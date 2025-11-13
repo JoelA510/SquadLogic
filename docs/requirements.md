@@ -46,7 +46,7 @@ Use this script when meeting the administrator so discovery conversations remain
 - **Pre-meeting prep**: Distribute the agenda and link to the "Season Intake" form at least 24 hours in advance so the administrator can gather field and roster artifacts.
 - **Recording**: Confirm whether the administrator approves a recording; if so, store it in the shared drive linked from the project hub with restricted access.
 - **Live capture**: Assign a note-taker (if available) to log answers in the form while the interviewer facilitates conversation.
-- **Post-meeting summary**: Within 24 hours, circulate a recap email that lists confirmed constraints, open questions, and next steps. File the summary in the `/docs/meeting-notes` folder for traceability.
+- **Post-meeting summary**: Within 24 hours, circulate a recap email that lists confirmed constraints, open questions, and next steps. File the summary in the `docs/meeting-notes` folder for traceability.
 - **Backlog updates**: Convert confirmed requirements and new follow-up items into GitHub issues tagged `requirements` so they can be prioritized in the next sprint planning session.
 
 ## Documented Constraints

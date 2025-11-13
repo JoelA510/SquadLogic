@@ -5,12 +5,12 @@
 - **Team Formation Agent**: Generates balanced rosters per division using roster formulas, mutual buddy handling, and coach-child constraints. Surfaces adjustments back to the admin UI.
 - **Schedule Orchestration Agent**: Assigns weekly practices and Saturday games while evaluating conflicts, daylight adjustments, and fairness metrics. Integrates an evaluator loop to refine assignments.
 - **Evaluation & Export Agent**: Audits schedules, produces reports, and generates CSV/Excel exports for TeamSnap along with draft coach communications.
-- **Coordinator (UI/API Layer)**: Next.js front end and API routes orchestrating user interactions, persisting state, and delegating tasks to agents.
+- **Coordinator (UI/API Layer)**: Create React App (CRA) front end backed by Supabase auth and APIs, orchestrating user interactions, persisting state, and delegating tasks to agents.
 
 ## Technology Stack Decisions
-- **Front End**: Next.js (React) deployed on Vercel for zero-config builds, file-based routing, and optimized serverless rendering.
+- **Front End**: Create React App built with `react-scripts`, deployed as a static bundle (e.g., Vercel or Netlify) with environment variables scoped as `REACT_APP_*`.
 - **State & Data Access**: React Query or SWR for client data fetching; Supabase JavaScript client for Auth + Postgres.
-- **Back End / APIs**: Next.js API routes or Vercel serverless functions in TypeScript for ingestion, scheduling jobs, and export preparation.
+- **Back End / APIs**: Supabase Edge Functions (TypeScript) or lightweight serverless handlers (e.g., Vercel/Netlify functions) for ingestion, scheduling jobs, and export preparation.
 - **Database**: Supabase Postgres with Row Level Security, Storage for file uploads, and Functions for complex SQL views if needed.
 - **Task Automation**: Background scheduling via Vercel Cron or Supabase Edge Functions for periodic evaluations or notifications.
 

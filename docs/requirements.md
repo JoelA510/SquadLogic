@@ -40,7 +40,7 @@ Use this script when meeting the administrator so discovery conversations remain
 7. **Operational considerations**
    - Are there other stakeholders (registrar, board members) who need read-only access?
    - Do you foresee the need for multilingual communications or accessibility accommodations?
-   - What is the preferred cadence for reviewing progress (weekly, bi-weekly)?
+   - What is the preferred cadence for reviewing progress (weekly, every two weeks)?
 
 ## Documented Constraints
 ### Hard Constraints

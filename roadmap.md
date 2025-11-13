@@ -4,7 +4,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 
 ## Progress Summary
 
-- [ ] Requirements Analysis & Planning – Baseline requirements captured in `docs/requirements.md`; still need live stakeholder sign-off and ongoing iteration.
+- [ ] Requirements Analysis & Planning – Baseline requirements captured in `docs/requirements.md`; stakeholder interview questionnaire drafted, pending live sign-off and ongoing iteration.
 - [ ] Architecture & Technology Selection – Target stack and agent modules documented in `docs/architecture.md`; proofs of concept and hosting validation pending.
 - [ ] Data Modeling & Storage – Schema blueprint drafted in `docs/data-modeling.md`; Supabase migrations and RLS policies not yet implemented.
 - [ ] Team Generation – Algorithm design documented in `docs/team-generation.md`; development, testing, and UI integration outstanding.

@@ -22,7 +22,7 @@
 2. **Hosting smoke test**
    - Scaffold the CRA front end with a placeholder dashboard and connect it to the Supabase sandbox via environment variables.
    - Deploy to both Netlify and Vercel trial projects to benchmark build times, bundle size limits, and environment variable management ergonomics.
-   - Capture build logs and deploy previews, noting any required configuration (e.g., `CI= npm run build`).
+   - Capture build logs and deploy previews, noting any required configuration (e.g., `CI=false npm run build`).
 3. **Integration spike**
    - Implement a prototype CSV upload flow that writes data to Supabase Storage and triggers the ingestion agent via webhook or direct Edge Function call.
    - Generate a mock TeamSnap CSV export from the stored sample data to verify the round trip path and identify schema adjustments early.

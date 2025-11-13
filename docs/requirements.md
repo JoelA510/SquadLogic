@@ -10,6 +10,38 @@
 - **Coach preferences**: Document availability constraints and whether coaches manage multiple teams.
 - **Season adjustments**: Note when practice durations shorten (e.g., daylight change) and any blackout dates.
 
+### Interview Agenda & Questionnaire (Draft)
+Use this script when meeting the administrator so discovery conversations remain consistent and the responses are captured in the product backlog. Capture answers in meeting notes and transpose key decisions into the requirements tables.
+
+1. **Season overview**
+   - Which divisions are confirmed for the upcoming season?
+   - How many teams per division do you anticipate based on prior years?
+   - Are there age groups with shared fields or unique rule variations (e.g., build-out lines)?
+2. **Registration data**
+   - Which GotSport export fields are relied on today for scheduling?
+   - Are there custom registration questions we must preserve in the data model?
+   - How frequently do late registrations or drops occur after the initial import?
+3. **Buddy & coach policies**
+   - How do you currently validate that buddy requests are mutual?
+   - Are there exceptions for sibling groups or carpool requests beyond the one-buddy limit?
+   - What communication should go to families when a buddy request cannot be honored?
+4. **Field availability**
+   - Can you supply the master field spreadsheet and note which slots are flexible vs. locked?
+   - Are there lighting constraints or municipal curfews that change mid-season?
+   - Do certain divisions have priority for specific fields/times?
+5. **Schedule approvals & adjustments**
+   - Who signs off on practice and game schedules before they are published?
+   - What is the current process for handling weather cancellations or field closures?
+   - How quickly do you need to regenerate schedules after an unexpected change?
+6. **Success metrics & reporting**
+   - Which fairness or quality metrics matter most (e.g., even distribution of late slots)?
+   - What exports or dashboards are required for board meetings or coach briefings?
+   - How are TeamSnap imports currently prepared, and what pain points exist?
+7. **Operational considerations**
+   - Are there other stakeholders (registrar, board members) who need read-only access?
+   - Do you foresee the need for multilingual communications or accessibility accommodations?
+   - What is the preferred cadence for reviewing progress (weekly, every two weeks)?
+
 ## Documented Constraints
 ### Hard Constraints
 1. One practice per team per week within available Monday–Thursday slots.

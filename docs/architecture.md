@@ -14,6 +14,20 @@
 - **Database**: Supabase Postgres with Row Level Security, Storage for file uploads, and Functions for complex SQL views if needed.
 - **Task Automation**: Background scheduling via the hosting provider's cron/scheduled functions (e.g., Vercel Cron or Netlify Scheduled Functions) or Supabase Edge Functions for periodic evaluations or notifications.
 
+### Proof-of-Concept Validation Plan
+1. **Supabase project dry run**
+   - Provision a sandbox Supabase project and enable Row Level Security on placeholder tables to ensure the default policy posture matches expectations.
+   - Deploy a minimal Edge Function (`hello-world`) with scheduled invocation to confirm cron support and cold start latency.
+   - Record resource consumption (invocations, bandwidth) after sample CSV uploads to validate free-tier headroom.
+2. **Hosting smoke test**
+   - Scaffold the CRA front end with a placeholder dashboard and connect it to the Supabase sandbox via environment variables.
+   - Deploy to both Netlify and Vercel trial projects to benchmark build times, bundle size limits, and environment variable management ergonomics.
+   - Capture build logs and deploy previews, noting any required configuration (e.g., `CI= npm run build`).
+3. **Integration spike**
+   - Implement a prototype CSV upload flow that writes data to Supabase Storage and triggers the ingestion agent via webhook or direct Edge Function call.
+   - Generate a mock TeamSnap CSV export from the stored sample data to verify the round trip path and identify schema adjustments early.
+   - Document blockers or additional services (e.g., background job queue) uncovered during the spike.
+
 ## Free-Tier Constraints & Mitigations
 - **Hosting Platform**: Deploy on a provider with a generous free plan (e.g., Vercel or Netlify). Evaluate their free-tier allowances for build minutes, serverless function hours, cron support, bandwidth, and analytics to confirm they cover early-season needs; cache heavy results and batch schedule generation to stay within limits.
 - **Supabase**: 500 MB Postgres, 50K monthly active users, and project pause after 1 week inactivity. Mitigation—archive historical seasons, prune uploads, and schedule heartbeat jobs or manual logins.

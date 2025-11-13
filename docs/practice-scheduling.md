@@ -9,7 +9,7 @@ This document elaborates the roadmap's practice scheduling phase into concrete i
 - Surface unmet constraints early so admins can make manual adjustments.
 
 ## Inputs
-- **Teams**: Records from the `teams` table joined with `divisions`, including metadata like preferred practice duration and daylight change dates from `season_settings`.
+- **Teams**: Records from the `teams` table joined with `divisions`.
 - **Practice Slots**: Rows from `practice_slots` joined to `field_subunits` and `fields`, filtered by the current effective date range.
 - **Coach Availability**: Time preferences from the `coaches` table (`preferred_practice_days`, `preferred_practice_window`, `can_coach_multiple_teams`).
 - **Season Configuration**: Values from `season_settings` describing early/late season durations, fallback days, and scoring weights for preference satisfaction.

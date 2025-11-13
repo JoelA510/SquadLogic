@@ -120,5 +120,3 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 3. **Mobile coach portal** – Build a simple mobile‑friendly interface for coaches to view their rosters and schedules, submit availability changes and receive notifications.
 4. **Parent/player communication** – Integrate messaging tools or calendar subscriptions (e.g., iCal feeds) so that parents can subscribe to their team’s schedule and receive updates automatically.
 5. **Analytics & reporting** – Add dashboards to analyze resource utilization (field usage, practice attendance), team parity (win/loss trends), and scheduling fairness.  Use these insights to tune algorithms in future seasons.
-
-By following this roadmap, developers can systematically build a robust, automated scheduling system tailored for youth sports.  The agentic approach ensures adaptability, while reliance on cost‑effective services like Vercel and Supabase keeps operational expenses low【503490883893339†L64-L87】【243507034388311†L19-L47】.  Continual refinement and user feedback will help the system meet the league’s needs season after season.

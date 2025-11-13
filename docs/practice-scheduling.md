@@ -18,7 +18,7 @@ This document elaborates the roadmap's practice scheduling phase into concrete i
 ## Scheduling Workflow
 1. **Preprocessing**
    - Expand each `practice_slot` into one or more "effective slots" if daylight transitions split the season. For example, a slot valid until a `late_season_start` date will generate two entries: one for the early weeks and one for the late weeks with adjusted durations.
-   - Build a priority queue of teams ordered by conflict risk: multi-team coaches first, then teams with locked preferences, then the remainder.
+   - Build a priority queue of teams ordered by conflict risk: multi-team coaches first, then teams with highly constrained coach availability, then the remainder.
    - Determine slot capacities per week by counting capacity across all effective slots within the same field/time combination.
 2. **Assignment Loop**
    - Pop the highest-priority team.

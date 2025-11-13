@@ -12,10 +12,10 @@
 - **State & Data Access**: React Query or SWR for client data fetching; Supabase JavaScript client for Auth + Postgres.
 - **Back End / APIs**: Supabase Edge Functions (TypeScript) or lightweight serverless handlers (e.g., Vercel/Netlify functions) for ingestion, scheduling jobs, and export preparation.
 - **Database**: Supabase Postgres with Row Level Security, Storage for file uploads, and Functions for complex SQL views if needed.
-- **Task Automation**: Background scheduling via Vercel Cron or Supabase Edge Functions for periodic evaluations or notifications.
+- **Task Automation**: Background scheduling via the hosting provider's cron/scheduled functions (e.g., Vercel Cron or Netlify Scheduled Functions) or Supabase Edge Functions for periodic evaluations or notifications.
 
 ## Free-Tier Constraints & Mitigations
-- **Vercel**: 100 GB bandwidth, 1,000 build minutes, and ~100K serverless invocations per day. Mitigation—batch schedule generation, cache heavy results, and monitor usage dashboards.
+- **Hosting Platform**: Deploy on a provider with a generous free plan (e.g., Vercel or Netlify). Evaluate their free-tier allowances for build minutes, serverless function hours, cron support, bandwidth, and analytics to confirm they cover early-season needs; cache heavy results and batch schedule generation to stay within limits.
 - **Supabase**: 500 MB Postgres, 50K monthly active users, and project pause after 1 week inactivity. Mitigation—archive historical seasons, prune uploads, and schedule heartbeat jobs or manual logins.
 - **Client Performance**: Optimize bundle size with code splitting, avoid unnecessary re-renders, and lean on incremental static regeneration for read-heavy pages.
 
@@ -23,4 +23,4 @@
 - **TeamSnap**: Export CSV/Excel templates aligned with TeamSnap import schema; manual upload flow in MVP, with future API exploration.
 - **Email Workflows**: Generate mailto links or integrate with a transactional email API (e.g., Resend) once auth is in place.
 - **Authentication**: Initially single-admin with environment guard; design for optional Supabase Auth roles later.
-- **Observability**: Use Supabase logs and Vercel analytics; consider Logflare for aggregated monitoring if limits permit.
+- **Observability**: Use Supabase logs and the hosting platform's analytics; consider Logflare for aggregated monitoring if limits permit.

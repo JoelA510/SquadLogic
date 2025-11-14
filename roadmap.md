@@ -7,7 +7,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 - [x] Requirements Analysis & Planning – Documentation complete; validated during the 2024-07-08 audit.
 - [x] Architecture & Technology Selection – Documentation complete; audit confirms status.
 - [x] Data Modeling & Storage – Documentation complete; audit confirms status.
-- [ ] Team Generation – Algorithm design documented in `docs/team-generation.md`; development, testing, and UI integration outstanding.
+- [ ] Team Generation – Core allocator implemented in `src/teamGeneration.js` with deterministic unit tests; UI wiring and admin workflows outstanding.
 - [ ] Practice Scheduling – Scheduling workflow outlined in `docs/practice-scheduling.md`; implementation, metrics, and admin tooling remain to be built.
 - [ ] Game Scheduling – Game scheduling blueprint refined in `docs/game-scheduling.md` with clarified inputs and fairness metrics; algorithm implementation and integration still pending.
 - [ ] Evaluation & Refinement – Evaluation pipeline, fairness metrics, and remediation workflow documented in `docs/evaluation.md`; implementation of automated checks and UI reporting outstanding.
@@ -49,7 +49,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 
 ## 4. Team Generation
 
-**Status:** Team formation algorithm, manual adjustment workflow, and acceptance/test harness outline documented in `docs/team-generation.md`; next steps cover implementing services, writing Jest tests aligned with the new fixtures plan, and building the roster review UI.
+**Status:** Team formation algorithm, manual adjustment workflow, and acceptance/test harness outline documented in `docs/team-generation.md`; initial roster allocator now lives in `src/teamGeneration.js` with repeatable `node:test` coverage, and next steps cover Supabase wiring plus roster review UI.
 
 1. **Define roster size rules** – Use formulae (max roster = 2 × playable roster − 2) for each division.  Store these in the configuration table so admins can adjust them.  A UI field should allow overriding defaults per season.
 2. **Implement pairing logic for buddies** – Detect mutual buddy requests and treat each pair as a single unit during assignment.  Ignore one‑sided requests but log them for reference.  When assigning players to teams, always place mutual buddies together unless roster limits or skill balancing rules conflict.

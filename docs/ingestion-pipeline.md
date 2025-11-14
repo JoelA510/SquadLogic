@@ -13,7 +13,7 @@ This document expands on the roadmap tasks for importing GotSport registrations 
   - Display a summary of detected divisions and player counts before submission.
 
 ### 1.2 Serverless Processing
-1. Upload the raw CSV to Supabase Storage under `imports/registrations/<timestamp>.csv` with metadata referencing the user id.
+1. Upload the raw CSV to Supabase Storage under `imports/registrations/<uuid>.csv` with metadata referencing the user id.
 2. Invoke an Edge Function (`process-registration-import`) with the storage path and a generated `import_job_id`.
 3. Inside the function:
    - Stream-parse the CSV (e.g., using `@fast-csv/parse`) to avoid loading the entire file into memory.

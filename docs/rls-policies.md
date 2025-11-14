@@ -72,7 +72,7 @@ create policy "Coaches can view roster names"
     );
 ```
 
-Additional column-level masking can be handled by exposing roster data to the front end through a security-definer view that calls `mask_guardian_contacts`.  The base table remains protected by RLS policies.
+Additional column-level masking can be handled by exposing roster data to the front end through a security-definer view that calls `mask_guardian_contacts`.  When using `SECURITY DEFINER`, ensure the owning role has only the privileges required for the view and explicitly set a safe `search_path` (for example, `set search_path = ''`) inside the function definition to avoid privilege escalation.  The base table remains protected by RLS policies.
 
 ## Enforcement Plan
 
@@ -83,7 +83,7 @@ Additional column-level masking can be handled by exposing roster data to the fr
    - Coach JWT reading only their team data; ensure attempts to access other teams fail.
    - Anonymous access blocked from all tables.
    - Masking function removes guardian contact info for coaches.
-4. **Monitoring** – Log policy denials in serverless functions to quickly detect misconfiguration after deployment.
+4. **Monitoring** – Instrument serverless functions to log when queries that normally return data instead come back empty, which can signal an unexpected RLS denial, and pair this with database-level auditing (e.g., PostgreSQL `pgaudit`) when available.
 
 ## Next Steps
 

@@ -43,11 +43,11 @@ Use this script when meeting the administrator so discovery conversations remain
    - What is the preferred cadence for reviewing progress (weekly, every two weeks)?
 
 ### Interview Logistics & Follow-Up Checklist
-- **Pre-meeting prep**: Distribute the agenda and link to the "Season Intake" form at least 24 hours in advance so the administrator can gather field and roster artifacts.
-- **Recording**: Confirm whether the administrator approves a recording; if so, store it in the shared drive linked from the project hub with restricted access.
-- **Live capture**: Assign a note-taker (if available) to log answers in the form while the interviewer facilitates conversation.
-- **Post-meeting summary**: Within 24 hours, circulate a recap email that lists confirmed constraints, open questions, and next steps. File the summary in the `docs/meeting-notes` folder for traceability.
-- **Backlog updates**: Convert confirmed requirements and new follow-up items into GitHub issues tagged `requirements` so they can be prioritized in the next sprint planning session.
+- **Pre-meeting prep**: Distribute the agenda, Season Intake link, and a copy of the [Stakeholder Interview Capture Template](meeting-notes/stakeholder-interview-template.md) at least 24 hours in advance so the administrator can gather field and roster artifacts.
+- **Recording**: Confirm whether the administrator approves a recording; if so, store it in the shared drive linked from the project hub with restricted access and reference the URL in the meeting template.
+- **Live capture**: Assign a note-taker (if available) to log answers in the template while the interviewer facilitates conversation. Update the Season Intake form in parallel when time permits.
+- **Post-meeting summary**: Within 24 hours, circulate a recap email that lists confirmed constraints, open questions, and next steps. File the completed template in the `docs/meeting-notes` folder (or linked knowledge base) for traceability and export the latest intake snapshot to `docs/intake-snapshots`.
+- **Backlog updates**: Convert confirmed requirements and new follow-up items into GitHub issues tagged `requirements` so they can be prioritized in the next sprint planning session. Reference the meeting template filename in each issue for context.
 
 ### Season Intake Form Blueprint
 Populate the Season Intake form with the following tabs/columns so discovery outputs remain structured and reviewable. Capture the initial draft in the shared Google Sheet before the stakeholder meeting and export a CSV backup to `docs/intake-snapshots` after each revision.

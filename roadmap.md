@@ -4,7 +4,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 
 ## Progress Summary
 
-- [ ] Requirements Analysis & Planning – Baseline requirements and Season Intake form blueprint captured in `docs/requirements.md`; initial Season Intake template exported to `docs/intake-snapshots/season-intake-20240701.csv` with consistent location naming across divisions and field slots; stakeholder interview playbook finalized with logistics checklist, awaiting live sign-off and ongoing iteration.
+- [ ] Requirements Analysis & Planning – Baseline requirements and Season Intake form blueprint captured in `docs/requirements.md`; initial Season Intake template exported to `docs/intake-snapshots/season-intake-20240701.csv` with consistent location naming across divisions and field slots; stakeholder interview playbook finalized with logistics checklist and a reusable capture template (`docs/meeting-notes/stakeholder-interview-template.md`) ready for upcoming sessions, awaiting live sign-off and ongoing iteration.
 - [ ] Architecture & Technology Selection – Target stack and agent modules documented in `docs/architecture.md`; proof-of-concept validation plan drafted, execution of sandbox tests pending.
 - [ ] Data Modeling & Storage – Schema blueprint drafted in `docs/data-modeling.md`; ingestion pipeline specification captured in `docs/ingestion-pipeline.md`; initial DDL in `docs/sql/initial_schema.sql` now adds enum-backed coach preferences, timestamp triggers, and double-booking guards while awaiting Supabase validation; RLS strategy drafted in `docs/rls-policies.md` with migrations still outstanding.
 - [ ] Team Generation – Algorithm design documented in `docs/team-generation.md`; development, testing, and UI integration outstanding.
@@ -15,7 +15,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 
 ## 1. Requirements Analysis & Planning
 
-**Status:** Baseline requirements, iteration plan, and Season Intake form blueprint captured in `docs/requirements.md`; initial Season Intake template exported to `docs/intake-snapshots/season-intake-20240701.csv` with representative data; stakeholder interview agenda and logistics checklist finalized, awaiting confirmation with the league administrator and refinement based on real registration exports.
+**Status:** Baseline requirements, iteration plan, and Season Intake form blueprint captured in `docs/requirements.md`; initial Season Intake template exported to `docs/intake-snapshots/season-intake-20240701.csv` with representative data; stakeholder interview agenda, logistics checklist, and capture template (`docs/meeting-notes/stakeholder-interview-template.md`) finalized, awaiting confirmation with the league administrator and refinement based on real registration exports.
 
 1. **Stakeholder interviews and scope definition** – Meet with the league administrator to confirm the exact feature set: number of divisions, roster size formulas (e.g., 7v7 → max 12 players), buddy rules (only mutual requests are honored), practice days (Mon–Thu), game days (Sat), season duration (August–October), and coach preferences.
 2. **Document constraints** – List all hard constraints (one practice per team per week, avoid coach conflicts, field capacities and halves, practice shortening when sunsets change, limit of one buddy per player) and soft preferences (balanced teams, coach time preferences).

@@ -4,7 +4,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 
 ## Progress Summary
 
-- [ ] Requirements Analysis & Planning – Baseline requirements and Season Intake form blueprint captured in `docs/requirements.md`; initial Season Intake template exported to `docs/intake-snapshots/season-intake-20240701.csv`; stakeholder interview playbook finalized with logistics checklist, awaiting live sign-off and ongoing iteration.
+- [ ] Requirements Analysis & Planning – Baseline requirements and Season Intake form blueprint captured in `docs/requirements.md`; initial Season Intake template exported to `docs/intake-snapshots/season-intake-20240701.csv` with consistent location naming across divisions and field slots; stakeholder interview playbook finalized with logistics checklist, awaiting live sign-off and ongoing iteration.
 - [ ] Architecture & Technology Selection – Target stack and agent modules documented in `docs/architecture.md`; proof-of-concept validation plan drafted, execution of sandbox tests pending.
 - [ ] Data Modeling & Storage – Schema blueprint drafted in `docs/data-modeling.md`; ingestion pipeline specification captured in `docs/ingestion-pipeline.md`; initial DDL in `docs/sql/initial_schema.sql` now adds enum-backed coach preferences, timestamp triggers, and double-booking guards while awaiting Supabase validation, with migrations and RLS policies still outstanding.
 - [ ] Team Generation – Algorithm design documented in `docs/team-generation.md`; development, testing, and UI integration outstanding.

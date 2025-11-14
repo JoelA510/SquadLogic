@@ -1,7 +1,7 @@
 # Divisions
 Division Name,Format,Target Teams,Roster Formula,Shared Fields,Special Rules
 U8 Coed,7v7,6,"max(12, ROUNDUP(Players/teams,0))",Primary School #1; Primary School #2,"Build-out line, no heading"
-U10 Girls,9v9,8,"=MIN(14, 2*PlayableRoster-2)",Complex A (Fields 3A/3B),"Offside in effect"
+U10 Girls,9v9,8,"=MIN(14, 2*PlayableRoster-2)",Community Complex (Fields 3A/3B),"Offside in effect"
 
 # Coaches
 Coach Name,Email,Associated Player,Division,Preferred Days,Conflict Days,Multiple Teams?

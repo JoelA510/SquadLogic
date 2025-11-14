@@ -10,8 +10,8 @@
 - **Coach preferences**: Document availability constraints and whether coaches manage multiple teams.
 - **Season adjustments**: Note when practice durations shorten (e.g., daylight change) and any blackout dates.
 
-### Interview Agenda & Questionnaire (Draft)
-Use this script when meeting the administrator so discovery conversations remain consistent and the responses are captured in the product backlog. Capture answers in meeting notes and transpose key decisions into the requirements tables.
+### Interview Agenda & Questionnaire (Finalized)
+Use this script when meeting the administrator so discovery conversations remain consistent and the responses are captured in the product backlog. Capture answers in meeting notes and transpose key decisions into the requirements tables. Record responses in the shared "Season Intake" form (Google Sheet tab per division) immediately after the call to avoid transcription drift.
 
 1. **Season overview**
    - Which divisions are confirmed for the upcoming season?
@@ -41,6 +41,13 @@ Use this script when meeting the administrator so discovery conversations remain
    - Are there other stakeholders (registrar, board members) who need read-only access?
    - Do you foresee the need for multilingual communications or accessibility accommodations?
    - What is the preferred cadence for reviewing progress (weekly, every two weeks)?
+
+### Interview Logistics & Follow-Up Checklist
+- **Pre-meeting prep**: Distribute the agenda and link to the "Season Intake" form at least 24 hours in advance so the administrator can gather field and roster artifacts.
+- **Recording**: Confirm whether the administrator approves a recording; if so, store it in the shared drive linked from the project hub with restricted access.
+- **Live capture**: Assign a note-taker (if available) to log answers in the form while the interviewer facilitates conversation.
+- **Post-meeting summary**: Within 24 hours, circulate a recap email that lists confirmed constraints, open questions, and next steps. File the summary in the `docs/meeting-notes` folder for traceability.
+- **Backlog updates**: Convert confirmed requirements and new follow-up items into GitHub issues tagged `requirements` so they can be prioritized in the next sprint planning session.
 
 ## Documented Constraints
 ### Hard Constraints

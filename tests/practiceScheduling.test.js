@@ -95,3 +95,36 @@ test('flags teams when no slots satisfy constraints', () => {
   assert.equal(result.unassigned[0].teamId, 'T1');
   assert.equal(result.unassigned[0].reason, 'no available slots meeting hard constraints');
 });
+
+test('breaks ties by earliest start time then slot id', () => {
+  const teams = [{ id: 'T1', division: 'U10', coachId: 'coach-a' }];
+  const slots = [
+    createSlot({ id: 'slot-b', day: 'Mon', startHour: 20, endHour: 21, capacity: 1 }),
+    createSlot({ id: 'slot-a', day: 'Mon', startHour: 20, endHour: 21, capacity: 1 }),
+    createSlot({ id: 'slot-early', day: 'Mon', startHour: 19, endHour: 20, capacity: 1 }),
+  ];
+
+  const result = schedulePractices({ teams, slots });
+
+  assert.equal(result.assignments.length, 1);
+  assert.equal(result.assignments[0].slotId, 'slot-early');
+
+  const remainingCapacity = Object.fromEntries(slots.map((slot) => [slot.id, slot.capacity]));
+  for (const assignment of result.assignments) {
+    remainingCapacity[assignment.slotId] -= 1;
+  }
+
+  assert.equal(remainingCapacity['slot-early'], 0);
+  assert.equal(remainingCapacity['slot-a'], 1);
+  assert.equal(remainingCapacity['slot-b'], 1);
+
+  const tieResult = schedulePractices({
+    teams,
+    slots: [
+      createSlot({ id: 'slot-b', day: 'Mon', startHour: 20, endHour: 21, capacity: 1 }),
+      createSlot({ id: 'slot-a', day: 'Mon', startHour: 20, endHour: 21, capacity: 1 }),
+    ],
+  });
+
+  assert.equal(tieResult.assignments[0].slotId, 'slot-a');
+});

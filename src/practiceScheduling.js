@@ -20,6 +20,11 @@
  *   Supports `preferredDays` similar to coach preferences.
  * @returns {{ assignments: Array<{ teamId: string, slotId: string }>, unassigned: Array<{ teamId: string, reason: string, candidates: Array<{ slotId: string, score: number }> }> }}
  */
+
+const PREFERRED_COACH_SLOT_SCORE = 10;
+const PREFERRED_COACH_DAY_SCORE = 5;
+const PREFERRED_DIVISION_DAY_SCORE = 3;
+
 export function schedulePractices({
   teams,
   slots,
@@ -157,6 +162,23 @@ export function schedulePractices({
   return { assignments, unassigned };
 }
 
+/**
+ * Determine viable slots for a given team, applying hard constraints and generating preference
+ * scores used by the scheduler to choose the optimal assignment.
+ *
+ * @param {Object} params
+ * @param {{ id: string, division: string, coachId: string | null }} params.team - The team being
+ *   evaluated.
+ * @param {Map<string, { id: string, day: string | null, start: Date, end: Date, capacity: number, assignedTeams: string[] }>} params.slotsById
+ *   - Lookup of slot metadata by identifier.
+ * @param {Object<string, { preferredDays?: Array<string>, preferredSlotIds?: Array<string>, unavailableSlotIds?: Array<string> }>} params.coachPreferences
+ *   - Optional map of coach preferences and unavailability.
+ * @param {Object<string, { preferredDays?: Array<string> }>} params.divisionPreferences - Optional
+ *   map of division level preferences.
+ * @param {Map<string, Array<{ slotId: string, start: Date, end: Date }>>} params.coachAssignments -
+ *   Existing assignments per coach used to prevent overlaps.
+ * @returns {{ slotScores: Array<{ slotId: string, score: number }>, viableSlots: Array<{ slot: Object, score: number }> }}
+ */
 function evaluateSlotsForTeam({
   team,
   slotsById,
@@ -175,32 +197,30 @@ function evaluateSlotsForTeam({
   const coachExistingAssignments = coachAssignments.get(team.coachId) ?? [];
 
   for (const slot of slotsById.values()) {
-    if (slot.capacity <= 0) {
-      slotScores.push({ slotId: slot.id, score: -Infinity });
-      continue;
-    }
-    if (unavailableCoachSlots.has(slot.id)) {
-      slotScores.push({ slotId: slot.id, score: -Infinity });
-      continue;
-    }
-    if (team.coachId && overlapsExistingAssignments({
-      assignments: coachExistingAssignments,
-      start: slot.start,
-      end: slot.end,
-    })) {
+    const isUnavailable =
+      slot.capacity <= 0 ||
+      unavailableCoachSlots.has(slot.id) ||
+      (team.coachId &&
+        overlapsExistingAssignments({
+          assignments: coachExistingAssignments,
+          start: slot.start,
+          end: slot.end,
+        }));
+
+    if (isUnavailable) {
       slotScores.push({ slotId: slot.id, score: -Infinity });
       continue;
     }
 
     let score = 0;
     if (preferredCoachSlots.has(slot.id)) {
-      score += 10;
+      score += PREFERRED_COACH_SLOT_SCORE;
     }
     if (slot.day && preferredCoachDays.has(slot.day)) {
-      score += 5;
+      score += PREFERRED_COACH_DAY_SCORE;
     }
     if (slot.day && preferredDivisionDays.has(slot.day)) {
-      score += 3;
+      score += PREFERRED_DIVISION_DAY_SCORE;
     }
 
     slotScores.push({ slotId: slot.id, score });

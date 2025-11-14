@@ -119,6 +119,7 @@ Detailed ingestion workflows live in `docs/ingestion-pipeline.md`. Highlights be
 ## Seeding & Test Data Strategy
 - Maintain `/supabase/seed` SQL files to insert representative divisions, players, coaches, and slots for local testing.
 - Include buddy pairs, multi-team coaches, and varying capacities to exercise scheduling logic.
+- Provide a ready-to-run dataset in `docs/sql/sample_seed_data.sql` that provisions a Fall 2024 recreation season with two divisions, seeded facilities, practice/game slots, teams, players, and example assignments.  The script is idempotent so it can refresh local Supabase instances repeatedly via `psql`.
 - Automate resets with an npm script invoking `supabase db reset` pointing to a disposable local stack.
 - Document seed assumptions so QA can validate schedule outputs against expected scenarios.
 

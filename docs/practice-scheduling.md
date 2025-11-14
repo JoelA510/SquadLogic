@@ -35,7 +35,8 @@ This document elaborates the roadmap's practice scheduling phase into concrete i
      - Fields exceeding capacity (should not happen but double-check).
    - Attempt local swaps between conflicting teams using a best-effort search: try exchanging slots with teams that have similar scores but no conflicts. Limit swap attempts to prevent infinite loops.
 4. **Finalization**
-   - Persist assignments into `practice_assignments` with `source = 'auto'` and `effective_date_range` derived from the slot.
+   - Persist assignments into `practice_assignments` with `source = 'auto'`.
+     Store the slot window as a `daterange` in `effective_date_range`.
    - The `practice_assignments` table is the authoritative source for assignments. `teams.practice_slot_id` should be considered for deprecation or used as a non-authoritative pointer to avoid inconsistency with mid-season slot changes.
    - Store a `practice_scheduler_runs` entry capturing parameters used, conflicts encountered, and manual follow-ups required.
 

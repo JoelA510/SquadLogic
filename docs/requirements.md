@@ -56,7 +56,7 @@ Populate the Season Intake form with the following tabs/columns so discovery out
 | --- | --- | --- |
 | `Divisions` | `Division Name`, `Format (e.g., 7v7)`, `Target Teams`, `Roster Formula`, `Shared Fields`, `Special Rules` | Use one row per division and record roster caps confirmed during interviews. |
 | `Coaches` | `Coach Name`, `Email`, `Associated Player`, `Division`, `Preferred Days`, `Conflict Days`, `Multiple Teams?` | Helps pre-compute availability constraints and identify multi-team coaches early. |
-| `Buddy Requests` | `Player A`, `Player B`, `Mutual?`, `Notes` | Generate from registration exports; the `Mutual?` column should be formula-driven (e.g., VLOOKUP). |
+| `Buddy Requests` | `Player A`, `Player B`, `Mutual?`, `Notes` | Generate from registration exports; calculate the `Mutual?` column with a resilient lookup such as `=IF(COUNTIFS(A:A, B2, B:B, A2) > 0, "Yes", "No")` or `XLOOKUP`, and lean on `QUERY` for exception reports so one-sided requests are easy to flag. |
 | `Fields & Slots` | `Location`, `Field`, `Subfield`, `Day`, `Start`, `End`, `Lighting/Curfew Notes`, `Capacity`, `Valid From`, `Valid To` | Map directly to the field slot schema to ease Supabase import later. |
 | `Season Milestones` | `Task`, `Owner`, `Target Date`, `Status`, `Dependencies` | Tracks approvals, schedule releases, and communication milestones. |
 

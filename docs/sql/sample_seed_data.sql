@@ -656,6 +656,17 @@ begin
         away_team_id = excluded.away_team_id,
         week_index = excluded.week_index;
 
+    -- Clear out old demo data in reverse order of dependency to avoid
+    -- relying on specific foreign key delete behaviors.
+    delete from email_log
+    where metadata ->> 'seed_tag' = 'fall2024-demo';
+
+    delete from export_jobs
+    where payload ->> 'seed_tag' = 'fall2024-demo';
+
+    delete from evaluation_runs
+    where input_snapshot ->> 'seed_tag' = 'fall2024-demo';
+
     delete from scheduler_runs
     where parameters ->> 'seed_tag' = 'fall2024-demo';
 
@@ -727,9 +738,6 @@ begin
     )
     returning id into practice_run_id;
 
-    delete from evaluation_runs
-    where input_snapshot ->> 'seed_tag' = 'fall2024-demo';
-
     insert into evaluation_runs (
         scheduler_run_type,
         scheduler_run_id,
@@ -762,9 +770,6 @@ begin
     )
     returning id into evaluation_run_id;
 
-    delete from export_jobs
-    where payload ->> 'seed_tag' = 'fall2024-demo';
-
     insert into export_jobs (
         season_settings_id,
         job_type,
@@ -789,9 +794,6 @@ begin
         timestamptz '2024-07-01 17:15:05+00'
     )
     returning id into export_job_id;
-
-    delete from email_log
-    where metadata ->> 'seed_tag' = 'fall2024-demo';
 
     insert into email_log (
         export_job_id,

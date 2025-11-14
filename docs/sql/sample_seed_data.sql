@@ -36,6 +36,10 @@ declare
     team_riverrunners_id uuid;
     team_lightning_id uuid;
     team_thunder_id uuid;
+    team_run_id uuid;
+    practice_run_id uuid;
+    evaluation_run_id uuid;
+    export_job_id uuid;
 begin
     insert into season_settings (
         season_label,
@@ -651,6 +655,161 @@ begin
         home_team_id = excluded.home_team_id,
         away_team_id = excluded.away_team_id,
         week_index = excluded.week_index;
+
+    -- Clear out old demo data in reverse order of dependency to avoid
+    -- relying on specific foreign key delete behaviors.
+    delete from email_log
+    where metadata ->> 'seed_tag' = 'fall2024-demo';
+
+    delete from export_jobs
+    where payload ->> 'seed_tag' = 'fall2024-demo';
+
+    delete from evaluation_runs
+    where input_snapshot ->> 'seed_tag' = 'fall2024-demo';
+
+    delete from scheduler_runs
+    where parameters ->> 'seed_tag' = 'fall2024-demo';
+
+    insert into scheduler_runs (
+        season_settings_id,
+        run_type,
+        status,
+        parameters,
+        metrics,
+        results,
+        started_at,
+        completed_at
+    ) values (
+        season_id,
+        'team',
+        'completed',
+        jsonb_build_object(
+            'seed_tag', 'fall2024-demo',
+            'triggered_by', 'seed-script',
+            'divisions', jsonb_build_array('U8 Coed', 'U10 Girls')
+        ),
+        jsonb_build_object(
+            'total_players', 12,
+            'total_teams', 4,
+            'buddy_pairs_honored', 3
+        ),
+        jsonb_build_object(
+            'team_names', jsonb_build_array('Firebolts', 'Riverrunners', 'Lightning', 'Thunder'),
+            'notes', 'Balanced rosters generated for sample season'
+        ),
+        timestamptz '2024-07-01 17:05:00+00',
+        timestamptz '2024-07-01 17:05:30+00'
+    )
+    returning id into team_run_id;
+
+    insert into scheduler_runs (
+        season_settings_id,
+        run_type,
+        status,
+        parameters,
+        metrics,
+        results,
+        started_at,
+        completed_at
+    ) values (
+        season_id,
+        'practice',
+        'completed_with_warnings',
+        jsonb_build_object(
+            'seed_tag', 'fall2024-demo',
+            'triggered_by', 'seed-script',
+            'slot_window', '2024-08-05..2024-10-25'
+        ),
+        jsonb_build_object(
+            'auto_assigned', 4,
+            'manual_adjustments_required', 1
+        ),
+        jsonb_build_object(
+            'conflicts', jsonb_build_array('Thunder requested earlier slot - logged for follow-up'),
+            'assigned_slots', jsonb_build_array(
+                jsonb_build_object('team', 'Firebolts', 'day', 'Mon', 'start_time', '17:00'),
+                jsonb_build_object('team', 'Riverrunners', 'day', 'Mon', 'start_time', '18:30'),
+                jsonb_build_object('team', 'Lightning', 'day', 'Tue', 'start_time', '17:00'),
+                jsonb_build_object('team', 'Thunder', 'day', 'Tue', 'start_time', '18:45')
+            )
+        ),
+        timestamptz '2024-07-01 17:10:00+00',
+        timestamptz '2024-07-01 17:10:45+00'
+    )
+    returning id into practice_run_id;
+
+    insert into evaluation_runs (
+        scheduler_run_type,
+        scheduler_run_id,
+        season_settings_id,
+        status,
+        findings_severity,
+        metrics_summary,
+        input_snapshot,
+        auto_fix_summary,
+        started_at,
+        completed_at
+    ) values (
+        'practice',
+        practice_run_id,
+        season_id,
+        'completed_with_warnings',
+        'warnings',
+        jsonb_build_object(
+            'conflicts_detected', 1,
+            'conflicts_resolved', 0,
+            'fairness_score', 0.78
+        ),
+        jsonb_build_object(
+            'seed_tag', 'fall2024-demo',
+            'run_reference', practice_run_id
+        ),
+        jsonb_build_object('manual_follow_up_needed', true),
+        timestamptz '2024-07-01 17:11:00+00',
+        timestamptz '2024-07-01 17:11:10+00'
+    )
+    returning id into evaluation_run_id;
+
+    insert into export_jobs (
+        season_settings_id,
+        job_type,
+        status,
+        payload,
+        storage_path,
+        schema_version,
+        started_at,
+        completed_at
+    ) values (
+        season_id,
+        'master',
+        'completed',
+        jsonb_build_object(
+            'seed_tag', 'fall2024-demo',
+            'source_run_id', team_run_id,
+            'format', 'teamsnap-csv'
+        ),
+        'storage://exports/fall2024/master-schedule.csv',
+        'v1',
+        timestamptz '2024-07-01 17:15:00+00',
+        timestamptz '2024-07-01 17:15:05+00'
+    )
+    returning id into export_job_id;
+
+    insert into email_log (
+        export_job_id,
+        recipient_email,
+        action,
+        metadata
+    ) values (
+        export_job_id,
+        'scheduler@example.com',
+        'draft_generated',
+        jsonb_build_object(
+            'seed_tag', 'fall2024-demo',
+            'evaluation_run_id', evaluation_run_id,
+            'notes', 'Demo email draft created for admin review'
+        )
+    );
 
     raise notice 'Seed data applied for Fall 2024 recreation season (season_settings.id=%)', season_id;
 end

@@ -64,11 +64,11 @@
 - **Key fields**:
   - Composite primary key (`team_id`, `player_id`).
   - `role` (text, defaults to `player`) for future assistant roles.
-  - `source` (enum: `auto`, `manual`) to flag automated vs. manual placements.
+  - `source` (`source_enum`, values `auto` | `manual`) to flag automated vs. manual placements.
   - `added_at` timestamp auto-populated via default expression.
 - **Indexes & constraints**:
   - Foreign keys cascade deletes with the parent team or player.
-  - `source` limited to expected values for analytics consistency.
+  - `source` limited to expected values via the shared enum for analytics consistency.
 
 ### Fields & Locations
 - **Purpose**: Represent facilities and discrete playable areas.
@@ -90,7 +90,7 @@
 
 ### Schedules
 - **Practice assignments** (`practice_assignments`):
-  - `id`, `team_id`, `practice_slot_id`, `effective_date_range` (`daterange`), `source` (`auto` | `manual`).
+  - `id`, `team_id`, `practice_slot_id`, `effective_date_range` (`daterange`), `source` (`source_enum`: `auto` | `manual`).
   - Unique constraint on (`team_id`, `practice_slot_id`, `effective_date_range`) with a check preventing empty ranges.
 - **Game assignments** (`games`):
   - `id`, `home_team_id`, `away_team_id`, `game_slot_id`, `week_index`, `score_home`, `score_away`.

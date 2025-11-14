@@ -13,6 +13,13 @@ begin
     end if;
 end$$;
 
+do $$
+begin
+    if not exists (select 1 from pg_type where typname = 'source_enum') then
+        create type source_enum as enum ('auto','manual');
+    end if;
+end$$;
+
 create or replace function trigger_set_timestamp()
 returns trigger
 language plpgsql
@@ -178,7 +185,7 @@ create table if not exists team_players (
     team_id   uuid not null references teams(id) on delete cascade,
     player_id uuid not null references players(id) on delete cascade,
     role      text not null default 'player',
-    source    text not null default 'auto' check (source in ('auto','manual')),
+    source    source_enum not null default 'auto'::source_enum,
     added_at  timestamptz not null default timezone('utc', now()),
     primary key (team_id, player_id)
 );
@@ -188,7 +195,7 @@ create table if not exists practice_assignments (
     team_id             uuid not null references teams(id) on delete cascade,
     practice_slot_id    uuid not null references practice_slots(id) on delete cascade,
     effective_date_range daterange not null,
-    source              text not null default 'auto' check (source in ('auto','manual')),
+    source              source_enum not null default 'auto'::source_enum,
     created_at          timestamptz not null default timezone('utc', now()),
     updated_at          timestamptz not null default timezone('utc', now()),
     constraint practice_assignments_effective_date_range_not_empty check (not isempty(effective_date_range)),
@@ -242,13 +249,11 @@ begin
         raise exception 'Head coach % cannot also be listed as an assistant', new.coach_id;
     end if;
 
-    select array_agg(coach_id)
+    select array_agg(u.coach_id)
       into missing_coaches
-    from (
-        select coach_id
-        from unnest(new.assistant_coach_ids) as coach_id
-        where not exists (select 1 from coaches c where c.id = coach_id)
-    ) missing;
+    from unnest(new.assistant_coach_ids) as u(coach_id)
+    left join coaches c on c.id = u.coach_id
+    where c.id is null;
 
     if missing_coaches is not null then
         raise exception 'assistant_coach_ids references coaches that do not exist: %', missing_coaches;

@@ -4,7 +4,7 @@
   "description": "An application that converts raw GotSport registration data in CSV format and provides both teaming and scheduling frameworks, intended to support youth sports organizations.",
   "type": "module",
   "scripts": {
-    "lint": "node --check src/teamGeneration.js && node --check src/practiceScheduling.js && node --check src/practiceMetrics.js && node --check tests/teamGeneration.test.js && node --check tests/practiceScheduling.test.js && node --check tests/practiceMetrics.test.js && node --check scripts/build.js",
+    "lint": "node --check src/teamGeneration.js && node --check src/practiceScheduling.js && node --check src/practiceMetrics.js && node --check src/gameScheduling.js && node --check tests/teamGeneration.test.js && node --check tests/practiceScheduling.test.js && node --check tests/practiceMetrics.test.js && node --check tests/gameScheduling.test.js && node --check scripts/build.js",
     "test": "node --test",
     "build": "node scripts/build.js"
   },

@@ -9,7 +9,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 - [x] Data Modeling & Storage – Documentation complete; audit confirms status.
 - [ ] Team Generation – Core allocator implemented in `src/teamGeneration.js` with deterministic unit tests; conflict detection and validation safeguards added while UI wiring and admin workflows remain outstanding.
 - [ ] Practice Scheduling – Scheduling workflow outlined in `docs/practice-scheduling.md`; initial slot allocator implemented in `src/practiceScheduling.js` with unit tests and metrics reporting now covered by `src/practiceMetrics.js`, while admin tooling remains to be built.
-- [ ] Game Scheduling – Game scheduling blueprint refined in `docs/game-scheduling.md` with clarified inputs and fairness metrics; algorithm implementation and integration still pending.
+- [ ] Game Scheduling – Game scheduling blueprint refined in `docs/game-scheduling.md` with clarified inputs and fairness metrics; round-robin generator and initial slot allocator implemented in `src/gameScheduling.js` with regression coverage in `tests/gameScheduling.test.js`, while Supabase persistence, shared-slot balancing, and admin conflict resolution tooling remain outstanding.
 - [ ] Evaluation & Refinement – Evaluation pipeline, fairness metrics, and remediation workflow documented in `docs/evaluation.md`; implementation of automated checks and UI reporting outstanding.
 - [ ] Output Generation & Integration – Export and communication workflow planned in `docs/output-generation.md`; serverless exporters, storage integration, and admin tooling still required.
 - [ ] Front-End Development – Navigation, screen blueprint, and state management approach documented in `docs/frontend-architecture.md`; project scaffolding (e.g., with Vite), Supabase client wiring, and component implementation pending.
@@ -75,7 +75,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 
 ## 6. Game Scheduling
 
-**Status:** Game scheduling blueprint documented in `docs/game-scheduling.md`; implementation of the scheduler service, admin UI workflows, and evaluator metrics integration is upcoming.
+**Status:** Game scheduling blueprint documented in `docs/game-scheduling.md`; deterministic round-robin generation and a first-pass slot allocator now live in `src/gameScheduling.js` with unit tests capturing even/odd divisions and coach conflict handling, while Supabase persistence, fairness tuning across shared slots, and admin UI workflows remain upcoming.
 
 1. **Determine game weeks and matchups** – Decide on the number of game weeks (e.g., eight Saturdays) and generate matchups within each division.  Use a round‑robin generator to produce a rotation where each team plays every other team; handle odd numbers of teams with byes or double‑headers.
 2. **Assign game slots** – For each week, assign each game (pair of teams) to a Saturday field/time slot.  Use similar logic as practice scheduling: prioritize avoiding coach conflicts, then allocate the earliest available slot.  If divisions share fields, consider field size constraints and age group requirements.

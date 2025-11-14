@@ -8,7 +8,7 @@
 ## Inputs & Prerequisites
 1. **Teams & Divisions**: Finalized rosters from the team generation workflow with division metadata and coach assignments.
 2. **Game Slots Catalog**: Structured records from `game_slots` including field, date, time, duration, and optional division restrictions.
-3. **Coach & Buddy Context**: Coach multi-team flags and any player/coach conflicts already captured in Supabase to prevent overlaps.
+3. **Coach & Family Conflict Context**: Coach multi-team flags plus guardian/household relationships that span multiple teams so siblings or parent-coach combinations are never scheduled in overlapping slots.
 4. **Season Calendar Rules**: Season start/end dates, blackout Saturdays, and special event weekends stored in configuration tables.
 5. **Round-Robin Generator**: Utility capable of emitting per-week matchups for round-robin and handling odd-team divisions.
 
@@ -34,7 +34,7 @@
 
 ## Data Persistence & Output
 - Persist assignments in the `games` table with references to `game_slot_id`, week index, and conflict flags.
-- Record unscheduled matchups and the reason code (`no-slot`, `coach-conflict`, `field-mismatch`) in a `scheduling_exceptions` table for administrative follow-up.
+- Record unscheduled matchups and the reason code (`no-slot`, `coach-conflict`, `no-compatible-field`) in a `scheduling_exceptions` table for administrative follow-up.
 - Emit per-week and per-team summaries for the Evaluation agent to analyze fairness metrics.
 
 ## Administrative Workflow
@@ -48,7 +48,7 @@
 - **Regression Safeguards**: When bugs are discovered, capture the fixture set in JSON fixtures and add targeted tests ensuring the scheduler resolves them correctly.
 
 ## Metrics & Evaluation Hooks
-- Capture per-division fairness metrics such as distribution of early/mid/late slots and frequency of back-to-back games.
+- Capture per-division fairness metrics such as distribution of early/mid/late slots, frequency of back-to-back games, and home/away game balance.
 - Feed metrics into the evaluator loop so repeated conflicts can trigger alternative assignment heuristics.
 - Log scheduling duration and iteration counts to identify performance bottlenecks as divisions scale.
 

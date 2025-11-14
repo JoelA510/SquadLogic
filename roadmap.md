@@ -9,7 +9,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 - [ ] Data Modeling & Storage – Schema blueprint drafted in `docs/data-modeling.md`; Supabase migrations and RLS policies not yet implemented.
 - [ ] Team Generation – Algorithm design documented in `docs/team-generation.md`; development, testing, and UI integration outstanding.
 - [ ] Practice Scheduling – Scheduling workflow outlined in `docs/practice-scheduling.md`; implementation, metrics, and admin tooling remain to be built.
-- [ ] Game Scheduling – Game scheduling blueprint drafted in `docs/game-scheduling.md`; algorithm implementation and integration still pending.
+- [ ] Game Scheduling – Game scheduling blueprint refined in `docs/game-scheduling.md` with clarified inputs and fairness metrics; algorithm implementation and integration still pending.
 
 ## 1. Requirements Analysis & Planning
 

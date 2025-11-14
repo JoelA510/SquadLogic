@@ -45,6 +45,7 @@ export function evaluateGameSchedule({ assignments, teams, byes = [], unschedule
     fieldUsage: {},
     teamsWithByes: {},
     unscheduledByReason: {},
+    teamGameLoad: {},
   };
 
   const warnings = [];
@@ -52,6 +53,7 @@ export function evaluateGameSchedule({ assignments, teams, byes = [], unschedule
   const teamAssignments = new Map();
   const coachAssignments = new Map();
   const fieldAssignments = new Map();
+  const teamGameLoad = new Map();
 
   for (const assignment of assignments) {
     validateAssignment(assignment);
@@ -79,8 +81,12 @@ export function evaluateGameSchedule({ assignments, teams, byes = [], unschedule
     fieldSummary.games += 1;
     fieldSummary.divisions.add(division);
 
-    const participants = [assignment.homeTeamId, assignment.awayTeamId];
-    for (const teamId of participants) {
+    const participants = [
+      { teamId: assignment.homeTeamId, role: 'home' },
+      { teamId: assignment.awayTeamId, role: 'away' },
+    ];
+    for (const participant of participants) {
+      const { teamId, role } = participant;
       if (!teamsById.has(teamId)) {
         if (!seenUnknownTeams.has(teamId)) {
           warnings.push({
@@ -105,6 +111,14 @@ export function evaluateGameSchedule({ assignments, teams, byes = [], unschedule
       teamAssignments.set(teamId, bucket);
 
       const teamRecord = teamsById.get(teamId);
+      trackTeamGameLoad({
+        teamGameLoad,
+        teamId,
+        role,
+        start,
+        fieldKey,
+        weekIndex,
+      });
       if (teamRecord.coachId) {
         const coachBucket = coachAssignments.get(teamRecord.coachId) ?? [];
         coachBucket.push({
@@ -138,6 +152,7 @@ export function evaluateGameSchedule({ assignments, teams, byes = [], unschedule
   for (const [fieldKey, record] of Object.entries(summary.fieldUsage)) {
     record.divisions = Array.from(record.divisions).sort((a, b) => a.localeCompare(b));
   }
+  summary.teamGameLoad = formatTeamGameLoad(teamGameLoad);
 
   for (const bye of byes) {
     validateBye(bye);
@@ -241,6 +256,54 @@ function validateUnscheduled(entry) {
   if (!entry.reason) {
     throw new TypeError('unscheduled entries require a reason');
   }
+}
+
+function trackTeamGameLoad({ teamGameLoad, teamId, role, start, fieldKey, weekIndex }) {
+  const record = teamGameLoad.get(teamId) ?? {
+    totalGames: 0,
+    homeGames: 0,
+    awayGames: 0,
+    uniqueFields: new Set(),
+    weeks: new Set(),
+    earliestStart: null,
+    latestStart: null,
+  };
+
+  record.totalGames += 1;
+  if (role === 'home') {
+    record.homeGames += 1;
+  } else {
+    record.awayGames += 1;
+  }
+
+  if (fieldKey && fieldKey !== 'unassigned') {
+    record.uniqueFields.add(fieldKey);
+  }
+  record.weeks.add(weekIndex);
+  if (!record.earliestStart || start < record.earliestStart) {
+    record.earliestStart = start;
+  }
+  if (!record.latestStart || start > record.latestStart) {
+    record.latestStart = start;
+  }
+
+  teamGameLoad.set(teamId, record);
+}
+
+function formatTeamGameLoad(teamGameLoad) {
+  const result = {};
+  for (const [teamId, record] of teamGameLoad.entries()) {
+    result[teamId] = {
+      totalGames: record.totalGames,
+      homeGames: record.homeGames,
+      awayGames: record.awayGames,
+      uniqueFields: Array.from(record.uniqueFields).sort((a, b) => a.localeCompare(b)),
+      weeksScheduled: Array.from(record.weeks).sort((a, b) => a - b),
+      earliestStart: record.earliestStart ? record.earliestStart.toISOString() : null,
+      latestStart: record.latestStart ? record.latestStart.toISOString() : null,
+    };
+  }
+  return result;
 }
 
 function detectConflicts({ assignmentsMap, warnings, idKey, warningType, messageFn }) {

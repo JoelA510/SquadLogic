@@ -101,10 +101,10 @@
 - `import_jobs`: Tracks CSV uploads with status, source file references (Supabase Storage path), error logs, and user id.
 
 ### Scheduler Run History
-- `scheduler_runs`: Consolidates team generation, practice scheduling, and game scheduling executions into a single table with a `run_type` discriminator. Stores parameters, metrics, and a `results` JSON payload so totals, conflict summaries, or other run-specific outputs remain queryable without maintaining separate tables per workflow.
+- `scheduler_runs`: Consolidates team generation, practice scheduling, and game scheduling executions into a single table with a `run_type` discriminator. Stores parameters, metrics, and a `results` JSON payload so totals, conflict summaries, or other run-specific outputs remain queryable without maintaining separate tables per workflow. The sample seed script now inserts representative team and practice runs tagged with `seed_tag = 'fall2024-demo'` so dashboards can be tested before live data exists.
 
 ### Evaluation & Remediation Tables
-- `evaluation_runs`: Stores evaluation pipeline executions linked to the originating `scheduler_runs` record (`team`, `practice`, `game`, or `composite`). Includes status, severity flags, metrics snapshots, and auto-fix summaries.
+- `evaluation_runs`: Stores evaluation pipeline executions linked to the originating `scheduler_runs` record (`team`, `practice`, `game`, or `composite`). Includes status, severity flags, metrics snapshots, and auto-fix summaries. Seed data populates a warning-level practice evaluation referencing the seeded run to validate relationships.
 - `evaluation_findings`: Row-per-issue log with severity, machine-friendly `finding_code`, and affected entity metadata so the UI can group results by team or field.
 - `evaluation_metrics`: Key/value metric store with optional thresholds for fairness scoring; unique per evaluation/metric pair to prevent duplicates.
 - `evaluation_run_events`: Timeline of remediation actions (auto fixes, manual overrides, notes) tied to an evaluation run for auditability.

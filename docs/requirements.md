@@ -49,6 +49,22 @@ Use this script when meeting the administrator so discovery conversations remain
 - **Post-meeting summary**: Within 24 hours, circulate a recap email that lists confirmed constraints, open questions, and next steps. File the summary in the `docs/meeting-notes` folder for traceability.
 - **Backlog updates**: Convert confirmed requirements and new follow-up items into GitHub issues tagged `requirements` so they can be prioritized in the next sprint planning session.
 
+### Season Intake Form Blueprint
+Populate the Season Intake form with the following tabs/columns so discovery outputs remain structured and reviewable. Capture the initial draft in the shared Google Sheet before the stakeholder meeting and export a CSV backup to `docs/intake-snapshots` after each revision.
+
+| Tab | Columns | Notes |
+| --- | --- | --- |
+| `Divisions` | `Division Name`, `Format (e.g., 7v7)`, `Target Teams`, `Roster Formula`, `Shared Fields`, `Special Rules` | Use one row per division and record roster caps confirmed during interviews. |
+| `Coaches` | `Coach Name`, `Email`, `Associated Player`, `Division`, `Preferred Days`, `Conflict Days`, `Multiple Teams?` | Helps pre-compute availability constraints and identify multi-team coaches early. |
+| `Buddy Requests` | `Player A`, `Player B`, `Mutual?`, `Notes` | Generate from registration exports; calculate the `Mutual?` column with a resilient lookup such as `=IF(COUNTIFS(A:A, B2, B:B, A2) > 0, "Yes", "No")` or `XLOOKUP`, and lean on `QUERY` for exception reports so one-sided requests are easy to flag. |
+| `Fields & Slots` | `Location`, `Field`, `Subfield`, `Day`, `Start`, `End`, `Lighting/Curfew Notes`, `Capacity`, `Valid From`, `Valid To` | Map directly to the field slot schema to ease Supabase import later. |
+| `Season Milestones` | `Task`, `Owner`, `Target Date`, `Status`, `Dependencies` | Tracks approvals, schedule releases, and communication milestones. |
+
+**Form maintenance cadence**
+- Refresh exports from GotSport and the field spreadsheet after each significant registration batch (weekly during peak sign-ups).
+- Log every manual adjustment (e.g., confirmed exception for siblings) in the `Notes` column so the history is auditable.
+- Snapshot the Google Sheet to the repo after major updates (export CSV and commit) to preserve baselines for regression testing.
+
 ## Documented Constraints
 ### Hard Constraints
 1. One practice per team per week within available Monday–Thursday slots.

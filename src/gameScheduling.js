@@ -93,14 +93,92 @@ export function generateRoundRobinWeeks({ teamIds }) {
  * }}
  */
 export function scheduleGames({ teams, slots, roundRobinByDivision }) {
-  if (!Array.isArray(teams)) {
-    throw new TypeError('teams must be an array');
-  }
-  if (!Array.isArray(slots)) {
-    throw new TypeError('slots must be an array');
-  }
   if (!roundRobinByDivision || typeof roundRobinByDivision !== 'object') {
     throw new TypeError('roundRobinByDivision must be an object');
+  }
+
+  const teamsById = indexTeams(teams);
+  const { divisionSlots, sharedSlots } = indexSlots(slots);
+
+  const assignments = [];
+  const byes = [];
+  const unscheduled = [];
+  const coachAssignments = new Map();
+  const teamWeekAssignments = new Set();
+
+  for (const [division, weeks] of Object.entries(roundRobinByDivision)) {
+    if (!Array.isArray(weeks)) {
+      throw new TypeError(`roundRobinByDivision for division ${division} must be an array`);
+    }
+
+    for (const week of weeks) {
+      validateWeek({ week, division });
+      collectWeekByes({ week, division, teamsById, byes });
+
+      for (const matchup of week.matchups ?? []) {
+        scheduleMatchup({
+          division,
+          weekIndex: week.weekIndex,
+          matchup,
+          teamsById,
+          divisionSlots,
+          sharedSlots,
+          coachAssignments,
+          teamWeekAssignments,
+          assignments,
+          unscheduled,
+        });
+      }
+    }
+  }
+
+  assignments.sort((a, b) => {
+    if (a.weekIndex !== b.weekIndex) {
+      return a.weekIndex - b.weekIndex;
+    }
+    if (a.division !== b.division) {
+      return a.division.localeCompare(b.division);
+    }
+    if (a.start !== b.start) {
+      return a.start.localeCompare(b.start);
+    }
+    if (a.slotId !== b.slotId) {
+      return a.slotId.localeCompare(b.slotId);
+    }
+    return a.homeTeamId.localeCompare(b.homeTeamId);
+  });
+
+  byes.sort((a, b) => {
+    if (a.weekIndex !== b.weekIndex) {
+      return a.weekIndex - b.weekIndex;
+    }
+    if (a.division !== b.division) {
+      return a.division.localeCompare(b.division);
+    }
+    return a.teamId.localeCompare(b.teamId);
+  });
+
+  unscheduled.sort((a, b) => {
+    if (a.weekIndex !== b.weekIndex) {
+      return a.weekIndex - b.weekIndex;
+    }
+    if (a.division !== b.division) {
+      return a.division.localeCompare(b.division);
+    }
+    const matchupA = `${a.matchup.homeTeamId}-${a.matchup.awayTeamId}`;
+    const matchupB = `${b.matchup.homeTeamId}-${b.matchup.awayTeamId}`;
+    if (matchupA !== matchupB) {
+      return matchupA.localeCompare(matchupB);
+    }
+    return a.reason.localeCompare(b.reason);
+  });
+
+  return { assignments, byes, unscheduled };
+}
+
+function indexTeams(teams) {
+  if (!Array.isArray(teams)) {
+    throw new TypeError('teams must be an array');
   }
 
   const teamsById = new Map();
@@ -120,6 +198,14 @@ export function scheduleGames({ teams, slots, roundRobinByDivision }) {
       division: team.division,
       coachId: team.coachId ?? null,
     });
+  }
+
+  return teamsById;
+}
+
+function indexSlots(slots) {
+  if (!Array.isArray(slots)) {
+    throw new TypeError('slots must be an array');
   }
 
   const divisionSlots = new Map();
@@ -186,209 +272,188 @@ export function scheduleGames({ teams, slots, roundRobinByDivision }) {
     });
   }
 
-  const assignments = [];
-  const byes = [];
-  const unscheduled = [];
-  const coachAssignments = new Map();
-  const teamWeekAssignments = new Set();
+  return { divisionSlots, sharedSlots };
+}
 
-  for (const [division, weeks] of Object.entries(roundRobinByDivision)) {
-    if (!Array.isArray(weeks)) {
-      throw new TypeError(`roundRobinByDivision for division ${division} must be an array`);
+function validateWeek({ week, division }) {
+  if (!week || typeof week !== 'object') {
+    throw new TypeError(`week entries for division ${division} must be objects`);
+  }
+  if (typeof week.weekIndex !== 'number') {
+    throw new TypeError(`week entries for division ${division} must include weekIndex`);
+  }
+}
+
+function collectWeekByes({ week, division, teamsById, byes }) {
+  for (const byeTeamId of week.byes ?? []) {
+    if (!teamsById.has(byeTeamId)) {
+      continue;
     }
+    byes.push({ weekIndex: week.weekIndex, division, teamId: byeTeamId });
+  }
+}
 
-    for (const week of weeks) {
-      if (!week || typeof week !== 'object') {
-        throw new TypeError(`week entries for division ${division} must be objects`);
-      }
-      if (typeof week.weekIndex !== 'number') {
-        throw new TypeError(`week entries for division ${division} must include weekIndex`);
-      }
-
-      for (const byeTeamId of week.byes ?? []) {
-        if (!teamsById.has(byeTeamId)) {
-          continue;
-        }
-        byes.push({ weekIndex: week.weekIndex, division, teamId: byeTeamId });
-      }
-
-      for (const matchup of week.matchups ?? []) {
-        if (!matchup || typeof matchup !== 'object') {
-          throw new TypeError(`matchups for division ${division} must be objects`);
-        }
-        const { homeTeamId, awayTeamId } = matchup;
-        if (!homeTeamId || !awayTeamId) {
-          throw new TypeError('each matchup requires homeTeamId and awayTeamId');
-        }
-
-        const homeTeam = teamsById.get(homeTeamId);
-        const awayTeam = teamsById.get(awayTeamId);
-
-        if (!homeTeam || !awayTeam) {
-          unscheduled.push({
-            weekIndex: week.weekIndex,
-            division,
-            matchup: { homeTeamId, awayTeamId },
-            reason: 'unknown-team',
-          });
-          continue;
-        }
-
-        if (homeTeam.division !== division || awayTeam.division !== division) {
-          unscheduled.push({
-            weekIndex: week.weekIndex,
-            division,
-            matchup: { homeTeamId, awayTeamId },
-            reason: 'division-mismatch',
-          });
-          continue;
-        }
-
-        const teamWeekKeyHome = `${homeTeamId}::${week.weekIndex}`;
-        const teamWeekKeyAway = `${awayTeamId}::${week.weekIndex}`;
-        if (teamWeekAssignments.has(teamWeekKeyHome) || teamWeekAssignments.has(teamWeekKeyAway)) {
-          unscheduled.push({
-            weekIndex: week.weekIndex,
-            division,
-            matchup: { homeTeamId, awayTeamId },
-            reason: 'duplicate-matchup',
-          });
-          continue;
-        }
-
-        if (homeTeam.coachId && homeTeam.coachId === awayTeam.coachId) {
-          unscheduled.push({
-            weekIndex: week.weekIndex,
-            division,
-            matchup: { homeTeamId, awayTeamId },
-            reason: 'coach-conflict',
-          });
-          continue;
-        }
-
-        const divisionKey = `${division}::${week.weekIndex}`;
-        const sharedKey = `*::${week.weekIndex}`;
-        const candidateSlots = [
-          ...(divisionSlots.get(divisionKey) ?? []),
-          ...(sharedSlots.get(sharedKey) ?? []),
-        ];
-
-        let selectedSlot = null;
-        let encounteredConflict = false;
-
-        for (const slotRecord of candidateSlots) {
-          if (slotRecord.remainingCapacity <= 0) {
-            continue;
-          }
-
-          if (
-            hasCoachConflict({
-              coachAssignments,
-              coaches: [homeTeam.coachId, awayTeam.coachId],
-              start: slotRecord.start,
-              end: slotRecord.end,
-            })
-          ) {
-            encounteredConflict = true;
-            continue;
-          }
-
-          selectedSlot = slotRecord;
-          break;
-        }
-
-        if (!selectedSlot) {
-          unscheduled.push({
-            weekIndex: week.weekIndex,
-            division,
-            matchup: { homeTeamId, awayTeamId },
-            reason: encounteredConflict ? 'coach-conflict' : 'no-slot-available',
-          });
-          continue;
-        }
-
-        selectedSlot.remainingCapacity -= 1;
-        teamWeekAssignments.add(teamWeekKeyHome);
-        teamWeekAssignments.add(teamWeekKeyAway);
-        recordCoachAssignment({
-          coachAssignments,
-          coachId: homeTeam.coachId,
-          assignment: {
-            slotId: selectedSlot.id,
-            start: selectedSlot.start,
-            end: selectedSlot.end,
-            weekIndex: week.weekIndex,
-            teamId: homeTeamId,
-          },
-        });
-        recordCoachAssignment({
-          coachAssignments,
-          coachId: awayTeam.coachId,
-          assignment: {
-            slotId: selectedSlot.id,
-            start: selectedSlot.start,
-            end: selectedSlot.end,
-            weekIndex: week.weekIndex,
-            teamId: awayTeamId,
-          },
-        });
-
-        assignments.push({
-          weekIndex: week.weekIndex,
-          division,
-          slotId: selectedSlot.id,
-          start: selectedSlot.start.toISOString(),
-          end: selectedSlot.end.toISOString(),
-          homeTeamId,
-          awayTeamId,
-          fieldId: selectedSlot.fieldId,
-        });
-      }
-    }
+function scheduleMatchup({
+  division,
+  weekIndex,
+  matchup,
+  teamsById,
+  divisionSlots,
+  sharedSlots,
+  coachAssignments,
+  teamWeekAssignments,
+  assignments,
+  unscheduled,
+}) {
+  if (!matchup || typeof matchup !== 'object') {
+    throw new TypeError(`matchups for division ${division} must be objects`);
   }
 
-  assignments.sort((a, b) => {
-    if (a.weekIndex !== b.weekIndex) {
-      return a.weekIndex - b.weekIndex;
-    }
-    if (a.division !== b.division) {
-      return a.division.localeCompare(b.division);
-    }
-    if (a.start !== b.start) {
-      return a.start.localeCompare(b.start);
-    }
-    if (a.slotId !== b.slotId) {
-      return a.slotId.localeCompare(b.slotId);
-    }
-    return a.homeTeamId.localeCompare(b.homeTeamId);
+  const { homeTeamId, awayTeamId } = matchup;
+  if (!homeTeamId || !awayTeamId) {
+    throw new TypeError('each matchup requires homeTeamId and awayTeamId');
+  }
+
+  const homeTeam = teamsById.get(homeTeamId);
+  const awayTeam = teamsById.get(awayTeamId);
+
+  if (!homeTeam || !awayTeam) {
+    unscheduled.push({
+      weekIndex,
+      division,
+      matchup: { homeTeamId, awayTeamId },
+      reason: 'unknown-team',
+    });
+    return;
+  }
+
+  if (homeTeam.division !== division || awayTeam.division !== division) {
+    unscheduled.push({
+      weekIndex,
+      division,
+      matchup: { homeTeamId, awayTeamId },
+      reason: 'division-mismatch',
+    });
+    return;
+  }
+
+  const teamWeekKeyHome = `${homeTeamId}::${weekIndex}`;
+  const teamWeekKeyAway = `${awayTeamId}::${weekIndex}`;
+  if (teamWeekAssignments.has(teamWeekKeyHome) || teamWeekAssignments.has(teamWeekKeyAway)) {
+    unscheduled.push({
+      weekIndex,
+      division,
+      matchup: { homeTeamId, awayTeamId },
+      reason: 'duplicate-matchup',
+    });
+    return;
+  }
+
+  if (homeTeam.coachId && homeTeam.coachId === awayTeam.coachId) {
+    unscheduled.push({
+      weekIndex,
+      division,
+      matchup: { homeTeamId, awayTeamId },
+      reason: 'coach-coaches-both-teams',
+    });
+    return;
+  }
+
+  const { slot: selectedSlot, encounteredConflict } = selectSlotForMatchup({
+    division,
+    weekIndex,
+    divisionSlots,
+    sharedSlots,
+    coachAssignments,
+    coaches: [homeTeam.coachId, awayTeam.coachId],
   });
 
-  byes.sort((a, b) => {
-    if (a.weekIndex !== b.weekIndex) {
-      return a.weekIndex - b.weekIndex;
-    }
-    if (a.division !== b.division) {
-      return a.division.localeCompare(b.division);
-    }
-    return a.teamId.localeCompare(b.teamId);
+  if (!selectedSlot) {
+    unscheduled.push({
+      weekIndex,
+      division,
+      matchup: { homeTeamId, awayTeamId },
+      reason: encounteredConflict ? 'coach-scheduling-conflict' : 'no-slot-available',
+    });
+    return;
+  }
+
+  selectedSlot.remainingCapacity -= 1;
+  teamWeekAssignments.add(teamWeekKeyHome);
+  teamWeekAssignments.add(teamWeekKeyAway);
+  recordCoachAssignment({
+    coachAssignments,
+    coachId: homeTeam.coachId,
+    assignment: {
+      slotId: selectedSlot.id,
+      start: selectedSlot.start,
+      end: selectedSlot.end,
+      weekIndex,
+      teamId: homeTeamId,
+    },
+  });
+  recordCoachAssignment({
+    coachAssignments,
+    coachId: awayTeam.coachId,
+    assignment: {
+      slotId: selectedSlot.id,
+      start: selectedSlot.start,
+      end: selectedSlot.end,
+      weekIndex,
+      teamId: awayTeamId,
+    },
   });
 
-  unscheduled.sort((a, b) => {
-    if (a.weekIndex !== b.weekIndex) {
-      return a.weekIndex - b.weekIndex;
-    }
-    if (a.division !== b.division) {
-      return a.division.localeCompare(b.division);
-    }
-    const matchupA = `${a.matchup.homeTeamId}-${a.matchup.awayTeamId}`;
-    const matchupB = `${b.matchup.homeTeamId}-${b.matchup.awayTeamId}`;
-    if (matchupA !== matchupB) {
-      return matchupA.localeCompare(matchupB);
-    }
-    return a.reason.localeCompare(b.reason);
+  assignments.push({
+    weekIndex,
+    division,
+    slotId: selectedSlot.id,
+    start: selectedSlot.start.toISOString(),
+    end: selectedSlot.end.toISOString(),
+    homeTeamId,
+    awayTeamId,
+    fieldId: selectedSlot.fieldId,
   });
+}
 
-  return { assignments, byes, unscheduled };
+function selectSlotForMatchup({
+  division,
+  weekIndex,
+  divisionSlots,
+  sharedSlots,
+  coachAssignments,
+  coaches,
+}) {
+  const divisionKey = `${division}::${weekIndex}`;
+  const sharedKey = `*::${weekIndex}`;
+  const candidateSlots = [
+    ...(divisionSlots.get(divisionKey) ?? []),
+    ...(sharedSlots.get(sharedKey) ?? []),
+  ];
+
+  let encounteredConflict = false;
+
+  for (const slotRecord of candidateSlots) {
+    if (slotRecord.remainingCapacity <= 0) {
+      continue;
+    }
+
+    if (
+      hasCoachConflict({
+        coachAssignments,
+        coaches,
+        start: slotRecord.start,
+        end: slotRecord.end,
+      })
+    ) {
+      encounteredConflict = true;
+      continue;
+    }
+
+    return { slot: slotRecord, encounteredConflict };
+  }
+
+  return { slot: null, encounteredConflict };
 }
 
 function hasCoachConflict({ coachAssignments, coaches, start, end }) {

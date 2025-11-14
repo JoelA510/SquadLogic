@@ -122,7 +122,7 @@ test('scheduleGames assigns matchups to earliest compatible slots', () => {
   }
 });
 
-test('scheduleGames marks unscheduled matchups when coach conflicts prevent assignment', () => {
+test('scheduleGames marks matchups where a coach leads both teams', () => {
   const conflictTeams = [
     { id: 'team-a', division: 'U12', coachId: 'coach-shared' },
     { id: 'team-b', division: 'U12', coachId: 'coach-shared' },
@@ -132,19 +132,11 @@ test('scheduleGames marks unscheduled matchups when coach conflicts prevent assi
 
   const conflictSlots = [
     {
-      id: 'slot-week-1-shared',
+      id: 'slot-week-1',
       division: 'U12',
       weekIndex: 1,
       start: '2024-08-10T16:00:00Z',
       end: '2024-08-10T17:00:00Z',
-      capacity: 1,
-    },
-    {
-      id: 'slot-week-1-late',
-      division: 'U12',
-      weekIndex: 1,
-      start: '2024-08-10T16:30:00Z',
-      end: '2024-08-10T17:30:00Z',
       capacity: 1,
     },
     {
@@ -165,13 +157,53 @@ test('scheduleGames marks unscheduled matchups when coach conflicts prevent assi
     },
   ];
 
-  const { assignments, unscheduled, byes } = scheduleGames({
+  const { unscheduled } = scheduleGames({
     teams: conflictTeams,
     slots: conflictSlots,
     roundRobinByDivision: { U12: roundRobin },
   });
 
-  assert(assignments.length > 0);
-  assert(unscheduled.some((entry) => entry.reason === 'coach-conflict'));
-  assert.equal(byes.length, 3);
+  assert(unscheduled.some((entry) => entry.reason === 'coach-coaches-both-teams'));
+});
+
+test('scheduleGames surfaces scheduling conflicts for coaches with multiple teams', () => {
+  const teams = [
+    { id: 'team-a', division: 'U12', coachId: 'coach-shared' },
+    { id: 'team-b', division: 'U12', coachId: 'coach-unique-1' },
+    { id: 'team-c', division: 'U14', coachId: 'coach-shared' },
+    { id: 'team-d', division: 'U14', coachId: 'coach-unique-2' },
+  ];
+
+  const roundRobin = {
+    U12: generateRoundRobinWeeks({ teamIds: ['team-a', 'team-b'] }),
+    U14: generateRoundRobinWeeks({ teamIds: ['team-c', 'team-d'] }),
+  };
+
+  const conflictSlots = [
+    {
+      id: 'slot-u12-week-1',
+      division: 'U12',
+      weekIndex: 1,
+      start: '2024-08-10T16:00:00Z',
+      end: '2024-08-10T17:00:00Z',
+      capacity: 1,
+    },
+    {
+      id: 'slot-u14-week-1',
+      division: 'U14',
+      weekIndex: 1,
+      start: '2024-08-10T16:30:00Z',
+      end: '2024-08-10T17:30:00Z',
+      capacity: 1,
+    },
+  ];
+
+  const { assignments, unscheduled } = scheduleGames({
+    teams,
+    slots: conflictSlots,
+    roundRobinByDivision: roundRobin,
+  });
+
+  assert.equal(assignments.length, 1);
+  assert(unscheduled.some((entry) => entry.reason === 'coach-scheduling-conflict'));
 });

@@ -151,9 +151,27 @@ export function evaluateGameSchedule({ assignments, teams, byes = [], unschedule
       (summary.unscheduledByReason[entry.reason] ?? 0) + 1;
   }
 
-  detectTeamConflicts({ teamAssignments, warnings });
-  detectCoachConflicts({ coachAssignments, warnings });
-  detectFieldConflicts({ fieldAssignments, warnings });
+  detectConflicts({
+    assignmentsMap: teamAssignments,
+    warnings,
+    idKey: 'teamId',
+    warningType: 'team-double-booked',
+    messageFn: (id) => `Team ${id} has overlapping games`,
+  });
+  detectConflicts({
+    assignmentsMap: coachAssignments,
+    warnings,
+    idKey: 'coachId',
+    warningType: 'coach-conflict',
+    messageFn: (id) => `Coach ${id} has overlapping games across teams`,
+  });
+  detectConflicts({
+    assignmentsMap: fieldAssignments,
+    warnings,
+    idKey: 'fieldId',
+    warningType: 'field-overlap',
+    messageFn: (id) => `Field ${id} has overlapping games`,
+  });
 
   if (unscheduled.length > 0) {
     warnings.push({
@@ -225,73 +243,25 @@ function validateUnscheduled(entry) {
   }
 }
 
-function detectTeamConflicts({ teamAssignments, warnings }) {
-  for (const [teamId, assignments] of teamAssignments.entries()) {
-    assignments.sort((a, b) => a.start - b.start || a.slotId.localeCompare(b.slotId));
-    for (let i = 1; i < assignments.length; i += 1) {
-      const prev = assignments[i - 1];
-      const curr = assignments[i];
-      if (curr.start < prev.end) {
-        warnings.push({
-          type: 'team-double-booked',
-          message: `Team ${teamId} has overlapping games`,
-          details: {
-            teamId,
-            conflicts: [
-              simplifyAssignment(prev),
-              simplifyAssignment(curr),
-            ],
-          },
-        });
-        break;
-      }
-    }
-  }
-}
-
-function detectCoachConflicts({ coachAssignments, warnings }) {
-  for (const [coachId, assignments] of coachAssignments.entries()) {
-    assignments.sort((a, b) => a.start - b.start || a.slotId.localeCompare(b.slotId));
-    for (let i = 1; i < assignments.length; i += 1) {
-      const prev = assignments[i - 1];
-      const curr = assignments[i];
-      if (curr.start < prev.end) {
-        warnings.push({
-          type: 'coach-conflict',
-          message: `Coach ${coachId} has overlapping games across teams`,
-          details: {
-            coachId,
-            conflicts: [
-              simplifyAssignment(prev),
-              simplifyAssignment(curr),
-            ],
-          },
-        });
-        break;
-      }
-    }
-  }
-}
-
-function detectFieldConflicts({ fieldAssignments, warnings }) {
-  for (const [fieldKey, assignments] of fieldAssignments.entries()) {
-    if (fieldKey === 'unassigned') {
+function detectConflicts({ assignmentsMap, warnings, idKey, warningType, messageFn }) {
+  for (const [id, assignments] of assignmentsMap.entries()) {
+    if (idKey === 'fieldId' && id === 'unassigned') {
       continue;
     }
+
     assignments.sort((a, b) => a.start - b.start || a.slotId.localeCompare(b.slotId));
+
     for (let i = 1; i < assignments.length; i += 1) {
       const prev = assignments[i - 1];
       const curr = assignments[i];
+
       if (curr.start < prev.end) {
         warnings.push({
-          type: 'field-overlap',
-          message: `Field ${fieldKey} has overlapping games`,
+          type: warningType,
+          message: messageFn(id),
           details: {
-            fieldId: fieldKey,
-            conflicts: [
-              simplifyAssignment(prev),
-              simplifyAssignment(curr),
-            ],
+            [idKey]: id,
+            conflicts: [simplifyAssignment(prev), simplifyAssignment(curr)],
           },
         });
         break;

@@ -87,6 +87,8 @@
 - `import_jobs`: Tracks CSV uploads with status, source file references (Supabase Storage path), error logs, and user id.
 
 ## Data Ingestion Utilities
+Detailed ingestion workflows live in `docs/ingestion-pipeline.md`. Highlights below summarize the responsibilities that inform the database design.
+
 1. **Registration Importer**
    - Parses GotSport CSV exports.
    - Normalizes guardian contact information into structured JSON.

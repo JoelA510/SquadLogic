@@ -6,7 +6,7 @@ Use this template during calls with the league administrator or supporting stake
 - **Date:** 
 - **Attendees:** 
 - **Recording Link:** (if approved)
-- **Prepared Intake Sheet Snapshot:** `docs/intake-snapshots/season-intake-YYYYMMDD.csv`
+- **Prepared Intake Sheet Snapshot:** `../intake-snapshots/season-intake-YYYYMMDD.csv`
 - **Summary Owner:** 
 
 ## Division Overview

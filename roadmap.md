@@ -12,6 +12,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 - [ ] Game Scheduling – Game scheduling blueprint refined in `docs/game-scheduling.md` with clarified inputs and fairness metrics; algorithm implementation and integration still pending.
 - [ ] Evaluation & Refinement – Evaluation pipeline, fairness metrics, and remediation workflow documented in `docs/evaluation.md`; implementation of automated checks and UI reporting outstanding.
 - [ ] Output Generation & Integration – Export and communication workflow planned in `docs/output-generation.md`; serverless exporters, storage integration, and admin tooling still required.
+- [ ] Front-End Development – Navigation, screen blueprint, and state management approach documented in `docs/frontend-architecture.md`; CRA scaffolding, Supabase client wiring, and component implementation pending.
 
 ## 1. Requirements Analysis & Planning
 
@@ -99,6 +100,8 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 4. **Preview and send** – In the UI, allow the admin to preview each email before sending.  Include a “Send” button that opens a `mailto:` link with the prefilled subject and body or sends via API if configured.  The final sending action should always require explicit confirmation.
 
 ## 9. Front‑End Development
+
+**Status:** Front-end architecture outline captured in `docs/frontend-architecture.md` covering routing, screen components, state management, and Supabase integration touchpoints; next steps include scaffolding the CRA project, wiring the Supabase client, and implementing high-priority screens starting with Data Import and Team Review.
 
 1. **User interface** – Build a responsive web app using Create React App.  Pages should include:
    - **Dashboard/home**: overview of the current season status, number of teams, schedule generation progress.

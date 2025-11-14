@@ -388,8 +388,13 @@ begin
         'active'
     )
     on conflict (email) do update set
+        player_id = excluded.player_id,
+        full_name = excluded.full_name,
         phone = excluded.phone,
+        certifications = excluded.certifications,
         preferred_practice_days = excluded.preferred_practice_days,
+        preferred_practice_window = excluded.preferred_practice_window,
+        can_coach_multiple_teams = excluded.can_coach_multiple_teams,
         status = excluded.status
     returning id into coach_maria_id;
 
@@ -415,8 +420,13 @@ begin
         'active'
     )
     on conflict (email) do update set
+        player_id = excluded.player_id,
+        full_name = excluded.full_name,
         phone = excluded.phone,
+        certifications = excluded.certifications,
         preferred_practice_days = excluded.preferred_practice_days,
+        preferred_practice_window = excluded.preferred_practice_window,
+        can_coach_multiple_teams = excluded.can_coach_multiple_teams,
         status = excluded.status
     returning id into coach_jordan_id;
 
@@ -442,8 +452,13 @@ begin
         'active'
     )
     on conflict (email) do update set
+        player_id = excluded.player_id,
+        full_name = excluded.full_name,
         phone = excluded.phone,
+        certifications = excluded.certifications,
         preferred_practice_days = excluded.preferred_practice_days,
+        preferred_practice_window = excluded.preferred_practice_window,
+        can_coach_multiple_teams = excluded.can_coach_multiple_teams,
         status = excluded.status
     returning id into coach_devon_id;
 
@@ -469,8 +484,13 @@ begin
         'active'
     )
     on conflict (email) do update set
+        player_id = excluded.player_id,
+        full_name = excluded.full_name,
         phone = excluded.phone,
+        certifications = excluded.certifications,
         preferred_practice_days = excluded.preferred_practice_days,
+        preferred_practice_window = excluded.preferred_practice_window,
+        can_coach_multiple_teams = excluded.can_coach_multiple_teams,
         status = excluded.status
     returning id into coach_elena_id;
 
@@ -491,6 +511,7 @@ begin
     )
     on conflict (division_id, name) do update set
         coach_id = excluded.coach_id,
+        assistant_coach_ids = excluded.assistant_coach_ids,
         practice_slot_id = excluded.practice_slot_id,
         notes = excluded.notes
     returning id into team_firebolts_id;
@@ -512,6 +533,7 @@ begin
     )
     on conflict (division_id, name) do update set
         coach_id = excluded.coach_id,
+        assistant_coach_ids = excluded.assistant_coach_ids,
         practice_slot_id = excluded.practice_slot_id,
         notes = excluded.notes
     returning id into team_riverrunners_id;
@@ -533,6 +555,7 @@ begin
     )
     on conflict (division_id, name) do update set
         coach_id = excluded.coach_id,
+        assistant_coach_ids = excluded.assistant_coach_ids,
         practice_slot_id = excluded.practice_slot_id,
         notes = excluded.notes
     returning id into team_lightning_id;
@@ -554,6 +577,7 @@ begin
     )
     on conflict (division_id, name) do update set
         coach_id = excluded.coach_id,
+        assistant_coach_ids = excluded.assistant_coach_ids,
         practice_slot_id = excluded.practice_slot_id,
         notes = excluded.notes
     returning id into team_thunder_id;
@@ -622,7 +646,11 @@ begin
         week_index
     ) values
         (game_slot_u8, team_firebolts_id, team_riverrunners_id, 1),
-        (game_slot_u10, team_lightning_id, team_thunder_id, 1);
+        (game_slot_u10, team_lightning_id, team_thunder_id, 1)
+    on conflict (game_slot_id) do update set
+        home_team_id = excluded.home_team_id,
+        away_team_id = excluded.away_team_id,
+        week_index = excluded.week_index;
 
     raise notice 'Seed data applied for Fall 2024 recreation season (season_settings.id=%)', season_id;
 end

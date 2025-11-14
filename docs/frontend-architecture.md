@@ -1,6 +1,6 @@
 # Front-End Architecture Plan
 
-This document breaks down the roadmap's front-end milestones into an actionable Create React App (CRA) implementation strategy. It establishes the page layout, state management approach, data-fetching patterns, and testing expectations so subsequent engineering tasks have clear guardrails.
+This document breaks down the roadmap's front-end milestones into an actionable implementation strategy using a modern React build tool (e.g., Vite). It establishes the page layout, state management approach, data-fetching patterns, and testing expectations so subsequent engineering tasks have clear guardrails.
 
 ## UI Shell & Navigation
 - **Routing**: Use `react-router-dom` v6 with a top-level `AppShell` that renders persistent navigation (sidebar on desktop, collapsible drawer on mobile).
@@ -44,7 +44,7 @@ This document breaks down the roadmap's front-end milestones into an actionable 
 - Implement optimistic updates for manual roster and schedule adjustments while verifying outcomes via evaluation reruns.
 
 ## Supabase Integration Strategy
-- **Authentication**: Start with service-role key in serverless context; front end gated behind a shared admin passcode stored in environment config until Supabase Auth is enabled.
+- **Authentication**: Use Supabase Auth with a dedicated admin user (email/password or magic link) from the outset. Gate the UI with Supabase session state and validate JWT roles within serverless handlers. Keep the service-role key restricted to trusted server-side environments and never expose it to the client bundle.
 - **Edge Functions**: Define typed client wrappers (e.g., `importRegistrations`, `runPracticeScheduler`) returning discriminated unions `{ status: 'queued' | 'running' | 'error', data?: ... }`.
 - **Realtime channels**: Subscribe to `import_jobs` and scheduler run tables to push live status updates into React Query caches.
 
@@ -60,7 +60,7 @@ This document breaks down the roadmap's front-end milestones into an actionable 
 - **CI hooks**: Lint (`npm run lint`), type-check (`tsc --noEmit`), and run targeted Jest suites on pull requests touching `src/`.
 
 ## Incremental Delivery Milestones
-1. Scaffold CRA project with routing, Supabase client bootstrap, and placeholder navigation.
+1. Scaffold the React project with routing, Supabase client bootstrap, and placeholder navigation using a modern build tool such as Vite.
 2. Implement Data Import screen with live import history reading from stubbed data.
 3. Build Team Review workflow, then expand into practice/game schedulers.
 4. Layer in Evaluation dashboards and export utilities.
@@ -68,5 +68,5 @@ This document breaks down the roadmap's front-end milestones into an actionable 
 
 ## Open Questions
 - Finalize UI component library choice (headless vs. prebuilt design system like Chakra UI).
-- Confirm whether admin authentication should launch with Supabase email magic links or remain passcode-protected MVP.
-- Determine if scheduling agents run via Netlify Scheduled Functions or Supabase Edge Function cron, as this affects UI polling patterns.
+- Confirm whether admin authentication should launch with Supabase Auth email/password or magic links and whether additional MFA is required for production.
+- Determine if scheduling agents run via Netlify Scheduled Functions or Supabase Edge Function cron (currently in beta), as this affects UI polling patterns and reliability expectations.

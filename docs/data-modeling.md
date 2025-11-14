@@ -100,6 +100,19 @@
 - `season_settings`: Single-row table for league-wide parameters (roster formulas, daylight change dates, export templates).
 - `import_jobs`: Tracks CSV uploads with status, source file references (Supabase Storage path), error logs, and user id.
 
+### Scheduler Run History
+- `scheduler_runs`: Consolidates team generation, practice scheduling, and game scheduling executions into a single table with a `run_type` discriminator. Stores parameters, metrics, and a `results` JSON payload so totals, conflict summaries, or other run-specific outputs remain queryable without maintaining separate tables per workflow.
+
+### Evaluation & Remediation Tables
+- `evaluation_runs`: Stores evaluation pipeline executions linked to the originating `scheduler_runs` record (`team`, `practice`, `game`, or `composite`). Includes status, severity flags, metrics snapshots, and auto-fix summaries.
+- `evaluation_findings`: Row-per-issue log with severity, machine-friendly `finding_code`, and affected entity metadata so the UI can group results by team or field.
+- `evaluation_metrics`: Key/value metric store with optional thresholds for fairness scoring; unique per evaluation/metric pair to prevent duplicates.
+- `evaluation_run_events`: Timeline of remediation actions (auto fixes, manual overrides, notes) tied to an evaluation run for auditability.
+
+### Export & Communication Logging
+- `export_jobs`: Background job tracker for generating master and team-specific schedule files. Captures payload filters, schema version, storage paths, and error details for retriable failures.
+- `email_log`: Minimal audit table recording when coach communication drafts are generated, copied, or sent (if an email API is later integrated), referencing the originating `export_job` when available.
+
 ## Data Ingestion Utilities
 Detailed ingestion workflows live in `docs/ingestion-pipeline.md`. Highlights below summarize the responsibilities that inform the database design.
 
@@ -125,9 +138,9 @@ Detailed ingestion workflows live in `docs/ingestion-pipeline.md`. Highlights be
 
 ## Initial Schema Draft
 - The first-pass DDL for these entities lives in `docs/sql/initial_schema.sql`. It can be copied into a Supabase migration
-  once validated locally. The script establishes core tables, lookup constraints, helper staging tables, and supporting indexes
-  required for ingestion, team assignments, and schedule generation. Shared timestamp triggers keep `updated_at` fresh across
-  mutable tables.
+  once validated locally. The script establishes core tables, lookup constraints, helper staging tables, scheduler run histories,
+  evaluation artifacts, export trackers, and supporting indexes required for ingestion, team assignments, scheduling, and
+  downstream reporting. Shared timestamp triggers keep `updated_at` fresh across mutable tables.
 - Follow-up work includes adding Row Level Security policies and additional data quality constraints (e.g., enforcing assistant
   coach references) before promoting the script to production migrations.
 

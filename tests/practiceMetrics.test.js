@@ -137,3 +137,21 @@ test('evaluatePracticeSchedule emits warnings for inconsistent data', () => {
   assert(report.dataQualityWarnings[1].includes('unknown slot'));
   assert(report.dataQualityWarnings[2].includes('duplicate assignment'));
 });
+
+test('evaluatePracticeSchedule correctly counts teams assigned to multiple slots', () => {
+  const report = evaluatePracticeSchedule({
+    assignments: [
+      { teamId: 'team-1', slotId: 'slot-early-mon' },
+      { teamId: 'team-1', slotId: 'slot-wed' },
+    ],
+    teams: SAMPLE_TEAMS,
+    slots: SAMPLE_SLOTS,
+  });
+
+  assert.deepEqual(report.summary, {
+    totalTeams: 4,
+    assignedTeams: 1,
+    unassignedTeams: 3,
+    assignmentRate: 0.25,
+  });
+});

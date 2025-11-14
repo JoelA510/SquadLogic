@@ -110,6 +110,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
 
   const dataQualityWarnings = [];
   const seenAssignments = new Set();
+  const assignedTeamIds = new Set();
   const assignmentsBySlot = new Map();
   const assignmentsByDivision = new Map();
   const assignmentsByCoach = new Map();
@@ -139,6 +140,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
       continue;
     }
     seenAssignments.add(key);
+    assignedTeamIds.add(team.id);
 
     const slotAssignments = assignmentsBySlot.get(slot.id) ?? [];
     slotAssignments.push({ teamId: assignment.teamId, team });
@@ -253,8 +255,8 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
   }
 
   const totalTeams = teams.length;
-  const assignedTeams = seenAssignments.size;
-  const unassignedTeams = unassigned.length + Math.max(0, totalTeams - (assignedTeams + unassigned.length));
+  const assignedTeams = assignedTeamIds.size;
+  const unassignedTeams = totalTeams - assignedTeams;
   const assignmentRate = totalTeams === 0 ? 1 : Number(((assignedTeams / totalTeams) || 0).toFixed(4));
 
   return {

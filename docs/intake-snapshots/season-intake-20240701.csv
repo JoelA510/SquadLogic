@@ -1,0 +1,24 @@
+# Divisions
+Division Name,Format,Target Teams,Roster Formula,Shared Fields,Special Rules
+U8 Coed,7v7,6,"max(12, ROUNDUP(Players/teams,0))",Primary School #1; Primary School #2,"Build-out line, no heading"
+U10 Girls,9v9,8,"=MIN(14, 2*PlayableRoster-2)",Complex A (Fields 3A/3B),"Offside in effect"
+
+# Coaches
+Coach Name,Email,Associated Player,Division,Preferred Days,Conflict Days,Multiple Teams?
+Alex Martinez,alex.martinez@example.com,Sofia Martinez (U8 Coed),U8 Coed,Tuesday; Thursday,Monday,No
+Priya Shah,priya.shah@example.com,Diya Shah (U10 Girls),U10 Girls,Wednesday,Thursday,Yes
+
+# Buddy Requests
+Player A,Player B,Mutual?,Notes
+Caleb Johnson,Noah Kim,Yes,Confirmed mutual request in GotSport 2024-06 export
+Harper Lee,Avery Smith,No,Avery only requested Harper; needs admin follow-up
+
+# Fields & Slots
+Location,Field,Subfield,Day,Start,End,Lighting/Curfew Notes,Capacity,Valid From,Valid To
+Primary School #1,1,A,Monday,17:30,18:30,"Lights off 20:30; shared with Parks dept",1,2024-08-05,2024-10-24
+Community Complex,3,B,Wednesday,18:00,19:15,"Full lighting",1,2024-08-07,2024-10-23
+
+# Season Milestones
+Task,Owner,Target Date,Status,Dependencies
+Confirm division counts,League Admin,2024-07-15,In Progress,None
+Publish practice schedule,League Admin,2024-08-10,Not Started,Confirm division counts; Load final field slots

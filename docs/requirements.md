@@ -65,6 +65,11 @@ Populate the Season Intake form with the following tabs/columns so discovery out
 - Log every manual adjustment (e.g., confirmed exception for siblings) in the `Notes` column so the history is auditable.
 - Snapshot the Google Sheet to the repo after major updates (export CSV and commit) to preserve baselines for regression testing.
 
+### Baseline Snapshot (2024-07-01)
+- Exported the initial template to `docs/intake-snapshots/season-intake-20240701.csv` to validate column structure and provide sample data for discovery conversations.
+- Populated representative rows for each tab (divisions, coaches, buddy requests, field slots, and milestones) so follow-up interviews can update real values without designing the schema from scratch.
+- Added example formulas in the roster and buddy columns to guide future spreadsheet automation; these will be replaced with league-specific numbers after stakeholder sign-off.
+
 ## Documented Constraints
 ### Hard Constraints
 1. One practice per team per week within available Monday–Thursday slots.

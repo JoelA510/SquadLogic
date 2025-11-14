@@ -64,7 +64,7 @@ This document translates the roadmap's team formation phase into actionable plan
 - **Overflow handling**: When roster caps are insufficient, affected players are surfaced in an overflow report with division context.
 - **Diagnostics**: Algorithm emits a structured summary (team counts, buddy stats, overflow list) persisted to `scheduler_runs`.
 
-**Test harness plan**
+### Test harness plan
 - Use Jest with a fixture loader that seeds in-memory objects mirroring the schema (players, coaches, divisions, configuration).
 - Provide scenario fixtures: balanced division, buddy-heavy division, coach overlap division, and capacity-deficit division.
 - Assert both database mutations (mocked repositories) and diagnostic payload content for each scenario.

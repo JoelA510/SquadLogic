@@ -21,6 +21,8 @@ clear tasks for administrators. It assumes the scheduling engines described in `
      or `field_id` within the same time range.
    - Detect coach conflicts by cross-referencing `coaches` to their teams' assignments and verifying non-overlapping windows.
    - Confirm buddy integrity by asserting that paired players share the same `team_id` in `team_players`.
+   - Guard against division drift by validating that every player listed in `team_players` matches the parent team's
+     `division_id`, catching any data corruption that slips past roster generation.
    - Write failures to `evaluation_findings` with severity (`error`, `warning`) and machine-friendly `finding_code`s.
 3. **Fairness Metrics**
    - Compute per-division distributions of early/mid/late time slots for practices and games.

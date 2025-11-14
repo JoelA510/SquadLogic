@@ -8,6 +8,8 @@ once schedules are finalized. It assumes team, practice, game, and evaluation da
 - Generate per-team packages (CSV/Excel + optional email draft) suitable for TeamSnap imports and coach outreach.
 - Provide administrators with tooling to preview, download, and confirm outputs before sharing them externally.
 - Maintain traceability so exports can be regenerated consistently after manual adjustments or reruns.
+- Ensure exports only surface necessary information, redacting sensitive player data per the data governance principles in
+  `docs/data-modeling.md`.
 
 ## Export Architecture
 1. **Export Requests**

@@ -7,7 +7,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 - [x] Requirements Analysis & Planning – Documentation complete; validated during the 2024-07-08 audit.
 - [x] Architecture & Technology Selection – Documentation complete; audit confirms status.
 - [x] Data Modeling & Storage – Documentation complete; audit confirms status.
-- [ ] Team Generation – Core allocator implemented in `src/teamGeneration.js` with deterministic unit tests; UI wiring and admin workflows outstanding.
+- [ ] Team Generation – Core allocator implemented in `src/teamGeneration.js` with deterministic unit tests; conflict detection and validation safeguards added while UI wiring and admin workflows remain outstanding.
 - [ ] Practice Scheduling – Scheduling workflow outlined in `docs/practice-scheduling.md`; implementation, metrics, and admin tooling remain to be built.
 - [ ] Game Scheduling – Game scheduling blueprint refined in `docs/game-scheduling.md` with clarified inputs and fairness metrics; algorithm implementation and integration still pending.
 - [ ] Evaluation & Refinement – Evaluation pipeline, fairness metrics, and remediation workflow documented in `docs/evaluation.md`; implementation of automated checks and UI reporting outstanding.

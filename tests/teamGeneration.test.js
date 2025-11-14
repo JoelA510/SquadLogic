@@ -73,6 +73,48 @@ test('throws when no team can accommodate a unit', () => {
   );
 });
 
+test('throws when buddy unit has conflicting coach assignments', () => {
+  const players = [
+    { id: 'a', division: 'U10', buddyId: 'b', coachId: 'coach-1' },
+    { id: 'b', division: 'U10', buddyId: 'a', coachId: 'coach-2' },
+  ];
+
+  assert.throws(
+    () => generateTeams({ players, divisionConfigs, random: createDeterministicRandom() }),
+    /conflicting coach assignments/i,
+  );
+});
+
+test('validates input arguments', () => {
+  assert.throws(() => generateTeams({ players: null, divisionConfigs }), /players must be an array/i);
+  assert.throws(
+    () => generateTeams({ players: [], divisionConfigs: null }),
+    /divisionconfigs must be an object/i,
+  );
+  assert.throws(
+    () => generateTeams({ players: [], divisionConfigs, random: 'not-a-function' }),
+    /random must be a function/i,
+  );
+
+  const missingId = [{ division: 'U10' }];
+  assert.throws(
+    () => generateTeams({ players: missingId, divisionConfigs }),
+    /each player requires an id/i,
+  );
+
+  const missingDivision = [{ id: 'no-division' }];
+  assert.throws(
+    () => generateTeams({ players: missingDivision, divisionConfigs }),
+    /is missing a division/i,
+  );
+
+  const players = [{ id: 'a', division: 'U11' }];
+  assert.throws(
+    () => generateTeams({ players, divisionConfigs }),
+    /missing maxrostersize for division u11/i,
+  );
+});
+
 function createDeterministicRandom() {
   const modulus = 2147483647;
   let state = 42;

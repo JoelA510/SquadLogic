@@ -77,7 +77,7 @@ function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
   );
 
   const requiredTeams = Math.max(
-    coachIds.length || 0,
+    coachIds.length,
     Math.ceil(players.length / maxRosterSize) || 1,
   );
 
@@ -104,9 +104,16 @@ function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
   const generalUnits = [];
 
   for (const unit of units) {
-    const coachPlayer = unit.find((player) => player.coachId);
-    if (coachPlayer) {
-      coachUnits.push({ coachId: coachPlayer.coachId, unit });
+    const coachPlayers = unit.filter((player) => player.coachId);
+    if (coachPlayers.length > 0) {
+      const coachIdsInUnit = new Set(coachPlayers.map((player) => player.coachId));
+      if (coachIdsInUnit.size > 1) {
+        throw new Error(
+          `Conflicting coach assignments for players in unit: ${unit.map((player) => player.id).join(', ')}`,
+        );
+      }
+
+      coachUnits.push({ coachId: coachPlayers[0].coachId, unit });
     } else {
       generalUnits.push(unit);
     }
@@ -181,13 +188,18 @@ function pickTeamWithMostCapacity({ teams, unitSize, maxRosterSize, random }) {
   }
 
   let minSize = Infinity;
-  for (const candidate of candidates) {
-    if (candidate.players.length < minSize) {
-      minSize = candidate.players.length;
+  let smallestTeams = [];
+
+  for (const team of candidates) {
+    const teamSize = team.players.length;
+    if (teamSize < minSize) {
+      minSize = teamSize;
+      smallestTeams = [team];
+    } else if (teamSize === minSize) {
+      smallestTeams.push(team);
     }
   }
 
-  const smallestTeams = candidates.filter((team) => team.players.length === minSize);
   const index = Math.floor(random() * smallestTeams.length);
   return smallestTeams[index];
 }

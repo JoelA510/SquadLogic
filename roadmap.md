@@ -10,6 +10,8 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 - [ ] Team Generation – Algorithm design documented in `docs/team-generation.md`; development, testing, and UI integration outstanding.
 - [ ] Practice Scheduling – Scheduling workflow outlined in `docs/practice-scheduling.md`; implementation, metrics, and admin tooling remain to be built.
 - [ ] Game Scheduling – Game scheduling blueprint refined in `docs/game-scheduling.md` with clarified inputs and fairness metrics; algorithm implementation and integration still pending.
+- [ ] Evaluation & Refinement – Evaluation pipeline, fairness metrics, and remediation workflow documented in `docs/evaluation.md`; implementation of automated checks and UI reporting outstanding.
+- [ ] Output Generation & Integration – Export and communication workflow planned in `docs/output-generation.md`; serverless exporters, storage integration, and admin tooling still required.
 
 ## 1. Requirements Analysis & Planning
 
@@ -80,11 +82,15 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 
 ## 7. Evaluation & Refinement Loop
 
+**Status:** Evaluation pipeline design, fairness metrics catalog, and remediation workflow documented in `docs/evaluation.md`; next steps include building Supabase helper views, orchestrating the evaluation worker, and surfacing dashboards in the admin UI.
+
 1. **Implement reflection** – After generating schedules, run an evaluation module that verifies hard constraints (one practice per team, no overlapping coach commitments, field capacities) and calculates metrics such as fairness (e.g., distribution of early vs. late slots).  This mirrors the evaluator loop pattern in agentic systems, where the agent reviews its output and revises actions until constraints are satisfied【19†L83-L91】【31†L129-L133】.
 2. **Automate fixes** – For each detected violation, attempt to swap assignments or shift teams to alternative slots.  Limit the number of iterations to avoid endless loops; if conflicts remain, flag them for manual resolution.
 3. **Admin review** – Present the proposed schedule in the UI with flags for potential issues.  Allow the administrator to override assignments manually and re‑run the evaluation.
 
 ## 8. Output Generation & Integration
+
+**Status:** Export architecture, TeamSnap integration considerations, and communication workflow are planned in `docs/output-generation.md`; pending work covers building serverless export jobs, Supabase Storage signing, and the admin interface for downloads and email drafts.
 
 1. **Master schedule spreadsheet** – Build a routine that compiles all teams, their rosters and their practice/game assignments into a master CSV or Excel file.  Include columns such as team name, coach, players, practice day/time/location, game day/time/location and notes.
 2. **Team‑specific exports** – For each team, generate a CSV or Excel file suitable for import into TeamSnap.  Include roster information and scheduled events.  Provide a ZIP download or a list of links.

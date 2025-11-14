@@ -24,12 +24,14 @@
   - `id` (UUID)
   - `player_id` (UUID, nullable) linking to their child participant
   - `email`, `phone`, `certifications`
-  - `preferred_practice_days` (text[] limited to Mon–Thu)
+  - `preferred_practice_days` (`day_of_week[]` limited to Mon–Thu)
   - `preferred_practice_window` (tsrange) for time-of-day preferences
   - `can_coach_multiple_teams` (boolean)
+  - `status` (`active`, `pending-confirmation`, `inactive`)
 - **Indexes & constraints**:
   - Unique index on `email`.
   - Foreign key `player_id` references `players.id` with `ON DELETE SET NULL`.
+  - Enum-backed availability days ensure consistent weekday values.
 
 ### Divisions
 - **Purpose**: Parameterize roster sizing and scheduling per age group.
@@ -70,6 +72,7 @@
     `start_time`, `end_time`, `capacity` (smallint, default 1),
     `valid_from`, `valid_until` for daylight adjustments.
   - Index on (`day_of_week`, `start_time`) for quick lookups.
+  - Partial unique indexes prevent double-booking full fields vs. subunits in the same time window.
 - **Game slots** (`game_slots`):
   - `id`, `field_id`, `week_index` (smallint), `slot_date`, `start_time`, `end_time`, `division_id` (nullable for shared fields).
   - Unique constraint on (`field_id`, `slot_date`, `start_time`).
@@ -107,6 +110,14 @@ Detailed ingestion workflows live in `docs/ingestion-pipeline.md`. Highlights be
 - Include buddy pairs, multi-team coaches, and varying capacities to exercise scheduling logic.
 - Automate resets with an npm script invoking `supabase db reset` pointing to a disposable local stack.
 - Document seed assumptions so QA can validate schedule outputs against expected scenarios.
+
+## Initial Schema Draft
+- The first-pass DDL for these entities lives in `docs/sql/initial_schema.sql`. It can be copied into a Supabase migration
+  once validated locally. The script establishes core tables, lookup constraints, helper staging tables, and supporting indexes
+  required for ingestion, team assignments, and schedule generation. Shared timestamp triggers keep `updated_at` fresh across
+  mutable tables.
+- Follow-up work includes adding Row Level Security policies and additional data quality constraints (e.g., enforcing assistant
+  coach references) before promoting the script to production migrations.
 
 ## Data Governance Considerations
 - Enable Row Level Security on all tables; define admin role policies permitting full access and future coach/player roles with read constraints.

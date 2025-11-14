@@ -38,12 +38,12 @@ This document elaborates the roadmap's practice scheduling phase into concrete i
    - Persist assignments into `practice_assignments` with `source = 'auto'`.
      Store the slot window as a `daterange` in `effective_date_range`.
    - The `practice_assignments` table is the authoritative source for assignments. `teams.practice_slot_id` should be considered for deprecation or used as a non-authoritative pointer to avoid inconsistency with mid-season slot changes.
-   - Store a `practice_scheduler_runs` entry capturing parameters used, conflicts encountered, and manual follow-ups required.
+   - Store a `scheduler_runs` entry with `run_type = 'practice'` capturing parameters used, conflicts encountered, and manual follow-ups required.
 
 ## Manual Adjustment Workflow
 - Display assigned slots in the admin UI grouped by day/field so conflicts are visible.
 - Provide controls to reassign a team to another available slot, automatically updating capacities and logging the change as `source = 'manual'`.
-- When a manual adjustment resolves a previously flagged conflict, mark the item as resolved in `practice_scheduler_runs`.
+- When a manual adjustment resolves a previously flagged conflict, mark the item as resolved in the related `scheduler_runs` record.
 
 ## Quality & Monitoring
 - **Unit Tests**: Cover slot scoring, capacity decrementing, conflict detection, and swap attempts using fixture data.

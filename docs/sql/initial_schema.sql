@@ -382,7 +382,7 @@ create table if not exists import_jobs (
     processed_rows     integer,
     error_summary      jsonb default '{}'::jsonb,
     warning_summary    jsonb default '{}'::jsonb,
-    created_by         uuid,
+    created_by         uuid references auth.users(id) on delete set null,
     created_at         timestamptz not null default timezone('utc', now())
 );
 
@@ -407,43 +407,15 @@ create table if not exists player_buddies (
     constraint player_buddies_player_ne_buddy check (player_id <> buddy_player_id)
 );
 
-create table if not exists team_generation_runs (
+create table if not exists scheduler_runs (
     id                 uuid primary key default gen_random_uuid(),
     season_settings_id bigint not null references season_settings(id) on delete cascade,
-    status             text not null check (status in ('queued','running','completed','needs_manual_review','failed')),
+    run_type           text not null check (run_type in ('team','practice','game')),
+    status             text not null check (status in ('queued','running','completed','completed_with_warnings','needs_manual_review','failed')),
     parameters         jsonb not null default '{}'::jsonb,
     metrics            jsonb not null default '{}'::jsonb,
-    total_players      integer,
-    total_teams        integer,
-    created_by         uuid,
-    started_at         timestamptz,
-    completed_at       timestamptz,
-    created_at         timestamptz not null default timezone('utc', now()),
-    updated_at         timestamptz not null default timezone('utc', now())
-);
-
-create table if not exists practice_scheduler_runs (
-    id                 uuid primary key default gen_random_uuid(),
-    season_settings_id bigint not null references season_settings(id) on delete cascade,
-    status             text not null check (status in ('queued','running','completed','completed_with_warnings','failed')),
-    parameters         jsonb not null default '{}'::jsonb,
-    metrics            jsonb not null default '{}'::jsonb,
-    conflict_summary   jsonb not null default '{}'::jsonb,
-    created_by         uuid,
-    started_at         timestamptz,
-    completed_at       timestamptz,
-    created_at         timestamptz not null default timezone('utc', now()),
-    updated_at         timestamptz not null default timezone('utc', now())
-);
-
-create table if not exists game_scheduler_runs (
-    id                 uuid primary key default gen_random_uuid(),
-    season_settings_id bigint not null references season_settings(id) on delete cascade,
-    status             text not null check (status in ('queued','running','completed','completed_with_warnings','failed')),
-    parameters         jsonb not null default '{}'::jsonb,
-    metrics            jsonb not null default '{}'::jsonb,
-    conflict_summary   jsonb not null default '{}'::jsonb,
-    created_by         uuid,
+    results            jsonb not null default '{}'::jsonb,
+    created_by         uuid references auth.users(id) on delete set null,
     started_at         timestamptz,
     completed_at       timestamptz,
     created_at         timestamptz not null default timezone('utc', now()),
@@ -453,18 +425,21 @@ create table if not exists game_scheduler_runs (
 create table if not exists evaluation_runs (
     id                   uuid primary key default gen_random_uuid(),
     scheduler_run_type   text not null check (scheduler_run_type in ('team','practice','game','composite')),
-    scheduler_run_id     uuid,
+    scheduler_run_id     uuid references scheduler_runs(id) on delete set null,
     season_settings_id   bigint references season_settings(id) on delete set null,
     status               text not null check (status in ('queued','running','completed','completed_with_warnings','failed')),
     findings_severity    text check (findings_severity in ('none','warnings','errors')),
     metrics_summary      jsonb not null default '{}'::jsonb,
     input_snapshot       jsonb not null default '{}'::jsonb,
     auto_fix_summary     jsonb not null default '{}'::jsonb,
-    created_by           uuid,
+    created_by           uuid references auth.users(id) on delete set null,
     started_at           timestamptz,
     completed_at         timestamptz,
     created_at           timestamptz not null default timezone('utc', now()),
-    updated_at           timestamptz not null default timezone('utc', now())
+    updated_at           timestamptz not null default timezone('utc', now()),
+    constraint evaluation_runs_scheduler_presence check (
+        scheduler_run_type = 'composite' or scheduler_run_id is not null
+    )
 );
 
 create table if not exists evaluation_findings (
@@ -505,7 +480,7 @@ create table if not exists export_jobs (
     storage_path   text,
     schema_version text not null default 'v1',
     error_details  jsonb not null default '{}'::jsonb,
-    created_by     uuid,
+    created_by     uuid references auth.users(id) on delete set null,
     started_at     timestamptz,
     completed_at   timestamptz,
     created_at     timestamptz not null default timezone('utc', now()),
@@ -515,35 +490,25 @@ create table if not exists export_jobs (
 create table if not exists email_log (
     id             bigint generated by default as identity primary key,
     export_job_id  uuid references export_jobs(id) on delete set null,
-    recipient_email text not null,
+    recipient_email text not null check (recipient_email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
     action         text not null check (action in ('draft_generated','copied','sent')),
     metadata       jsonb not null default '{}'::jsonb,
     created_at     timestamptz not null default timezone('utc', now())
 );
 
-drop trigger if exists set_timestamp_team_generation_runs on team_generation_runs;
-create trigger set_timestamp_team_generation_runs
-    before update on team_generation_runs
-    for each row execute function trigger_set_timestamp();
-
-drop trigger if exists set_timestamp_practice_scheduler_runs on practice_scheduler_runs;
-create trigger set_timestamp_practice_scheduler_runs
-    before update on practice_scheduler_runs
-    for each row execute function trigger_set_timestamp();
-
-drop trigger if exists set_timestamp_game_scheduler_runs on game_scheduler_runs;
-create trigger set_timestamp_game_scheduler_runs
-    before update on game_scheduler_runs
-    for each row execute function trigger_set_timestamp();
-
-drop trigger if exists set_timestamp_evaluation_runs on evaluation_runs;
-create trigger set_timestamp_evaluation_runs
-    before update on evaluation_runs
-    for each row execute function trigger_set_timestamp();
-
-drop trigger if exists set_timestamp_export_jobs on export_jobs;
-create trigger set_timestamp_export_jobs
-    before update on export_jobs
-    for each row execute function trigger_set_timestamp();
+do $$
+declare
+    t_name text;
+begin
+    foreach t_name in array ['scheduler_runs', 'evaluation_runs', 'export_jobs']
+    loop
+        execute format('drop trigger if exists %I on %I', 'set_timestamp_' || t_name, t_name);
+        execute format(
+            'create trigger %I before update on %I for each row execute function trigger_set_timestamp()',
+            'set_timestamp_' || t_name,
+            t_name
+        );
+    end loop;
+end$$;
 
 commit;

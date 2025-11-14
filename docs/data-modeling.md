@@ -120,7 +120,7 @@ Detailed ingestion workflows live in `docs/ingestion-pipeline.md`. Highlights be
   coach references) before promoting the script to production migrations.
 
 ## Data Governance Considerations
-- Enable Row Level Security on all tables; define admin role policies permitting full access and future coach/player roles with read constraints.
+- Enable Row Level Security on all tables with policy breakdowns captured in `docs/rls-policies.md`.  Admin personas receive full access while future coach-facing views are limited to roster visibility with masked guardian contact data.
 - Store personally identifiable information (PII) only as required; redact optional fields from exports when not necessary.
 - Regularly archive prior seasons by copying data into `season_history` tables or Supabase Storage exports to stay within free-tier quotas.
 - Monitor Supabase storage for uploaded CSVs and purge older imports after verification.

@@ -44,6 +44,7 @@ This document elaborates the roadmap's practice scheduling phase into concrete i
 - Display assigned slots in the admin UI grouped by day/field so conflicts are visible.
 - Provide controls to reassign a team to another available slot, automatically updating capacities and logging the change as `source = 'manual'`.
 - When a manual adjustment resolves a previously flagged conflict, mark the item as resolved in the related `scheduler_runs` record.
+- The current allocator in `src/practiceScheduling.js` now honours an optional `lockedAssignments` array so pre-assigned teams are preserved when the scheduler runs, matching the roadmap recommendation to support manual overrides.
 
 ## Quality & Monitoring
 - **Unit Tests**: Cover slot scoring, capacity decrementing, conflict detection, and swap attempts using fixture data.

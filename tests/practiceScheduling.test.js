@@ -24,6 +24,9 @@ test('assigns teams to available slots without exceeding capacity', () => {
   const result = schedulePractices({ teams, slots });
 
   assert.equal(result.assignments.length, 3);
+  for (const assignment of result.assignments) {
+    assert.equal(assignment.source, 'auto');
+  }
   const capacityUsage = new Map();
   for (const assignment of result.assignments) {
     capacityUsage.set(assignment.slotId, (capacityUsage.get(assignment.slotId) ?? 0) + 1);
@@ -49,6 +52,9 @@ test('avoids overlapping slots for the same coach', () => {
   assert.equal(result.assignments.length, 2);
   const assignedSlotIds = new Set(result.assignments.map((a) => a.slotId));
   assert.deepEqual(assignedSlotIds, new Set(['early', 'late']));
+  for (const assignment of result.assignments) {
+    assert.equal(assignment.source, 'auto');
+  }
 });
 
 test('prioritises preferred slots for coaches and divisions', () => {
@@ -76,6 +82,9 @@ test('prioritises preferred slots for coaches and divisions', () => {
   const assignmentMap = Object.fromEntries(result.assignments.map((a) => [a.teamId, a.slotId]));
   assert.equal(assignmentMap.T1, 'wed');
   assert.equal(assignmentMap.T2, 'mon');
+  for (const assignment of result.assignments) {
+    assert.equal(assignment.source, 'auto');
+  }
 });
 
 test('flags teams when no slots satisfy constraints', () => {
@@ -108,6 +117,7 @@ test('breaks ties by earliest start time then slot id', () => {
 
   assert.equal(result.assignments.length, 1);
   assert.equal(result.assignments[0].slotId, 'slot-early');
+  assert.equal(result.assignments[0].source, 'auto');
 
   const remainingCapacity = Object.fromEntries(slots.map((slot) => [slot.id, slot.capacity]));
   for (const assignment of result.assignments) {
@@ -127,4 +137,52 @@ test('breaks ties by earliest start time then slot id', () => {
   });
 
   assert.equal(tieResult.assignments[0].slotId, 'slot-a');
+  assert.equal(tieResult.assignments[0].source, 'auto');
+});
+
+test('respects locked assignments and prevents conflicting reassignments', () => {
+  const teams = [
+    { id: 'T1', division: 'U10', coachId: 'coach-shared' },
+    { id: 'T2', division: 'U10', coachId: 'coach-shared' },
+    { id: 'T3', division: 'U10', coachId: 'coach-other' },
+  ];
+
+  const slots = [
+    {
+      id: 'mon-early',
+      day: 'Mon',
+      start: new Date('2024-08-05T19:00:00.000Z'),
+      end: new Date('2024-08-05T20:00:00.000Z'),
+      capacity: 1,
+    },
+    {
+      id: 'mon-late',
+      day: 'Mon',
+      start: new Date('2024-08-05T20:00:00.000Z'),
+      end: new Date('2024-08-05T21:00:00.000Z'),
+      capacity: 1,
+    },
+    {
+      id: 'tue',
+      day: 'Tue',
+      start: new Date('2024-08-06T19:00:00.000Z'),
+      end: new Date('2024-08-06T20:00:00.000Z'),
+      capacity: 1,
+    },
+  ];
+
+  const result = schedulePractices({
+    teams,
+    slots,
+    lockedAssignments: [{ teamId: 'T1', slotId: 'mon-early' }],
+  });
+
+  const assignmentMap = new Map(result.assignments.map((entry) => [entry.teamId, entry]));
+  assert.equal(assignmentMap.get('T1').slotId, 'mon-early');
+  assert.equal(assignmentMap.get('T1').source, 'locked');
+  assert.equal(assignmentMap.get('T2').source, 'auto');
+  assert.equal(assignmentMap.get('T3').source, 'auto');
+
+  assert.notEqual(assignmentMap.get('T2').slotId, 'mon-early');
+  assert.equal(result.unassigned.length, 0);
 });

@@ -14,11 +14,13 @@
  *   `capacity` (number of teams that can share the slot). Optional `day` provides human readable
  *   metadata used for preference scoring.
  * @param {Object<string, Object>} [params.coachPreferences] - Optional coach preference map. Each
- *   entry may include `preferredDays` (array of day strings), `preferredSlotIds` (array of slot
- *   identifiers), and `unavailableSlotIds` (array of slot identifiers to avoid entirely).
+  *   entry may include `preferredDays` (array of day strings), `preferredSlotIds` (array of slot
+  *   identifiers), and `unavailableSlotIds` (array of slot identifiers to avoid entirely).
  * @param {Object<string, Object>} [params.divisionPreferences] - Optional division preference map.
- *   Supports `preferredDays` similar to coach preferences.
- * @returns {{ assignments: Array<{ teamId: string, slotId: string }>, unassigned: Array<{ teamId: string, reason: string, candidates: Array<{ slotId: string, score: number }> }> }}
+  *   Supports `preferredDays` similar to coach preferences.
+ * @param {Array<{ teamId: string, slotId: string }>} [params.lockedAssignments] - Optional manual
+ *   overrides that must be honoured ahead of auto assignments.
+ * @returns {{ assignments: Array<{ teamId: string, slotId: string, source: 'locked' | 'auto' }>, unassigned: Array<{ teamId: string, reason: string, candidates: Array<{ slotId: string, score: number }> }> }}
  */
 
 const PREFERRED_COACH_SLOT_SCORE = 10;
@@ -30,12 +32,16 @@ export function schedulePractices({
   slots,
   coachPreferences = {},
   divisionPreferences = {},
+  lockedAssignments = [],
 }) {
   if (!Array.isArray(teams)) {
     throw new TypeError('teams must be an array');
   }
   if (!Array.isArray(slots)) {
     throw new TypeError('slots must be an array');
+  }
+  if (!Array.isArray(lockedAssignments)) {
+    throw new TypeError('lockedAssignments must be an array');
   }
 
   const sanitizedTeams = teams.map((team) => {
@@ -99,6 +105,51 @@ export function schedulePractices({
   const assignments = [];
   const unassigned = [];
   const coachAssignments = new Map();
+  const assignedTeamIds = new Set();
+
+  const assignTeamToSlot = (team, slot, source) => {
+    slot.capacity -= 1;
+    slot.assignedTeams.push(team.id);
+    assignments.push({ teamId: team.id, slotId: slot.id, source });
+    assignedTeamIds.add(team.id);
+
+    if (team.coachId) {
+      const existing = coachAssignments.get(team.coachId) ?? [];
+      existing.push({ slotId: slot.id, start: slot.start, end: slot.end });
+      coachAssignments.set(team.coachId, existing);
+    }
+  };
+
+  const teamsById = new Map(sanitizedTeams.map((team) => [team.id, team]));
+
+  for (const locked of lockedAssignments) {
+    if (!locked || typeof locked !== 'object') {
+      throw new TypeError('each locked assignment must be an object');
+    }
+    if (!locked.teamId || !locked.slotId) {
+      throw new TypeError('locked assignments require teamId and slotId');
+    }
+
+    const team = teamsById.get(locked.teamId);
+    if (!team) {
+      throw new Error(`locked assignment references unknown team ${locked.teamId}`);
+    }
+    if (assignedTeamIds.has(team.id)) {
+      throw new Error(`multiple locked assignments provided for team ${team.id}`);
+    }
+
+    const slot = slotsById.get(locked.slotId);
+    if (!slot) {
+      throw new Error(`locked assignment references unknown slot ${locked.slotId}`);
+    }
+    if (slot.capacity <= 0) {
+      throw new Error(
+        `locked assignment for team ${team.id} targets slot ${slot.id} with no remaining capacity`,
+      );
+    }
+
+    assignTeamToSlot(team, slot, 'locked');
+  }
 
   const coachTeamCounts = new Map();
   for (const team of sanitizedTeams) {
@@ -117,6 +168,9 @@ export function schedulePractices({
   });
 
   for (const team of teamsByPriority) {
+    if (assignedTeamIds.has(team.id)) {
+      continue;
+    }
     const { slotScores, viableSlots } = evaluateSlotsForTeam({
       team,
       slotsById,
@@ -148,16 +202,10 @@ export function schedulePractices({
     }, null);
 
     const slotRecord = slotsById.get(bestSlot.slot.id);
-    slotRecord.assignedTeams.push(team.id);
-    slotRecord.capacity -= 1;
-    assignments.push({ teamId: team.id, slotId: slotRecord.id });
-
-    if (team.coachId) {
-      const existing = coachAssignments.get(team.coachId) ?? [];
-      existing.push({ slotId: slotRecord.id, start: slotRecord.start, end: slotRecord.end });
-      coachAssignments.set(team.coachId, existing);
-    }
+    assignTeamToSlot(team, slotRecord, 'auto');
   }
+
+  assignments.sort((a, b) => a.teamId.localeCompare(b.teamId) || a.slotId.localeCompare(b.slotId));
 
   return { assignments, unassigned };
 }

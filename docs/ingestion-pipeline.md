@@ -19,7 +19,7 @@ This document expands on the roadmap tasks for importing GotSport registrations 
    - Stream-parse the CSV (e.g., using `@fast-csv/parse`) to avoid loading the entire file into memory.
    - Normalize guardian contacts into a JSON array (`[{ name, email, phone, primary }]`).
    - Build a map of `mutual_buddy_code → [playerIds]` to quickly detect reciprocal pairs.
-   - For each row, stage inserts into a temporary table `staging_players` with raw values and validation flags.
+   - For each row, stage inserts into a staging table `staging_players` that includes the `import_job_id` to handle concurrent jobs, with raw values and validation flags.
 
 ### 1.3 Validation Rules
 - **Division mapping**: Use the `divisions` table to resolve `division_id`; record a validation error when the division name is unknown.

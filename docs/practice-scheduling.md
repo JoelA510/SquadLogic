@@ -47,7 +47,7 @@ This document elaborates the roadmap's practice scheduling phase into concrete i
 
 ## Quality & Monitoring
 - **Unit Tests**: Cover slot scoring, capacity decrementing, conflict detection, and swap attempts using fixture data.
-- **Metrics**: Emit counts of teams assigned on first pass vs. manual follow-up, distribution of start times per division, and slot utilization percentages.
+- **Metrics**: Emit counts of teams assigned on first pass vs. manual follow-up, distribution of start times per division, and slot utilization percentages. The `evaluatePracticeSchedule` helper in `src/practiceMetrics.js` now implements these summaries and flags data quality issues so the admin UI can surface early warnings.
 - **Alerts**: If more than 5% of teams require manual assignment, raise an admin warning suggesting more slot capacity.
 - **Audit Trail**: Persist a JSON diff of assignments compared to the prior run for transparency.
 

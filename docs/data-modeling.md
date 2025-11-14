@@ -59,6 +59,17 @@
   - Unique (`division_id`, `name`).
   - `assistant_coach_ids` enforced via trigger to ensure referenced coaches exist.
 
+### Team Players
+- **Purpose**: Join table assigning players to their teams while tracking assignment provenance.
+- **Key fields**:
+  - Composite primary key (`team_id`, `player_id`).
+  - `role` (text, defaults to `player`) for future assistant roles.
+  - `source` (enum: `auto`, `manual`) to flag automated vs. manual placements.
+  - `added_at` timestamp auto-populated via default expression.
+- **Indexes & constraints**:
+  - Foreign keys cascade deletes with the parent team or player.
+  - `source` limited to expected values for analytics consistency.
+
 ### Fields & Locations
 - **Purpose**: Represent facilities and discrete playable areas.
 - **Tables**:
@@ -79,11 +90,11 @@
 
 ### Schedules
 - **Practice assignments** (`practice_assignments`):
-  - `id`, `team_id`, `practice_slot_id`, `effective_date_range` (tsrange).
-  - Unique constraint on (`team_id`, `practice_slot_id`, `effective_date_range`).
+  - `id`, `team_id`, `practice_slot_id`, `effective_date_range` (`daterange`), `source` (`auto` | `manual`).
+  - Unique constraint on (`team_id`, `practice_slot_id`, `effective_date_range`) with a check preventing empty ranges.
 - **Game assignments** (`games`):
   - `id`, `home_team_id`, `away_team_id`, `game_slot_id`, `week_index`, `score_home`, `score_away`.
-  - Constraints enforcing teams belong to same division and differ from each other.
+  - Constraints enforcing teams belong to same division, differ from each other, and use compatible `game_slots`.
 
 ### Configuration & Metadata
 - `season_settings`: Single-row table for league-wide parameters (roster formulas, daylight change dates, export templates).

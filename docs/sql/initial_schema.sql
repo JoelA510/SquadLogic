@@ -166,7 +166,7 @@ create table if not exists teams (
     division_id          uuid not null references divisions(id) on delete cascade,
     name                 text not null,
     coach_id             uuid references coaches(id) on delete set null,
-    assistant_coach_ids  uuid[] default '{}',
+    assistant_coach_ids  uuid[] default '{}'::uuid[],
     practice_slot_id     uuid references practice_slots(id) on delete set null,
     notes                text,
     created_at           timestamptz not null default timezone('utc', now()),
@@ -178,6 +178,7 @@ create table if not exists team_players (
     team_id   uuid not null references teams(id) on delete cascade,
     player_id uuid not null references players(id) on delete cascade,
     role      text not null default 'player',
+    source    text not null default 'auto' check (source in ('auto','manual')),
     added_at  timestamptz not null default timezone('utc', now()),
     primary key (team_id, player_id)
 );
@@ -186,10 +187,12 @@ create table if not exists practice_assignments (
     id                  uuid primary key default gen_random_uuid(),
     team_id             uuid not null references teams(id) on delete cascade,
     practice_slot_id    uuid not null references practice_slots(id) on delete cascade,
-    effective_range     daterange not null,
+    effective_date_range daterange not null,
+    source              text not null default 'auto' check (source in ('auto','manual')),
     created_at          timestamptz not null default timezone('utc', now()),
     updated_at          timestamptz not null default timezone('utc', now()),
-    unique (team_id, practice_slot_id, effective_range)
+    constraint practice_assignments_effective_date_range_not_empty check (not isempty(effective_date_range)),
+    unique (team_id, practice_slot_id, effective_date_range)
 );
 
 create table if not exists games (
@@ -204,6 +207,94 @@ create table if not exists games (
     updated_at      timestamptz not null default timezone('utc', now()),
     constraint games_team_difference check (home_team_id <> away_team_id)
 );
+
+create or replace function ensure_assistant_coach_ids_valid()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+    duplicates uuid[];
+    missing_coaches uuid[];
+begin
+    if new.assistant_coach_ids is null or cardinality(new.assistant_coach_ids) = 0 then
+        return new;
+    end if;
+
+    if array_position(new.assistant_coach_ids, null) is not null then
+        raise exception 'assistant_coach_ids cannot contain null values';
+    end if;
+
+    select array_agg(coach_id)
+      into duplicates
+    from (
+        select coach_id
+        from unnest(new.assistant_coach_ids) as coach_id
+        group by coach_id
+        having count(*) > 1
+    ) dup;
+
+    if duplicates is not null then
+        raise exception 'assistant_coach_ids contains duplicate values: %', duplicates;
+    end if;
+
+    if new.coach_id is not null and new.coach_id = any(new.assistant_coach_ids) then
+        raise exception 'Head coach % cannot also be listed as an assistant', new.coach_id;
+    end if;
+
+    select array_agg(coach_id)
+      into missing_coaches
+    from (
+        select coach_id
+        from unnest(new.assistant_coach_ids) as coach_id
+        where not exists (select 1 from coaches c where c.id = coach_id)
+    ) missing;
+
+    if missing_coaches is not null then
+        raise exception 'assistant_coach_ids references coaches that do not exist: %', missing_coaches;
+    end if;
+
+    return new;
+end;
+$$;
+
+create or replace function ensure_game_team_consistency()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+    home_division uuid;
+    away_division uuid;
+begin
+    select division_id into home_division from teams where id = new.home_team_id;
+    if home_division is null then
+        raise exception 'Home team % does not exist', new.home_team_id;
+    end if;
+
+    select division_id into away_division from teams where id = new.away_team_id;
+    if away_division is null then
+        raise exception 'Away team % does not exist', new.away_team_id;
+    end if;
+
+    if home_division <> away_division then
+        raise exception 'Teams % and % belong to different divisions', new.home_team_id, new.away_team_id;
+    end if;
+
+    if new.game_slot_id is not null then
+        perform 1
+        from game_slots gs
+        where gs.id = new.game_slot_id
+          and (gs.division_id is null or gs.division_id = home_division);
+
+        if not found then
+            raise exception 'Game slot % is not compatible with division %', new.game_slot_id, home_division;
+        end if;
+    end if;
+
+    return new;
+end;
+$$;
 
 drop trigger if exists set_timestamp_season_settings on season_settings;
 create trigger set_timestamp_season_settings
@@ -250,6 +341,11 @@ create trigger set_timestamp_game_slots
     before update on game_slots
     for each row execute function trigger_set_timestamp();
 
+drop trigger if exists ensure_teams_assistant_coaches_valid on teams;
+create trigger ensure_teams_assistant_coaches_valid
+    before insert or update on teams
+    for each row execute function ensure_assistant_coach_ids_valid();
+
 drop trigger if exists set_timestamp_teams on teams;
 create trigger set_timestamp_teams
     before update on teams
@@ -259,6 +355,11 @@ drop trigger if exists set_timestamp_practice_assignments on practice_assignment
 create trigger set_timestamp_practice_assignments
     before update on practice_assignments
     for each row execute function trigger_set_timestamp();
+
+drop trigger if exists ensure_games_valid on games;
+create trigger ensure_games_valid
+    before insert or update on games
+    for each row execute function ensure_game_team_consistency();
 
 drop trigger if exists set_timestamp_games on games;
 create trigger set_timestamp_games

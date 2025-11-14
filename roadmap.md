@@ -6,7 +6,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 
 - [ ] Requirements Analysis & Planning – Baseline requirements and Season Intake form blueprint captured in `docs/requirements.md`; stakeholder interview playbook finalized with logistics checklist, awaiting live sign-off and ongoing iteration.
 - [ ] Architecture & Technology Selection – Target stack and agent modules documented in `docs/architecture.md`; proof-of-concept validation plan drafted, execution of sandbox tests pending.
-- [ ] Data Modeling & Storage – Schema blueprint drafted in `docs/data-modeling.md`; ingestion pipeline specification captured in `docs/ingestion-pipeline.md`; Supabase migrations and RLS policies not yet implemented.
+- [ ] Data Modeling & Storage – Schema blueprint drafted in `docs/data-modeling.md`; ingestion pipeline specification captured in `docs/ingestion-pipeline.md`; initial DDL assembled in `docs/sql/initial_schema.sql` awaiting Supabase validation, with migrations and RLS policies still outstanding.
 - [ ] Team Generation – Algorithm design documented in `docs/team-generation.md`; development, testing, and UI integration outstanding.
 - [ ] Practice Scheduling – Scheduling workflow outlined in `docs/practice-scheduling.md`; implementation, metrics, and admin tooling remain to be built.
 - [ ] Game Scheduling – Game scheduling blueprint refined in `docs/game-scheduling.md` with clarified inputs and fairness metrics; algorithm implementation and integration still pending.
@@ -33,7 +33,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 
 ## 3. Data Modeling & Storage
 
-**Status:** Proposed Supabase schema detailed in `docs/data-modeling.md` with ingestion pipeline workflows elaborated in `docs/ingestion-pipeline.md`; forthcoming tasks include generating migrations, enforcing RLS, and seeding example datasets.
+**Status:** Proposed Supabase schema detailed in `docs/data-modeling.md` with ingestion pipeline workflows elaborated in `docs/ingestion-pipeline.md`; initial DDL captured in `docs/sql/initial_schema.sql` for upcoming Supabase migration tests; next tasks include enforcing RLS and seeding example datasets.
 
 1. **Design database schema** – Define Supabase tables (or Postgres schemas) for:
    - **Players**: fields include `PlayerID`, name, grade/division, contact details, mutual buddy identifier, skill/experience indicators (if collected), coach volunteer flag.
@@ -44,6 +44,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
    - **Configuration**: table for adjustable parameters (roster size formulas, buddy rules, season date ranges, practice durations before and after sunset, etc.).
 2. **Implement importers** – Write utilities to parse GotSport registration CSVs and field availability spreadsheets.  Validate mutual buddy codes, remove duplicates and store clean data in Supabase.  Provide an admin UI for manual entry of field slots or allow uploading of a standardized CSV containing location, field, subfield, day, start, end and type.
 3. **Seed the database** – Populate example data for testing (e.g., sample players, fields and coaches) and write scripts to reset data at the start of each season.
+4. **Validate DDL in Supabase** – Run the script from `docs/sql/initial_schema.sql` against a local Supabase instance, add missing triggers or constraints surfaced during testing, and convert the draft into timestamped migrations.
 
 ## 4. Team Generation
 

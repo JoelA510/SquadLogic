@@ -108,6 +108,13 @@ Detailed ingestion workflows live in `docs/ingestion-pipeline.md`. Highlights be
 - Automate resets with an npm script invoking `supabase db reset` pointing to a disposable local stack.
 - Document seed assumptions so QA can validate schedule outputs against expected scenarios.
 
+## Initial Schema Draft
+- The first-pass DDL for these entities lives in `docs/sql/initial_schema.sql`. It can be copied into a Supabase migration
+  once validated locally. The script establishes core tables, lookup constraints, helper staging tables, and supporting indexes
+  required for ingestion, team assignments, and schedule generation.
+- Follow-up work includes adding Row Level Security policies, triggers for updating `updated_at`, and data quality constraints
+  (e.g., enforcing assistant coach references) before promoting the script to production migrations.
+
 ## Data Governance Considerations
 - Enable Row Level Security on all tables; define admin role policies permitting full access and future coach/player roles with read constraints.
 - Store personally identifiable information (PII) only as required; redact optional fields from exports when not necessary.

@@ -48,7 +48,7 @@ This document expands on the roadmap tasks for importing GotSport registrations 
 - Validate that `Type` is either `practice` or `game`; other values trigger a friendly error.
 
 ### 2.2 Processing Steps
-1. Store the uploaded CSV under `imports/fields/<timestamp>.csv` and create an `import_job` record.
+1. Store the uploaded CSV under `imports/fields/<uuid>.csv` and create an `import_job` record.
 2. Parse each row, normalizing times into ISO strings and converting `Capacity` to integers.
 3. Upsert `locations` and `fields` using case-insensitive matching to avoid duplicates caused by inconsistent capitalization.
 4. For rows with subunits, ensure a `field_subunits` entry exists (`field_id`, `label`).

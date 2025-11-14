@@ -57,6 +57,19 @@ This document translates the roadmap's team formation phase into actionable plan
 - Use Supabase Realtime or polling to update the UI with progress states (`queued`, `running`, `completed`, `needs_manual_action`).
 - Gate reruns behind an admin confirmation to avoid overwriting manual adjustments without exporting a diff.
 
+## Acceptance Criteria & Test Harness Outline
+- **Happy path**: For each division, all players (including buddy pairs) are assigned without exceeding roster caps when enough capacity exists.
+- **Coach coverage**: Every coach volunteer with `can_coach_multiple_teams = false` is assigned to exactly one roster that includes their player.
+- **Buddy enforcement**: Mutual buddy requests always share a `team_id`; single-sided or invalid codes are reported but do not block assignment.
+- **Overflow handling**: When roster caps are insufficient, affected players are surfaced in an overflow report with division context.
+- **Diagnostics**: Algorithm emits a structured summary (team counts, buddy stats, overflow list) persisted to `scheduler_runs`.
+
+### Test harness plan
+- Use Jest with a fixture loader that seeds in-memory objects mirroring the schema (players, coaches, divisions, configuration).
+- Provide scenario fixtures: balanced division, buddy-heavy division, coach overlap division, and capacity-deficit division.
+- Assert both database mutations (mocked repositories) and diagnostic payload content for each scenario.
+- Integrate snapshot tests for the overflow report and buddy resolution report to detect regressions in admin-facing outputs.
+
 ## Next Steps
 - Implement Jest unit tests for buddy pairing logic, roster balancing, and overflow detection using the seed data proposed in the data modeling plan.
 - Design admin UI wireframes for the roster review page, including filters and manual adjustment controls.

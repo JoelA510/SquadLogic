@@ -270,11 +270,7 @@ function trackTeamGameLoad({ teamGameLoad, teamId, role, start, fieldKey, weekIn
   };
 
   record.totalGames += 1;
-  if (role === 'home') {
-    record.homeGames += 1;
-  } else {
-    record.awayGames += 1;
-  }
+  record[`${role}Games`] += 1;
 
   if (fieldKey && fieldKey !== 'unassigned') {
     record.uniqueFields.add(fieldKey);
@@ -291,19 +287,20 @@ function trackTeamGameLoad({ teamGameLoad, teamId, role, start, fieldKey, weekIn
 }
 
 function formatTeamGameLoad(teamGameLoad) {
-  const result = {};
-  for (const [teamId, record] of teamGameLoad.entries()) {
-    result[teamId] = {
-      totalGames: record.totalGames,
-      homeGames: record.homeGames,
-      awayGames: record.awayGames,
-      uniqueFields: Array.from(record.uniqueFields).sort((a, b) => a.localeCompare(b)),
-      weeksScheduled: Array.from(record.weeks).sort((a, b) => a - b),
-      earliestStart: record.earliestStart ? record.earliestStart.toISOString() : null,
-      latestStart: record.latestStart ? record.latestStart.toISOString() : null,
-    };
-  }
-  return result;
+  return Object.fromEntries(
+    Array.from(teamGameLoad.entries()).map(([teamId, record]) => [
+      teamId,
+      {
+        totalGames: record.totalGames,
+        homeGames: record.homeGames,
+        awayGames: record.awayGames,
+        uniqueFields: Array.from(record.uniqueFields).sort((a, b) => a.localeCompare(b)),
+        weeksScheduled: Array.from(record.weeks).sort((a, b) => a - b),
+        earliestStart: record.earliestStart?.toISOString() ?? null,
+        latestStart: record.latestStart?.toISOString() ?? null,
+      },
+    ]),
+  );
 }
 
 function detectConflicts({ assignmentsMap, warnings, idKey, warningType, messageFn }) {

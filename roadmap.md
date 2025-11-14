@@ -9,6 +9,7 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 - [ ] Data Modeling & Storage – Schema blueprint drafted in `docs/data-modeling.md`; Supabase migrations and RLS policies not yet implemented.
 - [ ] Team Generation – Algorithm design documented in `docs/team-generation.md`; development, testing, and UI integration outstanding.
 - [ ] Practice Scheduling – Scheduling workflow outlined in `docs/practice-scheduling.md`; implementation, metrics, and admin tooling remain to be built.
+- [ ] Game Scheduling – Game scheduling blueprint refined in `docs/game-scheduling.md` with clarified inputs and fairness metrics; algorithm implementation and integration still pending.
 
 ## 1. Requirements Analysis & Planning
 
@@ -69,6 +70,8 @@ This roadmap describes the high‑level steps required to build a cost‑effecti
 4. **Coach conflict checks** – After assignment, scan the schedule to ensure that no coach appears in overlapping slots and that no field is double‑booked.  Log any conflicts and run a local swap algorithm to resolve them.
 
 ## 6. Game Scheduling
+
+**Status:** Game scheduling blueprint documented in `docs/game-scheduling.md`; implementation of the scheduler service, admin UI workflows, and evaluator metrics integration is upcoming.
 
 1. **Determine game weeks and matchups** – Decide on the number of game weeks (e.g., eight Saturdays) and generate matchups within each division.  Use a round‑robin generator to produce a rotation where each team plays every other team; handle odd numbers of teams with byes or double‑headers.
 2. **Assign game slots** – For each week, assign each game (pair of teams) to a Saturday field/time slot.  Use similar logic as practice scheduling: prioritize avoiding coach conflicts, then allocate the earliest available slot.  If divisions share fields, consider field size constraints and age group requirements.

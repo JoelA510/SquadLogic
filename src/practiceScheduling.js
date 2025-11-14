@@ -107,6 +107,19 @@ export function schedulePractices({
   const coachAssignments = new Map();
   const assignedTeamIds = new Set();
 
+  const assignTeamToSlot = (team, slot, source) => {
+    slot.capacity -= 1;
+    slot.assignedTeams.push(team.id);
+    assignments.push({ teamId: team.id, slotId: slot.id, source });
+    assignedTeamIds.add(team.id);
+
+    if (team.coachId) {
+      const existing = coachAssignments.get(team.coachId) ?? [];
+      existing.push({ slotId: slot.id, start: slot.start, end: slot.end });
+      coachAssignments.set(team.coachId, existing);
+    }
+  };
+
   const teamsById = new Map(sanitizedTeams.map((team) => [team.id, team]));
 
   for (const locked of lockedAssignments) {
@@ -135,16 +148,7 @@ export function schedulePractices({
       );
     }
 
-    slot.capacity -= 1;
-    slot.assignedTeams.push(team.id);
-    assignments.push({ teamId: team.id, slotId: slot.id, source: 'locked' });
-    assignedTeamIds.add(team.id);
-
-    if (team.coachId) {
-      const existing = coachAssignments.get(team.coachId) ?? [];
-      existing.push({ slotId: slot.id, start: slot.start, end: slot.end });
-      coachAssignments.set(team.coachId, existing);
-    }
+    assignTeamToSlot(team, slot, 'locked');
   }
 
   const coachTeamCounts = new Map();
@@ -198,15 +202,7 @@ export function schedulePractices({
     }, null);
 
     const slotRecord = slotsById.get(bestSlot.slot.id);
-    slotRecord.assignedTeams.push(team.id);
-    slotRecord.capacity -= 1;
-    assignments.push({ teamId: team.id, slotId: slotRecord.id, source: 'auto' });
-
-    if (team.coachId) {
-      const existing = coachAssignments.get(team.coachId) ?? [];
-      existing.push({ slotId: slotRecord.id, start: slotRecord.start, end: slotRecord.end });
-      coachAssignments.set(team.coachId, existing);
-    }
+    assignTeamToSlot(team, slotRecord, 'auto');
   }
 
   assignments.sort((a, b) => a.teamId.localeCompare(b.teamId) || a.slotId.localeCompare(b.slotId));

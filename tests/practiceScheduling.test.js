@@ -148,9 +148,27 @@ test('respects locked assignments and prevents conflicting reassignments', () =>
   ];
 
   const slots = [
-    createSlot({ id: 'mon-early', day: 'Mon', startHour: 19, endHour: 20, capacity: 1 }),
-    createSlot({ id: 'mon-late', day: 'Mon', startHour: 20, endHour: 21, capacity: 1 }),
-    createSlot({ id: 'tue', day: 'Tue', startHour: 19, endHour: 20, capacity: 1 }),
+    {
+      id: 'mon-early',
+      day: 'Mon',
+      start: new Date('2024-08-05T19:00:00.000Z'),
+      end: new Date('2024-08-05T20:00:00.000Z'),
+      capacity: 1,
+    },
+    {
+      id: 'mon-late',
+      day: 'Mon',
+      start: new Date('2024-08-05T20:00:00.000Z'),
+      end: new Date('2024-08-05T21:00:00.000Z'),
+      capacity: 1,
+    },
+    {
+      id: 'tue',
+      day: 'Tue',
+      start: new Date('2024-08-06T19:00:00.000Z'),
+      end: new Date('2024-08-06T20:00:00.000Z'),
+      capacity: 1,
+    },
   ];
 
   const result = schedulePractices({

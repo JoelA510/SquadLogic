@@ -103,8 +103,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
     const uniqueCoachIds = new Set(teams.map((team) => team.coachId).filter(Boolean));
     const teamsWithoutCoach = teams.filter((team) => !team.coachId).length;
     const teamsWithCoach = teams.length - teamsWithoutCoach;
-    const coverageRate =
-      teams.length === 0 ? 1 : Number((teamsWithCoach / teams.length).toFixed(4));
+    const coverageRate = Number((teamsWithCoach / teams.length).toFixed(4));
 
     coachCoverageByDivision[division] = {
       totalTeams: teams.length,

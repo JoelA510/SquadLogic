@@ -208,6 +208,65 @@ test('scheduleGames surfaces scheduling conflicts for coaches with multiple team
   assert(unscheduled.some((entry) => entry.reason === 'coach-scheduling-conflict'));
 });
 
+test('scheduleGames prefers start times previously assigned to teams when slots allow', () => {
+  const teams = SAMPLE_TEAMS;
+
+  const slots = [
+    { id: 'w1-early', weekIndex: 1, start: '2024-08-10T16:00:00Z', end: '2024-08-10T17:00:00Z', capacity: 1 },
+    { id: 'w1-late', weekIndex: 1, start: '2024-08-10T17:30:00Z', end: '2024-08-10T18:30:00Z', capacity: 1 },
+    { id: 'w2-early', weekIndex: 2, start: '2024-08-17T16:00:00Z', end: '2024-08-17T17:00:00Z', capacity: 1 },
+    { id: 'w2-late', weekIndex: 2, start: '2024-08-17T17:30:00Z', end: '2024-08-17T18:30:00Z', capacity: 1 },
+    { id: 'w3-early', weekIndex: 3, start: '2024-08-24T15:00:00Z', end: '2024-08-24T16:00:00Z', capacity: 1 },
+    { id: 'w3-late', weekIndex: 3, start: '2024-08-24T17:30:00Z', end: '2024-08-24T18:30:00Z', capacity: 1 },
+  ];
+
+  const roundRobin = {
+    U10: [
+      {
+        weekIndex: 1,
+        matchups: [
+          { homeTeamId: 'team-1', awayTeamId: 'team-2' },
+          { homeTeamId: 'team-3', awayTeamId: 'team-4' },
+        ],
+        byes: [],
+      },
+      {
+        weekIndex: 2,
+        matchups: [
+          { homeTeamId: 'team-2', awayTeamId: 'team-1' },
+          { homeTeamId: 'team-4', awayTeamId: 'team-3' },
+        ],
+        byes: [],
+      },
+      {
+        weekIndex: 3,
+        matchups: [
+          { homeTeamId: 'team-1', awayTeamId: 'team-4' },
+          { homeTeamId: 'team-2', awayTeamId: 'team-3' },
+        ],
+        byes: [],
+      },
+    ],
+  };
+
+  const { assignments } = scheduleGames({ teams, slots, roundRobinByDivision: roundRobin });
+
+  const team4Week3 = assignments.find(
+    (assignment) => assignment.weekIndex === 3 &&
+      (assignment.homeTeamId === 'team-4' || assignment.awayTeamId === 'team-4'),
+  );
+
+  assert(team4Week3, 'team 4 should have a week 3 assignment');
+  assert.equal(team4Week3.start, '2024-08-24T17:30:00.000Z');
+
+  const team3Week3 = assignments.find(
+    (assignment) => assignment.weekIndex === 3 &&
+      (assignment.homeTeamId === 'team-3' || assignment.awayTeamId === 'team-3'),
+  );
+  assert(team3Week3, 'team 3 should have a week 3 assignment');
+  assert.equal(team3Week3.start, '2024-08-24T15:00:00.000Z');
+});
+
 test('scheduleGames balances shared slots across divisions when capacity allows rotation', () => {
   const u10Teams = [
     { id: 'u10-team-1', division: 'U10', coachId: 'coach-u10-1' },

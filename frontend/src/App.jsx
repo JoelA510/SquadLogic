@@ -1,6 +1,9 @@
 import { useMemo } from 'react';
 import './App.css';
 import { teamSummarySnapshot } from './teamSummarySample.js';
+import { practiceReadinessSnapshot } from './practiceReadinessSample.js';
+
+const MANUAL_FOLLOW_UP_THRESHOLD = 0.05;
 
 const roadmapSections = [
   {
@@ -62,13 +65,37 @@ function App() {
   }, []);
 
   const { totals, divisions, generatedAt } = teamSummarySnapshot;
+  const practiceSummary = practiceReadinessSnapshot.summary;
+  const practiceGeneratedAt = practiceReadinessSnapshot.generatedAt;
 
   const formatPercent = (value) => `${Math.round((value ?? 0) * 100)}%`;
+  const formatPercentPrecise = (value) => {
+    const numeric = Number(value ?? 0);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return '0%';
+    }
+    const scaled = Math.round(numeric * 1000) / 10;
+    return `${Number.isInteger(scaled) ? scaled.toFixed(0) : scaled.toFixed(1)}%`;
+  };
   const formatList = (items) => (items.length > 0 ? items.join(', ') : 'None');
   const formatReasons = (reasons) =>
     Object.entries(reasons)
       .map(([reason, count]) => `${reason}: ${count}`)
       .join(', ');
+  const formatTime = (value) => {
+    if (!value) {
+      return 'unspecified time';
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return 'unspecified time';
+    }
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  };
+
+  const hasNoConflictsOrWarnings =
+    practiceReadinessSnapshot.coachConflicts.length === 0 &&
+    practiceReadinessSnapshot.dataQualityWarnings.length === 0;
 
   return (
     <div className="app-shell">
@@ -191,6 +218,118 @@ function App() {
               )}
             </article>
           ))}
+        </div>
+      </section>
+
+      <section className="practice-readiness" aria-labelledby="practice-readiness-heading">
+        <header className="practice-readiness__header">
+          <div>
+            <h2 id="practice-readiness-heading">Practice readiness</h2>
+            <p>
+              Preview of the practice evaluator output captured on{' '}
+              {new Date(practiceGeneratedAt).toLocaleDateString()} showing assignment progress,
+              manual follow-up requirements, and fairness alerts surfaced by the metrics agent.
+            </p>
+          </div>
+          <dl className="practice-readiness__grid" aria-label="Practice metrics summary">
+            <div>
+              <dt>Total teams</dt>
+              <dd>{practiceSummary.totalTeams}</dd>
+            </div>
+            <div>
+              <dt>Assignment rate</dt>
+              <dd>{formatPercentPrecise(practiceSummary.assignmentRate)}</dd>
+            </div>
+            <div>
+              <dt>Manual follow-up</dt>
+              <dd>{formatPercentPrecise(practiceSummary.manualFollowUpRate)}</dd>
+            </div>
+            <div>
+              <dt>Unassigned teams</dt>
+              <dd>{practiceSummary.unassignedTeams}</dd>
+            </div>
+          </dl>
+        </header>
+
+        {practiceSummary.manualFollowUpRate > MANUAL_FOLLOW_UP_THRESHOLD && (
+          <p className="practice-readiness__alert" role="status">
+            {practiceSummary.unassignedTeams}{' '}
+            {practiceSummary.unassignedTeams === 1 ? 'team requires' : 'teams require'} a manual
+            practice assignment — allocate additional slot capacity or adjust priorities before publishing.
+          </p>
+        )}
+
+        <div className="practice-insights">
+          <article>
+            <h3>Field load highlights</h3>
+            {practiceReadinessSnapshot.slotUtilization.length === 0 ? (
+              <p className="practice-insight__empty">No slot utilization data captured.</p>
+            ) : (
+              <ul className="practice-insight-list">
+                {practiceReadinessSnapshot.slotUtilization.map((slot) => (
+                  <li key={slot.slotId}>
+                    <div className="practice-insight__title">{slot.slotId}</div>
+                    <p>
+                      {slot.assignedCount} of {slot.capacity} capacity used ·{' '}
+                      {slot.utilization === null
+                        ? 'utilization unavailable'
+                        : `${formatPercentPrecise(slot.utilization)}`}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </article>
+
+          <article>
+            <h3>Fairness watchlist</h3>
+            {practiceReadinessSnapshot.fairnessConcerns.length === 0 ? (
+              <p className="practice-insight__empty">No dominant division patterns detected.</p>
+            ) : (
+              <ul className="practice-insight-list">
+                {practiceReadinessSnapshot.fairnessConcerns.map((concern) => (
+                  <li key={concern.baseSlotId}>
+                    <div className="practice-insight__title">{concern.baseSlotId}</div>
+                    <p>
+                      {concern.day ?? 'Unknown day'} · {formatTime(concern.representativeStart)} ·{' '}
+                      {concern.message}
+                    </p>
+                    <p className="practice-insight__meta">
+                      Dominant division {concern.dominantDivision} at{' '}
+                      {formatPercentPrecise(concern.dominantShare)} share
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </article>
+
+          <article>
+            <h3>Conflicts & warnings</h3>
+            {hasNoConflictsOrWarnings ? (
+              <p className="practice-insight__empty">No conflicts detected in the latest run.</p>
+            ) : (
+              <ul className="practice-insight-list">
+                {practiceReadinessSnapshot.coachConflicts.map((conflict, index) => (
+                  <li key={`conflict-${conflict.coachId}-${index}`}>
+                    <div className="practice-insight__title">Coach {conflict.coachId}</div>
+                    <p>
+                      {conflict.reason} between{' '}
+                      {conflict.teams
+                        .map((team) => `${team.teamId} (${team.slotId})`)
+                        .join(', ')}
+                    </p>
+                  </li>
+                ))}
+                {practiceReadinessSnapshot.dataQualityWarnings.map((warning, index) => (
+                  <li key={`warning-${index}`}>
+                    <div className="practice-insight__title">Data quality</div>
+                    <p>{warning}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </article>
         </div>
       </section>
 

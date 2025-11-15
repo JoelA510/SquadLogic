@@ -61,6 +61,7 @@ export function runScheduleEvaluations({ practice, games } = {}) {
       summary: { unassignedTeams },
       coachConflicts,
       dataQualityWarnings,
+      fairnessConcerns = [],
     } = practiceResult;
 
     if (unassignedTeams > 0) {
@@ -86,6 +87,15 @@ export function runScheduleEvaluations({ practice, games } = {}) {
         category: 'practice',
         severity: 'warning',
         message: warning,
+      });
+    }
+
+    for (const concern of fairnessConcerns) {
+      issues.push({
+        category: 'practice',
+        severity: 'warning',
+        message: concern.message,
+        details: concern,
       });
     }
   }

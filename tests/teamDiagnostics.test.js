@@ -89,3 +89,31 @@ test('summarizeTeamGeneration validates inputs', () => {
     /teamsbydivision must be an object/i,
   );
 });
+
+test('summarizeTeamGeneration defaults coverage and aggregates roster stats', () => {
+  const result = {
+    teamsByDivision: { U8: [{ id: 'team-1' }] },
+    overflowByDivision: {},
+    buddyDiagnosticsByDivision: {},
+    coachCoverageByDivision: {},
+    rosterBalanceByDivision: {
+      U8: {
+        teamStats: [
+          { playerCount: 6, maxRosterSize: 8, slotsRemaining: 2 },
+          { playerCount: 5, maxRosterSize: 7, slotsRemaining: 2 },
+        ],
+        summary: { averageFillRate: 0.75, teamsNeedingPlayers: ['team-1'] },
+      },
+    },
+  };
+
+  const summary = summarizeTeamGeneration(result);
+
+  assert.equal(summary.totals.playersAssigned, 11);
+  assert.equal(summary.totals.divisionsWithOpenRosterSlots, 1);
+  assert.equal(summary.divisions[0].playersAssigned, 11);
+  assert.equal(summary.divisions[0].totalCapacity, 15);
+  assert.equal(summary.divisions[0].slotsRemaining, 4);
+  assert.equal(summary.divisions[0].coachCoverage.totalTeams, 0);
+  assert.equal(summary.divisions[0].needsAdditionalCoaches, false);
+});

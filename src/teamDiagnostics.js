@@ -103,17 +103,18 @@ export function summarizeTeamGeneration(result) {
     const coachCoverage = coachCoverageByDivision[divisionId] ?? EMPTY_COACH_COVERAGE;
     const rosterBalance = rosterBalanceByDivision[divisionId] ?? EMPTY_ROSTER_BALANCE;
 
-    const playersAssigned = rosterBalance.teamStats.reduce(
-      (sum, entry) => sum + (entry.playerCount ?? 0),
-      0,
-    );
-    const totalCapacity = rosterBalance.teamStats.reduce(
-      (sum, entry) => sum + (entry.maxRosterSize ?? 0),
-      0,
-    );
-    const slotsRemaining = rosterBalance.teamStats.reduce(
-      (sum, entry) => sum + Math.max(0, entry.slotsRemaining ?? 0),
-      0,
+    const {
+      playersAssigned,
+      totalCapacity,
+      slotsRemaining,
+    } = rosterBalance.teamStats.reduce(
+      (stats, entry) => {
+        stats.playersAssigned += entry.playerCount ?? 0;
+        stats.totalCapacity += entry.maxRosterSize ?? 0;
+        stats.slotsRemaining += Math.max(0, entry.slotsRemaining ?? 0);
+        return stats;
+      },
+      { playersAssigned: 0, totalCapacity: 0, slotsRemaining: 0 },
     );
 
     const overflowPlayers = overflowEntries.reduce(
@@ -136,7 +137,7 @@ export function summarizeTeamGeneration(result) {
       teamsNeedingPlayers: rosterBalance.summary?.teamsNeedingPlayers ?? [],
       slotsRemaining,
       needsAdditionalCoaches: Boolean(coachCoverage.needsAdditionalCoaches),
-      coachCoverage: coachCoverage ?? EMPTY_COACH_COVERAGE,
+      coachCoverage,
       mutualBuddyPairs: buddyDiagnostics.mutualPairs?.length ?? 0,
       unmatchedBuddyCount: buddyDiagnostics.unmatchedRequests?.length ?? 0,
       unmatchedBuddyReasons,
@@ -171,13 +172,8 @@ function validateRecord(value, name) {
 }
 
 function collectDivisionIds(records) {
-  const ids = new Set();
-  for (const record of Object.values(records)) {
-    for (const key of Object.keys(record)) {
-      ids.add(key);
-    }
-  }
-  return Array.from(ids);
+  const allIds = Object.values(records).flatMap(Object.keys);
+  return Array.from(new Set(allIds));
 }
 
 function aggregateByKey(entries, keySelector) {

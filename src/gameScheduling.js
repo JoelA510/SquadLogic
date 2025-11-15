@@ -491,18 +491,13 @@ function selectSlotForMatchup({
     return { slot: null, encounteredConflict };
   }
 
-  viableSharedSlots.sort((a, b) => {
-    if (a.usage !== b.usage) {
-      return a.usage - b.usage;
-    }
-    if (a.slotRecord.start.getTime() !== b.slotRecord.start.getTime()) {
-      return a.slotRecord.start - b.slotRecord.start;
-    }
-    if ((a.slotRecord.fieldId ?? '') !== (b.slotRecord.fieldId ?? '')) {
-      return (a.slotRecord.fieldId ?? '').localeCompare(b.slotRecord.fieldId ?? '');
-    }
-    return a.slotRecord.id.localeCompare(b.slotRecord.id);
-  });
+  viableSharedSlots.sort(
+    (a, b) =>
+      a.usage - b.usage ||
+      a.slotRecord.start - b.slotRecord.start ||
+      (a.slotRecord.fieldId ?? '').localeCompare(b.slotRecord.fieldId ?? '') ||
+      a.slotRecord.id.localeCompare(b.slotRecord.id),
+  );
 
   return { slot: viableSharedSlots[0].slotRecord, encounteredConflict };
 }

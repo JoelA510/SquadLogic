@@ -124,13 +124,13 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
       baseSlotId,
       totalCapacity: 0,
       representativeStart: null,
-      day: slot.day ?? null,
+      day: null,
     };
     existingMeta.totalCapacity += slot.capacity;
-    if (
+    const becomesRepresentative =
       !existingMeta.representativeStart ||
-      startDate < existingMeta.representativeStart
-    ) {
+      startDate < existingMeta.representativeStart;
+    if (becomesRepresentative) {
       existingMeta.representativeStart = startDate;
       existingMeta.day = slot.day ?? null;
     }

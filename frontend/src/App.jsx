@@ -61,11 +61,14 @@ function App() {
     };
   }, []);
 
-  const { totals, divisions } = teamSummarySnapshot;
-  const generatedAt = teamSummarySnapshot.generatedAt;
+  const { totals, divisions, generatedAt } = teamSummarySnapshot;
 
   const formatPercent = (value) => `${Math.round((value ?? 0) * 100)}%`;
   const formatList = (items) => (items.length > 0 ? items.join(', ') : 'None');
+  const formatReasons = (reasons) =>
+    Object.entries(reasons)
+      .map(([reason, count]) => `${reason}: ${count}`)
+      .join(', ');
 
   return (
     <div className="app-shell">
@@ -163,9 +166,7 @@ function App() {
                   <dt>Outstanding buddy issues</dt>
                   <dd>
                     {division.unmatchedBuddyCount > 0
-                      ? `${division.unmatchedBuddyCount} (${Object.entries(division.unmatchedBuddyReasons)
-                          .map(([reason, count]) => `${reason}: ${count}`)
-                          .join(', ')})`
+                      ? `${division.unmatchedBuddyCount} (${formatReasons(division.unmatchedBuddyReasons)})`
                       : 'None'}
                   </dd>
                 </div>
@@ -178,9 +179,7 @@ function App() {
                   <dd>
                     {division.overflowPlayers}
                     {division.overflowPlayers > 0 &&
-                      ` (${Object.entries(division.overflowByReason)
-                        .map(([reason, count]) => `${reason}: ${count}`)
-                        .join(', ')})`}
+                      ` (${formatReasons(division.overflowByReason)})`}
                   </dd>
                 </div>
               </dl>

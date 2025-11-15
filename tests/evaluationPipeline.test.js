@@ -1,0 +1,103 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { runScheduleEvaluations } from '../src/evaluationPipeline.js';
+
+const BASE_TIME = new Date('2024-08-12T22:00:00Z');
+
+function addMinutes(date, minutes) {
+  return new Date(date.getTime() + minutes * 60_000);
+}
+
+test('aggregates practice and game evaluations with issue rollups', () => {
+  const practiceSlots = [
+    {
+      id: 'slot-1',
+      capacity: 1,
+      start: BASE_TIME,
+      end: addMinutes(BASE_TIME, 60),
+      day: 'Mon',
+    },
+  ];
+  const practiceTeams = [
+    { id: 'team-1', division: 'U10', coachId: 'coach-1' },
+    { id: 'team-2', division: 'U10', coachId: 'coach-1' },
+    { id: 'team-3', division: 'U10', coachId: 'coach-2' },
+  ];
+
+  const practiceAssignments = [
+    { teamId: 'team-1', slotId: 'slot-1' },
+    { teamId: 'team-2', slotId: 'slot-1' },
+  ];
+
+  const practiceResult = runScheduleEvaluations({
+    practice: {
+      assignments: practiceAssignments,
+      teams: practiceTeams,
+      slots: practiceSlots,
+      unassigned: [{ teamId: 'team-3', reason: 'no capacity', candidates: [] }],
+    },
+    games: {
+      assignments: [
+        {
+          id: 'game-1',
+          division: 'U10',
+          weekIndex: 1,
+          homeTeamId: 'team-1',
+          awayTeamId: 'team-99',
+          start: BASE_TIME,
+          end: addMinutes(BASE_TIME, 50),
+          slotId: 'field-1',
+          fieldId: 'field-1',
+        },
+      ],
+      teams: practiceTeams,
+      unscheduled: [{ reason: 'weather', matchup: 'team-1 vs team-2', weekIndex: 1, division: 'U10' }],
+    },
+  });
+
+  assert.equal(practiceResult.status, 'action-required');
+  assert.equal(practiceResult.issues.length, 5);
+
+  const messages = practiceResult.issues.map((issue) => issue.message);
+  assert.ok(messages.some((message) => message.includes('lack practice assignments')));
+  assert.ok(messages.some((message) => message.includes('overlapping practices')));
+  assert.ok(messages.some((message) => message.includes('exceeds capacity')));
+  assert.ok(messages.some((message) => message.includes('unknown team')));
+  assert.ok(messages.some((message) => message.includes('could not be scheduled')));
+
+  assert.equal(practiceResult.practice.summary.unassignedTeams, 1);
+  assert.equal(practiceResult.games.summary.totalAssignments, 1);
+  assert.ok(practiceResult.games.warnings.length >= 1);
+});
+
+test('reports ok status when no issues are detected', () => {
+  const practiceSlots = [
+    {
+      id: 'slot-2',
+      capacity: 2,
+      start: BASE_TIME,
+      end: addMinutes(BASE_TIME, 60),
+      day: 'Tue',
+    },
+  ];
+  const teams = [
+    { id: 'team-10', division: 'U12', coachId: null },
+    { id: 'team-11', division: 'U12', coachId: null },
+  ];
+
+  const result = runScheduleEvaluations({
+    practice: {
+      assignments: [
+        { teamId: 'team-10', slotId: 'slot-2' },
+        { teamId: 'team-11', slotId: 'slot-2' },
+      ],
+      teams,
+      slots: practiceSlots,
+    },
+  });
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.issues.length, 0);
+  assert.equal(result.practice.summary.unassignedTeams, 0);
+  assert.equal(result.games, null);
+});

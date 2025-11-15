@@ -99,6 +99,7 @@ export function scheduleGames({ teams, slots, roundRobinByDivision }) {
 
   const teamsById = indexTeams(teams);
   const { divisionSlots, sharedSlots } = indexSlots(slots);
+  const sharedSlotUsage = new Map();
 
   const assignments = [];
   const byes = [];
@@ -123,6 +124,7 @@ export function scheduleGames({ teams, slots, roundRobinByDivision }) {
           teamsById,
           divisionSlots,
           sharedSlots,
+          sharedSlotUsage,
           coachAssignments,
           teamWeekAssignments,
           assignments,
@@ -300,6 +302,7 @@ function scheduleMatchup({
   teamsById,
   divisionSlots,
   sharedSlots,
+  sharedSlotUsage,
   coachAssignments,
   teamWeekAssignments,
   assignments,
@@ -364,6 +367,7 @@ function scheduleMatchup({
     weekIndex,
     divisionSlots,
     sharedSlots,
+    sharedSlotUsage,
     coachAssignments,
     coaches: [homeTeam.coachId, awayTeam.coachId],
   });
@@ -404,6 +408,14 @@ function scheduleMatchup({
     },
   });
 
+  if (!selectedSlot.division) {
+    recordSharedSlotUsage({
+      sharedSlotUsage,
+      slotId: selectedSlot.id,
+      division,
+    });
+  }
+
   assignments.push({
     weekIndex,
     division,
@@ -421,19 +433,18 @@ function selectSlotForMatchup({
   weekIndex,
   divisionSlots,
   sharedSlots,
+  sharedSlotUsage,
   coachAssignments,
   coaches,
 }) {
   const divisionKey = `${division}::${weekIndex}`;
   const sharedKey = `*::${weekIndex}`;
-  const candidateSlots = [
-    ...(divisionSlots.get(divisionKey) ?? []),
-    ...(sharedSlots.get(sharedKey) ?? []),
-  ];
+  const divisionCandidates = divisionSlots.get(divisionKey) ?? [];
+  const sharedCandidates = sharedSlots.get(sharedKey) ?? [];
 
   let encounteredConflict = false;
 
-  for (const slotRecord of candidateSlots) {
+  for (const slotRecord of divisionCandidates) {
     if (slotRecord.remainingCapacity <= 0) {
       continue;
     }
@@ -453,7 +464,42 @@ function selectSlotForMatchup({
     return { slot: slotRecord, encounteredConflict };
   }
 
-  return { slot: null, encounteredConflict };
+  const viableSharedSlots = [];
+
+  for (const slotRecord of sharedCandidates) {
+    if (slotRecord.remainingCapacity <= 0) {
+      continue;
+    }
+
+    if (
+      hasCoachConflict({
+        coachAssignments,
+        coaches,
+        start: slotRecord.start,
+        end: slotRecord.end,
+      })
+    ) {
+      encounteredConflict = true;
+      continue;
+    }
+
+    const usage = getSharedSlotUsage({ sharedSlotUsage, slotId: slotRecord.id, division });
+    viableSharedSlots.push({ slotRecord, usage });
+  }
+
+  if (viableSharedSlots.length === 0) {
+    return { slot: null, encounteredConflict };
+  }
+
+  viableSharedSlots.sort(
+    (a, b) =>
+      a.usage - b.usage ||
+      a.slotRecord.start - b.slotRecord.start ||
+      (a.slotRecord.fieldId ?? '').localeCompare(b.slotRecord.fieldId ?? '') ||
+      a.slotRecord.id.localeCompare(b.slotRecord.id),
+  );
+
+  return { slot: viableSharedSlots[0].slotRecord, encounteredConflict };
 }
 
 function hasCoachConflict({ coachAssignments, coaches, start, end }) {
@@ -479,4 +525,18 @@ function recordCoachAssignment({ coachAssignments, coachId, assignment }) {
   existing.push(assignment);
   existing.sort((a, b) => a.start - b.start || a.slotId.localeCompare(b.slotId));
   coachAssignments.set(coachId, existing);
+}
+
+function getSharedSlotUsage({ sharedSlotUsage, slotId, division }) {
+  const slotUsage = sharedSlotUsage.get(slotId);
+  if (!slotUsage) {
+    return 0;
+  }
+  return slotUsage.get(division) ?? 0;
+}
+
+function recordSharedSlotUsage({ sharedSlotUsage, slotId, division }) {
+  const slotUsage = sharedSlotUsage.get(slotId) ?? new Map();
+  slotUsage.set(division, (slotUsage.get(division) ?? 0) + 1);
+  sharedSlotUsage.set(slotId, slotUsage);
 }

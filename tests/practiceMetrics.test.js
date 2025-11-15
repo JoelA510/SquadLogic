@@ -5,6 +5,7 @@ import { evaluatePracticeSchedule } from '../src/practiceMetrics.js';
 const SAMPLE_SLOTS = [
   {
     id: 'slot-early-mon',
+    baseSlotId: 'field-a-mon',
     capacity: 2,
     start: '2024-08-05T17:00:00Z',
     end: '2024-08-05T18:00:00Z',
@@ -12,6 +13,7 @@ const SAMPLE_SLOTS = [
   },
   {
     id: 'slot-late-mon',
+    baseSlotId: 'field-a-mon',
     capacity: 1,
     start: '2024-08-05T17:30:00Z',
     end: '2024-08-05T18:30:00Z',
@@ -19,6 +21,7 @@ const SAMPLE_SLOTS = [
   },
   {
     id: 'slot-wed',
+    baseSlotId: 'field-b-wed',
     capacity: 1,
     start: '2024-08-07T18:30:00Z',
     end: '2024-08-07T19:30:00Z',
@@ -91,6 +94,99 @@ test('evaluatePracticeSchedule summarises utilization and division distribution'
         { day: 'Wed', count: 1, percentage: 1 },
       ],
     },
+  });
+
+  assert.equal(report.baseSlotDistribution.length, 2);
+  const [fieldAMon, fieldBWed] = report.baseSlotDistribution;
+
+  assert.deepEqual(fieldAMon, {
+    baseSlotId: 'field-a-mon',
+    day: 'Mon',
+    representativeStart: '2024-08-05T17:00:00.000Z',
+    totalAssigned: 2,
+    totalCapacity: 3,
+    utilization: 0.6667,
+    divisionBreakdown: [
+      { division: 'U10', count: 2, percentage: 1 },
+    ],
+  });
+
+  assert.deepEqual(fieldBWed, {
+    baseSlotId: 'field-b-wed',
+    day: 'Wed',
+    representativeStart: '2024-08-07T18:30:00.000Z',
+    totalAssigned: 1,
+    totalCapacity: 1,
+    utilization: 1,
+    divisionBreakdown: [
+      { division: 'U12', count: 1, percentage: 1 },
+    ],
+  });
+});
+
+test('base slot metadata day matches earliest representative even when null', () => {
+  const slots = [
+    {
+      id: 'slot-null-day-earliest',
+      baseSlotId: 'shared-base-null-earliest',
+      capacity: 1,
+      start: '2024-08-08T17:00:00Z',
+      end: '2024-08-08T18:00:00Z',
+    },
+    {
+      id: 'slot-with-day-later',
+      baseSlotId: 'shared-base-null-earliest',
+      capacity: 1,
+      start: '2024-08-08T18:00:00Z',
+      end: '2024-08-08T19:00:00Z',
+      day: 'Thu',
+    },
+  ];
+
+  const report = evaluatePracticeSchedule({ assignments: [], teams: [], slots });
+
+  assert.equal(report.baseSlotDistribution.length, 1);
+  assert.deepEqual(report.baseSlotDistribution[0], {
+    baseSlotId: 'shared-base-null-earliest',
+    day: null,
+    representativeStart: '2024-08-08T17:00:00.000Z',
+    totalAssigned: 0,
+    totalCapacity: 2,
+    utilization: 0,
+    divisionBreakdown: [],
+  });
+});
+
+test('base slot metadata day follows earliest slot when defined', () => {
+  const slots = [
+    {
+      id: 'slot-with-day-earliest',
+      baseSlotId: 'shared-base-with-day',
+      capacity: 1,
+      start: '2024-08-09T17:00:00Z',
+      end: '2024-08-09T18:00:00Z',
+      day: 'Fri',
+    },
+    {
+      id: 'slot-later-null-day',
+      baseSlotId: 'shared-base-with-day',
+      capacity: 1,
+      start: '2024-08-09T19:00:00Z',
+      end: '2024-08-09T20:00:00Z',
+    },
+  ];
+
+  const report = evaluatePracticeSchedule({ assignments: [], teams: [], slots });
+
+  assert.equal(report.baseSlotDistribution.length, 1);
+  assert.deepEqual(report.baseSlotDistribution[0], {
+    baseSlotId: 'shared-base-with-day',
+    day: 'Fri',
+    representativeStart: '2024-08-09T17:00:00.000Z',
+    totalAssigned: 0,
+    totalCapacity: 2,
+    utilization: 0,
+    divisionBreakdown: [],
   });
 });
 

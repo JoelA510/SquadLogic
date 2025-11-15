@@ -25,6 +25,15 @@
  *     utilization: number | null,
  *     overbooked: boolean,
  *   }>,
+ *   baseSlotDistribution: Array<{
+ *     baseSlotId: string,
+ *     day: string | null,
+ *     representativeStart: string | null,
+ *     totalAssigned: number,
+ *     totalCapacity: number,
+ *     utilization: number | null,
+ *     divisionBreakdown: Array<{ division: string, count: number, percentage: number }>,
+ *   }>,
  *   divisionDayDistribution: Record<string, {
  *     totalAssigned: number,
  *     averageStartMinutes: number | null,
@@ -76,6 +85,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
   }
 
   const slotsById = new Map();
+  const baseSlotMetadata = new Map();
   for (const slot of slots) {
     if (!slot || typeof slot !== 'object') {
       throw new TypeError('each slot must be an object');
@@ -99,13 +109,32 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
       throw new Error(`slot ${slot.id} must end after it starts`);
     }
 
+    const baseSlotId = slot.baseSlotId ?? slot.id;
+
     slotsById.set(slot.id, {
       id: slot.id,
+      baseSlotId,
       capacity: slot.capacity,
       start: startDate,
       end: endDate,
       day: slot.day ?? null,
     });
+
+    const existingMeta = baseSlotMetadata.get(baseSlotId) ?? {
+      baseSlotId,
+      totalCapacity: 0,
+      representativeStart: null,
+      day: null,
+    };
+    existingMeta.totalCapacity += slot.capacity;
+    const becomesRepresentative =
+      !existingMeta.representativeStart ||
+      startDate < existingMeta.representativeStart;
+    if (becomesRepresentative) {
+      existingMeta.representativeStart = startDate;
+      existingMeta.day = slot.day ?? null;
+    }
+    baseSlotMetadata.set(baseSlotId, existingMeta);
   }
 
   const dataQualityWarnings = [];
@@ -114,6 +143,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
   const assignmentsBySlot = new Map();
   const assignmentsByDivision = new Map();
   const assignmentsByCoach = new Map();
+  const baseSlotDivisionCounts = new Map();
 
   for (const assignment of assignments) {
     if (!assignment || typeof assignment !== 'object') {
@@ -155,6 +185,18 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
       coachAssignments.push({ teamId: team.id, slot });
       assignmentsByCoach.set(team.coachId, coachAssignments);
     }
+
+    const baseSlotId = slot.baseSlotId;
+    const baseEntry = baseSlotDivisionCounts.get(baseSlotId) ?? {
+      totalAssigned: 0,
+      divisionCounts: new Map(),
+    };
+    baseEntry.totalAssigned += 1;
+    baseEntry.divisionCounts.set(
+      team.division,
+      (baseEntry.divisionCounts.get(team.division) ?? 0) + 1,
+    );
+    baseSlotDivisionCounts.set(baseSlotId, baseEntry);
   }
 
   const slotUtilization = [];
@@ -212,6 +254,40 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
     };
   }
 
+  const baseSlotDistribution = [];
+  for (const [baseSlotId, meta] of baseSlotMetadata.entries()) {
+    const countsRecord = baseSlotDivisionCounts.get(baseSlotId);
+    const totalAssigned = countsRecord?.totalAssigned ?? 0;
+    const divisionCounts = countsRecord?.divisionCounts ?? new Map();
+    const divisionBreakdown = Array.from(divisionCounts.entries())
+      .map(([division, count]) => ({
+        division,
+        count,
+        percentage: totalAssigned === 0 ? 0 : Number((count / totalAssigned).toFixed(4)),
+      }))
+      .sort((a, b) => {
+        if (b.count !== a.count) {
+          return b.count - a.count;
+        }
+        return a.division.localeCompare(b.division);
+      });
+
+    const totalCapacity = meta.totalCapacity;
+    const utilization = totalCapacity === 0 ? null : Number((totalAssigned / totalCapacity).toFixed(4));
+
+    baseSlotDistribution.push({
+      baseSlotId,
+      day: meta.day ?? null,
+      representativeStart: meta.representativeStart ? meta.representativeStart.toISOString() : null,
+      totalAssigned,
+      totalCapacity,
+      utilization,
+      divisionBreakdown,
+    });
+  }
+
+  baseSlotDistribution.sort((a, b) => a.baseSlotId.localeCompare(b.baseSlotId));
+
   const coachLoad = {};
   const coachConflicts = [];
   for (const [coachId, coachAssignments] of assignmentsByCoach.entries()) {
@@ -267,6 +343,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
       assignmentRate,
     },
     slotUtilization: slotUtilization.sort((a, b) => a.slotId.localeCompare(b.slotId)),
+    baseSlotDistribution,
     divisionDayDistribution,
     coachLoad,
     coachConflicts,

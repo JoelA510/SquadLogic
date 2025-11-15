@@ -268,24 +268,6 @@ function analyzeSharedSlotUsage(sharedSlotUsage) {
       bucket.set(record.division, (bucket.get(record.division) ?? 0) + record.count);
     }
     fieldAggregation.set(fieldKey, bucket);
-
-    if (divisionUsage.length > 1) {
-      const counts = divisionUsage.map((record) => record.count);
-      const max = Math.max(...counts);
-      const min = Math.min(...counts);
-      if (max - min > 1) {
-        imbalanceWarnings.push({
-          type: 'shared-slot-imbalance',
-          message: `Shared field ${fieldKey} is imbalanced across divisions`,
-          details: {
-            slotId: entry.slotId,
-            fieldId: entry.fieldId ?? null,
-            distribution: divisionUsage.map((record) => ({ ...record })),
-            spread: max - min,
-          },
-        });
-      }
-    }
   }
 
   sharedSlotSummaries.sort((a, b) => a.slotId.localeCompare(b.slotId));
@@ -294,6 +276,37 @@ function analyzeSharedSlotUsage(sharedSlotUsage) {
     sharedFieldDistribution[fieldId] = Object.fromEntries(
       Array.from(bucket.entries()).sort((a, b) => a[0].localeCompare(b[0])),
     );
+  }
+
+  for (const summary of sharedSlotSummaries) {
+    const fieldKey = summary.fieldId ?? 'unassigned';
+    const bucket = fieldAggregation.get(fieldKey);
+    if (!bucket || bucket.size <= 1) {
+      continue;
+    }
+
+    const slotUsageMap = new Map(
+      summary.divisionUsage.map((record) => [record.division, record.count]),
+    );
+    const distribution = Array.from(bucket.keys())
+      .sort((a, b) => a.localeCompare(b))
+      .map((division) => ({ division, count: slotUsageMap.get(division) ?? 0 }));
+
+    const counts = distribution.map((record) => record.count);
+    const max = Math.max(...counts);
+    const min = Math.min(...counts);
+    if (max - min > 1) {
+      imbalanceWarnings.push({
+        type: 'shared-slot-imbalance',
+        message: `Shared field ${fieldKey} is imbalanced across divisions`,
+        details: {
+          slotId: summary.slotId,
+          fieldId: summary.fieldId ?? null,
+          distribution,
+          spread: max - min,
+        },
+      });
+    }
   }
 
   return { sharedSlotSummaries, sharedFieldDistribution, imbalanceWarnings };

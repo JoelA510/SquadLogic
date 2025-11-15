@@ -546,9 +546,6 @@ function getSharedSlotUsage({ sharedSlotUsage, slotId, division }) {
   if (!slotUsage) {
     return 0;
   }
-  if (slotUsage instanceof Map) {
-    return slotUsage.get(division) ?? 0;
-  }
   if (slotUsage.divisions instanceof Map) {
     return slotUsage.divisions.get(division) ?? 0;
   }

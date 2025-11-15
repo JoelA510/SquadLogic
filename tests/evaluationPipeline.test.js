@@ -229,8 +229,12 @@ test('shared slot imbalance warnings surface with warning severity', () => {
           fieldId: 'field-x',
           divisionUsage: [
             { division: 'U10', count: 3 },
-            { division: 'U12', count: 0 },
           ],
+        },
+        {
+          slotId: 'shared-slot-2',
+          fieldId: 'field-x',
+          divisionUsage: [{ division: 'U12', count: 1 }],
         },
       ],
     },

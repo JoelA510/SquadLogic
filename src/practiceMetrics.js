@@ -53,6 +53,50 @@
  */
 const FAIRNESS_DOMINANCE_THRESHOLD = 0.7;
 
+function calculateFairnessConcerns(baseSlotDistribution, assignmentsByDivision) {
+  const assignedDivisions = new Set(assignmentsByDivision.keys());
+  const fairnessConcerns = [];
+
+  for (const entry of baseSlotDistribution) {
+    if (entry.totalAssigned < 2 || entry.divisionBreakdown.length === 0) {
+      continue;
+    }
+
+    const dominant = entry.divisionBreakdown[0];
+    const dominantShare = Number((dominant.count / entry.totalAssigned).toFixed(4));
+    const hasDiverseLeague = assignedDivisions.size > 1;
+    const hasMultipleDivisionsInSlot = entry.divisionBreakdown.length > 1;
+
+    if (dominantShare < FAIRNESS_DOMINANCE_THRESHOLD) {
+      continue;
+    }
+
+    if (!hasDiverseLeague && !hasMultipleDivisionsInSlot) {
+      continue;
+    }
+
+    const percentLabel = (dominantShare * 100).toFixed(1).replace(/\.0$/, '');
+    fairnessConcerns.push({
+      baseSlotId: entry.baseSlotId,
+      day: entry.day,
+      representativeStart: entry.representativeStart,
+      dominantDivision: dominant.division,
+      dominantShare,
+      totalAssigned: entry.totalAssigned,
+      totalCapacity: entry.totalCapacity,
+      message: `Base slot ${entry.baseSlotId} is ${percentLabel}% filled by division ${dominant.division} (${dominant.count}/${entry.totalAssigned} assignments)`,
+    });
+  }
+
+  fairnessConcerns.sort(
+    (a, b) =>
+      a.baseSlotId.localeCompare(b.baseSlotId) ||
+      a.message.localeCompare(b.message),
+  );
+
+  return fairnessConcerns;
+}
+
 export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, slots }) {
   if (!Array.isArray(assignments)) {
     throw new TypeError('assignments must be an array');
@@ -290,41 +334,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
 
   baseSlotDistribution.sort((a, b) => a.baseSlotId.localeCompare(b.baseSlotId));
 
-  const assignedDivisions = new Set(assignmentsByDivision.keys());
-  const fairnessConcerns = [];
-
-  for (const entry of baseSlotDistribution) {
-    if (entry.totalAssigned < 2 || entry.divisionBreakdown.length === 0) {
-      continue;
-    }
-
-    const dominant = entry.divisionBreakdown[0];
-    const dominantShare = Number((dominant.count / entry.totalAssigned).toFixed(4));
-    const hasDiverseLeague = assignedDivisions.size > 1;
-    const hasMultipleDivisionsInSlot = entry.divisionBreakdown.length > 1;
-
-    if (dominantShare < FAIRNESS_DOMINANCE_THRESHOLD) {
-      continue;
-    }
-
-    if (!hasDiverseLeague && !hasMultipleDivisionsInSlot) {
-      continue;
-    }
-
-    const percentLabel = (dominantShare * 100).toFixed(1).replace(/\.0$/, '');
-    fairnessConcerns.push({
-      baseSlotId: entry.baseSlotId,
-      day: entry.day,
-      representativeStart: entry.representativeStart,
-      dominantDivision: dominant.division,
-      dominantShare,
-      totalAssigned: entry.totalAssigned,
-      totalCapacity: entry.totalCapacity,
-      message: `Base slot ${entry.baseSlotId} is ${percentLabel}% filled by division ${dominant.division} (${dominant.count}/${entry.totalAssigned} assignments)`,
-    });
-  }
-
-  fairnessConcerns.sort((a, b) => a.baseSlotId.localeCompare(b.baseSlotId) || a.message.localeCompare(b.message));
+  const fairnessConcerns = calculateFairnessConcerns(baseSlotDistribution, assignmentsByDivision);
 
   const coachLoad = {};
   const coachConflicts = [];

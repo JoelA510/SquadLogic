@@ -381,7 +381,10 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
   const totalTeams = teams.length;
   const assignedTeams = assignedTeamIds.size;
   const unassignedTeams = totalTeams - assignedTeams;
-  const assignmentRate = totalTeams === 0 ? 1 : Number(((assignedTeams / totalTeams) || 0).toFixed(4));
+  const assignmentRate =
+    totalTeams === 0 ? 1 : Number(((assignedTeams / totalTeams) || 0).toFixed(4));
+  const manualFollowUpRate =
+    totalTeams === 0 ? 0 : Number(((unassignedTeams / totalTeams) || 0).toFixed(4));
 
   return {
     summary: {
@@ -389,6 +392,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
       assignedTeams,
       unassignedTeams,
       assignmentRate,
+      manualFollowUpRate,
     },
     slotUtilization: slotUtilization.sort((a, b) => a.slotId.localeCompare(b.slotId)),
     baseSlotDistribution,

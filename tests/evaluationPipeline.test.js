@@ -56,10 +56,11 @@ test('aggregates practice and game evaluations with issue rollups', () => {
   });
 
   assert.equal(practiceResult.status, 'action-required');
-  assert.equal(practiceResult.issues.length, 5);
+  assert.equal(practiceResult.issues.length, 6);
 
   const messages = practiceResult.issues.map((issue) => issue.message);
   assert.ok(messages.some((message) => message.includes('lack practice assignments')));
+  assert.ok(messages.some((message) => message.includes('Manual follow-up required')));
   assert.ok(messages.some((message) => message.includes('overlapping practices')));
   assert.ok(messages.some((message) => message.includes('exceeds capacity')));
   assert.ok(messages.some((message) => message.includes('unknown team')));
@@ -99,6 +100,7 @@ test('reports ok status when no issues are detected', () => {
   assert.equal(result.status, 'ok');
   assert.equal(result.issues.length, 0);
   assert.equal(result.practice.summary.unassignedTeams, 0);
+  assert.equal(result.practice.summary.manualFollowUpRate, 0);
   assert.equal(result.games, null);
 });
 
@@ -169,6 +171,7 @@ test('optional collections default safely when omitted', () => {
     assignedTeams: 0,
     unassignedTeams: 0,
     assignmentRate: 1,
+    manualFollowUpRate: 0,
   });
   assert.deepEqual(result.games.summary.unscheduledByReason, {});
 });

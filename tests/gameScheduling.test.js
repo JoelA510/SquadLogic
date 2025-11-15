@@ -234,13 +234,22 @@ test('scheduleGames balances shared slots across divisions when capacity allows 
     { id: 'shared-week-3-field-b', weekIndex: 3, start: '2024-08-24T17:15:00Z', end: '2024-08-24T18:15:00Z', capacity: 1, fieldId: 'field-b' },
   ];
 
-  const { assignments, unscheduled } = scheduleGames({
+  const { assignments, unscheduled, sharedSlotUsage } = scheduleGames({
     teams: [...u10Teams, ...u12Teams],
     slots: sharedSlots,
     roundRobinByDivision,
   });
 
   assert.equal(unscheduled.length, 0);
+
+  assert.equal(sharedSlotUsage.length, sharedSlots.length);
+  for (const usage of sharedSlotUsage) {
+    assert.ok(usage.slotId.includes('shared-week'), 'expected slotId to be captured');
+    assert.ok(usage.start.includes('2024-'), 'start timestamp should be serialized');
+    assert.ok(usage.end.includes('2024-'), 'end timestamp should be serialized');
+    assert.equal(typeof usage.weekIndex, 'number');
+    assert.equal(typeof usage.totalAssignments, 'number');
+  }
 
   const fieldUsageByDivision = new Map();
   for (const assignment of assignments) {
@@ -258,5 +267,27 @@ test('scheduleGames balances shared slots across divisions when capacity allows 
     const fieldB = usage.get('field-b') ?? 0;
     assert(fieldA > 0 && fieldB > 0, `${division} should use both shared fields`);
     assert(Math.abs(fieldA - fieldB) <= 1, `${division} assignments should be balanced across shared fields`);
+  }
+
+  const aggregatedSharedUsage = new Map();
+  for (const usage of sharedSlotUsage) {
+    const fieldId = usage.fieldId ?? 'unassigned';
+    const bucket = aggregatedSharedUsage.get(fieldId) ?? new Map();
+    for (const divisionUsage of usage.divisionUsage) {
+      bucket.set(
+        divisionUsage.division,
+        (bucket.get(divisionUsage.division) ?? 0) + divisionUsage.count,
+      );
+    }
+    aggregatedSharedUsage.set(fieldId, bucket);
+  }
+
+  for (const fieldId of ['field-a', 'field-b']) {
+    const bucket = aggregatedSharedUsage.get(fieldId) ?? new Map();
+    const counts = Array.from(bucket.values());
+    assert.equal(counts.length, 2, `${fieldId} should track both divisions`);
+    const max = Math.max(...counts);
+    const min = Math.min(...counts);
+    assert(max - min <= 1, `${fieldId} aggregated usage should stay balanced`);
   }
 });

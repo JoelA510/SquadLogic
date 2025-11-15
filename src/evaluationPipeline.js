@@ -51,6 +51,7 @@ export function runScheduleEvaluations({ practice, games } = {}) {
           teams: games.teams,
           byes: games.byes ?? [],
           unscheduled: games.unscheduled ?? [],
+          sharedSlotUsage: games.sharedSlotUsage ?? [],
         });
 
   const issues = [];

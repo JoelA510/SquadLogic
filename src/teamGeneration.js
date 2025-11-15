@@ -26,6 +26,22 @@
  *     coverageRate: number,
  *     needsAdditionalCoaches: boolean,
  *   }>,
+ *   rosterBalanceByDivision: Record<string, {
+ *     teamStats: Array<{
+ *       teamId: string,
+ *       coachId: string | null,
+ *       playerCount: number,
+ *       maxRosterSize: number,
+ *       slotsRemaining: number,
+ *       fillRate: number,
+ *     }>,
+ *     summary: {
+ *       totalPlayers: number,
+ *       totalCapacity: number,
+ *       averageFillRate: number,
+ *       teamsNeedingPlayers: Array<string>,
+ *     },
+ *   }>,
  * }}
  */
 export function generateTeams({ players, divisionConfigs, random = Math.random }) {
@@ -60,6 +76,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
   const overflowByDivision = {};
   const buddyDiagnosticsByDivision = {};
   const coachCoverageByDivision = {};
+  const rosterBalanceByDivision = {};
 
   for (const [division, divisionPlayers] of playersByDivision.entries()) {
     const config = divisionConfigs[division];
@@ -113,6 +130,43 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
       coverageRate,
       needsAdditionalCoaches: teamsWithoutCoach > 0,
     };
+
+    const teamStats = teams.map((team) => {
+      const playerCount = team.players.length;
+      const slotsRemaining = Math.max(0, maxRosterSize - playerCount);
+      const fillRate = Number((playerCount / maxRosterSize).toFixed(4));
+
+      return {
+        teamId: team.id,
+        coachId: team.coachId ?? null,
+        playerCount,
+        maxRosterSize,
+        slotsRemaining,
+        fillRate,
+      };
+    });
+
+    const totalPlayers = teamStats.reduce((sum, entry) => sum + entry.playerCount, 0);
+    const totalCapacity = teamStats.reduce((sum, entry) => sum + entry.maxRosterSize, 0);
+    const averageFillRate = Number(
+      (
+        teamStats.reduce((sum, entry) => sum + entry.fillRate, 0) /
+        (teamStats.length === 0 ? 1 : teamStats.length)
+      ).toFixed(4),
+    );
+    const teamsNeedingPlayers = teamStats
+      .filter((entry) => entry.slotsRemaining > 0)
+      .map((entry) => entry.teamId);
+
+    rosterBalanceByDivision[division] = {
+      teamStats: teamStats.map((entry) => ({ ...entry })),
+      summary: {
+        totalPlayers,
+        totalCapacity,
+        averageFillRate,
+        teamsNeedingPlayers,
+      },
+    };
   }
 
   return {
@@ -120,6 +174,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
     overflowByDivision,
     buddyDiagnosticsByDivision,
     coachCoverageByDivision,
+    rosterBalanceByDivision,
   };
 }
 

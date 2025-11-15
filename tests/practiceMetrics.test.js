@@ -53,6 +53,7 @@ test('evaluatePracticeSchedule summarises utilization and division distribution'
     assignedTeams: 3,
     unassignedTeams: 1,
     assignmentRate: 0.75,
+    manualFollowUpRate: 0.25,
   });
 
   assert.equal(report.slotUtilization.length, 3);
@@ -263,6 +264,7 @@ test('evaluatePracticeSchedule correctly counts teams assigned to multiple slots
     assignedTeams: 1,
     unassignedTeams: 3,
     assignmentRate: 0.25,
+    manualFollowUpRate: 0.75,
   });
   assert.deepEqual(report.fairnessConcerns, []);
 });

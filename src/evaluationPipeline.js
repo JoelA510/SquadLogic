@@ -1,6 +1,8 @@
 import { evaluatePracticeSchedule } from './practiceMetrics.js';
 import { evaluateGameSchedule } from './gameMetrics.js';
 
+const MANUAL_FOLLOW_UP_WARNING_THRESHOLD = 0.05;
+
 /**
  * Run practice and game schedule evaluations, returning an aggregated
  * dashboard-friendly payload describing overall readiness and key issues.
@@ -58,7 +60,7 @@ export function runScheduleEvaluations({ practice, games } = {}) {
 
   if (practiceResult) {
     const {
-      summary: { unassignedTeams },
+      summary: { unassignedTeams, totalTeams, manualFollowUpRate = 0 },
       coachConflicts,
       dataQualityWarnings,
       fairnessConcerns = [],
@@ -70,6 +72,20 @@ export function runScheduleEvaluations({ practice, games } = {}) {
         severity: 'error',
         message: `${unassignedTeams} team(s) lack practice assignments`,
         details: { unassignedTeams },
+      });
+    }
+
+    if (
+      totalTeams > 0 &&
+      manualFollowUpRate > MANUAL_FOLLOW_UP_WARNING_THRESHOLD &&
+      Number.isFinite(manualFollowUpRate)
+    ) {
+      const percentage = (manualFollowUpRate * 100).toFixed(1).replace(/\.0$/, '');
+      issues.push({
+        category: 'practice',
+        severity: 'warning',
+        message: `Manual follow-up required for ${percentage}% of teams (${unassignedTeams} of ${totalTeams})`,
+        details: { manualFollowUpRate, unassignedTeams, totalTeams },
       });
     }
 

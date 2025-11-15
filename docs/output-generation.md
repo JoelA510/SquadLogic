@@ -23,7 +23,9 @@ once schedules are finalized. It assumes team, practice, game, and evaluation da
      that version to avoid breaking TeamSnap templates when fields change.
 3. **File Generation**
    - Implement a shared TypeScript utility that accepts the flattened datasets and outputs both CSV and XLSX variants using
-     libraries such as `papaparse` (CSV) and `exceljs` (XLSX).
+     libraries such as `papaparse` (CSV) and `exceljs` (XLSX). A lightweight precursor now exists in `src/outputGeneration.js`
+     which returns CSV-friendly rows and helpers for master and per-team exports, providing a reference implementation ahead of
+     the serverless function wiring.
    - Include metadata sheets/tabs summarizing generation time, source run IDs, evaluation status, and known warnings.
    - Store generated files in Supabase Storage under `exports/<season>/<job_id>/` with read access limited to admins.
 4. **Delivery & Notifications**

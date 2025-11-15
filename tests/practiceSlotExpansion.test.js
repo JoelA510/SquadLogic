@@ -121,6 +121,54 @@ test('throws when overrides create invalid time ranges', () => {
   assert.throws(() => expandPracticeSlotsForSeason({ slots, seasonPhases }), /durationMinutes must be positive/);
 });
 
+test('normalizes varied day inputs via map lookup', () => {
+  const slots = [
+    {
+      id: 'slot-6',
+      day: 'sun',
+      start: '18:00',
+      end: '19:00',
+      capacity: 1,
+    },
+    {
+      id: 'slot-7',
+      day: 'SATURDAY',
+      start: '09:00',
+      end: '10:30',
+      capacity: 2,
+    },
+  ];
+  const seasonPhases = [createPhase('main', '2024-08-01', '2024-09-30')];
+
+  const expanded = expandPracticeSlotsForSeason({ slots, seasonPhases });
+
+  const dayMap = new Map(expanded.map((slot) => [slot.baseSlotId, slot.day]));
+  assert.equal(dayMap.get('slot-6'), 'Sun');
+  assert.equal(dayMap.get('slot-7'), 'Sat');
+});
+
+test('override endTime takes precedence over durationMinutes', () => {
+  const slots = [
+    {
+      id: 'slot-8',
+      day: 'Fri',
+      start: '18:00',
+      end: '19:30',
+      capacity: 1,
+      seasonOverrides: {
+        late: { startTime: '18:15', endTime: '20:00', durationMinutes: 30 },
+      },
+    },
+  ];
+  const seasonPhases = [createPhase('late', '2024-09-01', '2024-10-31')];
+
+  const [expanded] = expandPracticeSlotsForSeason({ slots, seasonPhases });
+
+  assert.equal(expanded.seasonPhaseId, 'late');
+  assert.equal(new Date(expanded.start).toISOString(), '2024-09-06T18:15:00.000Z');
+  assert.equal(new Date(expanded.end).toISOString(), '2024-09-06T20:00:00.000Z');
+});
+
 test('throws for invalid day names', () => {
   const slots = [
     {

@@ -166,21 +166,15 @@ function normalizeDayOfWeek(dayValue, slotId) {
 
   const normalized = trimmed.slice(0, 3).toLowerCase();
   const mapped =
-    normalized === 'sun'
-      ? 'Sun'
-      : normalized === 'mon'
-      ? 'Mon'
-      : normalized === 'tue'
-      ? 'Tue'
-      : normalized === 'wed'
-      ? 'Wed'
-      : normalized === 'thu'
-      ? 'Thu'
-      : normalized === 'fri'
-      ? 'Fri'
-      : normalized === 'sat'
-      ? 'Sat'
-      : null;
+    {
+      sun: 'Sun',
+      mon: 'Mon',
+      tue: 'Tue',
+      wed: 'Wed',
+      thu: 'Thu',
+      fri: 'Fri',
+      sat: 'Sat',
+    }[normalized] ?? null;
 
   if (!mapped || !DAY_NAME_SET.has(mapped)) {
     throw new Error(`slot ${slotId} has an unrecognised day value: ${dayValue}`);
@@ -306,8 +300,7 @@ function resolveTimeRange({ baseTimeRange, override, slotId, phaseId }) {
     }
     if (override.endTime !== undefined) {
       endMinutes = parseTimeOfDay(override.endTime, `override for slot ${slotId} phase ${phaseId} endTime`);
-    }
-    if (override.durationMinutes !== undefined) {
+    } else if (override.durationMinutes !== undefined) {
       const duration = Number(override.durationMinutes);
       if (!Number.isFinite(duration) || duration <= 0) {
         throw new TypeError(`override for slot ${slotId} phase ${phaseId} durationMinutes must be positive`);

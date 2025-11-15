@@ -132,9 +132,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
       startDate < existingMeta.representativeStart
     ) {
       existingMeta.representativeStart = startDate;
-      if (slot.day) {
-        existingMeta.day = slot.day;
-      }
+      existingMeta.day = slot.day ?? null;
     }
     baseSlotMetadata.set(baseSlotId, existingMeta);
   }

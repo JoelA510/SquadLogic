@@ -124,6 +124,72 @@ test('evaluatePracticeSchedule summarises utilization and division distribution'
   });
 });
 
+test('base slot metadata day matches earliest representative even when null', () => {
+  const slots = [
+    {
+      id: 'slot-null-day-earliest',
+      baseSlotId: 'shared-base-null-earliest',
+      capacity: 1,
+      start: '2024-08-08T17:00:00Z',
+      end: '2024-08-08T18:00:00Z',
+    },
+    {
+      id: 'slot-with-day-later',
+      baseSlotId: 'shared-base-null-earliest',
+      capacity: 1,
+      start: '2024-08-08T18:00:00Z',
+      end: '2024-08-08T19:00:00Z',
+      day: 'Thu',
+    },
+  ];
+
+  const report = evaluatePracticeSchedule({ assignments: [], teams: [], slots });
+
+  assert.equal(report.baseSlotDistribution.length, 1);
+  assert.deepEqual(report.baseSlotDistribution[0], {
+    baseSlotId: 'shared-base-null-earliest',
+    day: null,
+    representativeStart: '2024-08-08T17:00:00.000Z',
+    totalAssigned: 0,
+    totalCapacity: 2,
+    utilization: 0,
+    divisionBreakdown: [],
+  });
+});
+
+test('base slot metadata day follows earliest slot when defined', () => {
+  const slots = [
+    {
+      id: 'slot-with-day-earliest',
+      baseSlotId: 'shared-base-with-day',
+      capacity: 1,
+      start: '2024-08-09T17:00:00Z',
+      end: '2024-08-09T18:00:00Z',
+      day: 'Fri',
+    },
+    {
+      id: 'slot-later-null-day',
+      baseSlotId: 'shared-base-with-day',
+      capacity: 1,
+      start: '2024-08-09T19:00:00Z',
+      end: '2024-08-09T20:00:00Z',
+    },
+  ];
+
+  const report = evaluatePracticeSchedule({ assignments: [], teams: [], slots });
+
+  assert.equal(report.baseSlotDistribution.length, 1);
+  assert.deepEqual(report.baseSlotDistribution[0], {
+    baseSlotId: 'shared-base-with-day',
+    day: 'Fri',
+    representativeStart: '2024-08-09T17:00:00.000Z',
+    totalAssigned: 0,
+    totalCapacity: 2,
+    utilization: 0,
+    divisionBreakdown: [],
+  });
+});
+
 test('evaluatePracticeSchedule flags coach conflicts', () => {
   const report = evaluatePracticeSchedule({
     assignments: [

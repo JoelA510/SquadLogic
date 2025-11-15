@@ -1,18 +1,20 @@
-const MASTER_HEADERS = [
-  'Team ID',
-  'Team Name',
-  'Division',
-  'Coach Name',
-  'Coach Email',
-  'Event Type',
-  'Opponent',
-  'Role',
-  'Start',
-  'End',
-  'Field',
-  'Slot',
-  'Notes',
-];
+const HEADERS = {
+  TEAM_ID: 'Team ID',
+  TEAM_NAME: 'Team Name',
+  DIVISION: 'Division',
+  COACH_NAME: 'Coach Name',
+  COACH_EMAIL: 'Coach Email',
+  EVENT_TYPE: 'Event Type',
+  OPPONENT: 'Opponent',
+  ROLE: 'Role',
+  START: 'Start',
+  END: 'End',
+  FIELD: 'Field',
+  SLOT: 'Slot',
+  NOTES: 'Notes',
+};
+
+const MASTER_HEADERS = Object.values(HEADERS);
 
 /**
  * Generate flattened schedule exports for practices and games.
@@ -190,22 +192,22 @@ function formatRow({
   const normalizedStart = normalizeDate(start);
   const normalizedEnd = normalizeDate(end);
 
-  const opponent = opponentName ?? (opponentTeamId ? opponentTeamId : '');
+  const opponent = opponentName ?? opponentTeamId ?? '';
 
   return {
-    'Team ID': team.id,
-    'Team Name': team.name,
-    Division: team.division,
-    'Coach Name': team.coachName,
-    'Coach Email': team.coachEmail,
-    'Event Type': eventType,
-    Opponent: opponent,
-    Role: role,
-    Start: normalizedStart,
-    End: normalizedEnd,
-    Field: fieldId,
-    Slot: slotId,
-    Notes: notes,
+    [HEADERS.TEAM_ID]: team.id,
+    [HEADERS.TEAM_NAME]: team.name,
+    [HEADERS.DIVISION]: team.division,
+    [HEADERS.COACH_NAME]: team.coachName,
+    [HEADERS.COACH_EMAIL]: team.coachEmail,
+    [HEADERS.EVENT_TYPE]: eventType,
+    [HEADERS.OPPONENT]: opponent,
+    [HEADERS.ROLE]: role,
+    [HEADERS.START]: normalizedStart,
+    [HEADERS.END]: normalizedEnd,
+    [HEADERS.FIELD]: fieldId,
+    [HEADERS.SLOT]: slotId,
+    [HEADERS.NOTES]: notes,
   };
 }
 
@@ -218,11 +220,11 @@ function normalizeDate(value) {
 }
 
 function compareRows(a, b) {
-  const startComparison = a.Start.localeCompare(b.Start);
+  const startComparison = a[HEADERS.START].localeCompare(b[HEADERS.START]);
   if (startComparison !== 0) {
     return startComparison;
   }
-  return a['Team ID'].localeCompare(b['Team ID']);
+  return a[HEADERS.TEAM_ID].localeCompare(b[HEADERS.TEAM_ID]);
 }
 
 /**
@@ -253,7 +255,12 @@ function escapeCsvValue(value) {
     return '';
   }
   const stringValue = String(value);
-  if (stringValue.includes('"') || stringValue.includes(',') || stringValue.includes('\n')) {
+  if (
+    stringValue.includes('"') ||
+    stringValue.includes(',') ||
+    stringValue.includes('\n') ||
+    stringValue.includes('\r')
+  ) {
     return `"${stringValue.replace(/"/g, '""')}"`;
   }
   return stringValue;

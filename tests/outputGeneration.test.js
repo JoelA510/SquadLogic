@@ -71,6 +71,15 @@ test('formatCsv quotes values containing commas and quotes', () => {
   assert.equal(lines.slice(2).join('\n'), '"He said ""Hello""","Line\nBreak"');
 });
 
+test('formatCsv quotes values containing carriage returns', () => {
+  const headers = ['Column'];
+  const rows = [{ Column: 'Return\rCheck' }];
+
+  const csv = formatCsv(headers, rows);
+
+  assert.equal(csv, 'Column\n"Return\rCheck"');
+});
+
 test('generateScheduleExports throws for unknown teams', () => {
   const teams = [{ id: 'U8-T01' }];
   const practiceAssignments = [

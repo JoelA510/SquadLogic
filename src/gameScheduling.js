@@ -101,6 +101,7 @@ export function scheduleGames({ teams, slots, roundRobinByDivision }) {
   const { divisionSlots, sharedSlots } = indexSlots(slots);
   const sharedSlotUsage = new Map();
   const sharedFieldUsage = new Map();
+  const teamStartPreferences = new Map();
 
   const assignments = [];
   const byes = [];
@@ -129,6 +130,7 @@ export function scheduleGames({ teams, slots, roundRobinByDivision }) {
           sharedFieldUsage,
           coachAssignments,
           teamWeekAssignments,
+          teamStartPreferences,
           assignments,
           unscheduled,
         });
@@ -310,6 +312,7 @@ function scheduleMatchup({
   sharedFieldUsage,
   coachAssignments,
   teamWeekAssignments,
+  teamStartPreferences,
   assignments,
   unscheduled,
 }) {
@@ -375,6 +378,8 @@ function scheduleMatchup({
     sharedSlotUsage,
     sharedFieldUsage,
     coachAssignments,
+    teamIds: [homeTeamId, awayTeamId],
+    teamStartPreferences,
     coaches: [homeTeam.coachId, awayTeam.coachId],
   });
 
@@ -423,6 +428,14 @@ function scheduleMatchup({
     });
   }
 
+  for (const teamId of [homeTeamId, awayTeamId]) {
+    updateTeamStartPreference({
+      teamStartPreferences,
+      teamId,
+      start: selectedSlot.start,
+    });
+  }
+
   assignments.push({
     weekIndex,
     division,
@@ -443,6 +456,8 @@ function selectSlotForMatchup({
   sharedSlotUsage,
   sharedFieldUsage,
   coachAssignments,
+  teamIds,
+  teamStartPreferences,
   coaches,
 }) {
   const divisionKey = `${division}::${weekIndex}`;
@@ -451,6 +466,8 @@ function selectSlotForMatchup({
   const sharedCandidates = sharedSlots.get(sharedKey) ?? [];
 
   let encounteredConflict = false;
+
+  const viableDivisionSlots = [];
 
   for (const slotRecord of divisionCandidates) {
     if (slotRecord.remainingCapacity <= 0) {
@@ -469,7 +486,25 @@ function selectSlotForMatchup({
       continue;
     }
 
-    return { slot: slotRecord, encounteredConflict };
+    const consistencyScore = computeConsistencyScore({
+      teamStartPreferences,
+      teamIds,
+      slotRecord,
+    });
+
+    viableDivisionSlots.push({ slotRecord, consistencyScore });
+  }
+
+  if (viableDivisionSlots.length > 0) {
+    viableDivisionSlots.sort(
+      (a, b) =>
+        b.consistencyScore - a.consistencyScore ||
+        a.slotRecord.start - b.slotRecord.start ||
+        (a.slotRecord.fieldId ?? '').localeCompare(b.slotRecord.fieldId ?? '') ||
+        a.slotRecord.id.localeCompare(b.slotRecord.id),
+    );
+
+    return { slot: viableDivisionSlots[0].slotRecord, encounteredConflict };
   }
 
   const viableSharedSlots = [];
@@ -497,7 +532,12 @@ function selectSlotForMatchup({
       fieldId: slotRecord.fieldId,
       division,
     });
-    viableSharedSlots.push({ slotRecord, usage, fieldUsage });
+    const consistencyScore = computeConsistencyScore({
+      teamStartPreferences,
+      teamIds,
+      slotRecord,
+    });
+    viableSharedSlots.push({ slotRecord, usage, fieldUsage, consistencyScore });
   }
 
   if (viableSharedSlots.length === 0) {
@@ -508,12 +548,28 @@ function selectSlotForMatchup({
     (a, b) =>
       a.usage - b.usage ||
       a.fieldUsage - b.fieldUsage ||
+      b.consistencyScore - a.consistencyScore ||
       a.slotRecord.start - b.slotRecord.start ||
       (a.slotRecord.fieldId ?? '').localeCompare(b.slotRecord.fieldId ?? '') ||
       a.slotRecord.id.localeCompare(b.slotRecord.id),
   );
 
   return { slot: viableSharedSlots[0].slotRecord, encounteredConflict };
+}
+
+function computeConsistencyScore({ teamStartPreferences, teamIds, slotRecord }) {
+  const startKey = getStartTimeKey(slotRecord.start);
+  let score = 0;
+  for (const teamId of teamIds) {
+    if (!teamId) {
+      continue;
+    }
+    const record = teamStartPreferences.get(teamId);
+    if (record?.preferredKey === startKey) {
+      score += 1;
+    }
+  }
+  return score;
 }
 
 function hasCoachConflict({ coachAssignments, coaches, start, end }) {
@@ -539,6 +595,28 @@ function recordCoachAssignment({ coachAssignments, coachId, assignment }) {
   existing.push(assignment);
   existing.sort((a, b) => a.start - b.start || a.slotId.localeCompare(b.slotId));
   coachAssignments.set(coachId, existing);
+}
+
+function updateTeamStartPreference({ teamStartPreferences, teamId, start }) {
+  if (!teamId) {
+    return;
+  }
+
+  const startKey = getStartTimeKey(start);
+  const record = teamStartPreferences.get(teamId) ?? {
+    counts: new Map(),
+    preferredKey: null,
+  };
+
+  const nextCount = (record.counts.get(startKey) ?? 0) + 1;
+  record.counts.set(startKey, nextCount);
+
+  const currentPreferredCount = record.preferredKey ? record.counts.get(record.preferredKey) ?? 0 : 0;
+  if (!record.preferredKey || nextCount > currentPreferredCount) {
+    record.preferredKey = startKey;
+  }
+
+  teamStartPreferences.set(teamId, record);
 }
 
 function getSharedSlotUsage({ sharedSlotUsage, slotId, division }) {
@@ -599,4 +677,10 @@ function formatSharedSlotUsage(sharedSlotUsage) {
 
   usageSummaries.sort((a, b) => a.slotId.localeCompare(b.slotId));
   return usageSummaries;
+}
+
+function getStartTimeKey(date) {
+  const hours = String(date.getUTCHours()).padStart(2, '0');
+  const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+  return `${hours}:${minutes}`;
 }

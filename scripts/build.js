@@ -2,6 +2,7 @@ import { generateTeams } from '../src/teamGeneration.js';
 import { schedulePractices } from '../src/practiceScheduling.js';
 import { evaluatePracticeSchedule } from '../src/practiceMetrics.js';
 import { generateRoundRobinWeeks, scheduleGames } from '../src/gameScheduling.js';
+import { generateScheduleExports } from '../src/outputGeneration.js';
 
 // Lightweight build placeholder that ensures the module can be imported without executing tests.
 if (typeof generateTeams !== 'function') {
@@ -18,6 +19,9 @@ if (typeof generateRoundRobinWeeks !== 'function') {
 }
 if (typeof scheduleGames !== 'function') {
   throw new Error('scheduleGames export is missing');
+}
+if (typeof generateScheduleExports !== 'function') {
+  throw new Error('generateScheduleExports export is missing');
 }
 
 console.log('Core scheduling modules ready for integration.');

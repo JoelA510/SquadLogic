@@ -186,3 +186,59 @@ test('respects locked assignments and prevents conflicting reassignments', () =>
   assert.notEqual(assignmentMap.get('T2').slotId, 'mon-early');
   assert.equal(result.unassigned.length, 0);
 });
+
+test('attempts swaps to free unique slots for unassigned teams', () => {
+  const teams = [
+    { id: 'T1', division: 'U12', coachId: 'coach-a' },
+    { id: 'T2', division: 'U12', coachId: 'coach-b' },
+    { id: 'T3', division: 'U12', coachId: 'coach-c' },
+  ];
+
+  const slots = [
+    createSlot({ id: 'mon', day: 'Mon', startHour: 19, endHour: 20, capacity: 1 }),
+    createSlot({ id: 'tue', day: 'Tue', startHour: 19, endHour: 20, capacity: 1 }),
+    createSlot({ id: 'wed', day: 'Wed', startHour: 19, endHour: 20, capacity: 1 }),
+  ];
+
+  const result = schedulePractices({
+    teams,
+    slots,
+    coachPreferences: {
+      'coach-a': { preferredSlotIds: ['wed'] },
+      'coach-b': { preferredSlotIds: ['wed'] },
+      'coach-c': { unavailableSlotIds: ['mon', 'tue'] },
+    },
+  });
+
+  assert.equal(result.unassigned.length, 0);
+  const assignmentMap = new Map(result.assignments.map((entry) => [entry.teamId, entry.slotId]));
+  assert.equal(assignmentMap.get('T3'), 'wed');
+  assert.notEqual(assignmentMap.get('T1'), 'wed');
+  assert.notEqual(assignmentMap.get('T2'), 'wed');
+});
+
+test('does not relocate locked teams when resolving unassigned entries', () => {
+  const teams = [
+    { id: 'T1', division: 'U10', coachId: 'coach-a' },
+    { id: 'T2', division: 'U10', coachId: 'coach-b' },
+  ];
+
+  const slots = [
+    createSlot({ id: 'mon', day: 'Mon', startHour: 19, endHour: 20, capacity: 1 }),
+    createSlot({ id: 'wed', day: 'Wed', startHour: 19, endHour: 20, capacity: 1 }),
+  ];
+
+  const result = schedulePractices({
+    teams,
+    slots,
+    coachPreferences: {
+      'coach-b': { unavailableSlotIds: ['mon'] },
+    },
+    lockedAssignments: [{ teamId: 'T1', slotId: 'wed' }],
+  });
+
+  assert.equal(result.unassigned.length, 1);
+  assert.equal(result.unassigned[0].teamId, 'T2');
+  const assignmentMap = new Map(result.assignments.map((entry) => [entry.teamId, entry.slotId]));
+  assert.equal(assignmentMap.get('T1'), 'wed');
+});

@@ -12,8 +12,12 @@ test('distributes players evenly across teams', () => {
     division: 'U10',
   }));
 
-  const result = generateTeams({ players, divisionConfigs, random: createDeterministicRandom() });
-  const teams = result.U10;
+  const { teamsByDivision, overflowByDivision } = generateTeams({
+    players,
+    divisionConfigs,
+    random: createDeterministicRandom(),
+  });
+  const teams = teamsByDivision.U10;
 
   assert.equal(teams.length, 3);
 
@@ -22,6 +26,7 @@ test('distributes players evenly across teams', () => {
 
   const allPlayers = teams.flatMap((team) => team.players.map((player) => player.id));
   assert.equal(new Set(allPlayers).size, players.length);
+  assert.deepEqual(overflowByDivision.U10, []);
 });
 
 test('keeps mutual buddies on the same team', () => {
@@ -32,7 +37,12 @@ test('keeps mutual buddies on the same team', () => {
     { id: 'd', division: 'U10' },
   ];
 
-  const { U10: teams } = generateTeams({ players, divisionConfigs, random: createDeterministicRandom() });
+  const { teamsByDivision } = generateTeams({
+    players,
+    divisionConfigs,
+    random: createDeterministicRandom(),
+  });
+  const teams = teamsByDivision.U10;
   const buddyTeam = teams.find((team) => team.players.some((player) => player.id === 'a'));
   assert.ok(buddyTeam, 'expected buddy pair to be assigned to a team');
   const buddyIds = buddyTeam.players.filter((player) => player.id === 'a' || player.id === 'b').map((player) => player.id).sort();
@@ -47,7 +57,12 @@ test('respects coach assignments when creating teams', () => {
     { id: 'd', division: 'U10' },
   ];
 
-  const { U10: teams } = generateTeams({ players, divisionConfigs, random: createDeterministicRandom() });
+  const { teamsByDivision, overflowByDivision } = generateTeams({
+    players,
+    divisionConfigs,
+    random: createDeterministicRandom(),
+  });
+  const teams = teamsByDivision.U10;
   const coachTeam = teams.find((team) => team.coachId === 'coach-1');
 
   assert.ok(coachTeam, 'coach team should be created for volunteer coach');
@@ -56,9 +71,10 @@ test('respects coach assignments when creating teams', () => {
     .map((player) => player.id)
     .sort();
   assert.deepEqual(rosterIds, ['a', 'b']);
+  assert.deepEqual(overflowByDivision.U10, []);
 });
 
-test('throws when no team can accommodate a unit', () => {
+test('records overflow when no team can accommodate a unit', () => {
   const players = [
     { id: 'a', division: 'U10', coachId: 'coach-1' },
     { id: 'b', division: 'U10', coachId: 'coach-1' },
@@ -67,10 +83,17 @@ test('throws when no team can accommodate a unit', () => {
     { id: 'e', division: 'U10', coachId: 'coach-1' },
   ];
 
-  assert.throws(
-    () => generateTeams({ players, divisionConfigs, random: createDeterministicRandom() }),
-    /exceed max roster/i,
-  );
+  const { overflowByDivision } = generateTeams({
+    players,
+    divisionConfigs,
+    random: createDeterministicRandom(),
+  });
+
+  const overflow = overflowByDivision.U10;
+  assert.equal(overflow.length, 1);
+  assert.equal(overflow[0].reason, 'coach-capacity');
+  assert.deepEqual(overflow[0].players.map((player) => player.id).sort(), ['e']);
+  assert.equal(overflow[0].metadata.coachId, 'coach-1');
 });
 
 test('throws when buddy unit has conflicting coach assignments', () => {
@@ -83,6 +106,26 @@ test('throws when buddy unit has conflicting coach assignments', () => {
     () => generateTeams({ players, divisionConfigs, random: createDeterministicRandom() }),
     /conflicting coach assignments/i,
   );
+});
+
+test('records insufficient capacity overflow for buddy unit larger than roster', () => {
+  const players = [
+    { id: 'a', division: 'U10', buddyId: 'b' },
+    { id: 'b', division: 'U10', buddyId: 'a' },
+  ];
+
+  const { overflowByDivision, teamsByDivision } = generateTeams({
+    players,
+    divisionConfigs: { U10: { maxRosterSize: 1 } },
+    random: createDeterministicRandom(),
+  });
+
+  assert.equal(teamsByDivision.U10.length, 2);
+  const overflow = overflowByDivision.U10;
+  assert.equal(overflow.length, 1);
+  assert.equal(overflow[0].reason, 'insufficient-capacity');
+  assert.deepEqual(overflow[0].players.map((player) => player.id).sort(), ['a', 'b']);
+  assert.deepEqual(overflow[0].metadata, { unitSize: 2 });
 });
 
 test('validates input arguments', () => {

@@ -11,7 +11,10 @@
  * configuration such as `maxRosterSize`.
  * @param {Function} [params.random=Math.random] - Optional random number generator used to break ties when picking
  * between teams with the same roster size. It must return a floating point number in the range [0, 1).
- * @returns {Object<string, Array<{ id: string, coachId: string | null, players: Array<Object> }>>}
+ * @returns {{
+ *   teamsByDivision: Record<string, Array<{ id: string, coachId: string | null, players: Array<Object> }>>,
+ *   overflowByDivision: Record<string, Array<{ players: Array<Object>, reason: string, metadata?: Object }>>,
+ * }}
  */
 export function generateTeams({ players, divisionConfigs, random = Math.random }) {
   if (!Array.isArray(players)) {
@@ -42,6 +45,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
   }
 
   const results = {};
+  const overflowByDivision = {};
 
   for (const [division, divisionPlayers] of playersByDivision.entries()) {
     const config = divisionConfigs[division];
@@ -54,7 +58,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
       throw new Error(`maxRosterSize for division ${division} must be positive`);
     }
 
-    const teams = buildTeamsForDivision({
+    const { teams, overflow } = buildTeamsForDivision({
       division,
       players: divisionPlayers,
       maxRosterSize,
@@ -66,9 +70,17 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
       coachId: team.coachId,
       players: team.players.map((player) => structuredClone(player)),
     }));
+    overflowByDivision[division] = overflow.map((entry) => ({
+      players: entry.players.map((player) => structuredClone(player)),
+      reason: entry.reason,
+      metadata: entry.metadata ? { ...entry.metadata } : undefined,
+    }));
   }
 
-  return results;
+  return {
+    teamsByDivision: results,
+    overflowByDivision,
+  };
 }
 
 function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
@@ -83,6 +95,8 @@ function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
 
   const teams = [];
   let teamIndex = 0;
+
+  const overflow = [];
 
   const createTeam = (coachId = null) => {
     teamIndex += 1;
@@ -125,17 +139,44 @@ function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
     if (!targetTeam) {
       targetTeam = createTeam(coachId);
     }
-    assignUnitToTeam({ unit, team: targetTeam, maxRosterSize, reason: 'coach assignment' });
+    const assigned = assignUnitToTeam({
+      unit,
+      team: targetTeam,
+      maxRosterSize,
+      reason: 'coach assignment',
+    });
+
+    if (!assigned) {
+      overflow.push({
+        players: unit,
+        reason: 'coach-capacity',
+        metadata: { coachId },
+      });
+    }
   }
 
   shuffleUnits(generalUnits, random);
 
   for (const unit of generalUnits) {
     const team = pickTeamWithMostCapacity({ teams, unitSize: unit.length, maxRosterSize, random });
-    assignUnitToTeam({ unit, team, maxRosterSize, reason: 'balancing assignment' });
+    if (!team) {
+      overflow.push({
+        players: unit,
+        reason: 'insufficient-capacity',
+        metadata: { unitSize: unit.length },
+      });
+      continue;
+    }
+
+    assignUnitToTeam({
+      unit,
+      team,
+      maxRosterSize,
+      reason: 'balancing assignment',
+    });
   }
 
-  return teams;
+  return { teams, overflow };
 }
 
 function createAssignmentUnits(players) {
@@ -168,9 +209,7 @@ function createAssignmentUnits(players) {
 
 function assignUnitToTeam({ unit, team, maxRosterSize, reason }) {
   if (team.players.length + unit.length > maxRosterSize) {
-    throw new Error(
-      `Cannot assign unit of size ${unit.length} to team ${team.id}; ${reason} would exceed max roster of ${maxRosterSize}.`,
-    );
+    return false;
   }
 
   for (const player of unit) {
@@ -179,12 +218,14 @@ function assignUnitToTeam({ unit, team, maxRosterSize, reason }) {
     }
     team.players.push(player);
   }
+
+  return true;
 }
 
 function pickTeamWithMostCapacity({ teams, unitSize, maxRosterSize, random }) {
   const candidates = teams.filter((team) => team.players.length + unitSize <= maxRosterSize);
   if (candidates.length === 0) {
-    throw new Error('no team has enough capacity for the provided unit');
+    return null;
   }
 
   let minSize = Infinity;

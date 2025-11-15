@@ -1,21 +1,22 @@
 import { useMemo } from 'react';
 import './App.css';
+import { teamSummarySnapshot } from './teamSummarySample.js';
 
 const roadmapSections = [
   {
     id: 'team-generation',
     title: 'Team Generation',
-    status: 'complete',
+    status: 'in-progress',
     summary:
-      'Balanced roster allocator with buddy diagnostics and overflow tracking is available for integration.',
-    actions: ['Connect Supabase persistence', 'Design roster review workflows'],
+      'Balanced roster allocator with buddy diagnostics and overflow tracking is ready; wiring the summary UI into the admin experience is underway.',
+    actions: ['Connect Supabase persistence', 'Complete roster review workflows'],
   },
   {
     id: 'practice-scheduling',
     title: 'Practice Scheduling',
-    status: 'complete',
+    status: 'in-progress',
     summary:
-      'Allocator honors coach preferences, manual locks, and fairness scoring with automated swap recovery.',
+      'Allocator honors coach preferences, manual locks, and fairness scoring with automated swap recovery. Admin dashboards are still being assembled.',
     actions: ['Wire scheduler run logs', 'Expose manual adjustment tooling'],
   },
   {
@@ -60,6 +61,15 @@ function App() {
     };
   }, []);
 
+  const { totals, divisions, generatedAt } = teamSummarySnapshot;
+
+  const formatPercent = (value) => `${Math.round((value ?? 0) * 100)}%`;
+  const formatList = (items) => (items.length > 0 ? items.join(', ') : 'None');
+  const formatReasons = (reasons) =>
+    Object.entries(reasons)
+      .map(([reason, count]) => `${reason}: ${count}`)
+      .join(', ');
+
   return (
     <div className="app-shell">
       <header className="hero">
@@ -79,6 +89,109 @@ function App() {
           <h2>{summary.pending}</h2>
           <p>Follow-up integrations still planned</p>
         </article>
+      </section>
+
+      <section className="team-overview" aria-labelledby="team-overview-heading">
+        <header className="team-overview__header">
+          <div>
+            <h2 id="team-overview-heading">Team formation snapshot</h2>
+            <p>
+              Preview of the summarized output from the allocator showing roster fill rates, coach coverage, and overflow
+              diagnostics by division. Data is sourced from a representative dry-run captured on {new Date(generatedAt).toLocaleDateString()}.
+            </p>
+          </div>
+          <dl className="team-overview__totals" aria-label="Overall allocator totals">
+            <div>
+              <dt>Divisions</dt>
+              <dd>{totals.divisions}</dd>
+            </div>
+            <div>
+              <dt>Teams</dt>
+              <dd>{totals.teams}</dd>
+            </div>
+            <div>
+              <dt>Players placed</dt>
+              <dd>{totals.playersAssigned}</dd>
+            </div>
+            <div>
+              <dt>Overflow</dt>
+              <dd>{totals.overflowPlayers}</dd>
+            </div>
+            <div>
+              <dt>Needs coaches</dt>
+              <dd>{totals.divisionsNeedingCoaches}</dd>
+            </div>
+            <div>
+              <dt>Open roster divisions</dt>
+              <dd>{totals.divisionsWithOpenRosterSlots}</dd>
+            </div>
+          </dl>
+        </header>
+
+        <div className="team-overview__grid">
+          {divisions.map((division) => (
+            <article key={division.divisionId} className="team-overview__card">
+              <header>
+                <h3>{division.divisionId}</h3>
+                <p>{division.totalTeams} teams · {division.playersAssigned} players placed</p>
+              </header>
+
+              <dl className="team-overview__metrics">
+                <div>
+                  <dt>Roster capacity</dt>
+                  <dd>
+                    {division.playersAssigned} / {division.totalCapacity} ({formatPercent(division.averageFillRate)})
+                  </dd>
+                </div>
+                <div>
+                  <dt>Open slots</dt>
+                  <dd>{division.slotsRemaining}</dd>
+                </div>
+                <div>
+                  <dt>Teams needing players</dt>
+                  <dd>{formatList(division.teamsNeedingPlayers)}</dd>
+                </div>
+                <div>
+                  <dt>Coach coverage</dt>
+                  <dd>
+                    {division.coachCoverage.teamsWithCoach}/{division.coachCoverage.totalTeams} teams staffed ·
+                    {formatPercent(division.coachCoverage.coverageRate)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Buddy pairs honored</dt>
+                  <dd>{division.mutualBuddyPairs}</dd>
+                </div>
+                <div>
+                  <dt>Outstanding buddy issues</dt>
+                  <dd>
+                    {division.unmatchedBuddyCount > 0
+                      ? `${division.unmatchedBuddyCount} (${formatReasons(division.unmatchedBuddyReasons)})`
+                      : 'None'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Overflow units</dt>
+                  <dd>{division.overflowUnits}</dd>
+                </div>
+                <div>
+                  <dt>Overflow players</dt>
+                  <dd>
+                    {division.overflowPlayers}
+                    {division.overflowPlayers > 0 &&
+                      ` (${formatReasons(division.overflowByReason)})`}
+                  </dd>
+                </div>
+              </dl>
+
+              {division.needsAdditionalCoaches && (
+                <p className="team-overview__alert" role="status">
+                  Additional volunteer coaches required to staff every team.
+                </p>
+              )}
+            </article>
+          ))}
+        </div>
       </section>
 
       <section aria-labelledby="roadmap-heading" className="roadmap-section">

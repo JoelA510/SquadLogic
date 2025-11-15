@@ -51,6 +51,8 @@ test('evaluateGameSchedule summarises assignments and byes without warnings', ()
   assert.deepEqual(summary.assignmentsByDivision.U12.teams.sort(), ['u12-a', 'u12-b']);
   assert.deepEqual(summary.fieldUsage['field-1'].divisions, ['U12']);
   assert.equal(summary.teamsWithByes.U12, 1);
+  assert.deepEqual(summary.sharedSlotUsage, []);
+  assert.deepEqual(summary.sharedFieldDistribution, {});
   assert.deepEqual(summary.teamGameLoad['u12-a'], {
     totalGames: 1,
     homeGames: 1,
@@ -225,4 +227,56 @@ test('evaluateGameSchedule aggregates unscheduled matchups and unknown teams', (
     earliestStart: '2024-08-10T16:00:00.000Z',
     latestStart: '2024-08-10T16:00:00.000Z',
   });
+});
+
+test('evaluateGameSchedule flags shared slot imbalances across divisions', () => {
+  const teams = [
+    { id: 'team-a', division: 'U10', coachId: null },
+    { id: 'team-b', division: 'U12', coachId: null },
+  ];
+
+  const sharedSlotUsage = [
+    {
+      slotId: 'shared-slot-1',
+      fieldId: 'shared-field',
+      weekIndex: 1,
+      start: '2024-08-10T16:00:00Z',
+      end: '2024-08-10T17:00:00Z',
+      divisionUsage: [
+        { division: 'U10', count: 2 },
+      ],
+    },
+    {
+      slotId: 'shared-slot-2',
+      fieldId: 'shared-field',
+      weekIndex: 2,
+      start: '2024-08-17T16:00:00Z',
+      end: '2024-08-17T17:00:00Z',
+      divisionUsage: [
+        { division: 'U12', count: 1 },
+      ],
+    },
+  ];
+
+  const { summary, warnings } = evaluateGameSchedule({
+    assignments: [],
+    teams,
+    sharedSlotUsage,
+    unscheduled: [],
+    byes: [],
+  });
+
+  assert.equal(summary.sharedSlotUsage.length, 2);
+  assert.deepEqual(summary.sharedFieldDistribution['shared-field'], { U10: 2, U12: 1 });
+  const imbalanceWarnings = warnings.filter(
+    (warning) => warning.type === 'shared-slot-imbalance',
+  );
+  assert.ok(imbalanceWarnings.length >= 1, 'expected shared slot imbalance warnings');
+  const slotOneImbalance = imbalanceWarnings.find((warning) => warning.details.slotId === 'shared-slot-1');
+  assert.ok(slotOneImbalance, 'expected shared slot 1 imbalance warning');
+  assert.deepEqual(slotOneImbalance.details.distribution, [
+    { division: 'U10', count: 2 },
+    { division: 'U12', count: 0 },
+  ]);
+  assert.ok(slotOneImbalance.details.spread > 1);
 });

@@ -100,6 +100,7 @@ export function scheduleGames({ teams, slots, roundRobinByDivision }) {
   const teamsById = indexTeams(teams);
   const { divisionSlots, sharedSlots } = indexSlots(slots);
   const sharedSlotUsage = new Map();
+  const sharedFieldUsage = new Map();
 
   const assignments = [];
   const byes = [];
@@ -125,6 +126,7 @@ export function scheduleGames({ teams, slots, roundRobinByDivision }) {
           divisionSlots,
           sharedSlots,
           sharedSlotUsage,
+          sharedFieldUsage,
           coachAssignments,
           teamWeekAssignments,
           assignments,
@@ -175,7 +177,9 @@ export function scheduleGames({ teams, slots, roundRobinByDivision }) {
     return a.reason.localeCompare(b.reason);
   });
 
-  return { assignments, byes, unscheduled };
+  const sharedSlotUsageSummary = formatSharedSlotUsage(sharedSlotUsage);
+
+  return { assignments, byes, unscheduled, sharedSlotUsage: sharedSlotUsageSummary };
 }
 
 function indexTeams(teams) {
@@ -303,6 +307,7 @@ function scheduleMatchup({
   divisionSlots,
   sharedSlots,
   sharedSlotUsage,
+  sharedFieldUsage,
   coachAssignments,
   teamWeekAssignments,
   assignments,
@@ -368,6 +373,7 @@ function scheduleMatchup({
     divisionSlots,
     sharedSlots,
     sharedSlotUsage,
+    sharedFieldUsage,
     coachAssignments,
     coaches: [homeTeam.coachId, awayTeam.coachId],
   });
@@ -411,7 +417,8 @@ function scheduleMatchup({
   if (!selectedSlot.division) {
     recordSharedSlotUsage({
       sharedSlotUsage,
-      slotId: selectedSlot.id,
+      sharedFieldUsage,
+      slot: selectedSlot,
       division,
     });
   }
@@ -434,6 +441,7 @@ function selectSlotForMatchup({
   divisionSlots,
   sharedSlots,
   sharedSlotUsage,
+  sharedFieldUsage,
   coachAssignments,
   coaches,
 }) {
@@ -484,7 +492,12 @@ function selectSlotForMatchup({
     }
 
     const usage = getSharedSlotUsage({ sharedSlotUsage, slotId: slotRecord.id, division });
-    viableSharedSlots.push({ slotRecord, usage });
+    const fieldUsage = getSharedFieldUsage({
+      sharedFieldUsage,
+      fieldId: slotRecord.fieldId,
+      division,
+    });
+    viableSharedSlots.push({ slotRecord, usage, fieldUsage });
   }
 
   if (viableSharedSlots.length === 0) {
@@ -494,6 +507,7 @@ function selectSlotForMatchup({
   viableSharedSlots.sort(
     (a, b) =>
       a.usage - b.usage ||
+      a.fieldUsage - b.fieldUsage ||
       a.slotRecord.start - b.slotRecord.start ||
       (a.slotRecord.fieldId ?? '').localeCompare(b.slotRecord.fieldId ?? '') ||
       a.slotRecord.id.localeCompare(b.slotRecord.id),
@@ -532,11 +546,57 @@ function getSharedSlotUsage({ sharedSlotUsage, slotId, division }) {
   if (!slotUsage) {
     return 0;
   }
-  return slotUsage.get(division) ?? 0;
+  if (slotUsage.divisions instanceof Map) {
+    return slotUsage.divisions.get(division) ?? 0;
+  }
+  return 0;
 }
 
-function recordSharedSlotUsage({ sharedSlotUsage, slotId, division }) {
-  const slotUsage = sharedSlotUsage.get(slotId) ?? new Map();
-  slotUsage.set(division, (slotUsage.get(division) ?? 0) + 1);
-  sharedSlotUsage.set(slotId, slotUsage);
+function getSharedFieldUsage({ sharedFieldUsage, fieldId, division }) {
+  const fieldKey = fieldId ?? 'unassigned';
+  const fieldUsage = sharedFieldUsage.get(fieldKey);
+  if (!fieldUsage) {
+    return 0;
+  }
+  return fieldUsage.get(division) ?? 0;
+}
+
+function recordSharedSlotUsage({ sharedSlotUsage, sharedFieldUsage, slot, division }) {
+  const record = sharedSlotUsage.get(slot.id) ?? {
+    slotId: slot.id,
+    fieldId: slot.fieldId ?? null,
+    weekIndex: slot.weekIndex,
+    start: slot.start,
+    end: slot.end,
+    divisions: new Map(),
+  };
+  record.divisions.set(division, (record.divisions.get(division) ?? 0) + 1);
+  sharedSlotUsage.set(slot.id, record);
+
+  const fieldKey = slot.fieldId ?? 'unassigned';
+  const fieldUsage = sharedFieldUsage.get(fieldKey) ?? new Map();
+  fieldUsage.set(division, (fieldUsage.get(division) ?? 0) + 1);
+  sharedFieldUsage.set(fieldKey, fieldUsage);
+}
+
+function formatSharedSlotUsage(sharedSlotUsage) {
+  const usageSummaries = [];
+  for (const record of sharedSlotUsage.values()) {
+    const divisionUsage = Array.from(record.divisions.entries())
+      .map(([division, count]) => ({ division, count }))
+      .sort((a, b) => a.division.localeCompare(b.division));
+    const totalAssignments = divisionUsage.reduce((sum, entry) => sum + entry.count, 0);
+    usageSummaries.push({
+      slotId: record.slotId,
+      fieldId: record.fieldId,
+      weekIndex: record.weekIndex,
+      start: record.start.toISOString(),
+      end: record.end.toISOString(),
+      totalAssignments,
+      divisionUsage,
+    });
+  }
+
+  usageSummaries.sort((a, b) => a.slotId.localeCompare(b.slotId));
+  return usageSummaries;
 }

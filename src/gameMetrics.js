@@ -10,7 +10,13 @@ import { isDeepStrictEqual } from 'node:util';
  * @param {Array<Object>} [params.unscheduled=[]] - Unscheduled matchup descriptors with reasons.
  * @returns {{ summary: Object, warnings: Array<Object> }}
  */
-export function evaluateGameSchedule({ assignments, teams, byes = [], unscheduled = [] }) {
+export function evaluateGameSchedule({
+  assignments,
+  teams,
+  byes = [],
+  unscheduled = [],
+  sharedSlotUsage = [],
+}) {
   if (!Array.isArray(assignments)) {
     throw new TypeError('assignments must be an array');
   }
@@ -22,6 +28,9 @@ export function evaluateGameSchedule({ assignments, teams, byes = [], unschedule
   }
   if (!Array.isArray(unscheduled)) {
     throw new TypeError('unscheduled must be an array');
+  }
+  if (!Array.isArray(sharedSlotUsage)) {
+    throw new TypeError('sharedSlotUsage must be an array');
   }
 
   const teamsById = new Map();
@@ -46,6 +55,8 @@ export function evaluateGameSchedule({ assignments, teams, byes = [], unschedule
     teamsWithByes: {},
     unscheduledByReason: {},
     teamGameLoad: {},
+    sharedSlotUsage: [],
+    sharedFieldDistribution: {},
   };
 
   const warnings = [];
@@ -166,6 +177,12 @@ export function evaluateGameSchedule({ assignments, teams, byes = [], unschedule
       (summary.unscheduledByReason[entry.reason] ?? 0) + 1;
   }
 
+  const { sharedSlotSummaries, sharedFieldDistribution, imbalanceWarnings } =
+    analyzeSharedSlotUsage(sharedSlotUsage);
+  summary.sharedSlotUsage = sharedSlotSummaries;
+  summary.sharedFieldDistribution = sharedFieldDistribution;
+  warnings.push(...imbalanceWarnings);
+
   detectConflicts({
     assignmentsMap: teamAssignments,
     warnings,
@@ -197,6 +214,102 @@ export function evaluateGameSchedule({ assignments, teams, byes = [], unschedule
   }
 
   return { summary, warnings };
+}
+
+function analyzeSharedSlotUsage(sharedSlotUsage) {
+  const sharedSlotSummaries = [];
+  const sharedFieldDistribution = {};
+  const fieldAggregation = new Map();
+  const imbalanceWarnings = [];
+
+  for (const entry of sharedSlotUsage) {
+    if (!entry || typeof entry !== 'object') {
+      throw new TypeError('sharedSlotUsage entries must be objects');
+    }
+    if (!entry.slotId) {
+      throw new TypeError('sharedSlotUsage entries require slotId');
+    }
+    if (!Array.isArray(entry.divisionUsage)) {
+      throw new TypeError('sharedSlotUsage entries require divisionUsage arrays');
+    }
+
+    const divisionUsage = entry.divisionUsage.map((record) => {
+      if (!record || typeof record !== 'object') {
+        throw new TypeError('divisionUsage entries must be objects');
+      }
+      if (!record.division) {
+        throw new TypeError('divisionUsage entries require division');
+      }
+      if (typeof record.count !== 'number') {
+        throw new TypeError('divisionUsage entries require numeric count');
+      }
+      return { division: record.division, count: record.count };
+    });
+
+    divisionUsage.sort((a, b) => a.division.localeCompare(b.division));
+    const totalAssignments =
+      typeof entry.totalAssignments === 'number'
+        ? entry.totalAssignments
+        : divisionUsage.reduce((sum, record) => sum + record.count, 0);
+
+    sharedSlotSummaries.push({
+      slotId: entry.slotId,
+      fieldId: entry.fieldId ?? null,
+      weekIndex: typeof entry.weekIndex === 'number' ? entry.weekIndex : null,
+      start: entry.start ?? null,
+      end: entry.end ?? null,
+      totalAssignments,
+      divisionUsage,
+    });
+
+    const fieldKey = entry.fieldId ?? 'unassigned';
+    const bucket = fieldAggregation.get(fieldKey) ?? new Map();
+    for (const record of divisionUsage) {
+      bucket.set(record.division, (bucket.get(record.division) ?? 0) + record.count);
+    }
+    fieldAggregation.set(fieldKey, bucket);
+  }
+
+  sharedSlotSummaries.sort((a, b) => a.slotId.localeCompare(b.slotId));
+
+  for (const [fieldId, bucket] of fieldAggregation.entries()) {
+    sharedFieldDistribution[fieldId] = Object.fromEntries(
+      Array.from(bucket.entries()).sort((a, b) => a[0].localeCompare(b[0])),
+    );
+  }
+
+  for (const summary of sharedSlotSummaries) {
+    const fieldKey = summary.fieldId ?? 'unassigned';
+    const bucket = fieldAggregation.get(fieldKey);
+    if (!bucket || bucket.size <= 1) {
+      continue;
+    }
+
+    const slotUsageMap = new Map(
+      summary.divisionUsage.map((record) => [record.division, record.count]),
+    );
+    const distribution = Array.from(bucket.keys())
+      .sort((a, b) => a.localeCompare(b))
+      .map((division) => ({ division, count: slotUsageMap.get(division) ?? 0 }));
+
+    const counts = distribution.map((record) => record.count);
+    const max = Math.max(...counts);
+    const min = Math.min(...counts);
+    if (max - min > 1) {
+      imbalanceWarnings.push({
+        type: 'shared-slot-imbalance',
+        message: `Shared field ${fieldKey} is imbalanced across divisions`,
+        details: {
+          slotId: summary.slotId,
+          fieldId: summary.fieldId ?? null,
+          distribution,
+          spread: max - min,
+        },
+      });
+    }
+  }
+
+  return { sharedSlotSummaries, sharedFieldDistribution, imbalanceWarnings };
 }
 
 function validateAssignment(assignment) {

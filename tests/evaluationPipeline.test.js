@@ -217,3 +217,34 @@ test('game conflict warnings escalate to error severity', () => {
   assert.equal(conflictIssue.severity, 'error');
   assert.equal(result.status, 'action-required');
 });
+
+test('shared slot imbalance warnings surface with warning severity', () => {
+  const result = runScheduleEvaluations({
+    games: {
+      assignments: [],
+      teams: [],
+      sharedSlotUsage: [
+        {
+          slotId: 'shared-slot-1',
+          fieldId: 'field-x',
+          divisionUsage: [
+            { division: 'U10', count: 3 },
+          ],
+        },
+        {
+          slotId: 'shared-slot-2',
+          fieldId: 'field-x',
+          divisionUsage: [{ division: 'U12', count: 1 }],
+        },
+      ],
+    },
+  });
+
+  const imbalanceIssue = result.issues.find((issue) =>
+    issue.category === 'games' && issue.message.includes('imbalanced across divisions'),
+  );
+
+  assert.ok(imbalanceIssue, 'expected shared slot imbalance issue');
+  assert.equal(imbalanceIssue.severity, 'warning');
+  assert.equal(result.status, 'attention-needed');
+});

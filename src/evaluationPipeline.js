@@ -80,7 +80,7 @@ export function runScheduleEvaluations({ practice, games } = {}) {
       manualFollowUpRate > MANUAL_FOLLOW_UP_WARNING_THRESHOLD &&
       Number.isFinite(manualFollowUpRate)
     ) {
-      const percentage = (manualFollowUpRate * 100).toFixed(1).replace(/\.0$/, '');
+      const percentage = parseFloat((manualFollowUpRate * 100).toFixed(1));
       issues.push({
         category: 'practice',
         severity: 'warning',

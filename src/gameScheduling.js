@@ -428,16 +428,13 @@ function scheduleMatchup({
     });
   }
 
-  updateTeamStartPreference({
-    teamStartPreferences,
-    teamId: homeTeamId,
-    start: selectedSlot.start,
-  });
-  updateTeamStartPreference({
-    teamStartPreferences,
-    teamId: awayTeamId,
-    start: selectedSlot.start,
-  });
+  for (const teamId of [homeTeamId, awayTeamId]) {
+    updateTeamStartPreference({
+      teamStartPreferences,
+      teamId,
+      start: selectedSlot.start,
+    });
+  }
 
   assignments.push({
     weekIndex,

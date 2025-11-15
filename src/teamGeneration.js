@@ -14,6 +14,10 @@
  * @returns {{
  *   teamsByDivision: Record<string, Array<{ id: string, coachId: string | null, players: Array<Object> }>>,
  *   overflowByDivision: Record<string, Array<{ players: Array<Object>, reason: string, metadata?: Object }>>,
+ *   buddyDiagnosticsByDivision: Record<string, {
+ *     mutualPairs: Array<{ playerIds: Array<string> }>,
+ *     unmatchedRequests: Array<{ playerId: string, requestedBuddyId: string, reason: string }>,
+ *   }>,
  * }}
  */
 export function generateTeams({ players, divisionConfigs, random = Math.random }) {
@@ -46,6 +50,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
 
   const results = {};
   const overflowByDivision = {};
+  const buddyDiagnosticsByDivision = {};
 
   for (const [division, divisionPlayers] of playersByDivision.entries()) {
     const config = divisionConfigs[division];
@@ -58,7 +63,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
       throw new Error(`maxRosterSize for division ${division} must be positive`);
     }
 
-    const { teams, overflow } = buildTeamsForDivision({
+    const { teams, overflow, buddyDiagnostics } = buildTeamsForDivision({
       division,
       players: divisionPlayers,
       maxRosterSize,
@@ -75,11 +80,22 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
       reason: entry.reason,
       metadata: entry.metadata ? { ...entry.metadata } : undefined,
     }));
+    buddyDiagnosticsByDivision[division] = {
+      mutualPairs: buddyDiagnostics.mutualPairs.map((pair) => ({
+        playerIds: [...pair.playerIds],
+      })),
+      unmatchedRequests: buddyDiagnostics.unmatchedRequests.map((entry) => ({
+        playerId: entry.playerId,
+        requestedBuddyId: entry.requestedBuddyId,
+        reason: entry.reason,
+      })),
+    };
   }
 
   return {
     teamsByDivision: results,
     overflowByDivision,
+    buddyDiagnosticsByDivision,
   };
 }
 
@@ -113,7 +129,7 @@ function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
     createTeam(null);
   }
 
-  const units = createAssignmentUnits(players);
+  const { units, buddyDiagnostics } = createAssignmentUnits(players);
   const coachUnits = [];
   const generalUnits = [];
 
@@ -176,13 +192,18 @@ function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
     });
   }
 
-  return { teams, overflow };
+  return { teams, overflow, buddyDiagnostics };
 }
 
 function createAssignmentUnits(players) {
   const units = [];
   const visited = new Set();
   const playersById = new Map(players.map((player) => [player.id, player]));
+  const buddyDiagnostics = {
+    mutualPairs: [],
+    unmatchedRequests: [],
+  };
+  const recordedUnmatched = new Set();
 
   for (const player of players) {
     if (visited.has(player.id)) {
@@ -190,13 +211,47 @@ function createAssignmentUnits(players) {
     }
 
     const buddyId = player.buddyId;
-    if (buddyId && playersById.has(buddyId)) {
+    if (buddyId === player.id) {
+      const key = `${player.id}::self`;
+      if (!recordedUnmatched.has(key)) {
+        buddyDiagnostics.unmatchedRequests.push({
+          playerId: player.id,
+          requestedBuddyId: buddyId,
+          reason: 'self-reference',
+        });
+        recordedUnmatched.add(key);
+      }
+    } else if (buddyId && playersById.has(buddyId)) {
       const buddy = playersById.get(buddyId);
       if (buddy.buddyId === player.id && !visited.has(buddy.id)) {
         units.push([player, buddy]);
         visited.add(player.id);
         visited.add(buddy.id);
+        const pair = [player.id, buddy.id].sort();
+        buddyDiagnostics.mutualPairs.push({ playerIds: pair });
         continue;
+      }
+
+      const key = `${player.id}::${buddyId}`;
+      if (!recordedUnmatched.has(key)) {
+        buddyDiagnostics.unmatchedRequests.push({
+          playerId: player.id,
+          requestedBuddyId: buddyId,
+          reason: 'not-reciprocated',
+        });
+        recordedUnmatched.add(key);
+      }
+    }
+
+    if (buddyId && !playersById.has(buddyId)) {
+      const key = `${player.id}::${buddyId}`;
+      if (!recordedUnmatched.has(key)) {
+        buddyDiagnostics.unmatchedRequests.push({
+          playerId: player.id,
+          requestedBuddyId: buddyId,
+          reason: 'missing-player',
+        });
+        recordedUnmatched.add(key);
       }
     }
 
@@ -204,7 +259,7 @@ function createAssignmentUnits(players) {
     visited.add(player.id);
   }
 
-  return units;
+  return { units, buddyDiagnostics };
 }
 
 function assignUnitToTeam({ unit, team, maxRosterSize, reason }) {

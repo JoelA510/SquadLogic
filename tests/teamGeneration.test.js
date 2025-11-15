@@ -12,7 +12,7 @@ test('distributes players evenly across teams', () => {
     division: 'U10',
   }));
 
-  const { teamsByDivision, overflowByDivision } = generateTeams({
+  const { teamsByDivision, overflowByDivision, buddyDiagnosticsByDivision } = generateTeams({
     players,
     divisionConfigs,
     random: createDeterministicRandom(),
@@ -27,6 +27,7 @@ test('distributes players evenly across teams', () => {
   const allPlayers = teams.flatMap((team) => team.players.map((player) => player.id));
   assert.equal(new Set(allPlayers).size, players.length);
   assert.deepEqual(overflowByDivision.U10, []);
+  assert.deepEqual(buddyDiagnosticsByDivision.U10.unmatchedRequests, []);
 });
 
 test('keeps mutual buddies on the same team', () => {
@@ -37,7 +38,7 @@ test('keeps mutual buddies on the same team', () => {
     { id: 'd', division: 'U10' },
   ];
 
-  const { teamsByDivision } = generateTeams({
+  const { teamsByDivision, buddyDiagnosticsByDivision } = generateTeams({
     players,
     divisionConfigs,
     random: createDeterministicRandom(),
@@ -47,6 +48,9 @@ test('keeps mutual buddies on the same team', () => {
   assert.ok(buddyTeam, 'expected buddy pair to be assigned to a team');
   const buddyIds = buddyTeam.players.filter((player) => player.id === 'a' || player.id === 'b').map((player) => player.id).sort();
   assert.deepEqual(buddyIds, ['a', 'b']);
+  assert.deepEqual(buddyDiagnosticsByDivision.U10.mutualPairs, [
+    { playerIds: ['a', 'b'] },
+  ]);
 });
 
 test('respects coach assignments when creating teams', () => {
@@ -83,7 +87,7 @@ test('records overflow when no team can accommodate a unit', () => {
     { id: 'e', division: 'U10', coachId: 'coach-1' },
   ];
 
-  const { overflowByDivision } = generateTeams({
+  const { overflowByDivision, buddyDiagnosticsByDivision } = generateTeams({
     players,
     divisionConfigs,
     random: createDeterministicRandom(),
@@ -94,6 +98,7 @@ test('records overflow when no team can accommodate a unit', () => {
   assert.equal(overflow[0].reason, 'coach-capacity');
   assert.deepEqual(overflow[0].players.map((player) => player.id).sort(), ['e']);
   assert.equal(overflow[0].metadata.coachId, 'coach-1');
+  assert.deepEqual(buddyDiagnosticsByDivision.U10.unmatchedRequests, []);
 });
 
 test('throws when buddy unit has conflicting coach assignments', () => {
@@ -114,7 +119,7 @@ test('records insufficient capacity overflow for buddy unit larger than roster',
     { id: 'b', division: 'U10', buddyId: 'a' },
   ];
 
-  const { overflowByDivision, teamsByDivision } = generateTeams({
+  const { overflowByDivision, teamsByDivision, buddyDiagnosticsByDivision } = generateTeams({
     players,
     divisionConfigs: { U10: { maxRosterSize: 1 } },
     random: createDeterministicRandom(),
@@ -126,6 +131,9 @@ test('records insufficient capacity overflow for buddy unit larger than roster',
   assert.equal(overflow[0].reason, 'insufficient-capacity');
   assert.deepEqual(overflow[0].players.map((player) => player.id).sort(), ['a', 'b']);
   assert.deepEqual(overflow[0].metadata, { unitSize: 2 });
+  assert.deepEqual(buddyDiagnosticsByDivision.U10.mutualPairs, [
+    { playerIds: ['a', 'b'] },
+  ]);
 });
 
 test('validates input arguments', () => {
@@ -156,6 +164,55 @@ test('validates input arguments', () => {
     () => generateTeams({ players, divisionConfigs }),
     /missing maxrostersize for division u11/i,
   );
+});
+
+test('reports unmatched buddy requests for missing or non-reciprocal pairs', () => {
+  const players = [
+    { id: 'a', division: 'U10', buddyId: 'missing-player' },
+    { id: 'b', division: 'U10', buddyId: 'c' },
+    { id: 'c', division: 'U10' },
+  ];
+
+  const { buddyDiagnosticsByDivision } = generateTeams({
+    players,
+    divisionConfigs,
+    random: createDeterministicRandom(),
+  });
+
+  const diagnostics = buddyDiagnosticsByDivision.U10;
+  assert.deepEqual(diagnostics.mutualPairs, []);
+  assert.deepEqual(
+    diagnostics.unmatchedRequests.sort((a, b) => a.playerId.localeCompare(b.playerId)),
+    [
+      {
+        playerId: 'a',
+        requestedBuddyId: 'missing-player',
+        reason: 'missing-player',
+      },
+      {
+        playerId: 'b',
+        requestedBuddyId: 'c',
+        reason: 'not-reciprocated',
+      },
+    ],
+  );
+});
+
+test('flags self-referential buddy requests for review', () => {
+  const players = [
+    { id: 'solo', division: 'U10', buddyId: 'solo' },
+  ];
+
+  const { buddyDiagnosticsByDivision } = generateTeams({
+    players,
+    divisionConfigs,
+    random: createDeterministicRandom(),
+  });
+
+  assert.deepEqual(buddyDiagnosticsByDivision.U10.mutualPairs, []);
+  assert.deepEqual(buddyDiagnosticsByDivision.U10.unmatchedRequests, [
+    { playerId: 'solo', requestedBuddyId: 'solo', reason: 'self-reference' },
+  ]);
 });
 
 function createDeterministicRandom() {

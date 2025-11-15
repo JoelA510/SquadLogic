@@ -122,6 +122,18 @@ test('evaluatePracticeSchedule summarises utilization and division distribution'
       { division: 'U12', count: 1, percentage: 1 },
     ],
   });
+
+  assert.equal(report.fairnessConcerns.length, 1);
+  assert.deepEqual(report.fairnessConcerns[0], {
+    baseSlotId: 'field-a-mon',
+    day: 'Mon',
+    representativeStart: '2024-08-05T17:00:00.000Z',
+    dominantDivision: 'U10',
+    dominantShare: 1,
+    totalAssigned: 2,
+    totalCapacity: 3,
+    message: 'Base slot field-a-mon is 100% filled by division U10 (2/2 assignments)',
+  });
 });
 
 test('base slot metadata day matches earliest representative even when null', () => {
@@ -155,6 +167,7 @@ test('base slot metadata day matches earliest representative even when null', ()
     utilization: 0,
     divisionBreakdown: [],
   });
+  assert.deepEqual(report.fairnessConcerns, []);
 });
 
 test('base slot metadata day follows earliest slot when defined', () => {
@@ -188,6 +201,7 @@ test('base slot metadata day follows earliest slot when defined', () => {
     utilization: 0,
     divisionBreakdown: [],
   });
+  assert.deepEqual(report.fairnessConcerns, []);
 });
 
 test('evaluatePracticeSchedule flags coach conflicts', () => {
@@ -249,5 +263,67 @@ test('evaluatePracticeSchedule correctly counts teams assigned to multiple slots
     assignedTeams: 1,
     unassignedTeams: 3,
     assignmentRate: 0.25,
+  });
+  assert.deepEqual(report.fairnessConcerns, []);
+});
+
+test('flags fairness concerns when a base slot is dominated by one division', () => {
+  const slots = [
+    {
+      id: 'field-a-early',
+      baseSlotId: 'field-a',
+      capacity: 2,
+      start: '2024-08-06T21:00:00Z',
+      end: '2024-08-06T22:00:00Z',
+      day: 'Tue',
+    },
+    {
+      id: 'field-a-late',
+      baseSlotId: 'field-a',
+      capacity: 2,
+      start: '2024-08-06T22:00:00Z',
+      end: '2024-08-06T23:00:00Z',
+      day: 'Tue',
+    },
+    {
+      id: 'field-b',
+      baseSlotId: 'field-b',
+      capacity: 1,
+      start: '2024-08-07T21:00:00Z',
+      end: '2024-08-07T22:00:00Z',
+      day: 'Wed',
+    },
+  ];
+
+  const teams = [
+    { id: 'team-a', division: 'U10', coachId: 'coach-1' },
+    { id: 'team-b', division: 'U10', coachId: 'coach-2' },
+    { id: 'team-c', division: 'U10', coachId: 'coach-3' },
+    { id: 'team-d', division: 'U12', coachId: 'coach-4' },
+    { id: 'team-e', division: 'U12', coachId: 'coach-5' },
+  ];
+
+  const report = evaluatePracticeSchedule({
+    assignments: [
+      { teamId: 'team-a', slotId: 'field-a-early' },
+      { teamId: 'team-b', slotId: 'field-a-early' },
+      { teamId: 'team-c', slotId: 'field-a-late' },
+      { teamId: 'team-d', slotId: 'field-a-late' },
+      { teamId: 'team-e', slotId: 'field-b' },
+    ],
+    teams,
+    slots,
+  });
+
+  assert.equal(report.fairnessConcerns.length, 1);
+  assert.deepEqual(report.fairnessConcerns[0], {
+    baseSlotId: 'field-a',
+    day: 'Tue',
+    representativeStart: '2024-08-06T21:00:00.000Z',
+    dominantDivision: 'U10',
+    dominantShare: 0.75,
+    totalAssigned: 4,
+    totalCapacity: 4,
+    message: 'Base slot field-a is 75% filled by division U10 (3/4 assignments)',
   });
 });

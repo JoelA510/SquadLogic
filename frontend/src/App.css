@@ -86,6 +86,127 @@ body {
   box-shadow: 0 22px 50px rgba(var(--color-blue-950-rgb), 0.45);
 }
 
+.practice-readiness {
+  margin-bottom: 3rem;
+  padding: 1.75rem 1.5rem 2rem;
+  border-radius: 1.25rem;
+  background: rgba(17, 24, 39, 0.82);
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  box-shadow: 0 18px 42px rgba(8, 47, 73, 0.45);
+}
+
+.practice-readiness__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+}
+
+.practice-readiness__header h2 {
+  margin: 0 0 0.5rem;
+}
+
+.practice-readiness__header p {
+  margin: 0;
+  max-width: 460px;
+  color: rgba(var(--color-slate-200-rgb), 0.78);
+}
+
+.practice-readiness__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  margin: 0;
+}
+
+.practice-readiness__grid div {
+  background: rgba(30, 64, 175, 0.18);
+  border-radius: 0.85rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(147, 197, 253, 0.25);
+  text-align: center;
+}
+
+.practice-readiness__grid dt {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(var(--color-blue-100-rgb), 0.88);
+  margin-bottom: 0.3rem;
+}
+
+.practice-readiness__grid dd {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.practice-readiness__alert {
+  margin: 0 0 1.5rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.85rem;
+  background: rgba(251, 191, 36, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.32);
+  color: rgba(254, 243, 199, 0.96);
+  font-weight: 600;
+}
+
+.practice-insights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.5rem;
+}
+
+.practice-insights article {
+  background: rgba(var(--color-slate-900-rgb), 0.75);
+  border: 1px solid rgba(var(--color-slate-400-rgb), 0.24);
+  border-radius: 1rem;
+  padding: 1.25rem 1.1rem;
+  box-shadow: 0 12px 32px rgba(var(--color-blue-950-rgb), 0.35);
+}
+
+.practice-insights h3 {
+  margin-top: 0;
+  margin-bottom: 0.85rem;
+  font-size: 1.1rem;
+}
+
+.practice-insight-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.practice-insight-list li {
+  padding: 0.75rem 0.85rem;
+  border-radius: 0.75rem;
+  background: rgba(30, 41, 59, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: rgba(var(--color-slate-200-rgb), 0.92);
+}
+
+.practice-insight__title {
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+  color: rgba(191, 219, 254, 0.92);
+}
+
+.practice-insight__meta {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: rgba(var(--color-slate-200-rgb), 0.7);
+}
+
+.practice-insight__empty {
+  margin: 0;
+  color: rgba(var(--color-slate-200-rgb), 0.72);
+}
+
 .team-overview__header {
   display: flex;
   flex-wrap: wrap;

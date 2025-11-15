@@ -7,6 +7,16 @@ export const practiceReadinessSnapshot = {
     assignmentRate: 0.9444,
     manualFollowUpRate: 0.0556,
   },
+  unassignedByReason: [
+    {
+      reason: 'no shared slot capacity',
+      count: 1,
+      teamIds: ['U10-T04'],
+      divisionBreakdown: [
+        { division: 'U10', count: 1, percentage: 1 },
+      ],
+    },
+  ],
   slotUtilization: [
     { slotId: 'F1-TUE-1800', utilization: 1, capacity: 2, assignedCount: 2 },
     { slotId: 'F1-THU-1800', utilization: 0.75, capacity: 4, assignedCount: 3 },

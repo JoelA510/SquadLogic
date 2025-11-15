@@ -190,6 +190,45 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
   const assignmentsByDivision = new Map();
   const assignmentsByCoach = new Map();
   const baseSlotDivisionCounts = new Map();
+  const unassignedByReasonMap = new Map();
+  const unassignedUnknownTeams = new Set();
+
+  for (const entry of unassigned) {
+    if (!entry || typeof entry !== 'object') {
+      throw new TypeError('each unassigned entry must be an object');
+    }
+    if (!entry.teamId) {
+      throw new TypeError('each unassigned entry requires a teamId');
+    }
+
+    const reason =
+      typeof entry.reason === 'string' && entry.reason.trim().length > 0
+        ? entry.reason.trim()
+        : 'unspecified';
+
+    const bucket =
+      unassignedByReasonMap.get(reason) ?? {
+        reason,
+        count: 0,
+        teamIds: [],
+        divisionCounts: new Map(),
+      };
+
+    bucket.count += 1;
+    bucket.teamIds.push(entry.teamId);
+
+    const teamRecord = teamsById.get(entry.teamId);
+    if (!teamRecord) {
+      unassignedUnknownTeams.add(entry.teamId);
+    } else if (teamRecord.division) {
+      bucket.divisionCounts.set(
+        teamRecord.division,
+        (bucket.divisionCounts.get(teamRecord.division) ?? 0) + 1,
+      );
+    }
+
+    unassignedByReasonMap.set(reason, bucket);
+  }
 
   for (const assignment of assignments) {
     if (!assignment || typeof assignment !== 'object') {
@@ -386,6 +425,31 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
   const manualFollowUpRate =
     totalTeams === 0 ? 0 : Number(((unassignedTeams / totalTeams) || 0).toFixed(4));
 
+  if (unassignedUnknownTeams.size > 0) {
+    const list = Array.from(unassignedUnknownTeams).sort((a, b) => a.localeCompare(b));
+    dataQualityWarnings.push(
+      `Unassigned list references unknown team(s): ${list.join(', ')}`,
+    );
+  }
+
+  const unassignedByReason = Array.from(unassignedByReasonMap.values())
+    .map((bucket) => ({
+      reason: bucket.reason,
+      count: bucket.count,
+      teamIds: bucket.teamIds.sort((a, b) => a.localeCompare(b)),
+      divisionBreakdown: Array.from(bucket.divisionCounts.entries())
+        .map(([division, count]) => ({
+          division,
+          count,
+          percentage: Number((count / bucket.count).toFixed(4)),
+        }))
+        .sort(
+          (a, b) =>
+            b.count - a.count || a.division.localeCompare(b.division),
+        ),
+    }))
+    .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
+
   return {
     summary: {
       totalTeams,
@@ -401,5 +465,6 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
     coachConflicts,
     dataQualityWarnings,
     fairnessConcerns,
+    unassignedByReason,
   };
 }

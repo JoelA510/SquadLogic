@@ -262,8 +262,7 @@ function App() {
         <div className="practice-insights">
           <article>
             <h3>Manual follow-up reasons</h3>
-            {!practiceReadinessSnapshot.unassignedByReason ||
-            practiceReadinessSnapshot.unassignedByReason.length === 0 ? (
+            !practiceReadinessSnapshot.unassignedByReason?.length ? (
               <p className="practice-insight__empty">All teams received automated practice assignments.</p>
             ) : (
               <ul className="practice-insight-list">

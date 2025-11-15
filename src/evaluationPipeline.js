@@ -5,15 +5,15 @@ import { evaluateGameSchedule } from './gameMetrics.js';
  * Run practice and game schedule evaluations, returning an aggregated
  * dashboard-friendly payload describing overall readiness and key issues.
  *
- * @param {Object} params
+ * @param {Object} [params]
  * @param {Object} [params.practice] - Practice evaluation inputs.
- * @param {Array<Object>} params.practice.assignments
+ * @param {Array<Object>} [params.practice.assignments]
  * @param {Array<Object>} [params.practice.unassigned]
- * @param {Array<Object>} params.practice.teams
- * @param {Array<Object>} params.practice.slots
+ * @param {Array<Object>} [params.practice.teams]
+ * @param {Array<Object>} [params.practice.slots]
  * @param {Object} [params.games] - Game evaluation inputs.
- * @param {Array<Object>} params.games.assignments
- * @param {Array<Object>} params.games.teams
+ * @param {Array<Object>} [params.games.assignments]
+ * @param {Array<Object>} [params.games.teams]
  * @param {Array<Object>} [params.games.byes]
  * @param {Array<Object>} [params.games.unscheduled]
  * @returns {{
@@ -23,6 +23,7 @@ import { evaluateGameSchedule } from './gameMetrics.js';
  *   practice: ReturnType<typeof evaluatePracticeSchedule> | null,
  *   games: ReturnType<typeof evaluateGameSchedule> | null,
  * }}
+ * @throws {TypeError} When provided practice or game payloads omit required arrays expected by the evaluators.
  */
 export function runScheduleEvaluations({ practice, games } = {}) {
   if (practice !== undefined && (practice === null || typeof practice !== 'object')) {
@@ -36,18 +37,18 @@ export function runScheduleEvaluations({ practice, games } = {}) {
     practice === undefined
       ? null
       : evaluatePracticeSchedule({
-          assignments: practice.assignments ?? [],
+          assignments: practice.assignments,
           unassigned: practice.unassigned ?? [],
-          teams: practice.teams ?? [],
-          slots: practice.slots ?? [],
+          teams: practice.teams,
+          slots: practice.slots,
         });
 
   const gameResult =
     games === undefined
       ? null
       : evaluateGameSchedule({
-          assignments: games.assignments ?? [],
-          teams: games.teams ?? [],
+          assignments: games.assignments,
+          teams: games.teams,
           byes: games.byes ?? [],
           unscheduled: games.unscheduled ?? [],
         });
@@ -89,12 +90,15 @@ export function runScheduleEvaluations({ practice, games } = {}) {
   }
 
   if (gameResult) {
+    const errorTypes = new Set([
+      'team-double-booked',
+      'coach-conflict',
+      'field-overlap',
+    ]);
     for (const warning of gameResult.warnings) {
       issues.push({
         category: 'games',
-        severity: warning.type === 'team-double-booked' || warning.type === 'coach-conflict' || warning.type === 'field-overlap'
-          ? 'error'
-          : 'warning',
+        severity: errorTypes.has(warning.type) ? 'error' : 'warning',
         message: warning.message,
         details: warning.details,
       });

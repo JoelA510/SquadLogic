@@ -101,3 +101,119 @@ test('reports ok status when no issues are detected', () => {
   assert.equal(result.practice.summary.unassignedTeams, 0);
   assert.equal(result.games, null);
 });
+
+test('surface evaluator validation errors when required practice inputs are missing', () => {
+  assert.throws(() =>
+    runScheduleEvaluations({
+      practice: {
+        teams: [],
+        slots: [],
+      },
+    }),
+  /assignments must be an array/);
+
+  assert.throws(() =>
+    runScheduleEvaluations({
+      practice: {
+        assignments: [],
+        slots: [],
+      },
+    }),
+  /teams must be an array/);
+
+  assert.throws(() =>
+    runScheduleEvaluations({
+      practice: {
+        assignments: [],
+        teams: [],
+      },
+    }),
+  /slots must be an array/);
+});
+
+test('surface evaluator validation errors when required game inputs are missing', () => {
+  assert.throws(() =>
+    runScheduleEvaluations({
+      games: {
+        teams: [],
+      },
+    }),
+  /assignments must be an array/);
+
+  assert.throws(() =>
+    runScheduleEvaluations({
+      games: {
+        assignments: [],
+      },
+    }),
+  /teams must be an array/);
+});
+
+test('optional collections default safely when omitted', () => {
+  const result = runScheduleEvaluations({
+    practice: {
+      assignments: [],
+      teams: [],
+      slots: [],
+    },
+    games: {
+      assignments: [],
+      teams: [],
+    },
+  });
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.issues.length, 0);
+  assert.deepEqual(result.practice.summary, {
+    totalTeams: 0,
+    assignedTeams: 0,
+    unassignedTeams: 0,
+    assignmentRate: 1,
+  });
+  assert.deepEqual(result.games.summary.unscheduledByReason, {});
+});
+
+test('game conflict warnings escalate to error severity', () => {
+  const start = BASE_TIME;
+  const overlapEnd = addMinutes(BASE_TIME, 45);
+  const result = runScheduleEvaluations({
+    games: {
+      assignments: [
+        {
+          id: 'game-a',
+          division: 'U10',
+          weekIndex: 1,
+          homeTeamId: 'team-1',
+          awayTeamId: 'team-2',
+          start,
+          end: overlapEnd,
+          slotId: 'field-1',
+          fieldId: 'field-1',
+        },
+        {
+          id: 'game-b',
+          division: 'U10',
+          weekIndex: 1,
+          homeTeamId: 'team-1',
+          awayTeamId: 'team-3',
+          start: addMinutes(BASE_TIME, 15),
+          end: addMinutes(BASE_TIME, 60),
+          slotId: 'field-2',
+          fieldId: 'field-2',
+        },
+      ],
+      teams: [
+        { id: 'team-1', division: 'U10', coachId: 'coach-1' },
+        { id: 'team-2', division: 'U10', coachId: 'coach-2' },
+        { id: 'team-3', division: 'U10', coachId: 'coach-3' },
+      ],
+    },
+  });
+
+  const conflictIssue = result.issues.find((issue) =>
+    issue.category === 'games' && issue.message.includes('overlapping games'),
+  );
+  assert.ok(conflictIssue, 'expected overlapping games issue');
+  assert.equal(conflictIssue.severity, 'error');
+  assert.equal(result.status, 'action-required');
+});

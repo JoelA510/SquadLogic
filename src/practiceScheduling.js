@@ -398,13 +398,9 @@ function tryResolveTeamWithSwap({
   for (const candidate of rankedCandidates) {
     const targetSlot = candidate.slot;
 
-    if (!candidate.isFull && targetSlot.capacity > 0) {
+    if (!candidate.isFull) {
       assignTeamToSlot(team, targetSlot, 'auto');
       return true;
-    }
-
-    if (!candidate.isFull) {
-      continue;
     }
 
     for (const occupantTeamId of [...targetSlot.assignedTeams]) {

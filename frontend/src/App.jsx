@@ -3,6 +3,8 @@ import './App.css';
 import { teamSummarySnapshot } from './teamSummarySample.js';
 import { practiceReadinessSnapshot } from './practiceReadinessSample.js';
 
+const MANUAL_FOLLOW_UP_THRESHOLD = 0.05;
+
 const roadmapSections = [
   {
     id: 'team-generation',
@@ -90,6 +92,10 @@ function App() {
     }
     return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   };
+
+  const hasNoConflictsOrWarnings =
+    practiceReadinessSnapshot.coachConflicts.length === 0 &&
+    practiceReadinessSnapshot.dataQualityWarnings.length === 0;
 
   return (
     <div className="app-shell">
@@ -245,10 +251,11 @@ function App() {
           </dl>
         </header>
 
-        {practiceSummary.manualFollowUpRate > 0.05 && (
+        {practiceSummary.manualFollowUpRate > MANUAL_FOLLOW_UP_THRESHOLD && (
           <p className="practice-readiness__alert" role="status">
-            {practiceSummary.unassignedTeams} team requires a manual practice assignment — allocate
-            additional slot capacity or adjust priorities before publishing.
+            {practiceSummary.unassignedTeams}{' '}
+            {practiceSummary.unassignedTeams === 1 ? 'team requires' : 'teams require'} a manual
+            practice assignment — allocate additional slot capacity or adjust priorities before publishing.
           </p>
         )}
 
@@ -299,8 +306,7 @@ function App() {
 
           <article>
             <h3>Conflicts & warnings</h3>
-            {practiceReadinessSnapshot.coachConflicts.length === 0 &&
-            practiceReadinessSnapshot.dataQualityWarnings.length === 0 ? (
+            {hasNoConflictsOrWarnings ? (
               <p className="practice-insight__empty">No conflicts detected in the latest run.</p>
             ) : (
               <ul className="practice-insight-list">

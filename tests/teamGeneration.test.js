@@ -12,7 +12,12 @@ test('distributes players evenly across teams', () => {
     division: 'U10',
   }));
 
-  const { teamsByDivision, overflowByDivision, buddyDiagnosticsByDivision } = generateTeams({
+  const {
+    teamsByDivision,
+    overflowByDivision,
+    buddyDiagnosticsByDivision,
+    coachCoverageByDivision,
+  } = generateTeams({
     players,
     divisionConfigs,
     random: createDeterministicRandom(),
@@ -28,6 +33,14 @@ test('distributes players evenly across teams', () => {
   assert.equal(new Set(allPlayers).size, players.length);
   assert.deepEqual(overflowByDivision.U10, []);
   assert.deepEqual(buddyDiagnosticsByDivision.U10.unmatchedRequests, []);
+  assert.deepEqual(coachCoverageByDivision.U10, {
+    totalTeams: 3,
+    volunteerCoaches: 0,
+    teamsWithCoach: 0,
+    teamsWithoutCoach: 3,
+    coverageRate: 0,
+    needsAdditionalCoaches: true,
+  });
 });
 
 test('keeps mutual buddies on the same team', () => {
@@ -38,7 +51,7 @@ test('keeps mutual buddies on the same team', () => {
     { id: 'd', division: 'U10' },
   ];
 
-  const { teamsByDivision, buddyDiagnosticsByDivision } = generateTeams({
+  const { teamsByDivision, buddyDiagnosticsByDivision, coachCoverageByDivision } = generateTeams({
     players,
     divisionConfigs,
     random: createDeterministicRandom(),
@@ -51,6 +64,7 @@ test('keeps mutual buddies on the same team', () => {
   assert.deepEqual(buddyDiagnosticsByDivision.U10.mutualPairs, [
     { playerIds: ['a', 'b'] },
   ]);
+  assert.equal(coachCoverageByDivision.U10.needsAdditionalCoaches, true);
 });
 
 test('respects coach assignments when creating teams', () => {
@@ -61,7 +75,7 @@ test('respects coach assignments when creating teams', () => {
     { id: 'd', division: 'U10' },
   ];
 
-  const { teamsByDivision, overflowByDivision } = generateTeams({
+  const { teamsByDivision, overflowByDivision, coachCoverageByDivision } = generateTeams({
     players,
     divisionConfigs,
     random: createDeterministicRandom(),
@@ -76,6 +90,14 @@ test('respects coach assignments when creating teams', () => {
     .sort();
   assert.deepEqual(rosterIds, ['a', 'b']);
   assert.deepEqual(overflowByDivision.U10, []);
+  assert.deepEqual(coachCoverageByDivision.U10, {
+    totalTeams: 1,
+    volunteerCoaches: 1,
+    teamsWithCoach: 1,
+    teamsWithoutCoach: 0,
+    coverageRate: 1,
+    needsAdditionalCoaches: false,
+  });
 });
 
 test('records overflow when no team can accommodate a unit', () => {
@@ -87,7 +109,7 @@ test('records overflow when no team can accommodate a unit', () => {
     { id: 'e', division: 'U10', coachId: 'coach-1' },
   ];
 
-  const { overflowByDivision, buddyDiagnosticsByDivision } = generateTeams({
+  const { overflowByDivision, buddyDiagnosticsByDivision, coachCoverageByDivision } = generateTeams({
     players,
     divisionConfigs,
     random: createDeterministicRandom(),
@@ -99,6 +121,7 @@ test('records overflow when no team can accommodate a unit', () => {
   assert.deepEqual(overflow[0].players.map((player) => player.id).sort(), ['e']);
   assert.equal(overflow[0].metadata.coachId, 'coach-1');
   assert.deepEqual(buddyDiagnosticsByDivision.U10.unmatchedRequests, []);
+  assert.equal(coachCoverageByDivision.U10.teamsWithCoach, 1);
 });
 
 test('throws when buddy unit has conflicting coach assignments', () => {
@@ -119,7 +142,12 @@ test('records insufficient capacity overflow for buddy unit larger than roster',
     { id: 'b', division: 'U10', buddyId: 'a' },
   ];
 
-  const { overflowByDivision, teamsByDivision, buddyDiagnosticsByDivision } = generateTeams({
+  const {
+    overflowByDivision,
+    teamsByDivision,
+    buddyDiagnosticsByDivision,
+    coachCoverageByDivision,
+  } = generateTeams({
     players,
     divisionConfigs: { U10: { maxRosterSize: 1 } },
     random: createDeterministicRandom(),
@@ -134,6 +162,7 @@ test('records insufficient capacity overflow for buddy unit larger than roster',
   assert.deepEqual(buddyDiagnosticsByDivision.U10.mutualPairs, [
     { playerIds: ['a', 'b'] },
   ]);
+  assert.equal(coachCoverageByDivision.U10.totalTeams, 2);
 });
 
 test('validates input arguments', () => {
@@ -173,7 +202,7 @@ test('reports unmatched buddy requests for missing or non-reciprocal pairs', () 
     { id: 'c', division: 'U10' },
   ];
 
-  const { buddyDiagnosticsByDivision } = generateTeams({
+  const { buddyDiagnosticsByDivision, coachCoverageByDivision } = generateTeams({
     players,
     divisionConfigs,
     random: createDeterministicRandom(),
@@ -196,6 +225,14 @@ test('reports unmatched buddy requests for missing or non-reciprocal pairs', () 
       },
     ],
   );
+  assert.deepEqual(coachCoverageByDivision.U10, {
+    totalTeams: 1,
+    volunteerCoaches: 0,
+    teamsWithCoach: 0,
+    teamsWithoutCoach: 1,
+    coverageRate: 0,
+    needsAdditionalCoaches: true,
+  });
 });
 
 test('flags self-referential buddy requests for review', () => {
@@ -203,7 +240,7 @@ test('flags self-referential buddy requests for review', () => {
     { id: 'solo', division: 'U10', buddyId: 'solo' },
   ];
 
-  const { buddyDiagnosticsByDivision } = generateTeams({
+  const { buddyDiagnosticsByDivision, coachCoverageByDivision } = generateTeams({
     players,
     divisionConfigs,
     random: createDeterministicRandom(),
@@ -213,6 +250,41 @@ test('flags self-referential buddy requests for review', () => {
   assert.deepEqual(buddyDiagnosticsByDivision.U10.unmatchedRequests, [
     { playerId: 'solo', requestedBuddyId: 'solo', reason: 'self-reference' },
   ]);
+  assert.deepEqual(coachCoverageByDivision.U10, {
+    totalTeams: 1,
+    volunteerCoaches: 0,
+    teamsWithCoach: 0,
+    teamsWithoutCoach: 1,
+    coverageRate: 0,
+    needsAdditionalCoaches: true,
+  });
+});
+
+test('marks divisions that need additional coaches when team count exceeds volunteers', () => {
+  const players = [
+    { id: 'a', division: 'U10', coachId: 'coach-1' },
+    { id: 'b', division: 'U10' },
+    { id: 'c', division: 'U10' },
+    { id: 'd', division: 'U10' },
+    { id: 'e', division: 'U10' },
+    { id: 'f', division: 'U10' },
+  ];
+
+  const { coachCoverageByDivision, teamsByDivision } = generateTeams({
+    players,
+    divisionConfigs: { U10: { maxRosterSize: 3 } },
+    random: createDeterministicRandom(),
+  });
+
+  assert.equal(teamsByDivision.U10.length, 2);
+  assert.deepEqual(coachCoverageByDivision.U10, {
+    totalTeams: 2,
+    volunteerCoaches: 1,
+    teamsWithCoach: 1,
+    teamsWithoutCoach: 1,
+    coverageRate: 0.5,
+    needsAdditionalCoaches: true,
+  });
 });
 
 function createDeterministicRandom() {

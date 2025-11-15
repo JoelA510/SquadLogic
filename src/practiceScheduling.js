@@ -80,6 +80,10 @@ export function schedulePractices({
 
     return {
       id: slot.id,
+      baseSlotId: slot.baseSlotId ?? slot.id,
+      seasonPhaseId: slot.seasonPhaseId ?? null,
+      effectiveFrom: slot.effectiveFrom ?? null,
+      effectiveUntil: slot.effectiveUntil ?? null,
       day: slot.day ?? null,
       start: new Date(slot.start),
       end: new Date(slot.end),

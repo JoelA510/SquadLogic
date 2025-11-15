@@ -18,6 +18,14 @@
  *     mutualPairs: Array<{ playerIds: Array<string> }>,
  *     unmatchedRequests: Array<{ playerId: string, requestedBuddyId: string, reason: string }>,
  *   }>,
+ *   coachCoverageByDivision: Record<string, {
+ *     totalTeams: number,
+ *     volunteerCoaches: number,
+ *     teamsWithCoach: number,
+ *     teamsWithoutCoach: number,
+ *     coverageRate: number,
+ *     needsAdditionalCoaches: boolean,
+ *   }>,
  * }}
  */
 export function generateTeams({ players, divisionConfigs, random = Math.random }) {
@@ -51,6 +59,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
   const results = {};
   const overflowByDivision = {};
   const buddyDiagnosticsByDivision = {};
+  const coachCoverageByDivision = {};
 
   for (const [division, divisionPlayers] of playersByDivision.entries()) {
     const config = divisionConfigs[division];
@@ -90,12 +99,28 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
         reason: entry.reason,
       })),
     };
+
+    const uniqueCoachIds = new Set(teams.map((team) => team.coachId).filter(Boolean));
+    const teamsWithoutCoach = teams.filter((team) => !team.coachId).length;
+    const teamsWithCoach = teams.length - teamsWithoutCoach;
+    const coverageRate =
+      teams.length === 0 ? 1 : Number((teamsWithCoach / teams.length).toFixed(4));
+
+    coachCoverageByDivision[division] = {
+      totalTeams: teams.length,
+      volunteerCoaches: uniqueCoachIds.size,
+      teamsWithCoach,
+      teamsWithoutCoach,
+      coverageRate,
+      needsAdditionalCoaches: teamsWithoutCoach > 0,
+    };
   }
 
   return {
     teamsByDivision: results,
     overflowByDivision,
     buddyDiagnosticsByDivision,
+    coachCoverageByDivision,
   };
 }
 

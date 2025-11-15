@@ -39,7 +39,9 @@ This document translates the roadmap's team formation phase into actionable plan
 - **Roster assignments**: Populate a join table `team_players` with each player's `team_id`, assignment timestamp, and source (`auto` vs `manual`).
 - **Overflow queue**: The allocator exposes an `overflowByDivision` collection so manual workflows can immediately review units that exceeded roster capacity.
 - **Buddy resolution report**: JSON payload summarizing honored and unmet buddy requests for admin review. The allocator now exposes this via `buddyDiagnosticsByDivision`, listing mutual pairs alongside unmatched requests (missing registrations, non-reciprocal entries, and self references) so admins can reconcile data issues quickly.
-- **Coach coverage summary**: Highlight any division lacking enough volunteer coaches to meet team counts.
+- **Coach coverage summary**: Highlight any division lacking enough volunteer coaches to meet team counts. The allocator now
+  returns this metadata through `coachCoverageByDivision`, which includes total team counts, volunteer coach coverage, and a
+  `needsAdditionalCoaches` flag so the admin workflow can prioritize outreach.
 
 ## Manual Adjustment Workflow
 1. Present team rosters in the admin UI with sortable columns (player name, buddy code, skill tier).

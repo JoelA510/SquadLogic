@@ -99,8 +99,8 @@ function App() {
                     <div>
                       <p className="actions-heading">Next actions</p>
                       <ul className="actions-list">
-                        {section.actions.map((action) => (
-                          <li key={action}>{action}</li>
+                        {section.actions.map((action, index) => (
+                          <li key={index}>{action}</li>
                         ))}
                       </ul>
                     </div>

@@ -168,20 +168,12 @@ function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
       continue;
     }
 
-    const assigned = assignUnitToTeam({
+    assignUnitToTeam({
       unit,
       team,
       maxRosterSize,
       reason: 'balancing assignment',
     });
-
-    if (!assigned) {
-      overflow.push({
-        players: unit,
-        reason: 'insufficient-capacity',
-        metadata: { unitSize: unit.length },
-      });
-    }
   }
 
   return { teams, overflow };

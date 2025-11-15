@@ -28,6 +28,14 @@ const PREFERRED_COACH_DAY_SCORE = 5;
 const PREFERRED_DIVISION_DAY_SCORE = 3;
 const DIVISION_SLOT_SATURATION_PENALTY = 4;
 
+function getDivisionLoadKey(slotOrBaseSlotId, division) {
+  const baseSlotId =
+    typeof slotOrBaseSlotId === 'string'
+      ? slotOrBaseSlotId
+      : slotOrBaseSlotId.baseSlotId ?? slotOrBaseSlotId.id;
+  return `${baseSlotId}::${division}`;
+}
+
 export function schedulePractices({
   teams,
   slots,
@@ -117,8 +125,6 @@ export function schedulePractices({
   const assignmentSources = new Map();
   const divisionLoadByBaseSlot = new Map();
 
-  const getDivisionLoadKey = (slot, division) => `${slot.baseSlotId}::${division}`;
-
   const incrementDivisionLoad = (slot, division) => {
     const key = getDivisionLoadKey(slot, division);
     divisionLoadByBaseSlot.set(key, (divisionLoadByBaseSlot.get(key) ?? 0) + 1);
@@ -127,13 +133,12 @@ export function schedulePractices({
   const decrementDivisionLoad = (slot, division) => {
     const key = getDivisionLoadKey(slot, division);
     const current = divisionLoadByBaseSlot.get(key);
-    if (current === undefined) {
-      return;
-    }
-    if (current <= 1) {
-      divisionLoadByBaseSlot.delete(key);
-    } else {
-      divisionLoadByBaseSlot.set(key, current - 1);
+    if (current) {
+      if (current > 1) {
+        divisionLoadByBaseSlot.set(key, current - 1);
+      } else {
+        divisionLoadByBaseSlot.delete(key);
+      }
     }
   };
 
@@ -352,7 +357,7 @@ function evaluateSlotsForTeam({
       score += PREFERRED_DIVISION_DAY_SCORE;
     }
 
-    const divisionLoadKey = `${slot.baseSlotId}::${team.division}`;
+    const divisionLoadKey = getDivisionLoadKey(slot, team.division);
     const sameDivisionCount = divisionLoadByBaseSlot.get(divisionLoadKey) ?? 0;
     if (sameDivisionCount > 0) {
       score -= sameDivisionCount * DIVISION_SLOT_SATURATION_PENALTY;

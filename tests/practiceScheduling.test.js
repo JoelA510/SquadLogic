@@ -3,10 +3,10 @@ import { test } from 'node:test';
 
 import { schedulePractices } from '../src/practiceScheduling.js';
 
-function createSlot({ id, day, startHour, endHour, capacity = 1 }) {
+function createSlot({ id, day, startHour, endHour, capacity = 1, baseSlotId }) {
   const start = new Date(`2024-08-05T${String(startHour).padStart(2, '0')}:00:00.000Z`);
   const end = new Date(`2024-08-05T${String(endHour).padStart(2, '0')}:00:00.000Z`);
-  return { id, day, start, end, capacity };
+  return { id, day, start, end, capacity, baseSlotId };
 }
 
 test('assigns teams to available slots without exceeding capacity', () => {
@@ -54,6 +54,41 @@ test('discourages stacking the same division onto a single base slot when altern
   assert.equal(assignmentMap.get('T1'), 'shared-slot');
   assert.equal(assignmentMap.get('T2'), 'alt-slot');
   assert.equal(assignmentMap.get('T3'), 'shared-slot');
+});
+
+test('swap resolution updates division load tracking when teams move between base slots', () => {
+  const teams = [
+    { id: 'T1', division: 'U10', coachId: 'coach-1' },
+    { id: 'T2', division: 'U10', coachId: 'coach-2' },
+    { id: 'T3', division: 'U10', coachId: 'coach-3' },
+    { id: 'T4', division: 'U10', coachId: 'coach-4' },
+    { id: 'T5', division: 'U10', coachId: 'coach-5' },
+  ];
+
+  const slots = [
+    createSlot({ id: 'field-a-one', baseSlotId: 'field-a', day: 'Mon', startHour: 17, endHour: 18 }),
+    createSlot({ id: 'field-a-two', baseSlotId: 'field-a', day: 'Mon', startHour: 18, endHour: 19 }),
+    createSlot({ id: 'field-b-one', baseSlotId: 'field-b', day: 'Mon', startHour: 19, endHour: 20 }),
+    createSlot({ id: 'field-c-one', baseSlotId: 'field-c', day: 'Mon', startHour: 20, endHour: 21 }),
+    createSlot({ id: 'field-d-one', baseSlotId: 'field-d', day: 'Mon', startHour: 21, endHour: 22 }),
+  ];
+
+  const coachPreferences = {
+    'coach-3': { preferredSlotIds: ['field-a-two'] },
+    'coach-4': { unavailableSlotIds: ['field-c-one', 'field-d-one'] },
+    'coach-5': { unavailableSlotIds: ['field-c-one', 'field-d-one'] },
+  };
+
+  const result = schedulePractices({ teams, slots, coachPreferences });
+
+  assert.equal(result.unassigned.length, 0);
+
+  const assignmentMap = Object.fromEntries(result.assignments.map((entry) => [entry.teamId, entry.slotId]));
+  assert.equal(assignmentMap.T1, 'field-d-one');
+  assert.equal(assignmentMap.T2, 'field-c-one');
+  assert.equal(assignmentMap.T3, 'field-a-two');
+  assert.equal(assignmentMap.T4, 'field-b-one');
+  assert.equal(assignmentMap.T5, 'field-a-one');
 });
 
 test('avoids overlapping slots for the same coach', () => {

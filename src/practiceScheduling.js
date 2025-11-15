@@ -62,6 +62,8 @@ export function schedulePractices({
     };
   });
 
+  const teamsById = new Map(sanitizedTeams.map((team) => [team.id, team]));
+
   const sanitizedSlots = slots.map((slot) => {
     if (!slot || typeof slot !== 'object') {
       throw new TypeError('each slot must be an object');
@@ -106,21 +108,54 @@ export function schedulePractices({
   const unassigned = [];
   const coachAssignments = new Map();
   const assignedTeamIds = new Set();
+  const assignmentByTeamId = new Map();
+  const assignmentSources = new Map();
 
   const assignTeamToSlot = (team, slot, source) => {
     slot.capacity -= 1;
     slot.assignedTeams.push(team.id);
-    assignments.push({ teamId: team.id, slotId: slot.id, source });
+    const assignment = { teamId: team.id, slotId: slot.id, source };
+    assignments.push(assignment);
+    assignmentByTeamId.set(team.id, { assignment, slot });
+    assignmentSources.set(team.id, source);
     assignedTeamIds.add(team.id);
 
     if (team.coachId) {
       const existing = coachAssignments.get(team.coachId) ?? [];
-      existing.push({ slotId: slot.id, start: slot.start, end: slot.end });
+      existing.push({ teamId: team.id, slotId: slot.id, start: slot.start, end: slot.end });
       coachAssignments.set(team.coachId, existing);
     }
   };
 
-  const teamsById = new Map(sanitizedTeams.map((team) => [team.id, team]));
+  const removeAssignmentForTeam = (team) => {
+    const record = assignmentByTeamId.get(team.id);
+    if (!record) {
+      return;
+    }
+
+    const { assignment, slot } = record;
+    slot.capacity += 1;
+    slot.assignedTeams = slot.assignedTeams.filter((id) => id !== team.id);
+
+    const index = assignments.indexOf(assignment);
+    if (index >= 0) {
+      assignments.splice(index, 1);
+    }
+
+    assignmentByTeamId.delete(team.id);
+    assignmentSources.delete(team.id);
+    assignedTeamIds.delete(team.id);
+
+    if (team.coachId) {
+      const existing = coachAssignments.get(team.coachId) ?? [];
+      const filtered = existing.filter((entry) => entry.slotId !== assignment.slotId || entry.teamId !== team.id);
+      if (filtered.length === 0) {
+        coachAssignments.delete(team.coachId);
+      } else {
+        coachAssignments.set(team.coachId, filtered);
+      }
+    }
+  };
 
   for (const locked of lockedAssignments) {
     if (!locked || typeof locked !== 'object') {
@@ -188,22 +223,27 @@ export function schedulePractices({
       continue;
     }
 
-    const bestSlot = viableSlots.reduce((chosen, candidate) => {
-      if (!chosen) {
-        return candidate;
-      }
-      if (candidate.score !== chosen.score) {
-        return candidate.score > chosen.score ? candidate : chosen;
-      }
-      if (candidate.slot.start.getTime() !== chosen.slot.start.getTime()) {
-        return candidate.slot.start < chosen.slot.start ? candidate : chosen;
-      }
-      return candidate.slot.id.localeCompare(chosen.slot.id) < 0 ? candidate : chosen;
-    }, null);
+    const bestSlot = pickBestSlotCandidate(viableSlots);
 
     const slotRecord = slotsById.get(bestSlot.slot.id);
     assignTeamToSlot(team, slotRecord, 'auto');
   }
+
+  const unresolved = attemptResolveUnassignedTeams({
+    unassignedEntries: unassigned,
+    assignTeamToSlot,
+    removeAssignmentForTeam,
+    teamsById,
+    slotsById,
+    coachPreferences,
+    divisionPreferences,
+    coachAssignments,
+    assignmentByTeamId,
+    assignmentSources,
+  });
+
+  unassigned.length = 0;
+  unassigned.push(...unresolved);
 
   assignments.sort((a, b) => a.teamId.localeCompare(b.teamId) || a.slotId.localeCompare(b.slotId));
 
@@ -233,7 +273,9 @@ function evaluateSlotsForTeam({
   coachPreferences,
   divisionPreferences,
   coachAssignments,
-}) {
+}, options = {}) {
+  const { includeFullSlots = false, excludeSlotIds } = options;
+  const excludedSlots = excludeSlotIds ? new Set(excludeSlotIds) : null;
   const slotScores = [];
   const viableSlots = [];
   const coachPref = coachPreferences[team.coachId] ?? {};
@@ -245,8 +287,14 @@ function evaluateSlotsForTeam({
   const coachExistingAssignments = coachAssignments.get(team.coachId) ?? [];
 
   for (const slot of slotsById.values()) {
+    if (excludedSlots && excludedSlots.has(slot.id)) {
+      slotScores.push({ slotId: slot.id, score: -Infinity });
+      continue;
+    }
+
+    const isFull = slot.capacity <= 0;
     const isUnavailable =
-      slot.capacity <= 0 ||
+      (!includeFullSlots && isFull) ||
       unavailableCoachSlots.has(slot.id) ||
       (team.coachId &&
         overlapsExistingAssignments({
@@ -272,10 +320,171 @@ function evaluateSlotsForTeam({
     }
 
     slotScores.push({ slotId: slot.id, score });
-    viableSlots.push({ slot, score });
+    viableSlots.push({ slot, score, isFull });
   }
 
   return { slotScores, viableSlots };
+}
+
+function pickBestSlotCandidate(candidates) {
+  const ranked = rankSlotCandidates(candidates);
+  return ranked[0] ?? null;
+}
+
+function attemptResolveUnassignedTeams({
+  unassignedEntries,
+  assignTeamToSlot,
+  removeAssignmentForTeam,
+  teamsById,
+  slotsById,
+  coachPreferences,
+  divisionPreferences,
+  coachAssignments,
+  assignmentSources,
+}) {
+  const unresolved = [];
+
+  for (const entry of unassignedEntries) {
+    const team = teamsById.get(entry.teamId);
+    if (!team) {
+      unresolved.push(entry);
+      continue;
+    }
+
+    const resolved = tryResolveTeamWithSwap({
+      team,
+      assignTeamToSlot,
+      removeAssignmentForTeam,
+      slotsById,
+      coachPreferences,
+      divisionPreferences,
+      coachAssignments,
+      teamsById,
+      assignmentSources,
+    });
+
+    if (!resolved) {
+      unresolved.push(entry);
+    }
+  }
+
+  return unresolved;
+}
+
+function tryResolveTeamWithSwap({
+  team,
+  assignTeamToSlot,
+  removeAssignmentForTeam,
+  slotsById,
+  coachPreferences,
+  divisionPreferences,
+  coachAssignments,
+  teamsById,
+  assignmentSources,
+}) {
+  const { viableSlots } = evaluateSlotsForTeam(
+    {
+      team,
+      slotsById,
+      coachPreferences,
+      divisionPreferences,
+      coachAssignments,
+    },
+    { includeFullSlots: true },
+  );
+
+  const rankedCandidates = rankSlotCandidates(viableSlots);
+
+  for (const candidate of rankedCandidates) {
+    const targetSlot = candidate.slot;
+
+    if (!candidate.isFull && targetSlot.capacity > 0) {
+      assignTeamToSlot(team, targetSlot, 'auto');
+      return true;
+    }
+
+    if (!candidate.isFull) {
+      continue;
+    }
+
+    for (const occupantTeamId of [...targetSlot.assignedTeams]) {
+      if (occupantTeamId === team.id) {
+        continue;
+      }
+
+      const occupantTeam = teamsById.get(occupantTeamId);
+      if (!occupantTeam) {
+        continue;
+      }
+
+      const occupantSource = assignmentSources.get(occupantTeamId);
+      if (occupantSource === 'locked') {
+        continue;
+      }
+
+      removeAssignmentForTeam(occupantTeam);
+
+      const alternativeSlot = findBestAvailableSlotForTeam({
+        team: occupantTeam,
+        slotsById,
+        coachPreferences,
+        divisionPreferences,
+        coachAssignments,
+        excludeSlotIds: [targetSlot.id],
+      });
+
+      if (alternativeSlot) {
+        assignTeamToSlot(occupantTeam, alternativeSlot, occupantSource ?? 'auto');
+        assignTeamToSlot(team, targetSlot, 'auto');
+        return true;
+      }
+
+      assignTeamToSlot(occupantTeam, targetSlot, occupantSource ?? 'auto');
+    }
+  }
+
+  return false;
+}
+
+function findBestAvailableSlotForTeam({
+  team,
+  slotsById,
+  coachPreferences,
+  divisionPreferences,
+  coachAssignments,
+  excludeSlotIds,
+}) {
+  const { viableSlots } = evaluateSlotsForTeam(
+    {
+      team,
+      slotsById,
+      coachPreferences,
+      divisionPreferences,
+      coachAssignments,
+    },
+    { excludeSlotIds },
+  );
+
+  const ranked = rankSlotCandidates(viableSlots);
+  for (const candidate of ranked) {
+    if (candidate.isFull) {
+      continue;
+    }
+    return candidate.slot;
+  }
+  return null;
+}
+
+function rankSlotCandidates(candidates) {
+  return [...candidates].sort((a, b) => {
+    if (a.score !== b.score) {
+      return b.score - a.score;
+    }
+    if (a.slot.start.getTime() !== b.slot.start.getTime()) {
+      return a.slot.start - b.slot.start;
+    }
+    return a.slot.id.localeCompare(b.slot.id);
+  });
 }
 
 function overlapsExistingAssignments({ assignments, start, end }) {

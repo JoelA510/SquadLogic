@@ -148,18 +148,14 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
 
     const totalPlayers = teamStats.reduce((sum, entry) => sum + entry.playerCount, 0);
     const totalCapacity = teamStats.reduce((sum, entry) => sum + entry.maxRosterSize, 0);
-    const averageFillRate = Number(
-      (
-        teamStats.reduce((sum, entry) => sum + entry.fillRate, 0) /
-        (teamStats.length === 0 ? 1 : teamStats.length)
-      ).toFixed(4),
-    );
+    const averageFillRate =
+      totalCapacity > 0 ? Number((totalPlayers / totalCapacity).toFixed(4)) : 0;
     const teamsNeedingPlayers = teamStats
       .filter((entry) => entry.slotsRemaining > 0)
       .map((entry) => entry.teamId);
 
     rosterBalanceByDivision[division] = {
-      teamStats: teamStats.map((entry) => ({ ...entry })),
+      teamStats,
       summary: {
         totalPlayers,
         totalCapacity,

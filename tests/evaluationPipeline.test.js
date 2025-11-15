@@ -66,6 +66,21 @@ test('aggregates practice and game evaluations with issue rollups', () => {
   assert.ok(messages.some((message) => message.includes('unknown team')));
   assert.ok(messages.some((message) => message.includes('could not be scheduled')));
 
+  const manualFollowUpIssue = practiceResult.issues.find((issue) =>
+    issue.message.includes('Manual follow-up required'),
+  );
+  assert.ok(manualFollowUpIssue);
+  assert.deepEqual(manualFollowUpIssue.details.unassignedByReason, [
+    {
+      reason: 'no capacity',
+      count: 1,
+      teamIds: ['team-3'],
+      divisionBreakdown: [
+        { division: 'U10', count: 1, percentage: 1 },
+      ],
+    },
+  ]);
+
   assert.equal(practiceResult.practice.summary.unassignedTeams, 1);
   assert.equal(practiceResult.games.summary.totalAssignments, 1);
   assert.ok(practiceResult.games.warnings.length >= 1);
@@ -173,6 +188,7 @@ test('optional collections default safely when omitted', () => {
     assignmentRate: 1,
     manualFollowUpRate: 0,
   });
+  assert.deepEqual(result.practice.unassignedByReason, []);
   assert.deepEqual(result.games.summary.unscheduledByReason, {});
 });
 

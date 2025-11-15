@@ -261,6 +261,37 @@ function App() {
 
         <div className="practice-insights">
           <article>
+            <h3>Manual follow-up reasons</h3>
+            {!practiceReadinessSnapshot.unassignedByReason ||
+            practiceReadinessSnapshot.unassignedByReason.length === 0 ? (
+              <p className="practice-insight__empty">All teams received automated practice assignments.</p>
+            ) : (
+              <ul className="practice-insight-list">
+                {practiceReadinessSnapshot.unassignedByReason.map((entry) => (
+                  <li key={entry.reason}>
+                    <div className="practice-insight__title">{entry.reason}</div>
+                    <p>
+                      {entry.count} {entry.count === 1 ? 'team' : 'teams'} awaiting manual scheduling
+                      {entry.teamIds && entry.teamIds.length > 0 &&
+                        ` (${entry.teamIds.join(', ')})`}
+                    </p>
+                    {entry.divisionBreakdown && entry.divisionBreakdown.length > 0 && (
+                      <p className="practice-insight__meta">
+                        {entry.divisionBreakdown
+                          .map(
+                            (division) =>
+                              `${division.division}: ${formatPercentPrecise(division.percentage)}`,
+                          )
+                          .join(' · ')}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </article>
+
+          <article>
             <h3>Field load highlights</h3>
             {practiceReadinessSnapshot.slotUtilization.length === 0 ? (
               <p className="practice-insight__empty">No slot utilization data captured.</p>

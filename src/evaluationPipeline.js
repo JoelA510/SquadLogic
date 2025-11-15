@@ -71,7 +71,10 @@ export function runScheduleEvaluations({ practice, games } = {}) {
         category: 'practice',
         severity: 'error',
         message: `${unassignedTeams} team(s) lack practice assignments`,
-        details: { unassignedTeams },
+        details: {
+          unassignedTeams,
+          unassignedByReason: practiceResult.unassignedByReason,
+        },
       });
     }
 
@@ -85,7 +88,12 @@ export function runScheduleEvaluations({ practice, games } = {}) {
         category: 'practice',
         severity: 'warning',
         message: `Manual follow-up required for ${percentage}% of teams (${unassignedTeams} of ${totalTeams})`,
-        details: { manualFollowUpRate, unassignedTeams, totalTeams },
+        details: {
+          manualFollowUpRate,
+          unassignedTeams,
+          totalTeams,
+          unassignedByReason: practiceResult.unassignedByReason,
+        },
       });
     }
 

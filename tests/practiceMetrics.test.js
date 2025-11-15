@@ -135,6 +135,66 @@ test('evaluatePracticeSchedule summarises utilization and division distribution'
     totalCapacity: 3,
     message: 'Base slot field-a-mon is 100% filled by division U10 (2/2 assignments)',
   });
+
+  assert.deepEqual(report.unassignedByReason, [
+    {
+      reason: 'no capacity',
+      count: 1,
+      teamIds: ['team-4'],
+      divisionBreakdown: [
+        { division: 'U12', count: 1, percentage: 1 },
+      ],
+    },
+  ]);
+});
+
+test('manual follow-up reasons aggregate unknown teams and default reasons', () => {
+  const slots = [
+    {
+      id: 'slot-a',
+      baseSlotId: 'field-a',
+      capacity: 1,
+      start: '2024-08-05T22:00:00Z',
+      end: '2024-08-05T23:00:00Z',
+      day: 'Mon',
+    },
+  ];
+
+  const teams = [{ id: 'team-known', division: 'U10', coachId: null }];
+
+  const report = evaluatePracticeSchedule({
+    assignments: [],
+    teams,
+    slots,
+    unassigned: [
+      { teamId: 'team-known', reason: '' },
+      { teamId: 'team-unknown', reason: 'no coach availability' },
+    ],
+  });
+
+  assert.equal(report.summary.unassignedTeams, 1);
+  assert.deepEqual(report.unassignedByReason, [
+    {
+      reason: 'no coach availability',
+      count: 1,
+      teamIds: ['team-unknown'],
+      divisionBreakdown: [],
+    },
+    {
+      reason: 'unspecified',
+      count: 1,
+      teamIds: ['team-known'],
+      divisionBreakdown: [
+        { division: 'U10', count: 1, percentage: 1 },
+      ],
+    },
+  ]);
+
+  assert.ok(
+    report.dataQualityWarnings.some((warning) =>
+      warning.includes('team-unknown'),
+    ),
+  );
 });
 
 test('base slot metadata day matches earliest representative even when null', () => {

@@ -204,6 +204,17 @@ function createAssignmentUnits(players) {
     unmatchedRequests: [],
   };
   const recordedUnmatched = new Set();
+  const addUnmatchedRequest = (playerId, requestedBuddyId, reason) => {
+    const key = reason === 'self-reference' ? `${playerId}::self` : `${playerId}::${requestedBuddyId}`;
+    if (!recordedUnmatched.has(key)) {
+      buddyDiagnostics.unmatchedRequests.push({
+        playerId,
+        requestedBuddyId,
+        reason,
+      });
+      recordedUnmatched.add(key);
+    }
+  };
 
   for (const player of players) {
     if (visited.has(player.id)) {
@@ -211,47 +222,23 @@ function createAssignmentUnits(players) {
     }
 
     const buddyId = player.buddyId;
-    if (buddyId === player.id) {
-      const key = `${player.id}::self`;
-      if (!recordedUnmatched.has(key)) {
-        buddyDiagnostics.unmatchedRequests.push({
-          playerId: player.id,
-          requestedBuddyId: buddyId,
-          reason: 'self-reference',
-        });
-        recordedUnmatched.add(key);
-      }
-    } else if (buddyId && playersById.has(buddyId)) {
-      const buddy = playersById.get(buddyId);
-      if (buddy.buddyId === player.id && !visited.has(buddy.id)) {
-        units.push([player, buddy]);
-        visited.add(player.id);
-        visited.add(buddy.id);
-        const pair = [player.id, buddy.id].sort();
-        buddyDiagnostics.mutualPairs.push({ playerIds: pair });
-        continue;
-      }
+    if (buddyId) {
+      if (buddyId === player.id) {
+        addUnmatchedRequest(player.id, buddyId, 'self-reference');
+      } else if (playersById.has(buddyId)) {
+        const buddy = playersById.get(buddyId);
+        if (buddy.buddyId === player.id && !visited.has(buddy.id)) {
+          units.push([player, buddy]);
+          visited.add(player.id);
+          visited.add(buddy.id);
+          const pair = [player.id, buddy.id].sort();
+          buddyDiagnostics.mutualPairs.push({ playerIds: pair });
+          continue;
+        }
 
-      const key = `${player.id}::${buddyId}`;
-      if (!recordedUnmatched.has(key)) {
-        buddyDiagnostics.unmatchedRequests.push({
-          playerId: player.id,
-          requestedBuddyId: buddyId,
-          reason: 'not-reciprocated',
-        });
-        recordedUnmatched.add(key);
-      }
-    }
-
-    if (buddyId && !playersById.has(buddyId)) {
-      const key = `${player.id}::${buddyId}`;
-      if (!recordedUnmatched.has(key)) {
-        buddyDiagnostics.unmatchedRequests.push({
-          playerId: player.id,
-          requestedBuddyId: buddyId,
-          reason: 'missing-player',
-        });
-        recordedUnmatched.add(key);
+        addUnmatchedRequest(player.id, buddyId, 'not-reciprocated');
+      } else {
+        addUnmatchedRequest(player.id, buddyId, 'missing-player');
       }
     }
 

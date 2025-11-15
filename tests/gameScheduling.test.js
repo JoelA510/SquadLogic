@@ -207,3 +207,56 @@ test('scheduleGames surfaces scheduling conflicts for coaches with multiple team
   assert.equal(assignments.length, 1);
   assert(unscheduled.some((entry) => entry.reason === 'coach-scheduling-conflict'));
 });
+
+test('scheduleGames balances shared slots across divisions when capacity allows rotation', () => {
+  const u10Teams = [
+    { id: 'u10-team-1', division: 'U10', coachId: 'coach-u10-1' },
+    { id: 'u10-team-2', division: 'U10', coachId: 'coach-u10-2' },
+    { id: 'u10-team-3', division: 'U10', coachId: 'coach-u10-3' },
+  ];
+  const u12Teams = [
+    { id: 'u12-team-1', division: 'U12', coachId: 'coach-u12-1' },
+    { id: 'u12-team-2', division: 'U12', coachId: 'coach-u12-2' },
+    { id: 'u12-team-3', division: 'U12', coachId: 'coach-u12-3' },
+  ];
+
+  const roundRobinByDivision = {
+    U10: generateRoundRobinWeeks({ teamIds: u10Teams.map((team) => team.id) }),
+    U12: generateRoundRobinWeeks({ teamIds: u12Teams.map((team) => team.id) }),
+  };
+
+  const sharedSlots = [
+    { id: 'shared-week-1-field-a', weekIndex: 1, start: '2024-08-10T16:00:00Z', end: '2024-08-10T17:00:00Z', capacity: 1, fieldId: 'field-a' },
+    { id: 'shared-week-1-field-b', weekIndex: 1, start: '2024-08-10T17:15:00Z', end: '2024-08-10T18:15:00Z', capacity: 1, fieldId: 'field-b' },
+    { id: 'shared-week-2-field-a', weekIndex: 2, start: '2024-08-17T16:00:00Z', end: '2024-08-17T17:00:00Z', capacity: 1, fieldId: 'field-a' },
+    { id: 'shared-week-2-field-b', weekIndex: 2, start: '2024-08-17T17:15:00Z', end: '2024-08-17T18:15:00Z', capacity: 1, fieldId: 'field-b' },
+    { id: 'shared-week-3-field-a', weekIndex: 3, start: '2024-08-24T16:00:00Z', end: '2024-08-24T17:00:00Z', capacity: 1, fieldId: 'field-a' },
+    { id: 'shared-week-3-field-b', weekIndex: 3, start: '2024-08-24T17:15:00Z', end: '2024-08-24T18:15:00Z', capacity: 1, fieldId: 'field-b' },
+  ];
+
+  const { assignments, unscheduled } = scheduleGames({
+    teams: [...u10Teams, ...u12Teams],
+    slots: sharedSlots,
+    roundRobinByDivision,
+  });
+
+  assert.equal(unscheduled.length, 0);
+
+  const fieldUsageByDivision = new Map();
+  for (const assignment of assignments) {
+    if (!assignment.fieldId) {
+      continue;
+    }
+    const usage = fieldUsageByDivision.get(assignment.division) ?? new Map();
+    usage.set(assignment.fieldId, (usage.get(assignment.fieldId) ?? 0) + 1);
+    fieldUsageByDivision.set(assignment.division, usage);
+  }
+
+  for (const division of ['U10', 'U12']) {
+    const usage = fieldUsageByDivision.get(division) ?? new Map();
+    const fieldA = usage.get('field-a') ?? 0;
+    const fieldB = usage.get('field-b') ?? 0;
+    assert(fieldA > 0 && fieldB > 0, `${division} should use both shared fields`);
+    assert(Math.abs(fieldA - fieldB) <= 1, `${division} assignments should be balanced across shared fields`);
+  }
+});

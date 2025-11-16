@@ -17,7 +17,8 @@ export function filterRedundantCapacityWarnings(
   const overbookedSlotIds = new Set(
     overbookedSlots
       .map((slot) => slot?.slotId)
-      .filter((slotId) => typeof slotId === 'string' && slotId.length > 0),
+      .filter((slotId) => typeof slotId === 'string' && slotId.length > 0)
+      .map((slotId) => slotId.toLowerCase()),
   );
 
   if (overbookedSlotIds.size === 0) {
@@ -36,7 +37,7 @@ export function filterRedundantCapacityWarnings(
     }
 
     for (const slotId of overbookedSlotIds) {
-      if (normalizedWarning.includes(slotId.toLowerCase())) {
+      if (normalizedWarning.includes(slotId)) {
         return false;
       }
     }

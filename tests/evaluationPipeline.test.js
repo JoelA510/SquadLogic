@@ -297,3 +297,57 @@ test('underutilized practice base slots surface as warnings', () => {
   assert.equal(warning.severity, 'warning');
   assert.ok(warning.message.includes('slot-spacious'));
 });
+
+test('practice day concentration triggers a warning for limited coverage', () => {
+  const practiceSlots = [
+    {
+      id: 'slot-mon-1',
+      capacity: 1,
+      start: BASE_TIME,
+      end: addMinutes(BASE_TIME, 60),
+      day: 'Mon',
+    },
+    {
+      id: 'slot-mon-2',
+      capacity: 1,
+      start: addMinutes(BASE_TIME, 60),
+      end: addMinutes(BASE_TIME, 120),
+      day: 'Mon',
+    },
+    {
+      id: 'slot-mon-3',
+      capacity: 1,
+      start: addMinutes(BASE_TIME, 120),
+      end: addMinutes(BASE_TIME, 180),
+      day: 'Mon',
+    },
+  ];
+
+  const teams = [
+    { id: 'team-a', division: 'U10' },
+    { id: 'team-b', division: 'U10' },
+    { id: 'team-c', division: 'U10' },
+  ];
+
+  const result = runScheduleEvaluations({
+    practice: {
+      assignments: [
+        { teamId: 'team-a', slotId: 'slot-mon-1' },
+        { teamId: 'team-b', slotId: 'slot-mon-2' },
+        { teamId: 'team-c', slotId: 'slot-mon-3' },
+      ],
+      teams,
+      slots: practiceSlots,
+    },
+  });
+
+  const dayWarning = result.issues.find((issue) =>
+    issue.category === 'practice' && issue.message.includes('concentrated on Mon'),
+  );
+
+  assert.ok(dayWarning, 'expected day concentration warning');
+  assert.equal(dayWarning.severity, 'warning');
+  assert.equal(result.status, 'attention-needed');
+  assert.equal(dayWarning.details.dominantDay, 'Mon');
+  assert.equal(dayWarning.details.totalAssigned, 3);
+});

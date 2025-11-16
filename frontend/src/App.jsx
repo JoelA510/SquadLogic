@@ -55,6 +55,21 @@ const statusLabels = {
   pending: { label: 'Pending', tone: 'status-pending' },
 };
 
+function InsightSection({ title, items, emptyMessage, renderItem }) {
+  const hasItems = items && items.length > 0;
+
+  return (
+    <article>
+      <h3>{title}</h3>
+      {hasItems ? (
+        <ul className="insight-list">{items.map(renderItem)}</ul>
+      ) : (
+        <p className="insight__empty">{emptyMessage}</p>
+      )}
+    </article>
+  );
+}
+
 function App() {
   const summary = useMemo(() => {
     const completed = roadmapSections.filter((section) => section.status === 'complete').length;
@@ -95,6 +110,20 @@ function App() {
     }
     return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   };
+  const formatClockFromMinutes = (minutes) => {
+    if (!Number.isFinite(minutes)) {
+      return 'unspecified time';
+    }
+    const normalized = Math.max(0, Math.round(minutes));
+    const hours = Math.floor(normalized / 60) % 24;
+    const mins = normalized % 60;
+    const label = `${hours.toString().padStart(2, '0')}:${mins
+      .toString()
+      .padStart(2, '0')}`;
+    const suffix = hours >= 12 ? 'pm' : 'am';
+    const adjustedHour = ((hours + 11) % 12) + 1;
+    return `${adjustedHour}:${mins.toString().padStart(2, '0')} ${suffix} (${label})`;
+  };
 
   const formatGameWarningDetails = (details) => {
     if (!details) {
@@ -116,6 +145,10 @@ function App() {
   const hasGameWarnings =
     (gameReadinessSnapshot.warnings?.length ?? 0) > 0 ||
     (gameReadinessSnapshot.unscheduled?.length ?? 0) > 0;
+
+  const baseSlotItems = practiceReadinessSnapshot.baseSlotDistribution ?? [];
+  const divisionDayItems = Object.entries(practiceReadinessSnapshot.divisionDayDistribution ?? {});
+  const underutilizedBaseSlotItems = practiceReadinessSnapshot.underutilizedBaseSlots ?? [];
 
   return (
     <div className="app-shell">
@@ -353,6 +386,74 @@ function App() {
               </ul>
             )}
           </article>
+
+          <InsightSection
+            title="Base slot distribution"
+            items={baseSlotItems}
+            emptyMessage="No base slot summaries captured."
+            renderItem={(slot) => (
+              <li key={slot.baseSlotId}>
+                <div className="insight__title">{slot.baseSlotId}</div>
+                <p>
+                  {slot.day ?? 'Unknown day'} · {formatTime(slot.representativeStart)} · {slot.totalAssigned} of {slot.totalCapacity}
+                  teams assigned
+                </p>
+                {slot.divisionBreakdown && slot.divisionBreakdown.length > 0 && (
+                  <p className="insight__meta">
+                    {slot.divisionBreakdown
+                      .map(
+                        (division) => `${division.division}: ${formatPercentPrecise(division.percentage)} (${division.count})`,
+                      )
+                      .join(' · ')}
+                  </p>
+                )}
+              </li>
+            )}
+          />
+
+          <InsightSection
+            title="Division day coverage"
+            items={divisionDayItems}
+            emptyMessage="No day distribution captured for this run."
+            renderItem={(entry) => {
+              const [division, details] = entry;
+              return (
+                <li key={division}>
+                  <div className="insight__title">{division}</div>
+                  <p>
+                    {details.totalAssigned} assignments · average start {formatClockFromMinutes(details.averageStartMinutes)}
+                  </p>
+                  {details.dayBreakdown && details.dayBreakdown.length > 0 && (
+                    <p className="insight__meta">
+                      {details.dayBreakdown
+                        .map(
+                          (dayEntry) => `${dayEntry.day}: ${formatPercentPrecise(dayEntry.percentage)} (${dayEntry.count})`,
+                        )
+                        .join(' · ')}
+                    </p>
+                  )}
+                </li>
+              );
+            }}
+          />
+
+          <InsightSection
+            title="Underutilized base slots"
+            items={underutilizedBaseSlotItems}
+            emptyMessage="All base slots are at healthy utilization."
+            renderItem={(slot) => (
+              <li key={slot.baseSlotId}>
+                <div className="insight__title">{slot.baseSlotId}</div>
+                <p>
+                  {slot.day ?? 'Unknown day'} · {formatTime(slot.representativeStart)} · {slot.totalAssigned} of {slot.totalCapacity}
+                  teams assigned
+                </p>
+                <p className="insight__meta">
+                  Utilization {formatPercentPrecise(slot.utilization)} — consider rebalancing.
+                </p>
+              </li>
+            )}
+          />
 
           <article>
             <h3>Conflicts & warnings</h3>

@@ -81,6 +81,15 @@ export const practiceReadinessSnapshot = {
         'Base slot F1-THU-1800 is 75% filled by division U10 (3/4 assignments)',
     },
   ],
+  dayConcentrationAlerts: [
+    {
+      division: 'U12',
+      dominantDay: 'Wednesday',
+      dominantShare: 0.6667,
+      dominantCount: 4,
+      totalAssignments: 6,
+    },
+  ],
   divisionDayDistribution: {
     U8: {
       totalAssigned: 5,

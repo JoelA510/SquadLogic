@@ -53,6 +53,8 @@
  */
 const FAIRNESS_DOMINANCE_THRESHOLD = 0.7;
 const UNDERUTILIZATION_THRESHOLD = 0.25;
+const DAY_CONCENTRATION_THRESHOLD = 0.65;
+const MIN_ASSIGNMENTS_FOR_CONCENTRATION = 3;
 
 function calculateFairnessConcerns(baseSlotDistribution, assignmentsByDivision) {
   const assignedDivisions = new Set(assignmentsByDivision.keys());
@@ -307,6 +309,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
   }
 
   const divisionDayDistribution = {};
+  const dayConcentrationAlerts = [];
   for (const [division, divisionAssignments] of assignmentsByDivision.entries()) {
     const dayCounts = new Map();
     let totalMinutes = 0;
@@ -338,7 +341,26 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
       averageStartMinutes: counted === 0 ? null : Number((totalMinutes / counted).toFixed(2)),
       dayBreakdown: breakdown,
     };
+
+    const [primaryDay] = breakdown;
+    if (
+      counted >= MIN_ASSIGNMENTS_FOR_CONCENTRATION &&
+      primaryDay &&
+      primaryDay.percentage >= DAY_CONCENTRATION_THRESHOLD
+    ) {
+      dayConcentrationAlerts.push({
+        division,
+        dominantDay: primaryDay.day,
+        dominantShare: primaryDay.percentage,
+        dominantCount: primaryDay.count,
+        totalAssignments: counted,
+      });
+    }
   }
+
+  dayConcentrationAlerts.sort(
+    (a, b) => a.division.localeCompare(b.division) || a.dominantDay.localeCompare(b.dominantDay),
+  );
 
   const baseSlotDistribution = [];
   const underutilizedBaseSlots = [];
@@ -479,6 +501,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
     slotUtilization: slotUtilization.sort((a, b) => a.slotId.localeCompare(b.slotId)),
     baseSlotDistribution,
     divisionDayDistribution,
+    dayConcentrationAlerts,
     coachLoad,
     coachConflicts,
     dataQualityWarnings,

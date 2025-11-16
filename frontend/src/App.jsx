@@ -83,6 +83,7 @@ function App() {
   const { totals, divisions, generatedAt } = teamSummarySnapshot;
   const practiceSummary = practiceReadinessSnapshot.summary;
   const practiceGeneratedAt = practiceReadinessSnapshot.generatedAt;
+  const dayConcentrationAlerts = practiceReadinessSnapshot.dayConcentrationAlerts ?? [];
   const gameSummary = gameReadinessSnapshot.summary;
   const gameGeneratedAt = gameReadinessSnapshot.generatedAt;
 
@@ -435,6 +436,21 @@ function App() {
                 </li>
               );
             }}
+          />
+
+          <InsightSection
+            title="Day concentration alerts"
+            items={dayConcentrationAlerts}
+            emptyMessage="No divisions are stacked on a single practice day."
+            renderItem={(alert) => (
+              <li key={`${alert.division}-${alert.dominantDay}`}>
+                <div className="insight__title">{alert.division}</div>
+                <p>
+                  {formatPercentPrecise(alert.dominantShare)} of practices ({alert.dominantCount}/{alert.totalAssignments}) are
+                  concentrated on {alert.dominantDay}.
+                </p>
+              </li>
+            )}
           />
 
           <InsightSection

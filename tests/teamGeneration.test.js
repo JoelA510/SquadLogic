@@ -268,13 +268,24 @@ test('validates input arguments', () => {
     /missing maxrostersize for division u11/i,
   );
 
-  const duplicatePlayers = [
+  const duplicatePlayersSameDivision = [
     { id: 'dup', division: 'U10' },
     { id: 'dup', division: 'U10' },
   ];
   assert.throws(
-    () => generateTeams({ players: duplicatePlayers, divisionConfigs }),
-    /duplicate player id detected: dup/i,
+    () => generateTeams({ players: duplicatePlayersSameDivision, divisionConfigs }),
+    /duplicate player id detected: dup \(divisions U10 and U10\)/i,
+    'should throw for duplicate IDs in the same division',
+  );
+
+  const duplicatePlayersCrossDivisions = [
+    { id: 'dup', division: 'U10' },
+    { id: 'dup', division: 'U11' },
+  ];
+  assert.throws(
+    () => generateTeams({ players: duplicatePlayersCrossDivisions, divisionConfigs }),
+    /duplicate player id detected: dup \(divisions U10 and U11\)/i,
+    'should throw for duplicate IDs across divisions',
   );
 });
 

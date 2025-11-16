@@ -140,9 +140,9 @@ export function runScheduleEvaluations({ practice, games } = {}) {
       }
 
       const dominant = dayBreakdown[0];
-      const dominantShare = Number(dominant.percentage ?? 0);
+      const dominantShare = dominant.percentage ?? 0;
 
-      if (Number.isNaN(dominantShare) || dominantShare < PRACTICE_DAY_DOMINANCE_THRESHOLD) {
+      if (dominantShare < PRACTICE_DAY_DOMINANCE_THRESHOLD) {
         continue;
       }
 

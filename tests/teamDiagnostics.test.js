@@ -62,6 +62,8 @@ test('summarizeTeamGeneration aggregates per-division diagnostics', () => {
   assert.equal(u10.needsAdditionalCoaches, true);
   assert.equal(u10.overflowUnits, 0);
   assert.equal(u10.overflowPlayers, 0);
+  assert.deepEqual(u10.overflowByReason, {});
+  assert.deepEqual(u10.overflowPlayersByReason, {});
 
   assert.equal(u12.divisionId, 'U12');
   assert.equal(u12.totalTeams, 2);
@@ -72,6 +74,7 @@ test('summarizeTeamGeneration aggregates per-division diagnostics', () => {
   assert.equal(u12.overflowUnits, 1);
   assert.equal(u12.overflowPlayers, 1);
   assert.deepEqual(u12.overflowByReason, { 'coach-capacity': 1 });
+  assert.deepEqual(u12.overflowPlayersByReason, { 'coach-capacity': 1 });
 });
 
 test('summarizeTeamGeneration validates inputs', () => {
@@ -116,4 +119,47 @@ test('summarizeTeamGeneration defaults coverage and aggregates roster stats', ()
   assert.equal(summary.divisions[0].slotsRemaining, 4);
   assert.equal(summary.divisions[0].coachCoverage.totalTeams, 0);
   assert.equal(summary.divisions[0].needsAdditionalCoaches, false);
+});
+
+test('summarizeTeamGeneration leverages overflow summaries for player counts', () => {
+  const result = {
+    teamsByDivision: { U9: [{ id: 'team-u9-a' }] },
+    overflowByDivision: { U9: [] },
+    overflowSummaryByDivision: {
+      U9: {
+        totalUnits: 2,
+        totalPlayers: 3,
+        byReason: {
+          'coach-capacity': { units: 1, players: 2 },
+          'sibling-group': { units: 1, players: 1 },
+        },
+      },
+    },
+    buddyDiagnosticsByDivision: {},
+    coachCoverageByDivision: {},
+    rosterBalanceByDivision: {
+      U9: {
+        teamStats: [
+          { playerCount: 0, maxRosterSize: 10, slotsRemaining: 10 },
+        ],
+        summary: { averageFillRate: 0, teamsNeedingPlayers: ['team-u9-a'] },
+      },
+    },
+  };
+
+  const summary = summarizeTeamGeneration(result);
+
+  assert.equal(summary.divisions.length, 1);
+  const division = summary.divisions[0];
+  assert.equal(division.overflowUnits, 2);
+  assert.equal(division.overflowPlayers, 3);
+  assert.deepEqual(division.overflowByReason, {
+    'coach-capacity': 1,
+    'sibling-group': 1,
+  });
+  assert.deepEqual(division.overflowPlayersByReason, {
+    'coach-capacity': 2,
+    'sibling-group': 1,
+  });
+  assert.equal(summary.totals.overflowPlayers, 3);
 });

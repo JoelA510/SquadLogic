@@ -31,6 +31,7 @@ const EMPTY_ROSTER_BALANCE = {
  * @param {Record<string, Object>} result.buddyDiagnosticsByDivision
  * @param {Record<string, Object>} result.coachCoverageByDivision
  * @param {Record<string, Object>} result.rosterBalanceByDivision
+ * @param {Record<string, Object>} [result.overflowSummaryByDivision]
  * @returns {{
  *   divisions: Array<{
  *     divisionId: string,
@@ -48,6 +49,7 @@ const EMPTY_ROSTER_BALANCE = {
  *     overflowUnits: number,
  *     overflowPlayers: number,
  *     overflowByReason: Record<string, number>,
+ *     overflowPlayersByReason: Record<string, number>,
  *   }>,
  *   totals: {
  *     divisions: number,
@@ -70,6 +72,7 @@ export function summarizeTeamGeneration(result) {
     buddyDiagnosticsByDivision,
     coachCoverageByDivision,
     rosterBalanceByDivision,
+    overflowSummaryByDivision = {},
   } = result;
 
   validateRecord(teamsByDivision, 'teamsByDivision');
@@ -77,6 +80,7 @@ export function summarizeTeamGeneration(result) {
   validateRecord(buddyDiagnosticsByDivision, 'buddyDiagnosticsByDivision');
   validateRecord(coachCoverageByDivision, 'coachCoverageByDivision');
   validateRecord(rosterBalanceByDivision, 'rosterBalanceByDivision');
+  validateRecord(overflowSummaryByDivision, 'overflowSummaryByDivision');
 
   const divisionIds = collectDivisionIds({
     teamsByDivision,
@@ -117,11 +121,10 @@ export function summarizeTeamGeneration(result) {
       { playersAssigned: 0, totalCapacity: 0, slotsRemaining: 0 },
     );
 
-    const overflowPlayers = overflowEntries.reduce(
-      (sum, entry) => sum + (Array.isArray(entry.players) ? entry.players.length : 0),
-      0,
-    );
-    const overflowByReason = aggregateByKey(overflowEntries, (entry) => entry.reason);
+    const overflowRollup = buildOverflowRollup({
+      entries: overflowEntries,
+      summary: overflowSummaryByDivision[divisionId],
+    });
 
     const unmatchedBuddyReasons = aggregateByKey(
       buddyDiagnostics.unmatchedRequests,
@@ -141,16 +144,17 @@ export function summarizeTeamGeneration(result) {
       mutualBuddyPairs: buddyDiagnostics.mutualPairs?.length ?? 0,
       unmatchedBuddyCount: buddyDiagnostics.unmatchedRequests?.length ?? 0,
       unmatchedBuddyReasons,
-      overflowUnits: overflowEntries.length,
-      overflowPlayers,
-      overflowByReason,
+      overflowUnits: overflowRollup.units,
+      overflowPlayers: overflowRollup.players,
+      overflowByReason: overflowRollup.byReason,
+      overflowPlayersByReason: overflowRollup.playersByReason,
     };
 
     divisions.push(divisionSummary);
 
     totals.teams += divisionSummary.totalTeams;
     totals.playersAssigned += playersAssigned;
-    totals.overflowPlayers += overflowPlayers;
+    totals.overflowPlayers += overflowRollup.players;
 
     if (divisionSummary.needsAdditionalCoaches) {
       totals.divisionsNeedingCoaches += 1;
@@ -186,4 +190,82 @@ function aggregateByKey(entries, keySelector) {
     acc[key] = (acc[key] ?? 0) + 1;
     return acc;
   }, {});
+}
+
+function buildOverflowRollup({ entries, summary }) {
+  const derived = summarizeOverflowEntries(entries);
+
+  if (!summary || typeof summary !== 'object') {
+    return derived;
+  }
+
+  const overflowByReason = normalizeReasonCounts({
+    byReason: summary.byReason,
+    fallbackByReason: derived.byReason,
+    field: 'units',
+  });
+  const overflowPlayersByReason = normalizeReasonCounts({
+    byReason: summary.byReason,
+    fallbackByReason: derived.byReason,
+    field: 'players',
+  });
+
+  const players = Number.isFinite(summary.totalPlayers)
+    ? summary.totalPlayers
+    : derived.players;
+  const units = Number.isFinite(summary.totalUnits)
+    ? summary.totalUnits
+    : derived.units;
+
+  return {
+    players,
+    units,
+    byReason: overflowByReason,
+    playersByReason: overflowPlayersByReason,
+  };
+}
+
+function summarizeOverflowEntries(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return { players: 0, units: 0, byReason: {} };
+  }
+
+  const rollup = { players: 0, units: 0, byReason: {} };
+  for (const entry of entries) {
+    rollup.units += 1;
+    const playerCount = Array.isArray(entry.players) ? entry.players.length : 0;
+    rollup.players += playerCount;
+
+    const reason = entry.reason ?? 'unknown';
+    const existing = rollup.byReason[reason] ?? { units: 0, players: 0 };
+    existing.units += 1;
+    existing.players += playerCount;
+    rollup.byReason[reason] = existing;
+  }
+
+  return rollup;
+}
+
+function normalizeReasonCounts({ byReason, fallbackByReason, field }) {
+  if (byReason && typeof byReason === 'object') {
+    return Object.entries(byReason).reduce((acc, [reason, entry]) => {
+      const value = entry?.[field];
+      if (Number.isFinite(value)) {
+        acc[reason] = value;
+      }
+      return acc;
+    }, {});
+  }
+
+  if (fallbackByReason && typeof fallbackByReason === 'object') {
+    return Object.entries(fallbackByReason).reduce((acc, [reason, entry]) => {
+      const value = entry?.[field];
+      if (Number.isFinite(value)) {
+        acc[reason] = value;
+      }
+      return acc;
+    }, {});
+  }
+
+  return {};
 }

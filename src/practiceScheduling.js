@@ -42,7 +42,7 @@ function sanitizeScoringWeights(weights = {}) {
     if (!(key in DEFAULT_SCORING_WEIGHTS)) {
       throw new Error(`unsupported scoring weight provided: ${key}`);
     }
-    if (typeof value !== 'number' || Number.isNaN(value)) {
+    if (!Number.isFinite(value)) {
       throw new TypeError(`scoring weight ${key} must be a finite number`);
     }
     normalized[key] = value;

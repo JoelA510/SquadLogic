@@ -153,13 +153,15 @@ body {
   font-weight: 600;
 }
 
-.practice-insights {
+.practice-insights,
+.game-insights {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 1.5rem;
 }
 
-.practice-insights article {
+.practice-insights article,
+.game-insights article {
   background: rgba(var(--color-slate-900-rgb), 0.75);
   border: 1px solid rgba(var(--color-slate-400-rgb), 0.24);
   border-radius: 1rem;
@@ -167,13 +169,14 @@ body {
   box-shadow: 0 12px 32px rgba(var(--color-blue-950-rgb), 0.35);
 }
 
-.practice-insights h3 {
+.practice-insights h3,
+.game-insights h3 {
   margin-top: 0;
   margin-bottom: 0.85rem;
   font-size: 1.1rem;
 }
 
-.practice-insight-list {
+.insight-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -182,7 +185,7 @@ body {
   gap: 0.75rem;
 }
 
-.practice-insight-list li {
+.insight-list li {
   padding: 0.75rem 0.85rem;
   border-radius: 0.75rem;
   background: rgba(30, 41, 59, 0.72);
@@ -190,19 +193,19 @@ body {
   color: rgba(var(--color-slate-200-rgb), 0.92);
 }
 
-.practice-insight__title {
+.insight__title {
   font-weight: 600;
   margin-bottom: 0.3rem;
   color: rgba(191, 219, 254, 0.92);
 }
 
-.practice-insight__meta {
+.insight__meta {
   margin: 0.35rem 0 0;
   font-size: 0.85rem;
   color: rgba(var(--color-slate-200-rgb), 0.7);
 }
 
-.practice-insight__empty {
+.insight__empty {
   margin: 0;
   color: rgba(var(--color-slate-200-rgb), 0.72);
 }

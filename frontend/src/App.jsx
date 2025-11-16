@@ -96,6 +96,19 @@ function App() {
     return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   };
 
+  const formatGameWarningDetails = (details) => {
+    if (!details) {
+      return 'See evaluator details';
+    }
+    if (details.dominantDivision) {
+      return `${details.dominantDivision} at ${formatPercentPrecise(details.dominantShare)}`;
+    }
+    if (details.coachId) {
+      return `Coach ${details.coachId} · Week ${details.weekIndex}`;
+    }
+    return 'See evaluator details';
+  };
+
   const hasNoConflictsOrWarnings =
     practiceReadinessSnapshot.coachConflicts.length === 0 &&
     practiceReadinessSnapshot.dataQualityWarnings.length === 0;
@@ -270,19 +283,19 @@ function App() {
           <article>
             <h3>Manual follow-up reasons</h3>
             {!practiceReadinessSnapshot.unassignedByReason?.length ? (
-              <p className="practice-insight__empty">All teams received automated practice assignments.</p>
+              <p className="insight__empty">All teams received automated practice assignments.</p>
             ) : (
-              <ul className="practice-insight-list">
+              <ul className="insight-list">
                 {practiceReadinessSnapshot.unassignedByReason.map((entry) => (
                   <li key={entry.reason}>
-                    <div className="practice-insight__title">{entry.reason}</div>
+                    <div className="insight__title">{entry.reason}</div>
                     <p>
                       {entry.count} {entry.count === 1 ? 'team' : 'teams'} awaiting manual scheduling
                       {entry.teamIds && entry.teamIds.length > 0 &&
                         ` (${entry.teamIds.join(', ')})`}
                     </p>
                     {entry.divisionBreakdown && entry.divisionBreakdown.length > 0 && (
-                      <p className="practice-insight__meta">
+                      <p className="insight__meta">
                         {entry.divisionBreakdown
                           .map(
                             (division) =>
@@ -300,12 +313,12 @@ function App() {
           <article>
             <h3>Field load highlights</h3>
             {practiceReadinessSnapshot.slotUtilization.length === 0 ? (
-              <p className="practice-insight__empty">No slot utilization data captured.</p>
+              <p className="insight__empty">No slot utilization data captured.</p>
             ) : (
-              <ul className="practice-insight-list">
+              <ul className="insight-list">
                 {practiceReadinessSnapshot.slotUtilization.map((slot) => (
                   <li key={slot.slotId}>
-                    <div className="practice-insight__title">{slot.slotId}</div>
+                    <div className="insight__title">{slot.slotId}</div>
                     <p>
                       {slot.assignedCount} of {slot.capacity} capacity used ·{' '}
                       {slot.utilization === null
@@ -321,17 +334,17 @@ function App() {
           <article>
             <h3>Fairness watchlist</h3>
             {practiceReadinessSnapshot.fairnessConcerns.length === 0 ? (
-              <p className="practice-insight__empty">No dominant division patterns detected.</p>
+              <p className="insight__empty">No dominant division patterns detected.</p>
             ) : (
-              <ul className="practice-insight-list">
+              <ul className="insight-list">
                 {practiceReadinessSnapshot.fairnessConcerns.map((concern) => (
                   <li key={concern.baseSlotId}>
-                    <div className="practice-insight__title">{concern.baseSlotId}</div>
+                    <div className="insight__title">{concern.baseSlotId}</div>
                     <p>
                       {concern.day ?? 'Unknown day'} · {formatTime(concern.representativeStart)} ·{' '}
                       {concern.message}
                     </p>
-                    <p className="practice-insight__meta">
+                    <p className="insight__meta">
                       Dominant division {concern.dominantDivision} at{' '}
                       {formatPercentPrecise(concern.dominantShare)} share
                     </p>
@@ -344,12 +357,12 @@ function App() {
           <article>
             <h3>Conflicts & warnings</h3>
             {hasNoConflictsOrWarnings ? (
-              <p className="practice-insight__empty">No conflicts detected in the latest run.</p>
+              <p className="insight__empty">No conflicts detected in the latest run.</p>
             ) : (
-              <ul className="practice-insight-list">
+              <ul className="insight-list">
                 {practiceReadinessSnapshot.coachConflicts.map((conflict, index) => (
                   <li key={`conflict-${conflict.coachId}-${index}`}>
-                    <div className="practice-insight__title">Coach {conflict.coachId}</div>
+                    <div className="insight__title">Coach {conflict.coachId}</div>
                     <p>
                       {conflict.reason} between{' '}
                       {conflict.teams
@@ -360,7 +373,7 @@ function App() {
                 ))}
                 {practiceReadinessSnapshot.dataQualityWarnings.map((warning, index) => (
                   <li key={`warning-${index}`}>
-                    <div className="practice-insight__title">Data quality</div>
+                    <div className="insight__title">Data quality</div>
                     <p>{warning}</p>
                   </li>
                 ))}
@@ -418,16 +431,16 @@ function App() {
           <article>
             <h3>Unscheduled matchups</h3>
             {gameReadinessSnapshot.unscheduled.length === 0 ? (
-              <p className="practice-insight__empty">All matchups are assigned.</p>
+              <p className="insight__empty">All matchups are assigned.</p>
             ) : (
-              <ul className="practice-insight-list">
+              <ul className="insight-list">
                 {gameReadinessSnapshot.unscheduled.map((entry, index) => (
                   <li key={`unscheduled-${entry.matchup}-${index}`}>
-                    <div className="practice-insight__title">Week {entry.weekIndex}</div>
+                    <div className="insight__title">Week {entry.weekIndex}</div>
                     <p>
                       {entry.matchup} · {entry.reason}
                     </p>
-                    {entry.note && <p className="practice-insight__meta">{entry.note}</p>}
+                    {entry.note && <p className="insight__meta">{entry.note}</p>}
                   </li>
                 ))}
               </ul>
@@ -437,20 +450,14 @@ function App() {
           <article>
             <h3>Conflicts & shared slot alerts</h3>
             {gameReadinessSnapshot.warnings.length === 0 ? (
-              <p className="practice-insight__empty">No conflicts detected.</p>
+              <p className="insight__empty">No conflicts detected.</p>
             ) : (
-              <ul className="practice-insight-list">
+              <ul className="insight-list">
                 {gameReadinessSnapshot.warnings.map((warning, index) => (
                   <li key={`warning-${warning.type}-${index}`}>
-                    <div className="practice-insight__title">{warning.message}</div>
+                    <div className="insight__title">{warning.message}</div>
                     {warning.details && (
-                      <p className="practice-insight__meta">
-                        {warning.details.dominantDivision
-                          ? `${warning.details.dominantDivision} at ${formatPercentPrecise(warning.details.dominantShare)}`
-                          : warning.details.coachId
-                            ? `Coach ${warning.details.coachId} · Week ${warning.details.weekIndex}`
-                            : 'See evaluator details'}
-                      </p>
+                      <p className="insight__meta">{formatGameWarningDetails(warning.details)}</p>
                     )}
                   </li>
                 ))}
@@ -461,16 +468,16 @@ function App() {
           <article>
             <h3>Field highlights</h3>
             {gameReadinessSnapshot.fieldHighlights.length === 0 ? (
-              <p className="practice-insight__empty">No field usage captured.</p>
+              <p className="insight__empty">No field usage captured.</p>
             ) : (
-              <ul className="practice-insight-list">
+              <ul className="insight-list">
                 {gameReadinessSnapshot.fieldHighlights.map((entry) => (
                   <li key={entry.fieldId}>
-                    <div className="practice-insight__title">{entry.fieldId}</div>
+                    <div className="insight__title">{entry.fieldId}</div>
                     <p>
                       {entry.games} games · Divisions {formatList(entry.divisions)}
                     </p>
-                    {entry.note && <p className="practice-insight__meta">{entry.note}</p>}
+                    {entry.note && <p className="insight__meta">{entry.note}</p>}
                   </li>
                 ))}
               </ul>

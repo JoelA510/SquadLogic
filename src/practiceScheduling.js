@@ -381,8 +381,6 @@ function evaluateSlotsForTeam({
         rejectionReason = 'coach-unavailable';
       } else if (overlapsCoachSchedule) {
         rejectionReason = 'coach-conflict';
-      } else {
-        rejectionReason = 'unavailable';
       }
     }
 
@@ -436,10 +434,13 @@ function deriveUnassignmentReason(blockedSlots) {
   const coachBlocked = (reasonCounts['coach-conflict'] ?? 0) +
     (reasonCounts['coach-unavailable'] ?? 0);
   if (coachBlocked === total) {
-    if (reasonCounts['coach-conflict'] && !reasonCounts['coach-unavailable']) {
+    const hasConflicts = (reasonCounts['coach-conflict'] ?? 0) > 0;
+    const hasUnavailability = (reasonCounts['coach-unavailable'] ?? 0) > 0;
+
+    if (hasConflicts && !hasUnavailability) {
       return 'coach schedule conflicts on all slots';
     }
-    if (reasonCounts['coach-unavailable'] && !reasonCounts['coach-conflict']) {
+    if (hasUnavailability && !hasConflicts) {
       return 'coach availability excludes all slots';
     }
     return 'coach availability issues across all slots';

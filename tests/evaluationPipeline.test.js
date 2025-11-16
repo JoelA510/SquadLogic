@@ -349,5 +349,6 @@ test('practice day concentration triggers a warning for limited coverage', () =>
   assert.equal(dayWarning.severity, 'warning');
   assert.equal(result.status, 'attention-needed');
   assert.equal(dayWarning.details.dominantDay, 'Mon');
-  assert.equal(dayWarning.details.totalAssigned, 3);
+  assert.equal(dayWarning.details.totalAssignments, 3);
+  assert.equal(dayWarning.details.dominantCount, 3);
 });

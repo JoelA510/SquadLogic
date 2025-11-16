@@ -95,6 +95,20 @@ function App() {
     }
     return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   };
+  const formatClockFromMinutes = (minutes) => {
+    if (!Number.isFinite(minutes)) {
+      return 'unspecified time';
+    }
+    const normalized = Math.max(0, Math.round(minutes));
+    const hours = Math.floor(normalized / 60) % 24;
+    const mins = normalized % 60;
+    const label = `${hours.toString().padStart(2, '0')}:${mins
+      .toString()
+      .padStart(2, '0')}`;
+    const suffix = hours >= 12 ? 'pm' : 'am';
+    const adjustedHour = hours % 12 === 0 ? 12 : hours % 12;
+    return `${adjustedHour}:${mins.toString().padStart(2, '0')} ${suffix} (${label})`;
+  };
 
   const formatGameWarningDetails = (details) => {
     if (!details) {
@@ -351,6 +365,89 @@ function App() {
                   </li>
                 ))}
               </ul>
+            )}
+          </article>
+
+          <article>
+            <h3>Base slot distribution</h3>
+            {!practiceReadinessSnapshot.baseSlotDistribution?.length ? (
+              <p className="insight__empty">No base slot summaries captured.</p>
+            ) : (
+              <ul className="insight-list">
+                {practiceReadinessSnapshot.baseSlotDistribution.map((slot) => (
+                  <li key={slot.baseSlotId}>
+                    <div className="insight__title">{slot.baseSlotId}</div>
+                    <p>
+                      {slot.day ?? 'Unknown day'} · {formatTime(slot.representativeStart)} ·{' '}
+                      {slot.totalAssigned} of {slot.totalCapacity} teams assigned
+                    </p>
+                    {slot.divisionBreakdown && slot.divisionBreakdown.length > 0 && (
+                      <p className="insight__meta">
+                        {slot.divisionBreakdown
+                          .map(
+                            (division) =>
+                              `${division.division}: ${formatPercentPrecise(division.percentage)} (${division.count})`,
+                          )
+                          .join(' · ')}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </article>
+
+          <article>
+            <h3>Division day coverage</h3>
+            {practiceReadinessSnapshot.divisionDayDistribution &&
+            Object.keys(practiceReadinessSnapshot.divisionDayDistribution).length > 0 ? (
+              <ul className="insight-list">
+                {Object.entries(practiceReadinessSnapshot.divisionDayDistribution).map(
+                  ([division, details]) => (
+                    <li key={division}>
+                      <div className="insight__title">{division}</div>
+                      <p>
+                        {details.totalAssigned} assignments · average start{' '}
+                        {formatClockFromMinutes(details.averageStartMinutes)}
+                      </p>
+                      {details.dayBreakdown && details.dayBreakdown.length > 0 && (
+                        <p className="insight__meta">
+                          {details.dayBreakdown
+                            .map(
+                              (entry) =>
+                                `${entry.day}: ${formatPercentPrecise(entry.percentage)} (${entry.count})`,
+                            )
+                            .join(' · ')}
+                        </p>
+                      )}
+                    </li>
+                  ),
+                )}
+              </ul>
+            ) : (
+              <p className="insight__empty">No day distribution captured for this run.</p>
+            )}
+          </article>
+
+          <article>
+            <h3>Underutilized base slots</h3>
+            {practiceReadinessSnapshot.underutilizedBaseSlots?.length ? (
+              <ul className="insight-list">
+                {practiceReadinessSnapshot.underutilizedBaseSlots.map((slot) => (
+                  <li key={slot.baseSlotId}>
+                    <div className="insight__title">{slot.baseSlotId}</div>
+                    <p>
+                      {slot.day ?? 'Unknown day'} · {formatTime(slot.representativeStart)} ·{' '}
+                      {slot.totalAssigned} of {slot.totalCapacity} teams assigned
+                    </p>
+                    <p className="insight__meta">
+                      Utilization {formatPercentPrecise(slot.utilization)} — consider rebalancing.
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="insight__empty">All base slots are at healthy utilization.</p>
             )}
           </article>
 

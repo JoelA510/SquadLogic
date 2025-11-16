@@ -181,7 +181,25 @@ test('flags teams when no slots satisfy constraints', () => {
   assert.equal(result.assignments.length, 0);
   assert.equal(result.unassigned.length, 1);
   assert.equal(result.unassigned[0].teamId, 'T1');
-  assert.equal(result.unassigned[0].reason, 'no available slots meeting hard constraints');
+  assert.equal(result.unassigned[0].reason, 'no available capacity');
+});
+
+test('labels unassigned teams with coach conflict reasons when all slots overlap', () => {
+  const teams = [
+    { id: 'T1', division: 'U10', coachId: 'coach-a' },
+    { id: 'T2', division: 'U10', coachId: 'coach-a' },
+  ];
+  const slots = [
+    createSlot({ id: 's1', day: 'Tue', startHour: 18, endHour: 19, capacity: 2 }),
+    createSlot({ id: 's2', day: 'Tue', startHour: 18, endHour: 19, capacity: 1 }),
+  ];
+
+  const result = schedulePractices({ teams, slots });
+
+  assert.equal(result.assignments.length, 1);
+  assert.equal(result.unassigned.length, 1);
+  assert.equal(result.unassigned[0].teamId, 'T2');
+  assert.equal(result.unassigned[0].reason, 'coach schedule conflicts on all slots');
 });
 
 test('breaks ties by earliest start time then slot id', () => {

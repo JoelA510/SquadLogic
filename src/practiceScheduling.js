@@ -265,7 +265,7 @@ export function schedulePractices({
     if (assignedTeamIds.has(team.id)) {
       continue;
     }
-    const { slotScores, viableSlots } = evaluateSlotsForTeam({
+    const { slotScores, viableSlots, blockedSlots } = evaluateSlotsForTeam({
       team,
       slotsById,
       coachPreferences,
@@ -278,7 +278,7 @@ export function schedulePractices({
     if (viableSlots.length === 0) {
       unassigned.push({
         teamId: team.id,
-        reason: 'no available slots meeting hard constraints',
+        reason: deriveUnassignmentReason(blockedSlots),
         candidates: slotScores,
       });
       continue;
@@ -345,6 +345,7 @@ function evaluateSlotsForTeam({
   const excludedSlots = excludeSlotIds ? new Set(excludeSlotIds) : null;
   const slotScores = [];
   const viableSlots = [];
+  const blockedSlots = [];
   const coachPref = coachPreferences[team.coachId] ?? {};
   const divisionPref = divisionPreferences[team.division] ?? {};
   const preferredCoachDays = new Set(coachPref.preferredDays ?? []);
@@ -354,23 +355,37 @@ function evaluateSlotsForTeam({
   const coachExistingAssignments = coachAssignments.get(team.coachId) ?? [];
 
   for (const slot of slotsById.values()) {
+    let rejectionReason = null;
     if (excludedSlots && excludedSlots.has(slot.id)) {
-      slotScores.push({ slotId: slot.id, score: -Infinity });
-      continue;
+      rejectionReason = 'excluded-slot';
     }
 
     const isFull = slot.capacity <= 0;
+    const overlapsCoachSchedule =
+      team.coachId &&
+      overlapsExistingAssignments({
+        assignments: coachExistingAssignments,
+        start: slot.start,
+        end: slot.end,
+      });
     const isUnavailable =
+      rejectionReason !== null ||
       (!includeFullSlots && isFull) ||
       unavailableCoachSlots.has(slot.id) ||
-      (team.coachId &&
-        overlapsExistingAssignments({
-          assignments: coachExistingAssignments,
-          start: slot.start,
-          end: slot.end,
-        }));
+      overlapsCoachSchedule;
+
+    if (rejectionReason === null && isUnavailable) {
+      if (!includeFullSlots && isFull) {
+        rejectionReason = 'no-capacity';
+      } else if (unavailableCoachSlots.has(slot.id)) {
+        rejectionReason = 'coach-unavailable';
+      } else if (overlapsCoachSchedule) {
+        rejectionReason = 'coach-conflict';
+      }
+    }
 
     if (isUnavailable) {
+      blockedSlots.push({ slotId: slot.id, reason: rejectionReason });
       slotScores.push({ slotId: slot.id, score: -Infinity });
       continue;
     }
@@ -396,7 +411,46 @@ function evaluateSlotsForTeam({
     viableSlots.push({ slot, score, isFull });
   }
 
-  return { slotScores, viableSlots };
+  return { slotScores, viableSlots, blockedSlots };
+}
+
+function deriveUnassignmentReason(blockedSlots) {
+  if (!Array.isArray(blockedSlots) || blockedSlots.length === 0) {
+    return 'no available slots meeting hard constraints';
+  }
+
+  const reasonCounts = blockedSlots.reduce((acc, entry) => {
+    const reason = entry?.reason ?? 'unknown';
+    acc[reason] = (acc[reason] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  const total = blockedSlots.length;
+
+  if ((reasonCounts['no-capacity'] ?? 0) === total) {
+    return 'no available capacity';
+  }
+
+  const coachBlocked = (reasonCounts['coach-conflict'] ?? 0) +
+    (reasonCounts['coach-unavailable'] ?? 0);
+  if (coachBlocked === total) {
+    const hasConflicts = (reasonCounts['coach-conflict'] ?? 0) > 0;
+    const hasUnavailability = (reasonCounts['coach-unavailable'] ?? 0) > 0;
+
+    if (hasConflicts && !hasUnavailability) {
+      return 'coach schedule conflicts on all slots';
+    }
+    if (hasUnavailability && !hasConflicts) {
+      return 'coach availability excludes all slots';
+    }
+    return 'coach availability issues across all slots';
+  }
+
+  if ((reasonCounts['excluded-slot'] ?? 0) === total) {
+    return 'no alternative slots available';
+  }
+
+  return 'no available slots meeting hard constraints';
 }
 
 function pickBestSlotCandidate(candidates) {

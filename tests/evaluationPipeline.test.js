@@ -57,7 +57,7 @@ test('aggregates practice and game evaluations with issue rollups', () => {
   });
 
   assert.equal(practiceResult.status, 'action-required');
-  assert.equal(practiceResult.issues.length, 8);
+  assert.equal(practiceResult.issues.length, 7);
 
   const messages = practiceResult.issues.map((issue) => issue.message);
   assert.ok(messages.some((message) => message.includes('lack practice assignments')));
@@ -65,7 +65,6 @@ test('aggregates practice and game evaluations with issue rollups', () => {
   assert.ok(messages.some((message) => message.includes('Manual follow-up categories:')));
   assert.ok(messages.some((message) => message.includes('overlapping practices')));
   assert.ok(messages.some((message) => message.includes('over capacity')));
-  assert.ok(messages.some((message) => message.includes('exceeds capacity')));
   assert.ok(messages.some((message) => message.includes('unknown team')));
   assert.ok(messages.some((message) => message.includes('could not be scheduled')));
 

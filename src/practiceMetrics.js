@@ -326,9 +326,6 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
     if (capacity === 0 && assignedCount > 0) {
       dataQualityWarnings.push(`slot ${slot.id} has zero capacity but ${assignedCount} assignment(s)`);
     }
-    if (overbooked) {
-      dataQualityWarnings.push(`slot ${slot.id} exceeds capacity (${assignedCount}/${capacity})`);
-    }
     slotUtilization.push({
       slotId: slot.id,
       assignedCount,

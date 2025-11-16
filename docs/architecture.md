@@ -38,3 +38,7 @@
 - **Email Workflows**: Generate mailto links or integrate with a transactional email API (e.g., Resend) once auth is in place.
 - **Authentication**: Launch with Supabase Auth (admin email/password or magic link) and expand roles or MFA requirements as collaborator access grows.
 - **Observability**: Use Supabase logs and the hosting platform's analytics; consider Logflare for aggregated monitoring if limits permit.
+  - **Scheduler run dashboards**: Expose `scheduler_runs` and linked `evaluation_runs` in the admin UI with per-run timelines,
+    duration charts, conflict/warning counts, and retry buttons for failed runs. Surface the latest status per run type on the
+    landing page and add filters by `season_settings_id` and `run_type` so operators can quickly validate the consolidated run
+    history.

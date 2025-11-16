@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluatePracticeSchedule } from '../src/practiceMetrics.js';
+import {
+  evaluatePracticeSchedule,
+  MANUAL_FOLLOW_UP_CATEGORIES,
+} from '../src/practiceMetrics.js';
 
 const SAMPLE_SLOTS = [
   {
@@ -58,7 +61,7 @@ test('evaluatePracticeSchedule summarises utilization and division distribution'
 
   assert.deepEqual(report.manualFollowUpBreakdown, [
     {
-      category: 'capacity',
+      category: MANUAL_FOLLOW_UP_CATEGORIES.CAPACITY,
       count: 1,
       percentage: 1,
       teamIds: ['team-4'],
@@ -537,7 +540,7 @@ test('categorizes manual follow-ups by capacity, coach availability, and exclusi
 
   assert.deepEqual(report.manualFollowUpBreakdown, [
     {
-      category: 'coach-availability',
+      category: MANUAL_FOLLOW_UP_CATEGORIES.COACH_AVAILABILITY,
       count: 2,
       percentage: 0.5,
       teamIds: ['team-b', 'team-c'],
@@ -547,14 +550,14 @@ test('categorizes manual follow-ups by capacity, coach availability, and exclusi
       ],
     },
     {
-      category: 'capacity',
+      category: MANUAL_FOLLOW_UP_CATEGORIES.CAPACITY,
       count: 1,
       percentage: 0.25,
       teamIds: ['team-a'],
       reasons: ['no available capacity'],
     },
     {
-      category: 'excluded-slots',
+      category: MANUAL_FOLLOW_UP_CATEGORIES.EXCLUDED_SLOTS,
       count: 1,
       percentage: 0.25,
       teamIds: ['team-d'],

@@ -56,22 +56,29 @@ const UNDERUTILIZATION_THRESHOLD = 0.25;
 const DAY_CONCENTRATION_THRESHOLD = 0.65;
 const MIN_ASSIGNMENTS_FOR_CONCENTRATION = 3;
 
+export const MANUAL_FOLLOW_UP_CATEGORIES = {
+  CAPACITY: 'capacity',
+  COACH_AVAILABILITY: 'coach-availability',
+  EXCLUDED_SLOTS: 'excluded-slots',
+  UNKNOWN: 'constraints-or-unknown',
+};
+
 function categorizeManualFollowUpReason(reason) {
   const value = (reason ?? 'unknown').toLowerCase();
 
   if (value.includes('capacity')) {
-    return 'capacity';
+    return MANUAL_FOLLOW_UP_CATEGORIES.CAPACITY;
   }
 
   if (value.includes('coach')) {
-    return 'coach-availability';
+    return MANUAL_FOLLOW_UP_CATEGORIES.COACH_AVAILABILITY;
   }
 
   if (value.includes('exclude') || value.includes('alternative slot')) {
-    return 'excluded-slots';
+    return MANUAL_FOLLOW_UP_CATEGORIES.EXCLUDED_SLOTS;
   }
 
-  return 'constraints-or-unknown';
+  return MANUAL_FOLLOW_UP_CATEGORIES.UNKNOWN;
 }
 
 function calculateFairnessConcerns(baseSlotDistribution, assignmentsByDivision) {
@@ -512,7 +519,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
   const totalManualFollowUps = unassigned.length;
 
   for (const entry of unassigned) {
-    const category = categorizeManualFollowUpReason(entry?.reason);
+    const category = categorizeManualFollowUpReason(entry.reason);
     const bucket = manualFollowUpBreakdownMap.get(category) ?? {
       category,
       count: 0,
@@ -521,10 +528,8 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
     };
 
     bucket.count += 1;
-    if (entry?.teamId) {
-      bucket.teamIds.push(entry.teamId);
-    }
-    if (entry?.reason) {
+    bucket.teamIds.push(entry.teamId);
+    if (entry.reason) {
       bucket.reasons.add(entry.reason);
     }
 

@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runScheduleEvaluations } from '../src/evaluationPipeline.js';
+import {
+  filterRedundantCapacityWarnings,
+  runScheduleEvaluations,
+} from '../src/evaluationPipeline.js';
 import { MANUAL_FOLLOW_UP_CATEGORIES } from '../src/practiceMetrics.js';
 
 const BASE_TIME = new Date('2024-08-12T22:00:00Z');
@@ -8,6 +11,27 @@ const BASE_TIME = new Date('2024-08-12T22:00:00Z');
 function addMinutes(date, minutes) {
   return new Date(date.getTime() + minutes * 60_000);
 }
+
+test('filters redundant over-capacity warnings for overbooked slots', () => {
+  const overbookedSlots = [
+    { slotId: 'field-1', overbooked: true },
+    { slotId: 'Field-2', overbooked: true },
+  ];
+
+  const warnings = [
+    'slot field-1 exceeds capacity (3/2)',
+    'slot Field-2 is over capacity (5/4)',
+    'slot field-3 has zero capacity but 1 assignment(s)',
+    'other warning unrelated to capacity',
+  ];
+
+  const filtered = filterRedundantCapacityWarnings(warnings, overbookedSlots);
+
+  assert.deepEqual(filtered, [
+    'slot field-3 has zero capacity but 1 assignment(s)',
+    'other warning unrelated to capacity',
+  ]);
+});
 
 test('aggregates practice and game evaluations with issue rollups', () => {
   const practiceSlots = [

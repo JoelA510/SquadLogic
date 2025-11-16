@@ -6,6 +6,46 @@ const MANUAL_FOLLOW_UP_WARNING_THRESHOLD = 0.05;
 const formatPercentage = (value) =>
   (value * 100).toFixed(1).replace(/\.0$/, '');
 
+export function filterRedundantCapacityWarnings(
+  dataQualityWarnings = [],
+  overbookedSlots = [],
+) {
+  if (!Array.isArray(dataQualityWarnings) || !Array.isArray(overbookedSlots)) {
+    return dataQualityWarnings;
+  }
+
+  const overbookedSlotIds = new Set(
+    overbookedSlots
+      .map((slot) => slot?.slotId)
+      .filter((slotId) => typeof slotId === 'string' && slotId.length > 0)
+      .map((slotId) => slotId.toLowerCase()),
+  );
+
+  if (overbookedSlotIds.size === 0) {
+    return dataQualityWarnings;
+  }
+
+  return dataQualityWarnings.filter((warning) => {
+    const normalizedWarning = String(warning).toLowerCase();
+
+    const referencesOverCapacity =
+      normalizedWarning.includes('over capacity') ||
+      normalizedWarning.includes('exceeds capacity');
+
+    if (!referencesOverCapacity) {
+      return true;
+    }
+
+    for (const slotId of overbookedSlotIds) {
+      if (normalizedWarning.includes(slotId)) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
 /**
  * Run practice and game schedule evaluations, returning an aggregated
  * dashboard-friendly payload describing overall readiness and key issues.
@@ -73,6 +113,10 @@ export function runScheduleEvaluations({ practice, games } = {}) {
     } = practiceResult;
 
     const overbookedSlots = slotUtilization.filter((slot) => slot.overbooked);
+    const filteredDataQualityWarnings = filterRedundantCapacityWarnings(
+      dataQualityWarnings,
+      overbookedSlots,
+    );
 
     for (const slot of overbookedSlots) {
       issues.push({
@@ -141,7 +185,7 @@ export function runScheduleEvaluations({ practice, games } = {}) {
       });
     }
 
-    for (const warning of dataQualityWarnings) {
+    for (const warning of filteredDataQualityWarnings) {
       issues.push({
         category: 'practice',
         severity: 'warning',

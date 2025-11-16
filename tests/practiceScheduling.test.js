@@ -56,6 +56,30 @@ test('discourages stacking the same division onto a single base slot when altern
   assert.equal(assignmentMap.get('T3'), 'shared-slot');
 });
 
+test('supports tuning scoring weights for fairness penalties', () => {
+  const teams = [
+    { id: 'T1', division: 'U10', coachId: 'coach-a' },
+    { id: 'T2', division: 'U10', coachId: 'coach-b' },
+    { id: 'T3', division: 'U12', coachId: 'coach-c' },
+  ];
+
+  const slots = [
+    createSlot({ id: 'shared-slot', day: 'Mon', startHour: 19, endHour: 20, capacity: 2 }),
+    createSlot({ id: 'alt-slot', day: 'Tue', startHour: 20, endHour: 21, capacity: 1 }),
+  ];
+
+  const result = schedulePractices({
+    teams,
+    slots,
+    scoringWeights: { divisionSaturationPenalty: 0 },
+  });
+
+  const assignmentMap = new Map(result.assignments.map((entry) => [entry.teamId, entry.slotId]));
+  assert.equal(assignmentMap.get('T1'), 'shared-slot');
+  assert.equal(assignmentMap.get('T2'), 'shared-slot');
+  assert.equal(assignmentMap.get('T3'), 'alt-slot');
+});
+
 test('swap resolution updates division load tracking when teams move between base slots', () => {
   const teams = [
     { id: 'T1', division: 'U10', coachId: 'coach-1' },

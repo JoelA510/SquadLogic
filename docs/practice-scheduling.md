@@ -26,6 +26,8 @@ This document elaborates the roadmap's practice scheduling phase into concrete i
      - **Coach availability match** (highest weight).
      - **Division preference match** (some divisions might prefer earlier times).
      - **Field fairness** (penalize assigning too many teams from the same division to the same field).
+     - The `schedulePractices` helper now accepts a `scoringWeights` object so these multipliers can be tuned per season via `season_settings`
+       (e.g., dialing back fairness penalties during rebuilding years or boosting division preferences for limited-field divisions).
    - Select the highest-scoring slot that still has capacity and no coach conflict. If multiple slots tie, choose the earliest start time.
    - Record the assignment in a staging structure and decrement the slot capacity.
    - If no slot meets hard constraints, flag the team as `needs_manual_assignment` with candidate slots ranked by score.

@@ -19,14 +19,37 @@
  * @param {Object<string, Object>} [params.divisionPreferences] - Optional division preference map.
   *   Supports `preferredDays` similar to coach preferences.
  * @param {Array<{ teamId: string, slotId: string }>} [params.lockedAssignments] - Optional manual
- *   overrides that must be honoured ahead of auto assignments.
+  *   overrides that must be honoured ahead of auto assignments.
+ * @param {Object} [params.scoringWeights] - Optional weighting overrides supporting `coachPreferredSlot`,
+ *   `coachPreferredDay`, `divisionPreferredDay`, and `divisionSaturationPenalty` keys for tuning slot scoring.
  * @returns {{ assignments: Array<{ teamId: string, slotId: string, source: 'locked' | 'auto' }>, unassigned: Array<{ teamId: string, reason: string, candidates: Array<{ slotId: string, score: number }> }> }}
  */
 
-const PREFERRED_COACH_SLOT_SCORE = 10;
-const PREFERRED_COACH_DAY_SCORE = 5;
-const PREFERRED_DIVISION_DAY_SCORE = 3;
-const DIVISION_SLOT_SATURATION_PENALTY = 4;
+const DEFAULT_SCORING_WEIGHTS = {
+  coachPreferredSlot: 10,
+  coachPreferredDay: 5,
+  divisionPreferredDay: 3,
+  divisionSaturationPenalty: 4,
+};
+
+function sanitizeScoringWeights(weights = {}) {
+  if (weights === null || typeof weights !== 'object' || Array.isArray(weights)) {
+    throw new TypeError('scoringWeights must be an object when provided');
+  }
+
+  const normalized = { ...DEFAULT_SCORING_WEIGHTS };
+  for (const [key, value] of Object.entries(weights)) {
+    if (!(key in DEFAULT_SCORING_WEIGHTS)) {
+      throw new Error(`unsupported scoring weight provided: ${key}`);
+    }
+    if (!Number.isFinite(value)) {
+      throw new TypeError(`scoring weight ${key} must be a finite number`);
+    }
+    normalized[key] = value;
+  }
+
+  return normalized;
+}
 
 function getDivisionLoadKey(slotOrBaseSlotId, division) {
   const baseSlotId =
@@ -42,6 +65,7 @@ export function schedulePractices({
   coachPreferences = {},
   divisionPreferences = {},
   lockedAssignments = [],
+  scoringWeights,
 }) {
   if (!Array.isArray(teams)) {
     throw new TypeError('teams must be an array');
@@ -52,6 +76,8 @@ export function schedulePractices({
   if (!Array.isArray(lockedAssignments)) {
     throw new TypeError('lockedAssignments must be an array');
   }
+
+  const weights = sanitizeScoringWeights(scoringWeights);
 
   const sanitizedTeams = teams.map((team) => {
     if (!team || typeof team !== 'object') {
@@ -246,6 +272,7 @@ export function schedulePractices({
       divisionPreferences,
       coachAssignments,
       divisionLoadByBaseSlot,
+      weights,
     });
 
     if (viableSlots.length === 0) {
@@ -275,6 +302,7 @@ export function schedulePractices({
     assignmentByTeamId,
     assignmentSources,
     divisionLoadByBaseSlot,
+    weights,
   });
 
   unassigned.length = 0;
@@ -311,6 +339,7 @@ function evaluateSlotsForTeam({
   divisionPreferences,
   coachAssignments,
   divisionLoadByBaseSlot,
+  weights,
 }, options = {}) {
   const { includeFullSlots = false, excludeSlotIds } = options;
   const excludedSlots = excludeSlotIds ? new Set(excludeSlotIds) : null;
@@ -348,19 +377,19 @@ function evaluateSlotsForTeam({
 
     let score = 0;
     if (preferredCoachSlots.has(slot.id)) {
-      score += PREFERRED_COACH_SLOT_SCORE;
+      score += weights.coachPreferredSlot;
     }
     if (slot.day && preferredCoachDays.has(slot.day)) {
-      score += PREFERRED_COACH_DAY_SCORE;
+      score += weights.coachPreferredDay;
     }
     if (slot.day && preferredDivisionDays.has(slot.day)) {
-      score += PREFERRED_DIVISION_DAY_SCORE;
+      score += weights.divisionPreferredDay;
     }
 
     const divisionLoadKey = getDivisionLoadKey(slot, team.division);
     const sameDivisionCount = divisionLoadByBaseSlot.get(divisionLoadKey) ?? 0;
     if (sameDivisionCount > 0) {
-      score -= sameDivisionCount * DIVISION_SLOT_SATURATION_PENALTY;
+      score -= sameDivisionCount * weights.divisionSaturationPenalty;
     }
 
     slotScores.push({ slotId: slot.id, score });
@@ -386,6 +415,7 @@ function attemptResolveUnassignedTeams({
   coachAssignments,
   assignmentSources,
   divisionLoadByBaseSlot,
+  weights,
 }) {
   const unresolved = [];
 
@@ -407,6 +437,7 @@ function attemptResolveUnassignedTeams({
       teamsById,
       assignmentSources,
       divisionLoadByBaseSlot,
+      weights,
     });
 
     if (!resolved) {
@@ -428,6 +459,7 @@ function tryResolveTeamWithSwap({
   teamsById,
   assignmentSources,
   divisionLoadByBaseSlot,
+  weights,
 }) {
   const { viableSlots } = evaluateSlotsForTeam(
     {
@@ -437,6 +469,7 @@ function tryResolveTeamWithSwap({
       divisionPreferences,
       coachAssignments,
       divisionLoadByBaseSlot,
+      weights,
     },
     { includeFullSlots: true },
   );
@@ -476,6 +509,7 @@ function tryResolveTeamWithSwap({
         coachAssignments,
         divisionLoadByBaseSlot,
         excludeSlotIds: [targetSlot.id],
+        weights,
       });
 
       if (alternativeSlot) {
@@ -499,6 +533,7 @@ function findBestAvailableSlotForTeam({
   coachAssignments,
   divisionLoadByBaseSlot,
   excludeSlotIds,
+  weights,
 }) {
   const { viableSlots } = evaluateSlotsForTeam(
     {
@@ -508,6 +543,7 @@ function findBestAvailableSlotForTeam({
       divisionPreferences,
       coachAssignments,
       divisionLoadByBaseSlot,
+      weights,
     },
     { excludeSlotIds },
   );

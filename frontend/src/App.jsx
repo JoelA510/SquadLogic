@@ -55,6 +55,21 @@ const statusLabels = {
   pending: { label: 'Pending', tone: 'status-pending' },
 };
 
+function InsightSection({ title, items, emptyMessage, renderItem }) {
+  const hasItems = items && items.length > 0;
+
+  return (
+    <article>
+      <h3>{title}</h3>
+      {hasItems ? (
+        <ul className="insight-list">{items.map(renderItem)}</ul>
+      ) : (
+        <p className="insight__empty">{emptyMessage}</p>
+      )}
+    </article>
+  );
+}
+
 function App() {
   const summary = useMemo(() => {
     const completed = roadmapSections.filter((section) => section.status === 'complete').length;
@@ -106,7 +121,7 @@ function App() {
       .toString()
       .padStart(2, '0')}`;
     const suffix = hours >= 12 ? 'pm' : 'am';
-    const adjustedHour = hours % 12 === 0 ? 12 : hours % 12;
+    const adjustedHour = ((hours + 11) % 12) + 1;
     return `${adjustedHour}:${mins.toString().padStart(2, '0')} ${suffix} (${label})`;
   };
 
@@ -130,6 +145,10 @@ function App() {
   const hasGameWarnings =
     (gameReadinessSnapshot.warnings?.length ?? 0) > 0 ||
     (gameReadinessSnapshot.unscheduled?.length ?? 0) > 0;
+
+  const baseSlotItems = practiceReadinessSnapshot.baseSlotDistribution ?? [];
+  const divisionDayItems = Object.entries(practiceReadinessSnapshot.divisionDayDistribution ?? {});
+  const underutilizedBaseSlotItems = practiceReadinessSnapshot.underutilizedBaseSlots ?? [];
 
   return (
     <div className="app-shell">
@@ -368,88 +387,73 @@ function App() {
             )}
           </article>
 
-          <article>
-            <h3>Base slot distribution</h3>
-            {!practiceReadinessSnapshot.baseSlotDistribution?.length ? (
-              <p className="insight__empty">No base slot summaries captured.</p>
-            ) : (
-              <ul className="insight-list">
-                {practiceReadinessSnapshot.baseSlotDistribution.map((slot) => (
-                  <li key={slot.baseSlotId}>
-                    <div className="insight__title">{slot.baseSlotId}</div>
-                    <p>
-                      {slot.day ?? 'Unknown day'} · {formatTime(slot.representativeStart)} ·{' '}
-                      {slot.totalAssigned} of {slot.totalCapacity} teams assigned
-                    </p>
-                    {slot.divisionBreakdown && slot.divisionBreakdown.length > 0 && (
-                      <p className="insight__meta">
-                        {slot.divisionBreakdown
-                          .map(
-                            (division) =>
-                              `${division.division}: ${formatPercentPrecise(division.percentage)} (${division.count})`,
-                          )
-                          .join(' · ')}
-                      </p>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </article>
-
-          <article>
-            <h3>Division day coverage</h3>
-            {practiceReadinessSnapshot.divisionDayDistribution &&
-            Object.keys(practiceReadinessSnapshot.divisionDayDistribution).length > 0 ? (
-              <ul className="insight-list">
-                {Object.entries(practiceReadinessSnapshot.divisionDayDistribution).map(
-                  ([division, details]) => (
-                    <li key={division}>
-                      <div className="insight__title">{division}</div>
-                      <p>
-                        {details.totalAssigned} assignments · average start{' '}
-                        {formatClockFromMinutes(details.averageStartMinutes)}
-                      </p>
-                      {details.dayBreakdown && details.dayBreakdown.length > 0 && (
-                        <p className="insight__meta">
-                          {details.dayBreakdown
-                            .map(
-                              (entry) =>
-                                `${entry.day}: ${formatPercentPrecise(entry.percentage)} (${entry.count})`,
-                            )
-                            .join(' · ')}
-                        </p>
-                      )}
-                    </li>
-                  ),
+          <InsightSection
+            title="Base slot distribution"
+            items={baseSlotItems}
+            emptyMessage="No base slot summaries captured."
+            renderItem={(slot) => (
+              <li key={slot.baseSlotId}>
+                <div className="insight__title">{slot.baseSlotId}</div>
+                <p>
+                  {slot.day ?? 'Unknown day'} · {formatTime(slot.representativeStart)} · {slot.totalAssigned} of {slot.totalCapacity}
+                  teams assigned
+                </p>
+                {slot.divisionBreakdown && slot.divisionBreakdown.length > 0 && (
+                  <p className="insight__meta">
+                    {slot.divisionBreakdown
+                      .map(
+                        (division) => `${division.division}: ${formatPercentPrecise(division.percentage)} (${division.count})`,
+                      )
+                      .join(' · ')}
+                  </p>
                 )}
-              </ul>
-            ) : (
-              <p className="insight__empty">No day distribution captured for this run.</p>
+              </li>
             )}
-          </article>
+          />
 
-          <article>
-            <h3>Underutilized base slots</h3>
-            {practiceReadinessSnapshot.underutilizedBaseSlots?.length ? (
-              <ul className="insight-list">
-                {practiceReadinessSnapshot.underutilizedBaseSlots.map((slot) => (
-                  <li key={slot.baseSlotId}>
-                    <div className="insight__title">{slot.baseSlotId}</div>
-                    <p>
-                      {slot.day ?? 'Unknown day'} · {formatTime(slot.representativeStart)} ·{' '}
-                      {slot.totalAssigned} of {slot.totalCapacity} teams assigned
-                    </p>
+          <InsightSection
+            title="Division day coverage"
+            items={divisionDayItems}
+            emptyMessage="No day distribution captured for this run."
+            renderItem={(entry) => {
+              const [division, details] = entry;
+              return (
+                <li key={division}>
+                  <div className="insight__title">{division}</div>
+                  <p>
+                    {details.totalAssigned} assignments · average start {formatClockFromMinutes(details.averageStartMinutes)}
+                  </p>
+                  {details.dayBreakdown && details.dayBreakdown.length > 0 && (
                     <p className="insight__meta">
-                      Utilization {formatPercentPrecise(slot.utilization)} — consider rebalancing.
+                      {details.dayBreakdown
+                        .map(
+                          (dayEntry) => `${dayEntry.day}: ${formatPercentPrecise(dayEntry.percentage)} (${dayEntry.count})`,
+                        )
+                        .join(' · ')}
                     </p>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="insight__empty">All base slots are at healthy utilization.</p>
+                  )}
+                </li>
+              );
+            }}
+          />
+
+          <InsightSection
+            title="Underutilized base slots"
+            items={underutilizedBaseSlotItems}
+            emptyMessage="All base slots are at healthy utilization."
+            renderItem={(slot) => (
+              <li key={slot.baseSlotId}>
+                <div className="insight__title">{slot.baseSlotId}</div>
+                <p>
+                  {slot.day ?? 'Unknown day'} · {formatTime(slot.representativeStart)} · {slot.totalAssigned} of {slot.totalCapacity}
+                  teams assigned
+                </p>
+                <p className="insight__meta">
+                  Utilization {formatPercentPrecise(slot.utilization)} — consider rebalancing.
+                </p>
+              </li>
             )}
-          </article>
+          />
 
           <article>
             <h3>Conflicts & warnings</h3>

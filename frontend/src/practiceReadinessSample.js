@@ -43,7 +43,7 @@ export const practiceReadinessSnapshot = {
       totalCapacity: 4,
       utilization: 0.75,
       divisionBreakdown: [
-        { division: 'U10', count: 3, percentage: 0.75 },
+        { division: 'U10', count: 3, percentage: 1.0 },
       ],
     },
     {
@@ -54,7 +54,7 @@ export const practiceReadinessSnapshot = {
       totalCapacity: 2,
       utilization: 0.5,
       divisionBreakdown: [
-        { division: 'U12', count: 1, percentage: 0.5 },
+        { division: 'U12', count: 1, percentage: 1.0 },
       ],
     },
   ],

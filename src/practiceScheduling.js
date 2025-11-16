@@ -162,13 +162,13 @@ export function schedulePractices({
   const divisionLoadByDay = new Map();
 
   const incrementDivisionLoad = (slot, division) => {
-    const key = getDivisionLoadKey(slot, division);
-    divisionLoadByBaseSlot.set(key, (divisionLoadByBaseSlot.get(key) ?? 0) + 1);
-
-    const dayKey = getDivisionDayKey(slot, division);
-    if (dayKey) {
-      divisionLoadByDay.set(dayKey, (divisionLoadByDay.get(dayKey) ?? 0) + 1);
-    }
+    const increment = (map, key) => {
+      if (key) {
+        map.set(key, (map.get(key) ?? 0) + 1);
+      }
+    };
+    increment(divisionLoadByBaseSlot, getDivisionLoadKey(slot, division));
+    increment(divisionLoadByDay, getDivisionDayKey(slot, division));
   };
 
   const decrementDivisionLoad = (slot, division) => {

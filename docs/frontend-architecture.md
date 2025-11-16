@@ -12,7 +12,7 @@ This document breaks down the roadmap's front-end milestones into an actionable 
    - KPIs: total players imported, teams generated, practices scheduled, evaluation status.
    - Components: `SummaryStat`, `ProgressTimeline`, `RecentActivity` (backed by Supabase `import_jobs` and scheduler run logs).
    - **Scheduler run observability**: Wire tiles to `scheduler_runs` with live status badges, run durations, and conflict counts
-     drawn from the `metrics`/`results` JSON payloads. Include an expandable `RunDetailDrawer` that lists the latest run per
+     drawn from the `metrics` and `results` JSON payloads. Include an expandable `RunDetailDrawer` that lists the latest run per
      type (team, practice, game), links to related `evaluation_runs`, and surfaces retry controls when a run is stuck in
      `needs_manual_review` or `failed` states.
 2. **Data Import**

@@ -150,6 +150,8 @@ function App() {
   const baseSlotItems = practiceReadinessSnapshot.baseSlotDistribution ?? [];
   const divisionDayItems = Object.entries(practiceReadinessSnapshot.divisionDayDistribution ?? {});
   const underutilizedBaseSlotItems = practiceReadinessSnapshot.underutilizedBaseSlots ?? [];
+  const manualFollowUpBreakdown =
+    practiceReadinessSnapshot.manualFollowUpBreakdown ?? [];
 
   return (
     <div className="app-shell">
@@ -349,6 +351,27 @@ function App() {
               </ul>
             )}
           </article>
+
+          <InsightSection
+            title="Manual follow-up categories"
+            items={manualFollowUpBreakdown}
+            emptyMessage="No category breakdown captured."
+            renderItem={(entry) => (
+              <li key={entry.category}>
+                <div className="insight__title">{entry.category}</div>
+                <p>
+                  {entry.count} {entry.count === 1 ? 'team' : 'teams'} ·{' '}
+                  {formatPercentPrecise(entry.percentage)}
+                </p>
+                {entry.teamIds?.length > 0 && (
+                  <p className="insight__meta">Teams: {entry.teamIds.join(', ')}</p>
+                )}
+                {entry.reasons?.length > 0 && (
+                  <p className="insight__meta">Reasons: {formatList(entry.reasons)}</p>
+                )}
+              </li>
+            )}
+          />
 
           <article>
             <h3>Field load highlights</h3>

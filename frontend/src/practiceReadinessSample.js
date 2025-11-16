@@ -7,6 +7,15 @@ export const practiceReadinessSnapshot = {
     assignmentRate: 0.9444,
     manualFollowUpRate: 0.0556,
   },
+  manualFollowUpBreakdown: [
+    {
+      category: 'capacity',
+      count: 1,
+      percentage: 1,
+      teamIds: ['U10-T04'],
+      reasons: ['no shared slot capacity'],
+    },
+  ],
   unassignedByReason: [
     {
       reason: 'no shared slot capacity',

@@ -252,8 +252,8 @@ test('identifies divisions stacked on a single practice day', () => {
       division: 'U12',
       dominantDay: 'Tue',
       dominantShare: 0.8,
+      dominantCount: 4,
       totalAssignments: 5,
-      message: 'Division U12 has 80% of practices on Tue (4/5)',
     },
   ]);
 });

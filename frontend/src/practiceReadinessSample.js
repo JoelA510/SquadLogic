@@ -86,8 +86,8 @@ export const practiceReadinessSnapshot = {
       division: 'U12',
       dominantDay: 'Wednesday',
       dominantShare: 0.6667,
+      dominantCount: 4,
       totalAssignments: 6,
-      message: 'Division U12 has 66.7% of practices on Wednesday (4/6)',
     },
   ],
   divisionDayDistribution: {

@@ -445,9 +445,9 @@ function App() {
             renderItem={(alert) => (
               <li key={`${alert.division}-${alert.dominantDay}`}>
                 <div className="insight__title">{alert.division}</div>
-                <p>{alert.message}</p>
-                <p className="insight__meta">
-                  {alert.totalAssignments} assignments · {formatPercentPrecise(alert.dominantShare)} on {alert.dominantDay}
+                <p>
+                  {formatPercentPrecise(alert.dominantShare)} of practices ({alert.dominantCount}/{alert.totalAssignments}) are
+                  concentrated on {alert.dominantDay}.
                 </p>
               </li>
             )}

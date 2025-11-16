@@ -348,15 +348,12 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
       primaryDay &&
       primaryDay.percentage >= DAY_CONCENTRATION_THRESHOLD
     ) {
-      const percentLabel = (primaryDay.percentage * 100)
-        .toFixed(1)
-        .replace(/\.0$/, '');
       dayConcentrationAlerts.push({
         division,
         dominantDay: primaryDay.day,
         dominantShare: primaryDay.percentage,
+        dominantCount: primaryDay.count,
         totalAssignments: counted,
-        message: `Division ${division} has ${percentLabel}% of practices on ${primaryDay.day} (${primaryDay.count}/${counted})`,
       });
     }
   }

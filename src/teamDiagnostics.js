@@ -247,25 +247,17 @@ function summarizeOverflowEntries(entries) {
 }
 
 function normalizeReasonCounts({ byReason, fallbackByReason, field }) {
-  if (byReason && typeof byReason === 'object') {
-    return Object.entries(byReason).reduce((acc, [reason, entry]) => {
-      const value = entry?.[field];
-      if (Number.isFinite(value)) {
-        acc[reason] = value;
-      }
-      return acc;
-    }, {});
+  const source = byReason && typeof byReason === 'object' ? byReason : fallbackByReason;
+
+  if (!source || typeof source !== 'object') {
+    return {};
   }
 
-  if (fallbackByReason && typeof fallbackByReason === 'object') {
-    return Object.entries(fallbackByReason).reduce((acc, [reason, entry]) => {
-      const value = entry?.[field];
-      if (Number.isFinite(value)) {
-        acc[reason] = value;
-      }
-      return acc;
-    }, {});
-  }
-
-  return {};
+  return Object.entries(source).reduce((acc, [reason, entry]) => {
+    const value = entry?.[field];
+    if (Number.isFinite(value)) {
+      acc[reason] = value;
+    }
+    return acc;
+  }, {});
 }

@@ -262,7 +262,6 @@ function App() {
                     {division.overflowPlayers > 0 &&
                       ` (${formatReasons(division.overflowByReason)})`}
                     {division.overflowPlayers > 0 &&
-                      division.overflowPlayersByReason &&
                       Object.keys(division.overflowPlayersByReason).length > 0 && (
                         <span className="insight__meta">
                           Players affected: {formatReasons(division.overflowPlayersByReason)}

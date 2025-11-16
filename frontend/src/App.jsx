@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import './App.css';
 import { teamSummarySnapshot } from './teamSummarySample.js';
 import { practiceReadinessSnapshot } from './practiceReadinessSample.js';
+import { gameReadinessSnapshot } from './gameReadinessSample.js';
 
 const MANUAL_FOLLOW_UP_THRESHOLD = 0.05;
 
@@ -67,6 +68,8 @@ function App() {
   const { totals, divisions, generatedAt } = teamSummarySnapshot;
   const practiceSummary = practiceReadinessSnapshot.summary;
   const practiceGeneratedAt = practiceReadinessSnapshot.generatedAt;
+  const gameSummary = gameReadinessSnapshot.summary;
+  const gameGeneratedAt = gameReadinessSnapshot.generatedAt;
 
   const formatPercent = (value) => `${Math.round((value ?? 0) * 100)}%`;
   const formatPercentPrecise = (value) => {
@@ -96,6 +99,10 @@ function App() {
   const hasNoConflictsOrWarnings =
     practiceReadinessSnapshot.coachConflicts.length === 0 &&
     practiceReadinessSnapshot.dataQualityWarnings.length === 0;
+
+  const hasGameWarnings =
+    (gameReadinessSnapshot.warnings?.length ?? 0) > 0 ||
+    (gameReadinessSnapshot.unscheduled?.length ?? 0) > 0;
 
   return (
     <div className="app-shell">
@@ -262,7 +269,7 @@ function App() {
         <div className="practice-insights">
           <article>
             <h3>Manual follow-up reasons</h3>
-            !practiceReadinessSnapshot.unassignedByReason?.length ? (
+            {!practiceReadinessSnapshot.unassignedByReason?.length ? (
               <p className="practice-insight__empty">All teams received automated practice assignments.</p>
             ) : (
               <ul className="practice-insight-list">
@@ -355,6 +362,115 @@ function App() {
                   <li key={`warning-${index}`}>
                     <div className="practice-insight__title">Data quality</div>
                     <p>{warning}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </article>
+        </div>
+      </section>
+
+      <section className="game-readiness" aria-labelledby="game-readiness-heading">
+        <header className="game-readiness__header">
+          <div>
+            <h2 id="game-readiness-heading">Game readiness</h2>
+            <p>
+              Snapshot of the latest game evaluator outputs from{' '}
+              {new Date(gameGeneratedAt).toLocaleDateString()} capturing schedule completion,
+              bye coverage, and any outstanding matchups or shared slot imbalances surfaced by
+              the metrics agent.
+            </p>
+          </div>
+          <dl className="game-readiness__grid" aria-label="Game metrics summary">
+            <div>
+              <dt>Games scheduled</dt>
+              <dd>
+                {gameSummary.totalGames} ({formatPercentPrecise(gameSummary.scheduledRate)} of planned)
+              </dd>
+            </div>
+            <div>
+              <dt>Divisions covered</dt>
+              <dd>{gameSummary.divisionsCovered}</dd>
+            </div>
+            <div>
+              <dt>Unscheduled matchups</dt>
+              <dd>{gameSummary.unscheduledMatchups}</dd>
+            </div>
+            <div>
+              <dt>Teams with byes</dt>
+              <dd>{gameSummary.teamsWithByes}</dd>
+            </div>
+            <div>
+              <dt>Shared slot alerts</dt>
+              <dd>{gameSummary.sharedSlotAlerts}</dd>
+            </div>
+          </dl>
+        </header>
+
+        {hasGameWarnings && (
+          <p className="game-readiness__alert" role="status">
+            Review the flagged conflicts and unscheduled matchups before publishing the slate;
+            targeted adjustments will improve coach availability and balance shared fields.
+          </p>
+        )}
+
+        <div className="game-insights">
+          <article>
+            <h3>Unscheduled matchups</h3>
+            {gameReadinessSnapshot.unscheduled.length === 0 ? (
+              <p className="practice-insight__empty">All matchups are assigned.</p>
+            ) : (
+              <ul className="practice-insight-list">
+                {gameReadinessSnapshot.unscheduled.map((entry, index) => (
+                  <li key={`unscheduled-${entry.matchup}-${index}`}>
+                    <div className="practice-insight__title">Week {entry.weekIndex}</div>
+                    <p>
+                      {entry.matchup} · {entry.reason}
+                    </p>
+                    {entry.note && <p className="practice-insight__meta">{entry.note}</p>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </article>
+
+          <article>
+            <h3>Conflicts & shared slot alerts</h3>
+            {gameReadinessSnapshot.warnings.length === 0 ? (
+              <p className="practice-insight__empty">No conflicts detected.</p>
+            ) : (
+              <ul className="practice-insight-list">
+                {gameReadinessSnapshot.warnings.map((warning, index) => (
+                  <li key={`warning-${warning.type}-${index}`}>
+                    <div className="practice-insight__title">{warning.message}</div>
+                    {warning.details && (
+                      <p className="practice-insight__meta">
+                        {warning.details.dominantDivision
+                          ? `${warning.details.dominantDivision} at ${formatPercentPrecise(warning.details.dominantShare)}`
+                          : warning.details.coachId
+                            ? `Coach ${warning.details.coachId} · Week ${warning.details.weekIndex}`
+                            : 'See evaluator details'}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </article>
+
+          <article>
+            <h3>Field highlights</h3>
+            {gameReadinessSnapshot.fieldHighlights.length === 0 ? (
+              <p className="practice-insight__empty">No field usage captured.</p>
+            ) : (
+              <ul className="practice-insight-list">
+                {gameReadinessSnapshot.fieldHighlights.map((entry) => (
+                  <li key={entry.fieldId}>
+                    <div className="practice-insight__title">{entry.fieldId}</div>
+                    <p>
+                      {entry.games} games · Divisions {formatList(entry.divisions)}
+                    </p>
+                    {entry.note && <p className="practice-insight__meta">{entry.note}</p>}
                   </li>
                 ))}
               </ul>

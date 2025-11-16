@@ -57,11 +57,12 @@ test('aggregates practice and game evaluations with issue rollups', () => {
   });
 
   assert.equal(practiceResult.status, 'action-required');
-  assert.equal(practiceResult.issues.length, 6);
+  assert.equal(practiceResult.issues.length, 7);
 
   const messages = practiceResult.issues.map((issue) => issue.message);
   assert.ok(messages.some((message) => message.includes('lack practice assignments')));
   assert.ok(messages.some((message) => message.includes('Manual follow-up required')));
+  assert.ok(messages.some((message) => message.includes('Manual follow-up categories:')));
   assert.ok(messages.some((message) => message.includes('overlapping practices')));
   assert.ok(messages.some((message) => message.includes('exceeds capacity')));
   assert.ok(messages.some((message) => message.includes('unknown team')));
@@ -90,6 +91,25 @@ test('aggregates practice and game evaluations with issue rollups', () => {
       reasons: ['no capacity'],
     },
   ]);
+
+  const categorySummaryIssue = practiceResult.issues.find((issue) =>
+    issue.message.includes('Manual follow-up categories:'),
+  );
+  assert.ok(categorySummaryIssue);
+  assert.equal(
+    categorySummaryIssue.message,
+    'Manual follow-up categories: capacity (1 – 100%)',
+  );
+  assert.deepEqual(categorySummaryIssue.details.manualFollowUpBreakdown, [
+    {
+      category: MANUAL_FOLLOW_UP_CATEGORIES.CAPACITY,
+      count: 1,
+      percentage: 1,
+      teamIds: ['team-3'],
+      reasons: ['no capacity'],
+    },
+  ]);
+  assert.equal(categorySummaryIssue.details.totalManualFollowUps, 1);
 
   assert.equal(practiceResult.practice.summary.unassignedTeams, 1);
   assert.equal(practiceResult.games.summary.totalAssignments, 1);

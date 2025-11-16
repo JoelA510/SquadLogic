@@ -89,6 +89,8 @@ export function runScheduleEvaluations({ practice, games } = {}) {
       Number.isFinite(manualFollowUpRate)
     ) {
       const percentage = parseFloat((manualFollowUpRate * 100).toFixed(1));
+      const manualFollowUpBreakdown = practiceResult.manualFollowUpBreakdown ?? [];
+
       issues.push({
         category: 'practice',
         severity: 'warning',
@@ -98,9 +100,28 @@ export function runScheduleEvaluations({ practice, games } = {}) {
           unassignedTeams,
           totalTeams,
           unassignedByReason: practiceResult.unassignedByReason,
-          manualFollowUpBreakdown: practiceResult.manualFollowUpBreakdown,
+          manualFollowUpBreakdown,
         },
       });
+
+      if (manualFollowUpBreakdown.length > 0) {
+        const categorySummary = manualFollowUpBreakdown
+          .map((bucket) => {
+            const shareLabel = formatPercentage(bucket.percentage ?? 0);
+            return `${bucket.category} (${bucket.count} – ${shareLabel}%)`;
+          })
+          .join(', ');
+
+        issues.push({
+          category: 'practice',
+          severity: 'warning',
+          message: `Manual follow-up categories: ${categorySummary}`,
+          details: {
+            manualFollowUpBreakdown,
+            totalManualFollowUps: unassignedTeams,
+          },
+        });
+      }
     }
 
     for (const conflict of coachConflicts) {

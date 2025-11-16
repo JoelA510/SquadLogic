@@ -52,6 +52,7 @@
  * }
  */
 const FAIRNESS_DOMINANCE_THRESHOLD = 0.7;
+const UNDERUTILIZATION_THRESHOLD = 0.25;
 
 function calculateFairnessConcerns(baseSlotDistribution, assignmentsByDivision) {
   const assignedDivisions = new Set(assignmentsByDivision.keys());
@@ -340,6 +341,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
   }
 
   const baseSlotDistribution = [];
+  const underutilizedBaseSlots = [];
   for (const [baseSlotId, meta] of baseSlotMetadata.entries()) {
     const countsRecord = baseSlotDivisionCounts.get(baseSlotId);
     const totalAssigned = countsRecord?.totalAssigned ?? 0;
@@ -369,9 +371,25 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
       utilization,
       divisionBreakdown,
     });
+
+    if (
+      totalCapacity > 0 &&
+      utilization !== null &&
+      utilization < UNDERUTILIZATION_THRESHOLD
+    ) {
+      underutilizedBaseSlots.push({
+        baseSlotId,
+        day: meta.day ?? null,
+        representativeStart: meta.representativeStart ? meta.representativeStart.toISOString() : null,
+        totalAssigned,
+        totalCapacity,
+        utilization,
+      });
+    }
   }
 
   baseSlotDistribution.sort((a, b) => a.baseSlotId.localeCompare(b.baseSlotId));
+  underutilizedBaseSlots.sort((a, b) => a.baseSlotId.localeCompare(b.baseSlotId));
 
   const fairnessConcerns = calculateFairnessConcerns(baseSlotDistribution, assignmentsByDivision);
 
@@ -465,6 +483,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
     coachConflicts,
     dataQualityWarnings,
     fairnessConcerns,
+    underutilizedBaseSlots,
     unassignedByReason,
   };
 }

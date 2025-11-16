@@ -60,6 +60,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
   }
 
   const playersByDivision = new Map();
+  const playerDivisions = new Map();
   for (const player of players) {
     if (!player || typeof player !== 'object') {
       throw new TypeError('each player must be an object');
@@ -70,6 +71,14 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
     if (!player.division) {
       throw new TypeError(`player ${player.id} is missing a division`);
     }
+
+    const previousDivision = playerDivisions.get(player.id);
+    if (previousDivision) {
+      throw new Error(
+        `duplicate player id detected: ${player.id} (divisions ${previousDivision} and ${player.division})`,
+      );
+    }
+    playerDivisions.set(player.id, player.division);
 
     const bucket = playersByDivision.get(player.division) ?? [];
     bucket.push(structuredClone(player));

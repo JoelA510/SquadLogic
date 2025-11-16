@@ -389,3 +389,48 @@ test('flags fairness concerns when a base slot is dominated by one division', ()
     message: 'Base slot field-a is 75% filled by division U10 (3/4 assignments)',
   });
 });
+
+test('flags underutilized base slots for follow-up', () => {
+  const slots = [
+    {
+      id: 'slot-high-capacity',
+      baseSlotId: 'field-wide',
+      capacity: 5,
+      start: '2024-08-05T22:00:00Z',
+      end: '2024-08-05T23:00:00Z',
+      day: 'Mon',
+    },
+    {
+      id: 'slot-balanced',
+      baseSlotId: 'field-balanced',
+      capacity: 1,
+      start: '2024-08-06T22:00:00Z',
+      end: '2024-08-06T23:00:00Z',
+      day: 'Tue',
+    },
+  ];
+
+  const teams = [
+    { id: 'team-a', division: 'U10', coachId: null },
+    { id: 'team-b', division: 'U10', coachId: null },
+  ];
+
+  const report = evaluatePracticeSchedule({
+    assignments: [
+      { teamId: 'team-a', slotId: 'slot-high-capacity' },
+      { teamId: 'team-b', slotId: 'slot-balanced' },
+    ],
+    teams,
+    slots,
+  });
+
+  assert.equal(report.underutilizedBaseSlots.length, 1);
+  assert.deepEqual(report.underutilizedBaseSlots[0], {
+    baseSlotId: 'field-wide',
+    day: 'Mon',
+    representativeStart: '2024-08-05T22:00:00.000Z',
+    totalAssigned: 1,
+    totalCapacity: 5,
+    utilization: 0.2,
+  });
+});

@@ -64,6 +64,7 @@ export function runScheduleEvaluations({ practice, games } = {}) {
       coachConflicts,
       dataQualityWarnings,
       fairnessConcerns = [],
+      underutilizedBaseSlots = [],
     } = practiceResult;
 
     if (unassignedTeams > 0) {
@@ -120,6 +121,18 @@ export function runScheduleEvaluations({ practice, games } = {}) {
         severity: 'warning',
         message: concern.message,
         details: concern,
+      });
+    }
+
+    for (const slot of underutilizedBaseSlots) {
+      const utilization = Number.isFinite(slot.utilization)
+        ? `${(slot.utilization * 100).toFixed(1).replace(/\.0$/, '')}%`
+        : 'unknown';
+      issues.push({
+        category: 'practice',
+        severity: 'warning',
+        message: `Base slot ${slot.baseSlotId} is underutilized (${slot.totalAssigned}/${slot.totalCapacity} teams, ${utilization})`,
+        details: slot,
       });
     }
   }

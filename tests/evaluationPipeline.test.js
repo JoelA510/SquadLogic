@@ -267,3 +267,33 @@ test('shared slot imbalance warnings surface with warning severity', () => {
   assert.equal(imbalanceIssue.severity, 'warning');
   assert.equal(result.status, 'attention-needed');
 });
+
+test('underutilized practice base slots surface as warnings', () => {
+  const practiceSlots = [
+    {
+      id: 'slot-spacious',
+      capacity: 5,
+      start: BASE_TIME,
+      end: addMinutes(BASE_TIME, 60),
+      day: 'Wed',
+    },
+  ];
+  const teams = [{ id: 'team-70', division: 'U14', coachId: null }];
+
+  const result = runScheduleEvaluations({
+    practice: {
+      assignments: [{ teamId: 'team-70', slotId: 'slot-spacious' }],
+      teams,
+      slots: practiceSlots,
+    },
+  });
+
+  assert.equal(result.practice.underutilizedBaseSlots.length, 1);
+  const warning = result.issues.find((issue) =>
+    issue.message.includes('underutilized'),
+  );
+  assert.ok(warning);
+  assert.equal(warning.category, 'practice');
+  assert.equal(warning.severity, 'warning');
+  assert.ok(warning.message.includes('slot-spacious'));
+});

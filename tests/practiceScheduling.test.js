@@ -56,6 +56,25 @@ test('discourages stacking the same division onto a single base slot when altern
   assert.equal(assignmentMap.get('T3'), 'shared-slot');
 });
 
+test('discourages stacking the same division on one practice day', () => {
+  const teams = [
+    { id: 'T1', division: 'U10', coachId: 'coach-a' },
+    { id: 'T2', division: 'U10', coachId: 'coach-b' },
+  ];
+
+  const slots = [
+    createSlot({ id: 'mon-early', day: 'Mon', startHour: 18, endHour: 19, capacity: 1 }),
+    createSlot({ id: 'mon-late', day: 'Mon', startHour: 19, endHour: 20, capacity: 1 }),
+    createSlot({ id: 'tue-early', day: 'Tue', startHour: 18, endHour: 19, capacity: 1 }),
+  ];
+
+  const result = schedulePractices({ teams, slots });
+
+  const assignmentMap = new Map(result.assignments.map((entry) => [entry.teamId, entry.slotId]));
+  assert.equal(assignmentMap.get('T1'), 'mon-early');
+  assert.equal(assignmentMap.get('T2'), 'tue-early');
+});
+
 test('supports tuning scoring weights for fairness penalties', () => {
   const teams = [
     { id: 'T1', division: 'U10', coachId: 'coach-a' },
@@ -71,7 +90,7 @@ test('supports tuning scoring weights for fairness penalties', () => {
   const result = schedulePractices({
     teams,
     slots,
-    scoringWeights: { divisionSaturationPenalty: 0 },
+    scoringWeights: { divisionSaturationPenalty: 0, divisionDaySaturationPenalty: 0 },
   });
 
   const assignmentMap = new Map(result.assignments.map((entry) => [entry.teamId, entry.slotId]));

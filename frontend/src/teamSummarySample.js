@@ -36,6 +36,9 @@ export const teamSummarySnapshot = {
       overflowByReason: {
         'insufficient-capacity': 1,
       },
+      overflowPlayersByReason: {
+        'insufficient-capacity': 2,
+      },
     },
     {
       divisionId: 'U10',
@@ -65,6 +68,9 @@ export const teamSummarySnapshot = {
       overflowByReason: {
         'coach-capacity': 1,
       },
+      overflowPlayersByReason: {
+        'coach-capacity': 2,
+      },
     },
     {
       divisionId: 'U12',
@@ -89,6 +95,7 @@ export const teamSummarySnapshot = {
       overflowUnits: 0,
       overflowPlayers: 0,
       overflowByReason: {},
+      overflowPlayersByReason: {},
     },
   ],
 };

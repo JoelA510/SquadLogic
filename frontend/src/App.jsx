@@ -261,6 +261,12 @@ function App() {
                     {division.overflowPlayers}
                     {division.overflowPlayers > 0 &&
                       ` (${formatReasons(division.overflowByReason)})`}
+                    {division.overflowPlayers > 0 &&
+                      Object.keys(division.overflowPlayersByReason).length > 0 && (
+                        <span className="insight__meta">
+                          Players affected: {formatReasons(division.overflowPlayersByReason)}
+                        </span>
+                      )}
                   </dd>
                 </div>
               </dl>

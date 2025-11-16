@@ -278,14 +278,19 @@ test('validates input arguments', () => {
     'should throw for duplicate IDs in the same division',
   );
 
-  const duplicatePlayersCrossDivisions = [
+  const duplicatePlayersDifferentDivision = [
     { id: 'dup', division: 'U10' },
-    { id: 'dup', division: 'U11' },
+    { id: 'dup', division: 'U12' },
   ];
+  const divisionConfigsWithU12 = { ...divisionConfigs, U12: { maxRosterSize: 8 } };
   assert.throws(
-    () => generateTeams({ players: duplicatePlayersCrossDivisions, divisionConfigs }),
-    /duplicate player id detected: dup \(divisions U10 and U11\)/i,
-    'should throw for duplicate IDs across divisions',
+    () =>
+      generateTeams({
+        players: duplicatePlayersDifferentDivision,
+        divisionConfigs: divisionConfigsWithU12,
+      }),
+    /duplicate player id detected: dup \(divisions U10 and U12\)/i,
+    'should throw for duplicate IDs in different divisions',
   );
 });
 

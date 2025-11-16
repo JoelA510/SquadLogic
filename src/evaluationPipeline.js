@@ -3,6 +3,9 @@ import { evaluateGameSchedule } from './gameMetrics.js';
 
 const MANUAL_FOLLOW_UP_WARNING_THRESHOLD = 0.05;
 
+const formatPercentage = (value) =>
+  (value * 100).toFixed(1).replace(/\.0$/, '');
+
 /**
  * Run practice and game schedule evaluations, returning an aggregated
  * dashboard-friendly payload describing overall readiness and key issues.
@@ -126,9 +129,7 @@ export function runScheduleEvaluations({ practice, games } = {}) {
     }
 
     for (const alert of dayConcentrationAlerts) {
-      const percentageLabel = (alert.dominantShare * 100)
-        .toFixed(1)
-        .replace(/\.0$/, '');
+      const percentageLabel = formatPercentage(alert.dominantShare);
 
       issues.push({
         category: 'practice',
@@ -140,7 +141,7 @@ export function runScheduleEvaluations({ practice, games } = {}) {
 
     for (const slot of underutilizedBaseSlots) {
       const utilization = Number.isFinite(slot.utilization)
-        ? `${(slot.utilization * 100).toFixed(1).replace(/\.0$/, '')}%`
+        ? `${formatPercentage(slot.utilization)}%`
         : 'unknown';
       issues.push({
         category: 'practice',

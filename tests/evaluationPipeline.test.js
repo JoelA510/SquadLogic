@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runScheduleEvaluations } from '../src/evaluationPipeline.js';
+import { MANUAL_FOLLOW_UP_CATEGORIES } from '../src/practiceMetrics.js';
 
 const BASE_TIME = new Date('2024-08-12T22:00:00Z');
 
@@ -78,6 +79,15 @@ test('aggregates practice and game evaluations with issue rollups', () => {
       divisionBreakdown: [
         { division: 'U10', count: 1, percentage: 1 },
       ],
+    },
+  ]);
+  assert.deepEqual(manualFollowUpIssue.details.manualFollowUpBreakdown, [
+    {
+      category: MANUAL_FOLLOW_UP_CATEGORIES.CAPACITY,
+      count: 1,
+      percentage: 1,
+      teamIds: ['team-3'],
+      reasons: ['no capacity'],
     },
   ]);
 

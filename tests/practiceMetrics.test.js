@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluatePracticeSchedule } from '../src/practiceMetrics.js';
+import {
+  evaluatePracticeSchedule,
+  MANUAL_FOLLOW_UP_CATEGORIES,
+} from '../src/practiceMetrics.js';
 
 const SAMPLE_SLOTS = [
   {
@@ -55,6 +58,16 @@ test('evaluatePracticeSchedule summarises utilization and division distribution'
     assignmentRate: 0.75,
     manualFollowUpRate: 0.25,
   });
+
+  assert.deepEqual(report.manualFollowUpBreakdown, [
+    {
+      category: MANUAL_FOLLOW_UP_CATEGORIES.CAPACITY,
+      count: 1,
+      percentage: 1,
+      teamIds: ['team-4'],
+      reasons: ['no capacity'],
+    },
+  ]);
 
   assert.equal(report.slotUtilization.length, 3);
   const [earlyMon, lateMon, wed] = report.slotUtilization;
@@ -494,4 +507,97 @@ test('flags underutilized base slots for follow-up', () => {
     totalCapacity: 5,
     utilization: 0.2,
   });
+});
+
+test('categorizes manual follow-ups by capacity, coach availability, and exclusions', () => {
+  const slots = [
+    {
+      id: 'slot-mon',
+      capacity: 1,
+      start: '2024-08-05T17:00:00Z',
+      end: '2024-08-05T18:00:00Z',
+      day: 'Mon',
+    },
+  ];
+  const teams = [
+    { id: 'team-a', division: 'U10', coachId: 'coach-a' },
+    { id: 'team-b', division: 'U10', coachId: 'coach-b' },
+    { id: 'team-c', division: 'U12', coachId: 'coach-c' },
+    { id: 'team-d', division: 'U12', coachId: 'coach-d' },
+  ];
+
+  const report = evaluatePracticeSchedule({
+    assignments: [],
+    unassigned: [
+      { teamId: 'team-a', reason: 'no available capacity' },
+      { teamId: 'team-b', reason: 'coach schedule conflicts on all slots' },
+      { teamId: 'team-c', reason: 'coach availability excludes all slots' },
+      { teamId: 'team-d', reason: 'no alternative slots available' },
+    ],
+    teams,
+    slots,
+  });
+
+  assert.deepEqual(report.manualFollowUpBreakdown, [
+    {
+      category: MANUAL_FOLLOW_UP_CATEGORIES.COACH_AVAILABILITY,
+      count: 2,
+      percentage: 0.5,
+      teamIds: ['team-b', 'team-c'],
+      reasons: [
+        'coach availability excludes all slots',
+        'coach schedule conflicts on all slots',
+      ],
+    },
+    {
+      category: MANUAL_FOLLOW_UP_CATEGORIES.CAPACITY,
+      count: 1,
+      percentage: 0.25,
+      teamIds: ['team-a'],
+      reasons: ['no available capacity'],
+    },
+    {
+      category: MANUAL_FOLLOW_UP_CATEGORIES.EXCLUDED_SLOTS,
+      count: 1,
+      percentage: 0.25,
+      teamIds: ['team-d'],
+      reasons: ['no alternative slots available'],
+    },
+  ]);
+});
+
+test('handles non-string manual follow-up reasons without throwing', () => {
+  const slots = [
+    {
+      id: 'slot-mon',
+      capacity: 1,
+      start: '2024-08-05T17:00:00Z',
+      end: '2024-08-05T18:00:00Z',
+      day: 'Mon',
+    },
+  ];
+  const teams = [
+    { id: 'team-a', division: 'U10', coachId: 'coach-a' },
+    { id: 'team-b', division: 'U12', coachId: 'coach-b' },
+  ];
+
+  const report = evaluatePracticeSchedule({
+    assignments: [],
+    unassigned: [
+      { teamId: 'team-a', reason: 42 },
+      { teamId: 'team-b', reason: { note: 'missing info' } },
+    ],
+    teams,
+    slots,
+  });
+
+  assert.deepEqual(report.manualFollowUpBreakdown, [
+    {
+      category: MANUAL_FOLLOW_UP_CATEGORIES.UNKNOWN,
+      count: 2,
+      percentage: 1,
+      teamIds: ['team-a', 'team-b'],
+      reasons: [],
+    },
+  ]);
 });

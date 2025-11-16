@@ -56,6 +56,39 @@ const UNDERUTILIZATION_THRESHOLD = 0.25;
 const DAY_CONCENTRATION_THRESHOLD = 0.65;
 const MIN_ASSIGNMENTS_FOR_CONCENTRATION = 3;
 
+export const MANUAL_FOLLOW_UP_CATEGORIES = {
+  CAPACITY: 'capacity',
+  COACH_AVAILABILITY: 'coach-availability',
+  EXCLUDED_SLOTS: 'excluded-slots',
+  UNKNOWN: 'constraints-or-unknown',
+};
+
+const normalizeManualFollowUpReasonInput = (raw) => {
+  if (typeof raw !== 'string') {
+    return 'unspecified';
+  }
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : 'unspecified';
+};
+
+function categorizeManualFollowUpReason(rawReason) {
+  const value = normalizeManualFollowUpReasonInput(rawReason).toLowerCase();
+
+  if (value.includes('capacity')) {
+    return MANUAL_FOLLOW_UP_CATEGORIES.CAPACITY;
+  }
+
+  if (value.includes('coach')) {
+    return MANUAL_FOLLOW_UP_CATEGORIES.COACH_AVAILABILITY;
+  }
+
+  if (value.includes('exclude') || value.includes('alternative slot')) {
+    return MANUAL_FOLLOW_UP_CATEGORIES.EXCLUDED_SLOTS;
+  }
+
+  return MANUAL_FOLLOW_UP_CATEGORIES.UNKNOWN;
+}
+
 function calculateFairnessConcerns(baseSlotDistribution, assignmentsByDivision) {
   const assignedDivisions = new Set(assignmentsByDivision.keys());
   const fairnessConcerns = [];
@@ -204,10 +237,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
       throw new TypeError('each unassigned entry requires a teamId');
     }
 
-    const reason =
-      typeof entry.reason === 'string' && entry.reason.trim().length > 0
-        ? entry.reason.trim()
-        : 'unspecified';
+    const reason = normalizeManualFollowUpReasonInput(entry.reason);
 
     const bucket =
       unassignedByReasonMap.get(reason) ?? {
@@ -490,6 +520,41 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
     }))
     .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
 
+  const manualFollowUpBreakdownMap = new Map();
+  const totalManualFollowUps = unassigned.length;
+
+  for (const entry of unassigned) {
+    const normalizedReason = normalizeManualFollowUpReasonInput(entry.reason);
+    const category = categorizeManualFollowUpReason(normalizedReason);
+    const bucket = manualFollowUpBreakdownMap.get(category) ?? {
+      category,
+      count: 0,
+      teamIds: [],
+      reasons: new Set(),
+    };
+
+    bucket.count += 1;
+    bucket.teamIds.push(entry.teamId);
+    if (normalizedReason !== 'unspecified') {
+      bucket.reasons.add(normalizedReason);
+    }
+
+    manualFollowUpBreakdownMap.set(category, bucket);
+  }
+
+  const manualFollowUpBreakdown = Array.from(manualFollowUpBreakdownMap.values())
+    .map((bucket) => ({
+      category: bucket.category,
+      count: bucket.count,
+      percentage:
+        totalManualFollowUps === 0
+          ? 0
+          : Number((bucket.count / totalManualFollowUps).toFixed(4)),
+      teamIds: bucket.teamIds.sort((a, b) => a.localeCompare(b)),
+      reasons: Array.from(bucket.reasons).sort((a, b) => a.localeCompare(b)),
+    }))
+    .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
+
   return {
     summary: {
       totalTeams,
@@ -508,5 +573,6 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
     fairnessConcerns,
     underutilizedBaseSlots,
     unassignedByReason,
+    manualFollowUpBreakdown,
   };
 }

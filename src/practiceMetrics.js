@@ -63,8 +63,16 @@ export const MANUAL_FOLLOW_UP_CATEGORIES = {
   UNKNOWN: 'constraints-or-unknown',
 };
 
-function categorizeManualFollowUpReason(reason) {
-  const value = (reason ?? 'unknown').toLowerCase();
+const normalizeManualFollowUpReasonInput = (raw) => {
+  if (typeof raw !== 'string') {
+    return 'unspecified';
+  }
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : 'unspecified';
+};
+
+function categorizeManualFollowUpReason(rawReason) {
+  const value = normalizeManualFollowUpReasonInput(rawReason).toLowerCase();
 
   if (value.includes('capacity')) {
     return MANUAL_FOLLOW_UP_CATEGORIES.CAPACITY;
@@ -229,10 +237,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
       throw new TypeError('each unassigned entry requires a teamId');
     }
 
-    const reason =
-      typeof entry.reason === 'string' && entry.reason.trim().length > 0
-        ? entry.reason.trim()
-        : 'unspecified';
+    const reason = normalizeManualFollowUpReasonInput(entry.reason);
 
     const bucket =
       unassignedByReasonMap.get(reason) ?? {
@@ -519,7 +524,8 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
   const totalManualFollowUps = unassigned.length;
 
   for (const entry of unassigned) {
-    const category = categorizeManualFollowUpReason(entry.reason);
+    const normalizedReason = normalizeManualFollowUpReasonInput(entry.reason);
+    const category = categorizeManualFollowUpReason(normalizedReason);
     const bucket = manualFollowUpBreakdownMap.get(category) ?? {
       category,
       count: 0,
@@ -529,8 +535,8 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
 
     bucket.count += 1;
     bucket.teamIds.push(entry.teamId);
-    if (entry.reason) {
-      bucket.reasons.add(entry.reason);
+    if (normalizedReason !== 'unspecified') {
+      bucket.reasons.add(normalizedReason);
     }
 
     manualFollowUpBreakdownMap.set(category, bucket);

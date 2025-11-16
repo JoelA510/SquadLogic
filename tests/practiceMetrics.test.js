@@ -565,3 +565,39 @@ test('categorizes manual follow-ups by capacity, coach availability, and exclusi
     },
   ]);
 });
+
+test('handles non-string manual follow-up reasons without throwing', () => {
+  const slots = [
+    {
+      id: 'slot-mon',
+      capacity: 1,
+      start: '2024-08-05T17:00:00Z',
+      end: '2024-08-05T18:00:00Z',
+      day: 'Mon',
+    },
+  ];
+  const teams = [
+    { id: 'team-a', division: 'U10', coachId: 'coach-a' },
+    { id: 'team-b', division: 'U12', coachId: 'coach-b' },
+  ];
+
+  const report = evaluatePracticeSchedule({
+    assignments: [],
+    unassigned: [
+      { teamId: 'team-a', reason: 42 },
+      { teamId: 'team-b', reason: { note: 'missing info' } },
+    ],
+    teams,
+    slots,
+  });
+
+  assert.deepEqual(report.manualFollowUpBreakdown, [
+    {
+      category: MANUAL_FOLLOW_UP_CATEGORIES.UNKNOWN,
+      count: 2,
+      percentage: 1,
+      teamIds: ['team-a', 'team-b'],
+      reasons: [],
+    },
+  ]);
+});

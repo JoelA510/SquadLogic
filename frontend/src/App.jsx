@@ -352,30 +352,26 @@ function App() {
             )}
           </article>
 
-          <article>
-            <h3>Manual follow-up categories</h3>
-            {manualFollowUpBreakdown.length === 0 ? (
-              <p className="insight__empty">No category breakdown captured.</p>
-            ) : (
-              <ul className="insight-list">
-                {manualFollowUpBreakdown.map((entry) => (
-                  <li key={entry.category}>
-                    <div className="insight__title">{entry.category}</div>
-                    <p>
-                      {entry.count} {entry.count === 1 ? 'team' : 'teams'} ·{' '}
-                      {formatPercentPrecise(entry.percentage)}
-                    </p>
-                    {entry.teamIds && entry.teamIds.length > 0 && (
-                      <p className="insight__meta">Teams: {entry.teamIds.join(', ')}</p>
-                    )}
-                    {entry.reasons && entry.reasons.length > 0 && (
-                      <p className="insight__meta">Reasons: {formatList(entry.reasons)}</p>
-                    )}
-                  </li>
-                ))}
-              </ul>
+          <InsightSection
+            title="Manual follow-up categories"
+            items={manualFollowUpBreakdown}
+            emptyMessage="No category breakdown captured."
+            renderItem={(entry) => (
+              <li key={entry.category}>
+                <div className="insight__title">{entry.category}</div>
+                <p>
+                  {entry.count} {entry.count === 1 ? 'team' : 'teams'} ·{' '}
+                  {formatPercentPrecise(entry.percentage)}
+                </p>
+                {entry.teamIds?.length > 0 && (
+                  <p className="insight__meta">Teams: {entry.teamIds.join(', ')}</p>
+                )}
+                {entry.reasons?.length > 0 && (
+                  <p className="insight__meta">Reasons: {formatList(entry.reasons)}</p>
+                )}
+              </li>
             )}
-          </article>
+          />
 
           <article>
             <h3>Field load highlights</h3>

@@ -14,6 +14,10 @@
  * @returns {{
  *   teamsByDivision: Record<string, Array<{ id: string, coachId: string | null, players: Array<Object> }>>,
  *   overflowByDivision: Record<string, Array<{ players: Array<Object>, reason: string, metadata?: Object }>>,
+ *   overflowSummaryByDivision: Record<
+ *     string,
+ *     { totalUnits: number, totalPlayers: number, byReason: Record<string, { units: number, players: number }> }
+ *   >,
  *   buddyDiagnosticsByDivision: Record<string, {
  *     mutualPairs: Array<{ playerIds: Array<string> }>,
  *     unmatchedRequests: Array<{ playerId: string, requestedBuddyId: string, reason: string }>,
@@ -74,6 +78,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
 
   const results = {};
   const overflowByDivision = {};
+  const overflowSummaryByDivision = {};
   const buddyDiagnosticsByDivision = {};
   const coachCoverageByDivision = {};
   const rosterBalanceByDivision = {};
@@ -106,6 +111,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
       reason: entry.reason,
       metadata: entry.metadata ? { ...entry.metadata } : undefined,
     }));
+    overflowSummaryByDivision[division] = summarizeOverflow(overflow);
     buddyDiagnosticsByDivision[division] = {
       mutualPairs: buddyDiagnostics.mutualPairs.map((pair) => ({
         playerIds: [...pair.playerIds],
@@ -168,6 +174,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
   return {
     teamsByDivision: results,
     overflowByDivision,
+    overflowSummaryByDivision,
     buddyDiagnosticsByDivision,
     coachCoverageByDivision,
     rosterBalanceByDivision,
@@ -367,4 +374,29 @@ function shuffleUnits(units, random) {
     const j = Math.floor(random() * (i + 1));
     [units[i], units[j]] = [units[j], units[i]];
   }
+}
+
+function summarizeOverflow(entries) {
+  if (!entries || entries.length === 0) {
+    return { totalUnits: 0, totalPlayers: 0, byReason: {} };
+  }
+
+  const summary = {
+    totalUnits: entries.length,
+    totalPlayers: 0,
+    byReason: {},
+  };
+
+  for (const entry of entries) {
+    const playerCount = Array.isArray(entry.players) ? entry.players.length : 0;
+    summary.totalPlayers += playerCount;
+
+    const reason = entry.reason ?? 'unknown';
+    const reasonBucket = summary.byReason[reason] ?? { units: 0, players: 0 };
+    reasonBucket.units += 1;
+    reasonBucket.players += playerCount;
+    summary.byReason[reason] = reasonBucket;
+  }
+
+  return summary;
 }

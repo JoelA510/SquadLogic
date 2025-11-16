@@ -15,6 +15,7 @@ test('distributes players evenly across teams', () => {
   const {
     teamsByDivision,
     overflowByDivision,
+    overflowSummaryByDivision,
     buddyDiagnosticsByDivision,
     coachCoverageByDivision,
     rosterBalanceByDivision,
@@ -33,6 +34,11 @@ test('distributes players evenly across teams', () => {
   const allPlayers = teams.flatMap((team) => team.players.map((player) => player.id));
   assert.equal(new Set(allPlayers).size, players.length);
   assert.deepEqual(overflowByDivision.U10, []);
+  assert.deepEqual(overflowSummaryByDivision.U10, {
+    totalUnits: 0,
+    totalPlayers: 0,
+    byReason: {},
+  });
   assert.deepEqual(buddyDiagnosticsByDivision.U10.unmatchedRequests, []);
   assert.deepEqual(coachCoverageByDivision.U10, {
     totalTeams: 3,
@@ -103,6 +109,7 @@ test('respects coach assignments when creating teams', () => {
   const {
     teamsByDivision,
     overflowByDivision,
+    overflowSummaryByDivision,
     coachCoverageByDivision,
     rosterBalanceByDivision,
   } = generateTeams({
@@ -120,6 +127,11 @@ test('respects coach assignments when creating teams', () => {
     .sort();
   assert.deepEqual(rosterIds, ['a', 'b']);
   assert.deepEqual(overflowByDivision.U10, []);
+  assert.deepEqual(overflowSummaryByDivision.U10, {
+    totalUnits: 0,
+    totalPlayers: 0,
+    byReason: {},
+  });
   assert.deepEqual(coachCoverageByDivision.U10, {
     totalTeams: 1,
     volunteerCoaches: 1,
@@ -149,6 +161,7 @@ test('records overflow when no team can accommodate a unit', () => {
 
   const {
     overflowByDivision,
+    overflowSummaryByDivision,
     buddyDiagnosticsByDivision,
     coachCoverageByDivision,
     rosterBalanceByDivision,
@@ -163,6 +176,13 @@ test('records overflow when no team can accommodate a unit', () => {
   assert.equal(overflow[0].reason, 'coach-capacity');
   assert.deepEqual(overflow[0].players.map((player) => player.id).sort(), ['e']);
   assert.equal(overflow[0].metadata.coachId, 'coach-1');
+  assert.deepEqual(overflowSummaryByDivision.U10, {
+    totalUnits: 1,
+    totalPlayers: 1,
+    byReason: {
+      'coach-capacity': { units: 1, players: 1 },
+    },
+  });
   assert.deepEqual(buddyDiagnosticsByDivision.U10.unmatchedRequests, []);
   assert.equal(coachCoverageByDivision.U10.teamsWithCoach, 1);
   assert.equal(rosterBalanceByDivision.U10.summary.totalPlayers, players.length - 1);
@@ -188,6 +208,7 @@ test('records insufficient capacity overflow for buddy unit larger than roster',
 
   const {
     overflowByDivision,
+    overflowSummaryByDivision,
     teamsByDivision,
     buddyDiagnosticsByDivision,
     coachCoverageByDivision,
@@ -204,6 +225,13 @@ test('records insufficient capacity overflow for buddy unit larger than roster',
   assert.equal(overflow[0].reason, 'insufficient-capacity');
   assert.deepEqual(overflow[0].players.map((player) => player.id).sort(), ['a', 'b']);
   assert.deepEqual(overflow[0].metadata, { unitSize: 2 });
+  assert.deepEqual(overflowSummaryByDivision.U10, {
+    totalUnits: 1,
+    totalPlayers: 2,
+    byReason: {
+      'insufficient-capacity': { units: 1, players: 2 },
+    },
+  });
   assert.deepEqual(buddyDiagnosticsByDivision.U10.mutualPairs, [
     { playerIds: ['a', 'b'] },
   ]);

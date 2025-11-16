@@ -98,6 +98,7 @@ export function runScheduleEvaluations({ practice, games } = {}) {
           unassignedTeams,
           totalTeams,
           unassignedByReason: practiceResult.unassignedByReason,
+          manualFollowUpBreakdown: practiceResult.manualFollowUpBreakdown,
         },
       });
     }

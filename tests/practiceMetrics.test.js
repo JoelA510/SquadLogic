@@ -56,6 +56,16 @@ test('evaluatePracticeSchedule summarises utilization and division distribution'
     manualFollowUpRate: 0.25,
   });
 
+  assert.deepEqual(report.manualFollowUpBreakdown, [
+    {
+      category: 'capacity',
+      count: 1,
+      percentage: 1,
+      teamIds: ['team-4'],
+      reasons: ['no capacity'],
+    },
+  ]);
+
   assert.equal(report.slotUtilization.length, 3);
   const [earlyMon, lateMon, wed] = report.slotUtilization;
   assert.deepEqual(earlyMon, {
@@ -494,4 +504,61 @@ test('flags underutilized base slots for follow-up', () => {
     totalCapacity: 5,
     utilization: 0.2,
   });
+});
+
+test('categorizes manual follow-ups by capacity, coach availability, and exclusions', () => {
+  const slots = [
+    {
+      id: 'slot-mon',
+      capacity: 1,
+      start: '2024-08-05T17:00:00Z',
+      end: '2024-08-05T18:00:00Z',
+      day: 'Mon',
+    },
+  ];
+  const teams = [
+    { id: 'team-a', division: 'U10', coachId: 'coach-a' },
+    { id: 'team-b', division: 'U10', coachId: 'coach-b' },
+    { id: 'team-c', division: 'U12', coachId: 'coach-c' },
+    { id: 'team-d', division: 'U12', coachId: 'coach-d' },
+  ];
+
+  const report = evaluatePracticeSchedule({
+    assignments: [],
+    unassigned: [
+      { teamId: 'team-a', reason: 'no available capacity' },
+      { teamId: 'team-b', reason: 'coach schedule conflicts on all slots' },
+      { teamId: 'team-c', reason: 'coach availability excludes all slots' },
+      { teamId: 'team-d', reason: 'no alternative slots available' },
+    ],
+    teams,
+    slots,
+  });
+
+  assert.deepEqual(report.manualFollowUpBreakdown, [
+    {
+      category: 'coach-availability',
+      count: 2,
+      percentage: 0.5,
+      teamIds: ['team-b', 'team-c'],
+      reasons: [
+        'coach availability excludes all slots',
+        'coach schedule conflicts on all slots',
+      ],
+    },
+    {
+      category: 'capacity',
+      count: 1,
+      percentage: 0.25,
+      teamIds: ['team-a'],
+      reasons: ['no available capacity'],
+    },
+    {
+      category: 'excluded-slots',
+      count: 1,
+      percentage: 0.25,
+      teamIds: ['team-d'],
+      reasons: ['no alternative slots available'],
+    },
+  ]);
 });

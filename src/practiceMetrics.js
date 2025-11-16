@@ -56,6 +56,24 @@ const UNDERUTILIZATION_THRESHOLD = 0.25;
 const DAY_CONCENTRATION_THRESHOLD = 0.65;
 const MIN_ASSIGNMENTS_FOR_CONCENTRATION = 3;
 
+function categorizeManualFollowUpReason(reason) {
+  const value = (reason ?? 'unknown').toLowerCase();
+
+  if (value.includes('capacity')) {
+    return 'capacity';
+  }
+
+  if (value.includes('coach')) {
+    return 'coach-availability';
+  }
+
+  if (value.includes('exclude') || value.includes('alternative slot')) {
+    return 'excluded-slots';
+  }
+
+  return 'constraints-or-unknown';
+}
+
 function calculateFairnessConcerns(baseSlotDistribution, assignmentsByDivision) {
   const assignedDivisions = new Set(assignmentsByDivision.keys());
   const fairnessConcerns = [];
@@ -490,6 +508,42 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
     }))
     .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
 
+  const manualFollowUpBreakdownMap = new Map();
+  const totalManualFollowUps = unassigned.length;
+
+  for (const entry of unassigned) {
+    const category = categorizeManualFollowUpReason(entry?.reason);
+    const bucket = manualFollowUpBreakdownMap.get(category) ?? {
+      category,
+      count: 0,
+      teamIds: [],
+      reasons: new Set(),
+    };
+
+    bucket.count += 1;
+    if (entry?.teamId) {
+      bucket.teamIds.push(entry.teamId);
+    }
+    if (entry?.reason) {
+      bucket.reasons.add(entry.reason);
+    }
+
+    manualFollowUpBreakdownMap.set(category, bucket);
+  }
+
+  const manualFollowUpBreakdown = Array.from(manualFollowUpBreakdownMap.values())
+    .map((bucket) => ({
+      category: bucket.category,
+      count: bucket.count,
+      percentage:
+        totalManualFollowUps === 0
+          ? 0
+          : Number((bucket.count / totalManualFollowUps).toFixed(4)),
+      teamIds: bucket.teamIds.sort((a, b) => a.localeCompare(b)),
+      reasons: Array.from(bucket.reasons).sort((a, b) => a.localeCompare(b)),
+    }))
+    .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
+
   return {
     summary: {
       totalTeams,
@@ -508,5 +562,6 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
     fairnessConcerns,
     underutilizedBaseSlots,
     unassignedByReason,
+    manualFollowUpBreakdown,
   };
 }

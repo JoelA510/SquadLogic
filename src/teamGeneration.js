@@ -392,10 +392,11 @@ function summarizeOverflow(entries) {
     summary.totalPlayers += playerCount;
 
     const reason = entry.reason ?? 'unknown';
-    const reasonBucket = summary.byReason[reason] ?? { units: 0, players: 0 };
-    reasonBucket.units += 1;
-    reasonBucket.players += playerCount;
-    summary.byReason[reason] = reasonBucket;
+    if (!summary.byReason[reason]) {
+      summary.byReason[reason] = { units: 0, players: 0 };
+    }
+    summary.byReason[reason].units += 1;
+    summary.byReason[reason].players += playerCount;
   }
 
   return summary;

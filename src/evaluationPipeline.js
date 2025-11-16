@@ -69,7 +69,19 @@ export function runScheduleEvaluations({ practice, games } = {}) {
       fairnessConcerns = [],
       underutilizedBaseSlots = [],
       dayConcentrationAlerts = [],
+      slotUtilization = [],
     } = practiceResult;
+
+    const overbookedSlots = slotUtilization.filter((slot) => slot.overbooked);
+
+    for (const slot of overbookedSlots) {
+      issues.push({
+        category: 'practice',
+        severity: 'error',
+        message: `Practice slot ${slot.slotId} is over capacity (${slot.assignedCount}/${slot.capacity})`,
+        details: slot,
+      });
+    }
 
     if (unassignedTeams > 0) {
       issues.push({

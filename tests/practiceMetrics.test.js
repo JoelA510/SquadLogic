@@ -97,6 +97,8 @@ test('evaluatePracticeSchedule summarises utilization and division distribution'
     },
   });
 
+  assert.deepEqual(report.dayConcentrationAlerts, []);
+
   assert.equal(report.baseSlotDistribution.length, 2);
   const [fieldAMon, fieldBWed] = report.baseSlotDistribution;
 
@@ -195,6 +197,65 @@ test('manual follow-up reasons aggregate unknown teams and default reasons', () 
       warning.includes('team-unknown'),
     ),
   );
+});
+
+test('identifies divisions stacked on a single practice day', () => {
+  const slots = [
+    {
+      id: 'slot-tue-1',
+      baseSlotId: 'field-a-tue',
+      capacity: 2,
+      start: '2024-08-06T17:00:00Z',
+      end: '2024-08-06T18:00:00Z',
+      day: 'Tue',
+    },
+    {
+      id: 'slot-tue-2',
+      baseSlotId: 'field-b-tue',
+      capacity: 2,
+      start: '2024-08-06T18:00:00Z',
+      end: '2024-08-06T19:00:00Z',
+      day: 'Tue',
+    },
+    {
+      id: 'slot-thu',
+      baseSlotId: 'field-c-thu',
+      capacity: 2,
+      start: '2024-08-08T17:30:00Z',
+      end: '2024-08-08T18:30:00Z',
+      day: 'Thu',
+    },
+  ];
+
+  const teams = [
+    { id: 'u12-team-1', division: 'U12', coachId: 'coach-1' },
+    { id: 'u12-team-2', division: 'U12', coachId: 'coach-2' },
+    { id: 'u12-team-3', division: 'U12', coachId: 'coach-3' },
+    { id: 'u12-team-4', division: 'U12', coachId: 'coach-4' },
+    { id: 'u12-team-5', division: 'U12', coachId: 'coach-5' },
+  ];
+
+  const report = evaluatePracticeSchedule({
+    assignments: [
+      { teamId: 'u12-team-1', slotId: 'slot-tue-1' },
+      { teamId: 'u12-team-2', slotId: 'slot-tue-1' },
+      { teamId: 'u12-team-3', slotId: 'slot-tue-2' },
+      { teamId: 'u12-team-4', slotId: 'slot-tue-2' },
+      { teamId: 'u12-team-5', slotId: 'slot-thu' },
+    ],
+    teams,
+    slots,
+  });
+
+  assert.deepEqual(report.dayConcentrationAlerts, [
+    {
+      division: 'U12',
+      dominantDay: 'Tue',
+      dominantShare: 0.8,
+      totalAssignments: 5,
+      message: 'Division U12 has 80% of practices on Tue (4/5)',
+    },
+  ]);
 });
 
 test('base slot metadata day matches earliest representative even when null', () => {

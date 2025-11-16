@@ -267,6 +267,15 @@ test('validates input arguments', () => {
     () => generateTeams({ players, divisionConfigs }),
     /missing maxrostersize for division u11/i,
   );
+
+  const duplicatePlayers = [
+    { id: 'dup', division: 'U10' },
+    { id: 'dup', division: 'U10' },
+  ];
+  assert.throws(
+    () => generateTeams({ players: duplicatePlayers, divisionConfigs }),
+    /duplicate player id detected: dup/i,
+  );
 });
 
 test('reports unmatched buddy requests for missing or non-reciprocal pairs', () => {

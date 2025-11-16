@@ -116,10 +116,6 @@ export function runScheduleEvaluations({ practice, games } = {}) {
           category: 'practice',
           severity: 'warning',
           message: `Manual follow-up categories: ${categorySummary}`,
-          details: {
-            manualFollowUpBreakdown,
-            totalManualFollowUps: unassignedTeams,
-          },
         });
       }
     }

@@ -100,16 +100,6 @@ test('aggregates practice and game evaluations with issue rollups', () => {
     categorySummaryIssue.message,
     'Manual follow-up categories: capacity (1 – 100%)',
   );
-  assert.deepEqual(categorySummaryIssue.details.manualFollowUpBreakdown, [
-    {
-      category: MANUAL_FOLLOW_UP_CATEGORIES.CAPACITY,
-      count: 1,
-      percentage: 1,
-      teamIds: ['team-3'],
-      reasons: ['no capacity'],
-    },
-  ]);
-  assert.equal(categorySummaryIssue.details.totalManualFollowUps, 1);
 
   assert.equal(practiceResult.practice.summary.unassignedTeams, 1);
   assert.equal(practiceResult.games.summary.totalAssignments, 1);

@@ -120,6 +120,67 @@ export function deriveDivisionRosterConfigs(divisions, { overrides = {} } = {}) 
   return configs;
 }
 
+/**
+ * Normalize Supabase-backed roster overrides into the `overrides` map consumed by
+ * `deriveDivisionRosterConfigs`.
+ *
+ * Supabase rows can include season-specific overrides; when a `seasonId` is provided, the
+ * helper prefers rows matching that season and falls back to seasonless entries when no
+ * match exists. Rows tied to a different season are ignored so callers can pass the entire
+ * table snapshot safely.
+ *
+ * @param {Array<Object>} rows - Supabase roster override records.
+ * @param {{ seasonId?: string }} [options]
+ * @returns {Record<string, { maxRosterSize: number, playableCount: number | null }>}
+ */
+export function buildOverridesFromSupabaseRows(rows, { seasonId } = {}) {
+  if (!Array.isArray(rows)) {
+    throw new TypeError('rows must be an array');
+  }
+
+  const normalized = {};
+
+  rows.forEach((row, index) => {
+    if (!row || typeof row !== 'object') {
+      throw new TypeError(`rows[${index}] must be an object`);
+    }
+
+    const divisionId = selectSupabaseDivisionIdentifier(row, index);
+    const rowSeasonId = normalizeOptionalString(row.seasonId ?? row.season_id);
+
+    if (seasonId && rowSeasonId && rowSeasonId !== seasonId) {
+      return;
+    }
+
+    const maxRosterSize = normalizeRosterSize(
+      row.maxRosterSize ?? row.max_roster_size,
+      `Supabase row for division ${divisionId}`,
+    );
+    const playableCount = row.playableCount ?? row.playable_count;
+    const normalizedPlayableCount =
+      playableCount === undefined || playableCount === null
+        ? null
+        : normalizePlayableCount(playableCount, divisionId);
+
+    const candidate = {
+      maxRosterSize,
+      playableCount: normalizedPlayableCount,
+      seasonId: rowSeasonId,
+    };
+
+    const existing = normalized[divisionId];
+    if (!existing || shouldPreferCandidate({ existing, candidate, seasonId })) {
+      normalized[divisionId] = candidate;
+    }
+  });
+
+  for (const value of Object.values(normalized)) {
+    delete value.seasonId;
+  }
+
+  return normalized;
+}
+
 function selectDivisionIdentifier(division) {
   const candidates = [division.id, division.code, division.slug, division.name].filter(
     (value) => typeof value === 'string' && value.trim().length > 0,
@@ -167,4 +228,58 @@ function resolvePlayableCount(division, identifier) {
   }
 
   throw new Error(`division ${identifier} is missing roster sizing data`);
+}
+
+function selectSupabaseDivisionIdentifier(row, index) {
+  const identifiers = [row.divisionId, row.division_id, row.divisionCode, row.division_code]
+    .filter((value) => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim());
+
+  if (identifiers.length === 0) {
+    throw new Error(`rows[${index}] is missing a division identifier`);
+  }
+
+  return identifiers[0];
+}
+
+function normalizeOptionalString(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    throw new TypeError('seasonId must be a string when provided');
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizePlayableCount(playableCount, divisionId) {
+  const value = Number(playableCount);
+
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`invalid playableCount for division ${divisionId}`);
+  }
+
+  return Math.trunc(value);
+}
+
+function shouldPreferCandidate({ existing, candidate, seasonId }) {
+  if (!existing) {
+    return true;
+  }
+
+  const candidateMatchesSeason = Boolean(seasonId && candidate.seasonId === seasonId);
+  const existingMatchesSeason = Boolean(seasonId && existing.seasonId === seasonId);
+
+  if (candidateMatchesSeason && !existingMatchesSeason) {
+    return true;
+  }
+
+  if (!existingMatchesSeason && candidate.seasonId === null && existing.seasonId) {
+    return true;
+  }
+
+  return false;
 }

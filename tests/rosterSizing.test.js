@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   calculateMaxRosterSize,
+  buildOverridesFromSupabaseRows,
   deriveDivisionRosterConfigs,
   parsePlayableCount,
 } from '../src/rosterSizing.js';
@@ -95,5 +96,28 @@ describe('deriveDivisionRosterConfigs', () => {
   it('throws when a division is missing sizing data', () => {
     const divisions = [{ id: 'U14' }];
     assert.throws(() => deriveDivisionRosterConfigs(divisions));
+  });
+});
+
+describe('buildOverridesFromSupabaseRows', () => {
+  it('filters by season and prefers matching overrides', () => {
+    const rows = [
+      { divisionId: 'U10', seasonId: 'fall', maxRosterSize: 13 },
+      { division_id: 'U10', season_id: 'spring', max_roster_size: 12 },
+      { divisionCode: 'U12', maxRosterSize: 14 },
+    ];
+
+    const overrides = buildOverridesFromSupabaseRows(rows, { seasonId: 'fall' });
+
+    assert.deepEqual(overrides, {
+      U10: { maxRosterSize: 13, playableCount: null },
+      U12: { maxRosterSize: 14, playableCount: null },
+    });
+  });
+
+  it('throws when rows are malformed', () => {
+    assert.throws(() => buildOverridesFromSupabaseRows('oops'));
+    assert.throws(() => buildOverridesFromSupabaseRows([{}]));
+    assert.throws(() => buildOverridesFromSupabaseRows([{ divisionId: 'U8', maxRosterSize: 0 }]));
   });
 });

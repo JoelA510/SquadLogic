@@ -27,6 +27,16 @@ test('assigns teams to available slots without exceeding capacity', () => {
   for (const assignment of result.assignments) {
     assert.equal(assignment.source, 'auto');
   }
+  assert.deepEqual(result.divisionLoadSummary, {
+    byBaseSlot: [
+      { baseSlotId: 's1', division: 'U10', count: 2 },
+      { baseSlotId: 's2', division: 'U10', count: 1 },
+    ],
+    byDay: [
+      { day: 'Mon', division: 'U10', count: 2 },
+      { day: 'Tue', division: 'U10', count: 1 },
+    ],
+  });
   const capacityUsage = new Map();
   for (const assignment of result.assignments) {
     capacityUsage.set(assignment.slotId, (capacityUsage.get(assignment.slotId) ?? 0) + 1);

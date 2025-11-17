@@ -161,38 +161,29 @@ export function schedulePractices({
   const divisionLoadByBaseSlot = new Map();
   const divisionLoadByDay = new Map();
 
+  const adjustDivisionLoad = (map, key, delta) => {
+    if (!key) {
+      return;
+    }
+
+    const current = map.get(key) ?? 0;
+    const next = current + delta;
+
+    if (next > 0) {
+      map.set(key, next);
+    } else {
+      map.delete(key);
+    }
+  };
+
   const incrementDivisionLoad = (slot, division) => {
-    const increment = (map, key) => {
-      if (key) {
-        map.set(key, (map.get(key) ?? 0) + 1);
-      }
-    };
-    increment(divisionLoadByBaseSlot, getDivisionLoadKey(slot, division));
-    increment(divisionLoadByDay, getDivisionDayKey(slot, division));
+    adjustDivisionLoad(divisionLoadByBaseSlot, getDivisionLoadKey(slot, division), 1);
+    adjustDivisionLoad(divisionLoadByDay, getDivisionDayKey(slot, division), 1);
   };
 
   const decrementDivisionLoad = (slot, division) => {
-    const key = getDivisionLoadKey(slot, division);
-    const current = divisionLoadByBaseSlot.get(key);
-    if (current) {
-      if (current > 1) {
-        divisionLoadByBaseSlot.set(key, current - 1);
-      } else {
-        divisionLoadByBaseSlot.delete(key);
-      }
-    }
-
-    const dayKey = getDivisionDayKey(slot, division);
-    if (dayKey) {
-      const dayCurrent = divisionLoadByDay.get(dayKey);
-      if (dayCurrent) {
-        if (dayCurrent > 1) {
-          divisionLoadByDay.set(dayKey, dayCurrent - 1);
-        } else {
-          divisionLoadByDay.delete(dayKey);
-        }
-      }
-    }
+    adjustDivisionLoad(divisionLoadByBaseSlot, getDivisionLoadKey(slot, division), -1);
+    adjustDivisionLoad(divisionLoadByDay, getDivisionDayKey(slot, division), -1);
   };
 
   const assignTeamToSlot = (team, slot, source) => {
@@ -339,7 +330,25 @@ export function schedulePractices({
 
   assignments.sort((a, b) => a.teamId.localeCompare(b.teamId) || a.slotId.localeCompare(b.slotId));
 
-  return { assignments, unassigned };
+  const divisionLoadSummary = {
+    byBaseSlot: Array.from(divisionLoadByBaseSlot.entries())
+      .map(([key, count]) => {
+        const [baseSlotId, division] = key.split('::');
+        return { baseSlotId, division, count };
+      })
+      .sort(
+        (a, b) =>
+          a.baseSlotId.localeCompare(b.baseSlotId) || a.division.localeCompare(b.division),
+      ),
+    byDay: Array.from(divisionLoadByDay.entries())
+      .map(([key, count]) => {
+        const [day, division] = key.split('::');
+        return { day, division, count };
+      })
+      .sort((a, b) => a.day.localeCompare(b.day) || a.division.localeCompare(b.division)),
+  };
+
+  return { assignments, unassigned, divisionLoadSummary };
 }
 
 /**

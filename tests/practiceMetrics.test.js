@@ -110,6 +110,21 @@ test('evaluatePracticeSchedule summarises utilization and division distribution'
     },
   });
 
+  assert.deepEqual(report.divisionBaseSlotDistribution, {
+    U10: {
+      totalAssigned: 2,
+      baseSlots: [
+        { baseSlotId: 'field-a-mon', count: 2, percentage: 1 },
+      ],
+    },
+    U12: {
+      totalAssigned: 1,
+      baseSlots: [
+        { baseSlotId: 'field-b-wed', count: 1, percentage: 1 },
+      ],
+    },
+  });
+
   assert.deepEqual(report.dayConcentrationAlerts, []);
 
   assert.equal(report.baseSlotDistribution.length, 2);

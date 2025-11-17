@@ -39,6 +39,10 @@
  *     averageStartMinutes: number | null,
  *     dayBreakdown: Array<{ day: string, count: number, percentage: number }>,
  *   }>,
+ *   divisionBaseSlotDistribution: Record<string, {
+ *     totalAssigned: number,
+ *     baseSlots: Array<{ baseSlotId: string, count: number, percentage: number }>,
+ *   }>,
  *   coachLoad: Record<string, {
  *     assignedTeams: number,
  *     distinctDays: number,
@@ -336,13 +340,18 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
   }
 
   const divisionDayDistribution = {};
+  const divisionBaseSlotDistribution = {};
   const dayConcentrationAlerts = [];
   for (const [division, divisionAssignments] of assignmentsByDivision.entries()) {
     const dayCounts = new Map();
+    const baseSlotCounts = new Map();
     let totalMinutes = 0;
     let counted = 0;
 
     for (const { slot } of divisionAssignments) {
+      const baseSlotId = slot.baseSlotId ?? slot.id;
+      baseSlotCounts.set(baseSlotId, (baseSlotCounts.get(baseSlotId) ?? 0) + 1);
+
       const day = slot.day ?? 'unknown';
       dayCounts.set(day, (dayCounts.get(day) ?? 0) + 1);
       totalMinutes += slot.start.getHours() * 60 + slot.start.getMinutes();
@@ -367,6 +376,25 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
       totalAssigned: counted,
       averageStartMinutes: counted === 0 ? null : Number((totalMinutes / counted).toFixed(2)),
       dayBreakdown: breakdown,
+    };
+
+    const baseSlotBreakdown = Array.from(baseSlotCounts.entries())
+      .map(([baseSlotId, count]) => ({ baseSlotId, count }))
+      .sort((a, b) => {
+        if (b.count !== a.count) {
+          return b.count - a.count;
+        }
+        return a.baseSlotId.localeCompare(b.baseSlotId);
+      })
+      .map(({ baseSlotId, count }) => ({
+        baseSlotId,
+        count,
+        percentage: counted === 0 ? 0 : Number((count / counted).toFixed(4)),
+      }));
+
+    divisionBaseSlotDistribution[division] = {
+      totalAssigned: counted,
+      baseSlots: baseSlotBreakdown,
     };
 
     const [primaryDay] = breakdown;
@@ -563,6 +591,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
     slotUtilization: slotUtilization.sort((a, b) => a.slotId.localeCompare(b.slotId)),
     baseSlotDistribution,
     divisionDayDistribution,
+    divisionBaseSlotDistribution,
     dayConcentrationAlerts,
     coachLoad,
     coachConflicts,

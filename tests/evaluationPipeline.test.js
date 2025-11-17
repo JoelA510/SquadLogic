@@ -81,16 +81,21 @@ test('aggregates practice and game evaluations with issue rollups', () => {
   });
 
   assert.equal(practiceResult.status, 'action-required');
-  assert.equal(practiceResult.issues.length, 7);
+  assert.equal(practiceResult.issues.length, 8);
 
   const messages = practiceResult.issues.map((issue) => issue.message);
   assert.ok(messages.some((message) => message.includes('lack practice assignments')));
   assert.ok(messages.some((message) => message.includes('Manual follow-up required')));
   assert.ok(messages.some((message) => message.includes('Manual follow-up categories:')));
+  assert.ok(messages.some((message) => message.includes('alert threshold')));
   assert.ok(messages.some((message) => message.includes('overlapping practices')));
   assert.ok(messages.some((message) => message.includes('over capacity')));
   assert.ok(messages.some((message) => message.includes('unknown team')));
   assert.ok(messages.some((message) => message.includes('could not be scheduled')));
+  assert.equal(
+    messages.filter((message) => message.includes('alert threshold')).length,
+    1,
+  );
 
   const manualFollowUpIssue = practiceResult.issues.find((issue) =>
     issue.message.includes('Manual follow-up required'),

@@ -69,6 +69,13 @@ test('evaluatePracticeSchedule summarises utilization and division distribution'
     },
   ]);
 
+  assert.ok(
+    report.dataQualityWarnings.some((warning) =>
+      warning.includes('exceeds the 5% alert threshold'),
+    ),
+    'manual follow-up alert threshold not raised',
+  );
+
   assert.equal(report.slotUtilization.length, 3);
   const [earlyMon, lateMon, wed] = report.slotUtilization;
   assert.deepEqual(earlyMon, {
@@ -379,6 +386,62 @@ test('evaluatePracticeSchedule flags coach conflicts', () => {
   });
 });
 
+test('manual follow-up alert fires only when rate exceeds threshold', () => {
+  const slots = [
+    {
+      id: 'slot-1',
+      capacity: 10,
+      start: '2024-08-05T17:00:00Z',
+      end: '2024-08-05T18:00:00Z',
+      day: 'Mon',
+    },
+  ];
+
+  const teams = Array.from({ length: 20 }, (_, index) => ({
+    id: `team-${index + 1}`,
+    division: 'U10',
+  }));
+
+  const atThreshold = evaluatePracticeSchedule({
+    assignments: teams.slice(0, 19).map((team) => ({
+      teamId: team.id,
+      slotId: 'slot-1',
+    })),
+    unassigned: [{ teamId: teams[19].id, reason: 'no capacity' }],
+    teams,
+    slots,
+  });
+
+  assert.equal(atThreshold.summary.manualFollowUpRate, 0.05);
+  assert.ok(
+    atThreshold.dataQualityWarnings.every(
+      (warning) => !warning.includes('alert threshold'),
+    ),
+    'should not warn when manual follow-ups are exactly at threshold',
+  );
+
+  const aboveThreshold = evaluatePracticeSchedule({
+    assignments: teams.slice(0, 18).map((team) => ({
+      teamId: team.id,
+      slotId: 'slot-1',
+    })),
+    unassigned: teams.slice(18).map((team) => ({
+      teamId: team.id,
+      reason: 'no capacity',
+    })),
+    teams,
+    slots,
+  });
+
+  assert.equal(aboveThreshold.summary.manualFollowUpRate, 0.1);
+  assert.ok(
+    aboveThreshold.dataQualityWarnings.includes(
+      'Manual follow-up required for 2/20 teams (10%) exceeds the 5% alert threshold',
+    ),
+    'should warn when manual follow-ups exceed threshold',
+  );
+});
+
 test('evaluatePracticeSchedule emits warnings for inconsistent data', () => {
   const report = evaluatePracticeSchedule({
     assignments: [
@@ -392,10 +455,11 @@ test('evaluatePracticeSchedule emits warnings for inconsistent data', () => {
   });
 
   assert.equal(report.summary.assignedTeams, 1);
-  assert.equal(report.dataQualityWarnings.length, 3);
+  assert.equal(report.dataQualityWarnings.length, 4);
   assert(report.dataQualityWarnings[0].includes('unknown team'));
   assert(report.dataQualityWarnings[1].includes('unknown slot'));
   assert(report.dataQualityWarnings[2].includes('duplicate assignment'));
+  assert(report.dataQualityWarnings[3].includes('alert threshold'));
 });
 
 test('evaluatePracticeSchedule correctly counts teams assigned to multiple slots', () => {

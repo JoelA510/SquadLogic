@@ -69,6 +69,13 @@ test('evaluatePracticeSchedule summarises utilization and division distribution'
     },
   ]);
 
+  assert.ok(
+    report.dataQualityWarnings.some((warning) =>
+      warning.includes('exceeds the 5% alert threshold'),
+    ),
+    'manual follow-up alert threshold not raised',
+  );
+
   assert.equal(report.slotUtilization.length, 3);
   const [earlyMon, lateMon, wed] = report.slotUtilization;
   assert.deepEqual(earlyMon, {
@@ -392,10 +399,11 @@ test('evaluatePracticeSchedule emits warnings for inconsistent data', () => {
   });
 
   assert.equal(report.summary.assignedTeams, 1);
-  assert.equal(report.dataQualityWarnings.length, 3);
+  assert.equal(report.dataQualityWarnings.length, 4);
   assert(report.dataQualityWarnings[0].includes('unknown team'));
   assert(report.dataQualityWarnings[1].includes('unknown slot'));
   assert(report.dataQualityWarnings[2].includes('duplicate assignment'));
+  assert(report.dataQualityWarnings[3].includes('alert threshold'));
 });
 
 test('evaluatePracticeSchedule correctly counts teams assigned to multiple slots', () => {

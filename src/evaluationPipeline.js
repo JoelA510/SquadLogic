@@ -1,4 +1,7 @@
-import { evaluatePracticeSchedule } from './practiceMetrics.js';
+import {
+  MANUAL_FOLLOW_UP_ALERT_THRESHOLD,
+  evaluatePracticeSchedule,
+} from './practiceMetrics.js';
 import { evaluateGameSchedule } from './gameMetrics.js';
 
 const formatPercentage = (value) =>
@@ -108,6 +111,8 @@ export function runScheduleEvaluations({ practice, games } = {}) {
       underutilizedBaseSlots = [],
       dayConcentrationAlerts = [],
       slotUtilization = [],
+      unassignedByReason = [],
+      manualFollowUpBreakdown = [],
     } = practiceResult;
 
     const overbookedSlots = slotUtilization.filter((slot) => slot.overbooked);
@@ -132,42 +137,33 @@ export function runScheduleEvaluations({ practice, games } = {}) {
         message: `${unassignedTeams} team(s) lack practice assignments`,
         details: {
           unassignedTeams,
-          unassignedByReason: practiceResult.unassignedByReason,
+          unassignedByReason,
         },
       });
     }
 
     if (totalTeams > 0 && manualFollowUpRate > 0 && Number.isFinite(manualFollowUpRate)) {
-      const percentage = parseFloat((manualFollowUpRate * 100).toFixed(1));
-      const manualFollowUpBreakdown = practiceResult.manualFollowUpBreakdown ?? [];
+      const thresholdLabel = (MANUAL_FOLLOW_UP_ALERT_THRESHOLD * 100)
+        .toFixed(0)
+        .replace(/\.0$/, '');
+      const baseLabel = `Manual follow-up required for ${formatPercentage(manualFollowUpRate)}% of teams (${unassignedTeams} of ${totalTeams})`;
+      const message =
+        manualFollowUpRate > MANUAL_FOLLOW_UP_ALERT_THRESHOLD
+          ? `${baseLabel} exceeds the ${thresholdLabel}% alert threshold`
+          : baseLabel;
 
       issues.push({
         category: 'practice',
         severity: 'warning',
-        message: `Manual follow-up required for ${percentage}% of teams (${unassignedTeams} of ${totalTeams})`,
+        message,
         details: {
           manualFollowUpRate,
           unassignedTeams,
           totalTeams,
-          unassignedByReason: practiceResult.unassignedByReason,
+          unassignedByReason,
           manualFollowUpBreakdown,
         },
       });
-
-      if (manualFollowUpBreakdown.length > 0) {
-        const categorySummary = manualFollowUpBreakdown
-          .map((bucket) => {
-            const shareLabel = formatPercentage(bucket.percentage ?? 0);
-            return `${bucket.category} (${bucket.count} – ${shareLabel}%)`;
-          })
-          .join(', ');
-
-        issues.push({
-          category: 'practice',
-          severity: 'warning',
-          message: `Manual follow-up categories: ${categorySummary}`,
-        });
-      }
     }
 
     for (const conflict of coachConflicts) {
@@ -184,6 +180,21 @@ export function runScheduleEvaluations({ practice, games } = {}) {
         category: 'practice',
         severity: 'warning',
         message: warning,
+      });
+    }
+
+    if (manualFollowUpBreakdown.length > 0) {
+      const categorySummary = manualFollowUpBreakdown
+        .map((bucket) => {
+          const shareLabel = formatPercentage(bucket.percentage ?? 0);
+          return `${bucket.category} (${bucket.count} – ${shareLabel}%)`;
+        })
+        .join(', ');
+
+      issues.push({
+        category: 'practice',
+        severity: 'warning',
+        message: `Manual follow-up categories: ${categorySummary}`,
       });
     }
 

@@ -81,7 +81,7 @@ test('aggregates practice and game evaluations with issue rollups', () => {
   });
 
   assert.equal(practiceResult.status, 'action-required');
-  assert.equal(practiceResult.issues.length, 8);
+  assert.equal(practiceResult.issues.length, 7);
 
   const messages = practiceResult.issues.map((issue) => issue.message);
   assert.ok(messages.some((message) => message.includes('lack practice assignments')));

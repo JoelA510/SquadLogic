@@ -69,12 +69,7 @@ test('evaluatePracticeSchedule summarises utilization and division distribution'
     },
   ]);
 
-  assert.ok(
-    report.dataQualityWarnings.some((warning) =>
-      warning.includes('exceeds the 5% alert threshold'),
-    ),
-    'manual follow-up alert threshold not raised',
-  );
+  assert.equal(report.dataQualityWarnings.length, 0);
 
   assert.equal(report.slotUtilization.length, 3);
   const [earlyMon, lateMon, wed] = report.slotUtilization;
@@ -386,7 +381,7 @@ test('evaluatePracticeSchedule flags coach conflicts', () => {
   });
 });
 
-test('manual follow-up alert fires only when rate exceeds threshold', () => {
+test('manual follow-up alert messaging is handled in the evaluation pipeline', () => {
   const slots = [
     {
       id: 'slot-1',
@@ -413,12 +408,7 @@ test('manual follow-up alert fires only when rate exceeds threshold', () => {
   });
 
   assert.equal(atThreshold.summary.manualFollowUpRate, 0.05);
-  assert.ok(
-    atThreshold.dataQualityWarnings.every(
-      (warning) => !warning.includes('alert threshold'),
-    ),
-    'should not warn when manual follow-ups are exactly at threshold',
-  );
+  assert.ok(atThreshold.dataQualityWarnings.length === 0);
 
   const aboveThreshold = evaluatePracticeSchedule({
     assignments: teams.slice(0, 18).map((team) => ({
@@ -434,11 +424,15 @@ test('manual follow-up alert fires only when rate exceeds threshold', () => {
   });
 
   assert.equal(aboveThreshold.summary.manualFollowUpRate, 0.1);
-  assert.ok(
-    aboveThreshold.dataQualityWarnings.includes(
-      'Manual follow-up required for 2/20 teams (10%) exceeds the 5% alert threshold',
-    ),
-    'should warn when manual follow-ups exceed threshold',
+  assert.ok(aboveThreshold.dataQualityWarnings.length === 0);
+  assert.deepEqual(
+    aboveThreshold.manualFollowUpBreakdown.map((bucket) => ({
+      category: bucket.category,
+      count: bucket.count,
+    })),
+    [
+      { category: 'capacity', count: 2 },
+    ],
   );
 });
 
@@ -455,11 +449,10 @@ test('evaluatePracticeSchedule emits warnings for inconsistent data', () => {
   });
 
   assert.equal(report.summary.assignedTeams, 1);
-  assert.equal(report.dataQualityWarnings.length, 4);
+  assert.equal(report.dataQualityWarnings.length, 3);
   assert(report.dataQualityWarnings[0].includes('unknown team'));
   assert(report.dataQualityWarnings[1].includes('unknown slot'));
   assert(report.dataQualityWarnings[2].includes('duplicate assignment'));
-  assert(report.dataQualityWarnings[3].includes('alert threshold'));
 });
 
 test('evaluatePracticeSchedule correctly counts teams assigned to multiple slots', () => {

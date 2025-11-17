@@ -59,7 +59,7 @@ const FAIRNESS_DOMINANCE_THRESHOLD = 0.7;
 const UNDERUTILIZATION_THRESHOLD = 0.25;
 const DAY_CONCENTRATION_THRESHOLD = 0.65;
 const MIN_ASSIGNMENTS_FOR_CONCENTRATION = 3;
-const MANUAL_FOLLOW_UP_ALERT_THRESHOLD = 0.05;
+export const MANUAL_FOLLOW_UP_ALERT_THRESHOLD = 0.05;
 
 export const MANUAL_FOLLOW_UP_CATEGORIES = {
   CAPACITY: 'capacity',
@@ -520,14 +520,6 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
     totalTeams === 0 ? 1 : Number(((assignedTeams / totalTeams) || 0).toFixed(4));
   const manualFollowUpRate =
     totalTeams === 0 ? 0 : Number(((unassignedTeams / totalTeams) || 0).toFixed(4));
-
-  if (manualFollowUpRate > MANUAL_FOLLOW_UP_ALERT_THRESHOLD) {
-    const percentLabel = (manualFollowUpRate * 100).toFixed(1).replace(/\.0$/, '');
-    const thresholdLabel = (MANUAL_FOLLOW_UP_ALERT_THRESHOLD * 100).toFixed(0);
-    dataQualityWarnings.push(
-      `Manual follow-up required for ${unassignedTeams}/${totalTeams} teams (${percentLabel}%) exceeds the ${thresholdLabel}% alert threshold`,
-    );
-  }
 
   if (unassignedUnknownTeams.size > 0) {
     const list = Array.from(unassignedUnknownTeams).sort((a, b) => a.localeCompare(b));

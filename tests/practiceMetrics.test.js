@@ -429,9 +429,10 @@ test('manual follow-up alert messaging is handled in the evaluation pipeline', (
     aboveThreshold.manualFollowUpBreakdown.map((bucket) => ({
       category: bucket.category,
       count: bucket.count,
+      teamIds: bucket.teamIds,
     })),
     [
-      { category: 'capacity', count: 2 },
+      { category: 'capacity', count: 2, teamIds: ['team-19', 'team-20'] },
     ],
   );
 });

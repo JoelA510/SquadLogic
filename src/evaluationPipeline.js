@@ -1,8 +1,6 @@
 import { evaluatePracticeSchedule } from './practiceMetrics.js';
 import { evaluateGameSchedule } from './gameMetrics.js';
 
-const MANUAL_FOLLOW_UP_WARNING_THRESHOLD = 0.05;
-
 const formatPercentage = (value) =>
   (value * 100).toFixed(1).replace(/\.0$/, '');
 
@@ -139,11 +137,7 @@ export function runScheduleEvaluations({ practice, games } = {}) {
       });
     }
 
-    if (
-      totalTeams > 0 &&
-      manualFollowUpRate > MANUAL_FOLLOW_UP_WARNING_THRESHOLD &&
-      Number.isFinite(manualFollowUpRate)
-    ) {
+    if (totalTeams > 0 && manualFollowUpRate > 0 && Number.isFinite(manualFollowUpRate)) {
       const percentage = parseFloat((manualFollowUpRate * 100).toFixed(1));
       const manualFollowUpBreakdown = practiceResult.manualFollowUpBreakdown ?? [];
 

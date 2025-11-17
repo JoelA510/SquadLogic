@@ -92,6 +92,10 @@ test('aggregates practice and game evaluations with issue rollups', () => {
   assert.ok(messages.some((message) => message.includes('over capacity')));
   assert.ok(messages.some((message) => message.includes('unknown team')));
   assert.ok(messages.some((message) => message.includes('could not be scheduled')));
+  assert.equal(
+    messages.filter((message) => message.includes('alert threshold')).length,
+    1,
+  );
 
   const manualFollowUpIssue = practiceResult.issues.find((issue) =>
     issue.message.includes('Manual follow-up required'),

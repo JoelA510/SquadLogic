@@ -115,6 +115,32 @@ describe('buildOverridesFromSupabaseRows', () => {
     });
   });
 
+  it('prefers season specific overrides when seasonId is provided', () => {
+    const rows = [
+      { divisionId: 'U10', maxRosterSize: 10 },
+      { divisionId: 'U10', seasonId: 'fall', maxRosterSize: 13 },
+    ];
+
+    const overrides = buildOverridesFromSupabaseRows(rows, { seasonId: 'fall' });
+
+    assert.deepEqual(overrides, {
+      U10: { maxRosterSize: 13, playableCount: null },
+    });
+  });
+
+  it('prefers generic overrides when no seasonId is provided', () => {
+    const rows = [
+      { divisionId: 'U10', seasonId: 'fall', maxRosterSize: 13 },
+      { divisionId: 'U10', maxRosterSize: 10 },
+    ];
+
+    const overrides = buildOverridesFromSupabaseRows(rows);
+
+    assert.deepEqual(overrides, {
+      U10: { maxRosterSize: 10, playableCount: null },
+    });
+  });
+
   it('throws when rows are malformed', () => {
     assert.throws(() => buildOverridesFromSupabaseRows('oops'));
     assert.throws(() => buildOverridesFromSupabaseRows([{}]));

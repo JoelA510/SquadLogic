@@ -174,11 +174,13 @@ export function buildOverridesFromSupabaseRows(rows, { seasonId } = {}) {
     }
   });
 
-  for (const value of Object.values(normalized)) {
-    delete value.seasonId;
+  const result = {};
+  for (const divisionId in normalized) {
+    const { seasonId: _seasonId, ...override } = normalized[divisionId];
+    result[divisionId] = override;
   }
 
-  return normalized;
+  return result;
 }
 
 function selectDivisionIdentifier(division) {
@@ -270,16 +272,15 @@ function shouldPreferCandidate({ existing, candidate, seasonId }) {
     return true;
   }
 
-  const candidateMatchesSeason = Boolean(seasonId && candidate.seasonId === seasonId);
-  const existingMatchesSeason = Boolean(seasonId && existing.seasonId === seasonId);
-
-  if (candidateMatchesSeason && !existingMatchesSeason) {
-    return true;
+  // When a seasonId is provided, prefer a season specific candidate over a generic existing one.
+  if (seasonId) {
+    const candidateMatchesSeason = candidate.seasonId === seasonId;
+    const existingIsGeneric = existing.seasonId === null;
+    return candidateMatchesSeason && existingIsGeneric;
   }
 
-  if (!existingMatchesSeason && candidate.seasonId === null && existing.seasonId) {
-    return true;
-  }
-
-  return false;
+  // When no seasonId is provided, prefer a generic candidate over a season specific existing one.
+  const candidateIsGeneric = candidate.seasonId === null;
+  const existingIsSpecific = existing.seasonId !== null;
+  return candidateIsGeneric && existingIsSpecific;
 }

@@ -46,6 +46,36 @@ test('assigns teams to available slots without exceeding capacity', () => {
   assert.deepEqual(result.unassigned, []);
 });
 
+test('division load summary preserves composite keys with embedded separators', () => {
+  const teams = [
+    { id: 'T1', division: 'U10', coachId: 'coach-a' },
+    { id: 'T2', division: 'U12', coachId: 'coach-b' },
+  ];
+
+  const slots = [
+    createSlot({ id: 'slot-1', baseSlotId: 'complex::field::1', day: 'Wed::Block::A', startHour: 17, endHour: 18 }),
+    createSlot({ id: 'slot-2', baseSlotId: 'complex::field::2', day: 'Thu::Evening', startHour: 18, endHour: 19 }),
+  ];
+
+  const result = schedulePractices({ teams, slots });
+
+  assert.deepEqual(result.assignments, [
+    { teamId: 'T1', slotId: 'slot-1', source: 'auto' },
+    { teamId: 'T2', slotId: 'slot-2', source: 'auto' },
+  ]);
+
+  assert.deepEqual(result.divisionLoadSummary, {
+    byBaseSlot: [
+      { baseSlotId: 'complex::field::1', division: 'U10', count: 1 },
+      { baseSlotId: 'complex::field::2', division: 'U12', count: 1 },
+    ],
+    byDay: [
+      { day: 'Thu::Evening', division: 'U12', count: 1 },
+      { day: 'Wed::Block::A', division: 'U10', count: 1 },
+    ],
+  });
+});
+
 test('discourages stacking the same division onto a single base slot when alternatives exist', () => {
   const teams = [
     { id: 'T1', division: 'U10', coachId: 'coach-a' },

@@ -333,7 +333,9 @@ export function schedulePractices({
   const divisionLoadSummary = {
     byBaseSlot: Array.from(divisionLoadByBaseSlot.entries())
       .map(([key, count]) => {
-        const [baseSlotId, division] = key.split('::');
+        const separatorIndex = key.lastIndexOf('::');
+        const baseSlotId = key.substring(0, separatorIndex);
+        const division = key.substring(separatorIndex + 2);
         return { baseSlotId, division, count };
       })
       .sort(
@@ -342,7 +344,9 @@ export function schedulePractices({
       ),
     byDay: Array.from(divisionLoadByDay.entries())
       .map(([key, count]) => {
-        const [day, division] = key.split('::');
+        const separatorIndex = key.lastIndexOf('::');
+        const day = key.substring(0, separatorIndex);
+        const division = key.substring(separatorIndex + 2);
         return { day, division, count };
       })
       .sort((a, b) => a.day.localeCompare(b.day) || a.division.localeCompare(b.division)),

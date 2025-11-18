@@ -4,6 +4,7 @@ import {
   buildPracticeSlotsFromSupabaseRows,
   expandSupabasePracticeSlots,
   buildPracticeAssignmentRows,
+  persistPracticeAssignments,
 } from '../src/practiceSupabase.js';
 
 describe('buildPracticeSlotsFromSupabaseRows', () => {
@@ -441,5 +442,147 @@ describe('buildPracticeAssignmentRows', () => {
       source: 'auto',
       run_id: null,
     });
+  });
+});
+
+describe('persistPracticeAssignments', () => {
+  const sampleSlots = [
+    {
+      id: 'slot-1::early',
+      baseSlotId: 'slot-1',
+      seasonPhaseId: 'early',
+      effectiveFrom: '2024-08-01',
+      effectiveUntil: '2024-09-15',
+    },
+  ];
+
+  it('inserts practice assignments through Supabase client', async () => {
+    const calls = [];
+    const supabaseClient = {
+      from(table) {
+        calls.push({ table });
+        return {
+          insert: async (rows) => {
+            calls.push({ rows });
+            return { data: rows, error: null };
+          },
+        };
+      },
+    };
+
+    const result = await persistPracticeAssignments({
+      supabaseClient,
+      assignments: [{ teamId: 'team-1', slotId: 'slot-1::early' }],
+      slots: sampleSlots,
+      runId: 'run-123',
+    });
+
+    assert.deepEqual(calls, [
+      { table: 'practice_assignments' },
+      {
+        rows: [
+          {
+            team_id: 'team-1',
+            practice_slot_id: 'slot-1::early',
+            base_slot_id: 'slot-1',
+            season_phase_id: 'early',
+            effective_from: '2024-08-01',
+            effective_until: '2024-09-15',
+            effective_date_range: '[2024-08-01,2024-09-15]',
+            source: 'auto',
+            run_id: 'run-123',
+          },
+        ],
+      },
+    ]);
+
+    assert.deepEqual(result, [
+      {
+        team_id: 'team-1',
+        practice_slot_id: 'slot-1::early',
+        base_slot_id: 'slot-1',
+        season_phase_id: 'early',
+        effective_from: '2024-08-01',
+        effective_until: '2024-09-15',
+        effective_date_range: '[2024-08-01,2024-09-15]',
+        source: 'auto',
+        run_id: 'run-123',
+      },
+    ]);
+  });
+
+  it('supports upserts when requested', async () => {
+    const calls = [];
+    const supabaseClient = {
+      from(table) {
+        calls.push({ table });
+        return {
+          upsert: async (rows) => {
+            calls.push({ upserted: rows });
+            return { data: rows, error: null };
+          },
+        };
+      },
+    };
+
+    await persistPracticeAssignments({
+      supabaseClient,
+      assignments: [{ teamId: 'team-1', slotId: 'slot-1::early' }],
+      slots: sampleSlots,
+      upsert: true,
+    });
+
+    assert.deepEqual(calls, [
+      { table: 'practice_assignments' },
+      {
+        upserted: [
+          {
+            team_id: 'team-1',
+            practice_slot_id: 'slot-1::early',
+            base_slot_id: 'slot-1',
+            season_phase_id: 'early',
+            effective_from: '2024-08-01',
+            effective_until: '2024-09-15',
+            effective_date_range: '[2024-08-01,2024-09-15]',
+            source: 'auto',
+            run_id: null,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('surfaces Supabase errors with context', async () => {
+    const supabaseClient = {
+      from() {
+        return {
+          insert: async () => ({
+            data: null,
+            error: { message: 'insert failed' },
+          }),
+        };
+      },
+    };
+
+    await assert.rejects(
+      () =>
+        persistPracticeAssignments({
+          supabaseClient,
+          assignments: [{ teamId: 'team-1', slotId: 'slot-1::early' }],
+          slots: sampleSlots,
+        }),
+      /Failed to persist practice assignments: insert failed/,
+    );
+  });
+
+  it('validates Supabase client presence', async () => {
+    await assert.rejects(
+      () =>
+        persistPracticeAssignments({
+          assignments: [{ teamId: 'team-1', slotId: 'slot-1::early' }],
+          slots: sampleSlots,
+        }),
+      /supabaseClient with a from\(\) method is required/,
+    );
   });
 });

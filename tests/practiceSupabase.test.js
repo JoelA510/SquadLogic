@@ -552,6 +552,22 @@ describe('persistPracticeAssignments', () => {
     ]);
   });
 
+  it('skips Supabase writes when there are no assignments', async () => {
+    const supabaseClient = {
+      from() {
+        throw new Error('should not call Supabase when no rows are present');
+      },
+    };
+
+    const result = await persistPracticeAssignments({
+      supabaseClient,
+      assignments: [],
+      slots: sampleSlots,
+    });
+
+    assert.deepEqual(result, []);
+  });
+
   it('surfaces Supabase errors with context', async () => {
     const supabaseClient = {
       from() {

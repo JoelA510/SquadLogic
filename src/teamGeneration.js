@@ -46,6 +46,22 @@
  *       teamsNeedingPlayers: Array<string>,
  *     },
  *   }>,
+ *   skillBalanceByDivision: Record<string, {
+ *     teamStats: Array<{
+ *       teamId: string,
+ *       coachId: string | null,
+ *       playerCount: number,
+ *       skillTotal: number,
+ *       averageSkill: number,
+ *     }>,
+ *     summary: {
+ *       totalSkill: number,
+ *       averageSkillPerPlayer: number,
+ *       minAverageSkill: number,
+ *       maxAverageSkill: number,
+ *       spread: number,
+ *     },
+ *   }>,
  * }}
  */
 export function generateTeams({ players, divisionConfigs, random = Math.random }) {
@@ -91,6 +107,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
   const buddyDiagnosticsByDivision = {};
   const coachCoverageByDivision = {};
   const rosterBalanceByDivision = {};
+  const skillBalanceByDivision = {};
 
   for (const [division, divisionPlayers] of playersByDivision.entries()) {
     const config = divisionConfigs[division];
@@ -178,6 +195,41 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
         teamsNeedingPlayers,
       },
     };
+
+    const skillStats = teams.map((team) => {
+      const playerCount = team.players.length;
+      const skillTotal = team.skillTotal ?? 0;
+      const averageSkill = playerCount > 0 ? Number((skillTotal / playerCount).toFixed(4)) : 0;
+
+      return {
+        teamId: team.id,
+        coachId: team.coachId ?? null,
+        playerCount,
+        skillTotal,
+        averageSkill,
+      };
+    });
+
+    const totalSkill = skillStats.reduce((sum, entry) => sum + entry.skillTotal, 0);
+    const averageSkillPerPlayer = totalPlayers > 0 ? Number((totalSkill / totalPlayers).toFixed(4)) : 0;
+    const minAverageSkill = skillStats.length
+      ? Math.min(...skillStats.map((entry) => entry.averageSkill))
+      : 0;
+    const maxAverageSkill = skillStats.length
+      ? Math.max(...skillStats.map((entry) => entry.averageSkill))
+      : 0;
+    const spread = Number((maxAverageSkill - minAverageSkill).toFixed(4));
+
+    skillBalanceByDivision[division] = {
+      teamStats: skillStats,
+      summary: {
+        totalSkill,
+        averageSkillPerPlayer,
+        minAverageSkill,
+        maxAverageSkill,
+        spread,
+      },
+    };
   }
 
   return {
@@ -187,6 +239,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
     buddyDiagnosticsByDivision,
     coachCoverageByDivision,
     rosterBalanceByDivision,
+    skillBalanceByDivision,
   };
 }
 
@@ -208,7 +261,7 @@ function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
   const createTeam = (coachId = null) => {
     teamIndex += 1;
     const id = `${division}-T${String(teamIndex).padStart(2, '0')}`;
-    const team = { id, division, coachId, players: [] };
+    const team = { id, division, coachId, players: [], skillTotal: 0 };
     teams.push(team);
     return team;
   };
@@ -234,20 +287,25 @@ function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
         );
       }
 
-      coachUnits.push({ coachId: coachPlayers[0].coachId, unit });
+      coachUnits.push({
+        coachId: coachPlayers[0].coachId,
+        unit,
+        skillTotal: calculateUnitSkill(unit),
+      });
     } else {
-      generalUnits.push(unit);
+      generalUnits.push({ unit, skillTotal: calculateUnitSkill(unit) });
     }
   }
 
   // Assign players that require a specific coach first.
-  for (const { coachId, unit } of coachUnits) {
+  for (const { coachId, unit, skillTotal } of coachUnits) {
     let targetTeam = teams.find((team) => team.coachId === coachId);
     if (!targetTeam) {
       targetTeam = createTeam(coachId);
     }
     const assigned = assignUnitToTeam({
       unit,
+      unitSkillTotal: skillTotal,
       team: targetTeam,
       maxRosterSize,
       reason: 'coach assignment',
@@ -262,10 +320,16 @@ function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
     }
   }
 
-  shuffleUnits(generalUnits, random);
+  generalUnits.sort((a, b) => b.skillTotal - a.skillTotal);
 
-  for (const unit of generalUnits) {
-    const team = pickTeamWithMostCapacity({ teams, unitSize: unit.length, maxRosterSize, random });
+  for (const { unit, skillTotal } of generalUnits) {
+    const team = pickTeamWithMostCapacity({
+      teams,
+      unitSize: unit.length,
+      unitSkillTotal: skillTotal,
+      maxRosterSize,
+      random,
+    });
     if (!team) {
       overflow.push({
         players: unit,
@@ -277,6 +341,7 @@ function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
 
     assignUnitToTeam({
       unit,
+      unitSkillTotal: skillTotal,
       team,
       maxRosterSize,
       reason: 'balancing assignment',
@@ -340,7 +405,7 @@ function createAssignmentUnits(players) {
   return { units, buddyDiagnostics };
 }
 
-function assignUnitToTeam({ unit, team, maxRosterSize, reason }) {
+function assignUnitToTeam({ unit, unitSkillTotal, team, maxRosterSize, reason }) {
   if (team.players.length + unit.length > maxRosterSize) {
     return false;
   }
@@ -352,10 +417,12 @@ function assignUnitToTeam({ unit, team, maxRosterSize, reason }) {
     team.players.push(player);
   }
 
+  team.skillTotal += unitSkillTotal;
+
   return true;
 }
 
-function pickTeamWithMostCapacity({ teams, unitSize, maxRosterSize, random }) {
+function pickTeamWithMostCapacity({ teams, unitSize, unitSkillTotal, maxRosterSize, random }) {
   const candidates = teams.filter((team) => team.players.length + unitSize <= maxRosterSize);
   if (candidates.length === 0) {
     return null;
@@ -374,15 +441,29 @@ function pickTeamWithMostCapacity({ teams, unitSize, maxRosterSize, random }) {
     }
   }
 
-  const index = Math.floor(random() * smallestTeams.length);
-  return smallestTeams[index];
-}
-
-function shuffleUnits(units, random) {
-  for (let i = units.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(random() * (i + 1));
-    [units[i], units[j]] = [units[j], units[i]];
+  if (smallestTeams.length === 1) {
+    return smallestTeams[0];
   }
+
+  let lowestAverageSkill = Infinity;
+  let lowestSkillTeams = [];
+
+  for (const team of smallestTeams) {
+    const futureSkillTotal = team.skillTotal + unitSkillTotal;
+    const futurePlayerCount = team.players.length + unitSize;
+    const averageSkill = futurePlayerCount > 0 ? futureSkillTotal / futurePlayerCount : 0;
+
+    if (averageSkill < lowestAverageSkill) {
+      lowestAverageSkill = averageSkill;
+      lowestSkillTeams = [team];
+    } else if (averageSkill === lowestAverageSkill) {
+      lowestSkillTeams.push(team);
+    }
+  }
+
+  const pool = lowestSkillTeams.length > 0 ? lowestSkillTeams : smallestTeams;
+  const index = Math.floor(random() * pool.length);
+  return pool[index];
 }
 
 function summarizeOverflow(entries) {
@@ -409,4 +490,14 @@ function summarizeOverflow(entries) {
   }
 
   return summary;
+}
+
+function calculateUnitSkill(unit) {
+  return unit.reduce((total, player) => total + getSkillRating(player), 0);
+}
+
+function getSkillRating(player) {
+  return typeof player.skillRating === 'number' && Number.isFinite(player.skillRating)
+    ? player.skillRating
+    : 0;
 }

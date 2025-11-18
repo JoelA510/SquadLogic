@@ -430,6 +430,45 @@ test('summarises roster slots remaining across teams', () => {
   });
 });
 
+test('spreads higher skill ratings across teams and reports skill balance', () => {
+  const players = [
+    { id: 'a', division: 'U10', skillRating: 5 },
+    { id: 'b', division: 'U10', skillRating: 5 },
+    { id: 'c', division: 'U10', skillRating: 1 },
+    { id: 'd', division: 'U10', skillRating: 1 },
+    { id: 'e', division: 'U10', skillRating: 1 },
+    { id: 'f', division: 'U10', skillRating: 1 },
+  ];
+
+  const { teamsByDivision, skillBalanceByDivision } = generateTeams({
+    players,
+    divisionConfigs: { U10: { maxRosterSize: 3 } },
+    random: createDeterministicRandom(),
+  });
+
+  const teams = teamsByDivision.U10;
+  assert.equal(teams.length, 2);
+
+  const teamsWithHighSkill = teams.map((team) =>
+    team.players.some((player) => player.skillRating === 5),
+  );
+  assert.deepEqual(teamsWithHighSkill, [true, true]);
+
+  assert.deepEqual(
+    skillBalanceByDivision.U10.summary,
+    {
+      totalSkill: 14,
+      averageSkillPerPlayer: 2.3333,
+      minAverageSkill: 2.3333,
+      maxAverageSkill: 2.3333,
+      spread: 0,
+    },
+  );
+
+  const teamAverages = skillBalanceByDivision.U10.teamStats.map((entry) => entry.averageSkill);
+  teamAverages.forEach((avg) => assert.equal(avg, 2.3333));
+});
+
 function createDeterministicRandom() {
   const modulus = 2147483647;
   let state = 42;

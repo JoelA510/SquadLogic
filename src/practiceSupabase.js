@@ -217,18 +217,22 @@ export function buildPracticeAssignmentRows({ assignments, slots, runId } = {}) 
   }
 
   const slotById = new Map();
-  for (const slot of slots) {
+  slots.forEach((slot, index) => {
     if (!slot || typeof slot !== 'object') {
-      throw new TypeError('each slot must be an object');
+      throw new TypeError(`slots[${index}] must be an object`);
     }
     if (!slot.id) {
-      throw new TypeError('each slot requires an id');
+      throw new TypeError(`slots[${index}] requires an id`);
     }
     if (!slot.effectiveFrom || !slot.effectiveUntil) {
-      throw new Error(`slot ${slot.id} requires effectiveFrom and effectiveUntil`);
+      throw new Error(
+        `slot "${slot.id}" at slots[${index}] requires effectiveFrom and effectiveUntil`,
+      );
     }
     if (slotById.has(slot.id)) {
-      throw new Error(`duplicate slot id detected: ${slot.id}`);
+      throw new Error(
+        `duplicate slot id detected: "${slot.id}" at slots[${index}]`,
+      );
     }
 
     slotById.set(slot.id, {
@@ -236,7 +240,7 @@ export function buildPracticeAssignmentRows({ assignments, slots, runId } = {}) 
       baseSlotId: slot.baseSlotId ?? slot.id,
       seasonPhaseId: slot.seasonPhaseId ?? null,
     });
-  }
+  });
 
   const normalizeSource = (value, index) => {
     if (value === 'locked' || value === 'manual') {
@@ -268,7 +272,7 @@ export function buildPracticeAssignmentRows({ assignments, slots, runId } = {}) 
 
     return {
       team_id: assignment.teamId,
-      slot_id: slot.id,
+      practice_slot_id: slot.id,
       base_slot_id: slot.baseSlotId,
       season_phase_id: slot.seasonPhaseId,
       effective_from: slot.effectiveFrom,

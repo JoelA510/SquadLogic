@@ -32,8 +32,8 @@ function normalizeWeekIndex(value, index) {
 }
 
 function normalizeId(value, label, index) {
-  if (!value || typeof value !== 'string') {
-    throw new TypeError(`assignments[${index}] requires a ${label}`);
+  if (typeof value !== 'string') {
+    throw new TypeError(`assignments[${index}] requires a string for ${label}`);
   }
   const trimmed = value.trim();
   if (!trimmed) {

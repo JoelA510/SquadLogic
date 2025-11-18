@@ -66,7 +66,24 @@ test('buildGameAssignmentRows validates inputs and ordering', () => {
           },
         ],
       }),
-    /requires a division/,
+    /requires a string for division/,
+  );
+  assert.throws(
+    () =>
+      buildGameAssignmentRows({
+        assignments: [
+          {
+            division: '   ',
+            weekIndex: 1,
+            slotId: 'slot-1',
+            start: '2024-08-10T16:00:00Z',
+            end: '2024-08-10T17:00:00Z',
+            homeTeamId: 'team-1',
+            awayTeamId: 'team-2',
+          },
+        ],
+      }),
+    /division cannot be empty/,
   );
 });
 

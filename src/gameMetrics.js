@@ -1,5 +1,9 @@
 import { isDeepStrictEqual } from 'node:util';
 
+function incrementKey(map, key) {
+  map[key] = (map[key] ?? 0) + 1;
+}
+
 /**
  * Evaluate a set of scheduled games for quality, resource utilization, and potential conflicts.
  *
@@ -54,6 +58,7 @@ export function evaluateGameSchedule({
     fieldUsage: {},
     teamsWithByes: {},
     unscheduledByReason: {},
+    unscheduledByDivision: {},
     teamGameLoad: {},
     sharedSlotUsage: [],
     sharedFieldDistribution: {},
@@ -173,8 +178,8 @@ export function evaluateGameSchedule({
 
   for (const entry of unscheduled) {
     validateUnscheduled(entry);
-    summary.unscheduledByReason[entry.reason] =
-      (summary.unscheduledByReason[entry.reason] ?? 0) + 1;
+    incrementKey(summary.unscheduledByReason, entry.reason);
+    incrementKey(summary.unscheduledByDivision, entry.division);
   }
 
   const { sharedSlotSummaries, sharedFieldDistribution, imbalanceWarnings } =
@@ -217,7 +222,10 @@ export function evaluateGameSchedule({
     warnings.push({
       type: 'unscheduled-matchups',
       message,
-      details: { breakdown: summary.unscheduledByReason },
+      details: {
+        breakdown: summary.unscheduledByReason,
+        divisionBreakdown: summary.unscheduledByDivision,
+      },
     });
   }
 

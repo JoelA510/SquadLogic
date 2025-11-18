@@ -320,7 +320,6 @@ function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
     }
   }
 
-  shuffleUnits(generalUnits, random);
   generalUnits.sort((a, b) => b.skillTotal - a.skillTotal);
 
   for (const { unit, skillTotal } of generalUnits) {
@@ -418,7 +417,7 @@ function assignUnitToTeam({ unit, unitSkillTotal, team, maxRosterSize, reason })
     team.players.push(player);
   }
 
-  team.skillTotal += unitSkillTotal ?? calculateUnitSkill(unit);
+  team.skillTotal += unitSkillTotal;
 
   return true;
 }
@@ -450,7 +449,7 @@ function pickTeamWithMostCapacity({ teams, unitSize, unitSkillTotal, maxRosterSi
   let lowestSkillTeams = [];
 
   for (const team of smallestTeams) {
-    const futureSkillTotal = team.skillTotal + (unitSkillTotal ?? 0);
+    const futureSkillTotal = team.skillTotal + unitSkillTotal;
     const futurePlayerCount = team.players.length + unitSize;
     const averageSkill = futurePlayerCount > 0 ? futureSkillTotal / futurePlayerCount : 0;
 
@@ -465,13 +464,6 @@ function pickTeamWithMostCapacity({ teams, unitSize, unitSkillTotal, maxRosterSi
   const pool = lowestSkillTeams.length > 0 ? lowestSkillTeams : smallestTeams;
   const index = Math.floor(random() * pool.length);
   return pool[index];
-}
-
-function shuffleUnits(units, random) {
-  for (let i = units.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(random() * (i + 1));
-    [units[i], units[j]] = [units[j], units[i]];
-  }
 }
 
 function summarizeOverflow(entries) {

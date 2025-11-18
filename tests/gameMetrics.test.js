@@ -216,6 +216,7 @@ test('evaluateGameSchedule aggregates unscheduled matchups and unknown teams', (
 
   assert.equal(summary.unscheduledByReason['coach-scheduling-conflict'], 2);
   assert.equal(summary.unscheduledByReason['no-slot-available'], 1);
+  assert.equal(summary.unscheduledByDivision.U12, 3);
   assert(warnings.some((warning) => warning.type === 'unknown-team'));
   const unscheduledWarning = warnings.find(
     (warning) => warning.type === 'unscheduled-matchups',
@@ -234,6 +235,7 @@ test('evaluateGameSchedule aggregates unscheduled matchups and unknown teams', (
     earliestStart: '2024-08-10T16:00:00.000Z',
     latestStart: '2024-08-10T16:00:00.000Z',
   });
+  assert.deepEqual(unscheduledWarning.details.divisionBreakdown, { U12: 3 });
 });
 
 test('evaluateGameSchedule flags shared slot imbalances across divisions', () => {

@@ -239,6 +239,7 @@ test('optional collections default safely when omitted', () => {
   });
   assert.deepEqual(result.practice.unassignedByReason, []);
   assert.deepEqual(result.games.summary.unscheduledByReason, {});
+  assert.deepEqual(result.games.summary.unscheduledByDivision, {});
 });
 
 test('game conflict warnings escalate to error severity', () => {
@@ -307,6 +308,7 @@ test('unscheduled matchups are surfaced as errors', () => {
   assert.equal(unscheduledIssue.severity, 'error');
   assert.equal(result.games.summary.unscheduledByReason['no-slot-available'], 1);
   assert.equal(result.games.summary.unscheduledByReason.weather, 1);
+  assert.equal(result.games.summary.unscheduledByDivision.U10, 2);
   assert.equal(result.status, 'action-required');
 });
 

@@ -54,6 +54,7 @@ export function evaluateGameSchedule({
     fieldUsage: {},
     teamsWithByes: {},
     unscheduledByReason: {},
+    unscheduledByDivision: {},
     teamGameLoad: {},
     sharedSlotUsage: [],
     sharedFieldDistribution: {},
@@ -175,6 +176,8 @@ export function evaluateGameSchedule({
     validateUnscheduled(entry);
     summary.unscheduledByReason[entry.reason] =
       (summary.unscheduledByReason[entry.reason] ?? 0) + 1;
+    summary.unscheduledByDivision[entry.division] =
+      (summary.unscheduledByDivision[entry.division] ?? 0) + 1;
   }
 
   const { sharedSlotSummaries, sharedFieldDistribution, imbalanceWarnings } =
@@ -217,7 +220,10 @@ export function evaluateGameSchedule({
     warnings.push({
       type: 'unscheduled-matchups',
       message,
-      details: { breakdown: summary.unscheduledByReason },
+      details: {
+        breakdown: summary.unscheduledByReason,
+        divisionBreakdown: summary.unscheduledByDivision,
+      },
     });
   }
 

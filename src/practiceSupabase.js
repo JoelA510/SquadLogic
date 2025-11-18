@@ -283,3 +283,38 @@ export function buildPracticeAssignmentRows({ assignments, slots, runId } = {}) 
     };
   });
 }
+
+export async function persistPracticeAssignments({
+  supabaseClient,
+  assignments,
+  slots,
+  runId,
+  upsert = false,
+} = {}) {
+  if (!supabaseClient || typeof supabaseClient.from !== 'function') {
+    throw new TypeError('supabaseClient with a from() method is required');
+  }
+
+  const rows = buildPracticeAssignmentRows({ assignments, slots, runId });
+  const table = supabaseClient.from('practice_assignments');
+
+  if (!table || typeof table !== 'object') {
+    throw new TypeError('supabaseClient.from must return a query builder object');
+  }
+
+  const action = upsert ? table.upsert : table.insert;
+  const actionName = upsert ? 'upsert' : 'insert';
+
+  if (typeof action !== 'function') {
+    throw new TypeError(`practice_assignments builder must expose a ${actionName}() method`);
+  }
+
+  const { data, error } = await action.call(table, rows);
+
+  if (error) {
+    const message = error.message ?? String(error);
+    throw new Error(`Failed to persist practice assignments: ${message}`);
+  }
+
+  return data ?? null;
+}

@@ -213,9 +213,7 @@ export function evaluateGameSchedule({
     const breakdownLabel = breakdownEntries
       .map(([reason, count]) => `${reason}: ${count}`)
       .join(', ');
-    const message = breakdownLabel
-      ? `${total} matchup(s) could not be scheduled (${breakdownLabel}).`
-      : `${total} matchup(s) could not be scheduled.`;
+    const message = `${total} matchup(s) could not be scheduled (${breakdownLabel}).`;
     warnings.push({
       type: 'unscheduled-matchups',
       message,

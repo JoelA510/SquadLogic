@@ -296,6 +296,10 @@ export async function persistPracticeAssignments({
   }
 
   const rows = buildPracticeAssignmentRows({ assignments, slots, runId });
+  if (rows.length === 0) {
+    return [];
+  }
+
   const table = supabaseClient.from('practice_assignments');
 
   if (!table || typeof table !== 'object') {

@@ -113,6 +113,38 @@ function selectField(value) {
   return null;
 }
 
+function normalizeSeasonOverrides(overrides, index) {
+  if (overrides === undefined || overrides === null) {
+    return null;
+  }
+
+  if (typeof overrides !== 'object' || Array.isArray(overrides)) {
+    throw new TypeError(`rows[${index}] seasonOverrides must be an object when provided`);
+  }
+
+  const normalized = {};
+
+  for (const [phaseId, rawOverride] of Object.entries(overrides)) {
+    if (!rawOverride || typeof rawOverride !== 'object') {
+      throw new TypeError(`rows[${index}] seasonOverrides for phase ${phaseId} must be an object`);
+    }
+
+    const startTime = rawOverride.startTime ?? rawOverride.start_time;
+    const endTime = rawOverride.endTime ?? rawOverride.end_time;
+    const durationMinutes = rawOverride.durationMinutes ?? rawOverride.duration_minutes;
+    const capacity = rawOverride.capacity ?? rawOverride.slotCapacity;
+
+    normalized[phaseId] = {
+      ...(startTime !== undefined ? { startTime } : {}),
+      ...(endTime !== undefined ? { endTime } : {}),
+      ...(durationMinutes !== undefined ? { durationMinutes } : {}),
+      ...(capacity !== undefined ? { capacity } : {}),
+    };
+  }
+
+  return normalized;
+}
+
 export function buildPracticeSlotsFromSupabaseRows(rows) {
   if (!Array.isArray(rows)) {
     throw new TypeError('rows must be an array');
@@ -135,6 +167,11 @@ export function buildPracticeSlotsFromSupabaseRows(rows) {
     const validFrom = normalizeDate(row.validFrom ?? row.valid_from, 'validFrom', index);
     const validUntil = normalizeDate(row.validUntil ?? row.valid_until, 'validUntil', index);
 
+    const seasonOverrides = normalizeSeasonOverrides(
+      row.seasonOverrides ?? row.season_overrides,
+      index,
+    );
+
     if (validUntil < validFrom) {
       throw new Error(`rows[${index}] validUntil precedes validFrom`);
     }
@@ -152,6 +189,7 @@ export function buildPracticeSlotsFromSupabaseRows(rows) {
       fieldId: selectField(row.fieldId ?? row.field_id),
       fieldSubunitId: selectField(row.fieldSubunitId ?? row.field_subunit_id),
       location: row.location ?? row.fieldLabel ?? null,
+      ...(seasonOverrides ? { seasonOverrides } : {}),
     };
   });
 }

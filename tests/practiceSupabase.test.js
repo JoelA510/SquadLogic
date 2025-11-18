@@ -242,8 +242,10 @@ describe('buildPracticeSlotsFromSupabaseRows', () => {
     assert.throws(() => buildPracticeSlotsFromSupabaseRows([null]));
     assert.throws(() => buildPracticeSlotsFromSupabaseRows([{}]));
   });
+});
 
-  it('expands normalized Supabase slots into season-aware effective slots', () => {
+describe('expandSupabasePracticeSlots', () => {
+  it('expands normalized Supabase slots into season-aware effective slots with overrides', () => {
     const rows = [
       {
         id: 'slot-1',
@@ -299,9 +301,15 @@ describe('buildPracticeSlotsFromSupabaseRows', () => {
       ],
     );
 
-    for (const slot of expanded) {
-      assert.ok(slot.start instanceof Date);
-      assert.ok(slot.end instanceof Date);
-    }
+    const earlySlot = expanded.find((slot) => slot.seasonPhaseId === 'early');
+    const lateSlot = expanded.find((slot) => slot.seasonPhaseId === 'late');
+
+    assert.ok(earlySlot, 'Early phase slot should exist');
+    assert.ok(lateSlot, 'Late phase slot should exist');
+
+    assert.equal(earlySlot.start.toISOString(), '2024-08-05T17:00:00.000Z');
+    assert.equal(earlySlot.end.toISOString(), '2024-08-05T18:00:00.000Z');
+    assert.equal(lateSlot.start.toISOString(), '2024-09-16T17:00:00.000Z');
+    assert.equal(lateSlot.end.toISOString(), '2024-09-16T18:15:00.000Z');
   });
 });

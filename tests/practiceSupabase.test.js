@@ -76,6 +76,164 @@ describe('buildPracticeSlotsFromSupabaseRows', () => {
     assert.throws(() => buildPracticeSlotsFromSupabaseRows(rows));
   });
 
+  it('rejects unsupported day values', () => {
+    const rows = [
+      {
+        id: 'slot-1',
+        day: 'xyz',
+        start: '18:00',
+        end: '19:00',
+        validFrom: '2024-08-01',
+        validUntil: '2024-08-31',
+        capacity: 2,
+      },
+    ];
+
+    assert.throws(
+      () => buildPracticeSlotsFromSupabaseRows(rows),
+      /unsupported day value/i,
+    );
+  });
+
+  it('rejects invalid time strings', () => {
+    const baseRow = {
+      id: 'slot-1',
+      day: 'Tue',
+      validFrom: '2024-08-01',
+      validUntil: '2024-08-31',
+      capacity: 2,
+    };
+
+    assert.throws(
+      () => buildPracticeSlotsFromSupabaseRows([{ ...baseRow, start: '25:00', end: '26:00' }]),
+      /invalid hour component/i,
+    );
+    assert.throws(
+      () => buildPracticeSlotsFromSupabaseRows([{ ...baseRow, start: '10:60', end: '11:00' }]),
+      /invalid minute component/i,
+    );
+    assert.throws(
+      () => buildPracticeSlotsFromSupabaseRows([{ ...baseRow, start: 'abc', end: '11:00' }]),
+      /invalid hour component/i,
+    );
+  });
+
+  it('rejects invalid date strings', () => {
+    const rows = [
+      {
+        id: 'slot-1',
+        day: 'Tue',
+        start: '18:00',
+        end: '19:00',
+        validFrom: 'not-a-date',
+        validUntil: '2024-08-31',
+        capacity: 2,
+      },
+    ];
+
+    assert.throws(
+      () => buildPracticeSlotsFromSupabaseRows(rows),
+      /not a valid date/i,
+    );
+  });
+
+  it('rejects invalid capacity values', () => {
+    const baseRow = {
+      id: 'slot-1',
+      day: 'Tue',
+      start: '18:00',
+      end: '19:00',
+      validFrom: '2024-08-01',
+      validUntil: '2024-08-31',
+    };
+
+    assert.throws(
+      () => buildPracticeSlotsFromSupabaseRows([{ ...baseRow, capacity: 0 }]),
+      /capacity must be a positive number/i,
+    );
+    assert.throws(
+      () => buildPracticeSlotsFromSupabaseRows([{ ...baseRow, capacity: -1 }]),
+      /capacity must be a positive number/i,
+    );
+    assert.throws(
+      () => buildPracticeSlotsFromSupabaseRows([{ ...baseRow, capacity: 'abc' }]),
+      /capacity must be a positive number/i,
+    );
+  });
+
+  it('rejects when validUntil precedes validFrom', () => {
+    const rows = [
+      {
+        id: 'slot-1',
+        day: 'Tue',
+        start: '18:00',
+        end: '19:00',
+        validFrom: '2024-09-01',
+        validUntil: '2024-08-31',
+        capacity: 2,
+      },
+    ];
+
+    assert.throws(
+      () => buildPracticeSlotsFromSupabaseRows(rows),
+      /validUntil precedes validFrom/i,
+    );
+  });
+
+  it('accepts Friday and Saturday slots', () => {
+    const rows = [
+      {
+        id: 'slot-fri',
+        day: 'Friday',
+        start: '18:00',
+        end: '19:00',
+        validFrom: '2024-08-01',
+        validUntil: '2024-08-31',
+        capacity: 2,
+      },
+      {
+        id: 'slot-sat',
+        day: 'sat',
+        start: '09:00',
+        end: '10:00',
+        validFrom: '2024-08-01',
+        validUntil: '2024-08-31',
+        capacity: 2,
+      },
+    ];
+
+    const result = buildPracticeSlotsFromSupabaseRows(rows);
+
+    assert.deepEqual(
+      result.map((slot) => ({ id: slot.id, day: slot.day })),
+      [
+        { id: 'slot-fri', day: 'Fri' },
+        { id: 'slot-sat', day: 'Sat' },
+      ],
+    );
+  });
+
+  it('trims field identifiers and normalizes empty to null', () => {
+    const rows = [
+      {
+        id: 'slot-1',
+        day: 'Tue',
+        start: '18:00',
+        end: '19:00',
+        validFrom: '2024-08-01',
+        validUntil: '2024-08-31',
+        capacity: 2,
+        fieldId: '  FIELD-1  ',
+        fieldSubunitId: '   ',
+      },
+    ];
+
+    const [slot] = buildPracticeSlotsFromSupabaseRows(rows);
+
+    assert.equal(slot.fieldId, 'FIELD-1');
+    assert.equal(slot.fieldSubunitId, null);
+  });
+
   it('requires required fields', () => {
     assert.throws(() => buildPracticeSlotsFromSupabaseRows('nope'));
     assert.throws(() => buildPracticeSlotsFromSupabaseRows([null]));

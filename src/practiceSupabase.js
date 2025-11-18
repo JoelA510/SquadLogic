@@ -9,6 +9,10 @@ const DAY_MAP = {
   wednesday: 'Wed',
   thu: 'Thu',
   thursday: 'Thu',
+  fri: 'Fri',
+  friday: 'Fri',
+  sat: 'Sat',
+  saturday: 'Sat',
 };
 
 function normalizeDay(dayValue, index) {
@@ -27,8 +31,8 @@ function normalizeDay(dayValue, index) {
 function normalizeTime(value, label) {
   if (value instanceof Date) {
     return {
-      minutes: value.getHours() * 60 + value.getMinutes(),
-      formatted: `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`,
+      minutes: value.getUTCHours() * 60 + value.getUTCMinutes(),
+      formatted: `${String(value.getUTCHours()).padStart(2, '0')}:${String(value.getUTCMinutes()).padStart(2, '0')}`,
     };
   }
 
@@ -100,7 +104,11 @@ function normalizeCapacity(row, index) {
 }
 
 function selectField(value) {
-  return value && typeof value === 'string' ? value : null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+  return null;
 }
 
 export function buildPracticeSlotsFromSupabaseRows(rows) {
@@ -108,9 +116,7 @@ export function buildPracticeSlotsFromSupabaseRows(rows) {
     throw new TypeError('rows must be an array');
   }
 
-  const normalized = [];
-
-  rows.forEach((row, index) => {
+  return rows.map((row, index) => {
     if (!row || typeof row !== 'object') {
       throw new TypeError(`rows[${index}] must be an object`);
     }
@@ -133,7 +139,7 @@ export function buildPracticeSlotsFromSupabaseRows(rows) {
 
     const capacity = normalizeCapacity(row, index);
 
-    normalized.push({
+    return {
       id,
       day,
       start: start.formatted,
@@ -144,8 +150,6 @@ export function buildPracticeSlotsFromSupabaseRows(rows) {
       fieldId: selectField(row.fieldId ?? row.field_id),
       fieldSubunitId: selectField(row.fieldSubunitId ?? row.field_subunit_id),
       location: row.location ?? row.fieldLabel ?? null,
-    });
+    };
   });
-
-  return normalized;
 }

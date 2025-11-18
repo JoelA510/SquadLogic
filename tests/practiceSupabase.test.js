@@ -532,8 +532,24 @@ describe('persistPracticeAssignments', () => {
       upsert: true,
     });
 
-    assert.equal(calls[0].table, 'practice_assignments');
-    assert.ok(calls[1].upserted);
+    assert.deepEqual(calls, [
+      { table: 'practice_assignments' },
+      {
+        upserted: [
+          {
+            team_id: 'team-1',
+            practice_slot_id: 'slot-1::early',
+            base_slot_id: 'slot-1',
+            season_phase_id: 'early',
+            effective_from: '2024-08-01',
+            effective_until: '2024-09-15',
+            effective_date_range: '[2024-08-01,2024-09-15]',
+            source: 'auto',
+            run_id: null,
+          },
+        ],
+      },
+    ]);
   });
 
   it('surfaces Supabase errors with context', async () => {

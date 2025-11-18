@@ -1,3 +1,5 @@
+import { expandPracticeSlotsForSeason } from './practiceSlotExpansion.js';
+
 const DAY_MAP = {
   sun: 'Sun',
   sunday: 'Sun',
@@ -152,4 +154,9 @@ export function buildPracticeSlotsFromSupabaseRows(rows) {
       location: row.location ?? row.fieldLabel ?? null,
     };
   });
+}
+
+export function expandSupabasePracticeSlots({ rows, seasonPhases }) {
+  const normalizedSlots = buildPracticeSlotsFromSupabaseRows(rows);
+  return expandPracticeSlotsForSeason({ slots: normalizedSlots, seasonPhases });
 }

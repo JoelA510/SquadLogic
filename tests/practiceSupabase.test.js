@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildPracticeSlotsFromSupabaseRows } from '../src/practiceSupabase.js';
+import {
+  buildPracticeSlotsFromSupabaseRows,
+  expandSupabasePracticeSlots,
+} from '../src/practiceSupabase.js';
 
 describe('buildPracticeSlotsFromSupabaseRows', () => {
   it('normalizes camelCase and snake_case Supabase slot rows', () => {
@@ -238,5 +241,67 @@ describe('buildPracticeSlotsFromSupabaseRows', () => {
     assert.throws(() => buildPracticeSlotsFromSupabaseRows('nope'));
     assert.throws(() => buildPracticeSlotsFromSupabaseRows([null]));
     assert.throws(() => buildPracticeSlotsFromSupabaseRows([{}]));
+  });
+
+  it('expands normalized Supabase slots into season-aware effective slots', () => {
+    const rows = [
+      {
+        id: 'slot-1',
+        day: 'Mon',
+        start: '17:00',
+        end: '18:15',
+        capacity: 2,
+        validFrom: '2024-08-01',
+        validUntil: '2024-10-31',
+        seasonOverrides: {
+          early: { endTime: '18:00' },
+        },
+      },
+    ];
+
+    const seasonPhases = [
+      { id: 'early', startDate: '2024-08-01', endDate: '2024-09-15' },
+      { id: 'late', startDate: '2024-09-16', endDate: '2024-10-31' },
+    ];
+
+    const expanded = expandSupabasePracticeSlots({ rows, seasonPhases });
+
+    assert.equal(expanded.length, 2);
+    assert.deepEqual(
+      expanded.map((slot) => ({
+        id: slot.id,
+        baseSlotId: slot.baseSlotId,
+        seasonPhaseId: slot.seasonPhaseId,
+        day: slot.day,
+        capacity: slot.capacity,
+        effectiveFrom: slot.effectiveFrom,
+        effectiveUntil: slot.effectiveUntil,
+      })),
+      [
+        {
+          id: 'slot-1::early',
+          baseSlotId: 'slot-1',
+          seasonPhaseId: 'early',
+          day: 'Mon',
+          capacity: 2,
+          effectiveFrom: '2024-08-01',
+          effectiveUntil: '2024-09-15',
+        },
+        {
+          id: 'slot-1::late',
+          baseSlotId: 'slot-1',
+          seasonPhaseId: 'late',
+          day: 'Mon',
+          capacity: 2,
+          effectiveFrom: '2024-09-16',
+          effectiveUntil: '2024-10-31',
+        },
+      ],
+    );
+
+    for (const slot of expanded) {
+      assert.ok(slot.start instanceof Date);
+      assert.ok(slot.end instanceof Date);
+    }
   });
 });

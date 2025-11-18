@@ -217,7 +217,14 @@ test('evaluateGameSchedule aggregates unscheduled matchups and unknown teams', (
   assert.equal(summary.unscheduledByReason['coach-scheduling-conflict'], 2);
   assert.equal(summary.unscheduledByReason['no-slot-available'], 1);
   assert(warnings.some((warning) => warning.type === 'unknown-team'));
-  assert(warnings.some((warning) => warning.type === 'unscheduled-matchups'));
+  const unscheduledWarning = warnings.find(
+    (warning) => warning.type === 'unscheduled-matchups',
+  );
+  assert(unscheduledWarning);
+  assert.match(
+    unscheduledWarning.message,
+    /3 matchup\(s\) could not be scheduled \(coach-scheduling-conflict: 2, no-slot-available: 1\)\./,
+  );
   assert.deepEqual(summary.teamGameLoad['team-known'], {
     totalGames: 1,
     homeGames: 1,

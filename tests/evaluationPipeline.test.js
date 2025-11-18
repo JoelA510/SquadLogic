@@ -286,6 +286,30 @@ test('game conflict warnings escalate to error severity', () => {
   assert.equal(result.status, 'action-required');
 });
 
+test('unscheduled matchups are surfaced as errors', () => {
+  const result = runScheduleEvaluations({
+    games: {
+      assignments: [],
+      teams: [{ id: 'team-1', division: 'U10', coachId: null }],
+      unscheduled: [
+        { weekIndex: 1, division: 'U10', reason: 'no-slot-available' },
+        { weekIndex: 2, division: 'U10', reason: 'weather' },
+      ],
+    },
+  });
+
+  const unscheduledIssue = result.issues.find(
+    (issue) =>
+      issue.category === 'games' && issue.message.includes('could not be scheduled'),
+  );
+
+  assert.ok(unscheduledIssue, 'expected unscheduled matchup issue');
+  assert.equal(unscheduledIssue.severity, 'error');
+  assert.equal(result.games.summary.unscheduledByReason['no-slot-available'], 1);
+  assert.equal(result.games.summary.unscheduledByReason.weather, 1);
+  assert.equal(result.status, 'action-required');
+});
+
 test('shared slot imbalance warnings surface with warning severity', () => {
   const result = runScheduleEvaluations({
     games: {

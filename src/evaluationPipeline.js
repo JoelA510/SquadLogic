@@ -236,6 +236,7 @@ export function runScheduleEvaluations({ practice, games } = {}) {
       'team-double-booked',
       'coach-conflict',
       'field-overlap',
+      'unscheduled-matchups',
     ]);
     for (const warning of gameResult.warnings) {
       issues.push({

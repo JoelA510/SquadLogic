@@ -206,9 +206,19 @@ export function evaluateGameSchedule({
   });
 
   if (unscheduled.length > 0) {
+    const total = unscheduled.length;
+    const breakdownEntries = Object.entries(summary.unscheduledByReason).sort(
+      ([reasonA], [reasonB]) => reasonA.localeCompare(reasonB),
+    );
+    const breakdownLabel = breakdownEntries
+      .map(([reason, count]) => `${reason}: ${count}`)
+      .join(', ');
+    const message = breakdownLabel
+      ? `${total} matchup(s) could not be scheduled (${breakdownLabel}).`
+      : `${total} matchup(s) could not be scheduled.`;
     warnings.push({
       type: 'unscheduled-matchups',
-      message: 'Some matchups could not be scheduled.',
+      message,
       details: { breakdown: summary.unscheduledByReason },
     });
   }

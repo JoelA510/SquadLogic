@@ -135,10 +135,10 @@ function normalizeSeasonOverrides(overrides, index) {
     const capacity = rawOverride.capacity ?? rawOverride.slotCapacity;
 
     normalized[phaseId] = {
-      ...(startTime !== undefined ? { startTime } : {}),
-      ...(endTime !== undefined ? { endTime } : {}),
-      ...(durationMinutes !== undefined ? { durationMinutes } : {}),
-      ...(capacity !== undefined ? { capacity } : {}),
+      ...(startTime != null ? { startTime } : {}),
+      ...(endTime != null ? { endTime } : {}),
+      ...(durationMinutes != null ? { durationMinutes } : {}),
+      ...(capacity != null ? { capacity } : {}),
     };
   }
 

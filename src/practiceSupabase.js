@@ -198,3 +198,88 @@ export function expandSupabasePracticeSlots({ rows, seasonPhases }) {
   const normalizedSlots = buildPracticeSlotsFromSupabaseRows(rows);
   return expandPracticeSlotsForSeason({ slots: normalizedSlots, seasonPhases });
 }
+
+/**
+ * Build Supabase-ready `practice_assignments` rows from scheduler outputs.
+ *
+ * @param {Object} params
+ * @param {Array<{ teamId: string, slotId: string, source?: string }>} params.assignments
+ * @param {Array<Object>} params.slots - Slot definitions that include `effectiveFrom` and `effectiveUntil`.
+ * @param {string} [params.runId] - Optional scheduler run identifier to persist alongside assignments.
+ * @returns {Array<Object>} Supabase row payloads with snake_case keys.
+ */
+export function buildPracticeAssignmentRows({ assignments, slots, runId } = {}) {
+  if (!Array.isArray(assignments)) {
+    throw new TypeError('assignments must be an array');
+  }
+  if (!Array.isArray(slots)) {
+    throw new TypeError('slots must be an array');
+  }
+
+  const slotById = new Map();
+  slots.forEach((slot, index) => {
+    if (!slot || typeof slot !== 'object') {
+      throw new TypeError(`slots[${index}] must be an object`);
+    }
+    if (!slot.id) {
+      throw new TypeError(`slots[${index}] requires an id`);
+    }
+    if (!slot.effectiveFrom || !slot.effectiveUntil) {
+      throw new Error(
+        `slot "${slot.id}" at slots[${index}] requires effectiveFrom and effectiveUntil`,
+      );
+    }
+    if (slotById.has(slot.id)) {
+      throw new Error(
+        `duplicate slot id detected: "${slot.id}" at slots[${index}]`,
+      );
+    }
+
+    slotById.set(slot.id, {
+      ...slot,
+      baseSlotId: slot.baseSlotId ?? slot.id,
+      seasonPhaseId: slot.seasonPhaseId ?? null,
+    });
+  });
+
+  const normalizeSource = (value, index) => {
+    if (value === 'locked' || value === 'manual') {
+      return 'manual';
+    }
+    if (value === undefined || value === null || value === 'auto') {
+      return 'auto';
+    }
+    throw new Error(`assignments[${index}] has an unsupported source: ${value}`);
+  };
+
+  return assignments.map((assignment, index) => {
+    if (!assignment || typeof assignment !== 'object') {
+      throw new TypeError(`assignments[${index}] must be an object`);
+    }
+    if (!assignment.teamId) {
+      throw new TypeError(`assignments[${index}] requires a teamId`);
+    }
+    if (!assignment.slotId) {
+      throw new TypeError(`assignments[${index}] requires a slotId`);
+    }
+
+    const slot = slotById.get(assignment.slotId);
+    if (!slot) {
+      throw new Error(`assignments[${index}] references unknown slotId: ${assignment.slotId}`);
+    }
+
+    const normalizedSource = normalizeSource(assignment.source, index);
+
+    return {
+      team_id: assignment.teamId,
+      practice_slot_id: slot.id,
+      base_slot_id: slot.baseSlotId,
+      season_phase_id: slot.seasonPhaseId,
+      effective_from: slot.effectiveFrom,
+      effective_until: slot.effectiveUntil,
+      effective_date_range: `[${slot.effectiveFrom},${slot.effectiveUntil}]`,
+      source: normalizedSource,
+      run_id: runId ?? null,
+    };
+  });
+}

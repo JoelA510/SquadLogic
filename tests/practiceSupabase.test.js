@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   buildPracticeSlotsFromSupabaseRows,
   expandSupabasePracticeSlots,
+  buildPracticeAssignmentRows,
 } from '../src/practiceSupabase.js';
 
 describe('buildPracticeSlotsFromSupabaseRows', () => {
@@ -311,5 +312,134 @@ describe('expandSupabasePracticeSlots', () => {
     assert.equal(earlySlot.end.toISOString(), '2024-08-05T18:00:00.000Z');
     assert.equal(lateSlot.start.toISOString(), '2024-09-16T17:00:00.000Z');
     assert.equal(lateSlot.end.toISOString(), '2024-09-16T18:15:00.000Z');
+  });
+});
+
+describe('buildPracticeAssignmentRows', () => {
+  const sampleSlots = [
+    {
+      id: 'slot-1::early',
+      baseSlotId: 'slot-1',
+      seasonPhaseId: 'early',
+      effectiveFrom: '2024-08-01',
+      effectiveUntil: '2024-09-15',
+    },
+    {
+      id: 'slot-1::late',
+      baseSlotId: 'slot-1',
+      seasonPhaseId: 'late',
+      effectiveFrom: '2024-09-16',
+      effectiveUntil: '2024-10-31',
+    },
+  ];
+
+  it('builds Supabase-ready practice assignment rows', () => {
+    const assignments = [
+      { teamId: 'team-1', slotId: 'slot-1::early', source: 'locked' },
+      { teamId: 'team-2', slotId: 'slot-1::late', source: 'auto' },
+    ];
+
+    const rows = buildPracticeAssignmentRows({ assignments, slots: sampleSlots, runId: 'run-123' });
+
+    assert.deepEqual(rows, [
+      {
+        team_id: 'team-1',
+        practice_slot_id: 'slot-1::early',
+        base_slot_id: 'slot-1',
+        season_phase_id: 'early',
+        effective_from: '2024-08-01',
+        effective_until: '2024-09-15',
+        effective_date_range: '[2024-08-01,2024-09-15]',
+        source: 'manual',
+        run_id: 'run-123',
+      },
+      {
+        team_id: 'team-2',
+        practice_slot_id: 'slot-1::late',
+        base_slot_id: 'slot-1',
+        season_phase_id: 'late',
+        effective_from: '2024-09-16',
+        effective_until: '2024-10-31',
+        effective_date_range: '[2024-09-16,2024-10-31]',
+        source: 'auto',
+        run_id: 'run-123',
+      },
+    ]);
+  });
+
+  it('fails when slot metadata is missing', () => {
+    assert.throws(
+      () =>
+        buildPracticeAssignmentRows({
+          assignments: [{ teamId: 'team-1', slotId: 'slot-unknown' }],
+          slots: sampleSlots,
+        }),
+      /unknown slotId/i,
+    );
+
+    assert.throws(
+      () =>
+        buildPracticeAssignmentRows({
+          assignments: [{ teamId: 'team-1', slotId: 'slot-1::early' }],
+          slots: [{ id: 'slot-1::early' }],
+        }),
+      /requires effectiveFrom and effectiveUntil/i,
+    );
+  });
+
+  it('rejects non-array assignments', () => {
+    assert.throws(
+      () => buildPracticeAssignmentRows({ assignments: 'bad', slots: [] }),
+      {
+        name: 'TypeError',
+        message: /assignments must be an array/i,
+      },
+    );
+  });
+
+  it('rejects unsupported assignment sources', () => {
+    assert.throws(
+      () =>
+        buildPracticeAssignmentRows({
+          assignments: [
+            { teamId: 'team-1', slotId: 'slot-1::early', source: 'invalid' },
+          ],
+          slots: sampleSlots,
+        }),
+      /unsupported source: invalid/i,
+    );
+  });
+
+  it('rejects duplicate slot ids with index-aware errors', () => {
+    assert.throws(
+      () =>
+        buildPracticeAssignmentRows({
+          assignments: [],
+          slots: [
+            ...sampleSlots,
+            { ...sampleSlots[0], id: sampleSlots[0].id },
+          ],
+        }),
+      /duplicate slot id detected: ".*" at slots\[\d+\]/i,
+    );
+  });
+
+  it('emits practice_slot_id instead of slot_id', () => {
+    const rows = buildPracticeAssignmentRows({
+      assignments: [{ teamId: 'team-1', slotId: 'slot-1::early', source: 'auto' }],
+      slots: sampleSlots,
+    });
+
+    assert.deepEqual(rows[0], {
+      team_id: 'team-1',
+      practice_slot_id: 'slot-1::early',
+      base_slot_id: 'slot-1',
+      season_phase_id: 'early',
+      effective_from: '2024-08-01',
+      effective_until: '2024-09-15',
+      effective_date_range: '[2024-08-01,2024-09-15]',
+      source: 'auto',
+      run_id: null,
+    });
   });
 });

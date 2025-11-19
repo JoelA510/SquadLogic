@@ -42,6 +42,10 @@ This document translates the roadmap's team formation phase into actionable plan
 - **Coach coverage summary**: Highlight any division lacking enough volunteer coaches to meet team counts. The allocator now
   returns this metadata through `coachCoverageByDivision`, which includes total team counts, volunteer coach coverage, and a
   `needsAdditionalCoaches` flag so the admin workflow can prioritize outreach.
+- **Persistence snapshot builder**: The new `prepareTeamPersistenceSnapshot` helper in `src/teamPersistenceSnapshot.js`
+  packages the Supabase payloads (team rows plus player rows) alongside admin-facing metadata such as manual override queues,
+  pending/applied counts, and run history ordering. This gives the dashboard enough context to display readiness without
+  reimplementing normalization logic on the client.
 
 ## Manual Adjustment Workflow
 1. Present team rosters in the admin UI with sortable columns (player name, buddy code, skill tier).

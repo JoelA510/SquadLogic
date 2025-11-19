@@ -9,7 +9,7 @@ function deriveTeamUuid(generatorTeamId) {
   const bytes = Buffer.alloc(16);
   hash.copy(bytes, 0, 0, 16);
 
-  // Force UUID version 4 (random) bits while keeping deterministic hash-derived bytes.
+  // Per RFC 4122, set the version to 4 and the variant to "10xx".
   bytes[6] = (bytes[6] & 0x0f) | 0x40;
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
 

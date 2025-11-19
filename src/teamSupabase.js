@@ -202,7 +202,10 @@ export function buildTeamPlayerRows({ teamsByDivision, manualAssignments = [], r
     }
 
     const generatorTeamId = normalizeString(assignment.teamId, 'manualAssignments.teamId', index);
-    const teamId = teamIdMap?.get(generatorTeamId) ?? generatorTeamId;
+    const teamId = teamIdMap ? teamIdMap.get(generatorTeamId) : generatorTeamId;
+    if (teamIdMap && teamId === undefined) {
+      throw new Error(`UUID mapping not found for generator team ID: ${generatorTeamId}`);
+    }
     const playerId = normalizeString(assignment.playerId, 'manualAssignments.playerId', index);
     const role = normalizeRole(assignment.role, index);
     const source = normalizeSource(assignment.source ?? 'manual', index);

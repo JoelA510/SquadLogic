@@ -124,11 +124,13 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
       division,
       players: divisionPlayers,
       maxRosterSize,
+      divisionConfig: config,
       random,
     });
 
     results[division] = teams.map((team) => ({
       id: team.id,
+      name: team.name,
       coachId: team.coachId,
       players: team.players.map((player) => structuredClone(player)),
     }));
@@ -243,7 +245,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
   };
 }
 
-function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
+function buildTeamsForDivision({ division, players, maxRosterSize, divisionConfig, random }) {
   const coachIds = Array.from(
     new Set(players.filter((player) => player.coachId).map((player) => player.coachId)),
   );
@@ -261,7 +263,8 @@ function buildTeamsForDivision({ division, players, maxRosterSize, random }) {
   const createTeam = (coachId = null) => {
     teamIndex += 1;
     const id = `${division}-T${String(teamIndex).padStart(2, '0')}`;
-    const team = { id, division, coachId, players: [], skillTotal: 0 };
+    const name = generateTeamName({ division, teamIndex, divisionConfig });
+    const team = { id, name, division, coachId, players: [], skillTotal: 0 };
     teams.push(team);
     return team;
   };
@@ -494,6 +497,23 @@ function summarizeOverflow(entries) {
 
 function calculateUnitSkill(unit) {
   return unit.reduce((total, player) => total + getSkillRating(player), 0);
+}
+
+function generateTeamName({ division, teamIndex, divisionConfig }) {
+  const names = (divisionConfig?.teamNames ?? [])
+    .map((name) => (typeof name === 'string' ? name.trim() : ''))
+    .filter((name) => name.length > 0);
+
+  if (names.length >= teamIndex) {
+    return names[teamIndex - 1];
+  }
+
+  const prefix = typeof divisionConfig?.teamNamePrefix === 'string' ? divisionConfig.teamNamePrefix.trim() : '';
+  if (prefix.length > 0) {
+    return `${prefix} ${String(teamIndex).padStart(2, '0')}`;
+  }
+
+  return `${division} Team ${String(teamIndex).padStart(2, '0')}`;
 }
 
 function getSkillRating(player) {

@@ -217,15 +217,15 @@ function normalizeOptionalDate(value, label, index) {
 }
 
 function buildOverrideCounts(overrides) {
-  const counts = { total: overrides.length, pending: 0, applied: 0, byStatus: {} };
-  overrides.forEach((override) => {
-    counts.byStatus[override.status] = (counts.byStatus[override.status] ?? 0) + 1;
-    if (override.status === 'pending') {
-      counts.pending += 1;
-    }
-    if (override.status === 'applied') {
-      counts.applied += 1;
-    }
-  });
-  return counts;
+  const byStatus = overrides.reduce((acc, { status }) => {
+    acc[status] = (acc[status] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  return {
+    total: overrides.length,
+    pending: byStatus.pending ?? 0,
+    applied: byStatus.applied ?? 0,
+    byStatus,
+  };
 }

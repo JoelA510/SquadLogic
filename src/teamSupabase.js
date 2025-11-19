@@ -176,7 +176,10 @@ export function buildTeamPlayerRows({ teamsByDivision, manualAssignments = [], r
         throw new TypeError(`team entry at teamsByDivision[${division}][${teamIndex}] must be an object`);
       }
       const generatorTeamId = normalizeString(team.id, 'teamId', teamIndex);
-      const teamId = teamIdMap?.get(generatorTeamId) ?? generatorTeamId;
+      const teamId = teamIdMap ? teamIdMap.get(generatorTeamId) : generatorTeamId;
+      if (teamIdMap && teamId === undefined) {
+        throw new Error(`UUID mapping not found for generator team ID: ${generatorTeamId}`);
+      }
       if (!Array.isArray(team.players)) {
         throw new TypeError(`team ${teamId} must include a players array`);
       }

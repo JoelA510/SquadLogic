@@ -2,25 +2,13 @@
  * Helpers for persisting generated teams and roster memberships to Supabase.
  */
 
-import { createHash } from 'crypto';
+import { v5 as uuidv5 } from 'uuid';
+
+// A stable namespace UUID for team IDs. Do not change once set.
+const TEAM_ID_NAMESPACE = '9f7c9e2a-2b7f-4cc1-87b1-4af21d3aa2f0';
 
 function deriveTeamUuid(generatorTeamId) {
-  const hash = createHash('sha256').update(generatorTeamId).digest();
-  const bytes = Buffer.alloc(16);
-  hash.copy(bytes, 0, 0, 16);
-
-  // Set version to 4 (pseudo-random) and variant 10xxxxxx
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-
-  const hex = bytes.toString('hex');
-  return [
-    hex.slice(0, 8),
-    hex.slice(8, 12),
-    hex.slice(12, 16),
-    hex.slice(16, 20),
-    hex.slice(20, 32),
-  ].join('-');
+  return uuidv5(generatorTeamId, TEAM_ID_NAMESPACE);
 }
 
 function normalizeString(value, label, index) {

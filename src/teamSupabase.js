@@ -199,8 +199,7 @@ export function buildTeamPlayerRows({ teamsByDivision, manualAssignments = [], r
     addRow({ teamId, playerId, role, source });
   });
 
-  rowByKey.forEach((row) => rows.push(row));
-  return rows;
+  return Array.from(rowByKey.values());
 }
 
 async function persistRows({ supabaseClient, tableName, rows, upsert = false }) {

@@ -86,6 +86,198 @@ body {
   box-shadow: 0 22px 50px rgba(var(--color-blue-950-rgb), 0.45);
 }
 
+.team-persistence {
+  margin-bottom: 3rem;
+  padding: 1.75rem 1.5rem 2rem;
+  border-radius: 1.25rem;
+  background: rgba(5, 46, 73, 0.82);
+  border: 1px solid rgba(94, 234, 212, 0.2);
+  box-shadow: 0 20px 45px rgba(8, 47, 73, 0.45);
+}
+
+.team-persistence__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.team-persistence__header h2 {
+  margin: 0 0 0.5rem;
+}
+
+.team-persistence__header p {
+  margin: 0;
+  max-width: 520px;
+  color: rgba(var(--color-slate-200-rgb), 0.8);
+}
+
+.team-persistence__status {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.team-persistence__status div {
+  background: rgba(45, 212, 191, 0.12);
+  border-radius: 0.85rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(94, 234, 212, 0.3);
+  text-align: center;
+}
+
+.team-persistence__status dt {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(125, 211, 252, 0.9);
+  margin-bottom: 0.3rem;
+}
+
+.team-persistence__status dd {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.team-persistence__actions {
+  margin-top: 1.5rem;
+  padding: 1rem 1.25rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  background: rgba(30, 64, 175, 0.15);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.persistence-button {
+  border: none;
+  border-radius: 9999px;
+  padding: 0.65rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.95), rgba(14, 165, 233, 0.8));
+  color: #0f172a;
+  box-shadow: 0 12px 25px rgba(14, 165, 233, 0.35);
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.persistence-button:hover:not(:disabled) {
+  opacity: 0.95;
+  transform: translateY(-1px);
+}
+
+.persistence-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.team-persistence__goal {
+  margin: 0.65rem 0 0;
+  color: rgba(var(--color-slate-200-rgb), 0.85);
+}
+
+.team-persistence__action-message {
+  margin: 0;
+  font-weight: 600;
+  color: rgba(var(--color-blue-100-rgb), 0.9);
+}
+
+.team-persistence__grid {
+  margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.5rem;
+}
+
+.team-persistence__helper {
+  margin: 0 0 1rem;
+  color: rgba(var(--color-slate-200-rgb), 0.75);
+}
+
+.persistence-list,
+.persistence-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.persistence-list li,
+.persistence-history li {
+  border-radius: 0.85rem;
+  padding: 0.85rem 1rem;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  box-shadow: 0 12px 28px rgba(8, 47, 73, 0.35);
+}
+
+.persistence-list__title {
+  font-weight: 600;
+  color: rgba(191, 219, 254, 0.95);
+}
+
+.persistence-list__meta,
+.persistence-history__meta {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+  color: rgba(var(--color-slate-200-rgb), 0.72);
+}
+
+.persistence-list__detail,
+.persistence-history__detail {
+  margin: 0.35rem 0 0;
+  color: rgba(var(--color-slate-200-rgb), 0.85);
+}
+
+.persistence-history__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.persistence-history__id {
+  font-weight: 600;
+}
+
+.persistence-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.persistence-pill--success {
+  background: rgba(52, 211, 153, 0.2);
+  color: #6ee7b7;
+}
+
+.persistence-pill--blocked,
+.persistence-pill--error {
+  background: rgba(248, 113, 113, 0.18);
+  color: #fecaca;
+}
+
+.persistence-pill--pending,
+.persistence-pill--warning {
+  background: rgba(251, 191, 36, 0.18);
+  color: #fde68a;
+}
+
 .practice-readiness {
   margin-bottom: 3rem;
   padding: 1.75rem 1.5rem 2rem;

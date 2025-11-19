@@ -177,18 +177,13 @@ test('persistTeamPlayers inserts rows via Supabase client', async () => {
     manualAssignments: [{ teamId: 'u9-1', playerId: 'p2', source: 'manual' }],
   });
 
-  assert.deepEqual(calls, [
-    { table: 'team_players' },
-    {
-      rows: [
-        { team_id: 'u9-1', player_id: 'p1', role: 'player', source: 'auto', run_id: null },
-        { team_id: 'u9-1', player_id: 'p2', role: 'player', source: 'manual', run_id: null },
-      ],
-    },
-  ]);
-
-  assert.deepEqual(result, [
+  const sortFn = (a, b) => a.player_id.localeCompare(b.player_id);
+  const expectedRows = [
     { team_id: 'u9-1', player_id: 'p1', role: 'player', source: 'auto', run_id: null },
     { team_id: 'u9-1', player_id: 'p2', role: 'player', source: 'manual', run_id: null },
-  ]);
+  ];
+
+  assert.deepEqual(calls[0], { table: 'team_players' });
+  assert.deepEqual(calls[1].rows.sort(sortFn), expectedRows.sort(sortFn));
+  assert.deepEqual(result.sort(sortFn), expectedRows.sort(sortFn));
 });

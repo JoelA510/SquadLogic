@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import PropTypes from 'prop-types';
 import { formatDateTime } from '../utils/formatDateTime.js';
 
 const persistenceButtonCopy = {
@@ -20,12 +21,24 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
   }, [teamPersistenceSnapshot.runHistory]);
 
   const latestHistory = sortedPersistenceHistory.slice(0, 3);
-  const pendingOverrides = persistenceOverrides.filter((override) => override.status === 'pending');
-  const persistenceCounts = {
-    total: persistenceOverrides.length,
-    pending: pendingOverrides.length,
-    applied: persistenceOverrides.length - pendingOverrides.length,
-  };
+  const persistenceCounts = useMemo(() => {
+    let pendingCount = 0;
+    let appliedCount = 0;
+
+    for (const override of persistenceOverrides) {
+      if (override.status === 'pending') {
+        pendingCount++;
+      } else if (override.status === 'applied') {
+        appliedCount++;
+      }
+    }
+
+    return {
+      total: persistenceOverrides.length,
+      pending: pendingCount,
+      applied: appliedCount,
+    };
+  }, [persistenceOverrides]);
 
   useEffect(() => {
     return () => {
@@ -144,5 +157,37 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
     </section>
   );
 }
+
+TeamPersistencePanel.propTypes = {
+  teamPersistenceSnapshot: PropTypes.shape({
+    lastRunId: PropTypes.string,
+    lastSyncedAt: PropTypes.string,
+    preparedTeamRows: PropTypes.number,
+    preparedPlayerRows: PropTypes.number,
+    pendingManualOverrideGoal: PropTypes.string,
+    manualOverrides: PropTypes.arrayOf(
+      PropTypes.shape({
+        id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+        teamName: PropTypes.string,
+        field: PropTypes.string,
+        status: PropTypes.string,
+        updatedAt: PropTypes.string,
+        reason: PropTypes.string,
+        value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+      }),
+    ),
+    runHistory: PropTypes.arrayOf(
+      PropTypes.shape({
+        runId: PropTypes.string,
+        status: PropTypes.string,
+        triggeredBy: PropTypes.string,
+        startedAt: PropTypes.string,
+        updatedTeams: PropTypes.number,
+        updatedPlayers: PropTypes.number,
+        notes: PropTypes.string,
+      }),
+    ),
+  }).isRequired,
+};
 
 export default TeamPersistencePanel;

@@ -172,14 +172,6 @@ test('persistTeamPlayers inserts rows via Supabase client', async () => {
   const supabaseClient = {
     from(table) {
       calls.push({ table });
-      if (table === 'teams') {
-        return {
-          insert: async (rows) => {
-            calls.push({ table, rows });
-            return { data: rows, error: null };
-          },
-        };
-      }
       return {
         insert: async (rows) => {
           calls.push({ table, rows });

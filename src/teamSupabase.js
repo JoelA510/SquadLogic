@@ -2,7 +2,26 @@
  * Helpers for persisting generated teams and roster memberships to Supabase.
  */
 
-import { randomUUID } from 'crypto';
+import { createHash } from 'crypto';
+
+function deriveTeamUuid(generatorTeamId) {
+  const hash = createHash('sha256').update(generatorTeamId).digest();
+  const bytes = Buffer.alloc(16);
+  hash.copy(bytes, 0, 0, 16);
+
+  // Set version to 4 (pseudo-random) and variant 10xxxxxx
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = bytes.toString('hex');
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join('-');
+}
 
 function normalizeString(value, label, index) {
   if (typeof value !== 'string') {
@@ -106,7 +125,7 @@ export function buildTeamRows({ teamsByDivision, divisionIdMap, teamOverrides = 
       const override = overridesByTeamId.get(generatorTeamId);
       let dbTeamId = teamIdMap.get(generatorTeamId);
       if (!dbTeamId) {
-        dbTeamId = randomUUID();
+        dbTeamId = deriveTeamUuid(generatorTeamId);
         teamIdMap.set(generatorTeamId, dbTeamId);
       }
       const divisionId = normalizeDivisionId(division, divisionIdMap, divisionIndex);

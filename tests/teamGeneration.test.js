@@ -150,6 +150,40 @@ test('respects coach assignments when creating teams', () => {
   });
 });
 
+test('applies custom team names with sensible fallbacks', () => {
+  const players = [
+    { id: 'a', division: 'U10' },
+    { id: 'b', division: 'U10' },
+    { id: 'c', division: 'U10' },
+    { id: 'd', division: 'U10' },
+    { id: 'e', division: 'U10' },
+    { id: 'f', division: 'U10' },
+  ];
+
+  const { teamsByDivision } = generateTeams({
+    players,
+    divisionConfigs: {
+      U10: {
+        maxRosterSize: 2,
+        teamNames: ['Raptors', 'Sharks'],
+        teamNamePrefix: 'Lightning',
+      },
+    },
+    random: createDeterministicRandom(),
+  });
+
+  const names = teamsByDivision.U10.map((team) => team.name);
+  assert.deepEqual(names, ['Raptors', 'Sharks', 'Lightning 03']);
+
+  const fallback = generateTeams({
+    players: [{ id: 'solo', division: 'U12' }],
+    divisionConfigs: { U12: { maxRosterSize: 4 } },
+    random: createDeterministicRandom(),
+  });
+
+  assert.equal(fallback.teamsByDivision.U12[0].name, 'U12 Team 01');
+});
+
 test('records overflow when no team can accommodate a unit', () => {
   const players = [
     { id: 'a', division: 'U10', coachId: 'coach-1' },

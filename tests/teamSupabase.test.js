@@ -1,0 +1,194 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  buildTeamRows,
+  buildTeamPlayerRows,
+  persistTeamPlayers,
+  persistTeams,
+} from '../src/teamSupabase.js';
+
+test('buildTeamRows normalizes generator output and applies overrides', () => {
+  const teamsByDivision = {
+    U10: [
+      { id: 'u10-1', name: 'U10 Team 01', coachId: 'coach-1', players: [] },
+      { id: 'u10-2', name: 'U10 Team 02', coachId: null, players: [] },
+    ],
+  };
+
+  const rows = buildTeamRows({
+    teamsByDivision,
+    divisionIdMap: { U10: 'uuid-u10' },
+    teamOverrides: [
+      { teamId: 'u10-2', name: 'Renamed', coachId: '  coach-override  ' },
+    ],
+    runId: 'run-123',
+  });
+
+  assert.deepEqual(rows, [
+    {
+      id: 'u10-1',
+      division_id: 'uuid-u10',
+      name: 'U10 Team 01',
+      coach_id: 'coach-1',
+      run_id: 'run-123',
+    },
+    {
+      id: 'u10-2',
+      division_id: 'uuid-u10',
+      name: 'Renamed',
+      coach_id: 'coach-override',
+      run_id: 'run-123',
+    },
+  ]);
+});
+
+test('buildTeamPlayerRows merges manual assignments and enforces validation', () => {
+  const teamsByDivision = {
+    U12: [
+      {
+        id: 'u12-1',
+        name: 'U12 Team 01',
+        coachId: null,
+        players: [
+          { id: 'player-1' },
+          { id: 'player-2' },
+        ],
+      },
+    ],
+  };
+
+  const rows = buildTeamPlayerRows({
+    teamsByDivision,
+    manualAssignments: [
+      { teamId: 'u12-1', playerId: 'player-2', source: 'manual', role: 'captain' },
+      { teamId: 'u12-1', playerId: 'player-3', source: 'locked' },
+    ],
+    runId: 'run-321',
+  });
+
+  assert.deepEqual(
+    rows.sort((a, b) => a.player_id.localeCompare(b.player_id)),
+    [
+      {
+        team_id: 'u12-1',
+        player_id: 'player-1',
+        role: 'player',
+        source: 'auto',
+        run_id: 'run-321',
+      },
+      {
+        team_id: 'u12-1',
+        player_id: 'player-2',
+        role: 'captain',
+        source: 'manual',
+        run_id: 'run-321',
+      },
+      {
+        team_id: 'u12-1',
+        player_id: 'player-3',
+        role: 'player',
+        source: 'manual',
+        run_id: 'run-321',
+      },
+    ],
+  );
+
+  assert.throws(() => buildTeamPlayerRows({ teamsByDivision: null }), /teamsByDivision must be an object/);
+  assert.throws(
+    () =>
+      buildTeamPlayerRows({
+        teamsByDivision,
+        manualAssignments: [{ teamId: 'u12-1', playerId: '   ' }],
+      }),
+    /manualAssignments.playerId cannot be empty/,
+  );
+});
+
+test('persistTeams inserts rows via Supabase client and supports upserts', async () => {
+  const calls = [];
+  const supabaseClient = {
+    from(table) {
+      calls.push({ table });
+      return {
+        upsert: async (rows) => {
+          calls.push({ rows });
+          return { data: rows, error: null };
+        },
+      };
+    },
+  };
+
+  const teamsByDivision = { U8: [{ id: 'u8-1', name: 'U8A', players: [] }] };
+
+  const result = await persistTeams({
+    supabaseClient,
+    teamsByDivision,
+    upsert: true,
+  });
+
+  assert.deepEqual(calls, [
+    { table: 'teams' },
+    {
+      rows: [
+        {
+          id: 'u8-1',
+          division_id: 'U8',
+          name: 'U8A',
+          coach_id: null,
+          run_id: null,
+        },
+      ],
+    },
+  ]);
+  assert.deepEqual(result, [
+    {
+      id: 'u8-1',
+      division_id: 'U8',
+      name: 'U8A',
+      coach_id: null,
+      run_id: null,
+    },
+  ]);
+});
+
+test('persistTeamPlayers inserts rows via Supabase client', async () => {
+  const calls = [];
+  const supabaseClient = {
+    from(table) {
+      calls.push({ table });
+      return {
+        insert: async (rows) => {
+          calls.push({ rows });
+          return { data: rows, error: null };
+        },
+      };
+    },
+  };
+
+  const teamsByDivision = {
+    U9: [
+      { id: 'u9-1', name: 'U9 Team 1', coachId: 'coach-1', players: [{ id: 'p1' }] },
+    ],
+  };
+
+  const result = await persistTeamPlayers({
+    supabaseClient,
+    teamsByDivision,
+    manualAssignments: [{ teamId: 'u9-1', playerId: 'p2', source: 'manual' }],
+  });
+
+  assert.deepEqual(calls, [
+    { table: 'team_players' },
+    {
+      rows: [
+        { team_id: 'u9-1', player_id: 'p1', role: 'player', source: 'auto', run_id: null },
+        { team_id: 'u9-1', player_id: 'p2', role: 'player', source: 'manual', run_id: null },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(result, [
+    { team_id: 'u9-1', player_id: 'p1', role: 'player', source: 'auto', run_id: null },
+    { team_id: 'u9-1', player_id: 'p2', role: 'player', source: 'manual', run_id: null },
+  ]);
+});

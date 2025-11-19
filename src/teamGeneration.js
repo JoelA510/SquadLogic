@@ -508,8 +508,9 @@ function generateTeamName({ division, teamIndex, divisionConfig }) {
     return names[teamIndex - 1];
   }
 
-  if (typeof divisionConfig?.teamNamePrefix === 'string' && divisionConfig.teamNamePrefix.trim().length > 0) {
-    return `${divisionConfig.teamNamePrefix.trim()} ${String(teamIndex).padStart(2, '0')}`;
+  const prefix = typeof divisionConfig?.teamNamePrefix === 'string' ? divisionConfig.teamNamePrefix.trim() : '';
+  if (prefix.length > 0) {
+    return `${prefix} ${String(teamIndex).padStart(2, '0')}`;
   }
 
   return `${division} Team ${String(teamIndex).padStart(2, '0')}`;

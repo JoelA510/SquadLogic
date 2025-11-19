@@ -500,12 +500,12 @@ function calculateUnitSkill(unit) {
 }
 
 function generateTeamName({ division, teamIndex, divisionConfig }) {
-  const names = Array.isArray(divisionConfig?.teamNames)
-    ? divisionConfig.teamNames.filter((name) => typeof name === 'string' && name.trim().length > 0)
-    : [];
+  const names = (divisionConfig?.teamNames ?? [])
+    .map((name) => (typeof name === 'string' ? name.trim() : ''))
+    .filter((name) => name.length > 0);
 
   if (names.length >= teamIndex) {
-    return names[teamIndex - 1].trim();
+    return names[teamIndex - 1];
   }
 
   if (typeof divisionConfig?.teamNamePrefix === 'string' && divisionConfig.teamNamePrefix.trim().length > 0) {

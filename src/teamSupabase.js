@@ -2,7 +2,14 @@
  * Helpers for persisting generated teams and roster memberships to Supabase.
  */
 
-import { randomUUID } from 'crypto';
+import { v5 as uuidv5 } from 'uuid';
+
+// A stable namespace UUID for team IDs. Do not change once set.
+const TEAM_ID_NAMESPACE = '9f7c9e2a-2b7f-4cc1-87b1-4af21d3aa2f0';
+
+function deriveTeamUuid(generatorTeamId) {
+  return uuidv5(generatorTeamId, TEAM_ID_NAMESPACE);
+}
 
 function normalizeString(value, label, index) {
   if (typeof value !== 'string') {
@@ -106,7 +113,7 @@ export function buildTeamRows({ teamsByDivision, divisionIdMap, teamOverrides = 
       const override = overridesByTeamId.get(generatorTeamId);
       let dbTeamId = teamIdMap.get(generatorTeamId);
       if (!dbTeamId) {
-        dbTeamId = randomUUID();
+        dbTeamId = deriveTeamUuid(generatorTeamId);
         teamIdMap.set(generatorTeamId, dbTeamId);
       }
       const divisionId = normalizeDivisionId(division, divisionIdMap, divisionIndex);

@@ -24,7 +24,7 @@ test('buildTeamRows normalizes generator output and applies overrides', () => {
     runId: 'run-123',
   });
 
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
   assert.strictEqual(teamIdMap.size, 2);
   ['u10-1', 'u10-2'].forEach((generatorId) => {
@@ -172,14 +172,6 @@ test('persistTeamPlayers inserts rows via Supabase client', async () => {
   const supabaseClient = {
     from(table) {
       calls.push({ table });
-      if (table === 'teams') {
-        return {
-          insert: async (rows) => {
-            calls.push({ table, rows });
-            return { data: rows, error: null };
-          },
-        };
-      }
       return {
         insert: async (rows) => {
           calls.push({ table, rows });

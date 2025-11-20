@@ -44,7 +44,9 @@ This document translates the roadmap's team formation phase into actionable plan
   `needsAdditionalCoaches` flag so the admin workflow can prioritize outreach.
 - **Persistence snapshot builder**: The new `prepareTeamPersistenceSnapshot` helper in `src/teamPersistenceSnapshot.js`
   packages the Supabase payloads (team rows plus player rows) alongside admin-facing metadata such as manual override queues,
-  pending/applied counts, and run history ordering. This gives the dashboard enough context to display readiness without
+  pending/applied counts, and run history ordering. The helper also normalizes manual overrides (defaulting status to
+  `pending`, enforcing known status values, and filling in team names from the normalized Supabase payloads) while returning
+  the prepared counts that the admin dashboard displays. This gives the dashboard enough context to display readiness without
   reimplementing normalization logic on the client.
 - **Admin shell persistence trigger**: The dashboard now posts override-ready payloads to a configurable
   `VITE_SUPABASE_PERSISTENCE_URL` endpoint when present (via `teamPersistenceClient.js`), retaining the local simulator as a

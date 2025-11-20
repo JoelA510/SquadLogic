@@ -1,126 +1,142 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { prepareTeamPersistenceSnapshot } from '../src/teamPersistenceSnapshot.js';
+import {
+  normalizeManualOverrides,
+  normalizeRunHistory,
+  prepareTeamPersistenceSnapshot,
+} from '../src/teamPersistenceSnapshot.js';
 
-const BASE_TEAMS = {
-  U10: [
+test('prepareTeamPersistenceSnapshot returns payload counts and enriched metadata', () => {
+  const teamsByDivision = {
+    U8: [
+      { id: 'u8-1', name: 'U8 Team 1', coachId: 'coach-1', players: [{ id: 'p1' }, { id: 'p2' }] },
+      { id: 'u8-2', name: 'U8 Team 2', coachId: null, players: [{ id: 'p3' }] },
+    ],
+  };
+
+  const teamOverrides = [
     {
-      id: 'u10-1',
-      name: 'U10 Force',
-      coachId: 'coach-17',
-      players: [
-        { id: 'player-1' },
-        { id: 'player-2' },
-      ],
+      id: 'override-name',
+      teamId: 'u8-1',
+      field: 'name',
+      value: 'U8 Lightning',
+      status: 'applied',
+      updatedAt: '2024-07-01T12:00:00Z',
+      reason: 'Align with jersey color',
     },
     {
-      id: 'u10-2',
-      name: 'U10 Blaze',
-      coachId: 'coach-88',
-      players: [{ id: 'player-3' }],
+      id: 'override-coach',
+      teamId: 'u8-2',
+      field: 'coachId',
+      value: 'coach-9',
+      status: 'pending',
+      updatedAt: '2024-07-01T13:00:00Z',
+      reason: 'Background check in progress',
     },
-  ],
-};
+  ];
 
-test('prepareTeamPersistenceSnapshot produces payloads and normalized snapshot data', () => {
-  const { snapshot, payload, teamIdMap } = prepareTeamPersistenceSnapshot({
-    teamsByDivision: BASE_TEAMS,
-    manualAssignments: [{ teamId: 'u10-1', playerId: 'player-4', role: 'captain' }],
-    manualOverrideEntries: [
-      {
-        id: 'override-2',
-        teamId: 'u10-2',
-        teamName: 'U10 Blaze',
-        field: 'coachId',
-        value: 'coach-99',
-        status: 'Pending',
-        updatedAt: '2024-07-04T09:15:00Z',
-        reason: 'Coach paperwork pending',
-      },
-      {
-        id: 'override-1',
-        teamId: 'u10-1',
-        teamName: 'U10 Force',
-        field: 'name',
-        value: 'U10 Force – Navy',
-        status: 'applied',
-        updatedAt: '2024-07-03T10:00:00Z',
-        reason: 'Align with jersey color',
-      },
-    ],
-    runHistory: [
-      {
-        runId: 'run-initial',
-        status: 'success',
-        triggeredBy: 'scheduler-bot',
-        startedAt: '2024-07-03T12:00:00Z',
-        completedAt: '2024-07-03T12:02:00Z',
-        updatedTeams: 2,
-        updatedPlayers: 3,
-        notes: 'Seeded initial teams',
-      },
-      {
-        runId: 'run-prep',
-        status: 'blocked',
-        triggeredBy: 'admin-review',
-        startedAt: '2024-07-02T12:00:00Z',
-        updatedTeams: 0,
-        updatedPlayers: 0,
-        notes: 'Missing overrides',
-      },
-    ],
-    runId: 'run-initial',
-    lastSyncedAt: '2024-07-03T12:05:00Z',
-    pendingManualOverrideGoal: 'Confirm pending overrides before syncing.',
+  const manualAssignments = [
+    { teamId: 'u8-2', playerId: 'p4', source: 'manual', role: 'captain' },
+  ];
+
+  const runHistory = [
+    {
+      runId: 'run-initial',
+      status: 'success',
+      triggeredBy: 'scheduler',
+      startedAt: '2024-07-01T11:00:00Z',
+      updatedTeams: 2,
+      updatedPlayers: 3,
+      notes: 'Initial allocator output.',
+    },
+    {
+      runId: 'run-dry-run',
+      status: 'blocked',
+      triggeredBy: 'admin',
+      startedAt: '2024-06-30T10:00:00Z',
+      updatedTeams: 0,
+      updatedPlayers: 0,
+      notes: 'Overrides still pending.',
+    },
+  ];
+
+  const snapshot = prepareTeamPersistenceSnapshot({
+    teamsByDivision,
+    teamOverrides,
+    manualAssignments,
+    runHistory,
+    lastSyncedAt: '2024-07-01T12:30:00Z',
+    runId: 'run-live-sync',
+    pendingManualOverrideGoal: 'Clear pending coach approvals before syncing.',
   });
 
-  assert.strictEqual(payload.teamRows.length, 2);
-  assert.strictEqual(payload.teamPlayerRows.length, 4);
+  assert.strictEqual(snapshot.lastRunId, 'run-live-sync');
+  assert.strictEqual(snapshot.lastSyncedAt, '2024-07-01T12:30:00Z');
   assert.strictEqual(snapshot.preparedTeamRows, 2);
   assert.strictEqual(snapshot.preparedPlayerRows, 4);
-  assert.strictEqual(snapshot.lastRunId, 'run-initial');
-  assert.strictEqual(snapshot.lastSyncedAt, '2024-07-03T12:05:00.000Z');
-  assert.strictEqual(snapshot.pendingManualOverrideGoal, 'Confirm pending overrides before syncing.');
+  assert.strictEqual(snapshot.pendingManualOverrideGoal, 'Clear pending coach approvals before syncing.');
 
-  const pendingOverride = snapshot.manualOverrides[0];
-  assert.strictEqual(pendingOverride.id, 'override-2');
-  assert.strictEqual(pendingOverride.status, 'pending');
-  assert.strictEqual(pendingOverride.teamUuid, teamIdMap.get('u10-2'));
-  assert.strictEqual(snapshot.overrideCounts.total, 2);
-  assert.strictEqual(snapshot.overrideCounts.pending, 1);
-  assert.strictEqual(snapshot.overrideCounts.applied, 1);
-  assert.deepEqual(snapshot.overrideCounts.byStatus, { pending: 1, applied: 1 });
+  assert.deepEqual(
+    snapshot.manualOverrides.map((entry) => ({
+      id: entry.id,
+      teamId: entry.teamId,
+      teamName: entry.teamName,
+      status: entry.status,
+    })),
+    [
+      { id: 'override-name', teamId: 'u8-1', teamName: 'U8 Lightning', status: 'applied' },
+      { id: 'override-coach', teamId: 'u8-2', teamName: 'U8 Team 2', status: 'pending' },
+    ],
+  );
 
-  assert.strictEqual(snapshot.runHistory[0].runId, 'run-initial');
-  assert.strictEqual(snapshot.runHistory[0].status, 'success');
-  assert.strictEqual(snapshot.runHistory[1].status, 'blocked');
+  assert.deepEqual(
+    snapshot.runHistory.map((entry) => entry.runId),
+    ['run-initial', 'run-dry-run'],
+  );
+
+  assert.ok(Array.isArray(snapshot.payload.teamRows));
+  assert.ok(Array.isArray(snapshot.payload.teamPlayerRows));
+  assert.strictEqual(snapshot.payload.teamRows.length, 2);
+  assert.strictEqual(snapshot.payload.teamPlayerRows.length, 4);
 });
 
-test('prepareTeamPersistenceSnapshot validates override and history inputs', () => {
-  assert.throws(
-    () =>
-      prepareTeamPersistenceSnapshot({
-        teamsByDivision: BASE_TEAMS,
-        manualOverrideEntries: 'invalid',
-      }),
-    /manualOverrideEntries must be an array/,
+test('normalizeRunHistory validates entries and sorts by startedAt', () => {
+  const sorted = normalizeRunHistory([
+    { runId: 'b', startedAt: '2024-07-02T00:00:00Z', status: 'success' },
+    { runId: 'a', startedAt: '2024-07-03T00:00:00Z', status: 'blocked' },
+  ]);
+
+  assert.deepEqual(
+    sorted.map((entry) => entry.runId),
+    ['a', 'b'],
   );
 
-  assert.throws(
-    () =>
-      prepareTeamPersistenceSnapshot({
-        teamsByDivision: BASE_TEAMS,
-        manualOverrideEntries: [{ id: 'x', teamId: 'u10-1' }],
-      }),
-    /manualOverride.field/,
+  assert.throws(() => normalizeRunHistory(null), /runHistory must be an array/);
+  assert.throws(() => normalizeRunHistory([null]), /runHistory\[0\] must be an object/);
+  assert.throws(() => normalizeRunHistory([{}]), /requires a runId/);
+});
+
+test('normalizeManualOverrides validates structure and status', () => {
+  const overrides = normalizeManualOverrides(
+    [
+      { teamId: 't1', field: 'name', value: 'Name A', status: 'applied' },
+      { teamId: 't2', field: 'coachId', value: 'coach-1', updatedAt: '2024-07-01T00:00:00Z' },
+    ],
+    new Map([
+      ['t1', 'Team One'],
+      ['t2', 'Team Two'],
+    ]),
   );
 
-  assert.throws(
-    () =>
-      prepareTeamPersistenceSnapshot({
-        teamsByDivision: BASE_TEAMS,
-        runHistory: 'invalid',
-      }),
-    /runHistory must be an array/,
+  assert.deepEqual(
+    overrides.map((entry) => ({ teamId: entry.teamId, status: entry.status, teamName: entry.teamName })),
+    [
+      { teamId: 't1', status: 'applied', teamName: 'Team One' },
+      { teamId: 't2', status: 'pending', teamName: 'Team Two' },
+    ],
   );
+
+  assert.throws(() => normalizeManualOverrides('bad'), /manualOverrides must be an array/);
+  assert.throws(() => normalizeManualOverrides([{}]), /requires a teamId/);
+  assert.throws(() => normalizeManualOverrides([{ teamId: 't3', status: 'unknown' }]), /unsupported status/);
 });

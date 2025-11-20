@@ -91,6 +91,7 @@ export function buildTeamRows({ teamsByDivision, divisionIdMap, teamOverrides = 
   }
 
   const overridesByTeamId = new Map();
+  const teamNameByGeneratorId = new Map();
   teamOverrides.forEach((override, index) => {
     if (!override || typeof override !== 'object') {
       throw new TypeError(`teamOverrides[${index}] must be an object`);
@@ -139,6 +140,7 @@ export function buildTeamRows({ teamsByDivision, divisionIdMap, teamOverrides = 
           ? override.coachId
           : normalizeOptionalString(team.coachId);
 
+      teamNameByGeneratorId.set(generatorTeamId, name);
       rows.push({
         id: dbTeamId,
         division_id: divisionId,
@@ -149,7 +151,7 @@ export function buildTeamRows({ teamsByDivision, divisionIdMap, teamOverrides = 
     });
   });
 
-  return { rows, teamIdMap };
+  return { rows, teamIdMap, teamNameByGeneratorId };
 }
 
 /**

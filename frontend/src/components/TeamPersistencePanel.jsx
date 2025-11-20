@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import { formatDateTime } from '../utils/formatDateTime.js';
 import {
   getPersistenceEndpoint,
   triggerTeamPersistence,
 } from '../utils/teamPersistenceClient.js';
+import { applyOverridesToSnapshot } from '../utils/applyOverridesToSnapshot.js';
 
 const SUPABASE_SYNC_TIMEOUT_MS = 10000;
 
@@ -63,16 +64,20 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
     };
   }, []);
 
+  const setBlockedState = useCallback(() => {
+    setPersistenceActionState('blocked');
+    setPersistenceActionMessage(
+      `${persistenceCounts.pending} manual override${
+        persistenceCounts.pending === 1 ? ' is' : 's are'
+      } still pending review.`,
+    );
+  }, [persistenceCounts.pending]);
+
   useEffect(() => {
     if (hasBlockingOverrides) {
-      setPersistenceActionState((current) =>
-        current === 'submitting' ? current : 'blocked',
-      );
-      setPersistenceActionMessage(
-        `${persistenceCounts.pending} manual override${
-          persistenceCounts.pending === 1 ? ' is' : 's are'
-        } still pending review.`,
-      );
+      if (persistenceActionState !== 'submitting') {
+        setBlockedState();
+      }
       return;
     }
 
@@ -80,9 +85,12 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
       setPersistenceActionState('idle');
       setPersistenceActionMessage('All manual overrides have been reviewed.');
     }
-  }, [hasBlockingOverrides, persistenceCounts.pending, persistenceActionState]);
+  }, [hasBlockingOverrides, persistenceActionState, setBlockedState]);
 
   const persistenceEndpoint = getPersistenceEndpoint();
+  const snapshotForPersistence = useMemo(() => {
+    return applyOverridesToSnapshot(teamPersistenceSnapshot, persistenceOverrides);
+  }, [teamPersistenceSnapshot, persistenceOverrides]);
 
   const handlePersist = async () => {
     if (persistenceActionState === 'submitting') {
@@ -90,20 +98,15 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
     }
 
     if (hasBlockingOverrides) {
-      setPersistenceActionState('blocked');
-      setPersistenceActionMessage(
-        `${persistenceCounts.pending} manual override${
-          persistenceCounts.pending === 1 ? ' is' : 's are'
-        } still pending review.`,
-      );
+      setBlockedState();
       return;
     }
     setPersistenceActionState('submitting');
-    setPersistenceActionMessage(
-      persistenceEndpoint
-        ? 'Validating overrides and pushing Supabase payload...'
-        : 'Validating overrides and preparing Supabase payload...',
-    );
+      setPersistenceActionMessage(
+        persistenceEndpoint
+          ? 'Validating overrides and pushing Supabase payload...'
+          : 'Validating overrides and preparing Supabase payload...',
+      );
     persistenceTimeoutRef.current = setTimeout(() => {
       setPersistenceActionState('blocked');
       setPersistenceActionMessage('Supabase sync timed out. Please retry.');
@@ -111,7 +114,7 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
 
     try {
       const result = await triggerTeamPersistence({
-        snapshot: teamPersistenceSnapshot,
+        snapshot: snapshotForPersistence,
         overrides: persistenceOverrides,
         endpoint: persistenceEndpoint,
       });

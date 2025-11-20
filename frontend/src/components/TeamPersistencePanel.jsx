@@ -102,11 +102,11 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
       return;
     }
     setPersistenceActionState('submitting');
-      setPersistenceActionMessage(
-        persistenceEndpoint
-          ? 'Validating overrides and pushing Supabase payload...'
-          : 'Validating overrides and preparing Supabase payload...',
-      );
+    setPersistenceActionMessage(
+      persistenceEndpoint
+        ? 'Validating overrides and pushing Supabase payload...'
+        : 'Validating overrides and preparing Supabase payload...',
+    );
     persistenceTimeoutRef.current = setTimeout(() => {
       setPersistenceActionState('blocked');
       setPersistenceActionMessage('Supabase sync timed out. Please retry.');

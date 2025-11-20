@@ -15,7 +15,7 @@ test('buildTeamRows normalizes generator output and applies overrides', () => {
     ],
   };
 
-  const { rows: teamRows, teamIdMap } = buildTeamRows({
+  const { rows: teamRows, teamIdMap, teamNameByGeneratorId } = buildTeamRows({
     teamsByDivision,
     divisionIdMap: { U10: 'uuid-u10' },
     teamOverrides: [
@@ -31,6 +31,9 @@ test('buildTeamRows normalizes generator output and applies overrides', () => {
     const dbId = teamIdMap.get(generatorId);
     assert.match(dbId, uuidRegex);
   });
+
+  assert.strictEqual(teamNameByGeneratorId.get('u10-1'), 'U10 Team 01');
+  assert.strictEqual(teamNameByGeneratorId.get('u10-2'), 'Renamed');
 
   const sortedRows = [...teamRows].sort((a, b) => a.name.localeCompare(b.name));
   const expectedRows = [

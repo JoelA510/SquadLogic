@@ -1,5 +1,20 @@
 import { buildTeamPlayerRows, buildTeamRows } from './teamSupabase.js';
 
+/**
+ * Normalize override status to a lowercased string.
+ * Defaults to "pending" when status is missing or not a string.
+ *
+ * @param {object | null | undefined} entry
+ * @returns {string}
+ */
+function getOverrideStatus(entry) {
+  return (
+    (typeof entry?.status === 'string' &&
+      entry.status.trim().toLowerCase()) ||
+    'pending'
+  );
+}
+
 function normalizeRunHistory(runHistory = []) {
   if (!Array.isArray(runHistory)) {
     throw new TypeError('runHistory must be an array');
@@ -15,7 +30,7 @@ function normalizeRunHistory(runHistory = []) {
       throw new Error(`runHistory[${index}] requires a runId`);
     }
 
-const status = (typeof entry.status === 'string' && entry.status.trim().toLowerCase()) || 'unknown';
+    const status = (typeof entry.status === 'string' && entry.status.trim().toLowerCase()) || 'unknown';
     const startedAt = entry.startedAt ?? entry.started_at;
     const completedAt = entry.completedAt ?? entry.completed_at ?? null;
 
@@ -38,6 +53,8 @@ const status = (typeof entry.status === 'string' && entry.status.trim().toLowerC
   });
 }
 
+// Normalizes admin-provided overrides, defaulting status to "pending" so only explicit
+// "applied" entries are propagated into persistence payloads.
 function normalizeManualOverrides(overrides = [], teamNameByGeneratorId = new Map()) {
   if (!Array.isArray(overrides)) {
     throw new TypeError('manualOverrides must be an array');
@@ -52,7 +69,7 @@ function normalizeManualOverrides(overrides = [], teamNameByGeneratorId = new Ma
       throw new Error(`manualOverrides[${index}] requires a teamId`);
     }
 
-const status = (typeof entry.status === 'string' && entry.status.trim().toLowerCase()) || 'pending';
+    const status = getOverrideStatus(entry);
     if (status !== 'pending' && status !== 'applied') {
       throw new Error(`manualOverrides[${index}] has unsupported status: ${status}`);
     }
@@ -77,7 +94,9 @@ function deriveAppliedTeamOverrides(overrides = []) {
     .filter((entry) => entry && typeof entry === 'object')
     .map((entry) => {
       const teamId = entry.teamId ?? entry.team_id;
-      if (entry.status === 'pending' || !teamId) {
+      const status = getOverrideStatus(entry);
+
+      if (!teamId || status !== 'applied') {
         return null;
       }
 
@@ -140,4 +159,4 @@ export function prepareTeamPersistenceSnapshot({
   };
 }
 
-export { normalizeManualOverrides, normalizeRunHistory };
+export { deriveAppliedTeamOverrides, normalizeManualOverrides, normalizeRunHistory };

@@ -121,6 +121,49 @@ test('falls back to a default success message when status is success but message
   assert.equal(result.syncedAt, '2024-07-21T10:00:00Z');
 });
 
+test('surfaces backend error messages when the response is not ok', async () => {
+  process.env.VITE_SUPABASE_PERSISTENCE_URL = 'https://api.example.com';
+
+  const fetchImpl = async () => {
+    return {
+      ok: false,
+      status: 422,
+      json: async () => ({ message: 'Overrides blocked on the server' }),
+    };
+  };
+
+  const result = await triggerTeamPersistence({
+    snapshot: { preparedTeamRows: 2, preparedPlayerRows: 30 },
+    overrides: [],
+    fetchImpl,
+  });
+
+  assert.equal(result.status, 'error');
+  assert.equal(result.message, 'Overrides blocked on the server');
+});
+
+test('returns an error when the response payload cannot be parsed', async () => {
+  process.env.VITE_SUPABASE_PERSISTENCE_URL = 'https://api.example.com';
+
+  const fetchImpl = async () => {
+    return {
+      ok: true,
+      json: async () => {
+        throw new Error('invalid json');
+      },
+    };
+  };
+
+  const result = await triggerTeamPersistence({
+    snapshot: { preparedTeamRows: 2, preparedPlayerRows: 18 },
+    overrides: [],
+    fetchImpl,
+  });
+
+  assert.equal(result.status, 'error');
+  assert.match(result.message, /Unexpected response/);
+});
+
 test('returns an error status when the request fails', async () => {
   process.env.VITE_SUPABASE_PERSISTENCE_URL = 'https://api.example.com';
 

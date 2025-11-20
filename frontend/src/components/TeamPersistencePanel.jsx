@@ -150,6 +150,11 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
           </button>
           <p className="team-persistence__goal">{teamPersistenceSnapshot.pendingManualOverrideGoal}</p>
         </div>
+        <p className="team-persistence__mode" role="note">
+          {persistenceEndpoint
+            ? `Live Supabase persistence enabled at ${persistenceEndpoint}.`
+            : 'Simulated Supabase persistence active. Set VITE_SUPABASE_PERSISTENCE_URL to target your live endpoint.'}
+        </p>
         <p className="team-persistence__action-message" role="status">
           {persistenceActionMessage || 'No Supabase push requested yet.'}
         </p>

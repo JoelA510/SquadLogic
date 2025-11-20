@@ -3,6 +3,8 @@ import PropTypes from 'prop-types';
 import { formatDateTime } from '../utils/formatDateTime.js';
 import { simulateTeamPersistenceUpsert } from '../utils/simulateTeamPersistenceUpsert.js';
 
+const SUPABASE_SYNC_TIMEOUT_MS = 10000;
+
 const persistenceButtonCopy = {
   idle: 'Push overrides to Supabase',
   submitting: 'Preparing payload…',
@@ -60,14 +62,13 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
     persistenceTimeoutRef.current = setTimeout(() => {
       setPersistenceActionState('blocked');
       setPersistenceActionMessage('Supabase sync timed out. Please retry.');
-    }, 10000);
+    }, SUPABASE_SYNC_TIMEOUT_MS);
 
     try {
       const result = await simulateTeamPersistenceUpsert({
         snapshot: teamPersistenceSnapshot,
         overrides: persistenceOverrides,
       });
-      clearTimeout(persistenceTimeoutRef.current);
 
       if (result.status === 'blocked') {
         setPersistenceActionState('blocked');
@@ -87,9 +88,13 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
         `Supabase upsert completed for ${result.updatedTeams} teams and ${result.updatedPlayers} players at ${formatDateTime(result.syncedAt)}.`,
       );
     } catch (error) {
-      clearTimeout(persistenceTimeoutRef.current);
       setPersistenceActionState('idle');
       setPersistenceActionMessage('Supabase sync failed. Please retry.');
+    } finally {
+      if (persistenceTimeoutRef.current) {
+        clearTimeout(persistenceTimeoutRef.current);
+        persistenceTimeoutRef.current = null;
+      }
     }
   };
 

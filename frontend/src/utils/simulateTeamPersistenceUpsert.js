@@ -7,16 +7,16 @@ export function simulateTeamPersistenceUpsert({
 
   return new Promise((resolve) => {
     setTimeout(() => {
-      if (!snapshot || typeof snapshot !== 'object') {
-        resolve({ status: 'error', message: 'Snapshot data unavailable' });
-        return;
-      }
-
       if (pending > 0) {
         resolve({
           status: 'blocked',
           message: `${pending} manual override${pending === 1 ? ' is' : 's are'} still pending review.`,
         });
+        return;
+      }
+
+      if (!snapshot || typeof snapshot !== 'object') {
+        resolve({ status: 'error', message: 'Snapshot data unavailable' });
         return;
       }
 

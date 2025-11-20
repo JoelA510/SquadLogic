@@ -54,19 +54,16 @@ function evaluateOverrides(overrides = []) {
     throw new TypeError('overrides must be an array');
   }
 
-  let pending = 0;
-
-  overrides.forEach((entry, index) => {
+  const pending = overrides.reduce((count, entry, index) => {
     if (!entry || typeof entry !== 'object') {
       throw new TypeError(`overrides[${index}] must be an object`);
     }
 
     const status =
       (typeof entry.status === 'string' && entry.status.trim().toLowerCase()) || 'pending';
-    if (status === 'pending') {
-      pending += 1;
-    }
-  });
+
+    return status === 'pending' ? count + 1 : count;
+  }, 0);
 
   return { pending };
 }

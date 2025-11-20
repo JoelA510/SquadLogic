@@ -33,6 +33,7 @@ function resolvePendingOverrides(overrides = []) {
 export async function triggerTeamPersistence({
   snapshot,
   overrides = [],
+  endpoint: providedEndpoint,
   fetchImpl = fetch,
   simulateDelayMs = 800,
   signal,
@@ -46,7 +47,7 @@ export async function triggerTeamPersistence({
     return { status: 'error', message: 'Snapshot data unavailable' };
   }
 
-  const endpoint = normalizeEndpoint(readPersistenceEndpoint());
+  const endpoint = normalizeEndpoint(providedEndpoint ?? readPersistenceEndpoint());
   if (!endpoint) {
     return simulateTeamPersistenceUpsert({ snapshot, overrides, delayMs: simulateDelayMs });
   }
@@ -66,15 +67,29 @@ export async function triggerTeamPersistence({
     }
 
     const payload = await response.json();
+    if (!payload || typeof payload !== 'object') {
+      return {
+        status: 'error',
+        message: 'Unexpected response from persistence endpoint.',
+      };
+    }
+    const status = typeof payload.status === 'string' ? payload.status : 'error';
     return {
-      status: payload.status ?? 'success',
-      message: payload.message,
+      status,
+      message:
+        payload.message ||
+        (status === 'success'
+          ? 'Supabase sync completed.'
+          : 'Unexpected response from persistence endpoint.'),
       syncedAt: payload.syncedAt,
       updatedTeams: payload.updatedTeams,
       updatedPlayers: payload.updatedPlayers,
       runId: payload.runId,
     };
   } catch (error) {
+    // Helpful for debugging network or unexpected failures
+    // eslint-disable-next-line no-console
+    console.error('Supabase sync failed:', error);
     return { status: 'error', message: 'Supabase sync failed. Please retry.' };
   }
 }

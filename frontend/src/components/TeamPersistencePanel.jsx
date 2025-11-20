@@ -58,7 +58,7 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
 
   const persistenceEndpoint = getPersistenceEndpoint();
 
-  const handleSimulatedPersist = async () => {
+  const handlePersist = async () => {
     if (persistenceActionState === 'submitting') {
       return;
     }
@@ -77,6 +77,7 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
       const result = await triggerTeamPersistence({
         snapshot: teamPersistenceSnapshot,
         overrides: persistenceOverrides,
+        endpoint: persistenceEndpoint,
       });
 
       if (result.status === 'blocked') {
@@ -87,7 +88,9 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
 
       if (result.status === 'error') {
         setPersistenceActionState('idle');
-        setPersistenceActionMessage('Snapshot unavailable. Refresh and try again.');
+        setPersistenceActionMessage(
+          result.message || 'Snapshot unavailable. Refresh and try again.',
+        );
         return;
       }
 
@@ -140,7 +143,7 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
           <button
             type="button"
             className="persistence-button"
-            onClick={handleSimulatedPersist}
+            onClick={handlePersist}
             disabled={persistenceActionState === 'submitting'}
           >
             {persistenceButtonCopy[persistenceActionState] ?? persistenceButtonCopy.idle}

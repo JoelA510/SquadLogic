@@ -80,6 +80,47 @@ test('posts to a configured endpoint and returns payload data', async () => {
   assert.equal(result.syncedAt, '2024-07-20T18:00:00Z');
 });
 
+test('treats missing status responses as errors', async () => {
+  process.env.VITE_SUPABASE_PERSISTENCE_URL = 'https://api.example.com';
+
+  const fetchImpl = async () => {
+    return {
+      ok: true,
+      json: async () => ({}),
+    };
+  };
+
+  const result = await triggerTeamPersistence({
+    snapshot: { preparedTeamRows: 1, preparedPlayerRows: 10 },
+    overrides: [],
+    fetchImpl,
+  });
+
+  assert.equal(result.status, 'error');
+  assert.match(result.message, /Unexpected response/);
+});
+
+test('falls back to a default success message when status is success but message is missing', async () => {
+  process.env.VITE_SUPABASE_PERSISTENCE_URL = 'https://api.example.com';
+
+  const fetchImpl = async () => {
+    return {
+      ok: true,
+      json: async () => ({ status: 'success', syncedAt: '2024-07-21T10:00:00Z' }),
+    };
+  };
+
+  const result = await triggerTeamPersistence({
+    snapshot: { preparedTeamRows: 2, preparedPlayerRows: 22 },
+    overrides: [],
+    fetchImpl,
+  });
+
+  assert.equal(result.status, 'success');
+  assert.equal(result.message, 'Supabase sync completed.');
+  assert.equal(result.syncedAt, '2024-07-21T10:00:00Z');
+});
+
 test('returns an error status when the request fails', async () => {
   process.env.VITE_SUPABASE_PERSISTENCE_URL = 'https://api.example.com';
 

@@ -122,10 +122,14 @@ test('normalizeManualOverrides validates structure and status', () => {
     [
       { teamId: 't1', field: 'name', value: 'Name A', status: 'applied' },
       { teamId: 't2', field: 'coachId', value: 'coach-1', updatedAt: '2024-07-01T00:00:00Z' },
+      { teamId: 't3', field: 'name', value: 'Name C', status: '  APPLIED ' },
+      { teamId: 't4', field: 'name', value: 'Name D', status: 0 },
     ],
     new Map([
       ['t1', 'Team One'],
       ['t2', 'Team Two'],
+      ['t3', 'Team Three'],
+      ['t4', 'Team Four'],
     ]),
   );
 
@@ -134,6 +138,8 @@ test('normalizeManualOverrides validates structure and status', () => {
     [
       { teamId: 't1', status: 'applied', teamName: 'Team One' },
       { teamId: 't2', status: 'pending', teamName: 'Team Two' },
+      { teamId: 't3', status: 'applied', teamName: 'Team Three' },
+      { teamId: 't4', status: 'pending', teamName: 'Team Four' },
     ],
   );
 
@@ -147,6 +153,16 @@ test('deriveAppliedTeamOverrides applies only explicit applied overrides', () =>
     { teamId: 't1', field: 'name', value: 'Tigers', status: 'applied' },
     { teamId: 't2', field: 'coachId', value: 'coach-9', status: 'pending' },
     { teamId: 't3', field: 'name', value: 'Lions' },
+  ];
+
+  const applied = deriveAppliedTeamOverrides(overrides);
+
+  assert.deepEqual(applied, [{ teamId: 't1', name: 'Tigers' }]);
+});
+
+test('deriveAppliedTeamOverrides normalizes status casing and whitespace', () => {
+  const overrides = [
+    { teamId: 't1', field: 'name', value: 'Tigers', status: '  APPLIED ' },
   ];
 
   const applied = deriveAppliedTeamOverrides(overrides);

@@ -73,10 +73,10 @@ function extractUserRole(user) {
   }
 
   const role =
-    user.role ||
     user.app_metadata?.role ||
     user.user_metadata?.role ||
-    user.user_metadata?.appRole;
+    user.user_metadata?.appRole ||
+    user.role;
 
   if (typeof role !== 'string' || !role.trim()) {
     return null;

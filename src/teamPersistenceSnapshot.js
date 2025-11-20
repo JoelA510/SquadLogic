@@ -15,7 +15,7 @@ function normalizeRunHistory(runHistory = []) {
       throw new Error(`runHistory[${index}] requires a runId`);
     }
 
-    const status = entry.status ?? 'unknown';
+const status = (typeof entry.status === 'string' && entry.status.trim().toLowerCase()) || 'unknown';
     const startedAt = entry.startedAt ?? entry.started_at;
     const completedAt = entry.completedAt ?? entry.completed_at ?? null;
 

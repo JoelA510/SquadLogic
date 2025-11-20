@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import { formatDateTime } from '../utils/formatDateTime.js';
-import { simulateTeamPersistenceUpsert } from '../utils/simulateTeamPersistenceUpsert.js';
+import {
+  getPersistenceEndpoint,
+  triggerTeamPersistence,
+} from '../utils/teamPersistenceClient.js';
 
 const SUPABASE_SYNC_TIMEOUT_MS = 10000;
 
@@ -53,19 +56,25 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
     };
   }, []);
 
+  const persistenceEndpoint = getPersistenceEndpoint();
+
   const handleSimulatedPersist = async () => {
     if (persistenceActionState === 'submitting') {
       return;
     }
     setPersistenceActionState('submitting');
-    setPersistenceActionMessage('Validating overrides and preparing Supabase payload...');
+    setPersistenceActionMessage(
+      persistenceEndpoint
+        ? 'Validating overrides and pushing Supabase payload...'
+        : 'Validating overrides and preparing Supabase payload...',
+    );
     persistenceTimeoutRef.current = setTimeout(() => {
       setPersistenceActionState('blocked');
       setPersistenceActionMessage('Supabase sync timed out. Please retry.');
     }, SUPABASE_SYNC_TIMEOUT_MS);
 
     try {
-      const result = await simulateTeamPersistenceUpsert({
+      const result = await triggerTeamPersistence({
         snapshot: teamPersistenceSnapshot,
         overrides: persistenceOverrides,
       });

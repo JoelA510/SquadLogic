@@ -221,6 +221,10 @@ body {
 }
 
 .persistence-list__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   font-weight: 600;
   color: rgba(191, 219, 254, 0.95);
 }
@@ -236,6 +240,40 @@ body {
 .persistence-history__detail {
   margin: 0.35rem 0 0;
   color: rgba(var(--color-slate-200-rgb), 0.85);
+}
+
+.persistence-list__actions {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.persistence-action {
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.12);
+  color: rgba(191, 219, 254, 0.95);
+  border-radius: 0.65rem;
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background-color 120ms ease, transform 120ms ease, opacity 120ms ease;
+}
+
+.persistence-action:hover {
+  background: rgba(59, 130, 246, 0.2);
+  transform: translateY(-1px);
+}
+
+.persistence-action:active {
+  transform: translateY(0);
+}
+
+.persistence-list__note {
+  margin: 0;
+  font-size: 0.9rem;
+  color: rgba(var(--color-slate-200-rgb), 0.78);
 }
 
 .persistence-history__header {

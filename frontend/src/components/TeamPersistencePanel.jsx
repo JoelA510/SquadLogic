@@ -21,9 +21,14 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
   const [lastSyncedAt, setLastSyncedAt] = useState(
     teamPersistenceSnapshot.lastSyncedAt,
   );
+  const [persistenceOverrides, setPersistenceOverrides] = useState(
+    teamPersistenceSnapshot.manualOverrides ?? [],
+  );
   const persistenceTimeoutRef = useRef();
 
-  const persistenceOverrides = teamPersistenceSnapshot.manualOverrides ?? [];
+  useEffect(() => {
+    setPersistenceOverrides(teamPersistenceSnapshot.manualOverrides ?? []);
+  }, [teamPersistenceSnapshot.manualOverrides]);
   const sortedPersistenceHistory = useMemo(() => {
     return [...(teamPersistenceSnapshot.runHistory ?? [])].sort(
       (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
@@ -48,6 +53,8 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
     };
   }, [persistenceOverrides]);
 
+  const hasBlockingOverrides = persistenceCounts.pending > 0;
+
   useEffect(() => {
     return () => {
       if (persistenceTimeoutRef.current) {
@@ -56,10 +63,39 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (hasBlockingOverrides) {
+      setPersistenceActionState((current) =>
+        current === 'submitting' ? current : 'blocked',
+      );
+      setPersistenceActionMessage(
+        `${persistenceCounts.pending} manual override${
+          persistenceCounts.pending === 1 ? ' is' : 's are'
+        } still pending review.`,
+      );
+      return;
+    }
+
+    if (persistenceActionState === 'blocked') {
+      setPersistenceActionState('idle');
+      setPersistenceActionMessage('All manual overrides have been reviewed.');
+    }
+  }, [hasBlockingOverrides, persistenceCounts.pending, persistenceActionState]);
+
   const persistenceEndpoint = getPersistenceEndpoint();
 
   const handlePersist = async () => {
     if (persistenceActionState === 'submitting') {
+      return;
+    }
+
+    if (hasBlockingOverrides) {
+      setPersistenceActionState('blocked');
+      setPersistenceActionMessage(
+        `${persistenceCounts.pending} manual override${
+          persistenceCounts.pending === 1 ? ' is' : 's are'
+        } still pending review.`,
+      );
       return;
     }
     setPersistenceActionState('submitting');
@@ -108,6 +144,19 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
         persistenceTimeoutRef.current = null;
       }
     }
+  };
+
+  const handleOverrideStatusUpdate = (overrideId) => {
+    setPersistenceOverrides((current) =>
+      current.map((entry) =>
+        entry.id === overrideId
+          ? { ...entry, status: 'applied', updatedAt: new Date().toISOString() }
+          : entry,
+      ),
+    );
+    setPersistenceActionMessage(
+      'Override marked as applied. Supabase sync will include the update.',
+    );
   };
 
   return (
@@ -170,13 +219,38 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
             {persistenceOverrides.map((override) => (
               <li key={override.id}>
                 <div className="persistence-list__title">
-                  {override.teamName} · {override.field}
+                  <span>
+                    {override.teamName} · {override.field}
+                  </span>
+                  <span
+                    className={`persistence-pill persistence-pill--${
+                      override.status === 'pending' ? 'warning' : 'success'
+                    }`}
+                  >
+                    {override.status === 'pending' ? 'Pending' : 'Applied'}
+                  </span>
                 </div>
                 <p className="persistence-list__meta">
-                  {override.status === 'pending' ? 'Pending' : 'Applied'} · {formatDateTime(override.updatedAt)}
+                  Last updated {formatDateTime(override.updatedAt)}
                 </p>
                 <p className="persistence-list__detail">{override.reason}</p>
                 <p className="persistence-list__detail">Value: {override.value}</p>
+                {override.status === 'pending' ? (
+                  <div className="persistence-list__actions">
+                    <button
+                      type="button"
+                      className="persistence-action"
+                      onClick={() => handleOverrideStatusUpdate(override.id)}
+                    >
+                      Mark reviewed
+                    </button>
+                    <p className="persistence-list__note">
+                      This change will be included in the next Supabase sync.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="persistence-list__note">Included in the prepared Supabase payload.</p>
+                )}
               </li>
             ))}
           </ul>

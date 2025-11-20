@@ -62,11 +62,23 @@ export async function triggerTeamPersistence({
       signal,
     });
 
-    if (!response.ok) {
-      throw new Error(`Persistence request failed with status ${response.status}`);
+    let payload;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to parse persistence response payload:', error);
     }
 
-    const payload = await response.json();
+    if (!response.ok) {
+      return {
+        status: 'error',
+        message:
+          (payload && typeof payload === 'object' && payload.message) ||
+          `Persistence request failed with status ${response.status}`,
+      };
+    }
+
     if (!payload || typeof payload !== 'object') {
       return {
         status: 'error',

@@ -49,7 +49,8 @@ This document translates the roadmap's team formation phase into actionable plan
 - **Admin shell persistence trigger**: The dashboard now posts override-ready payloads to a configurable
   `VITE_SUPABASE_PERSISTENCE_URL` endpoint when present (via `teamPersistenceClient.js`), retaining the local simulator as a
   fallback. Pending manual overrides still block push attempts client-side so the UI avoids unnecessary network calls when the
-  Supabase run would be rejected.
+  Supabase run would be rejected. When a live endpoint is configured, the UI now surfaces which host will be called and echoes
+  backend-provided error messages so admins can distinguish client validation failures from server-side rejections.
 
 ## Manual Adjustment Workflow
 1. Present team rosters in the admin UI with sortable columns (player name, buddy code, skill tier).

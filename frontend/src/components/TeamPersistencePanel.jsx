@@ -152,7 +152,7 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
         </div>
         <p className="team-persistence__mode" role="note">
           {persistenceEndpoint
-            ? `Live Supabase persistence enabled at ${persistenceEndpoint}/team-persistence.`
+            ? `Live Supabase persistence enabled at ${persistenceEndpoint}.`
             : 'Simulated Supabase persistence active. Set VITE_SUPABASE_PERSISTENCE_URL to target your live endpoint.'}
         </p>
         <p className="team-persistence__action-message" role="status">

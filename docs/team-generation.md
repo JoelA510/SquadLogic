@@ -46,7 +46,9 @@ This document translates the roadmap's team formation phase into actionable plan
   packages the Supabase payloads (team rows plus player rows) alongside admin-facing metadata such as manual override queues,
   pending/applied counts, and run history ordering. The helper also normalizes manual overrides (defaulting status to
   `pending`, enforcing known status values, and filling in team names from the normalized Supabase payloads) while returning
-  the prepared counts that the admin dashboard displays. This gives the dashboard enough context to display readiness without
+  the prepared counts that the admin dashboard displays. Only overrides explicitly marked as `applied` are folded into the
+  Supabase-ready team rows; pending or unspecified statuses remain in the admin queue metadata so the dashboard can surface
+  them for review without mutating persistence payloads. This gives the dashboard enough context to display readiness without
   reimplementing normalization logic on the client.
 - **Admin shell persistence trigger**: The dashboard now posts override-ready payloads to a configurable
   `VITE_SUPABASE_PERSISTENCE_URL` endpoint when present (via `teamPersistenceClient.js`), retaining the local simulator as a

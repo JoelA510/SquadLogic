@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  deriveAppliedTeamOverrides,
   normalizeManualOverrides,
   normalizeRunHistory,
   prepareTeamPersistenceSnapshot,
@@ -139,4 +140,37 @@ test('normalizeManualOverrides validates structure and status', () => {
   assert.throws(() => normalizeManualOverrides('bad'), /manualOverrides must be an array/);
   assert.throws(() => normalizeManualOverrides([{}]), /requires a teamId/);
   assert.throws(() => normalizeManualOverrides([{ teamId: 't3', status: 'unknown' }]), /unsupported status/);
+});
+
+test('deriveAppliedTeamOverrides applies only explicit applied overrides', () => {
+  const overrides = [
+    { teamId: 't1', field: 'name', value: 'Tigers', status: 'applied' },
+    { teamId: 't2', field: 'coachId', value: 'coach-9', status: 'pending' },
+    { teamId: 't3', field: 'name', value: 'Lions' },
+  ];
+
+  const applied = deriveAppliedTeamOverrides(overrides);
+
+  assert.deepEqual(applied, [{ teamId: 't1', name: 'Tigers' }]);
+});
+
+test('deriveAppliedTeamOverrides ignores pending overrides', () => {
+  const overrides = [
+    { teamId: 't1', field: 'name', value: 'Tigers', status: 'applied' },
+    { teamId: 't1', field: 'coachId', value: 'coach-9', status: 'pending' },
+  ];
+
+  const applied = deriveAppliedTeamOverrides(overrides);
+
+  assert.deepEqual(applied, [{ teamId: 't1', name: 'Tigers' }]);
+});
+
+test('deriveAppliedTeamOverrides treats missing status as pending', () => {
+  const overrides = [
+    { teamId: 't1', field: 'name', value: 'Tigers' },
+  ];
+
+  const applied = deriveAppliedTeamOverrides(overrides);
+
+  assert.deepEqual(applied, []);
 });

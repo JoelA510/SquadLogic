@@ -1,16 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import { formatDateTime } from '../utils/formatDateTime.js';
+import { simulateTeamPersistenceUpsert } from '../utils/simulateTeamPersistenceUpsert.js';
+
+const SUPABASE_SYNC_TIMEOUT_MS = 10000;
 
 const persistenceButtonCopy = {
   idle: 'Push overrides to Supabase',
   submitting: 'Preparing payload…',
-  ready: 'Payload ready for Supabase upsert',
+  ready: 'Supabase sync succeeded',
+  blocked: 'Resolve overrides to sync',
 };
 
 function TeamPersistencePanel({ teamPersistenceSnapshot }) {
   const [persistenceActionState, setPersistenceActionState] = useState('idle');
   const [persistenceActionMessage, setPersistenceActionMessage] = useState('');
+  const [lastSyncedAt, setLastSyncedAt] = useState(
+    teamPersistenceSnapshot.lastSyncedAt,
+  );
   const persistenceTimeoutRef = useRef();
 
   const persistenceOverrides = teamPersistenceSnapshot.manualOverrides ?? [];
@@ -22,21 +29,19 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
 
   const latestHistory = sortedPersistenceHistory.slice(0, 3);
   const persistenceCounts = useMemo(() => {
-    let pendingCount = 0;
-    let appliedCount = 0;
-
-    for (const override of persistenceOverrides) {
-      if (override.status === 'pending') {
-        pendingCount++;
-      } else if (override.status === 'applied') {
-        appliedCount++;
-      }
-    }
+    const byStatus = persistenceOverrides.reduce(
+      (acc, { status }) => {
+        if (!status) return acc;
+        acc[status] = (acc[status] ?? 0) + 1;
+        return acc;
+      },
+      { pending: 0, applied: 0 },
+    );
 
     return {
       total: persistenceOverrides.length,
-      pending: pendingCount,
-      applied: appliedCount,
+      pending: byStatus.pending ?? 0,
+      applied: byStatus.applied ?? 0,
     };
   }, [persistenceOverrides]);
 
@@ -48,18 +53,49 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
     };
   }, []);
 
-  const handleSimulatedPersist = () => {
+  const handleSimulatedPersist = async () => {
     if (persistenceActionState === 'submitting') {
       return;
     }
     setPersistenceActionState('submitting');
-    setPersistenceActionMessage('Preparing Supabase payload with deterministic team IDs...');
+    setPersistenceActionMessage('Validating overrides and preparing Supabase payload...');
     persistenceTimeoutRef.current = setTimeout(() => {
+      setPersistenceActionState('blocked');
+      setPersistenceActionMessage('Supabase sync timed out. Please retry.');
+    }, SUPABASE_SYNC_TIMEOUT_MS);
+
+    try {
+      const result = await simulateTeamPersistenceUpsert({
+        snapshot: teamPersistenceSnapshot,
+        overrides: persistenceOverrides,
+      });
+
+      if (result.status === 'blocked') {
+        setPersistenceActionState('blocked');
+        setPersistenceActionMessage(result.message);
+        return;
+      }
+
+      if (result.status === 'error') {
+        setPersistenceActionState('idle');
+        setPersistenceActionMessage('Snapshot unavailable. Refresh and try again.');
+        return;
+      }
+
+      setLastSyncedAt(result.syncedAt);
       setPersistenceActionState('ready');
       setPersistenceActionMessage(
-        `Prepared ${teamPersistenceSnapshot.preparedTeamRows} team rows and ${teamPersistenceSnapshot.preparedPlayerRows} roster rows for ${teamPersistenceSnapshot.lastRunId}.`,
+        `Supabase upsert completed for ${result.updatedTeams} teams and ${result.updatedPlayers} players at ${formatDateTime(result.syncedAt)}.`,
       );
-    }, 900);
+    } catch (error) {
+      setPersistenceActionState('idle');
+      setPersistenceActionMessage('Supabase sync failed. Please retry.');
+    } finally {
+      if (persistenceTimeoutRef.current) {
+        clearTimeout(persistenceTimeoutRef.current);
+        persistenceTimeoutRef.current = null;
+      }
+    }
   };
 
   return (
@@ -80,7 +116,7 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
           </div>
           <div>
             <dt>Last synced</dt>
-            <dd>{formatDateTime(teamPersistenceSnapshot.lastSyncedAt)}</dd>
+            <dd>{formatDateTime(lastSyncedAt)}</dd>
           </div>
           <div>
             <dt>Prepared rows</dt>

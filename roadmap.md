@@ -134,9 +134,9 @@ Future changes would be refinements, not re-selection of the stack.
 ### 4.2 Next steps
 
 - [ ] Implement a `team-persistence` Supabase Edge Function (or equivalent backend handler) that:
-  - Validates auth/roles.
-  - Validates the snapshot shape.
-  - Performs transactional upserts into `teams`, `team_players`, and `scheduler_runs`.
+  - [x] Provide server-side validation of snapshot payloads and manual overrides.
+  - [ ] Validate auth/roles.
+  - [ ] Perform transactional upserts into `teams`, `team_players`, and `scheduler_runs`.
 - [ ] Wire the Edge Function endpoint to `VITE_SUPABASE_PERSISTENCE_URL` in deployment environments.
 - [ ] Integrate the real scheduler runs into the snapshot builder (replace static `teamSummarySample.js` with real data).
 

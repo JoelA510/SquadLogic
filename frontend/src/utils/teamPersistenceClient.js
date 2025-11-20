@@ -74,7 +74,7 @@ export async function triggerTeamPersistence({
       return {
         status: 'error',
         message:
-          (payload && typeof payload === 'object' && payload.message) ||
+          payload?.message ||
           `Persistence request failed with status ${response.status}`,
       };
     }

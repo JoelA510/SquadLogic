@@ -4,6 +4,7 @@ import {
   handleTeamPersistence,
   evaluateOverrides,
   normalizeSnapshot,
+  authorizeTeamPersistenceRequest,
 } from '../src/teamPersistenceHandler.js';
 
 const SAMPLE_SNAPSHOT = {
@@ -80,4 +81,65 @@ test('handleTeamPersistence blocks when overrides are pending', () => {
 
 test('handleTeamPersistence validates the clock input', () => {
   assert.throws(() => handleTeamPersistence({ snapshot: SAMPLE_SNAPSHOT, now: 'not-a-date' }), /valid Date/);
+});
+
+test('authorizeTeamPersistenceRequest enforces allowed roles', () => {
+  const baseUser = { id: 'user-1', role: 'admin' };
+
+  const authorized = authorizeTeamPersistenceRequest({ user: baseUser });
+  assert.deepEqual(authorized, { status: 'authorized', role: 'admin' });
+
+  const forbidden = authorizeTeamPersistenceRequest({ user: { ...baseUser, role: 'parent' } });
+  assert.strictEqual(forbidden.status, 'forbidden');
+  assert.match(forbidden.message, /not permitted/);
+  assert.strictEqual(forbidden.role, 'parent');
+
+  const missingRole = authorizeTeamPersistenceRequest({ user: { id: 'user-2' } });
+  assert.strictEqual(missingRole.status, 'unauthorized');
+  assert.match(missingRole.message, /allowed role is required/);
+
+  assert.throws(() => authorizeTeamPersistenceRequest({ allowedRoles: 'admin' }), /allowedRoles must be an array/);
+  assert.throws(() => authorizeTeamPersistenceRequest({ allowedRoles: [] }), /at least one role/);
+});
+
+test('authorizeTeamPersistenceRequest extracts role from app_metadata', () => {
+  const user = { app_metadata: { role: 'scheduler' } };
+
+  const result = authorizeTeamPersistenceRequest({ user });
+  assert.deepEqual(result, { status: 'authorized', role: 'scheduler' });
+});
+
+test('authorizeTeamPersistenceRequest normalizes user role (trim and lowercase)', () => {
+  const user = { role: '  Admin  ' };
+
+  const result = authorizeTeamPersistenceRequest({ user });
+  assert.deepEqual(result, { status: 'authorized', role: 'admin' });
+});
+
+test('authorizeTeamPersistenceRequest normalizes allowedRoles', () => {
+  const user = { role: 'scheduler' };
+
+  const result = authorizeTeamPersistenceRequest({
+    user,
+    allowedRoles: ['  Scheduler  '],
+  });
+  assert.deepEqual(result, { status: 'authorized', role: 'scheduler' });
+});
+
+test('authorizeTeamPersistenceRequest throws if allowedRoles contains invalid values', () => {
+  assert.throws(
+    () =>
+      authorizeTeamPersistenceRequest({
+        allowedRoles: ['admin', ''],
+      }),
+    /must be a non-empty string/i,
+  );
+
+  assert.throws(
+    () =>
+      authorizeTeamPersistenceRequest({
+        allowedRoles: ['admin', null],
+      }),
+    /must be a non-empty string/i,
+  );
 });

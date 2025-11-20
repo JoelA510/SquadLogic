@@ -42,11 +42,47 @@ function normalizeSnapshot(snapshot) {
     }
   });
 
-  return {
+ return {
     teamRows,
     teamPlayerRows,
     runId: snapshot.lastRunId ?? snapshot.runId ?? null,
   };
+}
+
+function normalizeAllowedRoles(allowedRoles = []) {
+  if (!Array.isArray(allowedRoles)) {
+    throw new TypeError('allowedRoles must be an array');
+  }
+
+  if (allowedRoles.length === 0) {
+    throw new Error('allowedRoles must include at least one role');
+  }
+
+  return allowedRoles.map((role, index) => {
+    if (typeof role !== 'string' || !role.trim()) {
+      throw new TypeError(`allowedRoles[${index}] must be a non-empty string`);
+    }
+
+    return role.trim().toLowerCase();
+  });
+}
+
+function extractUserRole(user) {
+  if (!user || typeof user !== 'object') {
+    return null;
+  }
+
+  const role =
+    user.role ||
+    user.app_metadata?.role ||
+    user.user_metadata?.role ||
+    user.user_metadata?.appRole;
+
+  if (typeof role !== 'string' || !role.trim()) {
+    return null;
+  }
+
+  return role.trim().toLowerCase();
 }
 
 function evaluateOverrides(overrides = []) {
@@ -96,6 +132,31 @@ export function handleTeamPersistence({ snapshot, overrides = [], now = new Date
     updatedPlayers: teamPlayerRows.length,
     runId,
   };
+}
+
+export function authorizeTeamPersistenceRequest({
+  user,
+  allowedRoles = ['admin', 'scheduler'],
+} = {}) {
+  const normalizedAllowedRoles = normalizeAllowedRoles(allowedRoles);
+  const normalizedRole = extractUserRole(user);
+
+  if (!normalizedRole) {
+    return {
+      status: 'unauthorized',
+      message: 'Authentication with an allowed role is required for team persistence.',
+    };
+  }
+
+  if (!normalizedAllowedRoles.includes(normalizedRole)) {
+    return {
+      status: 'forbidden',
+      message: `Role "${normalizedRole}" is not permitted for team persistence.`,
+      role: normalizedRole,
+    };
+  }
+
+  return { status: 'authorized', role: normalizedRole };
 }
 
 export { normalizeSnapshot, evaluateOverrides };

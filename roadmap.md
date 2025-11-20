@@ -1,167 +1,342 @@
-# Development Roadmap for Youth‑Sports Scheduling Program
+# Development Roadmap for Youth-Sports Scheduling Program
 
-This roadmap describes the high‑level steps required to build a cost‑effective youth sports scheduling application.  The goal is to ingest GotSport registrations, form balanced teams with mutual buddy requests, allocate practice slots on weeknights, schedule games on Saturdays, and export per‑team schedules for import into TeamSnap.  The project leverages modern agentic design concepts for flexibility and uses inexpensive cloud services like Netlify or Vercel alongside Supabase.  Citations reference research on agentic systems, scheduling patterns and hosting considerations【21†L225-L233】【25†L155-L163】.
+This roadmap describes the high-level steps required to build a cost-effective youth sports scheduling application. The goal is to ingest GotSport registrations, form balanced teams with mutual buddy requests, allocate practice slots on weeknights, schedule games on Saturdays, and export per-team schedules for import into TeamSnap.
+
+The project uses a documentation-first approach, a modern React admin shell (Vite), and Supabase for storage, RLS, and serverless functions. A recurring design pattern is:
+
+> **Scheduler/allocator → metrics + diagnostics → persistence snapshot → admin Persistence Panel → Supabase persistence (Edge Function).**
 
 ## Progress Summary
 
-- [x] Requirements Analysis & Planning – Documentation complete; validated during the 2024-07-08 audit.
-- [x] Architecture & Technology Selection – Documentation complete; audit confirms status.
-- [x] Data Modeling & Storage – Documentation complete; audit confirms status.
-- [x] Prior Fix Audit – Re-ran practice, game, export, and evaluation regression suites to confirm previously recommended fixes remain in place with no regressions detected.
-- [ ] Team Generation – Core allocator implemented in `src/teamGeneration.js` with deterministic unit tests; conflict detection and validation safeguards added, overflow tracking via the new `overflowByDivision` return channel surfaces manual follow-ups and the new `overflowSummaryByDivision` rollup highlights impacted players per reason for triage, buddy diagnostics now expose mutual pairs and unresolved requests for admin review through `buddyDiagnosticsByDivision`, coach coverage reporting via `coachCoverageByDivision` highlights divisions lacking enough volunteers, the latest roster balance telemetry returned through `rosterBalanceByDivision` pinpoints teams needing players to streamline roster review, skill-aware assignment now spreads stronger units and reports `skillBalanceByDivision` so admins can spot imbalance across teams, `src/rosterSizing.js` standardizes default roster caps from division formats and now converts Supabase roster override rows into season-aware config maps, the new summary helper `src/teamDiagnostics.js` assembles dashboard-ready division metrics with per-reason player overflow tallies for dashboard triage, duplicate player identifiers are now rejected early to protect data quality, and the admin shell now showcases a representative division snapshot with Supabase-backed persistence and override review controls wired in.
-  - [x] Configurable team naming supports ordered `teamNames` lists or a `teamNamePrefix` fallback before defaulting to `{division} Team {index}` formatting.
-  - [x] Persist generated teams (including names) back to Supabase and wire admin workflows for manual overrides.
-    - [x] Add Supabase mappers for teams and roster rows plus manual override intake to support admin adjustments before writing to the database.
-    - [x] Wire the admin shell to drive Supabase writes and surface override status for review.
-      - [x] Surface Supabase persistence status and manual override readiness in the admin shell dashboard.
-      - [x] Add an admin-shell Supabase push trigger with override gating and success/error feedback using simulated API responses until live endpoints are available.
-      - [x] Connect the admin-shell Supabase push to live backend endpoints once available.
-        - [x] Add a configurable persistence client that posts to a `VITE_SUPABASE_PERSISTENCE_URL` endpoint when set and falls back to the simulator when unset or blocked by pending overrides.
-      - [x] Allow admins to mark manual overrides as reviewed in-dashboard so Supabase syncs are unblocked once pending items are cleared.
-    - [x] Introduce a persistence snapshot helper that packages Supabase payloads with override metadata and ordered run history so the dashboard and worker orchestration can render readiness without reimplementing normalization logic.
-- [ ] Practice Scheduling – Scheduling workflow outlined in `docs/practice-scheduling.md`; allocator in `src/practiceScheduling.js` with tests covers swap-based conflict handling and fairness scoring, while `src/practiceMetrics.js` now reports fairness and base-slot distribution metrics, day-concentration and division dominance alerts, manual follow-up detection with category breakdowns, underutilized base-slot alerts, and division base-slot and day load snapshots; Supabase helpers now include the practice slot normalizer and season-phase expander, a practice assignment row builder, and the `persistPracticeAssignments` helper; the admin shell exposes a practice readiness snapshot backed by these metrics, while fully wired Supabase-backed workflows for practices remain outstanding.
-- [ ] Game Scheduling – Game scheduling blueprint refined in `docs/game-scheduling.md` with clarified inputs and fairness metrics; game allocation, fairness metrics, unscheduled game escalation, and division-level breakdowns are implemented with the round-robin generator and slot allocator in `src/gameScheduling.js` covered by `tests/gameScheduling.test.js`; the new `src/gameSupabase.js` helpers and tests normalize and persist game assignments; the admin shell surfaces a game readiness snapshot currently driven by evaluator outputs, while Supabase-backed game workflows and admin conflict resolution tooling remain outstanding.
-- [ ] Evaluation & Refinement – Evaluation pipeline, fairness metrics, and remediation workflow documented in `docs/evaluation.md`; automated schedule checks now include `src/practiceMetrics.js` for practices, the enhanced `src/gameMetrics.js` for games (with shared slot distribution analysis), and the orchestration helper `src/evaluationPipeline.js` that aggregates readiness signals for the admin dashboard while preserving evaluator validation and conflict severity semantics through additional unit tests while now surfacing practice day-concentration alerts for readiness triage, and Supabase orchestration plus UI reporting remain outstanding.
-- [ ] Output Generation & Integration – Export and communication workflow planned in `docs/output-generation.md`; baseline formatter module `src/outputGeneration.js` with unit tests now produces master and per-team CSV-ready rows with shared header constants and hardened CSV quoting while serverless exporters, storage integration, and admin tooling still required.
-- [ ] Front-End Development – Navigation, screen blueprint, and state management approach documented in `docs/frontend-architecture.md`; the initial Vite-powered admin shell now lives in `frontend/` as a roadmap dashboard prototype with team formation, practice readiness, and game readiness snapshots, while the current views are backed by sample data and wiring them to live Supabase diagnostics remains a follow-up alongside Supabase client wiring and production-ready component implementation.
-- [ ] Ingestion & Normalization – GotSport CSV ingestion and normalization into the internal player model, normalizing `import_jobs` / external JSON payloads, and adding real anonymized fixtures under `tests/fixtures` plus an end-to-end ingestion test.
-- [ ] Security & RLS Hardening – Applying the documented RLS policies as real SQL migrations, verifying RLS behavior in a live Supabase project, and ensuring service role keys are only used on the server / Edge functions, not in the frontend client.
-- [ ] Timezone & Calendar Semantics – Choosing and documenting a canonical league timezone, centralizing date/time handling in a utility layer (e.g. date-fns / Luxon), and adding tests around late-evening sessions and DST boundaries.
+- [x] **Requirements Analysis & Planning**  
+  Requirements, constraints, and success criteria captured under `docs/requirements.md`. Intake templates and interview scripts are in place.
+
+- [x] **Architecture & Technology Selection**  
+  Target stack (Vite + React + Supabase + serverless Edge Functions) chosen and documented under `docs/architecture.md`.
+
+- [x] **Data Modeling & Storage**  
+  Relational schema, RLS strategy, and seed data are drafted in `docs/data-modeling.md`, `docs/sql/initial_schema.sql`, and `docs/sql/sample_seed_data.sql`.
+
+- [ ] **Team Generation**  
+  Core allocator, diagnostics, Supabase mapping, and **client-side persistence (snapshot + Team Persistence Panel + Supabase client)** are implemented. **Server-side Edge Function and wiring to real scheduler runs remain.**
+
+- [ ] **Practice Scheduling**  
+  Allocator, metrics, and Supabase helpers are implemented. Admin UI for practice persistence and Edge Function wiring remain.
+
+- [ ] **Game Scheduling**  
+  Round-robin generator, conflict-aware allocator, metrics, and Supabase helpers are implemented. Admin UI for game persistence and Edge Function wiring remain.
+
+- [ ] **Evaluation & Refinement**  
+  Evaluation pipeline exists and ingests practice/game metrics. Wiring to scheduler runs, persistence into `evaluation_*` tables, and dashboard integration remain.
+
+- [ ] **Output Generation & Integration**  
+  CSV formatters for master/team exports are implemented. Admin export UI, Supabase Storage uploads, and email helpers remain.
+
+- [ ] **Front-End Development**  
+  Admin shell, dashboard, and Team Persistence Panel are implemented. Practice/Game Persistence Panels, ingestion flows, and Auth remain.
+
+- [ ] **Deployment & Infrastructure**  
+  Local Node/Vite scripts exist. Supabase migrations, Edge Function scaffolding, and CI/CD wiring remain.
+
+- [ ] **Testing & Quality Assurance**  
+  Node test harness covers allocators, helpers, and persistence mappers. Integration and E2E tests remain.
+
+- [ ] **Documentation, Training, Maintenance, Future Enhancements**  
+  Core system docs exist. Admin-focused training material, observability, and advanced AI features remain.
+
+---
 
 ## 1. Requirements Analysis & Planning
 
-**Status:** Baseline requirements, iteration plan, and Season Intake form blueprint captured in `docs/requirements.md`; initial Season Intake template exported to `docs/intake-snapshots/season-intake-20240701.csv` with representative data; stakeholder interview agenda, logistics checklist, and capture template (`docs/meeting-notes/stakeholder-interview-template.md`) finalized. Verified during the 2024-07-08 codebase audit, with live stakeholder validation still pending once registrations arrive.
+**Status: Complete**
 
-1. **Stakeholder interviews and scope definition** – Meet with the league administrator to confirm the exact feature set: number of divisions, roster size formulas (e.g., 7v7 → max 12 players), buddy rules (only mutual requests are honored), practice days (Mon–Thu), game days (Sat), season duration (August–October), and coach preferences.
-2. **Document constraints** – List all hard constraints (one practice per team per week, avoid coach conflicts, field capacities and halves, practice shortening when sunsets change, limit of one buddy per player) and soft preferences (balanced teams, coach time preferences).
-3. **Define success criteria** – Establish metrics for schedule quality (no overlaps, even distribution of practice times, equitable field usage) and output requirements (master spreadsheet, per‑team exports, manual email drafts).  Clarify that the scheduler will generate a season schedule at the start and occasionally adjust for weather or field changes.
-4. **Plan iterations** – Agree on project phases, acceptance tests and a review process.  Since only one person manages scheduling for ~1500 participants, emphasise automation and user‑friendliness.
+- Capture league constraints (roster sizes, buddy policy, field capacity, coach preferences, blackout dates) using the Season Intake templates.
+- Maintain `docs/requirements.md` as the canonical reference for:
+  - Hard constraints (e.g., mutual buddy rules, one practice/week, Saturday games).
+  - Soft preferences (fairness, time-slot balance).
+  - Success criteria (valid schedules, fair distributions, export formats).
+
+No further work is required here beyond incremental updates as policies change.
+
+---
 
 ## 2. Architecture & Technology Selection
 
-**Status:** Preferred architecture and platform decisions recorded in `docs/architecture.md`; proof-of-concept validation plan outlined, with cost assumption validation, trial deployments, and CI/CD documentation still outstanding. Audit action items call for locking in a default hosting provider before the sandbox spike.
+**Status: Complete**
 
-1. **Adopt an agentic design** – Use a modular, goal‑oriented architecture inspired by the Belief–Desire–Intention (BDI) model.  Research shows that multi‑agent systems excel at dynamic scheduling tasks because they can reason about goals, act in complex environments and iteratively refine plans【21†L225-L233】【25†L155-L163】.  The roadmap therefore divides the logic into distinct “agents” or modules: data ingestion, team generation, schedule orchestration and evaluation.
-2. **Choose the tech stack** – Implement the back end using Supabase Edge Functions or lightweight serverless handlers in JavaScript/TypeScript, whichever best fits the team’s expertise.  Build the front end using a modern React build tool such as Vite so the UI ships as a static bundle while benefiting from faster dev-server startup and HMR.  Host the bundle on a static provider such as Netlify or Vercel. Evaluate their free-tier allowances for bandwidth, build minutes, and serverless executions to confirm they cover initial usage【503490883893339†L60-L87】.  Store data in Supabase’s free tier, which offers unlimited API requests, 50,000 monthly active users and a 500 MB Postgres database【243507034388311†L19-L47】.  Use Supabase authentication if user roles are needed, and expose configuration via `REACT_APP_*` environment variables.
-3. **Assess limitations** – Document the hosting provider's free-tier caps (bandwidth, build minutes, function/runtime quotas) using resources such as Vercel and Netlify plan guides【503490883893339†L60-L124】, and Supabase's limits (project pauses after one week of inactivity, up to two active projects)【243507034388311†L19-L47】. Plan for a possible upgrade if league usage pushes past those allowances.
-4. **Define integration points** – Plan integration with TeamSnap via CSV import rather than direct API calls (TeamSnap may support CSV/Excel imports).  Consider adding mailto links or using an email API to generate drafts without auto‑sending.
+- Chosen stack:
+  - **Front-end:** React + Vite admin shell.
+  - **Backend:** Supabase (Postgres, RLS, Storage, Edge Functions).
+  - **Hosting:** Vercel or Netlify for static frontend + serverless endpoints.
+- Design patterns:
+  - Agentic framing: separate “agents” for ingestion, team generation, practice scheduling, game scheduling, evaluation, and output.
+  - Snapshot pattern: each major workflow produces a rich snapshot consumed by the admin UI.
+
+Future changes would be refinements, not re-selection of the stack.
+
+---
 
 ## 3. Data Modeling & Storage
 
-**Status:** Proposed Supabase schema detailed in `docs/data-modeling.md` with ingestion pipeline workflows elaborated in `docs/ingestion-pipeline.md`; initial DDL captured in `docs/sql/initial_schema.sql` now extends beyond core tables to include scheduler run histories, evaluation artifacts, and export/email logs for observability ahead of Supabase migration tests; reusable Fall 2024 seed data added in `docs/sql/sample_seed_data.sql` to enable realistic local demos; RLS strategy authored in `docs/rls-policies.md`. Audit recommends converting the drafts into timestamped migrations and validating against a Supabase instance.
+**Status: Complete at the design level; migrations still pending**
 
-1. **Design database schema** – Define Supabase tables (or Postgres schemas) for:
-   - **Players**: fields include `PlayerID`, name, grade/division, contact details, mutual buddy identifier, skill/experience indicators (if collected), coach volunteer flag.
-   - **Teams**: `TeamID`, division, roster size cap, coach details, assigned practice and game slots.
-   - **Fields & time slots**: each row represents a discrete resource – location, field number, subfield (A/B), day of week, start time, end time, slot type (practice/game), optional `capacity`.  This declarative representation mirrors the tool schema concept used in agent frameworks【8†L137-L144】.
-   - **Coaches**: `CoachID`, name, email, associated player (if a parent), available practice days/times, preferences and multi‑team indicator.
-   - **Schedules**: separate tables for practices and games with references to `TeamID` and `FieldSlotID` along with date/duration.
-   - **Configuration**: table for adjustable parameters (roster size formulas, buddy rules, season date ranges, practice durations before and after sunset, etc.).
-2. **Implement importers** – Write utilities to parse GotSport registration CSVs and field availability spreadsheets.  Validate mutual buddy codes, remove duplicates and store clean data in Supabase.  Provide an admin UI for manual entry of field slots or allow uploading of a standardized CSV containing location, field, subfield, day, start, end and type.
-3. **Seed the database** – Populate example data for testing (e.g., sample players, fields and coaches) and write scripts to reset data at the start of each season.  A baseline dataset for Fall 2024 already exists in `docs/sql/sample_seed_data.sql`; follow-up work will integrate it into a Supabase seeding workflow and expand coverage for additional divisions and edge cases.
-4. **Validate DDL in Supabase** – Run the script from `docs/sql/initial_schema.sql` against a local Supabase instance, add missing triggers or constraints surfaced during testing, and convert the draft into timestamped migrations.
+- Schema:
+  - Core tables: players, coaches, teams, divisions, practice_slots, game_slots, assignments, season_settings, import_jobs.
+  - Run history and evaluation: `scheduler_runs`, `evaluation_runs`, `evaluation_findings`, `evaluation_metrics`, `evaluation_run_events`.
+  - Exports and communication: `export_jobs`, `email_log`.
+- RLS and auth:
+  - Roles and policy outline under `docs/rls-policies.md`.
+  - Emphasis on protecting PII while keeping admin workflows efficient.
+- Seed data:
+  - `docs/sql/sample_seed_data.sql` seeds a representative Fall 2024 season and linked scheduler/evaluation/export jobs.
+
+**Next steps**
+
+- [ ] Translate `docs/sql/initial_schema.sql` into timestamped Supabase migrations.
+- [ ] Ensure `sample_seed_data.sql` runs cleanly against those migrations.
+- [ ] Stand up a Supabase project and validate schema + seed scripts.
+
+---
 
 ## 4. Team Generation
 
-**Status:** Team formation algorithm, manual adjustment workflow, and acceptance/test harness outline documented in `docs/team-generation.md`; initial roster allocator now lives in `src/teamGeneration.js` with repeatable `node:test` coverage, and next steps cover Supabase wiring plus roster review UI.
+**Status: Core algorithms and client-side persistence are complete; server-side persistence remains.**
 
-1. **Define roster size rules** – Implemented in `src/rosterSizing.js`, which derives caps via the max roster = 2 × playable roster − 2 formula and respects manual overrides; Supabase override rows can now be normalized into division configs for a given season, with UI controls for per-season adjustments still outstanding.
-2. **Implement pairing logic for buddies** – Detect mutual buddy requests and treat each pair as a single unit during assignment.  Ignore one‑sided requests but log them for reference.  When assigning players to teams, always place mutual buddies together unless roster limits or skill balancing rules conflict.
-3. **Algorithm for balanced teams** – Develop a function to distribute players evenly across teams:
-   - Group registrations by division (and possibly by gender if the league is not co‑ed).
-   - Optionally sort players by skill, experience or other attributes to balance ability.  Without rating data, simply randomize the list.
-   - Create `N = ceil(totalPlayers / maxRosterSize)` teams and iteratively allocate players (or buddy units) to the team with the current smallest roster.  If a coach’s child is in a division, place that player on their parent’s team and mark the team as coached.
-   - Honour volunteer coaches by ensuring they are assigned to a team with their child; assign assistant coaches if needed.
-4. **Manual adjustments** – After auto‑assignment, expose rosters in the UI for review.  Allow the admin to swap players between teams by drag‑and‑drop or by editing an exported CSV and re‑uploading it.  Changes should be persisted back to Supabase.
+### 4.1 Completed
+
+- **Roster sizing**
+  - `src/rosterSizing.js` implements parsing of play formats (e.g. `7v7`) and computes recommended max roster sizes.
+
+- **Allocator and diagnostics**
+  - `src/teamGeneration.js`:
+    - Forms balanced teams by division.
+    - Tracks overflows and exposes `overflowByDivision` and `overflowSummaryByDivision`.
+    - Produces buddy diagnostics so admins can see mutual vs one-sided requests.
+
+- **Supabase mapping**
+  - `src/teamSupabase.js`:
+    - Maps generator teams to stable UUIDs.
+    - Produces `teams` and `team_players` rows with source flags (auto/manual) aligned with Supabase expectations.
+
+- **Manual overrides and persistence snapshot**
+  - `src/teamPersistenceSnapshot.js`:
+    - Normalizes and filters manual overrides.
+    - Builds a single snapshot containing team rows, player rows, overrides, and run history metadata.
+
+- **Admin UI and client**
+  - `frontend/src/components/TeamPersistencePanel.jsx`:
+    - Renders the team persistence snapshot, including ready-to-sync status, pending overrides, and summary counts.
+  - `frontend/src/utils/teamPersistenceClient.js`:
+    - Sends the snapshot to `VITE_SUPABASE_PERSISTENCE_URL` when configured, or uses a local simulator in development.
+  - `frontend/src/App.jsx`:
+    - Shows the team summary, readiness snapshots, and includes the Team Persistence Panel.
+
+### 4.2 Next steps
+
+- [ ] Implement a `team-persistence` Supabase Edge Function (or equivalent backend handler) that:
+  - Validates auth/roles.
+  - Validates the snapshot shape.
+  - Performs transactional upserts into `teams`, `team_players`, and `scheduler_runs`.
+- [ ] Wire the Edge Function endpoint to `VITE_SUPABASE_PERSISTENCE_URL` in deployment environments.
+- [ ] Integrate the real scheduler runs into the snapshot builder (replace static `teamSummarySample.js` with real data).
+
+---
 
 ## 5. Practice Scheduling
 
-**Status:** Practice scheduling design captured in `docs/practice-scheduling.md`; the scheduler service in `src/practiceScheduling.js` ships with automated tests, swap-based conflict recovery, division load fairness scoring, and manual override support. Metrics rollups via `src/practiceMetrics.js` feed a new practice readiness snapshot in the admin shell while Supabase orchestration and full UI workflows remain outstanding.
+**Status: Allocator, metrics, and Supabase mapping are implemented; UI and Edge Function persistence remain.**
 
-1. **Collect practice slots** – Load field availability for Monday through Thursday evenings, including sub‑fields and capacities.  Represent each slot as a resource with a maximum team capacity (usually 1; 2 if the field can be split into halves).  Include a `ValidUntilDate` to handle shorter practice durations later in the season.
-2. **Schedule generation algorithm** – Implement a greedy or constraint‑solving algorithm that assigns each team one weekly practice slot:
-   - Prioritize coaches with multiple teams to avoid conflicts, scheduling their teams on different days or at least different times.
-   - Respect coach availability preferences (e.g., certain days or times).  Use a scoring function to pick the most preferred available slot; fall back to any slot if preferences cannot be met.
-   - Fill slots by looping through teams and assigning the earliest feasible slot with available capacity.  Decrease the slot’s capacity after assignment.
-   - If a team cannot be assigned due to capacity limits, attempt targeted swaps to free unique slots and, when that fails, flag the team for manual resolution or create overflow slots (e.g., Friday or Sunday) with admin approval.
-3. **Daylight adjustments** – When the league transitions from one‑hour practices to 45‑minute blocks (e.g., in October), adjust existing schedules by splitting each hour slot into two shorter slots (e.g., 4:00–4:45 and 4:45–5:30).  Predefine both sets of slots in the database with validity dates so the scheduler can treat them as separate resources.  Provide an option to output both early‑ and late‑season practice times for each team.
-4. **Coach conflict checks** – After assignment, scan the schedule to ensure that no coach appears in overlapping slots and that no field is double‑booked.  Log any conflicts and run a local swap algorithm to resolve them.
+### 5.1 Completed
+
+- **Slot expansion**
+  - `src/practiceSlotExpansion.js` expands season phases into concrete practice slots, handling daylight-driven duration changes.
+
+- **Scheduler**
+  - `src/practiceScheduling.js` schedules teams into available slots with:
+    - Coach availability and conflicts respected.
+    - Fairness scoring for distribution of late/early slots.
+    - Swap-based conflict recovery.
+
+- **Metrics and diagnostics**
+  - `src/practiceMetrics.js` computes:
+    - Coach conflict counts.
+    - Slot utilization and concentration by day.
+    - Fairness metrics per division.
+
+- **Supabase mapping**
+  - `src/practiceSupabase.js` builds `practice_assignments` rows and wraps persistence calls.
+
+- **Readiness snapshot (sample)**
+  - `frontend/src/practiceReadinessSample.js` and `App.jsx`:
+    - Provide a practice readiness snapshot view in the dashboard (summary, day concentration alerts, etc).
+
+### 5.2 Next steps
+
+- [ ] Implement `src/practicePersistenceSnapshot.js`:
+  - Aggregate scheduler outputs, metrics, overrides, and run metadata into a single snapshot.
+- [ ] Build `PracticePersistencePanel.jsx`:
+  - Mirror the Team Persistence Panel UX:
+    - Show auto vs manual assignments.
+    - Highlight conflicts and manual follow-ups.
+    - Offer a “Sync to Supabase” action.
+- [ ] Implement a `practice-persistence` Edge Function:
+  - Accept the snapshot.
+  - Validate auth and constraints.
+  - Perform transactional upserts into `practice_assignments` and `scheduler_runs`.
+
+---
 
 ## 6. Game Scheduling
 
-**Status:** Game scheduling blueprint documented in `docs/game-scheduling.md`; deterministic round-robin generation and a first-pass slot allocator now live in `src/gameScheduling.js` with unit tests capturing even/odd divisions and coach conflict handling, while Supabase persistence, fairness tuning across shared slots, and admin UI workflows remain upcoming.
+**Status: Game generator, allocator, metrics, and Supabase mapping are implemented; UI and Edge Function persistence remain.**
 
-1. **Determine game weeks and matchups** – Decide on the number of game weeks (e.g., eight Saturdays) and generate matchups within each division.  Use a round‑robin generator to produce a rotation where each team plays every other team; handle odd numbers of teams with byes or double‑headers.
-2. **Assign game slots** – For each week, assign each game (pair of teams) to a Saturday field/time slot.  Use similar logic as practice scheduling: prioritize avoiding coach conflicts, then allocate the earliest available slot.  If divisions share fields, consider field size constraints and age group requirements.
-3. **Consistent times** – If there are enough slots, assign each team the same Saturday time each week to simplify family logistics.  Otherwise, rotate times fairly across weeks. Implemented heuristically in `src/gameScheduling.js` by tracking each team's preferred start time and biasing slot selection toward matches when capacity allows, with regression coverage in `tests/gameScheduling.test.js`.
-4. **Record results** – Save the scheduled games in the database with references to the participating teams and the specific date/time.  Provide space for entering scores if desired.
+### 6.1 Completed
+
+- **Round-robin generation**
+  - `src/gameScheduling.js`:
+    - Generates round-robin weeks with byes when needed.
+    - Produces deterministic matchups and bye lists.
+
+- **Slot allocation and conflict detection**
+  - `src/gameScheduling.js` and related helpers:
+    - Assign matchups to game slots while respecting capacity and division constraints.
+    - Detect overlapping games for teams, coaches, and fields.
+    - Track unscheduled matchups and their reasons.
+
+- **Supabase mapping**
+  - `src/gameSupabase.js` builds `games` rows for persistence.
+
+- **Readiness snapshot (sample)**
+  - `frontend/src/gameReadinessSample.js` and `App.jsx`:
+    - Provide a summary of scheduled games, unscheduled matchups, and warnings in the dashboard.
+
+### 6.2 Next steps
+
+- [ ] Implement `src/gamePersistenceSnapshot.js`:
+  - Aggregate scheduled games, unscheduled matchups, and metrics into a snapshot structure.
+- [ ] Build `GamePersistencePanel.jsx`:
+  - Surface unscheduled games.
+  - Provide tools for manual reassignment/locking before persistence.
+- [ ] Implement a `game-persistence` Edge Function:
+  - Validate snapshots.
+  - Upsert into `games` and `scheduler_runs`.
+  - Enforce division and slot integrity.
+
+---
 
 ## 7. Evaluation & Refinement Loop
 
-**Status:** Evaluation pipeline design, fairness metrics catalog, and remediation workflow documented in `docs/evaluation.md`; automated evaluators now cover practice quality plus game conflict detection and per-team load metrics (`src/practiceMetrics.js`, `src/gameMetrics.js`), and the new aggregation utility `src/evaluationPipeline.js` rolls the results into an admin-ready readiness summary. Next steps include building Supabase helper views, orchestrating the evaluation worker, and surfacing dashboards in the admin UI.
+**Status: Evaluation pipeline exists; integration and persistence remain.**
 
-1. **Implement reflection** – After generating schedules, run an evaluation module that verifies hard constraints (one practice per team, no overlapping coach commitments, field capacities) and calculates metrics such as fairness (e.g., distribution of early vs. late slots).  This mirrors the evaluator loop pattern in agentic systems, where the agent reviews its output and revises actions until constraints are satisfied【19†L83-L91】【31†L129-L133】.
-2. **Automate fixes** – For each detected violation, attempt to swap assignments or shift teams to alternative slots.  Limit the number of iterations to avoid endless loops; if conflicts remain, flag them for manual resolution.
-3. **Admin review** – Present the proposed schedule in the UI with flags for potential issues.  Allow the administrator to override assignments manually and re‑run the evaluation.
+- `src/evaluationPipeline.js`:
+  - Aggregates practice and game metrics into readiness scores and warnings.
+  - Designed to consume `scheduler_runs` outputs and produce `evaluation_runs`, `evaluation_findings`, and `evaluation_metrics` payloads.
+
+**Next steps**
+
+- [ ] Wire evaluation into the admin shell dashboard:
+  - Replace sample metrics with live evaluation output derived from scheduler runs.
+- [ ] Implement persistence into `evaluation_runs`, `evaluation_findings`, `evaluation_metrics`, and `evaluation_run_events` tables via a dedicated Edge Function or server handler.
+- [ ] Add hooks so each “Sync to Supabase” action records an evaluation snapshot for audit.
+
+---
 
 ## 8. Output Generation & Integration
 
-**Status:** Export architecture, TeamSnap integration considerations, and communication workflow are planned in `docs/output-generation.md`; baseline formatter `src/outputGeneration.js` (covered by `tests/outputGeneration.test.js`) now generates master and per-team CSV-friendly datasets with centralized header constants and resilient quoting (including Windows carriage returns), while follow-on tasks still cover serverless export jobs, Supabase Storage signing, and the admin interface for downloads and email drafts.
+**Status: Core formatters are implemented; UI and storage integration remain.**
 
-1. **Master schedule spreadsheet** – Build a routine that compiles all teams, their rosters and their practice/game assignments into a master CSV or Excel file.  Include columns such as team name, coach, players, practice day/time/location, game day/time/location and notes.
-2. **Team‑specific exports** – For each team, generate a CSV or Excel file suitable for import into TeamSnap.  Include roster information and scheduled events.  Provide a ZIP download or a list of links.
-3. **Email drafting tool** – Implement a feature that creates a standard email template: subject line, greeting, statement thanking the coach and a note that TeamSnap will be configured.  Provide the attachment for manual insertion or integrate with an email API to attach the file automatically after admin review.
-4. **Preview and send** – In the UI, allow the admin to preview each email before sending.  Include a “Send” button that opens a `mailto:` link with the prefilled subject and body or sends via API if configured.  The final sending action should always require explicit confirmation.
+- `src/outputGeneration.js`:
+  - Produces master schedule CSVs.
+  - Produces per-team CSVs suitable for TeamSnap import.
 
-## 9. Front‑End Development
+**Next steps**
 
-**Status:** Front-end architecture outline captured in `docs/frontend-architecture.md` covering routing, screen components, state management, and Supabase integration touchpoints; next steps include scaffolding the project with a modern build tool (e.g., Vite), wiring the Supabase client, and implementing high-priority screens starting with Data Import and Team Review.
+- [ ] Add admin dashboard controls for:
+  - Generating and downloading exports (Master + Team).
+  - Selecting season/division filters.
+- [ ] Integrate Supabase Storage:
+  - Store generated exports with metadata.
+  - Optionally link `export_jobs` table entries to stored artifacts.
+- [ ] Add email drafting helpers:
+  - Pre-fill coach communication templates that reference generated schedules.
 
-1. **User interface** – Build a responsive web app using a modern React build tool such as Vite.  Pages should include:
-   - **Dashboard/home**: overview of the current season status, number of teams, schedule generation progress.
-   - **Data import**: forms to upload registration CSVs and field availability; show parsing results and validation errors.
-   - **Configuration**: inputs for roster size rules, practice durations, buddy rules, season start/end dates and coach preference settings.
-   - **Team roster review**: list of teams with rosters; options to swap players or edit details.
-   - **Schedule generation**: buttons to run practice and game scheduling, show status/spinner, and then display results.
-   - **Schedule visualization**: calendars or tables showing practice and game assignments; ability to filter by team/division or field.
-   - **Export & email**: interfaces to download master and team schedules and compose emails.
-2. **State management** – Use React context or a state management library (e.g., Zustand or Redux) to handle global state such as loaded players, teams and schedules.
-3. **Authentication** – Launch with Supabase Auth to gate admin access (email/password or magic links).  Expand roles or MFA as needed once additional collaborators join.
-4. **Accessibility and UX** – Ensure the interface meets accessibility guidelines and is easy to use by a non‑technical administrator.  Provide clear error messages and confirmations for actions.
+---
+
+## 9. Front-End Development
+
+**Status: Admin shell and Team Persistence Panel are implemented; practice/game panels and Auth remain.**
+
+- `frontend/src/App.jsx`:
+  - Renders a roadmap summary (Team, Practice, Game, Evaluation, Output).
+  - Shows team summary, practice readiness, game readiness, and the Team Persistence Panel.
+- Layout, styling, and component structure (App.css, status pills, roadmap sections) provide a modern admin UX.
+
+**Next steps**
+
+- [ ] Implement `PracticePersistencePanel.jsx` and `GamePersistencePanel.jsx`.
+- [ ] Replace sample snapshots with live data fetched from Supabase or Edge Functions.
+- [ ] Introduce Supabase Auth to gate access:
+  - Admin-only access for scheduling tools.
+  - Role-based branching for future multi-user scenarios.
+- [ ] Centralize state management (e.g., React context or lightweight store) as flows become more complex.
+
+---
 
 ## 10. Deployment & Infrastructure
 
-1. **Provision Supabase** – Create a Supabase project and define the database schema.  Use the free tier for the initial deployment.  Store the API keys and database URL in environment variables.
-2. **Set up hosting** – Create a new project with the chosen hosting provider (Vercel or Netlify) and connect it to the Git repository. Configure environment variables for Supabase keys and any email API keys, ensuring they are prefixed with `REACT_APP_` so they are exposed to the front-end build. Use Supabase Edge Functions or the host’s serverless functions for APIs that interact with Supabase and run scheduling algorithms.
-3. **Continuous integration** – Configure the hosting provider's CI/CD to deploy on each push. Use Git branches for development and staging. The free plan's build minutes should suffice for occasional deployments, but monitor usage to stay within whichever limits your provider enforces【503490883893339†L64-L87】.
-4. **Static assets and storage** – For user uploads (CSV files) and exported schedules, use Supabase Storage (1 GB included on the free tier【243507034388311†L19-L47】).  Clean up old files regularly to stay within quotas.
-5. **Monitor usage** – Use the hosting platform’s dashboard to track bandwidth and function invocations, and Supabase metrics to check database storage and query limits. Plan for upgrade if usage nears free-tier caps.
+**Status: Local tooling is ready; cloud infrastructure is not yet wired.**
+
+- `package.json` provides Node scripts for linting, tests, and building the frontend.
+
+**Next steps**
+
+- [ ] Create a Supabase project, apply migrations, and load seed data.
+- [ ] Scaffold Edge Functions:
+  - `process-registration-import`
+  - `team-persistence`
+  - `practice-persistence`
+  - `game-persistence`
+- [ ] Choose a hosting provider (Vercel/Netlify) and:
+  - Configure build settings and env vars (Supabase URL/key, Edge Function endpoints).
+  - Set up CI to run `npm test` and build on PRs.
+
+---
 
 ## 11. Testing & Quality Assurance
 
-1. **Unit tests** – Write automated tests for each algorithmic component: CSV parsing, team assignment (ensuring roster sizes and buddy placements), scheduling functions (checking for conflicts) and export routines.  Use a test runner like Jest or Pytest.
-2. **Integration tests** – Simulate a full workflow: load registration data, generate teams, schedule practices and games, produce exports.  Verify that the resulting schedules meet constraints and that the exported files contain correct information.
-3. **User acceptance testing** – Invite the administrator to use the system with past season data.  Gather feedback on usability, correctness and needed adjustments.  Incorporate changes before production.
-4. **Performance tests** – Measure scheduling runtime for ~1500 participants and ensure it completes in reasonable time (e.g., minutes). Validate that the application remains responsive on the free tiers of your hosting provider and Supabase.
+**Status: Unit tests exist for core logic; integration tests remain.**
 
-## 12. Documentation & Training
+- Node’s built-in test runner is used to cover:
+  - Team generation and roster sizing.
+  - Practice scheduling and metrics.
+  - Game scheduling and warnings.
+  - Supabase mappers and snapshot helpers.
 
-1. **System documentation** – Write internal documentation covering the architecture, database schema, algorithms, configuration parameters and deployment steps.  Include diagrams illustrating agent interactions and data flows.
-2. **User guide** – Produce a step‑by‑step guide for the league administrator: how to prepare and upload registration files, adjust settings, review and edit teams, generate schedules, export data and send communications.
-3. **On‑boarding** – Provide training sessions or videos to ensure the administrator is comfortable using the application and can troubleshoot common issues.
+**Next steps**
 
-## 13. Maintenance & Support
+- [ ] Add integration tests that:
+  - Run a full “season”: team generation → practice schedule → game schedule → evaluation.
+  - Assert key invariants (no conflicts, all teams scheduled, fairness thresholds).
+- [ ] Add tests around Edge Functions once implemented (success paths, failure modes).
 
-1. **Logging & error handling** – Implement structured logging for serverless functions and front-end errors. Store logs in Supabase or use the hosting provider’s built-in logs. Handle exceptions gracefully and surface helpful messages to the user.
-2. **Season rollover** – At the end of each season, archive schedules and rosters.  Provide a feature to reset the system for a new season without losing configuration settings.  Consider migrating old data to cold storage or exporting it for historical records.
-3. **Handling changes** – Implement tools to re‑schedule practices or games when fields become unavailable or weather causes cancellations.  Provide options to regenerate schedules for affected teams and notify coaches.
-4. **Updates and dependencies** – Keep dependencies up to date (Vite, Supabase client, etc.) and monitor security advisories. Since hosting providers such as Netlify or Vercel and Supabase update their platforms, regularly check for breaking changes or updated free-tier policies.
-5. **Scalability planning** – If the league grows or usage exceeds free tiers, be prepared to upgrade your hosting and Supabase plans. Review the paid tiers from providers like Netlify and Vercel alongside Supabase Pro to understand bandwidth, function, and database increases before committing budget【426420472487956†L152-L174】【243507034388311†L65-L91】.
+---
 
-## 14. Future Enhancements
+## 12. Documentation, Training, Maintenance & Future Enhancements
 
-1. **Advanced AI scheduling** – Experiment with integrating large language models or optimization libraries to handle complex scheduling scenarios and automatically adapt to changes (e.g., new fields, weather delays).  Research indicates that agentic frameworks can self‑evaluate and refine their output【19†L83-L91】【31†L125-L133】, which could improve fairness and reduce manual intervention.
-2. **Full TeamSnap integration** – Investigate TeamSnap’s API for creating teams and events programmatically.  Automate the export and import cycle to eliminate manual steps.
-3. **Mobile coach portal** – Build a simple mobile‑friendly interface for coaches to view their rosters and schedules, submit availability changes and receive notifications.
-4. **Parent/player communication** – Integrate messaging tools or calendar subscriptions (e.g., iCal feeds) so that parents can subscribe to their team’s schedule and receive updates automatically.
-5. **Analytics & reporting** – Add dashboards to analyze resource utilization (field usage, practice attendance), team parity (win/loss trends), and scheduling fairness.  Use these insights to tune algorithms in future seasons.
+**Status: Core system docs are strong; operator docs and observability remain.**
+
+- Documentation:
+  - Requirements, architecture, data modeling, ingestion pipeline, scheduling flows, SQL drafts, and RLS policies are already well covered under `docs/`.
+- Training:
+  - A future “Admin Guide” should walk a league administrator through:
+    - Importing registrations.
+    - Generating teams.
+    - Scheduling practices/games.
+    - Reviewing evaluations and exporting schedules.
+- Maintenance:
+  - Add logging and monitoring guidance for Edge Functions.
+  - Document procedures for schema changes and migrations.
+- Future enhancements (long-term):
+  - Advanced AI scheduling strategies beyond the current heuristic allocators.
+  - Full TeamSnap API integration.
+  - Multi-league, multi-tenant support.

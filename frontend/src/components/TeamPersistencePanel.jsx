@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import { formatDateTime } from '../utils/formatDateTime.js';
-import { simulateTeamPersistenceUpsert } from '../utils/simulateTeamPersistenceUpsert.js';
+import {
+  getPersistenceEndpoint,
+  triggerTeamPersistence,
+} from '../utils/teamPersistenceClient.js';
 
 const SUPABASE_SYNC_TIMEOUT_MS = 10000;
 
@@ -53,21 +56,28 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
     };
   }, []);
 
-  const handleSimulatedPersist = async () => {
+  const persistenceEndpoint = getPersistenceEndpoint();
+
+  const handlePersist = async () => {
     if (persistenceActionState === 'submitting') {
       return;
     }
     setPersistenceActionState('submitting');
-    setPersistenceActionMessage('Validating overrides and preparing Supabase payload...');
+    setPersistenceActionMessage(
+      persistenceEndpoint
+        ? 'Validating overrides and pushing Supabase payload...'
+        : 'Validating overrides and preparing Supabase payload...',
+    );
     persistenceTimeoutRef.current = setTimeout(() => {
       setPersistenceActionState('blocked');
       setPersistenceActionMessage('Supabase sync timed out. Please retry.');
     }, SUPABASE_SYNC_TIMEOUT_MS);
 
     try {
-      const result = await simulateTeamPersistenceUpsert({
+      const result = await triggerTeamPersistence({
         snapshot: teamPersistenceSnapshot,
         overrides: persistenceOverrides,
+        endpoint: persistenceEndpoint,
       });
 
       if (result.status === 'blocked') {
@@ -78,7 +88,9 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
 
       if (result.status === 'error') {
         setPersistenceActionState('idle');
-        setPersistenceActionMessage('Snapshot unavailable. Refresh and try again.');
+        setPersistenceActionMessage(
+          result.message || 'Snapshot unavailable. Refresh and try again.',
+        );
         return;
       }
 
@@ -131,7 +143,7 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
           <button
             type="button"
             className="persistence-button"
-            onClick={handleSimulatedPersist}
+            onClick={handlePersist}
             disabled={persistenceActionState === 'submitting'}
           >
             {persistenceButtonCopy[persistenceActionState] ?? persistenceButtonCopy.idle}

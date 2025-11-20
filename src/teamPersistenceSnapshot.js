@@ -52,7 +52,7 @@ function normalizeManualOverrides(overrides = [], teamNameByGeneratorId = new Ma
       throw new Error(`manualOverrides[${index}] requires a teamId`);
     }
 
-    const status = entry.status ?? 'pending';
+const status = (typeof entry.status === 'string' && entry.status.trim().toLowerCase()) || 'pending';
     if (status !== 'pending' && status !== 'applied') {
       throw new Error(`manualOverrides[${index}] has unsupported status: ${status}`);
     }

@@ -55,8 +55,8 @@ export function createTeamPersistenceHttpHandler({
         );
       }
 
-      const effectiveNow = now ?? new Date();
       const user = getUser ? await getUser(request) : undefined;
+      const effectiveNow = now ?? new Date();
       const result = await processTeamPersistenceRequest({
         supabaseClient,
         requestBody: body,

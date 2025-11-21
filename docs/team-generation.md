@@ -55,6 +55,10 @@ This document translates the roadmap's team formation phase into actionable plan
   fallback. Pending manual overrides still block push attempts client-side so the UI avoids unnecessary network calls when the
   Supabase run would be rejected. When a live endpoint is configured, the UI now surfaces which host will be called and echoes
   backend-provided error messages so admins can distinguish client validation failures from server-side rejections.
+- **Server-side request processor**: `processTeamPersistenceRequest` (see `src/teamPersistenceApi.js`) centralizes auth checks,
+  snapshot validation, and transactional upserts so Edge Functions or Node handlers can reuse the same path as the dashboard.
+  This keeps server responses consistent with the client simulator while ensuring `scheduler_runs` and roster tables stay in
+  sync.
 
 ## Manual Adjustment Workflow
 1. Present team rosters in the admin UI with sortable columns (player name, buddy code, skill tier).

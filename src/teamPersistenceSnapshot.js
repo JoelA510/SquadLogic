@@ -113,7 +113,7 @@ function deriveAppliedTeamOverrides(overrides = []) {
 }
 
 function normalizeRunMetadata(runMetadata = {}, fallbackRunId = null) {
-  if (runMetadata === null || runMetadata === undefined) {
+  if (runMetadata == null) {
     return fallbackRunId ? { runId: fallbackRunId } : {};
   }
 

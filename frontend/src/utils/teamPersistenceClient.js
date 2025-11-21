@@ -9,7 +9,22 @@ function readPersistenceEndpoint() {
   const nodeEnvEndpoint =
     typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_PERSISTENCE_URL : undefined;
 
-  return viteEndpoint || nodeEnvEndpoint;
+  const explicitEndpoint = viteEndpoint || nodeEnvEndpoint;
+  if (explicitEndpoint) return { endpoint: explicitEndpoint, source: 'explicit' };
+
+  const supabaseUrl =
+    (typeof import.meta !== 'undefined'
+      ? import.meta.env?.VITE_SUPABASE_URL || import.meta.env?.SUPABASE_URL
+      : undefined) ||
+    (typeof process !== 'undefined'
+      ? process.env?.VITE_SUPABASE_URL || process.env?.SUPABASE_URL
+      : undefined);
+
+  const normalizedSupabaseUrl = normalizeEndpoint(supabaseUrl);
+
+  return normalizedSupabaseUrl
+    ? { endpoint: `${normalizedSupabaseUrl}/functions/v1`, source: 'supabase-url' }
+    : { endpoint: undefined, source: undefined };
 }
 
 function normalizeEndpoint(baseUrl) {
@@ -34,6 +49,7 @@ export async function triggerTeamPersistence({
   snapshot,
   overrides = [],
   endpoint: providedEndpoint,
+  accessToken,
   fetchImpl = fetch,
   simulateDelayMs = 800,
   runMetadata,
@@ -48,13 +64,16 @@ export async function triggerTeamPersistence({
     return { status: 'error', message: 'Snapshot data unavailable' };
   }
 
-  const endpoint = normalizeEndpoint(providedEndpoint ?? readPersistenceEndpoint());
+  const { endpoint: configuredEndpoint, source } = readPersistenceEndpoint();
+  const endpoint = normalizeEndpoint(providedEndpoint ?? configuredEndpoint);
+  const isDerivedSupabaseEndpoint = !providedEndpoint && source === 'supabase-url';
+  const hasAuthToken = typeof accessToken === 'string' && accessToken.trim() !== '';
   const effectiveRunMetadata =
     runMetadata ??
     (snapshot.runMetadata && typeof snapshot.runMetadata === 'object' && !Array.isArray(snapshot.runMetadata)
       ? snapshot.runMetadata
       : undefined);
-  if (!endpoint) {
+  if (!endpoint || (isDerivedSupabaseEndpoint && !hasAuthToken)) {
     return simulateTeamPersistenceUpsert({ snapshot, overrides, delayMs: simulateDelayMs });
   }
 
@@ -63,6 +82,7 @@ export async function triggerTeamPersistence({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(hasAuthToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
       body: JSON.stringify({ snapshot, overrides, runMetadata: effectiveRunMetadata }),
       signal,
@@ -113,5 +133,5 @@ export async function triggerTeamPersistence({
 }
 
 export function getPersistenceEndpoint() {
-  return normalizeEndpoint(readPersistenceEndpoint());
+  return normalizeEndpoint(readPersistenceEndpoint().endpoint);
 }

@@ -52,9 +52,12 @@ This document translates the roadmap's team formation phase into actionable plan
   reimplementing normalization logic on the client.
 - **Admin shell persistence trigger**: The dashboard now posts override-ready payloads to a configurable
   `VITE_SUPABASE_PERSISTENCE_URL` endpoint when present (via `teamPersistenceClient.js`), retaining the local simulator as a
-  fallback. Pending manual overrides still block push attempts client-side so the UI avoids unnecessary network calls when the
-  Supabase run would be rejected. When a live endpoint is configured, the UI now surfaces which host will be called and echoes
-  backend-provided error messages so admins can distinguish client validation failures from server-side rejections.
+  fallback. When only a `SUPABASE_URL` (or `VITE_SUPABASE_URL`) is provided, the client now derives the Edge Function base
+  (`<supabase-url>/functions/v1`) automatically so deployments that export Supabase URLs to the frontend no longer need a
+  separate `VITE_SUPABASE_PERSISTENCE_URL`. Pending manual overrides still block push attempts client-side so the UI avoids
+  unnecessary network calls when the Supabase run would be rejected. When a live endpoint is configured, the UI now surfaces
+  which host will be called and echoes backend-provided error messages so admins can distinguish client validation failures
+  from server-side rejections.
 - **Server-side request processor**: `processTeamPersistenceRequest` (see `src/teamPersistenceApi.js`) centralizes auth checks,
   snapshot validation, and transactional upserts so Edge Functions or Node handlers can reuse the same path as the dashboard.
   This keeps server responses consistent with the client simulator while ensuring `scheduler_runs` and roster tables stay in

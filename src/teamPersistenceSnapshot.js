@@ -88,7 +88,7 @@ function normalizeSchedulerRuns(schedulerRuns = []) {
       parameters: normalizeObjectField(entry.parameters, 'parameters', index),
       metrics: normalizeObjectField(entry.metrics, 'metrics', index),
       results: normalizeObjectField(entry.results, 'results', index),
-      triggeredBy: entry.created_by ?? entry.createdBy ?? entry.triggered_by ?? entry.triggeredBy ?? 'unknown',
+      triggeredBy: entry.created_by ?? entry.createdBy ?? entry.triggered_by ?? 'unknown',
       startedAt: entry.started_at ?? entry.startedAt ?? entry.created_at ?? entry.createdAt ?? null,
       completedAt: entry.completed_at ?? entry.completedAt ?? null,
       updatedTeams:

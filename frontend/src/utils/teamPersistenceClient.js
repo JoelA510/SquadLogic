@@ -51,7 +51,7 @@ export async function triggerTeamPersistence({
   const endpoint = normalizeEndpoint(providedEndpoint ?? readPersistenceEndpoint());
   const effectiveRunMetadata =
     runMetadata ??
-    (snapshot && typeof snapshot.runMetadata === 'object' && !Array.isArray(snapshot.runMetadata)
+    (snapshot.runMetadata && typeof snapshot.runMetadata === 'object' && !Array.isArray(snapshot.runMetadata)
       ? snapshot.runMetadata
       : undefined);
   if (!endpoint) {

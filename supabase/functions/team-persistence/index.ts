@@ -30,7 +30,7 @@ if (!supabaseUrl || !serviceRoleKey) {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  async function getUserFromAuthHeader(request: Request) {
+  async function getUserFromAuthHeader(request: Request): Promise<import('https://esm.sh/@supabase/supabase-js@2.45.3').User | null> {
     const authHeader = request.headers.get('authorization') ?? '';
     const token = authHeader.toLowerCase().startsWith('bearer ')
       ? authHeader.slice('bearer '.length)

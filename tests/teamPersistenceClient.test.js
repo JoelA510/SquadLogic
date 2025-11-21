@@ -69,6 +69,30 @@ test('derives Supabase Edge Function base and forwards access token when provide
   assert.equal(result.status, 'success');
 });
 
+test('prefers VITE_SUPABASE_URL when deriving endpoint', async () => {
+  process.env.VITE_SUPABASE_URL = 'https://vite.project.supabase.co';
+  process.env.SUPABASE_URL = 'https://project.supabase.co';
+
+  let capturedUrl;
+  const fetchImpl = async (url) => {
+    capturedUrl = url;
+    return { ok: true, json: async () => ({ status: 'success' }) };
+  };
+
+  const result = await triggerTeamPersistence({
+    snapshot: { preparedTeamRows: 1, preparedPlayerRows: 1 },
+    overrides: [],
+    fetchImpl,
+    accessToken: 'token-abc',
+  });
+
+  assert.equal(
+    capturedUrl,
+    'https://vite.project.supabase.co/functions/v1/team-persistence',
+  );
+  assert.equal(result.status, 'success');
+});
+
 test('falls back to simulation when using derived Supabase endpoint without auth token', async () => {
   process.env.SUPABASE_URL = 'https://project.supabase.co/';
 

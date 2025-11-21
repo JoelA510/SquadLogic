@@ -12,13 +12,17 @@ function readPersistenceEndpoint() {
   const explicitEndpoint = viteEndpoint || nodeEnvEndpoint;
   if (explicitEndpoint) return { endpoint: explicitEndpoint, source: 'explicit' };
 
-  const supabaseUrl =
-    (typeof import.meta !== 'undefined'
+  const viteSupabaseUrl =
+    typeof import.meta !== 'undefined'
       ? import.meta.env?.VITE_SUPABASE_URL || import.meta.env?.SUPABASE_URL
-      : undefined) ||
-    (typeof process !== 'undefined'
+      : undefined;
+
+  const nodeSupabaseUrl =
+    typeof process !== 'undefined'
       ? process.env?.VITE_SUPABASE_URL || process.env?.SUPABASE_URL
-      : undefined);
+      : undefined;
+
+  const supabaseUrl = viteSupabaseUrl || nodeSupabaseUrl;
 
   const normalizedSupabaseUrl = normalizeEndpoint(supabaseUrl);
 

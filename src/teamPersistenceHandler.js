@@ -220,21 +220,23 @@ export async function persistTeamSnapshotTransactional({
       nowIso,
     });
 
-    const teams = await upsertRows({
-      supabaseClient: transaction,
-      tableName: 'teams',
-      rows: teamRows,
-    });
-    const teamPlayers = await upsertRows({
-      supabaseClient: transaction,
-      tableName: 'team_players',
-      rows: teamPlayerRows,
-    });
-    const schedulerRuns = await upsertRows({
-      supabaseClient: transaction,
-      tableName: 'scheduler_runs',
-      rows: [schedulerRunRow],
-    });
+    const [teams, teamPlayers, schedulerRuns] = await Promise.all([
+      upsertRows({
+        supabaseClient: transaction,
+        tableName: 'teams',
+        rows: teamRows,
+      }),
+      upsertRows({
+        supabaseClient: transaction,
+        tableName: 'team_players',
+        rows: teamPlayerRows,
+      }),
+      upsertRows({
+        supabaseClient: transaction,
+        tableName: 'scheduler_runs',
+        rows: [schedulerRunRow],
+      }),
+    ]);
 
     return { teams, teamPlayers, schedulerRuns };
   });

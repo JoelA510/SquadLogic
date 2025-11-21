@@ -34,7 +34,7 @@ if (!supabaseUrl || !serviceRoleKey) {
     transaction: async (callback) => callback(supabaseClient),
   };
 
-  async function getUserFromAuthHeader(request) {
+  async function getUserFromAuthHeader(request: Request): Promise<User | null> {
     const authHeader = request.headers.get('authorization') || '';
     const token = authHeader.toLowerCase().startsWith('bearer ')
       ? authHeader.slice('bearer '.length)

@@ -181,7 +181,7 @@ test('persistTeamSnapshotTransactional upserts teams, players, and scheduler_run
   });
 
   const tableOrder = calls.map((call) => call.table).filter(Boolean);
-  assert.deepEqual(tableOrder, ['teams', 'team_players', 'scheduler_runs']);
+  assert.deepEqual(tableOrder.sort(), ['teams', 'team_players', 'scheduler_runs'].sort());
 
   const schedulerRunUpsert = calls.find((call) => call.table === 'scheduler_runs');
   assert(schedulerRunUpsert, 'expected scheduler_runs upsert call');

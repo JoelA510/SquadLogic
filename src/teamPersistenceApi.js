@@ -32,7 +32,7 @@ export async function processTeamPersistenceRequest({
     return authResult;
   }
 
-  const { snapshot, overrides = [], runMetadata = {} } = requestBody;
+  const { snapshot, overrides = [], runMetadata = {} } = requestBody || {};
 
   try {
     const validationResult = handleTeamPersistence({ snapshot, overrides, now });

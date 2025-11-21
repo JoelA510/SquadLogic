@@ -18,7 +18,8 @@ The project uses a documentation-first approach, a modern React admin shell (Vit
   Relational schema, RLS strategy, and seed data are drafted in `docs/data-modeling.md`, `docs/sql/initial_schema.sql`, and `docs/sql/sample_seed_data.sql`.
 
 - [ ] **Team Generation**
-  Core allocator, diagnostics, Supabase mapping, and **client-side persistence (snapshot + Team Persistence Panel + Supabase client)** are implemented. **Server-side Edge Function and wiring to real scheduler runs remain.**
+  - [x] Added server-side request processor that combines auth, validation, and transactional Supabase upserts for team snapshots.
+  - [ ] Implement full Edge Function deployment and wire real scheduler runs through the new processor.
 
 - [ ] **Practice Scheduling**  
   Allocator, metrics, and Supabase helpers are implemented. Admin UI for practice persistence and Edge Function wiring remain.

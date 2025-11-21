@@ -36,6 +36,7 @@ export async function triggerTeamPersistence({
   endpoint: providedEndpoint,
   fetchImpl = fetch,
   simulateDelayMs = 800,
+  runMetadata,
   signal,
 } = {}) {
   const pendingResult = resolvePendingOverrides(overrides);
@@ -48,6 +49,11 @@ export async function triggerTeamPersistence({
   }
 
   const endpoint = normalizeEndpoint(providedEndpoint ?? readPersistenceEndpoint());
+  const effectiveRunMetadata =
+    runMetadata ??
+    (snapshot.runMetadata && typeof snapshot.runMetadata === 'object' && !Array.isArray(snapshot.runMetadata)
+      ? snapshot.runMetadata
+      : undefined);
   if (!endpoint) {
     return simulateTeamPersistenceUpsert({ snapshot, overrides, delayMs: simulateDelayMs });
   }
@@ -58,7 +64,7 @@ export async function triggerTeamPersistence({
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ snapshot, overrides }),
+      body: JSON.stringify({ snapshot, overrides, runMetadata: effectiveRunMetadata }),
       signal,
     });
 

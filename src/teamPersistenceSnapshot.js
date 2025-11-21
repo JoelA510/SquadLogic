@@ -112,6 +112,23 @@ function deriveAppliedTeamOverrides(overrides = []) {
     .filter(Boolean);
 }
 
+function normalizeRunMetadata(runMetadata = {}, fallbackRunId = null) {
+  if (runMetadata == null) {
+    return fallbackRunId ? { runId: fallbackRunId } : {};
+  }
+
+  if (typeof runMetadata !== 'object' || Array.isArray(runMetadata)) {
+    throw new TypeError('runMetadata must be an object');
+  }
+
+  const normalized = { ...runMetadata };
+  if (!normalized.runId && fallbackRunId) {
+    normalized.runId = fallbackRunId;
+  }
+
+  return normalized;
+}
+
 /**
  * Prepare a persistence snapshot with Supabase-ready payloads and admin metadata.
  */
@@ -123,6 +140,7 @@ export function prepareTeamPersistenceSnapshot({
   runHistory = [],
   lastSyncedAt = null,
   runId,
+  runMetadata = {},
   pendingManualOverrideGoal = 'Resolve pending overrides before the next Supabase sync.',
 } = {}) {
   const appliedTeamOverrides = deriveAppliedTeamOverrides(teamOverrides);
@@ -142,6 +160,7 @@ export function prepareTeamPersistenceSnapshot({
   const normalizedOverrides = normalizeManualOverrides(teamOverrides, teamNameByGeneratorId);
   const normalizedRunHistory = normalizeRunHistory(runHistory);
   const latestRunId = runId ?? normalizedRunHistory[0]?.runId ?? null;
+  const normalizedRunMetadata = normalizeRunMetadata(runMetadata, latestRunId);
 
   return {
     lastRunId: latestRunId,
@@ -151,6 +170,7 @@ export function prepareTeamPersistenceSnapshot({
     pendingManualOverrideGoal,
     manualOverrides: normalizedOverrides,
     runHistory: normalizedRunHistory,
+    runMetadata: normalizedRunMetadata,
     payload: {
       teamRows,
       teamPlayerRows,
@@ -159,4 +179,9 @@ export function prepareTeamPersistenceSnapshot({
   };
 }
 
-export { deriveAppliedTeamOverrides, normalizeManualOverrides, normalizeRunHistory };
+export {
+  deriveAppliedTeamOverrides,
+  normalizeManualOverrides,
+  normalizeRunHistory,
+  normalizeRunMetadata,
+};

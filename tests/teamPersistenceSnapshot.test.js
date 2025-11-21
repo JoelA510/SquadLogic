@@ -4,6 +4,9 @@ import {
   deriveAppliedTeamOverrides,
   normalizeManualOverrides,
   normalizeRunHistory,
+  normalizeSchedulerRuns,
+  buildRunHistoryFromSchedulerRuns,
+  deriveRunMetadataFromSchedulerRuns,
   prepareTeamPersistenceSnapshot,
 } from '../src/teamPersistenceSnapshot.js';
 
@@ -198,6 +201,73 @@ test('deriveAppliedTeamOverrides normalizes status casing and whitespace', () =>
   const applied = deriveAppliedTeamOverrides(overrides);
 
   assert.deepEqual(applied, [{ teamId: 't1', name: 'Tigers' }]);
+});
+
+test('schedulerRuns are normalized into runHistory and runMetadata', () => {
+  const schedulerRuns = [
+    {
+      id: 'run-from-prod',
+      season_settings_id: 123,
+      status: 'COMPLETED_WITH_WARNINGS',
+      metrics: { updatedTeams: 3, updatedPlayers: 33 },
+      parameters: { divisions: ['U10'] },
+      started_at: '2024-07-10T10:00:00Z',
+      completed_at: '2024-07-10T10:05:00Z',
+      created_by: 'admin-prod',
+    },
+  ];
+
+  const normalizedRuns = normalizeSchedulerRuns(schedulerRuns);
+  assert.deepEqual(normalizedRuns[0].runId, 'run-from-prod');
+  assert.deepEqual(normalizedRuns[0].metrics, { updatedTeams: 3, updatedPlayers: 33 });
+
+  const runHistory = buildRunHistoryFromSchedulerRuns(schedulerRuns);
+  assert.deepEqual(runHistory[0].updatedPlayers, 33);
+
+  const snapshot = prepareTeamPersistenceSnapshot({
+    teamsByDivision: { U10: [{ id: 'u10-1', name: 'Team', players: [] }] },
+    schedulerRuns,
+  });
+
+  assert.strictEqual(snapshot.lastRunId, 'run-from-prod');
+  assert.strictEqual(snapshot.runHistory[0].status, 'completed_with_warnings');
+  assert.deepEqual(snapshot.runMetadata, {
+    runId: 'run-from-prod',
+    seasonSettingsId: 123,
+    runType: 'team',
+    status: 'completed_with_warnings',
+    parameters: { divisions: ['U10'] },
+    metrics: { updatedTeams: 3, updatedPlayers: 33 },
+    results: {},
+    createdBy: 'admin-prod',
+    startedAt: '2024-07-10T10:00:00Z',
+    completedAt: '2024-07-10T10:05:00Z',
+  });
+});
+
+test('deriveRunMetadataFromSchedulerRuns respects provided runMetadata overrides', () => {
+  const schedulerRuns = [
+    { id: 'run-one', status: 'completed', parameters: { divisions: ['U6'] }, metrics: {} },
+  ];
+
+  const derived = deriveRunMetadataFromSchedulerRuns(schedulerRuns, 'run-one');
+  assert.strictEqual(derived.runId, 'run-one');
+
+  const snapshot = prepareTeamPersistenceSnapshot({
+    teamsByDivision: { U6: [{ id: 'u6-1', name: 'Team', players: [] }] },
+    schedulerRuns,
+    runMetadata: { createdBy: 'manual-override', results: { totalTeams: 1 } },
+  });
+
+  assert.deepEqual(snapshot.runMetadata, {
+    runId: 'run-one',
+    runType: 'team',
+    status: 'completed',
+    parameters: { divisions: ['U6'] },
+    metrics: {},
+    results: { totalTeams: 1 },
+    createdBy: 'manual-override',
+  });
 });
 
 test('deriveAppliedTeamOverrides ignores pending overrides', () => {

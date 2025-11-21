@@ -53,6 +53,114 @@ function normalizeRunHistory(runHistory = []) {
   });
 }
 
+function normalizeSchedulerRuns(schedulerRuns = []) {
+  if (!Array.isArray(schedulerRuns)) {
+    throw new TypeError('schedulerRuns must be an array');
+  }
+
+  const normalizeObjectField = (value, label, index) => {
+    if (value === undefined || value === null) {
+      return {};
+    }
+
+    if (typeof value !== 'object' || Array.isArray(value)) {
+      throw new TypeError(`schedulerRuns[${index}].${label} must be an object`);
+    }
+
+    return value;
+  };
+
+  return schedulerRuns.map((entry, index) => {
+    if (!entry || typeof entry !== 'object') {
+      throw new TypeError(`schedulerRuns[${index}] must be an object`);
+    }
+
+    const runId = entry.id ?? entry.runId ?? entry.run_id;
+    if (typeof runId !== 'string' || !runId.trim()) {
+      throw new Error(`schedulerRuns[${index}] requires an id`);
+    }
+
+    return {
+      runId,
+      runType: entry.run_type ?? entry.runType ?? 'team',
+      status: (typeof entry.status === 'string' && entry.status.trim().toLowerCase()) || 'unknown',
+      seasonSettingsId: entry.season_settings_id ?? entry.seasonSettingsId ?? null,
+      parameters: normalizeObjectField(entry.parameters, 'parameters', index),
+      metrics: normalizeObjectField(entry.metrics, 'metrics', index),
+      results: normalizeObjectField(entry.results, 'results', index),
+      triggeredBy: entry.created_by ?? entry.createdBy ?? entry.triggered_by ?? 'unknown',
+      startedAt: entry.started_at ?? entry.startedAt ?? entry.created_at ?? entry.createdAt ?? null,
+      completedAt: entry.completed_at ?? entry.completedAt ?? null,
+      updatedTeams:
+        entry.updatedTeams ?? entry.results?.updatedTeams ?? entry.metrics?.updatedTeams ?? 0,
+      updatedPlayers:
+        entry.updatedPlayers ?? entry.results?.updatedPlayers ?? entry.metrics?.updatedPlayers ?? 0,
+      notes: entry.results?.notes ?? entry.notes ?? '',
+    };
+  });
+}
+
+function buildRunHistoryFromSchedulerRuns(schedulerRuns = []) {
+  const normalized = normalizeSchedulerRuns(schedulerRuns);
+
+  return normalized.map((entry) => ({
+    runId: entry.runId,
+    status: entry.status,
+    triggeredBy: entry.triggeredBy,
+    startedAt: entry.startedAt,
+    completedAt: entry.completedAt,
+    updatedTeams: entry.updatedTeams,
+    updatedPlayers: entry.updatedPlayers,
+    notes: entry.notes,
+  }));
+}
+
+function deriveRunMetadataFromSchedulerRuns(schedulerRuns = [], targetRunId = null) {
+  const normalizedRuns = normalizeSchedulerRuns(schedulerRuns);
+
+  if (normalizedRuns.length === 0) {
+    return {};
+  }
+
+  const sorted = [...normalizedRuns].sort((a, b) => {
+    const aTime = a.startedAt ? new Date(a.startedAt).getTime() : 0;
+    const bTime = b.startedAt ? new Date(b.startedAt).getTime() : 0;
+    return bTime - aTime;
+  });
+
+  const source =
+    (targetRunId && normalizedRuns.find((entry) => entry.runId === targetRunId)) || sorted[0];
+
+  const metadata = {
+    runId: source.runId,
+    seasonSettingsId: source.seasonSettingsId ?? undefined,
+    runType: source.runType,
+    status: source.status,
+    parameters: source.parameters,
+    metrics: source.metrics,
+    results: source.results,
+    createdBy: source.triggeredBy,
+    startedAt: source.startedAt ?? undefined,
+    completedAt: source.completedAt ?? undefined,
+  };
+
+  return Object.fromEntries(
+    Object.entries(metadata).filter(([, value]) => value !== undefined && value !== null),
+  );
+}
+
+function mergeRunMetadata({ providedRunMetadata, derivedRunMetadata, fallbackRunId }) {
+  if (providedRunMetadata == null) {
+    return normalizeRunMetadata(derivedRunMetadata, fallbackRunId);
+  }
+
+  if (typeof providedRunMetadata !== 'object' || Array.isArray(providedRunMetadata)) {
+    throw new TypeError('runMetadata must be an object');
+  }
+
+  return normalizeRunMetadata({ ...derivedRunMetadata, ...providedRunMetadata }, fallbackRunId);
+}
+
 // Normalizes admin-provided overrides, defaulting status to "pending" so only explicit
 // "applied" entries are propagated into persistence payloads.
 function normalizeManualOverrides(overrides = [], teamNameByGeneratorId = new Map()) {
@@ -138,6 +246,7 @@ export function prepareTeamPersistenceSnapshot({
   teamOverrides = [],
   manualAssignments = [],
   runHistory = [],
+  schedulerRuns = [],
   lastSyncedAt = null,
   runId,
   runMetadata = {},
@@ -158,9 +267,20 @@ export function prepareTeamPersistenceSnapshot({
   });
 
   const normalizedOverrides = normalizeManualOverrides(teamOverrides, teamNameByGeneratorId);
-  const normalizedRunHistory = normalizeRunHistory(runHistory);
+  const normalizedSchedulerRuns = normalizeSchedulerRuns(schedulerRuns);
+  const normalizedRunHistory = normalizeRunHistory([
+    ...buildRunHistoryFromSchedulerRuns(normalizedSchedulerRuns),
+    ...runHistory,
+  ]);
   const latestRunId = runId ?? normalizedRunHistory[0]?.runId ?? null;
-  const normalizedRunMetadata = normalizeRunMetadata(runMetadata, latestRunId);
+  const normalizedRunMetadata = mergeRunMetadata({
+    providedRunMetadata: runMetadata,
+    derivedRunMetadata: deriveRunMetadataFromSchedulerRuns(
+      normalizedSchedulerRuns,
+      latestRunId,
+    ),
+    fallbackRunId: latestRunId,
+  });
 
   return {
     lastRunId: latestRunId,
@@ -184,4 +304,7 @@ export {
   normalizeManualOverrides,
   normalizeRunHistory,
   normalizeRunMetadata,
+  normalizeSchedulerRuns,
+  buildRunHistoryFromSchedulerRuns,
+  deriveRunMetadataFromSchedulerRuns,
 };

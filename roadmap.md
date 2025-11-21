@@ -21,7 +21,7 @@ The project uses a documentation-first approach, a modern React admin shell (Vit
   - [x] Added server-side request processor that combines auth, validation, and transactional Supabase upserts for team snapshots.
   - [ ] Implement full Edge Function deployment and wire real scheduler runs through the new processor.
     - [x] Derive the Supabase Edge Function base URL from `SUPABASE_URL`/`VITE_SUPABASE_URL` when no explicit persistence endpoint is configured.
-    - [ ] Wire scheduler runs from production data into the snapshot builder and persistence handler.
+    - [x] Wire scheduler runs from production data into the snapshot builder and persistence handler.
     - [x] Added an HTTP handler factory for the `team-persistence` endpoint to plug into Edge Functions.
     - [x] Propagate scheduler run metadata through the persistence snapshot and client requests to support Edge Function writes.
     - [x] Added a Supabase Edge Function entrypoint that wires auth role checks and service role configuration to the handler.

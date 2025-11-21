@@ -45,6 +45,16 @@ test('processTeamPersistenceRequest returns unauthorized when role is missing', 
   assert.match(result.message, /allowed role/i);
 });
 
+test('processTeamPersistenceRequest returns validation error for null requestBody', async () => {
+  const result = await processTeamPersistenceRequest({
+    requestBody: null,
+    user: { role: 'admin' },
+  });
+
+  assert.strictEqual(result.status, 'error');
+  assert.match(result.message, /snapshot must be an object/i);
+});
+
 test('processTeamPersistenceRequest blocks when overrides are pending', async () => {
   const result = await processTeamPersistenceRequest({
     requestBody: { snapshot: SAMPLE_SNAPSHOT, overrides: [{ status: 'pending' }], runMetadata: { seasonSettingsId: 7 } },

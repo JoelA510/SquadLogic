@@ -1,10 +1,10 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { createTeamPersistenceHttpHandler } from '../../src/teamPersistenceEdgeHandler.js';
+import { createTeamPersistenceHttpHandler } from '../../../src/teamPersistenceEdgeHandler.js';
 import {
   DEFAULT_ALLOWED_ROLES,
   parseAllowedRolesEnv,
-} from '../../src/teamPersistenceEdgeConfig.js';
+} from '../../../src/teamPersistenceEdgeConfig.js';
 
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -29,6 +29,13 @@ function createSupabaseServiceRoleClient() {
   });
 }
 
+function shimSupabaseTransaction(client) {
+  return {
+    ...client,
+    transaction: async (callback) => callback(client),
+  };
+}
+
 async function getUserFromRequest(request, supabaseClient) {
   const authHeader = request.headers.get('Authorization');
   if (!authHeader || !authHeader.toLowerCase().startsWith('bearer ')) {
@@ -48,7 +55,7 @@ async function getUserFromRequest(request, supabaseClient) {
 let handler;
 
 try {
-  const supabaseClient = createSupabaseServiceRoleClient();
+  const supabaseClient = shimSupabaseTransaction(createSupabaseServiceRoleClient());
   const allowedRoles = parseAllowedRolesEnv(
     Deno.env.get('TEAM_PERSISTENCE_ALLOWED_ROLES'),
     { fallbackRoles: DEFAULT_ALLOWED_ROLES },

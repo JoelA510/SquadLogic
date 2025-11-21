@@ -81,8 +81,8 @@ if (!supabaseUrl || !serviceRoleKey) {
     async transaction<T>(
       callback: (tx: { from: typeof supabaseClient.from }) => Promise<T>,
     ): Promise<T> {
-      const tx = {
-        from(table: string) {
+      const tx: { from: typeof supabaseClient.from } = {
+        from(table) {
           return supabaseClient.from(table);
         },
       };

@@ -46,12 +46,14 @@ test('falls back to simulation when no endpoint is configured', async () => {
   assert.equal(result.updatedPlayers, 45);
 });
 
-test('derives Supabase Edge Function base when only a Supabase URL is provided', async () => {
+test('derives Supabase Edge Function base and forwards access token when provided', async () => {
   process.env.SUPABASE_URL = 'https://project.supabase.co/';
 
   let capturedUrl;
-  const fetchImpl = async (url) => {
+  let capturedHeaders;
+  const fetchImpl = async (url, options) => {
     capturedUrl = url;
+    capturedHeaders = options.headers;
     return { ok: true, json: async () => ({ status: 'success' }) };
   };
 
@@ -59,9 +61,31 @@ test('derives Supabase Edge Function base when only a Supabase URL is provided',
     snapshot: { preparedTeamRows: 2, preparedPlayerRows: 22 },
     overrides: [],
     fetchImpl,
+    accessToken: 'token-123',
   });
 
   assert.equal(capturedUrl, 'https://project.supabase.co/functions/v1/team-persistence');
+  assert.equal(capturedHeaders.Authorization, 'Bearer token-123');
+  assert.equal(result.status, 'success');
+});
+
+test('falls back to simulation when using derived Supabase endpoint without auth token', async () => {
+  process.env.SUPABASE_URL = 'https://project.supabase.co/';
+
+  let fetchCalled = false;
+  const fetchImpl = async () => {
+    fetchCalled = true;
+    return { ok: true, json: async () => ({ status: 'success' }) };
+  };
+
+  const result = await triggerTeamPersistence({
+    snapshot: { preparedTeamRows: 2, preparedPlayerRows: 22 },
+    overrides: [],
+    fetchImpl,
+    simulateDelayMs: 0,
+  });
+
+  assert.equal(fetchCalled, false);
   assert.equal(result.status, 'success');
 });
 

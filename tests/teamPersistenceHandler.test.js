@@ -5,6 +5,7 @@ import {
   evaluateOverrides,
   normalizeSnapshot,
   authorizeTeamPersistenceRequest,
+  persistTeamSnapshotTransactional,
 } from '../src/teamPersistenceHandler.js';
 
 const SAMPLE_SNAPSHOT = {
@@ -141,5 +142,98 @@ test('authorizeTeamPersistenceRequest throws if allowedRoles contains invalid va
         allowedRoles: ['admin', null],
       }),
     /must be a non-empty string/i,
+  );
+});
+
+test('persistTeamSnapshotTransactional upserts teams, players, and scheduler_runs in one transaction', async () => {
+  const calls = [];
+  const supabaseClient = {
+    transaction: async (callback) => {
+      const tx = {
+        from: (table) => ({
+          upsert: async (rows) => {
+            calls.push({ table, rows });
+            return { data: rows, error: null };
+          },
+        }),
+      };
+
+      const result = await callback(tx);
+      calls.push({ committed: true });
+      return result;
+    },
+  };
+
+  const now = new Date('2024-08-01T12:00:00Z');
+  const result = await persistTeamSnapshotTransactional({
+    supabaseClient,
+    snapshot: SAMPLE_SNAPSHOT,
+    runMetadata: {
+      seasonSettingsId: 42,
+      parameters: { trigger: 'admin-dashboard' },
+      metrics: { updatedPlayers: 3 },
+      results: { summary: 'ok' },
+      startedAt: '2024-08-01T11:59:00Z',
+      completedAt: '2024-08-01T12:00:00Z',
+      createdBy: 'user-123',
+    },
+    now,
+  });
+
+  const tableOrder = calls.map((call) => call.table).filter(Boolean);
+  assert.deepEqual(tableOrder.sort(), ['teams', 'team_players', 'scheduler_runs'].sort());
+
+  const schedulerRunUpsert = calls.find((call) => call.table === 'scheduler_runs');
+  assert(schedulerRunUpsert, 'expected scheduler_runs upsert call');
+  assert.strictEqual(schedulerRunUpsert.rows[0].id, SAMPLE_SNAPSHOT.lastRunId);
+  assert.strictEqual(schedulerRunUpsert.rows[0].season_settings_id, 42);
+  assert.strictEqual(schedulerRunUpsert.rows[0].run_type, 'team');
+  assert.strictEqual(schedulerRunUpsert.rows[0].status, 'completed');
+  assert.strictEqual(schedulerRunUpsert.rows[0].created_by, 'user-123');
+  assert.strictEqual(schedulerRunUpsert.rows[0].completed_at, '2024-08-01T12:00:00.000Z');
+
+  assert.deepEqual(result, {
+    status: 'success',
+    syncedAt: now.toISOString(),
+    runId: SAMPLE_SNAPSHOT.lastRunId,
+    updatedTeams: 2,
+    updatedPlayers: 3,
+    results: {
+      teams: SAMPLE_SNAPSHOT.payload.teamRows,
+      teamPlayers: SAMPLE_SNAPSHOT.payload.teamPlayerRows,
+      schedulerRuns: schedulerRunUpsert.rows,
+    },
+  });
+  assert(calls.some((call) => call.committed), 'transaction should commit');
+});
+
+test('persistTeamSnapshotTransactional requires a transaction-capable client and season settings id', async () => {
+  await assert.rejects(
+    () =>
+      persistTeamSnapshotTransactional({
+        supabaseClient: {},
+        snapshot: SAMPLE_SNAPSHOT,
+        runMetadata: { seasonSettingsId: 99 },
+      }),
+    /transaction with a callback is required/,
+  );
+
+  const stubClient = {
+    transaction: async (callback) =>
+      callback({
+        from: () => ({
+          upsert: async () => ({ data: [], error: null }),
+        }),
+      }),
+  };
+
+  await assert.rejects(
+    () =>
+      persistTeamSnapshotTransactional({
+        supabaseClient: stubClient,
+        snapshot: SAMPLE_SNAPSHOT,
+        runMetadata: {},
+      }),
+    /seasonSettingsId is required/,
   );
 });

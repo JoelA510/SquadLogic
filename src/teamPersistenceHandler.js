@@ -2,6 +2,8 @@
  * Backend-oriented helpers for validating and responding to team persistence requests.
  */
 
+import { randomUUID } from 'node:crypto';
+
 function normalizeSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') {
     throw new TypeError('snapshot must be an object');
@@ -42,7 +44,7 @@ function normalizeSnapshot(snapshot) {
     }
   });
 
- return {
+  return {
     teamRows,
     teamPlayerRows,
     runId: snapshot.lastRunId ?? snapshot.runId ?? null,
@@ -102,6 +104,151 @@ function evaluateOverrides(overrides = []) {
   }, 0);
 
   return { pending };
+}
+
+function validateSupabaseTransactionClient(supabaseClient) {
+  if (!supabaseClient || typeof supabaseClient.transaction !== 'function') {
+    throw new TypeError('supabaseClient.transaction with a callback is required');
+  }
+}
+
+function normalizeJsonObject(value, label) {
+  if (value === undefined || value === null) {
+    return {};
+  }
+
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object`);
+  }
+
+  return value;
+}
+
+function normalizeTimestamp(value, label, fallbackIso) {
+  if (value === undefined || value === null) {
+    return fallbackIso;
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new TypeError(`${label} must be a valid date or timestamp string`);
+  }
+
+  return date.toISOString();
+}
+
+function buildSchedulerRunRow({
+  runId,
+  seasonSettingsId,
+  runType = 'team',
+  status = 'completed',
+  parameters,
+  metrics,
+  results,
+  startedAt,
+  completedAt,
+  createdBy,
+  nowIso,
+} = {}) {
+  if (typeof seasonSettingsId !== 'number' && typeof seasonSettingsId !== 'string') {
+    throw new TypeError('seasonSettingsId is required for scheduler_runs upsert');
+  }
+
+  const normalizedRunId = typeof runId === 'string' && runId.trim() ? runId : randomUUID();
+
+  return {
+    id: normalizedRunId,
+    season_settings_id: seasonSettingsId,
+    run_type: runType,
+    status,
+    parameters: normalizeJsonObject(parameters, 'parameters'),
+    metrics: normalizeJsonObject(metrics, 'metrics'),
+    results: normalizeJsonObject(results, 'results'),
+    started_at: normalizeTimestamp(startedAt, 'startedAt', nowIso),
+    completed_at: normalizeTimestamp(completedAt, 'completedAt', nowIso),
+    created_by: typeof createdBy === 'string' && createdBy.trim() ? createdBy : null,
+  };
+}
+
+async function upsertRows({ supabaseClient, tableName, rows }) {
+  if (!Array.isArray(rows)) {
+    throw new TypeError(`${tableName} rows must be an array`);
+  }
+
+  if (!supabaseClient || typeof supabaseClient.from !== 'function') {
+    throw new TypeError('supabaseClient with a from() method is required');
+  }
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const table = supabaseClient.from(tableName);
+  if (!table || typeof table.upsert !== 'function') {
+    throw new TypeError(`${tableName} builder must expose an upsert() method`);
+  }
+
+  const { data, error } = await table.upsert(rows);
+  if (error) {
+    const message = error.message ?? String(error);
+    throw new Error(`Failed to persist ${tableName}: ${message}`);
+  }
+
+  return data ?? null;
+}
+
+export async function persistTeamSnapshotTransactional({
+  supabaseClient,
+  snapshot,
+  runMetadata = {},
+  now = new Date(),
+} = {}) {
+  validateSupabaseTransactionClient(supabaseClient);
+  const { teamRows, teamPlayerRows, runId: snapshotRunId } = normalizeSnapshot(snapshot);
+
+  if (!(now instanceof Date) || Number.isNaN(now.getTime())) {
+    throw new TypeError('now must be a valid Date');
+  }
+
+  const nowIso = now.toISOString();
+  const runId = runMetadata.runId ?? snapshotRunId ?? null;
+
+  const transactionResult = await supabaseClient.transaction(async (transaction) => {
+    const schedulerRunRow = buildSchedulerRunRow({
+      ...runMetadata,
+      runId,
+      nowIso,
+    });
+
+    const [teams, teamPlayers, schedulerRuns] = await Promise.all([
+      upsertRows({
+        supabaseClient: transaction,
+        tableName: 'teams',
+        rows: teamRows,
+      }),
+      upsertRows({
+        supabaseClient: transaction,
+        tableName: 'team_players',
+        rows: teamPlayerRows,
+      }),
+      upsertRows({
+        supabaseClient: transaction,
+        tableName: 'scheduler_runs',
+        rows: [schedulerRunRow],
+      }),
+    ]);
+
+    return { teams, teamPlayers, schedulerRuns };
+  });
+
+  return {
+    status: 'success',
+    syncedAt: nowIso,
+    runId: transactionResult.schedulerRuns?.[0]?.id ?? runMetadata.runId ?? snapshotRunId,
+    updatedTeams: teamRows.length,
+    updatedPlayers: teamPlayerRows.length,
+    results: transactionResult,
+  };
 }
 
 /**

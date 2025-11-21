@@ -137,7 +137,7 @@ Future changes would be refinements, not re-selection of the stack.
 
 ### 4.2 Next steps
 
-- [ ] Implement a `team-persistence` Supabase Edge Function (or equivalent backend handler) that:
+- [x] Implement a `team-persistence` Supabase Edge Function (or equivalent backend handler) that:
   - [x] Provide server-side validation of snapshot payloads and manual overrides.
   - [x] Validate auth/roles.
   - [x] Perform transactional upserts into `teams`, `team_players`, and `scheduler_runs`.

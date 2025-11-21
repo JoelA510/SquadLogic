@@ -5,6 +5,8 @@ import { triggerTeamPersistence } from '../frontend/src/utils/teamPersistenceCli
 
 afterEach(() => {
   delete process.env.VITE_SUPABASE_PERSISTENCE_URL;
+  delete process.env.VITE_SUPABASE_URL;
+  delete process.env.SUPABASE_URL;
 });
 
 test('blocks persistence when pending overrides remain', async () => {
@@ -42,6 +44,25 @@ test('falls back to simulation when no endpoint is configured', async () => {
   assert.equal(result.status, 'success');
   assert.equal(result.updatedTeams, 3);
   assert.equal(result.updatedPlayers, 45);
+});
+
+test('derives Supabase Edge Function base when only a Supabase URL is provided', async () => {
+  process.env.SUPABASE_URL = 'https://project.supabase.co/';
+
+  let capturedUrl;
+  const fetchImpl = async (url) => {
+    capturedUrl = url;
+    return { ok: true, json: async () => ({ status: 'success' }) };
+  };
+
+  const result = await triggerTeamPersistence({
+    snapshot: { preparedTeamRows: 2, preparedPlayerRows: 22 },
+    overrides: [],
+    fetchImpl,
+  });
+
+  assert.equal(capturedUrl, 'https://project.supabase.co/functions/v1/team-persistence');
+  assert.equal(result.status, 'success');
 });
 
 test('posts to a configured endpoint and returns payload data', async () => {

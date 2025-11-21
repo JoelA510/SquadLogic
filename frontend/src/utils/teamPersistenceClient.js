@@ -9,7 +9,20 @@ function readPersistenceEndpoint() {
   const nodeEnvEndpoint =
     typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_PERSISTENCE_URL : undefined;
 
-  return viteEndpoint || nodeEnvEndpoint;
+  const explicitEndpoint = viteEndpoint || nodeEnvEndpoint;
+  if (explicitEndpoint) return explicitEndpoint;
+
+  const supabaseUrl =
+    (typeof import.meta !== 'undefined'
+      ? import.meta.env?.VITE_SUPABASE_URL || import.meta.env?.SUPABASE_URL
+      : undefined) ||
+    (typeof process !== 'undefined'
+      ? process.env?.VITE_SUPABASE_URL || process.env?.SUPABASE_URL
+      : undefined);
+
+  const normalizedSupabaseUrl = normalizeEndpoint(supabaseUrl);
+
+  return normalizedSupabaseUrl ? `${normalizedSupabaseUrl}/functions/v1` : undefined;
 }
 
 function normalizeEndpoint(baseUrl) {

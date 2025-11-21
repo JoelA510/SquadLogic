@@ -88,7 +88,7 @@ function normalizeSchedulerRuns(schedulerRuns = []) {
       parameters: normalizeObjectField(entry.parameters, 'parameters', index),
       metrics: normalizeObjectField(entry.metrics, 'metrics', index),
       results: normalizeObjectField(entry.results, 'results', index),
-      triggeredBy: entry.created_by ?? entry.createdBy ?? entry.triggered_by ?? 'unknown',
+      triggeredBy: entry.created_by ?? entry.createdBy ?? entry.triggered_by ?? entry.triggeredBy ?? 'unknown',
       startedAt: entry.started_at ?? entry.startedAt ?? entry.created_at ?? entry.createdAt ?? null,
       completedAt: entry.completed_at ?? entry.completedAt ?? null,
       updatedTeams:
@@ -122,14 +122,18 @@ function deriveRunMetadataFromSchedulerRuns(schedulerRuns = [], targetRunId = nu
     return {};
   }
 
-  const sorted = [...normalizedRuns].sort((a, b) => {
-    const aTime = a.startedAt ? new Date(a.startedAt).getTime() : 0;
-    const bTime = b.startedAt ? new Date(b.startedAt).getTime() : 0;
-    return bTime - aTime;
-  });
+  let source = targetRunId
+    ? normalizedRuns.find((entry) => entry.runId === targetRunId)
+    : undefined;
 
-  const source =
-    (targetRunId && normalizedRuns.find((entry) => entry.runId === targetRunId)) || sorted[0];
+  if (!source) {
+    const sorted = [...normalizedRuns].sort((a, b) => {
+      const aTime = a.startedAt ? new Date(a.startedAt).getTime() : 0;
+      const bTime = b.startedAt ? new Date(b.startedAt).getTime() : 0;
+      return bTime - aTime;
+    });
+    source = sorted[0];
+  }
 
   const metadata = {
     runId: source.runId,

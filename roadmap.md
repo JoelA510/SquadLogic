@@ -21,8 +21,9 @@ The project uses a documentation-first approach, a modern React admin shell (Vit
   - [x] Added server-side request processor that combines auth, validation, and transactional Supabase upserts for team snapshots.
   - [ ] Implement full Edge Function deployment and wire real scheduler runs through the new processor.
     - [x] Added an HTTP handler factory for the `team-persistence` endpoint to plug into Edge Functions.
+    - [x] Propagate scheduler run metadata through the persistence snapshot and client requests to support Edge Function writes.
 
-- [ ] **Practice Scheduling**  
+- [ ] **Practice Scheduling**
   Allocator, metrics, and Supabase helpers are implemented. Admin UI for practice persistence and Edge Function wiring remain.
 
 - [ ] **Game Scheduling**  

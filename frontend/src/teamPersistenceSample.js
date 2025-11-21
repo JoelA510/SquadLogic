@@ -1,6 +1,14 @@
 export const teamPersistenceSnapshot = {
   lastSyncedAt: '2024-07-15T13:12:00Z',
   lastRunId: 'run-2024-fall-initial',
+  runMetadata: {
+    seasonSettingsId: 'fall-2024',
+    runId: 'run-2024-fall-initial',
+    createdBy: 'scheduler-bot',
+    parameters: { divisions: ['U8', 'U10', 'U12'], buddyPolicy: 'mutual-only' },
+    metrics: { overflowTeams: 0, unpairedBuddies: 1 },
+    results: { totalTeams: 9, totalPlayers: 98 },
+  },
   preparedTeamRows: 9,
   preparedPlayerRows: 98,
   pendingManualOverrideGoal: 'Confirm coach assignments for two teams before the next sync.',

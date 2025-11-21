@@ -65,7 +65,12 @@ test('posts to a configured endpoint and returns payload data', async () => {
   };
 
   const result = await triggerTeamPersistence({
-    snapshot: { preparedTeamRows: 4, preparedPlayerRows: 50, lastRunId: 'run-live-1' },
+    snapshot: {
+      preparedTeamRows: 4,
+      preparedPlayerRows: 50,
+      lastRunId: 'run-live-1',
+      runMetadata: { seasonSettingsId: 'fall', runId: 'run-live-1' },
+    },
     overrides: [],
     fetchImpl,
   });
@@ -75,7 +80,9 @@ test('posts to a configured endpoint and returns payload data', async () => {
     preparedTeamRows: 4,
     preparedPlayerRows: 50,
     lastRunId: 'run-live-1',
+    runMetadata: { seasonSettingsId: 'fall', runId: 'run-live-1' },
   });
+  assert.deepEqual(capturedBody.runMetadata, { seasonSettingsId: 'fall', runId: 'run-live-1' });
   assert.equal(result.status, 'success');
   assert.equal(result.syncedAt, '2024-07-20T18:00:00Z');
 });

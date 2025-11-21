@@ -68,6 +68,7 @@ test('prepareTeamPersistenceSnapshot returns payload counts and enriched metadat
     runHistory,
     lastSyncedAt: '2024-07-01T12:30:00Z',
     runId: 'run-live-sync',
+    runMetadata: { seasonSettingsId: 42, parameters: { divisions: ['U8'] } },
     pendingManualOverrideGoal: 'Clear pending coach approvals before syncing.',
   });
 
@@ -76,6 +77,11 @@ test('prepareTeamPersistenceSnapshot returns payload counts and enriched metadat
   assert.strictEqual(snapshot.preparedTeamRows, 2);
   assert.strictEqual(snapshot.preparedPlayerRows, 4);
   assert.strictEqual(snapshot.pendingManualOverrideGoal, 'Clear pending coach approvals before syncing.');
+  assert.deepEqual(snapshot.runMetadata, {
+    runId: 'run-live-sync',
+    seasonSettingsId: 42,
+    parameters: { divisions: ['U8'] },
+  });
 
   assert.deepEqual(
     snapshot.manualOverrides.map((entry) => ({
@@ -158,6 +164,30 @@ test('deriveAppliedTeamOverrides applies only explicit applied overrides', () =>
   const applied = deriveAppliedTeamOverrides(overrides);
 
   assert.deepEqual(applied, [{ teamId: 't1', name: 'Tigers' }]);
+});
+
+test('normalizeRunMetadata defaults the runId and validates structure', () => {
+  const snapshot = prepareTeamPersistenceSnapshot({
+    teamsByDivision: { U6: [{ id: 'u6-1', name: 'Team 1', players: [] }] },
+    divisionIdMap: { U6: 'div-u6' },
+    runHistory: [{ runId: 'run-from-history', startedAt: '2024-07-02T00:00:00Z' }],
+    runMetadata: { seasonSettingsId: 'fall-u6' },
+  });
+
+  assert.deepEqual(snapshot.runMetadata, {
+    runId: 'run-from-history',
+    seasonSettingsId: 'fall-u6',
+  });
+
+  assert.throws(
+    () =>
+      prepareTeamPersistenceSnapshot({
+        teamsByDivision: { U6: [{ id: 'u6-2', name: 'Team 2', players: [] }] },
+        divisionIdMap: { U6: 'div-u6' },
+        runMetadata: 'oops',
+      }),
+    /runMetadata must be an object/,
+  );
 });
 
 test('deriveAppliedTeamOverrides normalizes status casing and whitespace', () => {

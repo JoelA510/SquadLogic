@@ -75,6 +75,18 @@ test('returns 401 when user is missing', async () => {
   assert.equal(payload.status, 'unauthorized');
 });
 
+test('returns 400 when the request object is invalid', async () => {
+  const { client } = buildTransactionStub();
+  const handler = createTeamPersistenceHttpHandler({ supabaseClient: client });
+
+  const response = await handler(null);
+  const payload = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.equal(payload.status, 'error');
+  assert.match(payload.message, /Invalid request object/i);
+});
+
 test('returns success response when persistence succeeds', async () => {
   const { client, calls } = buildTransactionStub();
   const now = new Date('2024-08-12T12:00:00Z');
@@ -105,4 +117,55 @@ test('returns success response when persistence succeeds', async () => {
   const runCall = calls.find((entry) => entry.table === 'scheduler_runs');
   assert.ok(runCall, 'scheduler_runs upsert should occur');
   assert.equal(runCall.rows[0].created_by, 'admin-1');
+});
+
+test('returns 403 when user is authenticated but not allowed', async () => {
+  const { client } = buildTransactionStub();
+  const handler = createTeamPersistenceHttpHandler({
+    supabaseClient: client,
+    allowedRoles: ['admin'],
+    getUser: async () => ({ role: 'coach' }),
+  });
+
+  const request = new Request('http://localhost/team-persistence', {
+    method: 'POST',
+    body: JSON.stringify({
+      snapshot: SAMPLE_SNAPSHOT,
+      runMetadata: { seasonSettingsId: 1 },
+    }),
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  const response = await handler(request);
+  const payload = await response.json();
+
+  assert.equal(response.status, 403);
+  assert.equal(payload.status, 'forbidden');
+});
+
+test('returns 500 when an unexpected error occurs in handler', async () => {
+  const { client } = buildTransactionStub();
+  const handler = createTeamPersistenceHttpHandler({
+    supabaseClient: client,
+    allowedRoles: ['admin'],
+    getUser: async () => {
+      throw new Error('boom');
+    },
+  });
+
+  const request = new Request('http://localhost/team-persistence', {
+    method: 'POST',
+    body: JSON.stringify({
+      snapshot: SAMPLE_SNAPSHOT,
+      runMetadata: { seasonSettingsId: 1 },
+    }),
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  const response = await handler(request);
+  const payload = await response.json();
+
+  assert.equal(response.status, 500);
+  assert.equal(payload.status, 'error');
+  assert.match(payload.message, /internal server error/i);
 });

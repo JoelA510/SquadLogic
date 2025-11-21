@@ -7,6 +7,10 @@ function responseWithJson(payload, status = 200) {
   });
 }
 
+// TODO: processTeamPersistenceRequest currently uses 'error' for both
+// validation and server failures. In a future pass, split these into
+// distinct statuses (e.g., 'validation_error' vs 'server_error') and
+// update this mapping accordingly.
 function mapStatusToHttpCode(status) {
   switch (status) {
     case 'success':
@@ -25,7 +29,7 @@ function mapStatusToHttpCode(status) {
 export function createTeamPersistenceHttpHandler({
   supabaseClient,
   allowedRoles,
-  now = new Date(),
+  now,
   getUser,
 } = {}) {
   if (!supabaseClient) {
@@ -33,32 +37,41 @@ export function createTeamPersistenceHttpHandler({
   }
 
   return async function handle(request) {
-    if (!request || typeof request.json !== 'function') {
-      return responseWithJson(
-        { status: 'error', message: 'Invalid request object' },
-        400,
-      );
-    }
-
-    let body;
     try {
-      body = await request.json();
+      if (!request || typeof request.json !== 'function') {
+        return responseWithJson(
+          { status: 'error', message: 'Invalid request object' },
+          400,
+        );
+      }
+
+      let body;
+      try {
+        body = await request.json();
+      } catch (error) {
+        return responseWithJson(
+          { status: 'error', message: 'Invalid JSON payload' },
+          400,
+        );
+      }
+
+      const effectiveNow = now ?? new Date();
+      const user = getUser ? await getUser(request) : undefined;
+      const result = await processTeamPersistenceRequest({
+        supabaseClient,
+        requestBody: body,
+        user,
+        allowedRoles,
+        now: effectiveNow,
+      });
+
+      return responseWithJson(result, mapStatusToHttpCode(result.status));
     } catch (error) {
+      console.error('Unhandled error in team persistence handler:', error);
       return responseWithJson(
-        { status: 'error', message: 'Invalid JSON payload' },
-        400,
+        { status: 'error', message: 'An internal server error occurred.' },
+        500,
       );
     }
-
-    const user = getUser ? await getUser(request) : undefined;
-    const result = await processTeamPersistenceRequest({
-      supabaseClient,
-      requestBody: body,
-      user,
-      allowedRoles,
-      now,
-    });
-
-    return responseWithJson(result, mapStatusToHttpCode(result.status));
   };
 }

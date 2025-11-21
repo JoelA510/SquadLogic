@@ -6,7 +6,7 @@ import {
   parseAllowedRolesEnv,
 } from '../../../src/teamPersistenceEdgeConfig.js';
 
-function jsonResponse(payload, status = 200) {
+function jsonResponse(payload: unknown, status: number = 200) {
   return new Response(JSON.stringify(payload), {
     status,
     headers: {

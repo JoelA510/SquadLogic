@@ -45,7 +45,7 @@ test('processTeamPersistenceRequest returns unauthorized when role is missing', 
   assert.match(result.message, /allowed role/i);
 });
 
-test('processTeamPersistenceRequest handles null requestBody gracefully', async () => {
+test('processTeamPersistenceRequest returns validation error for null requestBody', async () => {
   const result = await processTeamPersistenceRequest({
     requestBody: null,
     user: { role: 'admin' },

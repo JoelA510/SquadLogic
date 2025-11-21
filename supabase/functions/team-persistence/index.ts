@@ -36,7 +36,7 @@ function shimSupabaseTransaction(client) {
   };
 }
 
-async function getUserFromRequest(request, supabaseClient) {
+async function getUserFromRequest(request: Request, supabaseClient: SupabaseClient): Promise<User | null> {
   const authHeader = request.headers.get('Authorization');
   if (!authHeader || !authHeader.toLowerCase().startsWith('bearer ')) {
     return null;

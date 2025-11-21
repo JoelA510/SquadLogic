@@ -59,6 +59,9 @@ This document translates the roadmap's team formation phase into actionable plan
   snapshot validation, and transactional upserts so Edge Functions or Node handlers can reuse the same path as the dashboard.
   This keeps server responses consistent with the client simulator while ensuring `scheduler_runs` and roster tables stay in
   sync.
+- **Supabase Edge Function**: `supabase/functions/team-persistence/index.ts` wraps the HTTP handler for deployment, using
+  `TEAM_PERSISTENCE_ALLOWED_ROLES` (fallback: `admin`, `scheduler`) to align backend role checks with the dashboard’s
+  expectations.
 
 ## Manual Adjustment Workflow
 1. Present team rosters in the admin UI with sortable columns (player name, buddy code, skill tier).

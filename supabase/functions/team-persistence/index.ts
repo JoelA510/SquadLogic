@@ -1,80 +1,82 @@
 import { serve } from 'https://deno.land/std@0.223.0/http/server.ts';
-import { createClient, type User } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
+import { createClient, type SupabaseClient, type User } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
 import { createTeamPersistenceHttpHandler } from '../../../src/teamPersistenceEdgeHandler.js';
-import { DEFAULT_ALLOWED_ROLES, parseAllowedRolesEnv } from '../../../src/teamPersistenceEdgeConfig.js';
+import {
+  DEFAULT_ALLOWED_ROLES,
+  parseAllowedRolesEnv,
+} from '../../../src/teamPersistenceEdgeConfig.js';
 
-type HttpHandler = (request: Request) => Response | Promise<Response>;
-
-let handler: HttpHandler;
-
-const supabaseUrl = Deno.env.get('SUPABASE_URL');
-const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const allowedRolesEnv = Deno.env.get('TEAM_PERSISTENCE_ALLOWED_ROLES');
-
-const allowedRoles = parseAllowedRolesEnv(allowedRolesEnv, { fallbackRoles: DEFAULT_ALLOWED_ROLES });
-
-function respondWithConfigError(message: string) {
-  return new Response(JSON.stringify({ status: 'error', message }), {
-    status: 500,
-    headers: { 'Content-Type': 'application/json' },
+function jsonResponse(payload: unknown, status: number = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+    },
   });
 }
 
-if (!supabaseUrl || !serviceRoleKey) {
-  console.error(
-    'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for team persistence function.',
-  );
-  handler = () => respondWithConfigError('Supabase service configuration is missing.');
-} else {
-  const supabaseClient = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+function createSupabaseServiceRoleClient() {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
-  async function getUserFromAuthHeader(
-    request: Request,
-  ): Promise<User | null> {
-    const authHeader = request.headers.get('authorization') ?? '';
-    const token = authHeader.toLowerCase().startsWith('bearer ')
-      ? authHeader.slice('bearer '.length)
-      : null;
-
-    if (!token) {
-      return null;
-    }
-
-    const { data, error } = await supabaseClient.auth.getUser(token);
-    if (error) {
-      console.error(
-        'Failed to fetch user for team persistence:',
-        (error as { message?: string }).message ?? error,
-      );
-      return null;
-    }
-
-    return data?.user ?? null;
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
   }
 
-  // The team persistence handler requires a `transaction` method on the client.
-  // Supabase Edge client instances do not yet expose a transaction API, so this
-  // shim provides a compatible interface. It does NOT provide atomicity.
-  const transactionalClient = {
-    async transaction<T>(
-      callback: (tx: { from: typeof supabaseClient.from }) => Promise<T>,
-    ): Promise<T> {
-      const tx = {
-        from(table: string) {
-          return supabaseClient.from(table);
-        },
-      };
-      return callback(tx);
-    },
-  };
-
-  handler = createTeamPersistenceHttpHandler({
-    supabaseClient: transactionalClient,
-    allowedRoles,
-    getUser: getUserFromAuthHeader,
+  return createClient(supabaseUrl, serviceRoleKey, {
+    global: { fetch },
+    auth: { persistSession: false },
   });
 }
 
-serve(handler);
+function shimSupabaseTransaction(client) {
+  return {
+    ...client,
+    transaction: async (callback) => callback(client),
+  };
+}
+
+async function getUserFromRequest(request: Request, supabaseClient: SupabaseClient): Promise<User | null> {
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader || !authHeader.toLowerCase().startsWith('bearer ')) {
+    return null;
+  }
+
+  const accessToken = authHeader.slice('bearer '.length);
+  const { data, error } = await supabaseClient.auth.getUser(accessToken);
+
+  if (error) {
+    console.error('Failed to retrieve user from access token', error);
+    return null;
+  }
+
+  return data?.user ?? null;
+}
+let handler;
+
+try {
+  const supabaseClient = shimSupabaseTransaction(createSupabaseServiceRoleClient());
+  const allowedRoles = parseAllowedRolesEnv(
+    Deno.env.get('TEAM_PERSISTENCE_ALLOWED_ROLES'),
+    { fallbackRoles: DEFAULT_ALLOWED_ROLES },
+  );
+
+  handler = createTeamPersistenceHttpHandler({
+    supabaseClient,
+    allowedRoles,
+    getUser: (request) => getUserFromRequest(request, supabaseClient),
+  });
+} catch (error) {
+  console.error('Failed to initialize team-persistence function', error);
+}
+
+serve((request) => {
+  if (!handler) {
+    return jsonResponse(
+      { status: 'error', message: 'Team persistence function is not configured.' },
+      500,
+    );
+  }
+
+  return handler(request);
+});

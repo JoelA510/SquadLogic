@@ -30,7 +30,9 @@ if (!supabaseUrl || !serviceRoleKey) {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  async function getUserFromAuthHeader(request: Request): Promise<import('https://esm.sh/@supabase/supabase-js@2.45.3').User | null> {
+  async function getUserFromAuthHeader(
+    request: Request,
+  ): Promise<import('https://esm.sh/@supabase/supabase-js@2.45.3').User | null> {
     const authHeader = request.headers.get('authorization') ?? '';
     const token = authHeader.toLowerCase().startsWith('bearer ')
       ? authHeader.slice('bearer '.length)
@@ -52,6 +54,9 @@ if (!supabaseUrl || !serviceRoleKey) {
     return data?.user ?? null;
   }
 
+  // The team persistence handler requires a `transaction` method on the client.
+  // Supabase Edge client instances do not yet expose a transaction API, so this
+  // shim provides a compatible interface. It does NOT provide atomicity.
   const transactionalClient = {
     async transaction<T>(
       callback: (tx: { from: typeof supabaseClient.from }) => Promise<T>,

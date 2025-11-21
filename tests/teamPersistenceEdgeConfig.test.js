@@ -8,9 +8,19 @@ describe('parseAllowedRolesEnv', () => {
     assert.deepStrictEqual(roles, DEFAULT_ALLOWED_ROLES);
   });
 
+  it('returns default roles when value is null', () => {
+    const roles = parseAllowedRolesEnv(null);
+    assert.deepStrictEqual(roles, DEFAULT_ALLOWED_ROLES);
+  });
+
   it('normalizes comma-separated roles', () => {
     const roles = parseAllowedRolesEnv('Admin, Scheduler ,  CoAcH');
     assert.deepStrictEqual(roles, ['admin', 'scheduler', 'coach']);
+  });
+
+  it('accepts and normalizes an array of roles', () => {
+    const roles = parseAllowedRolesEnv(['  Admin  ', 'Scheduler']);
+    assert.deepStrictEqual(roles, ['admin', 'scheduler']);
   });
 
   it('throws when no roles remain after normalization', () => {

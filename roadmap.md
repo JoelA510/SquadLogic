@@ -20,6 +20,7 @@ The project uses a documentation-first approach, a modern React admin shell (Vit
 - [ ] **Team Generation**
   - [x] Added server-side request processor that combines auth, validation, and transactional Supabase upserts for team snapshots.
   - [ ] Implement full Edge Function deployment and wire real scheduler runs through the new processor.
+    - [x] Added an HTTP handler factory for the `team-persistence` endpoint to plug into Edge Functions.
 
 - [ ] **Practice Scheduling**  
   Allocator, metrics, and Supabase helpers are implemented. Admin UI for practice persistence and Edge Function wiring remain.
@@ -138,6 +139,7 @@ Future changes would be refinements, not re-selection of the stack.
   - [x] Provide server-side validation of snapshot payloads and manual overrides.
   - [x] Validate auth/roles.
   - [x] Perform transactional upserts into `teams`, `team_players`, and `scheduler_runs`.
+  - [x] Added an HTTP handler factory for the `team-persistence` endpoint to plug into Edge Functions.
 - [ ] Wire the Edge Function endpoint to `VITE_SUPABASE_PERSISTENCE_URL` in deployment environments.
 - [ ] Integrate the real scheduler runs into the snapshot builder (replace static `teamSummarySample.js` with real data).
 

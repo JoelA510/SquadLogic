@@ -24,6 +24,16 @@ if (!supabaseUrl || !serviceRoleKey) {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
+  // The team persistence handler requires a `transaction` method on the client.
+  // Supabase Edge client instances do not expose this API yet, so we provide a
+  // compatibility shim that runs the callback with the root client. This
+  // preserves handler expectations while we wait for native transaction
+  // support in the Edge runtime.
+  const transactionalSupabaseClient = {
+    ...supabaseClient,
+    transaction: async (callback) => callback(supabaseClient),
+  };
+
   async function getUserFromAuthHeader(request) {
     const authHeader = request.headers.get('authorization') || '';
     const token = authHeader.toLowerCase().startsWith('bearer ')
@@ -44,7 +54,7 @@ if (!supabaseUrl || !serviceRoleKey) {
   }
 
   const handler = createTeamPersistenceHttpHandler({
-    supabaseClient,
+    supabaseClient: transactionalSupabaseClient,
     allowedRoles,
     getUser: getUserFromAuthHeader,
   });

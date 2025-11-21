@@ -9,7 +9,7 @@ const allowedRolesEnv = Deno.env.get('TEAM_PERSISTENCE_ALLOWED_ROLES');
 
 const allowedRoles = parseAllowedRolesEnv(allowedRolesEnv, { fallbackRoles: DEFAULT_ALLOWED_ROLES });
 
-function respondWithConfigError(message) {
+function respondWithConfigError(message: string) {
   return new Response(JSON.stringify({ status: 'error', message }), {
     status: 500,
     headers: { 'Content-Type': 'application/json' },

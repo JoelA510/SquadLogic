@@ -115,6 +115,15 @@ function buildRunHistoryFromSchedulerRuns(schedulerRuns = []) {
   }));
 }
 
+/**
+ * Derives run metadata from a pre-normalized array of scheduler runs.
+ * Assumes inputs are already normalized via normalizeSchedulerRuns.
+ *
+ * @param {Array<Object>} [normalizedRuns=[]] - Pre-normalized scheduler run objects.
+ * @param {string | null} [targetRunId=null] - Specific run ID to derive metadata for.
+ *   If null, the most recent run (by startedAt) is used when available.
+ * @returns {Object} Derived run metadata, or an empty object when no runs are provided.
+ */
 function deriveRunMetadataFromNormalizedSchedulerRuns(
   normalizedRuns = [],
   targetRunId = null,
@@ -158,6 +167,14 @@ function deriveRunMetadataFromNormalizedSchedulerRuns(
   );
 }
 
+/**
+ * Normalizes raw scheduler runs and derives metadata from them.
+ *
+ * @param {Array<Object>} [schedulerRuns=[]] - Raw scheduler run objects to normalize.
+ * @param {string | null} [targetRunId=null] - Specific run ID to derive metadata for.
+ *   If null, the most recent run (by startedAt) is used when available.
+ * @returns {Object} Derived run metadata produced from the scheduler runs.
+ */
 function deriveRunMetadataFromSchedulerRuns(schedulerRuns = [], targetRunId = null) {
   const normalizedRuns = normalizeSchedulerRuns(schedulerRuns);
 

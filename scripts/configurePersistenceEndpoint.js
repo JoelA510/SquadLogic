@@ -1,6 +1,6 @@
 function normalizeBaseUrl(url) {
   if (!url || typeof url !== 'string') return undefined;
-  return url.endsWith('/') ? url.slice(0, -1) : url;
+  return url.replace(/\/+$/, '');
 }
 
 function deriveFromSupabaseEnv(env = process.env) {

@@ -115,8 +115,13 @@ function buildRunHistoryFromSchedulerRuns(schedulerRuns = []) {
   }));
 }
 
-function deriveRunMetadataFromSchedulerRuns(schedulerRuns = [], targetRunId = null) {
-  const normalizedRuns = normalizeSchedulerRuns(schedulerRuns);
+function deriveRunMetadataFromNormalizedSchedulerRuns(
+  normalizedRuns = [],
+  targetRunId = null,
+) {
+  if (!Array.isArray(normalizedRuns)) {
+    throw new TypeError('normalizedRuns must be an array');
+  }
 
   if (normalizedRuns.length === 0) {
     return {};
@@ -151,6 +156,12 @@ function deriveRunMetadataFromSchedulerRuns(schedulerRuns = [], targetRunId = nu
   return Object.fromEntries(
     Object.entries(metadata).filter(([, value]) => value !== undefined && value !== null),
   );
+}
+
+function deriveRunMetadataFromSchedulerRuns(schedulerRuns = [], targetRunId = null) {
+  const normalizedRuns = normalizeSchedulerRuns(schedulerRuns);
+
+  return deriveRunMetadataFromNormalizedSchedulerRuns(normalizedRuns, targetRunId);
 }
 
 function mergeRunMetadata({ providedRunMetadata, derivedRunMetadata, fallbackRunId }) {
@@ -279,7 +290,7 @@ export function prepareTeamPersistenceSnapshot({
   const latestRunId = runId ?? normalizedRunHistory[0]?.runId ?? null;
   const normalizedRunMetadata = mergeRunMetadata({
     providedRunMetadata: runMetadata,
-    derivedRunMetadata: deriveRunMetadataFromSchedulerRuns(
+    derivedRunMetadata: deriveRunMetadataFromNormalizedSchedulerRuns(
       normalizedSchedulerRuns,
       latestRunId,
     ),

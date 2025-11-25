@@ -16,6 +16,7 @@ const viteProcess = spawn('vite', viteArgs, {
   cwd: repoRoot,
   stdio: 'inherit',
   env: process.env,
+  shell: true,
 });
 
 viteProcess.on('exit', (code, signal) => {

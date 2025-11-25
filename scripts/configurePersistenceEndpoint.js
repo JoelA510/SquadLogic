@@ -11,28 +11,25 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const defaultEnvFilePath = path.join(repoRoot, 'frontend', '.env.local');
 
 function upsertEnvValue(envFilePath, key, value) {
-  let contents = '';
-
-  if (fs.existsSync(envFilePath)) {
-    contents = fs.readFileSync(envFilePath, 'utf8');
+  if (!fs.existsSync(envFilePath)) {
+    fs.writeFileSync(envFilePath, `${key}=${value}\n`);
+    return;
   }
 
-  const lines = contents.split(/\r?\n/).filter((line) => line.length > 0);
-  let updated = false;
+  let contents = fs.readFileSync(envFilePath, 'utf8');
+  const keyPattern = new RegExp(`^${key}=.*`, 'm');
+  const newLine = `${key}=${value}`;
 
-  const nextLines = lines.map((line) => {
-    if (line.startsWith(`${key}=`)) {
-      updated = true;
-      return `${key}=${value}`;
+  if (keyPattern.test(contents)) {
+    contents = contents.replace(keyPattern, newLine);
+  } else {
+    if (contents.length > 0 && !contents.endsWith('\n')) {
+      contents += '\n';
     }
-    return line;
-  });
-
-  if (!updated) {
-    nextLines.push(`${key}=${value}`);
+    contents += `${newLine}\n`;
   }
 
-  fs.writeFileSync(envFilePath, `${nextLines.join('\n')}${nextLines.length ? '\n' : ''}`);
+  fs.writeFileSync(envFilePath, contents);
 }
 
 export function deriveFromSupabaseEnv(env = process.env) {

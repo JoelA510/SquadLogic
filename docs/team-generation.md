@@ -54,7 +54,9 @@ This document translates the roadmap's team formation phase into actionable plan
   `VITE_SUPABASE_PERSISTENCE_URL` endpoint when present (via `teamPersistenceClient.js`), retaining the local simulator as a
   fallback. When only a `SUPABASE_URL` (or `VITE_SUPABASE_URL`) is provided, the client now derives the Edge Function base
   (`<supabase-url>/functions/v1`) automatically so deployments that export Supabase URLs to the frontend no longer need a
-  separate `VITE_SUPABASE_PERSISTENCE_URL`. Pending manual overrides still block push attempts client-side so the UI avoids
+  separate `VITE_SUPABASE_PERSISTENCE_URL`. The `frontend:build` and `frontend:preview` scripts now pre-populate
+  `VITE_SUPABASE_PERSISTENCE_URL` from `SUPABASE_URL`/`VITE_SUPABASE_URL`, ensuring deployed dashboards call the live Edge
+  Function without extra environment wiring. Pending manual overrides still block push attempts client-side so the UI avoids
   unnecessary network calls when the Supabase run would be rejected. When a live endpoint is configured, the UI now surfaces
   which host will be called and echoes backend-provided error messages so admins can distinguish client validation failures
   from server-side rejections.

@@ -8,8 +8,8 @@
     "test": "node --test",
     "build": "node scripts/build.js",
     "frontend:dev": "vite",
-    "frontend:build": "vite build",
-    "frontend:preview": "vite preview"
+    "frontend:build": "node scripts/configurePersistenceEndpoint.js && vite build",
+    "frontend:preview": "node scripts/configurePersistenceEndpoint.js && vite preview"
   },
   "directories": {
     "doc": "docs"

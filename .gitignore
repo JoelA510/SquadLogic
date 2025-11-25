@@ -4,3 +4,4 @@ dist/
 npm-debug.log*
 frontend/.vite/
 .env.local
+frontend/.env.local

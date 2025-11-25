@@ -5,7 +5,7 @@ import { configurePersistenceEndpoint } from './configurePersistenceEndpoint.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
-const envFilePath = path.join(repoRoot, '.env.local');
+const envFilePath = path.join(repoRoot, 'frontend', '.env.local');
 
 const viteCommand = process.argv[2] || 'build';
 const viteArgs = [viteCommand, ...process.argv.slice(3)];

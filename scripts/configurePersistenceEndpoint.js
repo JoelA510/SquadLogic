@@ -8,7 +8,7 @@ function normalizeBaseUrl(url) {
 }
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const defaultEnvFilePath = path.join(repoRoot, '.env.local');
+const defaultEnvFilePath = path.join(repoRoot, 'frontend', '.env.local');
 
 function upsertEnvValue(envFilePath, key, value) {
   let contents = '';

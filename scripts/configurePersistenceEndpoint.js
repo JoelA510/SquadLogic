@@ -21,7 +21,7 @@ function upsertEnvValue(envFilePath, key, value) {
   const newLine = `${key}=${value}`;
 
   if (keyPattern.test(contents)) {
-    contents = contents.replace(keyPattern, newLine);
+    contents = contents.replace(keyPattern, () => newLine);
   } else {
     if (contents.length > 0 && !contents.endsWith('\n')) {
       contents += '\n';

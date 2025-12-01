@@ -59,10 +59,11 @@ const statusLabels = {
 
 function InsightSection({ title, items, emptyMessage, renderItem }) {
   const hasItems = items && items.length > 0;
+  const sectionId = `insight-${title.toLowerCase().replace(/\s+/g, '-')}`;
 
   return (
-    <article>
-      <h3>{title}</h3>
+    <article aria-labelledby={sectionId}>
+      <h3 id={sectionId}>{title}</h3>
       {hasItems ? (
         <ul className="insight-list">{items.map(renderItem)}</ul>
       ) : (

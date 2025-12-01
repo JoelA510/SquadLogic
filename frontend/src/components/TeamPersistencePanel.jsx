@@ -67,8 +67,7 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
   const setBlockedState = useCallback(() => {
     setPersistenceActionState('blocked');
     setPersistenceActionMessage(
-      `${persistenceCounts.pending} manual override${
-        persistenceCounts.pending === 1 ? ' is' : 's are'
+      `${persistenceCounts.pending} manual override${persistenceCounts.pending === 1 ? ' is' : 's are'
       } still pending review.`,
     );
   }, [persistenceCounts.pending]);
@@ -202,11 +201,15 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
           </button>
           <p className="team-persistence__goal">{teamPersistenceSnapshot.pendingManualOverrideGoal}</p>
         </div>
-        <p className="team-persistence__mode" role="note">
-          {persistenceEndpoint
-            ? `Live Supabase persistence enabled at ${persistenceEndpoint}.`
-            : 'Simulated Supabase persistence active. Set VITE_SUPABASE_PERSISTENCE_URL to target your live endpoint.'}
-        </p>
+
+        <div className={`persistence-mode-banner ${persistenceEndpoint ? 'live' : 'simulated'}`}>
+          <p className="team-persistence__mode" role="note">
+            {persistenceEndpoint
+              ? `Live Supabase persistence enabled at ${persistenceEndpoint}.`
+              : 'Simulated Supabase persistence active. Set VITE_SUPABASE_PERSISTENCE_URL to target your live endpoint.'}
+          </p>
+        </div>
+
         <p className="team-persistence__action-message" role="status">
           {persistenceActionMessage || 'No Supabase push requested yet.'}
         </p>
@@ -226,9 +229,8 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
                     {override.teamName} · {override.field}
                   </span>
                   <span
-                    className={`persistence-pill persistence-pill--${
-                      override.status === 'pending' ? 'warning' : 'success'
-                    }`}
+                    className={`persistence-pill persistence-pill--${override.status === 'pending' ? 'warning' : 'success'
+                      }`}
                   >
                     {override.status === 'pending' ? 'Pending' : 'Applied'}
                   </span>

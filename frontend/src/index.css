@@ -1,5 +1,48 @@
+:root {
+  /* Color Tokens */
+  --color-bg-app: #0b172a;
+  --color-bg-surface: #1e293b;
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #94a3b8;
+
+  --color-primary-400: #38bdf8;
+  --color-primary-500: #0ea5e9;
+  --color-primary-600: #0284c7;
+
+  --color-status-success: #34d399;
+  --color-status-success-bg: rgba(52, 211, 153, 0.12);
+  --color-status-warning: #facc15;
+  --color-status-warning-bg: rgba(250, 204, 21, 0.14);
+  --color-status-pending: #cbd5f5;
+  --color-status-pending-bg: rgba(148, 163, 184, 0.18);
+
+  --color-focus-ring: #38bdf8;
+
+  /* Spacing Tokens (4px grid) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+
+  /* Radius Tokens */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+}
+
 * {
   box-sizing: border-box;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
 }
 
 a,
@@ -8,6 +51,13 @@ a:visited {
   text-decoration: none;
 }
 
+a:focus-visible {
+  text-decoration: underline;
+  text-decoration-color: var(--color-focus-ring);
+}
+
 body {
   font-family: inherit;
+  background-color: var(--color-bg-app);
+  color: var(--color-text-primary);
 }

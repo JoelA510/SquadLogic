@@ -1,0 +1,47 @@
+{
+    "version": "1.0.0",
+    "rules": [
+        {
+            "id": "keyboard_accessible",
+            "priority": "P0",
+            "area": "accessibility",
+            "description": "All interactive elements must be reachable and operable with keyboard only."
+        },
+        {
+            "id": "forms_labels_visible",
+            "priority": "P0",
+            "area": "forms",
+            "description": "Form fields must have always-visible labels and not rely solely on placeholders."
+        },
+        {
+            "id": "forms_error_specific",
+            "priority": "P1",
+            "area": "forms",
+            "description": "Validation error messages must state what is wrong and how to fix it."
+        },
+        {
+            "id": "tables_semantic",
+            "priority": "P1",
+            "area": "tables",
+            "description": "Use semantic table markup for tabular data, with headers and scopes defined."
+        },
+        {
+            "id": "motion_reduced",
+            "priority": "P1",
+            "area": "motion",
+            "description": "Respect the prefers-reduced-motion setting and disable or minimize non-essential animations when it is enabled."
+        },
+        {
+            "id": "feedback_loading",
+            "priority": "P1",
+            "area": "feedback",
+            "description": "Async operations longer than about 500 ms must show a loading state (spinner, skeleton, or progress)."
+        },
+        {
+            "id": "navigation_active_state",
+            "priority": "P1",
+            "area": "navigation",
+            "description": "Global navigation must clearly indicate the current active section."
+        }
+    ]
+}

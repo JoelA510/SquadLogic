@@ -290,7 +290,9 @@ function App() {
                 </ul>
               )}
             </article>
+          </div>
 
+          <div className="insights-grid">
             <InsightSection
               title="Manual follow-up categories"
               items={manualFollowUpBreakdown}

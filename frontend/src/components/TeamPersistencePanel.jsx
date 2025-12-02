@@ -174,61 +174,43 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
         <dl className="metrics-grid" aria-label="Supabase persistence status">
           <div className="metric-item">
             <dt>Last run</dt>
-            <dd style={{ fontSize: '1rem' }}>{teamPersistenceSnapshot.lastRunId}</dd>
+            <dd className="text-display">{teamPersistenceSnapshot.lastRunId}</dd>
           </div>
           <div className="metric-item">
             <dt>Synced</dt>
-            <dd style={{ fontSize: '1rem' }}>{formatDateTime(lastSyncedAt)}</dd>
+            <dd className="text-display">{formatDateTime(lastSyncedAt)}</dd>
           </div>
           <div className="metric-item">
             <dt>Prepared</dt>
-            <dd style={{ fontSize: '1rem' }}>
+            <dd className="text-display">
               {teamPersistenceSnapshot.preparedTeamRows} teams
             </dd>
           </div>
         </dl>
       </header>
 
-      <div className="team-persistence__actions" style={{ marginBottom: '2rem' }}>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem' }}>
+      <div className="team-persistence__actions">
+        <div className="team-persistence__controls">
           <button
             type="button"
             className="persistence-button"
             onClick={handlePersist}
             disabled={persistenceActionState === 'submitting'}
-            style={{
-              padding: '0.75rem 1.5rem',
-              borderRadius: '9999px',
-              background: 'var(--color-primary)',
-              color: 'white',
-              border: 'none',
-              fontWeight: '600',
-              cursor: 'pointer',
-              boxShadow: '0 4px 12px var(--color-primary-glow)'
-            }}
           >
             {persistenceButtonCopy[persistenceActionState] ?? persistenceButtonCopy.idle}
           </button>
           <span className="text-muted">{teamPersistenceSnapshot.pendingManualOverrideGoal}</span>
         </div>
 
-        <div className={`persistence-mode-banner ${persistenceEndpoint ? 'live' : 'simulated'}`}
-          style={{
-            padding: '0.75rem',
-            borderRadius: '0.5rem',
-            background: persistenceEndpoint ? 'var(--color-status-success-bg)' : 'var(--color-status-warning-bg)',
-            color: persistenceEndpoint ? 'var(--color-status-success)' : 'var(--color-status-warning)',
-            border: `1px solid ${persistenceEndpoint ? 'var(--color-status-success)' : 'var(--color-status-warning)'}`,
-            marginBottom: '1rem'
-          }}>
-          <p className="team-persistence__mode" role="note" style={{ margin: 0, fontSize: '0.9rem' }}>
+        <div className={`persistence-mode-banner ${persistenceEndpoint ? 'live' : 'simulated'}`}>
+          <p className="team-persistence__mode" role="note">
             {persistenceEndpoint
               ? `Live Supabase persistence enabled at ${persistenceEndpoint}.`
               : 'Simulated Supabase persistence active.'}
           </p>
         </div>
 
-        <p className="team-persistence__action-message" role="status" style={{ color: 'var(--color-text-secondary)' }}>
+        <p className="team-persistence__action-message" role="status">
           {persistenceActionMessage || 'No Supabase push requested yet.'}
         </p>
       </div>
@@ -236,48 +218,29 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
       <div className="insights-grid">
         <article className="insight-card">
           <h3>Manual overrides</h3>
-          <p className="insight-meta" style={{ marginBottom: '1rem' }}>
+          <p className="insight-meta">
             {persistenceCounts.pending} of {persistenceCounts.total} pending review.
           </p>
-          <ul className="insight-list" style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '0.75rem' }}>
+          <ul className="insight-card__list">
             {persistenceOverrides.map((override) => (
-              <li key={override.id} style={{
-                background: 'var(--color-bg-app)',
-                padding: '0.75rem',
-                borderRadius: '0.5rem',
-                border: '1px solid var(--color-border-subtle)'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                  <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
+              <li key={override.id} className="insight-card__list-item">
+                <div className="insight-card__list-header">
+                  <span className="insight-card__list-label">
                     {override.teamName}
                   </span>
                   <span
-                    style={{
-                      fontSize: '0.75rem',
-                      padding: '0.25rem 0.5rem',
-                      borderRadius: '999px',
-                      background: override.status === 'pending' ? 'var(--color-status-warning-bg)' : 'var(--color-status-success-bg)',
-                      color: override.status === 'pending' ? 'var(--color-status-warning)' : 'var(--color-status-success)'
-                    }}
+                    className={`insight-card__status-pill ${override.status === 'pending' ? 'status-warning' : 'status-success'
+                      }`}
                   >
                     {override.status === 'pending' ? 'Pending' : 'Applied'}
                   </span>
                 </div>
-                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>{override.reason}</p>
+                <p className="insight-card__list-meta">{override.reason}</p>
                 {override.status === 'pending' && (
                   <button
                     type="button"
+                    className="insight-card__action-button"
                     onClick={() => handleOverrideStatusUpdate(override.id)}
-                    style={{
-                      marginTop: '0.5rem',
-                      background: 'transparent',
-                      border: '1px solid var(--color-primary)',
-                      color: 'var(--color-primary)',
-                      padding: '0.25rem 0.75rem',
-                      borderRadius: '0.25rem',
-                      cursor: 'pointer',
-                      fontSize: '0.75rem'
-                    }}
                   >
                     Mark reviewed
                   </button>
@@ -289,27 +252,22 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
 
         <article className="insight-card">
           <h3>Recent Supabase syncs</h3>
-          <ul className="persistence-history" style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '0.75rem' }}>
+          <ul className="insight-card__list">
             {latestHistory.map((run) => (
-              <li key={run.runId} style={{
-                background: 'var(--color-bg-app)',
-                padding: '0.75rem',
-                borderRadius: '0.5rem',
-                border: '1px solid var(--color-border-subtle)'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                  <span style={{ fontFamily: 'monospace', color: 'var(--color-text-accent)' }}>{run.runId}</span>
-                  <span style={{
-                    fontSize: '0.75rem',
-                    color: run.status === 'success' ? 'var(--color-status-success)' : 'var(--color-status-warning)'
-                  }}>
+              <li key={run.runId} className="insight-card__list-item">
+                <div className="insight-card__list-header">
+                  <span className="text-accent text-monospace">{run.runId}</span>
+                  <span
+                    className={`insight-card__status-text ${run.status === 'success' ? 'text-success' : 'text-warning'
+                      }`}
+                  >
                     {run.status}
                   </span>
                 </div>
-                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+                <p className="insight-card__list-meta">
                   {formatDateTime(run.startedAt)}
                 </p>
-                <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                <p className="insight-card__list-detail">
                   Updated {run.updatedTeams} teams
                 </p>
               </li>

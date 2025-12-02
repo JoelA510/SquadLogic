@@ -20,7 +20,7 @@ SquadLogic is a comprehensive tool for youth sports administrators. It simplifie
 ## ✨ Key Features
 
 -   **🤖 Automated Team Generation**: Intelligent allocation of players to teams based on configurable criteria.
--   **wc Practice Scheduling**: Efficient scheduling of practice slots, minimizing conflicts and maximizing resource usage.
+-   **🗓️ Practice Scheduling**: Efficient scheduling of practice slots, minimizing conflicts and maximizing resource usage.
 -   **⚽ Game Scheduling**: Round-robin game generation and allocation.
 -   **💾 Persistence**: Robust data storage using Supabase (Edge Functions & Database).
 -   **🎨 Deep Space Glass UI**: A stunning, responsive interface with dark/light/party modes, glassmorphism effects, and dynamic animations.

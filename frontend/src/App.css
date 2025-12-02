@@ -344,20 +344,6 @@
   color: white;
   border: none;
   font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 4px 12px var(--color-primary-glow);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-}
-
-.insight-card__list-header {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: var(--space-1);
-}
-
-.insight-card__status-pill {
   font-size: 0.75rem;
   padding: 0.25rem 0.5rem;
   border-radius: var(--radius-full);

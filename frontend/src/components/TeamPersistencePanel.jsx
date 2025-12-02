@@ -162,125 +162,156 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
   };
 
   return (
-    <section className="team-persistence" aria-labelledby="team-persistence-heading">
-      <header className="team-persistence__header">
+    <section className="section-panel glass-panel team-persistence" aria-labelledby="team-persistence-heading">
+      <header className="section-header">
         <div>
           <h2 id="team-persistence-heading">Supabase persistence</h2>
           <p>
             Manual overrides are staged before writing teams and roster rows back to Supabase. Use this panel to
-            confirm override readiness, preview the queued upsert payload, and track the last scheduler run that
-            touched Supabase.
+            confirm override readiness.
           </p>
         </div>
-        <dl className="team-persistence__status" aria-label="Supabase persistence status">
-          <div>
+        <dl className="metrics-grid" aria-label="Supabase persistence status">
+          <div className="metric-item">
             <dt>Last run</dt>
-            <dd>{teamPersistenceSnapshot.lastRunId}</dd>
+            <dd style={{ fontSize: '1rem' }}>{teamPersistenceSnapshot.lastRunId}</dd>
           </div>
-          <div>
-            <dt>Last synced</dt>
-            <dd>{formatDateTime(lastSyncedAt)}</dd>
+          <div className="metric-item">
+            <dt>Synced</dt>
+            <dd style={{ fontSize: '1rem' }}>{formatDateTime(lastSyncedAt)}</dd>
           </div>
-          <div>
-            <dt>Prepared rows</dt>
-            <dd>
-              {teamPersistenceSnapshot.preparedTeamRows} teams · {teamPersistenceSnapshot.preparedPlayerRows} players
+          <div className="metric-item">
+            <dt>Prepared</dt>
+            <dd style={{ fontSize: '1rem' }}>
+              {teamPersistenceSnapshot.preparedTeamRows} teams
             </dd>
           </div>
         </dl>
       </header>
-      <div className="team-persistence__actions">
-        <div>
+
+      <div className="team-persistence__actions" style={{ marginBottom: '2rem' }}>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem' }}>
           <button
             type="button"
             className="persistence-button"
             onClick={handlePersist}
             disabled={persistenceActionState === 'submitting'}
+            style={{
+              padding: '0.75rem 1.5rem',
+              borderRadius: '9999px',
+              background: 'var(--color-primary)',
+              color: 'white',
+              border: 'none',
+              fontWeight: '600',
+              cursor: 'pointer',
+              boxShadow: '0 4px 12px var(--color-primary-glow)'
+            }}
           >
             {persistenceButtonCopy[persistenceActionState] ?? persistenceButtonCopy.idle}
           </button>
-          <p className="team-persistence__goal">{teamPersistenceSnapshot.pendingManualOverrideGoal}</p>
+          <span className="text-muted">{teamPersistenceSnapshot.pendingManualOverrideGoal}</span>
         </div>
 
-        <div className={`persistence-mode-banner ${persistenceEndpoint ? 'live' : 'simulated'}`}>
-          <p className="team-persistence__mode" role="note">
+        <div className={`persistence-mode-banner ${persistenceEndpoint ? 'live' : 'simulated'}`}
+          style={{
+            padding: '0.75rem',
+            borderRadius: '0.5rem',
+            background: persistenceEndpoint ? 'var(--color-status-success-bg)' : 'var(--color-status-warning-bg)',
+            color: persistenceEndpoint ? 'var(--color-status-success)' : 'var(--color-status-warning)',
+            border: `1px solid ${persistenceEndpoint ? 'var(--color-status-success)' : 'var(--color-status-warning)'}`,
+            marginBottom: '1rem'
+          }}>
+          <p className="team-persistence__mode" role="note" style={{ margin: 0, fontSize: '0.9rem' }}>
             {persistenceEndpoint
               ? `Live Supabase persistence enabled at ${persistenceEndpoint}.`
-              : 'Simulated Supabase persistence active. Set VITE_SUPABASE_PERSISTENCE_URL to target your live endpoint.'}
+              : 'Simulated Supabase persistence active.'}
           </p>
         </div>
 
-        <p className="team-persistence__action-message" role="status">
+        <p className="team-persistence__action-message" role="status" style={{ color: 'var(--color-text-secondary)' }}>
           {persistenceActionMessage || 'No Supabase push requested yet.'}
         </p>
       </div>
-      <div className="team-persistence__grid">
-        <article>
+
+      <div className="insights-grid">
+        <article className="insight-card">
           <h3>Manual overrides</h3>
-          <p className="team-persistence__helper">
-            {persistenceCounts.pending} of {persistenceCounts.total} overrides still require review before the next
-            Supabase write.
+          <p className="insight-meta" style={{ marginBottom: '1rem' }}>
+            {persistenceCounts.pending} of {persistenceCounts.total} pending review.
           </p>
-          <ul className="persistence-list">
+          <ul className="insight-list" style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '0.75rem' }}>
             {persistenceOverrides.map((override) => (
-              <li key={override.id}>
-                <div className="persistence-list__title">
-                  <span>
-                    {override.teamName} · {override.field}
+              <li key={override.id} style={{
+                background: 'var(--color-bg-app)',
+                padding: '0.75rem',
+                borderRadius: '0.5rem',
+                border: '1px solid var(--color-border-subtle)'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                    {override.teamName}
                   </span>
                   <span
-                    className={`persistence-pill persistence-pill--${override.status === 'pending' ? 'warning' : 'success'
-                      }`}
+                    style={{
+                      fontSize: '0.75rem',
+                      padding: '0.25rem 0.5rem',
+                      borderRadius: '999px',
+                      background: override.status === 'pending' ? 'var(--color-status-warning-bg)' : 'var(--color-status-success-bg)',
+                      color: override.status === 'pending' ? 'var(--color-status-warning)' : 'var(--color-status-success)'
+                    }}
                   >
                     {override.status === 'pending' ? 'Pending' : 'Applied'}
                   </span>
                 </div>
-                <p className="persistence-list__meta">
-                  Last updated {formatDateTime(override.updatedAt)}
-                </p>
-                <p className="persistence-list__detail">{override.reason}</p>
-                <p className="persistence-list__detail">Value: {override.value}</p>
-                {override.status === 'pending' ? (
-                  <div className="persistence-list__actions">
-                    <button
-                      type="button"
-                      className="persistence-action"
-                      onClick={() => handleOverrideStatusUpdate(override.id)}
-                    >
-                      Mark reviewed
-                    </button>
-                    <p className="persistence-list__note">
-                      This change will be included in the next Supabase sync.
-                    </p>
-                  </div>
-                ) : (
-                  <p className="persistence-list__note">Included in the prepared Supabase payload.</p>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>{override.reason}</p>
+                {override.status === 'pending' && (
+                  <button
+                    type="button"
+                    onClick={() => handleOverrideStatusUpdate(override.id)}
+                    style={{
+                      marginTop: '0.5rem',
+                      background: 'transparent',
+                      border: '1px solid var(--color-primary)',
+                      color: 'var(--color-primary)',
+                      padding: '0.25rem 0.75rem',
+                      borderRadius: '0.25rem',
+                      cursor: 'pointer',
+                      fontSize: '0.75rem'
+                    }}
+                  >
+                    Mark reviewed
+                  </button>
                 )}
               </li>
             ))}
           </ul>
         </article>
-        <article>
+
+        <article className="insight-card">
           <h3>Recent Supabase syncs</h3>
-          <p className="team-persistence__helper">
-            Track which scheduler run last wrote data and whether it succeeded.
-          </p>
-          <ul className="persistence-history">
+          <ul className="persistence-history" style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '0.75rem' }}>
             {latestHistory.map((run) => (
-              <li key={run.runId}>
-                <div className="persistence-history__header">
-                  <span className="persistence-history__id">{run.runId}</span>
-                  <span className={`persistence-pill persistence-pill--${run.status}`}>
-                    {run.status === 'success' ? 'Success' : run.status === 'blocked' ? 'Blocked' : run.status}
+              <li key={run.runId} style={{
+                background: 'var(--color-bg-app)',
+                padding: '0.75rem',
+                borderRadius: '0.5rem',
+                border: '1px solid var(--color-border-subtle)'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                  <span style={{ fontFamily: 'monospace', color: 'var(--color-text-accent)' }}>{run.runId}</span>
+                  <span style={{
+                    fontSize: '0.75rem',
+                    color: run.status === 'success' ? 'var(--color-status-success)' : 'var(--color-status-warning)'
+                  }}>
+                    {run.status}
                   </span>
                 </div>
-                <p className="persistence-history__meta">
-                  Triggered by {run.triggeredBy} · {formatDateTime(run.startedAt)}
+                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+                  {formatDateTime(run.startedAt)}
                 </p>
-                <p className="persistence-history__meta">
-                  Updated {run.updatedTeams} teams · {run.updatedPlayers} players
+                <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                  Updated {run.updatedTeams} teams
                 </p>
-                <p className="persistence-history__detail">{run.notes}</p>
               </li>
             ))}
           </ul>

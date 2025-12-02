@@ -1,25 +1,5 @@
 :root {
-  /* Color Tokens */
-  --color-bg-app: #0b172a;
-  --color-bg-surface: #1e293b;
-  --color-text-primary: #f8fafc;
-  --color-text-secondary: #cbd5e1;
-  --color-text-muted: #94a3b8;
-
-  --color-primary-400: #38bdf8;
-  --color-primary-500: #0ea5e9;
-  --color-primary-600: #0284c7;
-
-  --color-status-success: #34d399;
-  --color-status-success-bg: rgba(52, 211, 153, 0.12);
-  --color-status-warning: #facc15;
-  --color-status-warning-bg: rgba(250, 204, 21, 0.14);
-  --color-status-pending: #cbd5f5;
-  --color-status-pending-bg: rgba(148, 163, 184, 0.18);
-
-  --color-focus-ring: #38bdf8;
-
-  /* Spacing Tokens (4px grid) */
+  /* Shared Spacing (4px grid) */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -28,36 +8,194 @@
   --space-6: 1.5rem;
   --space-8: 2rem;
   --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
 
-  /* Radius Tokens */
+  /* Shared Radius */
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
   --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+  --radius-full: 9999px;
+
+  /* Shared Typography */
+  --font-family-base: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-family-display: 'Outfit', var(--font-family-base);
+  /* Assuming Outfit or similar for headers if available, else fallback */
+}
+
+/* --- THEME: DARK (Default) --- */
+:root,
+:root[data-theme='dark'] {
+  /* Backgrounds */
+  --color-bg-app: #0f172a;
+  --bg-app-gradient: radial-gradient(circle at top left, #1e293b, #020617 80%);
+  --color-bg-surface: rgba(30, 41, 59, 0.4);
+  --color-bg-surface-hover: rgba(30, 41, 59, 0.6);
+  --color-bg-glass: rgba(15, 23, 42, 0.6);
+
+  /* Borders & Effects */
+  --color-border-subtle: rgba(255, 255, 255, 0.08);
+  --color-border-highlight: rgba(56, 189, 248, 0.3);
+  --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.25);
+  --shadow-glow: 0 0 15px rgba(56, 189, 248, 0.15);
+  --backdrop-blur: blur(12px);
+
+  /* Text */
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #94a3b8;
+  --color-text-accent: #38bdf8;
+
+  /* Brand / Status */
+  --color-primary: #0ea5e9;
+  --color-primary-glow: rgba(14, 165, 233, 0.4);
+
+  --color-status-success: #34d399;
+  --color-status-success-bg: rgba(52, 211, 153, 0.15);
+  --color-status-warning: #facc15;
+  --color-status-warning-bg: rgba(250, 204, 21, 0.15);
+  --color-status-error: #f87171;
+  --color-status-error-bg: rgba(248, 113, 113, 0.15);
+  --color-status-pending: #cbd5e1;
+  --color-status-pending-bg: rgba(203, 213, 225, 0.15);
+
+  --color-focus-ring: #38bdf8;
+}
+
+/* --- THEME: LIGHT --- */
+:root[data-theme='light'] {
+  /* Backgrounds */
+  --color-bg-app: #f8fafc;
+  --bg-app-gradient: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+  --color-bg-surface: rgba(255, 255, 255, 0.7);
+  --color-bg-surface-hover: rgba(255, 255, 255, 0.9);
+  --color-bg-glass: rgba(255, 255, 255, 0.5);
+
+  /* Borders & Effects */
+  --color-border-subtle: rgba(148, 163, 184, 0.2);
+  --color-border-highlight: rgba(14, 165, 233, 0.4);
+  --shadow-soft: 0 4px 20px rgba(148, 163, 184, 0.15);
+  --shadow-glow: 0 0 10px rgba(14, 165, 233, 0.1);
+  --backdrop-blur: blur(10px);
+
+  /* Text */
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #475569;
+  --color-text-muted: #64748b;
+  --color-text-accent: #0284c7;
+
+  /* Brand / Status */
+  --color-primary: #0284c7;
+  --color-primary-glow: rgba(2, 132, 199, 0.2);
+
+  --color-status-success: #059669;
+  --color-status-success-bg: rgba(5, 150, 105, 0.1);
+  --color-status-warning: #d97706;
+  --color-status-warning-bg: rgba(217, 119, 6, 0.1);
+  --color-status-error: #dc2626;
+  --color-status-error-bg: rgba(220, 38, 38, 0.1);
+  --color-status-pending: #64748b;
+  --color-status-pending-bg: rgba(100, 116, 139, 0.1);
+
+  --color-focus-ring: #0ea5e9;
+}
+
+/* --- THEME: PARTY --- */
+:root[data-theme='party'] {
+  /* Backgrounds */
+  --color-bg-app: #1a0b2e;
+  --bg-app-gradient: radial-gradient(circle at top center, #4c1d95, #1a0b2e 70%);
+  --color-bg-surface: rgba(88, 28, 135, 0.3);
+  --color-bg-surface-hover: rgba(109, 40, 217, 0.4);
+  --color-bg-glass: rgba(46, 16, 101, 0.6);
+
+  /* Borders & Effects */
+  --color-border-subtle: rgba(216, 180, 254, 0.2);
+  --color-border-highlight: rgba(244, 114, 182, 0.5);
+  --shadow-soft: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --shadow-glow: 0 0 25px rgba(232, 121, 249, 0.3);
+  --backdrop-blur: blur(16px);
+
+  /* Text */
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #e9d5ff;
+  --color-text-muted: #c084fc;
+  --color-text-accent: #f472b6;
+
+  /* Brand / Status */
+  --color-primary: #d946ef;
+  --color-primary-glow: rgba(217, 70, 239, 0.5);
+
+  --color-status-success: #4ade80;
+  --color-status-success-bg: rgba(74, 222, 128, 0.2);
+  --color-status-warning: #facc15;
+  --color-status-warning-bg: rgba(250, 204, 21, 0.2);
+  --color-status-error: #fb7185;
+  --color-status-error-bg: rgba(251, 113, 133, 0.2);
+  --color-status-pending: #a78bfa;
+  --color-status-pending-bg: rgba(167, 139, 250, 0.2);
+
+  --color-focus-ring: #e879f9;
 }
 
 * {
   box-sizing: border-box;
 }
 
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-family-base);
+  background: var(--bg-app-gradient);
+  background-attachment: fixed;
+  /* Keeps gradient stable on scroll */
+  color: var(--color-text-primary);
+  transition: background 0.3s ease, color 0.3s ease;
+}
+
+/* Global Focus */
 :focus-visible {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
 }
 
-a,
-a:visited {
+a {
   color: inherit;
   text-decoration: none;
 }
 
-a:focus-visible {
-  text-decoration: underline;
-  text-decoration-color: var(--color-focus-ring);
+/* --- UTILITIES --- */
+
+/* Glass Panel Utility */
+.glass-panel {
+  background: var(--color-bg-surface);
+  backdrop-filter: var(--backdrop-blur);
+  -webkit-backdrop-filter: var(--backdrop-blur);
+  /* Safari support */
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-soft);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
-body {
-  font-family: inherit;
-  background-color: var(--color-bg-app);
-  color: var(--color-text-primary);
+.glass-panel:hover {
+  border-color: var(--color-border-highlight);
+  box-shadow: var(--shadow-glow), var(--shadow-soft);
+}
+
+/* Typography Utilities */
+.text-display {
+  font-family: var(--font-family-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.text-accent {
+  color: var(--color-text-accent);
+}
+
+.text-muted {
+  color: var(--color-text-muted);
 }

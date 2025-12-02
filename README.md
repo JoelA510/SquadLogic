@@ -68,7 +68,7 @@ To create a production build:
 npm run frontend:build
 ```
 
-## Tb Project Structure
+## 📂 Project Structure
 
 ```
 GotSportTeamerScheduler/

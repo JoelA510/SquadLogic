@@ -322,18 +322,21 @@
 }
 
 .status-pill.status-complete {
+  --dot-glow-color: var(--color-status-success-glow);
   background: var(--color-status-success-bg);
   color: var(--color-status-success);
   box-shadow: 0 0 10px var(--color-status-success-bg);
 }
 
 .status-pill.status-progress {
+  --dot-glow-color: var(--color-status-warning-glow);
   background: var(--color-status-warning-bg);
   color: var(--color-status-warning);
   box-shadow: 0 0 10px var(--color-status-warning-bg);
 }
 
 .status-pill.status-pending {
+  --dot-glow-color: var(--color-status-pending-glow);
   background: var(--color-status-pending-bg);
   color: var(--color-status-pending);
 }
@@ -343,6 +346,10 @@
   height: 0.5rem;
   border-radius: 50%;
   background: currentColor;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 12px var(--dot-glow-color, var(--color-primary-glow));
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 /* --- ALERTS --- */

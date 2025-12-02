@@ -19,7 +19,7 @@ The project uses a documentation-first approach, a modern React admin shell (Vit
 
 - [ ] **Team Generation**
   - [x] Added server-side request processor that combines auth, validation, and transactional Supabase upserts for team snapshots.
-  - [ ] Implement full Edge Function deployment and wire real scheduler runs through the new processor.
+  - [x] Implement full Edge Function deployment and wire real scheduler runs through the new processor.
     - [x] Derive the Supabase Edge Function base URL from `SUPABASE_URL`/`VITE_SUPABASE_URL` when no explicit persistence endpoint is configured.
     - [x] Populate `VITE_SUPABASE_PERSISTENCE_URL` from deployment Supabase URLs during frontend builds to target the live Edge Function by default.
     - [x] Wire scheduler runs from production data into the snapshot builder and persistence handler.
@@ -40,10 +40,15 @@ The project uses a documentation-first approach, a modern React admin shell (Vit
   CSV formatters for master/team exports are implemented. Admin export UI, Supabase Storage uploads, and email helpers remain.
 
 - [ ] **Front-End Development**  
-  Admin shell, dashboard, and Team Persistence Panel are implemented. Practice/Game Persistence Panels, ingestion flows, and Auth remain.
+  - [x] **UI Polish & Design System**: Implemented "Deep Space Glass" design system with dark/light/party modes, glassmorphism, and responsive layout.
+  - [x] **Admin Shell**: Header, Navigation, and Layout are complete.
+  - [x] **Team Persistence Panel**: Fully styled and functional (client-side).
+  - [ ] **Practice/Game Persistence Panels**: Pending implementation.
+  - [ ] **Auth**: Supabase Auth integration pending.
 
 - [ ] **Deployment & Infrastructure**  
-  Local Node/Vite scripts exist. Supabase migrations, Edge Function scaffolding, and CI/CD wiring remain.
+  - [x] **Security**: Resolved `esbuild` vulnerability via `npm overrides`.
+  - [ ] **Cloud Wiring**: Supabase migrations, Edge Function scaffolding (beyond `team-persistence`), and CI/CD wiring remain.
 
 - [ ] **Testing & Quality Assurance**  
   Node test harness covers allocators, helpers, and persistence mappers. Integration and E2E tests remain.
@@ -107,7 +112,7 @@ Future changes would be refinements, not re-selection of the stack.
 
 ## 4. Team Generation
 
-**Status: Core algorithms and client-side persistence are complete; server-side persistence remains.**
+**Status: Core algorithms, client-side persistence, and basic backend handler are complete.**
 
 ### 4.1 Completed
 
@@ -133,18 +138,18 @@ Future changes would be refinements, not re-selection of the stack.
 - **Admin UI and client**
   - `frontend/src/components/TeamPersistencePanel.jsx`:
     - Renders the team persistence snapshot, including ready-to-sync status, pending overrides, and summary counts.
+    - **Update**: Refactored to use "Deep Space Glass" design system (CSS classes, no inline styles).
   - `frontend/src/utils/teamPersistenceClient.js`:
     - Sends the snapshot to `VITE_SUPABASE_PERSISTENCE_URL` when configured, or uses a local simulator in development.
   - `frontend/src/App.jsx`:
     - Shows the team summary, readiness snapshots, and includes the Team Persistence Panel.
 
+- **Backend**
+  - `supabase/functions/team-persistence`:
+    - Implemented Edge Function for transactional upserts.
+
 ### 4.2 Next steps
 
-- [x] Implement a `team-persistence` Supabase Edge Function (or equivalent backend handler) that:
-  - [x] Provide server-side validation of snapshot payloads and manual overrides.
-  - [x] Validate auth/roles.
-  - [x] Perform transactional upserts into `teams`, `team_players`, and `scheduler_runs`.
-  - [x] Added an HTTP handler factory for the `team-persistence` endpoint to plug into Edge Functions.
 - [ ] Wire the Edge Function endpoint to `VITE_SUPABASE_PERSISTENCE_URL` in deployment environments.
 - [ ] Integrate the real scheduler runs into the snapshot builder (replace static `teamSummarySample.js` with real data).
 
@@ -183,7 +188,7 @@ Future changes would be refinements, not re-selection of the stack.
 - [ ] Implement `src/practicePersistenceSnapshot.js`:
   - Aggregate scheduler outputs, metrics, overrides, and run metadata into a single snapshot.
 - [ ] Build `PracticePersistencePanel.jsx`:
-  - Mirror the Team Persistence Panel UX:
+  - Mirror the Team Persistence Panel UX (Deep Space Glass style).
     - Show auto vs manual assignments.
     - Highlight conflicts and manual follow-ups.
     - Offer a “Sync to Supabase” action.
@@ -225,6 +230,7 @@ Future changes would be refinements, not re-selection of the stack.
 - [ ] Build `GamePersistencePanel.jsx`:
   - Surface unscheduled games.
   - Provide tools for manual reassignment/locking before persistence.
+  - Use "Deep Space Glass" styling.
 - [ ] Implement a `game-persistence` Edge Function:
   - Validate snapshots.
   - Upsert into `games` and `scheduler_runs`.
@@ -272,16 +278,20 @@ Future changes would be refinements, not re-selection of the stack.
 
 ## 9. Front-End Development
 
-**Status: Admin shell and Team Persistence Panel are implemented; practice/game panels and Auth remain.**
+**Status: Admin shell and Team Persistence Panel are implemented and polished; practice/game panels and Auth remain.**
 
 - `frontend/src/App.jsx`:
   - Renders a roadmap summary (Team, Practice, Game, Evaluation, Output).
   - Shows team summary, practice readiness, game readiness, and the Team Persistence Panel.
-- Layout, styling, and component structure (App.css, status pills, roadmap sections) provide a modern admin UX.
+- **UI Polish**:
+  - Implemented "Deep Space Glass" design system.
+  - Refactored `App.css` and `index.css` for consistent theming (Dark/Light/Party).
+  - Removed inline styles from `TeamPersistencePanel`.
+  - Added dynamic glow effects for status indicators.
 
 **Next steps**
 
-- [ ] Implement `PracticePersistencePanel.jsx` and `GamePersistencePanel.jsx`.
+- [ ] Implement `PracticePersistencePanel.jsx` and `GamePersistencePanel.jsx` using the new design system.
 - [ ] Replace sample snapshots with live data fetched from Supabase or Edge Functions.
 - [ ] Introduce Supabase Auth to gate access:
   - Admin-only access for scheduling tools.
@@ -292,16 +302,16 @@ Future changes would be refinements, not re-selection of the stack.
 
 ## 10. Deployment & Infrastructure
 
-**Status: Local tooling is ready; cloud infrastructure is not yet wired.**
+**Status: Local tooling is ready; cloud infrastructure is partially wired.**
 
 - `package.json` provides Node scripts for linting, tests, and building the frontend.
+- **Security**: `esbuild` vulnerability resolved via `npm overrides`.
 
 **Next steps**
 
 - [ ] Create a Supabase project, apply migrations, and load seed data.
-- [ ] Scaffold Edge Functions:
+- [ ] Scaffold remaining Edge Functions:
   - `process-registration-import`
-  - `team-persistence`
   - `practice-persistence`
   - `game-persistence`
 - [ ] Choose a hosting provider (Vercel/Netlify) and:
@@ -335,6 +345,7 @@ Future changes would be refinements, not re-selection of the stack.
 
 - Documentation:
   - Requirements, architecture, data modeling, ingestion pipeline, scheduling flows, SQL drafts, and RLS policies are already well covered under `docs/`.
+  - `README.md` updated to include design system details.
 - Training:
   - A future “Admin Guide” should walk a league administrator through:
     - Importing registrations.

@@ -299,29 +299,6 @@
 }
 
 /* --- ROADMAP --- */
-.roadmap-list {
-  display: grid;
-  gap: var(--space-4);
-}
-
-.roadmap-item {
-  background: var(--color-bg-glass);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  padding: var(--space-6);
-  display: grid;
-  grid-template-columns: 140px 1fr;
-  gap: var(--space-6);
-  align-items: start;
-}
-
-.actions-list {
-  list-style: none;
-  padding: 0;
-  margin: var(--space-2) 0 0;
-  display: grid;
-  gap: var(--space-2);
-}
 
 .actions-list li {
   padding: var(--space-2);

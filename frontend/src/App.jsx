@@ -391,8 +391,8 @@ function App() {
                     <h3>{section.title}</h3>
                     <p>{section.summary}</p>
                     {section.actions.length > 0 && (
-                      <div style={{ marginTop: '0.5rem' }}>
-                        <p className="text-muted" style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Next actions</p>
+                      <div className="roadmap-actions">
+                        <p className="roadmap-actions__label">Next actions</p>
                         <ul className="actions-list">
                           {section.actions.map((action, index) => (
                             <li key={index}>{action}</li>

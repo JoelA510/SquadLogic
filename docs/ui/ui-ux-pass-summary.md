@@ -1,58 +1,27 @@
-```markdown
-# UI / UX Pass Summary (Web – P0/P1 Focus)
+# UI/UX Pass Summary
 
-Use this when you need a quick version of the full checklist.
+## Overview
+This pass focused on a complete visual overhaul of the SquadLogic application, moving from a "functional but basic" UI to a premium, multi-theme design system.
 
-## P0 – Must Fix
+## Key Changes
 
-- **Accessibility blockers**
-  - Text contrast < 4.5:1 (normal) or < 3:1 (large).
-  - Interactive elements not keyboard accessible.
-  - Missing or invisible focus indicators.
-  - Critical actions with click area < 24x24 px and no spacing.
-  - Drag-and-drop without an alternative.
-  - Forms where labels are missing or only placeholders.
+### 1. Design System: "Deep Space Glass"
+- **Glassmorphism**: Replaced solid opaque cards with translucent "glass" panels (`.glass-panel`) using `backdrop-filter: blur()`.
+- **Gradients**: Introduced deep radial gradients for backgrounds to add depth and reduce the "flat" feel.
+- **Typography**: Adopted a "Display" font style for headers to improve hierarchy and brand presence.
 
-- **Broken flows**
-  - Users cannot complete a core task due to UI issues.
-  - Navigation dead ends or loops.
-  - Modals that trap focus or cannot be closed.
+### 2. Multi-Theme Support
+We implemented a robust theming engine using CSS variables scoped to `[data-theme]`.
+- **Dark (Default)**: Deep navy/charcoal background, high contrast text, blue accents. Optimized for low-light environments.
+- **Light**: Clean, airy interface with soft gray backgrounds and strong typography. Maintains the same layout structure.
+- **Party**: A vibrant "tournament night" mode featuring purple/pink gradients, stronger glows, and a more energetic vibe.
 
-- **Unreadable or confusing content**
-  - Body text < 14–16 px without strong reason.
-  - Key content clipped, overlapping, or hidden.
+### 3. Layout & Shell
+- **App Shell**: Introduced a proper header with the SquadLogic branding and a consistent main content area.
+- **Card-Based Grid**: Refactored long lists (like Insights) into grid-based card layouts to improve scannability and break the "wall of text."
+- **Theme Toggle**: Added a floating action button to instantly switch between themes.
 
-## P1 – Strongly Recommended
-
-- **Layout & spacing**
-  - Apply 4/8 px spacing scale.
-  - Ensure margins and grouping are consistent.
-
-- **Typography & hierarchy**
-  - Use defined type styles (display, heading, body, label).
-  - Ensure each screen has a clear primary action at a glance.
-
-- **Components & states**
-  - Buttons, inputs, lists, modals have consistent radii, padding, and states.
-  - Loading, success, and error feedback present for all async actions.
-
-- **Navigation**
-  - Active section clearly highlighted.
-  - Back navigation works predictably.
-
-- **Forms**
-  - Group related fields; use inline, specific error messages.
-  - Avoid redundant data entry; use sensible defaults.
-
-- **Tables & dense data**
-  - Use semantic tables.
-  - Sticky headers or other patterns to preserve context.
-  - Clear sort/filter behavior.
-
-## Process
-
-1) Run through 3–5 core flows.
-2) Fix all P0 issues.
-3) Fix as many P1 issues as possible.
-4) Log P2 items (visual polish) as follow-up tasks.
-```
+## Technical Implementation
+- **Tokens**: All colors, shadows, and spacing are defined in `index.css` as CSS variables.
+- **Composition**: Components use utility classes like `.glass-panel` and `.section-panel` to inherit styles, reducing CSS duplication.
+- **Persistence**: Theme preference is saved to `localStorage` to persist across sessions.

@@ -1,6 +1,6 @@
 ## Assumptions
 
-* Target repo: `GotSportTeamerScheduler` (React + Vite web admin, standard CSS). 
+* Target repo: `SquadLogic` (React + Vite web admin, standard CSS). 
 * You want “best of both worlds”:
 
   * Keep Gemini’s structure and web focus.
@@ -17,7 +17,7 @@ Current file is a good generic web checklist but not yet tuned to scheduling/adm
 Here is a merged, repo-specific version:
 
 ```markdown
-# UI / UX Pass Checklist – GotSportTeamerScheduler (Web)
+# UI / UX Pass Checklist – SquadLogic (Web)
 
 ## 0. Purpose and Scope
 
@@ -401,15 +401,15 @@ Use this when you need a quick version of the full checklist.
 
 ---
 
-## 3. `ui-ux-polish.md` (New: GotSportTeamerScheduler-specific)
+## 3. `ui-ux-polish.md` (New: SquadLogic-specific)
 
 Current file is AIAdvocate-specific (React Native, Paper, safe areas). 
 Below is a web-admin / scheduling-specific version, merging that structure with your earlier requirements.
 
 ```markdown
-# UI / UX Visual Polish – GotSportTeamerScheduler
+# UI / UX Visual Polish – SquadLogic
 
-This document defines **P2-level visual polish rules** for the GotSportTeamerScheduler web client (React + Vite + CSS). Use it *after* P0/P1 issues from `docs/ui/ui-ux-pass.md` are resolved or explicitly logged.
+This document defines **P2-level visual polish rules** for the SquadLogic web client (React + Vite + CSS). Use it *after* P0/P1 issues from `docs/ui/ui-ux-pass.md` are resolved or explicitly logged.
 
 - P0 / P1 rules in `docs/ui/ui-ux-pass.md` are **higher priority** than anything here.
 - Never break accessibility, platform conventions, or performance to achieve cosmetic effects.
@@ -769,13 +769,13 @@ Current agent instructions are solid but generic and unaware of flows or polish 
 Below is a merged version that keeps the concise style but adds flow awareness and polish behavior.
 
 ```markdown
-# Agent Workspace Instructions – UI/UX Guidelines (GotSportTeamerScheduler)
+# Agent Workspace Instructions – UI/UX Guidelines (SquadLogic)
 
 ## Role and Scope
 
-You are a senior frontend engineer working in the Antigravity AI IDE on the `GotSportTeamerScheduler` repository.
+You are a senior frontend engineer working in the Antigravity AI IDE on the `SquadLogic` repository.
 
-GotSportTeamerScheduler is a React Web application built with:
+SquadLogic is a React Web application built with:
 
 - **Vite** (build tool).
 - **React** (UI library).
@@ -906,7 +906,7 @@ Your existing audit docs are mostly templates and, in the case of `ui-ux-audit-f
 ### 5.1 `ui-ux-audit-plan.md` (specialize to this app)
 
 ```markdown
-# UI/UX Audit Plan – GotSportTeamerScheduler
+# UI/UX Audit Plan – SquadLogic
 
 ## 1. Rules Summary
 
@@ -1038,7 +1038,7 @@ Each audit pass should:
 Keep the structure but tie it explicitly to this repo and the new plan. 
 
 ```markdown
-# UI/UX Audit Issues – GotSportTeamerScheduler
+# UI/UX Audit Issues – SquadLogic
 
 This document tracks UI/UX issues discovered during audit passes, grouped by surface and priority. Use it with:
 
@@ -1122,9 +1122,9 @@ Current file still references `mobile-app/...` from AIAdvocate.
 Reset it as a narrative findings doc:
 
 ```markdown
-# UI/UX Audit Findings – GotSportTeamerScheduler
+# UI/UX Audit Findings – SquadLogic
 
-This document provides **narrative summaries** of UI/UX audit findings for GotSportTeamerScheduler. It complements:
+This document provides **narrative summaries** of UI/UX audit findings for SquadLogic. It complements:
 
 - `docs/ui/ui-ux-audit-plan.md` – which surfaces to audit and in what order.
 - `docs/ui/ui-ux-audit-issues.md` – detailed, per-issue tracking.
@@ -1196,7 +1196,7 @@ Use this file to record high-level conclusions after each audit pass, focusing o
 Current file is a generic template; keep the structure but align with these docs. 
 
 ```markdown
-# UI/UX Audit Verification Report – GotSportTeamerScheduler
+# UI/UX Audit Verification Report – SquadLogic
 
 **Date:** YYYY-MM-DD  
 **Status:** PENDING

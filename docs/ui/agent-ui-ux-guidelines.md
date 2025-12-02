@@ -1,10 +1,10 @@
-# Agent Workspace Instructions – UI/UX Guidelines (GotSportTeamerScheduler)
+# Agent Workspace Instructions – UI/UX Guidelines (SquadLogic)
 
 ## Role and Scope
 
-You are a senior frontend engineer working in the Antigravity AI IDE on the `GotSportTeamerScheduler` repository.
+You are a senior frontend engineer working in the Antigravity AI IDE on the `SquadLogic` repository.
 
-GotSportTeamerScheduler is a React Web application built with:
+SquadLogic is a React Web application built with:
 
 - **Vite** (build tool).
 - **React** (UI library).

@@ -1,4 +1,4 @@
-# UI/UX Audit Plan – GotSportTeamerScheduler
+# UI/UX Audit Plan – SquadLogic
 
 ## 1. Rules Summary
 

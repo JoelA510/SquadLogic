@@ -230,7 +230,7 @@ function App() {
                   Fill Rate: {formatPercent(division.averageFillRate)} · Coach Coverage: {formatPercent(division.coachCoverage.coverageRate)}
                 </div>
                 {division.needsAdditionalCoaches && (
-                  <p className="text-accent" style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
+                  <p className="insight-card__alert-text">
                     ⚠ Needs coaches
                   </p>
                 )}
@@ -275,15 +275,15 @@ function App() {
 
           <div className="insights-grid">
             <article className="insight-card">
-              <h3>Manual follow-up reasons</h3>
+              <h3 className="insight-card__title">Manual follow-up reasons</h3>
               {!practiceReadinessSnapshot.unassignedByReason?.length ? (
-                <p className="insight__empty">All teams assigned automatically.</p>
+                <p className="insight-card__empty">All teams assigned automatically.</p>
               ) : (
-                <ul className="insight-list">
+                <ul className="insight-card__list">
                   {practiceReadinessSnapshot.unassignedByReason.map((entry) => (
-                    <li key={entry.reason}>
-                      <div className="insight__title">{entry.reason}</div>
-                      <p>{entry.count} teams</p>
+                    <li key={entry.reason} className="insight-card__list-item">
+                      <div className="insight-card__list-label">{entry.reason}</div>
+                      <p className="insight-card__list-meta">{entry.count} teams</p>
                     </li>
                   ))}
                 </ul>

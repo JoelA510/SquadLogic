@@ -31,6 +31,7 @@
 
 .brand-logo span {
   background: linear-gradient(135deg, var(--color-primary-400), var(--color-primary-600));
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -74,7 +75,8 @@
   font-size: clamp(2.5rem, 5vw, 4rem);
   font-weight: 800;
   margin-bottom: var(--space-4);
-  background: linear-gradient(to right, var(--color-text-primary), var(--color-primary-400));
+  background: linear-gradient(to right, var(--color-text-primary), var(--color-primary-glow));
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   letter-spacing: -0.03em;
@@ -209,7 +211,7 @@
 /* --- INSIGHTS GRID (Replaces Lists) --- */
 .insights-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: var(--space-6);
 }
 
@@ -245,6 +247,57 @@
   border-top: 1px solid var(--color-border-subtle);
 }
 
+.insight-card__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.insight-card__empty {
+  margin-top: var(--space-2);
+  font-size: 0.95rem;
+  color: var(--color-text-muted);
+}
+
+.insight-card__list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-2) 0 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.insight-card__list-item {
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  box-shadow: var(--shadow-soft);
+}
+
+.insight-card__list-label {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.insight-card__list-meta {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+.insight-card__alert-text {
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+  color: var(--color-status-warning);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 /* --- ROADMAP --- */
 .roadmap-list {
   display: grid;
@@ -260,6 +313,23 @@
   grid-template-columns: 140px 1fr;
   gap: var(--space-6);
   align-items: start;
+}
+
+.actions-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-2) 0 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.actions-list li {
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  font-size: 0.95rem;
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-soft);
 }
 
 .status-pill {

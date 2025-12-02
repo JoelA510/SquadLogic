@@ -341,22 +341,6 @@
 .status-dot {
   width: 0.5rem;
   height: 0.5rem;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-/* --- ALERTS --- */
-.team-persistence__controls {
-  display: flex;
-  gap: var(--space-4);
-  align-items: center;
-  margin-bottom: var(--space-4);
-}
-
-.persistence-button {
-  padding: 0.75rem 1.5rem;
-  border-radius: var(--radius-full);
-  background: var(--color-primary);
   color: white;
   border: none;
   font-weight: 600;
@@ -365,42 +349,6 @@
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.persistence-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px var(--color-primary-glow);
-}
-
-.persistence-button:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-
-.persistence-mode-banner {
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--space-4);
-  border: 1px solid transparent;
-}
-
-.persistence-mode-banner.live {
-  background: var(--color-status-success-bg);
-  color: var(--color-status-success);
-  border-color: var(--color-status-success);
-}
-
-.persistence-mode-banner.simulated {
-  background: var(--color-status-warning-bg);
-  color: var(--color-status-warning);
-  border-color: var(--color-status-warning);
-}
-
-.team-persistence__mode {
-  margin: 0;
-  font-size: 0.9rem;
-}
-
-.team-persistence__action-message {
-  color: var(--color-text-secondary);
 }
 
 .insight-card__list-header {

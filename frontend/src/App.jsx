@@ -152,6 +152,7 @@ function App() {
     (gameReadinessSnapshot.unscheduled?.length ?? 0) > 0;
 
   const baseSlotItems = practiceReadinessSnapshot.baseSlotDistribution ?? [];
+  const dayConcentrationItems = practiceReadinessSnapshot.dayConcentrationAlerts ?? [];
   const divisionDayItems = Object.entries(practiceReadinessSnapshot.divisionDayDistribution ?? {});
   const underutilizedBaseSlotItems = practiceReadinessSnapshot.underutilizedBaseSlots ?? [];
   const manualFollowUpBreakdown =
@@ -311,6 +312,92 @@ function App() {
                   <h3>{concern.baseSlotId}</h3>
                   <p>{concern.message}</p>
                   <p className="insight-meta">Dominant: {concern.dominantDivision}</p>
+                </div>
+              )}
+            />
+
+            <InsightSection
+              title="Base slot utilization"
+              items={baseSlotItems}
+              emptyMessage="No base slot data."
+              renderItem={(slot) => (
+                <div key={slot.baseSlotId} className="insight-card">
+                  <h3>{slot.baseSlotId}</h3>
+                  <p>
+                    {slot.day} · {formatTime(slot.representativeStart)}
+                  </p>
+                  <p className="insight-meta">
+                    Utilization: {formatPercentPrecise(slot.utilization)} ({slot.totalAssigned}/{slot.totalCapacity})
+                  </p>
+                  {slot.divisionBreakdown?.length > 0 && (
+                    <ul className="insight-card__list insight-card__list--compact">
+                      {slot.divisionBreakdown.map((division) => (
+                        <li key={`${slot.baseSlotId}-${division.division}`} className="insight-card__list-item">
+                          <div className="insight-card__list-label">{division.division}</div>
+                          <p className="insight-card__list-meta">
+                            {division.count} teams · {formatPercentPrecise(division.percentage)}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            />
+
+            <InsightSection
+              title="Day concentration"
+              items={divisionDayItems}
+              emptyMessage="No day distribution data."
+              renderItem={([division, details]) => (
+                <div key={division} className="insight-card">
+                  <h3>{division}</h3>
+                  <p>{details.totalAssigned} assignments</p>
+                  <p className="insight-meta">Avg start: {formatClockFromMinutes(details.averageStartMinutes)}</p>
+                  {details.dayBreakdown?.length > 0 && (
+                    <ul className="insight-card__list insight-card__list--compact">
+                      {details.dayBreakdown.map((day) => (
+                        <li key={`${division}-${day.day}`} className="insight-card__list-item">
+                          <div className="insight-card__list-label">{day.day}</div>
+                          <p className="insight-card__list-meta">
+                            {day.count} teams · {formatPercentPrecise(day.percentage)}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            />
+
+            <InsightSection
+              title="Underutilized base slots"
+              items={underutilizedBaseSlotItems}
+              emptyMessage="No underutilized base slots."
+              renderItem={(slot) => (
+                <div key={slot.baseSlotId} className="insight-card">
+                  <h3>{slot.baseSlotId}</h3>
+                  <p>
+                    {slot.day} · {formatTime(slot.representativeStart)}
+                  </p>
+                  <p className="insight-meta">
+                    Utilization: {formatPercentPrecise(slot.utilization)} ({slot.totalAssigned}/{slot.totalCapacity})
+                  </p>
+                </div>
+              )}
+            />
+
+            <InsightSection
+              title="Day concentration alerts"
+              items={dayConcentrationItems}
+              emptyMessage="No concentration alerts."
+              renderItem={(alert, index) => (
+                <div key={`${alert.division}-${index}`} className="insight-card">
+                  <h3>{alert.division}</h3>
+                  <p>
+                    Dominant day: {alert.dominantDay} ({alert.dominantCount}/{alert.totalAssignments})
+                  </p>
+                  <p className="insight-meta">Share: {formatPercentPrecise(alert.dominantShare)}</p>
                 </div>
               )}
             />

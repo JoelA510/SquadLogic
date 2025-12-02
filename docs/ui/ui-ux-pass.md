@@ -1,4 +1,4 @@
-# UI / UX Pass Checklist – GotSportTeamerScheduler (Web)
+# UI / UX Pass Checklist – SquadLogic (Web)
 
 ## 0. Purpose and Scope
 

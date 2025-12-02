@@ -158,7 +158,7 @@ function App() {
   return (
     <div className="app-shell">
       <header className="hero">
-        <h1>GotSport Teamer Scheduler Admin</h1>
+        <h1>SquadLogic Admin</h1>
         <p>
           This prototype dashboard introduces the future admin experience. It surfaces roadmap agents and next steps while the
           Supabase-backed workflows are still under construction.

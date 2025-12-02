@@ -1,6 +1,6 @@
-# UI / UX Visual Polish – GotSportTeamerScheduler
+# UI / UX Visual Polish – SquadLogic
 
-This document defines **P2-level visual polish rules** for the GotSportTeamerScheduler web client (React + Vite + CSS). Use it *after* P0/P1 issues from `docs/ui/ui-ux-pass.md` are resolved or explicitly logged.
+This document defines **P2-level visual polish rules** for the SquadLogic web client (React + Vite + CSS). Use it *after* P0/P1 issues from `docs/ui/ui-ux-pass.md` are resolved or explicitly logged.
 
 - P0 / P1 rules in `docs/ui/ui-ux-pass.md` are **higher priority** than anything here.
 - Never break accessibility, platform conventions, or performance to achieve cosmetic effects.

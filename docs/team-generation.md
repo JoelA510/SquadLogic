@@ -1,6 +1,6 @@
 # Team Generation Design
 
-This document translates the roadmap's team formation phase into actionable plans for the GotSport Teamer Scheduler. It assumes the data model described in `docs/data-modeling.md` and focuses on how to transform cleaned registration data into balanced rosters that honor mutual buddy requests and coach commitments.
+This document translates the roadmap's team formation phase into actionable plans for the SquadLogic. It assumes the data model described in `docs/data-modeling.md` and focuses on how to transform cleaned registration data into balanced rosters that honor mutual buddy requests and coach commitments.
 
 ## Objectives
 - Produce balanced teams per division that respect maximum roster sizes stored in the database.

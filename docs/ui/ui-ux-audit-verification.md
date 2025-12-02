@@ -1,4 +1,4 @@
-# UI/UX Audit Verification Report – GotSportTeamerScheduler
+# UI/UX Audit Verification Report – SquadLogic
 
 **Date:** YYYY-MM-DD  
 **Status:** PENDING

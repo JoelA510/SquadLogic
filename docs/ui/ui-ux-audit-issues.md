@@ -1,4 +1,4 @@
-# UI/UX Audit Issues – GotSportTeamerScheduler
+# UI/UX Audit Issues – SquadLogic
 
 This document tracks UI/UX issues discovered during audit passes, grouped by surface and priority. Use it with:
 
@@ -62,7 +62,7 @@ During an audit, update this section with:
   - [x] `a11y_contrast` (P1): Verify contrast of status pills (e.g., `#6ee7b7` on dark bg) meets 4.5:1.
       - *Fix*: Check ratios and adjust text lightness if needed.
   - [x] `component_consistency` (P1): Button styles (`persistence-button`, `persistence-action`) define their own shadows/transitions instead of sharing a token.
-# UI/UX Audit Issues – GotSportTeamerScheduler
+# UI/UX Audit Issues – SquadLogic
 
 This document tracks UI/UX issues discovered during audit passes, grouped by surface and priority. Use it with:
 
@@ -135,7 +135,7 @@ During an audit, update this section with:
 - **Files**: `src/App.jsx` (Practice Readiness & Insights)
 - **Issues**:
   - [x] `layout_density` (P1): Header description text constrained to `460px`, leaving excessive whitespace on desktop.
-# UI/UX Audit Issues – GotSportTeamerScheduler
+# UI/UX Audit Issues – SquadLogic
 
 This document tracks UI/UX issues discovered during audit passes, grouped by surface and priority. Use it with:
 

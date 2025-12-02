@@ -1,6 +1,6 @@
 ## Current State
 
-* The GotSportTeamerScheduler repo **now contains**:
+* The SquadLogic repo **now contains**:
   * `docs/ui/ui-ux-pass.md`
   * `docs/ui/ui-ux-pass-summary.md`
   * `docs/ui/ui-ux-polish.md`
@@ -76,7 +76,7 @@ Use these as the canonical UI standards for this repo:
 - docs/ui/ui-ux-pass-summary.md
 
 Task:
-- Verify and refine the UI/UX audit plan for GotSportTeamerScheduler.
+- Verify and refine the UI/UX audit plan for SquadLogic.
 
 Steps:
 
@@ -323,7 +323,7 @@ Focus:
      * Enforce the P0 -> P1 -> P2 sequence.
      * Keep changes scoped to flows or components, matching how the app is structured.
      * **Include visual verification** via the browser tool, which is critical for UI work.
-   * They mirror what you are doing for the other two projects, just tailored to GotSportTeamerScheduler’s flows and file layout.
+   * They mirror what you are doing for the other two projects, just tailored to SquadLogic’s flows and file layout.
 
 2. **Edge case**
 

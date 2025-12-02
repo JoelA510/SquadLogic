@@ -1,7 +1,7 @@
 # Codebase Audit – 2024-07-08
 
 ## Context
-- **Repository scope**: Documentation-first planning for the GotSport Teamer Scheduler.
+- **Repository scope**: Documentation-first planning for the SquadLogic.
 - **Primary artifacts reviewed**: `README.md`, `roadmap.md`, architecture/design docs under `docs/` (requirements, data modeling, intake pipeline, scheduling flows, SQL drafts, RLS outline, frontend architecture), and meeting notes.
 
 ## High-Level Assessment

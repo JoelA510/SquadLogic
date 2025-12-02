@@ -1,5 +1,5 @@
 {
-  "name": "gotsportteamerscheduler",
+  "name": "squad-logic",
   "version": "1.0.0",
   "description": "An application that converts raw GotSport registration data in CSV format and provides both teaming and scheduling frameworks, intended to support youth sports organizations.",
   "type": "module",

@@ -1,6 +1,6 @@
-# UI/UX Audit Findings – GotSportTeamerScheduler
+# UI/UX Audit Findings – SquadLogic
 
-This document provides **narrative summaries** of UI/UX audit findings for GotSportTeamerScheduler. It complements:
+This document provides **narrative summaries** of UI/UX audit findings for SquadLogic. It complements:
 
 - `docs/ui/ui-ux-audit-plan.md` – which surfaces to audit and in what order.
 - `docs/ui/ui-ux-audit-issues.md` – detailed, per-issue tracking.

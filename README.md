@@ -6,7 +6,7 @@
 >
 > SquadLogic converts raw GotSport registration data into actionable teaming and scheduling frameworks, designed specifically to support youth sports organizations.
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/JoelA510/GotSportTeamerScheduler/actions)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/JoelA510/SquadLogic/actions)
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](https://opensource.org/licenses/ISC)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-green)](https://nodejs.org/)
 [![Vite](https://img.shields.io/badge/Vite-5.4.21-646cff)](https://vitejs.dev/)
@@ -20,7 +20,7 @@ SquadLogic is a comprehensive tool for youth sports administrators. It simplifie
 ## ✨ Key Features
 
 -   **🤖 Automated Team Generation**: Intelligent allocation of players to teams based on configurable criteria.
--   **🗓️ Practice Scheduling**: Efficient scheduling of practice slots, minimizing conflicts and maximizing resource usage.
+-   **wc Practice Scheduling**: Efficient scheduling of practice slots, minimizing conflicts and maximizing resource usage.
 -   **⚽ Game Scheduling**: Round-robin game generation and allocation.
 -   **💾 Persistence**: Robust data storage using Supabase (Edge Functions & Database).
 -   **🎨 Deep Space Glass UI**: A stunning, responsive interface with dark/light/party modes, glassmorphism effects, and dynamic animations.
@@ -45,8 +45,8 @@ SquadLogic is a comprehensive tool for youth sports administrators. It simplifie
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/JoelA510/GotSportTeamerScheduler.git
-    cd GotSportTeamerScheduler
+    git clone https://github.com/JoelA510/SquadLogic.git
+    cd SquadLogic
     ```
 
 2.  **Install dependencies:**
@@ -68,10 +68,10 @@ To create a production build:
 npm run frontend:build
 ```
 
-## 📂 Project Structure
+## Tb Project Structure
 
 ```
-GotSportTeamerScheduler/
+SquadLogic/
 ├── frontend/           # React frontend application
 │   ├── src/            # Source code
 │   │   ├── components/ # Reusable UI components

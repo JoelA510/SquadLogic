@@ -25,7 +25,7 @@
  *   `divisionDaySaturationPenalty` keys for tuning slot scoring.
  * @returns {{ assignments: Array<{ teamId: string, slotId: string, source: 'locked' | 'auto' }>, unassigned: Array<{ teamId: string, reason: string, candidates: Array<{ slotId: string, score: number }> }> }}
  */
-import { validateSlot, validateTeam } from './utils/validation.js';
+import { validateSlot } from './utils/validation.js';
 
 const DEFAULT_SCORING_WEIGHTS = {
   coachPreferredSlot: 10,

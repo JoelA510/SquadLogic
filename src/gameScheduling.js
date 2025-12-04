@@ -1,4 +1,4 @@
-import { validateSlot, validateTeam } from './utils/validation.js';
+import { validateSlot } from './utils/validation.js';
 
 const BYE = Symbol('BYE');
 

@@ -5,6 +5,7 @@
 
 - Implemented the initial database schema migration (`20251202000000_initial_schema.sql`) to support core entities like players, teams, and schedules.
 - Updated `supabase/seed.sql` with comprehensive sample data for a "Fall 2024 Recreation" season to facilitate local development and testing.
+- Applied schema fixes for unique constraints, strong typing (enums), and data integrity (email validation).
 - Establishes the foundational data layer required for the "Data Modeling & Storage" roadmap phase.
 
 ---
@@ -30,6 +31,7 @@
 
 **A. TL;DR (1–3 sentences)**  
 - Created the initial Supabase migration file defining tables for season settings, divisions, players, coaches, fields, and scheduling slots. Updated the seed script to populate these tables with a realistic sample season.
+- **Fixes applied**: Added `UNIQUE` constraint to `games.game_slot_id`, converted `gender_policy` to an ENUM, added email validation for coaches, and refactored triggers for maintainability.
 
 **B. 5W + H**
 
@@ -41,6 +43,11 @@
 
 - **How it changed:**  
   Translated the data modeling plan into SQL `CREATE TABLE` statements with appropriate constraints and relationships. The seed script uses an idempotent PL/pgSQL block to insert data without duplicates.
+  - **Schema Fixes**:
+    - `games.game_slot_id`: Added `UNIQUE` constraint to support `ON CONFLICT` upserts.
+    - `divisions.gender_policy`: Converted from text check to `gender_policy_enum` ('coed', 'girls', 'boys').
+    - `coaches.email`: Added regex `CHECK` constraint for email validation.
+    - Triggers: Refactored individual `CREATE TRIGGER` statements into a DRY `DO` loop.
 
 - **Where it changed:**  
   `supabase/migrations/` and `supabase/seed.sql`.

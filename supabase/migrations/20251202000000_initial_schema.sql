@@ -45,11 +45,18 @@ create table if not exists season_settings (
     unique (season_label, season_year)
 );
 
+do $$
+begin
+    if not exists (select 1 from pg_type where typname = 'gender_policy_enum') then
+        create type gender_policy_enum as enum ('coed', 'girls', 'boys');
+    end if;
+end$$;
+
 create table if not exists divisions (
     id              uuid primary key default gen_random_uuid(),
     season_settings_id bigint not null references season_settings(id) on delete cascade,
     name            text not null,
-    gender_policy   text check (gender_policy in ('coed', 'girls', 'boys')) default 'coed',
+    gender_policy   gender_policy_enum not null default 'coed',
     max_roster_size smallint not null,
     play_format     text not null,
     season_start    date not null,
@@ -86,7 +93,7 @@ create table if not exists coaches (
     id                           uuid primary key default gen_random_uuid(),
     player_id                    uuid references players(id) on delete set null,
     full_name                    text not null,
-    email                        text not null,
+    email                        text not null check (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
     phone                        text,
     certifications               text,
     preferred_practice_days      day_of_week[] check (preferred_practice_days <@ array['mon','tue','wed','thu']::day_of_week[]),
@@ -204,7 +211,7 @@ create table if not exists practice_assignments (
 
 create table if not exists games (
     id              uuid primary key default gen_random_uuid(),
-    game_slot_id    uuid not null references game_slots(id) on delete cascade,
+    game_slot_id    uuid not null unique references game_slots(id) on delete cascade,
     home_team_id    uuid not null references teams(id) on delete cascade,
     away_team_id    uuid not null references teams(id) on delete cascade,
     week_index      smallint,
@@ -301,75 +308,21 @@ begin
 end;
 $$;
 
-drop trigger if exists set_timestamp_season_settings on season_settings;
-create trigger set_timestamp_season_settings
-    before update on season_settings
-    for each row execute function trigger_set_timestamp();
 
-drop trigger if exists set_timestamp_divisions on divisions;
-create trigger set_timestamp_divisions
-    before update on divisions
-    for each row execute function trigger_set_timestamp();
-
-drop trigger if exists set_timestamp_players on players;
-create trigger set_timestamp_players
-    before update on players
-    for each row execute function trigger_set_timestamp();
-
-drop trigger if exists set_timestamp_coaches on coaches;
-create trigger set_timestamp_coaches
-    before update on coaches
-    for each row execute function trigger_set_timestamp();
-
-drop trigger if exists set_timestamp_locations on locations;
-create trigger set_timestamp_locations
-    before update on locations
-    for each row execute function trigger_set_timestamp();
-
-drop trigger if exists set_timestamp_fields on fields;
-create trigger set_timestamp_fields
-    before update on fields
-    for each row execute function trigger_set_timestamp();
-
-drop trigger if exists set_timestamp_field_subunits on field_subunits;
-create trigger set_timestamp_field_subunits
-    before update on field_subunits
-    for each row execute function trigger_set_timestamp();
-
-drop trigger if exists set_timestamp_practice_slots on practice_slots;
-create trigger set_timestamp_practice_slots
-    before update on practice_slots
-    for each row execute function trigger_set_timestamp();
-
-drop trigger if exists set_timestamp_game_slots on game_slots;
-create trigger set_timestamp_game_slots
-    before update on game_slots
-    for each row execute function trigger_set_timestamp();
 
 drop trigger if exists ensure_teams_assistant_coaches_valid on teams;
 create trigger ensure_teams_assistant_coaches_valid
     before insert or update on teams
     for each row execute function ensure_assistant_coach_ids_valid();
 
-drop trigger if exists set_timestamp_teams on teams;
-create trigger set_timestamp_teams
-    before update on teams
-    for each row execute function trigger_set_timestamp();
 
-drop trigger if exists set_timestamp_practice_assignments on practice_assignments;
-create trigger set_timestamp_practice_assignments
-    before update on practice_assignments
-    for each row execute function trigger_set_timestamp();
 
 drop trigger if exists ensure_games_valid on games;
 create trigger ensure_games_valid
     before insert or update on games
     for each row execute function ensure_game_team_consistency();
 
-drop trigger if exists set_timestamp_games on games;
-create trigger set_timestamp_games
-    before update on games
-    for each row execute function trigger_set_timestamp();
+
 
 create table if not exists import_jobs (
     id                 uuid primary key default gen_random_uuid(),
@@ -501,6 +454,25 @@ declare
     t_name text;
 begin
     foreach t_name in array ['scheduler_runs', 'evaluation_runs', 'export_jobs']
+    loop
+        execute format('drop trigger if exists %I on %I', 'set_timestamp_' || t_name, t_name);
+        execute format(
+            'create trigger %I before update on %I for each row execute function trigger_set_timestamp()',
+            'set_timestamp_' || t_name,
+            t_name
+        );
+    end loop;
+end$$;
+
+do $$
+declare
+    t_name text;
+begin
+    foreach t_name in array [
+        'season_settings', 'divisions', 'players', 'coaches', 'locations',
+        'fields', 'field_subunits', 'practice_slots', 'game_slots', 'teams',
+        'practice_assignments', 'games'
+    ]
     loop
         execute format('drop trigger if exists %I on %I', 'set_timestamp_' || t_name, t_name);
         execute format(

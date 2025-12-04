@@ -25,6 +25,7 @@
  *   `divisionDaySaturationPenalty` keys for tuning slot scoring.
  * @returns {{ assignments: Array<{ teamId: string, slotId: string, source: 'locked' | 'auto' }>, unassigned: Array<{ teamId: string, reason: string, candidates: Array<{ slotId: string, score: number }> }> }}
  */
+import { validateSlot } from './utils/validation.js';
 
 const DEFAULT_SCORING_WEIGHTS = {
   coachPreferredSlot: 10,
@@ -137,12 +138,7 @@ export function schedulePractices({
 
   const slotsById = new Map();
   for (const slot of sanitizedSlots) {
-    if (Number.isNaN(slot.start.getTime()) || Number.isNaN(slot.end.getTime())) {
-      throw new Error(`slot ${slot.id} includes an invalid timestamp`);
-    }
-    if (slot.end <= slot.start) {
-      throw new Error(`slot ${slot.id} must end after it starts`);
-    }
+    validateSlot(slot);
     if (slotsById.has(slot.id)) {
       throw new Error(`duplicate slot id detected: ${slot.id}`);
     }

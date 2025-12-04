@@ -1,3 +1,5 @@
+import { validateSlot } from './utils/validation.js';
+
 /**
  * Evaluate the quality of practice schedule assignments and emit metrics
  * used by the admin dashboard and regression tests.
@@ -174,28 +176,10 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
   const slotsById = new Map();
   const baseSlotMetadata = new Map();
   for (const slot of slots) {
-    if (!slot || typeof slot !== 'object') {
-      throw new TypeError('each slot must be an object');
-    }
-    if (!slot.id) {
-      throw new TypeError('each slot requires an id');
-    }
-    if (typeof slot.capacity !== 'number' || slot.capacity < 0) {
-      throw new TypeError(`slot ${slot.id} must define a non-negative capacity`);
-    }
-    if (!slot.start || !slot.end) {
-      throw new TypeError(`slot ${slot.id} must define start and end timestamps`);
-    }
+    validateSlot(slot);
 
     const startDate = new Date(slot.start);
     const endDate = new Date(slot.end);
-    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-      throw new Error(`slot ${slot.id} includes an invalid timestamp`);
-    }
-    if (endDate <= startDate) {
-      throw new Error(`slot ${slot.id} must end after it starts`);
-    }
-
     const baseSlotId = slot.baseSlotId ?? slot.id;
 
     slotsById.set(slot.id, {
@@ -355,7 +339,7 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
 
       const day = slot.day ?? 'unknown';
       dayCounts.set(day, (dayCounts.get(day) ?? 0) + 1);
-      totalMinutes += slot.start.getHours() * 60 + slot.start.getMinutes();
+      totalMinutes += slot.start.getUTCHours() * 60 + slot.start.getUTCMinutes();
       counted += 1;
     }
 

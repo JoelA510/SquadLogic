@@ -3,6 +3,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { normalizeString, normalizeOptionalString } from './utils/normalization.js';
 
 function deriveTeamUuid(generatorTeamId) {
   const hash = createHash('sha256').update(generatorTeamId).digest();
@@ -21,28 +22,6 @@ function deriveTeamUuid(generatorTeamId) {
     hex.slice(16, 20),
     hex.slice(20, 32),
   ].join('-');
-}
-
-function normalizeString(value, label, index) {
-  if (typeof value !== 'string') {
-    throw new TypeError(`${label} must be a string at index ${index}`);
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    throw new Error(`${label} cannot be empty at index ${index}`);
-  }
-  return trimmed;
-}
-
-function normalizeOptionalString(value) {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  if (typeof value !== 'string') {
-    throw new TypeError('coachId must be a string when provided');
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
 }
 
 function normalizeDivisionId(divisionKey, divisionIdMap, index) {

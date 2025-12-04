@@ -18,6 +18,11 @@ function buildTransactionStub() {
   return {
     calls,
     client: {
+      rpc: async (rpcName, args) => {
+        calls.push({ table: 'scheduler_runs', rows: [args.run_data] }); // Mocking the capture of run data
+        return { data: { success: true }, error: null };
+      },
+      // Keep transaction for backward compatibility if needed, but RPC is primary now
       transaction: async (callback) => {
         const tx = {
           from: (table) => ({
@@ -27,7 +32,6 @@ function buildTransactionStub() {
             },
           }),
         };
-
         const result = await callback(tx);
         calls.push({ committed: true });
         return result;

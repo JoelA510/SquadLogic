@@ -1,28 +1,9 @@
-/**
- * Helpers for persisting game scheduling outputs to Supabase.
- */
-
-function normalizeTimestamp(value, label, index) {
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-
-  if (typeof value !== 'string') {
-    throw new TypeError(`${label} must be a string or Date for assignments[${index}]`);
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed) {
-    throw new Error(`${label} cannot be empty for assignments[${index}]`);
-  }
-
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new Error(`${label} is not a valid date/time for assignments[${index}]`);
-  }
-
-  return parsed.toISOString();
-}
+import {
+  normalizeString,
+  normalizeId,
+  normalizeTimestamp,
+  normalizeOptionalString,
+} from './utils/normalization.js';
 
 function normalizeWeekIndex(value, index) {
   if (!Number.isFinite(value) || value <= 0) {
@@ -31,26 +12,8 @@ function normalizeWeekIndex(value, index) {
   return Math.trunc(value);
 }
 
-function normalizeId(value, label, index) {
-  if (typeof value !== 'string') {
-    throw new TypeError(`assignments[${index}] requires a string for ${label}`);
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    throw new Error(`assignments[${index}] ${label} cannot be empty`);
-  }
-  return trimmed;
-}
-
 function normalizeFieldId(value) {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  if (typeof value !== 'string') {
-    throw new TypeError('fieldId must be a string when provided');
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
+  return normalizeOptionalString(value);
 }
 
 /**

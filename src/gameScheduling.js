@@ -1,3 +1,5 @@
+import { validateSlot } from './utils/validation.js';
+
 const BYE = Symbol('BYE');
 
 /**
@@ -211,6 +213,8 @@ function indexTeams(teams) {
   return teamsById;
 }
 
+
+
 function indexSlots(slots) {
   if (!Array.isArray(slots)) {
     throw new TypeError('slots must be an array');
@@ -221,30 +225,12 @@ function indexSlots(slots) {
   const slotRecords = new Map();
 
   for (const slot of slots) {
-    if (!slot || typeof slot !== 'object') {
-      throw new TypeError('each slot must be an object');
-    }
-    if (!slot.id) {
-      throw new TypeError('each slot requires an id');
-    }
-    if (typeof slot.capacity !== 'number' || slot.capacity < 0) {
-      throw new TypeError(`slot ${slot.id} must define a non-negative capacity`);
-    }
+    validateSlot(slot);
+
     if (typeof slot.weekIndex !== 'number' || !Number.isInteger(slot.weekIndex) || slot.weekIndex <= 0) {
       throw new TypeError(`slot ${slot.id} must include a positive integer weekIndex`);
     }
-    if (!slot.start || !slot.end) {
-      throw new TypeError(`slot ${slot.id} must define start and end timestamps`);
-    }
 
-    const start = new Date(slot.start);
-    const end = new Date(slot.end);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-      throw new Error(`slot ${slot.id} includes an invalid timestamp`);
-    }
-    if (end <= start) {
-      throw new Error(`slot ${slot.id} must end after it starts`);
-    }
     if (slotRecords.has(slot.id)) {
       throw new Error(`duplicate slot id detected: ${slot.id}`);
     }
@@ -253,8 +239,8 @@ function indexSlots(slots) {
       id: slot.id,
       division: slot.division ?? null,
       weekIndex: slot.weekIndex,
-      start,
-      end,
+      start: new Date(slot.start),
+      end: new Date(slot.end),
       remainingCapacity: slot.capacity,
       fieldId: slot.fieldId ?? null,
     };

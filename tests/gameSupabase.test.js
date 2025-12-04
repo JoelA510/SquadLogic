@@ -66,7 +66,7 @@ test('buildGameAssignmentRows validates inputs and ordering', () => {
           },
         ],
       }),
-    /requires a string for division/,
+    /must be a string/,
   );
   assert.throws(
     () =>

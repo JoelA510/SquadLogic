@@ -5,6 +5,10 @@ import { practiceReadinessSnapshot } from './practiceReadinessSample.js';
 import { gameReadinessSnapshot } from './gameReadinessSample.js';
 import { teamPersistenceSnapshot } from './teamPersistenceSample.js';
 import TeamPersistencePanel from './components/TeamPersistencePanel.jsx';
+import PracticePersistencePanel from './components/PracticePersistencePanel.jsx';
+import GamePersistencePanel from './components/GamePersistencePanel.jsx';
+import OutputGenerationPanel from './components/OutputGenerationPanel.jsx';
+import EvaluationPanel from './components/EvaluationPanel.jsx';
 import ThemeToggle from './components/ThemeToggle.jsx';
 
 const MANUAL_FOLLOW_UP_THRESHOLD = 0.05;
@@ -192,6 +196,23 @@ function App() {
             <p>Integrations planned</p>
           </article>
         </section>
+
+        <div className="mb-6">
+          <EvaluationPanel
+            practiceData={{
+              assignments: practiceReadinessSnapshot.assignments,
+              unassigned: practiceReadinessSnapshot.unassigned,
+              teams: teamSummarySnapshot.teams, // Assuming teams are available
+              slots: practiceReadinessSnapshot.slots,
+            }}
+            gameData={{
+              assignments: gameReadinessSnapshot.assignments,
+              teams: teamSummarySnapshot.teams,
+              byes: gameReadinessSnapshot.byes,
+              unscheduled: gameReadinessSnapshot.unscheduled,
+            }}
+          />
+        </div>
 
         <section className="section-panel glass-panel team-overview" aria-labelledby="team-overview-heading">
           <header className="section-header">
@@ -406,6 +427,14 @@ function App() {
           </div>
         </section>
 
+        <PracticePersistencePanel
+          assignments={practiceReadinessSnapshot.assignments}
+          slots={practiceReadinessSnapshot.slots}
+          overrides={practiceReadinessSnapshot.overrides}
+          runMetadata={practiceReadinessSnapshot.runMetadata}
+          runId={practiceReadinessSnapshot.runId}
+        />
+
         <section className="section-panel glass-panel game-readiness" aria-labelledby="game-readiness-heading">
           <header className="section-header">
             <div>
@@ -464,6 +493,18 @@ function App() {
             />
           </div>
         </section>
+
+        <GamePersistencePanel
+          assignments={gameReadinessSnapshot.assignments}
+          runMetadata={gameReadinessSnapshot.runMetadata}
+          runId={gameReadinessSnapshot.runId}
+        />
+
+        <OutputGenerationPanel
+          teams={teamSummarySnapshot.teams} // Assuming teams are available here or in summary
+          practiceAssignments={practiceReadinessSnapshot.assignments}
+          gameAssignments={gameReadinessSnapshot.assignments}
+        />
 
         <section aria-labelledby="roadmap-heading" className="section-panel glass-panel roadmap-section">
           <h2 id="roadmap-heading">Core agents</h2>

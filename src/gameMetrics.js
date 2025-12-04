@@ -328,34 +328,7 @@ function analyzeSharedSlotUsage(sharedSlotUsage) {
   return { sharedSlotSummaries, sharedFieldDistribution, imbalanceWarnings };
 }
 
-function validateAssignment(assignment) {
-  if (!assignment || typeof assignment !== 'object') {
-    throw new TypeError('assignments must contain objects');
-  }
-  if (typeof assignment.weekIndex !== 'number' || assignment.weekIndex <= 0) {
-    throw new TypeError('assignment.weekIndex must be a positive number');
-  }
-  if (!assignment.division) {
-    throw new TypeError('assignment.division is required');
-  }
-  if (!assignment.slotId) {
-    throw new TypeError('assignment.slotId is required');
-  }
-  if (!assignment.homeTeamId || !assignment.awayTeamId) {
-    throw new TypeError('assignments require homeTeamId and awayTeamId');
-  }
-  if (!assignment.start || !assignment.end) {
-    throw new TypeError('assignments require start and end timestamps');
-  }
-  const start = new Date(assignment.start);
-  const end = new Date(assignment.end);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    throw new TypeError('assignments must have valid ISO timestamps');
-  }
-  if (end <= start) {
-    throw new TypeError('assignment end time must be after the start time');
-  }
-}
+import { validateAssignment } from './utils/validation.js';
 
 function validateBye(bye) {
   if (!bye || typeof bye !== 'object') {

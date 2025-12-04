@@ -45,7 +45,8 @@ This PR implements the core integration features for the SquadLogic application,
     -   Added missing `import React, { useState } from 'react';` to `PracticePersistencePanel.jsx`.
 -   **Handler Refactoring**:
     -   Refactored `practicePersistenceHandler.js` to use generic `handlePersistenceRequest` pipeline.
-    -   Added `normalizeSnapshot` function and `evaluateOverrides` integration.
+    -   Refactored `gamePersistenceHandler.js` to use generic `handlePersistenceRequest` pipeline.
+    -   All three persistence handlers (team, practice, game) now follow consistent pattern with `normalizeSnapshot` and `evaluateOverrides`.
 -   **Bug Fixes**:
     -   Fixed `ReferenceError` in `practiceSlotExpansion.js` (`slot.id` -> `slotId`).
 -   **Frontend Quality**:

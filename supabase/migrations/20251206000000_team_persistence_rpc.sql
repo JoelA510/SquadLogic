@@ -30,7 +30,7 @@ BEGIN
     )
     SELECT
         (run_data->>'id')::uuid,
-        (run_data->>'season_settings_id')::int,
+        (run_data->>'season_settings_id')::bigint,
         run_data->>'run_type',
         run_data->>'status',
         run_data->'parameters',

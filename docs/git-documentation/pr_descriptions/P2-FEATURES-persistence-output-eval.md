@@ -36,10 +36,16 @@ This PR implements the core integration features for the SquadLogic application,
 -   **RPC Migration**: Created `supabase/migrations/20251206000000_team_persistence_rpc.sql` to support atomic team persistence.
 
 ### Code Review Fixes (PR #135)
--   **SQL Correctness**:
-    -   Fixed `persist_practice_schedule` RPC to use correct table `practice_assignments` and columns (`practice_slot_id`, `effective_date_range`).
-    -   Fixed `persist_game_schedule` RPC to use correct table `games` and columns (`game_slot_id`).
-    -   Fixed `persist_team_schedule` RPC to remove invalid `season_settings_id` column from `teams` insert.
+-   **SQL Type Cast Alignment**:
+    -   Fixed `persist_practice_schedule` RPC: `id` cast to `::uuid`, `season_settings_id` cast to `::bigint`.
+    -   Fixed `persist_game_schedule` RPC: `id` cast to `::uuid`, `season_settings_id` cast to `::bigint`.
+    -   Fixed `persist_team_schedule` RPC: `season_settings_id` cast from `::int` to `::bigint`.
+-   **React Import Fixes**:
+    -   Added missing `import React, { useState } from 'react';` to `GamePersistencePanel.jsx`.
+    -   Added missing `import React, { useState } from 'react';` to `PracticePersistencePanel.jsx`.
+-   **Handler Refactoring**:
+    -   Refactored `practicePersistenceHandler.js` to use generic `handlePersistenceRequest` pipeline.
+    -   Added `normalizeSnapshot` function and `evaluateOverrides` integration.
 -   **Bug Fixes**:
     -   Fixed `ReferenceError` in `practiceSlotExpansion.js` (`slot.id` -> `slotId`).
 -   **Frontend Quality**:

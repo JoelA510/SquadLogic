@@ -1,3 +1,4 @@
+import React, { useState } from 'react';
 import { buildSupabaseAuthHeaders } from '../utils/authHeaders';
 import { prepareGamePersistenceSnapshot } from '../../../src/gamePersistenceSnapshot';
 import { GAME_PERSISTENCE_URL } from '../config';

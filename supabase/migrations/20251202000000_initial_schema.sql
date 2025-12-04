@@ -818,9 +818,9 @@ begin
       updated_at
     )
     values (
-      (run_data->>'id')::text,
+      (run_data->>'id')::uuid,
       (run_data->>'run_type')::text,
-      (run_data->>'season_settings_id')::uuid,
+      (run_data->>'season_settings_id')::bigint,
       (run_data->>'status')::text,
       (run_data->'parameters'),
       (run_data->'metrics'),
@@ -887,9 +887,9 @@ begin
       updated_at
     )
     values (
-      (run_data->>'id')::text,
+      (run_data->>'id')::uuid,
       (run_data->>'run_type')::text,
-      (run_data->>'season_settings_id')::uuid,
+      (run_data->>'season_settings_id')::bigint,
       (run_data->>'status')::text,
       (run_data->'parameters'),
       (run_data->'metrics'),

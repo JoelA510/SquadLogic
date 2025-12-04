@@ -1,0 +1,50 @@
+
+> squad-logic@1.0.0 test
+> node --test tests/gameSupabase.test.js
+
+Γ£ö buildGameAssignmentRows normalizes scheduler output for Supabase (3.1506ms)
+Γ£û buildGameAssignmentRows validates inputs and ordering (1.3257ms)
+Γ£ö persistGameAssignments inserts rows and returns Supabase payload (1.4157ms)
+Γ£ö persistGameAssignments supports upserts and no-op handling (0.366ms)
+Γ£ö persistGameAssignments surfaces Supabase errors and validates client (0.4678ms)
+Γä╣ tests 5
+Γä╣ suites 0
+Γä╣ pass 4
+Γä╣ fail 1
+Γä╣ cancelled 0
+Γä╣ skipped 0
+Γä╣ todo 0
+Γä╣ duration_ms 103.5459
+
+Γ£û failing tests:
+
+test at tests\gameSupabase.test.js:36:1
+Γ£û buildGameAssignmentRows validates inputs and ordering (1.3257ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /requires a string for division/. Input:
+  
+  'TypeError: division must be a string at index 0'
+  
+      at TestContext.<anonymous> (file:///C:/Users/joel.abraham/GotSportTeamerScheduler/SquadLogic/tests/gameSupabase.test.js:55:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:788:18)
+      at Test.postRun (node:internal/test_runner/test:1235:19)
+      at Test.run (node:internal/test_runner/test:1163:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: TypeError: division must be a string at index 0
+        at normalizeString (file:///C:/Users/joel.abraham/GotSportTeamerScheduler/SquadLogic/src/utils/normalization.js:7:15)
+        at normalizeId (file:///C:/Users/joel.abraham/GotSportTeamerScheduler/SquadLogic/src/utils/normalization.js:28:12)
+        at file:///C:/Users/joel.abraham/GotSportTeamerScheduler/SquadLogic/src/gameSupabase.js:37:22
+        at Array.map (<anonymous>)
+        at buildGameAssignmentRows (file:///C:/Users/joel.abraham/GotSportTeamerScheduler/SquadLogic/src/gameSupabase.js:32:22)
+        at file:///C:/Users/joel.abraham/GotSportTeamerScheduler/SquadLogic/tests/gameSupabase.test.js:57:7
+        at getActual (node:assert:611:5)
+        at strict.throws (node:assert:759:24)
+        at TestContext.<anonymous> (file:///C:/Users/joel.abraham/GotSportTeamerScheduler/SquadLogic/tests/gameSupabase.test.js:55:10)
+        at Test.runInAsyncScope (node:async_hooks:214:14),
+    expected: /requires a string for division/,
+    operator: 'throws',
+    diff: 'simple'
+  }

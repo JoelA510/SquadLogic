@@ -1,8 +1,17 @@
 import {
     authorizePersistenceRequest,
-    validateSnapshot,
+    handlePersistenceRequest,
     persistSnapshotTransactional,
 } from './persistenceHandler.js';
+import { evaluateOverrides } from './utils/snapshot.js';
+
+/**
+ * Normalize the practice snapshot to ensure a usable runId.
+ */
+const normalizeSnapshot = (snapshot) => ({
+    ...snapshot,
+    runId: snapshot.lastRunId ?? snapshot.runId ?? null,
+});
 
 /**
  * Authorize a practice persistence request.
@@ -12,10 +21,17 @@ export function authorizePracticePersistenceRequest(params) {
 }
 
 /**
- * Validate the practice persistence payload.
+ * Handle practice persistence using the generic pipeline.
  */
-export function handlePracticePersistence(params) {
-    return validateSnapshot(params);
+export function handlePracticePersistence({ snapshot, overrides, now }) {
+    return handlePersistenceRequest({
+        snapshot,
+        overrides,
+        now,
+        snapshotNormalizer: normalizeSnapshot,
+        overrideEvaluator: evaluateOverrides,
+        successMessage: 'Snapshot validated. Ready for practice persistence.',
+    });
 }
 
 /**

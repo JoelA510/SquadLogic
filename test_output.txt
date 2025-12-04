@@ -1,0 +1,116 @@
+
+> squad-logic@1.0.0 test
+> node --test tests/teamPersistenceHandler.test.js
+
+Γ£ö normalizeSnapshot validates payload shape (2.2792ms)
+Γ£ö evaluateOverrides counts pending entries (0.4382ms)
+Γ£û handleTeamPersistence returns success summary when overrides are clear (3.7482ms)
+Γ£ö handleTeamPersistence blocks when overrides are pending (0.3144ms)
+Γ£ö handleTeamPersistence validates the clock input (0.2828ms)
+Γ£ö authorizePersistenceRequest enforces allowed roles (0.4702ms)
+Γ£ö authorizePersistenceRequest extracts role from app_metadata (0.2548ms)
+Γ£ö authorizePersistenceRequest normalizes user role (trim and lowercase) (0.2722ms)
+Γ£û persistTeamSnapshotTransactional calls persist_team_schedule RPC (1.0045ms)
+Γ£ö persistTeamSnapshotTransactional propagates RPC errors (0.5142ms)
+Γä╣ tests 10
+Γä╣ suites 0
+Γä╣ pass 8
+Γä╣ fail 2
+Γä╣ cancelled 0
+Γä╣ skipped 0
+Γä╣ todo 0
+Γä╣ duration_ms 119.2683
+
+Γ£û failing tests:
+
+test at tests\teamPersistenceHandler.test.js:57:1
+Γ£û handleTeamPersistence returns success summary when overrides are clear (3.7482ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   message: 'Snapshot validated. Ready for team persistence upsert.',
+  -   message: 'Snapshot validated. Ready for persistence upsert.',
+      runId: 'run-123',
+      status: 'success',
+      syncedAt: '2024-07-04T12:00:00.000Z',
+  +   teamPlayerRows: [
+  +     {
+  +       player_id: 'player-1',
+  +       role: 'player',
+  +       source: 'auto',
+  +       team_id: 'team-1'
+  +     },
+  +     {
+  +       player_id: 'player-2',
+  +       role: 'player',
+  +       source: 'auto',
+  +       team_id: 'team-1'
+  +     },
+  +     {
+  +       player_id: 'player-3',
+  +       role: 'player',
+  +       source: 'manual',
+  +       team_id: 'team-2'
+  +     }
+  +   ],
+  +   teamRows: [
+  +     {
+  +       coach_id: null,
+  +       division_id: 'u8',
+  +       id: 'team-1',
+  +       name: 'Tigers'
+  +     },
+  +     {
+  +       coach_id: 'coach-2',
+  +       division_id: 'u8',
+  +       id: 'team-2',
+  +       name: 'Lions'
+  +     }
+  +   ],
+      updatedPlayers: 3,
+      updatedTeams: 2
+    }
+  
+      at TestContext.<anonymous> (file:///C:/Users/joel.abraham/GotSportTeamerScheduler/SquadLogic/tests/teamPersistenceHandler.test.js:62:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:788:18)
+      at Test.postRun (node:internal/test_runner/test:1235:19)
+      at Test.run (node:internal/test_runner/test:1163:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { status: 'success', message: 'Snapshot validated. Ready for team persistence upsert.', syncedAt: '2024-07-04T12:00:00.000Z', teamRows: [ [Object], [Object] ], teamPlayerRows: [ [Object], [Object], [Object] ], updatedTeams: 2, updatedPlayers: 3, runId: 'run-123' },
+    expected: { status: 'success', message: 'Snapshot validated. Ready for persistence upsert.', syncedAt: '2024-07-04T12:00:00.000Z', updatedTeams: 2, updatedPlayers: 3, runId: 'run-123' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests\teamPersistenceHandler.test.js:119:1
+Γ£û persistTeamSnapshotTransactional calls persist_team_schedule RPC (1.0045ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      data: {
+        results: {
+          success: true
+        },
+  +     runId: undefined
+  -     runId: 'run-123'
+      },
+      message: 'Successfully persisted schedule via persist_team_schedule.',
+      status: 'success'
+    }
+  
+      at TestContext.<anonymous> (file:///C:/Users/joel.abraham/GotSportTeamerScheduler/SquadLogic/tests/teamPersistenceHandler.test.js:163:10)
+      at async Test.run (node:internal/test_runner/test:1113:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { status: 'success', message: 'Successfully persisted schedule via persist_team_schedule.', data: { runId: undefined, results: [Object] } },
+    expected: { status: 'success', message: 'Successfully persisted schedule via persist_team_schedule.', data: { runId: 'run-123', results: [Object] } },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

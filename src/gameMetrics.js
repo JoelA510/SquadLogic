@@ -328,7 +328,7 @@ function analyzeSharedSlotUsage(sharedSlotUsage) {
   return { sharedSlotSummaries, sharedFieldDistribution, imbalanceWarnings };
 }
 
-import { validateAssignment, validateTeam } from './utils/validation.js';
+import { validateAssignment } from './utils/validation.js';
 
 function validateBye(bye) {
   if (!bye || typeof bye !== 'object') {

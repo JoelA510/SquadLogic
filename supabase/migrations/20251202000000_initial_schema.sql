@@ -91,6 +91,7 @@ create index if not exists players_mutual_buddy_code_idx
 
 create table if not exists coaches (
     id                           uuid primary key default gen_random_uuid(),
+    user_id                      uuid references auth.users(id) on delete set null,
     player_id                    uuid references players(id) on delete set null,
     full_name                    text not null,
     email                        text not null check (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
@@ -102,7 +103,8 @@ create table if not exists coaches (
     status                       text not null default 'active' check (status in ('active', 'pending-confirmation', 'inactive')),
     created_at                   timestamptz not null default timezone('utc', now()),
     updated_at                   timestamptz not null default timezone('utc', now()),
-    unique (email)
+    unique (email),
+    unique (user_id)
 );
 
 create table if not exists locations (

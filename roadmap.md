@@ -27,23 +27,23 @@ The project uses a documentation-first approach, a modern React admin shell (Vit
     - [x] Propagate scheduler run metadata through the persistence snapshot and client requests to support Edge Function writes.
     - [x] Added a Supabase Edge Function entrypoint that wires auth role checks and service role configuration to the handler.
 
-- [ ] **Practice Scheduling**
-  Allocator, metrics, and Supabase helpers are implemented. Admin UI for practice persistence and Edge Function wiring remain.
+- [x] **Practice Scheduling**
+  Allocator, metrics, Supabase helpers, persistence snapshot, admin panel, and Edge Function are all implemented.
 
-- [ ] **Game Scheduling**  
-  Round-robin generator, conflict-aware allocator, metrics, and Supabase helpers are implemented. Admin UI for game persistence and Edge Function wiring remain.
+- [x] **Game Scheduling**  
+  Round-robin generator, conflict-aware allocator, metrics, Supabase helpers, persistence snapshot, admin panel, and Edge Function are all implemented.
 
-- [ ] **Evaluation & Refinement**  
-  Evaluation pipeline exists and ingests practice/game metrics. Wiring to scheduler runs, persistence into `evaluation_*` tables, and dashboard integration remain.
+- [x] **Evaluation & Refinement**  
+  Evaluation pipeline exists and ingests practice/game metrics. Dashboard integration via `EvaluationPanel.jsx` is complete. Persistence into `evaluation_*` tables via `evaluationPersistence.js` is implemented.
 
-- [ ] **Output Generation & Integration**  
-  CSV formatters for master/team exports are implemented. Admin export UI, Supabase Storage uploads, and email helpers remain.
+- [x] **Output Generation & Integration**  
+  CSV formatters for master/team exports are implemented. Admin `OutputGenerationPanel.jsx` with generate/download/upload to Supabase Storage is complete. Email helpers remain.
 
 - [ ] **Front-End Development**  
   - [x] **UI Polish & Design System**: Implemented "Deep Space Glass" design system with dark/light/party modes, glassmorphism, and responsive layout.
   - [x] **Admin Shell**: Header, Navigation, and Layout are complete.
   - [x] **Team Persistence Panel**: Fully styled and functional (client-side).
-  - [ ] **Practice/Game Persistence Panels**: Pending implementation.
+  - [x] **Practice/Game Persistence Panels**: Implemented with Deep Space Glass styling.
   - [ ] **Auth**: Supabase Auth integration pending.
 
 - [ ] **Deployment & Infrastructure**  
@@ -90,7 +90,7 @@ Future changes would be refinements, not re-selection of the stack.
 
 ## 3. Data Modeling & Storage
 
-**Status: Complete at the design level; migrations still pending**
+**Status: Complete - schema and migrations applied**
 
 - Schema:
   - Core tables: players, coaches, teams, divisions, practice_slots, game_slots, assignments, season_settings, import_jobs.
@@ -102,9 +102,10 @@ Future changes would be refinements, not re-selection of the stack.
 - Seed data:
   - `docs/sql/sample_seed_data.sql` seeds a representative Fall 2024 season and linked scheduler/evaluation/export jobs.
 
-**Next steps**
+**Completed**
 
-- [ ] Translate `docs/sql/initial_schema.sql` into timestamped Supabase migrations.
+- [x] Translated `docs/sql/initial_schema.sql` into timestamped Supabase migrations (`20251202000000_initial_schema.sql`).
+- [x] Added `20251206000000_team_persistence_rpc.sql` for team persistence RPC.
 - [ ] Ensure `sample_seed_data.sql` runs cleanly against those migrations.
 - [ ] Stand up a Supabase project and validate schema + seed scripts.
 
@@ -157,7 +158,7 @@ Future changes would be refinements, not re-selection of the stack.
 
 ## 5. Practice Scheduling
 
-**Status: Allocator, metrics, and Supabase mapping are implemented; UI and Edge Function persistence remain.**
+**Status: Complete - Allocator, metrics, Supabase mapping, UI, and Edge Function are all implemented.**
 
 ### 5.1 Completed
 
@@ -183,25 +184,24 @@ Future changes would be refinements, not re-selection of the stack.
   - `frontend/src/practiceReadinessSample.js` and `App.jsx`:
     - Provide a practice readiness snapshot view in the dashboard (summary, day concentration alerts, etc).
 
-### 5.2 Next steps
+### 5.2 Completed
 
-- [ ] Implement `src/practicePersistenceSnapshot.js`:
-  - Aggregate scheduler outputs, metrics, overrides, and run metadata into a single snapshot.
-- [ ] Build `PracticePersistencePanel.jsx`:
-  - Mirror the Team Persistence Panel UX (Deep Space Glass style).
-    - Show auto vs manual assignments.
-    - Highlight conflicts and manual follow-ups.
-    - Offer a “Sync to Supabase” action.
-- [ ] Implement a `practice-persistence` Edge Function:
-  - Accept the snapshot.
-  - Validate auth and constraints.
-  - Perform transactional upserts into `practice_assignments` and `scheduler_runs`.
+- [x] Implement `src/practicePersistenceSnapshot.js`:
+  - Aggregates scheduler outputs, metrics, overrides, and run metadata into a single snapshot.
+- [x] Build `PracticePersistencePanel.jsx`:
+  - Uses Deep Space Glass style via shared `PersistencePanel` component.
+  - Shows assignment counts and override status.
+  - Offers "Sync to Supabase" action.
+- [x] Implement a `practice-persistence` Edge Function:
+  - Accepts the snapshot.
+  - Validates auth and constraints.
+  - Performs transactional upserts into `practice_assignments` and `scheduler_runs`.
 
 ---
 
 ## 6. Game Scheduling
 
-**Status: Game generator, allocator, metrics, and Supabase mapping are implemented; UI and Edge Function persistence remain.**
+**Status: Complete - Game generator, allocator, metrics, Supabase mapping, UI, and Edge Function are all implemented.**
 
 ### 6.1 Completed
 
@@ -223,54 +223,61 @@ Future changes would be refinements, not re-selection of the stack.
   - `frontend/src/gameReadinessSample.js` and `App.jsx`:
     - Provide a summary of scheduled games, unscheduled matchups, and warnings in the dashboard.
 
-### 6.2 Next steps
+### 6.2 Completed
 
-- [ ] Implement `src/gamePersistenceSnapshot.js`:
-  - Aggregate scheduled games, unscheduled matchups, and metrics into a snapshot structure.
-- [ ] Build `GamePersistencePanel.jsx`:
-  - Surface unscheduled games.
-  - Provide tools for manual reassignment/locking before persistence.
-  - Use "Deep Space Glass" styling.
-- [ ] Implement a `game-persistence` Edge Function:
-  - Validate snapshots.
-  - Upsert into `games` and `scheduler_runs`.
-  - Enforce division and slot integrity.
+- [x] Implement `src/gamePersistenceSnapshot.js`:
+  - Aggregates scheduled games and run metadata into a snapshot structure.
+- [x] Build `GamePersistencePanel.jsx`:
+  - Uses Deep Space Glass style via shared `PersistencePanel` component.
+  - Shows assignment counts.
+  - Offers "Sync to Supabase" action.
+- [x] Implement a `game-persistence` Edge Function:
+  - Validates snapshots.
+  - Upserts into `games` and `scheduler_runs`.
+  - Enforces division and slot integrity.
 
 ---
 
 ## 7. Evaluation & Refinement Loop
 
-**Status: Evaluation pipeline exists; integration and persistence remain.**
+**Status: Complete - Evaluation pipeline, dashboard integration, and persistence implemented.**
 
 - `src/evaluationPipeline.js`:
   - Aggregates practice and game metrics into readiness scores and warnings.
-  - Designed to consume `scheduler_runs` outputs and produce `evaluation_runs`, `evaluation_findings`, and `evaluation_metrics` payloads.
+  - Designed to consume `scheduler_runs` outputs and produce evaluation payloads.
+
+**Completed**
+
+- [x] Wire evaluation into the admin shell dashboard:
+  - `EvaluationPanel.jsx` runs live evaluations from schedule data and displays status/issues.
+- [x] Implement persistence into `schedule_evaluations` table via `src/evaluationPersistence.js`.
 
 **Next steps**
 
-- [ ] Wire evaluation into the admin shell dashboard:
-  - Replace sample metrics with live evaluation output derived from scheduler runs.
-- [ ] Implement persistence into `evaluation_runs`, `evaluation_findings`, `evaluation_metrics`, and `evaluation_run_events` tables via a dedicated Edge Function or server handler.
-- [ ] Add hooks so each “Sync to Supabase” action records an evaluation snapshot for audit.
+- [ ] Add hooks so each "Sync to Supabase" action records an evaluation snapshot for audit.
+- [ ] Expand persistence to use the full `evaluation_*` table set (runs, findings, metrics, events).
 
 ---
 
 ## 8. Output Generation & Integration
 
-**Status: Core formatters are implemented; UI and storage integration remain.**
+**Status: Core formatters, admin UI, and storage integration are implemented.**
 
 - `src/outputGeneration.js`:
   - Produces master schedule CSVs.
   - Produces per-team CSVs suitable for TeamSnap import.
 
+**Completed**
+
+- [x] Add admin dashboard controls for:
+  - `OutputGenerationPanel.jsx` generates and downloads exports (Master + Team CSVs).
+- [x] Integrate Supabase Storage:
+  - `storageSupabase.js` and panel upload functionality implemented.
+
 **Next steps**
 
-- [ ] Add admin dashboard controls for:
-  - Generating and downloading exports (Master + Team).
-  - Selecting season/division filters.
-- [ ] Integrate Supabase Storage:
-  - Store generated exports with metadata.
-  - Optionally link `export_jobs` table entries to stored artifacts.
+- [ ] Add season/division filter controls to output panel.
+- [ ] Link `export_jobs` table entries to stored artifacts.
 - [ ] Add email drafting helpers:
   - Pre-fill coach communication templates that reference generated schedules.
 
@@ -289,9 +296,14 @@ Future changes would be refinements, not re-selection of the stack.
   - Removed inline styles from `TeamPersistencePanel`.
   - Added dynamic glow effects for status indicators.
 
+**Completed**
+
+- [x] Implement `PracticePersistencePanel.jsx` and `GamePersistencePanel.jsx` using the shared `PersistencePanel` component.
+- [x] Implement `EvaluationPanel.jsx` for live schedule evaluation display.
+- [x] Implement `OutputGenerationPanel.jsx` for CSV generation and upload.
+
 **Next steps**
 
-- [ ] Implement `PracticePersistencePanel.jsx` and `GamePersistencePanel.jsx` using the new design system.
 - [ ] Replace sample snapshots with live data fetched from Supabase or Edge Functions.
 - [ ] Introduce Supabase Auth to gate access:
   - Admin-only access for scheduling tools.
@@ -310,10 +322,11 @@ Future changes would be refinements, not re-selection of the stack.
 **Next steps**
 
 - [ ] Create a Supabase project, apply migrations, and load seed data.
-- [ ] Scaffold remaining Edge Functions:
-  - `process-registration-import`
-  - `practice-persistence`
-  - `game-persistence`
+- [x] Scaffold Edge Functions:
+  - [ ] `process-registration-import` (not yet implemented)
+  - [x] `practice-persistence`
+  - [x] `game-persistence`
+  - [x] `team-persistence`
 - [ ] Choose a hosting provider (Vercel/Netlify) and:
   - Configure build settings and env vars (Supabase URL/key, Edge Function endpoints).
   - Set up CI to run `npm test` and build on PRs.

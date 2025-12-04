@@ -35,6 +35,18 @@ This PR implements the core integration features for the SquadLogic application,
 -   **Consumer Updates**: Refactored all consumers (`*Supabase.js`, `*Metrics.js`, `*Scheduling.js`, `*PersistenceSnapshot.js`) to use these new shared utilities.
 -   **RPC Migration**: Created `supabase/migrations/20251206000000_team_persistence_rpc.sql` to support atomic team persistence.
 
+### Code Review Fixes (PR #135)
+-   **SQL Correctness**:
+    -   Fixed `persist_practice_schedule` RPC to use correct table `practice_assignments` and columns (`practice_slot_id`, `effective_date_range`).
+    -   Fixed `persist_game_schedule` RPC to use correct table `games` and columns (`game_slot_id`).
+    -   Fixed `persist_team_schedule` RPC to remove invalid `season_settings_id` column from `teams` insert.
+-   **Bug Fixes**:
+    -   Fixed `ReferenceError` in `practiceSlotExpansion.js` (`slot.id` -> `slotId`).
+-   **Frontend Quality**:
+    -   Refactored `PersistencePanel.jsx` to use a theme configuration object and static Tailwind grid classes.
+    -   Extracted Supabase auth header logic into `frontend/src/utils/authHeaders.js`.
+    -   Added TODO in `OutputGenerationPanel.jsx` regarding Web Worker usage for large datasets.
+
 ### Dashboard
 -   **Integration**: Updated `frontend/src/App.jsx` to include all new panels (`PracticePersistencePanel`, `GamePersistencePanel`, `OutputGenerationPanel`, `EvaluationPanel`), providing a complete admin workflow.
 

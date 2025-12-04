@@ -52,21 +52,18 @@ BEGIN
             id,
             division_id,
             coach_id,
-            name,
-            season_settings_id
+            name
         )
         SELECT
             t->>'id',
             t->>'division_id',
             t->>'coach_id',
-            t->>'name',
-            (t->>'season_settings_id')::int
+            t->>'name'
         FROM jsonb_array_elements(teams) t
         ON CONFLICT (id) DO UPDATE SET
             division_id = EXCLUDED.division_id,
             coach_id = EXCLUDED.coach_id,
-            name = EXCLUDED.name,
-            season_settings_id = EXCLUDED.season_settings_id;
+            name = EXCLUDED.name;
             
         GET DIAGNOSTICS v_teams_count = ROW_COUNT;
     ELSE

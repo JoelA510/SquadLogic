@@ -23,6 +23,8 @@ export default function OutputGenerationPanel({
             setMessage('Generating CSVs...');
 
             // Small timeout to allow UI to update before heavy sync work
+            // TODO: If schedule sizes grow significantly, move generateScheduleExports
+            // into a Web Worker to avoid blocking the main thread.
             setTimeout(() => {
                 const exports = generateScheduleExports({
                     teams,

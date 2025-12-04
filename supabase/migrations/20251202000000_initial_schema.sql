@@ -843,27 +843,20 @@ begin
   if assignments is not null and jsonb_array_length(assignments) > 0 then
     insert into practice_assignments (
       team_id,
-      slot_id,
-      run_id,
-      start_time,
-      end_time,
-      field_id,
-      created_at
+      practice_slot_id,
+      effective_date_range,
+      created_at,
+      updated_at
     )
     select
-      (item->>'team_id')::text,
-      (item->>'slot_id')::text,
-      (item->>'run_id')::text,
-      (item->>'start_time')::timestamptz,
-      (item->>'end_time')::timestamptz,
-      (item->>'field_id')::text,
+      (item->>'team_id')::uuid,
+      (item->>'slot_id')::uuid,
+      daterange((item->>'effectiveFrom')::date, (item->>'effectiveUntil')::date, '[]'),
+      now(),
       now()
     from jsonb_array_elements(assignments) as item
-    on conflict (team_id, slot_id) do update set
-      run_id = excluded.run_id,
-      start_time = excluded.start_time,
-      end_time = excluded.end_time,
-      field_id = excluded.field_id;
+    on conflict (team_id, practice_slot_id, effective_date_range) do update set
+      updated_at = now();
   end if;
 end;
 $$;
@@ -917,36 +910,27 @@ begin
 
   -- 2. Persist Assignments
   if assignments is not null and jsonb_array_length(assignments) > 0 then
-    insert into game_assignments (
-      division,
-      week_index,
-      slot_id,
-      start,
-      end,
-      field_id,
+    insert into games (
+      game_slot_id,
       home_team_id,
       away_team_id,
-      run_id
+      week_index,
+      created_at,
+      updated_at
     )
     select
-      (item->>'division')::text,
-      (item->>'week_index')::int,
-      (item->>'slot_id')::text,
-      (item->>'start')::timestamptz,
-      (item->>'end')::timestamptz,
-      (item->>'field_id')::text,
-      (item->>'home_team_id')::text,
-      (item->>'away_team_id')::text,
-      (item->>'run_id')::text
+      (item->>'slot_id')::uuid,
+      (item->>'home_team_id')::uuid,
+      (item->>'away_team_id')::uuid,
+      (item->>'week_index')::smallint,
+      now(),
+      now()
     from jsonb_array_elements(assignments) as item
-    on conflict (slot_id, field_id) do update set -- Assuming composite key or similar constraint
-      division = excluded.division,
-      week_index = excluded.week_index,
-      start = excluded.start,
-      end = excluded.end,
+    on conflict (game_slot_id) do update set
       home_team_id = excluded.home_team_id,
       away_team_id = excluded.away_team_id,
-      run_id = excluded.run_id;
+      week_index = excluded.week_index,
+      updated_at = now();
   end if;
 end;
 $$;

@@ -215,7 +215,7 @@ function resolveTimeRange({ baseTimeRange, override, slotId, phaseId }) {
   }
 
   if (endMinutes <= startMinutes) {
-    throw new Error(`slot ${slot.id} phase ${phaseId} end time must be after start time`);
+    throw new Error(`slot ${slotId} phase ${phaseId} end time must be after start time`);
   }
 
   return { startMinutes, endMinutes };

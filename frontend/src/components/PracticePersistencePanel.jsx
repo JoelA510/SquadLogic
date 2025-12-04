@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { buildSupabaseAuthHeaders } from '../utils/authHeaders';
 import { preparePracticePersistenceSnapshot } from '../../../src/practicePersistenceSnapshot';
 import { PRACTICE_PERSISTENCE_URL } from '../config';
 import PersistencePanel from './PersistencePanel';
@@ -27,11 +27,12 @@ export default function PracticePersistencePanel({
         setMessage('Syncing to Supabase...');
 
         try {
+            const authHeaders = await buildSupabaseAuthHeaders(supabaseClient);
             const response = await fetch(PRACTICE_PERSISTENCE_URL, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': supabaseClient ? `Bearer ${(await supabaseClient.auth.getSession()).data.session?.access_token}` : '',
+                    ...authHeaders,
                 },
                 body: JSON.stringify({
                     snapshot,

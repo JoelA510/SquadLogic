@@ -6,7 +6,8 @@ import {
     buildRunHistoryFromSchedulerRuns,
     deriveRunMetadataFromSchedulerRuns,
     deriveRunMetadataFromNormalizedSchedulerRuns,
-} from './teamPersistenceSnapshot.js';
+    mergeRunMetadata,
+} from './utils/snapshot.js';
 
 /**
  * Normalize override status to a lowercased string.
@@ -74,17 +75,7 @@ function deriveAppliedPracticeOverrides(overrides = []) {
         .filter(Boolean);
 }
 
-function mergeRunMetadata({ providedRunMetadata, derivedRunMetadata, fallbackRunId }) {
-    if (providedRunMetadata == null) {
-        return normalizeRunMetadata(derivedRunMetadata, fallbackRunId);
-    }
 
-    if (typeof providedRunMetadata !== 'object' || Array.isArray(providedRunMetadata)) {
-        throw new TypeError('runMetadata must be an object');
-    }
-
-    return normalizeRunMetadata({ ...derivedRunMetadata, ...providedRunMetadata }, fallbackRunId);
-}
 
 /**
  * Prepare a persistence snapshot with Supabase-ready payloads and admin metadata.

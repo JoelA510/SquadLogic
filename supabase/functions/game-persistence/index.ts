@@ -74,22 +74,8 @@ if (!supabaseUrl || !serviceRoleKey) {
         auth: { persistSession: false },
     });
 
-    // Transaction shim
-    const transactionalClient = {
-        async transaction<T>(
-            callback: (tx: { from: typeof supabaseClient.from }) => Promise<T>,
-        ): Promise<T> {
-            const tx: { from: typeof supabaseClient.from } = {
-                from(table) {
-                    return supabaseClient.from(table);
-                },
-            };
-            return callback(tx);
-        },
-    };
-
     handler = createGamePersistenceHttpHandler({
-        supabaseClient: transactionalClient,
+        supabaseClient,
         allowedRoles,
         getUser: (request) => getUserFromRequest(request, supabaseClient),
     });

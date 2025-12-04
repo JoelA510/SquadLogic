@@ -20,6 +20,11 @@ function buildTransactionStub() {
   return {
     calls,
     client: {
+      rpc: async (rpcName, args) => {
+        calls.push({ table: 'scheduler_runs', rows: [args.run_data] }); // Mocking the capture of run data
+        return { data: { success: true }, error: null };
+      },
+      // Keep transaction for backward compatibility if needed, but RPC is primary now
       transaction: async (callback) => {
         const tx = {
           from: (table) => ({
@@ -29,7 +34,6 @@ function buildTransactionStub() {
             },
           }),
         };
-
         const result = await callback(tx);
         calls.push({ committed: true });
         return result;
@@ -42,7 +46,7 @@ test('processTeamPersistenceRequest returns unauthorized when role is missing', 
   const result = await processTeamPersistenceRequest({ requestBody: {}, user: null });
 
   assert.strictEqual(result.status, 'unauthorized');
-  assert.match(result.message, /allowed role/i);
+  assert.match(result.message, /Authentication required/i);
 });
 
 test('processTeamPersistenceRequest returns validation error for null requestBody', async () => {
@@ -109,7 +113,7 @@ test('processTeamPersistenceRequest surfaces validation errors', async () => {
 test('processTeamPersistenceRequest surfaces persistence errors', async () => {
   const result = await processTeamPersistenceRequest({
     supabaseClient: {
-      transaction: async () => {
+      rpc: async () => {
         throw new Error('transaction failed');
       },
     },

@@ -485,4 +485,470 @@ begin
     end loop;
 end$$;
 
+-- ==========================================
+-- RLS POLICIES
+-- ==========================================
+
+-- 1. Helper Functions
+create or replace function public.current_user_role()
+returns text
+language sql
+stable
+as $$
+  select nullif(current_setting('request.jwt.claim.role', true), '')::text;
+$$;
+
+create or replace view public.coach_team_map as
+select
+    c.user_id as coach_user_id,
+    t.id as team_id
+from coaches c
+join teams t on t.coach_id = c.id
+where c.user_id is not null
+union
+select
+    c.user_id as coach_user_id,
+    t.id as team_id
+from coaches c
+join teams t on c.id = any(t.assistant_coach_ids)
+where c.user_id is not null;
+
+-- 2. Enable RLS on all tables
+alter table season_settings enable row level security;
+alter table divisions enable row level security;
+alter table players enable row level security;
+alter table coaches enable row level security;
+alter table locations enable row level security;
+alter table fields enable row level security;
+alter table field_subunits enable row level security;
+alter table practice_slots enable row level security;
+alter table game_slots enable row level security;
+alter table teams enable row level security;
+alter table team_players enable row level security;
+alter table practice_assignments enable row level security;
+alter table games enable row level security;
+alter table import_jobs enable row level security;
+alter table staging_players enable row level security;
+alter table player_buddies enable row level security;
+alter table scheduler_runs enable row level security;
+alter table evaluation_runs enable row level security;
+alter table evaluation_findings enable row level security;
+alter table evaluation_metrics enable row level security;
+alter table evaluation_run_events enable row level security;
+alter table export_jobs enable row level security;
+alter table email_log enable row level security;
+
+-- 3. Create Admin Policies (Full Access)
+-- Pattern: Allow ALL operations if the user has the 'admin' role.
+
+-- season_settings
+create policy "Admins can do everything on season_settings"
+  on season_settings for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- divisions
+create policy "Admins can do everything on divisions"
+  on divisions for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- players
+create policy "Admins can do everything on players"
+  on players for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+create policy "Coaches can view roster names (masked)"
+  on players for select
+  to authenticated
+  using (
+    (auth.jwt() ->> 'role') = 'coach'
+    and exists (
+      select 1
+      from public.coach_team_map ctm
+      join public.team_players tp on tp.team_id = ctm.team_id
+      where tp.player_id = players.id
+        and ctm.coach_user_id = auth.uid()
+    )
+  );
+
+-- coaches
+create policy "Admins can do everything on coaches"
+  on coaches for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+create policy "Coaches can view own profile"
+  on coaches for select
+  to authenticated
+  using (
+    (auth.jwt() ->> 'role') = 'coach'
+    and user_id = auth.uid()
+  );
+
+create policy "Coaches can update own profile"
+  on coaches for update
+  to authenticated
+  using (
+    (auth.jwt() ->> 'role') = 'coach'
+    and user_id = auth.uid()
+  )
+  with check (
+    (auth.jwt() ->> 'role') = 'coach'
+    and user_id = auth.uid()
+  );
+
+-- locations
+create policy "Admins can do everything on locations"
+  on locations for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- fields
+create policy "Admins can do everything on fields"
+  on fields for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- field_subunits
+create policy "Admins can do everything on field_subunits"
+  on field_subunits for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- practice_slots
+create policy "Admins can do everything on practice_slots"
+  on practice_slots for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- game_slots
+create policy "Admins can do everything on game_slots"
+  on game_slots for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- teams
+create policy "Admins can do everything on teams"
+  on teams for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+create policy "Coaches can view their teams"
+  on teams for select
+  to authenticated
+  using (
+    (auth.jwt() ->> 'role') = 'coach'
+    and exists (
+      select 1
+      from public.coach_team_map ctm
+      where ctm.team_id = teams.id
+        and ctm.coach_user_id = auth.uid()
+    )
+  );
+
+-- team_players
+create policy "Admins can do everything on team_players"
+  on team_players for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- practice_assignments
+create policy "Admins can do everything on practice_assignments"
+  on practice_assignments for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- games
+create policy "Admins can do everything on games"
+  on games for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- import_jobs
+create policy "Admins can do everything on import_jobs"
+  on import_jobs for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- staging_players
+create policy "Admins can do everything on staging_players"
+  on staging_players for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- player_buddies
+create policy "Admins can do everything on player_buddies"
+  on player_buddies for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- scheduler_runs
+create policy "Admins can do everything on scheduler_runs"
+  on scheduler_runs for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- evaluation_runs
+create policy "Admins can do everything on evaluation_runs"
+  on evaluation_runs for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- evaluation_findings
+create policy "Admins can do everything on evaluation_findings"
+  on evaluation_findings for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- evaluation_metrics
+create policy "Admins can do everything on evaluation_metrics"
+  on evaluation_metrics for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- evaluation_run_events
+create policy "Admins can do everything on evaluation_run_events"
+  on evaluation_run_events for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- export_jobs
+create policy "Admins can do everything on export_jobs"
+  on export_jobs for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- email_log
+create policy "Admins can do everything on email_log"
+  on email_log for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+-- ==========================================
+-- EVALUATION SCHEMA
+-- ==========================================
+
+-- Create table for storing schedule evaluations
+create table if not exists schedule_evaluations (
+    id uuid primary key default gen_random_uuid(),
+    run_id text, -- Optional link to a scheduler run
+    evaluation_type text not null check (evaluation_type in ('practice', 'game', 'combined')),
+    status text not null check (status in ('ok', 'attention-needed', 'action-required')),
+    summary jsonb not null default '{}'::jsonb, -- High-level metrics
+    issues jsonb not null default '[]'::jsonb, -- Array of issue objects
+    details jsonb not null default '{}'::jsonb, -- Full evaluation payload
+    created_at timestamptz not null default timezone('utc', now()),
+    created_by text -- Optional user identifier
+);
+
+-- Enable RLS
+alter table schedule_evaluations enable row level security;
+
+-- Policies
+create policy "Admins can do everything on schedule_evaluations"
+  on schedule_evaluations for all
+  to authenticated
+  using ((auth.jwt() ->> 'role') = 'admin')
+  with check ((auth.jwt() ->> 'role') = 'admin');
+
+create policy "Service role can do everything on schedule_evaluations"
+  on schedule_evaluations for all
+  to service_role
+  using (true)
+  with check (true);
+
+-- Allow read-only access to authenticated users (e.g. coaches viewing status)
+create policy "Authenticated users can view schedule_evaluations"
+  on schedule_evaluations for select
+  to authenticated
+  using (true);
+
+-- ==========================================
+-- PERSISTENCE FUNCTIONS
+-- ==========================================
+
+-- Function to persist practice schedule transactionally
+create or replace function persist_practice_schedule(
+  run_data jsonb,
+  assignments jsonb
+)
+returns void
+language plpgsql
+security invoker -- Run with the caller's permissions (RLS)
+as $$
+begin
+  -- 1. Persist Scheduler Run
+  if run_data is not null then
+    insert into scheduler_runs (
+      id,
+      run_type,
+      season_settings_id,
+      status,
+      parameters,
+      metrics,
+      results,
+      created_by,
+      started_at,
+      completed_at,
+      updated_at
+    )
+    values (
+      (run_data->>'id')::text,
+      (run_data->>'run_type')::text,
+      (run_data->>'season_settings_id')::uuid,
+      (run_data->>'status')::text,
+      (run_data->'parameters'),
+      (run_data->'metrics'),
+      (run_data->'results'),
+      (run_data->>'created_by')::text,
+      (run_data->>'started_at')::timestamptz,
+      (run_data->>'completed_at')::timestamptz,
+      (run_data->>'updated_at')::timestamptz
+    )
+    on conflict (id) do update set
+      status = excluded.status,
+      parameters = excluded.parameters,
+      metrics = excluded.metrics,
+      results = excluded.results,
+      completed_at = excluded.completed_at,
+      updated_at = excluded.updated_at;
+  end if;
+
+  -- 2. Persist Assignments
+  if assignments is not null and jsonb_array_length(assignments) > 0 then
+    insert into practice_assignments (
+      team_id,
+      slot_id,
+      run_id,
+      start_time,
+      end_time,
+      field_id,
+      created_at
+    )
+    select
+      (item->>'team_id')::text,
+      (item->>'slot_id')::text,
+      (item->>'run_id')::text,
+      (item->>'start_time')::timestamptz,
+      (item->>'end_time')::timestamptz,
+      (item->>'field_id')::text,
+      now()
+    from jsonb_array_elements(assignments) as item
+    on conflict (team_id, slot_id) do update set
+      run_id = excluded.run_id,
+      start_time = excluded.start_time,
+      end_time = excluded.end_time,
+      field_id = excluded.field_id;
+  end if;
+end;
+$$;
+
+-- Function to persist game schedule transactionally
+create or replace function persist_game_schedule(
+  run_data jsonb,
+  assignments jsonb
+)
+returns void
+language plpgsql
+security invoker -- Run with the caller's permissions (RLS)
+as $$
+begin
+  -- 1. Persist Scheduler Run
+  if run_data is not null then
+    insert into scheduler_runs (
+      id,
+      run_type,
+      season_settings_id,
+      status,
+      parameters,
+      metrics,
+      results,
+      created_by,
+      started_at,
+      completed_at,
+      updated_at
+    )
+    values (
+      (run_data->>'id')::text,
+      (run_data->>'run_type')::text,
+      (run_data->>'season_settings_id')::uuid,
+      (run_data->>'status')::text,
+      (run_data->'parameters'),
+      (run_data->'metrics'),
+      (run_data->'results'),
+      (run_data->>'created_by')::text,
+      (run_data->>'started_at')::timestamptz,
+      (run_data->>'completed_at')::timestamptz,
+      (run_data->>'updated_at')::timestamptz
+    )
+    on conflict (id) do update set
+      status = excluded.status,
+      parameters = excluded.parameters,
+      metrics = excluded.metrics,
+      results = excluded.results,
+      completed_at = excluded.completed_at,
+      updated_at = excluded.updated_at;
+  end if;
+
+  -- 2. Persist Assignments
+  if assignments is not null and jsonb_array_length(assignments) > 0 then
+    insert into game_assignments (
+      division,
+      week_index,
+      slot_id,
+      start,
+      end,
+      field_id,
+      home_team_id,
+      away_team_id,
+      run_id
+    )
+    select
+      (item->>'division')::text,
+      (item->>'week_index')::int,
+      (item->>'slot_id')::text,
+      (item->>'start')::timestamptz,
+      (item->>'end')::timestamptz,
+      (item->>'field_id')::text,
+      (item->>'home_team_id')::text,
+      (item->>'away_team_id')::text,
+      (item->>'run_id')::text
+    from jsonb_array_elements(assignments) as item
+    on conflict (slot_id, field_id) do update set -- Assuming composite key or similar constraint
+      division = excluded.division,
+      week_index = excluded.week_index,
+      start = excluded.start,
+      end = excluded.end,
+      home_team_id = excluded.home_team_id,
+      away_team_id = excluded.away_team_id,
+      run_id = excluded.run_id;
+  end if;
+end;
+$$;
+
 commit;

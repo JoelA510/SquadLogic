@@ -5,19 +5,8 @@ import {
     normalizeSchedulerRuns,
     buildRunHistoryFromSchedulerRuns,
     deriveRunMetadataFromNormalizedSchedulerRuns,
-} from './teamPersistenceSnapshot.js';
-
-function mergeRunMetadata({ providedRunMetadata, derivedRunMetadata, fallbackRunId }) {
-    if (providedRunMetadata == null) {
-        return normalizeRunMetadata(derivedRunMetadata, fallbackRunId);
-    }
-
-    if (typeof providedRunMetadata !== 'object' || Array.isArray(providedRunMetadata)) {
-        throw new TypeError('runMetadata must be an object');
-    }
-
-    return normalizeRunMetadata({ ...derivedRunMetadata, ...providedRunMetadata }, fallbackRunId);
-}
+    mergeRunMetadata,
+} from './utils/snapshot.js';
 
 /**
  * Prepare a persistence snapshot with Supabase-ready payloads and admin metadata.

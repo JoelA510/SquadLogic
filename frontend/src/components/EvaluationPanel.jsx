@@ -34,10 +34,17 @@ export default function EvaluationPanel({
         setMessage('Saving snapshot...');
 
         try {
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            if (!user) {
+                setMessage('Error: User not authenticated.');
+                setPersisting(false);
+                return;
+            }
+
             await persistEvaluation({
                 supabaseClient,
                 evaluationResult: evaluation,
-                createdBy: 'admin-ui', // Replace with real user ID if available
+                createdBy: user.id,
             });
             setMessage('Evaluation snapshot saved.');
             setTimeout(() => setMessage(''), 3000);
@@ -96,10 +103,13 @@ export default function EvaluationPanel({
             {evaluation.issues.length > 0 && (
                 <div className="mt-4 space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
                     {evaluation.issues.map((issue, idx) => (
-                        <div key={idx} className={`text-xs p-2 rounded border ${issue.severity === 'error'
+                        <div
+                            key={`${issue.category}-${issue.message}-${idx}`}
+                            className={`text-xs p-2 rounded border ${issue.severity === 'error'
                                 ? 'bg-red-500/10 border-red-500/20 text-red-200'
                                 : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-200'
-                            }`}>
+                                }`}
+                        >
                             <span className="font-bold uppercase tracking-wider opacity-70 mr-2">{issue.category}</span>
                             {issue.message}
                         </div>

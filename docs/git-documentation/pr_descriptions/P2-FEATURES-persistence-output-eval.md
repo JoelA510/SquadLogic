@@ -1,12 +1,12 @@
-# PR Request: Persistence, Output Generation, and Evaluation Pipeline
+# PR Request: Persistence, Output Generation, Evaluation Pipeline, and Core Refactoring
 
 ## 1. High Level Summary
-This PR implements the core integration features for the SquadLogic application, completing the "Persistence", "Output Generation", and "Evaluation Pipeline" phases of the roadmap. It enables the application to persist generated schedules to Supabase, generate and upload CSV exports, and track schedule evaluation metrics over time.
+This PR implements the core integration features for the SquadLogic application, completing the "Persistence", "Output Generation", and "Evaluation Pipeline" phases of the roadmap. Additionally, it includes a significant refactoring effort to modularize the codebase, extract shared utilities, and standardize persistence logic using atomic RPCs.
 
 ## 2. Type of Change
 - [x] New Feature (non-breaking change which adds functionality)
 - [ ] Bug Fix (non-breaking change which fixes an issue)
-- [ ] Refactor (non-breaking change which improves code quality)
+- [x] Refactor (non-breaking change which improves code quality)
 - [ ] Documentation Update
 - [ ] Breaking Change (fix or feature that would cause existing functionality to not work as expected)
 
@@ -14,6 +14,7 @@ This PR implements the core integration features for the SquadLogic application,
 ### Persistence
 -   **Practice Persistence**: Implemented full stack (Snapshot -> Handler -> API -> Edge Function) for persisting practice assignments. Added `PracticePersistencePanel` to the dashboard.
 -   **Game Persistence**: Implemented full stack for persisting game assignments. Added `GamePersistencePanel` to the dashboard.
+-   **Team Persistence**: Standardized `teamPersistenceHandler.js` to use a new atomic RPC `persist_team_schedule`, removing legacy transaction logic.
 -   **Edge Functions**: Wired up `practice-persistence` and `game-persistence` functions.
 
 ### Output Generation
@@ -25,10 +26,20 @@ This PR implements the core integration features for the SquadLogic application,
 -   **Persistence**: Added `src/evaluationPersistence.js` to save evaluation snapshots.
 -   **UI**: Added `EvaluationPanel` to the dashboard for real-time health checks and snapshot saving.
 
+### Refactoring & Standardization
+-   **Utils Extraction**: Created shared utility modules to reduce duplication and improve maintainability:
+    -   `src/utils/normalization.js`: Common data normalization functions.
+    -   `src/utils/validation.js`: Shared validation logic for slots, teams, and assignments.
+    -   **[NEW]** `src/utils/snapshot.js`: Shared snapshot processing and run metadata derivation.
+    -   **[NEW]** `src/utils/date.js`: Centralized date and time manipulation utilities.
+-   **Consumer Updates**: Refactored all consumers (`*Supabase.js`, `*Metrics.js`, `*Scheduling.js`, `*PersistenceSnapshot.js`) to use these new shared utilities.
+-   **RPC Migration**: Created `supabase/migrations/20251206000000_team_persistence_rpc.sql` to support atomic team persistence.
+
 ### Dashboard
 -   **Integration**: Updated `frontend/src/App.jsx` to include all new panels (`PracticePersistencePanel`, `GamePersistencePanel`, `OutputGenerationPanel`, `EvaluationPanel`), providing a complete admin workflow.
 
 ## 4. Verification
+-   **Automated Tests**: Added and verified comprehensive unit tests for all new utilities and refactored handlers. **177 tests passing**.
 -   **Manual Verification**: Verified that all new components render correctly in the dashboard. Verified that helper functions produce expected payloads.
 -   **Schema**: Verified the new migration file syntax.
 
@@ -37,3 +48,4 @@ N/A - Backend/Integration focus.
 
 ## 6. Related Tickets/Issues
 -   Roadmap Items: Persistence, Output Generation, Evaluation Pipeline.
+-   Refactoring: Modularization and Standardization.

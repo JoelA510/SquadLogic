@@ -4,7 +4,9 @@
  */
 
 import {
-  authorizeTeamPersistenceRequest,
+  authorizePersistenceRequest,
+} from './persistenceHandler.js';
+import {
   handleTeamPersistence,
   persistTeamSnapshotTransactional,
 } from './teamPersistenceHandler.js';
@@ -27,7 +29,7 @@ export async function processTeamPersistenceRequest({
   allowedRoles,
   now = new Date(),
 } = {}) {
-  const authResult = authorizeTeamPersistenceRequest({ user, allowedRoles });
+  const authResult = authorizePersistenceRequest({ user, allowedRoles });
   if (authResult.status !== 'authorized') {
     return authResult;
   }

@@ -32,10 +32,10 @@ export async function processGamePersistenceRequest({
         return authResult;
     }
 
-    const { snapshot, runMetadata = {} } = requestBody || {};
+    const { snapshot, overrides = [], runMetadata = {} } = requestBody || {};
 
     try {
-        const validationResult = handleGamePersistence({ snapshot, now });
+        const validationResult = handleGamePersistence({ snapshot, overrides, now });
         if (validationResult.status !== 'success') {
             return validationResult;
         }

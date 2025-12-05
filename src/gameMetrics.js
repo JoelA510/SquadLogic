@@ -1,4 +1,4 @@
-import { isDeepStrictEqual } from 'node:util';
+
 
 function incrementKey(map, key) {
   map[key] = (map[key] ?? 0) + 1;
@@ -449,5 +449,4 @@ function simplifyAssignment(assignment) {
   return base;
 }
 
-// Avoid unused import warnings when linting via node --check
-void isDeepStrictEqual;
+

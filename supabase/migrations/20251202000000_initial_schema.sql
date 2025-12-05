@@ -763,7 +763,7 @@ create table if not exists schedule_evaluations (
     issues jsonb not null default '[]'::jsonb, -- Array of issue objects
     details jsonb not null default '{}'::jsonb, -- Full evaluation payload
     created_at timestamptz not null default timezone('utc', now()),
-    created_by text -- Optional user identifier
+    created_by uuid references auth.users(id) on delete set null -- Optional user identifier
 );
 
 -- Enable RLS
@@ -825,7 +825,7 @@ begin
       (run_data->'parameters'),
       (run_data->'metrics'),
       (run_data->'results'),
-      (run_data->>'created_by')::text,
+      (run_data->>'created_by')::uuid,
       (run_data->>'started_at')::timestamptz,
       (run_data->>'completed_at')::timestamptz,
       (run_data->>'updated_at')::timestamptz
@@ -894,7 +894,7 @@ begin
       (run_data->'parameters'),
       (run_data->'metrics'),
       (run_data->'results'),
-      (run_data->>'created_by')::text,
+      (run_data->>'created_by')::uuid,
       (run_data->>'started_at')::timestamptz,
       (run_data->>'completed_at')::timestamptz,
       (run_data->>'updated_at')::timestamptz

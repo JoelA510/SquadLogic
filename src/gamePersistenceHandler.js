@@ -38,8 +38,13 @@ export function handleGamePersistence({ snapshot, overrides, now }) {
  * Persist the game snapshot transactionally.
  */
 export async function persistGameSnapshotTransactional(params) {
+    const { snapshot, runMetadata = {} } = params;
+    const { runId: snapshotRunId } = normalizeSnapshot(snapshot);
+    const effectiveRunMetadata = { ...runMetadata, runId: runMetadata.runId ?? snapshotRunId };
+
     return persistSnapshotTransactional({
         ...params,
+        runMetadata: effectiveRunMetadata,
         runType: 'game',
         rpcName: 'persist_game_schedule',
     });

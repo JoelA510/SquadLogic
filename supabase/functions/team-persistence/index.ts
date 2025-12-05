@@ -1,4 +1,5 @@
 import { serve } from 'https://deno.land/std@0.223.0/http/server.ts';
+import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
 import {
   createClient,
   type SupabaseClient,
@@ -54,6 +55,16 @@ const allowedRoles = parseAllowedRolesEnv(
   { fallbackRoles: DEFAULT_ALLOWED_ROLES },
 );
 
+const PersistencePayloadSchema = z.object({
+  snapshot: z.object({
+    payload: z.object({
+      teamRows: z.array(z.object({ id: z.string() }).passthrough()),
+      teamPlayerRows: z.array(z.object({ team_id: z.string(), player_id: z.string() }).passthrough()),
+    }),
+  }),
+  overrides: z.array(z.unknown()).optional(),
+});
+
 let handler: HttpHandler;
 
 if (!supabaseUrl || !serviceRoleKey) {
@@ -74,27 +85,29 @@ if (!supabaseUrl || !serviceRoleKey) {
     auth: { persistSession: false },
   });
 
-  // The team persistence handler requires a `transaction` method on the client.
-  // Supabase Edge client instances do not yet expose a transaction API, so this
-  // shim provides a compatible interface. It does NOT provide atomicity.
-  const transactionalClient = {
-    async transaction<T>(
-      callback: (tx: { from: typeof supabaseClient.from }) => Promise<T>,
-    ): Promise<T> {
-      const tx: { from: typeof supabaseClient.from } = {
-        from(table) {
-          return supabaseClient.from(table);
-        },
-      };
-      return callback(tx);
-    },
-  };
 
-  handler = createTeamPersistenceHttpHandler({
-    supabaseClient: transactionalClient,
+
+  const innerHandler = createTeamPersistenceHttpHandler({
+    supabaseClient,
     allowedRoles,
     getUser: (request) => getUserFromRequest(request, supabaseClient),
   });
+
+  handler = async (req: Request) => {
+    if (req.method === 'POST') {
+      try {
+        const clone = req.clone();
+        const body = await clone.json();
+        const parsed = PersistencePayloadSchema.safeParse(body);
+        if (!parsed.success) {
+          return jsonResponse({ status: 'error', message: 'Invalid payload', issues: parsed.error.issues }, 400);
+        }
+      } catch {
+        return jsonResponse({ status: 'error', message: 'Invalid JSON' }, 400);
+      }
+    }
+    return innerHandler(req);
+  };
 }
 
 serve(handler);

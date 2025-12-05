@@ -38,8 +38,13 @@ export function handlePracticePersistence({ snapshot, overrides, now }) {
  * Persist the practice snapshot transactionally.
  */
 export async function persistPracticeSnapshotTransactional(params) {
+    const { snapshot, runMetadata = {} } = params;
+    const { runId: snapshotRunId } = normalizeSnapshot(snapshot);
+    const effectiveRunMetadata = { ...runMetadata, runId: runMetadata.runId ?? snapshotRunId };
+
     return persistSnapshotTransactional({
         ...params,
+        runMetadata: effectiveRunMetadata,
         runType: 'practice',
         rpcName: 'persist_practice_schedule',
     });

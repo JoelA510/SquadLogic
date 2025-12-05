@@ -8,6 +8,7 @@ import { teamPersistenceSnapshot } from './teamPersistenceSample.js';
 // Auth
 import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
 import { useTeamSummary } from './hooks/useTeamSummary.js';
+import { usePracticeSummary } from './hooks/usePracticeSummary.js';
 import Login from './components/Login.jsx';
 import ImportPanel from './components/ImportPanel';
 
@@ -83,11 +84,22 @@ function Dashboard() {
   }, []);
 
   const { summary: teamSummary, loading: teamLoading } = useTeamSummary();
+  const {
+    practiceSummary: hookPracticeSummary,
+    practiceReadinessSnapshot: hookPracticeSnapshot,
+    generatedAt: hookPracticeGeneratedAt,
+    loading: practiceLoading
+  } = usePracticeSummary();
+
   const totals = teamSummary ? teamSummary.totals : teamSummarySnapshot.totals;
   const divisions = teamSummary ? teamSummary.divisions : teamSummarySnapshot.divisions;
   const generatedAt = teamSummary ? teamSummary.generatedAt : teamSummarySnapshot.generatedAt;
-  const practiceSummary = practiceReadinessSnapshot.summary;
-  const practiceGeneratedAt = practiceReadinessSnapshot.generatedAt;
+
+  // Use hook data if valid, otherwise fallback to sample
+  const practiceSummary = hookPracticeSummary && hookPracticeSummary.assignmentRate !== undefined ? hookPracticeSummary : practiceReadinessSnapshot.summary;
+  const practiceGeneratedAt = hookPracticeGeneratedAt || practiceReadinessSnapshot.generatedAt;
+  const realPracticeSnapshot = hookPracticeSnapshot && hookPracticeSnapshot.baseSlotDistribution ? hookPracticeSnapshot : practiceReadinessSnapshot;
+
   const gameSummary = gameReadinessSnapshot.summary;
   const gameGeneratedAt = gameReadinessSnapshot.generatedAt;
 
@@ -137,7 +149,7 @@ function Dashboard() {
         <TeamPersistencePanel teamPersistenceSnapshot={teamPersistenceSnapshot} />
 
         <PracticeReadinessPanel
-          practiceReadinessSnapshot={practiceReadinessSnapshot}
+          practiceReadinessSnapshot={realPracticeSnapshot}
           practiceSummary={practiceSummary}
           generatedAt={practiceGeneratedAt}
         />

@@ -38,7 +38,7 @@ BEGIN
         run_data->'results',
         (run_data->>'started_at')::timestamptz,
         (run_data->>'completed_at')::timestamptz,
-        run_data->>'created_by'
+        (run_data->>'created_by')::uuid
     ON CONFLICT (id) DO UPDATE SET
         status = EXCLUDED.status,
         results = EXCLUDED.results,
@@ -74,13 +74,19 @@ BEGIN
     IF jsonb_array_length(team_players) > 0 THEN
         INSERT INTO team_players (
             team_id,
-            player_id
+            player_id,
+            role,
+            source
         )
         SELECT
-            tp->>'team_id',
-            tp->>'player_id'
+            (tp->>'team_id')::uuid,
+            (tp->>'player_id')::uuid,
+            COALESCE(tp->>'role', 'player'),
+            COALESCE(tp->>'source', 'auto')::source_enum
         FROM jsonb_array_elements(team_players) tp
-        ON CONFLICT (team_id, player_id) DO NOTHING;
+        ON CONFLICT (team_id, player_id) DO UPDATE SET
+            role = EXCLUDED.role,
+            source = EXCLUDED.source;
 
         GET DIAGNOSTICS v_players_count = ROW_COUNT;
     ELSE
@@ -92,11 +98,6 @@ BEGIN
         'run_id', v_run_id,
         'updated_teams', v_teams_count,
         'updated_players', v_players_count
-    );
-EXCEPTION WHEN OTHERS THEN
-    RETURN jsonb_build_object(
-        'status', 'error',
-        'message', SQLERRM
     );
 END;
 $$;

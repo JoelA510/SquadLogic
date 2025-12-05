@@ -1,4 +1,5 @@
 import { serve } from 'https://deno.land/std@0.223.0/http/server.ts';
+import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
 import {
     createClient,
     type SupabaseClient,
@@ -54,6 +55,15 @@ const allowedRoles = parseAllowedRolesEnv(
     { fallbackRoles: DEFAULT_ALLOWED_ROLES },
 );
 
+const PersistencePayloadSchema = z.object({
+    snapshot: z.object({
+        payload: z.object({
+            gameRows: z.array(z.object({ id: z.string() }).passthrough()),
+        }),
+    }),
+    overrides: z.array(z.unknown()).optional(),
+});
+
 let handler: HttpHandler;
 
 if (!supabaseUrl || !serviceRoleKey) {
@@ -74,11 +84,27 @@ if (!supabaseUrl || !serviceRoleKey) {
         auth: { persistSession: false },
     });
 
-    handler = createGamePersistenceHttpHandler({
+    const innerHandler = createGamePersistenceHttpHandler({
         supabaseClient,
         allowedRoles,
         getUser: (request) => getUserFromRequest(request, supabaseClient),
     });
+
+    handler = async (req: Request) => {
+        if (req.method === 'POST') {
+            try {
+                const clone = req.clone();
+                const body = await clone.json();
+                const parsed = PersistencePayloadSchema.safeParse(body);
+                if (!parsed.success) {
+                    return jsonResponse({ status: 'error', message: 'Invalid payload', issues: parsed.error.issues }, 400);
+                }
+            } catch {
+                return jsonResponse({ status: 'error', message: 'Invalid JSON' }, 400);
+            }
+        }
+        return innerHandler(req);
+    };
 }
 
 serve(handler);

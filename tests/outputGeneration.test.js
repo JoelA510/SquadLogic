@@ -90,3 +90,31 @@ test('generateScheduleExports throws for unknown teams', () => {
     generateScheduleExports({ teams, practiceAssignments });
   }, /unknown team U8-T99/);
 });
+
+test('generateScheduleExports handles empty inputs', () => {
+  const exports = generateScheduleExports({ teams: [] });
+  assert.equal(exports.master.rows.length, 0);
+  assert.equal(exports.perTeam.length, 0);
+});
+
+test('generateScheduleExports throws on invalid date', () => {
+  const teams = [{ id: 'T1' }];
+  const practiceAssignments = [
+    { teamId: 'T1', start: 'invalid-date', end: '2024-08-05T23:00:00Z' },
+  ];
+
+  assert.throws(() => {
+    generateScheduleExports({ teams, practiceAssignments });
+  }, /invalid date/);
+});
+
+test('generateScheduleExports throws on missing required fields', () => {
+  const teams = [{ id: 'T1' }];
+  const practiceAssignments = [
+    { teamId: 'T1', start: '2024-08-05T22:00:00Z' }, // Missing end
+  ];
+
+  assert.throws(() => {
+    generateScheduleExports({ teams, practiceAssignments });
+  }, /practice assignments require start and end/);
+});

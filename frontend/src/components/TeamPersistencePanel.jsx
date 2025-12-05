@@ -17,7 +17,7 @@ const persistenceButtonCopy = {
   blocked: 'Resolve overrides to sync',
 };
 
-function TeamPersistencePanel({ teamPersistenceSnapshot }) {
+export default function TeamPersistencePanel({ teamPersistenceSnapshot }) {
   const [persistenceActionState, setPersistenceActionState] = useState('idle');
   const [persistenceActionMessage, setPersistenceActionMessage] = useState('');
   const [lastSyncedAt, setLastSyncedAt] = useState(
@@ -28,11 +28,12 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
   );
   const persistenceTimeoutRef = useRef();
 
-  const theme = PERSISTENCE_THEMES.blue; // Default theme for Team Persistence
+  const theme = PERSISTENCE_THEMES.blue;
 
   useEffect(() => {
     setPersistenceOverrides(teamPersistenceSnapshot.manualOverrides ?? []);
   }, [teamPersistenceSnapshot.manualOverrides]);
+
   const sortedPersistenceHistory = useMemo(() => {
     return [...(teamPersistenceSnapshot.runHistory ?? [])].sort(
       (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
@@ -173,7 +174,7 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
           <div>
             <h2 id="team-persistence-heading" className="text-2xl font-bold text-white mb-2 flex items-center gap-2">
               <span className={`w-2 h-2 rounded-full ${theme.dotColor} ${theme.shadowColor}`} />
-              Supabase persistence
+              Supabase Persistence
             </h2>
             <p className="text-white/70 max-w-prose leading-relaxed">
               Manual overrides are staged before writing teams and roster rows back to Supabase. Use this panel to
@@ -182,114 +183,135 @@ function TeamPersistencePanel({ teamPersistenceSnapshot }) {
           </div>
           <dl className="grid grid-cols-3 gap-4" aria-label="Supabase persistence status">
             <div className="bg-white/5 border border-white/10 rounded-lg p-3 text-center">
-              <dt className="text-xs text-white/50 uppercase tracking-wider mb-1 font-semibold">Last run</dt>
-              <dd className="text-xl font-mono text-white font-bold">{teamPersistenceSnapshot.lastRunId}</dd>
+              <dt className="text-xs text-white/50 uppercase tracking-wider mb-1 font-semibold">Last Run</dt>
+              <dd className="text-xl font-mono text-white font-bold">{teamPersistenceSnapshot.lastRunId || '-'}</dd>
             </div>
             <div className="bg-white/5 border border-white/10 rounded-lg p-3 text-center">
               <dt className="text-xs text-white/50 uppercase tracking-wider mb-1 font-semibold">Synced</dt>
-              <dd className="text-xl font-mono text-white font-bold">{formatDateTime(lastSyncedAt)}</dd>
+              <dd className="text-xl font-mono text-white font-bold">{lastSyncedAt ? formatDateTime(lastSyncedAt) : 'Never'}</dd>
             </div>
             <div className="bg-white/5 border border-white/10 rounded-lg p-3 text-center">
               <dt className="text-xs text-white/50 uppercase tracking-wider mb-1 font-semibold">Prepared</dt>
               <dd className="text-xl font-mono text-white font-bold">
-                {teamPersistenceSnapshot.preparedTeamRows} teams
+                {teamPersistenceSnapshot.preparedTeamRows || 0} teams
               </dd>
             </div>
           </dl>
         </header>
 
-        <div className="mb-6">
-          <div className="flex gap-4 items-center mb-4">
+        <div className="mb-8 p-4 bg-white/5 rounded-lg border border-white/10 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
+              <span className={`w-2 h-2 rounded-full ${persistenceEndpoint ? 'bg-green-400' : 'bg-yellow-400'}`}></span>
+              <span className="font-semibold text-white">{persistenceEndpoint ? 'Live Mode' : 'Simulation Mode'}</span>
+            </div>
+            <p className="text-sm text-white/60 m-0">
+              {persistenceEndpoint
+                ? `Syncing to ${persistenceEndpoint}`
+                : 'Changes will not be saved to remote database.'}
+            </p>
+            {persistenceActionMessage && (
+              <p className="text-sm text-blue-300 mt-2 animate-pulse">
+                {persistenceActionMessage}
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-4">
+            {hasBlockingOverrides && (
+              <div className="text-right hidden md:block">
+                <div className="text-yellow-400 font-semibold text-sm">Action Required</div>
+                <div className="text-white/60 text-xs">Review overrides to sync</div>
+              </div>
+            )}
             <button
               type="button"
-              className={`px-6 py-3 rounded-full font-semibold text-white shadow-lg transition-all duration-200 ${persistenceActionState === 'submitting'
-                  ? 'bg-white/10 text-white/50 cursor-not-allowed'
+              className={`px-6 py-3 rounded-lg font-semibold text-white shadow-lg transition-all duration-200 flex items-center gap-2 ${persistenceActionState === 'submitting'
+                ? 'bg-white/10 text-white/50 cursor-not-allowed'
+                : hasBlockingOverrides
+                  ? 'bg-white/10 text-white/50 cursor-not-allowed border border-white/10'
                   : `${theme.btnBg} ${theme.btnShadow} hover:-translate-y-px`
                 }`}
               onClick={handlePersist}
-              disabled={persistenceActionState === 'submitting'}
+              disabled={persistenceActionState === 'submitting' || hasBlockingOverrides}
             >
               {persistenceButtonCopy[persistenceActionState] ?? persistenceButtonCopy.idle}
             </button>
-            <span className="text-white/50">{teamPersistenceSnapshot.pendingManualOverrideGoal}</span>
           </div>
-
-          <div className={`p-3 rounded-md mb-4 border ${persistenceEndpoint
-              ? 'bg-green-500/10 text-green-400 border-green-500/20'
-              : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
-            }`}>
-            <p className="text-sm m-0" role="note">
-              {persistenceEndpoint
-                ? `Live Supabase persistence enabled at ${persistenceEndpoint}.`
-                : 'Simulated Supabase persistence active.'}
-            </p>
-          </div>
-
-          <p className="text-white/70" role="status">
-            {persistenceActionMessage || 'No Supabase push requested yet.'}
-          </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <article className="bg-white/5 border border-white/10 rounded-lg p-5 flex flex-col gap-2">
-            <h3 className="text-base font-semibold text-blue-300 m-0">Manual overrides</h3>
+            <h3 className="text-base font-semibold text-blue-300 m-0">Manual Overrides</h3>
             <p className="text-sm text-white/50 mt-auto pt-3 border-t border-white/10">
               {persistenceCounts.pending} of {persistenceCounts.total} pending review.
             </p>
-            <ul className="list-none p-0 m-2 grid gap-2">
-              {persistenceOverrides.map((override) => (
-                <li key={override.id} className="p-2 rounded-md bg-white/5 flex justify-between items-baseline shadow-sm">
-                  <div className="flex flex-col">
-                    <div className="flex justify-between mb-1">
-                      <span className="font-semibold text-white">{override.teamName}</span>
-                      <span
-                        className={`text-xs px-2 py-1 rounded-full font-semibold ${override.status === 'pending'
+            {persistenceOverrides.length > 0 ? (
+              <ul className="list-none p-0 m-2 grid gap-2">
+                {persistenceOverrides.map((override) => (
+                  <li key={override.id} className="p-3 rounded-md bg-white/5 flex justify-between items-start shadow-sm border border-white/5">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-white">{override.teamName}</span>
+                        <span
+                          className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold ${override.status === 'pending'
                             ? 'bg-yellow-500/20 text-yellow-400'
                             : 'bg-green-500/20 text-green-400'
-                          }`}
-                      >
-                        {override.status === 'pending' ? 'Pending' : 'Applied'}
-                      </span>
+                            }`}
+                        >
+                          {override.status}
+                        </span>
+                      </div>
+                      <p className="text-sm text-white/70 m-0">{override.reason}</p>
                     </div>
-                    <p className="text-sm text-white/50 m-0">{override.reason}</p>
-                  </div>
-                  {override.status === 'pending' && (
-                    <button
-                      type="button"
-                      className="mt-2 bg-transparent border border-blue-400 text-blue-400 px-3 py-1 rounded text-xs cursor-pointer hover:bg-blue-400/20 transition-colors"
-                      onClick={() => handleOverrideStatusUpdate(override.id)}
-                    >
-                      Mark reviewed
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
+                    {override.status === 'pending' && (
+                      <button
+                        type="button"
+                        className="ml-4 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 px-3 py-1.5 rounded text-xs font-medium transition-colors whitespace-nowrap"
+                        onClick={() => handleOverrideStatusUpdate(override.id)}
+                      >
+                        Mark Reviewed
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="p-8 text-center text-white/30 italic border border-dashed border-white/10 rounded-lg">
+                No manual overrides detected.
+              </div>
+            )}
           </article>
 
           <article className="bg-white/5 border border-white/10 rounded-lg p-5 flex flex-col gap-2">
-            <h3 className="text-base font-semibold text-blue-300 m-0">Recent Supabase syncs</h3>
-            <ul className="list-none p-0 m-2 grid gap-2">
-              {latestHistory.map((run) => (
-                <li key={run.runId} className="p-2 rounded-md bg-white/5 shadow-sm">
-                  <div className="flex justify-between mb-1">
-                    <span className="text-blue-300 font-mono">{run.runId}</span>
-                    <span
-                      className={`text-xs font-semibold ${run.status === 'success' ? 'text-green-400' : 'text-yellow-400'
-                        }`}
-                    >
-                      {run.status}
-                    </span>
-                  </div>
-                  <p className="text-sm text-white/50 m-0">
-                    {formatDateTime(run.startedAt)}
-                  </p>
-                  <p className="text-sm text-white/70 mt-1">
-                    Updated {run.updatedTeams} teams
-                  </p>
-                </li>
-              ))}
-            </ul>
+            <h3 className="text-base font-semibold text-blue-300 m-0">Recent Supabase Syncs</h3>
+            {latestHistory.length > 0 ? (
+              <ul className="list-none p-0 m-2 grid gap-2">
+                {latestHistory.map((run) => (
+                  <li key={run.runId} className="p-3 rounded-md bg-white/5 shadow-sm border border-white/5">
+                    <div className="flex justify-between mb-1">
+                      <span className="text-blue-300 font-mono text-sm">{run.runId}</span>
+                      <span
+                        className={`text-xs font-semibold ${run.status === 'success' ? 'text-green-400' : 'text-yellow-400'
+                          }`}
+                      >
+                        {run.status.toUpperCase()}
+                      </span>
+                    </div>
+                    <p className="text-xs text-white/50 m-0">
+                      {formatDateTime(run.startedAt)}
+                    </p>
+                    <p className="text-sm text-white/80 mt-1">
+                      Updated {run.updatedTeams} teams
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="p-8 text-center text-white/30 italic border border-dashed border-white/10 rounded-lg">
+                No sync history available.
+              </div>
+            )}
           </article>
         </div>
       </div>
@@ -329,4 +351,4 @@ TeamPersistencePanel.propTypes = {
   }).isRequired,
 };
 
-export default TeamPersistencePanel;
+

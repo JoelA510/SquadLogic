@@ -7,3 +7,5 @@ frontend/.vite/
 frontend/.env.local
 mockups/
 *_test_output.txt
+.env
+logs/

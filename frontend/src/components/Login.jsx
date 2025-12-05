@@ -11,7 +11,7 @@ export default function Login() {
     const [error, setError] = useState(null);
     const [message, setMessage] = useState(null);
 
-    const { isConfigured } = useAuth && useAuth();
+    const { isConfigured } = useAuth();
 
     const handleAuth = async (e) => {
         e.preventDefault();

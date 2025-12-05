@@ -811,6 +811,105 @@ begin
     )
     returning id into practice_run_id;
 
+    -- Add a rich practice run to mimic the full metrics structure
+    INSERT INTO scheduler_runs (
+        season_settings_id,
+        run_type,
+        status,
+        parameters,
+        metrics,
+        results,
+        created_at,
+        completed_at
+    ) VALUES (
+        season_id,
+        'practice',
+        'completed',
+        jsonb_build_object('triggered_by', 'seed-script-v2'),
+        '{}'::jsonb,
+        '{
+            "summary": {
+                "totalTeams": 9,
+                "assignedTeams": 8,
+                "unassignedTeams": 1,
+                "assignmentRate": 0.8889,
+                "manualFollowUpRate": 0.1111
+            },
+            "slotUtilization": [
+                { "slotId": "F1-TUE-1800", "capacity": 2, "assignedCount": 2, "utilization": 1.0, "overbooked": false },
+                { "slotId": "F1-THU-1800", "capacity": 2, "assignedCount": 2, "utilization": 1.0, "overbooked": false },
+                { "slotId": "F2-MON-1700", "capacity": 2, "assignedCount": 2, "utilization": 1.0, "overbooked": false },
+                { "slotId": "F2-WED-1700", "capacity": 2, "assignedCount": 2, "utilization": 1.0, "overbooked": false }
+            ],
+            "baseSlotDistribution": [
+                {
+                    "baseSlotId": "F1-TUE-1800",
+                    "day": "Tuesday",
+                    "representativeStart": "2024-08-20T18:00:00Z",
+                    "totalAssigned": 2,
+                    "totalCapacity": 2,
+                    "utilization": 1.0,
+                    "divisionBreakdown": [
+                        { "division": "U8", "count": 2, "percentage": 1.0 }
+                    ]
+                },
+                {
+                    "baseSlotId": "F1-THU-1800",
+                    "day": "Thursday",
+                    "representativeStart": "2024-08-22T18:00:00Z",
+                    "totalAssigned": 2,
+                    "totalCapacity": 2,
+                    "utilization": 1.0,
+                    "divisionBreakdown": [
+                         { "division": "U10", "count": 2, "percentage": 1.0 }
+                    ]
+                }
+            ],
+            "underutilizedBaseSlots": [],
+            "fairnessConcerns": [],
+            "dayConcentrationAlerts": [],
+            "divisionDayDistribution": {
+                "U8": {
+                    "totalAssigned": 2,
+                    "dayBreakdown": [{ "day": "Tuesday", "count": 2, "percentage": 1.0 }]
+                },
+                "U10": {
+                    "totalAssigned": 2,
+                    "dayBreakdown": [{ "day": "Thursday", "count": 2, "percentage": 1.0 }]
+                },
+                "U12": {
+                    "totalAssigned": 4,
+                    "dayBreakdown": [
+                        { "day": "Monday", "count": 2, "percentage": 0.5 },
+                        { "day": "Wednesday", "count": 2, "percentage": 0.5 }
+                    ]
+                }
+            },
+            "unassignedByReason": [
+                {
+                    "reason": "no-capacity",
+                    "count": 1,
+                    "teamIds": ["U10-T04"],
+                    "divisionBreakdown": [{ "division": "U10", "count": 1, "percentage": 1.0 }]
+                }
+            ],
+            "manualFollowUpBreakdown": [
+                 {
+                    "category": "capacity",
+                    "count": 1,
+                    "percentage": 1.0,
+                    "teamIds": ["U10-T04"],
+                    "reasons": ["no-capacity"]
+                 }
+            ],
+            "coachLoad": {},
+            "coachConflicts": [],
+            "dataQualityWarnings": []
+        }'::jsonb,
+        '2024-08-02 10:00:00+00',
+        '2024-08-02 10:00:15+00'
+    );
+
     insert into evaluation_runs (
         scheduler_run_type,
         scheduler_run_id,

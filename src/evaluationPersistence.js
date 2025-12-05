@@ -53,6 +53,7 @@ export async function persistEvaluation({
             scheduler_run_type: type,
             scheduler_run_id: runId || null,
             status: dbStatus,
+            findings_severity: findingsSeverity,
             metrics_summary: summary,
             // We store a lightweight flag of what was analyzed, not the full massive snapshot
             input_snapshot: {

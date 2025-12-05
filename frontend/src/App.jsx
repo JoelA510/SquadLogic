@@ -7,6 +7,7 @@ import { teamPersistenceSnapshot } from './teamPersistenceSample.js';
 
 // Auth
 import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
+import { useTeamSummary } from './hooks/useTeamSummary.js';
 import Login from './components/Login.jsx';
 import ImportPanel from './components/ImportPanel';
 
@@ -81,7 +82,10 @@ function Dashboard() {
     };
   }, []);
 
-  const { totals, divisions, generatedAt } = teamSummarySnapshot;
+  const { summary: teamSummary, loading: teamLoading } = useTeamSummary();
+  const totals = teamSummary ? teamSummary.totals : teamSummarySnapshot.totals;
+  const divisions = teamSummary ? teamSummary.divisions : teamSummarySnapshot.divisions;
+  const generatedAt = teamSummary ? teamSummary.generatedAt : teamSummarySnapshot.generatedAt;
   const practiceSummary = practiceReadinessSnapshot.summary;
   const practiceGeneratedAt = practiceReadinessSnapshot.generatedAt;
   const gameSummary = gameReadinessSnapshot.summary;
@@ -100,6 +104,16 @@ function Dashboard() {
         <Hero />
 
         <SummaryGrid completed={summary.completed} pending={summary.pending} />
+
+        {teamLoading ? (
+          <div className="flex justify-center p-8 text-white/50">Loading metrics...</div>
+        ) : (
+          <TeamOverviewPanel
+            totals={totals}
+            divisions={divisions}
+            generatedAt={generatedAt}
+          />
+        )}
 
         <ImportPanel onImport={handleImport} />
 
@@ -120,11 +134,7 @@ function Dashboard() {
           />
         </div>
 
-        <TeamOverviewPanel
-          totals={totals}
-          divisions={divisions}
-          generatedAt={generatedAt}
-        />
+
 
         <TeamPersistencePanel teamPersistenceSnapshot={teamPersistenceSnapshot} />
 

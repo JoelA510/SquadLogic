@@ -86,8 +86,10 @@ export async function persistEvaluation({
             .insert(findingsPayload);
 
         if (findingsError) {
-            console.error('Failed to persist evaluation findings:', findingsError);
-            // We verify the run was created, so we don't throw here, just log.
+            // Re-throwing the error ensures the operation is atomic. The UI will
+            // catch this and notify the user that the save failed, preventing
+            // a partial-success state with inconsistent data.
+            throw new Error(`Failed to persist evaluation findings: ${findingsError.message}`);
         }
     }
 

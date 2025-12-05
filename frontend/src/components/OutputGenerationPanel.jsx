@@ -44,7 +44,7 @@ export default function OutputGenerationPanel({
 
     const handleUpload = async () => {
         if (!generated) return;
-        if (!supabaseClient && !MOCK_UPLOAD) {
+        if (!supabaseClient && !IS_MOCK_MODE) {
             setStatus('error');
             setMessage('Supabase client not available for upload.');
             return;

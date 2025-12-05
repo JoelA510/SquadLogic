@@ -241,7 +241,7 @@ test('returns an error when the response payload cannot be parsed', async () => 
   });
 
   assert.equal(result.status, 'error');
-  // assert.match(result.message, /Unexpected response/);
+  assert.match(result.message, /Invalid response: Unable to parse JSON/);
 });
 
 test('returns an error status when the request fails (network error)', async () => {

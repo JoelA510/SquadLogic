@@ -983,7 +983,6 @@ begin
         )
     );
 
-    );
 
     -- Add a rich game run to mimic the full metrics structure
     INSERT INTO scheduler_runs (

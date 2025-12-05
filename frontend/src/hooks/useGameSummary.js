@@ -19,7 +19,7 @@ export function useGameSummary() {
     const [error, setError] = useState(null);
 
     useEffect(() => {
-        let isMounted = true;
+        const controller = new AbortController();
 
         async function fetchLatestRun() {
             try {
@@ -31,9 +31,8 @@ export function useGameSummary() {
                     .eq('status', 'completed')
                     .order('completed_at', { ascending: false })
                     .limit(1)
-                    .single();
-
-                if (!isMounted) return;
+                    .single()
+                    .abortSignal(controller.signal);
 
                 if (queryError) {
                     if (queryError.code === 'PGRST116') {
@@ -47,13 +46,13 @@ export function useGameSummary() {
                 const mapped = mapSchedulerRunToGameSummary(run);
                 setData(mapped || EMPTY_SUMMARY);
             } catch (err) {
-                console.error('Failed to fetch game summary:', err);
-                if (isMounted) {
+                if (err.name !== 'AbortError') {
+                    console.error('Failed to fetch game summary:', err);
                     setError(err);
                     setData(EMPTY_SUMMARY);
                 }
             } finally {
-                if (isMounted) {
+                if (!controller.signal.aborted) {
                     setLoading(false);
                 }
             }
@@ -62,7 +61,7 @@ export function useGameSummary() {
         fetchLatestRun();
 
         return () => {
-            isMounted = false;
+            controller.abort();
         };
     }, []);
 

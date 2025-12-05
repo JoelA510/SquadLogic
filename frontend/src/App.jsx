@@ -74,6 +74,26 @@ const roadmapSections = [
   },
 ];
 
+/**
+ * Helper to resolve data between dynamic hook result and static snapshot fallback.
+ * Validates the hook data is populated before using it.
+ */
+function resolveData({ hookSummary, hookSnapshot, hookGeneratedAt, staticSnapshot, checkKey = 'summary' }) {
+  // Check if the hook successfully returned a populated snapshot
+  // e.g. baseSlotDistribution for practice, totalGames for game
+  const isValid = hookSnapshot && (
+    checkKey === 'baseSlotDistribution' ? hookSnapshot.baseSlotDistribution :
+      checkKey === 'totalGames' ? hookSnapshot.summary?.totalGames !== undefined :
+        true
+  );
+
+  return {
+    summary: isValid ? hookSummary : staticSnapshot.summary,
+    generatedAt: isValid ? hookGeneratedAt : staticSnapshot.generatedAt,
+    snapshot: isValid ? hookSnapshot : staticSnapshot
+  };
+}
+
 function Dashboard() {
   const summary = useMemo(() => {
     const completed = roadmapSections.filter((section) => section.status === 'complete').length;
@@ -92,20 +112,6 @@ function Dashboard() {
     loading: practiceLoading
   } = usePracticeSummary();
 
-  const totals = teamSummary ? teamSummary.totals : teamSummarySnapshot.totals;
-  const divisions = teamSummary ? teamSummary.divisions : teamSummarySnapshot.divisions;
-  const generatedAt = teamSummary ? teamSummary.generatedAt : teamSummarySnapshot.generatedAt;
-
-  // Use hook data if valid, otherwise fallback to sample
-  // Use hook data if valid, otherwise fallback to sample
-  // We check for baseSlotDistribution in the snapshot to confirm it's a "real" populated run
-  // and not just the default empty skeleton from the hook.
-  const isRealRun = hookPracticeSnapshot && hookPracticeSnapshot.baseSlotDistribution;
-
-  const practiceSummary = isRealRun ? hookPracticeSummary : practiceReadinessSnapshot.summary;
-  const practiceGeneratedAt = isRealRun ? hookPracticeGeneratedAt : practiceReadinessSnapshot.generatedAt;
-  const realPracticeSnapshot = isRealRun ? hookPracticeSnapshot : practiceReadinessSnapshot;
-
   const {
     gameSummary: hookGameSummary,
     gameReadinessSnapshot: hookGameSnapshot,
@@ -113,11 +119,35 @@ function Dashboard() {
     loading: gameLoading
   } = useGameSummary();
 
-  const isRealGameRun = hookGameSnapshot && hookGameSnapshot.summary?.totalGames !== undefined;
+  const totals = teamSummary ? teamSummary.totals : teamSummarySnapshot.totals;
+  const divisions = teamSummary ? teamSummary.divisions : teamSummarySnapshot.divisions;
+  const generatedAt = teamSummary ? teamSummary.generatedAt : teamSummarySnapshot.generatedAt;
 
-  const gameSummary = isRealGameRun ? hookGameSummary : gameReadinessSnapshot.summary;
-  const gameGeneratedAt = isRealGameRun ? hookGameGeneratedAt : gameReadinessSnapshot.generatedAt;
-  const realGameSnapshot = isRealGameRun ? hookGameSnapshot : gameReadinessSnapshot;
+  // Resolve Practice Data
+  const {
+    summary: practiceSummary,
+    generatedAt: practiceGeneratedAt,
+    snapshot: realPracticeSnapshot
+  } = resolveData({
+    hookSummary: hookPracticeSummary,
+    hookSnapshot: hookPracticeSnapshot,
+    hookGeneratedAt: hookPracticeGeneratedAt,
+    staticSnapshot: practiceReadinessSnapshot,
+    checkKey: 'baseSlotDistribution'
+  });
+
+  // Resolve Game Data
+  const {
+    summary: gameSummary,
+    generatedAt: gameGeneratedAt,
+    snapshot: realGameSnapshot
+  } = resolveData({
+    hookSummary: hookGameSummary,
+    hookSnapshot: hookGameSnapshot,
+    hookGeneratedAt: hookGameGeneratedAt,
+    staticSnapshot: gameReadinessSnapshot,
+    checkKey: 'totalGames'
+  });
 
   const handleImport = (data) => {
     console.log('Imported data:', data);
@@ -148,10 +178,10 @@ function Dashboard() {
         <div className="mb-6">
           <EvaluationPanel
             practiceData={{
-              assignments: practiceReadinessSnapshot.assignments,
-              unassigned: practiceReadinessSnapshot.unassigned,
+              assignments: realPracticeSnapshot.assignments,
+              unassigned: realPracticeSnapshot.unassigned,
               teams: teamSummary ? teamSummary.teams : teamSummarySnapshot.teams,
-              slots: practiceReadinessSnapshot.slots,
+              slots: realPracticeSnapshot.slots,
             }}
             gameData={{
               assignments: realGameSnapshot.assignments,
@@ -175,11 +205,11 @@ function Dashboard() {
         )}
 
         <PracticePersistencePanel
-          assignments={practiceReadinessSnapshot.assignments}
-          slots={practiceReadinessSnapshot.slots}
-          overrides={practiceReadinessSnapshot.overrides}
-          runMetadata={practiceReadinessSnapshot.runMetadata}
-          runId={practiceReadinessSnapshot.runId}
+          assignments={realPracticeSnapshot.assignments}
+          slots={realPracticeSnapshot.slots}
+          overrides={realPracticeSnapshot.overrides}
+          runMetadata={realPracticeSnapshot.runMetadata}
+          runId={realPracticeSnapshot.runId}
         />
 
         {gameLoading ? (
@@ -193,14 +223,14 @@ function Dashboard() {
         )}
 
         <GamePersistencePanel
-          assignments={gameReadinessSnapshot.assignments}
-          runMetadata={gameReadinessSnapshot.runMetadata}
-          runId={gameReadinessSnapshot.runId}
+          assignments={realGameSnapshot.assignments}
+          runMetadata={realGameSnapshot.runMetadata}
+          runId={realGameSnapshot.runId}
         />
 
         <OutputGenerationPanel
           teams={teamSummary ? teamSummary.teams : teamSummarySnapshot.teams}
-          practiceAssignments={practiceReadinessSnapshot.assignments}
+          practiceAssignments={realPracticeSnapshot.assignments}
           gameAssignments={realGameSnapshot.assignments}
         />
 

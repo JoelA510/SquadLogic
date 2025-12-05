@@ -44,8 +44,8 @@ function GameReadinessPanel({ gameReadinessSnapshot, gameSummary, generatedAt })
                     title="Unscheduled matchups"
                     items={gameReadinessSnapshot.unscheduled}
                     emptyMessage="All matchups assigned."
-                    renderItem={(entry, index) => (
-                        <div key={`unscheduled-${index}`} className="insight-card">
+                    renderItem={(entry) => (
+                        <div key={`unscheduled-${entry.weekIndex}-${entry.matchup}`} className="insight-card">
                             <h3>Week {entry.weekIndex}</h3>
                             <p>{entry.matchup}</p>
                             <p className="insight-meta">{entry.reason}</p>
@@ -57,8 +57,8 @@ function GameReadinessPanel({ gameReadinessSnapshot, gameSummary, generatedAt })
                     title="Conflicts"
                     items={gameReadinessSnapshot.warnings}
                     emptyMessage="No conflicts."
-                    renderItem={(warning, index) => (
-                        <div key={`warning-${index}`} className="insight-card">
+                    renderItem={(warning) => (
+                        <div key={`warning-${warning.message}`} className="insight-card">
                             <h3>Conflict</h3>
                             <p>{warning.message}</p>
                         </div>

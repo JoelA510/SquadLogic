@@ -53,6 +53,7 @@
 **A. TL;DR (1–3 sentences)**
 - Extracted `Header`, `Hero`, `SummaryGrid`, and readiness panels from `App.jsx` into dedicated components.
 - Centralized formatting functions and theme definitions to reduce code duplication and enforce consistency.
+- **Update**: Fixed React key warnings in `RoadmapSection`, `GameReadinessPanel`, and `PracticeReadinessPanel` based on code review.
 
 **B. 5W + H**
 
@@ -150,7 +151,8 @@
 **B. 5W + H**
 
 - **What changed:**
-  Added a test file `tests/verifyRpcUsage.test.js`. No production code changes were needed as the implementation was already secure.
+  To address SEC-01, we removed a legacy non-atomic transaction shim in `supabase/functions/team-persistence/index.ts` so that all persistence flows now use the atomic RPC. This is a production code change that hardens the security boundary and improves error propagation.
+  Additionally, `team_persistence_rpc` follows the pattern of allowing database errors to propagate naturally (no generic `EXCEPTION WHEN OTHERS`), ensuring clients receive meaningful error details.
 
 - **Why it changed:**
   Code review flagged a potential "transaction shim" security risk (SEC-01).

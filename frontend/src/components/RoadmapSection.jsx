@@ -26,8 +26,8 @@ function RoadmapSection({ roadmapSections }) {
                                     <div className="roadmap-actions">
                                         <p className="roadmap-actions__label">Next actions</p>
                                         <ul className="actions-list">
-                                            {section.actions.map((action) => (
-                                                <li key={action}>{action}</li>
+                                            {section.actions.map((action, index) => (
+                                                <li key={index}>{action}</li>
                                             ))}
                                         </ul>
                                     </div>

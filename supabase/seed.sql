@@ -983,6 +983,97 @@ begin
         )
     );
 
+
+    -- Add a rich game run to mimic the full metrics structure
+    INSERT INTO scheduler_runs (
+        season_settings_id,
+        run_type,
+        status,
+        parameters,
+        metrics,
+        results,
+        created_at,
+        completed_at
+    ) VALUES (
+        season_id,
+        'game',
+        'completed',
+        jsonb_build_object('triggered_by', 'seed-script-v2'),
+        '{}'::jsonb,
+        '{
+            "summary": {
+                "totalGames": 18,
+                "divisionsCovered": 3,
+                "scheduledRate": 0.9444,
+                "unscheduledMatchups": 1,
+                "teamsWithByes": 2,
+                "sharedSlotAlerts": 1
+            },
+            "assignments": [], 
+            "unscheduled": [
+                {
+                    "reason": "lightning postponement",
+                    "weekIndex": 3,
+                    "matchup": "U10-T01 vs U10-T02",
+                    "note": "Field 1 unavailable; awaiting reschedule window"
+                }
+            ],
+            "byes": [
+                {
+                    "division": "U12",
+                    "weekIndex": 4,
+                    "teamIds": ["U12-T02", "U12-T03"]
+                }
+            ],
+            "warnings": [
+                {
+                    "type": "coach-conflict",
+                    "severity": "error",
+                    "message": "Coach Marie is double-booked in week 2.",
+                    "details": {
+                        "coachId": "coach-marie",
+                        "weekIndex": 2,
+                        "games": [
+                            { "teamId": "U8-T01", "slotId": "FIELD-1-SAT-0900" },
+                            { "teamId": "U10-T02", "slotId": "FIELD-2-SAT-0915" }
+                        ]
+                    }
+                },
+                {
+                    "type": "shared-slot-imbalance",
+                    "severity": "warning",
+                    "message": "Shared slot FIELD-1-SAT-1100 is 75% allocated to U10.",
+                    "details": {
+                        "slotId": "FIELD-1-SAT-1100",
+                        "dominantDivision": "U10",
+                        "dominantShare": 0.75,
+                        "totalAssignments": 4,
+                        "breakdown": [
+                            { "division": "U10", "count": 3 },
+                            { "division": "U12", "count": 1 }
+                        ]
+                    }
+                }
+            ],
+            "fieldHighlights": [
+                {
+                    "fieldId": "Field 1",
+                    "games": 7,
+                    "divisions": ["U8", "U10"],
+                    "note": "Maintains even cadence across morning windows."
+                },
+                {
+                    "fieldId": "Field 2",
+                    "games": 5,
+                    "divisions": ["U10", "U12"],
+                    "note": "Hosts the outstanding shared-slot imbalance flagged above."
+                }
+            ]
+        }'::jsonb,
+        '2024-08-05 14:00:00+00',
+        '2024-08-05 14:00:25+00'
+    );
+
     raise notice 'Seed data applied for Fall 2024 recreation season (season_settings.id=%)', season_id;
 end
 $$;

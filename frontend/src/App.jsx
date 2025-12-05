@@ -9,6 +9,7 @@ import { teamPersistenceSnapshot } from './teamPersistenceSample.js';
 import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
 import { useTeamSummary } from './hooks/useTeamSummary.js';
 import { usePracticeSummary } from './hooks/usePracticeSummary.js';
+import { useGameSummary } from './hooks/useGameSummary.js';
 import Login from './components/Login.jsx';
 import ImportPanel from './components/ImportPanel';
 
@@ -105,8 +106,18 @@ function Dashboard() {
   const practiceGeneratedAt = isRealRun ? hookPracticeGeneratedAt : practiceReadinessSnapshot.generatedAt;
   const realPracticeSnapshot = isRealRun ? hookPracticeSnapshot : practiceReadinessSnapshot;
 
-  const gameSummary = gameReadinessSnapshot.summary;
-  const gameGeneratedAt = gameReadinessSnapshot.generatedAt;
+  const {
+    gameSummary: hookGameSummary,
+    gameReadinessSnapshot: hookGameSnapshot,
+    generatedAt: hookGameGeneratedAt,
+    loading: gameLoading
+  } = useGameSummary();
+
+  const isRealGameRun = hookGameSnapshot && hookGameSnapshot.summary?.totalGames !== undefined;
+
+  const gameSummary = isRealGameRun ? hookGameSummary : gameReadinessSnapshot.summary;
+  const gameGeneratedAt = isRealGameRun ? hookGameGeneratedAt : gameReadinessSnapshot.generatedAt;
+  const realGameSnapshot = isRealGameRun ? hookGameSnapshot : gameReadinessSnapshot;
 
   const handleImport = (data) => {
     console.log('Imported data:', data);
@@ -143,10 +154,10 @@ function Dashboard() {
               slots: practiceReadinessSnapshot.slots,
             }}
             gameData={{
-              assignments: gameReadinessSnapshot.assignments,
+              assignments: realGameSnapshot.assignments,
               teams: teamSummary ? teamSummary.teams : teamSummarySnapshot.teams,
-              byes: gameReadinessSnapshot.byes,
-              unscheduled: gameReadinessSnapshot.unscheduled,
+              byes: realGameSnapshot.byes,
+              unscheduled: realGameSnapshot.unscheduled,
             }}
           />
         </div>
@@ -171,11 +182,15 @@ function Dashboard() {
           runId={practiceReadinessSnapshot.runId}
         />
 
-        <GameReadinessPanel
-          gameReadinessSnapshot={gameReadinessSnapshot}
-          gameSummary={gameSummary}
-          generatedAt={gameGeneratedAt}
-        />
+        {gameLoading ? (
+          <div className="flex justify-center p-8 text-white/50">Loading game metrics...</div>
+        ) : (
+          <GameReadinessPanel
+            gameReadinessSnapshot={realGameSnapshot}
+            gameSummary={gameSummary}
+            generatedAt={gameGeneratedAt}
+          />
+        )}
 
         <GamePersistencePanel
           assignments={gameReadinessSnapshot.assignments}
@@ -186,7 +201,7 @@ function Dashboard() {
         <OutputGenerationPanel
           teams={teamSummary ? teamSummary.teams : teamSummarySnapshot.teams}
           practiceAssignments={practiceReadinessSnapshot.assignments}
-          gameAssignments={gameReadinessSnapshot.assignments}
+          gameAssignments={realGameSnapshot.assignments}
         />
 
         <RoadmapSection roadmapSections={roadmapSections} />

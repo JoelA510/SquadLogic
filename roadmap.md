@@ -107,7 +107,7 @@ Future changes would be refinements, not re-selection of the stack.
 - [x] Translated `docs/sql/initial_schema.sql` into timestamped Supabase migrations (`20251202000000_initial_schema.sql`).
 - [x] Added `20251206000000_team_persistence_rpc.sql` for team persistence RPC.
 - [ ] Ensure `sample_seed_data.sql` runs cleanly against those migrations.
-- [ ] Stand up a Supabase project and validate schema + seed scripts.
+- [ ] Stand up a Supabase project and validate schema + seed scripts. (See `docs/roadmap_from_home.md`)
 
 ---
 

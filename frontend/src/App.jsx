@@ -234,6 +234,7 @@ function Dashboard() {
           teams={teamSummary ? teamSummary.teams : teamSummarySnapshot.teams}
           practiceAssignments={realPracticeSnapshot.assignments}
           gameAssignments={realGameSnapshot.assignments}
+          supabaseClient={supabase}
         />
 
         <RoadmapSection roadmapSections={roadmapSections} />

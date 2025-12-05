@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
 import { useTeamSummary } from './hooks/useTeamSummary.js';
 import { usePracticeSummary } from './hooks/usePracticeSummary.js';
 import { useGameSummary } from './hooks/useGameSummary.js';
+import { supabase } from './utils/supabaseClient';
 import Login from './components/Login.jsx';
 import ImportPanel from './components/ImportPanel';
 
@@ -189,6 +190,7 @@ function Dashboard() {
               byes: realGameSnapshot.byes,
               unscheduled: realGameSnapshot.unscheduled,
             }}
+            supabaseClient={supabase}
           />
         </div>
 

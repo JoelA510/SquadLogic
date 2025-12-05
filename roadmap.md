@@ -250,12 +250,11 @@ Future changes would be refinements, not re-selection of the stack.
 
 - [x] Wire evaluation into the admin shell dashboard:
   - `EvaluationPanel.jsx` runs live evaluations from schedule data and displays status/issues.
-- [x] Implement persistence into `schedule_evaluations` table via `src/evaluationPersistence.js`.
+- [x] Implement persistence into `evaluation_runs` and `evaluation_findings` tables via `src/evaluationPersistence.js`.
 
 **Next steps**
 
 - [ ] Add hooks so each "Sync to Supabase" action records an evaluation snapshot for audit.
-- [ ] Expand persistence to use the full `evaluation_*` table set (runs, findings, metrics, events).
 
 ---
 

@@ -96,9 +96,14 @@ function Dashboard() {
   const generatedAt = teamSummary ? teamSummary.generatedAt : teamSummarySnapshot.generatedAt;
 
   // Use hook data if valid, otherwise fallback to sample
-  const practiceSummary = hookPracticeSummary && hookPracticeSummary.assignmentRate !== undefined ? hookPracticeSummary : practiceReadinessSnapshot.summary;
-  const practiceGeneratedAt = hookPracticeGeneratedAt || practiceReadinessSnapshot.generatedAt;
-  const realPracticeSnapshot = hookPracticeSnapshot && hookPracticeSnapshot.baseSlotDistribution ? hookPracticeSnapshot : practiceReadinessSnapshot;
+  // Use hook data if valid, otherwise fallback to sample
+  // We check for baseSlotDistribution in the snapshot to confirm it's a "real" populated run
+  // and not just the default empty skeleton from the hook.
+  const isRealRun = hookPracticeSnapshot && hookPracticeSnapshot.baseSlotDistribution;
+
+  const practiceSummary = isRealRun ? hookPracticeSummary : practiceReadinessSnapshot.summary;
+  const practiceGeneratedAt = isRealRun ? hookPracticeGeneratedAt : practiceReadinessSnapshot.generatedAt;
+  const realPracticeSnapshot = isRealRun ? hookPracticeSnapshot : practiceReadinessSnapshot;
 
   const gameSummary = gameReadinessSnapshot.summary;
   const gameGeneratedAt = gameReadinessSnapshot.generatedAt;
@@ -148,11 +153,15 @@ function Dashboard() {
 
         <TeamPersistencePanel teamPersistenceSnapshot={teamPersistenceSnapshot} />
 
-        <PracticeReadinessPanel
-          practiceReadinessSnapshot={realPracticeSnapshot}
-          practiceSummary={practiceSummary}
-          generatedAt={practiceGeneratedAt}
-        />
+        {practiceLoading ? (
+          <div className="flex justify-center p-8 text-white/50">Loading practice metrics...</div>
+        ) : (
+          <PracticeReadinessPanel
+            practiceReadinessSnapshot={realPracticeSnapshot}
+            practiceSummary={practiceSummary}
+            generatedAt={practiceGeneratedAt}
+          />
+        )}
 
         <PracticePersistencePanel
           assignments={practiceReadinessSnapshot.assignments}

@@ -19,6 +19,8 @@ export function usePracticeSummary() {
     const [error, setError] = useState(null);
 
     useEffect(() => {
+        let isMounted = true;
+
         async function fetchLatestRun() {
             try {
                 // Fetch the most recent completed run of type 'practice'
@@ -30,6 +32,8 @@ export function usePracticeSummary() {
                     .order('completed_at', { ascending: false })
                     .limit(1)
                     .single();
+
+                if (!isMounted) return;
 
                 if (queryError) {
                     if (queryError.code === 'PGRST116') {
@@ -44,14 +48,22 @@ export function usePracticeSummary() {
                 setData(mapped || EMPTY_SUMMARY);
             } catch (err) {
                 console.error('Failed to fetch practice summary:', err);
-                setError(err);
-                setData(EMPTY_SUMMARY);
+                if (isMounted) {
+                    setError(err);
+                    setData(EMPTY_SUMMARY);
+                }
             } finally {
-                setLoading(false);
+                if (isMounted) {
+                    setLoading(false);
+                }
             }
         }
 
         fetchLatestRun();
+
+        return () => {
+            isMounted = false;
+        };
     }, []);
 
     return {

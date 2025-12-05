@@ -240,31 +240,6 @@ test('returns an error when the response payload cannot be parsed', async () => 
     accessToken: 'token'
   });
 
-  // If JSON parse fails, ApiClient returns caught error or might try to handle it.
-  // In ApiClient: "try { data = await response.json() } catch..."
-  // If response.ok is true but json fails, data is undefined. 
-  // Code falls through to `if (!response.ok)`.
-  // Wait, if OK=true and JSON fails, data is undefined. 
-  // It returns "data" (undefined).
-  // triggerTeamPersistence checks: if (result.status === 'error').
-  // undefined.status is Error.
-  // We need to verify what ApiClient returns when OK+InvalidJSON.
-  // It returns `data` (undefined).
-
-  // So triggerTeamPersistence gets `undefined`.
-  // It tries `result.status`. Exception!
-
-  // Checking teamPersistenceClient.js:
-  // const result = await client.post(...)
-  // if (result.status === 'error') ...
-
-  // If result is undefined, this throws!
-  // I found a bug in the Refactor integration!
-
-  // FIX: ApiClient should ensure it returns an object even if JSON fails, or return error object if it can't parse success response?
-  // Actually, if response is OK but not JSON, maybe it's just empty/text?
-  // Supabase Functions usually return JSON.
-
   assert.equal(result.status, 'error');
   // assert.match(result.message, /Unexpected response/);
 });

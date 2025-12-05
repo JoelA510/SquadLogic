@@ -2,6 +2,31 @@ import { useMemo } from 'react';
 import './App.css';
 import { useTeamPersistence } from './hooks/useTeamPersistence';
 
+// Auth
+import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
+import { supabase } from './utils/supabaseClient';
+import Login from './components/Login.jsx';
+import ImportPanel from './components/ImportPanel';
+
+// Components
+import Header from './components/Header.jsx';
+import Hero from './components/Hero.jsx';
+import SummaryGrid from './components/SummaryGrid.jsx';
+import TeamOverviewPanel from './components/TeamOverviewPanel.jsx';
+import TeamPersistencePanel from './components/TeamPersistencePanel.jsx';
+import PracticeReadinessPanel from './components/PracticeReadinessPanel.jsx';
+import PracticePersistencePanel from './components/PracticePersistencePanel.jsx';
+import GameReadinessPanel from './components/GameReadinessPanel.jsx';
+import GamePersistencePanel from './components/GamePersistencePanel.jsx';
+import OutputGenerationPanel from './components/OutputGenerationPanel.jsx';
+import EvaluationPanel from './components/EvaluationPanel.jsx';
+import RoadmapSection from './components/RoadmapSection.jsx';
+import ThemeToggle from './components/ThemeToggle.jsx';
+import LoadingScreen from './components/LoadingScreen.jsx';
+
+// Data Hook
+import { useDashboardData } from './hooks/useDashboardData';
+
 function Dashboard() {
   const {
     loading,
@@ -13,11 +38,13 @@ function Dashboard() {
 
   const { persistenceSnapshot, loading: persistenceLoading } = useTeamPersistence();
 
-  // ... handleImport ...
+  const handleImport = (data) => {
+    console.log('Imported data:', data);
+    // TODO: Wire up to Supabase or state management
+  };
 
   return (
     <div className="app-shell">
-      {/* ... Header, Hero, SummaryGrid ... */}
       <Header />
       <main className="app-main">
         <Hero />
@@ -37,7 +64,6 @@ function Dashboard() {
 
         <div className="mb-6">
           <EvaluationPanel
-            // ... props ...
             practiceData={{
               assignments: practice.snapshot.assignments,
               unassigned: practice.snapshot.unassigned,

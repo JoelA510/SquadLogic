@@ -58,7 +58,7 @@ export class ApiClient {
                 };
             }
 
-            return data || { status: 'error', message: 'Invalid response: Unable to parse JSON' };
+            return data !== undefined ? data : { status: 'error', message: 'Invalid response: Unable to parse JSON' };
         } catch (error) {
             console.error(`API request to ${endpoint} failed:`, error);
             return {

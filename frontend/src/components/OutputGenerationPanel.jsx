@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { generateScheduleExports } from '../../../src/outputGeneration';
 import { uploadScheduleExport } from '../../../src/storageSupabase';
+import { IS_MOCK_MODE } from '../config';
 
 // Placeholder for Supabase client injection or context
 // In a real app, use a hook like useSupabaseClient()

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../utils/supabaseClient';
-import { mapSchedulerRunToSummary } from '../../../src/utils/teamSummaryMapper';
+// Use absolute import via configured alias
+import { mapSchedulerRunToSummary } from 'src/utils/teamSummaryMapper';
 
-// Fallback skeleton if no data is found (or while loading initially if we didn't want a full spinner)
+// Fallback skeleton
 const EMPTY_SUMMARY = {
     totals: {
         divisions: 0,
@@ -24,8 +25,7 @@ export function useTeamSummary() {
     useEffect(() => {
         async function fetchLatestRun() {
             try {
-                setLoading(true);
-                // Fetch the most recent completed run of type 'team'
+                // Loading is true by default, no need to set it here
                 const { data, error: queryError } = await supabase
                     .from('scheduler_runs')
                     .select('*')
@@ -36,9 +36,9 @@ export function useTeamSummary() {
                     .single();
 
                 if (queryError) {
-                    // PGRST116 means zero rows found, which is not an error here, just "no runs yet"
                     if (queryError.code === 'PGRST116') {
                         setSummary(EMPTY_SUMMARY);
+                        setLoading(false);
                         return;
                     }
                     throw queryError;

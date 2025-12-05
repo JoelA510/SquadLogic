@@ -122,19 +122,17 @@ function Dashboard() {
             practiceData={{
               assignments: practiceReadinessSnapshot.assignments,
               unassigned: practiceReadinessSnapshot.unassigned,
-              teams: teamSummarySnapshot.teams,
+              teams: teamSummary ? teamSummary.teams : teamSummarySnapshot.teams,
               slots: practiceReadinessSnapshot.slots,
             }}
             gameData={{
               assignments: gameReadinessSnapshot.assignments,
-              teams: teamSummarySnapshot.teams,
+              teams: teamSummary ? teamSummary.teams : teamSummarySnapshot.teams,
               byes: gameReadinessSnapshot.byes,
               unscheduled: gameReadinessSnapshot.unscheduled,
             }}
           />
         </div>
-
-
 
         <TeamPersistencePanel teamPersistenceSnapshot={teamPersistenceSnapshot} />
 
@@ -165,7 +163,7 @@ function Dashboard() {
         />
 
         <OutputGenerationPanel
-          teams={teamSummarySnapshot.teams}
+          teams={teamSummary ? teamSummary.teams : teamSummarySnapshot.teams}
           practiceAssignments={practiceReadinessSnapshot.assignments}
           gameAssignments={gameReadinessSnapshot.assignments}
         />

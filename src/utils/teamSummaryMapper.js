@@ -23,54 +23,16 @@ export function mapSchedulerRunToSummary(run) {
         rosterBalanceByDivision,
     } = results;
 
-    // 1. Calculate Grand Totals
+    // 1. Calculate Per-Division Statistics first
     const divisionKeys = Object.keys(teamsByDivision || {});
-    const totalDivisions = divisionKeys.length;
 
-    let totalTeams = 0;
-    let totalPlayersAssigned = 0;
-    let totalOverflow = 0;
-    let divisionsNeedingCoaches = 0;
-    let divisionsWithOpenRosterSlots = 0;
-
-    divisionKeys.forEach((division) => {
-        const teams = teamsByDivision[division] || [];
-        totalTeams += teams.length;
-
-        // Count players in teams
-        teams.forEach(team => {
-            totalPlayersAssigned += (team.players || []).length;
-        });
-
-        // Count overflow
-        const overflowSummary = overflowSummaryByDivision?.[division];
-        if (overflowSummary) {
-            // totalPlayers might be nested or direct
-            totalOverflow += (overflowSummary.totalPlayers || 0);
-        }
-
-        // Check coach needs
-        const coverage = coachCoverageByDivision?.[division];
-        if (coverage?.needsAdditionalCoaches) {
-            divisionsNeedingCoaches++;
-        }
-
-        // Check open slots
-        const rosterBalance = rosterBalanceByDivision?.[division];
-        const openSlots = rosterBalance?.summary?.totalCapacity - rosterBalance?.summary?.totalPlayers;
-        if (openSlots > 0) {
-            divisionsWithOpenRosterSlots++;
-        }
-    });
-
-    // 2. Map Division Summaries
     const divisions = divisionKeys.map((divisionId) => {
         const teams = teamsByDivision[divisionId] || [];
         const rosterBalance = rosterBalanceByDivision?.[divisionId];
         const coachCoverage = coachCoverageByDivision?.[divisionId];
         const buddyDiagnostics = buddyDiagnosticsByDivision?.[divisionId];
         const overflowSummary = overflowSummaryByDivision?.[divisionId];
-        const overflowDetail = overflowByDivision?.[divisionId] || [];
+        // overflowDetail was unused, removed.
 
         // Derive teams needing players
         const teamsNeedingPlayers = (rosterBalance?.teamStats || [])
@@ -95,6 +57,10 @@ export function mapSchedulerRunToSummary(run) {
             });
         }
 
+        // Fallback for missing overflowSummary (fixes data contract mismatch)
+        const overflowPlayersCount = overflowSummary?.totalPlayers ??
+            (overflowByDivision?.[divisionId] || []).reduce((sum, item) => sum + (item.players || []).length, 0);
+
         return {
             divisionId,
             totalTeams: teams.length,
@@ -116,22 +82,53 @@ export function mapSchedulerRunToSummary(run) {
             unmatchedBuddyCount: (buddyDiagnostics?.unmatchedRequests || []).length,
             unmatchedBuddyReasons,
             overflowUnits: overflowSummary?.totalUnits || 0,
-            overflowPlayers: overflowSummary?.totalPlayers || 0,
+            overflowPlayers: overflowPlayersCount,
             overflowByReason,
             overflowPlayersByReason,
         };
     });
 
+    // 2. Reduce divisions to get Grand Totals (Optimization)
+    const totals = divisions.reduce((acc, div) => {
+        acc.divisions++;
+        acc.teams += div.totalTeams;
+        acc.playersAssigned += div.playersAssigned;
+        acc.overflowPlayers += div.overflowPlayers;
+
+        if (div.needsAdditionalCoaches) {
+            acc.divisionsNeedingCoaches++;
+        }
+        if (div.slotsRemaining > 0) {
+            acc.divisionsWithOpenRosterSlots++;
+        }
+        return acc;
+    }, {
+        divisions: 0,
+        teams: 0,
+        playersAssigned: 0,
+        overflowPlayers: 0,
+        divisionsNeedingCoaches: 0,
+        divisionsWithOpenRosterSlots: 0,
+    });
+
+    // 3. Flatten teams for other components (Evaluation, Output)
+    const allTeams = [];
+    divisionKeys.forEach((division) => {
+        const divisionTeams = teamsByDivision[division] || [];
+        divisionTeams.forEach(t => {
+            // Ensure properties match what components expect (id, name, coachId, etc.)
+            allTeams.push({
+                courseId: t.id, // Some legacy components might use courseId or similar? standardizing on id.
+                ...t,
+                divisionName: division, // Helpful for display
+            });
+        });
+    });
+
     return {
         generatedAt,
-        totals: {
-            divisions: totalDivisions,
-            teams: totalTeams,
-            playersAssigned: totalPlayersAssigned,
-            overflowPlayers: totalOverflow,
-            divisionsNeedingCoaches,
-            divisionsWithOpenRosterSlots,
-        },
+        totals,
         divisions,
+        teams: allTeams,
     };
 }

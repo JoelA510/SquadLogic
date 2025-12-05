@@ -15,7 +15,9 @@ export default function PersistencePanel({
     onSync,
     status, // 'idle', 'syncing', 'success', 'error'
     message,
+
     colorTheme = 'blue', // 'blue' or 'green'
+    children
 }) {
     const theme = PERSISTENCE_THEMES[colorTheme] || PERSISTENCE_THEMES.blue;
     const gridClass = GRID_COLS[stats.length] || 'grid-cols-1';
@@ -42,6 +44,10 @@ export default function PersistencePanel({
                         </div>
                     )}
                 </div>
+
+                {/* Custom Content Injection */}
+                {children && <div className="mb-6">{children}</div>}
+
 
                 <div className="flex items-center justify-between">
                     <div className="text-sm">

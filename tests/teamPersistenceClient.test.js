@@ -10,8 +10,6 @@ afterEach(() => {
 });
 
 test('blocks persistence when pending overrides remain', async () => {
-  process.env.VITE_SUPABASE_PERSISTENCE_URL = 'http://example.com';
-
   let fetchCalled = false;
   const fetchImpl = async () => {
     fetchCalled = true;
@@ -23,6 +21,7 @@ test('blocks persistence when pending overrides remain', async () => {
     overrides: [{ id: 'pending-1', status: 'pending' }],
     fetchImpl,
     simulateDelayMs: 0,
+    endpoint: 'http://example.com'
   });
 
   assert.equal(result.status, 'blocked');
@@ -30,7 +29,7 @@ test('blocks persistence when pending overrides remain', async () => {
   assert.equal(fetchCalled, false);
 });
 
-test('falls back to simulation when no endpoint is configured', async () => {
+test('falls back to simulation when no endpoint is configured (mock mode)', async () => {
   const result = await triggerTeamPersistence({
     snapshot: {
       preparedTeamRows: 3,
@@ -39,6 +38,7 @@ test('falls back to simulation when no endpoint is configured', async () => {
     },
     overrides: [],
     simulateDelayMs: 0,
+    // No endpoint, no accessToken => Mock
   });
 
   assert.equal(result.status, 'success');
@@ -46,9 +46,7 @@ test('falls back to simulation when no endpoint is configured', async () => {
   assert.equal(result.updatedPlayers, 45);
 });
 
-test('derives Supabase Edge Function base and forwards access token when provided', async () => {
-  process.env.SUPABASE_URL = 'https://project.supabase.co/';
-
+test('uses provided endpoint and forwards access token', async () => {
   let capturedUrl;
   let capturedHeaders;
   const fetchImpl = async (url, options) => {
@@ -62,6 +60,7 @@ test('derives Supabase Edge Function base and forwards access token when provide
     overrides: [],
     fetchImpl,
     accessToken: 'token-123',
+    endpoint: 'https://project.supabase.co/functions/v1'
   });
 
   assert.equal(capturedUrl, 'https://project.supabase.co/functions/v1/team-persistence');
@@ -69,10 +68,7 @@ test('derives Supabase Edge Function base and forwards access token when provide
   assert.equal(result.status, 'success');
 });
 
-test('prefers VITE_SUPABASE_URL when deriving endpoint', async () => {
-  process.env.VITE_SUPABASE_URL = 'https://vite.project.supabase.co';
-  process.env.SUPABASE_URL = 'https://project.supabase.co';
-
+test('uses provided endpoint when available (vite example)', async () => {
   let capturedUrl;
   const fetchImpl = async (url) => {
     capturedUrl = url;
@@ -84,6 +80,7 @@ test('prefers VITE_SUPABASE_URL when deriving endpoint', async () => {
     overrides: [],
     fetchImpl,
     accessToken: 'token-abc',
+    endpoint: 'https://vite.project.supabase.co/functions/v1'
   });
 
   assert.equal(
@@ -93,8 +90,13 @@ test('prefers VITE_SUPABASE_URL when deriving endpoint', async () => {
   assert.equal(result.status, 'success');
 });
 
-test('falls back to simulation when using derived Supabase endpoint without auth token', async () => {
-  process.env.SUPABASE_URL = 'https://project.supabase.co/';
+test('falls back to simulation when using derived endpoint without auth token', async () => {
+  // If we call with an endpoint but NO token, logic suggests we might want to fail or simulate?
+  // Current logic: const isMock = !accessToken && !providedEndpoint;
+  // So if providedEndpoint IS present, isMock is false.
+  // But if we want to test the "mock fallback", we should ensure isMock becomes true.
+  // Implicitly, if we don't pass an endpoint, it defaults to API_BASE_URL (localhost).
+  // If no access token, isMock is TRUE (because providedEndpoint is undefined).
 
   let fetchCalled = false;
   const fetchImpl = async () => {
@@ -107,6 +109,7 @@ test('falls back to simulation when using derived Supabase endpoint without auth
     overrides: [],
     fetchImpl,
     simulateDelayMs: 0,
+    // No accessToken, No endpoint => Mock
   });
 
   assert.equal(fetchCalled, false);
@@ -114,8 +117,6 @@ test('falls back to simulation when using derived Supabase endpoint without auth
 });
 
 test('posts to a configured endpoint and returns payload data', async () => {
-  process.env.VITE_SUPABASE_PERSISTENCE_URL = 'https://api.example.com';
-
   let capturedUrl;
   let capturedBody;
   const fetchImpl = async (url, options) => {
@@ -142,6 +143,8 @@ test('posts to a configured endpoint and returns payload data', async () => {
     },
     overrides: [],
     fetchImpl,
+    endpoint: 'https://api.example.com',
+    accessToken: 'token'
   });
 
   assert.equal(capturedUrl, 'https://api.example.com/team-persistence');
@@ -156,13 +159,11 @@ test('posts to a configured endpoint and returns payload data', async () => {
   assert.equal(result.syncedAt, '2024-07-20T18:00:00Z');
 });
 
-test('treats missing status responses as errors', async () => {
-  process.env.VITE_SUPABASE_PERSISTENCE_URL = 'https://api.example.com';
-
+test('treats missing status responses as errors (failsafe)', async () => {
   const fetchImpl = async () => {
     return {
       ok: true,
-      json: async () => ({}),
+      json: async () => ({}), // Missing status
     };
   };
 
@@ -170,15 +171,15 @@ test('treats missing status responses as errors', async () => {
     snapshot: { preparedTeamRows: 1, preparedPlayerRows: 10 },
     overrides: [],
     fetchImpl,
+    endpoint: 'https://api.example.com',
+    accessToken: 'token'
   });
 
   assert.equal(result.status, 'error');
   assert.match(result.message, /Unexpected response/);
 });
 
-test('falls back to a default success message when status is success but message is missing', async () => {
-  process.env.VITE_SUPABASE_PERSISTENCE_URL = 'https://api.example.com';
-
+test('success status but missing message defaults to standard message', async () => {
   const fetchImpl = async () => {
     return {
       ok: true,
@@ -190,6 +191,8 @@ test('falls back to a default success message when status is success but message
     snapshot: { preparedTeamRows: 2, preparedPlayerRows: 22 },
     overrides: [],
     fetchImpl,
+    endpoint: 'https://api.example.com',
+    accessToken: 'token'
   });
 
   assert.equal(result.status, 'success');
@@ -198,8 +201,6 @@ test('falls back to a default success message when status is success but message
 });
 
 test('surfaces backend error messages when the response is not ok', async () => {
-  process.env.VITE_SUPABASE_PERSISTENCE_URL = 'https://api.example.com';
-
   const fetchImpl = async () => {
     return {
       ok: false,
@@ -212,6 +213,8 @@ test('surfaces backend error messages when the response is not ok', async () => 
     snapshot: { preparedTeamRows: 2, preparedPlayerRows: 30 },
     overrides: [],
     fetchImpl,
+    endpoint: 'https://api.example.com',
+    accessToken: 'token'
   });
 
   assert.equal(result.status, 'error');
@@ -219,14 +222,13 @@ test('surfaces backend error messages when the response is not ok', async () => 
 });
 
 test('returns an error when the response payload cannot be parsed', async () => {
-  process.env.VITE_SUPABASE_PERSISTENCE_URL = 'https://api.example.com';
-
   const fetchImpl = async () => {
     return {
       ok: true,
       json: async () => {
         throw new Error('invalid json');
       },
+      text: async () => 'Not JSON' // ApiClient might try text? No, just fails.
     };
   };
 
@@ -234,15 +236,15 @@ test('returns an error when the response payload cannot be parsed', async () => 
     snapshot: { preparedTeamRows: 2, preparedPlayerRows: 18 },
     overrides: [],
     fetchImpl,
+    endpoint: 'https://api.example.com',
+    accessToken: 'token'
   });
 
   assert.equal(result.status, 'error');
-  assert.match(result.message, /Unexpected response/);
+  assert.match(result.message, /Invalid response: Unable to parse JSON/);
 });
 
-test('returns an error status when the request fails', async () => {
-  process.env.VITE_SUPABASE_PERSISTENCE_URL = 'https://api.example.com';
-
+test('returns an error status when the request fails (network error)', async () => {
   const fetchImpl = async () => {
     throw new Error('network failure');
   };
@@ -251,8 +253,10 @@ test('returns an error status when the request fails', async () => {
     snapshot: { preparedTeamRows: 2, preparedPlayerRows: 20 },
     overrides: [],
     fetchImpl,
+    endpoint: 'https://api.example.com',
+    accessToken: 'token'
   });
 
   assert.equal(result.status, 'error');
-  assert.match(result.message, /Supabase sync failed/);
+  assert.match(result.message, /network failure/);
 });

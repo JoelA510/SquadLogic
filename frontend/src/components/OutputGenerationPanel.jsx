@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { generateScheduleExports } from '../../../src/outputGeneration';
 import { uploadScheduleExport } from '../../../src/storageSupabase';
+import { IS_MOCK_MODE } from '../config';
 
 // Placeholder for Supabase client injection or context
 // In a real app, use a hook like useSupabaseClient()
@@ -44,7 +45,7 @@ export default function OutputGenerationPanel({
 
     const handleUpload = async () => {
         if (!generated) return;
-        if (!supabaseClient && !MOCK_UPLOAD) {
+        if (!supabaseClient && !IS_MOCK_MODE) {
             setStatus('error');
             setMessage('Supabase client not available for upload.');
             return;

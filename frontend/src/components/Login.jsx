@@ -48,14 +48,7 @@ export default function Login() {
     };
 
     return (
-        <div className="login-container" style={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            minHeight: '100vh',
-            background: 'var(--bg-gradient)',
-            color: 'var(--text-primary)'
-        }}>
+        <div className="login-container">
             <div className="section-panel glass-panel" style={{ maxWidth: '480px', width: '100%', padding: '3rem' }}>
                 <header className="section-header" style={{ marginBottom: '2.5rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem' }}>
                     <img src={logo} alt="SquadLogic Logo" style={{ width: '160px', height: 'auto', filter: 'drop-shadow(0 0 20px rgba(59, 130, 246, 0.5))' }} />

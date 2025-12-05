@@ -5,6 +5,11 @@ import { practiceReadinessSnapshot } from './practiceReadinessSample.js';
 import { gameReadinessSnapshot } from './gameReadinessSample.js';
 import { teamPersistenceSnapshot } from './teamPersistenceSample.js';
 
+// Auth
+import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
+import Login from './components/Login.jsx';
+import ImportPanel from './components/ImportPanel';
+
 // Existing Components
 import TeamPersistencePanel from './components/TeamPersistencePanel.jsx';
 import PracticePersistencePanel from './components/PracticePersistencePanel.jsx';
@@ -21,6 +26,7 @@ import TeamOverviewPanel from './components/TeamOverviewPanel.jsx';
 import PracticeReadinessPanel from './components/PracticeReadinessPanel.jsx';
 import GameReadinessPanel from './components/GameReadinessPanel.jsx';
 import RoadmapSection from './components/RoadmapSection.jsx';
+import LoadingScreen from './components/LoadingScreen.jsx';
 
 const roadmapSections = [
   {
@@ -65,7 +71,7 @@ const roadmapSections = [
   },
 ];
 
-function App() {
+function Dashboard() {
   const summary = useMemo(() => {
     const completed = roadmapSections.filter((section) => section.status === 'complete').length;
     const pending = roadmapSections.length - completed;
@@ -81,6 +87,11 @@ function App() {
   const gameSummary = gameReadinessSnapshot.summary;
   const gameGeneratedAt = gameReadinessSnapshot.generatedAt;
 
+  const handleImport = (data) => {
+    console.log('Imported data:', data);
+    // TODO: Wire up to Supabase or state management
+  };
+
   return (
     <div className="app-shell">
       <Header />
@@ -89,6 +100,8 @@ function App() {
         <Hero />
 
         <SummaryGrid completed={summary.completed} pending={summary.pending} />
+
+        <ImportPanel onImport={handleImport} />
 
         <div className="mb-6">
           <EvaluationPanel
@@ -152,6 +165,28 @@ function App() {
 
       <ThemeToggle />
     </div>
+  );
+}
+
+function AppContent() {
+  const { session, loading } = useAuth();
+
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  if (!session) {
+    return <Login />;
+  }
+
+  return <Dashboard />;
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 

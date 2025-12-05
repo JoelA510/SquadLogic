@@ -31,12 +31,16 @@ export default function PersistencePanel({
                 </h2>
 
                 <div className={`grid ${gridClass} gap-4 mb-6`}>
-                    {stats.map((stat, idx) => (
+                    {stats.length > 0 ? stats.map((stat, idx) => (
                         <div key={idx} className="bg-white/5 rounded-lg p-3 border border-white/5">
                             <div className="text-xs text-white/50 uppercase tracking-wider mb-1">{stat.label}</div>
                             <div className="text-2xl font-mono text-white">{stat.value}</div>
                         </div>
-                    ))}
+                    )) : (
+                        <div className="col-span-full p-4 text-center text-white/30 italic border border-dashed border-white/10 rounded-lg">
+                            No statistics available.
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex items-center justify-between">

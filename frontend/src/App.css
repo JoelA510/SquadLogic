@@ -471,3 +471,14 @@
   font-size: 0.85rem;
   color: var(--color-text-secondary);
 }
+
+/* --- LOADING SCREEN --- */
+.loading-screen {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: var(--bg-app-gradient);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-base);
+}

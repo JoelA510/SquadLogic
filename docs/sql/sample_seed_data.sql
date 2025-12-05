@@ -694,8 +694,81 @@ begin
             'buddy_pairs_honored', 3
         ),
         jsonb_build_object(
-            'team_names', jsonb_build_array('Firebolts', 'Riverrunners', 'Lightning', 'Thunder'),
-            'notes', 'Balanced rosters generated for sample season'
+            'teamsByDivision', jsonb_build_object(
+                'U8 Coed', jsonb_build_array(
+                    jsonb_build_object('id', 'U8-T01', 'name', 'Firebolts', 'coachId', 'coach-u8-001', 'players', jsonb_build_array(
+                        jsonb_build_object('id', 'p1'), jsonb_build_object('id', 'p2'), jsonb_build_object('id', 'p3'), jsonb_build_object('id', 'p4'),
+                        jsonb_build_object('id', 'p5'), jsonb_build_object('id', 'p6'), jsonb_build_object('id', 'p7'), jsonb_build_object('id', 'p8'),
+                        jsonb_build_object('id', 'p9'), jsonb_build_object('id', 'p10')
+                    )),
+                    jsonb_build_object('id', 'U8-T02', 'name', 'River Runners', 'coachId', 'coach-u8-002', 'players', jsonb_build_array(
+                        jsonb_build_object('id', 'p11'), jsonb_build_object('id', 'p12'), jsonb_build_object('id', 'p13'), jsonb_build_object('id', 'p14'),
+                        jsonb_build_object('id', 'p15'), jsonb_build_object('id', 'p16'), jsonb_build_object('id', 'p17'), jsonb_build_object('id', 'p18'),
+                        jsonb_build_object('id', 'p19'), jsonb_build_object('id', 'p20')
+                    )),
+                    jsonb_build_object('id', 'U8-T03', 'name', 'U8 Coed Team 03', 'coachId', 'coach-u8-003', 'players', jsonb_build_array(
+                        jsonb_build_object('id', 'p21'), jsonb_build_object('id', 'p22'), jsonb_build_object('id', 'p23'), jsonb_build_object('id', 'p24'),
+                        jsonb_build_object('id', 'p25'), jsonb_build_object('id', 'p26'), jsonb_build_object('id', 'p27'), jsonb_build_object('id', 'p28'),
+                        jsonb_build_object('id', 'p29'), jsonb_build_object('id', 'p30')
+                    ))
+                ),
+                'U10 Girls', jsonb_build_array(
+                    jsonb_build_object('id', 'U10-T01', 'name', 'Lightning', 'coachId', 'coach-u10-001', 'players', jsonb_build_array(
+                        jsonb_build_object('id', 'p31'), jsonb_build_object('id', 'p32'), jsonb_build_object('id', 'p33'), jsonb_build_object('id', 'p34'),
+                        jsonb_build_object('id', 'p35'), jsonb_build_object('id', 'p36'), jsonb_build_object('id', 'p37'), jsonb_build_object('id', 'p38'),
+                        jsonb_build_object('id', 'p39'), jsonb_build_object('id', 'p40'), jsonb_build_object('id', 'p41')
+                    )),
+                    jsonb_build_object('id', 'U10-T02', 'name', 'Thunder', 'coachId', 'coach-u10-002', 'players', jsonb_build_array(
+                        jsonb_build_object('id', 'p42'), jsonb_build_object('id', 'p43'), jsonb_build_object('id', 'p44'), jsonb_build_object('id', 'p45'),
+                        jsonb_build_object('id', 'p46'), jsonb_build_object('id', 'p47'), jsonb_build_object('id', 'p48'), jsonb_build_object('id', 'p49'),
+                        jsonb_build_object('id', 'p50'), jsonb_build_object('id', 'p51'), jsonb_build_object('id', 'p52')
+                    )),
+                    jsonb_build_object('id', 'U10-T03', 'name', 'U10 Girls Team 03', 'coachId', null, 'players', jsonb_build_array(
+                        jsonb_build_object('id', 'p53'), jsonb_build_object('id', 'p54'), jsonb_build_object('id', 'p55'), jsonb_build_object('id', 'p56'),
+                        jsonb_build_object('id', 'p57'), jsonb_build_object('id', 'p58'), jsonb_build_object('id', 'p59'), jsonb_build_object('id', 'p60'),
+                        jsonb_build_object('id', 'p61'), jsonb_build_object('id', 'p62'), jsonb_build_object('id', 'p63')
+                    )),
+                    jsonb_build_object('id', 'U10-T04', 'name', 'U10 Girls Team 04', 'coachId', 'coach-u10-004', 'players', jsonb_build_array(
+                        jsonb_build_object('id', 'p64'), jsonb_build_object('id', 'p65'), jsonb_build_object('id', 'p66'), jsonb_build_object('id', 'p67'),
+                        jsonb_build_object('id', 'p68'), jsonb_build_object('id', 'p69'), jsonb_build_object('id', 'p70'), jsonb_build_object('id', 'p71'),
+                        jsonb_build_object('id', 'p72'), jsonb_build_object('id', 'p73'), jsonb_build_object('id', 'p74')
+                    ))
+                ),
+                'U12 Boys', jsonb_build_array(
+                    jsonb_build_object('id', 'U12-T01', 'name', 'Raptors', 'coachId', 'coach-u12-001', 'players', jsonb_build_array(
+                        jsonb_build_object('id', 'p75'), jsonb_build_object('id', 'p76'), jsonb_build_object('id', 'p77'), jsonb_build_object('id', 'p78'),
+                        jsonb_build_object('id', 'p79'), jsonb_build_object('id', 'p80'), jsonb_build_object('id', 'p81'), jsonb_build_object('id', 'p82'),
+                        jsonb_build_object('id', 'p83'), jsonb_build_object('id', 'p84'), jsonb_build_object('id', 'p85'), jsonb_build_object('id', 'p86')
+                    )),
+                    jsonb_build_object('id', 'U12-T02', 'name', 'Sharks', 'coachId', 'coach-u12-002', 'players', jsonb_build_array(
+                        jsonb_build_object('id', 'p87'), jsonb_build_object('id', 'p88'), jsonb_build_object('id', 'p89'), jsonb_build_object('id', 'p90'),
+                        jsonb_build_object('id', 'p91'), jsonb_build_object('id', 'p92'), jsonb_build_object('id', 'p93'), jsonb_build_object('id', 'p94'),
+                        jsonb_build_object('id', 'p95'), jsonb_build_object('id', 'p96'), jsonb_build_object('id', 'p97'), jsonb_build_object('id', 'p98')
+                    ))
+                 )
+            ),
+            'overflowByDivision', jsonb_build_object(
+                'U8 Coed', jsonb_build_array(
+                     jsonb_build_object('players', jsonb_build_array(jsonb_build_object('id', 'o1'), jsonb_build_object('id', 'o2')), 'reason', 'insufficient-capacity')
+                ),
+                'U10 Girls', jsonb_build_array(
+                     jsonb_build_object('players', jsonb_build_array(jsonb_build_object('id', 'o3'), jsonb_build_object('id', 'o4')), 'reason', 'coach-capacity')
+                )
+            ),
+            'buddyDiagnosticsByDivision', jsonb_build_object(
+                 'U8 Coed', jsonb_build_object('mutualPairs', jsonb_build_array(), 'unmatchedRequests', jsonb_build_array(jsonb_build_object('playerId', 'p28', 'requestedBuddyId', 'p29', 'reason', 'not-reciprocated'))),
+                 'U10 Girls', jsonb_build_object('mutualPairs', jsonb_build_array(), 'unmatchedRequests', jsonb_build_array(jsonb_build_object('playerId', 'p53', 'requestedBuddyId', 'p99', 'reason', 'missing-player')))
+            ),
+            'rosterBalanceByDivision', jsonb_build_object(
+                'U8 Coed', jsonb_build_object('summary', jsonb_build_object('totalCapacity', 36, 'averageFillRate', 0.8333)),
+                'U10 Girls', jsonb_build_object('summary', jsonb_build_object('totalCapacity', 48, 'averageFillRate', 0.9167)),
+                'U12 Boys', jsonb_build_object('summary', jsonb_build_object('totalCapacity', 24, 'averageFillRate', 1.0))
+            ),
+            'coachCoverageByDivision', jsonb_build_object(
+                'U8 Coed', jsonb_build_object('coverageRate', 1.0, 'needsAdditionalCoaches', false),
+                'U10 Girls', jsonb_build_object('coverageRate', 0.75, 'needsAdditionalCoaches', true),
+                'U12 Boys', jsonb_build_object('coverageRate', 1.0, 'needsAdditionalCoaches', false)
+            )
         ),
         timestamptz '2024-07-01 17:05:00+00',
         timestamptz '2024-07-01 17:05:30+00'

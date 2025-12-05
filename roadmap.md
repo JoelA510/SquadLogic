@@ -152,7 +152,7 @@ Future changes would be refinements, not re-selection of the stack.
 ### 4.2 Next steps
 
 - [ ] Wire the Edge Function endpoint to `VITE_SUPABASE_PERSISTENCE_URL` in deployment environments.
-- [ ] Integrate the real scheduler runs into the snapshot builder (replace static `teamSummarySample.js` with real data).
+- [x] Integrate the real scheduler runs into the snapshot builder (replace static `teamSummarySample.js` with real data).
 
 ---
 

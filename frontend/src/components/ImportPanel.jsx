@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import Papa from 'papaparse';
 import { PERSISTENCE_THEMES } from '../utils/themes.js';
 
 export default function ImportPanel({ onImport }) {
@@ -43,27 +44,32 @@ export default function ImportPanel({ onImport }) {
     };
 
     const parseCSV = (file) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const text = e.target.result;
-            const lines = text.split('\n');
-            if (lines.length < 2) {
-                setError('CSV file appears to be empty or invalid.');
-                return;
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (results) => {
+                const { data, meta } = results;
+                if (!data || data.length === 0) {
+                    setError('CSV file appears to be empty or invalid.');
+                    return;
+                }
+
+                // Headers are in meta.fields
+                const headers = meta.fields || [];
+                // Preview the first 5 rows
+                const previewRows = data.slice(0, 5);
+
+                setPreviewData({
+                    headers,
+                    rows: previewRows,
+                    totalRows: data.length,
+                    fullData: data
+                });
+            },
+            error: (err) => {
+                setError(`Error parsing CSV: ${err.message}`);
             }
-
-            const headers = lines[0].split(',').map(h => h.trim());
-            const previewRows = lines.slice(1, 6).map(line => {
-                const values = line.split(',');
-                return headers.reduce((obj, header, index) => {
-                    obj[header] = values[index]?.trim();
-                    return obj;
-                }, {});
-            });
-
-            setPreviewData({ headers, rows: previewRows, totalRows: lines.length - 1 });
-        };
-        reader.readAsText(file);
+        });
     };
 
     const handleImport = () => {

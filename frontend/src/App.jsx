@@ -26,6 +26,7 @@ import TeamOverviewPanel from './components/TeamOverviewPanel.jsx';
 import PracticeReadinessPanel from './components/PracticeReadinessPanel.jsx';
 import GameReadinessPanel from './components/GameReadinessPanel.jsx';
 import RoadmapSection from './components/RoadmapSection.jsx';
+import LoadingScreen from './components/LoadingScreen.jsx';
 
 const roadmapSections = [
   {
@@ -171,19 +172,7 @@ function AppContent() {
   const { session, loading } = useAuth();
 
   if (loading) {
-    return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-        background: 'var(--bg-gradient)',
-        color: 'var(--text-primary)',
-        fontFamily: 'var(--font-primary)'
-      }}>
-        Loading SquadLogic...
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   if (!session) {

@@ -163,8 +163,8 @@ function PracticeReadinessPanel({ practiceReadinessSnapshot, practiceSummary, ge
                     title="Day concentration alerts"
                     items={dayConcentrationItems}
                     emptyMessage="No concentration alerts."
-                    renderItem={(alert) => (
-                        <div key={`${alert.division}-${alert.dominantDay}`} className="insight-card">
+                    renderItem={(alert, index) => (
+                        <div key={`${alert.division}-${alert.dominantDay}-${index}`} className="insight-card">
                             <h3>{alert.division}</h3>
                             <p>
                                 Dominant day: {alert.dominantDay} ({alert.dominantCount}/{alert.totalAssignments})

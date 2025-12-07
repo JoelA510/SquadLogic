@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../utils/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
-import logo from '../assets/logo.png';
+import logo from '../assets/logo_modern.png';
 
 export default function Login() {
     const [email, setEmail] = useState('');
@@ -48,10 +48,17 @@ export default function Login() {
     };
 
     return (
-        <div className="login-container">
-            <div className="section-panel glass-panel" style={{ maxWidth: '480px', width: '100%', padding: '3rem' }}>
+        <div className="login-container" style={{
+            minHeight: '100vh',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '5%', // Responsive buffer
+            background: 'var(--bg-app-gradient)'
+        }}>
+            <div className="section-panel glass-panel-premium" style={{ maxWidth: '480px', width: '100%', padding: '3rem' }}>
                 <header className="section-header" style={{ marginBottom: '2.5rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem' }}>
-                    <img src={logo} alt="SquadLogic Logo" style={{ width: '160px', height: 'auto', filter: 'drop-shadow(0 0 20px rgba(59, 130, 246, 0.5))' }} />
+                    <img src={logo} alt="SquadLogic Logo" width="120" height="120" style={{ width: '120px', height: 'auto', filter: 'drop-shadow(0 0 20px rgba(56, 189, 248, 0.5))' }} />
                     <div>
                         <p style={{ color: 'var(--text-primary)', fontSize: '1.25rem', fontWeight: '500', margin: 0 }}>
                             {isSignUp ? 'Create an account' : 'Sign in to manage schedules'}

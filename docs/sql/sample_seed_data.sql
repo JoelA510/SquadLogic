@@ -6,40 +6,36 @@
 -- The script inserts a representative Fall 2024 recreation season with two
 -- divisions, facilities, practice/game slots, teams, players, and basic
 -- assignments.  It is idempotent: running it multiple times refreshes the
--- sample rows without creating duplicates.  Existing production data should
+-- Existing production data should
 -- be backed up before executing this file.
-
-set search_path = public;
-
-\echo 'Seeding Fall 2024 recreation data set...'
 
 do $$
 declare
-    season_id bigint;
-    u8_division_id uuid;
-    u10_division_id uuid;
-    location_id uuid;
-    field1_id uuid;
-    field1a_id uuid;
-    field1b_id uuid;
-    practice_slot_mon_5 uuid;
-    practice_slot_mon_615 uuid;
-    practice_slot_tue_5 uuid;
-    practice_slot_tue_615 uuid;
-    game_slot_u8 uuid;
-    game_slot_u10 uuid;
-    coach_maria_id uuid;
-    coach_jordan_id uuid;
-    coach_devon_id uuid;
-    coach_elena_id uuid;
-    team_firebolts_id uuid;
-    team_riverrunners_id uuid;
-    team_lightning_id uuid;
-    team_thunder_id uuid;
-    team_run_id uuid;
-    practice_run_id uuid;
-    evaluation_run_id uuid;
-    export_job_id uuid;
+    v_season_id bigint;
+    v_u8_division_id uuid;
+    v_u10_division_id uuid;
+    v_location_id uuid;
+    v_field1_id uuid;
+    v_field1a_id uuid;
+    v_field1b_id uuid;
+    v_practice_slot_mon_5 uuid;
+    v_practice_slot_mon_615 uuid;
+    v_practice_slot_tue_5 uuid;
+    v_practice_slot_tue_615 uuid;
+    v_game_slot_u8 uuid;
+    v_game_slot_u10 uuid;
+    v_coach_maria_id uuid;
+    v_coach_jordan_id uuid;
+    v_coach_devon_id uuid;
+    v_coach_elena_id uuid;
+    v_team_firebolts_id uuid;
+    v_team_riverrunners_id uuid;
+    v_team_lightning_id uuid;
+    v_team_thunder_id uuid;
+    v_team_run_id uuid;
+    v_practice_run_id uuid;
+    v_evaluation_run_id uuid;
+    v_export_job_id uuid;
 begin
     insert into season_settings (
         season_label,
@@ -70,7 +66,7 @@ begin
         daylight_adjustments = excluded.daylight_adjustments,
         exports_config = excluded.exports_config
     returning id
-    into season_id;
+    into v_season_id;
 
     insert into divisions (
         season_settings_id,
@@ -81,7 +77,7 @@ begin
         season_start,
         season_end
     ) values (
-        season_id,
+        v_season_id,
         'U8 Coed',
         'coed',
         12,
@@ -95,7 +91,7 @@ begin
         play_format = excluded.play_format,
         season_start = excluded.season_start,
         season_end = excluded.season_end
-    returning id into u8_division_id;
+    returning id into v_u8_division_id;
 
     insert into divisions (
         season_settings_id,
@@ -106,7 +102,7 @@ begin
         season_start,
         season_end
     ) values (
-        season_id,
+        v_season_id,
         'U10 Girls',
         'girls',
         14,
@@ -120,31 +116,31 @@ begin
         play_format = excluded.play_format,
         season_start = excluded.season_start,
         season_end = excluded.season_end
-    returning id into u10_division_id;
+    returning id into v_u10_division_id;
 
     insert into locations (name, address, lighting_available)
     values ('Riverfront Park', '101 Riverside Dr, Hometown', true)
     on conflict (name) do update set
         address = excluded.address,
         lighting_available = excluded.lighting_available
-    returning id into location_id;
+    returning id into v_location_id;
 
     insert into fields (location_id, name, surface_type, supports_halves)
-    values (location_id, 'Field 1', 'grass', true)
+    values (v_location_id, 'Field 1', 'grass', true)
     on conflict (location_id, name) do update set
         surface_type = excluded.surface_type,
         supports_halves = excluded.supports_halves
-    returning id into field1_id;
+    returning id into v_field1_id;
 
     insert into field_subunits (field_id, label)
-    values (field1_id, 'A')
+    values (v_field1_id, 'A')
     on conflict (field_id, label) do update set label = excluded.label
-    returning id into field1a_id;
+    returning id into v_field1a_id;
 
     insert into field_subunits (field_id, label)
-    values (field1_id, 'B')
+    values (v_field1_id, 'B')
     on conflict (field_id, label) do update set label = excluded.label
-    returning id into field1b_id;
+    returning id into v_field1b_id;
 
     insert into practice_slots (
         field_id,
@@ -156,8 +152,8 @@ begin
         valid_from,
         valid_until
     ) values (
-        field1_id,
-        field1a_id,
+        v_field1_id,
+        v_field1a_id,
         'mon',
         time '17:00',
         time '18:15',
@@ -165,11 +161,11 @@ begin
         date '2024-08-05',
         date '2024-10-25'
     )
-    on conflict (field_subunit_id, day_of_week, start_time, valid_from) do update set
+    on conflict (field_subunit_id, day_of_week, start_time, valid_from) where field_subunit_id is not null do update set
         end_time = excluded.end_time,
         capacity = excluded.capacity,
         valid_until = excluded.valid_until
-    returning id into practice_slot_mon_5;
+    returning id into v_practice_slot_mon_5;
 
     insert into practice_slots (
         field_id,
@@ -181,8 +177,8 @@ begin
         valid_from,
         valid_until
     ) values (
-        field1_id,
-        field1a_id,
+        v_field1_id,
+        v_field1a_id,
         'mon',
         time '18:30',
         time '19:45',
@@ -190,11 +186,11 @@ begin
         date '2024-08-05',
         date '2024-10-25'
     )
-    on conflict (field_subunit_id, day_of_week, start_time, valid_from) do update set
+    on conflict (field_subunit_id, day_of_week, start_time, valid_from) where field_subunit_id is not null do update set
         end_time = excluded.end_time,
         capacity = excluded.capacity,
         valid_until = excluded.valid_until
-    returning id into practice_slot_mon_615;
+    returning id into v_practice_slot_mon_615;
 
     insert into practice_slots (
         field_id,
@@ -206,8 +202,8 @@ begin
         valid_from,
         valid_until
     ) values (
-        field1_id,
-        field1b_id,
+        v_field1_id,
+        v_field1b_id,
         'tue',
         time '17:00',
         time '18:30',
@@ -215,11 +211,11 @@ begin
         date '2024-08-05',
         date '2024-10-25'
     )
-    on conflict (field_subunit_id, day_of_week, start_time, valid_from) do update set
+    on conflict (field_subunit_id, day_of_week, start_time, valid_from) where field_subunit_id is not null do update set
         end_time = excluded.end_time,
         capacity = excluded.capacity,
         valid_until = excluded.valid_until
-    returning id into practice_slot_tue_5;
+    returning id into v_practice_slot_tue_5;
 
     insert into practice_slots (
         field_id,
@@ -231,8 +227,8 @@ begin
         valid_from,
         valid_until
     ) values (
-        field1_id,
-        field1b_id,
+        v_field1_id,
+        v_field1b_id,
         'tue',
         time '18:45',
         time '20:00',
@@ -240,11 +236,11 @@ begin
         date '2024-08-05',
         date '2024-10-25'
     )
-    on conflict (field_subunit_id, day_of_week, start_time, valid_from) do update set
+    on conflict (field_subunit_id, day_of_week, start_time, valid_from) where field_subunit_id is not null do update set
         end_time = excluded.end_time,
         capacity = excluded.capacity,
         valid_until = excluded.valid_until
-    returning id into practice_slot_tue_615;
+    returning id into v_practice_slot_tue_615;
 
     insert into game_slots (
         field_id,
@@ -254,8 +250,8 @@ begin
         end_time,
         week_index
     ) values (
-        field1_id,
-        u8_division_id,
+        v_field1_id,
+        v_u8_division_id,
         date '2024-09-07',
         time '09:00',
         time '10:00',
@@ -265,7 +261,7 @@ begin
         division_id = excluded.division_id,
         end_time = excluded.end_time,
         week_index = excluded.week_index
-    returning id into game_slot_u8;
+    returning id into v_game_slot_u8;
 
     insert into game_slots (
         field_id,
@@ -275,8 +271,8 @@ begin
         end_time,
         week_index
     ) values (
-        field1_id,
-        u10_division_id,
+        v_field1_id,
+        v_u10_division_id,
         date '2024-09-14',
         time '09:00',
         time '10:15',
@@ -286,7 +282,7 @@ begin
         division_id = excluded.division_id,
         end_time = excluded.end_time,
         week_index = excluded.week_index
-    returning id into game_slot_u10;
+    returning id into v_game_slot_u10;
 
     insert into players (
         division_id,
@@ -300,62 +296,62 @@ begin
         coach_volunteer,
         skill_tier
     ) values
-        (u8_division_id, 'REG-U8-001', 'Emma', 'Johnson', null, '2nd',
+        (v_u8_division_id, 'REG-U8-001', 'Emma', 'Johnson', null, '2nd',
             '[{"name":"Maria Johnson","email":"maria.johnson@example.com","phone":"+1-555-0101","primary":true}]'::jsonb,
             null,
             true,
             'developing'),
-        (u8_division_id, 'REG-U8-002', 'Liam', 'Patel', null, '2nd',
+        (v_u8_division_id, 'REG-U8-002', 'Liam', 'Patel', null, '2nd',
             '[{"name":"Jordan Patel","email":"jordan.patel@example.com","phone":"+1-555-0112","primary":true}]'::jsonb,
             null,
             true,
             'novice'),
-        (u8_division_id, 'REG-U8-003', 'Ava', 'Chen', null, '2nd',
+        (v_u8_division_id, 'REG-U8-003', 'Ava', 'Chen', null, '2nd',
             '[{"name":"Yvonne Chen","email":"yvonne.chen@example.com","phone":"+1-555-0142","primary":true}]'::jsonb,
             'BUD-U8-01',
             false,
             'developing'),
-        (u8_division_id, 'REG-U8-004', 'Mia', 'Davis', null, '3rd',
+        (v_u8_division_id, 'REG-U8-004', 'Mia', 'Davis', null, '3rd',
             '[{"name":"Chris Davis","email":"chris.davis@example.com","phone":"+1-555-0167","primary":true}]'::jsonb,
             'BUD-U8-01',
             false,
             'novice'),
-        (u8_division_id, 'REG-U8-005', 'Noah', 'Williams', null, '3rd',
+        (v_u8_division_id, 'REG-U8-005', 'Noah', 'Williams', null, '3rd',
             '[{"name":"Jordan Williams","email":"jordan.williams@example.com","phone":"+1-555-0181","primary":true}]'::jsonb,
             null,
             false,
             'developing'),
-        (u8_division_id, 'REG-U8-006', 'Lucas', 'Brown', null, '3rd',
+        (v_u8_division_id, 'REG-U8-006', 'Lucas', 'Brown', null, '3rd',
             '[{"name":"Morgan Brown","email":"morgan.brown@example.com","phone":"+1-555-0194","primary":true}]'::jsonb,
             null,
             false,
             'advanced'),
-        (u10_division_id, 'REG-U10-001', 'Sofia', 'Ramirez', null, '4th',
+        (v_u10_division_id, 'REG-U10-001', 'Sofia', 'Ramirez', null, '4th',
             '[{"name":"Devon Ramirez","email":"devon.ramirez@example.com","phone":"+1-555-0203","primary":true}]'::jsonb,
             'BUD-U10-02',
             true,
             'developing'),
-        (u10_division_id, 'REG-U10-002', 'Harper', 'Lee', null, '4th',
+        (v_u10_division_id, 'REG-U10-002', 'Harper', 'Lee', null, '4th',
             '[{"name":"Quinn Lee","email":"quinn.lee@example.com","phone":"+1-555-0219","primary":true}]'::jsonb,
             'BUD-U10-02',
             false,
             'advanced'),
-        (u10_division_id, 'REG-U10-003', 'Chloe', 'Martin', null, '4th',
+        (v_u10_division_id, 'REG-U10-003', 'Chloe', 'Martin', null, '4th',
             '[{"name":"Dana Martin","email":"dana.martin@example.com","phone":"+1-555-0228","primary":true}]'::jsonb,
             'BUD-U10-03',
             false,
             'developing'),
-        (u10_division_id, 'REG-U10-004', 'Grace', 'Thompson', null, '5th',
+        (v_u10_division_id, 'REG-U10-004', 'Grace', 'Thompson', null, '5th',
             '[{"name":"Elena Thompson","email":"elena.thompson@example.com","phone":"+1-555-0241","primary":true}]'::jsonb,
             'BUD-U10-03',
             true,
             'novice'),
-        (u10_division_id, 'REG-U10-005', 'Isabella', 'Nguyen', null, '5th',
+        (v_u10_division_id, 'REG-U10-005', 'Isabella', 'Nguyen', null, '5th',
             '[{"name":"Linh Nguyen","email":"linh.nguyen@example.com","phone":"+1-555-0256","primary":true}]'::jsonb,
             null,
             false,
             'advanced'),
-        (u10_division_id, 'REG-U10-006', 'Zoe', 'Clark', null, '5th',
+        (v_u10_division_id, 'REG-U10-006', 'Zoe', 'Clark', null, '5th',
             '[{"name":"Taylor Clark","email":"taylor.clark@example.com","phone":"+1-555-0270","primary":true}]'::jsonb,
             null,
             false,
@@ -381,7 +377,7 @@ begin
         can_coach_multiple_teams,
         status
     ) values (
-        (select id from players where division_id = u8_division_id and external_registration_id = 'REG-U8-001'),
+        (select id from players where division_id = v_u8_division_id and external_registration_id = 'REG-U8-001'),
         'Maria Johnson',
         'maria.johnson@example.com',
         '+1-555-0101',
@@ -400,7 +396,7 @@ begin
         preferred_practice_window = excluded.preferred_practice_window,
         can_coach_multiple_teams = excluded.can_coach_multiple_teams,
         status = excluded.status
-    returning id into coach_maria_id;
+    returning id into v_coach_maria_id;
 
     insert into coaches (
         player_id,
@@ -413,7 +409,7 @@ begin
         can_coach_multiple_teams,
         status
     ) values (
-        (select id from players where division_id = u8_division_id and external_registration_id = 'REG-U8-002'),
+        (select id from players where division_id = v_u8_division_id and external_registration_id = 'REG-U8-002'),
         'Jordan Patel',
         'jordan.patel@example.com',
         '+1-555-0112',
@@ -432,7 +428,7 @@ begin
         preferred_practice_window = excluded.preferred_practice_window,
         can_coach_multiple_teams = excluded.can_coach_multiple_teams,
         status = excluded.status
-    returning id into coach_jordan_id;
+    returning id into v_coach_jordan_id;
 
     insert into coaches (
         player_id,
@@ -445,7 +441,7 @@ begin
         can_coach_multiple_teams,
         status
     ) values (
-        (select id from players where division_id = u10_division_id and external_registration_id = 'REG-U10-001'),
+        (select id from players where division_id = v_u10_division_id and external_registration_id = 'REG-U10-001'),
         'Devon Ramirez',
         'devon.ramirez@example.com',
         '+1-555-0203',
@@ -464,7 +460,7 @@ begin
         preferred_practice_window = excluded.preferred_practice_window,
         can_coach_multiple_teams = excluded.can_coach_multiple_teams,
         status = excluded.status
-    returning id into coach_devon_id;
+    returning id into v_coach_devon_id;
 
     insert into coaches (
         player_id,
@@ -477,7 +473,7 @@ begin
         can_coach_multiple_teams,
         status
     ) values (
-        (select id from players where division_id = u10_division_id and external_registration_id = 'REG-U10-004'),
+        (select id from players where division_id = v_u10_division_id and external_registration_id = 'REG-U10-004'),
         'Elena Thompson',
         'elena.thompson@example.com',
         '+1-555-0241',
@@ -496,7 +492,7 @@ begin
         preferred_practice_window = excluded.preferred_practice_window,
         can_coach_multiple_teams = excluded.can_coach_multiple_teams,
         status = excluded.status
-    returning id into coach_elena_id;
+    returning id into v_coach_elena_id;
 
     insert into teams (
         division_id,
@@ -506,11 +502,11 @@ begin
         practice_slot_id,
         notes
     ) values (
-        u8_division_id,
+        v_u8_division_id,
         'Firebolts',
-        coach_maria_id,
+        v_coach_maria_id,
         '{}'::uuid[],
-        practice_slot_mon_5,
+        v_practice_slot_mon_5,
         'Sample U8 roster emphasizing buddy retention'
     )
     on conflict (division_id, name) do update set
@@ -518,7 +514,7 @@ begin
         assistant_coach_ids = excluded.assistant_coach_ids,
         practice_slot_id = excluded.practice_slot_id,
         notes = excluded.notes
-    returning id into team_firebolts_id;
+    returning id into v_team_firebolts_id;
 
     insert into teams (
         division_id,
@@ -528,11 +524,11 @@ begin
         practice_slot_id,
         notes
     ) values (
-        u8_division_id,
+        v_u8_division_id,
         'River Runners',
-        coach_jordan_id,
+        v_coach_jordan_id,
         '{}'::uuid[],
-        practice_slot_mon_615,
+        v_practice_slot_mon_615,
         'Sample U8 roster with late practice preference'
     )
     on conflict (division_id, name) do update set
@@ -540,7 +536,7 @@ begin
         assistant_coach_ids = excluded.assistant_coach_ids,
         practice_slot_id = excluded.practice_slot_id,
         notes = excluded.notes
-    returning id into team_riverrunners_id;
+    returning id into v_team_riverrunners_id;
 
     insert into teams (
         division_id,
@@ -550,11 +546,11 @@ begin
         practice_slot_id,
         notes
     ) values (
-        u10_division_id,
+        v_u10_division_id,
         'Lightning',
-        coach_devon_id,
+        v_coach_devon_id,
         '{}'::uuid[],
-        practice_slot_tue_5,
+        v_practice_slot_tue_5,
         'Sample U10 roster with early slot'
     )
     on conflict (division_id, name) do update set
@@ -562,7 +558,7 @@ begin
         assistant_coach_ids = excluded.assistant_coach_ids,
         practice_slot_id = excluded.practice_slot_id,
         notes = excluded.notes
-    returning id into team_lightning_id;
+    returning id into v_team_lightning_id;
 
     insert into teams (
         division_id,
@@ -572,11 +568,11 @@ begin
         practice_slot_id,
         notes
     ) values (
-        u10_division_id,
+        v_u10_division_id,
         'Thunder',
-        coach_elena_id,
+        v_coach_elena_id,
         '{}'::uuid[],
-        practice_slot_tue_615,
+        v_practice_slot_tue_615,
         'Sample U10 roster with later slot'
     )
     on conflict (division_id, name) do update set
@@ -584,49 +580,49 @@ begin
         assistant_coach_ids = excluded.assistant_coach_ids,
         practice_slot_id = excluded.practice_slot_id,
         notes = excluded.notes
-    returning id into team_thunder_id;
+    returning id into v_team_thunder_id;
 
     delete from team_players
-    where team_id in (team_firebolts_id, team_riverrunners_id, team_lightning_id, team_thunder_id);
+    where team_id in (v_team_firebolts_id, v_team_riverrunners_id, v_team_lightning_id, v_team_thunder_id);
 
     insert into team_players (team_id, player_id, role, source)
-    select team_firebolts_id, p.id, 'player', 'auto'
+    select v_team_firebolts_id, p.id, 'player', 'auto'
     from players p
-    where p.division_id = u8_division_id
+    where p.division_id = v_u8_division_id
       and p.external_registration_id in ('REG-U8-001', 'REG-U8-003', 'REG-U8-004')
     on conflict (team_id, player_id) do update set
         role = excluded.role,
         source = excluded.source;
 
     insert into team_players (team_id, player_id, role, source)
-    select team_riverrunners_id, p.id, 'player', 'auto'
+    select v_team_riverrunners_id, p.id, 'player', 'auto'
     from players p
-    where p.division_id = u8_division_id
+    where p.division_id = v_u8_division_id
       and p.external_registration_id in ('REG-U8-002', 'REG-U8-005', 'REG-U8-006')
     on conflict (team_id, player_id) do update set
         role = excluded.role,
         source = excluded.source;
 
     insert into team_players (team_id, player_id, role, source)
-    select team_lightning_id, p.id, 'player', 'auto'
+    select v_team_lightning_id, p.id, 'player', 'auto'
     from players p
-    where p.division_id = u10_division_id
+    where p.division_id = v_u10_division_id
       and p.external_registration_id in ('REG-U10-001', 'REG-U10-002', 'REG-U10-003')
     on conflict (team_id, player_id) do update set
         role = excluded.role,
         source = excluded.source;
 
     insert into team_players (team_id, player_id, role, source)
-    select team_thunder_id, p.id, 'player', 'auto'
+    select v_team_thunder_id, p.id, 'player', 'auto'
     from players p
-    where p.division_id = u10_division_id
+    where p.division_id = v_u10_division_id
       and p.external_registration_id in ('REG-U10-004', 'REG-U10-005', 'REG-U10-006')
     on conflict (team_id, player_id) do update set
         role = excluded.role,
         source = excluded.source;
 
     delete from practice_assignments
-    where team_id in (team_firebolts_id, team_riverrunners_id, team_lightning_id, team_thunder_id);
+    where team_id in (v_team_firebolts_id, v_team_riverrunners_id, v_team_lightning_id, v_team_thunder_id);
 
     insert into practice_assignments (
         team_id,
@@ -634,14 +630,14 @@ begin
         effective_date_range,
         source
     ) values
-        (team_firebolts_id, practice_slot_mon_5, '[2024-08-05,2024-10-25]'::daterange, 'auto'),
-        (team_riverrunners_id, practice_slot_mon_615, '[2024-08-05,2024-10-25]'::daterange, 'auto'),
-        (team_lightning_id, practice_slot_tue_5, '[2024-08-05,2024-10-25]'::daterange, 'auto'),
-        (team_thunder_id, practice_slot_tue_615, '[2024-08-05,2024-10-25]'::daterange, 'auto')
+        (v_team_firebolts_id, v_practice_slot_mon_5, '[2024-08-05,2024-10-25]'::daterange, 'auto'),
+        (v_team_riverrunners_id, v_practice_slot_mon_615, '[2024-08-05,2024-10-25]'::daterange, 'auto'),
+        (v_team_lightning_id, v_practice_slot_tue_5, '[2024-08-05,2024-10-25]'::daterange, 'auto'),
+        (v_team_thunder_id, v_practice_slot_tue_615, '[2024-08-05,2024-10-25]'::daterange, 'auto')
     on conflict (team_id, practice_slot_id, effective_date_range) do update set
         source = excluded.source;
 
-    delete from games where game_slot_id in (game_slot_u8, game_slot_u10);
+    delete from games where game_slot_id in (v_game_slot_u8, v_game_slot_u10);
 
     insert into games (
         game_slot_id,
@@ -649,8 +645,8 @@ begin
         away_team_id,
         week_index
     ) values
-        (game_slot_u8, team_firebolts_id, team_riverrunners_id, 1),
-        (game_slot_u10, team_lightning_id, team_thunder_id, 1)
+        (v_game_slot_u8, v_team_firebolts_id, v_team_riverrunners_id, 1),
+        (v_game_slot_u10, v_team_lightning_id, v_team_thunder_id, 1)
     on conflict (game_slot_id) do update set
         home_team_id = excluded.home_team_id,
         away_team_id = excluded.away_team_id,
@@ -680,7 +676,7 @@ begin
         started_at,
         completed_at
     ) values (
-        season_id,
+        v_season_id,
         'team',
         'completed',
         jsonb_build_object(
@@ -773,7 +769,7 @@ begin
         timestamptz '2024-07-01 17:05:00+00',
         timestamptz '2024-07-01 17:05:30+00'
     )
-    returning id into team_run_id;
+    returning id into v_team_run_id;
 
     insert into scheduler_runs (
         season_settings_id,
@@ -785,7 +781,7 @@ begin
         started_at,
         completed_at
     ) values (
-        season_id,
+        v_season_id,
         'practice',
         'completed_with_warnings',
         jsonb_build_object(
@@ -798,116 +794,53 @@ begin
             'manual_adjustments_required', 1
         ),
         jsonb_build_object(
-            'conflicts', jsonb_build_array('Thunder requested earlier slot - logged for follow-up'),
-            'assigned_slots', jsonb_build_array(
-                jsonb_build_object('team', 'Firebolts', 'day', 'Mon', 'start_time', '17:00'),
-                jsonb_build_object('team', 'Riverrunners', 'day', 'Mon', 'start_time', '18:30'),
-                jsonb_build_object('team', 'Lightning', 'day', 'Tue', 'start_time', '17:00'),
-                jsonb_build_object('team', 'Thunder', 'day', 'Tue', 'start_time', '18:45')
+            'assignments', jsonb_build_array(
+                jsonb_build_object('teamId', 'U8-T01', 'slotId', 'slot-mon-5', 'day', 'mon', 'time', '17:00'),
+                jsonb_build_object('teamId', 'U8-T02', 'slotId', 'slot-mon-615', 'day', 'mon', 'time', '18:30'),
+                jsonb_build_object('teamId', 'U10-T01', 'slotId', 'slot-tue-5', 'day', 'tue', 'time', '17:00'),
+                jsonb_build_object('teamId', 'U10-T02', 'slotId', 'slot-tue-615', 'day', 'tue', 'time', '18:45')
+            ),
+            'unassigned', jsonb_build_array(
+                jsonb_build_object('teamId', 'U10-T03', 'reason', 'no-matching-availability')
             )
         ),
-        timestamptz '2024-07-01 17:10:00+00',
-        timestamptz '2024-07-01 17:10:45+00'
+        timestamptz '2024-07-02 10:00:00+00',
+        timestamptz '2024-07-02 10:00:15+00'
     )
-    returning id into practice_run_id;
+    returning id into v_practice_run_id;
 
-    -- Add a rich practice run to mimic the full metrics structure
-    INSERT INTO scheduler_runs (
+    insert into scheduler_runs (
         season_settings_id,
         run_type,
         status,
         parameters,
         metrics,
         results,
-        created_at,
+        started_at,
         completed_at
-    ) VALUES (
-        season_id,
-        'practice',
+    ) values (
+        v_season_id,
+        'game',
         'completed',
-        jsonb_build_object('triggered_by', 'seed-script-v2'),
-        '{}'::jsonb,
-        '{
-            "summary": {
-                "totalTeams": 9,
-                "assignedTeams": 8,
-                "unassignedTeams": 1,
-                "assignmentRate": 0.8889,
-                "manualFollowUpRate": 0.1111
-            },
-            "slotUtilization": [
-                { "slotId": "F1-TUE-1800", "capacity": 2, "assignedCount": 2, "utilization": 1.0, "overbooked": false },
-                { "slotId": "F1-THU-1800", "capacity": 2, "assignedCount": 2, "utilization": 1.0, "overbooked": false },
-                { "slotId": "F2-MON-1700", "capacity": 2, "assignedCount": 2, "utilization": 1.0, "overbooked": false },
-                { "slotId": "F2-WED-1700", "capacity": 2, "assignedCount": 2, "utilization": 1.0, "overbooked": false }
-            ],
-            "baseSlotDistribution": [
-                {
-                    "baseSlotId": "F1-TUE-1800",
-                    "day": "Tuesday",
-                    "representativeStart": "2024-08-20T18:00:00Z",
-                    "totalAssigned": 2,
-                    "totalCapacity": 2,
-                    "utilization": 1.0,
-                    "divisionBreakdown": [
-                        { "division": "U8", "count": 2, "percentage": 1.0 }
-                    ]
-                },
-                {
-                    "baseSlotId": "F1-THU-1800",
-                    "day": "Thursday",
-                    "representativeStart": "2024-08-22T18:00:00Z",
-                    "totalAssigned": 2,
-                    "totalCapacity": 2,
-                    "utilization": 1.0,
-                    "divisionBreakdown": [
-                         { "division": "U10", "count": 2, "percentage": 1.0 }
-                    ]
-                }
-            ],
-            "underutilizedBaseSlots": [],
-            "fairnessConcerns": [],
-            "dayConcentrationAlerts": [],
-            "divisionDayDistribution": {
-                "U8": {
-                    "totalAssigned": 2,
-                    "dayBreakdown": [{ "day": "Tuesday", "count": 2, "percentage": 1.0 }]
-                },
-                "U10": {
-                    "totalAssigned": 2,
-                    "dayBreakdown": [{ "day": "Thursday", "count": 2, "percentage": 1.0 }]
-                },
-                "U12": {
-                    "totalAssigned": 4,
-                    "dayBreakdown": [
-                        { "day": "Monday", "count": 2, "percentage": 0.5 },
-                        { "day": "Wednesday", "count": 2, "percentage": 0.5 }
-                    ]
-                }
-            },
-            "unassignedByReason": [
-                {
-                    "reason": "no-capacity",
-                    "count": 1,
-                    "teamIds": ["U10-T04"],
-                    "divisionBreakdown": [{ "division": "U10", "count": 1, "percentage": 1.0 }]
-                }
-            ],
-            "manualFollowUpBreakdown": [
-                 {
-                    "category": "capacity",
-                    "count": 1,
-                    "percentage": 1.0,
-                    "teamIds": ["U10-T04"],
-                    "reasons": ["no-capacity"]
-                 }
-            ],
-            "coachLoad": {},
-            "coachConflicts": [],
-            "dataQualityWarnings": []
-        }'::jsonb,
-        '2024-08-02 10:00:00+00',
-        '2024-08-02 10:00:15+00'
+        jsonb_build_object(
+            'seed_tag', 'fall2024-demo',
+            'triggered_by', 'seed-script',
+            'weeks', 10
+        ),
+        jsonb_build_object(
+            'total_games', 2,
+            'byes', 0
+        ),
+        jsonb_build_object(
+            'schedule', jsonb_build_array(
+                jsonb_build_object('week', 1, 'games', jsonb_build_array(
+                    jsonb_build_object('home', 'U8-T01', 'away', 'U8-T02', 'slotId', 'game-slot-u8', 'time', '09:00'),
+                    jsonb_build_object('home', 'U10-T01', 'away', 'U10-T02', 'slotId', 'game-slot-u10', 'time', '09:00')
+                ))
+            )
+        ),
+        timestamptz '2024-07-03 14:00:00+00',
+        timestamptz '2024-07-03 14:00:45+00'
     );
 
     insert into evaluation_runs (
@@ -918,29 +851,34 @@ begin
         findings_severity,
         metrics_summary,
         input_snapshot,
-        auto_fix_summary,
         started_at,
         completed_at
     ) values (
-        'practice',
-        practice_run_id,
-        season_id,
+        'team',
+        v_team_run_id,
+        v_season_id,
         'completed_with_warnings',
         'warnings',
-        jsonb_build_object(
-            'conflicts_detected', 1,
-            'conflicts_resolved', 0,
-            'fairness_score', 0.78
-        ),
-        jsonb_build_object(
-            'seed_tag', 'fall2024-demo',
-            'run_reference', practice_run_id
-        ),
-        jsonb_build_object('manual_follow_up_needed', true),
-        timestamptz '2024-07-01 17:11:00+00',
-        timestamptz '2024-07-01 17:11:10+00'
+        jsonb_build_object('score', 85, 'critical_issues', 0),
+        jsonb_build_object('seed_tag', 'fall2024-demo'),
+        timestamptz '2024-07-01 17:06:00+00',
+        timestamptz '2024-07-01 17:06:05+00'
     )
-    returning id into evaluation_run_id;
+    returning id into v_evaluation_run_id;
+
+    insert into evaluation_findings (
+        evaluation_run_id,
+        severity,
+        finding_code,
+        description,
+        affected_entities
+    ) values (
+        v_evaluation_run_id,
+        'warning',
+        'ROSTER_IMBALANCE',
+        'U10 Girls division has uneven roster sizes (11 vs 14)',
+        jsonb_build_array('U10-T01', 'U10-T02')
+    );
 
     insert into export_jobs (
         season_settings_id,
@@ -948,24 +886,18 @@ begin
         status,
         payload,
         storage_path,
-        schema_version,
         started_at,
         completed_at
     ) values (
-        season_id,
+        v_season_id,
         'master',
         'completed',
-        jsonb_build_object(
-            'seed_tag', 'fall2024-demo',
-            'source_run_id', team_run_id,
-            'format', 'teamsnap-csv'
-        ),
-        'storage://exports/fall2024/master-schedule.csv',
-        'v1',
-        timestamptz '2024-07-01 17:15:00+00',
-        timestamptz '2024-07-01 17:15:05+00'
+        jsonb_build_object('seed_tag', 'fall2024-demo'),
+        'exports/master-schedule-fall2024.csv',
+        timestamptz '2024-07-04 09:00:00+00',
+        timestamptz '2024-07-04 09:00:10+00'
     )
-    returning id into export_job_id;
+    returning id into v_export_job_id;
 
     insert into email_log (
         export_job_id,
@@ -973,110 +905,12 @@ begin
         action,
         metadata
     ) values (
-        export_job_id,
-        'scheduler@example.com',
-        'draft_generated',
-        jsonb_build_object(
-            'seed_tag', 'fall2024-demo',
-            'evaluation_run_id', evaluation_run_id,
-            'notes', 'Demo email draft created for admin review'
-        )
+        v_export_job_id,
+        'coach.maria@example.com',
+        'sent',
+        jsonb_build_object('seed_tag', 'fall2024-demo', 'subject', 'Your Fall 2024 Schedule')
     );
 
-
-    -- Add a rich game run to mimic the full metrics structure
-    INSERT INTO scheduler_runs (
-        season_settings_id,
-        run_type,
-        status,
-        parameters,
-        metrics,
-        results,
-        created_at,
-        completed_at
-    ) VALUES (
-        season_id,
-        'game',
-        'completed',
-        jsonb_build_object('triggered_by', 'seed-script-v2'),
-        '{}'::jsonb,
-        '{
-            "summary": {
-                "totalGames": 18,
-                "divisionsCovered": 3,
-                "scheduledRate": 0.9444,
-                "unscheduledMatchups": 1,
-                "teamsWithByes": 2,
-                "sharedSlotAlerts": 1
-            },
-            "assignments": [], 
-            "unscheduled": [
-                {
-                    "reason": "lightning postponement",
-                    "weekIndex": 3,
-                    "matchup": "U10-T01 vs U10-T02",
-                    "note": "Field 1 unavailable; awaiting reschedule window"
-                }
-            ],
-            "byes": [
-                {
-                    "division": "U12",
-                    "weekIndex": 4,
-                    "teamIds": ["U12-T02", "U12-T03"]
-                }
-            ],
-            "warnings": [
-                {
-                    "type": "coach-conflict",
-                    "severity": "error",
-                    "message": "Coach Marie is double-booked in week 2.",
-                    "details": {
-                        "coachId": "coach-marie",
-                        "weekIndex": 2,
-                        "games": [
-                            { "teamId": "U8-T01", "slotId": "FIELD-1-SAT-0900" },
-                            { "teamId": "U10-T02", "slotId": "FIELD-2-SAT-0915" }
-                        ]
-                    }
-                },
-                {
-                    "type": "shared-slot-imbalance",
-                    "severity": "warning",
-                    "message": "Shared slot FIELD-1-SAT-1100 is 75% allocated to U10.",
-                    "details": {
-                        "slotId": "FIELD-1-SAT-1100",
-                        "dominantDivision": "U10",
-                        "dominantShare": 0.75,
-                        "totalAssignments": 4,
-                        "breakdown": [
-                            { "division": "U10", "count": 3 },
-                            { "division": "U12", "count": 1 }
-                        ]
-                    }
-                }
-            ],
-            "fieldHighlights": [
-                {
-                    "fieldId": "Field 1",
-                    "games": 7,
-                    "divisions": ["U8", "U10"],
-                    "note": "Maintains even cadence across morning windows."
-                },
-                {
-                    "fieldId": "Field 2",
-                    "games": 5,
-                    "divisions": ["U10", "U12"],
-                    "note": "Hosts the outstanding shared-slot imbalance flagged above."
-                }
-            ]
-        }'::jsonb,
-        '2024-08-05 14:00:00+00',
-        '2024-08-05 14:00:25+00'
-    );
-
-    raise notice 'Seed data applied for Fall 2024 recreation season (season_settings.id=%)', season_id;
+    raise notice 'Seed data applied for Fall 2024 recreation season (season_settings.id=%)', v_season_id;
 end
 $$;
-
-
-\echo 'Seed complete.'

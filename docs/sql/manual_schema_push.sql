@@ -23,7 +23,6 @@ end$$;
 create or replace function trigger_set_timestamp()
 returns trigger
 language plpgsql
-set search_path = public
 as $$
 begin
     new.updated_at = timezone('utc', now());
@@ -227,7 +226,6 @@ create table if not exists games (
 create or replace function ensure_assistant_coach_ids_valid()
 returns trigger
 language plpgsql
-set search_path = public
 as $$
 declare
     duplicates uuid[];
@@ -275,7 +273,6 @@ $$;
 create or replace function ensure_game_team_consistency()
 returns trigger
 language plpgsql
-set search_path = public
 as $$
 declare
     home_division uuid;
@@ -455,7 +452,7 @@ do $$
 declare
     t_name text;
 begin
-    foreach t_name in array ['scheduler_runs', 'evaluation_runs', 'export_jobs']
+    for t_name in select unnest(array['scheduler_runs', 'evaluation_runs', 'export_jobs'])
     loop
         execute format('drop trigger if exists %I on %I', 'set_timestamp_' || t_name, t_name);
         execute format(
@@ -470,11 +467,11 @@ do $$
 declare
     t_name text;
 begin
-    foreach t_name in array [
+    for t_name in select unnest(array[
         'season_settings', 'divisions', 'players', 'coaches', 'locations',
         'fields', 'field_subunits', 'practice_slots', 'game_slots', 'teams',
         'practice_assignments', 'games'
-    ]
+    ])
     loop
         execute format('drop trigger if exists %I on %I', 'set_timestamp_' || t_name, t_name);
         execute format(
@@ -799,139 +796,63 @@ create or replace function persist_practice_schedule(
 )
 returns void
 language plpgsql
-security invoker -- Run with the caller's permissions (RLS)
 as $$
+declare
+  v_season_id bigint;
+  v_run_id uuid;
+  v_assignment jsonb;
+  v_team_id uuid;
+  v_slot_id uuid;
+  v_date_range daterange;
 begin
-  -- 1. Persist Scheduler Run
-  if run_data is not null then
-    insert into scheduler_runs (
-      id,
-      run_type,
-      season_settings_id,
-      status,
-      parameters,
-      metrics,
-      results,
-      created_by,
-      started_at,
-      completed_at,
-      updated_at
-    )
-    values (
-      (run_data->>'id')::uuid,
-      (run_data->>'run_type')::text,
-      (run_data->>'season_settings_id')::bigint,
-      (run_data->>'status')::text,
-      (run_data->'parameters'),
-      (run_data->'metrics'),
-      (run_data->'results'),
-      (run_data->>'created_by')::uuid,
-      (run_data->>'started_at')::timestamptz,
-      (run_data->>'completed_at')::timestamptz,
-      (run_data->>'updated_at')::timestamptz
-    )
-    on conflict (id) do update set
-      status = excluded.status,
-      parameters = excluded.parameters,
-      metrics = excluded.metrics,
-      results = excluded.results,
-      completed_at = excluded.completed_at,
-      updated_at = excluded.updated_at;
+  -- 1. Get or create season settings (simplified lookup for now)
+  select id into v_season_id from season_settings limit 1;
+  if v_season_id is null then
+    raise exception 'No season settings found';
   end if;
 
-  -- 2. Persist Assignments
-  if assignments is not null and jsonb_array_length(assignments) > 0 then
+  -- 2. Create scheduler run record
+  insert into scheduler_runs (
+    season_settings_id,
+    run_type,
+    status,
+    parameters,
+    results,
+    started_at,
+    completed_at
+  ) values (
+    v_season_id,
+    'practice',
+    'completed',
+    run_data,
+    jsonb_build_object('assignments_count', jsonb_array_length(assignments)),
+    now(),
+    now()
+  ) returning id into v_run_id;
+
+  -- 3. Process assignments
+  for v_assignment in select * from jsonb_array_elements(assignments)
+  loop
+    v_team_id := (v_assignment->>'teamId')::uuid;
+    v_slot_id := (v_assignment->>'slotId')::uuid;
+    -- Assuming full season for now, or extract from assignment
+    v_date_range := daterange((select season_start from season_settings where id = v_season_id),
+                              (select season_end from season_settings where id = v_season_id), '[]');
+
     insert into practice_assignments (
       team_id,
       practice_slot_id,
       effective_date_range,
-      created_at,
-      updated_at
+      source
+    ) values (
+      v_team_id,
+      v_slot_id,
+      v_date_range,
+      'manual'
     )
-    select
-      (item->>'team_id')::uuid,
-      (item->>'slot_id')::uuid,
-      daterange((item->>'effectiveFrom')::date, (item->>'effectiveUntil')::date, '[]'),
-      now(),
-      now()
-    from jsonb_array_elements(assignments) as item
-    on conflict (team_id, practice_slot_id, effective_date_range) do update set
-      updated_at = now();
-  end if;
-end;
-$$;
-
--- Function to persist game schedule transactionally
-create or replace function persist_game_schedule(
-  run_data jsonb,
-  assignments jsonb
-)
-returns void
-language plpgsql
-security invoker -- Run with the caller's permissions (RLS)
-as $$
-begin
-  -- 1. Persist Scheduler Run
-  if run_data is not null then
-    insert into scheduler_runs (
-      id,
-      run_type,
-      season_settings_id,
-      status,
-      parameters,
-      metrics,
-      results,
-      created_by,
-      started_at,
-      completed_at,
-      updated_at
-    )
-    values (
-      (run_data->>'id')::uuid,
-      (run_data->>'run_type')::text,
-      (run_data->>'season_settings_id')::bigint,
-      (run_data->>'status')::text,
-      (run_data->'parameters'),
-      (run_data->'metrics'),
-      (run_data->'results'),
-      (run_data->>'created_by')::uuid,
-      (run_data->>'started_at')::timestamptz,
-      (run_data->>'completed_at')::timestamptz,
-      (run_data->>'updated_at')::timestamptz
-    )
-    on conflict (id) do update set
-      status = excluded.status,
-      parameters = excluded.parameters,
-      metrics = excluded.metrics,
-      results = excluded.results,
-      completed_at = excluded.completed_at,
-      updated_at = excluded.updated_at;
-  end if;
-
-  -- 2. Persist Assignments
-  if assignments is not null and jsonb_array_length(assignments) > 0 then
-    insert into games (
-      game_slot_id,
-      home_team_id,
-      away_team_id,
-      week_index,
-      created_at,
-      updated_at
-    )
-    select
-      (item->>'slot_id')::uuid,
-      (item->>'home_team_id')::uuid,
-      (item->>'away_team_id')::uuid,
-      (item->>'week_index')::smallint,
-      now(),
-      now()
-    from jsonb_array_elements(assignments) as item
-    on conflict (game_slot_id) do update set
-      home_team_id = excluded.home_team_id,
-      away_team_id = excluded.away_team_id,
-      week_index = excluded.week_index,
-      updated_at = now();
-  end if;
+    on conflict (team_id, practice_slot_id, effective_date_range)
+    do update set source = 'manual', updated_at = now();
+  end loop;
 end;
 $$;
 

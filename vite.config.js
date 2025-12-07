@@ -15,6 +15,17 @@ export default defineConfig({
   build: {
     outDir: '../dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom'],
+          'supabase-vendor': ['@supabase/supabase-js'],
+          'lucide-vendor': ['lucide-react'],
+        },
+      },
+    },
+    minify: true,
+    cssMinify: true,
   },
   server: {
     port: 5173,

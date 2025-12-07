@@ -10,3 +10,4 @@ mockups/
 .env
 logs/
 docs/git-documentation/
+docs/sql/real-samples/*

@@ -21,17 +21,21 @@ export function useTeamSummary() {
     const [summary, setSummary] = useState(null); // null triggers loading state
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [status, setStatus] = useState('idle'); // idle, running, completed, error
+    const [progress, setProgress] = useState(0);
 
     useEffect(() => {
+        let pollInterval;
+
         async function fetchLatestRun() {
             try {
-                // Loading is true by default, no need to set it here
+                // Fetch the latest run, regardless of status (running or completed)
                 const { data, error: queryError } = await supabase
                     .from('scheduler_runs')
                     .select('*')
                     .eq('run_type', 'team')
-                    .eq('status', 'completed')
-                    .order('completed_at', { ascending: false })
+                    .in('status', ['completed', 'running'])
+                    .order('created_at', { ascending: false })
                     .limit(1)
                     .single();
 
@@ -39,24 +43,46 @@ export function useTeamSummary() {
                     if (queryError.code === 'PGRST116') {
                         setSummary(EMPTY_SUMMARY);
                         setLoading(false);
+                        setStatus('idle');
                         return;
                     }
                     throw queryError;
                 }
 
-                const mapped = mapSchedulerRunToSummary(data);
-                setSummary(mapped || EMPTY_SUMMARY);
+                // Update status and progress
+                setStatus(data.status);
+                // Assume progress is stored in metrics or calculate it (mocking for now if not present)
+                const currentProgress = data.metrics?.progress || (data.status === 'completed' ? 100 : 0);
+                setProgress(currentProgress);
+
+                if (data.status === 'completed') {
+                    const mapped = mapSchedulerRunToSummary(data);
+                    setSummary(mapped || EMPTY_SUMMARY);
+                    setLoading(false);
+                } else if (data.status === 'running') {
+                    // If running, keep loading true (or handle partial data if available)
+                    // but we have status to show progress bar
+                    setLoading(true);
+                }
+
             } catch (err) {
-                console.error('Failed to fetch team summary:', err);
-                setError(err);
-                setSummary(EMPTY_SUMMARY);
-            } finally {
-                setLoading(false);
+                console.error('Failed to fetch team summary:', JSON.stringify(err, null, 2));
+                // Don't set error state if we are just polling and failed once, unless it's critical
+                // But for now, let's just log it and maybe keep old state
             }
         }
 
         fetchLatestRun();
+
+        // Poll if running
+        pollInterval = setInterval(() => {
+            fetchLatestRun();
+        }, 2000);
+
+        return () => {
+            if (pollInterval) clearInterval(pollInterval);
+        };
     }, []);
 
-    return { summary, loading, error };
+    return { summary, loading, error, status, progress, generatedAt: summary?.generatedAt };
 }

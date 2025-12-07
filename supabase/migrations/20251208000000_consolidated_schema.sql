@@ -1,8 +1,9 @@
--- Initial schema draft for youth sports scheduler
--- This file translates the data modeling plan into concrete SQL DDL
--- statements suitable for a Supabase/Postgres migration.  It focuses on
--- core entities required for registration intake, team formation, and
--- scheduling.  RLS policies will be defined in subsequent migrations.
+-- Consolidated Schema Migration
+-- Combines initial schema, storage setup, RPCs, and new tables.
+
+-- ==========================================
+-- 1. INITIAL SCHEMA
+-- ==========================================
 
 begin;
 
@@ -455,7 +456,7 @@ do $$
 declare
     t_name text;
 begin
-    foreach t_name in array ['scheduler_runs', 'evaluation_runs', 'export_jobs']
+    for t_name in select unnest(array['scheduler_runs', 'evaluation_runs', 'export_jobs'])
     loop
         execute format('drop trigger if exists %I on %I', 'set_timestamp_' || t_name, t_name);
         execute format(
@@ -470,11 +471,11 @@ do $$
 declare
     t_name text;
 begin
-    foreach t_name in array [
+    for t_name in select unnest(array[
         'season_settings', 'divisions', 'players', 'coaches', 'locations',
         'fields', 'field_subunits', 'practice_slots', 'game_slots', 'teams',
         'practice_assignments', 'games'
-    ]
+    ])
     loop
         execute format('drop trigger if exists %I on %I', 'set_timestamp_' || t_name, t_name);
         execute format(
@@ -542,6 +543,7 @@ alter table email_log enable row level security;
 -- Pattern: Allow ALL operations if the user has the 'admin' role.
 
 -- season_settings
+drop policy if exists "Admins can do everything on season_settings" on season_settings;
 create policy "Admins can do everything on season_settings"
   on season_settings for all
   to authenticated
@@ -549,6 +551,7 @@ create policy "Admins can do everything on season_settings"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- divisions
+drop policy if exists "Admins can do everything on divisions" on divisions;
 create policy "Admins can do everything on divisions"
   on divisions for all
   to authenticated
@@ -556,12 +559,14 @@ create policy "Admins can do everything on divisions"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- players
+drop policy if exists "Admins can do everything on players" on players;
 create policy "Admins can do everything on players"
   on players for all
   to authenticated
   using ((auth.jwt() ->> 'role') = 'admin')
   with check ((auth.jwt() ->> 'role') = 'admin');
 
+drop policy if exists "Coaches can view roster names (masked)" on players;
 create policy "Coaches can view roster names (masked)"
   on players for select
   to authenticated
@@ -572,17 +577,19 @@ create policy "Coaches can view roster names (masked)"
       from public.coach_team_map ctm
       join public.team_players tp on tp.team_id = ctm.team_id
       where tp.player_id = players.id
-        and ctm.coach_user_id = auth.uid()
+      and ctm.coach_user_id = auth.uid()
     )
   );
 
 -- coaches
+drop policy if exists "Admins can do everything on coaches" on coaches;
 create policy "Admins can do everything on coaches"
   on coaches for all
   to authenticated
   using ((auth.jwt() ->> 'role') = 'admin')
   with check ((auth.jwt() ->> 'role') = 'admin');
 
+drop policy if exists "Coaches can view own profile" on coaches;
 create policy "Coaches can view own profile"
   on coaches for select
   to authenticated
@@ -591,6 +598,7 @@ create policy "Coaches can view own profile"
     and user_id = auth.uid()
   );
 
+drop policy if exists "Coaches can update own profile" on coaches;
 create policy "Coaches can update own profile"
   on coaches for update
   to authenticated
@@ -604,6 +612,7 @@ create policy "Coaches can update own profile"
   );
 
 -- locations
+drop policy if exists "Admins can do everything on locations" on locations;
 create policy "Admins can do everything on locations"
   on locations for all
   to authenticated
@@ -611,6 +620,7 @@ create policy "Admins can do everything on locations"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- fields
+drop policy if exists "Admins can do everything on fields" on fields;
 create policy "Admins can do everything on fields"
   on fields for all
   to authenticated
@@ -618,6 +628,7 @@ create policy "Admins can do everything on fields"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- field_subunits
+drop policy if exists "Admins can do everything on field_subunits" on field_subunits;
 create policy "Admins can do everything on field_subunits"
   on field_subunits for all
   to authenticated
@@ -625,6 +636,7 @@ create policy "Admins can do everything on field_subunits"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- practice_slots
+drop policy if exists "Admins can do everything on practice_slots" on practice_slots;
 create policy "Admins can do everything on practice_slots"
   on practice_slots for all
   to authenticated
@@ -632,6 +644,7 @@ create policy "Admins can do everything on practice_slots"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- game_slots
+drop policy if exists "Admins can do everything on game_slots" on game_slots;
 create policy "Admins can do everything on game_slots"
   on game_slots for all
   to authenticated
@@ -639,12 +652,14 @@ create policy "Admins can do everything on game_slots"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- teams
+drop policy if exists "Admins can do everything on teams" on teams;
 create policy "Admins can do everything on teams"
   on teams for all
   to authenticated
   using ((auth.jwt() ->> 'role') = 'admin')
   with check ((auth.jwt() ->> 'role') = 'admin');
 
+drop policy if exists "Coaches can view their teams" on teams;
 create policy "Coaches can view their teams"
   on teams for select
   to authenticated
@@ -659,6 +674,7 @@ create policy "Coaches can view their teams"
   );
 
 -- team_players
+drop policy if exists "Admins can do everything on team_players" on team_players;
 create policy "Admins can do everything on team_players"
   on team_players for all
   to authenticated
@@ -666,6 +682,7 @@ create policy "Admins can do everything on team_players"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- practice_assignments
+drop policy if exists "Admins can do everything on practice_assignments" on practice_assignments;
 create policy "Admins can do everything on practice_assignments"
   on practice_assignments for all
   to authenticated
@@ -673,6 +690,7 @@ create policy "Admins can do everything on practice_assignments"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- games
+drop policy if exists "Admins can do everything on games" on games;
 create policy "Admins can do everything on games"
   on games for all
   to authenticated
@@ -680,6 +698,7 @@ create policy "Admins can do everything on games"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- import_jobs
+drop policy if exists "Admins can do everything on import_jobs" on import_jobs;
 create policy "Admins can do everything on import_jobs"
   on import_jobs for all
   to authenticated
@@ -687,6 +706,7 @@ create policy "Admins can do everything on import_jobs"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- staging_players
+drop policy if exists "Admins can do everything on staging_players" on staging_players;
 create policy "Admins can do everything on staging_players"
   on staging_players for all
   to authenticated
@@ -694,6 +714,7 @@ create policy "Admins can do everything on staging_players"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- player_buddies
+drop policy if exists "Admins can do everything on player_buddies" on player_buddies;
 create policy "Admins can do everything on player_buddies"
   on player_buddies for all
   to authenticated
@@ -701,13 +722,36 @@ create policy "Admins can do everything on player_buddies"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- scheduler_runs
-create policy "Admins can do everything on scheduler_runs"
+-- UPDATED POLICY: Allow authenticated users to manage runs
+-- Trigger to set created_by to auth.uid() if null
+create or replace function public.set_created_by_to_auth_uid()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.created_by is null then
+    new.created_by := auth.uid();
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists set_scheduler_runs_created_by on scheduler_runs;
+create trigger set_scheduler_runs_created_by
+  before insert on scheduler_runs
+  for each row execute function public.set_created_by_to_auth_uid();
+
+-- scheduler_runs
+-- UPDATED POLICY: Restrict management to admins or the creator
+drop policy if exists "Authenticated users can manage scheduler_runs" on scheduler_runs;
+create policy "Authenticated users can manage scheduler_runs"
   on scheduler_runs for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() ->> 'role') = 'admin' or created_by = auth.uid())
+  with check ((auth.jwt() ->> 'role') = 'admin' or created_by = auth.uid());
 
 -- evaluation_runs
+drop policy if exists "Admins can do everything on evaluation_runs" on evaluation_runs;
 create policy "Admins can do everything on evaluation_runs"
   on evaluation_runs for all
   to authenticated
@@ -715,6 +759,7 @@ create policy "Admins can do everything on evaluation_runs"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- evaluation_findings
+drop policy if exists "Admins can do everything on evaluation_findings" on evaluation_findings;
 create policy "Admins can do everything on evaluation_findings"
   on evaluation_findings for all
   to authenticated
@@ -722,6 +767,7 @@ create policy "Admins can do everything on evaluation_findings"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- evaluation_metrics
+drop policy if exists "Admins can do everything on evaluation_metrics" on evaluation_metrics;
 create policy "Admins can do everything on evaluation_metrics"
   on evaluation_metrics for all
   to authenticated
@@ -729,6 +775,7 @@ create policy "Admins can do everything on evaluation_metrics"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- evaluation_run_events
+drop policy if exists "Admins can do everything on evaluation_run_events" on evaluation_run_events;
 create policy "Admins can do everything on evaluation_run_events"
   on evaluation_run_events for all
   to authenticated
@@ -736,6 +783,7 @@ create policy "Admins can do everything on evaluation_run_events"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- export_jobs
+drop policy if exists "Admins can do everything on export_jobs" on export_jobs;
 create policy "Admins can do everything on export_jobs"
   on export_jobs for all
   to authenticated
@@ -743,6 +791,7 @@ create policy "Admins can do everything on export_jobs"
   with check ((auth.jwt() ->> 'role') = 'admin');
 
 -- email_log
+drop policy if exists "Admins can do everything on email_log" on email_log;
 create policy "Admins can do everything on email_log"
   on email_log for all
   to authenticated
@@ -770,12 +819,14 @@ create table if not exists schedule_evaluations (
 alter table schedule_evaluations enable row level security;
 
 -- Policies
+drop policy if exists "Admins can do everything on schedule_evaluations" on schedule_evaluations;
 create policy "Admins can do everything on schedule_evaluations"
   on schedule_evaluations for all
   to authenticated
   using ((auth.jwt() ->> 'role') = 'admin')
   with check ((auth.jwt() ->> 'role') = 'admin');
 
+drop policy if exists "Service role can do everything on schedule_evaluations" on schedule_evaluations;
 create policy "Service role can do everything on schedule_evaluations"
   on schedule_evaluations for all
   to service_role
@@ -783,6 +834,7 @@ create policy "Service role can do everything on schedule_evaluations"
   with check (true);
 
 -- Allow read-only access to authenticated users (e.g. coaches viewing status)
+drop policy if exists "Authenticated users can view schedule_evaluations" on schedule_evaluations;
 create policy "Authenticated users can view schedule_evaluations"
   on schedule_evaluations for select
   to authenticated
@@ -799,140 +851,234 @@ create or replace function persist_practice_schedule(
 )
 returns void
 language plpgsql
-security invoker -- Run with the caller's permissions (RLS)
+security invoker
 as $$
+declare
+  v_run_id uuid;
+  v_assignment jsonb;
 begin
-  -- 1. Persist Scheduler Run
-  if run_data is not null then
-    insert into scheduler_runs (
-      id,
-      run_type,
-      season_settings_id,
-      status,
-      parameters,
-      metrics,
-      results,
-      created_by,
-      started_at,
-      completed_at,
-      updated_at
-    )
-    values (
-      (run_data->>'id')::uuid,
-      (run_data->>'run_type')::text,
-      (run_data->>'season_settings_id')::bigint,
-      (run_data->>'status')::text,
-      (run_data->'parameters'),
-      (run_data->'metrics'),
-      (run_data->'results'),
-      (run_data->>'created_by')::uuid,
-      (run_data->>'started_at')::timestamptz,
-      (run_data->>'completed_at')::timestamptz,
-      (run_data->>'updated_at')::timestamptz
-    )
-    on conflict (id) do update set
-      status = excluded.status,
-      parameters = excluded.parameters,
-      metrics = excluded.metrics,
-      results = excluded.results,
-      completed_at = excluded.completed_at,
-      updated_at = excluded.updated_at;
-  end if;
+  -- 1. Upsert Scheduler Run
+  insert into scheduler_runs (
+    id,
+    season_settings_id,
+    run_type,
+    status,
+    parameters,
+    metrics,
+    results,
+    started_at,
+    completed_at,
+    created_by
+  )
+  select
+    (run_data->>'id')::uuid,
+    (run_data->>'season_settings_id')::bigint,
+    run_data->>'run_type',
+    run_data->>'status',
+    run_data->'parameters',
+    run_data->'metrics',
+    run_data->'results',
+    (run_data->>'started_at')::timestamptz,
+    (run_data->>'completed_at')::timestamptz,
+    (run_data->>'created_by')::uuid
+  on conflict (id) do update set
+    status = excluded.status,
+    results = excluded.results,
+    completed_at = excluded.completed_at;
 
-  -- 2. Persist Assignments
-  if assignments is not null and jsonb_array_length(assignments) > 0 then
-    insert into practice_assignments (
-      team_id,
-      practice_slot_id,
-      effective_date_range,
-      created_at,
-      updated_at
-    )
-    select
-      (item->>'team_id')::uuid,
-      (item->>'slot_id')::uuid,
-      daterange((item->>'effectiveFrom')::date, (item->>'effectiveUntil')::date, '[]'),
-      now(),
-      now()
-    from jsonb_array_elements(assignments) as item
-    on conflict (team_id, practice_slot_id, effective_date_range) do update set
-      updated_at = now();
-  end if;
-end;
-$$;
+  v_run_id := (run_data->>'id')::uuid;
 
--- Function to persist game schedule transactionally
-create or replace function persist_game_schedule(
-  run_data jsonb,
-  assignments jsonb
-)
-returns void
-language plpgsql
-security invoker -- Run with the caller's permissions (RLS)
-as $$
-begin
-  -- 1. Persist Scheduler Run
-  if run_data is not null then
-    insert into scheduler_runs (
-      id,
-      run_type,
-      season_settings_id,
-      status,
-      parameters,
-      metrics,
-      results,
-      created_by,
-      started_at,
-      completed_at,
-      updated_at
-    )
-    values (
-      (run_data->>'id')::uuid,
-      (run_data->>'run_type')::text,
-      (run_data->>'season_settings_id')::bigint,
-      (run_data->>'status')::text,
-      (run_data->'parameters'),
-      (run_data->'metrics'),
-      (run_data->'results'),
-      (run_data->>'created_by')::uuid,
-      (run_data->>'started_at')::timestamptz,
-      (run_data->>'completed_at')::timestamptz,
-      (run_data->>'updated_at')::timestamptz
-    )
-    on conflict (id) do update set
-      status = excluded.status,
-      parameters = excluded.parameters,
-      metrics = excluded.metrics,
-      results = excluded.results,
-      completed_at = excluded.completed_at,
-      updated_at = excluded.updated_at;
-  end if;
-
-  -- 2. Persist Assignments
-  if assignments is not null and jsonb_array_length(assignments) > 0 then
-    insert into games (
-      game_slot_id,
-      home_team_id,
-      away_team_id,
-      week_index,
-      created_at,
-      updated_at
-    )
-    select
-      (item->>'slot_id')::uuid,
-      (item->>'home_team_id')::uuid,
-      (item->>'away_team_id')::uuid,
-      (item->>'week_index')::smallint,
-      now(),
-      now()
-    from jsonb_array_elements(assignments) as item
-    on conflict (game_slot_id) do update set
-      home_team_id = excluded.home_team_id,
-      away_team_id = excluded.away_team_id,
-      week_index = excluded.week_index,
-      updated_at = now();
+  -- 2. Upsert Practice Assignments
+  -- Note: We assume the frontend passes valid team_id and practice_slot_id
+  if jsonb_array_length(assignments) > 0 then
+    for v_assignment in select * from jsonb_array_elements(assignments)
+    loop
+      insert into practice_assignments (
+        team_id,
+        practice_slot_id,
+        effective_date_range,
+        source
+      )
+      values (
+        (v_assignment->>'team_id')::uuid,
+        (v_assignment->>'practice_slot_id')::uuid,
+        (v_assignment->>'effective_date_range')::daterange,
+        coalesce((v_assignment->>'source'), 'auto')::source_enum
+      )
+      on conflict (team_id, practice_slot_id, effective_date_range) do update set
+        source = excluded.source;
+    end loop;
   end if;
 end;
 $$;
 
 commit;
+
+-- ==========================================
+-- 2. STORAGE BUCKET
+-- ==========================================
+
+-- Create the raw-imports bucket if it doesn't exist
+insert into storage.buckets (id, name, public)
+values ('raw-imports', 'raw-imports', true)
+on conflict (id) do nothing;
+
+-- Set up RLS policies for the bucket
+-- Note: Policies might fail if they already exist, so we drop them first just in case
+drop policy if exists "Public Access" on storage.objects;
+drop policy if exists "Public Access" on storage;
+create policy "Public Access"
+  on storage.objects for select
+  using ( bucket_id = 'raw-imports' );
+
+drop policy if exists "Authenticated Upload" on storage.objects;
+drop policy if exists "Authenticated Upload" on storage;
+create policy "Authenticated Upload"
+  on storage.objects for insert
+  with check ( bucket_id = 'raw-imports' and auth.role() = 'authenticated' );
+
+
+-- ==========================================
+-- 3. TEAM PERSISTENCE RPC
+-- ==========================================
+
+CREATE OR REPLACE FUNCTION persist_team_schedule(
+    run_data jsonb,
+    teams jsonb,
+    team_players jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+    v_run_id uuid;
+    v_teams_count int;
+    v_players_count int;
+BEGIN
+    -- 1. Persist Scheduler Run
+    INSERT INTO scheduler_runs (
+        id,
+        season_settings_id,
+        run_type,
+        status,
+        parameters,
+        metrics,
+        results,
+        started_at,
+        completed_at,
+        created_by
+    )
+    SELECT
+        (run_data->>'id')::uuid,
+        (run_data->>'season_settings_id')::bigint,
+        run_data->>'run_type',
+        run_data->>'status',
+        run_data->'parameters',
+        run_data->'metrics',
+        run_data->'results',
+        (run_data->>'started_at')::timestamptz,
+        (run_data->>'completed_at')::timestamptz,
+        (run_data->>'created_by')::uuid
+    ON CONFLICT (id) DO UPDATE SET
+        status = EXCLUDED.status,
+        results = EXCLUDED.results,
+        completed_at = EXCLUDED.completed_at;
+
+    v_run_id := (run_data->>'id')::uuid;
+
+    -- 2. Upsert Teams
+    IF jsonb_array_length(teams) > 0 THEN
+        INSERT INTO teams (
+            id,
+            division_id,
+            coach_id,
+            name
+        )
+        SELECT
+            t->>'id',
+            t->>'division_id',
+            t->>'coach_id',
+            t->>'name'
+        FROM jsonb_array_elements(teams) t
+        ON CONFLICT (id) DO UPDATE SET
+            division_id = EXCLUDED.division_id,
+            coach_id = EXCLUDED.coach_id,
+            name = EXCLUDED.name;
+            
+        GET DIAGNOSTICS v_teams_count = ROW_COUNT;
+    ELSE
+        v_teams_count := 0;
+    END IF;
+
+    -- 3. Upsert Team Players
+    IF jsonb_array_length(team_players) > 0 THEN
+        INSERT INTO team_players (
+            team_id,
+            player_id,
+            role,
+            source
+        )
+        SELECT
+            (tp->>'team_id')::uuid,
+            (tp->>'player_id')::uuid,
+            COALESCE(tp->>'role', 'player'),
+            COALESCE(tp->>'source', 'auto')::source_enum
+        FROM jsonb_array_elements(team_players) tp
+        ON CONFLICT (team_id, player_id) DO UPDATE SET
+            role = EXCLUDED.role,
+            source = EXCLUDED.source;
+
+        GET DIAGNOSTICS v_players_count = ROW_COUNT;
+    ELSE
+        v_players_count := 0;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'status', 'success',
+        'run_id', v_run_id,
+        'updated_teams', v_teams_count,
+        'updated_players', v_players_count
+    );
+END;
+$$;
+
+
+-- ==========================================
+-- 4. IMPORTS TABLE
+-- ==========================================
+
+-- Create imports table to store parsed CSV data
+create table if not exists imports (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid references auth.users(id) on delete cascade,
+    file_name text not null,
+    import_type text not null check (import_type in ('players', 'coaches', 'fields')),
+    data jsonb not null,
+    created_at timestamptz not null default timezone('utc', now())
+);
+
+-- Enable RLS
+alter table imports enable row level security;
+
+-- Policies
+drop policy if exists "Users can insert their own imports" on imports;
+drop policy if exists "Users can insert their own imports" on imports;
+create policy "Users can insert their own imports"
+    on imports for insert
+    to authenticated
+    with check (auth.uid() = user_id);
+
+drop policy if exists "Users can view their own imports" on imports;
+drop policy if exists "Users can view their own imports" on imports;
+create policy "Users can view their own imports"
+    on imports for select
+    to authenticated
+    using (auth.uid() = user_id);
+
+drop policy if exists "Users can delete their own imports" on imports;
+drop policy if exists "Users can delete their own imports" on imports;
+create policy "Users can delete their own imports"
+    on imports for delete
+    to authenticated
+    using (auth.uid() = user_id);

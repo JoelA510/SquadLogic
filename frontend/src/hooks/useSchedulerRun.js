@@ -42,7 +42,7 @@ export function useSchedulerRun(runType, mapper, emptyState) {
                 setData(mapped || emptyState);
             } catch (err) {
                 if (err.name !== 'AbortError') {
-                    console.error(`Failed to fetch ${runType} summary:`, err);
+                    console.error(`Failed to fetch ${runType} summary:`, JSON.stringify(err, null, 2));
                     setError(err);
                     setData(emptyState);
                 }

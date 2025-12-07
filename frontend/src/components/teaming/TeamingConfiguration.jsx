@@ -9,7 +9,8 @@ export default function TeamingConfiguration({ program, config, onUpdate }) {
     );
 
     const handleChange = (field, value) => {
-        onUpdate(program.id, { [field]: parseInt(value) || 0 });
+        const intValue = parseInt(value);
+        onUpdate(program.id, { [field]: isNaN(intValue) ? null : intValue });
     };
 
     return (

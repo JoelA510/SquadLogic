@@ -723,12 +723,32 @@ create policy "Admins can do everything on player_buddies"
 
 -- scheduler_runs
 -- UPDATED POLICY: Allow authenticated users to manage runs
+-- Trigger to set created_by to auth.uid() if null
+create or replace function public.set_created_by_to_auth_uid()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.created_by is null then
+    new.created_by := auth.uid();
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists set_scheduler_runs_created_by on scheduler_runs;
+create trigger set_scheduler_runs_created_by
+  before insert on scheduler_runs
+  for each row execute function public.set_created_by_to_auth_uid();
+
+-- scheduler_runs
+-- UPDATED POLICY: Restrict management to admins or the creator
 drop policy if exists "Authenticated users can manage scheduler_runs" on scheduler_runs;
 create policy "Authenticated users can manage scheduler_runs"
   on scheduler_runs for all
   to authenticated
-  using (true)
-  with check (true);
+  using ((auth.jwt() ->> 'role') = 'admin' or created_by = auth.uid())
+  with check ((auth.jwt() ->> 'role') = 'admin' or created_by = auth.uid());
 
 -- evaluation_runs
 drop policy if exists "Admins can do everything on evaluation_runs" on evaluation_runs;

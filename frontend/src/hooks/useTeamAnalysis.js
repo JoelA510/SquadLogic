@@ -47,7 +47,7 @@ export function useTeamAnalysis() {
             // Determine Program (Age Group + Gender)
             // Logic: Calculate Age based on Season (assuming 2025 for now, should be dynamic)
             const dob = new Date(player['Birthdate']);
-            const age = 2025 - dob.getFullYear();
+            const age = (new Date().getFullYear()) - dob.getFullYear();
             const gender = player['Gender'] === 'm' ? 'Boys' : 'Girls';
 
             // Simple U-grouping logic (e.g., U10 = ages 8-9)

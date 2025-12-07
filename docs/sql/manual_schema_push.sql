@@ -804,9 +804,23 @@ declare
   v_team_id uuid;
   v_slot_id uuid;
   v_date_range daterange;
+  v_season_start date;
+  v_season_end date;
 begin
-  -- 1. Get or create season settings (simplified lookup for now)
-  select id into v_season_id from season_settings limit 1;
+  -- 1. Get or create season settings
+  -- Use season_settings_id from run_data if available, otherwise fallback (but avoid random limit 1)
+  if run_data ? 'season_settings_id' then
+      select id, season_start, season_end into v_season_id, v_season_start, v_season_end
+      from season_settings
+      where id = (run_data->>'season_settings_id')::bigint;
+  else
+      -- Fallback: Pick the most recent season if not specified (better than random)
+      select id, season_start, season_end into v_season_id, v_season_start, v_season_end
+      from season_settings
+      order by created_at desc
+      limit 1;
+  end if;
+
   if v_season_id is null then
     raise exception 'No season settings found';
   end if;
@@ -831,14 +845,13 @@ begin
   ) returning id into v_run_id;
 
   -- 3. Process assignments
+  v_date_range := daterange(v_season_start, v_season_end, '[]');
+  
   for v_assignment in select * from jsonb_array_elements(assignments)
   loop
     v_team_id := (v_assignment->>'teamId')::uuid;
     v_slot_id := (v_assignment->>'slotId')::uuid;
-    -- Assuming full season for now, or extract from assignment
-    v_date_range := daterange((select season_start from season_settings where id = v_season_id),
-                              (select season_end from season_settings where id = v_season_id), '[]');
-
+    
     insert into practice_assignments (
       team_id,
       practice_slot_id,

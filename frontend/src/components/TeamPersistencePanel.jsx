@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
+import { useAuth } from '../contexts/AuthContext';
 import { formatDateTime } from '../utils/formatDateTime.js';
 import {
   getPersistenceEndpoint,
@@ -13,6 +14,7 @@ import PersistenceHistoryList from './PersistenceHistoryList';
 const SUPABASE_SYNC_TIMEOUT_MS = 10000;
 
 export default function TeamPersistencePanel({ teamPersistenceSnapshot }) {
+  const { session } = useAuth();
   const [persistenceActionState, setPersistenceActionState] = useState('idle');
   const [persistenceActionMessage, setPersistenceActionMessage] = useState('');
   const [lastSyncedAt, setLastSyncedAt] = useState(
@@ -114,6 +116,7 @@ export default function TeamPersistencePanel({ teamPersistenceSnapshot }) {
         snapshot: snapshotForPersistence,
         overrides: persistenceOverrides,
         endpoint: persistenceEndpoint,
+        accessToken: session?.access_token,
       });
 
       if (result.status === 'blocked') {

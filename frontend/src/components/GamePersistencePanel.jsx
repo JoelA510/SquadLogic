@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { buildSupabaseAuthHeaders } from '../utils/authHeaders';
+import { useAuth } from '../contexts/AuthContext';
 import { prepareGamePersistenceSnapshot } from '../../../src/gamePersistenceSnapshot';
 import { GAME_PERSISTENCE_URL } from '../config';
 import PersistencePanel from './PersistencePanel';
@@ -8,8 +8,8 @@ export default function GamePersistencePanel({
     assignments = [],
     runMetadata = {},
     runId,
-    supabaseClient,
 }) {
+    const { session } = useAuth();
     const [status, setStatus] = useState('idle'); // idle, syncing, success, error
     const [message, setMessage] = useState('');
 
@@ -24,7 +24,9 @@ export default function GamePersistencePanel({
         setMessage('Syncing to Supabase...');
 
         try {
-            const authHeaders = await buildSupabaseAuthHeaders(supabaseClient);
+            const token = session?.access_token;
+            const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+
             const response = await fetch(GAME_PERSISTENCE_URL, {
                 method: 'POST',
                 headers: {

@@ -34,6 +34,8 @@ export const AuthProvider = ({ children }) => {
         loading,
         signOut: () => supabase?.auth.signOut(),
         isConfigured: !!supabase,
+        isAdmin: session?.user?.app_metadata?.role === 'admin',
+        isCoach: session?.user?.app_metadata?.role === 'coach',
     };
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

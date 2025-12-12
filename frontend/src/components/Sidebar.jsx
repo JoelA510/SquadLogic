@@ -23,7 +23,7 @@ const navItems = [
 ];
 
 export default function Sidebar({ isOpen, toggleSidebar }) {
-    const { signOut } = useAuth();
+    const { signOut, isAdmin, isCoach } = useAuth();
 
     return (
         <>
@@ -57,7 +57,20 @@ export default function Sidebar({ isOpen, toggleSidebar }) {
 
                 {/* Navigation */}
                 <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-                    {navItems.map((item) => (
+                    {navItems.filter(item => {
+                        // Admin sees everything
+                        if (isAdmin) return true;
+
+                        // Coach restrictions
+                        if (isCoach) {
+                            const allowed = ['dashboard', 'teams', 'schedule-practice', 'schedule-game'];
+                            return allowed.includes(item.id);
+                        }
+
+                        // Default / Fallback (e.g. unauthenticated or other roles?)
+                        // Usually sidebar only shows if auth, but safe fallback:
+                        return ['dashboard'].includes(item.id);
+                    }).map((item) => (
                         <NavLink
                             key={item.id}
                             to={item.path}

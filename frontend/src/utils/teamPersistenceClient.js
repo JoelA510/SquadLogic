@@ -1,5 +1,4 @@
 import { ApiClient } from './apiClient.js';
-import { simulateTeamPersistenceUpsert } from './simulateTeamPersistenceUpsert.js';
 import { API_BASE_URL } from '../config.js';
 
 function normalizeEndpoint(baseUrl) {
@@ -25,7 +24,6 @@ export async function triggerTeamPersistence({
   overrides = [],
   endpoint: providedEndpoint, // Allow overriding endpoint for testing
   accessToken,
-  simulateDelayMs = 800,
   runMetadata,
   signal,
   fetchImpl = fetch,
@@ -43,22 +41,17 @@ export async function triggerTeamPersistence({
   const targetUrl = providedEndpoint ? normalizeEndpoint(providedEndpoint) : API_BASE_URL;
 
   // 3. Simulation vs. Real Request
-  // If no endpoint is available (mock mode), default to simulation
-  const shouldUseSimulation = !targetUrl || targetUrl.includes('localhost') && !accessToken && !providedEndpoint;
-
-  // However, the original logic had a specific check:
-  // If we derived the URL from env (source='supabase-url') but have no token, simulate.
-  // With centralization, API_BASE_URL is always defined (defaults to localhost).
-  // So we rely on the specific 'providedEndpoint' argument to force a real fetch in tests,
-  // or the presence of a token for real auth calls.
+  // If no endpoint is available (mock mode), default to error in production, or check config.
 
   // Simplification for Refactor:
   // If we have an accessToken, we assume we want to write to the backend.
-  // If we don't, and no explicit endpoint was forced, we simulate.
-  const isMock = !accessToken && !providedEndpoint;
+  // If we don't, we fail. Use AuthContext to ensure token presence.
 
-  if (isMock) {
-    return simulateTeamPersistenceUpsert({ snapshot, overrides, delayMs: simulateDelayMs });
+  if (!accessToken && !providedEndpoint) {
+    return {
+      status: 'error',
+      message: 'Authentication token missing. Please sign in.'
+    };
   }
 
   // 4. Execute Request

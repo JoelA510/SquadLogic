@@ -547,31 +547,31 @@ drop policy if exists "Admins can do everything on season_settings" on season_se
 create policy "Admins can do everything on season_settings"
   on season_settings for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- divisions
 drop policy if exists "Admins can do everything on divisions" on divisions;
 create policy "Admins can do everything on divisions"
   on divisions for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- players
 drop policy if exists "Admins can do everything on players" on players;
 create policy "Admins can do everything on players"
   on players for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 drop policy if exists "Coaches can view roster names (masked)" on players;
 create policy "Coaches can view roster names (masked)"
   on players for select
   to authenticated
   using (
-    (auth.jwt() ->> 'role') = 'coach'
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'coach'
     and exists (
       select 1
       from public.coach_team_map ctm
@@ -586,15 +586,15 @@ drop policy if exists "Admins can do everything on coaches" on coaches;
 create policy "Admins can do everything on coaches"
   on coaches for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 drop policy if exists "Coaches can view own profile" on coaches;
 create policy "Coaches can view own profile"
   on coaches for select
   to authenticated
   using (
-    (auth.jwt() ->> 'role') = 'coach'
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'coach'
     and user_id = auth.uid()
   );
 
@@ -603,11 +603,11 @@ create policy "Coaches can update own profile"
   on coaches for update
   to authenticated
   using (
-    (auth.jwt() ->> 'role') = 'coach'
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'coach'
     and user_id = auth.uid()
   )
   with check (
-    (auth.jwt() ->> 'role') = 'coach'
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'coach'
     and user_id = auth.uid()
   );
 
@@ -616,55 +616,55 @@ drop policy if exists "Admins can do everything on locations" on locations;
 create policy "Admins can do everything on locations"
   on locations for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- fields
 drop policy if exists "Admins can do everything on fields" on fields;
 create policy "Admins can do everything on fields"
   on fields for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- field_subunits
 drop policy if exists "Admins can do everything on field_subunits" on field_subunits;
 create policy "Admins can do everything on field_subunits"
   on field_subunits for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- practice_slots
 drop policy if exists "Admins can do everything on practice_slots" on practice_slots;
 create policy "Admins can do everything on practice_slots"
   on practice_slots for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- game_slots
 drop policy if exists "Admins can do everything on game_slots" on game_slots;
 create policy "Admins can do everything on game_slots"
   on game_slots for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- teams
 drop policy if exists "Admins can do everything on teams" on teams;
 create policy "Admins can do everything on teams"
   on teams for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 drop policy if exists "Coaches can view their teams" on teams;
 create policy "Coaches can view their teams"
   on teams for select
   to authenticated
   using (
-    (auth.jwt() ->> 'role') = 'coach'
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'coach'
     and exists (
       select 1
       from public.coach_team_map ctm
@@ -678,48 +678,61 @@ drop policy if exists "Admins can do everything on team_players" on team_players
 create policy "Admins can do everything on team_players"
   on team_players for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- practice_assignments
 drop policy if exists "Admins can do everything on practice_assignments" on practice_assignments;
 create policy "Admins can do everything on practice_assignments"
   on practice_assignments for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
+
+create policy "Coaches can view their team practices"
+  on practice_assignments for select
+  to authenticated
+  using (
+    (auth.jwt() -> 'app_metadata' ->> 'role') = 'coach'
+    and exists (
+      select 1
+      from public.coach_team_map ctm
+      where ctm.team_id = practice_assignments.team_id
+        and ctm.coach_user_id = auth.uid()
+    )
+  );
 
 -- games
 drop policy if exists "Admins can do everything on games" on games;
 create policy "Admins can do everything on games"
   on games for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- import_jobs
 drop policy if exists "Admins can do everything on import_jobs" on import_jobs;
 create policy "Admins can do everything on import_jobs"
   on import_jobs for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- staging_players
 drop policy if exists "Admins can do everything on staging_players" on staging_players;
 create policy "Admins can do everything on staging_players"
   on staging_players for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- player_buddies
 drop policy if exists "Admins can do everything on player_buddies" on player_buddies;
 create policy "Admins can do everything on player_buddies"
   on player_buddies for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- scheduler_runs
 -- UPDATED POLICY: Allow authenticated users to manage runs
@@ -747,56 +760,56 @@ drop policy if exists "Authenticated users can manage scheduler_runs" on schedul
 create policy "Authenticated users can manage scheduler_runs"
   on scheduler_runs for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin' or created_by = auth.uid())
-  with check ((auth.jwt() ->> 'role') = 'admin' or created_by = auth.uid());
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin' or created_by = auth.uid())
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin' or created_by = auth.uid());
 
 -- evaluation_runs
 drop policy if exists "Admins can do everything on evaluation_runs" on evaluation_runs;
 create policy "Admins can do everything on evaluation_runs"
   on evaluation_runs for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- evaluation_findings
 drop policy if exists "Admins can do everything on evaluation_findings" on evaluation_findings;
 create policy "Admins can do everything on evaluation_findings"
   on evaluation_findings for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- evaluation_metrics
 drop policy if exists "Admins can do everything on evaluation_metrics" on evaluation_metrics;
 create policy "Admins can do everything on evaluation_metrics"
   on evaluation_metrics for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- evaluation_run_events
 drop policy if exists "Admins can do everything on evaluation_run_events" on evaluation_run_events;
 create policy "Admins can do everything on evaluation_run_events"
   on evaluation_run_events for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- export_jobs
 drop policy if exists "Admins can do everything on export_jobs" on export_jobs;
 create policy "Admins can do everything on export_jobs"
   on export_jobs for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- email_log
 drop policy if exists "Admins can do everything on email_log" on email_log;
 create policy "Admins can do everything on email_log"
   on email_log for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 -- ==========================================
 -- EVALUATION SCHEMA
@@ -823,8 +836,8 @@ drop policy if exists "Admins can do everything on schedule_evaluations" on sche
 create policy "Admins can do everything on schedule_evaluations"
   on schedule_evaluations for all
   to authenticated
-  using ((auth.jwt() ->> 'role') = 'admin')
-  with check ((auth.jwt() ->> 'role') = 'admin');
+  using ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin')
+  with check ((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin');
 
 drop policy if exists "Service role can do everything on schedule_evaluations" on schedule_evaluations;
 create policy "Service role can do everything on schedule_evaluations"
@@ -1082,3 +1095,14 @@ create policy "Users can delete their own imports"
     on imports for delete
     to authenticated
     using (auth.uid() = user_id);
+
+-- GRANT PERMISSIONS
+grant usage on schema public to postgres, anon, authenticated, service_role;
+grant all privileges on all tables in schema public to postgres, anon, authenticated, service_role;
+grant all privileges on all functions in schema public to postgres, anon, authenticated, service_role;
+grant all privileges on all sequences in schema public to postgres, anon, authenticated, service_role;
+
+-- Ensure future tables get grants
+alter default privileges in schema public grant all on tables to postgres, anon, authenticated, service_role;
+alter default privileges in schema public grant all on sequences to postgres, anon, authenticated, service_role;
+alter default privileges in schema public grant all on functions to postgres, anon, authenticated, service_role;

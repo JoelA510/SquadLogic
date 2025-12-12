@@ -21,7 +21,8 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.86.2",
+    "@supabase/supabase-js": "^2.87.1",
+    "dotenv": "^17.2.3",
     "lucide-react": "^0.556.0",
     "papaparse": "^5.5.3",
     "prop-types": "^15.8.1",

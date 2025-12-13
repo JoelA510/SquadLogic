@@ -1,6 +1,6 @@
 import { validateSlot } from './utils/validation.js';
 
-const BYE = Symbol('BYE');
+const BYE = '__BYE__';
 
 /**
  * Generate a deterministic round-robin schedule for a division.
@@ -92,6 +92,7 @@ export function generateRoundRobinWeeks({ teamIds }) {
  *   assignments: Array<{ weekIndex: number, division: string, slotId: string, start: string, end: string, homeTeamId: string, awayTeamId: string, fieldId: string | null }>,
  *   byes: Array<{ weekIndex: number, division: string, teamId: string }>,
  *   unscheduled: Array<{ weekIndex: number, division: string, matchup: { homeTeamId: string, awayTeamId: string }, reason: string }>,
+ *   sharedSlotUsage: Array<Object>,
  * }}
  */
 export function scheduleGames({ teams, slots, roundRobinByDivision }) {

@@ -38,6 +38,8 @@
  * @property {string[]} [teamNames]
  * @property {string} [teamNamePrefix]
  * @property {string} [format] - e.g. '5v5'
+ * @property {number} [targetTeamSize]
+ * @property {number} [teamCountOverride]
  */
 
 /**
@@ -311,10 +313,40 @@ function buildTeamsForDivision({ division, players, maxRosterSize, divisionConfi
     new Set(players.filter((player) => player.coachId).map((player) => player.coachId)),
   );
 
+  // Determine number of teams based on target size, defaulting to max roster size if not set.
+  // This allows generating smaller teams (higher count) than simply filling to capacity.
+  const targetSize = divisionConfig.targetTeamSize || maxRosterSize;
+
+  // Calculate based on player count
+  let calculatedTeams = Math.ceil(players.length / targetSize) || 1;
+
+  // Ensure consistent team count if override provided
+  if (divisionConfig.teamCountOverride && divisionConfig.teamCountOverride > 0) {
+    calculatedTeams = divisionConfig.teamCountOverride;
+  }
+
   const requiredTeams = Math.max(
     coachIds.length,
-    Math.ceil(players.length / maxRosterSize) || 1,
+    calculatedTeams
   );
+
+  // Validation: If requiredTeams results in roster size > maxRosterSize, we must increase team count?
+  // Actually, if targetSize < maxRosterSize, team count is higher, so avg size is lower.
+  // But if override or targetSize makes teams too small or too big?
+  // We should ensure players.length / requiredTeams <= maxRosterSize.
+  // If not, we must bump requiredTeams.
+  const minTeamsForCapacity = Math.ceil(players.length / maxRosterSize);
+  if (requiredTeams < minTeamsForCapacity) {
+    // This happens if teamCountOverride is too low or targetSize is invalidly high (though handled by default).
+    // We enforce capacity.
+    // throw new Error or adjust? Let's adjust.
+    // logic: we can't fit everyone if we don't have enough teams.
+    // return Math.max(requiredTeams, minTeamsForCapacity);
+  }
+
+  // We use the stricter of the two constraints (enough to fit everyone vs target preference)
+  // Actually we need `requiredTeams` >= `minTeamsForCapacity`.
+  const finalRequiredTeams = Math.max(requiredTeams, minTeamsForCapacity);
 
   const teams = [];
   let teamIndex = 0;
@@ -333,7 +365,7 @@ function buildTeamsForDivision({ division, players, maxRosterSize, divisionConfi
   for (const coachId of coachIds) {
     createTeam(coachId);
   }
-  while (teams.length < requiredTeams) {
+  while (teams.length < finalRequiredTeams) {
     createTeam(null);
   }
 

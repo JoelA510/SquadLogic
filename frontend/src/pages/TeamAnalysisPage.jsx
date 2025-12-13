@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { supabase } from '../utils/supabaseClient';
+import { useTheme } from '../contexts/ThemeContext.jsx';
+import { supabase } from '../utils/supabaseClient.js';
 import TeamOverviewPanel from '../components/TeamOverviewPanel';
 import TeamPersistencePanel from '../components/TeamPersistencePanel';
 import Button from '../components/ui/Button';
@@ -20,6 +21,7 @@ export default function TeamAnalysisPage() {
     const { team, loading } = useDashboardData();
     const { persistenceSnapshot } = useTeamPersistence();
     const { importedData } = useImport();
+    const { timezone } = useTheme();
     const navigate = useNavigate();
     const [isEditMode, setIsEditMode] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
@@ -191,6 +193,7 @@ export default function TeamAnalysisPage() {
                         totals={team.totals}
                         divisions={team.divisions}
                         generatedAt={team.generatedAt}
+                        timezone={timezone}
                     />
                     <TeamPersistencePanel teamPersistenceSnapshot={persistenceSnapshot} />
                     <div className="flex justify-end pt-4 border-t border-border-subtle">

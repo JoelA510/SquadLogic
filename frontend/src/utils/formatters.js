@@ -31,6 +31,21 @@ export const formatTime = (value, timezone) => {
     return date.toLocaleTimeString([], options);
 };
 
+export const formatDate = (value, timezone) => {
+    if (!value) {
+        return 'unspecified date';
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return 'unspecified date';
+    }
+    const options = { year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short' };
+    if (timezone) {
+        options.timeZone = timezone;
+    }
+    return date.toLocaleDateString(undefined, options);
+};
+
 export const formatClockFromMinutes = (minutes) => {
     if (!Number.isFinite(minutes)) {
         return 'unspecified time';

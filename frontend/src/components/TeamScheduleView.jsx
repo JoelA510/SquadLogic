@@ -1,6 +1,6 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import { formatTime } from '../utils/formatters.js';
+import { formatTime, formatDate } from '../utils/formatters.js';
 
 export default function TeamScheduleView({ assignments, teamId, timezone }) {
     if (!assignments || !teamId) {
@@ -32,11 +32,7 @@ export default function TeamScheduleView({ assignments, teamId, timezone }) {
                 const date = new Date(game.start);
 
                 // Format date as "Sat, Oct 14"
-                const dateStr = date.toLocaleDateString(undefined, {
-                    weekday: 'short',
-                    month: 'short',
-                    day: 'numeric'
-                });
+                const dateStr = formatDate(game.start, timezone);
 
                 return (
                     <div

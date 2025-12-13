@@ -1,7 +1,7 @@
 import React from 'react';
-import { formatPercent } from '../utils/formatters';
+import { formatPercent, formatDate } from '../utils/formatters.js';
 
-function TeamOverviewPanel({ totals, divisions, generatedAt }) {
+function TeamOverviewPanel({ totals, divisions, generatedAt, timezone }) {
     return (
         <section className="section-panel glass-panel team-overview" aria-labelledby="team-overview-heading">
             <header className="section-header">
@@ -9,7 +9,7 @@ function TeamOverviewPanel({ totals, divisions, generatedAt }) {
                     <h2 id="team-overview-heading">Team formation snapshot</h2>
                     <p>
                         Roster fill rates, coach coverage, and overflow diagnostics.
-                        Sourced from dry-run on {new Date(generatedAt).toLocaleDateString()}.
+                        Sourced from dry-run on {formatDate(generatedAt, timezone)}.
                     </p>
                 </div>
                 <dl className="metrics-grid" aria-label="Overall allocator totals">

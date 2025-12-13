@@ -1,9 +1,11 @@
 import React from 'react';
 import GameReadinessPanel from '../components/GameReadinessPanel';
-import { useDashboardData } from '../hooks/useDashboardData';
+import { useDashboardData } from '../hooks/useDashboardData.js';
+import { useTheme } from '../contexts/ThemeContext.jsx';
 
 export default function GameSchedulingPage() {
     const { game } = useDashboardData();
+    const { timezone } = useTheme();
 
     return (
         <div className="animate-fadeIn space-y-8">
@@ -16,6 +18,7 @@ export default function GameSchedulingPage() {
                 gameReadinessSnapshot={game.snapshot}
                 gameSummary={game.summary}
                 generatedAt={game.generatedAt}
+                timezone={timezone}
             />
         </div>
     );

@@ -1,8 +1,8 @@
 import React from 'react';
-import InsightSection from './InsightSection';
-import { formatPercentPrecise } from '../utils/formatters';
+import InsightSection from './InsightSection.jsx';
+import { formatPercentPrecise, formatDate } from '../utils/formatters.js';
 
-function GameReadinessPanel({ gameReadinessSnapshot, gameSummary, generatedAt }) {
+function GameReadinessPanel({ gameReadinessSnapshot, gameSummary, generatedAt, timezone }) {
     const hasGameWarnings =
         (gameReadinessSnapshot.warnings?.length ?? 0) > 0 ||
         (gameReadinessSnapshot.unscheduled?.length ?? 0) > 0;
@@ -13,7 +13,7 @@ function GameReadinessPanel({ gameReadinessSnapshot, gameSummary, generatedAt })
                 <div>
                     <h2 id="game-readiness-heading">Game readiness</h2>
                     <p>
-                        Schedule completion and conflict alerts from {new Date(generatedAt).toLocaleDateString()}.
+                        Schedule completion and conflict alerts from {formatDate(generatedAt, timezone)}.
                     </p>
                 </div>
                 <dl className="metrics-grid">

@@ -449,7 +449,7 @@ function buildTeamsForDivision({ division, players, maxRosterSize, divisionConfi
     if (!team) {
       overflow.push({
         players: unit,
-        reason: TEAM_GENERATION.REASON_BuddyRequest,
+        reason: TEAM_GENERATION.REASON_InsufficientCapacity,
         metadata: { unitSize: unit.length },
       });
       continue;

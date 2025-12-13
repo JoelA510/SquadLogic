@@ -16,6 +16,8 @@ import { DEFAULT_ALLOWED_ROLES, PERSISTENCE_STATUS } from './constants.js';
  * @typedef {Object} PersistenceSnapshot
  * @property {Object} payload
  * @property {Array<Object>} [payload.assignmentRows]
+ * @property {Array<Object>} [payload.teamRows]
+ * @property {Array<Object>} [payload.teamPlayerRows]
  * @property {string | null} [lastRunId]
  * @property {string | null} [runId]
  * @property {Object} [runMetadata]

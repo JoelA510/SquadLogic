@@ -2,7 +2,7 @@
  * Constants for team generation and scheduling.
  */
 
-export const DEFAULT_ALLOWED_ROLES = ['authenticated', 'service_role'];
+export const DEFAULT_ALLOWED_ROLES = ['authenticated', 'service_role', 'admin', 'scheduler'];
 
 export const PERSISTENCE_STATUS = {
     UNAUTHORIZED: 'unauthorized',
@@ -17,6 +17,7 @@ export const TEAM_GENERATION = {
     REASON_SkillDisparity: 'skill disparity',
     REASON_CoachAssignment: 'coach assignment',
     REASON_BuddyRequest: 'buddy request',
+    REASON_InsufficientCapacity: 'insufficient-capacity',
     REASON_Random: 'random assignment',
     REASON_Recovery: 'recovery assignment',
     REASON_ExhaustedRetries: 'exhausted retries',

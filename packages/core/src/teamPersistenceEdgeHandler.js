@@ -26,6 +26,13 @@ function mapStatusToHttpCode(status) {
   }
 }
 
+/**
+ * @param {Object} [options]
+ * @param {Object} [options.supabaseClient]
+ * @param {string[]} [options.allowedRoles]
+ * @param {Date} [options.now]
+ * @param {function(Request): Promise<Object|undefined>|undefined} [options.getUser]
+ */
 export function createTeamPersistenceHttpHandler({
   supabaseClient,
   allowedRoles,

@@ -75,9 +75,9 @@ export default function TeamAnalysisPage() {
 
     // Mock teams for edit mode if no real data
     const [teams, setTeams] = useState([
-        { id: 1, name: 'Team A', division: 'U10 Boys', players: 12 },
-        { id: 2, name: 'Team B', division: 'U10 Boys', players: 11 },
-        { id: 3, name: 'Team C', division: 'U12 Girls', players: 14 },
+        { id: 1, name: 'Team A', division: 'U10 Boys', players: 12, headCoach: 'Mike Smith', assistants: ['Sarah Jones'] },
+        { id: 2, name: 'Team B', division: 'U10 Boys', players: 11, headCoach: 'John Doe', assistants: [] },
+        { id: 3, name: 'Team C', division: 'U12 Girls', players: 14, headCoach: 'Jane Doe', assistants: ['Bill Gates', 'Steve Jobs'] },
     ]);
 
     const selectedProgram = programs.find(p => p.id === selectedProgramId);
@@ -167,6 +167,10 @@ export default function TeamAnalysisPage() {
                                     <div>
                                         <h4 className="font-bold text-text-primary">{t.name}</h4>
                                         <p className="text-sm text-text-secondary">{t.division} · {t.players} Players</p>
+                                        <p className="text-xs text-text-muted mt-1">
+                                            Head: {t.headCoach || 'Vacant'}
+                                            {t.assistants?.length > 0 && <span className="text-text-secondary"> · Assistants: {t.assistants.join(', ')}</span>}
+                                        </p>
                                     </div>
                                     <div className="flex gap-2">
                                         <button className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-blue-400 transition-colors">

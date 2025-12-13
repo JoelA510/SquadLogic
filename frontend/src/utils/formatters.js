@@ -73,3 +73,16 @@ export const formatGameWarningDetails = (details) => {
     }
     return 'See evaluator details';
 };
+
+export const formatDateTime = (value, timezone) => {
+    if (!value) {
+        return 'unspecified time';
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return 'unspecified time';
+    }
+    const datePart = formatDate(value, timezone);
+    const timePart = formatTime(value, timezone);
+    return `${datePart} · ${timePart}`;
+};

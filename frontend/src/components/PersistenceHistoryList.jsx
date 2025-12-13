@@ -1,6 +1,6 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import { formatDateTime } from '../utils/formatDateTime.js';
+import { formatDateTime } from '../utils/formatters.js';
 
 export default function PersistenceHistoryList({ history }) {
     return (

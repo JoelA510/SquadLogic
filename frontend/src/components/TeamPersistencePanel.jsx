@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import { useAuth } from '../contexts/AuthContext';
-import { formatDateTime } from '../utils/formatDateTime.js';
+import { formatDateTime } from '../utils/formatters.js';
 import {
   getPersistenceEndpoint,
   triggerTeamPersistence,

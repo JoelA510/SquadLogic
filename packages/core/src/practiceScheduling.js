@@ -76,12 +76,52 @@ export function schedulePractices({
   divisionPreferences = {},
   lockedAssignments = [],
   scoringWeights,
+  schoolDayEnd, // e.g. '16:00'
+  timezone, // e.g. 'America/Los_Angeles' (unused for now, assuming slots are already localized or schoolDayEnd is UTC if slots are UTC)
 }) {
   if (!Array.isArray(teams)) {
     throw new TypeError('teams must be an array');
   }
   if (!Array.isArray(slots)) {
     throw new TypeError('slots must be an array');
+  }
+
+  // Filter slots based on schoolDayEnd if provided and day is Mon-Thu
+  // Note: We assume slots.start is a Date object or ISO string.
+  // We need to be careful about timezone. If slots are UTC and schoolDayEnd is local, we need conversion.
+  // For R3 MVP, we will assume simple hour comparison if timezone handling is external,
+  // OR we implement robust checking here.
+  // Given Refactor.md says "scheduling logic... to respect these values", we should filter here.
+
+  let effectiveSlots = slots;
+  if (schoolDayEnd) {
+    const [endHour, endMinute] = schoolDayEnd.split(':').map(Number);
+    effectiveSlots = slots.filter(slot => {
+      // If no day defined, assume it might be a weekday? Or only filter if day is explicit?
+      // practice_slots usually have a day.
+      if (!slot.day || ['Friday', 'Saturday', 'Sunday'].includes(slot.day)) {
+        return true;
+      }
+      // Check start time against schoolDayEnd
+      const start = new Date(slot.start);
+      // This is tricky without a date library or explicit timezone.
+      // If we assume the system is running in the same timezone as the league, getHours() works.
+      // But it's likely UTC.
+      // If we have `timezone`, we can use toLocaleString.
+      if (timezone) {
+        const localTime = new Date(start.toLocaleString('en-US', { timeZone: timezone }));
+        const localHour = localTime.getHours();
+        const localMinute = localTime.getMinutes();
+        if (localHour < endHour || (localHour === endHour && localMinute < endMinute)) {
+          return false;
+        }
+      } else {
+        // Fallback: If no timezone, we can't reliably filter UTC slots against a wall-clock time 
+        // without assuming the server is in the same zone or data is local.
+        // We will skip filtering to avoid false positives/negatives until timezone is passed.
+      }
+      return true;
+    });
   }
   if (!Array.isArray(lockedAssignments)) {
     throw new TypeError('lockedAssignments must be an array');
@@ -109,7 +149,7 @@ export function schedulePractices({
 
   const teamsById = new Map(sanitizedTeams.map((team) => [team.id, team]));
 
-  const sanitizedSlots = slots.map((slot) => {
+  const sanitizedSlots = effectiveSlots.map((slot) => {
     if (!slot || typeof slot !== 'object') {
       throw new TypeError('each slot must be an object');
     }

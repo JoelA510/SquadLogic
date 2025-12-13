@@ -366,8 +366,8 @@ export default function SettingsPage() {
                                                     key={season}
                                                     onClick={() => setLocalCurrentSeason(season)}
                                                     className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${localCurrentSeason === season
-                                                            ? 'bg-brand-500/20 text-brand-400 border-brand-500/30'
-                                                            : 'bg-bg-surface text-text-muted border-border-subtle hover:bg-bg-surface-hover'
+                                                        ? 'bg-brand-500/20 text-brand-400 border-brand-500/30'
+                                                        : 'bg-bg-surface text-text-muted border-border-subtle hover:bg-bg-surface-hover'
                                                         }`}
                                                 >
                                                     {season}
@@ -379,6 +379,34 @@ export default function SettingsPage() {
                                 <p className="text-xs text-text-muted">
                                     Type a new season to create it, or select from saved seasons.
                                 </p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label htmlFor="season-timezone" className="block text-sm font-medium text-text-secondary mb-2">Timezone</label>
+                                <select
+                                    id="season-timezone"
+                                    className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-3 text-text-primary focus:outline-none focus:border-brand-400 transition-colors"
+                                >
+                                    <option value="America/Log_Angeles">Pacific Time (US & Canada)</option>
+                                    <option value="America/Denver">Mountain Time (US & Canada)</option>
+                                    <option value="America/Chicago">Central Time (US & Canada)</option>
+                                    <option value="America/New_York">Eastern Time (US & Canada)</option>
+                                    <option value="UTC">UTC</option>
+                                </select>
+                                <p className="text-xs text-text-muted mt-1">All schedules will be generated relative to this timezone.</p>
+                            </div>
+
+                            <div>
+                                <label htmlFor="school-day-end" className="block text-sm font-medium text-text-secondary mb-2">School Day End (Earliest Practice)</label>
+                                <input
+                                    id="school-day-end"
+                                    type="time"
+                                    defaultValue="16:00"
+                                    className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-3 text-text-primary focus:outline-none focus:border-brand-400 transition-colors"
+                                />
+                                <p className="text-xs text-text-muted mt-1">Practices on Mon-Thu will not be scheduled before this time.</p>
                             </div>
                         </div>
                     </div>

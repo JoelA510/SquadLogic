@@ -14,6 +14,10 @@
  * @property {string} [coachId]
  * @property {number} [skillRating]
  * @property {string} [name]
+ * @property {string} [skillTier] - 'novice' | 'developing' | 'advanced'
+ * @property {boolean} [willingToCoach]
+ * @property {Object} [medicalInfo]
+ * @property {Object} [contactInfo]
  */
 
 /**
@@ -31,6 +35,7 @@
  * @property {number} maxRosterSize
  * @property {string[]} [teamNames]
  * @property {string} [teamNamePrefix]
+ * @property {string} [format] - e.g. '5v5'
  */
 
 /**

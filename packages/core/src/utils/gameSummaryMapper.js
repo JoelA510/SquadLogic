@@ -21,6 +21,7 @@ export function mapSchedulerRunToGameSummary(run) {
     const generatedAt = run.completed_at || run.created_at;
 
     return {
+        runId: run.id,
         generatedAt,
         gameSummary,
         gameReadinessSnapshot: snapshot

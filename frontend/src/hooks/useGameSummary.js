@@ -1,5 +1,5 @@
-import { useSchedulerRun } from './useSchedulerRun';
-import { mapSchedulerRunToGameSummary } from 'src/utils/gameSummaryMapper';
+import { useSchedulerRun } from './useSchedulerRun.js';
+import { mapSchedulerRunToGameSummary } from '@squadlogic/core/src/utils/gameSummaryMapper.js';
 
 // Fallback empty state to prevent null access errors
 const EMPTY_SUMMARY = {
@@ -19,6 +19,7 @@ export function useGameSummary() {
         gameSummary: data ? data.gameSummary : EMPTY_SUMMARY.gameSummary,
         gameReadinessSnapshot: data ? data.gameReadinessSnapshot : EMPTY_SUMMARY.gameReadinessSnapshot,
         generatedAt: data ? data.generatedAt : EMPTY_SUMMARY.generatedAt,
+        runId: data ? data.runId : null,
         loading,
         error
     };

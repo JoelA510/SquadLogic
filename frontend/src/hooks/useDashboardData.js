@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
-import { useTeamSummary } from './useTeamSummary';
-import { usePracticeSummary } from './usePracticeSummary';
-import { useGameSummary } from './useGameSummary';
-import { ROADMAP_SECTIONS } from '../constants/roadmap';
+import { useTeamSummary } from './useTeamSummary.js';
+import { usePracticeSummary } from './usePracticeSummary.js';
+import { useGameSummary } from './useGameSummary.js';
+import { useGameAssignments } from './useGameAssignments.js';
+import { ROADMAP_SECTIONS } from '../constants/roadmap.js';
 
 export function useDashboardData() {
     const { summary: teamSummary, loading: teamLoading, generatedAt: teamGeneratedAt } = useTeamSummary();
@@ -18,8 +19,11 @@ export function useDashboardData() {
         gameSummary,
         gameReadinessSnapshot,
         generatedAt: gameGeneratedAt,
-        loading: gameLoading
+        loading: gameLoading,
+        runId: gameRunId
     } = useGameSummary();
+
+    const { assignments: gameAssignments } = useGameAssignments(gameRunId);
 
     const roadmapStats = useMemo(() => {
         const completed = ROADMAP_SECTIONS.filter((section) => section.status === 'complete').length;
@@ -44,7 +48,9 @@ export function useDashboardData() {
     const resolvedGame = {
         summary: gameSummary,
         snapshot: gameReadinessSnapshot,
-        generatedAt: gameGeneratedAt
+        generatedAt: gameGeneratedAt,
+        runId: gameRunId,
+        assignments: gameAssignments
     };
 
     return {

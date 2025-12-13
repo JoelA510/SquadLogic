@@ -350,3 +350,42 @@ test('scheduleGames balances shared slots across divisions when capacity allows 
     assert(max - min <= 1, `${fieldId} aggregated usage should stay balanced`);
   }
 });
+
+test('scheduleGames prioritizes slots with higher field priority', () => {
+  const teams = [
+    { id: 'team-a', division: 'U10', coachId: 'coach-1' },
+    { id: 'team-b', division: 'U10', coachId: 'coach-2' },
+  ];
+
+  const roundRobin = generateRoundRobinWeeks({ teamIds: ['team-a', 'team-b'] }); // 1 matchup
+
+  const slots = [
+    {
+      id: 'low-priority',
+      weekIndex: 1,
+      start: '2024-08-10T16:00:00Z',
+      end: '2024-08-10T17:00:00Z',
+      capacity: 1,
+      fieldId: 'field-low',
+      priority: 1
+    },
+    {
+      id: 'high-priority',
+      weekIndex: 1,
+      start: '2024-08-10T16:00:00Z',
+      end: '2024-08-10T17:00:00Z',
+      capacity: 1,
+      fieldId: 'field-high',
+      priority: 10
+    },
+  ];
+
+  const { assignments } = scheduleGames({
+    teams,
+    slots,
+    roundRobinByDivision: { U10: roundRobin },
+  });
+
+  assert.equal(assignments.length, 1);
+  assert.equal(assignments[0].slotId, 'high-priority', 'should choose high priority slot');
+});

@@ -243,6 +243,7 @@ function indexSlots(slots) {
       end: new Date(slot.end),
       remainingCapacity: slot.capacity,
       fieldId: slot.fieldId ?? null,
+      priority: slot.priority ?? 1,
     };
 
     slotRecords.set(record.id, record);
@@ -256,6 +257,10 @@ function indexSlots(slots) {
 
   for (const slotList of [...divisionSlots.values(), ...sharedSlots.values()]) {
     slotList.sort((a, b) => {
+      // Primary Sort: Field Priority (Descending)
+      if (b.priority !== a.priority) {
+        return b.priority - a.priority;
+      }
       if (a.start.getTime() !== b.start.getTime()) {
         return a.start - b.start;
       }
@@ -486,21 +491,33 @@ function selectSlotForMatchup({
       continue;
     }
 
-    // Compare: Higher score is better. Then earlier start, then fieldId, then id.
-    if (consistencyScore > bestDivisionScore) {
+    // Compare: Higher score implies time consistency.
+    // BUT we also want high priority fields.
+    // Strategy: Priority > Score > Start Time
+    if (slotRecord.priority > bestDivisionSlot.priority) {
       bestDivisionSlot = slotRecord;
       bestDivisionScore = consistencyScore;
-    } else if (consistencyScore === bestDivisionScore) {
-      if (slotRecord.start < bestDivisionSlot.start) {
+    } else if (slotRecord.priority < bestDivisionSlot.priority) {
+      continue;
+    } else {
+      // Equal priority: check score
+      if (consistencyScore > bestDivisionScore) {
         bestDivisionSlot = slotRecord;
-      } else if (slotRecord.start.getTime() === bestDivisionSlot.start.getTime()) {
-        const fieldA = slotRecord.fieldId ?? '';
-        const fieldB = bestDivisionSlot.fieldId ?? '';
-        if (fieldA < fieldB) {
+        bestDivisionScore = consistencyScore;
+      } else if (consistencyScore === bestDivisionScore) {
+        // Tie-breakers
+        if (slotRecord.start < bestDivisionSlot.start) {
           bestDivisionSlot = slotRecord;
-        } else if (fieldA === fieldB) {
-          if (slotRecord.id < bestDivisionSlot.id) {
+        } else if (slotRecord.start.getTime() === bestDivisionSlot.start.getTime()) {
+          // ... field comparison ...
+          const fieldA = slotRecord.fieldId ?? '';
+          const fieldB = bestDivisionSlot.fieldId ?? '';
+          if (fieldA < fieldB) {
             bestDivisionSlot = slotRecord;
+          } else if (fieldA === fieldB) {
+            if (slotRecord.id < bestDivisionSlot.id) {
+              bestDivisionSlot = slotRecord;
+            }
           }
         }
       }
@@ -513,7 +530,7 @@ function selectSlotForMatchup({
 
   // 2. Try Shared Slots
   let bestSharedSlot = null;
-  let bestSharedMetrics = null; // { usage, fieldUsage, consistencyScore }
+  let bestSharedMetrics = null; // { usage, fieldUsage, consistencyScore, priority }
 
   for (const slotRecord of sharedCandidates) {
     if (slotRecord.remainingCapacity <= 0) {
@@ -543,36 +560,47 @@ function selectSlotForMatchup({
       teamIds,
       slotRecord,
     });
+    const priority = slotRecord.priority;
 
     if (bestSharedSlot === null) {
       bestSharedSlot = slotRecord;
-      bestSharedMetrics = { usage, fieldUsage, consistencyScore };
+      bestSharedMetrics = { usage, fieldUsage, consistencyScore, priority };
       continue;
     }
 
-    // Compare: Lower usage is better. Lower fieldUsage is better. Higher score is better.
-    // a.usage - b.usage
+    // Compare: Priority (High) > Usage (Low) > FieldUsage (Low) > Score (High)
+
+    // 1. Priority
+    if (priority > bestSharedMetrics.priority) {
+      bestSharedSlot = slotRecord;
+      bestSharedMetrics = { usage, fieldUsage, consistencyScore, priority };
+      continue;
+    } else if (priority < bestSharedMetrics.priority) {
+      continue;
+    }
+
+    // 2. Usage (load balancing)
     if (usage < bestSharedMetrics.usage) {
       bestSharedSlot = slotRecord;
-      bestSharedMetrics = { usage, fieldUsage, consistencyScore };
+      bestSharedMetrics = { usage, fieldUsage, consistencyScore, priority };
       continue;
     } else if (usage > bestSharedMetrics.usage) {
       continue;
     }
 
-    // a.fieldUsage - b.fieldUsage
+    // 3. Field Usage (load balancing)
     if (fieldUsage < bestSharedMetrics.fieldUsage) {
       bestSharedSlot = slotRecord;
-      bestSharedMetrics = { usage, fieldUsage, consistencyScore };
+      bestSharedMetrics = { usage, fieldUsage, consistencyScore, priority };
       continue;
     } else if (fieldUsage > bestSharedMetrics.fieldUsage) {
       continue;
     }
 
-    // b.consistencyScore - a.consistencyScore
+    // 4. Consistency Score
     if (consistencyScore > bestSharedMetrics.consistencyScore) {
       bestSharedSlot = slotRecord;
-      bestSharedMetrics = { usage, fieldUsage, consistencyScore };
+      bestSharedMetrics = { usage, fieldUsage, consistencyScore, priority };
       continue;
     } else if (consistencyScore < bestSharedMetrics.consistencyScore) {
       continue;
@@ -581,17 +609,17 @@ function selectSlotForMatchup({
     // Tie-breakers: start, fieldId, id
     if (slotRecord.start < bestSharedSlot.start) {
       bestSharedSlot = slotRecord;
-      bestSharedMetrics = { usage, fieldUsage, consistencyScore };
+      bestSharedMetrics = { usage, fieldUsage, consistencyScore, priority };
     } else if (slotRecord.start.getTime() === bestSharedSlot.start.getTime()) {
       const fieldA = slotRecord.fieldId ?? '';
       const fieldB = bestSharedSlot.fieldId ?? '';
       if (fieldA < fieldB) {
         bestSharedSlot = slotRecord;
-        bestSharedMetrics = { usage, fieldUsage, consistencyScore };
+        bestSharedMetrics = { usage, fieldUsage, consistencyScore, priority };
       } else if (fieldA === fieldB) {
         if (slotRecord.id < bestSharedSlot.id) {
           bestSharedSlot = slotRecord;
-          bestSharedMetrics = { usage, fieldUsage, consistencyScore };
+          bestSharedMetrics = { usage, fieldUsage, consistencyScore, priority };
         }
       }
     }

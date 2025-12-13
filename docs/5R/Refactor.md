@@ -232,21 +232,14 @@ In summary, we will make timezone a configurable attribute for each league/seaso
 
 With the above clarifications and decisions, our immediate next steps are clear:
 
-1. Apply the Consolidated Migration: Use the provided consolidated SQL schema to set up the Supabase database (or run a migration to alter existing schema to match it). This will bring all tables and functions up to date. We should double-check that all Phase 2–10 changes are present (e.g. new player fields, JSONB columns, etc.) and that no previous data is lost in the migration. After running it, the schema should match exactly what we described above.  
-2. Remove Redundant Migrations/Docs: Since we now have one script, we can archive or remove the old phase-specific migration files (to avoid confusion). Documentation should be updated to point to the consolidated schema as the canonical definition.  
-3. Implement Timezone & School Hour Settings:  
-   * Add a timezone column to season\_settings (and possibly school\_day\_end time column as well). Alternatively, incorporate school\_day\_end into the daylight\_adjustments or a new JSON config, but a dedicated column is more straightforward for querying.  
-   * Write a migration or update script for this addition, and default existing seasons to a sensible value (perhaps use the server’s timezone or ask the admin to set it).  
-   * Update the front-end forms for creating/editing a season to include these fields (dropdown for timezone, time picker for earliest practice time).  
-   * Update the scheduling logic (team generation, practice scheduler functions) to respect these values. For example, filter out practice slots whose start\_time is earlier than season\_settings.school\_day\_end (if set). This might involve adjusting the SQL in our persist\_practice\_schedule or the edge function that generates assignments, to skip invalid slots.  
-   * Ensure all times are converted to UTC on storage and converted to local timezone on display. We might use PostgreSQL functions (timezone() and AT TIME ZONE clauses) or handle conversion in the application layer using a library, depending on where it’s easiest.  
-4. Multi-Org Data Partitioning (Long Term): Begin designing how we would incorporate an organization\_id:  
-   * Plan the organizations table (fields could be name, contact info, default timezone, etc.).  
-   * Consider linking seasons to organizations and updating RLS policies to include org checks. This will involve issuing new JWTs with an org claim for users. For now, this is not urgent since we are controlling admin access internally. But as a future roadmap item, it’s good to outline this for truly allowing each organization to self-manage their data within one platform.  
-   * In the interim, maintain a convention that season names or codes are unique across organizations to avoid mix-ups.  
-5. Testing & Feedback: After the changes above, run a full cycle test:  
-   * Create two seasons (for two hypothetical organizations), assign some players and coaches, and generate teams and schedules. Verify that coaches from Org A cannot see Org B data through the UI or direct queries (the RLS should cover it, as they have no teams in Org B).  
-   * Check scheduling times: e.g., set Org A timezone to Pacific and Org B to Eastern, ensure a 5 PM practice in Pacific shows as 8 PM Eastern if viewed in that zone, etc., and that none violate each org’s school hour rule.  
-   * Collect feedback from any pilot leagues about the scheduling times feature (maybe 4 PM is too early or late for some, etc.) to refine the default or make it more flexible if needed.
+1. Apply the Consolidated Migration: **DONE**. The consolidated schema has been applied and verified.
+2. Remove Redundant Migrations/Docs: **DONE**. Old migrations are archived/superseded.
+3. Implement Timezone & School Hour Settings: **IN PROGRESS**.
+   * Add a timezone column to season\_settings: **DONE**.
+   * Update the front-end forms: **DONE**. 
+   * Update the scheduling logic: **DONE** (Practice scheduler respects school hours).
+   * Ensure all times are converted to UTC/Local: **ONGOING** (Formatters standardized).
+4. Multi-Org Data Partitioning (Long Term): Pending.
+5. Testing & Feedback: Pending.
 
 Following this plan will ensure SquadLogic’s schema is up-to-date and robust, and the platform is ready to serve multiple organizations with proper constraints and configurations. We have merged all development into a unified path, captured all enhancements in the schema, and set the stage for configurable timezone support – all steps that improve the system’s clarity and usability for us and our users.

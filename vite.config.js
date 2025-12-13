@@ -7,8 +7,9 @@ export default defineConfig({
   envDir: '..', // Look for .env in the project root
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
-      'src': path.resolve(__dirname, './src'),
+      '@': path.resolve(__dirname, './packages/core/src'),
+      'src': path.resolve(__dirname, './packages/core/src'),
+      '@squadlogic/core': path.resolve(__dirname, './packages/core/src'),
     },
   },
   plugins: [react()],

@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
-import { DEFAULT_ALLOWED_ROLES, parseAllowedRolesEnv } from '../src/teamPersistenceEdgeConfig.js';
+import { DEFAULT_ALLOWED_ROLES, parseAllowedRolesEnv } from '../packages/core/src/teamPersistenceEdgeConfig.js';
 
 describe('parseAllowedRolesEnv', () => {
   it('returns default roles when value is undefined', () => {

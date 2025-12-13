@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeSnapshot } from '../src/teamPersistenceHandler.js';
+import { normalizeSnapshot } from '../packages/core/src/teamPersistenceHandler.js';
 
 test('normalizeSnapshot validates structure', () => {
     const validSnapshot = {

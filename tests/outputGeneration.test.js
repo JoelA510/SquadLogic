@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { formatCsv, generateScheduleExports } from '../src/outputGeneration.js';
+import { formatCsv, generateScheduleExports } from '../packages/core/src/outputGeneration.js';
 
 test('generateScheduleExports builds master and per-team exports', () => {
   const teams = [

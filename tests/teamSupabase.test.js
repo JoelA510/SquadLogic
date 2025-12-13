@@ -5,7 +5,7 @@ import {
   buildTeamPlayerRows,
   persistTeamPlayers,
   persistTeams,
-} from '../src/teamSupabase.js';
+} from '../packages/core/src/teamSupabase.js';
 
 test('buildTeamRows normalizes generator output and applies overrides', () => {
   const teamsByDivision = {

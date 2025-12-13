@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { authorizePersistenceRequest } from '../src/persistenceHandler.js';
-import { PERSISTENCE_STATUS } from '../src/constants.js';
+import { authorizePersistenceRequest } from '../packages/core/src/persistenceHandler.js';
+import { PERSISTENCE_STATUS } from '../packages/core/src/constants.js';
 
 describe('authorizePersistenceRequest', () => {
     it('returns UNAUTHORIZED if no user is provided', () => {

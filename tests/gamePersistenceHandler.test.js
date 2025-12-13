@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
     authorizeGamePersistenceRequest,
     handleGamePersistence,
-} from '../src/gamePersistenceHandler.js';
+} from '../packages/core/src/gamePersistenceHandler.js';
 
 test('authorizeGamePersistenceRequest checks role', () => {
     const result = authorizeGamePersistenceRequest({
@@ -23,7 +23,7 @@ test('authorizeGamePersistenceRequest allows admin', () => {
 
 test('handleGamePersistence validates snapshot', () => {
     const result = handleGamePersistence({
-        snapshot: { lastRunId: 'run-1' },
+        snapshot: { lastRunId: 'run-1', payload: { assignmentRows: [] } },
         overrides: [],
     });
     assert.equal(result.status, 'success');

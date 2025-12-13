@@ -6,7 +6,7 @@ import {
 import { evaluateOverrides } from './utils/snapshot.js';
 
 /**
- * Normalize the game snapshot to ensure a usable runId.
+ * Normalize the practice snapshot to ensure a usable runId.
  */
 const normalizeSnapshot = (snapshot) => ({
     ...snapshot,
@@ -14,30 +14,30 @@ const normalizeSnapshot = (snapshot) => ({
 });
 
 /**
- * Authorize a game persistence request.
+ * Authorize a practice persistence request.
  */
-export function authorizeGamePersistenceRequest(params) {
-    return authorizePersistenceRequest({ ...params, runType: 'game' });
+export function authorizePracticePersistenceRequest(params) {
+    return authorizePersistenceRequest({ ...params, runType: 'practice' });
 }
 
 /**
- * Handle game persistence using the generic pipeline.
+ * Handle practice persistence using the generic pipeline.
  */
-export function handleGamePersistence({ snapshot, overrides, now }) {
+export function handlePracticePersistence({ snapshot, overrides, now }) {
     return handlePersistenceRequest({
         snapshot,
         overrides,
         now,
         snapshotNormalizer: normalizeSnapshot,
         overrideEvaluator: evaluateOverrides,
-        successMessage: 'Snapshot validated. Ready for game persistence.',
+        successMessage: 'Snapshot validated. Ready for practice persistence.',
     });
 }
 
 /**
- * Persist the game snapshot transactionally.
+ * Persist the practice snapshot transactionally.
  */
-export async function persistGameSnapshotTransactional(params) {
+export async function persistPracticeSnapshotTransactional(params) {
     const { snapshot, runMetadata = {} } = params;
     const { runId: snapshotRunId } = normalizeSnapshot(snapshot);
     const effectiveRunMetadata = { ...runMetadata, runId: runMetadata.runId ?? snapshotRunId };
@@ -45,7 +45,12 @@ export async function persistGameSnapshotTransactional(params) {
     return persistSnapshotTransactional({
         ...params,
         runMetadata: effectiveRunMetadata,
-        runType: 'game',
-        rpcName: 'persist_game_schedule',
+        runType: 'practice',
+        rpcName: 'persist_practice_schedule',
+        // @ts-ignore
+        transformPayload: ({ snapshot, runData }) => ({
+            run_data: runData,
+            assignments: snapshot.payload.assignmentRows,
+        }),
     });
 }

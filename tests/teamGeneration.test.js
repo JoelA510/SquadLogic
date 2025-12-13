@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateTeams } from '../src/teamGeneration.js';
+import { generateTeams } from '../packages/core/src/teamGeneration.js';
 
 const divisionConfigs = {
   U10: { maxRosterSize: 4 },

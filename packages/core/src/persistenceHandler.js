@@ -181,8 +181,8 @@ export async function persistSnapshotTransactional({
 
     // Transform payload if normalizer provided, otherwise use snapshot directly
     const rpcPayload = transformPayload
-        ? transformPayload({ snapshot, runMetadata, nowIso: now.toISOString(), runId: runMetadata?.runId })
-        : { snapshot };
+        ? transformPayload({ snapshot, runMetadata, nowIso: now.toISOString(), runId: runMetadata?.runId, runData })
+        : { snapshot, run_data: runData };
 
     // Call the RPC function
     // @ts-ignore

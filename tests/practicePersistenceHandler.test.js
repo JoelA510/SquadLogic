@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
     authorizePracticePersistenceRequest,
     handlePracticePersistence,
-} from '../src/practicePersistenceHandler.js';
+} from '../packages/core/src/practicePersistenceHandler.js';
 
 test('authorizePracticePersistenceRequest checks role', () => {
     const result = authorizePracticePersistenceRequest({
@@ -23,7 +23,7 @@ test('authorizePracticePersistenceRequest allows admin', () => {
 
 test('handlePracticePersistence validates snapshot', () => {
     const result = handlePracticePersistence({
-        snapshot: { lastRunId: 'run-1' },
+        snapshot: { lastRunId: 'run-1', payload: { assignmentRows: [] } },
         overrides: [],
     });
     assert.equal(result.status, 'success');

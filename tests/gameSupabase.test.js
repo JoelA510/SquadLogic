@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildGameAssignmentRows, persistGameAssignments } from '../src/gameSupabase.js';
+import { buildGameAssignmentRows, persistGameAssignments } from '../packages/core/src/gameSupabase.js';
 
 test('buildGameAssignmentRows normalizes scheduler output for Supabase', () => {
   const assignments = [

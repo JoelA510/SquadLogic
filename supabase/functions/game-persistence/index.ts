@@ -5,11 +5,11 @@ import {
     type SupabaseClient,
     type User,
 } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
-import { createGamePersistenceHttpHandler } from '../../../src/gamePersistenceEdgeHandler.js';
+import { createGamePersistenceHttpHandler } from '../../../packages/core/src/gamePersistenceEdgeHandler.js';
 import {
     DEFAULT_ALLOWED_ROLES,
     parseAllowedRolesEnv,
-} from '../../../src/teamPersistenceEdgeConfig.js'; // Reusing config
+} from '../../../packages/core/src/teamPersistenceEdgeConfig.js'; // Reusing config
 
 type HttpHandler = (request: Request) => Response | Promise<Response>;
 

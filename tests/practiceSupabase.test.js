@@ -5,7 +5,7 @@ import {
   expandSupabasePracticeSlots,
   buildPracticeAssignmentRows,
   persistPracticeAssignments,
-} from '../src/practiceSupabase.js';
+} from '../packages/core/src/practiceSupabase.js';
 
 describe('buildPracticeSlotsFromSupabaseRows', () => {
   it('normalizes camelCase and snake_case Supabase slot rows', () => {

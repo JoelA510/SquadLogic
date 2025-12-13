@@ -39,6 +39,11 @@
     "typescript": "^5.9.3",
     "vite": "^5.4.0"
   },
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "packages/*"
+  ],
   "overrides": {
     "esbuild": "^0.25.0"
   }

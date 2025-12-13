@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { expandPracticeSlotsForSeason } from '../src/practiceSlotExpansion.js';
+import { expandPracticeSlotsForSeason } from '../packages/core/src/practiceSlotExpansion.js';
 
 function createPhase(id, startDate, endDate) {
   return { id, startDate, endDate };

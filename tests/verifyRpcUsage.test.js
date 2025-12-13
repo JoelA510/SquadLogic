@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { persistTeamSnapshotTransactional } from '../src/teamPersistenceHandler.js';
-import { persistPracticeSnapshotTransactional } from '../src/practicePersistenceHandler.js';
-import { persistGameSnapshotTransactional } from '../src/gamePersistenceHandler.js';
+import { persistTeamSnapshotTransactional } from '../packages/core/src/teamPersistenceHandler.js';
+import { persistPracticeSnapshotTransactional } from '../packages/core/src/practicePersistenceHandler.js';
+import { persistGameSnapshotTransactional } from '../packages/core/src/gamePersistenceHandler.js';
 
 function createMockClient() {
     let rpcCalled = false;

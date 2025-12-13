@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {
   filterRedundantCapacityWarnings,
   runScheduleEvaluations,
-} from '../src/evaluationPipeline.js';
-import { MANUAL_FOLLOW_UP_CATEGORIES } from '../src/practiceMetrics.js';
+} from '../packages/core/src/evaluationPipeline.js';
+import { MANUAL_FOLLOW_UP_CATEGORIES } from '../packages/core/src/practiceMetrics.js';
 
 const BASE_TIME = new Date('2024-08-12T22:00:00Z');
 

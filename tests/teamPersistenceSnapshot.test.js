@@ -8,7 +8,7 @@ import {
   buildRunHistoryFromSchedulerRuns,
   deriveRunMetadataFromSchedulerRuns,
   prepareTeamPersistenceSnapshot,
-} from '../src/teamPersistenceSnapshot.js';
+} from '../packages/core/src/teamPersistenceSnapshot.js';
 
 test('prepareTeamPersistenceSnapshot returns payload counts and enriched metadata', () => {
   const teamsByDivision = {

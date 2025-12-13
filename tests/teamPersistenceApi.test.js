@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { processTeamPersistenceRequest } from '../src/teamPersistenceApi.js';
+import { processTeamPersistenceRequest } from '../packages/core/src/teamPersistenceApi.js';
 
 const SAMPLE_SNAPSHOT = {
   lastRunId: 'run-456',

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTeamPersistenceHttpHandler } from '../src/teamPersistenceEdgeHandler.js';
+import { createTeamPersistenceHttpHandler } from '../packages/core/src/teamPersistenceEdgeHandler.js';
 
 const SAMPLE_SNAPSHOT = {
   payload: {

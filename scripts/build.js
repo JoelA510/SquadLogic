@@ -1,9 +1,9 @@
-import { generateTeams } from '../src/teamGeneration.js';
-import { schedulePractices } from '../src/practiceScheduling.js';
-import { evaluatePracticeSchedule } from '../src/practiceMetrics.js';
-import { generateRoundRobinWeeks, scheduleGames } from '../src/gameScheduling.js';
-import { generateScheduleExports } from '../src/outputGeneration.js';
-import { runScheduleEvaluations } from '../src/evaluationPipeline.js';
+import { generateTeams } from '../packages/core/src/teamGeneration.js';
+import { schedulePractices } from '../packages/core/src/practiceScheduling.js';
+import { evaluatePracticeSchedule } from '../packages/core/src/practiceMetrics.js';
+import { generateRoundRobinWeeks, scheduleGames } from '../packages/core/src/gameScheduling.js';
+import { generateScheduleExports } from '../packages/core/src/outputGeneration.js';
+import { runScheduleEvaluations } from '../packages/core/src/evaluationPipeline.js';
 
 // Lightweight build placeholder that ensures the module can be imported without executing tests.
 if (typeof generateTeams !== 'function') {

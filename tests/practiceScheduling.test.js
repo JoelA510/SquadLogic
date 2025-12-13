@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { schedulePractices } from '../src/practiceScheduling.js';
+import { schedulePractices } from '../packages/core/src/practiceScheduling.js';
 
 function createSlot({ id, day, startHour, endHour, capacity = 1, baseSlotId }) {
   const start = new Date(`2024-08-05T${String(startHour).padStart(2, '0')}:00:00.000Z`);

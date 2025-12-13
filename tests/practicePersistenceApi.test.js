@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { processPracticePersistenceRequest } from '../src/practicePersistenceApi.js';
+import { processPracticePersistenceRequest } from '../packages/core/src/practicePersistenceApi.js';
 
 const SAMPLE_SNAPSHOT = {
     lastRunId: 'run-practice-123',

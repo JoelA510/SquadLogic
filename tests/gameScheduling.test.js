@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateRoundRobinWeeks, scheduleGames } from '../src/gameScheduling.js';
+import { generateRoundRobinWeeks, scheduleGames } from '../packages/core/src/gameScheduling.js';
 
 const SAMPLE_TEAMS = [
   { id: 'team-1', division: 'U10', coachId: 'coach-a' },

@@ -6,7 +6,7 @@ import {
   buildOverridesFromSupabaseRows,
   deriveDivisionRosterConfigs,
   parsePlayableCount,
-} from '../src/rosterSizing.js';
+} from '../packages/core/src/rosterSizing.js';
 
 describe('parsePlayableCount', () => {
   it('parses standard lowercase formats', () => {

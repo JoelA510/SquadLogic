@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   evaluatePracticeSchedule,
   MANUAL_FOLLOW_UP_CATEGORIES,
-} from '../src/practiceMetrics.js';
+} from '../packages/core/src/practiceMetrics.js';
 
 const SAMPLE_SLOTS = [
   {

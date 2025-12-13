@@ -1,0 +1,11 @@
+{
+    "name": "@squadlogic/core",
+    "version": "1.0.0",
+    "description": "Core logic for SquadLogic",
+    "main": "src/index.js",
+    "type": "module",
+    "scripts": {},
+    "keywords": [],
+    "author": "",
+    "license": "ISC"
+}

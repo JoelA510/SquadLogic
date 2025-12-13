@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { evaluateGameSchedule } from '../src/gameMetrics.js';
+import { evaluateGameSchedule } from '../packages/core/src/gameMetrics.js';
 
 test('evaluateGameSchedule summarises assignments and byes without warnings', () => {
   const teams = [

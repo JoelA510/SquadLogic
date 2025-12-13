@@ -16,7 +16,7 @@ export const formatReasons = (reasons) =>
         .map(([reason, count]) => `${reason}: ${count}`)
         .join(', ');
 
-export const formatTime = (value) => {
+export const formatTime = (value, timezone) => {
     if (!value) {
         return 'unspecified time';
     }
@@ -24,7 +24,11 @@ export const formatTime = (value) => {
     if (Number.isNaN(date.getTime())) {
         return 'unspecified time';
     }
-    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const options = { hour: 'numeric', minute: '2-digit' };
+    if (timezone) {
+        options.timeZone = timezone;
+    }
+    return date.toLocaleTimeString([], options);
 };
 
 export const formatClockFromMinutes = (minutes) => {

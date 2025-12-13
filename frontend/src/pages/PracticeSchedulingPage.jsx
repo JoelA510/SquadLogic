@@ -1,9 +1,11 @@
 import React from 'react';
 import PracticeReadinessPanel from '../components/PracticeReadinessPanel';
 import { useDashboardData } from '../hooks/useDashboardData';
+import { useTheme } from '../contexts/ThemeContext';
 
 export default function PracticeSchedulingPage() {
     const { practice } = useDashboardData();
+    const { timezone } = useTheme();
 
     return (
         <div className="animate-fadeIn space-y-8">
@@ -16,6 +18,7 @@ export default function PracticeSchedulingPage() {
                 practiceReadinessSnapshot={practice.snapshot}
                 practiceSummary={practice.summary}
                 generatedAt={practice.generatedAt}
+                timezone={timezone}
             />
         </div>
     );

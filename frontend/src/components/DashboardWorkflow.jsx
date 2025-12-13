@@ -19,7 +19,8 @@ const DashboardWorkflow = ({
     onImport,
     importedData,
     controlledActiveStep,
-    onStepChange
+    onStepChange,
+    timezone
 }) => {
     const [internalActiveStep, setInternalActiveStep] = useState(() => {
         const saved = localStorage.getItem('dashboardActiveStep');
@@ -215,6 +216,7 @@ const DashboardWorkflow = ({
                         practiceReadinessSnapshot={practiceData.snapshot}
                         practiceSummary={practiceData.summary}
                         generatedAt={practiceData.generatedAt}
+                        timezone={timezone}
                     />
                 </WorkflowStep >
 

@@ -52,6 +52,10 @@ export const ThemeProvider = ({ children }) => {
         return saved ? JSON.parse(saved) : ['2025'];
     });
 
+    const [timezone, setTimezone] = useState(() => {
+        return localStorage.getItem('squadlogic-timezone') || 'UTC';
+    });
+
     useEffect(() => {
         document.documentElement.setAttribute('data-theme', theme);
         localStorage.setItem('squadlogic-theme', theme);
@@ -111,6 +115,11 @@ export const ThemeProvider = ({ children }) => {
             setAvailableSeasons(newSeasons);
             localStorage.setItem('squadlogic-available-seasons', JSON.stringify(newSeasons));
         }
+    };
+
+    const updateTimezone = (tz) => {
+        setTimezone(tz);
+        localStorage.setItem('squadlogic-timezone', tz);
     };
 
     const applyClubTheme = (colors, mode) => {
@@ -232,6 +241,8 @@ export const ThemeProvider = ({ children }) => {
             updateLeagueName,
             currentSeason,
             updateCurrentSeason,
+            timezone,
+            updateTimezone,
             availableSeasons,
             addSeason
         }}>

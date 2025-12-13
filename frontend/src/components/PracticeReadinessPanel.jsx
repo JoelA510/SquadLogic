@@ -150,7 +150,7 @@ function PracticeReadinessPanel({ practiceReadinessSnapshot, practiceSummary, ge
                         <div key={slot.baseSlotId} className="insight-card">
                             <h3>{slot.baseSlotId}</h3>
                             <p>
-                                {slot.day} · {formatTime(slot.representativeStart)}
+                                {slot.day} · {formatTime(slot.representativeStart, timezone)}
                             </p>
                             <p className="insight-meta">
                                 Utilization: {formatPercentPrecise(slot.utilization)} ({slot.totalAssigned}/{slot.totalCapacity})

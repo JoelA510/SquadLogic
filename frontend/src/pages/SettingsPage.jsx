@@ -23,7 +23,9 @@ export default function SettingsPage() {
         currentSeason,
         updateCurrentSeason,
         availableSeasons,
-        addSeason
+        addSeason,
+        timezone,
+        updateTimezone
     } = useTheme();
     const [activeTab, setActiveTab] = useState('general');
     const fileInputRef = useRef(null);
@@ -387,9 +389,11 @@ export default function SettingsPage() {
                                 <label htmlFor="season-timezone" className="block text-sm font-medium text-text-secondary mb-2">Timezone</label>
                                 <select
                                     id="season-timezone"
+                                    value={timezone}
+                                    onChange={(e) => updateTimezone(e.target.value)}
                                     className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-3 text-text-primary focus:outline-none focus:border-brand-400 transition-colors"
                                 >
-                                    <option value="America/Log_Angeles">Pacific Time (US & Canada)</option>
+                                    <option value="America/Los_Angeles">Pacific Time (US & Canada)</option>
                                     <option value="America/Denver">Mountain Time (US & Canada)</option>
                                     <option value="America/Chicago">Central Time (US & Canada)</option>
                                     <option value="America/New_York">Eastern Time (US & Canada)</option>

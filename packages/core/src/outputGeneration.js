@@ -29,10 +29,12 @@ export function generateScheduleExports({
   teams,
   practiceAssignments = [],
   gameAssignments = [],
+  timezone,
 }) {
   if (!Array.isArray(teams)) {
     throw new TypeError('teams must be an array');
   }
+  // ... (existing validation)
   if (!Array.isArray(practiceAssignments)) {
     throw new TypeError('practiceAssignments must be an array');
   }
@@ -55,6 +57,7 @@ export function generateScheduleExports({
       division: team.division ?? '',
       coachName: team.coachName ?? '',
       coachEmail: team.coachEmail ?? '',
+      assistantCoaches: Array.isArray(team.assistantCoaches) ? team.assistantCoaches.join('; ') : '',
     };
     teamDirectory.set(team.id, sanitized);
   }
@@ -79,6 +82,7 @@ export function generateScheduleExports({
     const row = formatRow({
       team,
       opponentTeamId: null,
+      opponentName: null,
       eventType: 'Practice',
       start: assignment.start,
       end: assignment.end,
@@ -86,6 +90,7 @@ export function generateScheduleExports({
       slotId: assignment.slotId ?? '',
       notes: assignment.notes ?? '',
       role: '',
+      timezone,
     });
 
     pushRow(team.id, row);
@@ -110,6 +115,7 @@ export function generateScheduleExports({
       fieldId: assignment.fieldId ?? '',
       slotId: assignment.slotId ?? '',
       notes: assignment.notes ?? '',
+      timezone,
     };
 
     const homeRow = formatRow({
@@ -136,22 +142,26 @@ export function generateScheduleExports({
     rows.sort(compareRows);
   }
 
+  const headers = [...MASTER_HEADERS, 'Assistant Coaches']; // Add new header dynamically
+
   return {
     master: {
-      headers: MASTER_HEADERS.slice(),
+      headers: headers.slice(),
       rows: masterRows.map((row) => ({ ...row })),
-      csv: formatCsv(MASTER_HEADERS, masterRows),
+      csv: formatCsv(headers, masterRows),
     },
     perTeam: Array.from(teamRows.entries())
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([teamId, rows]) => ({
         teamId,
-        headers: MASTER_HEADERS.slice(),
+        headers: headers.slice(),
         rows: rows.map((row) => ({ ...row })),
-        csv: formatCsv(MASTER_HEADERS, rows),
+        csv: formatCsv(headers, rows),
       })),
   };
 }
+
+// ... validation functions ...
 
 function validatePracticeAssignment(assignment) {
   if (!assignment || typeof assignment !== 'object') {
@@ -188,9 +198,10 @@ function formatRow({
   slotId,
   notes,
   role,
+  timezone,
 }) {
-  const normalizedStart = normalizeDate(start);
-  const normalizedEnd = normalizeDate(end);
+  const normalizedStart = normalizeDate(start, timezone);
+  const normalizedEnd = normalizeDate(end, timezone);
 
   const opponent = opponentName ?? opponentTeamId ?? '';
 
@@ -200,6 +211,7 @@ function formatRow({
     [HEADERS.DIVISION]: team.division,
     [HEADERS.COACH_NAME]: team.coachName,
     [HEADERS.COACH_EMAIL]: team.coachEmail,
+    ['Assistant Coaches']: team.assistantCoaches, // Mapped new field
     [HEADERS.EVENT_TYPE]: eventType,
     [HEADERS.OPPONENT]: opponent,
     [HEADERS.ROLE]: role,
@@ -211,10 +223,13 @@ function formatRow({
   };
 }
 
-function normalizeDate(value) {
+function normalizeDate(value, timezone) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) {
     throw new Error('invalid date provided to export formatter');
+  }
+  if (timezone) {
+    return date.toLocaleString('en-US', { timeZone: timezone });
   }
   return date.toISOString();
 }

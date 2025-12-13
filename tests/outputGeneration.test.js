@@ -33,7 +33,7 @@ test('generateScheduleExports builds master and per-team exports', () => {
 
   const exports = generateScheduleExports({ teams, practiceAssignments, gameAssignments });
 
-  assert.equal(exports.master.headers.length, 13);
+  assert.equal(exports.master.headers.length, 14);
   assert.equal(exports.master.rows.length, 3, 'one practice plus two game entries');
   assert.equal(exports.perTeam.length, 2, 'two teams represented');
 
@@ -117,4 +117,23 @@ test('generateScheduleExports throws on missing required fields', () => {
   assert.throws(() => {
     generateScheduleExports({ teams, practiceAssignments });
   }, /practice assignments require start and end/);
+});
+
+test('generateScheduleExports localizes dates when timezone is provided', () => {
+  const teams = [{ id: 'T1', assistantCoaches: ['Coach A', 'Coach B'] }];
+  const practiceAssignments = [
+    { teamId: 'T1', start: '2024-08-05T22:00:00Z', end: '2024-08-05T23:00:00Z' },
+  ];
+  // 10:00 PM UTC = 6:00 PM EDT (America/New_York)
+
+  const exports = generateScheduleExports({
+    teams,
+    practiceAssignments,
+    timezone: 'America/New_York',
+  });
+
+  const row = exports.master.rows[0];
+  assert.equal(row['Assistant Coaches'], 'Coach A; Coach B');
+  assert.match(row.Start, /6:00:00 PM/);
+  assert.match(row.End, /7:00:00 PM/);
 });

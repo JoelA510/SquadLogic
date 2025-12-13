@@ -11,6 +11,7 @@ import { supabase } from '../utils/supabaseClient';
  */
 export function useSchedulerRun(runType, mapper, emptyState) {
     const [data, setData] = useState(null);
+    const [evaluation, setEvaluation] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
@@ -19,6 +20,7 @@ export function useSchedulerRun(runType, mapper, emptyState) {
 
         async function fetchLatestRun() {
             try {
+                // 1. Fetch latest run
                 const { data: run, error: queryError } = await supabase
                     .from('scheduler_runs')
                     .select('*')
@@ -38,13 +40,26 @@ export function useSchedulerRun(runType, mapper, emptyState) {
                     throw queryError;
                 }
 
+                // 2. Fetch associated evaluation (if any)
+                let evalRecord = null;
+                if (run && run.id) {
+                    const { data: evalData } = await supabase
+                        .from('schedule_evaluations')
+                        .select('*')
+                        .eq('run_id', run.id)
+                        .maybeSingle(); // Use maybeSingle to avoid 406/error if none found
+                    evalRecord = evalData;
+                }
+
                 const mapped = mapper(run);
                 setData(mapped || emptyState);
+                setEvaluation(evalRecord);
             } catch (err) {
                 if (err.name !== 'AbortError') {
                     console.error(`Failed to fetch ${runType} summary:`, JSON.stringify(err, null, 2));
                     setError(err);
                     setData(emptyState);
+                    setEvaluation(null);
                 }
             } finally {
                 if (!controller.signal.aborted) {
@@ -60,5 +75,5 @@ export function useSchedulerRun(runType, mapper, emptyState) {
         };
     }, [runType, mapper, emptyState]);
 
-    return { data, loading, error };
+    return { data, evaluation, loading, error };
 }

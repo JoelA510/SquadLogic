@@ -19,6 +19,7 @@ export default function PracticeSchedulingPage() {
                 practiceSummary={practice.summary}
                 generatedAt={practice.generatedAt}
                 timezone={timezone}
+                scheduleEvaluation={practice.scheduleEvaluation}
             />
         </div>
     );

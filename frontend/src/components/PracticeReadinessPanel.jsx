@@ -1,10 +1,10 @@
 import React from 'react';
-import InsightSection from './InsightSection';
-import { formatPercentPrecise, formatTime, formatClockFromMinutes } from '../utils/formatters';
+import InsightSection from './InsightSection.jsx';
+import { formatPercentPrecise, formatTime, formatClockFromMinutes } from '../utils/formatters.js';
 
 const MANUAL_FOLLOW_UP_THRESHOLD = 0.05;
 
-function PracticeReadinessPanel({ practiceReadinessSnapshot, practiceSummary, generatedAt }) {
+function PracticeReadinessPanel({ practiceReadinessSnapshot, practiceSummary, generatedAt, scheduleEvaluation, timezone }) {
     const baseSlotItems = practiceReadinessSnapshot.baseSlotDistribution ?? [];
     const dayConcentrationItems = practiceReadinessSnapshot.dayConcentrationAlerts ?? [];
     const divisionDayItems = Object.entries(practiceReadinessSnapshot.divisionDayDistribution ?? {});
@@ -37,7 +37,15 @@ function PracticeReadinessPanel({ practiceReadinessSnapshot, practiceSummary, ge
                 </dl>
             </header>
 
-            {practiceSummary.manualFollowUpRate > MANUAL_FOLLOW_UP_THRESHOLD && (
+            {scheduleEvaluation && (
+                <div className={`alert-banner ${scheduleEvaluation.status === 'ok' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`} role="status">
+                    <span>{scheduleEvaluation.status === 'ok' ? '✓' : '⚠'}</span>
+                    Evaluation Status: <strong className="uppercase ml-1">{scheduleEvaluation.status.replace('-', ' ')}</strong>
+                    {scheduleEvaluation.summary?.message && <span className="ml-2">— {scheduleEvaluation.summary.message}</span>}
+                </div>
+            )}
+
+            {!scheduleEvaluation && practiceSummary.manualFollowUpRate > MANUAL_FOLLOW_UP_THRESHOLD && (
                 <div className="alert-banner" role="status">
                     <span>⚠</span>
                     {practiceSummary.unassignedTeams} teams require manual assignment.

@@ -674,3 +674,55 @@ test('handles non-string manual follow-up reasons without throwing', () => {
     },
   ]);
 });
+
+test('evaluatePracticeSchedule flags school hour violations', () => {
+  const timezone = 'America/New_York';
+  const schoolDayEnd = '16:00'; // 4:00 PM
+
+  const slots = [
+    {
+      id: 'slot-early-violation',
+      capacity: 1,
+      start: '2024-08-05T19:30:00Z', // Mon 3:30 PM ET (Pre-4:00 PM) -> Violated
+      end: '2024-08-05T20:30:00Z',
+      day: 'Mon',
+    },
+    {
+      id: 'slot-safe',
+      capacity: 1,
+      start: '2024-08-05T20:30:00Z', // Mon 4:30 PM ET (Post-4:00 PM) -> OK
+      end: '2024-08-05T21:30:00Z',
+      day: 'Mon',
+    },
+    {
+      id: 'slot-weekend',
+      capacity: 1,
+      start: '2024-08-10T14:00:00Z', // Sat 10:00 AM ET -> OK (Weekend)
+      end: '2024-08-10T15:00:00Z',
+      day: 'Sat',
+    },
+  ];
+
+  const teams = [
+    { id: 'team-1', division: 'U10', coachId: null },
+    { id: 'team-2', division: 'U10', coachId: null },
+    { id: 'team-3', division: 'U10', coachId: null },
+  ];
+
+  const report = evaluatePracticeSchedule({
+    assignments: [
+      { teamId: 'team-1', slotId: 'slot-early-violation' },
+      { teamId: 'team-2', slotId: 'slot-safe' },
+      { teamId: 'team-3', slotId: 'slot-weekend' },
+    ],
+    teams,
+    slots,
+    timezone,
+    schoolDayEnd,
+  });
+
+  const violationWarnings = report.dataQualityWarnings.filter(w => w.includes('violates school hours'));
+  assert.equal(violationWarnings.length, 1);
+  assert.match(violationWarnings[0], /team-1/);
+  assert.match(violationWarnings[0], /15:30/);
+});

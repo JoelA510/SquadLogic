@@ -140,7 +140,7 @@ function calculateFairnessConcerns(baseSlotDistribution, assignmentsByDivision) 
   return fairnessConcerns;
 }
 
-export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, slots }) {
+export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, slots, schoolDayEnd, timezone }) {
   if (!Array.isArray(assignments)) {
     throw new TypeError('assignments must be an array');
   }
@@ -304,6 +304,25 @@ export function evaluatePracticeSchedule({ assignments, unassigned = [], teams, 
       (baseEntry.divisionCounts.get(team.division) ?? 0) + 1,
     );
     baseSlotDivisionCounts.set(baseSlotId, baseEntry);
+
+    // R3 Validation: Check School Hours
+    if (schoolDayEnd && timezone && slot.start) {
+      // Convert to local time
+      const localDateString = slot.start.toLocaleString('en-US', { timeZone: timezone });
+      const localDate = new Date(localDateString);
+      const day = localDate.getDay(); // 0 is Sunday, 1 is Monday...
+
+      // Mon(1) - Thu(4)
+      if (day >= 1 && day <= 4) {
+        const [endHour, endMinute] = schoolDayEnd.split(':').map(Number);
+        const slotHour = localDate.getHours();
+        const slotMinute = localDate.getMinutes();
+
+        if (slotHour < endHour || (slotHour === endHour && slotMinute < endMinute)) {
+          dataQualityWarnings.push(`Assignment for team ${team.id} violates school hours (starts at ${slotHour}:${String(slotMinute).padStart(2, '0')} ${timezone}, limit is ${schoolDayEnd})`);
+        }
+      }
+    }
   }
 
   const slotUtilization = [];

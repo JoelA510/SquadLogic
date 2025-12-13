@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { supabase } from '../utils/supabaseClient';
+import { supabase } from '../utils/supabaseClient.js';
 import Papa from 'papaparse';
 
 const ImportContext = createContext();
@@ -88,13 +88,36 @@ export function ImportProvider({ children }) {
                 skipEmptyLines: true,
                 complete: async (results) => {
                     const { data } = results;
+
+                    // R3 Update: Normalize headers to match schema
+                    const normalizedData = data.map(row => {
+                        const newRow = {};
+                        Object.keys(row).forEach(key => {
+                            const normalizedKey = key.toLowerCase().trim();
+                            // Map known variations to schema fields
+                            if (normalizedKey.includes('coach') && normalizedKey.includes('willing')) {
+                                newRow['willing_to_coach'] = row[key];
+                            } else if (normalizedKey.includes('buddy') || normalizedKey.includes('friend')) {
+                                newRow['buddy_request'] = row[key];
+                            } else if (normalizedKey.includes('medical') || normalizedKey.includes('allergy')) {
+                                newRow['medical_info'] = row[key];
+                            } else if (normalizedKey.includes('skill') || normalizedKey.includes('level')) {
+                                newRow['skill_tier'] = row[key];
+                            } else {
+                                // Keep original key if no specific mapping
+                                newRow[key] = row[key];
+                            }
+                        });
+                        return newRow;
+                    });
+
                     addLog(`Parsed ${data.length} rows.`);
 
                     const importData = {
                         fileName: file.name,
                         totalRows: data.length,
                         timestamp: new Date(),
-                        data: data
+                        data: normalizedData
                     };
 
                     // 2. Save to Supabase DB

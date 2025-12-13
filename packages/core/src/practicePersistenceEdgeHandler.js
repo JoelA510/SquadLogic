@@ -53,6 +53,27 @@ export function createPracticePersistenceHttpHandler({
 
             const user = getUser ? await getUser(request) : undefined;
             const effectiveNow = now ?? new Date();
+
+            // R3 Follow-up: Fetch season settings to inject timezone/schoolDayEnd into run metadata
+            // This ensures the recorded run reflects the authoritative server-side configuration.
+            const seasonSettingsId = body.runMetadata?.seasonSettingsId;
+            if (seasonSettingsId && supabaseClient) {
+                const { data: settings } = await supabaseClient
+                    .from('season_settings')
+                    .select('timezone, school_day_end')
+                    .eq('id', seasonSettingsId)
+                    .single();
+
+                if (settings) {
+                    body.runMetadata = body.runMetadata || {};
+                    body.runMetadata.parameters = {
+                        ...(body.runMetadata.parameters || {}),
+                        timezone: settings.timezone,
+                        schoolDayEnd: settings.school_day_end,
+                    };
+                }
+            }
+
             const result = await processPracticePersistenceRequest({
                 supabaseClient,
                 requestBody: body,

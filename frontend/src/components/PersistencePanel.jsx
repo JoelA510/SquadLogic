@@ -1,4 +1,5 @@
 import React from 'react';
+import PropTypes from 'prop-types';
 
 import { PERSISTENCE_THEMES } from '../utils/themes.js';
 
@@ -75,3 +76,16 @@ export default function PersistencePanel({
         </div>
     );
 }
+
+PersistencePanel.propTypes = {
+    title: PropTypes.string.isRequired,
+    stats: PropTypes.arrayOf(PropTypes.shape({
+        label: PropTypes.string.isRequired,
+        value: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+    })),
+    onSync: PropTypes.func.isRequired,
+    status: PropTypes.oneOf(['idle', 'syncing', 'success', 'error']).isRequired,
+    message: PropTypes.string,
+    colorTheme: PropTypes.oneOf(['blue', 'green']),
+    children: PropTypes.node,
+};

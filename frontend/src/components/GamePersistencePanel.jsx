@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import PropTypes from 'prop-types';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { prepareGamePersistenceSnapshot } from '@squadlogic/core/gamePersistenceSnapshot.js';
 import { GAME_PERSISTENCE_URL } from '../config.js';
@@ -25,7 +26,10 @@ export default function GamePersistencePanel({
 
         try {
             const token = session?.access_token;
-            const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+            if (!token) {
+                throw new Error('Authentication required');
+            }
+            const authHeaders = { Authorization: `Bearer ${token}` };
 
             const response = await fetch(GAME_PERSISTENCE_URL, {
                 method: 'POST',
@@ -67,3 +71,9 @@ export default function GamePersistencePanel({
         />
     );
 }
+
+GamePersistencePanel.propTypes = {
+    assignments: PropTypes.array,
+    runMetadata: PropTypes.object,
+    runId: PropTypes.string,
+};

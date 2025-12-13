@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import PropTypes from 'prop-types';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { preparePracticePersistenceSnapshot } from '@squadlogic/core/practicePersistenceSnapshot.js';
 import { PRACTICE_PERSISTENCE_URL } from '../config.js';
@@ -29,7 +30,10 @@ export default function PracticePersistencePanel({
 
         try {
             const token = session?.access_token;
-            const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+            if (!token) {
+                throw new Error('Authentication required');
+            }
+            const authHeaders = { Authorization: `Bearer ${token}` };
 
             const response = await fetch(PRACTICE_PERSISTENCE_URL, {
                 method: 'POST',
@@ -73,3 +77,11 @@ export default function PracticePersistencePanel({
         />
     );
 }
+
+PracticePersistencePanel.propTypes = {
+    assignments: PropTypes.array,
+    slots: PropTypes.array,
+    overrides: PropTypes.array,
+    runMetadata: PropTypes.object,
+    runId: PropTypes.string,
+};

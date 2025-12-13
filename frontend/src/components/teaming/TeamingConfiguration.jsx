@@ -81,6 +81,31 @@ export default function TeamingConfiguration({ program, config, onUpdate }) {
                         Force a specific number of teams (currently estimated: {program.estimatedTeams})
                     </p>
                 </div>
+
+                <div className="pt-4 border-t border-border-subtle">
+                    <label className="block text-sm font-medium text-text-secondary mb-2">
+                        Random Seed (Optional)
+                    </label>
+                    <div className="flex gap-2">
+                        <input
+                            type="text"
+                            placeholder="e.g. 12345"
+                            className="w-full bg-bg-base border border-border-subtle rounded-lg px-3 py-2 text-text-primary focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                            value={config?.seed || ''}
+                            onChange={(e) => onUpdate(program.id, { seed: e.target.value })}
+                        />
+                        <Button
+                            variant="secondary"
+                            onClick={() => onUpdate(program.id, { seed: '' })}
+                            disabled={!config?.seed}
+                        >
+                            Clear
+                        </Button>
+                    </div>
+                    <p className="text-xs text-text-muted mt-1">
+                        Use the same seed to reproduce specific team assignments.
+                    </p>
+                </div>
             </div>
         </div>
     );

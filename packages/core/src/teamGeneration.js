@@ -38,6 +38,7 @@
  * @param {Array<Player>} params.players - List of player records. Each record must include an `id` and `division`.
  * @param {Object<string, DivisionConfig>} params.divisionConfigs - Map of division identifiers.
  * @param {function(): number} [params.random=Math.random] - RNG returning [0, 1).
+ * @param {string|number} [params.seed] - Optional seed for deterministic generation. Overrides random if provided.
  * @returns {{
  *   teamsByDivision: Record<string, Array<Team>>,
  *   overflowByDivision: Record<string, Array<{ players: Array<Player>, reason: string, metadata?: Object }>>,
@@ -91,13 +92,21 @@
  *   }>,
  * }}
  */
-export function generateTeams({ players, divisionConfigs, random = Math.random }) {
+export function generateTeams({ players, divisionConfigs, random = Math.random, seed }) {
   if (!Array.isArray(players)) {
     throw new TypeError('players must be an array');
   }
   if (typeof divisionConfigs !== 'object' || divisionConfigs === null) {
     throw new TypeError('divisionConfigs must be an object');
   }
+
+  // If seed is provided, create a deterministic RNG
+  if (seed !== undefined && seed !== null && seed !== '') {
+    const seedNum = typeof seed === 'string' ? xmur3(seed)() : Number(seed);
+    const prng = mulberry32(seedNum);
+    random = prng;
+  }
+
   if (typeof random !== 'function') {
     throw new TypeError('random must be a function');
   }
@@ -130,11 +139,17 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
 
   /** @type {Record<string, Array<Team>>} */
   const results = {};
+  /** @type {any} */
   const overflowByDivision = {};
+  /** @type {any} */
   const overflowSummaryByDivision = {};
+  /** @type {any} */
   const buddyDiagnosticsByDivision = {};
+  /** @type {any} */
   const coachCoverageByDivision = {};
+  /** @type {any} */
   const rosterBalanceByDivision = {};
+  /** @type {any} */
   const skillBalanceByDivision = {};
 
   for (const [division, divisionPlayers] of playersByDivision.entries()) {
@@ -582,4 +597,32 @@ function getSkillRating(player) {
   return typeof player.skillRating === 'number' && Number.isFinite(player.skillRating)
     ? player.skillRating
     : 0;
+}
+
+/**
+ * Simple hash function for seeding.
+ */
+function xmur3(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return function () {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    return (h ^= h >>> 16) >>> 0;
+  };
+}
+
+/**
+ * Simple seeded PRNG (Mulberry32).
+ */
+function mulberry32(a) {
+  return function () {
+    let t = (a += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }

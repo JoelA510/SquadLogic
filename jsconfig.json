@@ -7,7 +7,13 @@
         "module": "NodeNext",
         "moduleResolution": "NodeNext",
         "resolveJsonModule": true,
-        "strict": false
+        "strict": false,
+        "jsx": "react-jsx",
+        "lib": [
+            "dom",
+            "dom.iterable",
+            "esnext"
+        ]
     },
     "include": [
         "packages/core/src/**/*",

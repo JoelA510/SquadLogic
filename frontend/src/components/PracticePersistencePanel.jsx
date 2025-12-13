@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import { preparePracticePersistenceSnapshot } from '../../../src/practicePersistenceSnapshot';
-import { PRACTICE_PERSISTENCE_URL } from '../config';
-import PersistencePanel from './PersistencePanel';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import { preparePracticePersistenceSnapshot } from '@squadlogic/core/practicePersistenceSnapshot.js';
+import { PRACTICE_PERSISTENCE_URL } from '../config.js';
+import PersistencePanel from './PersistencePanel.jsx';
 
 export default function PracticePersistencePanel({
     assignments = [],

@@ -1,4 +1,40 @@
 /**
+ * @typedef {Object} Team
+ * @property {string} id
+ * @property {string} division
+ * @property {string|null} [coachId]
+ */
+
+/**
+ * @typedef {Object} PracticeSlot
+ * @property {string} id
+ * @property {string} [baseSlotId]
+ * @property {string|Date} start
+ * @property {string|Date} end
+ * @property {number} capacity
+ * @property {string} [day]
+ * @property {string} [seasonPhaseId]
+ * @property {string} [effectiveFrom]
+ * @property {string} [effectiveUntil]
+ */
+
+/**
+ * @typedef {Object} ScoringWeights
+ * @property {number} coachPreferredSlot
+ * @property {number} coachPreferredDay
+ * @property {number} divisionPreferredDay
+ * @property {number} divisionSaturationPenalty
+ * @property {number} divisionDaySaturationPenalty
+ */
+
+/**
+ * @typedef {Object} ScheduleResult
+ * @property {Array<{ teamId: string, slotId: string, source: 'locked' | 'auto' }>} assignments
+ * @property {Array<{ teamId: string, reason: string, candidates: Array<{ slotId: string, score: number }> }>} unassigned
+ * @property {Object} divisionLoadSummary
+ */
+
+/**
  * Assign weekly practice slots to teams using a simple scoring system that respects slot capacity
  * and avoids coach conflicts.
  *
@@ -8,22 +44,15 @@
  * stable for automated testing.
  *
  * @param {Object} params
- * @param {Array<Object>} params.teams - Teams requiring practice assignments. Each team must expose
- *   `id`, `division`, and `coachId` (nullable for teams without a coach assignment).
- * @param {Array<Object>} params.slots - Practice slot definitions with `id`, `start`, `end`, and
- *   `capacity` (number of teams that can share the slot). Optional `day` provides human readable
- *   metadata used for preference scoring.
- * @param {Object<string, Object>} [params.coachPreferences] - Optional coach preference map. Each
-  *   entry may include `preferredDays` (array of day strings), `preferredSlotIds` (array of slot
-  *   identifiers), and `unavailableSlotIds` (array of slot identifiers to avoid entirely).
- * @param {Object<string, Object>} [params.divisionPreferences] - Optional division preference map.
-  *   Supports `preferredDays` similar to coach preferences.
- * @param {Array<{ teamId: string, slotId: string }>} [params.lockedAssignments] - Optional manual
-  *   overrides that must be honoured ahead of auto assignments.
- * @param {Object} [params.scoringWeights] - Optional weighting overrides supporting `coachPreferredSlot`,
- *   `coachPreferredDay`, `divisionPreferredDay`, `divisionSaturationPenalty`, and
- *   `divisionDaySaturationPenalty` keys for tuning slot scoring.
- * @returns {{ assignments: Array<{ teamId: string, slotId: string, source: 'locked' | 'auto' }>, unassigned: Array<{ teamId: string, reason: string, candidates: Array<{ slotId: string, score: number }> }> }}
+ * @param {Team[]} params.teams - Teams requiring practice assignments.
+ * @param {PracticeSlot[]} params.slots - Practice slot definitions.
+ * @param {Record<string, { preferredDays?: string[], preferredSlotIds?: string[], unavailableSlotIds?: string[] }>} [params.coachPreferences]
+ * @param {Record<string, { preferredDays?: string[] }>} [params.divisionPreferences]
+ * @param {Array<{ teamId: string, slotId: string }>} [params.lockedAssignments]
+ * @param {Partial<ScoringWeights>} [params.scoringWeights]
+ * @param {string} [params.schoolDayEnd] - e.g. '16:00'
+ * @param {string} [params.timezone]
+ * @returns {ScheduleResult}
  */
 import { validateSlot } from './utils/validation.js';
 

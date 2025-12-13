@@ -12,6 +12,7 @@
  * @property {string} division
  * @property {string} [buddyId]
  * @property {string} [coachId]
+ * @property {string} [assistantCoachId]
  * @property {number} [skillRating]
  * @property {string} [name]
  * @property {string} [skillTier] - 'novice' | 'developing' | 'advanced'
@@ -26,6 +27,7 @@
  * @property {string} name
  * @property {string} division
  * @property {string|null} coachId
+ * @property {string[]} [assistantCoachIds]
  * @property {Player[]} players
  * @property {number} skillTotal
  */
@@ -181,6 +183,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random, 
       name: team.name,
       division: team.division,
       coachId: team.coachId,
+      assistantCoachIds: team.assistantCoachIds ? [...team.assistantCoachIds] : [],
       skillTotal: team.skillTotal,
       players: team.players.map((player) => structuredClone(player)),
     }));
@@ -322,7 +325,7 @@ function buildTeamsForDivision({ division, players, maxRosterSize, divisionConfi
     teamIndex += 1;
     const id = `${division}-T${String(teamIndex).padStart(2, '0')}`;
     const name = generateTeamName({ division, teamIndex, divisionConfig });
-    const team = { id, name, division, coachId, players: [], skillTotal: 0 };
+    const team = { id, name, division, coachId, assistantCoachIds: [], players: [], skillTotal: 0 };
     teams.push(team);
     return team;
   };
@@ -339,17 +342,24 @@ function buildTeamsForDivision({ division, players, maxRosterSize, divisionConfi
   const generalUnits = [];
 
   for (const unit of units) {
-    const coachPlayers = unit.filter((player) => player.coachId);
+    const coachPlayers = unit.filter((player) => player.coachId || player.assistantCoachId);
     if (coachPlayers.length > 0) {
-      const coachIdsInUnit = new Set(coachPlayers.map((player) => player.coachId));
+      const coachIdsInUnit = new Set(coachPlayers.map((player) => player.coachId).filter(Boolean));
+      const assistantCoachIdsInUnit = new Set(coachPlayers.map((player) => player.assistantCoachId).filter(Boolean));
+
       if (coachIdsInUnit.size > 1) {
         throw new Error(
           `Conflicting coach assignments for players in unit: ${unit.map((player) => player.id).join(', ')}`,
         );
       }
 
+      const headCoachId = coachIdsInUnit.size > 0 ? [...coachIdsInUnit][0] : null;
+      // Assistant coaches are cumulative for the unit
+      const assistantCoachIds = [...assistantCoachIdsInUnit];
+
       coachUnits.push({
-        coachId: coachPlayers[0].coachId,
+        coachId: headCoachId,
+        assistantCoachIds,
         unit,
         skillTotal: calculateUnitSkill(unit),
       });
@@ -359,11 +369,54 @@ function buildTeamsForDivision({ division, players, maxRosterSize, divisionConfi
   }
 
   // Assign players that require a specific coach first.
-  for (const { coachId, unit, skillTotal } of coachUnits) {
-    let targetTeam = teams.find((team) => team.coachId === coachId);
-    if (!targetTeam) {
-      targetTeam = createTeam(coachId);
+  for (const { coachId, assistantCoachIds, unit, skillTotal } of coachUnits) {
+    let targetTeam = null;
+
+    if (coachId) {
+      targetTeam = teams.find((team) => team.coachId === coachId);
+      if (!targetTeam) {
+        targetTeam = createTeam(coachId);
+      }
+    } else if (assistantCoachIds.length > 0) {
+      // If unit only has assistant coach request, try to find a team with that assistant
+      // or any team? For now, if they *only* have assistant, we might need a strategy.
+      // Strategy: treat first assistant as "anchor" if no head coach?
+      // Or find a team that already has this assistant assigned?
+      // Since we process sequentially, maybe we just pick a team or create one?
+      // Current simplified logic: If no head coach, treating primarily as "needs placement".
+      // But if they requested an assistant, they should be with that assistant.
+      // We'll search for team with this assistant or create/pick one.
+      // IMPORTANT: We need to store assistant identifiers on the team to match future requests.
+
+      // Find team with ANY of these assistants
+      targetTeam = teams.find(t => t.assistantCoachIds && t.assistantCoachIds.some(id => assistantCoachIds.includes(id)));
+
+      if (!targetTeam) {
+        // Pick a team?? Or create new?
+        // If they are assistants, maybe they are volunteering to HELP.
+        // Let's create a new team or pick latest?
+        // For now, let's treat them as needing a team. 
+        // We'll CreateTeam(null) if none found, effectively making them a team with assistants but no head yet.
+        targetTeam = createTeam(null);
+      }
     }
+
+    if (!targetTeam && !coachId && assistantCoachIds.length === 0) {
+      // Fallback (shouldn't happen given logic above)
+      targetTeam = createTeam(null);
+    }
+
+    // Ensure team has assistant array
+    if (!targetTeam.assistantCoachIds) {
+      targetTeam.assistantCoachIds = [];
+    }
+    // Add new assistants
+    for (const acid of assistantCoachIds) {
+      if (!targetTeam.assistantCoachIds.includes(acid)) {
+        targetTeam.assistantCoachIds.push(acid);
+      }
+    }
+
     const assigned = assignUnitToTeam({
       unit,
       unitSkillTotal: skillTotal,

@@ -196,6 +196,18 @@ export function buildTeamPlayerRows({ teamsByDivision, manualAssignments = [], r
           source: 'auto',
         });
       });
+
+      if (Array.isArray(team.assistantCoachIds)) {
+        team.assistantCoachIds.forEach((coachId, index) => {
+          const playerId = normalizeString(coachId, 'assistantCoachId', index);
+          addRow({
+            teamId,
+            playerId,
+            role: 'assistant_coach',
+            source: 'auto',
+          });
+        });
+      }
     });
   });
 

@@ -1,5 +1,8 @@
 import { validateSlot } from './utils/validation.js';
 
+/** @typedef {import('./types.js').Team} Team */
+/** @typedef {import('./types.js').GameSlot} GameSlot */
+
 const BYE = '__BYE__';
 
 /**
@@ -83,8 +86,8 @@ export function generateRoundRobinWeeks({ teamIds }) {
  * Allocate round-robin matchups into concrete game slots while respecting capacity and coach conflicts.
  *
  * @param {Object} params
- * @param {Array<{ id: string, division: string, coachId?: string | null }>} params.teams - Teams participating in scheduling.
- * @param {Array<{ id: string, division?: string | null, weekIndex: number, start: string | Date, end: string | Date, capacity: number, fieldId?: string | null }>} params.slots
+ * @param {Team[]} params.teams - Teams participating in scheduling.
+ * @param {GameSlot[]} params.slots
  *   - Slot definitions with optional division restriction.
  * @param {Record<string, Array<{ weekIndex: number, matchups: Array<{ homeTeamId: string, awayTeamId: string }>, byes: Array<string> }>>} params.roundRobinByDivision
  *   - Precomputed round-robin output keyed by division.
@@ -98,6 +101,13 @@ export function generateRoundRobinWeeks({ teamIds }) {
 export function scheduleGames({ teams, slots, roundRobinByDivision }) {
   if (!roundRobinByDivision || typeof roundRobinByDivision !== 'object') {
     throw new TypeError('roundRobinByDivision must be an object');
+  }
+
+  if (!Array.isArray(teams)) {
+    throw new TypeError('teams must be an array');
+  }
+  if (!Array.isArray(slots)) {
+    throw new TypeError('slots must be an array');
   }
 
   const teamsById = indexTeams(teams);

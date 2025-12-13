@@ -7,10 +7,6 @@ function responseWithJson(payload, status = 200) {
   });
 }
 
-// TODO: processTeamPersistenceRequest currently uses 'error' for both
-// validation and server failures. In a future pass, split these into
-// distinct statuses (e.g., 'validation_error' vs 'server_error') and
-// update this mapping accordingly.
 function mapStatusToHttpCode(status) {
   switch (status) {
     case 'success':
@@ -21,8 +17,12 @@ function mapStatusToHttpCode(status) {
       return 401;
     case 'forbidden':
       return 403;
-    default:
+    case 'validation_error':
       return 400;
+    case 'error':
+      return 500;
+    default:
+      return 500;
   }
 }
 

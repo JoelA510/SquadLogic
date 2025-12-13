@@ -1,31 +1,8 @@
-/**
- * @typedef {Object} Team
- * @property {string} id
- * @property {string} division
- * @property {string|null} [coachId]
- */
+import { validateSlot } from './utils/validation.js';
 
-/**
- * @typedef {Object} PracticeSlot
- * @property {string} id
- * @property {string} [baseSlotId]
- * @property {string|Date} start
- * @property {string|Date} end
- * @property {number} capacity
- * @property {string} [day]
- * @property {string} [seasonPhaseId]
- * @property {string} [effectiveFrom]
- * @property {string} [effectiveUntil]
- */
-
-/**
- * @typedef {Object} ScoringWeights
- * @property {number} coachPreferredSlot
- * @property {number} coachPreferredDay
- * @property {number} divisionPreferredDay
- * @property {number} divisionSaturationPenalty
- * @property {number} divisionDaySaturationPenalty
- */
+/** @typedef {import('./types.js').Team} Team */
+/** @typedef {import('./types.js').PracticeSlot} PracticeSlot */
+/** @typedef {import('./types.js').ScoringWeights} ScoringWeights */
 
 /**
  * @typedef {Object} ScheduleResult
@@ -54,7 +31,7 @@
  * @param {string} [params.timezone]
  * @returns {ScheduleResult}
  */
-import { validateSlot } from './utils/validation.js';
+
 
 const DEFAULT_SCORING_WEIGHTS = {
   coachPreferredSlot: 10,

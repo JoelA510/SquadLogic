@@ -110,7 +110,7 @@ export function handlePersistenceRequest({
         normalizedSnapshot = snapshotNormalizer(snapshot); // Throws if invalid
     } catch (err) {
         // @ts-ignore
-        return { status: 'error', message: err.message };
+        return { status: 'validation_error', message: err.message };
     }
 
     // Check for pending overrides

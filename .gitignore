@@ -11,3 +11,15 @@ mockups/
 logs/
 docs/git-documentation/
 docs/sql/real-samples/*
+
+# Editor directories
+.idea/
+.vscode/
+
+# Testing
+coverage/
+test-results/
+
+# Misc
+tmp/
+*.log

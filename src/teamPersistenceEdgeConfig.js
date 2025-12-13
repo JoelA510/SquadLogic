@@ -1,4 +1,4 @@
-const DEFAULT_ALLOWED_ROLES = ['admin', 'scheduler'];
+import { DEFAULT_ALLOWED_ROLES } from './constants.js';
 
 export function parseAllowedRolesEnv(value, { fallbackRoles = DEFAULT_ALLOWED_ROLES } = {}) {
   let roles;

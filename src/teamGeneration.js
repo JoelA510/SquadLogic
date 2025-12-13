@@ -4,16 +4,43 @@
  * Players can optionally provide a `buddyId` that references another player. When two players reference each
  * other they are treated as a single unit during assignment. Players can also specify a `coachId` to indicate
  * that their household is volunteering to coach and the player must appear on that coach's roster.
- *
+ */
+
+/**
+ * @typedef {Object} Player
+ * @property {string} id
+ * @property {string} division
+ * @property {string} [buddyId]
+ * @property {string} [coachId]
+ * @property {number} [skillRating]
+ * @property {string} [name]
+ */
+
+/**
+ * @typedef {Object} Team
+ * @property {string} id
+ * @property {string} name
+ * @property {string} division
+ * @property {string|null} coachId
+ * @property {Player[]} players
+ * @property {number} skillTotal
+ */
+
+/**
+ * @typedef {Object} DivisionConfig
+ * @property {number} maxRosterSize
+ * @property {string[]} [teamNames]
+ * @property {string} [teamNamePrefix]
+ */
+
+/**
  * @param {Object} params
- * @param {Array<Object>} params.players - List of player records. Each record must include an `id` and `division`.
- * @param {Object<string, { maxRosterSize: number }>} params.divisionConfigs - Map of division identifiers to
- * configuration such as `maxRosterSize`.
- * @param {Function} [params.random=Math.random] - Optional random number generator used to break ties when picking
- * between teams with the same roster size. It must return a floating point number in the range [0, 1).
+ * @param {Array<Player>} params.players - List of player records. Each record must include an `id` and `division`.
+ * @param {Object<string, DivisionConfig>} params.divisionConfigs - Map of division identifiers.
+ * @param {function(): number} [params.random=Math.random] - RNG returning [0, 1).
  * @returns {{
- *   teamsByDivision: Record<string, Array<{ id: string, coachId: string | null, players: Array<Object> }>>,
- *   overflowByDivision: Record<string, Array<{ players: Array<Object>, reason: string, metadata?: Object }>>,
+ *   teamsByDivision: Record<string, Array<Team>>,
+ *   overflowByDivision: Record<string, Array<{ players: Array<Player>, reason: string, metadata?: Object }>>,
  *   overflowSummaryByDivision: Record<
  *     string,
  *     { totalUnits: number, totalPlayers: number, byReason: Record<string, { units: number, players: number }> }
@@ -101,6 +128,7 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
     playersByDivision.set(player.division, bucket);
   }
 
+  /** @type {Record<string, Array<Team>>} */
   const results = {};
   const overflowByDivision = {};
   const overflowSummaryByDivision = {};
@@ -131,7 +159,9 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
     results[division] = teams.map((team) => ({
       id: team.id,
       name: team.name,
+      division: team.division,
       coachId: team.coachId,
+      skillTotal: team.skillTotal,
       players: team.players.map((player) => structuredClone(player)),
     }));
     overflowByDivision[division] = overflow.map((entry) => ({
@@ -245,6 +275,14 @@ export function generateTeams({ players, divisionConfigs, random = Math.random }
   };
 }
 
+/**
+ * @param {Object} params
+ * @param {string} params.division
+ * @param {Array<Player>} params.players
+ * @param {number} params.maxRosterSize
+ * @param {DivisionConfig} params.divisionConfig
+ * @param {function(): number} params.random
+ */
 function buildTeamsForDivision({ division, players, maxRosterSize, divisionConfig, random }) {
   const coachIds = Array.from(
     new Set(players.filter((player) => player.coachId).map((player) => player.coachId)),
@@ -408,6 +446,14 @@ function createAssignmentUnits(players) {
   return { units, buddyDiagnostics };
 }
 
+/**
+ * @param {Object} params
+ * @param {Array<Player>} params.unit
+ * @param {number} params.unitSkillTotal
+ * @param {Team} params.team
+ * @param {number} params.maxRosterSize
+ * @param {string} params.reason
+ */
 function assignUnitToTeam({ unit, unitSkillTotal, team, maxRosterSize, reason }) {
   if (team.players.length + unit.length > maxRosterSize) {
     return false;
@@ -425,6 +471,15 @@ function assignUnitToTeam({ unit, unitSkillTotal, team, maxRosterSize, reason })
   return true;
 }
 
+/**
+ * @param {Object} params
+ * @param {Array<Team>} params.teams
+ * @param {number} params.unitSize
+ * @param {number} params.unitSkillTotal
+ * @param {number} params.maxRosterSize
+ * @param {function(): number} params.random
+ * @returns {Team | null}
+ */
 function pickTeamWithMostCapacity({ teams, unitSize, unitSkillTotal, maxRosterSize, random }) {
   const candidates = teams.filter((team) => team.players.length + unitSize <= maxRosterSize);
   if (candidates.length === 0) {
@@ -499,6 +554,13 @@ function calculateUnitSkill(unit) {
   return unit.reduce((total, player) => total + getSkillRating(player), 0);
 }
 
+/**
+ * @param {Object} params
+ * @param {string} params.division
+ * @param {number} params.teamIndex
+ * @param {DivisionConfig} params.divisionConfig
+ * @returns {string}
+ */
 function generateTeamName({ division, teamIndex, divisionConfig }) {
   const names = (divisionConfig?.teamNames ?? [])
     .map((name) => (typeof name === 'string' ? name.trim() : ''))

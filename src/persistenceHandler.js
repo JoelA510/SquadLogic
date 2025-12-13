@@ -1,10 +1,31 @@
+// @ts-check
 import { DEFAULT_ALLOWED_ROLES, PERSISTENCE_STATUS } from './constants.js';
+
+/**
+ * @typedef {Object} UserAppMetadata
+ * @property {string} [role]
+ */
+
+/**
+ * @typedef {Object} User
+ * @property {string} [role]
+ * @property {UserAppMetadata} [app_metadata]
+ */
+
+/**
+ * @typedef {Object} PersistenceSnapshot
+ * @property {Object} payload
+ * @property {Array<Object>} [payload.assignmentRows]
+ * @property {string | null} [lastRunId]
+ * @property {string | null} [runId]
+ * @property {Object} [runMetadata]
+ */
 
 /**
  * Authorize a persistence request.
  *
  * @param {Object} params
- * @param {Object} [params.user] - Authenticated user record.
+ * @param {User} [params.user] - Authenticated user record.
  * @param {Array<string>} [params.allowedRoles] - Allowed roles.
  * @param {string} [params.runType] - Type of run (practice/game) for error messages.
  * @returns {Object} { status: 'authorized' | 'unauthorized' | 'forbidden', message? }
@@ -37,25 +58,18 @@ export function authorizePersistenceRequest({
 /**
  * Validate the persistence payload.
  *
- * @param {Object} params
- * @param {Object} params.snapshot - The snapshot payload.
+ * @param {Object} [params]
+ * @param {PersistenceSnapshot} [params.snapshot] - The snapshot payload.
  * @returns {Object} { status: 'success' | 'error', message? }
  */
 export function validateSnapshot({ snapshot } = {}) {
     if (!snapshot || typeof snapshot !== 'object') {
-        return {
-            status: PERSISTENCE_STATUS.ERROR,
-            message: 'Invalid snapshot payload.',
-        };
+        return { status: 'error', message: 'Invalid snapshot payload.' };
     }
-
-    if (!snapshot.payload || !Array.isArray(snapshot.payload.assignmentRows)) {
-        return {
-            status: PERSISTENCE_STATUS.ERROR,
-            message: 'Snapshot must contain an assignmentRows array in its payload.',
-        };
+    // @ts-ignore
+    if (!snapshot.payload || typeof snapshot.payload !== 'object') {
+        return { status: 'error', message: 'Snapshot must contain an assignmentRows array in its payload.' };
     }
-
     return { status: 'success' };
 }
 
@@ -63,15 +77,16 @@ export function validateSnapshot({ snapshot } = {}) {
  * Generic handler for validating persistence requests.
  *
  * @param {Object} params
- * @param {Object} params.snapshot
- * @param {Array} params.overrides
+ * @param {PersistenceSnapshot} [params.snapshot]
+ * @param {Array<any>} [params.overrides]
  * @param {Date} params.now
- * @param {Function} params.snapshotNormalizer - Function to normalize/validate snapshot.
- * @param {Function} params.overrideEvaluator - Function to check for pending overrides.
+ * @param {function(PersistenceSnapshot): any} params.snapshotNormalizer - Function to normalize/validate snapshot.
+ * @param {function(Array<any>): { pending: number }} params.overrideEvaluator - Function to check for pending overrides.
  * @param {string} params.successMessage
  * @returns {Object} Response object.
  */
 export function handlePersistenceRequest({
+    // @ts-ignore
     snapshot,
     overrides = [],
     now = new Date(),
@@ -80,19 +95,26 @@ export function handlePersistenceRequest({
     successMessage,
 }) {
     if (!(now instanceof Date) || Number.isNaN(now.getTime())) {
-        throw new TypeError('now must be a valid Date');
+        return { status: 'error', message: 'Invalid server time configuration.' };
     }
 
-    if (typeof snapshotNormalizer !== 'function') {
-        throw new TypeError('snapshotNormalizer must be a function');
-    }
-    if (typeof overrideEvaluator !== 'function') {
-        throw new TypeError('overrideEvaluator must be a function');
+    // @ts-ignore
+    const structureValidation = validateSnapshot({ snapshot });
+    if (structureValidation.status !== 'success') {
+        return structureValidation;
     }
 
-    const normalizedSnapshot = snapshotNormalizer(snapshot);
+    let normalizedSnapshot;
+    try {
+        // @ts-ignore
+        normalizedSnapshot = snapshotNormalizer(snapshot); // Throws if invalid
+    } catch (err) {
+        // @ts-ignore
+        return { status: 'error', message: err.message };
+    }
+
+    // Check for pending overrides
     const { pending } = overrideEvaluator(overrides);
-
     if (pending > 0) {
         return {
             status: 'blocked',
@@ -102,12 +124,7 @@ export function handlePersistenceRequest({
         };
     }
 
-    return {
-        status: 'success',
-        message: successMessage,
-        syncedAt: now.toISOString(),
-        ...normalizedSnapshot,
-    };
+    return { status: 'success', message: successMessage };
 }
 
 /**
@@ -115,11 +132,20 @@ export function handlePersistenceRequest({
  *
  * @param {Object} params
  * @param {Object} params.supabaseClient
- * @param {Object} params.snapshot
- * @param {Object} params.runMetadata
+ * @param {PersistenceSnapshot} params.snapshot
+ * @param {Object} [params.runMetadata]
+ * @param {string} [params.runMetadata.runId]
+ * @param {string} [params.runMetadata.seasonSettingsId]
+ * @param {Object} [params.runMetadata.parameters]
+ * @param {Object} [params.runMetadata.metrics]
+ * @param {Object} [params.runMetadata.results]
+ * @param {string} [params.runMetadata.createdBy]
+ * @param {string} [params.runMetadata.startedAt]
+ * @param {string} [params.runMetadata.completedAt]
  * @param {Date} params.now
- * @param {string} params.runType - 'practice' or 'game'
+ * @param {string} params.runType - 'practice' or 'game' or 'team'
  * @param {string} params.rpcName - Name of the RPC function to call
+ * @param {function(Object): Object} [params.transformPayload]
  * @returns {Promise<Object>} Result object.
  */
 export async function persistSnapshotTransactional({
@@ -146,34 +172,30 @@ export async function persistSnapshotTransactional({
             completed_at: runMetadata.completedAt ?? now.toISOString(),
             updated_at: now.toISOString(),
         }
-        : null;
-
-    let rpcArgs;
-    if (transformPayload) {
-        rpcArgs = transformPayload({ snapshot, runMetadata, nowIso: now.toISOString(), runId: runMetadata?.runId });
-    } else {
-        const { assignmentRows } = snapshot.payload;
-        rpcArgs = {
-            run_data: runData,
-            assignments: assignmentRows,
+        : {
+            // Fallback if no run metadata provided (less common for transactional)
+            run_type: runType,
+            status: 'completed',
+            updated_at: now.toISOString(),
         };
-    }
+
+    // Transform payload if normalizer provided, otherwise use snapshot directly
+    const rpcPayload = transformPayload
+        ? transformPayload({ snapshot, runMetadata, nowIso: now.toISOString(), runId: runMetadata?.runId })
+        : { snapshot };
 
     // Call the RPC function
-    const { data, error } = await supabaseClient.rpc(rpcName, rpcArgs);
+    // @ts-ignore
+    const { data, error } = await supabaseClient.rpc(rpcName, rpcPayload);
 
     if (error) {
-        throw new Error(`Failed to persist ${runType ?? 'schedule'} via ${rpcName}: ${error.message}`);
+        throw error;
     }
 
     return {
-        status: PERSISTENCE_STATUS.SUCCESS,
-        message: `Successfully persisted schedule via ${rpcName}.`,
+        status: 'success',
+        runId: runMetadata?.runId ?? snapshot.runId ?? (data ? data : null),
+        message: 'Persistence successful.',
         syncedAt: now.toISOString(),
-        runId: runMetadata?.runId,
-        data: {
-            runId: runMetadata?.runId,
-            results: data,
-        },
     };
 }

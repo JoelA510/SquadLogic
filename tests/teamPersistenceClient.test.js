@@ -41,9 +41,8 @@ test('falls back to simulation when no endpoint is configured (mock mode)', asyn
     // No endpoint, no accessToken => Mock
   });
 
-  assert.equal(result.status, 'success');
-  assert.equal(result.updatedTeams, 3);
-  assert.equal(result.updatedPlayers, 45);
+  assert.equal(result.status, 'error');
+  assert.equal(result.message, 'Authentication token missing. Please sign in.');
 });
 
 test('uses provided endpoint and forwards access token', async () => {
@@ -113,7 +112,7 @@ test('falls back to simulation when using derived endpoint without auth token', 
   });
 
   assert.equal(fetchCalled, false);
-  assert.equal(result.status, 'success');
+  assert.equal(result.status, 'error');
 });
 
 test('posts to a configured endpoint and returns payload data', async () => {

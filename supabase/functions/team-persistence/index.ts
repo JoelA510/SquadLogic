@@ -28,11 +28,49 @@ function jsonResponse(payload: unknown, status: number = 200): Response {
   });
 }
 
-// ... (getUserFromRequest remains the same)
+async function getUserFromRequest(
+  request: Request,
+  supabaseClient: SupabaseClient,
+): Promise<User | null> {
+  const authHeader = request.headers.get('authorization') ?? '';
+  const token = authHeader.toLowerCase().startsWith('bearer ')
+    ? authHeader.slice('bearer '.length)
+    : null;
 
-// ... (config remains the same)
+  if (!token) {
+    return null;
+  }
 
-// ... (PersistencePayloadSchema remains the same)
+  const { data, error } = await supabaseClient.auth.getUser(token);
+
+  if (error) {
+    console.error(
+      'Failed to retrieve user from access token',
+      error.message ?? error,
+    );
+    return null;
+  }
+
+  return data?.user ?? null;
+}
+
+const supabaseUrl = Deno.env.get('SUPABASE_URL');
+const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const allowedRoles = parseAllowedRolesEnv(
+  Deno.env.get('TEAM_PERSISTENCE_ALLOWED_ROLES'),
+  { fallbackRoles: DEFAULT_ALLOWED_ROLES },
+);
+
+const PersistencePayloadSchema = z.object({
+  snapshot: z.object({
+    payload: z.object({
+      teamRows: z.array(z.object({ id: z.string() }).passthrough()),
+      teamPlayerRows: z.array(z.object({ team_id: z.string(), player_id: z.string() }).passthrough()),
+    }),
+  }),
+  overrides: z.array(z.unknown()).optional(),
+  runMetadata: z.record(z.unknown()).optional(),
+});
 
 let handler: HttpHandler;
 
@@ -80,10 +118,12 @@ if (!supabaseUrl || !serviceRoleKey) {
 
     const response = await innerHandler(req);
 
-    // Clone response to add CORS headers if missing
+    // Clone response to add CORS headers if missing (inner handler might not add them on errors)
     const newHeaders = new Headers(response.headers);
     Object.entries(corsHeaders).forEach(([key, value]) => {
-      newHeaders.set(key, value);
+      if (!newHeaders.has(key)) {
+        newHeaders.set(key, value);
+      }
     });
 
     return new Response(response.body, {

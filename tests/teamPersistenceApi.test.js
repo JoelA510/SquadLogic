@@ -56,7 +56,7 @@ test('processTeamPersistenceRequest returns validation error for null requestBod
   });
 
   assert.strictEqual(result.status, 'error');
-  assert.match(result.message, /snapshot must be an object/i);
+  assert.match(result.message, /Invalid snapshot payload/i);
 });
 
 test('processTeamPersistenceRequest blocks when overrides are pending', async () => {
@@ -88,6 +88,8 @@ test('processTeamPersistenceRequest persists snapshot after validation and auth'
     now,
   });
 
+  // console.log('DEBUG Result:', result); // Manual debug
+  assert.ok(result, 'Result should be defined');
   assert.strictEqual(result.status, 'success');
   assert.strictEqual(result.syncedAt, now.toISOString());
   assert.strictEqual(result.updatedTeams, 1);
@@ -107,7 +109,7 @@ test('processTeamPersistenceRequest surfaces validation errors', async () => {
   });
 
   assert.strictEqual(result.status, 'error');
-  assert.match(result.message, /snapshot must be an object/i);
+  assert.match(result.message, /Invalid snapshot payload/i);
 });
 
 test('processTeamPersistenceRequest surfaces persistence errors', async () => {

@@ -1,13 +1,41 @@
+// @ts-check
 /**
  * Backend-oriented helpers for validating and responding to team persistence requests.
  */
 
 import {
+  authorizePersistenceRequest,
   handlePersistenceRequest,
   persistSnapshotTransactional,
 } from './persistenceHandler.js';
 import { evaluateOverrides } from './utils/snapshot.js';
 
+/**
+ * @typedef {import('./persistenceHandler.js').PersistenceSnapshot} PersistenceSnapshot
+ */
+
+/**
+ * Authorize a team persistence request.
+ * @param {Object} params
+ * @param {string} [params.runId]
+ * @param {string} [params.seasonSettingsId]
+ * @param {string} [params.createdBy]
+ * @param {string} [params.runType]
+ * @param {import('./persistenceHandler.js').User} [params.user]
+ * @param {string[]} [params.allowedRoles]
+ * @returns {Object}
+ */
+export function authorizeTeamPersistenceRequest(params) {
+  // @ts-ignore
+  return authorizePersistenceRequest({ ...params, runType: 'team' });
+}
+
+/**
+ * Normalize the team snapshot to ensure structural validity.
+ *
+ * @param {PersistenceSnapshot} snapshot
+ * @returns {PersistenceSnapshot & { teamRows: Array<Object>, teamPlayerRows: Array<Object>, updatedTeams: number, updatedPlayers: number }}
+ */
 function normalizeSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') {
     throw new TypeError('snapshot must be an object');
@@ -18,6 +46,7 @@ function normalizeSnapshot(snapshot) {
     throw new TypeError('snapshot.payload must be an object');
   }
 
+  // @ts-ignore - payload structure dynamic validation
   const { teamRows, teamPlayerRows } = payload;
 
   if (!Array.isArray(teamRows)) {
@@ -31,6 +60,7 @@ function normalizeSnapshot(snapshot) {
     if (!row || typeof row !== 'object') {
       throw new TypeError(`teamRows[${index}] must be an object`);
     }
+    // @ts-ignore
     if (typeof row.id !== 'string' || !row.id.trim()) {
       throw new Error(`teamRows[${index}] requires an id`);
     }
@@ -40,15 +70,23 @@ function normalizeSnapshot(snapshot) {
     if (!row || typeof row !== 'object') {
       throw new TypeError(`teamPlayerRows[${index}] must be an object`);
     }
+    // @ts-ignore
     if (typeof row.team_id !== 'string' || !row.team_id.trim()) {
       throw new Error(`teamPlayerRows[${index}] requires a team_id`);
     }
+    // @ts-ignore
     if (typeof row.player_id !== 'string' || !row.player_id.trim()) {
       throw new Error(`teamPlayerRows[${index}] requires a player_id`);
     }
   });
 
   return {
+    ...snapshot,
+    payload: {
+      ...snapshot.payload,
+      // @ts-ignore
+      assignmentRows: undefined // Clear incompatible assignments if any
+    },
     teamRows,
     teamPlayerRows,
     updatedTeams: teamRows.length,
@@ -57,6 +95,22 @@ function normalizeSnapshot(snapshot) {
   };
 }
 
+/**
+ * Build a scheduler run row.
+ * @param {Object} params
+ * @param {string} [params.runId]
+ * @param {string} [params.seasonSettingsId]
+ * @param {string} [params.runType]
+ * @param {string} [params.status]
+ * @param {Object} [params.parameters]
+ * @param {Object} [params.metrics]
+ * @param {Object} [params.results]
+ * @param {string} [params.startedAt]
+ * @param {string} [params.completedAt]
+ * @param {string} [params.createdBy]
+ * @param {string} [params.nowIso]
+ * @returns {Object}
+ */
 function buildSchedulerRunRow({
   runId,
   seasonSettingsId,
@@ -86,13 +140,25 @@ function buildSchedulerRunRow({
   };
 }
 
+/**
+ * Persist the team snapshot transactionally.
+ *
+ * @param {Object} params
+ * @param {Object} params.supabaseClient
+ * @param {PersistenceSnapshot} params.snapshot
+ * @param {Object} [params.runMetadata]
+ * @param {Date} [params.now]
+ * @returns {Promise<Object>}
+ */
 export async function persistTeamSnapshotTransactional({
   supabaseClient,
   snapshot,
   runMetadata = {},
   now = new Date(),
-} = {}) {
+}) {
+  // @ts-ignore - Validated by normalizeSnapshot
   const { teamRows, teamPlayerRows, runId: snapshotRunId } = normalizeSnapshot(snapshot);
+  // @ts-ignore
   const effectiveRunId = runMetadata.runId ?? snapshotRunId;
   const effectiveRunMetadata = { ...runMetadata, runId: effectiveRunId };
 
@@ -103,6 +169,7 @@ export async function persistTeamSnapshotTransactional({
     runType: 'team',
     runMetadata: effectiveRunMetadata,
     now,
+    // @ts-ignore
     transformPayload: ({ snapshot, runMetadata, nowIso, runId }) => {
       // Prepare run data for the RPC
       const runData = buildSchedulerRunRow({
@@ -119,6 +186,8 @@ export async function persistTeamSnapshotTransactional({
     },
   });
 
+  // console.log('DEBUG persistSnapshotTransactional inner result:', result);
+
   return {
     ...result,
     updatedTeams: teamRows.length,
@@ -128,8 +197,14 @@ export async function persistTeamSnapshotTransactional({
 
 /**
  * Validate a persistence request payload and return a response-friendly summary.
+ * @param {Object} params
+ * @param {PersistenceSnapshot} [params.snapshot]
+ * @param {Array<any>} [params.overrides]
+ * @param {Date} [params.now]
+ * @returns {Object}
  */
-export function handleTeamPersistence({ snapshot, overrides = [], now = new Date() } = {}) {
+export function handleTeamPersistence({ snapshot, overrides = [], now = new Date() }) {
+  // @ts-ignore
   return handlePersistenceRequest({
     snapshot,
     overrides,

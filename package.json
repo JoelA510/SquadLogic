@@ -9,7 +9,8 @@
     "build": "node scripts/build.js",
     "frontend:dev": "vite",
     "frontend:build": "node scripts/runViteWithPersistenceEndpoint.js build",
-    "frontend:preview": "node scripts/runViteWithPersistenceEndpoint.js preview"
+    "frontend:preview": "node scripts/runViteWithPersistenceEndpoint.js preview",
+    "typecheck": "tsc -p jsconfig.json"
   },
   "directories": {
     "doc": "docs"
@@ -35,6 +36,7 @@
     "autoprefixer": "^10.4.22",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
+    "typescript": "^5.9.3",
     "vite": "^5.4.0"
   },
   "overrides": {

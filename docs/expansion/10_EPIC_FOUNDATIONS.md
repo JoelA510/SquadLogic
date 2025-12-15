@@ -18,4 +18,4 @@
 | :--- | :--- | :--- | :--- | :--- |
 | **PR-01** | `feat/fnd-01-tooling` | CI/Lint/Test | Setup Vitest, ESLint, Prettier. Add `npm run test` and `npm run lint`. | [x] Verify generic PASS on dummy test. |
 | **PR-02** | `feat/fnd-02-types` | Types | Define JSDoc/TS types for `Organization`, `User`, `Event`, `Team` in `packages/core`. | [x] N/A (Static check). |
-| **PR-03** | `feat/fnd-03-utils` | Logging/Error | Create `Logger` and `AppError` classes in `packages/core`. | Unit tests for logger. |
+| **PR-03** | `feat/fnd-03-utils` | Logging/Error | Create `Logger` and `AppError` classes in `packages/core`. | [x] Unit tests for logger. |

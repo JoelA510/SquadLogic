@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext.jsx';
 import { ImportProvider } from './contexts/ImportContext.jsx';
 import { ThemeProvider } from './contexts/ThemeContext.jsx';
+import { OrganizationProvider } from './contexts/OrganizationContext.jsx';
 import LoadingScreen from './components/LoadingScreen.jsx';
 
 // Layouts
@@ -60,11 +61,13 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <ImportProvider>
-          <ThemeProvider>
-            <AppContent />
-          </ThemeProvider>
-        </ImportProvider>
+        <OrganizationProvider>
+          <ImportProvider>
+            <ThemeProvider>
+              <AppContent />
+            </ThemeProvider>
+          </ImportProvider>
+        </OrganizationProvider>
       </AuthProvider>
     </BrowserRouter>
   );

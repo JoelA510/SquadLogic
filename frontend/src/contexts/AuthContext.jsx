@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { supabase } from '../utils/supabaseClient';
+import { supabase } from '../utils/supabaseClient.js';
 
 const AuthContext = createContext({});
 
@@ -19,9 +19,24 @@ export const AuthProvider = ({ children }) => {
         // Listen for changes
         const {
             data: { subscription },
-        } = supabase.auth.onAuthStateChange((_event, session) => {
+        } = supabase.auth.onAuthStateChange(async (_event, session) => {
             setSession(session);
-            setUser(session?.user ?? null);
+
+            if (session?.user) {
+                // Fetch profile
+                const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', session.user.id)
+                    .single();
+
+                // Merge profile data into user object for convenience, or keep separate
+                // Here we keep user object as is, but could add specific profile logic
+                setUser({ ...session.user, profile });
+            } else {
+                setUser(null);
+            }
+
             setLoading(false);
         });
 

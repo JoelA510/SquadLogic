@@ -7,3 +7,4 @@
 | 2025-12-14 | PR-02 | **DONE** | Core Domain JSDoc types defined. |
 | 2025-12-14 | PR-03 | **DONE** | Shared utilities (Logger, AppError) implemented and tested. |
 | 2025-12-14 | PR-04 | **DONE** | Core Auth Schema (Profiles, OrgMembers) migration created. |
+| 2025-12-14 | PR-05 | **DONE** | Frontend Contexts (Auth, Organization) implemented with Integration Test. |

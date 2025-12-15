@@ -17,5 +17,5 @@
 | PR # | Branch | Scope | Description | Tests |
 | :--- | :--- | :--- | :--- | :--- |
 | **PR-04** | `feat/core-01-schema` | DB Schema | create `profiles`, `organization_members` tables + RLS policies. | [x] Test RLS with distinct users. |
-| **PR-05** | `feat/core-02-auth` | Frontend | Update `AuthProvider` to fetch Profile. Create `OrganizationProvider`. | Integration test: Login -> Load Org. |
+| **PR-05** | `feat/core-02-auth` | Frontend | Update `AuthProvider` to fetch Profile. Create `OrganizationProvider`. | [x] Integration test: Login -> Load Org. |
 | **PR-06** | `feat/core-03-roles` | Permissions | Implement `usePermission` hook based on Role. | Unit test hook logic. |

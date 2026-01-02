@@ -2,7 +2,7 @@
 
 ![SquadLogic Logo](logo.png)
 
-> **Tagline will go here.**
+> **Focus on the Field.**
 >
 > SquadLogic converts raw GotSport registration data into actionable teaming and scheduling frameworks, designed specifically to support youth sports organizations.
 

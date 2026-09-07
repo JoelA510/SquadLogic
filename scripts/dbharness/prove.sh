@@ -13,6 +13,12 @@ R1="$REPO/docs/sql/20260906000000_revert.sql"
 R3="$REPO/docs/sql/20260907000000_revert.sql"
 EMERG="$REPO/docs/sql/reverts/20260504060000_admin_facility_mutation_rpcs.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
+# What each plant scored, by label, for the census at the bottom of this file.
+# The census asserts that every health claim run.sh prints has a plant that
+# reached one of its RED branches, and it reads THIS run's results rather than a
+# sentence in a comment -- so a prover that stopped catching its defect fails
+# the census as loudly as a claim with no prover at all.
+declare -A RESULT=()
 
 # **Refuse to start on a stale backup.** `plant()` writes `<file>.orig` before
 # it mutates and removes it on the way out; a run killed in between leaves one
@@ -246,6 +252,17 @@ fi
 plant() { # label file old new [expected-failing-check] [check-that-must-stay-green]
   local label="$1" file="$2" old="$3" new="$4" expect="${5:-}" green="${6:-}"
   ATTEMPTED=$((ATTEMPTED+1))
+  # **The label is the census's key, so two plants may not share one.** A
+  # duplicate would overwrite the first one's result and the census would then
+  # read a verdict belonging to a different mutation -- a check answering about
+  # data other than the data it names, which is the shape this file exists to
+  # find. Cheap to make impossible, so it is.
+  if [ -n "${RESULT[$label]+x}" ]; then
+    echo "REFUSING TO PLANT: two plants share the label \"$label\"" >&2
+    echo "  The census keys on the label; a duplicate makes it report on the" >&2
+    echo "  wrong mutation. Rename one." >&2
+    exit 5
+  fi
   # **Every planted file must live under a PLANT_DIRS entry.** Those directories
   # are the only thing the stale-backup refusal and `restore_all` look at, and
   # PLANT_DIRS is still hand-maintained one level up from the list it replaced --
@@ -291,6 +308,7 @@ io.open(f,'w',encoding='utf8').write(s.replace(old,new,1))
 PY
   if [ $? -ne 0 ]; then
     printf '%-52s ANCHOR-MISS (meaningless)\n' "$label"
+    RESULT["$label"]=ANCHOR-MISS
     MISS=$((MISS+1)); FAIL=$((FAIL+1)); return
   fi
   # **Detect by EXIT STATUS, not by a string.** The first version grepped for
@@ -385,6 +403,7 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
       # check caught it -- which is exactly the borrowed-evidence mode above --
       # so it is NOT a catch for the named check and the difference is printed.
       printf '%-52s MISATTRIBUTED  <-- red, but not at %s\n' "$label" "$expect_desc"
+      RESULT["$label"]=MISATTRIBUTED
       FAIL=$((FAIL+1))
       # `  |` lines included: half the harness's health claims print there and
       # nowhere else, so a filter without them cannot show the line the verdict
@@ -438,12 +457,13 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
     fi
     if [ "$green_ok" -ne 1 ]; then
       printf '%-52s BORROWED  <-- "%s" did not stay green\n' "$label" "$green"
+      RESULT["$label"]=BORROWED
       FAIL=$((FAIL+1))
       grep -E '^(applied|PASS|FAIL|BASELINE|HARNESS|  \|)' <<<"$out" | sed 's/^/    /'
       return
     fi
     printf '%-52s CAUGHT%s%s\n' "$label" "${expect:+ (at $expect_desc)}" \
-      "${green:+, $green stayed green}"; PASS=$((PASS+1))
+      "${green:+, $green stayed green}"; RESULT["$label"]=CAUGHT; PASS=$((PASS+1))
   else
     # **Print the transcript on a miss.** `out` was captured and never read --
     # a field parsed and left unread, in the tool whose whole output is the
@@ -451,7 +471,8 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
     # nothing about what the harness actually did, so the next step was always
     # to re-run by hand. The failing case is the one worth keeping the
     # transcript of; a catch needs no explanation.
-    printf '%-52s NOT CAUGHT  <-- the check is hollow\n' "$label"; FAIL=$((FAIL+1))
+    printf '%-52s NOT CAUGHT  <-- the check is hollow\n' "$label"
+    RESULT["$label"]="NOT CAUGHT"; FAIL=$((FAIL+1))
     echo "$out" | grep -E '^(applied|PASS|FAIL|BASELINE|HARNESS|  \|)' | sed 's/^/    /'
   fi
 }
@@ -996,6 +1017,144 @@ DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date) CASCADE;" \
   "emergency rollback 20260504060000: it dropped public.field_bookings, breaking admin_retire_field" \
   "(checked) the rollback removed every overload of all four admin facility RPCs"
 
+# **The one claim in this harness that no plant had ever reached.**
+#
+# `(checked) the rollback removed every overload of all four admin facility
+# RPCs` is claim 6 of 7, and its RED branch -- `N admin facility RPC(s) survived
+# a rollback that reported success` -- had nothing aimed at it. Not because it
+# is unreachable: it is gated behind the rollback script's OWN by-name guard,
+# which raises on any mutation that leaves an RPC standing, so the stage fails
+# at its bare line and this branch is never evaluated. Every EMERG plant tried
+# so far stopped there. So the census this PR wrote -- "all seven claims have a
+# plant" -- was false, and the branch was neither planted nor declared
+# unplantable, which is the state the QUERY-FAILED declaration exists to keep
+# things out of.
+#
+# Reaching it means defeating that guard in the SAME edit, and the shape that
+# does is the realistic one: the script stops dropping an RPC and its own guard
+# stops looking for it, so it commits and reports success with an admin RPC
+# still callable. That is the whole reason run.sh names the four independently
+# of the script rather than trusting the guard -- and this is what proves the
+# independent census is not redundant.
+#
+# `green` names the claim beside it, which is untouched: the producer survives
+# either way, so an isolation is genuinely available here and is asserted.
+plant "EMERG the rollback and its own guard drift together" "$EMERG" \
+  "DROP FUNCTION IF EXISTS public.admin_create_location(uuid, text, text, boolean);
+
+-- Every overload, by NAME rather than by signature: a rollback that reports
+-- success must have removed the thing it names, and only a name survives a
+-- signature change.
+DO \$rollback_check\$
+DECLARE
+    v_left text;
+BEGIN
+    SELECT string_agg(n.nspname || '.' || p.proname || '(' ||
+                      pg_get_function_identity_arguments(p.oid) || ')', ', ' ORDER BY p.proname)
+      INTO v_left
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.proname IN ('admin_delete_field', 'admin_update_field',
+                         'admin_create_field', 'admin_create_location');" \
+  "-- admin_create_location is left standing, and the guard below stops naming it
+
+DO \$rollback_check\$
+DECLARE
+    v_left text;
+BEGIN
+    SELECT string_agg(n.nspname || '.' || p.proname || '(' ||
+                      pg_get_function_identity_arguments(p.oid) || ')', ', ' ORDER BY p.proname)
+      INTO v_left
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.proname IN ('admin_delete_field', 'admin_update_field',
+                         'admin_create_field');" \
+  "emergency rollback 20260504060000: 1 admin facility RPC(s) survived a rollback that reported success" \
+  "(checked) it left public.field_bookings standing, which admin_retire_field still calls"
+
+# ---------------------------------------------------------------------------
+# The census, executed rather than counted by eye
+# ---------------------------------------------------------------------------
+#
+# **"All seven claims have a plant" was a sentence in a comment, and it was
+# false.** Claim 6 had none, and nothing in the run said so -- the sweep printed
+# every plant caught and exited 0 with a health claim nobody had ever tried to
+# make fail. That is the same falsely perfect result this whole file exists to
+# stop, one level up: a census that cannot fail is not a census.
+#
+# So it runs. The UNIVERSE comes from the BASELINE transcript -- a claim is a
+# claim because the green harness PRINTED it -- and not from this file, because
+# a set derived from the thing being checked compares a set against itself. Add
+# a claim to run.sh and this fails on its first run rather than on the round
+# someone re-counts. The COVERAGE comes from the table below, and it is checked
+# against THIS RUN's results: a prover that has stopped catching its defect
+# fails the census exactly as loudly as a claim with no prover at all.
+#
+# The only branch deliberately without a prover is still QUERY-FAILED, argued
+# where it lives: it comes from `psql_cmd` itself failing, which no mutation of
+# a file this sweep plants can cause. Claim 4's other three branches are named
+# here, all three, because the rule that finding taught is to enumerate the ways
+# a claim can go RED rather than the lines it prints when it does not.
+declare -A CLAIM_PROVER=(
+  ["(checked) the revert named the retirement it was about to erase"]="R1 revert erases a future retirement silently"
+  ["(checked) the revert counted the practice assignment it was about to expose"]="R3 revert exposes dangling rows silently"
+  ["(checked) the revert named the retirement guard it was putting back"]="R3 revert reinstates the weaker guard silently"
+  ["(checked) exactly one public.admin_retire_field survives the revert, and it no longer calls the dropped producer"]="R3 revert drops the retirement RPC instead of restoring it|R3 the restored retire still calls the dropped producer|R3 revert restores retire under a second signature"
+  ["(checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"]="R3 the restored retire calls a helper the revert also drops|R3 the restored retire's CONFIRMED path calls a dropped helper"
+  ["(checked) the rollback removed every overload of all four admin facility RPCs"]="EMERG the rollback and its own guard drift together"
+  ["(checked) it left public.field_bookings standing, which admin_retire_field still calls"]="EMERG rollback takes the producer another RPC still calls"
+)
+
+echo
+census_ok=1
+declare -A CLAIM_SEEN=()
+# Whole-line, for the reason the `green` matcher is: `  | NOTICE:  ...` carries
+# the same prefix, and a NOTICE is something a plant writes.
+while IFS= read -r claim; do
+  [ -n "$claim" ] || continue
+  CLAIM_SEEN["$claim"]=1
+  if [ -z "${CLAIM_PROVER[$claim]+x}" ]; then
+    echo "CENSUS FAIL: run.sh prints a health claim no plant is declared for:"
+    echo "    $claim"
+    census_ok=0
+    continue
+  fi
+  IFS='|' read -r -a provers <<<"${CLAIM_PROVER[$claim]}"
+  for prover in "${provers[@]}"; do
+    if [ "${RESULT[$prover]:-}" != "CAUGHT" ]; then
+      echo "CENSUS FAIL: the claim"
+      echo "    $claim"
+      echo "  is declared proved by the plant \"$prover\", which this run scored ${RESULT[$prover]:-NOT AT ALL}"
+      census_ok=0
+    fi
+  done
+done < <(sed -n 's/^  | \((checked) .*\)$/\1/p' /tmp/harness_baseline_out)
+
+# The other direction: a claim that was renamed or removed leaves its entry here
+# naming nothing, and an entry nobody checks is the unread field this project
+# keeps finding. A stale key is a failure, not a tidy-up.
+for claim in "${!CLAIM_PROVER[@]}"; do
+  if [ -z "${CLAIM_SEEN[$claim]+x}" ]; then
+    echo "CENSUS FAIL: a plant is declared for a claim the green harness never printed:"
+    echo "    $claim"
+    census_ok=0
+  fi
+done
+
+# And the meta-assertion, because every assertion above passes vacuously over an
+# empty universe: a baseline transcript with no claim lines in it would report a
+# clean census having examined nothing.
+if [ "${#CLAIM_SEEN[@]}" -eq 0 ]; then
+  echo "CENSUS FAIL: the baseline transcript carries no (checked) claim line at all"
+  census_ok=0
+fi
+
+if [ "$census_ok" -eq 1 ]; then
+  echo "census: ${#CLAIM_SEEN[@]} health claims, each with a plant that reached one of its red branches in this run"
+fi
+
 # **Three numbers, not one.** A single "N caught" cannot tell a genuine catch
 # from a plant that never applied: last round seven mutations reported RED and
 # every one was trivially red against an already-red suite. So the count of
@@ -1005,3 +1164,6 @@ DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date) CASCADE;" \
 echo
 echo "attempted $ATTEMPTED, anchor-miss $MISS (meaningless), caught $PASS, not caught $((FAIL-MISS))"
 [ "$FAIL" -eq 0 ] || exit 1
+# Kept out of $FAIL so the three numbers stay a count of PLANTS, and a separate
+# exit so a census failure cannot be read as a plant that went uncaught.
+[ "$census_ok" -eq 1 ] || exit 1

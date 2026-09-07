@@ -856,6 +856,50 @@ plant "R3 the restored retire still calls the dropped producer" "$R3" \
   "revert 20260907000000: admin_retire_field after the revert reads STILL-CALLS-PRODUCER" \
   "(checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"
 
+# **The half of the probe's claim that no plant could reach, and the probe that
+# now reaches it.** The probe drove only the REFUSAL path, and the verdict
+# strips `field_bookings_digest` by design -- so a revert that restored the
+# refusal branch and left the CONFIRMED branch on the digest (before-audit,
+# UPDATE, after-audit, success RETURN) passed both checks with the harness
+# fully green, while raising 42883 on the first confirmed retirement anyone
+# ran. A broken revert scoring clean is the failure this whole stage exists to
+# make impossible, so it is closed by making the claim true rather than by
+# declaring it out of reach: the probe now runs a confirmed retirement too, and
+# this plant is what proves that half can fail. Measured both ways -- against
+# the refusal-only probe it scores NOT CAUGHT with the harness green, which is
+# the reproduction; against the two-half probe it is red at the probe with the
+# verdict's claim still printed.
+plant "R3 the restored retire's CONFIRMED path calls a dropped helper" "$R3" \
+  "            'affected_count', v_affected_count,
+            'after', to_jsonb(v_after)" \
+  "            'affected_count', v_affected_count,
+            'affected', public.field_bookings_digest(v_affected),
+            'after', to_jsonb(v_after)" \
+  "revert 20260907000000 probe" \
+  "(checked) exactly one public.admin_retire_field survives the revert, and it no longer calls the dropped producer"
+
+# **And the third branch, for the same reason.** `AMBIGUOUS` is the other half
+# of "exactly one survives", and it was as unreached as STILL-CALLS-PRODUCER
+# was: `GONE` is what a revert that removes too much prints, and nothing tried a
+# revert that removes too LITTLE. This restores the function under a CHANGED
+# signature, so 20260907000000's own version is left standing beside the
+# restored one -- the unguarded-overload shape this migration exists to close,
+# in the revert rather than the migration.
+#
+# No `green` here, and the omission is the honest one: the surviving overload IS
+# the pre-revert body, which cannot resolve once the producer is dropped, so the
+# probe is RIGHT to fail beside it. `expect` names the branch, which only the
+# verdict prints, so the attribution is exact even though the isolation is not
+# available to be claimed.
+plant "R3 revert restores retire under a second signature" "$R3" \
+  "    p_confirm boolean DEFAULT false
+)
+RETURNS jsonb" \
+  "    p_confirm text DEFAULT 'false'
+)
+RETURNS jsonb" \
+  "revert 20260907000000: admin_retire_field after the revert reads AMBIGUOUS"
+
 # **The emergency rollback, back in the state 20260907000000 left it in.** It
 # dropped a signature that no longer exists, so the DROP was a silent no-op and
 # the script committed and reported success with the guarded delete still

@@ -13,6 +13,12 @@ R1="$REPO/docs/sql/20260906000000_revert.sql"
 R3="$REPO/docs/sql/20260907000000_revert.sql"
 EMERG="$REPO/docs/sql/reverts/20260504060000_admin_facility_mutation_rpcs.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
+# What each plant scored, by label, for the census at the bottom of this file.
+# The census asserts that every health claim run.sh prints has a plant that
+# reached one of its RED branches, and it reads THIS run's results rather than a
+# sentence in a comment -- so a prover that stopped catching its defect fails
+# the census as loudly as a claim with no prover at all.
+declare -A RESULT=()
 
 # **Refuse to start on a stale backup.** `plant()` writes `<file>.orig` before
 # it mutates and removes it on the way out; a run killed in between leaves one
@@ -99,8 +105,28 @@ done <<< "$STALE_AT_START"
 # not blocked by a backup THIS run abandoned. Same derivation, for the same
 # reason: a file this run planted is a file this run must put back, whether or
 # not anyone remembered to add it to a list.
+#
+# **`mv`'s status was thrown away and the announcement made anyway.** This
+# printed "restored X from its backup" whether or not the move happened, which
+# is the loud-message-that-changes-nothing shape three times over in this file.
+# `plant()` verifies ITS restore byte for byte and refuses to continue on a
+# mismatch; this, the higher-consequence twin -- it runs when the script is
+# already going down and nobody is left to notice -- verified nothing. Two
+# mutations have escaped onto disk in this series, both on interrupt paths.
+#
+# Every move is now checked, and the directories are swept a SECOND time
+# afterwards: a restore that reported success and left the `.orig` behind is the
+# same silence, one layer in.
+#
+# **The failure is a RETURN STATUS, and that is all it is.** This also set a
+# `RESTORE_ALL_FAILED` flag, in two places, and the comment above said the
+# callers acted on it -- they act on the status, and nothing anywhere read the
+# flag. A field that reads as load-bearing and is not is how the board waiver
+# was lost; in a restore path whose whole subject is a mutation possibly left on
+# disk, a second signal nobody reads is worse than none, because it is the one a
+# reader trusts. Both callers turn a non-zero return into exit 6.
 restore_all() {
-  local orig list
+  local orig list failed=0
   # A sweep that FAILED is not a sweep that found nothing: saying so is the
   # whole point, because this runs when the script is already going down and
   # there is nobody left to notice a mutation it quietly declined to restore.
@@ -111,9 +137,27 @@ restore_all() {
   fi
   while IFS= read -r orig; do
     [ -n "$orig" ] || continue
-    mv -f "$orig" "${orig%.orig}"
-    echo "restored $(basename "${orig%.orig}") from its backup" >&2
+    if mv -f "$orig" "${orig%.orig}"; then
+      echo "restored $(basename "${orig%.orig}") from its backup" >&2
+    else
+      echo "restore_all: FAILED to restore ${orig%.orig} from its backup -- the" >&2
+      echo "  PLANTED MUTATION IS STILL ON DISK. Resolve it against 'git show HEAD'," >&2
+      echo "  never against the .orig, and do not commit until you have." >&2
+      failed=1
+    fi
   done <<< "$list"
+  if list="$(stale_backups)"; then
+    while IFS= read -r orig; do
+      [ -n "$orig" ] || continue
+      echo "restore_all: $orig SURVIVED the restore sweep" >&2
+      failed=1
+    done <<< "$list"
+  else
+    echo "restore_all: could not re-sweep to confirm the restores" >&2
+    failed=1
+  fi
+  if [ "$failed" -ne 0 ]; then return 4; fi
+  return 0
 }
 
 # **A signal handler that returns does not stop the script.** The first version
@@ -150,10 +194,22 @@ kill_harness() {
 on_signal() {
   trap - EXIT INT TERM
   kill_harness
-  restore_all
+  restore_all || exit 6
   exit 130
 }
-trap restore_all EXIT
+# **A trap that returns cannot change the exit status.** `trap restore_all EXIT`
+# discarded restore_all's status -- bash ignores what an EXIT handler returns --
+# and `on_signal` exited 130 regardless, so both callers could announce that a
+# planted file may still be on disk and then exit 0. The status of the run has
+# to carry that: `exit` inside an EXIT handler sets the final status and the
+# handler is not re-entered, so the original status is preserved on success and
+# replaced by 6 when a mutation may have survived.
+on_exit() {
+  local status=$?
+  restore_all || status=6
+  exit "$status"
+}
+trap on_exit EXIT
 trap on_signal INT TERM
 
 # **A green baseline, asserted before anything is planted.**
@@ -202,6 +258,17 @@ fi
 plant() { # label file old new [expected-failing-check] [check-that-must-stay-green]
   local label="$1" file="$2" old="$3" new="$4" expect="${5:-}" green="${6:-}"
   ATTEMPTED=$((ATTEMPTED+1))
+  # **The label is the census's key, so two plants may not share one.** A
+  # duplicate would overwrite the first one's result and the census would then
+  # read a verdict belonging to a different mutation -- a check answering about
+  # data other than the data it names, which is the shape this file exists to
+  # find. Cheap to make impossible, so it is.
+  if [ -n "${RESULT[$label]+x}" ]; then
+    echo "REFUSING TO PLANT: two plants share the label \"$label\"" >&2
+    echo "  The census keys on the label; a duplicate makes it report on the" >&2
+    echo "  wrong mutation. Rename one." >&2
+    exit 5
+  fi
   # **Every planted file must live under a PLANT_DIRS entry.** Those directories
   # are the only thing the stale-backup refusal and `restore_all` look at, and
   # PLANT_DIRS is still hand-maintained one level up from the list it replaced --
@@ -225,6 +292,17 @@ plant() { # label file old new [expected-failing-check] [check-that-must-stay-gr
   # check below for why a checksum rather than trust.
   local before_sum
   before_sum="$(sha256sum "$file" | cut -d' ' -f1)"
+  # **An empty checksum compares equal to an empty checksum.** `sha256sum`'s
+  # status is eaten by the pipe and was never read, so a file this could not
+  # read produced "" here and "" again at the verification below -- the restore
+  # check passing exactly when it had nothing to check, in the guard that exists
+  # to stop a planted mutation escaping onto disk. Same swallowed-status shape
+  # as the two seeds in run.sh, found by the sweep those prompted.
+  if [ -z "$before_sum" ]; then
+    echo "REFUSING TO PLANT \"$label\": could not checksum $file before planting" >&2
+    echo "  Without a baseline the restore verification below cannot fail." >&2
+    exit 4
+  fi
   python3 - "$file" "$old" "$new" <<'PY'
 import io,sys
 f,old,new=sys.argv[1],sys.argv[2],sys.argv[3]
@@ -236,6 +314,7 @@ io.open(f,'w',encoding='utf8').write(s.replace(old,new,1))
 PY
   if [ $? -ne 0 ]; then
     printf '%-52s ANCHOR-MISS (meaningless)\n' "$label"
+    RESULT["$label"]=ANCHOR-MISS
     MISS=$((MISS+1)); FAIL=$((FAIL+1)); return
   fi
   # **Detect by EXIT STATUS, not by a string.** The first version grepped for
@@ -271,14 +350,83 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
     echo "  repair the file, and only then re-run." >&2
     exit 4
   fi
+  # **A stage name is a PREFIX of every check under it.** The emergency
+  # rollback stage prints four different `FAIL emergency rollback 20260504060000`
+  # lines -- the precondition, the script itself, and its two claims -- so a
+  # substring naming the stage is satisfied by whichever fired, which is the
+  # borrowed-evidence mode one level down. Most checks can be named by their own
+  # words; one cannot, because the line it prints IS the bare stage line. An
+  # `expect` beginning with `^` is matched against the WHOLE line, which is the
+  # only way to say "this check and not the three that share its prefix".
+  #
+  # **The transcript is not only the harness's own words, and a plant writes
+  # into it.** Every stage `tail`s the failing psql log and pipes NOTICE and
+  # WARNING lines through a `  | ` prefix -- and rewriting a NOTICE is what half
+  # the plants in this file DO. Both matches below searched the whole transcript
+  # for a substring, so a mutation that raised `FAIL smoke 20260906000100`
+  # forged the catch, and one that raised `| (checked) <claim>` forged the very
+  # claim that exists to prove the claim was checked. The mechanism this PR
+  # added to make isolation expressible was satisfiable by output the plant
+  # itself controls, which is the borrowed-evidence mode with the plant as the
+  # lender.
+  #
+  # Both now match only the shape `run.sh`'s own `echo`s produce: a verdict line
+  # starts with `PASS `/`FAIL ` in column 0, and a claim line IS
+  # `  | (checked) ...` entire. Constructed both ways before being believed; the
+  # controls are in the commit messages.
+  #
+  # **The comment here used to declare a residual UNCLOSABLE, and it was wrong
+  # in both halves.** It read: a multi-line RAISE whose continuation line
+  # reproduces a checker line byte for byte arrives in a `tail` dump unlabelled
+  # and would still match, and closing that "needs run.sh to report its verdicts
+  # on a channel psql cannot write to". The first half was true and worse than
+  # stated -- it was a live forge, measured: a mutation raising
+  # `E'...\nFAIL scenario table\n  | (checked) ...'` scored `CAUGHT (at
+  # substring "FAIL scenario table")` with the scenario table PASSING, and its
+  # twin scored a claim "stayed green" the run never printed.
+  #
+  # The second half was false, and the disproof was one function away in the
+  # file it was written about: `run.sh`'s NOTICE passthrough has always indented
+  # what psql says, and its eleven `tail` dumps had not. They do now, through
+  # one `dump` helper, and no plant-authored byte can reach column 0 or shrink
+  # `      | ` back to `  | `. Both forgeries above are rejected -- MISATTRIBUTED
+  # and BORROWED -- against the same mutation that produced them.
+  #
+  # An impossibility asserted in a comment that a neighbouring function
+  # disproves is worse than no comment: it stops the next reader looking.
+  local verdict_lines
+  verdict_lines="$(grep -E '^(PASS|FAIL) ' <<<"$out")"
+  #
+  # **And the transcript has to say WHICH form matched.** Both branches printed
+  # `$expect_line`, the expect with its `^` stripped, so a whole-line match and
+  # a substring match were indistinguishable in the evidence -- and the
+  # difference between them is the entire content of the third finding this PR
+  # closed: `^emergency rollback 20260504060000` asserts that the stage printed
+  # nothing but its bare line, while the same words unanchored are satisfied by
+  # any of the four checks under it. A reader could not tell which claim a
+  # CAUGHT line was making.
+  local expect_line="${expect#^}" expect_hit=1 expect_desc=""
+  if [ -n "$expect" ]; then
+    case "$expect" in
+      '^'*) expect_desc="whole line \"FAIL $expect_line\""
+            grep -qxF "FAIL $expect_line" <<<"$verdict_lines" || expect_hit=0 ;;
+      *)    expect_desc="substring \"FAIL $expect_line\""
+            grep -qF  "FAIL $expect_line" <<<"$verdict_lines" || expect_hit=0 ;;
+    esac
+  fi
   if [ "$status" -ne 0 ]; then
-    if [ -n "$expect" ] && ! grep -qF "FAIL $expect" <<<"$out"; then
+    if [ "$expect_hit" -ne 1 ]; then
       # The harness went red, but not where this plant was aimed. Some other
       # check caught it -- which is exactly the borrowed-evidence mode above --
       # so it is NOT a catch for the named check and the difference is printed.
-      printf '%-52s MISATTRIBUTED  <-- red, but not at "%s"\n' "$label" "$expect"
+      printf '%-52s MISATTRIBUTED  <-- red, but not at %s\n' "$label" "$expect_desc"
+      RESULT["$label"]=MISATTRIBUTED
       FAIL=$((FAIL+1))
-      grep -E '^(applied|PASS|FAIL|BASELINE|HARNESS)' <<<"$out" | sed 's/^/    /'
+      # `  |` lines included: half the harness's health claims print there and
+      # nowhere else, so a filter without them cannot show the line the verdict
+      # under it turned on. The NOT CAUGHT branch below had this and its two
+      # siblings did not -- the one-arm-corrected twin, again.
+      grep -E '^(applied|PASS|FAIL|BASELINE|HARNESS|  \|)' <<<"$out" | sed 's/^/    /'
       return
     fi
     # **A plant aimed at one check, that another check was supposed NOT to
@@ -288,14 +436,55 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
     # harness can see this", that is the claim. `green` asserts it, so an
     # isolation that used to be argued in a comment is now measured on every
     # run and cannot quietly stop being true.
-    if [ -n "$green" ] && ! grep -qF "PASS $green" <<<"$out"; then
+    #
+    # **A health CLAIM is a green line too.** `green` could only ever name a
+    # STAGE, because it matched `PASS <green>` -- and half of what this harness
+    # asserts is not a stage. Seven checks print `  | (checked) ...` beneath a
+    # stage that says PASS whether or not the claim under it held, so an
+    # isolation FROM one of those could not be written down at all. The plant
+    # that most needed it -- the probe isolation, whose whole point is that the
+    # verdict beside it must NOT see the mutation -- was left passing no green
+    # argument while its comment claimed the isolation had been measured, and
+    # `expect` is a substring match that scores CAUGHT either way. A `green`
+    # beginning with `(checked)` is matched against the claim line instead,
+    # which makes all seven claims usable as a neighbour that must stay quiet.
+    #
+    # **And a stage's `PASS` is not the stage's verdict.** `run.sh` prints
+    # `PASS scenario table` as soon as the generated script exits 0, and only
+    # THEN checks that the table reported how many scenarios it executed,
+    # printing `FAIL scenario table ran without reporting ...` underneath its
+    # own PASS. (It said "at line 165" until round 3, which was the `done` of
+    # the smoke loop by then -- the third stale line citation in this file, and
+    # the twin the round-2 sweep of the other two missed. Nothing here cites a
+    # line number any more; a check's own words do not move.) Three stages are
+    # built this way -- the scenario table, each revert, and the emergency
+    # rollback -- so `grep "PASS <stage>"` asserts that the stage's first
+    # command exited 0, not that the stage concluded green. Six plants carry
+    # `green "scenario table"` and would have reported "stayed green" for a
+    # stage that went red one line later: the same defect as the one this
+    # commit's parent fixed, in the older half of this same function. A stage
+    # green now requires its PASS AND the absence of any FAIL naming it.
+    local green_ok=1
+    if [ -n "$green" ]; then
+      case "$green" in
+        '(checked)'*)
+          grep -qxF "  | $green" <<<"$out" || green_ok=0
+          ;;
+        *)
+          grep -qF "PASS $green" <<<"$verdict_lines" || green_ok=0
+          ! grep -qF "FAIL $green" <<<"$verdict_lines" || green_ok=0
+          ;;
+      esac
+    fi
+    if [ "$green_ok" -ne 1 ]; then
       printf '%-52s BORROWED  <-- "%s" did not stay green\n' "$label" "$green"
+      RESULT["$label"]=BORROWED
       FAIL=$((FAIL+1))
-      grep -E '^(applied|PASS|FAIL|BASELINE|HARNESS)' <<<"$out" | sed 's/^/    /'
+      grep -E '^(applied|PASS|FAIL|BASELINE|HARNESS|  \|)' <<<"$out" | sed 's/^/    /'
       return
     fi
-    printf '%-52s CAUGHT%s%s\n' "$label" "${expect:+ (at $expect)}" \
-      "${green:+, $green stayed green}"; PASS=$((PASS+1))
+    printf '%-52s CAUGHT%s%s\n' "$label" "${expect:+ (at $expect_desc)}" \
+      "${green:+, $green stayed green}"; RESULT["$label"]=CAUGHT; PASS=$((PASS+1))
   else
     # **Print the transcript on a miss.** `out` was captured and never read --
     # a field parsed and left unread, in the tool whose whole output is the
@@ -303,7 +492,8 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
     # nothing about what the harness actually did, so the next step was always
     # to re-run by hand. The failing case is the one worth keeping the
     # transcript of; a catch needs no explanation.
-    printf '%-52s NOT CAUGHT  <-- the check is hollow\n' "$label"; FAIL=$((FAIL+1))
+    printf '%-52s NOT CAUGHT  <-- the check is hollow\n' "$label"
+    RESULT["$label"]="NOT CAUGHT"; FAIL=$((FAIL+1))
     echo "$out" | grep -E '^(applied|PASS|FAIL|BASELINE|HARNESS|  \|)' | sed 's/^/    /'
   fi
 }
@@ -619,10 +809,15 @@ plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M3" \
 # The revert's loss report is code like any other, and the harness plants a
 # future-dated retirement so it cannot pass by iterating zero rows. This proves
 # THAT check can fail: silence the report and the harness must go red.
+# `expect` names the CHECK, not the stage, for the same reason as its R3
+# siblings below: `FAIL revert 20260906000000` is also what a revert that failed
+# to APPLY prints, and then the loss report never ran at all -- so the bare
+# stage name would score this a catch for a run in which the thing it exists to
+# exercise was never reached.
 plant "R1 revert erases a future retirement silently" "$R1" \
   "    RAISE NOTICE 'LOSING future retirement: field % (%) org % closes % active=%'," \
   "    RAISE NOTICE 'considering a row: % % % % %'," \
-  "revert 20260906000000"
+  "revert 20260906000000: planted a future-dated retirement and the revert did not name it"
 
 # The same, for the revert that re-opens LIVE-1. It counts the
 # practice_assignments about to lose the foreign key protecting their field_id,
@@ -630,7 +825,7 @@ plant "R1 revert erases a future retirement silently" "$R1" \
 plant "R3 revert exposes dangling rows silently" "$R3" \
   "        'EXPOSING % practice_assignment(s) with a field_id: after this revert a field delete leaves them dangling'," \
   "        'considering % row(s)'," \
-  "revert 20260907000000"
+  "revert 20260907000000: planted a practice_assignment with a field_id and the revert did not count it"
 
 # **A revert that removes the RPC instead of restoring it.** Both of run.sh's
 # checks on the restored admin_retire_field used to PASS on this mutation: the
@@ -638,11 +833,17 @@ plant "R3 revert exposes dangling rows silently" "$R3" \
 # zero-row answer as "no longer calls the producer" and printed its green line
 # for a database with no retirement RPC at all. This is the positive control
 # for the fix -- a check that matches zero records must be a loud failure.
+#
+# **`expect` names the BRANCH, not the stage.** Three checks in this stage print
+# `FAIL revert 20260907000000...` and this mutation makes two of them fire (the
+# probe cannot resolve a function that is gone either), so the bare stage name
+# scored a catch without ever showing WHICH answer the verdict gave. Measured:
+# it reads GONE.
 plant "R3 revert drops the retirement RPC instead of restoring it" "$R3" \
   "DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);" \
   "DROP FUNCTION IF EXISTS public.admin_retire_field(uuid, uuid, date, boolean);
 DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);" \
-  "revert 20260907000000"
+  "revert 20260907000000: admin_retire_field after the revert reads GONE"
 
 # **One plant per health claim the harness prints.** The three `(checked)` lines
 # above had two plants between them, and the gap is how a probe that reported
@@ -650,10 +851,20 @@ DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);" \
 # class share no syntax, so no grep finds them, but the class is enumerable --
 # every line that prints `(checked)` is a claim, and a claim with no plant is a
 # claim nobody has tried to make fail. These two close the remaining gap.
+#
+# **SIX checks in this one stage print `FAIL revert 20260907000000...`**, so a
+# bare stage name as `expect` cannot say which of them a plant reached. Each is
+# named by its own line now, counted by command rather than by eye -- and it was
+# five until the round-2 fix for the probe's unchecked `cat` added a second
+# `FAIL revert <id> probe:` line. That made `probe` ambiguous between the probe
+# that RAN and the probe that could not be STAGED, which is the same
+# prefix-of-its-neighbour defect one level down, introduced by the commit that
+# was fixing a swallowed status. Both plants aimed at the probe carry `^` and
+# the whole line now; a substring cannot separate those two.
 plant "R3 revert reinstates the weaker guard silently" "$R3" \
   "  RAISE WARNING 'RESTORING admin_retire_field to its pre-20260907000000 body:" \
   "  RAISE NOTICE 'restoring a function, no consequences worth naming:" \
-  "revert 20260907000000"
+  "revert 20260907000000: restored the old admin_retire_field without naming what that costs"
 # **A restored body that calls something ELSE this revert drops.** A botched
 # revert that reinstated the new audit line -- `field_bookings_digest`, dropped
 # three statements later -- leaves a retirement raising 42883 on the next call,
@@ -666,7 +877,36 @@ plant "R3 revert reinstates the weaker guard silently" "$R3" \
 # Measured, not argued: with the plant applied, the harness printed BOTH
 # `FAIL ... reads STILL-CALLS-PRODUCER` and `FAIL ... does not resolve`. The
 # verdict now strips the digest name before looking for the producer, and the
-# probe's failure line carries `probe` so `expect` can name it alone.
+# `^` anchor on this plant's `expect` is what names the probe alone.
+#
+# **That last clause used to credit the WORD, and my own staging branch made it
+# false.** It read "the probe's failure line carries `probe` so `expect` can
+# name it alone", which was true when written and stopped being true in the
+# round-2 commit that added `FAIL revert <id> probe: the probe script could not
+# be staged`. Two lines share the `probe` prefix now, so the word distinguishes
+# nothing and a substring naming it is satisfied by a probe that was never
+# staged -- measured, not reasoned about: both plants aimed here scored CAUGHT
+# with the probe never run. The whole-line `^` form is what makes the attribution
+# exact, and the corresponding note in run.sh says the same thing from the other
+# side. A sentence crediting the wrong mechanism is the same defect as the wrong
+# impossibility this round removed: it tells the next reader to stop looking.
+#
+# **And the isolation is now ASSERTED rather than hand-measured.** That
+# re-measurement was a number in a report: nothing in the sweep would have
+# noticed it stopping being true, because `expect` is a substring match and this
+# plant passed no `green`, so it scored CAUGHT whether or not the verdict fired
+# beside it. Reproduced before it was fixed -- a variant of this mutation that
+# calls the PRODUCER rather than the digest makes both checks red, and the plant
+# as it stood still printed CAUGHT.
+#
+# **What this `green` does and does not defend**, stated exactly, because the
+# first version of this sentence claimed both directions and delivers one. It
+# catches the strip being REMOVED or NARROWED: the verdict starts seeing the
+# digest again, the claim never prints, and this reports BORROWED -- the pass-3
+# defect, watched by the run instead of by a report. It does NOT catch the strip
+# WIDENING: a strip that also removed `field_bookings_digest` would still leave
+# the claim green here and this plant scoring a catch. That direction belongs to
+# the plant below, and is measured there.
 plant "R3 the restored retire calls a helper the revert also drops" "$R3" \
   "            'affected_count', v_affected_count,
             'affected', v_affected
@@ -676,25 +916,309 @@ plant "R3 the restored retire calls a helper the revert also drops" "$R3" \
             'affected', public.field_bookings_digest(v_affected)
         );
     END IF;" \
-  "revert 20260907000000 probe"
+  "^revert 20260907000000 probe: the restored admin_retire_field does not resolve" \
+  "(checked) exactly one public.admin_retire_field survives the revert, and it no longer calls the dropped producer"
+
+# **The census counted claims, and a claim is not always one assertion.** All
+# seven `(checked)` lines had a plant and one of them was still half unprovable,
+# because the verdict under it decides between three failing branches and only
+# one of them was ever reached. The rule the next census wants: enumerate the
+# ways a claim can go RED, not the lines it prints when it does not.
+#
+# **So: the other half of that verdict's claim, which nothing had ever tried to
+# fail.** The verdict decides between three red answers and only one of them was
+# reachable by a plant: `GONE`, above. This is the second; the third is below.
+# `STILL-CALLS-PRODUCER` is the half the claim says out loud -- "it no longer
+# calls the dropped producer" -- and no plant reached it, because the digest
+# plant above is the only one that puts a `field_bookings` name back into the
+# restored body and the verdict strips that name before it looks. So a strip
+# widened to remove the PRODUCER's name too would let a revert that never
+# restored the enumerator read RESTORED with this sweep still printing every
+# plant caught.
+#
+# **Re-measured, because this PR's own probe fix invalidated the first
+# measurement.** That control read "with the strip widened to
+# `field_bookings[a-z_]*`, the harness exits 0 and this plant prints NOT
+# CAUGHT", and it was true when it was taken. It is not now: the probe drives a
+# confirmed retirement, and what a widened strip goes blind to is a LIVE
+# producer call in the path the probe executes. Executed again, against a run.sh
+# with the strip widened: `FAIL revert 20260907000000 probe: the restored
+# admin_retire_field does not resolve`, every other stage green, and this plant
+# printing `MISATTRIBUTED  <-- red, but not at substring "FAIL revert
+# 20260907000000: admin_retire_field after the revert reads
+# STILL-CALLS-PRODUCER"`.
+#
+# The control still proves what this plant is for, and proves it more exactly:
+# the probe says the restored body is BROKEN, and only the verdict says which
+# way. What it no longer proves is a hollow harness, because there no longer is
+# one. A measurement recorded in a comment is a measurement the code can move
+# under -- the second time in this PR that strengthening one check changed a
+# neighbour's recorded control, and the reason the census below reads results
+# rather than prose.
+#
+# There is a fourth answer, `QUERY-FAILED`, and it deliberately has no plant:
+# it comes from `psql_cmd` itself failing, which no mutation of a file this
+# sweep plants can cause. Saying so is the point -- an unplanted branch that is
+# unplantable has to be declared, not left looking like the three that were
+# simply never tried.
+#
+# Reproduced before it was written, by running the harness under each of the
+# four plants that mutate $R3 and reading the branch it printed: GONE once and
+# the green claim three times, never STILL-CALLS-PRODUCER. No plant on any other
+# file can reach it either -- the restored body is whatever $R3's CREATE OR
+# REPLACE says, so $R3's text is the verdict's only input.
+#
+# The mutation is the shape a half-finished revert actually takes: the refusal
+# path restored, the CONFIRMED path left on the new producer.
+#
+# **It carried a `green` naming the probe's claim, and the sweep took it away.**
+# When it was written the probe drove only a refusal, so this statement never
+# executed and the probe stayed green -- a genuine isolation, measured. Then the
+# finding above extended the probe to drive the confirmed path too, and a LIVE
+# producer call there is now something the probe executes and dies on: the sweep
+# reported BORROWED, correctly, because the claim it named no longer prints.
+# Both halves of that are this PR's own work, which is the interaction worth
+# recording -- strengthening one check can invalidate a neighbour's isolation,
+# and the mechanism said so on the first run rather than a review round later.
+#
+# So the isolation is not claimed. The probe is RIGHT to fail beside it: after
+# the revert the producer is gone, and a call to it anywhere the function
+# executes is a real break. `expect` names the branch, which only the verdict
+# prints, so attribution stays exact -- the same honest shape as the AMBIGUOUS
+# plant below. The verdict's unique value is unchanged and still proved: it
+# reads the SOURCE, so it is what names WHICH way the restored body is wrong.
+plant "R3 the restored retire still calls the dropped producer" "$R3" \
+  "        'affected', v_affected,
+        'field', to_jsonb(v_after)" \
+  "        'affected', (SELECT jsonb_agg(to_jsonb(b))
+                     FROM public.field_bookings(p_organization_id, p_field_id, p_effective_to) b),
+        'field', to_jsonb(v_after)" \
+  "revert 20260907000000: admin_retire_field after the revert reads STILL-CALLS-PRODUCER"
+
+# **The half of the probe's claim that no plant could reach, and the probe that
+# now reaches it.** The probe drove only the REFUSAL path, and the verdict
+# strips `field_bookings_digest` by design -- so a revert that restored the
+# refusal branch and left the CONFIRMED branch on the digest (before-audit,
+# UPDATE, after-audit, success RETURN) passed both checks with the harness
+# fully green, while raising 42883 on the first confirmed retirement anyone
+# ran. A broken revert scoring clean is the failure this whole stage exists to
+# make impossible, so it is closed by making the claim true rather than by
+# declaring it out of reach: the probe now runs a confirmed retirement too, and
+# this plant is what proves that half can fail. Measured both ways -- against
+# the refusal-only probe it scores NOT CAUGHT with the harness green, which is
+# the reproduction; against the two-half probe it is red at the probe with the
+# verdict's claim still printed.
+plant "R3 the restored retire's CONFIRMED path calls a dropped helper" "$R3" \
+  "            'affected_count', v_affected_count,
+            'after', to_jsonb(v_after)" \
+  "            'affected_count', v_affected_count,
+            'affected', public.field_bookings_digest(v_affected),
+            'after', to_jsonb(v_after)" \
+  "^revert 20260907000000 probe: the restored admin_retire_field does not resolve" \
+  "(checked) exactly one public.admin_retire_field survives the revert, and it no longer calls the dropped producer"
+
+# **And the third branch, for the same reason.** `AMBIGUOUS` is the other half
+# of "exactly one survives", and it was as unreached as STILL-CALLS-PRODUCER
+# was: `GONE` is what a revert that removes too much prints, and nothing tried a
+# revert that removes too LITTLE. This restores the function under a CHANGED
+# signature, so 20260907000000's own version is left standing beside the
+# restored one -- the unguarded-overload shape this migration exists to close,
+# in the revert rather than the migration.
+#
+# No `green` here, and the omission is the honest one: the surviving overload IS
+# the pre-revert body, which cannot resolve once the producer is dropped, so the
+# probe is RIGHT to fail beside it. `expect` names the branch, which only the
+# verdict prints, so the attribution is exact even though the isolation is not
+# available to be claimed.
+plant "R3 revert restores retire under a second signature" "$R3" \
+  "    p_confirm boolean DEFAULT false
+)
+RETURNS jsonb" \
+  "    p_confirm text DEFAULT 'false'
+)
+RETURNS jsonb" \
+  "revert 20260907000000: admin_retire_field after the revert reads AMBIGUOUS"
 
 # **The emergency rollback, back in the state 20260907000000 left it in.** It
 # dropped a signature that no longer exists, so the DROP was a silent no-op and
 # the script committed and reported success with the guarded delete still
 # standing -- the file someone runs at 2am, lying to them. Nothing executed it
 # until this round, which is why two review passes went by without noticing.
+#
+# **Both expects name their own check now, and one of them can only be named by
+# its whole line.** This stage prints four `FAIL emergency rollback
+# 20260504060000` lines and both plants carried the bare prefix, so a second
+# `admin_delete_field` overload -- which fires the precondition, `expected
+# exactly one admin_delete_field before it runs` -- would have scored BOTH of
+# them CAUGHT with neither named check running. That
+# is the stage-not-check defect fixed for the reverts in this PR's parent,
+# unapplied one stage along: the twin, again, in the round that was about twins.
+#
+# Measured rather than written by eye, and the measurement corrected a guess:
+# removing the three-argument DROP does not leave a survivor for the survivor
+# check -- `N admin facility RPC(s) survived a rollback that reported success`
+# -- to find, because the rollback script's own by-name guard raises first and
+# the stage prints nothing but its bare line. Hence `^`.
+#
+# **Named by their words rather than by `run.sh:406` and `run.sh:419`.** Those
+# two references were correct when written and were stale fifteen lines later,
+# by exactly the fifteen lines this PR added above them -- both then pointed at
+# unrelated code. A line number in a comment is a reference that rots silently;
+# the check's own text does not.
 plant "EMERG rollback drops a signature that no longer exists" "$EMERG" \
   "DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid);
 DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);" \
   "DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid);" \
-  "emergency rollback 20260504060000"
+  "^emergency rollback 20260504060000"
 # The other direction: a rollback that over-reaches and takes the producer
 # `admin_retire_field` still needs, breaking a function it does not own.
+# This one the stage can name in its own words, and its transcript showed an
+# isolation available for nothing: the rollback still removes all four RPCs, so
+# the claim above it stays green while only the producer check goes red.
 plant "EMERG rollback takes the producer another RPC still calls" "$EMERG" \
   "DROP FUNCTION IF EXISTS public.admin_create_location(uuid, text, text, boolean);" \
   "DROP FUNCTION IF EXISTS public.admin_create_location(uuid, text, text, boolean);
 DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date) CASCADE;" \
-  "emergency rollback 20260504060000"
+  "emergency rollback 20260504060000: it dropped public.field_bookings, breaking admin_retire_field" \
+  "(checked) the rollback removed every overload of all four admin facility RPCs"
+
+# **The one claim in this harness that no plant had ever reached.**
+#
+# `(checked) the rollback removed every overload of all four admin facility
+# RPCs` is claim 6 of 7, and its RED branch -- `N admin facility RPC(s) survived
+# a rollback that reported success` -- had nothing aimed at it. Not because it
+# is unreachable: it is gated behind the rollback script's OWN by-name guard,
+# which raises on any mutation that leaves an RPC standing, so the stage fails
+# at its bare line and this branch is never evaluated. Every EMERG plant tried
+# so far stopped there. So the census this PR wrote -- "all seven claims have a
+# plant" -- was false, and the branch was neither planted nor declared
+# unplantable, which is the state the QUERY-FAILED declaration exists to keep
+# things out of.
+#
+# Reaching it means defeating that guard in the SAME edit, and the shape that
+# does is the realistic one: the script stops dropping an RPC and its own guard
+# stops looking for it, so it commits and reports success with an admin RPC
+# still callable. That is the whole reason run.sh names the four independently
+# of the script rather than trusting the guard -- and this is what proves the
+# independent census is not redundant.
+#
+# `green` names the claim beside it, which is untouched: the producer survives
+# either way, so an isolation is genuinely available here and is asserted.
+plant "EMERG the rollback and its own guard drift together" "$EMERG" \
+  "DROP FUNCTION IF EXISTS public.admin_create_location(uuid, text, text, boolean);
+
+-- Every overload, by NAME rather than by signature: a rollback that reports
+-- success must have removed the thing it names, and only a name survives a
+-- signature change.
+DO \$rollback_check\$
+DECLARE
+    v_left text;
+BEGIN
+    SELECT string_agg(n.nspname || '.' || p.proname || '(' ||
+                      pg_get_function_identity_arguments(p.oid) || ')', ', ' ORDER BY p.proname)
+      INTO v_left
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.proname IN ('admin_delete_field', 'admin_update_field',
+                         'admin_create_field', 'admin_create_location');" \
+  "-- admin_create_location is left standing, and the guard below stops naming it
+
+DO \$rollback_check\$
+DECLARE
+    v_left text;
+BEGIN
+    SELECT string_agg(n.nspname || '.' || p.proname || '(' ||
+                      pg_get_function_identity_arguments(p.oid) || ')', ', ' ORDER BY p.proname)
+      INTO v_left
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.proname IN ('admin_delete_field', 'admin_update_field',
+                         'admin_create_field');" \
+  "emergency rollback 20260504060000: 1 admin facility RPC(s) survived a rollback that reported success" \
+  "(checked) it left public.field_bookings standing, which admin_retire_field still calls"
+
+# ---------------------------------------------------------------------------
+# The census, executed rather than counted by eye
+# ---------------------------------------------------------------------------
+#
+# **"All seven claims have a plant" was a sentence in a comment, and it was
+# false.** Claim 6 had none, and nothing in the run said so -- the sweep printed
+# every plant caught and exited 0 with a health claim nobody had ever tried to
+# make fail. That is the same falsely perfect result this whole file exists to
+# stop, one level up: a census that cannot fail is not a census.
+#
+# So it runs. The UNIVERSE comes from the BASELINE transcript -- a claim is a
+# claim because the green harness PRINTED it -- and not from this file, because
+# a set derived from the thing being checked compares a set against itself. Add
+# a claim to run.sh and this fails on its first run rather than on the round
+# someone re-counts. The COVERAGE comes from the table below, and it is checked
+# against THIS RUN's results: a prover that has stopped catching its defect
+# fails the census exactly as loudly as a claim with no prover at all.
+#
+# The only branch deliberately without a prover is still QUERY-FAILED, argued
+# where it lives: it comes from `psql_cmd` itself failing, which no mutation of
+# a file this sweep plants can cause. Claim 4's other three branches are named
+# here, all three, because the rule that finding taught is to enumerate the ways
+# a claim can go RED rather than the lines it prints when it does not.
+declare -A CLAIM_PROVER=(
+  ["(checked) the revert named the retirement it was about to erase"]="R1 revert erases a future retirement silently"
+  ["(checked) the revert counted the practice assignment it was about to expose"]="R3 revert exposes dangling rows silently"
+  ["(checked) the revert named the retirement guard it was putting back"]="R3 revert reinstates the weaker guard silently"
+  ["(checked) exactly one public.admin_retire_field survives the revert, and it no longer calls the dropped producer"]="R3 revert drops the retirement RPC instead of restoring it|R3 the restored retire still calls the dropped producer|R3 revert restores retire under a second signature"
+  ["(checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"]="R3 the restored retire calls a helper the revert also drops|R3 the restored retire's CONFIRMED path calls a dropped helper"
+  ["(checked) the rollback removed every overload of all four admin facility RPCs"]="EMERG the rollback and its own guard drift together"
+  ["(checked) it left public.field_bookings standing, which admin_retire_field still calls"]="EMERG rollback takes the producer another RPC still calls"
+)
+
+echo
+census_ok=1
+declare -A CLAIM_SEEN=()
+# Whole-line, for the reason the `green` matcher is: `  | NOTICE:  ...` carries
+# the same prefix, and a NOTICE is something a plant writes.
+while IFS= read -r claim; do
+  [ -n "$claim" ] || continue
+  CLAIM_SEEN["$claim"]=1
+  if [ -z "${CLAIM_PROVER[$claim]+x}" ]; then
+    echo "CENSUS FAIL: run.sh prints a health claim no plant is declared for:"
+    echo "    $claim"
+    census_ok=0
+    continue
+  fi
+  IFS='|' read -r -a provers <<<"${CLAIM_PROVER[$claim]}"
+  for prover in "${provers[@]}"; do
+    if [ "${RESULT[$prover]:-}" != "CAUGHT" ]; then
+      echo "CENSUS FAIL: the claim"
+      echo "    $claim"
+      echo "  is declared proved by the plant \"$prover\", which this run scored ${RESULT[$prover]:-NOT AT ALL}"
+      census_ok=0
+    fi
+  done
+done < <(sed -n 's/^  | \((checked) .*\)$/\1/p' /tmp/harness_baseline_out)
+
+# The other direction: a claim that was renamed or removed leaves its entry here
+# naming nothing, and an entry nobody checks is the unread field this project
+# keeps finding. A stale key is a failure, not a tidy-up.
+for claim in "${!CLAIM_PROVER[@]}"; do
+  if [ -z "${CLAIM_SEEN[$claim]+x}" ]; then
+    echo "CENSUS FAIL: a plant is declared for a claim the green harness never printed:"
+    echo "    $claim"
+    census_ok=0
+  fi
+done
+
+# And the meta-assertion, because every assertion above passes vacuously over an
+# empty universe: a baseline transcript with no claim lines in it would report a
+# clean census having examined nothing.
+if [ "${#CLAIM_SEEN[@]}" -eq 0 ]; then
+  echo "CENSUS FAIL: the baseline transcript carries no (checked) claim line at all"
+  census_ok=0
+fi
+
+if [ "$census_ok" -eq 1 ]; then
+  echo "census: ${#CLAIM_SEEN[@]} health claims, each with a plant that reached one of its red branches in this run"
+fi
 
 # **Three numbers, not one.** A single "N caught" cannot tell a genuine catch
 # from a plant that never applied: last round seven mutations reported RED and
@@ -705,3 +1229,6 @@ DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date) CASCADE;" \
 echo
 echo "attempted $ATTEMPTED, anchor-miss $MISS (meaningless), caught $PASS, not caught $((FAIL-MISS))"
 [ "$FAIL" -eq 0 ] || exit 1
+# Kept out of $FAIL so the three numbers stay a count of PLANTS, and a separate
+# exit so a census failure cannot be read as a plant that went uncaught.
+[ "$census_ok" -eq 1 ] || exit 1

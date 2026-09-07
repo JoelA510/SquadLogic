@@ -60,9 +60,34 @@ psql_file() {
 }
 psql_cmd() { as_pg "psql -v ON_ERROR_STOP=1 -h ~/sock -U postgres -d $DB -tAc \"$1\""; }
 
+# **Every dump of psql's own output is INDENTED, and that is load-bearing.**
+#
+# `prove.sh` decides which check a plant reached by reading this transcript, and
+# it matches only the shapes THIS script's `echo`s produce: a verdict line
+# beginning `PASS `/`FAIL ` in column 0, and a health claim that is
+# `  | (checked) ...` entire. Raw psql output printed at column 0 defeats both,
+# because the message is something a plant WRITES: a multi-line `RAISE` emits
+# its continuation lines verbatim and unprefixed, so a mutation raising
+# `E'...\nFAIL scenario table\n  | (checked) ...'` put both shapes into the
+# transcript itself. Measured before it was closed -- one such plant scored
+# `CAUGHT (at substring "FAIL scenario table")` with the scenario table PASSING,
+# and its twin scored a claim "stayed green" that the run never printed.
+#
+# Indenting removes the whole class rather than one instance: no amount of
+# plant-authored text can reach column 0, or reduce `      | ` to `  | `, once
+# every byte of it is pushed four columns right.
+#
+# The NOTICE passthrough solved this at the start by prefixing `  | `. Eleven
+# `tail` dumps had not adopted it -- the correction on one arm of a pair, in the
+# round after the one about pairs. One function now, so a twelfth cannot forget,
+# and the argument lives in one place instead of eleven.
+dump() { # lines file
+  tail -n "$1" "$2" | sed 's/^/    /'
+}
+
 fresh_db() {
   if ! as_pg "psql -h ~/sock -U postgres -q -c 'DROP DATABASE IF EXISTS $DB' -c 'CREATE DATABASE $DB'" >/tmp/harness_freshdb 2>&1; then
-    echo "FAIL creating a fresh database"; tail -10 /tmp/harness_freshdb; return 1
+    echo "FAIL creating a fresh database"; dump 10 /tmp/harness_freshdb; return 1
   fi
   # **The prelude's exit status was thrown away.** `psql_file ... >/dev/null`
   # discarded both the output and, because nothing tested `$?`, the failure --
@@ -71,24 +96,46 @@ fresh_db() {
   # fail: a deliberately broken prelude produced BASELINE GREEN and fifteen
   # meaningless CAUGHTs. The gate was right; what it stood on was not.
   if ! psql_file "$REPO/scripts/dbharness/prelude.sql" >/tmp/harness_prelude 2>&1; then
-    echo "FAIL applying the prelude"; tail -20 /tmp/harness_prelude; return 1
+    echo "FAIL applying the prelude"; dump 20 /tmp/harness_prelude; return 1
   fi
 }
 
+# `apply_all [stop-after-id]` -- the whole migration set, or the set truncated
+# after the migration whose basename begins with that id.
+#
+# **It was three copies of this loop and only ONE of them counted.** The revert
+# stage and the emergency-rollback stage each built a database with their own
+# open-coded copy, neither of which carried the meta-assertion below -- so a
+# glob that matched nothing, or a migration directory that had moved, built an
+# EMPTY database and every revert and rollback check below then passed against
+# it. The correction applied to one arm of a pair and not its twin is the defect
+# this whole series keeps finding, so there is now one arm: a caller that wants
+# a truncated build passes the id it wants to stop at, and gets the same count
+# gate the full build has always had.
 apply_all() {
-  local applied=0
+  local stop="${1:-}" applied=0 reached=0
   for m in "$REPO"/supabase/migrations/*.sql; do
     if ! psql_file "$m" >/tmp/harness_err 2>&1; then
       echo "FAIL applying $(basename "$m")"
-      tail -20 /tmp/harness_err
+      dump 20 /tmp/harness_err
       return 1
     fi
     applied=$((applied + 1))
+    if [ -n "$stop" ] && [[ "$(basename "$m")" == ${stop}* ]]; then reached=1; break; fi
   done
-  echo "applied $applied migrations"
+  echo "applied $applied migrations${stop:+ up to $stop}"
   # Meta-assertion: a loop that applied nothing would print "applied 0" and
   # every check below would pass against an empty database.
   if [ "$applied" -lt 100 ]; then echo "FAIL: only $applied migrations applied"; return 1; fi
+  # Its twin, for the truncated form: a loop that ran off the end without ever
+  # meeting its stop id built the database to HEAD, and the revert then checked
+  # against it is a revert checked against a state nobody asked for. A renamed
+  # or removed migration is exactly how that happens, and it would have been
+  # invisible -- the build succeeds, every check runs, and the stage says PASS.
+  if [ -n "$stop" ] && [ "$reached" -ne 1 ]; then
+    echo "FAIL: the migration set contains no ${stop}*, so the build never stopped at it"
+    return 1
+  fi
 }
 
 # pg_cron is not in this image and one migration requires it. A STUB extension
@@ -138,7 +185,7 @@ for id in "${NEW_MIGRATIONS[@]}"; do
     grep -E '^(psql:[^ ]+ )?(NOTICE|WARNING):' /tmp/harness_smoke |
       sed -E 's/^psql:[^ ]+ //; s/^/  | /' || true
   else
-    echo "FAIL smoke ${id}"; tail -15 /tmp/harness_smoke; STATUS=1
+    echo "FAIL smoke ${id}"; dump 15 /tmp/harness_smoke; STATUS=1
   fi
 done
 
@@ -158,7 +205,7 @@ echo "=== shared scenario table, against Postgres ==="
 # that guard was fine and this path went round it.
 rm -f /tmp/harness_scenarios.sql
 if ! python3 "$REPO/scripts/dbharness/scenarios.py" > /tmp/harness_scenarios.sql 2>/tmp/harness_scen_gen; then
-  echo "FAIL generating the scenario script"; tail -10 /tmp/harness_scen_gen; STATUS=1
+  echo "FAIL generating the scenario script"; dump 10 /tmp/harness_scen_gen; STATUS=1
 elif [ ! -s /tmp/harness_scenarios.sql ]; then
   echo "FAIL the scenario generator produced an empty script"; STATUS=1
 elif psql_file /tmp/harness_scenarios.sql >/tmp/harness_scen_out 2>&1; then
@@ -170,7 +217,7 @@ elif psql_file /tmp/harness_scenarios.sql >/tmp/harness_scen_out 2>&1; then
   fi
   grep -E '^(psql:[^ ]+ )?NOTICE:' /tmp/harness_scen_out | sed -E 's/^psql:[^ ]+ //; s/^/  | /' || true
 else
-  echo "FAIL scenario table"; tail -15 /tmp/harness_scen_out; STATUS=1
+  echo "FAIL scenario table"; dump 15 /tmp/harness_scen_out; STATUS=1
 fi
 
 echo "=== reverts (each applied on a database built up to its own migration) ==="
@@ -182,12 +229,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # database migrated up to and including its own forward migration.
 for id in "${NEW_MIGRATIONS[@]}"; do
   if ! fresh_db; then echo "FAIL building a fresh database for ${id}"; STATUS=1; continue; fi
-  ok=1
-  for m in "$REPO"/supabase/migrations/*.sql; do
-    psql_file "$m" >/tmp/harness_err 2>&1 || { ok=0; break; }
-    [[ "$(basename "$m")" == ${id}* ]] && break
-  done
-  if [ "$ok" -eq 0 ]; then echo "FAIL building up to ${id}"; STATUS=1; continue; fi
+  if ! apply_all "$id"; then echo "FAIL building up to ${id}"; STATUS=1; continue; fi
 
   # **Give the revert something to lose.** 20260906000000's revert now names
   # every future-dated retirement before it drops the column that records them,
@@ -204,8 +246,18 @@ for id in "${NEW_MIGRATIONS[@]}"; do
   # parses. A row that IS about to be exposed is planted, and the warning is
   # then required. practice_assignments.team_id is NOT NULL and references
   # teams, so the plant needs the season/division/team chain behind it.
+  #
+  # **Both seeds threw `psql_cmd`'s status away, and a seed that never landed
+  # reads exactly like a revert that ignored it.** A column renamed by a later
+  # migration, a constraint added, the chain reordered -- any of those left the
+  # table empty, and the check below then printed "the revert did not count it"
+  # for a revert that had nothing to count. `prove.sh` scores that FAIL as a
+  # CAUGHT, so the harness would have been MANUFACTURING evidence for a check
+  # that never ran, which is worse than having no check at all. A failed seed
+  # now fails the stage in its own words and skips the checks it would have
+  # made meaningless.
   if [ "$id" = "20260907000000" ]; then
-    psql_cmd "INSERT INTO public.organizations (id, name, slug)
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug)
               VALUES ('33333333-3333-3333-3333-333333333333','Expose Org','expose-org');
               INSERT INTO public.locations (id, organization_id, name)
               VALUES ('44444444-4444-4444-4444-444444444444','33333333-3333-3333-3333-333333333333','Expose Park');
@@ -218,16 +270,24 @@ for id in "${NEW_MIGRATIONS[@]}"; do
               INSERT INTO public.teams (id, organization_id, division_id, name)
               VALUES ('88888888-8888-8888-8888-888888888888','33333333-3333-3333-3333-333333333333','77777777-7777-7777-7777-777777777777','Expose Team');
               INSERT INTO public.practice_assignments (organization_id, team_id, field_id)
-              VALUES ('33333333-3333-3333-3333-333333333333','88888888-8888-8888-8888-888888888888','55555555-5555-5555-5555-555555555555');" >/dev/null
+              VALUES ('33333333-3333-3333-3333-333333333333','88888888-8888-8888-8888-888888888888','55555555-5555-5555-5555-555555555555');" \
+         >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the practice_assignment the revert check requires was never inserted"
+      dump 10 /tmp/harness_seed; STATUS=1; continue
+    fi
   fi
 
   if [ "$id" = "20260906000000" ]; then
-    psql_cmd "INSERT INTO public.organizations (id, name, slug)
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug)
               VALUES ('11111111-1111-1111-1111-111111111111','Revert Org','revert-org');
               INSERT INTO public.locations (id, organization_id, name)
               VALUES ('22222222-2222-2222-2222-222222222222','11111111-1111-1111-1111-111111111111','Revert Park');
               INSERT INTO public.fields (organization_id, location_id, name, active, effective_to)
-              VALUES ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222','Closing Soon', true, current_date + 30);" >/dev/null
+              VALUES ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222','Closing Soon', true, current_date + 30);" \
+         >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the future-dated retirement the revert check requires was never inserted"
+      dump 10 /tmp/harness_seed; STATUS=1; continue
+    fi
   fi
 
   if psql_file "$REPO/docs/sql/${id}_revert.sql" >/tmp/harness_rev 2>&1; then
@@ -314,7 +374,14 @@ for id in "${NEW_MIGRATIONS[@]}"; do
       # same prelude the scenario generator uses -- and requires the call to run
       # all the way to a decision. `field_bookings` is dropped by this revert, so
       # a retire still calling it raises 42883 here and the harness goes red.
-      cat >/tmp/harness_rev_probe.sql <<'PROBE'
+      #
+      # **Staged with an unchecked `cat`, to a path reused across runs.** A
+      # write that failed left the PREVIOUS run's probe on disk and psql ran
+      # that one -- the identical stale-staging shape `psql_file` was fixed for
+      # last round, on the one call site that does its own staging. Removed
+      # first so a failed write leaves nothing to run, and the write is checked.
+      rm -f /tmp/harness_rev_probe.sql
+      if ! cat >/tmp/harness_rev_probe.sql <<'PROBE'
 DO $probe$
 DECLARE
     v_org uuid; v_loc uuid; v_field uuid; v_user uuid := gen_random_uuid();
@@ -350,25 +417,49 @@ BEGIN
     END IF;
     RAISE NOTICE 'RESOLVED: the restored admin_retire_field enumerated % booking(s) and refused',
         v_res->>'affected_count';
+
+    -- **And the CONFIRMED path, which the refusal above never reaches.** A
+    -- revert that restored the refusal branch but left the confirmed branch on
+    -- `field_bookings_digest` -- the before-audit, the UPDATE, the after-audit,
+    -- the success RETURN -- passed every check here while raising 42883 on the
+    -- first confirmed retirement anyone ran: the `pg_proc` verdict strips the
+    -- digest name by design, and a probe that only ever refuses never executes
+    -- those statements. A broken revert scoring clean is the exact failure this
+    -- stage exists to make impossible, so the probe drives both halves.
+    v_res := public.admin_retire_field(v_org, v_field, current_date + 10, true);
+    IF v_res IS NULL OR (v_res->>'retired')::boolean IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'UNRESOLVED: the restored admin_retire_field did not complete a confirmed retirement: %', v_res;
+    END IF;
+    RAISE NOTICE 'RESOLVED: the restored admin_retire_field also ran its confirmed path to completion';
+
     DELETE FROM public.organizations WHERE id = v_org;
     DELETE FROM auth.users WHERE id = v_user;
 END
 $probe$;
 PROBE
-      # The failure line carries `probe` so `prove.sh`'s `expect` can name THIS
-      # check rather than the stage: both this and the verdict above print
-      # `FAIL revert 20260907000000...`, and a substring match cannot tell two
-      # checks apart when one is a prefix of the other's line.
-      if psql_file /tmp/harness_rev_probe.sql >/tmp/harness_rev_probe 2>&1; then
-        echo "  | (checked) the restored admin_retire_field resolves and runs its own body"
+      then
+        echo "FAIL revert ${id} probe: the probe script could not be staged"
+        STATUS=1
+      # **`probe` is no longer enough to name this check, and the commit that
+      # made that true said the opposite here.** This comment used to read "the
+      # failure line carries `probe` so `prove.sh`'s `expect` can name THIS
+      # check rather than the stage" -- and then the staging branch directly
+      # above it added a SECOND line beginning `FAIL revert <id> probe:`, in the
+      # same commit, leaving the assertion describing the state it had just
+      # ended. Six lines in this stage now begin `FAIL revert 20260907000000`.
+      # Both plants aimed here carry `^` and the whole line, which is the only
+      # form that separates the probe that RAN from the probe that could not be
+      # staged.
+      elif psql_file /tmp/harness_rev_probe.sql >/tmp/harness_rev_probe 2>&1; then
+        echo "  | (checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"
       else
         echo "FAIL revert ${id} probe: the restored admin_retire_field does not resolve"
-        tail -5 /tmp/harness_rev_probe
+        dump 5 /tmp/harness_rev_probe
         STATUS=1
       fi
     fi
   else
-    echo "FAIL revert ${id}"; tail -10 /tmp/harness_rev; STATUS=1
+    echo "FAIL revert ${id}"; dump 10 /tmp/harness_rev; STATUS=1
   fi
 done
 
@@ -390,12 +481,8 @@ echo "=== emergency rollback docs/sql/reverts/20260504060000 (on a database buil
 if ! fresh_db; then
   echo "FAIL building a fresh database for the emergency rollback"; STATUS=1
 else
-  ok=1
-  for m in "$REPO"/supabase/migrations/*.sql; do
-    psql_file "$m" >/tmp/harness_err 2>&1 || { ok=0; break; }
-  done
-  if [ "$ok" -eq 0 ]; then
-    echo "FAIL building to head for the emergency rollback"; tail -5 /tmp/harness_err; STATUS=1
+  if ! apply_all; then
+    echo "FAIL building to head for the emergency rollback"; STATUS=1
   else
     # The precondition, asserted rather than assumed: if the guarded delete were
     # already absent the rollback would have nothing to remove and would pass
@@ -430,7 +517,7 @@ else
         STATUS=1
       fi
     else
-      echo "FAIL emergency rollback 20260504060000"; tail -10 /tmp/harness_emerg; STATUS=1
+      echo "FAIL emergency rollback 20260504060000"; dump 10 /tmp/harness_emerg; STATUS=1
     fi
   fi
 fi

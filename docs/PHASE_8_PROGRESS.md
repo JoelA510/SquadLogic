@@ -1437,20 +1437,28 @@ Two further divergences came out of the controls rather than out of reading:
 - Harness: **HARNESS OK** — 108 migrations, 4 smokes, 42 scenarios, 4 reverts,
   emergency rollback. The new smoke is behavioural: it calls the function on
   three staged rows, including a cross-org decoy, and replays the refused one.
-- `prove:mock`: **38 / 0 / 38** (was 30/0/30). `prove`: 41 → **53 plants**, with
-  3 new census claims, each naming a distinct red branch of its verdict
-  (`GONE`, `AMBIGUOUS`, `STILL-GUARDED`).
+- `prove`: **54 / 0 / 54**, census **10** health claims all proved (was 41/0/41
+  and 7 claims). `prove:mock`: **40 / 0 / 40** (was 30/0/30). Thirteen of the new
+  plants are LIVE-2's; the three aimed at the revert's verdict name a distinct
+  red branch each — `GONE`, `AMBIGUOUS:2`, `STILL-GUARDED` — because R3's lesson
+  was that a claim with one reachable branch is a claim two-thirds untested.
 - pgTAP, run against **real pgTAP 1.3.2** on a locally built PostgreSQL rather
   than read: **21/21** and **15/15**. Two defects in the new file surfaced only
   by executing it — a direct `INSERT` into `public.fields` that RLS refuses for
   the `authenticated` role, and an assertion that added an RPC result to a table
   count in one expression, where SQL does not promise which subquery runs first.
-- Tests **2809 → 2818** (179 files), counted by running the suite. Main entry
-  134.52 → **135.03 KB gz**, measured against `origin/main` built in a worktree.
-- `/code-review` at high before opening: **eight findings, all real, all fixed
-  in the same PR**. Two were the one-arm-not-its-twin shape again — the direct
-  apply path never reported refusals, and the mock kept a stale refusal on a
-  replayed row after the SQL stopped.
+- Tests **2809 → 2819** (181 files), counted by running the suite. Main entry
+  134.52 → **135.05 KB gz**, measured against `origin/main` built in a worktree.
+- `/code-review` at high, **twice**: eight findings before opening, then four
+  more on the fixes themselves. All twelve real, all fixed in this PR. Three
+  were the one-arm-not-its-twin shape again — the direct apply path never
+  reported refusals, the mock kept a stale refusal on a replayed row after the
+  SQL stopped, and the mock overwrote `processed_rows` where the SQL
+  accumulates. **Reviewing the fixes was worth as much as the first pass**: two
+  of the second round's four findings were defects the first round's own fixes
+  had introduced.
+- CI green on the merged head, including `Run pgTAP against local Supabase` —
+  the job that runs the new suite in the environment it was written for.
 
 ### Two process notes, both about the harness rather than the fix
 

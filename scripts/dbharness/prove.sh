@@ -372,17 +372,28 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
   #
   # Both now match only the shape `run.sh`'s own `echo`s produce: a verdict line
   # starts with `PASS `/`FAIL ` in column 0, and a claim line IS
-  # `  | (checked) ...` entire. Passthrough keeps psql's `NOTICE:`/`WARNING:`
-  # label after the prefix, and a `tail` dump keeps psql's `psql:file:line:`
-  # one, so neither can satisfy either match now. Constructed both ways before
-  # being believed; the controls are in the commit message.
+  # `  | (checked) ...` entire. Constructed both ways before being believed; the
+  # controls are in the commit messages.
   #
-  # **The residual, stated rather than left implied.** A multi-line RAISE whose
-  # CONTINUATION line reproduces a checker line byte for byte arrives in a
-  # `tail` dump unlabelled, and would still match. Nothing distinguishes that
-  # from the real line inside one text stream; closing it needs run.sh to
-  # report its verdicts on a channel psql cannot write to, which is a larger
-  # change than this round and not one any plant here needs.
+  # **The comment here used to declare a residual UNCLOSABLE, and it was wrong
+  # in both halves.** It read: a multi-line RAISE whose continuation line
+  # reproduces a checker line byte for byte arrives in a `tail` dump unlabelled
+  # and would still match, and closing that "needs run.sh to report its verdicts
+  # on a channel psql cannot write to". The first half was true and worse than
+  # stated -- it was a live forge, measured: a mutation raising
+  # `E'...\nFAIL scenario table\n  | (checked) ...'` scored `CAUGHT (at
+  # substring "FAIL scenario table")` with the scenario table PASSING, and its
+  # twin scored a claim "stayed green" the run never printed.
+  #
+  # The second half was false, and the disproof was one function away in the
+  # file it was written about: `run.sh`'s NOTICE passthrough has always indented
+  # what psql says, and its eleven `tail` dumps had not. They do now, through
+  # one `dump` helper, and no plant-authored byte can reach column 0 or shrink
+  # `      | ` back to `  | `. Both forgeries above are rejected -- MISATTRIBUTED
+  # and BORROWED -- against the same mutation that produced them.
+  #
+  # An impossibility asserted in a comment that a neighbouring function
+  # disproves is worse than no comment: it stops the next reader looking.
   local verdict_lines
   verdict_lines="$(grep -E '^(PASS|FAIL) ' <<<"$out")"
   #

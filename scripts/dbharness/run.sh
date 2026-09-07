@@ -60,9 +60,34 @@ psql_file() {
 }
 psql_cmd() { as_pg "psql -v ON_ERROR_STOP=1 -h ~/sock -U postgres -d $DB -tAc \"$1\""; }
 
+# **Every dump of psql's own output is INDENTED, and that is load-bearing.**
+#
+# `prove.sh` decides which check a plant reached by reading this transcript, and
+# it matches only the shapes THIS script's `echo`s produce: a verdict line
+# beginning `PASS `/`FAIL ` in column 0, and a health claim that is
+# `  | (checked) ...` entire. Raw psql output printed at column 0 defeats both,
+# because the message is something a plant WRITES: a multi-line `RAISE` emits
+# its continuation lines verbatim and unprefixed, so a mutation raising
+# `E'...\nFAIL scenario table\n  | (checked) ...'` put both shapes into the
+# transcript itself. Measured before it was closed -- one such plant scored
+# `CAUGHT (at substring "FAIL scenario table")` with the scenario table PASSING,
+# and its twin scored a claim "stayed green" that the run never printed.
+#
+# Indenting removes the whole class rather than one instance: no amount of
+# plant-authored text can reach column 0, or reduce `      | ` to `  | `, once
+# every byte of it is pushed four columns right.
+#
+# The NOTICE passthrough solved this at the start by prefixing `  | `. Eleven
+# `tail` dumps had not adopted it -- the correction on one arm of a pair, in the
+# round after the one about pairs. One function now, so a twelfth cannot forget,
+# and the argument lives in one place instead of eleven.
+dump() { # lines file
+  tail -n "$1" "$2" | sed 's/^/    /'
+}
+
 fresh_db() {
   if ! as_pg "psql -h ~/sock -U postgres -q -c 'DROP DATABASE IF EXISTS $DB' -c 'CREATE DATABASE $DB'" >/tmp/harness_freshdb 2>&1; then
-    echo "FAIL creating a fresh database"; tail -10 /tmp/harness_freshdb; return 1
+    echo "FAIL creating a fresh database"; dump 10 /tmp/harness_freshdb; return 1
   fi
   # **The prelude's exit status was thrown away.** `psql_file ... >/dev/null`
   # discarded both the output and, because nothing tested `$?`, the failure --
@@ -71,7 +96,7 @@ fresh_db() {
   # fail: a deliberately broken prelude produced BASELINE GREEN and fifteen
   # meaningless CAUGHTs. The gate was right; what it stood on was not.
   if ! psql_file "$REPO/scripts/dbharness/prelude.sql" >/tmp/harness_prelude 2>&1; then
-    echo "FAIL applying the prelude"; tail -20 /tmp/harness_prelude; return 1
+    echo "FAIL applying the prelude"; dump 20 /tmp/harness_prelude; return 1
   fi
 }
 
@@ -92,7 +117,7 @@ apply_all() {
   for m in "$REPO"/supabase/migrations/*.sql; do
     if ! psql_file "$m" >/tmp/harness_err 2>&1; then
       echo "FAIL applying $(basename "$m")"
-      tail -20 /tmp/harness_err
+      dump 20 /tmp/harness_err
       return 1
     fi
     applied=$((applied + 1))
@@ -160,7 +185,7 @@ for id in "${NEW_MIGRATIONS[@]}"; do
     grep -E '^(psql:[^ ]+ )?(NOTICE|WARNING):' /tmp/harness_smoke |
       sed -E 's/^psql:[^ ]+ //; s/^/  | /' || true
   else
-    echo "FAIL smoke ${id}"; tail -15 /tmp/harness_smoke; STATUS=1
+    echo "FAIL smoke ${id}"; dump 15 /tmp/harness_smoke; STATUS=1
   fi
 done
 
@@ -180,7 +205,7 @@ echo "=== shared scenario table, against Postgres ==="
 # that guard was fine and this path went round it.
 rm -f /tmp/harness_scenarios.sql
 if ! python3 "$REPO/scripts/dbharness/scenarios.py" > /tmp/harness_scenarios.sql 2>/tmp/harness_scen_gen; then
-  echo "FAIL generating the scenario script"; tail -10 /tmp/harness_scen_gen; STATUS=1
+  echo "FAIL generating the scenario script"; dump 10 /tmp/harness_scen_gen; STATUS=1
 elif [ ! -s /tmp/harness_scenarios.sql ]; then
   echo "FAIL the scenario generator produced an empty script"; STATUS=1
 elif psql_file /tmp/harness_scenarios.sql >/tmp/harness_scen_out 2>&1; then
@@ -192,7 +217,7 @@ elif psql_file /tmp/harness_scenarios.sql >/tmp/harness_scen_out 2>&1; then
   fi
   grep -E '^(psql:[^ ]+ )?NOTICE:' /tmp/harness_scen_out | sed -E 's/^psql:[^ ]+ //; s/^/  | /' || true
 else
-  echo "FAIL scenario table"; tail -15 /tmp/harness_scen_out; STATUS=1
+  echo "FAIL scenario table"; dump 15 /tmp/harness_scen_out; STATUS=1
 fi
 
 echo "=== reverts (each applied on a database built up to its own migration) ==="
@@ -248,7 +273,7 @@ for id in "${NEW_MIGRATIONS[@]}"; do
               VALUES ('33333333-3333-3333-3333-333333333333','88888888-8888-8888-8888-888888888888','55555555-5555-5555-5555-555555555555');" \
          >/tmp/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the practice_assignment the revert check requires was never inserted"
-      tail -10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 /tmp/harness_seed; STATUS=1; continue
     fi
   fi
 
@@ -261,7 +286,7 @@ for id in "${NEW_MIGRATIONS[@]}"; do
               VALUES ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222','Closing Soon', true, current_date + 30);" \
          >/tmp/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the future-dated retirement the revert check requires was never inserted"
-      tail -10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 /tmp/harness_seed; STATUS=1; continue
     fi
   fi
 
@@ -423,12 +448,12 @@ PROBE
         echo "  | (checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"
       else
         echo "FAIL revert ${id} probe: the restored admin_retire_field does not resolve"
-        tail -5 /tmp/harness_rev_probe
+        dump 5 /tmp/harness_rev_probe
         STATUS=1
       fi
     fi
   else
-    echo "FAIL revert ${id}"; tail -10 /tmp/harness_rev; STATUS=1
+    echo "FAIL revert ${id}"; dump 10 /tmp/harness_rev; STATUS=1
   fi
 done
 
@@ -486,7 +511,7 @@ else
         STATUS=1
       fi
     else
-      echo "FAIL emergency rollback 20260504060000"; tail -10 /tmp/harness_emerg; STATUS=1
+      echo "FAIL emergency rollback 20260504060000"; dump 10 /tmp/harness_emerg; STATUS=1
     fi
   fi
 fi

@@ -361,11 +361,22 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
   # change than this round and not one any plant here needs.
   local verdict_lines
   verdict_lines="$(grep -E '^(PASS|FAIL) ' <<<"$out")"
-  local expect_line="${expect#^}" expect_hit=1
+  #
+  # **And the transcript has to say WHICH form matched.** Both branches printed
+  # `$expect_line`, the expect with its `^` stripped, so a whole-line match and
+  # a substring match were indistinguishable in the evidence -- and the
+  # difference between them is the entire content of the third finding this PR
+  # closed: `^emergency rollback 20260504060000` asserts that the stage printed
+  # nothing but its bare line, while the same words unanchored are satisfied by
+  # any of the four checks under it. A reader could not tell which claim a
+  # CAUGHT line was making.
+  local expect_line="${expect#^}" expect_hit=1 expect_desc=""
   if [ -n "$expect" ]; then
     case "$expect" in
-      '^'*) grep -qxF "FAIL $expect_line" <<<"$verdict_lines" || expect_hit=0 ;;
-      *)    grep -qF  "FAIL $expect_line" <<<"$verdict_lines" || expect_hit=0 ;;
+      '^'*) expect_desc="whole line \"FAIL $expect_line\""
+            grep -qxF "FAIL $expect_line" <<<"$verdict_lines" || expect_hit=0 ;;
+      *)    expect_desc="substring \"FAIL $expect_line\""
+            grep -qF  "FAIL $expect_line" <<<"$verdict_lines" || expect_hit=0 ;;
     esac
   fi
   if [ "$status" -ne 0 ]; then
@@ -373,7 +384,7 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
       # The harness went red, but not where this plant was aimed. Some other
       # check caught it -- which is exactly the borrowed-evidence mode above --
       # so it is NOT a catch for the named check and the difference is printed.
-      printf '%-52s MISATTRIBUTED  <-- red, but not at "%s"\n' "$label" "$expect_line"
+      printf '%-52s MISATTRIBUTED  <-- red, but not at %s\n' "$label" "$expect_desc"
       FAIL=$((FAIL+1))
       # `  |` lines included: half the harness's health claims print there and
       # nowhere else, so a filter without them cannot show the line the verdict
@@ -431,7 +442,7 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
       grep -E '^(applied|PASS|FAIL|BASELINE|HARNESS|  \|)' <<<"$out" | sed 's/^/    /'
       return
     fi
-    printf '%-52s CAUGHT%s%s\n' "$label" "${expect:+ (at $expect_line)}" \
+    printf '%-52s CAUGHT%s%s\n' "$label" "${expect:+ (at $expect_desc)}" \
       "${green:+, $green stayed green}"; PASS=$((PASS+1))
   else
     # **Print the transcript on a miss.** `out` was captured and never read --

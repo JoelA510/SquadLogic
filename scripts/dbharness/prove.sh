@@ -450,9 +450,13 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
     # which makes all seven claims usable as a neighbour that must stay quiet.
     #
     # **And a stage's `PASS` is not the stage's verdict.** `run.sh` prints
-    # `PASS scenario table` at line 165 and only THEN checks that the table
-    # reported how many scenarios it executed, printing `FAIL scenario table
-    # ran without reporting ...` underneath its own PASS. Three stages are
+    # `PASS scenario table` as soon as the generated script exits 0, and only
+    # THEN checks that the table reported how many scenarios it executed,
+    # printing `FAIL scenario table ran without reporting ...` underneath its
+    # own PASS. (It said "at line 165" until round 3, which was the `done` of
+    # the smoke loop by then -- the third stale line citation in this file, and
+    # the twin the round-2 sweep of the other two missed. Nothing here cites a
+    # line number any more; a check's own words do not move.) Three stages are
     # built this way -- the scenario table, each revert, and the emergency
     # rollback -- so `grep "PASS <stage>"` asserts that the stage's first
     # command exited 0, not that the stage concluded green. Six plants carry

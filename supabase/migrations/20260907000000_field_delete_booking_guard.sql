@@ -170,7 +170,194 @@ COMMENT ON COLUMN public.practice_assignments.field_id IS
   'The pitch this practice is assigned to. ON DELETE SET NULL, matching game_assignments.field_id: deleting a field must not destroy the booking, and must not leave a uuid pointing at nothing either. NULL here means the venue is gone and the practice needs one.';
 
 -- ---------------------------------------------------------------------------
--- 2. admin_delete_field, with the refusal shape admin_retire_field already has
+-- 2. ONE producer of "what is booked on this ground"
+-- ---------------------------------------------------------------------------
+--
+-- **Two enumerators is the defect, not two copies of one.** The first draft of
+-- this migration wrote the union out again inside `admin_delete_field` and left
+-- `admin_retire_field`'s four-arm copy alone. That is not "a second copy" -- it
+-- is a SECOND ANSWER: retire's copy has no `games` arm and does not see an
+-- assignment reached through its slot, so a retirement under-reports what it
+-- affects and the operator confirms against an incomplete list. Less
+-- destructive than the delete path, because a retirement writes a date rather
+-- than removing rows, but it is still a wrong answer given to a human at the
+-- moment they decide.
+--
+-- So there is one producer and both RPCs call it. `docs/sql/20260907000000_smoke.sql`
+-- requires each of them to reference this function and to contain no union of
+-- its own, so re-inlining fails the run rather than quietly reintroducing the
+-- divergence.
+--
+-- `p_after` is the only thing the two callers differ by:
+--   * a RETIREMENT has an effective date and asks what is booked AFTER it;
+--   * a DELETION has no date and takes everything, so it passes NULL.
+-- NULL is "no date applies", which is a different answer from an empty filter.
+--
+-- `cascades` says whether a CASCADE edge reaches the row, which is what decides
+-- a deletion's disposition. It is computed here rather than by the caller
+-- because it is a fact about the referential graph, not about the operation:
+-- retire simply ignores it, since a retirement destroys nothing.
+--
+-- SECURITY INVOKER and no grants: both callers are SECURITY DEFINER, so this
+-- runs as the definer through them, and nothing outside them may call it.
+CREATE OR REPLACE FUNCTION public.field_bookings(
+    p_organization_id uuid,
+    p_field_id uuid,
+    p_after date DEFAULT NULL
+)
+RETURNS TABLE (
+    kind text,
+    booking_id uuid,
+    on_date date,
+    week_index integer,
+    undated boolean,
+    unbounded boolean,
+    cascades boolean
+)
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = public
+AS $$
+    -- Dates: a game slot's is `slot_date` falling back to `start` (the import
+    -- writes slot_date and never start, 20260503070000:738); an assignment's is
+    -- its own `start`; a practice slot's is `valid_until`; a practice
+    -- assignment's is the upper bound of its `effective_date_range`; a game's
+    -- is its slot's.
+    --
+    -- `undated` means COULD NOT BE JUDGED. `unbounded` means runs forever and
+    -- is therefore CERTAINLY affected -- a different answer, not a missing one.
+    SELECT 'game_slot'::text, gs.id,
+           COALESCE(gs.slot_date, gs.start::date),
+           gs.week_index::integer,
+           COALESCE(gs.slot_date, gs.start::date) IS NULL,
+           false,
+           true
+    FROM public.game_slots gs
+    WHERE gs.organization_id = p_organization_id AND gs.field_id = p_field_id
+      AND (p_after IS NULL
+           OR COALESCE(gs.slot_date, gs.start::date) IS NULL
+           OR COALESCE(gs.slot_date, gs.start::date) > p_after)
+    UNION ALL
+    -- **`games` carries no field_id and is reached anyway.** It hangs off
+    -- game_slots ON DELETE CASCADE (20260331000000:585), so removing the ground
+    -- takes the fixture and its recorded score. A census by COLUMN NAME cannot
+    -- see it; this list comes from the cascade closure instead.
+    SELECT 'game'::text, g.id,
+           COALESCE(gs.slot_date, gs.start::date),
+           gs.week_index::integer,
+           COALESCE(gs.slot_date, gs.start::date) IS NULL,
+           false,
+           true
+    FROM public.games g
+    JOIN public.game_slots gs ON gs.id = g.game_slot_id
+    WHERE gs.organization_id = p_organization_id AND gs.field_id = p_field_id
+      AND (p_after IS NULL
+           OR COALESCE(gs.slot_date, gs.start::date) IS NULL
+           OR COALESCE(gs.slot_date, gs.start::date) > p_after)
+    UNION ALL
+    -- **An assignment's fate depends on the ROW, not on its table.**
+    -- `game_assignments.field_id` is SET NULL, but `game_slot_id` and `slot_id`
+    -- are ON DELETE CASCADE to `game_slots` (20260503030000:39-56) and
+    -- `persist_game_schedule` writes them on every row it produces -- so for a
+    -- real persisted schedule the slot cascade destroys the assignment before
+    -- the SET NULL can fire. Measured against a real delete, not reasoned about.
+    --
+    -- The row is caught when its SLOT is on this ground even if its own
+    -- `field_id` is not, because the cascade does not consult `field_id`.
+    SELECT 'game_assignment'::text, ga.id,
+           ga.start::date,
+           ga.week_index::integer,
+           ga.start IS NULL,
+           false,
+           EXISTS (SELECT 1 FROM public.game_slots s
+                    WHERE s.field_id = p_field_id
+                      AND s.id IN (ga.game_slot_id, ga.slot_id))
+    FROM public.game_assignments ga
+    WHERE ga.organization_id = p_organization_id
+      AND (ga.field_id = p_field_id
+           OR EXISTS (SELECT 1 FROM public.game_slots s
+                       WHERE s.field_id = p_field_id
+                         AND s.id IN (ga.game_slot_id, ga.slot_id)))
+      AND (p_after IS NULL OR ga.start IS NULL OR ga.start::date > p_after)
+    UNION ALL
+    SELECT 'practice_slot'::text, ps.id,
+           ps.valid_until,
+           NULL::integer,
+           false,
+           ps.valid_until IS NULL,
+           true
+    FROM public.practice_slots ps
+    WHERE ps.organization_id = p_organization_id AND ps.field_id = p_field_id
+      AND (p_after IS NULL OR ps.valid_until IS NULL OR ps.valid_until > p_after)
+    UNION ALL
+    -- The same, for practices. `practice_assignments.slot_id` and
+    -- `.practice_slot_id` are both ON DELETE CASCADE to `practice_slots`
+    -- (20260331000000:526-527) and `persist_practice_schedule` writes them.
+    SELECT 'practice_assignment'::text, pa.id,
+           upper(pa.effective_date_range),
+           NULL::integer,
+           false,
+           pa.effective_date_range IS NULL OR upper_inf(pa.effective_date_range),
+           EXISTS (SELECT 1 FROM public.practice_slots s
+                    WHERE s.field_id = p_field_id
+                      AND s.id IN (pa.practice_slot_id, pa.slot_id))
+    FROM public.practice_assignments pa
+    WHERE pa.organization_id = p_organization_id
+      AND (pa.field_id = p_field_id
+           OR EXISTS (SELECT 1 FROM public.practice_slots s
+                       WHERE s.field_id = p_field_id
+                         AND s.id IN (pa.practice_slot_id, pa.slot_id)))
+      AND (p_after IS NULL
+           OR pa.effective_date_range IS NULL
+           OR upper_inf(pa.effective_date_range)
+           OR upper(pa.effective_date_range) > p_after);
+$$;
+
+REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM PUBLIC;
+
+COMMENT ON FUNCTION public.field_bookings(uuid, uuid, date) IS
+  'THE single reading of "what is booked on this ground", shared by admin_retire_field and admin_delete_field. Five kinds, derived from the cascade closure from fields rather than from the field_id column name. p_after NULL means no date applies (a deletion takes everything); a date means "booked after this" (a retirement). cascades says a CASCADE edge reaches the row, which is what decides a deletion disposition. Internal: no EXECUTE grant, both callers are SECURITY DEFINER.';
+
+-- ---------------------------------------------------------------------------
+-- 3. A refusal must not embed an unbounded list in the audit row
+-- ---------------------------------------------------------------------------
+--
+-- Every refusal writes the affected list into `audit_log.metadata`, and a
+-- delete refused on a busy field would write an arbitrarily large row on every
+-- attempt. The trail needs enough to review the decision, not a copy of the
+-- schedule: a bounded sample, the total, and the counts the sample is a sample
+-- of.
+CREATE OR REPLACE FUNCTION public.field_bookings_digest(p_affected jsonb, p_limit integer DEFAULT 25)
+RETURNS jsonb
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public
+AS $$
+    SELECT jsonb_build_object(
+        'total', jsonb_array_length(COALESCE(p_affected, '[]'::jsonb)),
+        'omitted', GREATEST(jsonb_array_length(COALESCE(p_affected, '[]'::jsonb)) - p_limit, 0),
+        'by_kind', COALESCE(
+            (SELECT jsonb_object_agg(k, n)
+               FROM (SELECT x->>'kind' AS k, count(*) AS n
+                       FROM jsonb_array_elements(COALESCE(p_affected, '[]'::jsonb)) x
+                      GROUP BY 1) c),
+            '{}'::jsonb),
+        'sample', COALESCE(
+            (SELECT jsonb_agg(x)
+               FROM (SELECT x FROM jsonb_array_elements(COALESCE(p_affected, '[]'::jsonb)) x
+                      LIMIT p_limit) t),
+            '[]'::jsonb)
+    );
+$$;
+
+REVOKE ALL ON FUNCTION public.field_bookings_digest(jsonb, integer) FROM PUBLIC;
+
+COMMENT ON FUNCTION public.field_bookings_digest(jsonb, integer) IS
+  'A bounded audit-log rendering of an affected-booking list: total, omitted, per-kind counts and a capped sample. The RPCs return the full list to the caller and record this, so a refusal on a busy field cannot write an arbitrarily large audit row on every attempt.';
+
+-- ---------------------------------------------------------------------------
+-- 4. admin_delete_field, with the refusal shape admin_retire_field already has
 -- ---------------------------------------------------------------------------
 --
 -- **The two-argument function is DROPPED, not left beside the new one.**
@@ -220,13 +407,6 @@ BEGIN
     -- deleted first and inferred not-found from the RETURNING being empty, so
     -- there was no window in which the field existed and the bookings could be
     -- counted.
-    --
-    -- `FOR UPDATE` also closes the gap between counting and deleting, and it
-    -- does so through the foreign keys rather than despite them: inserting a
-    -- row that REFERENCES this field takes a KEY SHARE lock on it, which
-    -- conflicts with the FOR UPDATE held here. That covers a booking table
-    -- only if it HAS such a key -- which practice_assignments did not until
-    -- the constraint added above, so the same defect closed two things.
     SELECT *
       INTO v_existing
       FROM public.fields
@@ -239,115 +419,57 @@ BEGIN
             USING ERRCODE = 'P0002';
     END IF;
 
+    -- **Locking the field is not enough, because not everything the cascade
+    -- reaches has a key to the field.**
+    --
+    -- `FOR UPDATE` on the `fields` row blocks a concurrent INSERT into any
+    -- table with a foreign key TO that row, because such an insert takes a
+    -- conflicting KEY SHARE lock on it. That covers the slot tables and the
+    -- assignments' own `field_id`. It does NOT cover a `games` row, which
+    -- references a game_slot and never the field, nor an assignment carrying
+    -- only a slot id -- and both of those are destroyed by the cascade. So the
+    -- guard would read one set while the delete removed a larger one: the exact
+    -- defect this migration exists to fix, returning as a race.
+    --
+    -- Locking the field's SLOTS closes it: an insert that hangs a game or an
+    -- assignment off one of them takes KEY SHARE on the slot row, which
+    -- conflicts with this. Taken after the field, so the two RPCs acquire in
+    -- one order and cannot deadlock against each other.
+    PERFORM 1 FROM public.game_slots
+     WHERE organization_id = p_organization_id AND field_id = p_field_id
+     FOR UPDATE;
+    PERFORM 1 FROM public.practice_slots
+     WHERE organization_id = p_organization_id AND field_id = p_field_id
+     FOR UPDATE;
+
     -- **Every booking the deletion would take -- all FIVE kinds**, and what
-    -- it would do to each. Enumerated from the BOOKING tables, never from the
-    -- field: the field is the row about to disappear, so anything derived from
-    -- it would report an empty set exactly when the answer matters.
+    -- it would do to each. The enumeration itself is `public.field_bookings`,
+    -- shared with `admin_retire_field`, so "who is affected" has one answer.
+    -- `p_after => NULL` means no date applies: a deletion takes everything on
+    -- the ground, dated or not.
     --
-    -- No date filter, unlike admin_retire_field: a deletion has no effective
-    -- date and takes everything on the ground, dated or not.
-    --
-    -- `disposition` says what the schema will do, and the per-kind literals
-    -- below are checked against `pg_constraint.confdeltype` by
-    -- docs/sql/20260907000000_smoke.sql rather than trusted -- if an ON DELETE
-    -- rule is ever changed without changing this list, the smoke goes red.
-    --   'deleted'    -- the FK is ON DELETE CASCADE; the row goes with the field
-    --   'unassigned' -- the FK is ON DELETE SET NULL; the row survives, venueless
-    --
-    -- `undated` means the row records no date at all, so the operator cannot
-    -- see WHEN the thing they are about to lose was. `unbounded` means it runs
-    -- forever. Neither changes that it is affected -- for a deletion,
-    -- everything on the field is -- they say what is being lost.
-    WITH affected AS (
-      SELECT 'game_slot'::text AS kind, gs.id,
-             COALESCE(gs.slot_date, gs.start::date) AS on_date,
-             gs.week_index::integer AS week_index,
-             COALESCE(gs.slot_date, gs.start::date) IS NULL AS undated,
-             false AS unbounded,
-             'deleted'::text AS disposition
-      FROM public.game_slots gs
-      WHERE gs.organization_id = p_organization_id AND gs.field_id = p_field_id
-      UNION ALL
-      -- **`games` carries no field_id and is destroyed anyway.** It hangs off
-      -- game_slots ON DELETE CASCADE (20260331000000:585), so deleting the
-      -- ground takes the fixture and the score with it. Enumerating the family
-      -- by COLUMN NAME missed it entirely -- the first version of this RPC
-      -- reported nothing about the one table that holds a result.
-      SELECT 'game'::text, g.id,
-             COALESCE(gs.slot_date, gs.start::date), gs.week_index::integer,
-             COALESCE(gs.slot_date, gs.start::date) IS NULL, false,
-             'deleted'::text
-      FROM public.games g
-      JOIN public.game_slots gs ON gs.id = g.game_slot_id
-      WHERE gs.organization_id = p_organization_id AND gs.field_id = p_field_id
-      UNION ALL
-      -- **An assignment's fate depends on the ROW, not on its table.**
-      -- `game_assignments.field_id` is SET NULL, so the first version of this
-      -- RPC told the operator every assignment would survive venueless. That is
-      -- true only of an assignment with no slot behind it. `persist_game_schedule`
-      -- writes `game_slot_id` and `slot_id` on every row it produces
-      -- (20260503030000:618-630), and both are ON DELETE CASCADE to `game_slots`
-      -- -- so for a real persisted schedule the slot cascade destroys the
-      -- assignment before the SET NULL can fire. Measured, not reasoned about:
-      -- an assignment carrying `game_slot_id` does not survive the delete.
-      --
-      -- The row is also caught when its SLOT is on this ground but its own
-      -- `field_id` is not, because the cascade does not consult `field_id`.
-      SELECT 'game_assignment'::text, ga.id,
-             ga.start::date, ga.week_index::integer,
-             ga.start IS NULL, false,
-             CASE WHEN EXISTS (
-                    SELECT 1 FROM public.game_slots s
-                     WHERE s.field_id = p_field_id
-                       AND s.id IN (ga.game_slot_id, ga.slot_id)
-                  ) THEN 'deleted' ELSE 'unassigned' END
-      FROM public.game_assignments ga
-      WHERE ga.organization_id = p_organization_id
-        AND (ga.field_id = p_field_id
-             OR EXISTS (SELECT 1 FROM public.game_slots s
-                         WHERE s.field_id = p_field_id
-                           AND s.id IN (ga.game_slot_id, ga.slot_id)))
-      UNION ALL
-      SELECT 'practice_slot'::text, ps.id,
-             ps.valid_until, NULL::integer,
-             false, ps.valid_until IS NULL, 'deleted'::text
-      FROM public.practice_slots ps
-      WHERE ps.organization_id = p_organization_id AND ps.field_id = p_field_id
-      UNION ALL
-      -- The same, for practices. `practice_assignments.slot_id` and
-      -- `.practice_slot_id` are both ON DELETE CASCADE to `practice_slots`
-      -- (20260331000000:526-527) and `persist_practice_schedule` writes them.
-      SELECT 'practice_assignment'::text, pa.id,
-             upper(pa.effective_date_range), NULL::integer,
-             false,
-             pa.effective_date_range IS NULL OR upper_inf(pa.effective_date_range),
-             CASE WHEN EXISTS (
-                    SELECT 1 FROM public.practice_slots s
-                     WHERE s.field_id = p_field_id
-                       AND s.id IN (pa.practice_slot_id, pa.slot_id)
-                  ) THEN 'deleted' ELSE 'unassigned' END
-      FROM public.practice_assignments pa
-      WHERE pa.organization_id = p_organization_id
-        AND (pa.field_id = p_field_id
-             OR EXISTS (SELECT 1 FROM public.practice_slots s
-                         WHERE s.field_id = p_field_id
-                           AND s.id IN (pa.practice_slot_id, pa.slot_id)))
-    )
+    -- `disposition` turns the producer's `cascades` into the word the operator
+    -- reads. It is decided PER ROW because it differs per row: a slot-linked
+    -- assignment is destroyed by the slot cascade while a free-standing one
+    -- keeps its row and loses its venue.
+    --   'deleted'    -- a CASCADE reaches it; the row goes with the field
+    --   'unassigned' -- only field_id is SET NULL; the row survives, venueless
     SELECT
       COALESCE(
         jsonb_agg(
           jsonb_build_object(
-            'kind', a.kind, 'id', a.id, 'on_date', a.on_date,
-            'week_index', a.week_index, 'undated', a.undated,
-            'unbounded', a.unbounded, 'disposition', a.disposition
+            'kind', b.kind, 'id', b.booking_id, 'on_date', b.on_date,
+            'week_index', b.week_index, 'undated', b.undated,
+            'unbounded', b.unbounded,
+            'disposition', CASE WHEN b.cascades THEN 'deleted' ELSE 'unassigned' END
           )
-          ORDER BY a.on_date NULLS FIRST, a.kind, a.id
+          ORDER BY b.on_date NULLS FIRST, b.kind, b.booking_id
         ),
         '[]'::jsonb
       ),
       COUNT(*)
     INTO v_affected, v_affected_count
-    FROM affected a;
+    FROM public.field_bookings(p_organization_id, p_field_id, NULL) b;
 
     -- **The refusal lives here, not in the UI.** A confirmation prompt a
     -- caller can skip by calling the RPC directly is not a guard. Same shape as
@@ -364,7 +486,11 @@ BEGIN
                 'phase', 'refused',
                 'reason', 'bookings_exist',
                 'affected_count', v_affected_count,
-                'affected', v_affected,
+                -- A bounded rendering: the full list goes back to the CALLER,
+                -- a sample and the per-kind counts go into the trail. A delete
+                -- refused on a busy field would otherwise write an arbitrarily
+                -- large audit row on every attempt.
+                'affected', public.field_bookings_digest(v_affected),
                 'previous', to_jsonb(v_existing)
             )
         );
@@ -391,7 +517,7 @@ BEGIN
             'phase', 'before',
             'confirmed', COALESCE(p_confirm, false),
             'affected_count', v_affected_count,
-            'affected', v_affected,
+            'affected', public.field_bookings_digest(v_affected),
             'previous', to_jsonb(v_existing)
         )
     );
@@ -431,5 +557,168 @@ GRANT EXECUTE ON FUNCTION public.admin_delete_field(uuid, uuid, boolean) TO auth
 
 COMMENT ON FUNCTION public.admin_delete_field(uuid, uuid, boolean) IS
   'Admin-only org-scoped field deletion. Refuses with everything the delete would take -- game_slots, games, game_assignments, practice_slots, practice_assignments -- unless p_confirm is true, mirroring admin_retire_field. Each affected row carries a disposition: deleted (a CASCADE reaches it) or unassigned (only its field_id is SET NULL); assignments report this per row, because a slot-linked assignment is destroyed while a free-standing one survives. Returns {deleted:false, reason:''bookings_exist'', affected_count, affected} on refusal rather than raising, and audits refused/before/after.';
+
+-- ---------------------------------------------------------------------------
+-- 5. admin_retire_field, moved onto the same producer
+-- ---------------------------------------------------------------------------
+--
+-- **Recreated here, and that is the point.** 20260906000000 shipped it with its
+-- own four-arm union, which is why a retirement under-reported: no `games` arm,
+-- and no sight of an assignment reached through its slot. The body below is
+-- that function with two changes and nothing else:
+--
+--   1. it enumerates through `public.field_bookings`, so retire and delete give
+--      one answer to "what is booked here";
+--   2. `NOT COALESCE(p_confirm, false)` where it read `NOT p_confirm`.
+--
+-- **`p_confirm => NULL` retired booked ground unconfirmed.** `NULL` is not
+-- false: `v_affected_count > 0 AND NOT NULL` is NULL, the IF does not fire, and
+-- the retirement proceeds without the operator ever confirming. A three-valued
+-- flag guarding a destructive action must read unknown as NO, and the mock read
+-- it that way (`!p.p_confirm`) while the database did not -- so the two arms
+-- disagreed on the one input that turns the guard off.
+--
+-- Everything else -- the one-directional `active` write, the audit phases, the
+-- refusal reason literal -- is carried across unchanged, and 20260906000000's
+-- smoke still asserts all of it against whatever version is installed.
+--
+-- The affected list keeps retire's SIX keys and no `disposition`: a retirement
+-- writes a date and destroys nothing, so "what would happen to this row" has no
+-- answer to give. The producer computes `cascades` for the deletion's benefit
+-- and this arm ignores it.
+CREATE OR REPLACE FUNCTION public.admin_retire_field(
+    p_organization_id uuid,
+    p_field_id uuid,
+    p_effective_to date,
+    p_confirm boolean DEFAULT false
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_before public.fields%ROWTYPE;
+    v_after  public.fields%ROWTYPE;
+    v_affected jsonb;
+    v_affected_count integer;
+BEGIN
+    IF p_organization_id IS NULL THEN
+        RAISE EXCEPTION 'p_organization_id is required' USING ERRCODE = '22023';
+    END IF;
+    IF NOT public.is_org_admin(p_organization_id) THEN
+        RAISE EXCEPTION 'Access denied: caller is not an admin of organization %', p_organization_id
+            USING ERRCODE = '42501';
+    END IF;
+    IF p_field_id IS NULL THEN
+        RAISE EXCEPTION 'p_field_id is required' USING ERRCODE = '22023';
+    END IF;
+    IF p_effective_to IS NULL THEN
+        RAISE EXCEPTION 'p_effective_to is required; retiring with no end date is a deletion, not a retirement'
+            USING ERRCODE = '22023';
+    END IF;
+
+    SELECT * INTO v_before
+    FROM public.fields
+    WHERE id = p_field_id AND organization_id = p_organization_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Field % not found in organization %', p_field_id, p_organization_id
+            USING ERRCODE = 'P0002';
+    END IF;
+
+    SELECT
+      COALESCE(
+        jsonb_agg(
+          jsonb_build_object(
+            'kind', b.kind, 'id', b.booking_id, 'on_date', b.on_date,
+            'week_index', b.week_index, 'undated', b.undated, 'unbounded', b.unbounded
+          )
+          ORDER BY b.on_date NULLS FIRST, b.kind, b.booking_id
+        ),
+        '[]'::jsonb
+      ),
+      COUNT(*)
+    INTO v_affected, v_affected_count
+    FROM public.field_bookings(p_organization_id, p_field_id, p_effective_to) b;
+
+    -- **The refusal lives here, not in the UI.** A confirmation prompt a
+    -- caller can skip by calling the RPC directly is not a guard.
+    IF v_affected_count > 0 AND NOT COALESCE(p_confirm, false) THEN
+        PERFORM public.record_audit_event(
+            p_organization_id,
+            'settings.updated',
+            'field',
+            p_field_id,
+            jsonb_build_object(
+                'operation', 'admin_retire_field',
+                'phase', 'refused',
+                'reason', 'bookings_after_effective_to',
+                'effective_to', p_effective_to,
+                'affected_count', v_affected_count,
+                'affected', public.field_bookings_digest(v_affected),
+                'before', to_jsonb(v_before)
+            )
+        );
+        RETURN jsonb_build_object(
+            'retired', false,
+            'reason', 'bookings_after_effective_to',
+            'affected_count', v_affected_count,
+            'affected', v_affected
+        );
+    END IF;
+
+    PERFORM public.record_audit_event(
+        p_organization_id,
+        'settings.updated',
+        'field',
+        p_field_id,
+        jsonb_build_object(
+            'operation', 'admin_retire_field',
+            'phase', 'before',
+            'effective_to', p_effective_to,
+            'confirmed', COALESCE(p_confirm, false),
+            'affected_count', v_affected_count,
+            'affected', public.field_bookings_digest(v_affected),
+            'before', to_jsonb(v_before)
+        )
+    );
+
+    -- `v_before.active AND live` is the only reading that is one-directional in
+    -- the same sense the trigger is: it can turn activity off and never on.
+    UPDATE public.fields
+    SET effective_to = p_effective_to,
+        active = v_before.active AND public.field_is_live_on(p_effective_to),
+        updated_at = timezone('utc', now())
+    WHERE id = p_field_id AND organization_id = p_organization_id
+    RETURNING * INTO v_after;
+
+    PERFORM public.record_audit_event(
+        p_organization_id,
+        'settings.updated',
+        'field',
+        p_field_id,
+        jsonb_build_object(
+            'operation', 'admin_retire_field',
+            'phase', 'after',
+            'effective_to', p_effective_to,
+            'confirmed', COALESCE(p_confirm, false),
+            'affected_count', v_affected_count,
+            'after', to_jsonb(v_after)
+        )
+    );
+
+    RETURN jsonb_build_object(
+        'retired', true,
+        'affected_count', v_affected_count,
+        'affected', v_affected,
+        'field', to_jsonb(v_after)
+    );
+END;
+$$;
+
+COMMENT ON FUNCTION public.admin_retire_field(uuid, uuid, date, boolean) IS
+  'Org-admin retirement: writes fields.effective_to and keeps fields.active in step, refusing with the affected bookings unless p_confirm. Enumerates through public.field_bookings, the reading it shares with admin_delete_field. p_confirm NULL reads as false.';
 
 COMMIT;

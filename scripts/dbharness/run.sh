@@ -248,6 +248,27 @@ for id in "${NEW_MIGRATIONS[@]}"; do
         echo "FAIL revert ${id}: planted a practice_assignment with a field_id and the revert did not count it"
         STATUS=1
       fi
+      # It also puts admin_retire_field back on its own four-arm union, and must
+      # say so: a revert that silently reinstates an under-reporting guard is
+      # the same silence this PR exists to remove, one level up.
+      if grep -q 'RESTORING admin_retire_field' /tmp/harness_rev; then
+        echo "  | (checked) the revert named the retirement guard it was putting back"
+      else
+        echo "FAIL revert ${id}: restored the old admin_retire_field without naming what that costs"
+        STATUS=1
+      fi
+      # And the restored RPC must actually WORK -- the producer it used to call
+      # is gone by now, so a revert that left the call in place would leave the
+      # function raising undefined_function on the next retirement.
+      if ! psql_cmd "SELECT public.admin_retire_field(NULL, NULL, NULL, false)" >/dev/null 2>&1; then
+        : # it raises 22023 for the NULL org, which is the point: it RESOLVED.
+      fi
+      if psql_cmd "SELECT prosrc LIKE '%field_bookings%' FROM pg_proc WHERE proname='admin_retire_field'" 2>/dev/null | grep -q '^t$'; then
+        echo "FAIL revert ${id}: admin_retire_field still calls the producer this revert dropped"
+        STATUS=1
+      else
+        echo "  | (checked) the restored admin_retire_field no longer calls the dropped producer"
+      fi
     fi
   else
     echo "FAIL revert ${id}"; tail -10 /tmp/harness_rev; STATUS=1

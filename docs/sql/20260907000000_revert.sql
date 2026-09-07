@@ -57,7 +57,177 @@ ALTER TABLE public.practice_assignments
 
 COMMENT ON COLUMN public.practice_assignments.field_id IS NULL;
 
+-- **admin_retire_field must be put back before the producer goes.** This
+-- migration moved it onto `public.field_bookings`; dropping that function while
+-- retire still calls it leaves the RPC raising `undefined_function` on every
+-- call -- a revert that silently breaks a path it never claimed to touch. So
+-- retire is restored to its 20260906000000 body first, and the two defects that
+-- body carries are named rather than reintroduced quietly.
+DO $$
+BEGIN
+  RAISE WARNING 'RESTORING admin_retire_field to its pre-20260907000000 body: it enumerates four kinds, so a retirement will again under-report (no games, no slot-reached assignments), and p_confirm => NULL will again read as confirmed';
+END $$;
+
+CREATE OR REPLACE FUNCTION public.admin_retire_field(
+    p_organization_id uuid,
+    p_field_id uuid,
+    p_effective_to date,
+    p_confirm boolean DEFAULT false
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_before public.fields%ROWTYPE;
+    v_after  public.fields%ROWTYPE;
+    v_affected jsonb;
+    v_affected_count integer;
+BEGIN
+    IF p_organization_id IS NULL THEN
+        RAISE EXCEPTION 'p_organization_id is required' USING ERRCODE = '22023';
+    END IF;
+    IF NOT public.is_org_admin(p_organization_id) THEN
+        RAISE EXCEPTION 'Access denied: caller is not an admin of organization %', p_organization_id
+            USING ERRCODE = '42501';
+    END IF;
+    IF p_field_id IS NULL THEN
+        RAISE EXCEPTION 'p_field_id is required' USING ERRCODE = '22023';
+    END IF;
+    IF p_effective_to IS NULL THEN
+        RAISE EXCEPTION 'p_effective_to is required; retiring with no end date is a deletion, not a retirement'
+            USING ERRCODE = '22023';
+    END IF;
+
+    SELECT * INTO v_before
+    FROM public.fields
+    WHERE id = p_field_id AND organization_id = p_organization_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Field % not found in organization %', p_field_id, p_organization_id
+            USING ERRCODE = 'P0002';
+    END IF;
+
+    WITH affected AS (
+      SELECT 'game_slot'::text AS kind, gs.id,
+             COALESCE(gs.slot_date, gs.start::date) AS on_date,
+             gs.week_index::integer AS week_index,
+             COALESCE(gs.slot_date, gs.start::date) IS NULL AS undated,
+             false AS unbounded
+      FROM public.game_slots gs
+      WHERE gs.organization_id = p_organization_id AND gs.field_id = p_field_id
+        AND (COALESCE(gs.slot_date, gs.start::date) IS NULL
+             OR COALESCE(gs.slot_date, gs.start::date) > p_effective_to)
+      UNION ALL
+      SELECT 'game_assignment'::text, ga.id,
+             ga.start::date, ga.week_index::integer,
+             ga.start IS NULL, false
+      FROM public.game_assignments ga
+      WHERE ga.organization_id = p_organization_id AND ga.field_id = p_field_id
+        AND (ga.start IS NULL OR ga.start::date > p_effective_to)
+      UNION ALL
+      SELECT 'practice_slot'::text, ps.id,
+             ps.valid_until, NULL::integer,
+             false, ps.valid_until IS NULL
+      FROM public.practice_slots ps
+      WHERE ps.organization_id = p_organization_id AND ps.field_id = p_field_id
+        AND (ps.valid_until IS NULL OR ps.valid_until > p_effective_to)
+      UNION ALL
+      SELECT 'practice_assignment'::text, pa.id,
+             upper(pa.effective_date_range), NULL::integer,
+             false,
+             pa.effective_date_range IS NULL OR upper_inf(pa.effective_date_range)
+      FROM public.practice_assignments pa
+      WHERE pa.organization_id = p_organization_id AND pa.field_id = p_field_id
+        AND (pa.effective_date_range IS NULL
+             OR upper_inf(pa.effective_date_range)
+             OR upper(pa.effective_date_range) > p_effective_to)
+    )
+    SELECT
+      COALESCE(
+        jsonb_agg(
+          jsonb_build_object(
+            'kind', a.kind, 'id', a.id, 'on_date', a.on_date,
+            'week_index', a.week_index, 'undated', a.undated, 'unbounded', a.unbounded
+          )
+          ORDER BY a.on_date NULLS FIRST, a.kind, a.id
+        ),
+        '[]'::jsonb
+      ),
+      COUNT(*)
+    INTO v_affected, v_affected_count
+    FROM affected a;
+
+    IF v_affected_count > 0 AND NOT p_confirm THEN
+        PERFORM public.record_audit_event(
+            p_organization_id, 'settings.updated', 'field', p_field_id,
+            jsonb_build_object(
+                'operation', 'admin_retire_field',
+                'phase', 'refused',
+                'reason', 'bookings_after_effective_to',
+                'effective_to', p_effective_to,
+                'affected_count', v_affected_count,
+                'affected', v_affected,
+                'before', to_jsonb(v_before)
+            )
+        );
+        RETURN jsonb_build_object(
+            'retired', false,
+            'reason', 'bookings_after_effective_to',
+            'affected_count', v_affected_count,
+            'affected', v_affected
+        );
+    END IF;
+
+    PERFORM public.record_audit_event(
+        p_organization_id, 'settings.updated', 'field', p_field_id,
+        jsonb_build_object(
+            'operation', 'admin_retire_field',
+            'phase', 'before',
+            'effective_to', p_effective_to,
+            'confirmed', p_confirm,
+            'affected_count', v_affected_count,
+            'affected', v_affected,
+            'before', to_jsonb(v_before)
+        )
+    );
+
+    UPDATE public.fields
+    SET effective_to = p_effective_to,
+        active = v_before.active AND public.field_is_live_on(p_effective_to),
+        updated_at = timezone('utc', now())
+    WHERE id = p_field_id AND organization_id = p_organization_id
+    RETURNING * INTO v_after;
+
+    PERFORM public.record_audit_event(
+        p_organization_id, 'settings.updated', 'field', p_field_id,
+        jsonb_build_object(
+            'operation', 'admin_retire_field',
+            'phase', 'after',
+            'effective_to', p_effective_to,
+            'confirmed', p_confirm,
+            'affected_count', v_affected_count,
+            'after', to_jsonb(v_after)
+        )
+    );
+
+    RETURN jsonb_build_object(
+        'retired', true,
+        'affected_count', v_affected_count,
+        'affected', v_affected,
+        'field', to_jsonb(v_after)
+    );
+END;
+$$;
+
+COMMENT ON FUNCTION public.admin_retire_field(uuid, uuid, date, boolean) IS
+  'Org-admin field retirement: writes effective_to and keeps active in step, refusing with the affected bookings unless p_confirm. Audits before and after.';
+
 DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);
+DROP FUNCTION IF EXISTS public.field_bookings_digest(jsonb, integer);
+DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date);
 
 -- Restored verbatim from 20260504060000_admin_facility_mutation_rpcs.sql.
 CREATE OR REPLACE FUNCTION public.admin_delete_field(

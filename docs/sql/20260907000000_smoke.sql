@@ -175,20 +175,26 @@ BEGIN
     RAISE EXCEPTION 'every closure member must be read or excluded; the two lists do not cover the declared set';
   END IF;
 
+  -- **The producer is what enumerates**, so it is what this reads. Checking the
+  -- RPC body would now pass for any table name, since the RPC names none of
+  -- them -- a check that had quietly stopped looking at anything.
   SELECT pg_get_functiondef(p.oid) INTO v_def
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-   WHERE n.nspname = 'public' AND p.proname = 'admin_delete_field';
+   WHERE n.nspname = 'public' AND p.proname = 'field_bookings';
+  IF v_def IS NULL THEN
+    RAISE EXCEPTION 'public.field_bookings is missing; nothing enumerates the bookings';
+  END IF;
 
   FOREACH t IN ARRAY v_bookings LOOP
     IF v_def NOT LIKE '%public.' || t || '%' THEN
-      RAISE EXCEPTION 'admin_delete_field does not enumerate %, which a field delete destroys rows in', t;
+      RAISE EXCEPTION 'field_bookings does not enumerate %, which a field delete destroys rows in', t;
     END IF;
   END LOOP;
 
   FOREACH t IN ARRAY v_excluded LOOP
     IF v_def LIKE '%public.' || t || '%' THEN
       RAISE EXCEPTION
-        'admin_delete_field reads %, which this migration documents as NOT a booking', t;
+        'field_bookings reads %, which this migration documents as NOT a booking', t;
     END IF;
   END LOOP;
 
@@ -235,24 +241,16 @@ DO $$
 DECLARE
   v_def text; v_cte text; v_arms text[]; v_arm text;
   v_kind text; v_disp text; v_table text; v_del char; v_expected text;
-  v_checked int := 0; v_n int;
+  v_checked int := 0; v_n int; v_via text;
 BEGIN
-  SELECT pg_get_functiondef(p.oid) INTO v_def
+  -- **The union lives in the shared producer now**, which is the whole point:
+  -- two enumerators is two answers, and retire's copy was the one missing
+  -- `games` and slot-reached assignments.
+  SELECT pg_get_functiondef(p.oid) INTO v_cte
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-   WHERE n.nspname = 'public' AND p.proname = 'admin_delete_field';
-
-  -- Sliced by position rather than by a regex over the whole body: the union
-  -- is the text between the CTE header and the aggregate that consumes it, and
-  -- a slice that failed to find either end is a failure here rather than an
-  -- empty arm list that would pass every check below by iterating nothing.
-  IF position('WITH affected AS (' in v_def) = 0
-     OR position('INTO v_affected' in v_def) = 0 THEN
-    RAISE EXCEPTION 'could not find the affected-booking union in admin_delete_field';
-  END IF;
-  v_cte := substring(v_def, position('WITH affected AS (' in v_def),
-                     position('INTO v_affected' in v_def) - position('WITH affected AS (' in v_def));
-  IF length(v_cte) < 100 THEN
-    RAISE EXCEPTION 'the affected-booking union parsed as % characters; that is not the union', length(v_cte);
+   WHERE n.nspname = 'public' AND p.proname = 'field_bookings';
+  IF v_cte IS NULL OR length(v_cte) < 100 THEN
+    RAISE EXCEPTION 'public.field_bookings is missing or empty; there is no shared enumerator';
   END IF;
 
   v_arms := regexp_split_to_array(v_cte, 'UNION ALL');
@@ -264,111 +262,146 @@ BEGIN
     -- Dollar-quoted so the single quotes in the pattern are the ones that
     -- appear in the function body, not an escaping puzzle.
     v_kind  := (regexp_match(v_arm, $re$'([a-z_]+)'::text$re$))[1];
-    -- **The arm's OWN table, anchored to the start of a line.** A bare
-    -- `FROM public\.` match takes the FIRST one in the arm, and in a per-row
-    -- arm that is the `EXISTS (SELECT 1 FROM public.game_slots ...)` inside the
-    -- CASE -- so `v_table` resolved to the SLOT table and the "does it really
-    -- have both edges" check below counted CASCADE keys on a table that always
-    -- has them. A meta-assertion that could not fail, in the file whose whole
-    -- purpose is assertions that can. The outer FROM is the only one at the
-    -- arm's own indentation; the 'n' flag makes ^ mean start-of-line.
-    v_table := (regexp_match(v_arm, $re$^      FROM public\.([a-z_]+)$re$, 'n'))[1];
+    -- The arm's OWN table: the only FROM that starts a line. A subquery's FROM
+    -- never does -- it follows `SELECT 1 ` -- and that is the property relied
+    -- on, rather than a hard-coded indent width. Taking the first `FROM
+    -- public.` anywhere in the arm picked the EXISTS subquery instead, so the
+    -- check below counted keys on the SLOT table, which always has them: a
+    -- meta-assertion that could not fail.
+    v_table := (regexp_match(v_arm, $re$^[ ]+FROM public\.([a-z_]+)$re$, 'n'))[1];
     IF v_kind IS NULL OR v_table IS NULL THEN
       RAISE EXCEPTION 'an arm of the union declares no kind (%) or table (%)', v_kind, v_table;
     END IF;
 
-    -- **Two shapes of arm, and the difference is the point.** A CASCADE-only
-    -- arm states one disposition word outright. An arm whose table reaches the
-    -- field BOTH ways -- SET NULL on field_id and CASCADE through a slot --
-    -- must decide per row, and states both words in a CASE. Checking only the
-    -- first literal would have passed the version of this RPC that told the
-    -- operator every assignment survives.
-    IF v_arm LIKE '%CASE WHEN EXISTS%' THEN
-      IF v_arm NOT LIKE $q$%'deleted'%$q$ OR v_arm NOT LIKE $q$%'unassigned'%$q$ THEN
-        RAISE EXCEPTION 'arm % decides per row but does not offer both dispositions', v_kind;
-      END IF;
-      -- **Its table must genuinely have BOTH edges, or the CASE is
-      -- decoration.** A per-row answer is only justified when the table
-      -- reaches `fields` two ways with two different outcomes: SET NULL on
-      -- its own field_id, and CASCADE through something else. Checking only
-      -- for "a CASCADE key somewhere" passes for any table with any cascading
-      -- foreign key at all, which is nearly all of them.
-      SELECT count(*) INTO v_n
-        FROM pg_constraint con
+    v_via := (regexp_match(v_arm, $re$EXISTS \(SELECT 1 FROM public\.([a-z_]+)$re$))[1];
+
+    IF v_via IS NOT NULL THEN
+      -- **A per-row arm claims the table reaches the field TWO ways with two
+      -- different outcomes.** Both halves are checked against the constraints,
+      -- and both are anchored to the tables the arm actually names -- "has some
+      -- cascading key somewhere" is true of `game_assignments` because of
+      -- `home_team_id` -> `teams`, and would pass whatever the arm did.
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint con
         JOIN pg_class src ON src.oid = con.conrelid
         JOIN pg_class tgt ON tgt.oid = con.confrelid
         JOIN pg_namespace sn ON sn.oid = src.relnamespace AND sn.nspname = 'public'
        WHERE con.contype = 'f' AND src.relname = v_table
-         AND tgt.relname = 'fields' AND con.confdeltype = 'n';
-      IF v_n = 0 THEN
+         AND tgt.relname = 'fields' AND con.confdeltype = 'n'
+      ) THEN
         RAISE EXCEPTION
-          'arm % reports a per-row disposition but %.field_id is not SET NULL; there is no second outcome',
+          'arm % decides per row but %.field_id is not SET NULL; there is no second outcome',
           v_kind, v_table;
       END IF;
-      SELECT count(*) INTO v_n
-        FROM pg_constraint con
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint con
         JOIN pg_class src ON src.oid = con.conrelid
         JOIN pg_class tgt ON tgt.oid = con.confrelid
         JOIN pg_namespace sn ON sn.oid = src.relnamespace AND sn.nspname = 'public'
        WHERE con.contype = 'f' AND src.relname = v_table
-         AND tgt.relname <> 'fields' AND con.confdeltype = 'c';
-      IF v_n = 0 THEN
-        RAISE EXCEPTION
-          'arm % reports a per-row disposition but % has no CASCADE key that could destroy it',
-          v_kind, v_table;
+         AND tgt.relname = v_via AND con.confdeltype = 'c'
+      ) THEN
+        RAISE EXCEPTION 'arm % decides per row via %, but % has no CASCADE key to it',
+          v_kind, v_via, v_table;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint con
+        JOIN pg_class src ON src.oid = con.conrelid
+        JOIN pg_class tgt ON tgt.oid = con.confrelid
+        JOIN pg_namespace sn ON sn.oid = src.relnamespace AND sn.nspname = 'public'
+       WHERE con.contype = 'f' AND src.relname = v_via
+         AND tgt.relname = 'fields' AND con.confdeltype = 'c'
+      ) THEN
+        RAISE EXCEPTION 'arm % routes through %, which does not cascade from fields', v_kind, v_via;
       END IF;
       v_checked := v_checked + 1;
       CONTINUE;
     END IF;
 
-    v_disp := (regexp_match(v_arm, $re$'(deleted|unassigned)'::text$re$))[1];
-    IF v_disp IS NULL THEN
-      RAISE EXCEPTION 'arm % declares no disposition', v_kind;
-    END IF;
-
-    -- A flat 'deleted' must be backed by a CASCADE edge somewhere in the
-    -- closure -- directly on field_id, or through the slot it joins.
-    SELECT con.confdeltype INTO v_del
-      FROM pg_constraint con
+    -- **A flat arm claims the row is ALWAYS destroyed**, so a CASCADE must
+    -- reach it from `fields` -- directly, or through one hop, which is how
+    -- `games` is reached and the reason a column-name census could not see it.
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint con
       JOIN pg_class src ON src.oid = con.conrelid
       JOIN pg_class tgt ON tgt.oid = con.confrelid
       JOIN pg_namespace sn ON sn.oid = src.relnamespace AND sn.nspname = 'public'
-     WHERE con.contype = 'f' AND src.relname = v_table AND tgt.relname = 'fields'
-       AND con.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a
-                                WHERE a.attrelid = src.oid AND a.attname = 'field_id')]::smallint[];
-    IF v_del IS NULL THEN
-      -- No direct edge: the arm reaches the field through something else, so
-      -- the destroying key is a CASCADE on that table (games -> game_slots).
-      SELECT count(*) INTO v_n
-        FROM pg_constraint con
-        JOIN pg_class src ON src.oid = con.conrelid
-        JOIN pg_namespace sn ON sn.oid = src.relnamespace AND sn.nspname = 'public'
-       WHERE con.contype = 'f' AND src.relname = v_table AND con.confdeltype = 'c';
-      IF v_n = 0 THEN
-        RAISE EXCEPTION '% is enumerated as destroyed but has no CASCADE key at all', v_table;
-      END IF;
-      IF v_disp <> 'deleted' THEN
-        RAISE EXCEPTION 'arm % reaches the field only by cascade but declares "%"', v_kind, v_disp;
-      END IF;
-      v_checked := v_checked + 1;
-      CONTINUE;
-    END IF;
-
-    v_expected := CASE v_del WHEN 'c' THEN 'deleted' WHEN 'n' THEN 'unassigned' ELSE NULL END;
-    IF v_expected IS NULL THEN
-      RAISE EXCEPTION '%.field_id is ON DELETE %, which the RPC has no disposition word for', v_table, v_del;
-    END IF;
-    IF v_disp <> v_expected THEN
-      RAISE EXCEPTION 'arm % (%) declares disposition "%" but %.field_id is ON DELETE % (expected "%")',
-        v_kind, v_table, v_disp, v_table, v_del, v_expected;
+     WHERE con.contype = 'f' AND src.relname = v_table AND con.confdeltype = 'c'
+       AND (tgt.relname = 'fields'
+            OR EXISTS (SELECT 1 FROM pg_constraint c2
+                       JOIN pg_class s2 ON s2.oid = c2.conrelid
+                       JOIN pg_class t2 ON t2.oid = c2.confrelid
+                      WHERE c2.contype = 'f' AND s2.relname = tgt.relname
+                        AND t2.relname = 'fields' AND c2.confdeltype = 'c'))
+    ) THEN
+      RAISE EXCEPTION
+        'arm % says % is always destroyed, but no CASCADE reaches it from fields', v_kind, v_table;
     END IF;
     v_checked := v_checked + 1;
   END LOOP;
+
+  -- **And the caller turns `cascades` into exactly two words.** The producer
+  -- answers "does a cascade reach this row"; the operator reads "deleted" or
+  -- "unassigned", and that translation is the delete RPC's own.
+  SELECT pg_get_functiondef(p.oid) INTO v_def
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public' AND p.proname = 'admin_delete_field';
+  IF v_def NOT LIKE '%CASE WHEN b.cascades THEN ''deleted'' ELSE ''unassigned'' END%' THEN
+    RAISE EXCEPTION 'admin_delete_field does not turn the producer''s cascades flag into a disposition';
+  END IF;
 
   IF v_checked <> 5 THEN
     RAISE EXCEPTION 'checked % dispositions, expected 5', v_checked;
   END IF;
   RAISE NOTICE 'disposition literals checked against pg_constraint on % arms', v_checked;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 5b. ONE producer, and no caller keeping a copy
+-- ---------------------------------------------------------------------------
+--
+-- The first version of this migration left `admin_retire_field`'s own union in
+-- place and wrote a second one for the delete. That is not duplication, it is a
+-- SECOND ANSWER: retire's copy had no `games` arm and could not see an
+-- assignment reached through its slot, so a retirement under-reported what it
+-- affected and the operator confirmed against an incomplete list. This check is
+-- what stops the copy coming back.
+DO $$
+DECLARE r record; v_n int := 0;
+BEGIN
+  FOR r IN
+    SELECT p.proname, pg_get_functiondef(p.oid) AS def
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public' AND p.proname IN ('admin_retire_field','admin_delete_field')
+  LOOP
+    v_n := v_n + 1;
+    IF r.def NOT LIKE '%public.field_bookings(%' THEN
+      RAISE EXCEPTION '% does not enumerate through the shared producer', r.proname;
+    END IF;
+    IF r.def LIKE '%UNION ALL%' THEN
+      RAISE EXCEPTION '% has re-inlined a union of its own; there are two answers again', r.proname;
+    END IF;
+  END LOOP;
+  -- A loop over an empty set proves nothing, and both RPCs must exist.
+  IF v_n <> 2 THEN
+    RAISE EXCEPTION 'expected both field RPCs, examined %', v_n;
+  END IF;
+
+  -- **`p_confirm => NULL` must not read as confirmed.** `NOT NULL` is NULL, so
+  -- a bare `NOT p_confirm` leaves the IF unfired and the destructive path runs
+  -- with nobody having confirmed. Checked on BOTH RPCs, because this was live
+  -- in retire while delete had it right -- the asymmetry, not the idea.
+  FOR r IN
+    SELECT p.proname, pg_get_functiondef(p.oid) AS def
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public' AND p.proname IN ('admin_retire_field','admin_delete_field')
+  LOOP
+    IF r.def NOT LIKE '%NOT COALESCE(p_confirm, false)%' THEN
+      RAISE EXCEPTION '% does not read a NULL p_confirm as unconfirmed', r.proname;
+    END IF;
+  END LOOP;
+
+  RAISE NOTICE 'one producer, two callers, and neither treats a NULL confirmation as yes';
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -388,7 +421,7 @@ DECLARE
   v_season uuid; v_div uuid; v_team uuid;
   v_gs uuid; v_ga uuid; v_ps uuid; v_pa uuid;
   v_ga_slotted uuid; v_ga_orphan uuid; v_pa_slotted uuid; v_game uuid; v_team_b uuid;
-  v_res jsonb; v_n int; v_kinds text[]; v_fk uuid; v_disp text;
+  v_res jsonb; v_n int; v_kinds text[]; v_fk uuid; v_disp text; v_audit_affected jsonb;
 BEGIN
   -- `password_length` satisfies check_password_length_on_auth_users from
   -- 20240405180000. Nothing here depends on a password.
@@ -523,6 +556,34 @@ BEGIN
      AND metadata->>'operation' = 'admin_delete_field'
      AND metadata->>'phase' = 'refused';
   IF v_n <> 1 THEN RAISE EXCEPTION 'expected 1 refused audit row, found %', v_n; END IF;
+
+  -- **And it is BOUNDED.** The caller gets the whole list; the trail gets a
+  -- digest. Embedding the array itself would write an arbitrarily large row on
+  -- every refusal of a busy field, and a refusal is the cheapest thing in the
+  -- system to repeat. A raw array has none of these keys, so this fails the
+  -- moment the cap is removed.
+  SELECT metadata->'affected' INTO v_audit_affected FROM public.audit_log
+   WHERE resource_id = v_field
+     AND metadata->>'operation' = 'admin_delete_field'
+     AND metadata->>'phase' = 'refused';
+  IF jsonb_typeof(v_audit_affected) <> 'object'
+     OR NOT (v_audit_affected ? 'total' AND v_audit_affected ? 'omitted'
+             AND v_audit_affected ? 'by_kind' AND v_audit_affected ? 'sample') THEN
+    RAISE EXCEPTION 'the refusal audit embeds the raw affected list rather than a bounded digest: %',
+      left(v_audit_affected::text, 120); END IF;
+  IF (v_audit_affected->>'total')::int <> (v_res->>'affected_count')::int THEN
+    RAISE EXCEPTION 'the audit digest total (%) disagrees with the reported count (%)',
+      v_audit_affected->>'total', v_res->>'affected_count'; END IF;
+  IF jsonb_array_length(v_audit_affected->'sample') > 25 THEN
+    RAISE EXCEPTION 'the audit digest sample is not capped: % entries',
+      jsonb_array_length(v_audit_affected->'sample'); END IF;
+  -- The per-kind counts must add up to the total, or the digest is a summary of
+  -- something other than what it claims to summarise.
+  SELECT COALESCE(sum(value::int), 0) INTO v_n
+    FROM jsonb_each_text(v_audit_affected->'by_kind');
+  IF v_n <> (v_audit_affected->>'total')::int THEN
+    RAISE EXCEPTION 'the digest per-kind counts sum to % but total says %',
+      v_n, v_audit_affected->>'total'; END IF;
 
   -- 6b. UNBOOKED ground deletes with no confirmation. Without this the guard
   --     could be "refuse everything", which passes 6a and is not the contract.

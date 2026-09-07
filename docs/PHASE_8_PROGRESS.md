@@ -1154,6 +1154,62 @@ claim, not a fix; that is the same shape as the hollow probes above, one file
 along.
 
 
+### Pass 3: a claim of isolation that was not measured
+
+The review found that the plant meant to prove the resolve probe can fail was
+ALSO tripping the `pg_proc` verdict beside it, because that verdict used
+`prosrc LIKE '%field_bookings%'` and the two helpers share a prefix -- so
+`field_bookings_digest` matched, and `prove.sh`'s `expect` (a substring of the
+FAIL line) could not tell the two checks apart. **The pass-2 report claimed the
+isolation and had not measured it.** Establishing it by running took one plant
+and two minutes: the harness printed BOTH `FAIL ... reads STILL-CALLS-PRODUCER`
+and `FAIL ... does not resolve`. Borrowed evidence, in the check built to stop
+borrowed evidence.
+
+The verdict now strips the digest name before looking for the producer -- a
+correctness fix in its own right, since it should distinguish the two helpers --
+and the probe's failure line carries the word `probe` so `expect` can name it
+alone. Re-measured: the verdict prints its `(checked)` line and only the probe
+fails.
+
+### The security claim the catalogue contradicted
+
+The producer's `COMMENT` said "Internal: no EXECUTE grant". 20260614000000 sets
+`ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT EXECUTE ON
+FUNCTIONS TO authenticated, service_role`, which a `REVOKE ... FROM PUBLIC` does
+not remove, so both helpers arrived with `authenticated=X/postgres` on their
+ACL. Measured on the migrated database rather than reasoned about.
+
+**It was not a live exposure**, and saying so precisely matters: `field_bookings`
+is SECURITY INVOKER and all five tables it reads have row security enabled with
+org-scoped policies, so an authenticated non-member calling it directly with
+another organisation's ids gets an empty result. What was wrong was that the
+whole defence rested on RLS while the comment asserted a grant that did not
+exist. The claim is made TRUE -- explicit revokes from PUBLIC, anon,
+authenticated and service_role, which cost the callers nothing because both are
+SECURITY DEFINER owned by postgres -- and section 5c of the smoke fails if a
+future default privilege puts a role back on either ACL. Its plant is caught at
+the smoke with the scenario table green, which is the point: no behaviour
+changes, so nothing else in the harness could ever have noticed.
+
+### The list that fell out of step, and the rule that replaces it
+
+`$EMERG` was planted but appeared in neither the stale-backup refusal nor
+`restore_all`, so an interrupted run would have left the emergency rollback
+mutated and the next run would have adopted that mutation as its baseline --
+which is what happened to this session once already, when a container restart
+froze a plant mid-flight and left a security mutant in the tree. Both
+enumerations now derive from the DISK (`find` over the directories the sweep
+plants into) rather than from a hand-maintained list, so the next file added is
+covered without anyone remembering. Proved by planting a stale `.orig` in each
+directory and watching the refusal fire.
+
+The census that generalises this is worth keeping: **every line printing a
+health claim needs a plant, and a claim with no plant is a claim nobody has
+tried to falsify.** Seven `(checked)` claims in `run.sh` and the smoke's new
+section 5c; all eight now have one.
+
+
 ### Still open
 
 - **LIVE-4** — roughly thirty hard deletes in `mockSupabaseClient.js` remove rows

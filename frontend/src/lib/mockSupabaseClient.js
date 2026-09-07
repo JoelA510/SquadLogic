@@ -2065,13 +2065,6 @@ export const mockSupabase = {
       // others did not.
       const applyRetirementTrigger = applyFieldRetirementTrigger;
 
-      // **`upper()` on a daterange, mirrored.** PostgreSQL normalizes a
-      // discrete range to `[lower, upper)`, so `upper('[a,b]')` is b + 1 and
-      // `upper('[a,b)')` is b. Both spellings appear in this repo's fixtures,
-      // and reading the closing literal as "the last day covered" would judge
-      // an inclusive range one day short -- an assignment on the retirement
-      // date itself would be reported unaffected. Returns null when there is
-      // no upper bound at all, which is what `upper_inf` is true for.
       /**
        * The LAST DAY a practice range covers, or null when it covers no end.
        *
@@ -2083,6 +2076,11 @@ export const mockSupabase = {
        * is why the shared scenario table could not see it: agreement is not
        * correctness. The boundary is now stated as data in the fixture, in the
        * `retire-*-on-boundary` / `retire-*-day-after-boundary` pairs.
+       *
+       * Postgres normalises a discrete range to `[lower, upper)`, so both
+       * spellings in this repo's fixtures reduce to one rule: `[a,b]` covers
+       * through b, `[a,b)` covers through the day before b. Null when there is
+       * no upper bound at all, which is what `upper_inf` is true for.
        *
        * @param {string|null} range a daterange literal
        * @returns {string|null} ISO date of the last covered day

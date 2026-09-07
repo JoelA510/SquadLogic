@@ -2311,6 +2311,12 @@ export const mockSupabase = {
         if (!existing) {
           return { data: null, error: { message: 'Blackout not found in organization' } };
         }
+        // **Tombstoned, like every other hard delete.** `getDB()` re-merges the
+        // seed on each read and only `markMockDeleted` survives it, so a
+        // blackout that came from an E2E injection resurrected on the next
+        // call. `admin_delete_field` got this fix and its blackout twin did
+        // not -- the same sibling gap, one function along.
+        markMockDeleted(db, 'field_blackouts', [existing.id]);
         db.field_blackouts = (db.field_blackouts || []).filter(
           (item) => String(item.id) !== String(p.p_blackout_id)
         );
@@ -2357,20 +2363,22 @@ export const mockSupabase = {
       // means it runs forever and is therefore CERTAINLY affected. Two
       // different answers, never collapsed into one.
       //
-      // `options.includeGames` adds the `games` rows hanging off this field's
-      // game slots -- destroyed by the slot cascade although `games` carries no
-      // field_id at all. `options.viaSlots` also catches assignments whose SLOT
-      // is on this field, because the cascade does not consult `field_id`.
-      // Both are DELETE-only: `admin_retire_field` writes a date and destroys
-      // nothing, so it enumerates neither, and its SQL twin has four arms where
-      // the delete has five. Sharing the enumerator without sharing the options
-      // is what keeps the two retire arms identical.
+      // **One enumerator, no options -- both callers see the same five kinds.**
+      //
+      // An earlier version made `games` and slot-reached assignments DELETE-only
+      // on the reasoning that a retirement destroys nothing. That was wrong in
+      // the same way the SQL was: a retirement that cannot see the fixture on
+      // its ground UNDER-REPORTS, and the operator confirms against an
+      // incomplete list. What differs between the two callers is the DATE and
+      // nothing else, so that is the only parameter.
+      //
+      // Mirrors `public.field_bookings(p_organization_id, p_field_id, p_after)`.
       //
       // @param {string} fieldId
-      // @param {string|null} after
-      // @param {{ includeGames?: boolean, viaSlots?: boolean }} [options]
-      const fieldBookings = (fieldId, after, options = {}) => {
-        const { includeGames = false, viaSlots = false } = options;
+      // @param {string|null} after `null` means no date applies -- a deletion
+      //   takes everything on the ground, which is not the same as an empty
+      //   filter.
+      const fieldBookings = (fieldId, after) => {
         // A row with no date of its own is affected whatever `after` says.
         // **An empty string is "no date", not a date before every date.** The
         // field-import apply path writes `valid_until: ''` for an open-ended
@@ -2402,7 +2410,7 @@ export const mockSupabase = {
           practiceSlotIds.has(String(row.slot_id));
         const inScope = (row, viaSlot) =>
           String(row.organization_id) === String(orgId) &&
-          (String(row.field_id) === String(fieldId) || (viaSlots && viaSlot(row)));
+          (String(row.field_id) === String(fieldId) || viaSlot(row));
 
         return [
           ...(db.game_slots || [])
@@ -2414,6 +2422,7 @@ export const mockSupabase = {
               week_index: slot.week_index ?? null,
               undated: !gameDate(slot),
               unbounded: false,
+              cascades: true,
             })),
           ...(db.practice_slots || [])
             .filter((slot) => mine(slot) && !past(slot.valid_until ?? null))
@@ -2425,6 +2434,7 @@ export const mockSupabase = {
               // Unbounded, therefore CERTAINLY stranded -- not unjudged.
               undated: false,
               unbounded: !slot.valid_until,
+              cascades: true,
             })),
           // **The assignment tables.** The mock enumerated the two SLOT tables
           // only, so the E2E client reported `affected_count: 0` for a field
@@ -2435,24 +2445,30 @@ export const mockSupabase = {
           // answer to a question that is supposed to have one.
           // `games` carries no field_id and dies with the slot, score and all.
           // A census by column name could not see it; this list comes from the
-          // cascade closure instead.
-          ...(includeGames
-            ? (db.games || [])
-                .filter((row) => gameSlotIds.has(String(row.game_slot_id)))
-                .map((row) => {
-                  const slot = (db.game_slots || []).find(
-                    (candidate) => String(candidate.id) === String(row.game_slot_id)
-                  );
-                  return {
-                    kind: 'game',
-                    id: row.id,
-                    on_date: slot ? gameDate(slot) : null,
-                    week_index: slot?.week_index ?? null,
-                    undated: !(slot && gameDate(slot)),
-                    unbounded: false,
-                  };
-                })
-            : []),
+          // cascade closure instead. Its date is its slot's, so a retirement
+          // judges it against the same day the slot is judged against.
+          ...(db.games || [])
+            .filter((row) => {
+              if (!gameSlotIds.has(String(row.game_slot_id))) return false;
+              const slot = (db.game_slots || []).find(
+                (candidate) => String(candidate.id) === String(row.game_slot_id)
+              );
+              return !past(slot ? gameDate(slot) : null);
+            })
+            .map((row) => {
+              const slot = (db.game_slots || []).find(
+                (candidate) => String(candidate.id) === String(row.game_slot_id)
+              );
+              return {
+                kind: 'game',
+                id: row.id,
+                on_date: slot ? gameDate(slot) : null,
+                week_index: slot?.week_index ?? null,
+                undated: !(slot && gameDate(slot)),
+                unbounded: false,
+                cascades: true,
+              };
+            }),
           ...(db.game_assignments || [])
             .filter(
               (row) =>
@@ -2465,15 +2481,12 @@ export const mockSupabase = {
               week_index: row.week_index ?? null,
               undated: !row.start,
               unbounded: false,
-              // **Per row, not per table**, and DELETE-ONLY. `field_id` is SET
-              // NULL, but the slot columns are CASCADE, so a scheduler-produced
-              // assignment is destroyed while a free-standing one survives
-              // venueless. `admin_retire_field` destroys nothing and its SQL
-              // twin emits no such key, so the field is added only when the
-              // caller asked to see through slots -- a payload shape the mock
-              // produced and the database did not is the divergence this whole
-              // mechanism exists to stop.
-              ...(viaSlots ? { cascades: onGameSlot(row) } : {}),
+              // **Per row, not per table.** `field_id` is SET NULL, but the
+              // slot columns are CASCADE, so a scheduler-produced assignment is
+              // destroyed while a free-standing one survives venueless. The
+              // producer computes it for both callers; retire ignores it,
+              // because a retirement destroys nothing.
+              cascades: onGameSlot(row),
             })),
           ...(db.practice_assignments || [])
             .filter(
@@ -2491,7 +2504,7 @@ export const mockSupabase = {
                 week_index: null,
                 undated: false,
                 unbounded: upper === null,
-                ...(viaSlots ? { cascades: onPracticeSlot(row) } : {}),
+                cascades: onPracticeSlot(row),
               };
             }),
         ];
@@ -2506,8 +2519,18 @@ export const mockSupabase = {
         // affected rather than being dropped -- the same reading the SQL takes.
         // The enumeration itself is the shared one above, so a correction to
         // who counts as booked reaches retire and delete together.
-        const affected = fieldBookings(p.p_field_id, String(p.p_effective_to));
-        if (affected.length > 0 && !p.p_confirm) {
+        // The shared enumerator, then the six keys retire's payload carries:
+        // `cascades` is the producer's answer to "would a delete destroy this",
+        // which a retirement has no use for and whose SQL twin never emits.
+        const affected = fieldBookings(p.p_field_id, String(p.p_effective_to)).map(
+          ({ cascades: _cascades, ...row }) => row
+        );
+        // `p_confirm` NULL or undefined reads as UNCONFIRMED, matching
+        // `NOT COALESCE(p_confirm, false)`. The SQL used a bare `NOT p_confirm`
+        // until this PR, so `p_confirm => NULL` retired booked ground with
+        // nobody confirming while the mock refused it -- the two arms
+        // disagreeing on the one input that turns the guard off.
+        if (affected.length > 0 && p.p_confirm !== true) {
           audit('field', field.id, 'updated', {
             operation: 'admin_retire_field',
             phase: 'refused',
@@ -2639,16 +2662,17 @@ export const mockSupabase = {
         const DECIDES_PER_ROW = ['game_assignment', 'practice_assignment'];
         // No date: a deletion takes everything on the ground. Games and
         // via-slot assignments are delete-only, so retire never sees them.
-        const affected = fieldBookings(p.p_field_id, null, {
-          includeGames: true,
-          viaSlots: true,
-        }).map((row) => {
+        const affected = fieldBookings(p.p_field_id, null).map((row) => {
           // Every switch over a union throws on the value it does not know. A
           // sixth booking kind must stop here rather than be reported to the
           // operator with an undefined consequence.
-          if (ALWAYS_DELETED.includes(row.kind)) return { ...row, disposition: 'deleted' };
+          // `cascades` is stripped on EVERY arm, not just the per-row ones.
+          // Leaving it on the always-deleted kinds put a key in the payload
+          // that the SQL never emits -- the same leak as retire's, one branch
+          // along, and caught only once something asserted the key set.
+          const { cascades, ...rest } = row;
+          if (ALWAYS_DELETED.includes(row.kind)) return { ...rest, disposition: 'deleted' };
           if (DECIDES_PER_ROW.includes(row.kind)) {
-            const { cascades, ...rest } = row;
             return { ...rest, disposition: cascades ? 'deleted' : 'unassigned' };
           }
           throw new Error(`unknown booking kind "${row.kind}"`);
@@ -2658,7 +2682,7 @@ export const mockSupabase = {
         // RETURNS rather than raising, and it records the decision it refused.
         // A caller that only checks PostgREST's `error` sees this as success,
         // which is why `useFields.deleteField` reads `data.deleted`.
-        if (affected.length > 0 && !p.p_confirm) {
+        if (affected.length > 0 && p.p_confirm !== true) {
           audit('field', field.id, 'deleted', {
             operation: 'admin_delete_field',
             phase: 'refused',

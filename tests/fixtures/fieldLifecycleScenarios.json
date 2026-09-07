@@ -524,6 +524,216 @@
         "ok": false,
         "sqlstate": "P0002"
       }
+    },
+    {
+      "id": "retire-game-slot-on-boundary",
+      "why": "THE BOUNDARY, STATED AS DATA. `p_after` is the last day the ground is usable -- the reading `field_is_live_on(effective_to, d) = effective_to >= d` already ships -- so a game slot dated EXACTLY on the retirement date is not stranded and the retirement proceeds. This case exists because the SQL and the mock shared an off-by-one on `practice_assignments` (comparing a daterange's EXCLUSIVE upper bound), and two agreeing implementations compared only to each other cannot see that. One pair per arm, because a single arm getting it right by accident is exactly the state this table was in.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_slot"],
+      "bookingOffset": 30,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": 30,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "retire-game-slot-day-after-boundary",
+      "why": "The other side of the same boundary, and the positive control for the case above: a game slot dated ONE DAY after the retirement date IS stranded, so the retirement refuses and the field is untouched. Without it, an enumerator that had stopped seeing this kind entirely would pass the on-boundary case for the wrong reason.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_slot"],
+      "bookingOffset": 31,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": null,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "retire-game-assignment-on-boundary",
+      "why": "THE BOUNDARY, STATED AS DATA. `p_after` is the last day the ground is usable -- the reading `field_is_live_on(effective_to, d) = effective_to >= d` already ships -- so a game assignment starting EXACTLY on the retirement date is not stranded and the retirement proceeds. This case exists because the SQL and the mock shared an off-by-one on `practice_assignments` (comparing a daterange's EXCLUSIVE upper bound), and two agreeing implementations compared only to each other cannot see that. One pair per arm, because a single arm getting it right by accident is exactly the state this table was in.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_assignment"],
+      "bookingOffset": 30,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": 30,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "retire-game-assignment-day-after-boundary",
+      "why": "The other side of the same boundary, and the positive control for the case above: a game assignment starting ONE DAY after the retirement date IS stranded, so the retirement refuses and the field is untouched. Without it, an enumerator that had stopped seeing this kind entirely would pass the on-boundary case for the wrong reason.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_assignment"],
+      "bookingOffset": 31,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": null,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "retire-practice-slot-on-boundary",
+      "why": "THE BOUNDARY, STATED AS DATA. `p_after` is the last day the ground is usable -- the reading `field_is_live_on(effective_to, d) = effective_to >= d` already ships -- so a practice slot whose valid_until is EXACTLY on the retirement date is not stranded and the retirement proceeds. This case exists because the SQL and the mock shared an off-by-one on `practice_assignments` (comparing a daterange's EXCLUSIVE upper bound), and two agreeing implementations compared only to each other cannot see that. One pair per arm, because a single arm getting it right by accident is exactly the state this table was in.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["practice_slot"],
+      "bookingOffset": 30,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": 30,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "retire-practice-slot-day-after-boundary",
+      "why": "The other side of the same boundary, and the positive control for the case above: a practice slot whose valid_until is ONE DAY after the retirement date IS stranded, so the retirement refuses and the field is untouched. Without it, an enumerator that had stopped seeing this kind entirely would pass the on-boundary case for the wrong reason.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["practice_slot"],
+      "bookingOffset": 31,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": null,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "retire-practice-assignment-on-boundary",
+      "why": "THE BOUNDARY, STATED AS DATA. `p_after` is the last day the ground is usable -- the reading `field_is_live_on(effective_to, d) = effective_to >= d` already ships -- so a practice whose date range ends EXACTLY on the retirement date is not stranded and the retirement proceeds. This case exists because the SQL and the mock shared an off-by-one on `practice_assignments` (comparing a daterange's EXCLUSIVE upper bound), and two agreeing implementations compared only to each other cannot see that. One pair per arm, because a single arm getting it right by accident is exactly the state this table was in.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["practice_assignment"],
+      "bookingOffset": 30,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": 30,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "retire-practice-assignment-day-after-boundary",
+      "why": "The other side of the same boundary, and the positive control for the case above: a practice whose date range ends ONE DAY after the retirement date IS stranded, so the retirement refuses and the field is untouched. Without it, an enumerator that had stopped seeing this kind entirely would pass the on-boundary case for the wrong reason.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["practice_assignment"],
+      "bookingOffset": 31,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": null,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "retire-scheduled-game-on-boundary",
+      "why": "THE BOUNDARY, STATED AS DATA. `p_after` is the last day the ground is usable -- the reading `field_is_live_on(effective_to, d) = effective_to >= d` already ships -- so a persisted slot+assignment+game dated EXACTLY on the retirement date is not stranded and the retirement proceeds. This case exists because the SQL and the mock shared an off-by-one on `practice_assignments` (comparing a daterange's EXCLUSIVE upper bound), and two agreeing implementations compared only to each other cannot see that. One pair per arm, because a single arm getting it right by accident is exactly the state this table was in.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["scheduled_game"],
+      "bookingOffset": 30,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": 30,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "retire-scheduled-game-day-after-boundary",
+      "why": "The other side of the same boundary, and the positive control for the case above: a persisted slot+assignment+game dated ONE DAY after the retirement date IS stranded, so the retirement refuses and the field is untouched. Without it, an enumerator that had stopped seeing this kind entirely would pass the on-boundary case for the wrong reason.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["scheduled_game"],
+      "bookingOffset": 31,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": null,
+        "auditPhases": ["refused"]
+      }
     }
   ],
   "blackoutScenarios": [

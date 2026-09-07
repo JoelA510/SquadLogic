@@ -933,14 +933,19 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
     expect(byId.get('fam-ga').on_date).toBe('2099-01-02');
     expect(byId.get('fam-ga').week_index).toBe(4);
     expect(byId.get('fam-ga').undated).toBe(false);
-    // **`upper()` normalizes an inclusive range to the day after.** Reading the
-    // closing literal as the last covered day would report 2099-06-30 here and
-    // judge an assignment on its final day unaffected.
-    expect(byId.get('fam-pa').on_date).toBe('2099-07-01');
+    // **The LAST COVERED DAY, which is what the other four arms report.** This
+    // assertion used to demand 2099-07-01 -- `upper()` of the canonicalised
+    // `[)` range, the day AFTER the practice ends -- and argued for it in a
+    // comment. That was the defect, pinned: an operator reading the payload saw
+    // a date the practice does not run on, and comparing that value to the
+    // retirement date called a practice ending exactly ON it stranded, while a
+    // game slot the same day was not. The mock agreed, so the shared scenario
+    // table saw one answer twice; the fixture now states the boundary as data.
+    expect(byId.get('fam-pa').on_date).toBe('2099-06-30');
     expect(byId.get('fam-pa').unbounded).toBe(false);
   });
 
-  it('calls an unbounded practice assignment certain, and an exclusive range by its literal', async () => {
+  it('calls an unbounded practice assignment certain, and reads each range by its last covered day', async () => {
     const field = someField();
     await supabase.from('practice_assignments').insert({
       id: 'fam-pa-forever',
@@ -975,8 +980,11 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
       expect(byId.get(id).undated).toBe(false);
       expect(byId.get(id).on_date).toBeNull();
     }
-    // An exclusive upper bound is already the exclusive upper: no day added.
-    expect(byId.get('fam-pa-excl').on_date).toBe('2099-06-30');
+    // An EXCLUSIVE upper bound of 2099-06-30 means the range stops covering on
+    // the 29th, so that is the last day -- the other side of the same reading,
+    // and the reason this case sits beside the inclusive one: a fix that simply
+    // subtracted a day everywhere would get this wrong in the other direction.
+    expect(byId.get('fam-pa-excl').on_date).toBe('2099-06-29');
     expect(byId.get('fam-pa-excl').unbounded).toBe(false);
   });
 

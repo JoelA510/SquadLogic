@@ -95,6 +95,30 @@
 -- run and fails if a table joins or leaves it, so the next `games` cannot
 -- arrive unnoticed.
 --
+-- ## The retirement boundary is INCLUSIVE, and every arm reads it that way
+--
+-- `p_after` is the LAST DAY THE GROUND IS USABLE, not the first day it is shut.
+-- "Retire this field on the 30th" leaves a booking on the 30th alone and
+-- strands only what falls after it. That is not a new decision here: it is the
+-- reading `public.field_is_live_on(effective_to, d)` already ships
+-- (`effective_to >= d`, 20260906000000:140) and the one
+-- `packages/core/src/facility/lifecycle.js isLiveOn()` gives the frontend, so
+-- choosing the other way would have made the guard disagree with the predicate
+-- the scheduler uses to decide the same question.
+--
+-- Four of the five arms compare the booking's OWN date and get it right for
+-- free. `practice_assignments` carries a daterange, which Postgres canonicalises
+-- to `[)` -- so `upper()` is the day AFTER the last one covered, and comparing
+-- it to `p_after` reported a practice ending exactly ON the retirement date as
+-- stranded while a game slot the same day was not. The arm now compares
+-- `upper() - 1`, computed once and used by both the projection and the filter.
+--
+-- This is the shape two agreeing implementations cannot catch: the mock had the
+-- same off-by-one, so the shared scenario table saw two answers that matched.
+-- The table now states the boundary as DATA -- `retire-*-on-boundary` proceeds,
+-- `retire-*-day-after-boundary` refuses, one pair per arm -- so both runners are
+-- measured against the fixture rather than against each other.
+--
 -- ## Why practice_assignments.field_id becomes ON DELETE SET NULL
 --
 -- Its twin `game_assignments.field_id` is already SET NULL, and the two
@@ -294,8 +318,29 @@ AS $$
     -- The same, for practices. `practice_assignments.slot_id` and
     -- `.practice_slot_id` are both ON DELETE CASCADE to `practice_slots`
     -- (20260331000000:526-527) and `persist_practice_schedule` writes them.
+    --
+    -- **The boundary is INCLUSIVE, and this arm is the one that has to say so
+    -- out loud.** `p_after` is the last day the ground is usable -- the same
+    -- reading `field_is_live_on(effective_to, d) = effective_to >= d`
+    -- (20260906000000:140) and `facility/lifecycle.js isLiveOn()` already give,
+    -- so "retire this field on the 30th" leaves a booking ON the 30th alone and
+    -- strands only what falls after it. The four arms above compare the
+    -- booking's OWN date and get this right for free.
+    --
+    -- A daterange does not. Postgres canonicalises every daterange to `[)`, so
+    -- `upper()` is the day AFTER the last one covered: a practice running
+    -- through the 30th has `upper() = the 31st`, and `upper() > p_after` made it
+    -- the one kind reported as stranded by a retirement it actually survives.
+    -- The last covered day is `upper() - 1`, computed ONCE in the lateral below
+    -- and used by both the projection and the filter -- the projection had the
+    -- same defect, reporting the 31st to an operator as the date a practice
+    -- ends.
+    --
+    -- `upper_inc` is always false for a canonical daterange, so no case
+    -- distinction is needed; an empty range yields NULL and is excluded by the
+    -- comparison exactly as it was before.
     SELECT 'practice_assignment'::text, pa.id,
-           upper(pa.effective_date_range),
+           b.last_day,
            NULL::integer,
            false,
            pa.effective_date_range IS NULL OR upper_inf(pa.effective_date_range),
@@ -303,6 +348,14 @@ AS $$
                     WHERE s.field_id = p_field_id
                       AND s.id IN (pa.practice_slot_id, pa.slot_id))
     FROM public.practice_assignments pa
+    CROSS JOIN LATERAL (
+        SELECT CASE
+                 WHEN pa.effective_date_range IS NULL
+                   OR upper_inf(pa.effective_date_range)
+                 THEN NULL::date
+                 ELSE upper(pa.effective_date_range) - 1
+               END
+    ) AS b(last_day)
     WHERE pa.organization_id = p_organization_id
       AND (pa.field_id = p_field_id
            OR EXISTS (SELECT 1 FROM public.practice_slots s
@@ -311,7 +364,7 @@ AS $$
       AND (p_after IS NULL
            OR pa.effective_date_range IS NULL
            OR upper_inf(pa.effective_date_range)
-           OR upper(pa.effective_date_range) > p_after);
+           OR b.last_day > p_after);
 $$;
 
 REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM PUBLIC;

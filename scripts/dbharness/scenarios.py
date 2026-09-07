@@ -88,21 +88,45 @@ def condition_for(scenario):
 # Each entry is an INSERT with `%(field)s` for the field the scenario is about.
 # `practice_assignments.team_id` is NOT NULL and references `teams`, which is
 # why the preamble builds a season, a division and a team.
+# How many days out each kind is seeded when the scenario does not say.
+#
+# **A scenario overrides this with `bookingOffset`**, which is how the retirement
+# BOUNDARY became data instead of something the two runners agreed about
+# privately: `bookingOffset == args.effectiveTo` is a booking on the last usable
+# day, `effectiveTo + 1` is the first one stranded, and the fixture states which
+# of those refuses. Two implementations compared only to each other cannot catch
+# an off-by-one they share.
+DEFAULT_BOOKING_OFFSET = {
+    'game_slot': 30,
+    'game_assignment': 30,
+    'practice_slot': 60,
+    'practice_assignment': 60,
+    'scheduled_game': 30,
+    'scheduled_practice': 60,
+}
+
 BOOKING_SEEDS = {
     'game_slot':
         "INSERT INTO public.game_slots (organization_id, field_id, slot_date, week_index) "
-        "VALUES (v_org, %(field)s, current_date + 30, 1);",
+        "VALUES (v_org, %(field)s, current_date + %(at)s, 1);",
+    # **Anchored to `current_date`, not to `now()`.** `timezone('utc', now()) +
+    # interval 'N days'` cast back to a date can land a day either side of
+    # `current_date + N` depending on the session TimeZone, which is harmless at
+    # 30 days out and a coin toss for a case whose whole point is the boundary.
     'game_assignment':
         'INSERT INTO public.game_assignments (organization_id, field_id, "start", week_index) '
-        "VALUES (v_org, %(field)s, timezone('utc', now()) + interval '30 days', 1);",
+        "VALUES (v_org, %(field)s, (current_date + %(at)s) + time '18:00', 1);",
     'practice_slot':
         "INSERT INTO public.practice_slots "
         "(organization_id, field_id, day_of_week, start_time, end_time, valid_until) "
-        "VALUES (v_org, %(field)s, 'mon', '18:00', '19:30', current_date + 60);",
+        "VALUES (v_org, %(field)s, 'mon', '18:00', '19:30', current_date + %(at)s);",
+    # `'[]'` on the upper bound: the range covers `at` itself, so its LAST DAY is
+    # `at` -- the value the boundary cases compare against effectiveTo.
     'practice_assignment':
         "INSERT INTO public.practice_assignments "
         "(organization_id, team_id, field_id, effective_date_range) "
-        "VALUES (v_org, v_team, %(field)s, daterange(current_date, current_date + 60, '[]'));",
+        "VALUES (v_org, v_team, %(field)s, "
+        "daterange(current_date, current_date + %(at)s, '[]'));",
 }
 
 # The table each kind lives in, for counting survivors after a refusal.
@@ -127,12 +151,12 @@ BOOKING_TABLES = {
 COMPOSITE_SEEDS = {
     'scheduled_game': [
         ("INSERT INTO public.game_slots (organization_id, field_id, slot_date, week_index) "
-         "VALUES (v_org, %(field)s, current_date + 30, 1) RETURNING id INTO v_seed_slot;",
+         "VALUES (v_org, %(field)s, current_date + %(at)s, 1) RETURNING id INTO v_seed_slot;",
          'game_slots'),
         ('INSERT INTO public.game_assignments '
          '(organization_id, field_id, game_slot_id, slot_id, "start", week_index) '
          "VALUES (v_org, %(field)s, v_seed_slot, v_seed_slot, "
-         "timezone('utc', now()) + interval '30 days', 1);",
+         "(current_date + %(at)s) + time '18:00', 1);",
          'game_assignments'),
         ("INSERT INTO public.games (organization_id, game_slot_id, home_team_id, away_team_id) "
          "VALUES (v_org, v_seed_slot, v_team, v_team_b);",
@@ -141,13 +165,13 @@ COMPOSITE_SEEDS = {
     'scheduled_practice': [
         ("INSERT INTO public.practice_slots "
          "(organization_id, field_id, day_of_week, start_time, end_time, valid_until) "
-         "VALUES (v_org, %(field)s, 'mon', '18:00', '19:30', current_date + 60) "
+         "VALUES (v_org, %(field)s, 'mon', '18:00', '19:30', current_date + %(at)s) "
          "RETURNING id INTO v_seed_slot;",
          'practice_slots'),
         ("INSERT INTO public.practice_assignments "
          "(organization_id, team_id, field_id, practice_slot_id, slot_id, effective_date_range) "
          "VALUES (v_org, v_team, %(field)s, v_seed_slot, v_seed_slot, "
-         "daterange(current_date, current_date + 60, '[]'));",
+         "daterange(current_date, current_date + %(at)s, '[]'));",
          'practice_assignments'),
     ],
 }
@@ -200,9 +224,12 @@ def emit_bookings(scenario, target):
         return counts[table]
 
     for kind in scenario.get('bookings') or []:
+        at = scenario.get('bookingOffset', DEFAULT_BOOKING_OFFSET.get(kind))
+        if at is None:
+            raise SystemExit(f'no default offset for booking kind {kind!r}')
         if kind in COMPOSITE_SEEDS:
             for statement, table in COMPOSITE_SEEDS[kind]:
-                lines.append('  ' + statement % {'field': target})
+                lines.append('  ' + statement % {'field': target, 'at': at})
                 expected = seeded(table)
                 lines += [
                     '  ' + booking_count_sql(table),
@@ -216,7 +243,7 @@ def emit_bookings(scenario, target):
             # Every switch over a union throws on the value it does not know.
             raise SystemExit(f"unknown booking kind {kind!r} in scenario {scenario['id']!r}")
         table = BOOKING_TABLES[kind]
-        lines.append('  ' + BOOKING_SEEDS[kind] % {'field': target})
+        lines.append('  ' + BOOKING_SEEDS[kind] % {'field': target, 'at': at})
         expected = seeded(table)
         lines += [
             '  ' + booking_count_sql(table),

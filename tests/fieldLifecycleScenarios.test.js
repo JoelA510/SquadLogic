@@ -109,22 +109,40 @@ const fieldInState = async (before) => {
  * naming a fifth booking kind must stop the run rather than quietly seed
  * nothing and then pass a refusal case by counting zero.
  */
+/**
+ * How many days out each kind is seeded when the scenario does not say.
+ *
+ * **A scenario can override this with `bookingOffset`**, which is how the
+ * retirement BOUNDARY became data rather than something the two runners agreed
+ * about privately: `bookingOffset === args.effectiveTo` is a booking on the last
+ * usable day, `effectiveTo + 1` is the first one stranded, and the fixture
+ * states which of those refuses.
+ */
+const DEFAULT_BOOKING_OFFSET = {
+  game_slot: 30,
+  game_assignment: 30,
+  practice_slot: 60,
+  practice_assignment: 60,
+  scheduled_game: 30,
+  scheduled_practice: 60,
+};
+
 const BOOKING_SEEDS = {
-  game_slot: (id, fieldId) => [
+  game_slot: (id, fieldId, at) => [
     'game_slots',
-    { id, organization_id: ORG, field_id: fieldId, slot_date: dateAt(30), week_index: 1 },
+    { id, organization_id: ORG, field_id: fieldId, slot_date: dateAt(at), week_index: 1 },
   ],
-  game_assignment: (id, fieldId) => [
+  game_assignment: (id, fieldId, at) => [
     'game_assignments',
     {
       id,
       organization_id: ORG,
       field_id: fieldId,
-      start: `${dateAt(30)}T18:00:00.000Z`,
+      start: `${dateAt(at)}T18:00:00.000Z`,
       week_index: 1,
     },
   ],
-  practice_slot: (id, fieldId) => [
+  practice_slot: (id, fieldId, at) => [
     'practice_slots',
     {
       id,
@@ -133,17 +151,19 @@ const BOOKING_SEEDS = {
       day_of_week: 'mon',
       start_time: '18:00',
       end_time: '19:30',
-      valid_until: dateAt(60),
+      valid_until: dateAt(at),
     },
   ],
-  practice_assignment: (id, fieldId) => [
+  practice_assignment: (id, fieldId, at) => [
     'practice_assignments',
     {
       id,
       organization_id: ORG,
       team_id: 'scenario-team',
       field_id: fieldId,
-      effective_date_range: `[${dateAt(0)},${dateAt(60)}]`,
+      // `]` on the upper bound: the range covers `at` itself, so its LAST DAY
+      // is `at` -- the value the boundary cases compare against effectiveTo.
+      effective_date_range: `[${dateAt(0)},${dateAt(at)}]`,
     },
   ],
 };
@@ -160,14 +180,14 @@ const BOOKING_SEEDS = {
  * Each entry seeds several rows and declares how many the RPC must report.
  */
 const COMPOSITE_SEEDS = {
-  scheduled_game: (id, fieldId) => [
+  scheduled_game: (id, fieldId, at) => [
     [
       'game_slots',
       {
         id: `${id}-slot`,
         organization_id: ORG,
         field_id: fieldId,
-        slot_date: dateAt(30),
+        slot_date: dateAt(at),
         week_index: 1,
       },
     ],
@@ -179,13 +199,13 @@ const COMPOSITE_SEEDS = {
         field_id: fieldId,
         game_slot_id: `${id}-slot`,
         slot_id: `${id}-slot`,
-        start: `${dateAt(30)}T18:00:00.000Z`,
+        start: `${dateAt(at)}T18:00:00.000Z`,
         week_index: 1,
       },
     ],
     ['games', { id: `${id}-game`, organization_id: ORG, game_slot_id: `${id}-slot` }],
   ],
-  scheduled_practice: (id, fieldId) => [
+  scheduled_practice: (id, fieldId, at) => [
     [
       'practice_slots',
       {
@@ -195,7 +215,7 @@ const COMPOSITE_SEEDS = {
         day_of_week: 'mon',
         start_time: '18:00',
         end_time: '19:30',
-        valid_until: dateAt(60),
+        valid_until: dateAt(at),
       },
     ],
     [
@@ -207,7 +227,7 @@ const COMPOSITE_SEEDS = {
         field_id: fieldId,
         practice_slot_id: `${id}-slot`,
         slot_id: `${id}-slot`,
-        effective_date_range: `[${dateAt(0)},${dateAt(60)}]`,
+        effective_date_range: `[${dateAt(0)},${dateAt(at)}]`,
       },
     ],
   ],
@@ -224,14 +244,16 @@ const COMPOSITE_SEEDS = {
  * @param {string[]} kinds
  * @returns {Promise<Array<{ kind: string, table: string, id: string }>>}
  */
-const seedBookings = async (fieldId, kinds) => {
+const seedBookings = async (fieldId, kinds, bookingOffset) => {
   const seeded = [];
   for (const kind of kinds) {
     const id = `${fieldId}-${kind}`;
+    const at = bookingOffset ?? DEFAULT_BOOKING_OFFSET[kind];
+    if (at === undefined) throw new Error(`no default offset for booking kind "${kind}"`);
     // Composite kinds first: `scheduled_game` is three rows, not one.
     const composite = COMPOSITE_SEEDS[kind];
     if (composite !== undefined) {
-      for (const [tableName, row] of composite(id, fieldId)) {
+      for (const [tableName, row] of composite(id, fieldId, at)) {
         await supabase.from(tableName).insert(row);
         const landed = getMockData(tableName).find((r) => String(r.id) === String(row.id));
         expect(landed, `${kind} seed did not land in ${tableName}`).toBeDefined();
@@ -241,7 +263,7 @@ const seedBookings = async (fieldId, kinds) => {
     }
     const build = BOOKING_SEEDS[kind];
     if (build === undefined) throw new Error(`unknown booking kind "${kind}"`);
-    const [tableName, row] = build(id, fieldId);
+    const [tableName, row] = build(id, fieldId, at);
     await supabase.from(tableName).insert(row);
     const landed = getMockData(tableName).find((r) => String(r.id) === id);
     expect(landed, `${kind} seed did not land in ${tableName}`).toBeDefined();
@@ -256,10 +278,10 @@ describe('scenario table :: the table itself', () => {
     // The meta-assertion. A table that failed to parse, or that lost its
     // entries, would make every `it.each` below run zero cases and the file
     // would pass green having asserted nothing at all.
-    expect(TABLE.fieldScenarios.length).toBe(23);
+    expect(TABLE.fieldScenarios.length).toBe(33);
     expect(TABLE.blackoutScenarios.length).toBe(9);
     const all = [...TABLE.fieldScenarios, ...TABLE.blackoutScenarios];
-    expect(all.length).toBe(32);
+    expect(all.length).toBe(42);
     for (const scenario of all) {
       expect(typeof scenario.id).toBe('string');
       expect(scenario.why.length).toBeGreaterThan(10);
@@ -352,7 +374,7 @@ describe('scenario table :: the mock honours it', () => {
     // `bookings` is absent on the retirement cases and empty on some delete
     // cases; both mean "nothing booked". `?? []` is the only reading that does
     // not turn a missing key into a crash.
-    const seeded = await seedBookings(field.id, scenario.bookings ?? []);
+    const seeded = await seedBookings(field.id, scenario.bookings ?? [], scenario.bookingOffset);
 
     // **Every switch over a union throws on the value it does not know.** This
     // side guarded an unknown SCOPE on the blackout half and nothing at all on

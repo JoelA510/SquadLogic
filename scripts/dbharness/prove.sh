@@ -877,7 +877,19 @@ plant "R3 revert reinstates the weaker guard silently" "$R3" \
 # Measured, not argued: with the plant applied, the harness printed BOTH
 # `FAIL ... reads STILL-CALLS-PRODUCER` and `FAIL ... does not resolve`. The
 # verdict now strips the digest name before looking for the producer, and the
-# probe's failure line carries `probe` so `expect` can name it alone.
+# `^` anchor on this plant's `expect` is what names the probe alone.
+#
+# **That last clause used to credit the WORD, and my own staging branch made it
+# false.** It read "the probe's failure line carries `probe` so `expect` can
+# name it alone", which was true when written and stopped being true in the
+# round-2 commit that added `FAIL revert <id> probe: the probe script could not
+# be staged`. Two lines share the `probe` prefix now, so the word distinguishes
+# nothing and a substring naming it is satisfied by a probe that was never
+# staged -- measured, not reasoned about: both plants aimed here scored CAUGHT
+# with the probe never run. The whole-line `^` form is what makes the attribution
+# exact, and the corresponding note in run.sh says the same thing from the other
+# side. A sentence crediting the wrong mechanism is the same defect as the wrong
+# impossibility this round removed: it tells the next reader to stop looking.
 #
 # **And the isolation is now ASSERTED rather than hand-measured.** That
 # re-measurement was a number in a report: nothing in the sweep would have

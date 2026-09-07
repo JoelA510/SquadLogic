@@ -842,19 +842,31 @@ plant "R3 the restored retire calls a helper the revert also drops" "$R3" \
 # REPLACE says, so $R3's text is the verdict's only input.
 #
 # The mutation is the shape a half-finished revert actually takes: the refusal
-# path restored, the CONFIRMED path left on the new producer. The probe drives a
-# REFUSAL, so it never executes that statement and stays green -- which is what
-# makes this the verdict's own catch rather than one borrowed from the probe
-# beside it, and why it names the probe's claim as the line that must stay
-# green. Measured: verdict red at STILL-CALLS-PRODUCER, probe claim printed.
+# path restored, the CONFIRMED path left on the new producer.
+#
+# **It carried a `green` naming the probe's claim, and the sweep took it away.**
+# When it was written the probe drove only a refusal, so this statement never
+# executed and the probe stayed green -- a genuine isolation, measured. Then the
+# finding above extended the probe to drive the confirmed path too, and a LIVE
+# producer call there is now something the probe executes and dies on: the sweep
+# reported BORROWED, correctly, because the claim it named no longer prints.
+# Both halves of that are this PR's own work, which is the interaction worth
+# recording -- strengthening one check can invalidate a neighbour's isolation,
+# and the mechanism said so on the first run rather than a review round later.
+#
+# So the isolation is not claimed. The probe is RIGHT to fail beside it: after
+# the revert the producer is gone, and a call to it anywhere the function
+# executes is a real break. `expect` names the branch, which only the verdict
+# prints, so attribution stays exact -- the same honest shape as the AMBIGUOUS
+# plant below. The verdict's unique value is unchanged and still proved: it
+# reads the SOURCE, so it is what names WHICH way the restored body is wrong.
 plant "R3 the restored retire still calls the dropped producer" "$R3" \
   "        'affected', v_affected,
         'field', to_jsonb(v_after)" \
   "        'affected', (SELECT jsonb_agg(to_jsonb(b))
                      FROM public.field_bookings(p_organization_id, p_field_id, p_effective_to) b),
         'field', to_jsonb(v_after)" \
-  "revert 20260907000000: admin_retire_field after the revert reads STILL-CALLS-PRODUCER" \
-  "(checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"
+  "revert 20260907000000: admin_retire_field after the revert reads STILL-CALLS-PRODUCER"
 
 # **The half of the probe's claim that no plant could reach, and the probe that
 # now reaches it.** The probe drove only the REFUSAL path, and the verdict

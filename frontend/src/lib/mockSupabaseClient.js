@@ -2072,17 +2072,33 @@ export const mockSupabase = {
       // an inclusive range one day short -- an assignment on the retirement
       // date itself would be reported unaffected. Returns null when there is
       // no upper bound at all, which is what `upper_inf` is true for.
-      const rangeUpperBound = (range) => {
+      /**
+       * The LAST DAY a practice range covers, or null when it covers no end.
+       *
+       * **This used to return the exclusive upper bound**, mirroring Postgres
+       * `upper()`, and both arms then compared that to the retirement date --
+       * so a practice running through the 30th, whose range canonicalises to
+       * `[.., 31st)`, was reported stranded by a retirement on the 30th while a
+       * game slot the same day was not. The two implementations AGREED, which
+       * is why the shared scenario table could not see it: agreement is not
+       * correctness. The boundary is now stated as data in the fixture, in the
+       * `retire-*-on-boundary` / `retire-*-day-after-boundary` pairs.
+       *
+       * @param {string|null} range a daterange literal
+       * @returns {string|null} ISO date of the last covered day
+       */
+      const rangeLastDay = (range) => {
         const text = String(range || '');
         const match = /^[[(]([^,]*),([^,]*)([\])])$/.exec(text);
         if (match === null) return null;
         const end = match[2].trim();
         if (end === '') return null;
-        if (match[3] === ')') return end;
-        const next = new Date(`${end}T00:00:00Z`);
-        if (Number.isNaN(next.getTime())) return null;
-        next.setUTCDate(next.getUTCDate() + 1);
-        return next.toISOString().slice(0, 10);
+        // `]` means the bound itself is covered; `)` means the day before it is.
+        if (match[3] === ']') return end;
+        const previous = new Date(`${end}T00:00:00Z`);
+        if (Number.isNaN(previous.getTime())) return null;
+        previous.setUTCDate(previous.getUTCDate() - 1);
+        return previous.toISOString().slice(0, 10);
       };
 
       const audit = (resourceType, resourceId, operation, payload) => {
@@ -2499,13 +2515,14 @@ export const mockSupabase = {
             })),
           ...(db.practice_assignments || [])
             .filter(
-              (row) =>
-                inScope(row, onPracticeSlot) && !past(rangeUpperBound(row.effective_date_range))
+              (row) => inScope(row, onPracticeSlot) && !past(rangeLastDay(row.effective_date_range))
             )
             .map((row) => {
-              // `null` upper covers both "no range at all" and an unbounded
-              // one; the SQL treats both as running forever.
-              const upper = rangeUpperBound(row.effective_date_range);
+              // `null` covers both "no range at all" and an unbounded one; the
+              // SQL treats both as running forever. The LAST COVERED DAY is
+              // what the other four arms report and compare, so this arm
+              // reports and compares it too.
+              const upper = rangeLastDay(row.effective_date_range);
               return {
                 kind: 'practice_assignment',
                 id: row.id,
@@ -2691,33 +2708,37 @@ export const mockSupabase = {
       // silent default arm on a destructive operation is not a thing to leave
       // standing, so the name is checked and an unclaimed one is a loud error.
       if (name === 'admin_delete_field') {
-        // **What deleting the field does to each row.** The slot tables and
-        // `games` are reached only by CASCADE, so they are always destroyed.
-        // The assignment tables reach the field TWICE -- SET NULL on field_id
-        // and CASCADE through their slot columns -- so they decide per row, and
-        // the enumerator has already worked out which by setting `cascades`. A
-        // flat per-kind map was the first version of this, and it told the
-        // operator every assignment would survive: false for every row the
-        // scheduler writes, since `persist_game_schedule` and
-        // `persist_practice_schedule` always populate the slot columns.
-        const ALWAYS_DELETED = ['game_slot', 'practice_slot', 'game'];
-        const DECIDES_PER_ROW = ['game_assignment', 'practice_assignment'];
+        // **What deleting the field does to each row: ONE rule, no kind list.**
+        // The SQL is `CASE WHEN b.cascades THEN 'deleted' ELSE 'unassigned' END`
+        // -- it asks the producer and never asks which table the row came from.
+        // This arm used to re-derive the same answer from two hard-coded kind
+        // lists, which is a second answer to the question the migration header
+        // argues must have exactly one: the lists and `cascades` could drift,
+        // and a sixth kind would land in neither list. `cascades` already
+        // encodes the whole schema fact -- slots and `games` are reached only by
+        // CASCADE so it is always true for them; the assignment tables reach the
+        // field twice, SET NULL on field_id and CASCADE through their slot
+        // columns, so it is per row.
+        //
+        // What remains worth checking is that the producer ANSWERED. A row
+        // arriving with `cascades` undefined would read as `unassigned` and tell
+        // the operator a booking survives a delete that destroys it, which is
+        // the original defect wearing a different hat.
+        //
         // No date: a deletion takes everything on the ground. Games and
         // via-slot assignments are delete-only, so retire never sees them.
         const affected = fieldBookings(p.p_field_id, null).map((row) => {
-          // Every switch over a union throws on the value it does not know. A
-          // sixth booking kind must stop here rather than be reported to the
-          // operator with an undefined consequence.
-          // `cascades` is stripped on EVERY arm, not just the per-row ones.
-          // Leaving it on the always-deleted kinds put a key in the payload
-          // that the SQL never emits -- the same leak as retire's, one branch
-          // along, and caught only once something asserted the key set.
+          // `cascades` is stripped on EVERY arm. Leaving it on put a key in the
+          // payload that the SQL never emits -- the same leak as retire's, and
+          // caught only once something asserted the key set.
           const { cascades, ...rest } = row;
-          if (ALWAYS_DELETED.includes(row.kind)) return { ...rest, disposition: 'deleted' };
-          if (DECIDES_PER_ROW.includes(row.kind)) {
-            return { ...rest, disposition: cascades ? 'deleted' : 'unassigned' };
+          if (typeof cascades !== 'boolean') {
+            throw new Error(
+              `the producer returned no cascades for a ${row.kind} row; ` +
+                'its deletion consequence is unknown and must not be guessed'
+            );
           }
-          throw new Error(`unknown booking kind "${row.kind}"`);
+          return { ...rest, disposition: cascades ? 'deleted' : 'unassigned' };
         });
 
         // **The refusal, in the same shape admin_retire_field uses**: it

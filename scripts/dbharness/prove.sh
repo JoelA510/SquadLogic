@@ -288,6 +288,7 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
     # harness can see this", that is the claim. `green` asserts it, so an
     # isolation that used to be argued in a comment is now measured on every
     # run and cannot quietly stop being true.
+    #
     # **A health CLAIM is a green line too.** `green` could only ever name a
     # STAGE, because it matched `PASS <green>` -- and half of what this harness
     # asserts is not a stage. Seven checks print `  | (checked) ...` beneath a
@@ -643,7 +644,7 @@ plant "R1 revert erases a future retirement silently" "$R1" \
 plant "R3 revert exposes dangling rows silently" "$R3" \
   "        'EXPOSING % practice_assignment(s) with a field_id: after this revert a field delete leaves them dangling'," \
   "        'considering % row(s)'," \
-  "revert 20260907000000"
+  "revert 20260907000000: planted a practice_assignment with a field_id and the revert did not count it"
 
 # **A revert that removes the RPC instead of restoring it.** Both of run.sh's
 # checks on the restored admin_retire_field used to PASS on this mutation: the
@@ -651,11 +652,17 @@ plant "R3 revert exposes dangling rows silently" "$R3" \
 # zero-row answer as "no longer calls the producer" and printed its green line
 # for a database with no retirement RPC at all. This is the positive control
 # for the fix -- a check that matches zero records must be a loud failure.
+#
+# **`expect` names the BRANCH, not the stage.** Three checks in this stage print
+# `FAIL revert 20260907000000...` and this mutation makes two of them fire (the
+# probe cannot resolve a function that is gone either), so the bare stage name
+# scored a catch without ever showing WHICH answer the verdict gave. Measured:
+# it reads GONE.
 plant "R3 revert drops the retirement RPC instead of restoring it" "$R3" \
   "DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);" \
   "DROP FUNCTION IF EXISTS public.admin_retire_field(uuid, uuid, date, boolean);
 DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);" \
-  "revert 20260907000000"
+  "revert 20260907000000: admin_retire_field after the revert reads GONE"
 
 # **One plant per health claim the harness prints.** The three `(checked)` lines
 # above had two plants between them, and the gap is how a probe that reported
@@ -663,10 +670,14 @@ DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);" \
 # class share no syntax, so no grep finds them, but the class is enumerable --
 # every line that prints `(checked)` is a claim, and a claim with no plant is a
 # claim nobody has tried to make fail. These two close the remaining gap.
+#
+# **Five checks in this one stage print `FAIL revert 20260907000000...`**, so a
+# bare stage name as `expect` cannot say which of them a plant reached. Each is
+# named by its own line now, measured from a run rather than copied by eye.
 plant "R3 revert reinstates the weaker guard silently" "$R3" \
   "  RAISE WARNING 'RESTORING admin_retire_field to its pre-20260907000000 body:" \
   "  RAISE NOTICE 'restoring a function, no consequences worth naming:" \
-  "revert 20260907000000"
+  "revert 20260907000000: restored the old admin_retire_field without naming what that costs"
 # **A restored body that calls something ELSE this revert drops.** A botched
 # revert that reinstated the new audit line -- `field_bookings_digest`, dropped
 # three statements later -- leaves a retirement raising 42883 on the next call,
@@ -680,6 +691,7 @@ plant "R3 revert reinstates the weaker guard silently" "$R3" \
 # `FAIL ... reads STILL-CALLS-PRODUCER` and `FAIL ... does not resolve`. The
 # verdict now strips the digest name before looking for the producer, and the
 # probe's failure line carries `probe` so `expect` can name it alone.
+#
 # **And the isolation is now ASSERTED rather than hand-measured.** That
 # re-measurement was a number in a report: nothing in the sweep would have
 # noticed it stopping being true, because `expect` is a substring match and this
@@ -700,6 +712,65 @@ plant "R3 the restored retire calls a helper the revert also drops" "$R3" \
     END IF;" \
   "revert 20260907000000 probe" \
   "(checked) exactly one public.admin_retire_field survives the revert, and it no longer calls the dropped producer"
+
+# **The census counted claims, and a claim is not always one assertion.** All
+# seven `(checked)` lines had a plant and one of them was still half unprovable,
+# because the verdict under it decides between three failing branches and only
+# one of them was ever reached. The rule the next census wants: enumerate the
+# ways a claim can go RED, not the lines it prints when it does not.
+#
+# **So: the other half of that verdict's claim, which nothing had ever tried to
+# fail.** The verdict has three ways to go red and only one of them was
+# reachable by a plant: `GONE`, above. This is the second; the third is below. `STILL-CALLS-PRODUCER` is the half the
+# claim says out loud -- "it no longer calls the dropped producer" -- and no
+# plant reached it, because the digest plant above is the only one that puts a
+# `field_bookings` name back into the restored body and the verdict strips that
+# name before it looks. So a widened strip, or a digest renamed to something the
+# strip no longer removes, would let a revert that never restored the enumerator
+# read RESTORED with this sweep still printing every plant caught.
+#
+# Reproduced before it was written, by running the harness under each of the
+# four plants that mutate $R3 and reading the branch it printed: GONE once and
+# the green claim three times, never STILL-CALLS-PRODUCER. No plant on any other
+# file can reach it either -- the restored body is whatever $R3's CREATE OR
+# REPLACE says, so $R3's text is the verdict's only input.
+#
+# The mutation is the shape a half-finished revert actually takes: the refusal
+# path restored, the CONFIRMED path left on the new producer. The probe drives a
+# REFUSAL, so it never executes that statement and stays green -- which is what
+# makes this the verdict's own catch rather than one borrowed from the probe
+# beside it, and why it names the probe's claim as the line that must stay
+# green. Measured: verdict red at STILL-CALLS-PRODUCER, probe claim printed.
+plant "R3 the restored retire still calls the dropped producer" "$R3" \
+  "        'affected', v_affected,
+        'field', to_jsonb(v_after)" \
+  "        'affected', (SELECT jsonb_agg(to_jsonb(b))
+                     FROM public.field_bookings(p_organization_id, p_field_id, p_effective_to) b),
+        'field', to_jsonb(v_after)" \
+  "revert 20260907000000: admin_retire_field after the revert reads STILL-CALLS-PRODUCER" \
+  "(checked) the restored admin_retire_field resolves and runs its own body"
+
+# **And the third branch, for the same reason.** `AMBIGUOUS` is the other half
+# of "exactly one survives", and it was as unreached as STILL-CALLS-PRODUCER
+# was: `GONE` is what a revert that removes too much prints, and nothing tried a
+# revert that removes too LITTLE. This restores the function under a CHANGED
+# signature, so 20260907000000's own version is left standing beside the
+# restored one -- the unguarded-overload shape this migration exists to close,
+# in the revert rather than the migration.
+#
+# No `green` here, and the omission is the honest one: the surviving overload IS
+# the pre-revert body, which cannot resolve once the producer is dropped, so the
+# probe is RIGHT to fail beside it. `expect` names the branch, which only the
+# verdict prints, so the attribution is exact even though the isolation is not
+# available to be claimed.
+plant "R3 revert restores retire under a second signature" "$R3" \
+  "    p_confirm boolean DEFAULT false
+)
+RETURNS jsonb" \
+  "    p_confirm text DEFAULT 'false'
+)
+RETURNS jsonb" \
+  "revert 20260907000000: admin_retire_field after the revert reads AMBIGUOUS"
 
 # **The emergency rollback, back in the state 20260907000000 left it in.** It
 # dropped a signature that no longer exists, so the DROP was a silent no-op and

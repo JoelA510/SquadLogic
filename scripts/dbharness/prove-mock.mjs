@@ -362,6 +362,63 @@ const PLANTS = [
     find: '  if (row && row.effective_to && String(row.effective_to) < today) row.active = false;',
     replace: '  if (false && row && row.effective_to) row.active = false;',
   },
+  // ------------------------------------------------------------------
+  // LIVE-2: the import's field resolution on the mock arm.
+  //
+  // This arm did not resolve at all before 20260908000000 -- it wrote
+  // `field_id: null` on every profile it created -- so there was nothing here
+  // to plant against and nothing that would have noticed. The SQL twins of
+  // these six are the M4 plants in `prove.sh`.
+  // ------------------------------------------------------------------
+  {
+    label: 'the import stops resolving a profile to a field',
+    suite: 'tests/fieldAvailabilityLifecycle.test.js',
+    find: '          field_id: fieldId,',
+    replace: '          field_id: null,',
+  },
+  {
+    label: 'an unresolvable row is applied instead of refused',
+    suite: 'tests/fieldAvailabilityLifecycle.test.js',
+    find: `          if (!fieldId) {
+            unresolved += 1;`,
+    replace: `          if (false) {
+            unresolved += 1;`,
+  },
+  {
+    label: 'the resolution ignores organization_id',
+    suite: 'tests/fieldAvailabilityLifecycle.test.js',
+    find: `            String(f.organization_id) === String(job.organization_id) &&
+            locIds.has(String(f.location_id)) &&`,
+    replace: '            locIds.has(String(f.location_id)) &&',
+  },
+  {
+    label: 'the refusal carries no branchable reason key',
+    suite: 'tests/fieldAvailabilityLifecycle.test.js',
+    find: `              reason: 'field_unresolved',
+              location,`,
+    replace: '              location,',
+  },
+  {
+    label: 'a refused row is marked applied and cannot be replayed',
+    suite: 'tests/fieldAvailabilityLifecycle.test.js',
+    find: `        if (rowErrors.length > 0) {
+          invalid += 1;
+          row.validation_errors = rowErrors;
+          return;
+        }`,
+    replace: `        if (rowErrors.length > 0) {
+          invalid += 1;
+          row.validation_errors = rowErrors;
+          row.applied_at = now;
+          return;
+        }`,
+  },
+  {
+    label: 'the name match becomes case-sensitive',
+    suite: 'tests/fieldAvailabilityLifecycle.test.js',
+    find: "            String(f.name ?? '').toLowerCase() === fc",
+    replace: "            String(f.name ?? '') === fc",
+  },
 ];
 
 const original = readFileSync(MOCK, 'utf8');

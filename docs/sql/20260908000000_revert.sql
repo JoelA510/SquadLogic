@@ -146,4 +146,13 @@ $$;
 COMMENT ON FUNCTION public.finalize_field_availability_import_job(uuid, jsonb) IS
   'Applies staged field_availability rows. Reverted to the pre-20260908000000 body: the location/field_name resolution has NO NOT FOUND guard, so a row matching no fields row creates a profile with field_id NULL and its blackout windows are unattributable to ground.';
 
+-- **And the view's comment, for the same reason.** The forward migration
+-- rewrote `field_closures`' comment to say the import can no longer create a
+-- field-less profile. Restoring the unguarded body without restoring the
+-- comment leaves the one reader asserting a guarantee its producer no longer
+-- makes -- the stale-comment failure this file argues against three paragraphs
+-- up, committed by the file itself. This is 20260906000100's wording verbatim.
+COMMENT ON VIEW public.field_closures IS
+  'THE reader for "is this ground closed on this date". Unions admin-authored field_blackouts with import-derived field_blackout_windows so the question has one answer. SCOPE is closes_location_id / closes_field_id -- what this row shuts. field_location_id is a different fact (the site the closed field sits on) and is never a scope; the two were one column in the first draft and a location filter therefore closed every other pitch on the site. closes_field_id is NULL for import rows whose profile resolved to no field -- surfaced, not filtered, because a closure nobody can attribute is what an inner join would hide. reason is NULL on the import arm because the import carries no structured reason, and its own words travel in source_reason_text rather than in note -- note is admin free text on both arms, so a privacy guard or an enum filter cannot silently mean two things. The union is temporary: it collapses to field_blackouts alone once finalize_field_availability_import_job resolves a profile to a field reliably.';
+
 COMMIT;

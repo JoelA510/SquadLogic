@@ -63,6 +63,24 @@
 --    WHERE p.field_id IS NULL
 --    GROUP BY p.id ORDER BY blackout_windows DESC;
 --
+-- ## One deliberate difference from the sibling finalizer, and why
+--
+-- `finalize_field_import_job` selects its staged rows with
+-- `AND COALESCE(jsonb_array_length(validation_errors), 0) = 0`, so a row it
+-- once refused is never attempted again. **This function deliberately does
+-- NOT carry that clause, and adopting it would silently destroy the
+-- replayability this migration is built on**: the only rows that ever hold a
+-- non-empty `validation_errors` are ones a previous finalize refused (the
+-- import-validation edge function stages every row with `validation_errors:
+-- []` and drops the rest), so that filter makes a refusal permanent. Here a
+-- refusal is a DEFERRAL -- the operator creates the missing field and the row
+-- applies. The two functions want different things from the same column, and
+-- the difference is stated because "adopt the sibling's contract" is the right
+-- instinct almost everywhere else in this codebase.
+--
+-- `docs/sql/20260908000000_smoke.sql` asserts the clause is absent, so
+-- harmonising the two by hand fails loudly instead of quietly.
+--
 -- ## What this does NOT fix
 --
 -- It closes the IMPORT as a producer of field-less profiles. It does not close
@@ -203,7 +221,11 @@ BEGIN
       ON CONFLICT (import_job_id, target_table, target_id) DO NOTHING;
     END IF;
 
-    UPDATE public.staging_import_rows SET applied_at=v_now, applied_by=auth.uid() WHERE id=v_row.id;
+    -- **Clear the refusal when the row is applied.** A row refused in an
+    -- earlier run keeps its `field_unresolved` entry, and without this a row
+    -- that has now succeeded reads as applied AND refused -- so anything
+    -- asking "which rows did this import refuse" names one that did not.
+    UPDATE public.staging_import_rows SET applied_at=v_now, applied_by=auth.uid(), validation_errors='[]'::jsonb WHERE id=v_row.id;
   END LOOP;
 
   UPDATE public.import_jobs SET status = CASE WHEN v_invalid_rows > 0 OR jsonb_array_length(COALESCE(p_validation_errors,'[]'::jsonb)) > 0 THEN 'completed_with_warnings' ELSE 'completed' END,

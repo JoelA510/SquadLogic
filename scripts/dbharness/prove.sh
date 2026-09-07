@@ -1203,6 +1203,24 @@ plant "M4 the name match becomes case-sensitive" "$M4" \
   "smoke 20260908000000" \
   "smoke 20260907000000"
 
+# **A replayed row that keeps its refusal** reads as applied AND refused at
+# once, so anything asking which rows the import refused names one that
+# succeeded.
+plant "M4 a replayed row keeps the refusal it no longer deserves" "$M4" \
+  "applied_by=auth.uid(), validation_errors='[]'::jsonb WHERE id=v_row.id;" \
+  "applied_by=auth.uid() WHERE id=v_row.id;" \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
+# **The clause that must stay ABSENT**, planted so the check for its absence is
+# itself falsifiable. `finalize_field_import_job` carries it and a refusal there
+# is permanent; here it would kill the replay this migration is built on.
+plant "M4 adopts the sibling filter and can never replay a refusal" "$M4" \
+  "AND applied_at IS NULL AND normalized_payload IS NOT NULL ORDER BY source_row_number" \
+  "AND applied_at IS NULL AND normalized_payload IS NOT NULL AND COALESCE(jsonb_array_length(validation_errors), 0) = 0 ORDER BY source_row_number" \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
 # **The revert's count, on the row run.sh plants for it.** Without the seed this
 # would report zero on a fresh database and prove only that the code parses;
 # with the seed, a revert that counts the wrong set prints ORPHANS: 0 and the

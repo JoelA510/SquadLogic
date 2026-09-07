@@ -518,30 +518,36 @@ describe('field availability lifecycle', () => {
     // The unresolvable row is staged AFTER a resolvable one, so a `field_id`
     // carried over from the previous iteration would show up as a profile
     // attached to the wrong ground rather than as no profile at all.
-    await supabase
-      .from('staging_import_rows')
-      .insert([
-        staged('resolvable-row', 'Alder Park', 'Main', 1),
-        staged('unresolvable-row', 'Alder Park', 'Ghost Pitch', 2),
-      ]);
+    await supabase.from('staging_import_rows').insert([
+      staged('resolvable-row', 'Alder Park', 'Main', 1),
+      staged('unresolvable-row', 'Alder Park', 'Ghost Pitch', 2),
+      // Surrounding whitespace, which `import_payload_text` btrims on the SQL
+      // side. This arm read the raw value, so a padded cell resolved against
+      // real Supabase and was refused here.
+      staged('padded-row', '  Alder Park ', ' Main  ', 3),
+    ]);
 
     const res = await supabase.rpc('finalize_field_availability_import_job', {
       p_import_job_id: job.id,
       p_validation_errors: [],
     });
     expect(res.error).toBeNull();
-    expect(res.data.inserted_profiles).toBe(1);
+    expect(res.data.inserted_profiles).toBe(2);
     expect(res.data.unresolved_field_rows).toBe(1);
     expect(res.data.invalid_rows).toBe(1);
     expect(res.data.status).toBe('completed_with_warnings');
-    expect(res.data.inserted_blackouts).toBe(1);
+    expect(res.data.inserted_blackouts).toBe(2);
 
     // Nothing field-less was created, and nothing was created for the refused
     // row at all.
     const profiles = getMockData('field_availability_profiles');
-    expect(profiles.length).toBe(1);
+    expect(profiles.length).toBe(2);
     expect(profiles.filter((p) => !p.field_id)).toEqual([]);
     expect(profiles.filter((p) => p.field_name === 'Ghost Pitch')).toEqual([]);
+    // The padded row resolved to the same pitch, and stored the TRIMMED names,
+    // which is what the SQL stores.
+    expect(profiles.map((p) => p.field_name).sort()).toEqual(['Main', 'Main']);
+    expect(profiles.every((p) => p.location === 'Alder Park')).toBe(true);
 
     // The refusal is reported with a reason a caller can branch on, on the
     // staging row and in the job's warning summary.
@@ -575,8 +581,17 @@ describe('field availability lifecycle', () => {
     expect(replay.error).toBeNull();
     expect(replay.data.inserted_profiles).toBe(1);
     expect(replay.data.unresolved_field_rows).toBe(0);
+    // **A replayed row stops reading as refused.** Its earlier
+    // field_unresolved entry is cleared when it applies; otherwise the row is
+    // applied and refused at once, and anything asking which rows the import
+    // refused names one that succeeded.
+    const replayed = getMockData('staging_import_rows').find(
+      (r) => String(r.id) === 'unresolvable-row'
+    );
+    expect(replayed.applied_at).toBeTruthy();
+    expect(replayed.validation_errors).toEqual([]);
     const after = getMockData('field_availability_profiles');
-    expect(after.length).toBe(2);
+    expect(after.length).toBe(3);
     expect(after.filter((p) => !p.field_id)).toEqual([]);
     expect(after.find((p) => p.field_name === 'Ghost Pitch').field_id).toBe('seed-field-ghost');
   });

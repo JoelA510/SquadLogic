@@ -4609,8 +4609,19 @@ export const mockSupabase = {
 
       stagedRows.forEach((row) => {
         const payload = row.normalized_payload || {};
-        const location = payload.location;
-        const fieldName = payload.field_name || payload.name;
+        // **Trimmed, because `import_payload_text` btrims every value it
+        // returns and the SQL resolves and stores the trimmed form.** This arm
+        // used the raw value, so `"Alder Park "` resolved against real Supabase
+        // and was refused as field_unresolved in mock and E2E mode -- the two
+        // arms disagreeing on the very contract they were made to share. The
+        // production edge function also trims when it stages, so this matters
+        // for rows staged any other way, which is every test in this suite.
+        const payloadText = (value) => {
+          const text = value === null || value === undefined ? '' : String(value).trim();
+          return text === '' ? null : text;
+        };
+        const location = payloadText(payload.location);
+        const fieldName = payloadText(payload.field_name) || payloadText(payload.name);
         const af = payload.available_from;
         const au = payload.available_until;
         const t1 = af ? Date.parse(af) : NaN;
@@ -4784,6 +4795,10 @@ export const mockSupabase = {
         });
         row.applied_at = now;
         row.applied_by = 'mock-admin-id';
+        // Clear the refusal a previous run may have left, exactly as the SQL
+        // does: a replayed row that keeps its field_unresolved entry reads as
+        // applied AND refused at once.
+        row.validation_errors = [];
         inserted += 1;
       });
       const status =

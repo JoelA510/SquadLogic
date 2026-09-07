@@ -419,6 +419,21 @@ const PLANTS = [
     find: "            String(f.name ?? '').toLowerCase() === fc",
     replace: "            String(f.name ?? '') === fc",
   },
+  {
+    // The SQL gets its values through `import_payload_text`, which btrims. This
+    // arm read the raw value, so a padded cell resolved there and was refused
+    // here -- the two arms disagreeing on the contract they exist to share.
+    label: 'the payload is read untrimmed, unlike import_payload_text',
+    suite: 'tests/fieldAvailabilityLifecycle.test.js',
+    find: "          const text = value === null || value === undefined ? '' : String(value).trim();",
+    replace: "          const text = value === null || value === undefined ? '' : String(value);",
+  },
+  {
+    label: 'a replayed row keeps the refusal it no longer deserves',
+    suite: 'tests/fieldAvailabilityLifecycle.test.js',
+    find: '        row.validation_errors = [];\n        inserted += 1;',
+    replace: '        inserted += 1;',
+  },
 ];
 
 const original = readFileSync(MOCK, 'utf8');

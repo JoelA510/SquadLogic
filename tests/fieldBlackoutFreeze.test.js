@@ -41,7 +41,23 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
  */
 const SCAN_ROOTS = Object.freeze(['packages', 'frontend', 'supabase', 'scripts', 'tests', 'docs']);
 
-const SCANNED_EXTENSIONS = Object.freeze(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.sql']);
+// **`.sh` is here because a writer landed in one.** `scripts/dbharness/run.sh`
+// seeds a field_blackout_windows row so 20260908000000's revert has an orphan
+// to count, and the scan could not see it -- so "who may write this table is a
+// checked list, scanned out of the source tree" was false in the same PR that
+// added the writer. An extension list is a filter on the universe, and a
+// universe that cannot contain the new writer is the set-derived-from-the-thing
+// -being-checked defect wearing different clothes.
+const SCANNED_EXTENSIONS = Object.freeze([
+  '.js',
+  '.jsx',
+  '.ts',
+  '.tsx',
+  '.mjs',
+  '.cjs',
+  '.sql',
+  '.sh',
+]);
 
 const SKIPPED_DIRECTORIES = Object.freeze([
   'node_modules',
@@ -185,7 +201,14 @@ describe('blackout freeze :: who may write each table is a checked list', () => 
    * visible. It is not a producer -- nothing it writes outlives the `DELETE
    * FROM public.organizations` that ends the block.
    *
-   * The seventh is 20260908000000's REVERT, which carries the pre-fix body
+   * The seventh is the local harness, which seeds one window so
+   * 20260908000000's revert has an orphaned closure to count -- the revert
+   * reports what the database already holds, and on a freshly migrated database
+   * that is nothing, so the count would prove only that the code parses. Same
+   * reasoning as the smoke: a script that seeds a table to check it is a writer
+   * the freeze wants visible, and nothing it writes outlives the run.
+   *
+   * The eighth is 20260908000000's REVERT, which carries the pre-fix body
    * verbatim in order to restore it. It is listed for the same reason as the
    * smoke and for one more: a revert is the one artefact that puts an old
    * writer back, so a freeze that could not see reverts would be blind to
@@ -203,6 +226,7 @@ describe('blackout freeze :: who may write each table is a checked list', () => 
     'docs/sql/20260906000100_smoke.sql',
     'docs/sql/20260908000000_revert.sql',
     'frontend/src/lib/mockSupabaseClient.js',
+    'scripts/dbharness/run.sh',
     'supabase/migrations/20260522120000_field_availability_phase1.sql',
     'supabase/migrations/20260522153000_field_availability_finalize_hardening.sql',
     'supabase/migrations/20260602000000_field_availability_finalize_applied_payload_fix.sql',

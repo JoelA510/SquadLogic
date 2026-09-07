@@ -96,17 +96,16 @@ describe('ImportContext field_availability state hygiene', () => {
       await result.current.applyDeferredImport('field_availability');
     });
 
+    // **What this asserts is that the lines REACH the log.** The wording is
+    // `describeFinalizeOutcome`'s to own and is asserted against literals in
+    // tests/importFinalizeOutcome.test.js -- restating it here would make two
+    // places to change and neither the authority.
+    const { describeFinalizeOutcome } =
+      await import('../frontend/src/utils/importDeferredActions.js');
+    const expected = describeFinalizeOutcome({ invalid_rows: 3, unresolved_field_rows: 2 });
+    expect(expected.length).toBe(2);
     const messages = result.current.importLogs.map((entry) => entry.message);
     expect(messages.length).toBeGreaterThan(0);
-    expect(messages.some((m) => m.includes('3 row(s) were not applied and remain staged'))).toBe(
-      true
-    );
-    expect(
-      messages.some(
-        (m) =>
-          m.includes('2 of those named a field this organization does not have') &&
-          m.includes('nothing was discarded')
-      )
-    ).toBe(true);
+    expected.forEach((line) => expect(messages).toContain(line));
   });
 });

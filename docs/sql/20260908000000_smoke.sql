@@ -64,6 +64,15 @@ BEGIN
   THEN
     RAISE EXCEPTION 'import_application_records.applied_payload is no longer NOT NULL; 20260602000000 satisfied that constraint rather than relaxing it'; END IF;
 
+  -- **The clause that must stay ABSENT.** `finalize_field_import_job` filters
+  -- its staged rows on `jsonb_array_length(validation_errors) = 0`, which makes
+  -- a refusal permanent. Adopting it here would silently kill the replay this
+  -- migration exists for, and "adopt the sibling's contract" is the right
+  -- instinct often enough that someone will try. A check for something that
+  -- must NOT be there is as much a check as one for something that must.
+  IF r.src LIKE '%jsonb_array_length(validation_errors)%' THEN
+    RAISE EXCEPTION 'finalize_field_availability_import_job now skips rows carrying validation_errors; a refused row can never be replayed and the operator import is lost'; END IF;
+
   IF has_function_privilege('public','public.finalize_field_availability_import_job(uuid, jsonb)','EXECUTE') THEN
     RAISE EXCEPTION 'PUBLIC must not execute finalize_field_availability_import_job'; END IF;
   IF NOT has_function_privilege('authenticated','public.finalize_field_availability_import_job(uuid, jsonb)','EXECUTE') THEN
@@ -112,9 +121,16 @@ END $$;
 --
 -- Three staged rows against a real organisation with real facility rows:
 --
---   row 1  exact name match                 -> applied, field_id set
---   row 2  case- and spacing-differing match -> applied, field_id set
---   row 3  names a field that does not exist -> REFUSED, nothing written
+--   row 1  exact name match                  -> applied, field_id set
+--   row 2  case- AND whitespace-differing match -> applied, field_id set
+--   row 3  names a field that does not exist   -> REFUSED, nothing written
+--
+-- Row 2 differs in BOTH, and the two are tolerated by different mechanisms:
+-- case by the `lower()` on each side of the match, surrounding whitespace by
+-- `import_payload_text`, which `btrim`s every value it returns. The resolver
+-- itself does no whitespace normalisation, so calling row 2 a "spacing" case
+-- without the payload helper in the path would credit it with a tolerance it
+-- does not have.
 --
 -- Row 3 is staged AFTER the two that resolve, deliberately: `v_field_id` is a
 -- single variable reused by every iteration, so a row that inherits its
@@ -164,7 +180,7 @@ BEGIN
                         'available_from','2026-08-01','available_until','2026-11-30',
                         'primary_format','7v7','blackout_months','Sep'), '[]'::jsonb),
     (v_org, v_job, 'field_availability', 2, '{}',
-     jsonb_build_object('season_label','Fall 2026','location','ALDER park','field_name','uPPer',
+     jsonb_build_object('season_label','Fall 2026','location','  ALDER park ','field_name',' uPPer  ',
                         'available_from','2026-08-01','available_until','2026-11-30',
                         'primary_format','9v9'), '[]'::jsonb);
   INSERT INTO public.staging_import_rows (id, organization_id, import_job_id, import_type, source_row_number, raw_payload, normalized_payload, validation_errors)
@@ -207,6 +223,8 @@ BEGIN
    WHERE organization_id = v_org AND field_name = 'Main';
   IF v_resolved IS DISTINCT FROM v_field_a THEN
     RAISE EXCEPTION 'the exact-match row resolved to % rather than to the Main pitch %', v_resolved, v_field_a; END IF;
+  -- `import_payload_text` btrims, so the profile stores the trimmed value --
+  -- asserted by looking it up under the trimmed name.
   SELECT field_id INTO v_resolved FROM public.field_availability_profiles
    WHERE organization_id = v_org AND field_name = 'uPPer';
   IF v_resolved IS DISTINCT FROM v_field_b THEN
@@ -269,7 +287,18 @@ BEGIN
   IF v_n <> 0 THEN
     RAISE EXCEPTION 'the replay created % field-less profile(s)', v_n; END IF;
 
-  RAISE NOTICE 'resolution guard exercised: 3 staged rows, 2 resolved (1 exact, 1 case-differing), 1 refused with reason=field_unresolved and replayed to a profile once its field existed';
+  -- **A replayed row must stop reading as refused.** Its earlier
+  -- `field_unresolved` entry is cleared when it applies; without that the row
+  -- is applied AND refused at once, and anything asking which rows the import
+  -- refused names one that succeeded.
+  SELECT applied_at, validation_errors INTO v_applied, v_errs
+    FROM public.staging_import_rows WHERE id = v_row3;
+  IF v_applied IS NULL THEN
+    RAISE EXCEPTION 'the replayed row was not marked applied'; END IF;
+  IF jsonb_array_length(COALESCE(v_errs,'[]'::jsonb)) <> 0 THEN
+    RAISE EXCEPTION 'the replayed row still carries its refusal: %', v_errs; END IF;
+
+  RAISE NOTICE 'resolution guard exercised: 3 staged rows, 2 resolved (1 exact, 1 differing in case AND surrounding whitespace), 1 refused with reason=field_unresolved and replayed to a profile once its field existed';
 
   DELETE FROM public.organizations WHERE id IN (v_org, v_other_org);
   DELETE FROM auth.users WHERE id IN (v_user, v_other_user);

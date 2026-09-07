@@ -43,6 +43,41 @@ export function buildDeferredImportDataFromJob(job) {
   };
 }
 
+/**
+ * What a finalize actually did, as lines for the import log.
+ *
+ * **One producer for both apply paths.** The refusal reporting was added to
+ * `applyDeferredImport` first and the direct-apply path in `startImport` --
+ * which runs the very same finalize RPCs -- went on printing only its insert
+ * counts. That is the one-arm-and-not-its-twin shape this project keeps
+ * finding, so the lines are built here and both callers use it.
+ *
+ * `invalid_rows` is returned by all three finalizers, so the count reads the
+ * same whichever import this is. `unresolved_field_rows` is field_availability
+ * only, and it is the one a person can act on.
+ *
+ * The wording is careful about what it promises. The rows ARE still staged and
+ * a further finalize on the same job would apply them -- but no UI reaches that
+ * today, so this does not tell anyone to "apply again" as though a button
+ * existed. See the PR body for LIVE-2.
+ */
+export function describeFinalizeOutcome(result) {
+  const lines = [];
+  const invalid = Number(result?.invalid_rows) || 0;
+  const unresolved = Number(result?.unresolved_field_rows) || 0;
+  if (invalid > 0) {
+    lines.push(
+      `${invalid} row(s) were not applied. Nothing was discarded — they are still staged on this import job.`
+    );
+  }
+  if (unresolved > 0) {
+    lines.push(
+      `${unresolved} of those name a field this organization does not have. Create the field, or correct the location/field spelling, and the rows can be applied without re-uploading.`
+    );
+  }
+  return lines;
+}
+
 export async function markDeferredImportReady({
   supabase,
   job,

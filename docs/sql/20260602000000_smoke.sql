@@ -1,4 +1,13 @@
 -- Smoke checks for 20260602000000_field_availability_finalize_applied_payload_fix.sql
+--
+-- **ON_ERROR_STOP, or the assertions below cannot fail either.** psql exits 0
+-- after a statement error unless it is set, so adding a RAISE to a file that
+-- lacked it produced a gate that reported red and returned green -- the same
+-- shape as the bare SELECTs it was added to replace. This file's only caller is
+-- a person running psql by hand, which is exactly the caller that would have
+-- been fooled. Measured both ways: without it the file exits 0 on a forced
+-- failure, with it 3.
+\set ON_ERROR_STOP on
 
 -- 1. Function still exists, is SECURITY DEFINER, and pins search_path.
 select 'finalize_field_availability_import_job defined' as check,

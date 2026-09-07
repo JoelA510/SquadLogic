@@ -966,6 +966,17 @@ export function ImportProvider({ children }) {
                 );
               }
 
+              // **The same refusal reporting as the deferred path.** This arm
+              // calls the identical finalize RPCs and printed only its insert
+              // counts, so an operator importing a CSV whose venues do not
+              // match any field saw "0 profiles" and "check the import log"
+              // with nothing in the log to check.
+              if (persistenceResult) {
+                const { describeFinalizeOutcome } =
+                  await import('../utils/importDeferredActions.js');
+                describeFinalizeOutcome(persistenceResult).forEach(addLog);
+              }
+
               const importData = {
                 importJobId: job.id,
                 fileName: file.name,
@@ -1043,24 +1054,13 @@ export function ImportProvider({ children }) {
           validationErrors: deferredState.validationErrors || [],
         });
 
-        // **Say which rows the server refused, and why.** `completeImport`
-        // already tells the operator to "check the import log" when a job
-        // finishes with warnings, and for a server-side row refusal that log
-        // had nothing in it to check: the reasons live on the staging rows and
-        // in the job's warning_summary, neither of which this flow reads.
-        // `invalid_rows` is returned by all three finalizers, so the count is
-        // reported the same way whichever import this is; the unresolved-field
-        // line is specific to field_availability, where the fix is an action
-        // the operator can take.
-        if (finalizeResult?.invalid_rows > 0) {
-          addLog(`${finalizeResult.invalid_rows} row(s) were not applied and remain staged.`);
-        }
-        if (finalizeResult?.unresolved_field_rows > 0) {
-          addLog(
-            `${finalizeResult.unresolved_field_rows} of those named a field this organization does not have. ` +
-              'Create the field (or correct the location/field spelling) and apply again — nothing was discarded.'
-          );
-        }
+        // Say which rows the server refused, and why. `completeImport` already
+        // tells the operator to "check the import log" when a job finishes with
+        // warnings, and for a server-side row refusal that log had nothing in
+        // it to check: the reasons live on the staging rows and in the job's
+        // warning_summary, neither of which this flow reads.
+        const { describeFinalizeOutcome } = await import('../utils/importDeferredActions.js');
+        describeFinalizeOutcome(finalizeResult).forEach(addLog);
 
         const appliedData = {
           ...deferredState,

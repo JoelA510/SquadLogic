@@ -1043,6 +1043,25 @@ export function ImportProvider({ children }) {
           validationErrors: deferredState.validationErrors || [],
         });
 
+        // **Say which rows the server refused, and why.** `completeImport`
+        // already tells the operator to "check the import log" when a job
+        // finishes with warnings, and for a server-side row refusal that log
+        // had nothing in it to check: the reasons live on the staging rows and
+        // in the job's warning_summary, neither of which this flow reads.
+        // `invalid_rows` is returned by all three finalizers, so the count is
+        // reported the same way whichever import this is; the unresolved-field
+        // line is specific to field_availability, where the fix is an action
+        // the operator can take.
+        if (finalizeResult?.invalid_rows > 0) {
+          addLog(`${finalizeResult.invalid_rows} row(s) were not applied and remain staged.`);
+        }
+        if (finalizeResult?.unresolved_field_rows > 0) {
+          addLog(
+            `${finalizeResult.unresolved_field_rows} of those named a field this organization does not have. ` +
+              'Create the field (or correct the location/field spelling) and apply again — nothing was discarded.'
+          );
+        }
+
         const appliedData = {
           ...deferredState,
           persistence: {

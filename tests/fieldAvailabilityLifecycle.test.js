@@ -551,9 +551,7 @@ describe('field availability lifecycle', () => {
     expect(refused.applied_at ?? null).toBeNull();
     const reasons = (refused.validation_errors || []).map((e) => e.reason);
     expect(reasons).toContain('field_unresolved');
-    const detail = (refused.validation_errors || []).find(
-      (e) => e.reason === 'field_unresolved'
-    );
+    const detail = (refused.validation_errors || []).find((e) => e.reason === 'field_unresolved');
     expect(detail.location).toBe('Alder Park');
     expect(detail.field_name).toBe('Ghost Pitch');
     const finishedJob = getMockData('import_jobs').find((j) => String(j.id) === String(job.id));

@@ -41,7 +41,23 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
  */
 const SCAN_ROOTS = Object.freeze(['packages', 'frontend', 'supabase', 'scripts', 'tests', 'docs']);
 
-const SCANNED_EXTENSIONS = Object.freeze(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.sql']);
+// **`.sh` is here because a writer landed in one.** `scripts/dbharness/run.sh`
+// seeds a field_blackout_windows row so 20260908000000's revert has an orphan
+// to count, and the scan could not see it -- so "who may write this table is a
+// checked list, scanned out of the source tree" was false in the same PR that
+// added the writer. An extension list is a filter on the universe, and a
+// universe that cannot contain the new writer is the set-derived-from-the-thing
+// -being-checked defect wearing different clothes.
+const SCANNED_EXTENSIONS = Object.freeze([
+  '.js',
+  '.jsx',
+  '.ts',
+  '.tsx',
+  '.mjs',
+  '.cjs',
+  '.sql',
+  '.sh',
+]);
 
 const SKIPPED_DIRECTORIES = Object.freeze([
   'node_modules',
@@ -174,23 +190,47 @@ describe('blackout freeze :: who may write each table is a checked list', () => 
   /**
    * The import path, and nothing else.
    *
-   * Three migrations define `finalize_field_availability_import_job` in
+   * FOUR migrations now define `finalize_field_availability_import_job` in
    * sequence -- the live definition is the last -- and the mock client mirrors
-   * it for the E2E suite. All four are the import path.
+   * it for the E2E suite. All five are the import path.
    *
-   * The fifth is M2's own smoke, which seeds a window so it can assert what
+   * The sixth is M2's own smoke, which seeds a window so it can assert what
    * `field_closures` reports for the import arm. It is a writer by the
    * matcher's definition and is listed rather than excepted: an operator script
    * that runs against a database is exactly the kind of writer a freeze wants
    * visible. It is not a producer -- nothing it writes outlives the `DELETE
    * FROM public.organizations` that ends the block.
+   *
+   * The seventh is the local harness, which seeds one window so
+   * 20260908000000's revert has an orphaned closure to count -- the revert
+   * reports what the database already holds, and on a freshly migrated database
+   * that is nothing, so the count would prove only that the code parses. Same
+   * reasoning as the smoke: a script that seeds a table to check it is a writer
+   * the freeze wants visible, and nothing it writes outlives the run.
+   *
+   * The eighth is 20260908000000's REVERT, which carries the pre-fix body
+   * verbatim in order to restore it. It is listed for the same reason as the
+   * smoke and for one more: a revert is the one artefact that puts an old
+   * writer back, so a freeze that could not see reverts would be blind to
+   * exactly the change that undoes it.
+   *
+   * **This list did its job on the change that added to it.** 20260908000000
+   * re-issues the import path's body, so both the migration and its revert
+   * became writers, and this test failed until they were named here -- which is
+   * what "who may write this table is a checked list" is for. Adding a file
+   * here is a decision to be argued, not a formality: the freeze says
+   * field_blackout_windows is owned SOLELY by the import path, and every entry
+   * below either is that path or is a script that seeds it to check it.
    */
   const EXPECTED_FROZEN_WRITERS = Object.freeze([
     'docs/sql/20260906000100_smoke.sql',
+    'docs/sql/20260908000000_revert.sql',
     'frontend/src/lib/mockSupabaseClient.js',
+    'scripts/dbharness/run.sh',
     'supabase/migrations/20260522120000_field_availability_phase1.sql',
     'supabase/migrations/20260522153000_field_availability_finalize_hardening.sql',
     'supabase/migrations/20260602000000_field_availability_finalize_applied_payload_fix.sql',
+    'supabase/migrations/20260908000000_field_availability_profile_field_resolution.sql',
   ]);
 
   it('holds field_blackout_windows to the import path, in both directions', () => {

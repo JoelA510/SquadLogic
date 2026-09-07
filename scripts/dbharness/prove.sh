@@ -12,6 +12,8 @@ M3="$REPO/supabase/migrations/20260907000000_field_delete_booking_guard.sql"
 R1="$REPO/docs/sql/20260906000000_revert.sql"
 R3="$REPO/docs/sql/20260907000000_revert.sql"
 EMERG="$REPO/docs/sql/reverts/20260504060000_admin_facility_mutation_rpcs.sql"
+M4="$REPO/supabase/migrations/20260908000000_field_availability_profile_field_resolution.sql"
+R4="$REPO/docs/sql/20260908000000_revert.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # What each plant scored, by label, for the census at the bottom of this file.
 # The census asserts that every health claim run.sh prints has a plant that
@@ -1140,6 +1142,151 @@ BEGIN
   "(checked) it left public.field_bookings standing, which admin_retire_field still calls"
 
 # ---------------------------------------------------------------------------
+# LIVE-2: the import's field resolution, and the revert that undoes it
+# ---------------------------------------------------------------------------
+#
+# `docs/sql/20260908000000_smoke.sql` is the first BEHAVIOURAL smoke on this
+# function. The one it sits beside -- `docs/sql/20260602000000_smoke.sql`, on
+# the very same function -- is four bare SELECTs with no RAISE in them, so it
+# exits 0 whatever the body does and has done since the day it was written.
+# These plants are what stops the new one going the same way.
+#
+# Every M4 plant carries `green "smoke 20260907000000"`: LIVE-1's smoke runs in
+# the same stage and must NOT see a mutation of the import path, so the
+# isolation is measured rather than asserted in a comment.
+
+# **The defect itself, put back.** The guard stops firing, so a row matching no
+# field is applied with field_id NULL and its blackout window is hung off it --
+# exactly the state the migration exists to make unreachable.
+plant "M4 the resolution guard stops firing" "$M4" \
+  "      IF v_field_id IS NULL THEN
+        v_unresolved_rows := v_unresolved_rows + 1;" \
+  "      IF false THEN
+        v_unresolved_rows := v_unresolved_rows + 1;" \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
+# **The tenant filter.** The mock arm had this filter on the location as well as
+# on the field, which made the field-side one unreachable and a control removing
+# it changed no test. The SQL puts it on the field only, so this is the plant
+# that proves the smoke's cross-org decoy is doing work.
+plant "M4 resolution ignores organization_id" "$M4" \
+  "WHERE f.organization_id=v_job.organization_id AND lower(l.name)=lower(v_location)" \
+  "WHERE lower(l.name)=lower(v_location)" \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
+# **A refused row that is marked applied is a DISCARDED row.** Re-running
+# finalize would skip it, so the operator's import is gone rather than deferred
+# -- the failure mode that would make refusing worse than the defect.
+plant "M4 a refused row is marked applied and cannot be replayed" "$M4" \
+  "      UPDATE public.staging_import_rows SET validation_errors = v_row_errors WHERE id = v_row.id;" \
+  "      UPDATE public.staging_import_rows SET validation_errors = v_row_errors, applied_at = v_now WHERE id = v_row.id;" \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
+# **A refusal a caller cannot branch on.** The prose survives -- so section 1's
+# `prosrc LIKE '%field_unresolved%'` still passes -- and only the behavioural
+# section notices, which is the point of having one.
+plant "M4 the refusal carries no branchable reason key" "$M4" \
+  "          'reason','field_unresolved','location',v_location,'field_name',v_field_name," \
+  "          'note','field_unresolved','location',v_location,'field_name',v_field_name," \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
+# The corpus this import was built for spells venues as the club's spreadsheet
+# spells them, not as the fields table does, so case-insensitive matching is
+# the difference between resolving most rows and refusing most rows.
+plant "M4 the name match becomes case-sensitive" "$M4" \
+  "lower(l.name)=lower(v_location) AND lower(f.name)=lower(v_field_name)" \
+  "l.name=v_location AND f.name=v_field_name" \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
+# **A replayed row that keeps its refusal** reads as applied AND refused at
+# once, so anything asking which rows the import refused names one that
+# succeeded.
+plant "M4 a replayed row keeps the refusal it no longer deserves" "$M4" \
+  "applied_by=auth.uid(), validation_errors='[]'::jsonb WHERE id=v_row.id;" \
+  "applied_by=auth.uid() WHERE id=v_row.id;" \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
+# **The clause that must stay ABSENT**, planted so the check for its absence is
+# itself falsifiable. `finalize_field_import_job` carries it and a refusal there
+# is permanent; here it would kill the replay this migration is built on.
+plant "M4 adopts the sibling filter and can never replay a refusal" "$M4" \
+  "AND applied_at IS NULL AND normalized_payload IS NOT NULL ORDER BY source_row_number" \
+  "AND applied_at IS NULL AND normalized_payload IS NOT NULL AND COALESCE(jsonb_array_length(validation_errors), 0) = 0 ORDER BY source_row_number" \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
+# **warning_summary assigned rather than merged** destroys the deferred_apply
+# key the UI reads to know a job was ever staged. Every sibling finalizer
+# merges; this is the control for the one that did not.
+plant "M4 the finalize overwrites warning_summary instead of merging" "$M4" \
+  "    warning_summary = jsonb_set(
+      COALESCE(warning_summary, '{}'::jsonb),
+      '{availability_finalize}',
+      jsonb_build_object('invalid_rows', v_invalid_rows, 'unresolved_field_rows', v_unresolved_rows),
+      true
+    )" \
+  "    warning_summary = jsonb_build_object('availability_finalize', jsonb_build_object('invalid_rows', v_invalid_rows, 'unresolved_field_rows', v_unresolved_rows))" \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
+# **The revert's count, on the row run.sh plants for it.** Without the seed this
+# would report zero on a fresh database and prove only that the code parses;
+# with the seed, a revert that counts the wrong set prints ORPHANS: 0 and the
+# check fires.
+plant "R4 revert counts no orphans" "$R4" \
+  "  SELECT count(*) INTO v_p FROM public.field_availability_profiles WHERE field_id IS NULL;" \
+  "  SELECT count(*) INTO v_p FROM public.field_availability_profiles WHERE field_id IS NOT NULL;" \
+  "revert 20260908000000: planted a field-less profile with a blackout window and the revert did not count it"
+
+# A revert that puts the unguarded body back without saying so is the same
+# silence this migration removes, one level up.
+plant "R4 revert reinstates the unguarded body silently" "$R4" \
+  "  RAISE WARNING 'RESTORING finalize_field_availability_import_job to its pre-20260908000000 body:" \
+  "  RAISE NOTICE 'reinstating the previous finalize body:" \
+  "revert 20260908000000: restored the unguarded finalize without naming what that costs"
+
+# **The verdict's three red branches, one plant each**, because the lesson from
+# R3 was that a claim with one reachable branch is a claim two-thirds untested.
+#
+# STILL-GUARDED: a revert that is a no-op. The comment carries the marker, so
+# the restored body reads as still carrying the guard while being the old one.
+plant "R4 revert leaves the guard in place" "$R4" \
+  "  v_row_errors jsonb;
+BEGIN" \
+  "  v_row_errors jsonb; -- field_unresolved
+BEGIN" \
+  "revert 20260908000000: finalize_field_availability_import_job after the revert reads STILL-GUARDED"
+
+# GONE: a revert that removes the function instead of restoring it. The DROP
+# goes in front of the trailing COMMENT and the comment is re-aimed at the
+# schema, so the revert still applies cleanly and the VERDICT is what fires --
+# not the stage, on a script that failed half way.
+plant "R4 revert drops the finalizer instead of restoring it" "$R4" \
+  "COMMENT ON FUNCTION public.finalize_field_availability_import_job(uuid, jsonb) IS
+  'Applies staged field_availability rows. Reverted" \
+  "DROP FUNCTION public.finalize_field_availability_import_job(uuid, jsonb);
+COMMENT ON SCHEMA public IS
+  'Applies staged field_availability rows. Reverted" \
+  "revert 20260908000000: finalize_field_availability_import_job after the revert reads GONE"
+
+# AMBIGUOUS: a revert that removes too little. The restored body arrives under a
+# CHANGED signature, so 20260908000000's guarded version is left standing beside
+# it and every two-argument call becomes 42725 function is not unique.
+plant "R4 revert restores the finalizer under a second signature" "$R4" \
+  "  p_validation_errors jsonb DEFAULT '[]'::jsonb
+) RETURNS jsonb" \
+  "  p_validation_errors jsonb DEFAULT '[]'::jsonb,
+  p_unused integer DEFAULT 0
+) RETURNS jsonb" \
+  "revert 20260908000000: finalize_field_availability_import_job after the revert reads AMBIGUOUS:2"
+
+# ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
 #
@@ -1168,6 +1315,9 @@ declare -A CLAIM_PROVER=(
   ["(checked) the revert named the retirement guard it was putting back"]="R3 revert reinstates the weaker guard silently"
   ["(checked) exactly one public.admin_retire_field survives the revert, and it no longer calls the dropped producer"]="R3 revert drops the retirement RPC instead of restoring it|R3 the restored retire still calls the dropped producer|R3 revert restores retire under a second signature"
   ["(checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"]="R3 the restored retire calls a helper the revert also drops|R3 the restored retire's CONFIRMED path calls a dropped helper"
+  ["(checked) the revert counted the field-less profile already in the database"]="R4 revert counts no orphans"
+  ["(checked) the revert named the import guard it was putting back"]="R4 revert reinstates the unguarded body silently"
+  ["(checked) exactly one public.finalize_field_availability_import_job survives the revert, and its body no longer carries the resolution guard"]="R4 revert drops the finalizer instead of restoring it|R4 revert leaves the guard in place|R4 revert restores the finalizer under a second signature"
   ["(checked) the rollback removed every overload of all four admin facility RPCs"]="EMERG the rollback and its own guard drift together"
   ["(checked) it left public.field_bookings standing, which admin_retire_field still calls"]="EMERG rollback takes the producer another RPC still calls"
 )

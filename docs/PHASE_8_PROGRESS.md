@@ -791,13 +791,14 @@ mutant. Work in progress under a mutation harness is not work in progress.
 - **PR 3 (UI)** — the three surfaces, consequence preview, WCAG pass, bundle
   measurement.
 - ~~**LIVE-1**~~ — **fixed, in its own PR.** Recorded below.
-- **LIVE-2** — `finalize_field_availability_import_job` resolves the field via
-  `LIMIT 1` with no `NOT FOUND` guard against a nullable
+- ~~**LIVE-2**~~ — `finalize_field_availability_import_job` resolves the field
+  via `LIMIT 1` with no `NOT FOUND` guard against a nullable
   `field_availability_profiles.field_id`, so a profile matching no field still
-  accretes blackout rows invisible to every field-scoped query. Own PR. This is
-  also the precondition for ever collapsing the two blackout tables: PR 2 ships
-  two, with disjoint producers and a single reader, only because profile-scoped
-  blackouts cannot be expressed in a scope-bearing table while this stands.
+  accretes blackout rows invisible to every field-scoped query. **Fixed in its
+  own PR, recorded at the foot of this document.** It turned out to be the
+  precondition for only HALF of collapsing the two blackout tables: the import
+  is no longer a producer of field-less profiles, but `admin_delete_field` still
+  is, so PR 2's two-table shape stands until LIVE-3's family is finished.
 - **Two asymmetries referred rather than fixed** (non-HIGH, fail-safe): the JS
   scenario runner guards an unknown scope but not an unknown rpc, where
   `scenarios.py` guards both -- **fixed by the LIVE-1 PR**, which needed it
@@ -1263,7 +1264,7 @@ finding was worth blocking a merge on.
   this PR's. Not reachable for every table (a table absent from the seed has
   nothing to resurrect from), so the fix wants the census, not a blanket change.
   Its own PR; the mechanism census that found it is in this PR's report.
-- **LIVE-2**, unchanged.
+- ~~**LIVE-2**~~ — **fixed, in its own PR.** Recorded below.
 - **LIVE-3**, above.
 - The mock's generic `.delete().eq()` does not tombstone, so a direct delete of
   a SEEDED row resurrects on the next `getDB()`. Examined and left: RLS routes
@@ -1321,3 +1322,182 @@ had anyone try to make them fail.
   in the blackouts migration. Both were caught by diffing the tree before
   trusting it, and an automated commit-and-push step would have shipped the
   first. **Work in progress under a mutation harness is not work in progress.**
+
+---
+
+## LIVE-2 — the availability import created field-less profiles — **fixed, own PR**
+
+Not part of 8.4's three-PR stack. Recorded as LIVE-2 at the foot of the PR 2
+entry above, and unblocked by the harness PR 2 built and PR #380 made
+trustworthy.
+
+- **PR:** [#381](https://github.com/JoelA510/SquadLogic/pull/381), branch
+  `fix/import-profile-field-resolution`.
+- **Migration:** `20260908000000_field_availability_profile_field_resolution.sql`,
+  with `docs/sql/20260908000000_{smoke,revert}.sql`.
+- **New pgTAP:** `supabase/tests/field_availability_profile_resolution.sql`.
+
+### What the defect actually cost, measured rather than described
+
+`finalize_field_availability_import_job` resolved a row to a field with a
+`LIMIT 1` name match and no `NOT FOUND` guard, and
+`field_availability_profiles.field_id` is nullable, so a row matching no field
+was applied anyway with no ground.
+
+Run against the corpus the pgTAP suite already stages, on the pre-fix body:
+**15 profiles, 15 of 15 field-less; 4 blackout windows, 4 of 4 on those
+profiles; 4 rows in `field_closures` with `closes_field_id IS NULL`** — and the
+RPC returned `"status": "completed", "invalid_rows": 0`.
+
+**The pgTAP suite asserted those exact counts and passed.** It could not have
+done otherwise: the shared fixtures seed no locations and no fields, so every
+row in the fixture was unresolvable and the file certified the _outcome_ of a
+broken resolution rather than the behaviour of a working one. The corpus for a
+resolution test has to contain something to resolve to; this one contained
+nothing, and nothing said so.
+
+### The disposition, and why it is not the obvious one
+
+An unresolvable row is refused, reported with `reason=field_unresolved` naming
+the location and field, and left replayable (`applied_at IS NULL`, payload
+intact). Three arguments carried it, and the third is the one that generalises:
+
+1. The refusal contract already existed **in this function**, for bad dates and
+   bad quantities. A fourth kind of bad row gets the third disposition, not a
+   fourth.
+2. Refusal has to mean _deferral_ or the fix is worse than the defect. Create
+   the field, re-run finalize, the row applies — proved on all three arms.
+3. **`field_id IS NULL` must keep one meaning.** The FK is `ON DELETE SET NULL`,
+   so NULL already means "the field was deleted". A second producer of NULL
+   makes it a two-meanings column across two writers — the defect the
+   `field_closures` scope columns were redesigned to remove one PR earlier.
+
+The sibling settled the shape: `finalize_field_import_job` does the same
+resolution and **does** guard `NOT FOUND` — by creating the row, which is right
+for the importer _of_ fields and wrong for an importer of availability, where it
+would turn a typo into a permanent pitch.
+
+### One sibling contract deliberately NOT adopted
+
+`finalize_field_import_job` selects staged rows with
+`AND COALESCE(jsonb_array_length(validation_errors), 0) = 0`. Adopting it here
+would silently destroy the replay this whole PR is built on: the
+import-validation edge function stages every row with `validation_errors: []`,
+so the only rows that ever hold one are rows a previous finalize refused, and
+that filter makes a refusal permanent.
+
+"Adopt the sibling's contract" is right almost everywhere in this codebase,
+which is exactly why the exception needed writing down **and** a check. The
+smoke asserts the clause is ABSENT, and a plant adds it — a check for something
+that must not be there is as much a check as one for something that must.
+
+### Claims corrected by testing — running tally now 12
+
+Four supervisor claims were put up for verification. Three held. The fourth was
+overstated in a way that mattered:
+
+> "Blackouts hung off such a profile are invisible to every field-scoped query."
+
+Measured with one resolved and one field-less window on the same ground:
+field-scoped `closes_field_id = <pitch>` returns **1 of 2** and any join to
+`fields` through the profile returns **1 of 2** — so the claim holds _for
+field-scoped queries_. But the org-scoped view returns **2 of 2**, and so does
+the shipped UI read path (`useFields`' profile embed, feeding BlackoutsPage and
+FieldManagementPage), labelled from the profile's own free text.
+
+The row is therefore **not invisible; it is visible in the review list and
+absent from the answer to "is this ground closed"** — which is worse than plain
+invisibility, because it reads as handled. Getting this right changed the fix:
+it is why the disposition is a refusal rather than a marker column, since a
+marker would have made an already-visible-but-useless row prettier.
+
+### The mock arm had no implementation to diverge from
+
+`mockSupabaseClient.js` wrote `field_id: null` on every profile it created,
+unconditionally — it never attempted resolution at all. Three tests asserted the
+resulting counts and passed, because no test in that file seeded a location or a
+field either.
+
+So the two-runner scenario table's premise did not hold here: this was not two
+implementations of one contract drifting apart, it was one implementation and
+one placeholder that had always agreed with a broken result. **A parity
+mechanism assumes both arms exist.** Worth remembering the next time "the two
+arms agree" is offered as evidence.
+
+Two further divergences came out of the controls rather than out of reading:
+
+- the tenant filter sat on the **location** as well as the field, which made the
+  field-side filter unreachable — a control removing it changed no test, which
+  is how it was found. The SQL puts it on the field only; so does the mock now.
+- the payload was read **untrimmed** while `import_payload_text` btrims, so
+  `"Alder Park "` resolved against Postgres and was refused in mock and E2E mode.
+
+### Verification
+
+- Harness: **HARNESS OK** — 108 migrations, 4 smokes, 42 scenarios, 4 reverts,
+  emergency rollback. The new smoke is behavioural: it calls the function on
+  three staged rows, including a cross-org decoy, and replays the refused one.
+- `prove`: **54 / 0 / 54**, census **10** health claims all proved (was 41/0/41
+  and 7 claims). `prove:mock`: **40 / 0 / 40** (was 30/0/30). Thirteen of the new
+  plants are LIVE-2's; the three aimed at the revert's verdict name a distinct
+  red branch each — `GONE`, `AMBIGUOUS:2`, `STILL-GUARDED` — because R3's lesson
+  was that a claim with one reachable branch is a claim two-thirds untested.
+- pgTAP, run against **real pgTAP 1.3.2** on a locally built PostgreSQL rather
+  than read: **21/21** and **15/15**. Two defects in the new file surfaced only
+  by executing it — a direct `INSERT` into `public.fields` that RLS refuses for
+  the `authenticated` role, and an assertion that added an RPC result to a table
+  count in one expression, where SQL does not promise which subquery runs first.
+- Tests **2809 → 2819** (181 files), counted by running the suite. Main entry
+  134.52 → **135.05 KB gz**, measured against `origin/main` built in a worktree.
+- `/code-review` at high, **twice**: eight findings before opening, then four
+  more on the fixes themselves. All twelve real, all fixed in this PR. Three
+  were the one-arm-not-its-twin shape again — the direct apply path never
+  reported refusals, the mock kept a stale refusal on a replayed row after the
+  SQL stopped, and the mock overwrote `processed_rows` where the SQL
+  accumulates. **Reviewing the fixes was worth as much as the first pass**: two
+  of the second round's four findings were defects the first round's own fixes
+  had introduced.
+- CI green on the merged head, including `Run pgTAP against local Supabase` —
+  the job that runs the new suite in the environment it was written for.
+
+### Two process notes, both about the harness rather than the fix
+
+- **A mutation sweep was invalidated by editing its own script mid-run.** bash
+  reads a script incrementally, so appending plants to `prove.sh` while it ran
+  made it die at plant 17 on a syntax error, exit 2, and prove nothing. The
+  established rule — work in progress under a mutation harness is not work in
+  progress — turns out to cover the harness's own scripts, not just the files it
+  plants. A second sweep was stopped deliberately once migration files had been
+  edited under it.
+- **The pgTAP suite can be executed here after all.** The image carries genuine
+  pgTAP 1.3.2 beside the harness's deliberately empty stub, and a second cluster
+  under a different OS user (the harness's `pkill -u pgrunner` kills anything
+  else) runs the suite against a database built from the full migration set. Two
+  defects in this PR's own pgTAP file were caught that way and would otherwise
+  have reached CI. The stub's comment says the suite "runs against Supabase via
+  `npm run test:db`, not here" — true of the harness, and it need not be true of
+  a developer checking their own file.
+
+### Still open after LIVE-2
+
+- **LIVE-3**, unchanged, and now with one more reason: `admin_delete_field` is
+  the remaining producer of field-less profiles. Measured — a confirmed delete
+  leaves the profile with `field_id NULL`, its blackout window attached and
+  `affected_count: 0`, because `field_availability_profiles` is excluded from the
+  booking guard. **Collapsing the two blackout tables is therefore still
+  blocked**: this PR closed the import half of the obstacle and not the delete
+  half, and `field_closures`' comment was rewritten to say so rather than left
+  reading as permission to collapse it.
+- **LIVE-4**, unchanged.
+- **Nothing renders `importLogs`.** The context accumulates them and no component
+  reads them, so the refusal reasons this PR added reach a log that is not on
+  screen. `completeImport` has told operators to "check the import log" all
+  along. PR 3's surface.
+- **No UI path re-applies a finished import job**, though the RPC is safe to
+  re-run and the rows are staged for exactly that. The operator message was
+  worded to avoid promising a button that does not exist, and a test asserts it
+  does not say "apply again".
+- **Re-uploading an availability CSV duplicates**: `field_availability_profiles`
+  has no unique constraint, so a second upload re-inserts already-applied rows.
+  Pre-existing and not touched here; the reason the message does not suggest
+  re-uploading as the recovery.

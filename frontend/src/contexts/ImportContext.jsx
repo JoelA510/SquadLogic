@@ -966,6 +966,17 @@ export function ImportProvider({ children }) {
                 );
               }
 
+              // **The same refusal reporting as the deferred path.** This arm
+              // calls the identical finalize RPCs and printed only its insert
+              // counts, so an operator importing a CSV whose venues do not
+              // match any field saw "0 profiles" and "check the import log"
+              // with nothing in the log to check.
+              if (persistenceResult) {
+                const { describeFinalizeOutcome } =
+                  await import('../utils/importDeferredActions.js');
+                describeFinalizeOutcome(persistenceResult, type).forEach(addLog);
+              }
+
               const importData = {
                 importJobId: job.id,
                 fileName: file.name,
@@ -1042,6 +1053,14 @@ export function ImportProvider({ children }) {
           importJobId: deferredJobId,
           validationErrors: deferredState.validationErrors || [],
         });
+
+        // Say which rows the server refused, and why. `completeImport` already
+        // tells the operator to "check the import log" when a job finishes with
+        // warnings, and for a server-side row refusal that log had nothing in
+        // it to check: the reasons live on the staging rows and in the job's
+        // warning_summary, neither of which this flow reads.
+        const { describeFinalizeOutcome } = await import('../utils/importDeferredActions.js');
+        describeFinalizeOutcome(finalizeResult, type).forEach(addLog);
 
         const appliedData = {
           ...deferredState,

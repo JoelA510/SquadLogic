@@ -4556,10 +4556,72 @@ export const mockSupabase = {
       let blackouts = 0;
       let reqs = 0;
       let members = 0;
+      let unresolved = 0;
+
+      /**
+       * The SQL's field resolution, in JavaScript: a case-insensitive
+       * location/field_name match inside the job's organisation, oldest field
+       * first, first match wins.
+       *
+       * **This arm previously did not resolve at all** -- it wrote
+       * `field_id: null` on every profile it created, unconditionally, so in
+       * mock mode 100% of imported profiles were field-less while the SQL
+       * resolved most of them. The two arms were not two implementations of
+       * one contract; one of them had no implementation.
+       *
+       * `created_at` is the SQL's first ORDER BY key and is NOT NULL there;
+       * seeded mock fields may carry none, so a missing value sorts last and
+       * the id breaks the remaining tie. Any case that depends on which of two
+       * same-named fields wins must seed `created_at` on both, on both arms.
+       */
+      const resolveFieldId = (location, fieldName) => {
+        const lc = String(location ?? '').toLowerCase();
+        const fc = String(fieldName ?? '').toLowerCase();
+        // **Locations are matched by NAME only, and fields by organisation.**
+        // That is the SQL's shape exactly -- `fields f JOIN locations l ON
+        // l.id = f.location_id WHERE f.organization_id = <job org> AND
+        // lower(l.name) = ... AND lower(f.name) = ...` puts the tenant filter
+        // on the field, not on the location. Filtering both here read as
+        // harmless extra safety and was not: it made the field-side filter
+        // unreachable, so removing it from this arm changed no test while the
+        // same removal in the SQL would leak another organisation's pitch.
+        const locIds = new Set(
+          (db.locations || [])
+            .filter((l) => String(l.name ?? '').toLowerCase() === lc)
+            .map((l) => String(l.id))
+        );
+        if (locIds.size === 0) return null;
+        const matches = (db.fields || []).filter(
+          (f) =>
+            String(f.organization_id) === String(job.organization_id) &&
+            locIds.has(String(f.location_id)) &&
+            String(f.name ?? '').toLowerCase() === fc
+        );
+        if (matches.length === 0) return null;
+        matches.sort((a, b) => {
+          const at = a.created_at ?? '\uffff';
+          const bt = b.created_at ?? '\uffff';
+          if (at !== bt) return at < bt ? -1 : 1;
+          return String(a.id) < String(b.id) ? -1 : 1;
+        });
+        return matches[0].id;
+      };
+
       stagedRows.forEach((row) => {
         const payload = row.normalized_payload || {};
-        const location = payload.location;
-        const fieldName = payload.field_name || payload.name;
+        // **Trimmed, because `import_payload_text` btrims every value it
+        // returns and the SQL resolves and stores the trimmed form.** This arm
+        // used the raw value, so `"Alder Park "` resolved against real Supabase
+        // and was refused as field_unresolved in mock and E2E mode -- the two
+        // arms disagreeing on the very contract they were made to share. The
+        // production edge function also trims when it stages, so this matters
+        // for rows staged any other way, which is every test in this suite.
+        const payloadText = (value) => {
+          const text = value === null || value === undefined ? '' : String(value).trim();
+          return text === '' ? null : text;
+        };
+        const location = payloadText(payload.location);
+        const fieldName = payloadText(payload.field_name) || payloadText(payload.name);
         const af = payload.available_from;
         const au = payload.available_until;
         const t1 = af ? Date.parse(af) : NaN;
@@ -4568,6 +4630,7 @@ export const mockSupabase = {
         const atph = payload.aggregate_teams_per_hour
           ? parseInt(payload.aggregate_teams_per_hour, 10)
           : null;
+        const rowErrors = [];
         if (
           !location ||
           !fieldName ||
@@ -4579,21 +4642,47 @@ export const mockSupabase = {
           (tph !== null && tph < 1) ||
           (atph !== null && atph < 1)
         ) {
-          invalid += 1;
-          row.validation_errors = [
-            {
+          rowErrors.push({
+            message:
+              'Availability row missing required location/field/date range or has invalid capacities',
+            source_row_number: row.source_row_number,
+          });
+        }
+
+        // **Resolve before anything is written, and refuse the row if it does
+        // not resolve.** A profile that matches no field carries blackout
+        // windows that no field-scoped query can attribute to ground; the row
+        // is refused and left replayable instead. Same disposition, same
+        // `reason` key and same counters as the SQL -- see
+        // supabase/migrations/20260908000000_field_availability_profile_field_resolution.sql
+        // for why refusing beats creating it and marking it.
+        let fieldId = null;
+        if (location && fieldName) {
+          fieldId = resolveFieldId(location, fieldName);
+          if (!fieldId) {
+            unresolved += 1;
+            rowErrors.push({
               message:
-                'Availability row missing required location/field/date range or has invalid capacities',
+                `No field named "${fieldName}" at location "${location}" in this organization -- ` +
+                'import or create the field first, or correct the spelling, then re-run the import.',
+              reason: 'field_unresolved',
+              location,
+              field_name: fieldName,
               source_row_number: row.source_row_number,
-            },
-          ];
+            });
+          }
+        }
+
+        if (rowErrors.length > 0) {
+          invalid += 1;
+          row.validation_errors = rowErrors;
           return;
         }
         const profile = {
           id: mockId(),
           organization_id: job.organization_id,
           season_label: payload.season_label || 'Unspecified Season',
-          field_id: null,
+          field_id: fieldId,
           location,
           field_name: fieldName,
           surface_type: payload.surface_type || null,
@@ -4706,6 +4795,10 @@ export const mockSupabase = {
         });
         row.applied_at = now;
         row.applied_by = 'mock-admin-id';
+        // Clear the refusal a previous run may have left, exactly as the SQL
+        // does: a replayed row that keeps its field_unresolved entry reads as
+        // applied AND refused at once.
+        row.validation_errors = [];
         inserted += 1;
       });
       const status =
@@ -4716,7 +4809,18 @@ export const mockSupabase = {
         status,
         completed_at: now,
         progress_percent: 100,
-        processed_rows: inserted,
+        // **Accumulated, as the SQL does** (`COALESCE(processed_rows,0) + …`).
+        // Overwriting was unreachable while a job was only ever finalized once;
+        // the replay this PR introduces reaches it, and the two arms would then
+        // report different progress for the same job.
+        processed_rows: (Number(job.processed_rows) || 0) + inserted,
+        // The SQL writes this summary and this arm did not, so an operator
+        // reading the JOB rather than the RPC result learned nothing about a
+        // refused row in mock mode.
+        warning_summary: {
+          ...(job.warning_summary || {}),
+          availability_finalize: { invalid_rows: invalid, unresolved_field_rows: unresolved },
+        },
       });
       saveDB(db);
       return {
@@ -4728,6 +4832,7 @@ export const mockSupabase = {
           inserted_requirements: reqs,
           inserted_scenario_members: members,
           invalid_rows: invalid,
+          unresolved_field_rows: unresolved,
         },
         error: null,
       };

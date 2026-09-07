@@ -43,6 +43,59 @@ export function buildDeferredImportDataFromJob(job) {
   };
 }
 
+/**
+ * Import types whose finalizer will RETRY a row it once refused.
+ *
+ * **Only field_availability.** The coach and field finalizers select their
+ * staged rows with `AND COALESCE(jsonb_array_length(validation_errors), 0) = 0`
+ * (`20260503060000:194`, `20260503070000:211`, `20260726000300:715`), so a row
+ * they counted in `invalid_rows` has just had its errors written to it and is
+ * excluded from every future finalize -- the refusal is terminal.
+ * `finalize_field_availability_import_job` deliberately omits that clause so a
+ * row refused for an unresolvable field can be applied once the field exists;
+ * its migration header argues why, and its smoke asserts the clause stays
+ * absent.
+ *
+ * The distinction is here because the LOG LINE differs: telling an operator
+ * that three refused rows of a FIELDS import are "still staged" would promise
+ * a recovery that finalizer does not offer.
+ */
+const REPLAYS_REFUSED_ROWS = new Set(['field_availability']);
+
+/**
+ * What a finalize actually did, as lines for the import log.
+ *
+ * **One producer for both apply paths.** The refusal reporting was added to
+ * `applyDeferredImport` first and the direct-apply path in `startImport` --
+ * which runs the very same finalize RPCs -- went on printing only its insert
+ * counts. That is the one-arm-and-not-its-twin shape this project keeps
+ * finding, so the lines are built here and both callers use it.
+ *
+ * The wording is careful about what it promises. A replayable row IS still
+ * staged and a further finalize on the same job would apply it -- but no UI
+ * reaches that today, so this does not tell anyone to "apply again" as though a
+ * button existed. See the PR body for LIVE-2.
+ */
+export function describeFinalizeOutcome(result, importType) {
+  const lines = [];
+  const invalid = Number(result?.invalid_rows) || 0;
+  const unresolved = Number(result?.unresolved_field_rows) || 0;
+  const replayable = REPLAYS_REFUSED_ROWS.has(importType);
+  if (invalid > 0) {
+    lines.push(
+      replayable
+        ? `${invalid} row(s) were not applied. Nothing was discarded — they are still staged on this import job.`
+        : `${invalid} row(s) were not applied. Their errors are recorded against the staged rows, and a further apply will not retry them.`
+    );
+  }
+  if (unresolved > 0) {
+    lines.push(
+      `${unresolved} of those name a field this organization does not have. Create the field, or correct the location/field spelling, and the rows can be applied without re-uploading.`
+    );
+  }
+  return lines;
+}
+
 export async function markDeferredImportReady({
   supabase,
   job,

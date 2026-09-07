@@ -2,6 +2,50 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { mockSupabase as supabase, getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
 import { finalizeDeferredImportJob } from '../frontend/src/utils/importDeferredActions.js';
 
+/**
+ * Seed the locations and fields an availability row names, so it can resolve.
+ *
+ * Before 20260908000000 no test in this file seeded any facility row, and none
+ * needed to: the finalize path attached `field_id: null` to every profile it
+ * created and reported success, so a fifteen-row pack imported into an
+ * organisation with no fields at all produced fifteen profiles and four
+ * blackout windows that no field-scoped query could attribute to ground. The
+ * counts these tests assert were real; what they certified was not.
+ *
+ * Seeding is derived from the rows under test on purpose -- it is FIXTURE
+ * construction, not an expected set. What each test asserts afterwards is
+ * enumerated from the mock tables, which is where a break would show.
+ */
+async function seedFacilityFor(rows, organizationId = 'org-1') {
+  const locations = new Map();
+  const fields = [];
+  rows.forEach((row, index) => {
+    const locationName = row.location;
+    const fieldName = row.field_name || row.name;
+    if (!locationName || !fieldName) return;
+    const key = locationName.toLowerCase();
+    if (!locations.has(key)) {
+      locations.set(key, { id: `seed-loc-${locations.size + 1}`, name: locationName });
+    }
+    fields.push({
+      id: `seed-field-${index + 1}`,
+      organization_id: organizationId,
+      location_id: locations.get(key).id,
+      name: fieldName,
+      active: true,
+      created_at: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),
+    });
+  });
+  await supabase.from('locations').insert(
+    [...locations.values()].map((loc) => ({
+      id: loc.id,
+      organization_id: organizationId,
+      name: loc.name,
+    }))
+  );
+  await supabase.from('fields').insert(fields);
+}
+
 describe('field availability lifecycle', () => {
   beforeEach(() => {
     sessionStorage.clear();
@@ -59,6 +103,7 @@ describe('field availability lifecycle', () => {
       p_import_type: 'field_availability',
       p_file_name: 'fa.csv',
     });
+    await seedFacilityFor([{ location: 'San Lorenzo', field_name: 'Main' }]);
     await supabase.from('staging_import_rows').insert({
       id: 'row1',
       import_job_id: job.id,
@@ -155,6 +200,7 @@ describe('field availability lifecycle', () => {
       p_import_type: 'field_availability',
       p_file_name: 'months.csv',
     });
+    await seedFacilityFor([{ location: 'San Lorenzo', field_name: 'Main' }]);
     await supabase.from('staging_import_rows').insert({
       id: 'row-months',
       import_job_id: job.id,
@@ -361,6 +407,7 @@ describe('field availability lifecycle', () => {
     ];
     const basePractice = getMockData('practice_slots').length;
     const baseGame = getMockData('game_slots').length;
+    await seedFacilityFor(rows);
     const { data: job } = await supabase.rpc('create_import_job', {
       p_organization_id: 'org-1',
       p_import_type: 'field_availability',
@@ -414,5 +461,154 @@ describe('field availability lifecycle', () => {
       ).length
     ).toBe(4);
     expect(getMockData('field_availability_scenario_members').length).toBe(4);
+    // Every profile the pack produced points at a field. Enumerated from the
+    // table rather than from `rows`, because a row silently dropped by the
+    // resolution would be absent from the table and a check driven by `rows`
+    // would report on a profile that is not there.
+    const packProfiles = getMockData('field_availability_profiles');
+    expect(packProfiles.length).toBeGreaterThan(0);
+    expect(packProfiles.filter((p) => !p.field_id)).toEqual([]);
+    // And the blackouts hang off resolved profiles, so field_closures can say
+    // which ground each one shuts.
+    const closures = getMockData('field_closures').filter(
+      (c) => c.source === 'field_blackout_windows'
+    );
+    expect(closures.length).toBe(4);
+    expect(closures.filter((c) => !c.closes_field_id)).toEqual([]);
+  });
+
+  it('refuses an availability row that matches no field, with a reason, and replays it later', async () => {
+    const { data: job } = await supabase.rpc('create_import_job', {
+      p_organization_id: 'org-1',
+      p_import_type: 'field_availability',
+      p_file_name: 'unresolvable.csv',
+    });
+    // Stage it first, so the finalize has a warning_summary key it must not
+    // destroy -- the same setup as docs/sql/20260908000000_smoke.sql.
+    await supabase.rpc('mark_import_job_ready_to_apply', {
+      p_import_job_id: job.id,
+      p_import_type: 'field_availability',
+      p_validation_errors: [],
+    });
+    await seedFacilityFor([{ location: 'Alder Park', field_name: 'Main' }]);
+    // A decoy in another organisation carrying the exact location and field
+    // name the unresolvable row asks for. A resolution that forgot its tenant
+    // filter finds this and attaches org-1's closure to org-2's ground.
+    await supabase
+      .from('locations')
+      .insert({ id: 'decoy-loc', organization_id: 'org-2', name: 'Alder Park' });
+    await supabase.from('fields').insert({
+      id: 'decoy-field',
+      organization_id: 'org-2',
+      location_id: 'decoy-loc',
+      name: 'Ghost Pitch',
+      active: true,
+      created_at: new Date(Date.UTC(2025, 0, 1)).toISOString(),
+    });
+    const staged = (id, location, fieldName, sourceRow) => ({
+      id,
+      import_job_id: job.id,
+      organization_id: 'org-1',
+      import_type: 'field_availability',
+      source_row_number: sourceRow,
+      raw_payload: {},
+      normalized_payload: {
+        season_label: 'Fall 2026',
+        location,
+        field_name: fieldName,
+        available_from: '2026-08-01',
+        available_until: '2026-11-30',
+        blackout_months: 'Aug',
+      },
+      validation_errors: [],
+    });
+    // The unresolvable row is staged AFTER a resolvable one, so a `field_id`
+    // carried over from the previous iteration would show up as a profile
+    // attached to the wrong ground rather than as no profile at all.
+    await supabase.from('staging_import_rows').insert([
+      staged('resolvable-row', 'Alder Park', 'Main', 1),
+      staged('unresolvable-row', 'Alder Park', 'Ghost Pitch', 2),
+      // Surrounding whitespace, which `import_payload_text` btrims on the SQL
+      // side. This arm read the raw value, so a padded cell resolved against
+      // real Supabase and was refused here.
+      staged('padded-row', '  Alder Park ', ' Main  ', 3),
+    ]);
+
+    const res = await supabase.rpc('finalize_field_availability_import_job', {
+      p_import_job_id: job.id,
+      p_validation_errors: [],
+    });
+    expect(res.error).toBeNull();
+    expect(res.data.inserted_profiles).toBe(2);
+    expect(res.data.unresolved_field_rows).toBe(1);
+    expect(res.data.invalid_rows).toBe(1);
+    expect(res.data.status).toBe('completed_with_warnings');
+    expect(res.data.inserted_blackouts).toBe(2);
+
+    // Nothing field-less was created, and nothing was created for the refused
+    // row at all.
+    const profiles = getMockData('field_availability_profiles');
+    expect(profiles.length).toBe(2);
+    expect(profiles.filter((p) => !p.field_id)).toEqual([]);
+    expect(profiles.filter((p) => p.field_name === 'Ghost Pitch')).toEqual([]);
+    // The padded row resolved to the same pitch, and stored the TRIMMED names,
+    // which is what the SQL stores.
+    expect(profiles.map((p) => p.field_name).sort()).toEqual(['Main', 'Main']);
+    expect(profiles.every((p) => p.location === 'Alder Park')).toBe(true);
+
+    // The refusal is reported with a reason a caller can branch on, on the
+    // staging row and in the job's warning summary.
+    const refused = getMockData('staging_import_rows').find(
+      (r) => String(r.id) === 'unresolvable-row'
+    );
+    expect(refused.applied_at ?? null).toBeNull();
+    const reasons = (refused.validation_errors || []).map((e) => e.reason);
+    expect(reasons).toContain('field_unresolved');
+    const detail = (refused.validation_errors || []).find((e) => e.reason === 'field_unresolved');
+    expect(detail.location).toBe('Alder Park');
+    expect(detail.field_name).toBe('Ghost Pitch');
+    const finishedJob = getMockData('import_jobs').find((j) => String(j.id) === String(job.id));
+    expect(finishedJob.warning_summary.availability_finalize.unresolved_field_rows).toBe(1);
+    // ... merged into whatever was already there, not assigned over it. The SQL
+    // assigned outright until 20260908000000, which destroyed the deferred_apply
+    // key ImportPanel and ImportContext read.
+    expect(finishedJob.warning_summary.deferred_apply).toBeTruthy();
+
+    // **Refused means deferred, not discarded.** Create the field it asked for
+    // and re-run the same job: the row applies, and the row that already
+    // applied is not applied twice.
+    await supabase.from('fields').insert({
+      id: 'seed-field-ghost',
+      organization_id: 'org-1',
+      location_id: 'seed-loc-1',
+      name: 'Ghost Pitch',
+      active: true,
+      created_at: new Date(Date.UTC(2026, 0, 2)).toISOString(),
+    });
+    const replay = await supabase.rpc('finalize_field_availability_import_job', {
+      p_import_job_id: job.id,
+      p_validation_errors: [],
+    });
+    expect(replay.error).toBeNull();
+    expect(replay.data.inserted_profiles).toBe(1);
+    expect(replay.data.unresolved_field_rows).toBe(0);
+    // **A replayed row stops reading as refused.** Its earlier
+    // field_unresolved entry is cleared when it applies; otherwise the row is
+    // applied and refused at once, and anything asking which rows the import
+    // refused names one that succeeded.
+    const replayed = getMockData('staging_import_rows').find(
+      (r) => String(r.id) === 'unresolvable-row'
+    );
+    expect(replayed.applied_at).toBeTruthy();
+    expect(replayed.validation_errors).toEqual([]);
+    // **Progress accumulates across the replay**, as the SQL's
+    // `COALESCE(processed_rows,0) + …` does. Overwriting was unreachable while
+    // a job was finalized once; the replay reaches it.
+    const replayedJob = getMockData('import_jobs').find((j) => String(j.id) === String(job.id));
+    expect(replayedJob.processed_rows).toBe(3);
+    const after = getMockData('field_availability_profiles');
+    expect(after.length).toBe(3);
+    expect(after.filter((p) => !p.field_id)).toEqual([]);
+    expect(after.find((p) => p.field_name === 'Ghost Pitch').field_id).toBe('seed-field-ghost');
   });
 });

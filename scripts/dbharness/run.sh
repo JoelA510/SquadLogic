@@ -169,7 +169,7 @@ echo "=== smokes for this PR's migrations ==="
 # pgTAP suite already does. Claiming to verify them would be the hollow kind of
 # green this whole phase exists to stop.
 STATUS=0
-NEW_MIGRATIONS=(20260906000000 20260906000100 20260907000000)
+NEW_MIGRATIONS=(20260906000000 20260906000100 20260907000000 20260908000000)
 
 for id in "${NEW_MIGRATIONS[@]}"; do
   smoke="$REPO/docs/sql/${id}_smoke.sql"
@@ -277,6 +277,30 @@ for id in "${NEW_MIGRATIONS[@]}"; do
     fi
   fi
 
+  # **The same reasoning for 20260908000000's revert.** It counts the profiles
+  # that already have no field before restoring a body that will make more of
+  # them, and on a freshly migrated database there are none -- so it would
+  # report zero and prove only that the code parses. A profile that IS in that
+  # state, carrying a blackout window, is planted, and the count is then
+  # required to be non-zero. `field_blackout_windows.profile_id` is NOT NULL,
+  # so the window needs the profile; the profile needs a location name and a
+  # field name as TEXT and no field row at all, which is exactly the state the
+  # unguarded import produced.
+  if [ "$id" = "20260908000000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug)
+              VALUES ('99999999-9999-9999-9999-999999999999','Orphan Org','orphan-org');
+              INSERT INTO public.field_availability_profiles
+                (id, organization_id, season_label, field_id, location, field_name, available_from, available_until)
+              VALUES ('9a999999-9999-9999-9999-999999999999','99999999-9999-9999-9999-999999999999','Fall 2026',NULL,'Orphan Park','Ghost Pitch','2026-08-01','2026-11-30');
+              INSERT INTO public.field_blackout_windows
+                (organization_id, profile_id, blackout_from, blackout_until, reason)
+              VALUES ('99999999-9999-9999-9999-999999999999','9a999999-9999-9999-9999-999999999999','2026-09-01','2026-09-30','blackout_months');" \
+         >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the field-less profile the revert check requires was never inserted"
+      dump 10 /tmp/harness_seed; STATUS=1; continue
+    fi
+  fi
+
   if [ "$id" = "20260906000000" ]; then
     if ! psql_cmd "INSERT INTO public.organizations (id, name, slug)
               VALUES ('11111111-1111-1111-1111-111111111111','Revert Org','revert-org');
@@ -300,6 +324,48 @@ for id in "${NEW_MIGRATIONS[@]}"; do
       else
         echo "FAIL revert ${id}: planted a future-dated retirement and the revert did not name it"
         STATUS=1
+      fi
+    fi
+    if [ "$id" = "20260908000000" ]; then
+      # It counted what the database already holds. The seed above planted
+      # exactly one, so a revert that counted nothing -- or counted rows it
+      # should not -- fails here instead of printing a reassuring zero.
+      if grep -q 'ORPHANS: 1 field-less availability profile' /tmp/harness_rev; then
+        echo "  | (checked) the revert counted the field-less profile already in the database"
+      else
+        echo "FAIL revert ${id}: planted a field-less profile with a blackout window and the revert did not count it"
+        STATUS=1
+      fi
+      # And it named what restoring the old body costs. A revert that quietly
+      # reinstates a silent accretion is the same silence one level up.
+      if grep -q 'RESTORING finalize_field_availability_import_job' /tmp/harness_rev; then
+        echo "  | (checked) the revert named the import guard it was putting back"
+      else
+        echo "FAIL revert ${id}: restored the unguarded finalize without naming what that costs"
+        STATUS=1
+      fi
+      # **Present in the catalogue is not the same as reverted.** The verdict
+      # enumerates the ways this can be wrong rather than testing for the one
+      # way it can be right: no function at all, two of them (a second overload
+      # is a route round whichever body a caller means), or a body that still
+      # carries the guard because the revert was a no-op. `field_unresolved`
+      # has no prefix-sibling in this repository, so unlike the
+      # field_bookings/field_bookings_digest pair this LIKE cannot fire on a
+      # different identifier.
+      v_fin_verdict=$(psql_cmd "SELECT CASE
+             WHEN count(*) = 0 THEN 'GONE'
+             WHEN count(*) > 1 THEN 'AMBIGUOUS:' || count(*)
+             WHEN bool_or(p.prosrc LIKE '%field_unresolved%') THEN 'STILL-GUARDED'
+             ELSE 'RESTORED'
+           END
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'finalize_field_availability_import_job'" 2>/dev/null || echo "QUERY-FAILED")
+      if [ "$v_fin_verdict" != "RESTORED" ]; then
+        echo "FAIL revert ${id}: finalize_field_availability_import_job after the revert reads ${v_fin_verdict}, wanted RESTORED"
+        STATUS=1
+      else
+        echo "  | (checked) exactly one public.finalize_field_availability_import_job survives the revert, and its body no longer carries the resolution guard"
       fi
     fi
     if [ "$id" = "20260907000000" ]; then

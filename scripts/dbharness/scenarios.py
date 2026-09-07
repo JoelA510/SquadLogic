@@ -586,7 +586,40 @@ def main():
         if half == 'blackout':
             return [f'{sid}: expected the blackout to be accepted']
         if scenario['rpc'] == 'admin_delete_field':
-            return [f'{sid}: expected deleted=', f'{sid}: audit phases were']
+            # **The delete arm owes as much as the retire arm does.** This
+            # branch used to demand two markers where the retire branch demanded
+            # three, which left the delete arm's affected-count, count/list
+            # agreement, survival and refusal-wrote-nothing checks entirely
+            # unguarded -- so the very refactor this guard was written after,
+            # applied to the delete arm instead, would still have produced a
+            # script reporting "N of N executed" and saying nothing about them.
+            expect = scenario['expect']
+            markers = [
+                f'{sid}: expected deleted=',
+                f'{sid}: expected {int(expect["affectedCount"])} affected bookings',
+                f'{sid}: affected_count and the affected list disagree',
+                f'{sid}: expected the field row to '
+                f'{"survive" if expect["exists"] else "be gone"}',
+                f'{sid}: audit phases were',
+            ]
+            if expect.get('reason') is not None:
+                markers.append(f'{sid}: expected reason={expect["reason"]}')
+            if expect.get('dispositions') is not None:
+                markers.append(f'{sid}: dispositions were')
+            if not expect['deleted']:
+                # One per table the seeding touched, recomputed from the table
+                # rather than read back out of the emitter -- deriving the
+                # expected set from the code a break would corrupt is what makes
+                # a guard agree with the thing it is guarding.
+                for kind in scenario.get('bookings') or []:
+                    tables = (
+                        [table for _statement, table in COMPOSITE_SEEDS[kind]]
+                        if kind in COMPOSITE_SEEDS
+                        else [BOOKING_TABLES[kind]]
+                    )
+                    for table in tables:
+                        markers.append(f'{sid}: a REFUSED delete changed {table}')
+            return markers
         return [
             f'{sid}: expected active=',
             f'{sid}: expected effective_to=',

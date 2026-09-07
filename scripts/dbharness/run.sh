@@ -260,14 +260,60 @@ for id in "${NEW_MIGRATIONS[@]}"; do
       # And the restored RPC must actually WORK -- the producer it used to call
       # is gone by now, so a revert that left the call in place would leave the
       # function raising undefined_function on the next retirement.
-      if ! psql_cmd "SELECT public.admin_retire_field(NULL, NULL, NULL, false)" >/dev/null 2>&1; then
-        : # it raises 22023 for the NULL org, which is the point: it RESOLVED.
-      fi
-      if psql_cmd "SELECT prosrc LIKE '%field_bookings%' FROM pg_proc WHERE proname='admin_retire_field'" 2>/dev/null | grep -q '^t$'; then
-        echo "FAIL revert ${id}: admin_retire_field still calls the producer this revert dropped"
+      #
+      # **Both halves of this check used to pass on the failure they name.** The
+      # resolve probe had `:` in one branch and nothing in the other, so it set
+      # no status and printed nothing whatever happened. The prosrc probe read
+      # `... | grep -q '^t$'`, and a revert that DROPPED admin_retire_field
+      # returns zero rows -- no `t`, so the else branch fired and reported the
+      # restored function as clean, for a database that no longer has one. Both
+      # are now one verdict that a zero-row answer fails loudly, and
+      # `R3 revert drops the retirement RPC instead of restoring it` in
+      # prove.sh is the positive control for exactly that scenario.
+      v_verdict=$(psql_cmd "SELECT CASE
+             WHEN count(*) = 0 THEN 'GONE'
+             WHEN count(*) > 1 THEN 'AMBIGUOUS:' || count(*)
+             WHEN bool_or(p.prosrc LIKE '%field_bookings%') THEN 'STILL-CALLS-PRODUCER'
+             ELSE 'RESTORED'
+           END
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'admin_retire_field'" 2>/dev/null || echo "QUERY-FAILED")
+      if [ "$v_verdict" != "RESTORED" ]; then
+        echo "FAIL revert ${id}: admin_retire_field after the revert reads ${v_verdict}, wanted RESTORED"
         STATUS=1
       else
-        echo "  | (checked) the restored admin_retire_field no longer calls the dropped producer"
+        echo "  | (checked) exactly one public.admin_retire_field survives the revert, and it no longer calls the dropped producer"
+      fi
+      # Present in the catalogue is not the same as callable. A NULL org makes
+      # it raise -- the point is WHICH error: 22023 from its own validation
+      # means the body ran, 42883 means the revert left it calling something
+      # that is no longer there.
+      # Written to a FILE rather than passed through `psql_cmd`: that helper
+      # interpolates its argument through a second shell (`as_pg ... bash -lc`),
+      # which ate the `$probe$` dollar-quote tags and left psql parsing a bare
+      # `DO $`. A heredoc keeps the SQL as SQL.
+      cat >/tmp/harness_rev_probe.sql <<'PROBE'
+DO $probe$
+BEGIN
+    BEGIN
+        PERFORM public.admin_retire_field(NULL, NULL, NULL, false);
+        RAISE NOTICE 'RESOLVED: returned without raising';
+    EXCEPTION
+        WHEN undefined_function OR undefined_table THEN
+            RAISE EXCEPTION 'UNRESOLVED: %', SQLERRM;
+        WHEN OTHERS THEN
+            RAISE NOTICE 'RESOLVED: raised % from its own body', SQLSTATE;
+    END;
+END
+$probe$;
+PROBE
+      if psql_file /tmp/harness_rev_probe.sql >/tmp/harness_rev_probe 2>&1; then
+        echo "  | (checked) the restored admin_retire_field resolves and runs its own body"
+      else
+        echo "FAIL revert ${id}: the restored admin_retire_field does not resolve"
+        tail -5 /tmp/harness_rev_probe
+        STATUS=1
       fi
     fi
   else

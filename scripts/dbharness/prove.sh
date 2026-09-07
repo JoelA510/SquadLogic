@@ -512,6 +512,18 @@ plant "R3 revert exposes dangling rows silently" "$R3" \
   "        'considering % row(s)'," \
   "revert 20260907000000"
 
+# **A revert that removes the RPC instead of restoring it.** Both of run.sh's
+# checks on the restored admin_retire_field used to PASS on this mutation: the
+# resolve probe reported nothing whatever happened, and the prosrc probe read a
+# zero-row answer as "no longer calls the producer" and printed its green line
+# for a database with no retirement RPC at all. This is the positive control
+# for the fix -- a check that matches zero records must be a loud failure.
+plant "R3 revert drops the retirement RPC instead of restoring it" "$R3" \
+  "DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);" \
+  "DROP FUNCTION IF EXISTS public.admin_retire_field(uuid, uuid, date, boolean);
+DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);" \
+  "revert 20260907000000"
+
 # **Three numbers, not one.** A single "N caught" cannot tell a genuine catch
 # from a plant that never applied: last round seven mutations reported RED and
 # every one was trivially red against an already-red suite. So the count of

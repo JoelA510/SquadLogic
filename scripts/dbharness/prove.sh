@@ -22,25 +22,38 @@ ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # `supabase/migrations/` is also something a directory glob may pick up. So:
 # find one, stop, and say what to do about it. `.gitignore` covers `*.orig` as
 # the second line of defence, not the first.
-for f in "$M1" "$M2" "$M3" "$R1" "$R3"; do
-  if [ -e "$f.orig" ]; then
-    echo "REFUSING TO START: stale backup $f.orig" >&2
-    echo "  A previous run died between backing up and restoring. Compare it with" >&2
-    echo "  the live file, keep whichever is correct, and delete the .orig." >&2
-    exit 2
-  fi
-done
+#
+# **Derived from the DISK, not from a list.** This was a hand-written
+# `for f in "$M1" "$M2" "$M3" "$R1" "$R3"`, and when `$EMERG` was added as a
+# fifth plantable file it went into neither this loop nor `restore_all` -- so an
+# interrupted run would have left the emergency rollback mutated on disk and the
+# next run would have adopted that mutation as its baseline. That is the exact
+# failure both of these exist to prevent, and it happened to this session once
+# already: a container restart froze a plant mid-flight and left a security
+# mutant in the tree. A second list to keep in step is a list that falls out of
+# step, so the sweep now looks wherever it plants.
+PLANT_DIRS=("$REPO/supabase/migrations" "$REPO/docs/sql")
+stale_backups() { find "${PLANT_DIRS[@]}" -name '*.orig' -type f 2>/dev/null; }
+
+while IFS= read -r stale; do
+  [ -n "$stale" ] || continue
+  echo "REFUSING TO START: stale backup $stale" >&2
+  echo "  A previous run died between backing up and restoring. Compare it with" >&2
+  echo "  the live file, keep whichever is correct, and delete the .orig." >&2
+  exit 2
+done < <(stale_backups)
 
 # Restore anything still planted if this run is interrupted, so the next one is
-# not blocked by a backup THIS run abandoned.
+# not blocked by a backup THIS run abandoned. Same derivation, for the same
+# reason: a file this run planted is a file this run must put back, whether or
+# not anyone remembered to add it to a list.
 restore_all() {
-  local f
-  for f in "$M1" "$M2" "$M3" "$R1" "$R3"; do
-    if [ -e "$f.orig" ]; then
-      mv -f "$f.orig" "$f"
-      echo "restored $(basename "$f") from its backup" >&2
-    fi
-  done
+  local orig
+  while IFS= read -r orig; do
+    [ -n "$orig" ] || continue
+    mv -f "$orig" "${orig%.orig}"
+    echo "restored $(basename "${orig%.orig}") from its backup" >&2
+  done < <(stale_backups)
 }
 
 # **A signal handler that returns does not stop the script.** The first version
@@ -464,6 +477,20 @@ plant "ONLY-SCEN refusal also audits a phase it never reached" "$M3" \
 # each arm's disposition word against `pg_constraint`. Both are checks about
 # checks, and a check about a check is exactly the kind that quietly stops
 # working, so each gets a plant.
+# **The internal helpers, actually internal.** 20260614000000 grants EXECUTE on
+# every new public function to `authenticated` by default privilege, and a
+# revoke from PUBLIC does not remove it -- so the producer's COMMENT claimed "no
+# EXECUTE grant" while the catalogue said otherwise. RLS contained it (the
+# producer is SECURITY INVOKER over five tables that all have org-scoped
+# policies), but a claim nothing enforces is the shape this phase keeps finding.
+# Drop the explicit revoke and section 5c must go red; the scenario table stays
+# green, because both callers are SECURITY DEFINER and behaviour is unchanged --
+# which is exactly why nothing noticed for two rounds.
+plant "M3 the producer is left callable by authenticated" "$M3" \
+  "REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM authenticated;" \
+  "-- the default privilege from 20260614000000 is left in place" \
+  "smoke 20260907000000" \
+  "scenario table"
 plant "M3 an eighth table joins the field_id family unnoticed" "$M3" \
   "ALTER TABLE public.practice_assignments
   DROP CONSTRAINT IF EXISTS practice_assignments_field_id_fkey;" \
@@ -548,12 +575,19 @@ plant "R3 revert reinstates the weaker guard silently" "$R3" \
   "  RAISE WARNING 'RESTORING admin_retire_field to its pre-20260907000000 body:" \
   "  RAISE NOTICE 'restoring a function, no consequences worth naming:" \
   "revert 20260907000000"
-# **A restored body that calls something ELSE this revert drops.** The pg_proc
-# verdict only looks for `field_bookings`, so a botched revert that reinstated
-# the new audit line -- `field_bookings_digest`, dropped three statements later
-# -- passes it and leaves a retirement raising 42883 on the next call. Only the
-# probe that runs the function can see this, which is what makes it a check
-# rather than a decoration.
+# **A restored body that calls something ELSE this revert drops.** A botched
+# revert that reinstated the new audit line -- `field_bookings_digest`, dropped
+# three statements later -- leaves a retirement raising 42883 on the next call,
+# and only a probe that RUNS the function can see it.
+#
+# It did not isolate the probe when it was written, and the report claiming it
+# did was wrong: `LIKE '%field_bookings%'` matched `field_bookings_digest`, so
+# the verdict fired too and this plant was scored on borrowed evidence -- the
+# defect fixed in PR 2 round 5, recurring in the check built to prevent it.
+# Measured, not argued: with the plant applied, the harness printed BOTH
+# `FAIL ... reads STILL-CALLS-PRODUCER` and `FAIL ... does not resolve`. The
+# verdict now strips the digest name before looking for the producer, and the
+# probe's failure line carries `probe` so `expect` can name it alone.
 plant "R3 the restored retire calls a helper the revert also drops" "$R3" \
   "            'affected_count', v_affected_count,
             'affected', v_affected
@@ -563,7 +597,7 @@ plant "R3 the restored retire calls a helper the revert also drops" "$R3" \
             'affected', public.field_bookings_digest(v_affected)
         );
     END IF;" \
-  "revert 20260907000000"
+  "revert 20260907000000 probe"
 
 # **The emergency rollback, back in the state 20260907000000 left it in.** It
 # dropped a signature that no longer exists, so the DROP was a silent no-op and

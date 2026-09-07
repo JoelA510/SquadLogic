@@ -113,7 +113,8 @@ fresh_db || { echo "HARNESS FAILED"; exit 1; }
 apply_all || { echo "HARNESS FAILED"; exit 1; }
 echo "=== smokes for this PR's migrations ==="
 #
-# **Scoped to the two migrations this PR adds**, and that is a deliberate limit
+# **Scoped to the migrations this PR adds** (`NEW_MIGRATIONS`, three of them),
+# and that is a deliberate limit
 # worth stating. Several pre-existing smokes are BEHAVIOURAL: they seed an org,
 # assume an authenticated admin session, and exercise an RPC. They fail here for
 # want of fixtures and a real JWT, not because anything is wrong with them --
@@ -270,10 +271,16 @@ for id in "${NEW_MIGRATIONS[@]}"; do
       # are now one verdict that a zero-row answer fails loudly, and
       # `R3 revert drops the retirement RPC instead of restoring it` in
       # prove.sh is the positive control for exactly that scenario.
+      # **`LIKE '%field_bookings%'` also matched `field_bookings_digest`.** The
+      # two helpers share a prefix, so the verdict fired on a body that
+      # mentioned only the digest -- which meant the plant aimed at the probe
+      # below was caught HERE as well, and scored on borrowed evidence. The
+      # digest name is stripped before the producer is looked for.
       v_verdict=$(psql_cmd "SELECT CASE
              WHEN count(*) = 0 THEN 'GONE'
              WHEN count(*) > 1 THEN 'AMBIGUOUS:' || count(*)
-             WHEN bool_or(p.prosrc LIKE '%field_bookings%') THEN 'STILL-CALLS-PRODUCER'
+             WHEN bool_or(regexp_replace(p.prosrc, 'field_bookings_digest', '', 'g')
+                            LIKE '%field_bookings%') THEN 'STILL-CALLS-PRODUCER'
              ELSE 'RESTORED'
            END
       FROM pg_proc p
@@ -348,10 +355,14 @@ BEGIN
 END
 $probe$;
 PROBE
+      # The failure line carries `probe` so `prove.sh`'s `expect` can name THIS
+      # check rather than the stage: both this and the verdict above print
+      # `FAIL revert 20260907000000...`, and a substring match cannot tell two
+      # checks apart when one is a prefix of the other's line.
       if psql_file /tmp/harness_rev_probe.sql >/tmp/harness_rev_probe 2>&1; then
         echo "  | (checked) the restored admin_retire_field resolves and runs its own body"
       else
-        echo "FAIL revert ${id}: the restored admin_retire_field does not resolve"
+        echo "FAIL revert ${id} probe: the restored admin_retire_field does not resolve"
         tail -5 /tmp/harness_rev_probe
         STATUS=1
       fi

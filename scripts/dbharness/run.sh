@@ -350,6 +350,21 @@ BEGIN
     END IF;
     RAISE NOTICE 'RESOLVED: the restored admin_retire_field enumerated % booking(s) and refused',
         v_res->>'affected_count';
+
+    -- **And the CONFIRMED path, which the refusal above never reaches.** A
+    -- revert that restored the refusal branch but left the confirmed branch on
+    -- `field_bookings_digest` -- the before-audit, the UPDATE, the after-audit,
+    -- the success RETURN -- passed every check here while raising 42883 on the
+    -- first confirmed retirement anyone ran: the `pg_proc` verdict strips the
+    -- digest name by design, and a probe that only ever refuses never executes
+    -- those statements. A broken revert scoring clean is the exact failure this
+    -- stage exists to make impossible, so the probe drives both halves.
+    v_res := public.admin_retire_field(v_org, v_field, current_date + 10, true);
+    IF v_res IS NULL OR (v_res->>'retired')::boolean IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'UNRESOLVED: the restored admin_retire_field did not complete a confirmed retirement: %', v_res;
+    END IF;
+    RAISE NOTICE 'RESOLVED: the restored admin_retire_field also ran its confirmed path to completion';
+
     DELETE FROM public.organizations WHERE id = v_org;
     DELETE FROM auth.users WHERE id = v_user;
 END
@@ -360,7 +375,7 @@ PROBE
       # `FAIL revert 20260907000000...`, and a substring match cannot tell two
       # checks apart when one is a prefix of the other's line.
       if psql_file /tmp/harness_rev_probe.sql >/tmp/harness_rev_probe 2>&1; then
-        echo "  | (checked) the restored admin_retire_field resolves and runs its own body"
+        echo "  | (checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"
       else
         echo "FAIL revert ${id} probe: the restored admin_retire_field does not resolve"
         tail -5 /tmp/harness_rev_probe

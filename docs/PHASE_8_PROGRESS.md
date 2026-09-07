@@ -1068,6 +1068,92 @@ Both sweeps end at zero: SQL 31 attempted, 0 anchor-miss, 0 misattributed, 31
 caught; mock 28 attempted, 0 anchor-miss, 28 caught.
 
 
+### Pass 2: the defect two agreeing implementations cannot produce
+
+The review found an **off-by-one on the retirement boundary** in the
+`practice_assignment` arm: it compared the daterange's EXCLUSIVE upper bound to
+`p_after`, while the four sibling arms compare the booking's own date. A
+practice ending exactly on the retirement date was reported stranded; a game
+slot the same day was not. **The mock had the identical off-by-one**, so the two
+runners agreed and the shared scenario table saw one answer twice.
+
+That is the structural limit of the mechanism this phase built. Two independent
+implementations compared against one table catches DIVERGENCE. It cannot catch a
+defect present identically in both — and a date boundary in the guard that
+decides what gets destroyed is exactly that shape. **Agreement is not
+correctness.**
+
+Two tests in `fieldLifecycleRpcs.test.js` had pinned the wrong reading and
+argued for it in their comments (`expect(on_date).toBe('2099-07-01')` for a
+practice ending on the 30th). A passing test certifying the bug, for the third
+time in this phase.
+
+So the table now ADJUDICATES the boundary rather than the implementations
+agreeing about it. `bookingOffset` makes a seed's date data, and ten new cases —
+`retire-<arm>-on-boundary` and `retire-<arm>-day-after-boundary`, one pair for
+each of the five arms — state in the fixture which side refuses. The pair
+matters: without the day-after case, an enumerator that had stopped seeing a
+kind entirely would pass the on-boundary case for the wrong reason.
+
+The reading itself was chosen on evidence rather than taste.
+`public.field_is_live_on(effective_to, d)` is `effective_to >= d`
+(20260906000000:140) and `facility/lifecycle.js isLiveOn()` gives the frontend
+the same answer, so `p_after` is the LAST DAY THE GROUND IS USABLE. Choosing the
+other way would have made the guard disagree with the predicate the scheduler
+already uses to decide the same question. The migration header now says so.
+
+Downstream of it, and fixed first: the mock's delete arm re-derived the
+disposition from two hard-coded kind lists instead of using the producer's
+`cascades` uniformly the way the SQL's `CASE` does. The arms could only diverge
+on a boundary because each computed its own answer.
+
+### Why the mechanism index missed the third hollow probe
+
+The review found a THIRD check in `run.sh` that passes on the failure it names:
+the resolve probe called the RPC with a NULL organisation, which it rejects in
+its opening statement, so the `undefined_function` case the comment claims to
+detect was unreachable.
+
+The index should have caught it and did not, and the reason is precise: the two
+queries I ran were greps for the SYNTAX of the two instances I had just fixed —
+`^\s*:\s*(#|$)` for the no-op branch, `psql_cmd .* | grep -q` for the zero-rows
+read. The mechanism is not a syntax. "A probe that reports health without
+exercising the thing it names" has no shared text; the third instance is a
+SEMANTIC miss, an argument that short-circuits before the code under test.
+
+The fix is to enumerate the CLASS rather than grep the instances, and the class
+is enumerable by command: every line that prints a `(checked)` claim. Running
+that returned five claims and three plants — so two claims had never had anyone
+try to make them fail, and one of those two was the hollow probe. The rule that
+generalises: **every health claim needs a plant, and a claim with no plant is a
+claim nobody has tried to falsify.** Both gaps are now closed, and one of the new
+plants isolates the probe from the `pg_proc` verdict beside it by dropping a
+DIFFERENT helper the revert removes — a case only a probe that runs the function
+can see.
+
+### The emergency rollback nothing was running
+
+`docs/sql/reverts/20260504060000_admin_facility_mutation_rpcs.sql` drops
+`admin_delete_field(uuid, uuid)`. This PR replaced that signature, so the DROP
+became a **silent no-op**: run against a current database the script left the
+guarded delete standing, COMMITTED, and reported success. It is the file an
+operator runs at 2am with production broken, and it was lying to them. A
+pre-existing file this change invalidated, so it is fixed here.
+
+Both signatures are dropped now, and the script refuses to report success while
+having removed nothing — a check by NAME rather than signature, since only a name
+survives a signature change. `field_bookings` and `field_bookings_digest` are
+deliberately left standing, because `admin_retire_field` belongs to a different
+migration and still calls the first.
+
+**And the harness now runs it**, on a database built to head, with a precondition
+assertion so it cannot pass on an already-empty catalogue and two plants — one
+for a rollback that removes nothing, one for a rollback that over-reaches and
+takes the producer another RPC needs. A fix to a rollback nothing executes is a
+claim, not a fix; that is the same shape as the hollow probes above, one file
+along.
+
+
 ### Still open
 
 - **LIVE-4** — roughly thirty hard deletes in `mockSupabaseClient.js` remove rows

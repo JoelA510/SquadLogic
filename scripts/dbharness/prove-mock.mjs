@@ -56,7 +56,22 @@ const runSuite = (suite) => {
     env: { ...process.env, CI: '1' },
   });
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
-  return { ok: result.status === 0, output };
+  // **A run that never happened is not a run that failed.** `status` is null
+  // when the child could not be spawned at all or was killed by a signal, and
+  // `!== 0` reads both as "red" -- so an ENOENT or an OOM kill would score
+  // every plant CAUGHT and the sweep would report a clean sheet having proved
+  // nothing. Same shape as the exit statuses four tools swallowed in PR 2.
+  if (result.error || result.signal !== null || result.status === null) {
+    return {
+      ok: false,
+      ran: false,
+      output,
+      why: result.error
+        ? `could not run ${suite}: ${result.error.message}`
+        : `${suite} was killed by ${result.signal ?? 'an unknown signal'}`,
+    };
+  }
+  return { ok: result.status === 0, ran: true, output, why: '' };
 };
 
 /**
@@ -119,10 +134,10 @@ const PLANTS = [
   // -------------------------------------------------------------------------
   {
     label: 'delete loses its booking guard entirely',
-    find: `        if (affected.length > 0 && !p.p_confirm) {
+    find: `        if (affected.length > 0 && p.p_confirm !== true) {
           audit('field', field.id, 'deleted', {
             operation: 'admin_delete_field',`,
-    replace: `        if (false && affected.length > 0 && !p.p_confirm) {
+    replace: `        if (false && affected.length > 0 && p.p_confirm !== true) {
           audit('field', field.id, 'deleted', {
             operation: 'admin_delete_field',`,
   },
@@ -151,15 +166,16 @@ const PLANTS = [
     // CAUGHT and said nothing about whether anything covers it.
     label: 'delete stops seeing assignments reached through their slot',
     suite: 'tests/fieldDeleteGuard.test.js',
-    find: '          (String(row.field_id) === String(fieldId) || (viaSlots && viaSlot(row)));',
+    find: '          (String(row.field_id) === String(fieldId) || viaSlot(row));',
     replace: '          String(row.field_id) === String(fieldId);',
   },
   {
     // `games` carries no field_id; only the cascade closure reaches it.
-    label: 'delete stops enumerating the fixtures it destroys',
-    find: '        const affected = fieldBookings(p.p_field_id, null, {\n          includeGames: true,',
-    replace:
-      '        const affected = fieldBookings(p.p_field_id, null, {\n          includeGames: false,',
+    // `games` carries no field_id; only the cascade closure reaches it. Both
+    // callers enumerate it now, so this is aimed at the shared producer.
+    label: 'the enumerator stops seeing the fixtures on its slots',
+    find: '              if (!gameSlotIds.has(String(row.game_slot_id))) return false;',
+    replace: '              if (true) return false;',
   },
   {
     // **The shared enumerator's `after: null` contract.** `null` means no date
@@ -219,6 +235,51 @@ const PLANTS = [
     replace: "        // markMockDeleted(db, 'fields', [field.id]);",
   },
   {
+    // **A NULL confirmation is not a confirmation.** It must read as
+    // unconfirmed on BOTH arms; the SQL got retire wrong until 20260907000000
+    // while the mock had it right, so this pins the mock's half of a contract
+    // the two used to disagree on.
+    label: 'retire reads a NULL confirmation as yes',
+    find: `        if (affected.length > 0 && p.p_confirm !== true) {
+          audit('field', field.id, 'updated', {`,
+    replace: `        if (affected.length > 0 && !p.p_confirm === false) {
+          audit('field', field.id, 'updated', {`,
+  },
+  {
+    label: 'delete reads a NULL confirmation as yes',
+    find: `        if (affected.length > 0 && p.p_confirm !== true) {
+          audit('field', field.id, 'deleted', {`,
+    replace: `        if (affected.length > 0 && !p.p_confirm === false) {
+          audit('field', field.id, 'deleted', {`,
+  },
+  {
+    // The blackout twin of the field tombstone. Aimed at the contract file,
+    // because the scenario table says nothing about durability.
+    label: 'a deleted blackout is not tombstoned',
+    suite: 'tests/fieldBlackoutMockContract.test.js',
+    find: "        markMockDeleted(db, 'field_blackouts', [existing.id]);",
+    replace: "        // markMockDeleted(db, 'field_blackouts', [existing.id]);",
+  },
+  {
+    // `cascades` is the producer's internal answer; retire's payload must not
+    // carry it, because its SQL twin emits no such key.
+    label: 'retire leaks the producer cascades flag into its payload',
+    suite: 'tests/fieldLifecycleRpcs.test.js',
+    find: `        const affected = fieldBookings(p.p_field_id, String(p.p_effective_to)).map(
+          ({ cascades: _cascades, ...row }) => row
+        );`,
+    replace: '        const affected = fieldBookings(p.p_field_id, String(p.p_effective_to));',
+  },
+  {
+    // The same leak on the delete arm's always-deleted branch, which is where
+    // it actually was: `cascades` was stripped for the per-row kinds only.
+    label: 'delete leaks the cascades flag on its always-deleted kinds',
+    suite: 'tests/fieldLifecycleRpcs.test.js',
+    find: "          if (ALWAYS_DELETED.includes(row.kind)) return { ...rest, disposition: 'deleted' };",
+    replace:
+      "          if (ALWAYS_DELETED.includes(row.kind)) return { ...row, disposition: 'deleted' };",
+  },
+  {
     // Not a scenario-table plant: a scenario's `before` state is written
     // through `.insert()`, so the very state this breaks is one the table
     // cannot express. `fieldLifecycleRpcs.test.js` asserts it on the write
@@ -239,14 +300,30 @@ if (existsSync(`${MOCK}.orig`)) {
   process.exit(2);
 }
 
-console.log('=== baseline: the scenario suite must pass before any plant ===');
-const baseline = runSuite(SCENARIOS);
-if (!baseline.ok) {
-  console.error('BASELINE RED -- refusing to plant. Every plant would report CAUGHT.');
-  console.error(baseline.output.split('\n').slice(-25).join('\n'));
-  process.exit(3);
+// **A baseline for EVERY suite a plant targets, derived from the plant list.**
+//
+// This asserted a green baseline for the scenario suite alone while six plants
+// aimed at two other files, whose baselines were never checked -- so a suite
+// that was already red would have scored its plants CAUGHT and proved nothing.
+// That is the identical defect found in `prove.sh` in PR 2 round 3 and then
+// found unapplied one directory over in round 5; this is its third appearance,
+// so the set is now DERIVED rather than written down and cannot drift again.
+const TARGETED_SUITES = [...new Set(PLANTS.map((plant) => plant.suite ?? SCENARIOS))].sort();
+console.log(`=== baseline: every targeted suite must pass before any plant ===`);
+for (const suite of TARGETED_SUITES) {
+  const baseline = runSuite(suite);
+  if (!baseline.ran) {
+    console.error(`BASELINE COULD NOT RUN -- ${baseline.why}`);
+    process.exit(3);
+  }
+  if (!baseline.ok) {
+    console.error(`BASELINE RED for ${suite} -- refusing to plant.`);
+    console.error('  Every plant aimed at it would report CAUGHT and prove nothing.');
+    console.error(baseline.output.split('\n').slice(-25).join('\n'));
+    process.exit(3);
+  }
+  console.log(`BASELINE GREEN  ${suite}`);
 }
-console.log('BASELINE GREEN');
 
 let attempted = 0;
 let missed = 0;
@@ -262,10 +339,14 @@ for (const plant of PLANTS) {
     continue;
   }
   let red = false;
+  let ran = true;
+  let why = '';
   let output = '';
   try {
     writeFileSync(MOCK, original.replace(plant.find, plant.replace));
     const result = runSuite(plant.suite ?? SCENARIOS);
+    ran = result.ran;
+    why = result.why;
     red = !result.ok;
     output = result.output;
   } finally {
@@ -278,7 +359,11 @@ for (const plant of PLANTS) {
     console.error('RESTORE FAILED -- the mock client does not match what was read at start');
     process.exit(4);
   }
-  if (red) {
+  if (!ran) {
+    // Never scored: the suite did not execute, so this says nothing either way.
+    console.log(`${plant.label.padEnd(52)} DID NOT RUN (${why})`);
+    uncaught += 1;
+  } else if (red) {
     console.log(`${plant.label.padEnd(52)} CAUGHT (by ${plant.suite ?? SCENARIOS})`);
     caught += 1;
   } else {

@@ -256,10 +256,10 @@ describe('scenario table :: the table itself', () => {
     // The meta-assertion. A table that failed to parse, or that lost its
     // entries, would make every `it.each` below run zero cases and the file
     // would pass green having asserted nothing at all.
-    expect(TABLE.fieldScenarios.length).toBe(21);
+    expect(TABLE.fieldScenarios.length).toBe(23);
     expect(TABLE.blackoutScenarios.length).toBe(9);
     const all = [...TABLE.fieldScenarios, ...TABLE.blackoutScenarios];
-    expect(all.length).toBe(30);
+    expect(all.length).toBe(32);
     for (const scenario of all) {
       expect(typeof scenario.id).toBe('string');
       expect(scenario.why.length).toBeGreaterThan(10);
@@ -366,12 +366,17 @@ describe('scenario table :: the mock honours it', () => {
     }
 
     const args = { p_organization_id: ORG, p_field_id: field.id };
+    // **The confirmation is passed THROUGH, not coerced.** `Boolean(null)` is
+    // `false`, which is the answer the guard is supposed to reach on its own --
+    // coercing here would make the runner supply the very behaviour the
+    // `*-null-confirm-refused` cases exist to demand of the RPC.
+    const confirmArg = 'confirm' in scenario.args ? scenario.args.confirm : false;
     if (scenario.rpc === 'admin_retire_field') {
       args.p_effective_to = dateAt(scenario.args.effectiveTo);
-      args.p_confirm = Boolean(scenario.args.confirm);
+      args.p_confirm = confirmArg;
     }
     if (scenario.rpc === 'admin_delete_field') {
-      args.p_confirm = Boolean(scenario.args.confirm);
+      args.p_confirm = confirmArg;
     }
     // **`expect.ok` is read here, on the field half too.** It was validated for
     // shape on every scenario and read by neither runner for a field case: the
@@ -436,14 +441,25 @@ describe('scenario table :: the mock honours it', () => {
     // could not tell an unretire's record from a legacy one. A REFUSED delete
     // records `refused` instead, which is why the expected set comes from the
     // table rather than being written into this file.
-    const phases = getMockData('audit_log')
-      .filter(
-        (row) =>
-          String(row.resource_id) === String(field.id) && row.metadata?.operation === scenario.rpc
-      )
-      .map((row) => row.metadata.phase)
-      .sort();
-    expect(phases).toEqual(scenario.expect.auditPhases);
+    // **The DISTINCT sorted set, because that is what `scenarios.py` compares.**
+    // It uses `array_agg(DISTINCT metadata->>'phase' ORDER BY ...)`, so a second
+    // `before` row would fail here and pass there: one field of the shared
+    // table read at two strictness levels, which makes it two contracts wearing
+    // one name. The table is a single source of truth only if both runners
+    // interpret every field identically -- and this is the third divergence
+    // found in this file, so the rule is now written where the comparison is.
+    const phases = [
+      ...new Set(
+        getMockData('audit_log')
+          .filter(
+            (row) =>
+              String(row.resource_id) === String(field.id) &&
+              row.metadata?.operation === scenario.rpc
+          )
+          .map((row) => row.metadata.phase)
+      ),
+    ].sort();
+    expect(phases).toEqual([...scenario.expect.auditPhases].sort());
   });
 
   it.each(TABLE.blackoutScenarios.map((s) => [s.id, s]))('%s', async (_id, scenario) => {

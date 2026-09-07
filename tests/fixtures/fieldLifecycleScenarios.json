@@ -63,7 +63,14 @@
     "free-standing one survives. The `scheduled_game` and `scheduled_practice`",
     "booking kinds seed the shape persist_game_schedule and",
     "persist_practice_schedule actually produce, and `delete-mixed-shapes-refused`",
-    "puts both shapes on one field so a per-table answer cannot pass."
+    "puts both shapes on one field so a per-table answer cannot pass.",
+    "",
+    "A NULL CONFIRMATION IS NOT A CONFIRMATION. `retire-null-confirm-refused` and",
+    "`delete-null-confirm-refused` pass `p_confirm => NULL` on both RPCs. `NOT NULL`",
+    "is NULL in SQL, so a bare `NOT p_confirm` leaves the refusal unfired and the",
+    "destructive path runs unconfirmed -- which admin_retire_field did until",
+    "20260907000000, while the mock refused it. The one input that turns the guard",
+    "off is now covered on both arms rather than on whichever happened to be right."
   ],
   "version": 1,
   "fieldScenarios": [
@@ -454,6 +461,48 @@
         "reason": "bookings_exist",
         "affectedCount": 5,
         "dispositions": ["deleted", "unassigned"],
+        "exists": true,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "retire-null-confirm-refused",
+      "why": "`p_confirm => NULL` must read as UNCONFIRMED. `NOT NULL` is NULL, so a bare `NOT p_confirm` leaves the IF unfired and the retirement proceeds with nobody having confirmed -- which is what the SQL did until 20260907000000 while the mock refused it. A three-valued flag guarding a destructive action must read unknown as no. The field must be untouched and the only audit phase must be `refused`.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_slot"],
+      "args": {
+        "effectiveTo": 10,
+        "confirm": null
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": null,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "delete-null-confirm-refused",
+      "why": "The same input on the delete arm, so the guard's weakest input is covered on both RPCs rather than on whichever one happened to get it right.",
+      "rpc": "admin_delete_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_slot"],
+      "args": {
+        "confirm": null
+      },
+      "expect": {
+        "ok": true,
+        "deleted": false,
+        "reason": "bookings_exist",
+        "affectedCount": 1,
+        "dispositions": ["deleted"],
         "exists": true,
         "auditPhases": ["refused"]
       }

@@ -166,6 +166,19 @@ def booking_count_sql(table):
     return f"SELECT count(*) INTO v_n FROM public.{table} WHERE field_id = v_field;"
 
 
+def confirm_expr(scenario):
+    """The confirmation argument, passed THROUGH rather than coerced.
+
+    `bool(None)` is `False`, which is the answer the guard is supposed to reach
+    on its own -- coercing here would make the generator supply the behaviour
+    the `*-null-confirm-refused` cases exist to demand of the RPC. `NOT NULL` is
+    NULL in SQL, so a bare `NOT p_confirm` leaves the refusal unfired.
+    """
+    if 'confirm' not in scenario['args']:
+        return 'false'
+    return lit(scenario['args']['confirm'])
+
+
 def emit_bookings(scenario, target):
     """Seed the scenario's bookings, and prove each landed.
 
@@ -278,7 +291,7 @@ def emit_field(scenario, index):
         call = (
             "public.admin_retire_field(p_organization_id => v_org, "
             f"p_field_id => {target}, p_effective_to => {date_expr(s['args']['effectiveTo'])}, "
-            f"p_confirm => {lit(bool(s['args'].get('confirm')))})"
+            f"p_confirm => {confirm_expr(s)})"
         )
     elif s['rpc'] == 'admin_unretire_field':
         call = (
@@ -289,7 +302,7 @@ def emit_field(scenario, index):
         call = (
             "public.admin_delete_field(p_organization_id => v_org, "
             f"p_field_id => {target}, "
-            f"p_confirm => {lit(bool(s['args'].get('confirm')))})"
+            f"p_confirm => {confirm_expr(s)})"
         )
     else:
         # Every switch over a union throws on the value it does not know.
@@ -548,21 +561,47 @@ def main():
     # must produce an `expected active=` line; a delete case must produce an
     # `expected deleted=` line. Zero matches for a scenario is a loud failure
     # here rather than a quiet one three checks downstream.
+    # **Both halves, and every marker each case owes.** The first version of
+    # this guard covered `fieldScenarios` only and demanded one marker per case
+    # -- so `emit_blackout` kept exactly the unguarded `v_ran` shape the guard
+    # had just been written to remove, one function along in the same file. The
+    # markers are listed per case now, so a case that stops asserting ANY of the
+    # things its shape owes fails here.
     body = '\n'.join(out)
-    for scenario in fields:
+
+    def markers_for(scenario, half):
+        """Every assertion message this scenario must have emitted."""
+        sid = scenario['id']
         if not scenario['expect']['ok']:
-            continue
-        marker = (
-            f"{scenario['id']}: expected deleted="
-            if scenario['rpc'] == 'admin_delete_field'
-            else f"{scenario['id']}: expected active="
-        )
-        if marker not in body:
-            raise SystemExit(
-                f"scenario {scenario['id']!r} emitted no outcome assertion "
-                f"(looked for {marker!r}); the generator would produce a script "
-                'that runs the case and checks nothing about it'
+            # A refusal case owes its "expected a refusal" assertion, and on the
+            # blackout half also the "nothing was written" one.
+            return (
+                [f'{sid}: expected a refusal and the call SUCCEEDED']
+                if half == 'field'
+                else [
+                    f'{sid}: expected a refusal and the row was ACCEPTED',
+                    f'{sid}: a refused blackout still wrote a row',
+                ]
             )
+        if half == 'blackout':
+            return [f'{sid}: expected the blackout to be accepted']
+        if scenario['rpc'] == 'admin_delete_field':
+            return [f'{sid}: expected deleted=', f'{sid}: audit phases were']
+        return [
+            f'{sid}: expected active=',
+            f'{sid}: expected effective_to=',
+            f'{sid}: audit phases were',
+        ]
+
+    for half, cases in (('field', fields), ('blackout', blackouts)):
+        for scenario in cases:
+            for marker in markers_for(scenario, half):
+                if marker not in body:
+                    raise SystemExit(
+                        f"scenario {scenario['id']!r} emitted no {marker.split(': ', 1)[1]!r} "
+                        'assertion; the generator would produce a script that runs '
+                        'the case and checks less about it than its shape owes'
+                    )
 
     out += [
         # **A run that judged fewer cases than the table holds is a failure.**

@@ -215,7 +215,7 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
   fi
 }
 
-plant "M1 retire deactivates a FUTURE retirement" "$M1" \
+plant "M3 retire deactivates a FUTURE retirement" "$M3" \
   "        active = v_before.active AND public.field_is_live_on(p_effective_to)," \
   "        active = false," \
   "smoke 20260906000000"
@@ -270,7 +270,7 @@ plant "M2 note carries the import reason again" "$M2" \
 # the side that missed it, so both directions must be shown: these plant against
 # Postgres, and the mutation sweep in the report plants the same two defects
 # against the mock. Both are the round-3 HIGHs, in the arm that had them right.
-plant "SCEN retire un-deactivates an inactive field" "$M1" \
+plant "SCEN retire un-deactivates an inactive field" "$M3" \
   "        active = v_before.active AND public.field_is_live_on(p_effective_to)," \
   "        active = public.field_is_live_on(p_effective_to)," \
   "scenario table"
@@ -280,11 +280,11 @@ plant "SCEN unretire reactivates what it never closed" "$M1" \
   "        active = true,
         updated_at = timezone('utc', now())" \
   "scenario table"
-plant "SCEN retire stops auditing before" "$M1" \
-  "            'phase', 'before',
-            'effective_to', p_effective_to," \
-  "            'phase', 'after',
-            'effective_to', p_effective_to," \
+plant "SCEN retire stops auditing before" "$M3" \
+  "            'operation', 'admin_retire_field',
+            'phase', 'before'," \
+  "            'operation', 'admin_retire_field',
+            'phase', 'after'," \
   "scenario table"
 plant "M2 the two blackout tables share a policy name" "$M2" \
   "CREATE POLICY \"Admin field blackouts: members select\"" \
@@ -329,14 +329,101 @@ plant "ONLY-SCEN half a blackout window accepted" "$M2" \
 # LIVE-1: admin_delete_field's booking guard, and the foreign key beside it
 # ---------------------------------------------------------------------------
 #
+# **Both RPCs now enumerate through one producer**, so the plants below aim at
+# the shared reading as well as at each caller. A plant that only one of the two
+# would have caught is the shape this PR removed. `games` carries no field_id,
+# so a census by column name cannot see this arm at all and the cascade closure
+# is the only thing that can -- dropping it must go red.
+plant "M3 the shared producer loses its games arm" "$M3" \
+    "    SELECT 'game'::text, g.id," \
+    "    SELECT 'not_a_game'::text, g.id," \
+  "smoke 20260907000000" \
+  "smoke 20260906000000"
+plant "M3 retire reads a NULL confirmation as yes" "$M3" \
+  "    IF v_affected_count > 0 AND NOT COALESCE(p_confirm, false) THEN
+        PERFORM public.record_audit_event(
+            p_organization_id,
+            'settings.updated',
+            'field',
+            p_field_id,
+            jsonb_build_object(
+                'operation', 'admin_retire_field'," \
+  "    IF v_affected_count > 0 AND NOT p_confirm THEN
+        PERFORM public.record_audit_event(
+            p_organization_id,
+            'settings.updated',
+            'field',
+            p_field_id,
+            jsonb_build_object(
+                'operation', 'admin_retire_field'," \
+  "scenario table" \
+  "smoke 20260906000000"
+plant "M3 delete reads a NULL confirmation as yes" "$M3" \
+  "    IF v_affected_count > 0 AND NOT COALESCE(p_confirm, false) THEN
+        PERFORM public.record_audit_event(
+            p_organization_id,
+            'settings.updated',
+            'field',
+            p_field_id,
+            jsonb_build_object(
+                'setting', 'facility.field'," \
+  "    IF v_affected_count > 0 AND NOT p_confirm THEN
+        PERFORM public.record_audit_event(
+            p_organization_id,
+            'settings.updated',
+            'field',
+            p_field_id,
+            jsonb_build_object(
+                'setting', 'facility.field'," \
+  "scenario table" \
+  "smoke 20260906000000"
+# **Re-inlining the union is the defect the producer exists to stop**, and the
+# smoke is what notices. Nothing else can: the re-inlined copy below is a
+# faithful one, so behaviour is unchanged until it drifts -- which is exactly
+# how the two answers came to exist in the first place.
+plant "M3 retire keeps a union of its own again" "$M3" \
+  "    FROM public.field_bookings(p_organization_id, p_field_id, p_effective_to) b;" \
+  "    FROM (SELECT kind, booking_id, on_date, week_index, undated, unbounded
+            FROM public.field_bookings(p_organization_id, p_field_id, p_effective_to)
+            UNION ALL SELECT NULL, NULL, NULL, NULL, NULL, NULL WHERE false) b;" \
+  "smoke 20260907000000" \
+  "scenario table"
+# The audit digest keeps a refusal from writing an unbounded row. Remove the cap
+# and the smoke's bound check goes red.
+plant "M3 the refusal embeds the whole list in the audit row" "$M3" \
+  "                'affected', public.field_bookings_digest(v_affected),
+                'previous', to_jsonb(v_existing)" \
+  "                'affected', v_affected,
+                'previous', to_jsonb(v_existing)" \
+  "smoke 20260907000000" \
+  "scenario table"
+#
 # The sixth argument is load-bearing on all four. Each names a check that must
 # stay GREEN, so a catch supplied by a check that ran earlier is reported
 # BORROWED rather than scored -- the failure mode round 3 found in this very
 # file, where three plants aimed at the scenario table were being caught by a
 # smoke that ran before it.
+# The guard line is now IDENTICAL in both RPCs -- delete and retire read the
+# same shape -- so an anchor that is only that line matches twice and `plant`
+# refuses it. Each is disambiguated by the first key of the audit row beneath
+# it, the same way the two NULL-confirmation plants above are.
 plant "M3 delete loses its booking guard entirely" "$M3" \
-  "    IF v_affected_count > 0 AND NOT COALESCE(p_confirm, false) THEN" \
-  "    IF false THEN" \
+  "    IF v_affected_count > 0 AND NOT COALESCE(p_confirm, false) THEN
+        PERFORM public.record_audit_event(
+            p_organization_id,
+            'settings.updated',
+            'field',
+            p_field_id,
+            jsonb_build_object(
+                'setting', 'facility.field'," \
+  "    IF false THEN
+        PERFORM public.record_audit_event(
+            p_organization_id,
+            'settings.updated',
+            'field',
+            p_field_id,
+            jsonb_build_object(
+                'setting', 'facility.field'," \
   "smoke 20260907000000" \
   "smoke 20260906000000"
 plant "M3 practice_assignments cascades instead of unassigning" "$M3" \
@@ -387,35 +474,28 @@ ALTER TABLE public.practice_assignments
 # **The per-row disposition, flattened back to one word per table.** This is
 # the defect a review found in the first version of the RPC: `field_id` is SET
 # NULL, so every assignment was reported as surviving -- false for every row the
-# scheduler writes, because the slot cascade destroys it first. Both halves get
-# a plant, since a flat answer in either direction passes the case for the shape
-# it happens to match.
+# scheduler writes, because the slot cascade destroys it first. The decision now
+# lives in the producer's `cascades` column, so each plant pins that column to a
+# constant. Both halves get one, since a flat answer in either direction passes
+# the case for the shape it happens to match.
 plant "M3 every game assignment claimed to survive" "$M3" \
-  "             CASE WHEN EXISTS (
-                    SELECT 1 FROM public.game_slots s
-                     WHERE s.field_id = p_field_id
-                       AND s.id IN (ga.game_slot_id, ga.slot_id)
-                  ) THEN 'deleted' ELSE 'unassigned' END" \
-  "             'unassigned'::text" \
+  "           EXISTS (SELECT 1 FROM public.game_slots s
+                    WHERE s.field_id = p_field_id
+                      AND s.id IN (ga.game_slot_id, ga.slot_id))
+    FROM public.game_assignments ga" \
+  "           false
+    FROM public.game_assignments ga" \
   "smoke 20260907000000" \
   "smoke 20260906000000"
 plant "M3 every practice assignment claimed to be destroyed" "$M3" \
-  "             CASE WHEN EXISTS (
-                    SELECT 1 FROM public.practice_slots s
-                     WHERE s.field_id = p_field_id
-                       AND s.id IN (pa.practice_slot_id, pa.slot_id)
-                  ) THEN 'deleted' ELSE 'unassigned' END" \
-  "             'deleted'::text" \
+  "           EXISTS (SELECT 1 FROM public.practice_slots s
+                    WHERE s.field_id = p_field_id
+                      AND s.id IN (pa.practice_slot_id, pa.slot_id))
+    FROM public.practice_assignments pa" \
+  "           true
+    FROM public.practice_assignments pa" \
   "smoke 20260907000000" \
   "smoke 20260906000000"
-# `games` carries no field_id, so a census by column name cannot see it and the
-# closure walk is the only thing that can. Dropping the arm must go red.
-plant "M3 the games arm disappears with the fixture it names" "$M3" \
-  "      SELECT 'game'::text, g.id," \
-  "      SELECT 'not_a_game'::text, g.id," \
-  "smoke 20260907000000" \
-  "smoke 20260906000000"
-
 # The revert's loss report is code like any other, and the harness plants a
 # future-dated retirement so it cannot pass by iterating zero rows. This proves
 # THAT check can fail: silence the report and the harness must go red.

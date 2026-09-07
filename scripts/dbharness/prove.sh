@@ -278,7 +278,11 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
       # so it is NOT a catch for the named check and the difference is printed.
       printf '%-52s MISATTRIBUTED  <-- red, but not at "%s"\n' "$label" "$expect"
       FAIL=$((FAIL+1))
-      grep -E '^(applied|PASS|FAIL|BASELINE|HARNESS)' <<<"$out" | sed 's/^/    /'
+      # `  |` lines included: half the harness's health claims print there and
+      # nowhere else, so a filter without them cannot show the line the verdict
+      # under it turned on. The NOT CAUGHT branch below had this and its two
+      # siblings did not -- the one-arm-corrected twin, again.
+      grep -E '^(applied|PASS|FAIL|BASELINE|HARNESS|  \|)' <<<"$out" | sed 's/^/    /'
       return
     fi
     # **A plant aimed at one check, that another check was supposed NOT to
@@ -305,7 +309,7 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
     if [ -n "$green" ] && ! grep -qF "$green_line" <<<"$out"; then
       printf '%-52s BORROWED  <-- "%s" did not stay green\n' "$label" "$green"
       FAIL=$((FAIL+1))
-      grep -E '^(applied|PASS|FAIL|BASELINE|HARNESS)' <<<"$out" | sed 's/^/    /'
+      grep -E '^(applied|PASS|FAIL|BASELINE|HARNESS|  \|)' <<<"$out" | sed 's/^/    /'
       return
     fi
     printf '%-52s CAUGHT%s%s\n' "$label" "${expect:+ (at $expect)}" \
@@ -633,10 +637,15 @@ plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M3" \
 # The revert's loss report is code like any other, and the harness plants a
 # future-dated retirement so it cannot pass by iterating zero rows. This proves
 # THAT check can fail: silence the report and the harness must go red.
+# `expect` names the CHECK, not the stage, for the same reason as its R3
+# siblings below: `FAIL revert 20260906000000` is also what a revert that failed
+# to APPLY prints, and then the loss report never ran at all -- so the bare
+# stage name would score this a catch for a run in which the thing it exists to
+# exercise was never reached.
 plant "R1 revert erases a future retirement silently" "$R1" \
   "    RAISE NOTICE 'LOSING future retirement: field % (%) org % closes % active=%'," \
   "    RAISE NOTICE 'considering a row: % % % % %'," \
-  "revert 20260906000000"
+  "revert 20260906000000: planted a future-dated retirement and the revert did not name it"
 
 # The same, for the revert that re-opens LIVE-1. It counts the
 # practice_assignments about to lose the foreign key protecting their field_id,
@@ -698,9 +707,16 @@ plant "R3 revert reinstates the weaker guard silently" "$R3" \
 # plant passed no `green`, so it scored CAUGHT whether or not the verdict fired
 # beside it. Reproduced before it was fixed -- a variant of this mutation that
 # calls the PRODUCER rather than the digest makes both checks red, and the plant
-# as it stood still printed CAUGHT. The verdict's own claim is the green
-# argument now, so a strip that widens or a digest that is renamed reports
-# BORROWED instead of a catch.
+# as it stood still printed CAUGHT.
+#
+# **What this `green` does and does not defend**, stated exactly, because the
+# first version of this sentence claimed both directions and delivers one. It
+# catches the strip being REMOVED or NARROWED: the verdict starts seeing the
+# digest again, the claim never prints, and this reports BORROWED -- the pass-3
+# defect, watched by the run instead of by a report. It does NOT catch the strip
+# WIDENING: a strip that also removed `field_bookings_digest` would still leave
+# the claim green here and this plant scoring a catch. That direction belongs to
+# the plant below, and is measured there.
 plant "R3 the restored retire calls a helper the revert also drops" "$R3" \
   "            'affected_count', v_affected_count,
             'affected', v_affected
@@ -720,14 +736,23 @@ plant "R3 the restored retire calls a helper the revert also drops" "$R3" \
 # ways a claim can go RED, not the lines it prints when it does not.
 #
 # **So: the other half of that verdict's claim, which nothing had ever tried to
-# fail.** The verdict has three ways to go red and only one of them was
-# reachable by a plant: `GONE`, above. This is the second; the third is below. `STILL-CALLS-PRODUCER` is the half the
-# claim says out loud -- "it no longer calls the dropped producer" -- and no
-# plant reached it, because the digest plant above is the only one that puts a
-# `field_bookings` name back into the restored body and the verdict strips that
-# name before it looks. So a widened strip, or a digest renamed to something the
-# strip no longer removes, would let a revert that never restored the enumerator
-# read RESTORED with this sweep still printing every plant caught.
+# fail.** The verdict decides between three red answers and only one of them was
+# reachable by a plant: `GONE`, above. This is the second; the third is below.
+# `STILL-CALLS-PRODUCER` is the half the claim says out loud -- "it no longer
+# calls the dropped producer" -- and no plant reached it, because the digest
+# plant above is the only one that puts a `field_bookings` name back into the
+# restored body and the verdict strips that name before it looks. So a strip
+# widened to remove the PRODUCER's name too would let a revert that never
+# restored the enumerator read RESTORED with this sweep still printing every
+# plant caught. Measured, as the control for this plant: with the strip widened
+# to `field_bookings[a-z_]*`, the harness exits 0 and this plant prints
+# NOT CAUGHT.
+#
+# There is a fourth answer, `QUERY-FAILED`, and it deliberately has no plant:
+# it comes from `psql_cmd` itself failing, which no mutation of a file this
+# sweep plants can cause. Saying so is the point -- an unplanted branch that is
+# unplantable has to be declared, not left looking like the three that were
+# simply never tried.
 #
 # Reproduced before it was written, by running the harness under each of the
 # four plants that mutate $R3 and reading the branch it printed: GONE once and

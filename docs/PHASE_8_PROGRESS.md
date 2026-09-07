@@ -814,13 +814,26 @@ mutant. Work in progress under a mutation harness is not work in progress.
 Not part of 8.4's three-PR stack. Recorded as LIVE-1 at the foot of the PR 2
 entry above and unblocked by the harness PR 2 built.
 
+- **PR:** [#378](https://github.com/JoelA510/SquadLogic/pull/378), branch
+  `fix/field-delete-booking-guard`, squash-merged as `07b5227`. 24 files.
 - **Migration:** `20260907000000_field_delete_booking_guard.sql`, with
   `docs/sql/20260907000000_{smoke,revert}.sql`.
-- **Tests:** 2772 / 34 / 6 (177 files) → **2792 / 34 / 6** (179 files),
-  counted by running the suite rather than by adding up what was written.
-  Scenario table 20 → **30**, both runners. pgTAP 428 → **445** across 42 files:
-  arithmetic on PR 2's recorded 428 plus the 17 new assertions, since no
-  existing `plan()` changed. Main entry 131.04 → **131.38 KB gz**.
+- **Tests:** 2772 / 34 / 6 (177 files) → **2809 / 34 / 6** (179 files at the
+  merged head), counted by running the suite rather than by adding up what was
+  written. Scenario table 20 → **42** scenarios against Postgres. pgTAP green in
+  CI. Main entry 131.04 → **131.38 KB gz**.
+- **Review rounds:** four supervisor passes of **10, 4, 5, 3**, plus two rounds
+  the agent ran on itself with `/code-review` at high. Final sweeps: SQL **37 of
+  37** caught with 0 anchor-miss and 0 misattributed, mock **30 of 30**.
+- **Two live defects in code merged the same day were folded in** rather than
+  deferred, because both sat in the guard contract this PR existed to establish:
+  `admin_retire_field` keeping its own enumerator that missed `games` and
+  slot-reached assignments, so an operator confirmed against an incomplete list;
+  and the same RPC guarding on bare `NOT p_confirm`, so `p_confirm => NULL`
+  retired booked ground unconfirmed.
+- **Three further live defects were surfaced and carved out** rather than
+  absorbed: LIVE-2, LIVE-3 and LIVE-4, plus a harness follow-up. Fixing one live
+  defect found four more; that is the finding, not an aside.
 
 ### The three claims, checked against the schema before anything was built
 
@@ -1030,15 +1043,15 @@ twin" would have produced it, and one command did.
   probe on the restored `admin_retire_field` had `:` in one branch and nothing
   in the other -- it set no status and printed nothing, whatever happened. Its
   neighbour read `psql_cmd "SELECT prosrc LIKE '%field_bookings%' ..." | grep -q
-  '^t$'`, and a revert that DROPPED the function returns zero rows: no `t`, so
+'^t$'`, and a revert that DROPPED the function returns zero rows: no `t`, so
   the `else` fired and reported the restored function as clean for a database
   that no longer had one. Both are now one verdict over `pg_proc` that fails
   loudly on `GONE`/`AMBIGUOUS`, plus a plpgsql probe that distinguishes 22023
   from 42883. The positive control is `R3 revert drops the retirement RPC
-  instead of restoring it`, which both old checks passed.
+instead of restoring it`, which both old checks passed.
 - **The mock wrote the raw list into `audit_log.metadata.affected`** where the
   migration writes `field_bookings_digest(...)` -- `{total, omitted, by_kind,
-  sample}`. Nothing in the suite read the mock's audit metadata, so the two arms
+sample}`. Nothing in the suite read the mock's audit metadata, so the two arms
   disagreed silently about a field PR 3's audit surface is built to read. The
   mock now mirrors the digest on all four booking phases; the returned payload
   keeps the whole list, as in SQL.
@@ -1066,7 +1079,6 @@ fix's twin" would have produced it.
 
 Both sweeps end at zero: SQL 31 attempted, 0 anchor-miss, 0 misattributed, 31
 caught; mock 28 attempted, 0 anchor-miss, 28 caught.
-
 
 ### Pass 2: the defect two agreeing implementations cannot produce
 
@@ -1153,7 +1165,6 @@ takes the producer another RPC needs. A fix to a rollback nothing executes is a
 claim, not a fix; that is the same shape as the hollow probes above, one file
 along.
 
-
 ### Pass 3: a claim of isolation that was not measured
 
 The review found that the plant meant to prove the resolve probe can fail was
@@ -1209,7 +1220,6 @@ health claim needs a plant, and a claim with no plant is a claim nobody has
 tried to falsify.** Seven `(checked)` claims in `run.sh` and the smoke's new
 section 5c; all eight now have one.
 
-
 ### Pass 4: the guard against silent no-ops was one itself, twice
 
 `stale_backups()` ran `find ... 2>/dev/null` and never looked at its exit
@@ -1245,7 +1255,6 @@ rather than against the `.orig`, which is the habit the whole guard exists to
 make unnecessary. Second escaped mutation of this series, and the reason this
 finding was worth blocking a merge on.
 
-
 ### Still open
 
 - **LIVE-4** — roughly thirty hard deletes in `mockSupabaseClient.js` remove rows
@@ -1261,3 +1270,54 @@ finding was worth blocking a merge on.
   field writes through RPCs, so no production path reaches it. The RPC arm was
   fixed because this PR's own test found it reporting `deleted: true` for a
   field that was still there.
+- **Harness follow-up**, carved out of pass 4 rather than held against the live
+  fix: no `R3` plant reaches the verdict's `STILL-CALLS-PRODUCER` branch, so half
+  that claim is unprovable; and the probe-isolation plant passes no `green`
+  argument while `expect` is a substring match, so it scores CAUGHT whether or
+  not its sibling verdict also fires — `green` cannot express the assertion at
+  all, because that verdict's success line reads `| (checked) …` rather than
+  `PASS …`. Both are real by the rule below. **Lands before LIVE-2**, since
+  LIVE-2, LIVE-3 and LIVE-4 all lean on this harness.
+
+### Two rules this PR produced, both the agent's
+
+Recorded because they generalise past this task and past this phase.
+
+> **A fix whose sibling set cannot be produced by a command is a fix that is not
+> finished.**
+
+The twin-arm audit had been indexed by _subject_, so it structurally could not
+reach a mechanism invented mid-round — the readback guard did not exist when the
+audit was written, so "does its sibling have it" was not yet a question. A second
+index, by mechanism and derived by grep rather than memory, runs after every fix
+round. It has since returned two finds nothing else did.
+
+> **Every health claim needs a plant; a claim with no plant is a claim nobody has
+> tried to falsify.**
+
+The hollow-probe class has no shared syntax — one instance was a semantic miss,
+an argument short-circuiting before the code under test — so it cannot be
+grepped by shape. It is enumerable anyway: _every line that prints a `(checked)`
+claim_. That query returned five claims and three plants, so two claims had never
+had anyone try to make them fail.
+
+### Three things worth keeping from how this one went
+
+- **Agreement is not correctness.** The date-boundary defect existed identically
+  in the SQL and the mock, so the two-runner scenario table — built across two
+  PRs precisely to catch divergence — was structurally blind to it. The boundary
+  now lives in the fixture as data, per arm, so the table adjudicates rather than
+  the implementations agreeing with each other. Any mechanism that compares two
+  implementations has this blind spot; the answer is to put the expected answer
+  somewhere neither implementation owns.
+- **The fix for a silent no-op was itself a silent no-op.** The agent's first
+  version of the stale-backup guard printed its refusal and called `exit` from
+  inside a function used as `done < <(stale_backups)` — a subshell — so the run
+  carried on. Only the control it built caught it. A loud message that changes
+  nothing is still a silent no-op.
+- **A mutation escaped onto disk twice.** Once when a container restart froze a
+  plant mid-flight, leaving `security_invoker` stripped from the `field_closures`
+  view in the working tree; once when a killed sweep left a scope-column mutation
+  in the blackouts migration. Both were caught by diffing the tree before
+  trusting it, and an automated commit-and-push step would have shipped the
+  first. **Work in progress under a mutation harness is not work in progress.**

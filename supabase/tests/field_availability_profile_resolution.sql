@@ -17,7 +17,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(12);
+SELECT plan(15);
 
 -- Org A gets one location with one pitch. The staged rows below ask for that
 -- pitch (twice, once with the case the club's spreadsheet uses) and for one
@@ -91,11 +91,29 @@ SELECT is((SELECT count(*) FROM public.field_closures
 -- **Refused means deferred.** Create the pitch the refused row asked for and
 -- re-run the same job: it applies, and the two that already applied do not
 -- apply twice.
-INSERT INTO public.fields (id, organization_id, location_id, name)
-VALUES ('d2222222-0000-0000-0000-000000000003','a1111111-1111-1111-1111-111111111111','c2222222-0000-0000-0000-000000000001','Ghost Pitch');
-SELECT is((SELECT (public.finalize_field_availability_import_job('11111111-3333-3333-3333-77777777777a','[]'::jsonb)->>'inserted_profiles')::int
-             + (SELECT count(*) FROM public.field_availability_profiles WHERE organization_id='a1111111-1111-1111-1111-111111111111')::int),4,
-          'the replay applies the refused row and only it: 1 newly applied, 3 profiles in total');
+--
+-- Through `admin_create_field` rather than a direct INSERT: this test runs as
+-- `authenticated`, and RLS on `public.fields` refuses a direct write -- which
+-- is the point of the RPC-only rule. The first version of this file inserted
+-- directly and died here, and only running it said so.
+SELECT lives_ok(
+  $$ SELECT public.admin_create_field(
+       p_organization_id => 'a1111111-1111-1111-1111-111111111111',
+       p_location_id     => 'c2222222-0000-0000-0000-000000000001',
+       p_name            => 'Ghost Pitch') $$,
+  'an admin can create the pitch the refused row named');
+-- **Two assertions, not one sum.** The first version added the RPC's result to
+-- a count of the table in one expression, and SQL does not promise which
+-- subquery runs first -- so the number it compared was not the number it
+-- described. Executing it is what said so.
+SELECT is((public.finalize_field_availability_import_job('11111111-3333-3333-3333-77777777777a','[]'::jsonb)->>'inserted_profiles')::int,1,
+          'the replay applies the refused row');
+SELECT is((SELECT count(*) FROM public.field_availability_profiles WHERE organization_id='a1111111-1111-1111-1111-111111111111')::int,3,
+          'and only it: the two already-applied rows are not applied twice');
+-- And the row that could not be attributed to ground now is.
+SELECT is((SELECT count(*) FROM public.field_availability_profiles
+            WHERE organization_id='a1111111-1111-1111-1111-111111111111' AND field_id IS NULL)::int,0,
+          'the replay creates no field-less profile either');
 
 SELECT * FROM finish();
 ROLLBACK;

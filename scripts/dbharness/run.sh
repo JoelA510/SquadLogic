@@ -204,8 +204,18 @@ for id in "${NEW_MIGRATIONS[@]}"; do
   # parses. A row that IS about to be exposed is planted, and the warning is
   # then required. practice_assignments.team_id is NOT NULL and references
   # teams, so the plant needs the season/division/team chain behind it.
+  #
+  # **Both seeds threw `psql_cmd`'s status away, and a seed that never landed
+  # reads exactly like a revert that ignored it.** A column renamed by a later
+  # migration, a constraint added, the chain reordered -- any of those left the
+  # table empty, and the check below then printed "the revert did not count it"
+  # for a revert that had nothing to count. `prove.sh` scores that FAIL as a
+  # CAUGHT, so the harness would have been MANUFACTURING evidence for a check
+  # that never ran, which is worse than having no check at all. A failed seed
+  # now fails the stage in its own words and skips the checks it would have
+  # made meaningless.
   if [ "$id" = "20260907000000" ]; then
-    psql_cmd "INSERT INTO public.organizations (id, name, slug)
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug)
               VALUES ('33333333-3333-3333-3333-333333333333','Expose Org','expose-org');
               INSERT INTO public.locations (id, organization_id, name)
               VALUES ('44444444-4444-4444-4444-444444444444','33333333-3333-3333-3333-333333333333','Expose Park');
@@ -218,16 +228,24 @@ for id in "${NEW_MIGRATIONS[@]}"; do
               INSERT INTO public.teams (id, organization_id, division_id, name)
               VALUES ('88888888-8888-8888-8888-888888888888','33333333-3333-3333-3333-333333333333','77777777-7777-7777-7777-777777777777','Expose Team');
               INSERT INTO public.practice_assignments (organization_id, team_id, field_id)
-              VALUES ('33333333-3333-3333-3333-333333333333','88888888-8888-8888-8888-888888888888','55555555-5555-5555-5555-555555555555');" >/dev/null
+              VALUES ('33333333-3333-3333-3333-333333333333','88888888-8888-8888-8888-888888888888','55555555-5555-5555-5555-555555555555');" \
+         >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the practice_assignment the revert check requires was never inserted"
+      tail -10 /tmp/harness_seed; STATUS=1; continue
+    fi
   fi
 
   if [ "$id" = "20260906000000" ]; then
-    psql_cmd "INSERT INTO public.organizations (id, name, slug)
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug)
               VALUES ('11111111-1111-1111-1111-111111111111','Revert Org','revert-org');
               INSERT INTO public.locations (id, organization_id, name)
               VALUES ('22222222-2222-2222-2222-222222222222','11111111-1111-1111-1111-111111111111','Revert Park');
               INSERT INTO public.fields (organization_id, location_id, name, active, effective_to)
-              VALUES ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222','Closing Soon', true, current_date + 30);" >/dev/null
+              VALUES ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222','Closing Soon', true, current_date + 30);" \
+         >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the future-dated retirement the revert check requires was never inserted"
+      tail -10 /tmp/harness_seed; STATUS=1; continue
+    fi
   fi
 
   if psql_file "$REPO/docs/sql/${id}_revert.sql" >/tmp/harness_rev 2>&1; then
@@ -314,7 +332,14 @@ for id in "${NEW_MIGRATIONS[@]}"; do
       # same prelude the scenario generator uses -- and requires the call to run
       # all the way to a decision. `field_bookings` is dropped by this revert, so
       # a retire still calling it raises 42883 here and the harness goes red.
-      cat >/tmp/harness_rev_probe.sql <<'PROBE'
+      #
+      # **Staged with an unchecked `cat`, to a path reused across runs.** A
+      # write that failed left the PREVIOUS run's probe on disk and psql ran
+      # that one -- the identical stale-staging shape `psql_file` was fixed for
+      # last round, on the one call site that does its own staging. Removed
+      # first so a failed write leaves nothing to run, and the write is checked.
+      rm -f /tmp/harness_rev_probe.sql
+      if ! cat >/tmp/harness_rev_probe.sql <<'PROBE'
 DO $probe$
 DECLARE
     v_org uuid; v_loc uuid; v_field uuid; v_user uuid := gen_random_uuid();
@@ -370,11 +395,14 @@ BEGIN
 END
 $probe$;
 PROBE
+      then
+        echo "FAIL revert ${id} probe: the probe script could not be staged"
+        STATUS=1
       # The failure line carries `probe` so `prove.sh`'s `expect` can name THIS
       # check rather than the stage: both this and the verdict above print
       # `FAIL revert 20260907000000...`, and a substring match cannot tell two
       # checks apart when one is a prefix of the other's line.
-      if psql_file /tmp/harness_rev_probe.sql >/tmp/harness_rev_probe 2>&1; then
+      elif psql_file /tmp/harness_rev_probe.sql >/tmp/harness_rev_probe 2>&1; then
         echo "  | (checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"
       else
         echo "FAIL revert ${id} probe: the restored admin_retire_field does not resolve"

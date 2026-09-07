@@ -269,6 +269,17 @@ plant() { # label file old new [expected-failing-check] [check-that-must-stay-gr
   # check below for why a checksum rather than trust.
   local before_sum
   before_sum="$(sha256sum "$file" | cut -d' ' -f1)"
+  # **An empty checksum compares equal to an empty checksum.** `sha256sum`'s
+  # status is eaten by the pipe and was never read, so a file this could not
+  # read produced "" here and "" again at the verification below -- the restore
+  # check passing exactly when it had nothing to check, in the guard that exists
+  # to stop a planted mutation escaping onto disk. Same swallowed-status shape
+  # as the two seeds in run.sh, found by the sweep those prompted.
+  if [ -z "$before_sum" ]; then
+    echo "REFUSING TO PLANT \"$label\": could not checksum $file before planting" >&2
+    echo "  Without a baseline the restore verification below cannot fail." >&2
+    exit 4
+  fi
   python3 - "$file" "$old" "$new" <<'PY'
 import io,sys
 f,old,new=sys.argv[1],sys.argv[2],sys.argv[3]

@@ -405,6 +405,61 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- 5c. THE INTERNAL HELPERS ARE ACTUALLY INTERNAL
+-- ---------------------------------------------------------------------------
+--
+-- **`REVOKE ... FROM PUBLIC` is not what makes a function internal here.**
+-- 20260614000000 sets `ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA
+-- public GRANT EXECUTE ON FUNCTIONS TO authenticated, service_role`, so a
+-- function created by this migration arrives with `authenticated=X/postgres`
+-- on its ACL and a revoke from PUBLIC leaves it there. The COMMENT on
+-- `field_bookings` claimed "no EXECUTE grant" while the catalogue said
+-- otherwise -- a security statement the database contradicted.
+--
+-- RLS contained it: the producer is SECURITY INVOKER and every table it reads
+-- has row security with org-scoped policies, so a non-member calling it
+-- directly got an empty result. But a claim nothing enforces is the shape this
+-- phase keeps finding, so the revokes are explicit now and this is what stops
+-- a FUTURE default privilege quietly reopening them.
+--
+-- The universe is the two helpers by name, not "whatever has an ACL": a helper
+-- that vanished would otherwise pass by having no row to examine.
+DO $$
+DECLARE
+  r record;
+  v_seen int := 0;
+  v_grantees text;
+BEGIN
+  FOR r IN
+    SELECT p.proname, p.proacl
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.proname IN ('field_bookings', 'field_bookings_digest')
+  LOOP
+    v_seen := v_seen + 1;
+    -- A NULL acl means "the default", which for a function is EXECUTE to
+    -- PUBLIC -- the most open state of all, and the one an `IS NOT NULL` guard
+    -- would skip. It is a failure, not an exemption.
+    IF r.proacl IS NULL THEN
+      RAISE EXCEPTION 'public.% has a DEFAULT acl, which grants EXECUTE to PUBLIC', r.proname;
+    END IF;
+    SELECT string_agg(a.grantee::regrole::text, ', ' ORDER BY a.grantee::regrole::text)
+      INTO v_grantees
+      FROM aclexplode(r.proacl) a
+     WHERE a.privilege_type = 'EXECUTE'
+       AND a.grantee <> (SELECT oid FROM pg_roles WHERE rolname = current_user);
+    IF v_grantees IS NOT NULL THEN
+      RAISE EXCEPTION 'public.% is internal but grants EXECUTE to %', r.proname, v_grantees;
+    END IF;
+  END LOOP;
+  IF v_seen <> 2 THEN
+    RAISE EXCEPTION 'expected both internal helpers, examined % -- the check found nothing to check', v_seen;
+  END IF;
+  RAISE NOTICE 'both internal helpers grant EXECUTE to nobody but their owner';
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- 6. THE RPC ITSELF, called rather than read, on all five booking kinds
 -- ---------------------------------------------------------------------------
 --

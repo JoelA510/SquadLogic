@@ -367,10 +367,31 @@ AS $$
            OR b.last_day > p_after);
 $$;
 
+-- **`REVOKE ... FROM PUBLIC` does not make a function internal here.**
+-- 20260614000000 sets `ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA
+-- public GRANT EXECUTE ON FUNCTIONS TO authenticated, service_role`, so every
+-- function this migration creates arrives with `authenticated=X/postgres`
+-- already on its ACL, and revoking from PUBLIC leaves that grant untouched.
+-- Measured on a migrated database: `field_bookings_digest` carried
+-- `authenticated=X/postgres` with the PUBLIC revoke in place.
+--
+-- It was not a live exposure -- `field_bookings` is SECURITY INVOKER and all
+-- five tables it reads have RLS enabled with org-scoped policies, so a
+-- non-member calling it directly with another organisation's ids gets an empty
+-- result -- but the COMMENT below claimed "no EXECUTE grant" and the catalogue
+-- said otherwise, and the whole defence rested on RLS rather than on the grant
+-- the comment asserted. The claim is made TRUE rather than weakened.
+--
+-- Both callers are SECURITY DEFINER owned by postgres, which keeps its own
+-- grant, so nothing legitimate loses access. Section 5c of the smoke fails if a
+-- future default privilege puts a role back on either ACL.
 REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM anon;
+REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM authenticated;
+REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM service_role;
 
 COMMENT ON FUNCTION public.field_bookings(uuid, uuid, date) IS
-  'THE single reading of "what is booked on this ground", shared by admin_retire_field and admin_delete_field. Five kinds, derived from the cascade closure from fields rather than from the field_id column name. p_after NULL means no date applies (a deletion takes everything); a date means "booked after this" (a retirement). cascades says a CASCADE edge reaches the row, which is what decides a deletion disposition. Internal: no EXECUTE grant, both callers are SECURITY DEFINER.';
+  'THE single reading of "what is booked on this ground", shared by admin_retire_field and admin_delete_field. Five kinds, derived from the cascade closure from fields rather than from the field_id column name. p_after NULL means no date applies (a deletion takes everything); a date means "booked after this" (a retirement). cascades says a CASCADE edge reaches the row, which is what decides a deletion disposition. Internal: EXECUTE revoked from PUBLIC, anon, authenticated and service_role, so only the owner may call it and both callers reach it as SECURITY DEFINER. The revokes are explicit because 20260614000000 grants EXECUTE to authenticated by default privilege, which a revoke from PUBLIC does not remove.';
 
 -- ---------------------------------------------------------------------------
 -- 3. A refusal must not embed an unbounded list in the audit row
@@ -404,7 +425,11 @@ AS $$
     );
 $$;
 
+-- The same, and for the same reason: see the note above the producer's revokes.
 REVOKE ALL ON FUNCTION public.field_bookings_digest(jsonb, integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.field_bookings_digest(jsonb, integer) FROM anon;
+REVOKE ALL ON FUNCTION public.field_bookings_digest(jsonb, integer) FROM authenticated;
+REVOKE ALL ON FUNCTION public.field_bookings_digest(jsonb, integer) FROM service_role;
 
 COMMENT ON FUNCTION public.field_bookings_digest(jsonb, integer) IS
   'A bounded audit-log rendering of an affected-booking list: total, omitted, per-kind counts and a capped sample. The RPCs return the full list to the caller and record this, so a refusal on a busy field cannot write an arbitrarily large audit row on every attempt.';

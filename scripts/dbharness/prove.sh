@@ -288,7 +288,20 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
     # harness can see this", that is the claim. `green` asserts it, so an
     # isolation that used to be argued in a comment is now measured on every
     # run and cannot quietly stop being true.
-    if [ -n "$green" ] && ! grep -qF "PASS $green" <<<"$out"; then
+    # **A health CLAIM is a green line too.** `green` could only ever name a
+    # STAGE, because it matched `PASS <green>` -- and half of what this harness
+    # asserts is not a stage. Seven checks print `  | (checked) ...` beneath a
+    # stage that says PASS whether or not the claim under it held, so an
+    # isolation FROM one of those could not be written down at all. The plant
+    # that most needed it -- the probe isolation, whose whole point is that the
+    # verdict beside it must NOT see the mutation -- was left passing no green
+    # argument while its comment claimed the isolation had been measured, and
+    # `expect` is a substring match that scores CAUGHT either way. A `green`
+    # beginning with `(checked)` is matched against the claim line instead,
+    # which makes all seven claims usable as a neighbour that must stay quiet.
+    local green_line="PASS $green"
+    case "$green" in '(checked)'*) green_line="| $green" ;; esac
+    if [ -n "$green" ] && ! grep -qF "$green_line" <<<"$out"; then
       printf '%-52s BORROWED  <-- "%s" did not stay green\n' "$label" "$green"
       FAIL=$((FAIL+1))
       grep -E '^(applied|PASS|FAIL|BASELINE|HARNESS)' <<<"$out" | sed 's/^/    /'
@@ -667,6 +680,15 @@ plant "R3 revert reinstates the weaker guard silently" "$R3" \
 # `FAIL ... reads STILL-CALLS-PRODUCER` and `FAIL ... does not resolve`. The
 # verdict now strips the digest name before looking for the producer, and the
 # probe's failure line carries `probe` so `expect` can name it alone.
+# **And the isolation is now ASSERTED rather than hand-measured.** That
+# re-measurement was a number in a report: nothing in the sweep would have
+# noticed it stopping being true, because `expect` is a substring match and this
+# plant passed no `green`, so it scored CAUGHT whether or not the verdict fired
+# beside it. Reproduced before it was fixed -- a variant of this mutation that
+# calls the PRODUCER rather than the digest makes both checks red, and the plant
+# as it stood still printed CAUGHT. The verdict's own claim is the green
+# argument now, so a strip that widens or a digest that is renamed reports
+# BORROWED instead of a catch.
 plant "R3 the restored retire calls a helper the revert also drops" "$R3" \
   "            'affected_count', v_affected_count,
             'affected', v_affected
@@ -676,7 +698,8 @@ plant "R3 the restored retire calls a helper the revert also drops" "$R3" \
             'affected', public.field_bookings_digest(v_affected)
         );
     END IF;" \
-  "revert 20260907000000 probe"
+  "revert 20260907000000 probe" \
+  "(checked) exactly one public.admin_retire_field survives the revert, and it no longer calls the dropped producer"
 
 # **The emergency rollback, back in the state 20260907000000 left it in.** It
 # dropped a signature that no longer exists, so the DROP was a silent no-op and

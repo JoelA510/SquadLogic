@@ -334,11 +334,38 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
   # words; one cannot, because the line it prints IS the bare stage line. An
   # `expect` beginning with `^` is matched against the WHOLE line, which is the
   # only way to say "this check and not the three that share its prefix".
+  #
+  # **The transcript is not only the harness's own words, and a plant writes
+  # into it.** Every stage `tail`s the failing psql log and pipes NOTICE and
+  # WARNING lines through a `  | ` prefix -- and rewriting a NOTICE is what half
+  # the plants in this file DO. Both matches below searched the whole transcript
+  # for a substring, so a mutation that raised `FAIL smoke 20260906000100`
+  # forged the catch, and one that raised `| (checked) <claim>` forged the very
+  # claim that exists to prove the claim was checked. The mechanism this PR
+  # added to make isolation expressible was satisfiable by output the plant
+  # itself controls, which is the borrowed-evidence mode with the plant as the
+  # lender.
+  #
+  # Both now match only the shape `run.sh`'s own `echo`s produce: a verdict line
+  # starts with `PASS `/`FAIL ` in column 0, and a claim line IS
+  # `  | (checked) ...` entire. Passthrough keeps psql's `NOTICE:`/`WARNING:`
+  # label after the prefix, and a `tail` dump keeps psql's `psql:file:line:`
+  # one, so neither can satisfy either match now. Constructed both ways before
+  # being believed; the controls are in the commit message.
+  #
+  # **The residual, stated rather than left implied.** A multi-line RAISE whose
+  # CONTINUATION line reproduces a checker line byte for byte arrives in a
+  # `tail` dump unlabelled, and would still match. Nothing distinguishes that
+  # from the real line inside one text stream; closing it needs run.sh to
+  # report its verdicts on a channel psql cannot write to, which is a larger
+  # change than this round and not one any plant here needs.
+  local verdict_lines
+  verdict_lines="$(grep -E '^(PASS|FAIL) ' <<<"$out")"
   local expect_line="${expect#^}" expect_hit=1
   if [ -n "$expect" ]; then
     case "$expect" in
-      '^'*) grep -qxF "FAIL $expect_line" <<<"$out" || expect_hit=0 ;;
-      *)    grep -qF  "FAIL $expect_line" <<<"$out" || expect_hit=0 ;;
+      '^'*) grep -qxF "FAIL $expect_line" <<<"$verdict_lines" || expect_hit=0 ;;
+      *)    grep -qF  "FAIL $expect_line" <<<"$verdict_lines" || expect_hit=0 ;;
     esac
   fi
   if [ "$status" -ne 0 ]; then
@@ -390,11 +417,11 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
     if [ -n "$green" ]; then
       case "$green" in
         '(checked)'*)
-          grep -qF "| $green" <<<"$out" || green_ok=0
+          grep -qxF "  | $green" <<<"$out" || green_ok=0
           ;;
         *)
-          grep -qF "PASS $green" <<<"$out" || green_ok=0
-          ! grep -qF "FAIL $green" <<<"$out" || green_ok=0
+          grep -qF "PASS $green" <<<"$verdict_lines" || green_ok=0
+          ! grep -qF "FAIL $green" <<<"$verdict_lines" || green_ok=0
           ;;
       esac
     fi

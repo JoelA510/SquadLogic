@@ -967,8 +967,69 @@ correctly, and reported a consequence that was false for every row the scheduler
 writes — and its smoke, its pgTAP suite and its mutation plants all agreed with
 it, because they were built on the same wrong model.
 
+### Two defects folded in from PR 2's code, not from this diff
+
+Both are in the same guard contract this PR exists to establish, and shipping a
+known-wrong sibling beside a fixed one is the shape this phase keeps finding:
+
+- **`admin_retire_field` kept its own four-arm union**, so a retirement
+  under-reported: no `games`, and no sight of an assignment reached through its
+  slot. Less destructive than the delete path — a retirement writes a date
+  rather than removing rows — but still a wrong list shown to a human at the
+  moment they decide. Both RPCs now enumerate through `public.field_bookings`,
+  and the smoke fails if either re-inlines a union of its own.
+- **`p_confirm => NULL` retired booked ground unconfirmed.** `NOT NULL` is NULL,
+  so a bare `NOT p_confirm` leaves the refusal unfired and the destructive path
+  runs with nobody having confirmed — and the mock read it the other way, so the
+  two arms disagreed on the one input that turns the guard off. Both now read
+  `NOT COALESCE(p_confirm, false)`, both are checked by the smoke, and the
+  shared table has a `*-null-confirm-refused` case on each arm.
+
+### What the twin-pair audit missed, and what changes because of it
+
+Three of pass 1's findings — the blackout half of the generator readback, the
+two runners' phase comparison, and the blackout delete's missing tombstone —
+have one thing in common: **every one is the sibling of a fix made during this
+session, not a sibling of the thing the PR is about.**
+
+The 19-pair audit was indexed by SUBJECT. Every pair in it had the shape
+"`admin_delete_field` ↔ its counterpart": SQL ↔ mock, delete ↔ retire, smoke ↔
+pgTAP. That index cannot reach these three, because the mechanisms they belong
+to did not exist when the audit was written — the readback guard was invented
+mid-round, so "does its sibling have it" was not yet a question the audit could
+ask. Running the same audit again would have found nothing.
+
+So the audit gains a second index and a second run:
+
+1. **By subject**, as before, once — what the PR is about.
+2. **By MECHANISM, after every fix round.** For each hunk in the diff, ask what
+   the complete set of places that do this same job is, and derive that set with
+   a grep rather than from memory: every `markMockDeleted` site, every `v_ran`
+   counter, every place the two runners read one field of the shared table.
+
+The operational tell is short enough to use: **a fix whose sibling set cannot be
+produced by a command is a fix that is not finished.** Naming the twin is a
+guess; grepping the mechanism is a set.
+
+Run once, the new index paid for itself immediately and also showed why the old
+one felt adequate. Enumerating every hard delete in the mock client — every
+`db.<table> = (db.<table> || []).filter(...)` — returns **about thirty sites, of
+which four record a tombstone**. The blackout twin that pass 1 found is one
+member of a family roughly fifteen times larger, covering players, coaches,
+teams, registrations, members and import staging. Two of the four that do
+tombstone are this PR's; the rest of the family is **LIVE-4**, recorded below
+rather than fixed, because it is a different contract in different RPCs. The
+point is not the count — it is that no amount of asking "what is this fix's
+twin" would have produced it, and one command did.
+
 ### Still open
 
+- **LIVE-4** — roughly thirty hard deletes in `mockSupabaseClient.js` remove rows
+  without `markMockDeleted`, so a SEEDED or re-merged row deleted through those
+  RPCs resurrects on the next `getDB()`. Four sites tombstone; two of those are
+  this PR's. Not reachable for every table (a table absent from the seed has
+  nothing to resurrect from), so the fix wants the census, not a blanket change.
+  Its own PR; the mechanism census that found it is in this PR's report.
 - **LIVE-2**, unchanged.
 - **LIVE-3**, above.
 - The mock's generic `.delete().eq()` does not tombstone, so a direct delete of

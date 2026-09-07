@@ -50,9 +50,12 @@ const migrationDispositions = () => {
     path.join(REPO_ROOT, 'supabase/migrations/20260907000000_field_delete_booking_guard.sql'),
     'utf8'
   );
-  const start = sql.indexOf('WITH affected AS (');
-  const end = sql.indexOf('INTO v_affected');
-  expect(start, 'the affected-booking union moved; this parse is stale').toBeGreaterThan(-1);
+  // **The producer, not the RPC.** The union moved into `public.field_bookings`
+  // so retire and delete give one answer; reading the RPC body would now match
+  // no table name at all and pass by looking at nothing.
+  const start = sql.indexOf('CREATE OR REPLACE FUNCTION public.field_bookings(');
+  const end = sql.indexOf('REVOKE ALL ON FUNCTION public.field_bookings');
+  expect(start, 'the shared enumerator moved; this parse is stale').toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
   const arms = sql.slice(start, end).split('UNION ALL');
   // The meta-assertion. A parse that found no arms would produce an empty map
@@ -63,15 +66,11 @@ const migrationDispositions = () => {
   for (const arm of arms) {
     const kind = /'([a-z_]+)'::text/.exec(arm);
     expect(kind, `an arm of the union names no kind: ${arm.slice(0, 80)}`).not.toBeNull();
-    if (arm.includes('CASE WHEN EXISTS')) {
-      expect(arm, `arm ${kind[1]} decides per row but offers one word`).toContain("'unassigned'");
-      expect(arm).toContain("'deleted'");
-      map[kind[1]] = 'per-row';
-      continue;
-    }
-    const disposition = /'(deleted|unassigned)'::text/.exec(arm);
-    expect(disposition, `arm ${kind[1]} names no disposition`).not.toBeNull();
-    map[kind[1]] = disposition[1];
+    // An arm whose `cascades` is a flat `true` is always destroyed; one that
+    // asks `EXISTS (... its slot ...)` decides per row. Reporting the latter as
+    // a single word is the defect a review found: `field_id` is SET NULL, so
+    // "unassigned" was told to the operator for every row the scheduler writes.
+    map[kind[1]] = /EXISTS \(SELECT 1 FROM public\./.test(arm) ? 'per-row' : 'deleted';
   }
   return map;
 };
@@ -93,91 +92,147 @@ const someField = () => getMockData('fields').find((f) => String(f.organization_
  * test forging state the production path never produces.
  */
 const seedEveryKind = async (fieldId) => {
-  await supabase.from('game_slots').insert({
-    id: 'guard-game-slot',
-    organization_id: ORG,
-    field_id: fieldId,
-    slot_date: '2099-06-01',
-    week_index: 1,
-  });
-  await supabase.from('practice_slots').insert({
-    id: 'guard-practice-slot',
-    organization_id: ORG,
-    field_id: fieldId,
-    day_of_week: 'mon',
-    start_time: '18:00',
-    end_time: '19:30',
-    valid_until: '2099-06-30',
-  });
+  // **One insert per TABLE, not per row.** Every `.insert()` on the mock client
+  // runs `getDB()` -- which deep-copies the seed and re-merges sessionStorage --
+  // and then `saveDB()`, which stringifies the whole database again. Measured:
+  // one insert costs ~1.3ms and ten cost ~274ms, because each call pays for the
+  // whole store. Seeding row by row made this file's third test 2.7s of a 5s
+  // budget, which passes unloaded and fails on a busy CI runner -- and would
+  // then be called flaky. The mock's `insert()` already accepts an array.
+  await supabase.from('game_slots').insert([
+    {
+      id: 'guard-game-slot',
+      organization_id: ORG,
+      field_id: fieldId,
+      slot_date: '2099-06-01',
+      week_index: 1,
+    },
+  ]);
+  await supabase.from('practice_slots').insert([
+    {
+      id: 'guard-practice-slot',
+      organization_id: ORG,
+      field_id: fieldId,
+      day_of_week: 'mon',
+      start_time: '18:00',
+      end_time: '19:30',
+      valid_until: '2099-06-30',
+    },
+  ]);
   // `games` carries no field_id at all and dies with the slot, score included.
-  await supabase.from('games').insert({
-    id: 'guard-game',
-    organization_id: ORG,
-    game_slot_id: 'guard-game-slot',
-  });
-  await supabase.from('game_assignments').insert({
-    id: 'guard-game-assignment',
-    organization_id: ORG,
-    field_id: fieldId,
-    start: '2099-06-01T18:00:00.000Z',
-    week_index: 1,
-  });
-  await supabase.from('game_assignments').insert({
-    id: 'guard-game-assignment-slotted',
-    organization_id: ORG,
-    field_id: fieldId,
-    game_slot_id: 'guard-game-slot',
-    slot_id: 'guard-game-slot',
-    start: '2099-06-01T18:00:00.000Z',
-    week_index: 1,
-  });
-  await supabase.from('practice_assignments').insert({
-    id: 'guard-practice-assignment',
-    organization_id: ORG,
-    team_id: 'guard-team',
-    field_id: fieldId,
-    effective_date_range: '[2099-01-01,2099-12-31]',
-  });
-  // **Reachable ONLY through its slot.** `game_assignments.field_id` is
-  // nullable, so a row can carry a slot on this field and no field_id at all --
-  // an earlier delete's SET NULL leaves exactly this shape. The cascade does
-  // not consult field_id, so the row is destroyed; an enumeration that filtered
-  // on field_id alone would not mention it.
-  await supabase.from('game_assignments').insert({
-    id: 'guard-game-assignment-slot-only',
-    organization_id: ORG,
-    field_id: null,
-    game_slot_id: 'guard-game-slot',
-    start: '2099-06-01T18:00:00.000Z',
-    week_index: 1,
-  });
-  await supabase.from('practice_assignments').insert({
-    id: 'guard-practice-assignment-slotted',
-    organization_id: ORG,
-    team_id: 'guard-team',
-    field_id: fieldId,
-    practice_slot_id: 'guard-practice-slot',
-    slot_id: 'guard-practice-slot',
-    effective_date_range: '[2099-01-01,2099-12-31]',
-  });
+  await supabase
+    .from('games')
+    .insert([{ id: 'guard-game', organization_id: ORG, game_slot_id: 'guard-game-slot' }]);
+  await supabase.from('game_assignments').insert([
+    // Free-standing: a field_id and no slot behind it. Unassigned by SET NULL.
+    {
+      id: 'guard-game-assignment',
+      organization_id: ORG,
+      field_id: fieldId,
+      start: '2099-06-01T18:00:00.000Z',
+      week_index: 1,
+    },
+    // Slot-linked: what `persist_game_schedule` writes. Destroyed by cascade.
+    {
+      id: 'guard-game-assignment-slotted',
+      organization_id: ORG,
+      field_id: fieldId,
+      game_slot_id: 'guard-game-slot',
+      slot_id: 'guard-game-slot',
+      start: '2099-06-01T18:00:00.000Z',
+      week_index: 1,
+    },
+    // **Reachable ONLY through its slot.** `field_id` is nullable, so a row can
+    // carry a slot on this field and no field_id at all -- the shape an earlier
+    // delete's SET NULL leaves behind. The cascade does not consult field_id.
+    {
+      id: 'guard-game-assignment-slot-only',
+      organization_id: ORG,
+      field_id: null,
+      game_slot_id: 'guard-game-slot',
+      start: '2099-06-01T18:00:00.000Z',
+      week_index: 1,
+    },
+  ]);
+  await supabase.from('practice_assignments').insert([
+    {
+      id: 'guard-practice-assignment',
+      organization_id: ORG,
+      team_id: 'guard-team',
+      field_id: fieldId,
+      effective_date_range: '[2099-01-01,2099-12-31]',
+    },
+    {
+      id: 'guard-practice-assignment-slotted',
+      organization_id: ORG,
+      team_id: 'guard-team',
+      field_id: fieldId,
+      practice_slot_id: 'guard-practice-slot',
+      slot_id: 'guard-practice-slot',
+      effective_date_range: '[2099-01-01,2099-12-31]',
+    },
+  ]);
+
   // Every seed landed. A seed that silently failed would turn a refusal case
   // into an unbooked one, and it would pass for entirely the wrong reason.
-  for (const [table, id] of [
-    ['game_slots', 'guard-game-slot'],
-    ['practice_slots', 'guard-practice-slot'],
-    ['games', 'guard-game'],
-    ['game_assignments', 'guard-game-assignment'],
-    ['game_assignments', 'guard-game-assignment-slotted'],
-    ['game_assignments', 'guard-game-assignment-slot-only'],
-    ['practice_assignments', 'guard-practice-assignment'],
-    ['practice_assignments', 'guard-practice-assignment-slotted'],
+  // One snapshot per table rather than one lookup per row, for the same reason
+  // the inserts are batched.
+  for (const [table, ids] of [
+    ['game_slots', ['guard-game-slot']],
+    ['practice_slots', ['guard-practice-slot']],
+    ['games', ['guard-game']],
+    [
+      'game_assignments',
+      ['guard-game-assignment', 'guard-game-assignment-slotted', 'guard-game-assignment-slot-only'],
+    ],
+    ['practice_assignments', ['guard-practice-assignment', 'guard-practice-assignment-slotted']],
   ]) {
-    const row = getMockData(table).find((r) => String(r.id) === id);
-    expect(row, `${id} did not land in ${table}`).toBeDefined();
+    const rows = getMockData(table);
+    for (const id of ids) {
+      expect(
+        rows.find((r) => String(r.id) === id),
+        `${id} did not land in ${table}`
+      ).toBeDefined();
+    }
   }
 };
 
-const rowById = (table, id) => getMockData(table).find((r) => String(r.id) === id);
+/**
+ * One read of the whole mock database, indexed by table and id.
+ *
+ * `getMockData` re-derives the store on every call, so asserting row by row
+ * pays for the entire database once per assertion. These tests make ~20 such
+ * reads each; taking one snapshot after the operation is both faster and more
+ * honest, since every assertion then describes the SAME moment rather than
+ * twenty successive ones.
+ *
+ * @param {string[]} tables
+ */
+const snapshot = (tables) => {
+  /** @type {Record<string, Map<string, any>>} */
+  const byTable = {};
+  for (const table of tables) {
+    byTable[table] = new Map(getMockData(table).map((row) => [String(row.id), row]));
+  }
+  return {
+    /** @param {string} table @param {string} id */
+    row: (table, id) => byTable[table]?.get(String(id)),
+    /** @param {string} table */
+    all: (table) => [...(byTable[table]?.values() ?? [])],
+  };
+};
+
+const AFFECTED_TABLES = [
+  'fields',
+  'game_slots',
+  'practice_slots',
+  'games',
+  'game_assignments',
+  'practice_assignments',
+  'field_blackouts',
+  'field_subunits',
+  'field_availability_profiles',
+];
 
 describe('field delete guard :: the mock agrees with the migration about consequences', () => {
   beforeEach(() => {
@@ -258,7 +313,8 @@ describe('field delete guard :: the mock agrees with the migration about consequ
     await seedEveryKind(field.id);
     await supabase.rpc('admin_delete_field', { p_organization_id: ORG, p_field_id: field.id });
 
-    expect(rowById('fields', field.id)).toBeDefined();
+    const after = snapshot(AFFECTED_TABLES);
+    expect(after.row('fields', field.id)).toBeDefined();
     for (const [table, id] of [
       ['game_slots', 'guard-game-slot'],
       ['practice_slots', 'guard-practice-slot'],
@@ -269,10 +325,10 @@ describe('field delete guard :: the mock agrees with the migration about consequ
       ['practice_assignments', 'guard-practice-assignment'],
       ['practice_assignments', 'guard-practice-assignment-slotted'],
     ]) {
-      expect(rowById(table, id), `${id} was destroyed by a REFUSED delete`).toBeDefined();
+      expect(after.row(table, id), `${id} was destroyed by a REFUSED delete`).toBeDefined();
     }
-    expect(rowById('game_assignments', 'guard-game-assignment').field_id).toBe(field.id);
-    expect(rowById('practice_assignments', 'guard-practice-assignment').field_id).toBe(field.id);
+    expect(after.row('game_assignments', 'guard-game-assignment').field_id).toBe(field.id);
+    expect(after.row('practice_assignments', 'guard-practice-assignment').field_id).toBe(field.id);
   });
 
   it('destroys what it said it would destroy, and unassigns the rest', async () => {
@@ -293,7 +349,11 @@ describe('field delete guard :: the mock agrees with the migration about consequ
       p_confirm: true,
     });
     expect(data.deleted).toBe(true);
-    expect(rowById('fields', field.id)).toBeUndefined();
+
+    // One read of the world after the delete: every assertion below then
+    // describes the same moment.
+    const after = snapshot(AFFECTED_TABLES);
+    expect(after.row('fields', field.id)).toBeUndefined();
 
     // **The report and the effect, checked against each other.** Every row the
     // RPC called `deleted` must be gone and every row it called `unassigned`
@@ -314,13 +374,16 @@ describe('field delete guard :: the mock agrees with the migration about consequ
     for (const row of affected) {
       const table = TABLE_FOR_KIND[row.kind];
       expect(table, `no table known for kind ${row.kind}`).toBeDefined();
-      const after = rowById(table, row.id);
+      const survivor = after.row(table, row.id);
       if (row.disposition === 'deleted') {
-        expect(after, `${row.kind} ${row.id} was reported deleted and survived`).toBeUndefined();
+        expect(survivor, `${row.kind} ${row.id} was reported deleted and survived`).toBeUndefined();
         destroyed += 1;
       } else {
-        expect(after, `${row.kind} ${row.id} was reported unassigned and vanished`).toBeDefined();
-        expect(after.field_id, `${row.kind} ${row.id} kept its venue`).toBeNull();
+        expect(
+          survivor,
+          `${row.kind} ${row.id} was reported unassigned and vanished`
+        ).toBeDefined();
+        expect(survivor.field_id, `${row.kind} ${row.id} kept its venue`).toBeNull();
         kept += 1;
       }
     }
@@ -330,18 +393,9 @@ describe('field delete guard :: the mock agrees with the migration about consequ
     expect(kept).toBeGreaterThan(0);
 
     // Blackouts cascade too, and nothing anywhere still points at the field.
-    expect(getMockData('field_blackouts').length).toBe(0);
-    for (const table of [
-      'game_slots',
-      'practice_slots',
-      'games',
-      'game_assignments',
-      'practice_assignments',
-      'field_blackouts',
-      'field_subunits',
-      'field_availability_profiles',
-    ]) {
-      const dangling = getMockData(table).filter((r) => String(r.field_id) === String(field.id));
+    expect(after.all('field_blackouts')).toHaveLength(0);
+    for (const table of AFFECTED_TABLES.filter((t) => t !== 'fields')) {
+      const dangling = after.all(table).filter((r) => String(r.field_id) === String(field.id));
       expect(dangling, `${table} still points at the deleted field`).toHaveLength(0);
     }
   });

@@ -2,13 +2,14 @@
 --
 -- **These ASSERT rather than report.** A smoke made of bare SELECTs exits 0
 -- whatever it prints -- which is what `docs/sql/20260602000000_smoke.sql`, the
--- smoke on the very function this migration fixes, does: four SELECTs, no
--- RAISE, green for three years against a body with no NOT FOUND guard in it.
+-- smoke on the very function this migration fixes, did: four SELECTs and no
+-- RAISE, printing three reassuring rows for a body with no NOT FOUND guard in
+-- it. (It asserts now, and carries `ON_ERROR_STOP` so the assertions can fail.)
 -- Every invariant below RAISEs, so `scripts/dbharness/prove.sh` can plant the
 -- defect each one exists to catch and require this file to go red.
 --
--- Section 6 is the one that matters: it CALLS the function. Sections 1-5 read
--- it, and reading a function says nothing about what it does.
+-- **Section 3 is the one that matters: it CALLS the function.** Sections 1 and
+-- 2 read the catalogue, and reading a function says nothing about what it does.
 --
 -- Figures that are evidence rather than gates are reporting NOTICEs, labelled.
 

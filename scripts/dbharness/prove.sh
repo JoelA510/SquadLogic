@@ -116,8 +116,15 @@ done <<< "$STALE_AT_START"
 #
 # Every move is now checked, and the directories are swept a SECOND time
 # afterwards: a restore that reported success and left the `.orig` behind is the
-# same silence, one layer in. A failure sets a flag the callers act on.
-RESTORE_ALL_FAILED=0
+# same silence, one layer in.
+#
+# **The failure is a RETURN STATUS, and that is all it is.** This also set a
+# `RESTORE_ALL_FAILED` flag, in two places, and the comment above said the
+# callers acted on it -- they act on the status, and nothing anywhere read the
+# flag. A field that reads as load-bearing and is not is how the board waiver
+# was lost; in a restore path whose whole subject is a mutation possibly left on
+# disk, a second signal nobody reads is worse than none, because it is the one a
+# reader trusts. Both callers turn a non-zero return into exit 6.
 restore_all() {
   local orig list failed=0
   # A sweep that FAILED is not a sweep that found nothing: saying so is the
@@ -126,7 +133,6 @@ restore_all() {
   if ! list="$(stale_backups)"; then
     echo "restore_all: could not sweep the plant directories -- a planted file may" >&2
     echo "  STILL BE ON DISK. Check 'git status' before trusting this tree." >&2
-    RESTORE_ALL_FAILED=1
     return 3
   fi
   while IFS= read -r orig; do
@@ -150,7 +156,7 @@ restore_all() {
     echo "restore_all: could not re-sweep to confirm the restores" >&2
     failed=1
   fi
-  if [ "$failed" -ne 0 ]; then RESTORE_ALL_FAILED=1; return 4; fi
+  if [ "$failed" -ne 0 ]; then return 4; fi
   return 0
 }
 
@@ -895,9 +901,27 @@ plant "R3 the restored retire calls a helper the revert also drops" "$R3" \
 # restored body and the verdict strips that name before it looks. So a strip
 # widened to remove the PRODUCER's name too would let a revert that never
 # restored the enumerator read RESTORED with this sweep still printing every
-# plant caught. Measured, as the control for this plant: with the strip widened
-# to `field_bookings[a-z_]*`, the harness exits 0 and this plant prints
-# NOT CAUGHT.
+# plant caught.
+#
+# **Re-measured, because this PR's own probe fix invalidated the first
+# measurement.** That control read "with the strip widened to
+# `field_bookings[a-z_]*`, the harness exits 0 and this plant prints NOT
+# CAUGHT", and it was true when it was taken. It is not now: the probe drives a
+# confirmed retirement, and what a widened strip goes blind to is a LIVE
+# producer call in the path the probe executes. Executed again, against a run.sh
+# with the strip widened: `FAIL revert 20260907000000 probe: the restored
+# admin_retire_field does not resolve`, every other stage green, and this plant
+# printing `MISATTRIBUTED  <-- red, but not at substring "FAIL revert
+# 20260907000000: admin_retire_field after the revert reads
+# STILL-CALLS-PRODUCER"`.
+#
+# The control still proves what this plant is for, and proves it more exactly:
+# the probe says the restored body is BROKEN, and only the verdict says which
+# way. What it no longer proves is a hollow harness, because there no longer is
+# one. A measurement recorded in a comment is a measurement the code can move
+# under -- the second time in this PR that strengthening one check changed a
+# neighbour's recorded control, and the reason the census below reads results
+# rather than prose.
 #
 # There is a fourth answer, `QUERY-FAILED`, and it deliberately has no plant:
 # it comes from `psql_cmd` itself failing, which no mutation of a file this
@@ -991,15 +1015,23 @@ RETURNS jsonb" \
 # **Both expects name their own check now, and one of them can only be named by
 # its whole line.** This stage prints four `FAIL emergency rollback
 # 20260504060000` lines and both plants carried the bare prefix, so a second
-# `admin_delete_field` overload -- which fires the precondition at run.sh:406 --
-# would have scored BOTH of them CAUGHT with neither named check running. That
+# `admin_delete_field` overload -- which fires the precondition, `expected
+# exactly one admin_delete_field before it runs` -- would have scored BOTH of
+# them CAUGHT with neither named check running. That
 # is the stage-not-check defect fixed for the reverts in this PR's parent,
 # unapplied one stage along: the twin, again, in the round that was about twins.
 #
 # Measured rather than written by eye, and the measurement corrected a guess:
-# removing the three-argument DROP does not leave a survivor for the check at
-# run.sh:419 to find, because the rollback script's own by-name guard raises
-# first and the stage prints nothing but its bare line. Hence `^`.
+# removing the three-argument DROP does not leave a survivor for the survivor
+# check -- `N admin facility RPC(s) survived a rollback that reported success`
+# -- to find, because the rollback script's own by-name guard raises first and
+# the stage prints nothing but its bare line. Hence `^`.
+#
+# **Named by their words rather than by `run.sh:406` and `run.sh:419`.** Those
+# two references were correct when written and were stale fifteen lines later,
+# by exactly the fifteen lines this PR added above them -- both then pointed at
+# unrelated code. A line number in a comment is a reference that rots silently;
+# the check's own text does not.
 plant "EMERG rollback drops a signature that no longer exists" "$EMERG" \
   "DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid);
 DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);" \

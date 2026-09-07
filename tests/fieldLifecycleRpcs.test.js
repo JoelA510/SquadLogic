@@ -357,6 +357,11 @@ describe('field lifecycle RPCs :: retirement writes active and effective_to toge
     expect(carried, 'an open-ended practice slot was dropped from the refusal').toBeDefined();
     expect(carried.unbounded).toBe(true);
     expect(carried.undated).toBe(false);
+    // And the same reading in the PROJECTION, not only in the filter. Postgres
+    // cannot store '' in a date column, so it reports null here; passing the ''
+    // through would give a consumer branching on `on_date === null` a different
+    // answer on each arm for exactly the row this case is about.
+    expect(carried.on_date, 'the empty valid_until reached the payload verbatim').toBeNull();
   });
 
   it('reads a game slot date from slot_date, not only from start', async () => {
@@ -697,6 +702,177 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
         'undated',
         'week_index',
       ]);
+    }
+  });
+
+  it('returns the top-level keys its SQL twin returns, on the SUCCESS paths too', async () => {
+    // **The refusal payloads were pinned; the success payloads were not.** The
+    // mechanism census -- every site in this file writing `affected` -- found
+    // a confirmed retirement returning `{retired, affected_count, field}` while
+    // its SQL twin returns `affected` as well, so a UI could list what a
+    // refusal would strand but not what a confirmation just did.
+    //
+    // The expected sets are read out of the migration's own RETURN blocks.
+    const sql = readFileSync(
+      path.join(
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
+        'supabase/migrations/20260907000000_field_delete_booking_guard.sql'
+      ),
+      'utf8'
+    );
+    /**
+     * The keys of the LAST `RETURN jsonb_build_object(...)` in one RPC -- the
+     * success path, every earlier return being a refusal or a not-found.
+     *
+     * @param {string} fnName
+     * @returns {string[]} sorted key literals
+     */
+    const successKeys = (fnName) => {
+      const start = sql.indexOf(`CREATE OR REPLACE FUNCTION public.${fnName}(`);
+      expect(start, `${fnName} is not in this migration`).toBeGreaterThan(-1);
+      const body = sql.slice(start, sql.indexOf('REVOKE ALL ON FUNCTION', start));
+      const blocks = body.split('RETURN jsonb_build_object(');
+      expect(blocks.length, `${fnName} has no RETURN jsonb_build_object`).toBeGreaterThan(1);
+      const last = blocks[blocks.length - 1].split(');')[0];
+      const keys = [...new Set([...last.matchAll(/'([a-z_]+)',/g)].map((m) => m[1]))];
+      expect(keys.length, `${fnName}'s success return parsed to nothing`).toBeGreaterThan(1);
+      return keys.sort();
+    };
+
+    const field = someField();
+    await supabase.from('game_slots').insert({
+      id: 'success-keys-gs',
+      organization_id: ORG,
+      field_id: field.id,
+      slot_date: '2099-01-01',
+    });
+
+    const { data: retired } = await supabase.rpc('admin_retire_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+      p_effective_to: '2026-01-01',
+      p_confirm: true,
+    });
+    expect(retired.retired).toBe(true);
+    expect(Object.keys(retired).sort()).toEqual(successKeys('admin_retire_field'));
+    // Not merely present: the same rows the refusal would have listed.
+    expect(retired.affected.length).toBe(retired.affected_count);
+    expect(retired.affected_count).toBeGreaterThan(0);
+
+    const { data: deleted } = await supabase.rpc('admin_delete_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+      p_confirm: true,
+    });
+    expect(deleted.deleted).toBe(true);
+    expect(Object.keys(deleted).sort()).toEqual(successKeys('admin_delete_field'));
+  });
+
+  it('bounds the audit row the way field_bookings_digest does, on both arms', async () => {
+    // **The PAYLOAD carries the whole list; the AUDIT ROW carries a digest.**
+    // The migration writes `public.field_bookings_digest(v_affected)` into
+    // `audit_log.metadata.affected` on all four booking phases -- a refusal on
+    // a busy field would otherwise write an arbitrarily large row on every
+    // attempt -- while the mock wrote the raw array. Nothing in the suite
+    // looked at the mock's audit metadata, so the two arms disagreed silently
+    // about the shape of a field PR 3's audit surface is built to read.
+    //
+    // The expected key set is READ OUT OF THE MIGRATION, not written here: a
+    // list copied from either arm would agree with whichever it was copied
+    // from, which is how the shortfall above got certified once already.
+    const sql = readFileSync(
+      path.join(
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
+        'supabase/migrations/20260907000000_field_delete_booking_guard.sql'
+      ),
+      'utf8'
+    );
+    const digestBody = sql.slice(
+      sql.indexOf('CREATE OR REPLACE FUNCTION public.field_bookings_digest('),
+      sql.indexOf('REVOKE ALL ON FUNCTION public.field_bookings_digest')
+    );
+    expect(digestBody.length, 'the digest moved; this parse is stale').toBeGreaterThan(100);
+    const digestKeys = [
+      ...new Set([...digestBody.matchAll(/^\s+'([a-z_]+)',/gm)].map((m) => m[1])),
+    ];
+    expect(digestKeys.sort()).toEqual(['by_kind', 'omitted', 'sample', 'total']);
+
+    const field = someField();
+    await supabase.from('game_slots').insert({
+      id: 'digest-gs',
+      organization_id: ORG,
+      field_id: field.id,
+      slot_date: '2099-01-01',
+    });
+    await supabase.from('practice_slots').insert({
+      id: 'digest-ps',
+      organization_id: ORG,
+      field_id: field.id,
+      day_of_week: 'mon',
+      valid_from: '2026-01-01',
+    });
+
+    const auditRows = () =>
+      getMockData('audit_log').filter(
+        (row) =>
+          String(row.resource_id) === String(field.id) &&
+          ['admin_retire_field', 'admin_delete_field'].includes(row.metadata?.operation)
+      );
+
+    // All four phases that carry the key, in the order that reaches them: a
+    // refusal on each arm, then a confirmed call on each. Without the confirmed
+    // retire the `before` phase of that arm is never written, and its plant
+    // came back NOT CAUGHT -- the assertion below was reading the delete's
+    // `before` twice and calling it both arms.
+    await supabase.rpc('admin_retire_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+      p_effective_to: '2026-01-01',
+      p_confirm: false,
+    });
+    await supabase.rpc('admin_retire_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+      p_effective_to: '2026-01-01',
+      p_confirm: true,
+    });
+    await supabase.rpc('admin_delete_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+    });
+    await supabase.rpc('admin_delete_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+      p_confirm: true,
+    });
+
+    // Every phase that carries `affected` at all, whichever RPC wrote it,
+    // compared against the four NAMED pairs rather than against itself: an arm
+    // that stopped writing the key is then a shortfall, not a silence.
+    const carrying = auditRows().filter((row) => 'affected' in (row.metadata || {}));
+    expect(
+      [...new Set(carrying.map((row) => `${row.metadata.operation}/${row.metadata.phase}`))].sort()
+    ).toEqual([
+      'admin_delete_field/before',
+      'admin_delete_field/refused',
+      'admin_retire_field/before',
+      'admin_retire_field/refused',
+    ]);
+    for (const row of carrying) {
+      const digest = row.metadata.affected;
+      expect(
+        Array.isArray(digest),
+        `${row.metadata.operation}/${row.metadata.phase} wrote a raw array`
+      ).toBe(false);
+      expect(Object.keys(digest).sort(), `${row.metadata.operation}/${row.metadata.phase}`).toEqual(
+        ['by_kind', 'omitted', 'sample', 'total']
+      );
+      expect(digest.total).toBe(row.metadata.affected_count);
+      expect(digest.sample.length).toBeLessThanOrEqual(digest.total);
+      expect(
+        Object.values(digest.by_kind).reduce((a, b) => a + b, 0),
+        'by_kind does not add up to total'
+      ).toBe(digest.total);
     }
   });
 

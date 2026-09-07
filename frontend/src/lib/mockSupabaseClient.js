@@ -2429,11 +2429,20 @@ export const mockSupabase = {
             .map((slot) => ({
               kind: 'practice_slot',
               id: slot.id,
-              on_date: slot.valid_until ?? null,
+              // **`undatedValue` is the single reading, projection included.**
+              // The filter above already treats `valid_until: ''` -- what the
+              // field-import apply path writes for an open-ended slot -- as no
+              // date, but the projection still passed the `''` through, so this
+              // row read `{on_date: '', unbounded: true}` here and
+              // `{on_date: null, unbounded: true}` in Postgres, where an empty
+              // string is not a storable date. A consumer branching on
+              // `on_date === null` took different paths on the two arms for
+              // precisely the row this hunk was written for.
+              on_date: undatedValue(slot.valid_until) ? null : slot.valid_until,
               week_index: null,
               // Unbounded, therefore CERTAINLY stranded -- not unjudged.
               undated: false,
-              unbounded: !slot.valid_until,
+              unbounded: undatedValue(slot.valid_until),
               cascades: true,
             })),
           // **The assignment tables.** The mock enumerated the two SLOT tables
@@ -2510,6 +2519,31 @@ export const mockSupabase = {
         ];
       };
 
+      // **The audit row is BOUNDED, here as in the database.** A refusal writes
+      // the affected list into `audit_log.metadata`, and a delete refused on a
+      // busy field would otherwise write an arbitrarily large row on every
+      // attempt. `public.field_bookings_digest` caps it at a sample plus the
+      // totals the sample is a sample of, and this is that function -- same
+      // keys, same limit, same reading of an empty list.
+      //
+      // Writing the raw array here while the database wrote the digest is the
+      // exact divergence this PR exists to remove, one level up: a consumer
+      // reading `metadata.affected.total` would get `undefined` under the mock
+      // and a number in production, or read `.length` and get the reverse.
+      const fieldBookingsDigest = (affected, limit = 25) => {
+        const rows = Array.isArray(affected) ? affected : [];
+        const byKind = {};
+        for (const row of rows) {
+          byKind[row.kind] = (byKind[row.kind] || 0) + 1;
+        }
+        return {
+          total: rows.length,
+          omitted: Math.max(rows.length - limit, 0),
+          by_kind: byKind,
+          sample: rows.slice(0, limit),
+        };
+      };
+
       if (name === 'admin_retire_field') {
         if (!p.p_effective_to) {
           return { data: null, error: { message: 'p_effective_to is required' } };
@@ -2535,6 +2569,7 @@ export const mockSupabase = {
             operation: 'admin_retire_field',
             phase: 'refused',
             affected_count: affected.length,
+            affected: fieldBookingsDigest(affected),
             previous: { ...field },
           });
           saveDB(db);
@@ -2555,7 +2590,7 @@ export const mockSupabase = {
           effective_to: p.p_effective_to,
           confirmed: Boolean(p.p_confirm),
           affected_count: affected.length,
-          affected,
+          affected: fieldBookingsDigest(affected),
           before: previous,
         });
         // **A retirement can only ever REMOVE activity. It never grants it.**
@@ -2582,7 +2617,14 @@ export const mockSupabase = {
         });
         saveDB(db);
         return {
-          data: { retired: true, affected_count: affected.length, field },
+          // **The successful retirement reports what it stranded, too.** Its
+          // SQL twin returns `'affected', v_affected` on this path as well as
+          // on the refusal, and dropping the key here left a confirmed
+          // retirement unable to tell the operator WHICH bookings it just
+          // closed over -- the same list, one confirmation later. Found by the
+          // mechanism census: every site writing `affected`, not the twin of
+          // any one fix.
+          data: { retired: true, affected_count: affected.length, affected, field },
           error: null,
         };
       }
@@ -2688,7 +2730,7 @@ export const mockSupabase = {
             phase: 'refused',
             reason: 'bookings_exist',
             affected_count: affected.length,
-            affected,
+            affected: fieldBookingsDigest(affected),
             previous: { ...field },
           });
           saveDB(db);
@@ -2709,7 +2751,7 @@ export const mockSupabase = {
           phase: 'before',
           confirmed: Boolean(p.p_confirm),
           affected_count: affected.length,
-          affected,
+          affected: fieldBookingsDigest(affected),
           previous,
         });
 

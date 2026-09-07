@@ -280,6 +280,47 @@ const PLANTS = [
       "          if (ALWAYS_DELETED.includes(row.kind)) return { ...row, disposition: 'deleted' };",
   },
   {
+    // **The audit row goes back to carrying the whole list.** The migration
+    // writes `field_bookings_digest(v_affected)` into `metadata.affected` on
+    // every booking phase; the mock wrote the raw array, and nothing looked.
+    label: 'the refusal audit writes the whole list again',
+    suite: 'tests/fieldLifecycleRpcs.test.js',
+    find: `            reason: 'bookings_exist',
+            affected_count: affected.length,
+            affected: fieldBookingsDigest(affected),`,
+    replace: `            reason: 'bookings_exist',
+            affected_count: affected.length,
+            affected,`,
+  },
+  {
+    // The other arm of the same divergence: retire's `before` phase.
+    label: 'the retirement audit writes the whole list again',
+    suite: 'tests/fieldLifecycleRpcs.test.js',
+    find: `          affected_count: affected.length,
+          affected: fieldBookingsDigest(affected),
+          before: previous,`,
+    replace: `          affected_count: affected.length,
+          affected,
+          before: previous,`,
+  },
+  {
+    // **The empty valid_until reaches the payload verbatim.** `undatedValue`
+    // was applied to the filter but not to the projection, so the row this
+    // reading exists for reported `on_date: ''` here and `null` in Postgres.
+    label: 'an empty valid_until is projected as an empty string',
+    suite: 'tests/fieldLifecycleRpcs.test.js',
+    find: '              on_date: undatedValue(slot.valid_until) ? null : slot.valid_until,',
+    replace: '              on_date: slot.valid_until ?? null,',
+  },
+  {
+    // **A confirmed retirement stops saying what it just closed over.** Its SQL
+    // twin returns `affected` on the success path as well as on the refusal.
+    label: 'the confirmed retirement stops reporting what it stranded',
+    suite: 'tests/fieldLifecycleRpcs.test.js',
+    find: '          data: { retired: true, affected_count: affected.length, affected, field },',
+    replace: '          data: { retired: true, affected_count: affected.length, field },',
+  },
+  {
     // Not a scenario-table plant: a scenario's `before` state is written
     // through `.insert()`, so the very state this breaks is one the table
     // cannot express. `fieldLifecycleRpcs.test.js` asserts it on the write

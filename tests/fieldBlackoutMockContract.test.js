@@ -158,3 +158,48 @@ describe('blackout mock contract :: the migration is the source of the shape', (
     expect(MIGRATION).toContain("'phase', 'after'");
   });
 });
+
+describe('field blackout mock contract :: a deleted blackout is tombstoned', () => {
+  it('records the tombstone every other hard delete records', async () => {
+    // **What this asserts, and what it deliberately does not.**
+    //
+    // `getDB()` re-merges its sources on every read and only `markMockDeleted`
+    // survives that merge, which is why `admin_delete_field` was found
+    // reporting `deleted: true` for a SEEDED field that came straight back. Its
+    // blackout twin never got the same fix.
+    //
+    // For blackouts the consequence is not reachable TODAY, and saying so is
+    // the point: `initialMockData.field_blackouts` is empty, and `saveDB()`
+    // overwrites `window.__MOCK_DB__`, so neither merge source can hold a
+    // blackout to resurrect. Two attempts to write a failing behavioural test
+    // for it passed without the fix -- they proved the row was gone, which it
+    // was either way.
+    //
+    // So this checks the MECHANISM rather than staging an outcome that cannot
+    // happen: the delete records the tombstone, like every other hard delete in
+    // this client. That assertion does fail when the call is removed, and it is
+    // the thing that keeps this arm consistent with its siblings for the moment
+    // a blackout does come from the seed or a re-merged injection.
+    sessionStorage.clear();
+    delete window.__MOCK_DB__;
+    sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: 'mock-admin-id' } }));
+
+    const field = getMockData('fields').find((f) => String(f.organization_id) === 'org-1');
+    const { data: created } = await supabase.rpc('admin_create_field_blackout', {
+      p_organization_id: 'org-1',
+      p_location_id: null,
+      p_field_id: field.id,
+      p_blackout_from: '2099-08-01',
+      p_blackout_until: '2099-08-31',
+    });
+    expect(getMockData('__deleted__')?.field_blackouts ?? []).not.toContain(created.id);
+
+    const { error } = await supabase.rpc('admin_delete_field_blackout', {
+      p_organization_id: 'org-1',
+      p_blackout_id: created.id,
+    });
+    expect(error).toBeNull();
+    expect(getMockData('field_blackouts').some((b) => b.id === created.id)).toBe(false);
+    expect(getMockData('__deleted__')?.field_blackouts ?? []).toContain(created.id);
+  });
+});

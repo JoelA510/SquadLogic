@@ -34,7 +34,43 @@
     "The JS runner used to accept ANY error while the SQL runner restricted the",
     "class, so five blackout cases could have stopped exercising their constraint",
     "and stayed green. The mock now carries `error.code`, which is what PostgREST",
-    "puts there, so one contract is expressible for both."
+    "puts there, so one contract is expressible for both.",
+    "",
+    "DELETE SCENARIOS (LIVE-1). `admin_delete_field` had no booking guard at all;",
+    "it now carries the one `admin_retire_field` already had. Its cases add two",
+    "keys the retirement cases do not need: `bookings`, the kinds to seed on the",
+    "field before the call, and `expect.deleted`/`expect.exists`, because a",
+    "deletion's outcome is whether the row survives rather than what its columns",
+    "say. `expect.auditPhases` is stated on every accepted field case -- a refused",
+    "delete records `refused` where an accepted one records `before` and `after`,",
+    "and hard-coding that in each runner is how the two came to disagree before.",
+    "",
+    "What these cases do NOT cover, stated rather than left implied: what happens",
+    "to each booking ROW after a confirmed delete -- the two CASCADE kinds",
+    "destroyed and the two SET NULL kinds kept and unassigned. That is schema",
+    "behaviour rather than RPC outcome, and it is pinned in",
+    "docs/sql/20260907000000_smoke.sql, supabase/tests/field_delete_booking_guard.sql",
+    "and tests/fieldDeleteGuard.test.js. A refusal writing NOTHING is covered here,",
+    "on both runners, because that is the guard's whole promise.",
+    "",
+    "WHAT A DELETE COSTS IS THE CASCADE CLOSURE, NOT A COLUMN NAME. The first",
+    "version of these delete cases enumerated the seven tables carrying a",
+    "`field_id` and reported one disposition per TABLE. Both were wrong, and a",
+    "review caught them: `games` carries no field_id and is destroyed anyway",
+    "(it hangs off game_slots ON DELETE CASCADE), and an assignment reaches the",
+    "field a second way through its slot columns -- CASCADE where field_id is",
+    "SET NULL -- so the row the SCHEDULER writes is destroyed while a",
+    "free-standing one survives. The `scheduled_game` and `scheduled_practice`",
+    "booking kinds seed the shape persist_game_schedule and",
+    "persist_practice_schedule actually produce, and `delete-mixed-shapes-refused`",
+    "puts both shapes on one field so a per-table answer cannot pass.",
+    "",
+    "A NULL CONFIRMATION IS NOT A CONFIRMATION. `retire-null-confirm-refused` and",
+    "`delete-null-confirm-refused` pass `p_confirm => NULL` on both RPCs. `NOT NULL`",
+    "is NULL in SQL, so a bare `NOT p_confirm` leaves the refusal unfired and the",
+    "destructive path runs unconfirmed -- which admin_retire_field did until",
+    "20260907000000, while the mock refused it. The one input that turns the guard",
+    "off is now covered on both arms rather than on whichever happened to be right."
   ],
   "version": 1,
   "fieldScenarios": [
@@ -53,7 +89,8 @@
       "expect": {
         "ok": true,
         "active": true,
-        "effectiveTo": 30
+        "effectiveTo": 30,
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -71,7 +108,8 @@
       "expect": {
         "ok": true,
         "active": false,
-        "effectiveTo": -1
+        "effectiveTo": -1,
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -89,7 +127,8 @@
       "expect": {
         "ok": true,
         "active": true,
-        "effectiveTo": 0
+        "effectiveTo": 0,
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -107,7 +146,8 @@
       "expect": {
         "ok": true,
         "active": false,
-        "effectiveTo": 30
+        "effectiveTo": 30,
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -125,7 +165,8 @@
       "expect": {
         "ok": true,
         "active": false,
-        "effectiveTo": -1
+        "effectiveTo": -1,
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -143,7 +184,8 @@
       "expect": {
         "ok": true,
         "active": true,
-        "effectiveTo": 60
+        "effectiveTo": 60,
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -158,7 +200,8 @@
       "expect": {
         "ok": true,
         "active": true,
-        "effectiveTo": null
+        "effectiveTo": null,
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -173,7 +216,8 @@
       "expect": {
         "ok": true,
         "active": false,
-        "effectiveTo": null
+        "effectiveTo": null,
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -188,7 +232,8 @@
       "expect": {
         "ok": true,
         "active": false,
-        "effectiveTo": null
+        "effectiveTo": null,
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -203,7 +248,8 @@
       "expect": {
         "ok": true,
         "active": true,
-        "effectiveTo": null
+        "effectiveTo": null,
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -222,6 +268,471 @@
       "expect": {
         "ok": false,
         "sqlstate": "P0002"
+      }
+    },
+    {
+      "id": "delete-unbooked",
+      "why": "LIVE-1. Ground nothing is booked on deletes with no confirmation. Without this case the guard could be 'refuse everything', which satisfies every refusal case below and is not the contract -- admin_delete_field keeps existing because a genuine mistake still needs a delete.",
+      "rpc": "admin_delete_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": [],
+      "args": {
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "deleted": true,
+        "affectedCount": 0,
+        "exists": false,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "delete-booked-game-slot-refused",
+      "why": "LIVE-1. game_slots.field_id is ON DELETE CASCADE, so the slot is destroyed with the field. One kind per case: an arm dropped from the RPC's five-way union fails the case for THAT table rather than being absorbed by the others.",
+      "rpc": "admin_delete_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_slot"],
+      "args": {
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "deleted": false,
+        "reason": "bookings_exist",
+        "affectedCount": 1,
+        "dispositions": ["deleted"],
+        "exists": true,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "delete-booked-game-assignment-refused",
+      "why": "LIVE-1. game_assignments.field_id is ON DELETE SET NULL, so a FREE-STANDING assignment -- one with no slot behind it -- survives having silently lost its venue. Its slot-linked twin is the next case, and the two must report DIFFERENT dispositions.",
+      "rpc": "admin_delete_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_assignment"],
+      "args": {
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "deleted": false,
+        "reason": "bookings_exist",
+        "affectedCount": 1,
+        "dispositions": ["unassigned"],
+        "exists": true,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "delete-booked-practice-slot-refused",
+      "why": "LIVE-1. practice_slots.field_id is ON DELETE CASCADE.",
+      "rpc": "admin_delete_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["practice_slot"],
+      "args": {
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "deleted": false,
+        "reason": "bookings_exist",
+        "affectedCount": 1,
+        "dispositions": ["deleted"],
+        "exists": true,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "delete-booked-practice-assignment-refused",
+      "why": "LIVE-1, the sharpest form. practice_assignments.field_id had NO foreign key at all, so a delete left the uuid DANGLING at a row that no longer exists -- worse than SET NULL, because nothing downstream could tell it from a live venue. This is the free-standing shape; the slot-linked one follows.",
+      "rpc": "admin_delete_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["practice_assignment"],
+      "args": {
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "deleted": false,
+        "reason": "bookings_exist",
+        "affectedCount": 1,
+        "dispositions": ["unassigned"],
+        "exists": true,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "delete-booked-all-four-confirmed",
+      "why": "One FREE-STANDING booking in each of the four tables that carry a field_id, and p_confirm true. The count must be 4: the game slot here has no fixture on it, so the games arm contributes nothing and a union that lost an arm reports 3. Both disposition words must appear, because the two slot tables cascade and the two unlinked assignments are merely unassigned.",
+      "rpc": "admin_delete_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_slot", "game_assignment", "practice_slot", "practice_assignment"],
+      "args": {
+        "confirm": true
+      },
+      "expect": {
+        "ok": true,
+        "deleted": true,
+        "affectedCount": 4,
+        "dispositions": ["deleted", "unassigned"],
+        "exists": false,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "delete-scheduled-game-refused",
+      "why": "The shape persist_game_schedule actually writes: a game slot, an assignment carrying game_slot_id, and a games row. All three are DESTROYED, because the slot cascade reaches the assignment before field_id's SET NULL can fire. Reporting 'unassigned' here -- which the first version of the RPC did for the whole table -- promises the operator a survival that does not happen.",
+      "rpc": "admin_delete_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["scheduled_game"],
+      "args": {
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "deleted": false,
+        "reason": "bookings_exist",
+        "affectedCount": 3,
+        "dispositions": ["deleted"],
+        "exists": true,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "delete-scheduled-practice-refused",
+      "why": "The same for practices: a practice slot and an assignment carrying practice_slot_id and slot_id, both ON DELETE CASCADE to practice_slots. Both destroyed, neither unassigned.",
+      "rpc": "admin_delete_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["scheduled_practice"],
+      "args": {
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "deleted": false,
+        "reason": "bookings_exist",
+        "affectedCount": 2,
+        "dispositions": ["deleted"],
+        "exists": true,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "delete-mixed-shapes-refused",
+      "why": "Both shapes on one field, so BOTH disposition words must appear in one refusal. A version that reported per TABLE rather than per ROW can satisfy either single-shape case above by picking the right constant; it cannot satisfy this one.",
+      "rpc": "admin_delete_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["scheduled_game", "game_assignment", "practice_assignment"],
+      "args": {
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "deleted": false,
+        "reason": "bookings_exist",
+        "affectedCount": 5,
+        "dispositions": ["deleted", "unassigned"],
+        "exists": true,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "retire-null-confirm-refused",
+      "why": "`p_confirm => NULL` must read as UNCONFIRMED. `NOT NULL` is NULL, so a bare `NOT p_confirm` leaves the IF unfired and the retirement proceeds with nobody having confirmed -- which is what the SQL did until 20260907000000 while the mock refused it. A three-valued flag guarding a destructive action must read unknown as no. The field must be untouched and the only audit phase must be `refused`.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_slot"],
+      "args": {
+        "effectiveTo": 10,
+        "confirm": null
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": null,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "delete-null-confirm-refused",
+      "why": "The same input on the delete arm, so the guard's weakest input is covered on both RPCs rather than on whichever one happened to get it right.",
+      "rpc": "admin_delete_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_slot"],
+      "args": {
+        "confirm": null
+      },
+      "expect": {
+        "ok": true,
+        "deleted": false,
+        "reason": "bookings_exist",
+        "affectedCount": 1,
+        "dispositions": ["deleted"],
+        "exists": true,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "delete-field-of-another-org",
+      "why": "The org gate, on the delete arm as well as the retire arm. A SECURITY DEFINER RPC bypasses RLS, so this check is the only thing between an admin of one organisation and another's ground -- and a guard that refuses bookings while letting a stranger through would be worse than none.",
+      "rpc": "admin_delete_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": [],
+      "args": {
+        "confirm": true,
+        "foreignOrg": true
+      },
+      "expect": {
+        "ok": false,
+        "sqlstate": "P0002"
+      }
+    },
+    {
+      "id": "retire-game-slot-on-boundary",
+      "why": "THE BOUNDARY, STATED AS DATA. `p_after` is the last day the ground is usable -- the reading `field_is_live_on(effective_to, d) = effective_to >= d` already ships -- so a game slot dated EXACTLY on the retirement date is not stranded and the retirement proceeds. This case exists because the SQL and the mock shared an off-by-one on `practice_assignments` (comparing a daterange's EXCLUSIVE upper bound), and two agreeing implementations compared only to each other cannot see that. One pair per arm, because a single arm getting it right by accident is exactly the state this table was in.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_slot"],
+      "bookingOffset": 30,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": 30,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "retire-game-slot-day-after-boundary",
+      "why": "The other side of the same boundary, and the positive control for the case above: a game slot dated ONE DAY after the retirement date IS stranded, so the retirement refuses and the field is untouched. Without it, an enumerator that had stopped seeing this kind entirely would pass the on-boundary case for the wrong reason.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_slot"],
+      "bookingOffset": 31,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": null,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "retire-game-assignment-on-boundary",
+      "why": "THE BOUNDARY, STATED AS DATA. `p_after` is the last day the ground is usable -- the reading `field_is_live_on(effective_to, d) = effective_to >= d` already ships -- so a game assignment starting EXACTLY on the retirement date is not stranded and the retirement proceeds. This case exists because the SQL and the mock shared an off-by-one on `practice_assignments` (comparing a daterange's EXCLUSIVE upper bound), and two agreeing implementations compared only to each other cannot see that. One pair per arm, because a single arm getting it right by accident is exactly the state this table was in.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_assignment"],
+      "bookingOffset": 30,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": 30,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "retire-game-assignment-day-after-boundary",
+      "why": "The other side of the same boundary, and the positive control for the case above: a game assignment starting ONE DAY after the retirement date IS stranded, so the retirement refuses and the field is untouched. Without it, an enumerator that had stopped seeing this kind entirely would pass the on-boundary case for the wrong reason.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["game_assignment"],
+      "bookingOffset": 31,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": null,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "retire-practice-slot-on-boundary",
+      "why": "THE BOUNDARY, STATED AS DATA. `p_after` is the last day the ground is usable -- the reading `field_is_live_on(effective_to, d) = effective_to >= d` already ships -- so a practice slot whose valid_until is EXACTLY on the retirement date is not stranded and the retirement proceeds. This case exists because the SQL and the mock shared an off-by-one on `practice_assignments` (comparing a daterange's EXCLUSIVE upper bound), and two agreeing implementations compared only to each other cannot see that. One pair per arm, because a single arm getting it right by accident is exactly the state this table was in.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["practice_slot"],
+      "bookingOffset": 30,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": 30,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "retire-practice-slot-day-after-boundary",
+      "why": "The other side of the same boundary, and the positive control for the case above: a practice slot whose valid_until is ONE DAY after the retirement date IS stranded, so the retirement refuses and the field is untouched. Without it, an enumerator that had stopped seeing this kind entirely would pass the on-boundary case for the wrong reason.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["practice_slot"],
+      "bookingOffset": 31,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": null,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "retire-practice-assignment-on-boundary",
+      "why": "THE BOUNDARY, STATED AS DATA. `p_after` is the last day the ground is usable -- the reading `field_is_live_on(effective_to, d) = effective_to >= d` already ships -- so a practice whose date range ends EXACTLY on the retirement date is not stranded and the retirement proceeds. This case exists because the SQL and the mock shared an off-by-one on `practice_assignments` (comparing a daterange's EXCLUSIVE upper bound), and two agreeing implementations compared only to each other cannot see that. One pair per arm, because a single arm getting it right by accident is exactly the state this table was in.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["practice_assignment"],
+      "bookingOffset": 30,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": 30,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "retire-practice-assignment-day-after-boundary",
+      "why": "The other side of the same boundary, and the positive control for the case above: a practice whose date range ends ONE DAY after the retirement date IS stranded, so the retirement refuses and the field is untouched. Without it, an enumerator that had stopped seeing this kind entirely would pass the on-boundary case for the wrong reason.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["practice_assignment"],
+      "bookingOffset": 31,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": null,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "retire-scheduled-game-on-boundary",
+      "why": "THE BOUNDARY, STATED AS DATA. `p_after` is the last day the ground is usable -- the reading `field_is_live_on(effective_to, d) = effective_to >= d` already ships -- so a persisted slot+assignment+game dated EXACTLY on the retirement date is not stranded and the retirement proceeds. This case exists because the SQL and the mock shared an off-by-one on `practice_assignments` (comparing a daterange's EXCLUSIVE upper bound), and two agreeing implementations compared only to each other cannot see that. One pair per arm, because a single arm getting it right by accident is exactly the state this table was in.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["scheduled_game"],
+      "bookingOffset": 30,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": 30,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "retire-scheduled-game-day-after-boundary",
+      "why": "The other side of the same boundary, and the positive control for the case above: a persisted slot+assignment+game dated ONE DAY after the retirement date IS stranded, so the retirement refuses and the field is untouched. Without it, an enumerator that had stopped seeing this kind entirely would pass the on-boundary case for the wrong reason.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": ["scheduled_game"],
+      "bookingOffset": 31,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": null,
+        "auditPhases": ["refused"]
       }
     }
   ],

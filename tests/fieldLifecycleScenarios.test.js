@@ -98,15 +98,190 @@ const fieldInState = async (before) => {
   return row;
 };
 
+/**
+ * The mock table each booking kind lives in, and a row shaped like one.
+ *
+ * The map is here rather than in the scenario table because it is SEEDING
+ * knowledge -- how to make a booking of each kind exist -- and both runners
+ * need their own. What is shared is the OUTCOME the table states.
+ *
+ * Every switch over a union throws on the value it does not know: a scenario
+ * naming a fifth booking kind must stop the run rather than quietly seed
+ * nothing and then pass a refusal case by counting zero.
+ */
+/**
+ * How many days out each kind is seeded when the scenario does not say.
+ *
+ * **A scenario can override this with `bookingOffset`**, which is how the
+ * retirement BOUNDARY became data rather than something the two runners agreed
+ * about privately: `bookingOffset === args.effectiveTo` is a booking on the last
+ * usable day, `effectiveTo + 1` is the first one stranded, and the fixture
+ * states which of those refuses.
+ */
+const DEFAULT_BOOKING_OFFSET = {
+  game_slot: 30,
+  game_assignment: 30,
+  practice_slot: 60,
+  practice_assignment: 60,
+  scheduled_game: 30,
+  scheduled_practice: 60,
+};
+
+const BOOKING_SEEDS = {
+  game_slot: (id, fieldId, at) => [
+    'game_slots',
+    { id, organization_id: ORG, field_id: fieldId, slot_date: dateAt(at), week_index: 1 },
+  ],
+  game_assignment: (id, fieldId, at) => [
+    'game_assignments',
+    {
+      id,
+      organization_id: ORG,
+      field_id: fieldId,
+      start: `${dateAt(at)}T18:00:00.000Z`,
+      week_index: 1,
+    },
+  ],
+  practice_slot: (id, fieldId, at) => [
+    'practice_slots',
+    {
+      id,
+      organization_id: ORG,
+      field_id: fieldId,
+      day_of_week: 'mon',
+      start_time: '18:00',
+      end_time: '19:30',
+      valid_until: dateAt(at),
+    },
+  ],
+  practice_assignment: (id, fieldId, at) => [
+    'practice_assignments',
+    {
+      id,
+      organization_id: ORG,
+      team_id: 'scenario-team',
+      field_id: fieldId,
+      // `]` on the upper bound: the range covers `at` itself, so its LAST DAY
+      // is `at` -- the value the boundary cases compare against effectiveTo.
+      effective_date_range: `[${dateAt(0)},${dateAt(at)}]`,
+    },
+  ],
+};
+
+/**
+ * Composite kinds: the shapes the persistence RPCs actually write.
+ *
+ * `persist_game_schedule` writes `game_slot_id` and `slot_id` on every
+ * assignment, and both are ON DELETE CASCADE to `game_slots` -- so a real
+ * scheduled game is DESTROYED by a field delete, not unassigned. Seeding only
+ * the free-standing shape, as the first version of these scenarios did, tests
+ * a row the production path never produces.
+ *
+ * Each entry seeds several rows and declares how many the RPC must report.
+ */
+const COMPOSITE_SEEDS = {
+  scheduled_game: (id, fieldId, at) => [
+    [
+      'game_slots',
+      {
+        id: `${id}-slot`,
+        organization_id: ORG,
+        field_id: fieldId,
+        slot_date: dateAt(at),
+        week_index: 1,
+      },
+    ],
+    [
+      'game_assignments',
+      {
+        id: `${id}-assignment`,
+        organization_id: ORG,
+        field_id: fieldId,
+        game_slot_id: `${id}-slot`,
+        slot_id: `${id}-slot`,
+        start: `${dateAt(at)}T18:00:00.000Z`,
+        week_index: 1,
+      },
+    ],
+    ['games', { id: `${id}-game`, organization_id: ORG, game_slot_id: `${id}-slot` }],
+  ],
+  scheduled_practice: (id, fieldId, at) => [
+    [
+      'practice_slots',
+      {
+        id: `${id}-slot`,
+        organization_id: ORG,
+        field_id: fieldId,
+        day_of_week: 'mon',
+        start_time: '18:00',
+        end_time: '19:30',
+        valid_until: dateAt(at),
+      },
+    ],
+    [
+      'practice_assignments',
+      {
+        id: `${id}-assignment`,
+        organization_id: ORG,
+        team_id: 'scenario-team',
+        field_id: fieldId,
+        practice_slot_id: `${id}-slot`,
+        slot_id: `${id}-slot`,
+        effective_date_range: `[${dateAt(0)},${dateAt(at)}]`,
+      },
+    ],
+  ],
+};
+
+/**
+ * Seed one booking of each named kind onto a field, and prove each landed.
+ *
+ * A seed that silently failed would turn a refusal case into an unbooked one
+ * and it would pass for the wrong reason -- the field would delete, the
+ * assertion would be about nothing, and the guard could be gone.
+ *
+ * @param {string} fieldId
+ * @param {string[]} kinds
+ * @returns {Promise<Array<{ kind: string, table: string, id: string }>>}
+ */
+const seedBookings = async (fieldId, kinds, bookingOffset) => {
+  const seeded = [];
+  for (const kind of kinds) {
+    const id = `${fieldId}-${kind}`;
+    const at = bookingOffset ?? DEFAULT_BOOKING_OFFSET[kind];
+    if (at === undefined) throw new Error(`no default offset for booking kind "${kind}"`);
+    // Composite kinds first: `scheduled_game` is three rows, not one.
+    const composite = COMPOSITE_SEEDS[kind];
+    if (composite !== undefined) {
+      for (const [tableName, row] of composite(id, fieldId, at)) {
+        await supabase.from(tableName).insert(row);
+        const landed = getMockData(tableName).find((r) => String(r.id) === String(row.id));
+        expect(landed, `${kind} seed did not land in ${tableName}`).toBeDefined();
+        seeded.push({ kind, table: tableName, id: String(row.id) });
+      }
+      continue;
+    }
+    const build = BOOKING_SEEDS[kind];
+    if (build === undefined) throw new Error(`unknown booking kind "${kind}"`);
+    const [tableName, row] = build(id, fieldId, at);
+    await supabase.from(tableName).insert(row);
+    const landed = getMockData(tableName).find((r) => String(r.id) === id);
+    expect(landed, `${kind} seed did not land in ${tableName}`).toBeDefined();
+    expect(String(landed.field_id)).toBe(String(fieldId));
+    seeded.push({ kind, table: tableName, id });
+  }
+  return seeded;
+};
+
 describe('scenario table :: the table itself', () => {
   it('holds scenarios, and every one is shaped like a scenario', () => {
     // The meta-assertion. A table that failed to parse, or that lost its
     // entries, would make every `it.each` below run zero cases and the file
     // would pass green having asserted nothing at all.
-    expect(TABLE.fieldScenarios.length).toBe(11);
+    expect(TABLE.fieldScenarios.length).toBe(33);
     expect(TABLE.blackoutScenarios.length).toBe(9);
     const all = [...TABLE.fieldScenarios, ...TABLE.blackoutScenarios];
-    expect(all.length).toBe(20);
+    expect(all.length).toBe(42);
     for (const scenario of all) {
       expect(typeof scenario.id).toBe('string');
       expect(scenario.why.length).toBeGreaterThan(10);
@@ -117,6 +292,17 @@ describe('scenario table :: the table itself', () => {
       if (!scenario.expect.ok) {
         expect(scenario.expect.sqlstate, `${scenario.id}`).toMatch(/^[0-9A-Z]{5}$/);
       }
+    }
+    // Every field case that is expected to succeed states the audit phases it
+    // must leave behind. Both runners read this rather than each hard-coding
+    // ['before','after'] -- which was fine while every accepted call had those
+    // two, and is wrong now that a REFUSED delete records `refused` instead.
+    for (const scenario of TABLE.fieldScenarios) {
+      if (!scenario.expect.ok) continue;
+      expect(scenario.expect.auditPhases, `${scenario.id}: names no audit phases`).toBeInstanceOf(
+        Array
+      );
+      expect(scenario.expect.auditPhases.length).toBeGreaterThan(0);
     }
     expect(new Set(all.map((s) => s.id)).size).toBe(all.length);
   });
@@ -131,9 +317,48 @@ describe('scenario table :: the table itself', () => {
     expect(outcomes(TABLE.fieldScenarios)).toEqual(new Set([true, false]));
     // ... and it exercises both ACTIVITY outcomes as well.
     const activities = new Set(
-      TABLE.fieldScenarios.filter((s) => s.expect.ok).map((s) => s.expect.active)
+      TABLE.fieldScenarios
+        .filter((s) => s.expect.ok && s.rpc !== 'admin_delete_field')
+        .map((s) => s.expect.active)
     );
     expect(activities).toEqual(new Set([true, false]));
+  });
+
+  it('exercises all three field RPCs, and both delete outcomes', () => {
+    // **A table that covers two of the three RPCs would say nothing about the
+    // third while looking complete.** admin_delete_field is the one this PR
+    // adds; naming the set here means dropping its cases fails loudly rather
+    // than shrinking the suite quietly.
+    expect(new Set(TABLE.fieldScenarios.map((s) => s.rpc))).toEqual(
+      new Set(['admin_retire_field', 'admin_unretire_field', 'admin_delete_field'])
+    );
+    const deletes = TABLE.fieldScenarios.filter((s) => s.rpc === 'admin_delete_field');
+    // Refused AND accepted. All-refused would be satisfied by an RPC that
+    // never deletes; all-accepted by one with no guard at all -- which is the
+    // defect this PR exists for.
+    expect(new Set(deletes.filter((s) => s.expect.ok).map((s) => s.expect.deleted))).toEqual(
+      new Set([true, false])
+    );
+    // ... and at least one case seeds a booking of every kind the RPC reads,
+    // so a union arm that vanished cannot hide behind the other three.
+    const seededKinds = new Set(deletes.flatMap((s) => s.bookings ?? []));
+    expect(seededKinds).toEqual(
+      new Set([
+        'game_slot',
+        'game_assignment',
+        'practice_slot',
+        'practice_assignment',
+        // The shapes the scheduler writes. Without these the table only ever
+        // exercises free-standing assignments, and a per-TABLE disposition --
+        // the defect a review found here -- passes every case.
+        'scheduled_game',
+        'scheduled_practice',
+      ])
+    );
+    // ... and both disposition words are demanded by at least one case, on a
+    // field where both are true at once.
+    const mixed = deletes.find((s) => (s.expect.dispositions ?? []).length === 2);
+    expect(mixed, 'no case requires both dispositions in one refusal').toBeDefined();
   });
 });
 
@@ -146,11 +371,34 @@ describe('scenario table :: the mock honours it', () => {
 
   it.each(TABLE.fieldScenarios.map((s) => [s.id, s]))('%s', async (_id, scenario) => {
     const field = await fieldInState(scenario.before);
+    // `bookings` is absent on the retirement cases and empty on some delete
+    // cases; both mean "nothing booked". `?? []` is the only reading that does
+    // not turn a missing key into a crash.
+    const seeded = await seedBookings(field.id, scenario.bookings ?? [], scenario.bookingOffset);
+
+    // **Every switch over a union throws on the value it does not know.** This
+    // side guarded an unknown SCOPE on the blackout half and nothing at all on
+    // the field half, while `scenarios.py` guarded both -- an asymmetry PR 2
+    // recorded as referred rather than fixed. It matters more now that the
+    // field half has three RPCs instead of two: a scenario naming a fourth
+    // would otherwise be called with no arguments of its own and score a pass.
+    const KNOWN_FIELD_RPCS = ['admin_retire_field', 'admin_unretire_field', 'admin_delete_field'];
+    if (!KNOWN_FIELD_RPCS.includes(scenario.rpc)) {
+      throw new Error(`unknown rpc "${scenario.rpc}" in scenario "${scenario.id}"`);
+    }
 
     const args = { p_organization_id: ORG, p_field_id: field.id };
+    // **The confirmation is passed THROUGH, not coerced.** `Boolean(null)` is
+    // `false`, which is the answer the guard is supposed to reach on its own --
+    // coercing here would make the runner supply the very behaviour the
+    // `*-null-confirm-refused` cases exist to demand of the RPC.
+    const confirmArg = 'confirm' in scenario.args ? scenario.args.confirm : false;
     if (scenario.rpc === 'admin_retire_field') {
       args.p_effective_to = dateAt(scenario.args.effectiveTo);
-      args.p_confirm = Boolean(scenario.args.confirm);
+      args.p_confirm = confirmArg;
+    }
+    if (scenario.rpc === 'admin_delete_field') {
+      args.p_confirm = confirmArg;
     }
     // **`expect.ok` is read here, on the field half too.** It was validated for
     // shape on every scenario and read by neither runner for a field case: the
@@ -167,22 +415,73 @@ describe('scenario table :: the mock honours it', () => {
     expect(error).toBeNull();
     expect(data).not.toBeNull();
 
-    const after = getMockData('fields').find((f) => String(f.id) === String(field.id));
-    expect(after.active).toBe(scenario.expect.active);
-    expect(after.effective_to ?? null).toBe(dateAt(scenario.expect.effectiveTo));
+    const rows = getMockData('fields');
+    const after = rows.find((f) => String(f.id) === String(field.id));
 
-    // Both audit phases, on every accepted call. The SQL RPCs audit before AND
-    // after; the mock recorded only `after`, and `admin_unretire_field`
-    // recorded no `phase` at all -- so an audit reader could not tell an
-    // unretire's record from a legacy one.
-    const phases = getMockData('audit_log')
-      .filter(
-        (row) =>
-          String(row.resource_id) === String(field.id) && row.metadata?.operation === scenario.rpc
-      )
-      .map((row) => row.metadata.phase)
-      .sort();
-    expect(phases).toEqual(['after', 'before']);
+    if (scenario.rpc === 'admin_delete_field') {
+      // **A refusal is not an error.** admin_delete_field mirrors
+      // admin_retire_field: it RETURNS `{deleted:false, ...}`. A runner that
+      // only checked `error` would score every refusal as a successful delete,
+      // which is exactly what the hook did before this PR.
+      expect(data.deleted).toBe(scenario.expect.deleted);
+      expect(data.affected_count).toBe(scenario.expect.affectedCount);
+      expect((data.affected ?? []).length).toBe(scenario.expect.affectedCount);
+      if (scenario.expect.reason !== undefined) {
+        expect(data.reason).toBe(scenario.expect.reason);
+      }
+      if (scenario.expect.dispositions !== undefined) {
+        expect([...new Set(data.affected.map((row) => row.disposition))].sort()).toEqual(
+          scenario.expect.dispositions
+        );
+      }
+      // **Whether the field survived, read from `fields` by id.** Never from
+      // the returned payload: the payload is what a broken RPC would get
+      // wrong, so believing it would be checking a claim against itself.
+      expect(after === undefined).toBe(!scenario.expect.exists);
+
+      if (!scenario.expect.deleted) {
+        // A refusal writes NOTHING. Each seeded booking is looked for in its
+        // own table, which a break in the delete path leaves intact.
+        for (const booking of seeded) {
+          const row = getMockData(booking.table).find((r) => String(r.id) === booking.id);
+          expect(row, `${booking.kind} was destroyed by a REFUSED delete`).toBeDefined();
+          // `games` reaches the field through its slot and carries no field_id
+          // of its own, so only the rows that HAVE one are checked for it --
+          // asserting a column that does not exist would fail on the table this
+          // whole correction exists to include.
+          if ('field_id' in row) expect(String(row.field_id)).toBe(String(field.id));
+        }
+      }
+    } else {
+      expect(after.active).toBe(scenario.expect.active);
+      expect(after.effective_to ?? null).toBe(dateAt(scenario.expect.effectiveTo));
+    }
+
+    // The audit phases the table names for this case. The SQL RPCs audit
+    // before AND after; the mock recorded only `after`, and
+    // `admin_unretire_field` recorded no `phase` at all -- so an audit reader
+    // could not tell an unretire's record from a legacy one. A REFUSED delete
+    // records `refused` instead, which is why the expected set comes from the
+    // table rather than being written into this file.
+    // **The DISTINCT sorted set, because that is what `scenarios.py` compares.**
+    // It uses `array_agg(DISTINCT metadata->>'phase' ORDER BY ...)`, so a second
+    // `before` row would fail here and pass there: one field of the shared
+    // table read at two strictness levels, which makes it two contracts wearing
+    // one name. The table is a single source of truth only if both runners
+    // interpret every field identically -- and this is the third divergence
+    // found in this file, so the rule is now written where the comparison is.
+    const phases = [
+      ...new Set(
+        getMockData('audit_log')
+          .filter(
+            (row) =>
+              String(row.resource_id) === String(field.id) &&
+              row.metadata?.operation === scenario.rpc
+          )
+          .map((row) => row.metadata.phase)
+      ),
+    ].sort();
+    expect(phases).toEqual([...scenario.expect.auditPhases].sort());
   });
 
   it.each(TABLE.blackoutScenarios.map((s) => [s.id, s]))('%s', async (_id, scenario) => {

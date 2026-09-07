@@ -56,7 +56,22 @@ const runSuite = (suite) => {
     env: { ...process.env, CI: '1' },
   });
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
-  return { ok: result.status === 0, output };
+  // **A run that never happened is not a run that failed.** `status` is null
+  // when the child could not be spawned at all or was killed by a signal, and
+  // `!== 0` reads both as "red" -- so an ENOENT or an OOM kill would score
+  // every plant CAUGHT and the sweep would report a clean sheet having proved
+  // nothing. Same shape as the exit statuses four tools swallowed in PR 2.
+  if (result.error || result.signal !== null || result.status === null) {
+    return {
+      ok: false,
+      ran: false,
+      output,
+      why: result.error
+        ? `could not run ${suite}: ${result.error.message}`
+        : `${suite} was killed by ${result.signal ?? 'an unknown signal'}`,
+    };
+  }
+  return { ok: result.status === 0, ran: true, output, why: '' };
 };
 
 /**
@@ -114,6 +129,229 @@ const PLANTS = [
     find: "            error: { code: '23514', message: 'blackout times must be within 0..1440 and ordered' },",
     replace: "            error: { message: 'blackout times must be within 0..1440 and ordered' },",
   },
+  // -------------------------------------------------------------------------
+  // LIVE-1: the delete guard, in the arm that had none at all
+  // -------------------------------------------------------------------------
+  {
+    label: 'delete loses its booking guard entirely',
+    find: `        if (affected.length > 0 && p.p_confirm !== true) {
+          audit('field', field.id, 'deleted', {
+            operation: 'admin_delete_field',`,
+    replace: `        if (false && affected.length > 0 && p.p_confirm !== true) {
+          audit('field', field.id, 'deleted', {
+            operation: 'admin_delete_field',`,
+  },
+  {
+    label: 'refusal is audited as a delete that began',
+    find: `          phase: 'refused',
+            reason: 'bookings_exist',`,
+    replace: `          phase: 'before',
+            reason: 'bookings_exist',`,
+  },
+  {
+    // **The per-row disposition flattened back to one word per table.** That
+    // was the first version of this arm, and it told the operator every
+    // assignment survives -- false for every row the scheduler writes, because
+    // the slot cascade destroys it before the field_id SET NULL can fire.
+    label: 'delete reports one disposition per table again',
+    find: "          return { ...rest, disposition: cascades ? 'deleted' : 'unassigned' };",
+    replace: "          return { ...rest, disposition: 'unassigned' };",
+  },
+  {
+    // Aimed at fieldDeleteGuard, not the scenario table: every scenario seeds
+    // assignments that ALSO carry a field_id, so the via-slot route is never
+    // the only one there. The row that has a slot and no field_id at all --
+    // the shape an earlier delete's SET NULL leaves behind -- lives in that
+    // suite, and pointing this plant at the table would have reported NOT
+    // CAUGHT and said nothing about whether anything covers it.
+    label: 'delete stops seeing assignments reached through their slot',
+    suite: 'tests/fieldDeleteGuard.test.js',
+    find: '          (String(row.field_id) === String(fieldId) || viaSlot(row));',
+    replace: '          String(row.field_id) === String(fieldId);',
+  },
+  {
+    // `games` carries no field_id; only the cascade closure reaches it.
+    // `games` carries no field_id; only the cascade closure reaches it. Both
+    // callers enumerate it now, so this is aimed at the shared producer.
+    label: 'the enumerator stops seeing the fixtures on its slots',
+    find: '              if (!gameSlotIds.has(String(row.game_slot_id))) return false;',
+    replace: '              if (true) return false;',
+  },
+  {
+    // **The shared enumerator's `after: null` contract.** `null` means no date
+    // applies -- a deletion takes everything -- which is a different answer
+    // from comparing against the string "null". Get that wrong and every
+    // booking reads as past, the count is zero, and the guard is silently off.
+    label: 'the enumerator treats "no date at all" as a date',
+    find: '        const past = (value) => after !== null && !undatedValue(value) && String(value) <= after;',
+    replace: '        const past = (value) => value !== null && String(value) <= String(after);',
+  },
+  {
+    // The other half of the same predicate: `''` is what the field-import
+    // apply path writes for an open-ended practice slot, and reading it as a
+    // date earlier than everything drops a slot that runs forever out of the
+    // refusal -- while the same row still reports `unbounded: true`.
+    label: 'an empty valid_until reads as a date before every date',
+    suite: 'tests/fieldLifecycleRpcs.test.js',
+    find: `        const undatedValue = (value) =>
+          value === null || value === undefined || String(value) === '';`,
+    replace: '        const undatedValue = (value) => value === null || value === undefined;',
+  },
+  {
+    // Not scenario-table plants: the table states the RPC's OUTCOME and
+    // deliberately leaves the row-level consequences to
+    // `fieldDeleteGuard.test.js`, so that is the suite these are aimed at.
+    // Pointing them at the table instead would report NOT CAUGHT and say
+    // nothing about whether anything covers them.
+    label: 'a confirmed delete stops unassigning what survives it',
+    suite: 'tests/fieldDeleteGuard.test.js',
+    find: `          for (const row of db[table] || []) {
+            if (String(row.field_id) === String(p.p_field_id)) row.field_id = null;
+          }`,
+    replace: '          // survivors left pointing at the deleted field',
+  },
+  {
+    label: 'a confirmed delete stops cascading game slots',
+    suite: 'tests/fieldDeleteGuard.test.js',
+    find: "        destroy('game_slots', onField('game_slots'));",
+    replace: "        // destroy('game_slots', onField('game_slots'));",
+  },
+  {
+    // The report and the effect are held together by reading the doomed ids
+    // out of `affected`. Recomputing them independently is how the two come
+    // to disagree.
+    label: 'a confirmed delete stops destroying the fixtures it reported',
+    suite: 'tests/fieldDeleteGuard.test.js',
+    find: "        destroy('games', reported('games'));",
+    replace: "        // destroy('games', reported('games'));",
+  },
+  {
+    // The tombstone is what makes a delete of a SEEDED row durable across
+    // `getDB()`'s re-merge. Without it the RPC reports `deleted: true` and the
+    // row is back on the next read -- the defect this file's own test found.
+    label: 'the deleted field is not tombstoned and resurrects',
+    suite: 'tests/fieldDeleteGuard.test.js',
+    find: "        markMockDeleted(db, 'fields', [field.id]);",
+    replace: "        // markMockDeleted(db, 'fields', [field.id]);",
+  },
+  {
+    // **A NULL confirmation is not a confirmation.** It must read as
+    // unconfirmed on BOTH arms; the SQL got retire wrong until 20260907000000
+    // while the mock had it right, so this pins the mock's half of a contract
+    // the two used to disagree on.
+    label: 'retire reads a NULL confirmation as yes',
+    find: `        if (affected.length > 0 && p.p_confirm !== true) {
+          audit('field', field.id, 'updated', {`,
+    replace: `        if (affected.length > 0 && !p.p_confirm === false) {
+          audit('field', field.id, 'updated', {`,
+  },
+  {
+    label: 'delete reads a NULL confirmation as yes',
+    find: `        if (affected.length > 0 && p.p_confirm !== true) {
+          audit('field', field.id, 'deleted', {`,
+    replace: `        if (affected.length > 0 && !p.p_confirm === false) {
+          audit('field', field.id, 'deleted', {`,
+  },
+  {
+    // The blackout twin of the field tombstone. Aimed at the contract file,
+    // because the scenario table says nothing about durability.
+    label: 'a deleted blackout is not tombstoned',
+    suite: 'tests/fieldBlackoutMockContract.test.js',
+    find: "        markMockDeleted(db, 'field_blackouts', [existing.id]);",
+    replace: "        // markMockDeleted(db, 'field_blackouts', [existing.id]);",
+  },
+  {
+    // `cascades` is the producer's internal answer; retire's payload must not
+    // carry it, because its SQL twin emits no such key.
+    label: 'retire leaks the producer cascades flag into its payload',
+    suite: 'tests/fieldLifecycleRpcs.test.js',
+    find: `        const affected = fieldBookings(p.p_field_id, String(p.p_effective_to)).map(
+          ({ cascades: _cascades, ...row }) => row
+        );`,
+    replace: '        const affected = fieldBookings(p.p_field_id, String(p.p_effective_to));',
+  },
+  {
+    // The same leak on the delete arm. It used to live on a second branch --
+    // `cascades` was stripped for the per-row kinds and not for the
+    // always-deleted ones -- and there is only one branch now that the
+    // disposition comes from `cascades` for every kind, so the plant follows it
+    // rather than being retired with the branch it happened to sit on.
+    label: 'delete leaks the cascades flag into its payload',
+    suite: 'tests/fieldLifecycleRpcs.test.js',
+    find: "          return { ...rest, disposition: cascades ? 'deleted' : 'unassigned' };",
+    replace: "          return { ...row, disposition: cascades ? 'deleted' : 'unassigned' };",
+  },
+  {
+    // **The audit row goes back to carrying the whole list.** The migration
+    // writes `field_bookings_digest(v_affected)` into `metadata.affected` on
+    // every booking phase; the mock wrote the raw array, and nothing looked.
+    label: 'the refusal audit writes the whole list again',
+    suite: 'tests/fieldLifecycleRpcs.test.js',
+    find: `            reason: 'bookings_exist',
+            affected_count: affected.length,
+            affected: fieldBookingsDigest(affected),`,
+    replace: `            reason: 'bookings_exist',
+            affected_count: affected.length,
+            affected,`,
+  },
+  {
+    // The other arm of the same divergence: retire's `before` phase.
+    label: 'the retirement audit writes the whole list again',
+    suite: 'tests/fieldLifecycleRpcs.test.js',
+    find: `          affected_count: affected.length,
+          affected: fieldBookingsDigest(affected),
+          before: previous,`,
+    replace: `          affected_count: affected.length,
+          affected,
+          before: previous,`,
+  },
+  {
+    // **The empty valid_until reaches the payload verbatim.** `undatedValue`
+    // was applied to the filter but not to the projection, so the row this
+    // reading exists for reported `on_date: ''` here and `null` in Postgres.
+    label: 'an empty valid_until is projected as an empty string',
+    suite: 'tests/fieldLifecycleRpcs.test.js',
+    find: '              on_date: undatedValue(slot.valid_until) ? null : slot.valid_until,',
+    replace: '              on_date: slot.valid_until ?? null,',
+  },
+  {
+    // **A confirmed retirement stops saying what it just closed over.** Its SQL
+    // twin returns `affected` on the success path as well as on the refusal.
+    label: 'the confirmed retirement stops reporting what it stranded',
+    suite: 'tests/fieldLifecycleRpcs.test.js',
+    find: '          data: { retired: true, affected_count: affected.length, affected, field },',
+    replace: '          data: { retired: true, affected_count: affected.length, field },',
+  },
+  {
+    // **The boundary off-by-one, on the arm that shared it with the SQL.**
+    // `rangeLastDay` used to return the EXCLUSIVE upper bound, so a practice
+    // running through the retirement date read as stranded. Both arms agreed,
+    // which is exactly why the scenario table had to state the boundary as data
+    // before either could be measured against it.
+    label: 'the practice range boundary is read exclusively again',
+    find: `        if (match[3] === ']') return end;
+        const previous = new Date(\`\${end}T00:00:00Z\`);
+        if (Number.isNaN(previous.getTime())) return null;
+        previous.setUTCDate(previous.getUTCDate() - 1);`,
+    replace: `        if (match[3] === ')') return end;
+        const previous = new Date(\`\${end}T00:00:00Z\`);
+        if (Number.isNaN(previous.getTime())) return null;
+        previous.setUTCDate(previous.getUTCDate() + 1);`,
+  },
+  {
+    // **The disposition, re-derived from a hard-coded kind list.** The SQL asks
+    // the producer and never asks which table a row came from; this arm used to
+    // keep two lists beside `cascades`, a second answer to a question the
+    // migration header argues must have exactly one.
+    label: 'the delete arm keeps its own kind lists again',
+    find: `          return { ...rest, disposition: cascades ? 'deleted' : 'unassigned' };`,
+    replace: `          return {
+            ...rest,
+            disposition: ['game_slot', 'practice_slot', 'game'].includes(row.kind)
+              ? 'deleted'
+              : 'unassigned',
+          };`,
+  },
   {
     // Not a scenario-table plant: a scenario's `before` state is written
     // through `.insert()`, so the very state this breaks is one the table
@@ -135,14 +373,30 @@ if (existsSync(`${MOCK}.orig`)) {
   process.exit(2);
 }
 
-console.log('=== baseline: the scenario suite must pass before any plant ===');
-const baseline = runSuite(SCENARIOS);
-if (!baseline.ok) {
-  console.error('BASELINE RED -- refusing to plant. Every plant would report CAUGHT.');
-  console.error(baseline.output.split('\n').slice(-25).join('\n'));
-  process.exit(3);
+// **A baseline for EVERY suite a plant targets, derived from the plant list.**
+//
+// This asserted a green baseline for the scenario suite alone while six plants
+// aimed at two other files, whose baselines were never checked -- so a suite
+// that was already red would have scored its plants CAUGHT and proved nothing.
+// That is the identical defect found in `prove.sh` in PR 2 round 3 and then
+// found unapplied one directory over in round 5; this is its third appearance,
+// so the set is now DERIVED rather than written down and cannot drift again.
+const TARGETED_SUITES = [...new Set(PLANTS.map((plant) => plant.suite ?? SCENARIOS))].sort();
+console.log(`=== baseline: every targeted suite must pass before any plant ===`);
+for (const suite of TARGETED_SUITES) {
+  const baseline = runSuite(suite);
+  if (!baseline.ran) {
+    console.error(`BASELINE COULD NOT RUN -- ${baseline.why}`);
+    process.exit(3);
+  }
+  if (!baseline.ok) {
+    console.error(`BASELINE RED for ${suite} -- refusing to plant.`);
+    console.error('  Every plant aimed at it would report CAUGHT and prove nothing.');
+    console.error(baseline.output.split('\n').slice(-25).join('\n'));
+    process.exit(3);
+  }
+  console.log(`BASELINE GREEN  ${suite}`);
 }
-console.log('BASELINE GREEN');
 
 let attempted = 0;
 let missed = 0;
@@ -158,10 +412,14 @@ for (const plant of PLANTS) {
     continue;
   }
   let red = false;
+  let ran = true;
+  let why = '';
   let output = '';
   try {
     writeFileSync(MOCK, original.replace(plant.find, plant.replace));
     const result = runSuite(plant.suite ?? SCENARIOS);
+    ran = result.ran;
+    why = result.why;
     red = !result.ok;
     output = result.output;
   } finally {
@@ -174,7 +432,11 @@ for (const plant of PLANTS) {
     console.error('RESTORE FAILED -- the mock client does not match what was read at start');
     process.exit(4);
   }
-  if (red) {
+  if (!ran) {
+    // Never scored: the suite did not execute, so this says nothing either way.
+    console.log(`${plant.label.padEnd(52)} DID NOT RUN (${why})`);
+    uncaught += 1;
+  } else if (red) {
     console.log(`${plant.label.padEnd(52)} CAUGHT (by ${plant.suite ?? SCENARIOS})`);
     caught += 1;
   } else {

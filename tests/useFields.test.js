@@ -121,6 +121,12 @@ describe('useFields', () => {
       p_active: false,
     });
 
+    // **`p_confirm` is passed explicitly, and false by default.** The guard
+    // lives in the RPC, so the flag is the only way past it; a caller that
+    // omitted it would be relying on the database's DEFAULT, which is the same
+    // guarantee stated in two places.
+    // @ts-expect-error [MOCK] - partial RPC response is enough for this assertion.
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: { deleted: true }, error: null });
     await act(async () => {
       await result.current.deleteField('field-1');
     });
@@ -128,6 +134,70 @@ describe('useFields', () => {
     expect(supabase.rpc).toHaveBeenCalledWith('admin_delete_field', {
       p_organization_id: 'org-1',
       p_field_id: 'field-1',
+      p_confirm: false,
     });
+    await waitFor(() => expect(result.current.fields).toHaveLength(0));
+  });
+
+  it('keeps a refused field in the list and hands the refusal back', async () => {
+    // **A refusal is not an error.** `admin_delete_field` returns
+    // `{deleted:false, ...}` with `error` null, and this hook used to discard
+    // `data` entirely -- so a refusal removed the field from the list it had
+    // not deleted. The list is the subject here, not the return value: it is
+    // what an operator sees.
+    const refusal = {
+      deleted: false,
+      reason: 'bookings_exist',
+      affected_count: 2,
+      affected: [
+        { kind: 'game_slot', id: 'gs-1', disposition: 'deleted' },
+        { kind: 'practice_assignment', id: 'pa-1', disposition: 'unassigned' },
+      ],
+    };
+    // @ts-expect-error [MOCK] - partial RPC response is enough for this assertion.
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: refusal, error: null });
+
+    const { result } = renderHook(() => useFields());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.fields).toHaveLength(1);
+
+    /** @type {any} */
+    let outcome;
+    await act(async () => {
+      outcome = await result.current.deleteField('field-1');
+    });
+
+    expect(outcome).toEqual(refusal);
+    expect(result.current.fields).toHaveLength(1);
+    expect(result.current.fields[0].id).toBe('field-1');
+
+    // Confirming passes the flag through rather than calling a different RPC.
+    // @ts-expect-error [MOCK] - partial RPC response is enough for this assertion.
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: { deleted: true }, error: null });
+    await act(async () => {
+      await result.current.deleteField('field-1', { confirm: true });
+    });
+    expect(supabase.rpc).toHaveBeenCalledWith('admin_delete_field', {
+      p_organization_id: 'org-1',
+      p_field_id: 'field-1',
+      p_confirm: true,
+    });
+    await waitFor(() => expect(result.current.fields).toHaveLength(0));
+  });
+
+  it('raises on a response it cannot read rather than calling it a refusal', async () => {
+    // **Unreadable is not "nothing is booked".** Returning `{deleted:false}`
+    // here made the page offer a consequence preview reading "0 booking(s)",
+    // which an operator reasonably takes as "this field is empty". The field
+    // still must not leave the list, so this raises rather than guessing in
+    // either direction.
+    // @ts-expect-error [MOCK] - the point of this case is an unreadable payload.
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: null, error: null });
+
+    const { result } = renderHook(() => useFields());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await expect(result.current.deleteField('field-1')).rejects.toThrow(/no readable result/);
+    expect(result.current.fields).toHaveLength(1);
   });
 });

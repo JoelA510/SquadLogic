@@ -114,13 +114,49 @@ export default function FieldManagementPage() {
   };
 
   const handleDelete = async (field) => {
-    if (window.confirm(`Are you sure you want to delete ${field.name}?`)) {
-      try {
-        await deleteField(field.id);
-      } catch (err) {
-        logger.error('Delete failed', err);
-        alert('Failed to delete field: ' + err.message);
+    if (!window.confirm(`Are you sure you want to delete ${field.name}?`)) return;
+    try {
+      const attempt = await deleteField(field.id);
+      if (attempt?.deleted) return;
+
+      // **The RPC refused because the ground is booked, and it said what is
+      // on it.** Before the guard existed this delete cascaded the field's
+      // slots away, left its assigned games without a venue and left its
+      // practice assignments pointing at a row that no longer existed --
+      // silently. Showing the operator the count and what would happen to each
+      // kind is the whole point of the refusal; swallowing it here would put
+      // the silence back one level up.
+      //
+      // `window.confirm`/`alert` match what the rest of this page already
+      // uses. The proper consequence preview is 8.4 PR 3's surface.
+      const affected = attempt.affected ?? [];
+      const byOutcome = affected.reduce((acc, row) => {
+        acc[row.disposition] = (acc[row.disposition] || 0) + 1;
+        return acc;
+      }, /** @type {Record<string, number>} */ ({}));
+      // **"Destroyed" and "left without a venue" are different losses**, and
+      // which one a booking suffers depends on the row rather than its table:
+      // a scheduled game is destroyed with its slot, while a free-standing
+      // assignment survives venueless. The RPC works that out per row and this
+      // just counts the words, so the prompt cannot promise a survival the
+      // database is not going to deliver.
+      const destroyed = byOutcome.deleted ?? 0;
+      const unassigned = byOutcome.unassigned ?? 0;
+      const proceed = window.confirm(
+        `${field.name} has ${attempt.affected_count ?? affected.length} booking(s).\n` +
+          `Deleting it permanently removes ${destroyed} of them` +
+          (unassigned > 0 ? ` and leaves ${unassigned} without a venue` : '') +
+          '.\n\nDelete anyway?'
+      );
+      if (!proceed) return;
+
+      const confirmed = await deleteField(field.id, { confirm: true });
+      if (!confirmed?.deleted) {
+        alert('Failed to delete field: the request was refused.');
       }
+    } catch (err) {
+      logger.error('Delete failed', err);
+      alert('Failed to delete field: ' + err.message);
     }
   };
 

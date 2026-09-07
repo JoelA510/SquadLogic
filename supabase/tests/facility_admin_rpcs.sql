@@ -157,6 +157,11 @@ SELECT is(
     'deleted field is removed'
 );
 
+-- create_location, create_field, update_field, then admin_delete_field's
+-- BEFORE and AFTER phases -- five, not four. 20260907000000 gave the delete
+-- the same audit-both-phases shape admin_retire_field has, because "what did
+-- it look like before" is the half that makes a destructive decision
+-- reviewable.
 SELECT is(
     (
         SELECT count(*)
@@ -165,7 +170,7 @@ SELECT is(
            AND action = 'settings.updated'
            AND resource_type IN ('location', 'field')
     )::integer,
-    4,
+    5,
     'facility RPC mutations write settings audit events'
 );
 

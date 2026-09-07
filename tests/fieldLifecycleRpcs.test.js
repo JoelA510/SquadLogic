@@ -37,15 +37,28 @@ const ORG = 'org-1';
  * @returns {string[]} sorted `kind` literals
  */
 const migrationKinds = () => {
+  // **Read from the SHARED producer.** It used to parse admin_retire_field's
+  // own union in 20260906000000 -- which was the problem: that union had four
+  // arms where the delete had five, so a retirement under-reported and this
+  // helper certified the shortfall as the expected set. 20260907000000 moved
+  // both RPCs onto `public.field_bookings`, and this reads that.
   const sql = readFileSync(
     path.join(
       path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
-      'supabase/migrations/20260906000000_field_effective_dating.sql'
+      'supabase/migrations/20260907000000_field_delete_booking_guard.sql'
     ),
     'utf8'
   );
-  const cte = sql.slice(sql.indexOf('WITH affected AS ('), sql.indexOf('INTO v_affected'));
-  return [...new Set([...cte.matchAll(/SELECT '([a-z_]+)'::text/g)].map((m) => m[1]))].sort();
+  const body = sql.slice(
+    sql.indexOf('CREATE OR REPLACE FUNCTION public.field_bookings('),
+    sql.indexOf('REVOKE ALL ON FUNCTION public.field_bookings')
+  );
+  expect(body.length, 'the shared enumerator moved; this parse is stale').toBeGreaterThan(100);
+  const kinds = [...new Set([...body.matchAll(/SELECT '([a-z_]+)'::text/g)].map((m) => m[1]))];
+  // A parse that matched nothing would make every `kinds.includes(...)` below
+  // fail loudly rather than pass, but an empty set is still a stale parse.
+  expect(kinds.length).toBe(5);
+  return kinds.sort();
 };
 
 const setMockSession = (userId) => {
@@ -316,6 +329,41 @@ describe('field lifecycle RPCs :: retirement writes active and effective_to toge
     expect(bounded.unbounded).toBe(false);
   });
 
+  it('treats an EMPTY valid_until as no date, not as a date before every date', async () => {
+    // **The field-import apply path writes `valid_until: ''`** for an
+    // open-ended practice slot (`payload.valid_until || payload.end_date ||
+    // ''`), so '' is a shape the corpus really produces. A date comparison
+    // reads '' as earlier than everything, which drops a slot that runs
+    // forever out of the affected list -- while the same row still reports
+    // `unbounded: true`. A row cannot be both certainly stranded and
+    // unaffected.
+    const field = someField();
+    await supabase.from('practice_slots').insert({
+      id: 'practice-empty-until',
+      organization_id: ORG,
+      field_id: field.id,
+      day_of_week: 'wed',
+      valid_from: '2026-01-01',
+      valid_until: '',
+    });
+
+    const { data } = await supabase.rpc('admin_retire_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+      p_effective_to: '2099-12-31',
+      p_confirm: false,
+    });
+    const carried = data.affected.find((a) => String(a.id) === 'practice-empty-until');
+    expect(carried, 'an open-ended practice slot was dropped from the refusal').toBeDefined();
+    expect(carried.unbounded).toBe(true);
+    expect(carried.undated).toBe(false);
+    // And the same reading in the PROJECTION, not only in the filter. Postgres
+    // cannot store '' in a date column, so it reports null here; passing the ''
+    // through would give a consumer branching on `on_date === null` a different
+    // answer on each arm for exactly the row this case is about.
+    expect(carried.on_date, 'the empty valid_until reached the payload verbatim').toBeNull();
+  });
+
   it('reads a game slot date from slot_date, not only from start', async () => {
     // **The defect the first draft shipped.** `game_slots.start` is nullable
     // AND the import path never populates it -- it writes slot_date/start_time.
@@ -515,9 +563,24 @@ describe('field lifecycle RPCs :: blackouts are scoped to exactly one thing', ()
       p_blackout_until: '2026-08-31',
     });
     expect(getMockData('field_blackouts').length).toBe(1);
+    // **`p_confirm: true` is load-bearing here, and its absence is why this
+    // test changed.** The seeded org's first field carries game slots, so an
+    // unconfirmed delete is now REFUSED and cascades nothing. The refusal is
+    // asserted directly first, so this test proves the guard is live rather
+    // than routing round it: without the assertion, a guard that had stopped
+    // working would leave the confirmed call below passing unchanged.
+    const refused = await supabase.rpc('admin_delete_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+    });
+    expect(refused.error).toBeNull();
+    expect(refused.data.deleted).toBe(false);
+    expect(getMockData('field_blackouts').length).toBe(1);
+
     await supabase.rpc('admin_delete_field', {
       p_organization_id: ORG,
       p_field_id: field.id,
+      p_confirm: true,
     });
     expect(getMockData('field_blackouts').length).toBe(0);
   });
@@ -573,8 +636,244 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
     // below assert that the mock produces the empty set, which every possible
     // mock satisfies.
     const kinds = migrationKinds();
-    expect(kinds.length).toBe(4);
-    expect(kinds).toEqual(['game_assignment', 'game_slot', 'practice_assignment', 'practice_slot']);
+    // FIVE, not four. `games` carries no field_id and is destroyed with its
+    // slot anyway, so a retirement that could not see it under-reported what it
+    // stranded -- and this assertion, pinned at four, certified the shortfall.
+    expect(kinds.length).toBe(5);
+    expect(kinds).toEqual([
+      'game',
+      'game_assignment',
+      'game_slot',
+      'practice_assignment',
+      'practice_slot',
+    ]);
+  });
+
+  it('gives retire the six keys its SQL twin emits, and no more', async () => {
+    // **`cascades` is the producer's internal answer**, not part of either
+    // payload: it says whether a DELETE would destroy the row, and a retirement
+    // destroys nothing. The SQL builds retire's jsonb key by key and emits six;
+    // the mock shares the enumerator, so it has to drop the seventh rather than
+    // pass it through. A key the mock produces and the database does not is the
+    // divergence the shared scenario table exists to stop, one level below
+    // anything the table compares.
+    const field = someField();
+    await supabase.from('game_slots').insert({
+      id: 'keys-gs',
+      organization_id: ORG,
+      field_id: field.id,
+      slot_date: '2099-01-01',
+    });
+
+    const { data: retired } = await supabase.rpc('admin_retire_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+      p_effective_to: '2026-01-01',
+      p_confirm: false,
+    });
+    expect(retired.retired).toBe(false);
+    expect(retired.affected.length).toBeGreaterThan(0);
+    for (const row of retired.affected) {
+      expect(Object.keys(row).sort(), `retire row ${row.id}`).toEqual([
+        'id',
+        'kind',
+        'on_date',
+        'unbounded',
+        'undated',
+        'week_index',
+      ]);
+    }
+
+    // ... and the delete payload carries exactly one more: the word the
+    // operator reads, which retire has no answer for.
+    const { data: refused } = await supabase.rpc('admin_delete_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+    });
+    expect(refused.deleted).toBe(false);
+    expect(refused.affected.length).toBeGreaterThan(0);
+    for (const row of refused.affected) {
+      expect(Object.keys(row).sort(), `delete row ${row.id}`).toEqual([
+        'disposition',
+        'id',
+        'kind',
+        'on_date',
+        'unbounded',
+        'undated',
+        'week_index',
+      ]);
+    }
+  });
+
+  it('returns the top-level keys its SQL twin returns, on the SUCCESS paths too', async () => {
+    // **The refusal payloads were pinned; the success payloads were not.** The
+    // mechanism census -- every site in this file writing `affected` -- found
+    // a confirmed retirement returning `{retired, affected_count, field}` while
+    // its SQL twin returns `affected` as well, so a UI could list what a
+    // refusal would strand but not what a confirmation just did.
+    //
+    // The expected sets are read out of the migration's own RETURN blocks.
+    const sql = readFileSync(
+      path.join(
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
+        'supabase/migrations/20260907000000_field_delete_booking_guard.sql'
+      ),
+      'utf8'
+    );
+    /**
+     * The keys of the LAST `RETURN jsonb_build_object(...)` in one RPC -- the
+     * success path, every earlier return being a refusal or a not-found.
+     *
+     * @param {string} fnName
+     * @returns {string[]} sorted key literals
+     */
+    const successKeys = (fnName) => {
+      const start = sql.indexOf(`CREATE OR REPLACE FUNCTION public.${fnName}(`);
+      expect(start, `${fnName} is not in this migration`).toBeGreaterThan(-1);
+      const body = sql.slice(start, sql.indexOf('REVOKE ALL ON FUNCTION', start));
+      const blocks = body.split('RETURN jsonb_build_object(');
+      expect(blocks.length, `${fnName} has no RETURN jsonb_build_object`).toBeGreaterThan(1);
+      const last = blocks[blocks.length - 1].split(');')[0];
+      const keys = [...new Set([...last.matchAll(/'([a-z_]+)',/g)].map((m) => m[1]))];
+      expect(keys.length, `${fnName}'s success return parsed to nothing`).toBeGreaterThan(1);
+      return keys.sort();
+    };
+
+    const field = someField();
+    await supabase.from('game_slots').insert({
+      id: 'success-keys-gs',
+      organization_id: ORG,
+      field_id: field.id,
+      slot_date: '2099-01-01',
+    });
+
+    const { data: retired } = await supabase.rpc('admin_retire_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+      p_effective_to: '2026-01-01',
+      p_confirm: true,
+    });
+    expect(retired.retired).toBe(true);
+    expect(Object.keys(retired).sort()).toEqual(successKeys('admin_retire_field'));
+    // Not merely present: the same rows the refusal would have listed.
+    expect(retired.affected.length).toBe(retired.affected_count);
+    expect(retired.affected_count).toBeGreaterThan(0);
+
+    const { data: deleted } = await supabase.rpc('admin_delete_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+      p_confirm: true,
+    });
+    expect(deleted.deleted).toBe(true);
+    expect(Object.keys(deleted).sort()).toEqual(successKeys('admin_delete_field'));
+  });
+
+  it('bounds the audit row the way field_bookings_digest does, on both arms', async () => {
+    // **The PAYLOAD carries the whole list; the AUDIT ROW carries a digest.**
+    // The migration writes `public.field_bookings_digest(v_affected)` into
+    // `audit_log.metadata.affected` on all four booking phases -- a refusal on
+    // a busy field would otherwise write an arbitrarily large row on every
+    // attempt -- while the mock wrote the raw array. Nothing in the suite
+    // looked at the mock's audit metadata, so the two arms disagreed silently
+    // about the shape of a field PR 3's audit surface is built to read.
+    //
+    // The expected key set is READ OUT OF THE MIGRATION, not written here: a
+    // list copied from either arm would agree with whichever it was copied
+    // from, which is how the shortfall above got certified once already.
+    const sql = readFileSync(
+      path.join(
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
+        'supabase/migrations/20260907000000_field_delete_booking_guard.sql'
+      ),
+      'utf8'
+    );
+    const digestBody = sql.slice(
+      sql.indexOf('CREATE OR REPLACE FUNCTION public.field_bookings_digest('),
+      sql.indexOf('REVOKE ALL ON FUNCTION public.field_bookings_digest')
+    );
+    expect(digestBody.length, 'the digest moved; this parse is stale').toBeGreaterThan(100);
+    const digestKeys = [
+      ...new Set([...digestBody.matchAll(/^\s+'([a-z_]+)',/gm)].map((m) => m[1])),
+    ];
+    expect(digestKeys.sort()).toEqual(['by_kind', 'omitted', 'sample', 'total']);
+
+    const field = someField();
+    await supabase.from('game_slots').insert({
+      id: 'digest-gs',
+      organization_id: ORG,
+      field_id: field.id,
+      slot_date: '2099-01-01',
+    });
+    await supabase.from('practice_slots').insert({
+      id: 'digest-ps',
+      organization_id: ORG,
+      field_id: field.id,
+      day_of_week: 'mon',
+      valid_from: '2026-01-01',
+    });
+
+    const auditRows = () =>
+      getMockData('audit_log').filter(
+        (row) =>
+          String(row.resource_id) === String(field.id) &&
+          ['admin_retire_field', 'admin_delete_field'].includes(row.metadata?.operation)
+      );
+
+    // All four phases that carry the key, in the order that reaches them: a
+    // refusal on each arm, then a confirmed call on each. Without the confirmed
+    // retire the `before` phase of that arm is never written, and its plant
+    // came back NOT CAUGHT -- the assertion below was reading the delete's
+    // `before` twice and calling it both arms.
+    await supabase.rpc('admin_retire_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+      p_effective_to: '2026-01-01',
+      p_confirm: false,
+    });
+    await supabase.rpc('admin_retire_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+      p_effective_to: '2026-01-01',
+      p_confirm: true,
+    });
+    await supabase.rpc('admin_delete_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+    });
+    await supabase.rpc('admin_delete_field', {
+      p_organization_id: ORG,
+      p_field_id: field.id,
+      p_confirm: true,
+    });
+
+    // Every phase that carries `affected` at all, whichever RPC wrote it,
+    // compared against the four NAMED pairs rather than against itself: an arm
+    // that stopped writing the key is then a shortfall, not a silence.
+    const carrying = auditRows().filter((row) => 'affected' in (row.metadata || {}));
+    expect(
+      [...new Set(carrying.map((row) => `${row.metadata.operation}/${row.metadata.phase}`))].sort()
+    ).toEqual([
+      'admin_delete_field/before',
+      'admin_delete_field/refused',
+      'admin_retire_field/before',
+      'admin_retire_field/refused',
+    ]);
+    for (const row of carrying) {
+      const digest = row.metadata.affected;
+      expect(
+        Array.isArray(digest),
+        `${row.metadata.operation}/${row.metadata.phase} wrote a raw array`
+      ).toBe(false);
+      expect(Object.keys(digest).sort(), `${row.metadata.operation}/${row.metadata.phase}`).toEqual(
+        ['by_kind', 'omitted', 'sample', 'total']
+      );
+      expect(digest.total).toBe(row.metadata.affected_count);
+      expect(digest.sample.length).toBeLessThanOrEqual(digest.total);
+      expect(
+        Object.values(digest.by_kind).reduce((a, b) => a + b, 0),
+        'by_kind does not add up to total'
+      ).toBe(digest.total);
+    }
   });
 
   it('reports every kind the migration enumerates, assignments included', async () => {
@@ -605,6 +904,13 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
       field_id: field.id,
       effective_date_range: '[2098-01-01,2099-06-30]',
     });
+    // The fifth kind: a fixture on the seeded slot. A retirement strands it
+    // exactly as it strands the slot, and until this PR neither arm said so.
+    await supabase.from('games').insert({
+      id: 'fam-g',
+      organization_id: ORG,
+      game_slot_id: 'fam-gs',
+    });
 
     const { data, error } = await supabase.rpc('admin_retire_field', {
       p_organization_id: ORG,
@@ -621,20 +927,25 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
     // ... and each seeded row is there by id, so "the kind appeared" is not
     // satisfied by some other row of the same kind already in the corpus.
     const byId = new Map(data.affected.map((a) => [String(a.id), a]));
-    for (const id of ['fam-gs', 'fam-ga', 'fam-ps', 'fam-pa']) {
+    for (const id of ['fam-gs', 'fam-ga', 'fam-ps', 'fam-pa', 'fam-g']) {
       expect(byId.has(id)).toBe(true);
     }
     expect(byId.get('fam-ga').on_date).toBe('2099-01-02');
     expect(byId.get('fam-ga').week_index).toBe(4);
     expect(byId.get('fam-ga').undated).toBe(false);
-    // **`upper()` normalizes an inclusive range to the day after.** Reading the
-    // closing literal as the last covered day would report 2099-06-30 here and
-    // judge an assignment on its final day unaffected.
-    expect(byId.get('fam-pa').on_date).toBe('2099-07-01');
+    // **The LAST COVERED DAY, which is what the other four arms report.** This
+    // assertion used to demand 2099-07-01 -- `upper()` of the canonicalised
+    // `[)` range, the day AFTER the practice ends -- and argued for it in a
+    // comment. That was the defect, pinned: an operator reading the payload saw
+    // a date the practice does not run on, and comparing that value to the
+    // retirement date called a practice ending exactly ON it stranded, while a
+    // game slot the same day was not. The mock agreed, so the shared scenario
+    // table saw one answer twice; the fixture now states the boundary as data.
+    expect(byId.get('fam-pa').on_date).toBe('2099-06-30');
     expect(byId.get('fam-pa').unbounded).toBe(false);
   });
 
-  it('calls an unbounded practice assignment certain, and an exclusive range by its literal', async () => {
+  it('calls an unbounded practice assignment certain, and reads each range by its last covered day', async () => {
     const field = someField();
     await supabase.from('practice_assignments').insert({
       id: 'fam-pa-forever',
@@ -669,8 +980,11 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
       expect(byId.get(id).undated).toBe(false);
       expect(byId.get(id).on_date).toBeNull();
     }
-    // An exclusive upper bound is already the exclusive upper: no day added.
-    expect(byId.get('fam-pa-excl').on_date).toBe('2099-06-30');
+    // An EXCLUSIVE upper bound of 2099-06-30 means the range stops covering on
+    // the 29th, so that is the last day -- the other side of the same reading,
+    // and the reason this case sits beside the inclusive one: a fix that simply
+    // subtracted a day everywhere would get this wrong in the other direction.
+    expect(byId.get('fam-pa-excl').on_date).toBe('2099-06-29');
     expect(byId.get('fam-pa-excl').unbounded).toBe(false);
   });
 

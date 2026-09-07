@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import FieldManagementPage from '../frontend/src/pages/FieldManagementPage.jsx';
 
 vi.mock('../frontend/src/hooks/useFields.js', () => ({ useFields: vi.fn() }));
@@ -126,5 +126,126 @@ describe('FieldManagementPage seasonal availability panel', () => {
     render(<FieldManagementPage />);
     expect(screen.getByText('Conditional state')).toBeInTheDocument();
     expect(screen.getByText('Excluded state')).toBeInTheDocument();
+  });
+});
+
+describe('FieldManagementPage delete flow', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /**
+   * `deleteField` returns the RPC's payload; a refusal is `{deleted:false}`
+   * with no error. This mirrors that so the page is exercised against the
+   * contract the hook actually has.
+   *
+   * @param {Array<any>} outcomes one per call, in order
+   */
+  const hookWith = (outcomes) => {
+    const deleteField = vi.fn();
+    for (const outcome of outcomes) deleteField.mockResolvedValueOnce(outcome);
+    vi.mocked(useFields).mockReturnValue({ ...baseHook, deleteField });
+    return deleteField;
+  };
+
+  const REFUSAL = {
+    deleted: false,
+    reason: 'bookings_exist',
+    affected_count: 3,
+    affected: [
+      { kind: 'game_slot', id: 'gs-1', disposition: 'deleted' },
+      { kind: 'practice_slot', id: 'ps-1', disposition: 'deleted' },
+      { kind: 'practice_assignment', id: 'pa-1', disposition: 'unassigned' },
+    ],
+  };
+
+  it('shows the operator what is booked and only deletes when they confirm again', async () => {
+    // **The status the page used to swallow.** Before the guard, deleting
+    // booked ground cascaded its slots away and left its assignments without a
+    // venue, silently. A page that ignored `{deleted:false}` would put that
+    // silence back one level up: the operator would click Delete, see nothing
+    // happen, and have no idea why.
+    const deleteField = hookWith([REFUSAL, { deleted: true }]);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<FieldManagementPage />);
+
+    fireEvent.click(screen.getByLabelText('Delete North Field'));
+
+    await waitFor(() => expect(deleteField).toHaveBeenCalledTimes(2));
+    expect(deleteField).toHaveBeenNthCalledWith(1, 'field-1');
+    expect(deleteField).toHaveBeenNthCalledWith(2, 'field-1', { confirm: true });
+
+    // The second prompt carries the count and both consequences, from the
+    // payload rather than from a sentence written here.
+    const consequence = confirmSpy.mock.calls[1][0];
+    expect(consequence).toContain('3 booking(s)');
+    expect(consequence).toContain('permanently removes 2 of them');
+    expect(consequence).toContain('leaves 1 without a venue');
+    confirmSpy.mockRestore();
+  });
+
+  it('does not delete when the operator declines the consequence prompt', async () => {
+    // The other direction, so the test above is about the confirmation and not
+    // about the page calling delete twice whatever the operator says.
+    const deleteField = hookWith([REFUSAL]);
+    const confirmSpy = vi
+      .spyOn(window, 'confirm')
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+    render(<FieldManagementPage />);
+
+    fireEvent.click(screen.getByLabelText('Delete North Field'));
+
+    await waitFor(() => expect(deleteField).toHaveBeenCalledTimes(1));
+    expect(deleteField).toHaveBeenCalledWith('field-1');
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    confirmSpy.mockRestore();
+  });
+
+  it('does not promise a survival for bookings the database will destroy', async () => {
+    // **The disposition is per ROW, not per table.** A refusal naming two game
+    // assignments -- one slot-linked, one free-standing -- must be summarised
+    // as one destroyed and one left venueless. Counting by TABLE would report
+    // "leaves 2 without a venue" and promise the operator that a scheduled
+    // game survives, which it does not.
+    const deleteField = hookWith([
+      {
+        deleted: false,
+        reason: 'bookings_exist',
+        affected_count: 2,
+        affected: [
+          { kind: 'game_assignment', id: 'ga-slotted', disposition: 'deleted' },
+          { kind: 'game_assignment', id: 'ga-free', disposition: 'unassigned' },
+        ],
+      },
+    ]);
+    const confirmSpy = vi
+      .spyOn(window, 'confirm')
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+    render(<FieldManagementPage />);
+
+    fireEvent.click(screen.getByLabelText('Delete North Field'));
+
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalledTimes(2));
+    const consequence = confirmSpy.mock.calls[1][0];
+    expect(consequence).toContain('permanently removes 1 of them');
+    expect(consequence).toContain('leaves 1 without a venue');
+    expect(deleteField).toHaveBeenCalledTimes(1);
+    confirmSpy.mockRestore();
+  });
+
+  it('asks only once when nothing is booked', async () => {
+    const deleteField = hookWith([{ deleted: true, affected_count: 0, affected: [] }]);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<FieldManagementPage />);
+
+    fireEvent.click(screen.getByLabelText('Delete North Field'));
+
+    await waitFor(() => expect(deleteField).toHaveBeenCalledTimes(1));
+    // One prompt, not two: a guard that refused unbooked ground would be a
+    // different defect, and this is where the page would show it.
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    confirmSpy.mockRestore();
   });
 });

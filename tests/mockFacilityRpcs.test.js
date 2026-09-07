@@ -67,12 +67,22 @@ describe('mock facility admin rpcs', () => {
     expect(deleteError).toBeNull();
     expect(deleted).toMatchObject({ id: field.id, organization_id: 'org-1', deleted: true });
     expect(getMockData('fields').some((row) => row.id === field.id)).toBe(false);
+    // create_location, create_field, update_field, then admin_delete_field's
+    // BEFORE and AFTER phases -- five, not four. The delete audits both phases
+    // because the SQL does, and it does because "what did it look like before"
+    // is the half that makes a destructive decision reviewable.
     expect(
       getMockData('audit_log').filter(
         (row) =>
           row.action === 'settings.updated' && ['location', 'field'].includes(row.resource_type)
       )
-    ).toHaveLength(4);
+    ).toHaveLength(5);
+    expect(
+      getMockData('audit_log')
+        .filter((row) => row.metadata?.operation === 'admin_delete_field')
+        .map((row) => row.metadata.phase)
+        .sort()
+    ).toEqual(['after', 'before']);
   });
 
   it('rejects non-admin and cross-org facility writes', async () => {

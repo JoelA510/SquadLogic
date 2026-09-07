@@ -1210,6 +1210,42 @@ tried to falsify.** Seven `(checked)` claims in `run.sh` and the smoke's new
 section 5c; all eight now have one.
 
 
+### Pass 4: the guard against silent no-ops was one itself, twice
+
+`stale_backups()` ran `find ... 2>/dev/null` and never looked at its exit
+status, so a `PLANT_DIRS` entry that did not resolve produced an empty result
+indistinguishable from a clean tree -- and both the stale-backup refusal and
+`restore_all` became silent no-ops. Reproduced on the pre-fix code with a
+mis-resolved `$REPO`: with a stale `.orig` sitting on disk, the script printed no
+refusal and went straight into the baseline, leaving the backup where it was.
+
+Three guards now, each with a control that was constructed and run:
+
+1. A `PLANT_DIRS` entry that is not a directory stops the run before anything is
+   planted (exit 2). Control: the mis-resolved `$REPO` above.
+2. A `find` that fails at all stops the run (exit 3). Control: a `find` shim on
+   `PATH` that exits 1.
+3. A plant whose file is under no `PLANT_DIRS` entry refuses (exit 5), which is
+   what keeps the still-hand-maintained `PLANT_DIRS` honest -- derived from what
+   is ACTUALLY planted rather than from a second list. Control: a plant aimed at
+   `package.json`.
+
+**The second control found that the first version of the fix was the same defect
+one layer in.** `stale_backups` printed its refusal and called `exit 3` -- from
+inside a function used as `done < <(stale_backups)`, a SUBSHELL, so the exit
+killed the subshell and the run continued. Measured, not reasoned about: the
+log showed the refusal followed by `=== baseline: ...`. A loud message that
+changes nothing is still a silent no-op. It returns a status now and every
+caller checks it.
+
+While running these controls a killed sweep left a real mutation on disk --
+`scope columns collapse to one meaning`, planted into
+`20260906000100_field_blackouts.sql`. It was resolved against `git show HEAD`
+rather than against the `.orig`, which is the habit the whole guard exists to
+make unnecessary. Second escaped mutation of this series, and the reason this
+finding was worth blocking a merge on.
+
+
 ### Still open
 
 - **LIVE-4** — roughly thirty hard deletes in `mockSupabaseClient.js` remove rows

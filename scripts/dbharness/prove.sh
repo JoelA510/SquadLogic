@@ -33,27 +33,87 @@ ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # mutant in the tree. A second list to keep in step is a list that falls out of
 # step, so the sweep now looks wherever it plants.
 PLANT_DIRS=("$REPO/supabase/migrations" "$REPO/docs/sql")
-stale_backups() { find "${PLANT_DIRS[@]}" -name '*.orig' -type f 2>/dev/null; }
 
+# **`2>/dev/null` on the sweep made both callers silent no-ops.** The first
+# version of `stale_backups` discarded `find`'s stderr AND its exit status, so a
+# `PLANT_DIRS` entry that did not resolve -- a mis-resolved `$REPO`, a directory
+# renamed -- produced an empty result that reads exactly like a clean tree. The
+# refusal then printed nothing and exited 0, and `restore_all` left whatever was
+# planted sitting on disk. That is the silent-no-op class this file has now been
+# bitten by three times, in the one function whose whole job is to stop a
+# mutation escaping into the working tree -- and an escaped mutation is not
+# hypothetical here: a container restart earlier in this series left
+# `security_invoker` stripped from the `field_closures` view.
+#
+# So an entry that is not a directory stops the run before anything is planted,
+# and a `find` that fails at all stops it wherever it is noticed. An empty sweep
+# is only allowed to mean "nothing is planted" once the places it looked are
+# known to exist.
+for d in "${PLANT_DIRS[@]}"; do
+  if [ ! -d "$d" ]; then
+    echo "REFUSING TO START: plant directory $d does not exist" >&2
+    echo "  The stale-backup refusal and restore_all sweep only these paths, so a" >&2
+    echo "  wrong one makes both silently do nothing. Fix PLANT_DIRS." >&2
+    exit 2
+  fi
+done
+
+#
+# **It RETURNS rather than exits, and every caller checks.** The first version
+# of this guard printed the refusal and called `exit 3` from inside the
+# function -- but the function is used as `done < <(stale_backups)` and
+# `$(stale_backups)`, both of which run it in a SUBSHELL, so the exit killed the
+# subshell and the script carried straight on. Measured, not reasoned about: a
+# `find` shim that exits 1 produced the refusal message AND then
+# `=== baseline: ...`, the run continuing exactly as if nothing had happened.
+# The identical mistake as the thing being fixed, one layer in -- a loud message
+# that changes nothing is still a silent no-op.
+stale_backups() {
+  local out status
+  out="$(find "${PLANT_DIRS[@]}" -name '*.orig' -type f 2>/tmp/harness_find_err)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "find over the plant directories failed (exit $status)" >&2
+    sed 's/^/  /' /tmp/harness_find_err >&2
+    return 3
+  fi
+  printf '%s\n' "$out"
+  return 0
+}
+
+if ! STALE_AT_START="$(stale_backups)"; then
+  echo "REFUSING TO START: the plant directories could not be swept" >&2
+  echo "  A planted file may be on disk with its .orig beside it. Compare against" >&2
+  echo "  git before re-running." >&2
+  exit 3
+fi
 while IFS= read -r stale; do
   [ -n "$stale" ] || continue
   echo "REFUSING TO START: stale backup $stale" >&2
   echo "  A previous run died between backing up and restoring. Compare it with" >&2
   echo "  the live file, keep whichever is correct, and delete the .orig." >&2
   exit 2
-done < <(stale_backups)
+done <<< "$STALE_AT_START"
 
 # Restore anything still planted if this run is interrupted, so the next one is
 # not blocked by a backup THIS run abandoned. Same derivation, for the same
 # reason: a file this run planted is a file this run must put back, whether or
 # not anyone remembered to add it to a list.
 restore_all() {
-  local orig
+  local orig list
+  # A sweep that FAILED is not a sweep that found nothing: saying so is the
+  # whole point, because this runs when the script is already going down and
+  # there is nobody left to notice a mutation it quietly declined to restore.
+  if ! list="$(stale_backups)"; then
+    echo "restore_all: could not sweep the plant directories -- a planted file may" >&2
+    echo "  STILL BE ON DISK. Check 'git status' before trusting this tree." >&2
+    return 3
+  fi
   while IFS= read -r orig; do
     [ -n "$orig" ] || continue
     mv -f "$orig" "${orig%.orig}"
     echo "restored $(basename "${orig%.orig}") from its backup" >&2
-  done < <(stale_backups)
+  done <<< "$list"
 }
 
 # **A signal handler that returns does not stop the script.** The first version
@@ -142,6 +202,25 @@ fi
 plant() { # label file old new [expected-failing-check] [check-that-must-stay-green]
   local label="$1" file="$2" old="$3" new="$4" expect="${5:-}" green="${6:-}"
   ATTEMPTED=$((ATTEMPTED+1))
+  # **Every planted file must live under a PLANT_DIRS entry.** Those directories
+  # are the only thing the stale-backup refusal and `restore_all` look at, and
+  # PLANT_DIRS is still hand-maintained one level up from the list it replaced --
+  # so this is what stops it drifting, derived from what is ACTUALLY planted
+  # rather than from a second list. `$EMERG` fell into exactly this gap: it was
+  # planted for a whole round while appearing in neither sweep, so an
+  # interrupted run would have left the emergency rollback mutated and the next
+  # run would have adopted that mutation as its baseline.
+  local covered=0 pd
+  for pd in "${PLANT_DIRS[@]}"; do
+    case "$file" in "$pd"/*) covered=1; break;; esac
+  done
+  if [ "$covered" -ne 1 ]; then
+    echo "REFUSING TO PLANT \"$label\": $file is under no PLANT_DIRS entry" >&2
+    echo "  restore_all and the stale-backup refusal would never see its .orig," >&2
+    echo "  so an interrupted run would leave the mutation on disk. Add its" >&2
+    echo "  directory to PLANT_DIRS." >&2
+    exit 5
+  fi
   # **What the file looked like before this run touched it.** See the restore
   # check below for why a checksum rather than trust.
   local before_sum

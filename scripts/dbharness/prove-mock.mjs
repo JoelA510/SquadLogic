@@ -154,8 +154,8 @@ const PLANTS = [
     // assignment survives -- false for every row the scheduler writes, because
     // the slot cascade destroys it before the field_id SET NULL can fire.
     label: 'delete reports one disposition per table again',
-    find: "            return { ...rest, disposition: cascades ? 'deleted' : 'unassigned' };",
-    replace: "            return { ...rest, disposition: 'unassigned' };",
+    find: "          return { ...rest, disposition: cascades ? 'deleted' : 'unassigned' };",
+    replace: "          return { ...rest, disposition: 'unassigned' };",
   },
   {
     // Aimed at fieldDeleteGuard, not the scenario table: every scenario seeds
@@ -271,13 +271,15 @@ const PLANTS = [
     replace: '        const affected = fieldBookings(p.p_field_id, String(p.p_effective_to));',
   },
   {
-    // The same leak on the delete arm's always-deleted branch, which is where
-    // it actually was: `cascades` was stripped for the per-row kinds only.
-    label: 'delete leaks the cascades flag on its always-deleted kinds',
+    // The same leak on the delete arm. It used to live on a second branch --
+    // `cascades` was stripped for the per-row kinds and not for the
+    // always-deleted ones -- and there is only one branch now that the
+    // disposition comes from `cascades` for every kind, so the plant follows it
+    // rather than being retired with the branch it happened to sit on.
+    label: 'delete leaks the cascades flag into its payload',
     suite: 'tests/fieldLifecycleRpcs.test.js',
-    find: "          if (ALWAYS_DELETED.includes(row.kind)) return { ...rest, disposition: 'deleted' };",
-    replace:
-      "          if (ALWAYS_DELETED.includes(row.kind)) return { ...row, disposition: 'deleted' };",
+    find: "          return { ...rest, disposition: cascades ? 'deleted' : 'unassigned' };",
+    replace: "          return { ...row, disposition: cascades ? 'deleted' : 'unassigned' };",
   },
   {
     // **The audit row goes back to carrying the whole list.** The migration
@@ -319,6 +321,36 @@ const PLANTS = [
     suite: 'tests/fieldLifecycleRpcs.test.js',
     find: '          data: { retired: true, affected_count: affected.length, affected, field },',
     replace: '          data: { retired: true, affected_count: affected.length, field },',
+  },
+  {
+    // **The boundary off-by-one, on the arm that shared it with the SQL.**
+    // `rangeLastDay` used to return the EXCLUSIVE upper bound, so a practice
+    // running through the retirement date read as stranded. Both arms agreed,
+    // which is exactly why the scenario table had to state the boundary as data
+    // before either could be measured against it.
+    label: 'the practice range boundary is read exclusively again',
+    find: `        if (match[3] === ']') return end;
+        const previous = new Date(\`\${end}T00:00:00Z\`);
+        if (Number.isNaN(previous.getTime())) return null;
+        previous.setUTCDate(previous.getUTCDate() - 1);`,
+    replace: `        if (match[3] === ')') return end;
+        const previous = new Date(\`\${end}T00:00:00Z\`);
+        if (Number.isNaN(previous.getTime())) return null;
+        previous.setUTCDate(previous.getUTCDate() + 1);`,
+  },
+  {
+    // **The disposition, re-derived from a hard-coded kind list.** The SQL asks
+    // the producer and never asks which table a row came from; this arm used to
+    // keep two lists beside `cascades`, a second answer to a question the
+    // migration header argues must have exactly one.
+    label: 'the delete arm keeps its own kind lists again',
+    find: `          return { ...rest, disposition: cascades ? 'deleted' : 'unassigned' };`,
+    replace: `          return {
+            ...rest,
+            disposition: ['game_slot', 'practice_slot', 'game'].includes(row.kind)
+              ? 'deleted'
+              : 'unassigned',
+          };`,
   },
   {
     // Not a scenario-table plant: a scenario's `before` state is written

@@ -11,6 +11,7 @@ M2="$REPO/supabase/migrations/20260906000100_field_blackouts.sql"
 M3="$REPO/supabase/migrations/20260907000000_field_delete_booking_guard.sql"
 R1="$REPO/docs/sql/20260906000000_revert.sql"
 R3="$REPO/docs/sql/20260907000000_revert.sql"
+EMERG="$REPO/docs/sql/reverts/20260504060000_admin_facility_mutation_rpcs.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 
 # **Refuse to start on a stale backup.** `plant()` writes `<file>.orig` before
@@ -496,6 +497,19 @@ plant "M3 every practice assignment claimed to be destroyed" "$M3" \
     FROM public.practice_assignments pa" \
   "smoke 20260907000000" \
   "smoke 20260906000000"
+# **The boundary, and the one plant the smokes cannot catch.** A daterange
+# canonicalises to `[)`, so `upper()` is the day AFTER the last one covered;
+# comparing it to `p_after` reported a practice ending exactly ON the retirement
+# date as stranded, while a game slot the same day was not. The mock had the
+# identical off-by-one, so the two runners AGREED and the table saw one answer
+# twice -- which is why this plant names the scenario table and requires the
+# smoke to stay green. Agreement is not correctness; only a fixture that states
+# the boundary as data can adjudicate it.
+plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M3" \
+  "                 ELSE upper(pa.effective_date_range) - 1" \
+  "                 ELSE upper(pa.effective_date_range)" \
+  "scenario table" \
+  "smoke 20260907000000"
 # The revert's loss report is code like any other, and the harness plants a
 # future-dated retirement so it cannot pass by iterating zero rows. This proves
 # THAT check can fail: silence the report and the harness must go red.
@@ -523,6 +537,51 @@ plant "R3 revert drops the retirement RPC instead of restoring it" "$R3" \
   "DROP FUNCTION IF EXISTS public.admin_retire_field(uuid, uuid, date, boolean);
 DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);" \
   "revert 20260907000000"
+
+# **One plant per health claim the harness prints.** The three `(checked)` lines
+# above had two plants between them, and the gap is how a probe that reported
+# health without exercising anything survived two rounds: the members of that
+# class share no syntax, so no grep finds them, but the class is enumerable --
+# every line that prints `(checked)` is a claim, and a claim with no plant is a
+# claim nobody has tried to make fail. These two close the remaining gap.
+plant "R3 revert reinstates the weaker guard silently" "$R3" \
+  "  RAISE WARNING 'RESTORING admin_retire_field to its pre-20260907000000 body:" \
+  "  RAISE NOTICE 'restoring a function, no consequences worth naming:" \
+  "revert 20260907000000"
+# **A restored body that calls something ELSE this revert drops.** The pg_proc
+# verdict only looks for `field_bookings`, so a botched revert that reinstated
+# the new audit line -- `field_bookings_digest`, dropped three statements later
+# -- passes it and leaves a retirement raising 42883 on the next call. Only the
+# probe that runs the function can see this, which is what makes it a check
+# rather than a decoration.
+plant "R3 the restored retire calls a helper the revert also drops" "$R3" \
+  "            'affected_count', v_affected_count,
+            'affected', v_affected
+        );
+    END IF;" \
+  "            'affected_count', v_affected_count,
+            'affected', public.field_bookings_digest(v_affected)
+        );
+    END IF;" \
+  "revert 20260907000000"
+
+# **The emergency rollback, back in the state 20260907000000 left it in.** It
+# dropped a signature that no longer exists, so the DROP was a silent no-op and
+# the script committed and reported success with the guarded delete still
+# standing -- the file someone runs at 2am, lying to them. Nothing executed it
+# until this round, which is why two review passes went by without noticing.
+plant "EMERG rollback drops a signature that no longer exists" "$EMERG" \
+  "DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid);
+DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);" \
+  "DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid);" \
+  "emergency rollback 20260504060000"
+# The other direction: a rollback that over-reaches and takes the producer
+# `admin_retire_field` still needs, breaking a function it does not own.
+plant "EMERG rollback takes the producer another RPC still calls" "$EMERG" \
+  "DROP FUNCTION IF EXISTS public.admin_create_location(uuid, text, text, boolean);" \
+  "DROP FUNCTION IF EXISTS public.admin_create_location(uuid, text, text, boolean);
+DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date) CASCADE;" \
+  "emergency rollback 20260504060000"
 
 # **Three numbers, not one.** A single "N caught" cannot tell a genuine catch
 # from a plant that never applied: last round seven mutations reported RED and

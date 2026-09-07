@@ -75,8 +75,20 @@ fresh_db() {
   fi
 }
 
+# `apply_all [stop-after-id]` -- the whole migration set, or the set truncated
+# after the migration whose basename begins with that id.
+#
+# **It was three copies of this loop and only ONE of them counted.** The revert
+# stage and the emergency-rollback stage each built a database with their own
+# open-coded copy, neither of which carried the meta-assertion below -- so a
+# glob that matched nothing, or a migration directory that had moved, built an
+# EMPTY database and every revert and rollback check below then passed against
+# it. The correction applied to one arm of a pair and not its twin is the defect
+# this whole series keeps finding, so there is now one arm: a caller that wants
+# a truncated build passes the id it wants to stop at, and gets the same count
+# gate the full build has always had.
 apply_all() {
-  local applied=0
+  local stop="${1:-}" applied=0 reached=0
   for m in "$REPO"/supabase/migrations/*.sql; do
     if ! psql_file "$m" >/tmp/harness_err 2>&1; then
       echo "FAIL applying $(basename "$m")"
@@ -84,11 +96,21 @@ apply_all() {
       return 1
     fi
     applied=$((applied + 1))
+    if [ -n "$stop" ] && [[ "$(basename "$m")" == ${stop}* ]]; then reached=1; break; fi
   done
-  echo "applied $applied migrations"
+  echo "applied $applied migrations${stop:+ up to $stop}"
   # Meta-assertion: a loop that applied nothing would print "applied 0" and
   # every check below would pass against an empty database.
   if [ "$applied" -lt 100 ]; then echo "FAIL: only $applied migrations applied"; return 1; fi
+  # Its twin, for the truncated form: a loop that ran off the end without ever
+  # meeting its stop id built the database to HEAD, and the revert then checked
+  # against it is a revert checked against a state nobody asked for. A renamed
+  # or removed migration is exactly how that happens, and it would have been
+  # invisible -- the build succeeds, every check runs, and the stage says PASS.
+  if [ -n "$stop" ] && [ "$reached" -ne 1 ]; then
+    echo "FAIL: the migration set contains no ${stop}*, so the build never stopped at it"
+    return 1
+  fi
 }
 
 # pg_cron is not in this image and one migration requires it. A STUB extension
@@ -182,12 +204,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # database migrated up to and including its own forward migration.
 for id in "${NEW_MIGRATIONS[@]}"; do
   if ! fresh_db; then echo "FAIL building a fresh database for ${id}"; STATUS=1; continue; fi
-  ok=1
-  for m in "$REPO"/supabase/migrations/*.sql; do
-    psql_file "$m" >/tmp/harness_err 2>&1 || { ok=0; break; }
-    [[ "$(basename "$m")" == ${id}* ]] && break
-  done
-  if [ "$ok" -eq 0 ]; then echo "FAIL building up to ${id}"; STATUS=1; continue; fi
+  if ! apply_all "$id"; then echo "FAIL building up to ${id}"; STATUS=1; continue; fi
 
   # **Give the revert something to lose.** 20260906000000's revert now names
   # every future-dated retirement before it drops the column that records them,
@@ -433,12 +450,8 @@ echo "=== emergency rollback docs/sql/reverts/20260504060000 (on a database buil
 if ! fresh_db; then
   echo "FAIL building a fresh database for the emergency rollback"; STATUS=1
 else
-  ok=1
-  for m in "$REPO"/supabase/migrations/*.sql; do
-    psql_file "$m" >/tmp/harness_err 2>&1 || { ok=0; break; }
-  done
-  if [ "$ok" -eq 0 ]; then
-    echo "FAIL building to head for the emergency rollback"; tail -5 /tmp/harness_err; STATUS=1
+  if ! apply_all; then
+    echo "FAIL building to head for the emergency rollback"; STATUS=1
   else
     # The precondition, asserted rather than assumed: if the guarded delete were
     # already absent the rollback would have nothing to remove and would pass

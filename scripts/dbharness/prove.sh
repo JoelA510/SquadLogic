@@ -99,21 +99,53 @@ done <<< "$STALE_AT_START"
 # not blocked by a backup THIS run abandoned. Same derivation, for the same
 # reason: a file this run planted is a file this run must put back, whether or
 # not anyone remembered to add it to a list.
+#
+# **`mv`'s status was thrown away and the announcement made anyway.** This
+# printed "restored X from its backup" whether or not the move happened, which
+# is the loud-message-that-changes-nothing shape three times over in this file.
+# `plant()` verifies ITS restore byte for byte and refuses to continue on a
+# mismatch; this, the higher-consequence twin -- it runs when the script is
+# already going down and nobody is left to notice -- verified nothing. Two
+# mutations have escaped onto disk in this series, both on interrupt paths.
+#
+# Every move is now checked, and the directories are swept a SECOND time
+# afterwards: a restore that reported success and left the `.orig` behind is the
+# same silence, one layer in. A failure sets a flag the callers act on.
+RESTORE_ALL_FAILED=0
 restore_all() {
-  local orig list
+  local orig list failed=0
   # A sweep that FAILED is not a sweep that found nothing: saying so is the
   # whole point, because this runs when the script is already going down and
   # there is nobody left to notice a mutation it quietly declined to restore.
   if ! list="$(stale_backups)"; then
     echo "restore_all: could not sweep the plant directories -- a planted file may" >&2
     echo "  STILL BE ON DISK. Check 'git status' before trusting this tree." >&2
+    RESTORE_ALL_FAILED=1
     return 3
   fi
   while IFS= read -r orig; do
     [ -n "$orig" ] || continue
-    mv -f "$orig" "${orig%.orig}"
-    echo "restored $(basename "${orig%.orig}") from its backup" >&2
+    if mv -f "$orig" "${orig%.orig}"; then
+      echo "restored $(basename "${orig%.orig}") from its backup" >&2
+    else
+      echo "restore_all: FAILED to restore ${orig%.orig} from its backup -- the" >&2
+      echo "  PLANTED MUTATION IS STILL ON DISK. Resolve it against 'git show HEAD'," >&2
+      echo "  never against the .orig, and do not commit until you have." >&2
+      failed=1
+    fi
   done <<< "$list"
+  if list="$(stale_backups)"; then
+    while IFS= read -r orig; do
+      [ -n "$orig" ] || continue
+      echo "restore_all: $orig SURVIVED the restore sweep" >&2
+      failed=1
+    done <<< "$list"
+  else
+    echo "restore_all: could not re-sweep to confirm the restores" >&2
+    failed=1
+  fi
+  if [ "$failed" -ne 0 ]; then RESTORE_ALL_FAILED=1; return 4; fi
+  return 0
 }
 
 # **A signal handler that returns does not stop the script.** The first version
@@ -150,10 +182,22 @@ kill_harness() {
 on_signal() {
   trap - EXIT INT TERM
   kill_harness
-  restore_all
+  restore_all || exit 6
   exit 130
 }
-trap restore_all EXIT
+# **A trap that returns cannot change the exit status.** `trap restore_all EXIT`
+# discarded restore_all's status -- bash ignores what an EXIT handler returns --
+# and `on_signal` exited 130 regardless, so both callers could announce that a
+# planted file may still be on disk and then exit 0. The status of the run has
+# to carry that: `exit` inside an EXIT handler sets the final status and the
+# handler is not re-entered, so the original status is preserved on success and
+# replaced by 6 when a mutation may have survived.
+on_exit() {
+  local status=$?
+  restore_all || status=6
+  exit "$status"
+}
+trap on_exit EXIT
 trap on_signal INT TERM
 
 # **A green baseline, asserted before anything is planted.**
@@ -271,12 +315,27 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
     echo "  repair the file, and only then re-run." >&2
     exit 4
   fi
+  # **A stage name is a PREFIX of every check under it.** The emergency
+  # rollback stage prints four different `FAIL emergency rollback 20260504060000`
+  # lines -- the precondition, the script itself, and its two claims -- so a
+  # substring naming the stage is satisfied by whichever fired, which is the
+  # borrowed-evidence mode one level down. Most checks can be named by their own
+  # words; one cannot, because the line it prints IS the bare stage line. An
+  # `expect` beginning with `^` is matched against the WHOLE line, which is the
+  # only way to say "this check and not the three that share its prefix".
+  local expect_line="${expect#^}" expect_hit=1
+  if [ -n "$expect" ]; then
+    case "$expect" in
+      '^'*) grep -qxF "FAIL $expect_line" <<<"$out" || expect_hit=0 ;;
+      *)    grep -qF  "FAIL $expect_line" <<<"$out" || expect_hit=0 ;;
+    esac
+  fi
   if [ "$status" -ne 0 ]; then
-    if [ -n "$expect" ] && ! grep -qF "FAIL $expect" <<<"$out"; then
+    if [ "$expect_hit" -ne 1 ]; then
       # The harness went red, but not where this plant was aimed. Some other
       # check caught it -- which is exactly the borrowed-evidence mode above --
       # so it is NOT a catch for the named check and the difference is printed.
-      printf '%-52s MISATTRIBUTED  <-- red, but not at "%s"\n' "$label" "$expect"
+      printf '%-52s MISATTRIBUTED  <-- red, but not at "%s"\n' "$label" "$expect_line"
       FAIL=$((FAIL+1))
       # `  |` lines included: half the harness's health claims print there and
       # nowhere else, so a filter without them cannot show the line the verdict
@@ -304,15 +363,37 @@ io.open(f,'w',encoding='utf8').write(orig); os.remove(f+'.orig')" "$file"
     # `expect` is a substring match that scores CAUGHT either way. A `green`
     # beginning with `(checked)` is matched against the claim line instead,
     # which makes all seven claims usable as a neighbour that must stay quiet.
-    local green_line="PASS $green"
-    case "$green" in '(checked)'*) green_line="| $green" ;; esac
-    if [ -n "$green" ] && ! grep -qF "$green_line" <<<"$out"; then
+    #
+    # **And a stage's `PASS` is not the stage's verdict.** `run.sh` prints
+    # `PASS scenario table` at line 165 and only THEN checks that the table
+    # reported how many scenarios it executed, printing `FAIL scenario table
+    # ran without reporting ...` underneath its own PASS. Three stages are
+    # built this way -- the scenario table, each revert, and the emergency
+    # rollback -- so `grep "PASS <stage>"` asserts that the stage's first
+    # command exited 0, not that the stage concluded green. Six plants carry
+    # `green "scenario table"` and would have reported "stayed green" for a
+    # stage that went red one line later: the same defect as the one this
+    # commit's parent fixed, in the older half of this same function. A stage
+    # green now requires its PASS AND the absence of any FAIL naming it.
+    local green_ok=1
+    if [ -n "$green" ]; then
+      case "$green" in
+        '(checked)'*)
+          grep -qF "| $green" <<<"$out" || green_ok=0
+          ;;
+        *)
+          grep -qF "PASS $green" <<<"$out" || green_ok=0
+          ! grep -qF "FAIL $green" <<<"$out" || green_ok=0
+          ;;
+      esac
+    fi
+    if [ "$green_ok" -ne 1 ]; then
       printf '%-52s BORROWED  <-- "%s" did not stay green\n' "$label" "$green"
       FAIL=$((FAIL+1))
       grep -E '^(applied|PASS|FAIL|BASELINE|HARNESS|  \|)' <<<"$out" | sed 's/^/    /'
       return
     fi
-    printf '%-52s CAUGHT%s%s\n' "$label" "${expect:+ (at $expect)}" \
+    printf '%-52s CAUGHT%s%s\n' "$label" "${expect:+ (at $expect_line)}" \
       "${green:+, $green stayed green}"; PASS=$((PASS+1))
   else
     # **Print the transcript on a miss.** `out` was captured and never read --
@@ -773,47 +854,42 @@ plant "R3 the restored retire still calls the dropped producer" "$R3" \
                      FROM public.field_bookings(p_organization_id, p_field_id, p_effective_to) b),
         'field', to_jsonb(v_after)" \
   "revert 20260907000000: admin_retire_field after the revert reads STILL-CALLS-PRODUCER" \
-  "(checked) the restored admin_retire_field resolves and runs its own body"
-
-# **And the third branch, for the same reason.** `AMBIGUOUS` is the other half
-# of "exactly one survives", and it was as unreached as STILL-CALLS-PRODUCER
-# was: `GONE` is what a revert that removes too much prints, and nothing tried a
-# revert that removes too LITTLE. This restores the function under a CHANGED
-# signature, so 20260907000000's own version is left standing beside the
-# restored one -- the unguarded-overload shape this migration exists to close,
-# in the revert rather than the migration.
-#
-# No `green` here, and the omission is the honest one: the surviving overload IS
-# the pre-revert body, which cannot resolve once the producer is dropped, so the
-# probe is RIGHT to fail beside it. `expect` names the branch, which only the
-# verdict prints, so the attribution is exact even though the isolation is not
-# available to be claimed.
-plant "R3 revert restores retire under a second signature" "$R3" \
-  "    p_confirm boolean DEFAULT false
-)
-RETURNS jsonb" \
-  "    p_confirm text DEFAULT 'false'
-)
-RETURNS jsonb" \
-  "revert 20260907000000: admin_retire_field after the revert reads AMBIGUOUS"
+  "(checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"
 
 # **The emergency rollback, back in the state 20260907000000 left it in.** It
 # dropped a signature that no longer exists, so the DROP was a silent no-op and
 # the script committed and reported success with the guarded delete still
 # standing -- the file someone runs at 2am, lying to them. Nothing executed it
 # until this round, which is why two review passes went by without noticing.
+#
+# **Both expects name their own check now, and one of them can only be named by
+# its whole line.** This stage prints four `FAIL emergency rollback
+# 20260504060000` lines and both plants carried the bare prefix, so a second
+# `admin_delete_field` overload -- which fires the precondition at run.sh:406 --
+# would have scored BOTH of them CAUGHT with neither named check running. That
+# is the stage-not-check defect fixed for the reverts in this PR's parent,
+# unapplied one stage along: the twin, again, in the round that was about twins.
+#
+# Measured rather than written by eye, and the measurement corrected a guess:
+# removing the three-argument DROP does not leave a survivor for the check at
+# run.sh:419 to find, because the rollback script's own by-name guard raises
+# first and the stage prints nothing but its bare line. Hence `^`.
 plant "EMERG rollback drops a signature that no longer exists" "$EMERG" \
   "DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid);
 DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);" \
   "DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid);" \
-  "emergency rollback 20260504060000"
+  "^emergency rollback 20260504060000"
 # The other direction: a rollback that over-reaches and takes the producer
 # `admin_retire_field` still needs, breaking a function it does not own.
+# This one the stage can name in its own words, and its transcript showed an
+# isolation available for nothing: the rollback still removes all four RPCs, so
+# the claim above it stays green while only the producer check goes red.
 plant "EMERG rollback takes the producer another RPC still calls" "$EMERG" \
   "DROP FUNCTION IF EXISTS public.admin_create_location(uuid, text, text, boolean);" \
   "DROP FUNCTION IF EXISTS public.admin_create_location(uuid, text, text, boolean);
 DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date) CASCADE;" \
-  "emergency rollback 20260504060000"
+  "emergency rollback 20260504060000: it dropped public.field_bookings, breaking admin_retire_field" \
+  "(checked) the rollback removed every overload of all four admin facility RPCs"
 
 # **Three numbers, not one.** A single "N caught" cannot tell a genuine catch
 # from a plant that never applied: last round seven mutations reported RED and

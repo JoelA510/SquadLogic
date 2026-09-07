@@ -848,9 +848,15 @@ DROP FUNCTION IF EXISTS public.admin_delete_field(uuid, uuid, boolean);" \
 # every line that prints `(checked)` is a claim, and a claim with no plant is a
 # claim nobody has tried to make fail. These two close the remaining gap.
 #
-# **Five checks in this one stage print `FAIL revert 20260907000000...`**, so a
+# **SIX checks in this one stage print `FAIL revert 20260907000000...`**, so a
 # bare stage name as `expect` cannot say which of them a plant reached. Each is
-# named by its own line now, measured from a run rather than copied by eye.
+# named by its own line now, counted by command rather than by eye -- and it was
+# five until the round-2 fix for the probe's unchecked `cat` added a second
+# `FAIL revert <id> probe:` line. That made `probe` ambiguous between the probe
+# that RAN and the probe that could not be STAGED, which is the same
+# prefix-of-its-neighbour defect one level down, introduced by the commit that
+# was fixing a swallowed status. Both plants aimed at the probe carry `^` and
+# the whole line now; a substring cannot separate those two.
 plant "R3 revert reinstates the weaker guard silently" "$R3" \
   "  RAISE WARNING 'RESTORING admin_retire_field to its pre-20260907000000 body:" \
   "  RAISE NOTICE 'restoring a function, no consequences worth naming:" \
@@ -894,7 +900,7 @@ plant "R3 the restored retire calls a helper the revert also drops" "$R3" \
             'affected', public.field_bookings_digest(v_affected)
         );
     END IF;" \
-  "revert 20260907000000 probe" \
+  "^revert 20260907000000 probe: the restored admin_retire_field does not resolve" \
   "(checked) exactly one public.admin_retire_field survives the revert, and it no longer calls the dropped producer"
 
 # **The census counted claims, and a claim is not always one assertion.** All
@@ -992,7 +998,7 @@ plant "R3 the restored retire's CONFIRMED path calls a dropped helper" "$R3" \
   "            'affected_count', v_affected_count,
             'affected', public.field_bookings_digest(v_affected),
             'after', to_jsonb(v_after)" \
-  "revert 20260907000000 probe" \
+  "^revert 20260907000000 probe: the restored admin_retire_field does not resolve" \
   "(checked) exactly one public.admin_retire_field survives the revert, and it no longer calls the dropped producer"
 
 # **And the third branch, for the same reason.** `AMBIGUOUS` is the other half

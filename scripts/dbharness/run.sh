@@ -440,10 +440,16 @@ PROBE
       then
         echo "FAIL revert ${id} probe: the probe script could not be staged"
         STATUS=1
-      # The failure line carries `probe` so `prove.sh`'s `expect` can name THIS
-      # check rather than the stage: both this and the verdict above print
-      # `FAIL revert 20260907000000...`, and a substring match cannot tell two
-      # checks apart when one is a prefix of the other's line.
+      # **`probe` is no longer enough to name this check, and the commit that
+      # made that true said the opposite here.** This comment used to read "the
+      # failure line carries `probe` so `prove.sh`'s `expect` can name THIS
+      # check rather than the stage" -- and then the staging branch directly
+      # above it added a SECOND line beginning `FAIL revert <id> probe:`, in the
+      # same commit, leaving the assertion describing the state it had just
+      # ended. Six lines in this stage now begin `FAIL revert 20260907000000`.
+      # Both plants aimed here carry `^` and the whole line, which is the only
+      # form that separates the probe that RAN from the probe that could not be
+      # staged.
       elif psql_file /tmp/harness_rev_probe.sql >/tmp/harness_rev_probe 2>&1; then
         echo "  | (checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"
       else

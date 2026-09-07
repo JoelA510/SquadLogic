@@ -429,6 +429,23 @@ const PLANTS = [
     replace: "          const text = value === null || value === undefined ? '' : String(value);",
   },
   {
+    label: 'the finalize overwrites warning_summary instead of merging',
+    suite: 'tests/fieldAvailabilityLifecycle.test.js',
+    find: `        warning_summary: {
+          ...(job.warning_summary || {}),
+          availability_finalize: { invalid_rows: invalid, unresolved_field_rows: unresolved },
+        },`,
+    replace: `        warning_summary: {
+          availability_finalize: { invalid_rows: invalid, unresolved_field_rows: unresolved },
+        },`,
+  },
+  {
+    label: 'the finalize overwrites processed_rows instead of accumulating',
+    suite: 'tests/fieldAvailabilityLifecycle.test.js',
+    find: '        processed_rows: (Number(job.processed_rows) || 0) + inserted,',
+    replace: '        processed_rows: inserted,',
+  },
+  {
     label: 'a replayed row keeps the refusal it no longer deserves',
     suite: 'tests/fieldAvailabilityLifecycle.test.js',
     find: '        row.validation_errors = [];\n        inserted += 1;',

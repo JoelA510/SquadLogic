@@ -65,7 +65,15 @@ SELECT is((SELECT status FROM public.import_jobs WHERE id='11111111-3333-3333-33
 -- Nothing field-less was created, counted from the table.
 SELECT is((SELECT count(*) FROM public.field_availability_profiles WHERE organization_id='a1111111-1111-1111-1111-111111111111' AND field_id IS NULL)::int,0,'no field-less profile is created');
 SELECT is((SELECT count(*) FROM public.field_availability_profiles WHERE organization_id='a1111111-1111-1111-1111-111111111111')::int,2,'exactly the two resolvable rows became profiles');
-SELECT is((SELECT count(*) FROM public.field_availability_profiles WHERE field_name='Ghost Pitch')::int,0,'the refused row created nothing, in either organisation');
+-- **"In this organisation", and not more.** This runs as Alice under
+-- `SET LOCAL role = 'authenticated'`, and RLS scopes
+-- `field_availability_profiles` to org membership, so the query cannot see Org
+-- B at all -- a claim about "either organisation" would have passed identically
+-- had a profile been created there. The cross-org decoy is proved instead by
+-- `inserted_profiles = 2` and `unresolved_field_rows = 1` above: had the tenant
+-- filter been dropped, Org B's Ghost Pitch would have resolved and the row
+-- would have been applied rather than refused.
+SELECT is((SELECT count(*) FROM public.field_availability_profiles WHERE field_name='Ghost Pitch')::int,0,'the refused row created nothing this caller can see');
 
 -- Each resolved row points at the pitch its NAME asks for, including the one
 -- whose case differs -- not at whichever pitch the loop happened to hold.

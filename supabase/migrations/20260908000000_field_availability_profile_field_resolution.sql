@@ -231,7 +231,20 @@ BEGIN
   UPDATE public.import_jobs SET status = CASE WHEN v_invalid_rows > 0 OR jsonb_array_length(COALESCE(p_validation_errors,'[]'::jsonb)) > 0 THEN 'completed_with_warnings' ELSE 'completed' END,
     processed_rows = COALESCE(processed_rows,0) + v_inserted_profiles, progress_percent = 100, completed_at = v_now,
     error_summary = jsonb_build_object('rowErrors', COALESCE(p_validation_errors,'[]'::jsonb)),
-    warning_summary = jsonb_build_object('availability_finalize', jsonb_build_object('invalid_rows', v_invalid_rows, 'unresolved_field_rows', v_unresolved_rows))
+    -- **Merged, not replaced.** This assignment overwrote the whole column, and
+    -- `mark_import_job_ready_to_apply` puts `deferred_apply` there with
+    -- `jsonb_set` -- so finalizing a DEFERRED availability job destroyed the
+    -- key `ImportPanel` and `ImportContext` read to know a job was ever staged.
+    -- Every sibling finalizer merges (`20260503060000:433`,
+    -- `20260503070000:882`, `20260503090000:142`); this one now does too, which
+    -- also settles a disagreement this PR would otherwise have created, since
+    -- the mock arm merges.
+    warning_summary = jsonb_set(
+      COALESCE(warning_summary, '{}'::jsonb),
+      '{availability_finalize}',
+      jsonb_build_object('invalid_rows', v_invalid_rows, 'unresolved_field_rows', v_unresolved_rows),
+      true
+    )
   WHERE id = p_import_job_id;
 
   RETURN jsonb_build_object('status', CASE WHEN v_invalid_rows > 0 OR jsonb_array_length(COALESCE(p_validation_errors,'[]'::jsonb)) > 0 THEN 'completed_with_warnings' ELSE 'completed' END,'inserted_profiles', v_inserted_profiles,'inserted_formats', v_inserted_formats,'inserted_blackouts', v_inserted_blackouts,'inserted_requirements', v_inserted_requirements,'inserted_scenarios', v_inserted_scenarios,'inserted_scenario_members', v_inserted_members,'invalid_rows', v_invalid_rows,'unresolved_field_rows', v_unresolved_rows);

@@ -170,8 +170,13 @@ BEGIN
   INSERT INTO public.locations (organization_id, name) VALUES (v_other_org,'Alder Park') RETURNING id INTO v_other_loc;
   INSERT INTO public.fields (organization_id, location_id, name) VALUES (v_other_org, v_other_loc, 'Ghost Pitch');
 
-  INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, created_by, total_rows)
-  VALUES (v_job, v_org, 'field_availability', 'live2/fall2026.csv', 'importing', v_user, 3);
+  -- **A job that was STAGED before it is finalized**, carrying the
+  -- `deferred_apply` key `mark_import_job_ready_to_apply` writes and
+  -- `ImportPanel`/`ImportContext` read. The finalize used to assign
+  -- `warning_summary` outright and destroy it.
+  INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, created_by, total_rows, warning_summary)
+  VALUES (v_job, v_org, 'field_availability', 'live2/fall2026.csv', 'importing', v_user, 3,
+          jsonb_build_object('deferred_apply', jsonb_build_object('import_type','field_availability','staged_rows',3)));
 
   INSERT INTO public.staging_import_rows (organization_id, import_job_id, import_type, source_row_number, raw_payload, normalized_payload, validation_errors)
   VALUES
@@ -256,6 +261,15 @@ BEGIN
   IF (SELECT (warning_summary->'availability_finalize'->>'unresolved_field_rows')::int
         FROM public.import_jobs WHERE id = v_job) <> 1 THEN
     RAISE EXCEPTION 'import_jobs.warning_summary does not report the unresolved row'; END IF;
+
+  -- 3f-bis. **And it did not destroy what was already there.** Every sibling
+  -- finalizer merges into warning_summary with jsonb_set; this one assigned it
+  -- outright, so finalizing a deferred job erased the key the UI reads to know
+  -- the job was ever staged.
+  IF (SELECT warning_summary->'deferred_apply'->>'import_type'
+        FROM public.import_jobs WHERE id = v_job) IS DISTINCT FROM 'field_availability' THEN
+    RAISE EXCEPTION 'the finalize destroyed import_jobs.warning_summary.deferred_apply: %',
+      (SELECT warning_summary FROM public.import_jobs WHERE id = v_job); END IF;
 
   -- 3g. **The closure is attributable.** This is the whole point: a blackout
   -- from a resolved profile answers "is this ground closed" through

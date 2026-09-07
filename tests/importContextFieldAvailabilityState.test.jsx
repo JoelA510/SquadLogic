@@ -102,7 +102,10 @@ describe('ImportContext field_availability state hygiene', () => {
     // places to change and neither the authority.
     const { describeFinalizeOutcome } =
       await import('../frontend/src/utils/importDeferredActions.js');
-    const expected = describeFinalizeOutcome({ invalid_rows: 3, unresolved_field_rows: 2 });
+    const expected = describeFinalizeOutcome(
+      { invalid_rows: 3, unresolved_field_rows: 2 },
+      'field_availability'
+    );
     expect(expected.length).toBe(2);
     const messages = result.current.importLogs.map((entry) => entry.message);
     expect(messages.length).toBeGreaterThan(0);

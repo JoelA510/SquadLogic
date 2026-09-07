@@ -1221,6 +1221,20 @@ plant "M4 adopts the sibling filter and can never replay a refusal" "$M4" \
   "smoke 20260908000000" \
   "smoke 20260907000000"
 
+# **warning_summary assigned rather than merged** destroys the deferred_apply
+# key the UI reads to know a job was ever staged. Every sibling finalizer
+# merges; this is the control for the one that did not.
+plant "M4 the finalize overwrites warning_summary instead of merging" "$M4" \
+  "    warning_summary = jsonb_set(
+      COALESCE(warning_summary, '{}'::jsonb),
+      '{availability_finalize}',
+      jsonb_build_object('invalid_rows', v_invalid_rows, 'unresolved_field_rows', v_unresolved_rows),
+      true
+    )" \
+  "    warning_summary = jsonb_build_object('availability_finalize', jsonb_build_object('invalid_rows', v_invalid_rows, 'unresolved_field_rows', v_unresolved_rows))" \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
 # **The revert's count, on the row run.sh plants for it.** Without the seed this
 # would report zero on a fresh database and prove only that the code parses;
 # with the seed, a revert that counts the wrong set prints ORPHANS: 0 and the

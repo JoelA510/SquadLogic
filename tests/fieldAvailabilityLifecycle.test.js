@@ -483,6 +483,13 @@ describe('field availability lifecycle', () => {
       p_import_type: 'field_availability',
       p_file_name: 'unresolvable.csv',
     });
+    // Stage it first, so the finalize has a warning_summary key it must not
+    // destroy -- the same setup as docs/sql/20260908000000_smoke.sql.
+    await supabase.rpc('mark_import_job_ready_to_apply', {
+      p_import_job_id: job.id,
+      p_import_type: 'field_availability',
+      p_validation_errors: [],
+    });
     await seedFacilityFor([{ location: 'Alder Park', field_name: 'Main' }]);
     // A decoy in another organisation carrying the exact location and field
     // name the unresolvable row asks for. A resolution that forgot its tenant
@@ -562,6 +569,10 @@ describe('field availability lifecycle', () => {
     expect(detail.field_name).toBe('Ghost Pitch');
     const finishedJob = getMockData('import_jobs').find((j) => String(j.id) === String(job.id));
     expect(finishedJob.warning_summary.availability_finalize.unresolved_field_rows).toBe(1);
+    // ... merged into whatever was already there, not assigned over it. The SQL
+    // assigned outright until 20260908000000, which destroyed the deferred_apply
+    // key ImportPanel and ImportContext read.
+    expect(finishedJob.warning_summary.deferred_apply).toBeTruthy();
 
     // **Refused means deferred, not discarded.** Create the field it asked for
     // and re-run the same job: the row applies, and the row that already
@@ -590,6 +601,11 @@ describe('field availability lifecycle', () => {
     );
     expect(replayed.applied_at).toBeTruthy();
     expect(replayed.validation_errors).toEqual([]);
+    // **Progress accumulates across the replay**, as the SQL's
+    // `COALESCE(processed_rows,0) + …` does. Overwriting was unreachable while
+    // a job was finalized once; the replay reaches it.
+    const replayedJob = getMockData('import_jobs').find((j) => String(j.id) === String(job.id));
+    expect(replayedJob.processed_rows).toBe(3);
     const after = getMockData('field_availability_profiles');
     expect(after.length).toBe(3);
     expect(after.filter((p) => !p.field_id)).toEqual([]);

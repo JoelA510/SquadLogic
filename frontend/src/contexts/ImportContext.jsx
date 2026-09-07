@@ -974,7 +974,7 @@ export function ImportProvider({ children }) {
               if (persistenceResult) {
                 const { describeFinalizeOutcome } =
                   await import('../utils/importDeferredActions.js');
-                describeFinalizeOutcome(persistenceResult).forEach(addLog);
+                describeFinalizeOutcome(persistenceResult, type).forEach(addLog);
               }
 
               const importData = {
@@ -1060,7 +1060,7 @@ export function ImportProvider({ children }) {
         // it to check: the reasons live on the staging rows and in the job's
         // warning_summary, neither of which this flow reads.
         const { describeFinalizeOutcome } = await import('../utils/importDeferredActions.js');
-        describeFinalizeOutcome(finalizeResult).forEach(addLog);
+        describeFinalizeOutcome(finalizeResult, type).forEach(addLog);
 
         const appliedData = {
           ...deferredState,

@@ -4809,7 +4809,11 @@ export const mockSupabase = {
         status,
         completed_at: now,
         progress_percent: 100,
-        processed_rows: inserted,
+        // **Accumulated, as the SQL does** (`COALESCE(processed_rows,0) + …`).
+        // Overwriting was unreachable while a job was only ever finalized once;
+        // the replay this PR introduces reaches it, and the two arms would then
+        // report different progress for the same job.
+        processed_rows: (Number(job.processed_rows) || 0) + inserted,
         // The SQL writes this summary and this arm did not, so an operator
         // reading the JOB rather than the RPC result learned nothing about a
         // refused row in mock mode.

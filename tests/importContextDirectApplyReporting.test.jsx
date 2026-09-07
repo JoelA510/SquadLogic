@@ -81,7 +81,10 @@ describe('ImportContext direct apply :: refused rows reach the operator', () => 
 
     const { describeFinalizeOutcome } =
       await import('../frontend/src/utils/importDeferredActions.js');
-    const expected = describeFinalizeOutcome({ invalid_rows: 1, unresolved_field_rows: 1 });
+    const expected = describeFinalizeOutcome(
+      { invalid_rows: 1, unresolved_field_rows: 1 },
+      'field_availability'
+    );
     expect(expected).toHaveLength(2);
 
     await waitFor(() => {

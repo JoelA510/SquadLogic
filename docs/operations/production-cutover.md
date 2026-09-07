@@ -103,6 +103,35 @@ Users will see the mock client with seed data. No real data is lost. The Supabas
 
 ---
 
+## Migration ordering: `20260907000000_field_delete_booking_guard`
+
+**Deploy the frontend BEFORE applying this migration**, not after.
+
+`admin_delete_field` gains a `p_confirm boolean DEFAULT false` parameter and a
+refusal, and the 2-argument overload is dropped. Because of the default,
+PostgREST still resolves a cached pre-PR bundle's 2-key request body against the
+new 3-argument function — so the old bundle keeps *working*, which is the
+hazard. In the window between applying the migration and shipping the new
+frontend:
+
+1. An admin on the old bundle clicks Delete on a field that has bookings.
+2. The RPC refuses and returns `{deleted: false, reason: 'bookings_exist', …}`
+   with PostgREST's `error` null — a refusal is a return value, not an error.
+3. The old `deleteField` discards `data` and removes the row from local state,
+   so the field disappears from the list and reappears on the next refresh.
+
+Nothing is lost — the refusal is real and the field survives — but the operator
+is shown a deletion that did not happen, which is the defect this migration
+exists to remove. Shipping the frontend first closes the window: the new
+`deleteField` reads `data.deleted` and surfaces the refusal.
+
+Rolling back uses `docs/sql/20260907000000_revert.sql`, which restores the
+2-argument `admin_delete_field` and the pre-migration `admin_retire_field`. It
+raises `EXPOSING N practice_assignment(s)` and `RESTORING admin_retire_field`
+warnings naming what the rollback costs; read them rather than discarding them.
+
+---
+
 ## What does NOT need a runbook step
 
 - **Historical 2026-04-17 remediation** — the three 2026-04-16 migrations and the two missing Edge Function deployments were already reconciled during that session.

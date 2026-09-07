@@ -1022,6 +1022,52 @@ rather than fixed, because it is a different contract in different RPCs. The
 point is not the count — it is that no amount of asking "what is this fix's
 twin" would have produced it, and one command did.
 
+### The second review round, and what the mechanism index returned
+
+`/code-review` at high on the whole branch found six, all fixed in this PR:
+
+- **Two checks in `run.sh` that passed on the failure they name.** The resolve
+  probe on the restored `admin_retire_field` had `:` in one branch and nothing
+  in the other -- it set no status and printed nothing, whatever happened. Its
+  neighbour read `psql_cmd "SELECT prosrc LIKE '%field_bookings%' ..." | grep -q
+  '^t$'`, and a revert that DROPPED the function returns zero rows: no `t`, so
+  the `else` fired and reported the restored function as clean for a database
+  that no longer had one. Both are now one verdict over `pg_proc` that fails
+  loudly on `GONE`/`AMBIGUOUS`, plus a plpgsql probe that distinguishes 22023
+  from 42883. The positive control is `R3 revert drops the retirement RPC
+  instead of restoring it`, which both old checks passed.
+- **The mock wrote the raw list into `audit_log.metadata.affected`** where the
+  migration writes `field_bookings_digest(...)` -- `{total, omitted, by_kind,
+  sample}`. Nothing in the suite read the mock's audit metadata, so the two arms
+  disagreed silently about a field PR 3's audit surface is built to read. The
+  mock now mirrors the digest on all four booking phases; the returned payload
+  keeps the whole list, as in SQL.
+- **`undatedValue` was applied to the filter but not to the projection**, so an
+  imported open-ended practice slot read `{on_date: ''}` here and
+  `{on_date: null}` in Postgres -- exactly the row that reading was added for.
+- **`markers_for` demanded two markers of a delete case and three of a retire
+  case**, leaving the delete arm's affected-count, count/list agreement,
+  survival and refusal-wrote-nothing checks unguarded: the very refactor that
+  guard was written after, applied to the other arm, would still have produced a
+  script reporting "N of N executed". Both positive controls were run and both
+  made the generator exit 1.
+- **A deploy-ordering window**, now in `docs/operations/production-cutover.md`:
+  `p_confirm DEFAULT false` means a cached pre-PR bundle still RESOLVES against
+  the new function, so between the migration and the frontend deploy an old
+  bundle turns a refusal into a phantom delete. Ship the frontend first.
+
+Then the mechanism index from the previous section was run over the fix itself
+-- every site in the mock writing `affected` -- and returned a seventh the
+review had not: a confirmed `admin_retire_field` returned `{retired,
+affected_count, field}` while its SQL twin returns `affected` too, so a UI could
+list what a refusal would strand but not what a confirmation just did. It is the
+index's second unprompted find, and again no amount of asking "what is this
+fix's twin" would have produced it.
+
+Both sweeps end at zero: SQL 31 attempted, 0 anchor-miss, 0 misattributed, 31
+caught; mock 28 attempted, 0 anchor-miss, 28 caught.
+
+
 ### Still open
 
 - **LIVE-4** — roughly thirty hard deletes in `mockSupabaseClient.js` remove rows

@@ -219,6 +219,16 @@ $$;
 COMMENT ON FUNCTION public.finalize_field_availability_import_job(uuid, jsonb) IS
   'Applies staged field_availability rows. A row whose location/field_name matches no fields row in the organisation is REFUSED, not applied: it is counted in unresolved_field_rows, its reason is written to staging_import_rows.validation_errors with reason=field_unresolved, and it keeps applied_at IS NULL so re-running finalize applies it once the field exists. Before 20260908000000 the resolution had no NOT FOUND guard and the profile was created with field_id NULL, which made every blackout hung off it unattributable to ground -- invisible to any field-scoped query through public.field_closures.';
 
+-- **The one reader's own comment, corrected.** `field_closures` says the union
+-- "collapses to field_blackouts alone once finalize_field_availability_import_job
+-- resolves a profile to a field reliably". After this migration that sentence
+-- reads as "the precondition is met, go and collapse it", and that is false: the
+-- import is no longer a producer of field-less profiles, but the DELETE path
+-- still is. A comment made misleading by a change is that change's
+-- responsibility, so it is rewritten here rather than left to be believed.
+COMMENT ON VIEW public.field_closures IS
+  'THE reader for "is this ground closed on this date". Unions admin-authored field_blackouts with import-derived field_blackout_windows so the question has one answer. SCOPE is closes_location_id / closes_field_id -- what this row shuts. field_location_id is a different fact (the site the closed field sits on) and is never a scope; the two were one column in the first draft and a location filter therefore closed every other pitch on the site. closes_field_id is NULL for import rows whose profile has no field -- surfaced, not filtered, because a closure nobody can attribute is what an inner join would hide. reason is NULL on the import arm because the import carries no structured reason, and its own words travel in source_reason_text rather than in note -- note is admin free text on both arms, so a privacy guard or an enum filter cannot silently mean two things. COLLAPSING THE UNION IS STILL BLOCKED, and only half the obstacle is gone: as of 20260908000000 the IMPORT can no longer create a profile with no field (such a row is refused and reported), but fields.id is referenced ON DELETE SET NULL and field_availability_profiles is deliberately excluded from admin_delete_field''s booking guard, so deleting a field still orphans every profile pointing at it. Until that second producer is closed, a profile-scoped blackout still cannot be expressed in a scope-bearing table.';
+
 -- **What this database already holds.** Reported at apply time rather than
 -- repaired: the header argues why a blanket backfill or delete is worse than
 -- the state it would repair. A count of zero is stated too, so "no warning"

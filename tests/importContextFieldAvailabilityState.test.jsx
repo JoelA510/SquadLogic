@@ -10,9 +10,16 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   }),
 }));
 
+// The rpc spy is held here rather than reached for through the mocked module:
+// `checkJs` types that import as the real client, where `rpc` returns a
+// PostgrestFilterBuilder, so a test that sets its implementation through the
+// import does not type-check. This is the pattern the other context tests in
+// this directory use.
+const mocks = vi.hoisted(() => ({ rpc: vi.fn() }));
+
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
-    rpc: vi.fn(),
+    rpc: mocks.rpc,
     auth: {
       getUser: vi.fn(async () => ({ data: { user: { id: 'user-1' } }, error: null })),
       onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
@@ -63,8 +70,7 @@ describe('ImportContext field_availability state hygiene', () => {
    * in the RPC result, so they are logged from there.
    */
   it('applying an import logs the rows the server refused and why', async () => {
-    const { supabase } = await import('../frontend/src/lib/supabaseClient.js');
-    supabase.rpc.mockImplementation(async (name) => {
+    mocks.rpc.mockImplementation(async (name) => {
       if (name === 'finalize_field_availability_import_job') {
         return {
           data: {

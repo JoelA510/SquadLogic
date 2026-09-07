@@ -48,6 +48,22 @@ BEGIN
   IF r.src NOT LIKE '%unresolved_field_rows%' THEN
     RAISE EXCEPTION 'finalize_field_availability_import_job does not report unresolved_field_rows'; END IF;
 
+  -- **20260602000000's guarantee, enforced for the first time.** Its own smoke
+  -- is four bare SELECTs and cannot go red, and it is not in run.sh's
+  -- NEW_MIGRATIONS either -- so the fix that made finalize able to complete at
+  -- all has never been checked by anything that runs. This migration re-issues
+  -- the same body, so the invariant is this file's to keep.
+  IF position($needle$,NULL,v_now,auth.uid())$needle$ in r.src) <> 0 THEN
+    RAISE EXCEPTION 'the applied_payload NULL literal from before 20260602000000 is back; finalizing a job with child rows will abort on the NOT NULL'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname='public' AND c.relname='import_application_records'
+       AND a.attname='applied_payload' AND a.attnotnull)
+  THEN
+    RAISE EXCEPTION 'import_application_records.applied_payload is no longer NOT NULL; 20260602000000 satisfied that constraint rather than relaxing it'; END IF;
+
   IF has_function_privilege('public','public.finalize_field_availability_import_job(uuid, jsonb)','EXECUTE') THEN
     RAISE EXCEPTION 'PUBLIC must not execute finalize_field_availability_import_job'; END IF;
   IF NOT has_function_privilege('authenticated','public.finalize_field_availability_import_job(uuid, jsonb)','EXECUTE') THEN
@@ -257,6 +273,26 @@ BEGIN
 
   DELETE FROM public.organizations WHERE id IN (v_org, v_other_org);
   DELETE FROM auth.users WHERE id IN (v_user, v_other_user);
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 3b. The reader's comment states the obstacle that REMAINS
+-- ---------------------------------------------------------------------------
+--
+-- Not pedantry about prose: the sentence this migration rewrote used to say the
+-- union collapses once the import resolves reliably, which after this change
+-- reads as permission to collapse it. The delete path still orphans profiles,
+-- so the comment has to say so and this is what stops it drifting back.
+DO $$
+DECLARE v_c text;
+BEGIN
+  SELECT obj_description('public.field_closures'::regclass, 'pg_class') INTO v_c;
+  IF v_c IS NULL THEN RAISE EXCEPTION 'field_closures has no comment at all'; END IF;
+  IF v_c NOT LIKE '%STILL BLOCKED%' THEN
+    RAISE EXCEPTION 'field_closures no longer records that collapsing the union is blocked'; END IF;
+  IF v_c NOT LIKE '%ON DELETE SET NULL%' THEN
+    RAISE EXCEPTION 'field_closures does not name the delete path as the producer that remains'; END IF;
+  RAISE NOTICE 'field_closures records that the import half is closed and the delete half is not';
 END $$;
 
 -- ---------------------------------------------------------------------------

@@ -264,6 +264,22 @@ COMMENT ON FUNCTION public.finalize_field_availability_import_job(uuid, jsonb) I
 COMMENT ON VIEW public.field_closures IS
   'THE reader for "is this ground closed on this date". Unions admin-authored field_blackouts with import-derived field_blackout_windows so the question has one answer. SCOPE is closes_location_id / closes_field_id -- what this row shuts. field_location_id is a different fact (the site the closed field sits on) and is never a scope; the two were one column in the first draft and a location filter therefore closed every other pitch on the site. closes_field_id is NULL for import rows whose profile has no field -- surfaced, not filtered, because a closure nobody can attribute is what an inner join would hide. reason is NULL on the import arm because the import carries no structured reason, and its own words travel in source_reason_text rather than in note -- note is admin free text on both arms, so a privacy guard or an enum filter cannot silently mean two things. COLLAPSING THE UNION IS STILL BLOCKED, and only half the obstacle is gone: as of 20260908000000 the IMPORT can no longer create a profile with no field (such a row is refused and reported), but fields.id is referenced ON DELETE SET NULL and field_availability_profiles is deliberately excluded from admin_delete_field''s booking guard, so deleting a field still orphans every profile pointing at it. Until that second producer is closed, a profile-scoped blackout still cannot be expressed in a scope-bearing table.';
 
+-- **And the TABLE's own comment, which is the first place anyone looks.**
+-- `field_blackout_windows` is frozen, and its COMMENT names the condition for
+-- unfreezing it: "cannot be collapsed until
+-- finalize_field_availability_import_job stops attaching blackouts to profiles
+-- whose field_id resolution can be NULL". This migration makes that condition
+-- read as SATISFIED, so the table would be telling the next reader to go ahead
+-- and collapse a union `admin_delete_field` still makes unsafe. The view's
+-- comment above was corrected and this one was not, in the PR whose whole
+-- subject is a fix applied to one arm and not its twin.
+--
+-- `20260906000100`'s smoke asserts this comment begins 'FROZEN as of
+-- 20260906000100' -- a prefix match, which is why it could not see the stale
+-- sentence. The prefix is kept; the condition is restated.
+COMMENT ON TABLE public.field_blackout_windows IS
+  'FROZEN as of 20260906000100. Owned solely by finalize_field_availability_import_job; no new code may write it. New blackouts go to public.field_blackouts. Read both through public.field_closures. COLLAPSING THE UNION IS STILL BLOCKED as of 20260908000000, and the condition this comment used to name -- that the import stops attaching blackouts to profiles whose field_id can be NULL -- is now only HALF of it. The import half is closed: a row matching no field is refused and reported. The DELETE half is not: fields.id is referenced ON DELETE SET NULL and field_availability_profiles is excluded from admin_delete_field''s booking guard, so deleting a field still orphans every profile pointing at it, and a profile-scoped blackout still cannot be expressed in a scope-bearing table. tests/fieldBlackoutFreeze.test.js holds the writer set to the import path by scanning the source tree.';
+
 -- **What this database already holds.** Reported at apply time rather than
 -- repaired: the header argues why a blanket backfill or delete is worse than
 -- the state it would repair. A count of zero is stated too, so "no warning"

@@ -320,23 +320,46 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 3b. The reader's comment states the obstacle that REMAINS
+-- 3b. BOTH comments state the obstacle that REMAINS
 -- ---------------------------------------------------------------------------
 --
--- Not pedantry about prose: the sentence this migration rewrote used to say the
--- union collapses once the import resolves reliably, which after this change
--- reads as permission to collapse it. The delete path still orphans profiles,
--- so the comment has to say so and this is what stops it drifting back.
+-- Not pedantry about prose. Two objects carried a sentence saying the union
+-- collapses once the import resolves reliably -- the view `field_closures` and
+-- the frozen table `field_blackout_windows` itself, which is the first place
+-- anyone looks before touching it. After this migration that condition reads
+-- as satisfied while `admin_delete_field` still makes collapsing unsafe.
+--
+-- **Both objects are checked, and each check has three parts**, because
+-- `LIKE '%STILL BLOCKED%'` alone is satisfied by a comment that says it and
+-- then goes on to say the obstacle is gone. So: the phrase must be present,
+-- the remaining producer must be NAMED, and the superseded condition must be
+-- ABSENT -- the last is what actually catches a revert to the old wording.
 DO $$
-DECLARE v_c text;
+DECLARE r record; v_seen int := 0;
 BEGIN
-  SELECT obj_description('public.field_closures'::regclass, 'pg_class') INTO v_c;
-  IF v_c IS NULL THEN RAISE EXCEPTION 'field_closures has no comment at all'; END IF;
-  IF v_c NOT LIKE '%STILL BLOCKED%' THEN
-    RAISE EXCEPTION 'field_closures no longer records that collapsing the union is blocked'; END IF;
-  IF v_c NOT LIKE '%ON DELETE SET NULL%' THEN
-    RAISE EXCEPTION 'field_closures does not name the delete path as the producer that remains'; END IF;
-  RAISE NOTICE 'field_closures records that the import half is closed and the delete half is not';
+  FOR r IN
+    SELECT 'field_closures'::text AS obj,
+           obj_description('public.field_closures'::regclass, 'pg_class') AS c
+    UNION ALL
+    SELECT 'field_blackout_windows',
+           obj_description('public.field_blackout_windows'::regclass, 'pg_class')
+  LOOP
+    v_seen := v_seen + 1;
+    IF r.c IS NULL THEN
+      RAISE EXCEPTION '% has no comment at all', r.obj; END IF;
+    IF r.c NOT LIKE '%STILL BLOCKED%' THEN
+      RAISE EXCEPTION '% no longer records that collapsing the union is blocked', r.obj; END IF;
+    IF r.c NOT LIKE '%admin_delete_field%' THEN
+      RAISE EXCEPTION '% does not name admin_delete_field as the producer that remains', r.obj; END IF;
+    -- The superseded claim, in either object's original phrasing. A comment
+    -- that carries this again is telling a reader the precondition is met.
+    IF r.c LIKE '%resolves a profile to a field reliably%'
+       OR r.c LIKE '%cannot be collapsed until finalize_field_availability_import_job stops%' THEN
+      RAISE EXCEPTION '% carries the superseded claim that the import resolution was the only blocker: %', r.obj, r.c; END IF;
+  END LOOP;
+  IF v_seen <> 2 THEN
+    RAISE EXCEPTION 'expected both comments, examined % -- the check found nothing to check', v_seen; END IF;
+  RAISE NOTICE 'both field_closures and field_blackout_windows record that the import half is closed and the delete half is not';
 END $$;
 
 -- ---------------------------------------------------------------------------

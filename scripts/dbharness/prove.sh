@@ -1147,7 +1147,7 @@ BEGIN
 #
 # `docs/sql/20260908000000_smoke.sql` is the first BEHAVIOURAL smoke on this
 # function. The one it sits beside -- `docs/sql/20260602000000_smoke.sql`, on
-# the very same function -- is four bare SELECTs with no RAISE in them, so it
+# the very same function -- is three bare SELECTs with no RAISE in them, so it
 # exits 0 whatever the body does and has done since the day it was written.
 # These plants are what stops the new one going the same way.
 #

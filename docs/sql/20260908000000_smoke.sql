@@ -2,7 +2,7 @@
 --
 -- **These ASSERT rather than report.** A smoke made of bare SELECTs exits 0
 -- whatever it prints -- which is what `docs/sql/20260602000000_smoke.sql`, the
--- smoke on the very function this migration fixes, did: four SELECTs and no
+-- smoke on the very function this migration fixes, did: three SELECTs and no
 -- RAISE, printing three reassuring rows for a body with no NOT FOUND guard in
 -- it. (It asserts now, and carries `ON_ERROR_STOP` so the assertions can fail.)
 -- Every invariant below RAISEs, and `scripts/dbharness/prove.sh` plants the
@@ -63,7 +63,7 @@ BEGIN
     RAISE EXCEPTION 'finalize_field_availability_import_job does not report unresolved_field_rows'; END IF;
 
   -- **20260602000000's guarantee, enforced for the first time.** Its own smoke
-  -- is four bare SELECTs and cannot go red, and it is not in run.sh's
+  -- is three bare SELECTs and cannot go red, and it is not in run.sh's
   -- NEW_MIGRATIONS either -- so the fix that made finalize able to complete at
   -- all has never been checked by anything that runs. This migration re-issues
   -- the same body, so the invariant is this file's to keep.

@@ -2,7 +2,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(21);
+SELECT plan(22);
 
 INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, created_by, total_rows)
 VALUES
@@ -82,6 +82,13 @@ SELECT is((SELECT count(*) FROM public.field_availability_profiles)::int,15,'exp
 -- question. Counted from the tables rather than from the staged rows, so a row
 -- silently dropped by the resolution is absent here rather than unmentioned.
 SELECT is((SELECT count(*) FROM public.field_availability_profiles WHERE field_id IS NULL)::int,0,'no imported profile is field-less');
+-- **The zero-count check gets a positive companion.** On its own it passes
+-- over an EMPTY field_closures -- a view that returned nothing at all would
+-- satisfy "none of them is unattributable". Its neighbour above is anchored by
+-- the `= 15` pin on the same table two lines up; this one reads the view, which
+-- nothing else in this file pins. So the attributable count is asserted too,
+-- and the pair says "four closures exist and all four name their ground".
+SELECT is((SELECT count(*) FROM public.field_closures WHERE source='field_blackout_windows' AND closes_field_id IS NOT NULL)::int,4,'all four import-derived closures are present to be counted');
 SELECT is((SELECT count(*) FROM public.field_closures WHERE source='field_blackout_windows' AND closes_field_id IS NULL)::int,0,'every import-derived closure names the ground it shuts');
 SELECT is((SELECT count(*) FROM public.field_equipment_requirements)::int,9,'expected equipment requirement count (rows 1-5 and 12-15 carry goal_equipment/goal_status)');
 SELECT is((SELECT count(*) FROM public.field_availability_profiles WHERE location IN ('Creekside','Proctor') AND record_status='active')::int,0,'exclusions do not become active');

@@ -19,7 +19,7 @@ BEGIN;
 
 -- What is already in this state, before the revert makes more of it possible.
 DO $$
-DECLARE v_p bigint; v_w bigint;
+DECLARE v_p bigint; v_w bigint; v_stale bigint;
 BEGIN
   SELECT count(*) INTO v_p FROM public.field_availability_profiles WHERE field_id IS NULL;
   SELECT count(*) INTO v_w
@@ -28,6 +28,19 @@ BEGIN
    WHERE p.field_id IS NULL;
   RAISE WARNING 'ORPHANS: % field-less availability profile(s) already in this database, carrying % blackout window(s) no field-scoped query can attribute to ground', v_p, v_w;
   RAISE WARNING 'RESTORING finalize_field_availability_import_job to its pre-20260908000000 body: an availability row matching no field will again be APPLIED with field_id NULL instead of refused, and its blackouts will again be invisible to every field-scoped query';
+
+  -- **The two fixes bundled into 20260908000000 that this also undoes.**
+  -- Restoring the body verbatim is the point, and it is exactly why these go
+  -- with it. An operator reverting during an incident reads the warnings and
+  -- nothing else; a warning that names one of three costs reads as complete.
+  SELECT count(*) INTO v_stale
+    FROM public.staging_import_rows r
+   WHERE r.import_type = 'field_availability'
+     AND r.applied_at IS NULL
+     AND EXISTS (SELECT 1
+                   FROM jsonb_array_elements(COALESCE(r.validation_errors, '[]'::jsonb)) e
+                  WHERE e->>'reason' = 'field_unresolved');
+  RAISE WARNING 'ALSO REVERTING two fixes bundled into 20260908000000: (1) warning_summary goes back to being ASSIGNED rather than merged, so finalizing a deferred job will again destroy warning_summary.deferred_apply, which ImportPanel and ImportContext read; (2) an applied row will no longer have its validation_errors cleared, so each of the % staged row(s) currently refused with reason=field_unresolved will, once applied, stay marked refused forever', v_stale;
 END $$;
 
 CREATE OR REPLACE FUNCTION public.finalize_field_availability_import_job(

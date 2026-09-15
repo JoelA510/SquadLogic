@@ -294,7 +294,13 @@ for id in "${NEW_MIGRATIONS[@]}"; do
               VALUES ('9a999999-9999-9999-9999-999999999999','99999999-9999-9999-9999-999999999999','Fall 2026',NULL,'Orphan Park','Ghost Pitch','2026-08-01','2026-11-30');
               INSERT INTO public.field_blackout_windows
                 (organization_id, profile_id, blackout_from, blackout_until, reason)
-              VALUES ('99999999-9999-9999-9999-999999999999','9a999999-9999-9999-9999-999999999999','2026-09-01','2026-09-30','blackout_months');" \
+              VALUES ('99999999-9999-9999-9999-999999999999','9a999999-9999-9999-9999-999999999999','2026-09-01','2026-09-30','blackout_months');
+              INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, total_rows)
+              VALUES ('9b999999-9999-9999-9999-999999999999','99999999-9999-9999-9999-999999999999','field_availability','orphan/fa.csv','importing',1);
+              INSERT INTO public.staging_import_rows
+                (organization_id, import_job_id, import_type, source_row_number, raw_payload, normalized_payload, validation_errors)
+              VALUES ('99999999-9999-9999-9999-999999999999','9b999999-9999-9999-9999-999999999999','field_availability',1,'{}','{}',
+                      jsonb_build_array(jsonb_build_object('reason','field_unresolved','location','Orphan Park','field_name','Ghost Pitch')));" \
          >/tmp/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the field-less profile the revert check requires was never inserted"
       dump 10 /tmp/harness_seed; STATUS=1; continue
@@ -342,6 +348,20 @@ for id in "${NEW_MIGRATIONS[@]}"; do
         echo "  | (checked) the revert named the import guard it was putting back"
       else
         echo "FAIL revert ${id}: restored the unguarded finalize without naming what that costs"
+        STATUS=1
+      fi
+      # **The migration bundles three fixes and the revert undoes all three.**
+      # Restoring the body verbatim also reinstates the outright
+      # `warning_summary` assignment and drops the `validation_errors` clearing,
+      # and a warning naming one cost of three reads as complete to an operator
+      # reverting during an incident. The seed above plants a row refused with
+      # reason=field_unresolved so the count in that warning cannot pass on an
+      # empty table -- the same reasoning as the orphaned profile beside it.
+      if grep -q 'ALSO REVERTING two fixes bundled into 20260908000000' /tmp/harness_rev &&
+         grep -q '1 staged row(s) currently refused' /tmp/harness_rev; then
+        echo "  | (checked) the revert named the two bundled fixes it also undoes, and counted the rows one of them strands"
+      else
+        echo "FAIL revert ${id}: planted a row refused with reason=field_unresolved and the revert did not name the two bundled fixes it undoes, or did not count it"
         STATUS=1
       fi
       # **Present in the catalogue is not the same as reverted.** The verdict

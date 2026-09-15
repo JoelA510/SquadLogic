@@ -91,8 +91,24 @@
 -- therefore remains blocked -- by a smaller and bounded obstacle than before,
 -- but blocked. See the PR body for 8.4 PR 2.
 --
--- Behaviour is otherwise identical to 20260602000000: the same normalisation,
--- the same ledger rows, the same `applied_payload` handling.
+-- ## What else changed, so the revert can say so
+--
+-- **This is NOT otherwise identical to 20260602000000**, and saying it was is
+-- what made this migration's revert read as a single-issue rollback. The
+-- normalisation, the ledger rows and the `applied_payload` handling are
+-- unchanged, but two further fixes are bundled here and a revert undoes both:
+--
+--   1. `warning_summary` is now merged with `jsonb_set` instead of assigned
+--      outright. The old assignment destroyed `warning_summary.deferred_apply`
+--      -- written by `mark_import_job_ready_to_apply`, read by `ImportPanel`
+--      and `ImportContext` -- every time a deferred job was finalized. Every
+--      sibling finalizer merges.
+--   2. An applied row now has its `validation_errors` cleared. Without that, a
+--      row refused by this guard and applied on a later run stays marked
+--      `reason=field_unresolved` forever, reading as applied AND refused.
+--
+-- `docs/sql/20260908000000_revert.sql` names both, counts the rows the second
+-- would strand, and `run.sh` requires it to.
 BEGIN;
 
 CREATE OR REPLACE FUNCTION public.finalize_field_availability_import_job(

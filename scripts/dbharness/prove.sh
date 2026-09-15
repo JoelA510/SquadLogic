@@ -1251,6 +1251,24 @@ plant "R4 revert reinstates the unguarded body silently" "$R4" \
   "  RAISE NOTICE 'reinstating the previous finalize body:" \
   "revert 20260908000000: restored the unguarded finalize without naming what that costs"
 
+# **A revert that names one cost of three.** The migration bundles the guard,
+# the warning_summary merge and the validation_errors clearing; restoring the
+# body verbatim undoes all three, and an operator reverting during an incident
+# reads the warnings and nothing else.
+plant "R4 revert does not name the two bundled fixes it also undoes" "$R4" \
+  "  RAISE WARNING 'ALSO REVERTING two fixes bundled into 20260908000000:" \
+  "  RAISE NOTICE 'restoring the previous body, second note:" \
+  "revert 20260908000000: planted a row refused with reason=field_unresolved and the revert did not name the two bundled fixes it undoes, or did not count it"
+
+# The count in that warning, on the row run.sh plants for it: a revert that
+# counts the wrong set reports zero and the check fires.
+plant "R4 revert counts no stranded refusals" "$R4" \
+  "     AND r.applied_at IS NULL
+     AND EXISTS (SELECT 1" \
+  "     AND r.applied_at IS NOT NULL
+     AND EXISTS (SELECT 1" \
+  "revert 20260908000000: planted a row refused with reason=field_unresolved and the revert did not name the two bundled fixes it undoes, or did not count it"
+
 # **The verdict's three red branches, one plant each**, because the lesson from
 # R3 was that a claim with one reachable branch is a claim two-thirds untested.
 #
@@ -1317,6 +1335,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"]="R3 the restored retire calls a helper the revert also drops|R3 the restored retire's CONFIRMED path calls a dropped helper"
   ["(checked) the revert counted the field-less profile already in the database"]="R4 revert counts no orphans"
   ["(checked) the revert named the import guard it was putting back"]="R4 revert reinstates the unguarded body silently"
+  ["(checked) the revert named the two bundled fixes it also undoes, and counted the rows one of them strands"]="R4 revert does not name the two bundled fixes it also undoes|R4 revert counts no stranded refusals"
   ["(checked) exactly one public.finalize_field_availability_import_job survives the revert, and its body no longer carries the resolution guard"]="R4 revert drops the finalizer instead of restoring it|R4 revert leaves the guard in place|R4 revert restores the finalizer under a second signature"
   ["(checked) the rollback removed every overload of all four admin facility RPCs"]="EMERG the rollback and its own guard drift together"
   ["(checked) it left public.field_bookings standing, which admin_retire_field still calls"]="EMERG rollback takes the producer another RPC still calls"

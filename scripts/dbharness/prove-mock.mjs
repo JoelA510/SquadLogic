@@ -429,6 +429,15 @@ const PLANTS = [
     replace: "          const text = value === null || value === undefined ? '' : String(value);",
   },
   {
+    // The two arms rendered this sentence differently for a whole round while a
+    // comment claimed they matched. Now it is pinned on both, so a drift on
+    // either side is caught on that side.
+    label: 'the refusal prose drifts from the SQL wording',
+    suite: 'tests/fieldAvailabilityLifecycle.test.js',
+    find: '`No field named "${fieldName}" at location "${location}" in this organization -- ` +',
+    replace: "`No field named '${fieldName}' at location '${location}' in this organization -- ` +",
+  },
+  {
     label: 'the finalize overwrites warning_summary instead of merging',
     suite: 'tests/fieldAvailabilityLifecycle.test.js',
     find: `        warning_summary: {

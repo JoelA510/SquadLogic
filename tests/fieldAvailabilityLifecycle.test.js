@@ -567,6 +567,14 @@ describe('field availability lifecycle', () => {
     const detail = (refused.validation_errors || []).find((e) => e.reason === 'field_unresolved');
     expect(detail.location).toBe('Alder Park');
     expect(detail.field_name).toBe('Ghost Pitch');
+    // **The prose, byte for byte, and the same literal the SQL smoke pins.**
+    // Nothing asserted the message body on either arm and the two differed:
+    // the SQL used `%L`, which wraps in single quotes and doubles apostrophes,
+    // so a pitch called Ann's Field reached the operator as 'Ann''s Field'.
+    expect(detail.message).toBe(
+      'No field named "Ghost Pitch" at location "Alder Park" in this organization -- ' +
+        'import or create the field first, or correct the spelling, then re-run the import.'
+    );
     const finishedJob = getMockData('import_jobs').find((j) => String(j.id) === String(job.id));
     expect(finishedJob.warning_summary.availability_finalize.unresolved_field_rows).toBe(1);
     // ... merged into whatever was already there, not assigned over it. The SQL

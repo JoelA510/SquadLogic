@@ -270,6 +270,17 @@ BEGIN
                   WHERE e->>'field_name' = 'Ghost Pitch' AND e->>'location' = 'Alder Park') THEN
     RAISE EXCEPTION 'the refusal does not name the location and field it could not resolve: %', v_errs; END IF;
 
+  -- **The prose itself, byte for byte.** Nothing asserted the message body on
+  -- either arm, and the two produced different text: this one used `%L`, the
+  -- SQL-literal conversion, which wraps in single quotes and doubles
+  -- apostrophes, while the mock used ordinary double quotes. The contract is
+  -- the sentence an operator reads, so it is pinned here and in
+  -- tests/fieldAvailabilityLifecycle.test.js against the same literal.
+  IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_errs) e
+                  WHERE e->>'message' = 'No field named "Ghost Pitch" at location "Alder Park" in this organization -- import or create the field first, or correct the spelling, then re-run the import.') THEN
+    RAISE EXCEPTION 'the refusal prose is not what the operator is promised: %',
+      (SELECT e->>'message' FROM jsonb_array_elements(v_errs) e WHERE e->>'reason' = 'field_unresolved'); END IF;
+
   -- 3f. The job's warning summary carries the count too, so an operator reading
   -- the job rather than the RPC result still learns of it.
   IF (SELECT (warning_summary->'availability_finalize'->>'unresolved_field_rows')::int

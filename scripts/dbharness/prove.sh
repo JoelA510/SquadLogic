@@ -1235,6 +1235,14 @@ plant "M4 the finalize overwrites warning_summary instead of merging" "$M4" \
   "smoke 20260908000000" \
   "smoke 20260907000000"
 
+# The refusal prose, pinned on both arms after they were found producing
+# different sentences. `%L` is the SQL-literal conversion, not a display one.
+plant "M4 the refusal prose reverts to SQL-literal quoting" "$M4" \
+  'No field named "%s" at location "%s" in this organization' \
+  'No field named %L at location %L in this organization' \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
 # **The comment pins, which the migration calls "what stops it drifting back"
 # and which had no control at all.** Two objects carry the claim and each gets
 # its own plant, because a pin on a pair that only one plant can reach is a pin

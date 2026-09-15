@@ -4653,7 +4653,11 @@ export const mockSupabase = {
         // not resolve.** A profile that matches no field carries blackout
         // windows that no field-scoped query can attribute to ground; the row
         // is refused and left replayable instead. Same disposition, same
-        // `reason` key and same counters as the SQL -- see
+        // `reason` key, same counters AND the same prose as the SQL -- the
+        // message below is asserted byte for byte on both arms, because that
+        // claim used to be made in this comment and was false: the SQL built
+        // its names with `%L`, which single-quotes and doubles apostrophes.
+        // See
         // supabase/migrations/20260908000000_field_availability_profile_field_resolution.sql
         // for why refusing beats creating it and marking it.
         let fieldId = null;

@@ -177,8 +177,18 @@ BEGIN
         v_unresolved_rows := v_unresolved_rows + 1;
         -- The reason travels as structured keys as well as prose, so a caller
         -- can branch on `reason` rather than parse a sentence.
+        --
+        -- **`%s`, not `%L`.** `%L` is the SQL-literal conversion: it wraps the
+        -- value in single quotes and DOUBLES any apostrophe, so a pitch called
+        -- Ann's Field reached the operator as `'Ann''s Field'`, and a NULL name
+        -- would have read as a bare `NULL`. Measured, not assumed. The quotes
+        -- here are ordinary punctuation, and they are double quotes because
+        -- that is what the mock arm already produced -- the two arms rendered
+        -- the same refusal differently while the mock's comment claimed "same
+        -- disposition, same reason key and same counters as the SQL", and
+        -- nothing asserted the message body on either side.
         v_row_errors := v_row_errors || jsonb_build_object(
-          'message', format('No field named %L at location %L in this organization -- import or create the field first, or correct the spelling, then re-run the import.', v_field_name, v_location),
+          'message', format('No field named "%s" at location "%s" in this organization -- import or create the field first, or correct the spelling, then re-run the import.', v_field_name, v_location),
           'reason','field_unresolved','location',v_location,'field_name',v_field_name,
           'source_row_number',v_row.source_row_number);
       END IF;

@@ -1486,6 +1486,43 @@ plant "M5-SMOKE the fields-arm parse is allowed to match nothing" "$S5" \
   "  IF length(COALESCE(v_fields_arm, '')) < 0 THEN" \
   "smoke 20260909000000"
 
+# **The asymmetry inside the fix.** `game_assignments` reaches a game slot
+# through `game_slot_id` AND `slot_id`, both CASCADE, and the arm read only the
+# first while its practice sibling read both. Put it back and an assignment
+# carrying `slot_id` alone is destroyed by the rollback with nothing refusing.
+plant "M5 the game_slots arm forgets slot_id again" "$M5" \
+  "                      AND (
+                        ga.game_slot_id = v_record.target_id
+                        OR ga.slot_id = v_record.target_id
+                      )" \
+  "                      AND ga.game_slot_id = v_record.target_id" \
+  "smoke 20260909000000"
+
+# **A third table referencing `locations`.** The arm refuses only while a FIELD
+# remains, so a new referent that is not under `fields` would be destroyed by a
+# rollback in silence -- which is exactly what happened when 20260906000100
+# added `field_blackouts.location_id` and nothing noticed.
+plant "M5 a third table references locations unnoticed" "$M5" \
+  "-- ---------------------------------------------------------------------------
+-- 2. The producer gains a SIXTH kind" \
+  "CREATE TABLE public.location_notices (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  location_id uuid NOT NULL REFERENCES public.locations(id) ON DELETE CASCADE
+);
+
+-- ---------------------------------------------------------------------------
+-- 2. The producer gains a SIXTH kind" \
+  "smoke 20260909000000"
+
+# **The unbounded audit row.** Write the raw list where the digest goes and a
+# rollback refused on a busy season stores an arbitrarily large array in
+# `warning_summary` and the audit row on every attempt -- the hazard
+# 20260907000000 built `field_bookings_digest` for.
+plant "M5 the audit row gets the raw blocked list" "$M5" \
+  "        'blocked', public.field_bookings_digest(v_blocked)" \
+  "        'blocked', v_blocked" \
+  "smoke 20260909000000"
+
 # ---------------------------------------------------------------------------
 # LIVE-3's revert: four warnings, two counts, three verdicts
 # ---------------------------------------------------------------------------

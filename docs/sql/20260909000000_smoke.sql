@@ -80,9 +80,18 @@ BEGIN
     RAISE EXCEPTION 'the update switch has no arm for a target_table it does not handle';
   END IF;
 
-  -- A blocked record says which one and why.
-  IF v_def NOT LIKE '%''blocked'', v_blocked%' THEN
-    RAISE EXCEPTION 'the result does not carry the blocked list';
+  -- A blocked record says which one and why, the trail gets a bounded
+  -- rendering of them, and the CALLER gets all of them. All three, because the
+  -- first two are satisfied by a function that digests the list and never
+  -- returns it.
+  IF v_def NOT LIKE '%''blocked'', public.field_bookings_digest(v_blocked)%' THEN
+    RAISE EXCEPTION 'the audit row does not carry a bounded rendering of the blocked list';
+  END IF;
+  IF v_def NOT LIKE '%RETURN v_result || jsonb_build_object(''blocked'', v_blocked)%' THEN
+    RAISE EXCEPTION 'the caller does not get the whole blocked list';
+  END IF;
+  IF v_def NOT LIKE '%''reason'', ''bookings_exist''%' THEN
+    RAISE EXCEPTION 'a refused field does not name its reason';
   END IF;
 
   RAISE NOTICE 'rollback_field_import_job: one producer, no second list, no silent arm';
@@ -150,6 +159,42 @@ BEGIN
   END IF;
 
   RAISE NOTICE 'subunit closure: % reached, all of it through practice_slots', v_closure;
+END $$;
+
+-- 2b. THE LOCATION ARM, by the same argument and the same derivation
+-- ---------------------------------------------------------------------------
+--
+-- `locations` is referenced directly by exactly two tables. `fields` is what
+-- the arm refuses on, and everything else a location delete could reach hangs
+-- under a field -- so refusing while any field remains cuts the closure at its
+-- only other edge. `field_blackouts` is the other edge and is EXCLUDED, on
+-- 20260907000000's reasoning for excluding it from the booking family: a
+-- closure is not a booking, and removing a site cannot strand the statement
+-- that the site was already shut.
+--
+-- **That edge did not exist when the arm was written.** 20260906000100 added
+-- it, and nothing noticed -- which is the whole reason this is a derivation
+-- rather than a sentence. A third table referencing `locations` fails here
+-- instead of being destroyed in silence.
+DO $$
+DECLARE v_direct text[];
+BEGIN
+  SELECT array_agg(DISTINCT src.relname::text ORDER BY src.relname::text)
+    INTO v_direct
+    FROM pg_constraint con
+    JOIN pg_class src ON src.oid = con.conrelid
+    JOIN pg_class tgt ON tgt.oid = con.confrelid
+    JOIN pg_namespace n ON n.oid = src.relnamespace AND n.nspname = 'public'
+   WHERE con.contype = 'f' AND tgt.relname = 'locations';
+  IF v_direct IS NULL OR array_length(v_direct, 1) IS NULL THEN
+    RAISE EXCEPTION 'nothing references locations; this check is looking at nothing';
+  END IF;
+  IF v_direct <> ARRAY['field_blackouts','fields'] THEN
+    RAISE EXCEPTION
+      'locations is now referenced by %. The rollback''s locations arm refuses only while a FIELD remains, so decide whether the new referent is something a rollback may destroy.',
+      v_direct;
+  END IF;
+  RAISE NOTICE 'locations referents: %, one refused on and one excluded with a reason', v_direct;
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -306,7 +351,7 @@ DECLARE
   v_org uuid; v_user uuid := gen_random_uuid();
   v_loc uuid; v_booked uuid; v_free uuid;
   v_season uuid; v_div uuid; v_team uuid;
-  v_job uuid; v_pa uuid; v_profile uuid;
+  v_job uuid; v_job2 uuid; v_pa uuid; v_profile uuid; v_slot uuid;
   v_res jsonb; v_n int; v_blocked jsonb;
 BEGIN
   INSERT INTO auth.users (id, email, raw_user_meta_data)
@@ -348,6 +393,13 @@ BEGIN
     (v_org, v_job, 'fields', 'fields', v_booked, 'inserted', v_user),
     (v_org, v_job, 'fields', 'fields', v_free,   'inserted', v_user);
 
+  -- A second job, for 5d below. Its records must not be picked up by the
+  -- calls in 5a-5c, which is why it is a job of its own rather than more rows
+  -- on the first.
+  INSERT INTO public.import_jobs (organization_id, job_type, storage_path, status, created_by)
+  VALUES (v_org, 'fields', 'imports/rollback-guard/slots.csv', 'completed', v_user)
+  RETURNING id INTO v_job2;
+
   -- 5a. The booked field is refused BY NAME; the free one rolls back.
   v_res := public.rollback_field_import_job(v_job);
   IF (v_res->>'blocked_records')::int <> 1 THEN
@@ -360,12 +412,34 @@ BEGIN
   SELECT x INTO v_blocked FROM jsonb_array_elements(v_res->'blocked') x LIMIT 1;
   IF v_blocked IS NULL THEN
     RAISE EXCEPTION 'blocked_records counted 1 and the blocked list is empty'; END IF;
-  IF (v_blocked->>'target_id')::uuid <> v_booked THEN
-    RAISE EXCEPTION 'the blocked record names %, not the booked field', v_blocked->>'target_id'; END IF;
+  IF (v_blocked->>'id')::uuid <> v_booked THEN
+    RAISE EXCEPTION 'the blocked record names %, not the booked field', v_blocked->>'id'; END IF;
+  IF v_blocked->>'kind' <> 'fields' THEN
+    RAISE EXCEPTION 'the blocked record names kind %, not fields', v_blocked->>'kind'; END IF;
   IF v_blocked->>'reason' <> 'bookings_exist' THEN
     RAISE EXCEPTION 'the blocked record gives reason %', v_blocked->>'reason'; END IF;
   IF (v_blocked->>'affected_count')::int <> 1 THEN
     RAISE EXCEPTION 'the blocked record counted % bookings, expected 1', v_blocked->>'affected_count'; END IF;
+
+  -- **The trail is BOUNDED and the caller's list is not.** The returned
+  -- payload above carries every refusal; `warning_summary.field_rollback` and
+  -- the audit row carry `field_bookings_digest` of it -- total, omitted,
+  -- per-kind counts and a capped sample -- so a rollback refused on a busy
+  -- season cannot write an unbounded array on every attempt. Read HERE, before
+  -- the replay below overwrites it with a clean run's summary: reading it at
+  -- the foot of the block reported a digest of zero and would have passed for
+  -- a function that wrote no digest at all.
+  SELECT warning_summary->'field_rollback'->'blocked' INTO v_blocked
+    FROM public.import_jobs WHERE id = v_job;
+  IF v_blocked IS NULL OR jsonb_typeof(v_blocked) <> 'object' THEN
+    RAISE EXCEPTION 'warning_summary.field_rollback.blocked is not a digest object: %', v_blocked; END IF;
+  IF (v_blocked->>'total')::int <> 1 THEN
+    RAISE EXCEPTION 'the digest totals %, expected the one refusal', v_blocked->>'total'; END IF;
+  IF v_blocked->'by_kind'->>'fields' <> '1' THEN
+    RAISE EXCEPTION 'the digest does not count the refusal by kind: %', v_blocked->'by_kind'; END IF;
+  -- Re-read the refusal entry from the RETURNED payload, which the digest
+  -- replaced in `v_blocked` above.
+  SELECT x INTO v_blocked FROM jsonb_array_elements(v_res->'blocked') x LIMIT 1;
 
   -- **The refusal wrote nothing to the ground it refused.** A guard that
   -- reports a refusal and half-applies is worse than no guard. Counted from
@@ -426,7 +500,32 @@ BEGIN
   IF v_n <> 0 THEN
     RAISE EXCEPTION 'the refused record was stamped rolled back anyway'; END IF;
 
-  RAISE NOTICE 'rollback guard exercised: 1 refused with a reason, 1 rolled back, 1 replayed, 1 unhandled table raised';
+  -- 5d. **The game_slots arm, on the column it did not read.**
+  -- `game_assignments` reaches a slot through `game_slot_id` AND `slot_id`,
+  -- both ON DELETE CASCADE, and this arm consulted only the first while its
+  -- practice sibling read both. An assignment carrying `slot_id` alone was
+  -- destroyed by the rollback with nothing refusing. The row is seeded with
+  -- `game_slot_id` NULL so it is invisible to the pre-fix predicate and
+  -- visible to the fixed one.
+  INSERT INTO public.game_slots (organization_id, field_id, slot_date, week_index)
+  VALUES (v_org, v_free, current_date + 14, 1) RETURNING id INTO v_slot;
+  INSERT INTO public.game_assignments
+    (organization_id, field_id, slot_id, "start", week_index)
+  VALUES (v_org, NULL, v_slot, (current_date + 14) + time '18:00', 1);
+  INSERT INTO public.import_application_records
+    (organization_id, import_job_id, import_type, target_table, target_id, operation, applied_by)
+  VALUES (v_org, v_job2, 'fields', 'game_slots', v_slot, 'inserted', v_user);
+
+  v_res := public.rollback_field_import_job(v_job2);
+  IF (v_res->>'blocked_records')::int <> 1 THEN
+    RAISE EXCEPTION 'a game slot held by a slot_id-only assignment was not refused: %', v_res; END IF;
+  SELECT x INTO v_blocked FROM jsonb_array_elements(v_res->'blocked') x LIMIT 1;
+  IF v_blocked->>'reason' <> 'game_slot_in_use' THEN
+    RAISE EXCEPTION 'the game slot refusal gave reason %', v_blocked->>'reason'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.game_slots WHERE id = v_slot) THEN
+    RAISE EXCEPTION 'the refused game slot was deleted anyway'; END IF;
+
+  RAISE NOTICE 'rollback guard exercised: 1 refused with a reason, 1 rolled back, 1 replayed, 1 unhandled table raised, 1 game slot held by a slot_id-only assignment';
   DELETE FROM public.organizations WHERE id = v_org;
   DELETE FROM auth.users WHERE id = v_user;
 END $$;

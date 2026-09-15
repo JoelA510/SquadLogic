@@ -87,22 +87,31 @@
 --     and counted in `restored_records` having restored nothing.
 --
 -- `import_application_records.target_table` admits twelve values
--- (20260522120000:19) and this loop handles five, so the arm is reachable by
--- data rather than only by a future edit -- and `ORDER BY ... ELSE 99` in the
--- same statement already concedes that. Both now RAISE, naming the union they
--- belong to. This is the silent-`default:` class 8.3 recorded three instances
--- of; nothing in the repo checks for it generally, so it is fixed where it is
--- found.
+-- (20260522120000:19) and this loop handles five. The arm is DEFENSIVE rather
+-- than reachable through the apply path: `finalize_field_import_job` only ever
+-- writes those five with `import_type = 'fields'`, so reaching the ELSE means
+-- the ledger disagrees with its own import type -- which is why it RAISES
+-- rather than joining `blocked`. A job whose record of what it did cannot be
+-- trusted must not be half-rolled-back on the strength of it. `ORDER BY ...
+-- ELSE 99` in the same statement already conceded the value can arrive, and
+-- the smoke and the pgTAP suite construct such a record directly, which is the
+-- only way to reach a defensive arm. This is the silent-`default:` class 8.3
+-- recorded three instances of; nothing in the repo checks for it generally, so
+-- it is fixed where it is found.
 --
 -- ### 4. A blocked record now says which record and why
 --
 -- The function returned `blocked_records` as a bare count. An operator told
 -- "3 blocked" cannot act on it. Each refusal now appends
--- `{target_table, target_id, reason, affected_count}` to a `blocked` array in
--- the result and the audit row, in the shape LIVE-2 established for a refused
--- import row: refuse, report with a reason, leave it replayable
--- (`rolled_back_at` stays NULL, so re-running after clearing the booking rolls
--- the record back).
+-- `{kind, id, reason, affected_count}` to a `blocked` array, in the shape
+-- LIVE-2 established for a refused import row: refuse, report with a reason,
+-- leave it replayable (`rolled_back_at` stays NULL, so re-running after
+-- clearing the booking rolls the record back). The keys are `kind` and `id`
+-- rather than `target_table` and `target_id` because that is what the affected
+-- rows the other two RPCs return are called, and because it is what
+-- `public.field_bookings_digest` counts by -- the CALLER gets the whole list
+-- and the audit row gets that digest, so a rollback refused on a busy season
+-- cannot write an unbounded array into `warning_summary` on every attempt.
 --
 -- ## `field_subunits` keeps a NARROWER check, and here is why
 --
@@ -505,6 +514,16 @@ BEGIN
     LOOP
         IF v_record.operation = 'inserted' THEN
             IF v_record.target_table = 'game_slots' THEN
+                -- **`ga.slot_id` was missing, and its twin one arm down had
+                -- it.** `game_assignments` reaches a game slot through TWO
+                -- CASCADE columns -- `game_slot_id` and `slot_id`
+                -- (20260503030000:39-56) -- and `persist_game_schedule` writes
+                -- both, but nothing requires a row to carry both, and this arm
+                -- consulted only the first. The `practice_slots` arm below has
+                -- always read `slot_id OR practice_slot_id`. Adopting the
+                -- sibling's contract rather than inventing a third one is the
+                -- rule that produced this migration; the asymmetry was found by
+                -- walking the closure from `game_slots`, not by reading the arm.
                 IF EXISTS (
                     SELECT 1 FROM public.games g
                     WHERE g.organization_id = v_job.organization_id
@@ -512,12 +531,15 @@ BEGIN
                 ) OR EXISTS (
                     SELECT 1 FROM public.game_assignments ga
                     WHERE ga.organization_id = v_job.organization_id
-                      AND ga.game_slot_id = v_record.target_id
+                      AND (
+                        ga.game_slot_id = v_record.target_id
+                        OR ga.slot_id = v_record.target_id
+                      )
                 ) THEN
                     v_blocked_records := v_blocked_records + 1;
                     v_blocked := v_blocked || jsonb_build_object(
-                        'target_table', v_record.target_table,
-                        'target_id', v_record.target_id,
+                        'kind', v_record.target_table,
+                        'id', v_record.target_id,
                         'reason', 'game_slot_in_use');
                     CONTINUE;
                 END IF;
@@ -537,8 +559,8 @@ BEGIN
                 ) THEN
                     v_blocked_records := v_blocked_records + 1;
                     v_blocked := v_blocked || jsonb_build_object(
-                        'target_table', v_record.target_table,
-                        'target_id', v_record.target_id,
+                        'kind', v_record.target_table,
+                        'id', v_record.target_id,
                         'reason', 'practice_slot_in_use');
                     CONTINUE;
                 END IF;
@@ -565,8 +587,8 @@ BEGIN
                 ) THEN
                     v_blocked_records := v_blocked_records + 1;
                     v_blocked := v_blocked || jsonb_build_object(
-                        'target_table', v_record.target_table,
-                        'target_id', v_record.target_id,
+                        'kind', v_record.target_table,
+                        'id', v_record.target_id,
                         'reason', 'subunit_in_use');
                     CONTINUE;
                 END IF;
@@ -600,8 +622,8 @@ BEGIN
                     -- for the same reason it does in
                     -- finalize_field_availability_import_job.
                     v_blocked := v_blocked || jsonb_build_object(
-                        'target_table', v_record.target_table,
-                        'target_id', v_record.target_id,
+                        'kind', v_record.target_table,
+                        'id', v_record.target_id,
                         'reason', 'bookings_exist',
                         'affected_count', v_affected_count);
                     CONTINUE;
@@ -612,6 +634,22 @@ BEGIN
                   AND f.organization_id = v_job.organization_id;
                 v_deleted_fields := v_deleted_fields + 1;
             ELSIF v_record.target_table = 'locations' THEN
+                -- **A complete cut, like the subunit arm, and for the same
+                -- kind of reason.** `locations` is referenced directly by
+                -- exactly two tables: `fields` (CASCADE), which this refuses
+                -- on, and `field_blackouts` (CASCADE, added by
+                -- 20260906000100). Everything else a location delete could
+                -- reach is under `fields`, so refusing while any field remains
+                -- cuts the whole closure at its only other edge.
+                --
+                -- `field_blackouts` is EXCLUDED, on 20260907000000's reasoning
+                -- for excluding it from the booking family: a closure is not a
+                -- booking, and removing a site cannot strand the statement that
+                -- the site was already shut. Stated here rather than left
+                -- implicit, and re-derived every harness run by
+                -- docs/sql/20260909000000_smoke.sql section 2b -- that edge did
+                -- not exist when this arm was written and nothing noticed when
+                -- 20260906000100 added it.
                 IF EXISTS (
                     SELECT 1 FROM public.fields f
                     WHERE f.organization_id = v_job.organization_id
@@ -619,8 +657,8 @@ BEGIN
                 ) THEN
                     v_blocked_records := v_blocked_records + 1;
                     v_blocked := v_blocked || jsonb_build_object(
-                        'target_table', v_record.target_table,
-                        'target_id', v_record.target_id,
+                        'kind', v_record.target_table,
+                        'id', v_record.target_id,
                         'reason', 'location_has_fields');
                     CONTINUE;
                 END IF;
@@ -731,6 +769,16 @@ BEGIN
         END IF;
     END LOOP;
 
+    -- **The trail gets a BOUNDED rendering; the caller gets the whole list.**
+    -- One job's ledger can hold a row per CSV line, so a rollback refused on a
+    -- busy season would otherwise write an arbitrarily large `blocked` array
+    -- into `import_jobs.warning_summary` AND into the audit row, on every
+    -- attempt. `public.field_bookings_digest` is the helper 20260907000000
+    -- built for exactly this on the refusal path, and its shape is why the
+    -- entries above are keyed `kind`/`id` rather than
+    -- `target_table`/`target_id`: it counts `by_kind`, so adopting the
+    -- sibling's key names makes the per-table refusal counts fall out instead
+    -- of needing a third convention.
     v_result := jsonb_build_object(
         'status', CASE WHEN v_blocked_records > 0 THEN 'completed_with_warnings' ELSE 'rolled_back' END,
         'deleted_locations', v_deleted_locations,
@@ -740,7 +788,7 @@ BEGIN
         'deleted_game_slots', v_deleted_game_slots,
         'restored_records', v_restored_records,
         'blocked_records', v_blocked_records,
-        'blocked', v_blocked
+        'blocked', public.field_bookings_digest(v_blocked)
     );
 
     UPDATE public.import_jobs
@@ -762,7 +810,8 @@ BEGIN
         v_result
     );
 
-    RETURN v_result;
+    -- The caller renders every refusal, so it gets all of them.
+    RETURN v_result || jsonb_build_object('blocked', v_blocked);
 END;
 $$;
 

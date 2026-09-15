@@ -460,6 +460,115 @@ const PLANTS = [
     find: '        row.validation_errors = [];\n        inserted += 1;',
     replace: '        inserted += 1;',
   },
+  // -------------------------------------------------------------------------
+  // LIVE-3: the third deleter, and the profile that outlived its ground
+  //
+  // The rollback arm is aimed at its OWN suite rather than at the shared
+  // scenario table, because the table has no rollback cases: it states what
+  // the three lifecycle RPCs must do and `rollback_field_import_job` is not
+  // one of them. Naming the suite is what keeps that honest -- a plant scored
+  // against a table that cannot see it is the borrowed-evidence mode this
+  // file exists to refuse.
+  // -------------------------------------------------------------------------
+  {
+    // The defect itself, on this arm: the mock had NO guard, so this is the
+    // state the file shipped in before LIVE-3.
+    label: 'the rollback goes back to deleting whatever the import inserted',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: '            const refusal = blockedReason(record);',
+    replace: '            const refusal = null;',
+  },
+  {
+    // The producer, reached from the third caller. A rollback that consults a
+    // narrower reading than the other two RPCs is LIVE-3 exactly.
+    label: 'the rollback stops asking the shared producer',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: '          const affected = mockFieldBookings(db, rollbackOrg, record.target_id, null);',
+    replace: `          const affected = owned('practice_slots').filter(
+            (ps) => String(ps.field_id) === String(record.target_id)
+          );`,
+  },
+  {
+    // A blocked record that says how many and not which.
+    label: 'a blocked record stops saying which one and why',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: `              blocked.push({
+                kind: record.target_table,
+                id: record.target_id,
+                ...refusal,
+              });`,
+    replace: '              blocked.push({});',
+  },
+  {
+    // The game arm's missing column, which its practice sibling always had.
+    label: 'the game_slots arm forgets slot_id again',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: `              (ga) =>
+                String(ga.game_slot_id) === String(record.target_id) ||
+                String(ga.slot_id) === String(record.target_id)`,
+    replace: '              (ga) => String(ga.game_slot_id) === String(record.target_id)',
+  },
+  {
+    // The counter that testified to a restore nobody performed.
+    label: 'the updated restore goes back to being a counter',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: `          if (target) {
+            for (const column of columns) {
+              target[column] = emptyToNull(previous[column]);
+            }
+            target.updated_at = now;
+          }`,
+    replace: '          if (target) target.updated_at = now;',
+  },
+  {
+    // The unhandled `target_table` that was stamped as rolled back.
+    label: 'an unhandled target_table falls through silently again',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: `            if (refusal === undefined) {`,
+    replace: `            if (false) {`,
+  },
+  {
+    // The sixth kind, removed from the enumerator. The shared scenario table
+    // is what must see this, because it states the delete outcome.
+    label: 'the enumerator stops seeing availability profiles',
+    find: `    ...(db.field_availability_profiles || [])
+      .filter(
+        (row) =>
+          mine(row) &&`,
+    replace: `    ...(db.field_availability_profiles || [])
+      .filter(
+        (row) =>
+          false &&
+          mine(row) &&`,
+  },
+  {
+    // The profile survives the field, which is the LIVE-2 state this PR
+    // closed: a profile describing ground that no longer exists.
+    label: 'a confirmed delete strands the profile again',
+    suite: 'tests/fieldDeleteGuard.test.js',
+    find: `        const doomedProfiles = reported('field_availability_profiles');
+        destroy('field_availability_profiles', doomedProfiles);`,
+    replace: `        const doomedProfiles = reported('field_availability_profiles');`,
+  },
+  {
+    // Its parts survive it, which is the same row one level down: a blackout
+    // window attached to a profile that no longer exists.
+    label: "a confirmed delete leaves the profile's blackout window behind",
+    suite: 'tests/fieldDeleteGuard.test.js',
+    find: `          destroy(
+            table,
+            (db[table] || []).filter((row) => doomedProfileIds.has(String(row.profile_id)))
+          );`,
+    replace: '          void table;',
+  },
+  {
+    // The stored summary takes the raw list where the database stores a
+    // digest -- the divergence PR #378's review found one refusal path along.
+    label: 'the stored rollback summary takes the raw blocked list',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: '        blocked: mockFieldBookingsDigest(blocked),',
+    replace: '        blocked,',
+  },
 ];
 
 const original = readFileSync(MOCK, 'utf8');

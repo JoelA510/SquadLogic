@@ -164,8 +164,8 @@ describe('field import rollback :: the booking guard the mock never had', () => 
     expect(data.deleted_fields).toBe(1);
 
     expect(data.blocked).toHaveLength(1);
-    expect(data.blocked[0].target_table).toBe('fields');
-    expect(data.blocked[0].target_id).toBe('rg-booked');
+    expect(data.blocked[0].kind).toBe('fields');
+    expect(data.blocked[0].id).toBe('rg-booked');
     expect(data.blocked[0].reason).toBe('bookings_exist');
     expect(data.blocked[0].affected_count).toBe(1);
 
@@ -178,6 +178,19 @@ describe('field import rollback :: the booking guard the mock never had', () => 
     const held = getMockData(booking.table).find((r) => String(r.id) === String(booking.row.id));
     expect(held, 'the booking the refusal was about was destroyed').toBeDefined();
     expect(held.field_id).toBe('rg-booked');
+
+    // **The stored summary is BOUNDED and the returned list is not.** The SQL
+    // writes `field_bookings_digest(v_blocked)` into
+    // `warning_summary.field_rollback` and RETURNS the whole list, because one
+    // job's ledger can hold a row per CSV line. A mock storing the raw array
+    // while the database stores a digest is the divergence PR #378's review
+    // found one refusal path along.
+    const job = getMockData('import_jobs').find((j) => String(j.id) === JOB);
+    const stored = job.warning_summary.field_rollback.blocked;
+    expect(Array.isArray(stored), 'the stored summary is the raw list').toBe(false);
+    expect(stored.total).toBe(1);
+    expect(stored.by_kind).toEqual({ fields: 1 });
+    expect(stored.sample).toHaveLength(1);
 
     // Refusal means DEFERRAL. The record keeps `rolled_back_at` unset, so
     // clearing the booking and re-running rolls it back.
@@ -219,6 +232,68 @@ describe('field import rollback :: the booking guard the mock never had', () => 
     expect(data.deleted_fields).toBe(1);
     expect(data.status).toBe('rolled_back');
     expect(getMockData('fields').find((f) => String(f.id) === 'rg-booked')).toBeUndefined();
+  });
+
+  it('refuses a game slot held by an assignment that carries only slot_id', async () => {
+    // **The column the game arm did not read.** `game_assignments` reaches a
+    // slot through `game_slot_id` AND `slot_id`, both ON DELETE CASCADE, and
+    // this arm consulted only the first while its practice sibling read both
+    // -- a one-arm-not-its-twin asymmetry inside the function this PR is about.
+    // `game_slot_id` is left unset so the row is invisible to the old
+    // predicate and visible to the new one.
+    await seedJob([]);
+    await supabase.from('game_slots').insert([
+      {
+        id: 'rg-game-slot',
+        organization_id: ORG,
+        field_id: 'rg-free',
+        slot_date: '2099-06-01',
+        week_index: 1,
+      },
+    ]);
+    await supabase.from('game_assignments').insert([
+      {
+        id: 'rg-game-assignment',
+        organization_id: ORG,
+        field_id: null,
+        slot_id: 'rg-game-slot',
+        start: '2099-06-01T18:00:00.000Z',
+        week_index: 1,
+      },
+    ]);
+    await supabase.from('import_application_records').insert([
+      {
+        id: 'rg-record-slot',
+        organization_id: ORG,
+        import_job_id: JOB,
+        import_type: 'fields',
+        target_table: 'game_slots',
+        target_id: 'rg-game-slot',
+        operation: 'inserted',
+      },
+    ]);
+
+    const { data, error } = await supabase.rpc('rollback_field_import_job', {
+      p_import_job_id: JOB,
+    });
+    expect(error).toBeNull();
+    // TWO refusals, and the second falls out of the first: the slot survives,
+    // so the field it sits on is a booked field and is refused in turn. A test
+    // expecting one would have been asserting a reading of the RPC rather than
+    // the RPC.
+    expect(data.blocked_records).toBe(2);
+    const slotEntry = data.blocked.find((b) => b.kind === 'game_slots');
+    expect(slotEntry, 'the game slot was not refused').toBeDefined();
+    expect(slotEntry.id).toBe('rg-game-slot');
+    expect(slotEntry.reason).toBe('game_slot_in_use');
+    expect(data.blocked.map((b) => b.kind).sort()).toEqual(['fields', 'game_slots']);
+    expect(
+      getMockData('game_slots').find((slot) => String(slot.id) === 'rg-game-slot'),
+      'the refused game slot was deleted anyway'
+    ).toBeDefined();
+    // The other field carried nothing and still rolls back, so the refusals
+    // above are targeted rather than a guard that stopped everything.
+    expect(data.deleted_fields).toBe(1);
   });
 
   it('rolls back an unbooked import without refusing anything', async () => {

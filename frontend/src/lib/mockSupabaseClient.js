@@ -5033,10 +5033,15 @@ export const mockSupabase = {
       /** @param {Record<string, any>} record */
       const blockedReason = (record) => {
         if (record.target_table === 'game_slots') {
+          // **Both CASCADE columns, matching the SQL and the practice arm one
+          // branch down.** `game_assignments` reaches a slot through
+          // `game_slot_id` AND `slot_id`, and this read only the first.
           const inUse =
             owned('games').some((g) => String(g.game_slot_id) === String(record.target_id)) ||
             owned('game_assignments').some(
-              (ga) => String(ga.game_slot_id) === String(record.target_id)
+              (ga) =>
+                String(ga.game_slot_id) === String(record.target_id) ||
+                String(ga.slot_id) === String(record.target_id)
             );
           return inUse ? { reason: 'game_slot_in_use' } : null;
         }
@@ -5094,9 +5099,12 @@ export const mockSupabase = {
               return;
             }
             if (refusal !== null) {
+              // `kind`/`id`, the names the affected rows of the other two
+              // field RPCs already carry, and the names
+              // `field_bookings_digest` counts by.
               blocked.push({
-                target_table: record.target_table,
-                target_id: record.target_id,
+                kind: record.target_table,
+                id: record.target_id,
                 ...refusal,
               });
               // Left replayable: `rolled_back_at` stays unset, so clearing the
@@ -5218,7 +5226,13 @@ export const mockSupabase = {
         deleted_game_slots: deletedGameSlots,
         restored_records: restoredRecords,
         blocked_records: blocked.length,
-        blocked,
+        // **Bounded here as in the database.** The SQL writes
+        // `field_bookings_digest(v_blocked)` into warning_summary and the
+        // audit row and RETURNS the whole list, because one job's ledger can
+        // hold a row per CSV line. Writing the raw array into the stored
+        // summary while the database wrote a digest is the divergence
+        // PR #378's review found one refusal path along.
+        blocked: mockFieldBookingsDigest(blocked),
       };
       Object.assign(job, {
         status: blocked.length > 0 ? 'completed_with_warnings' : 'needs_fix',
@@ -5229,7 +5243,8 @@ export const mockSupabase = {
       });
 
       saveDB(db);
-      return { data: result, error: null };
+      // The caller renders every refusal, so it gets all of them.
+      return { data: { ...result, blocked }, error: null };
     }
 
     if (name === 'set_import_job_coach_lead_summary') {

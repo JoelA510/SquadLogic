@@ -17,7 +17,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(26);
+SELECT plan(28);
 
 -- ──────────────────────────────────────────────────────────────
 -- Seed, as superuser, before any SET LOCAL role.
@@ -174,11 +174,33 @@ SELECT is(
 
 SELECT is(
     (
-        SELECT x->>'target_id'
+        SELECT x->>'id'
           FROM rollback_result, jsonb_array_elements(r->'blocked') x
     ),
     'e0000000-0000-0000-0000-0000000000e2',
     'the blocked entry names WHICH record was refused, not just how many'
+);
+
+SELECT is(
+    (
+        SELECT x->>'kind'
+          FROM rollback_result, jsonb_array_elements(r->'blocked') x
+    ),
+    'fields',
+    'the blocked entry names what KIND of record it was, in the key the other two field RPCs use'
+);
+
+-- **The trail is bounded and the caller's list is not.** The RETURN above
+-- carries every refusal; `warning_summary.field_rollback.blocked` carries
+-- `field_bookings_digest` of it, so a rollback refused on a busy season cannot
+-- write an unbounded array on every attempt.
+SELECT is(
+    (
+        SELECT (warning_summary->'field_rollback'->'blocked'->>'total')
+          FROM public.import_jobs WHERE id = 'e0000000-0000-0000-0000-0000000000e5'
+    ),
+    '1',
+    'the stored summary carries a bounded digest of the refusals rather than the raw list'
 );
 
 SELECT is(

@@ -320,6 +320,35 @@ for id in "${NEW_MIGRATIONS[@]}"; do
     fi
   fi
 
+  # **The migration's own PRE-EXISTING warning, on a database that has some.**
+  #
+  # That branch had never executed. `apply_all` builds from scratch, so when
+  # 20260908000000 applies the table is always empty and only its NOTICE branch
+  # fires -- and `apply_all` sends migration output to a file it prints only on
+  # failure, so nothing was displayed either. The one thing telling a production
+  # operator how many field-less profiles they already hold, and pointing at the
+  # listing query, was unreached and unseen, while its byte-for-byte twin in the
+  # revert had a seed, two greps and a census entry.
+  #
+  # The seed above has just planted an orphan, so re-applying the migration here
+  # runs that branch against real rows. The migration is idempotent -- CREATE OR
+  # REPLACE, COMMENT ON, and a reporting DO block -- so this leaves the database
+  # exactly as the revert expects to find it.
+  if [ "$id" = "20260908000000" ]; then
+    if psql_file "$REPO/supabase/migrations/20260908000000_field_availability_profile_field_resolution.sql" \
+         >/tmp/harness_reapply 2>&1; then
+      if grep -q 'PRE-EXISTING: 1 field_availability_profiles row(s) have field_id IS NULL, carrying 1 blackout window(s)' /tmp/harness_reapply; then
+        echo "  | (checked) applying the migration onto a database that already holds a field-less profile warns and counts it"
+      else
+        echo "FAIL ${id}: re-applied onto a seeded database and the PRE-EXISTING warning did not name the orphan it found"
+        dump 10 /tmp/harness_reapply; STATUS=1
+      fi
+    else
+      echo "FAIL ${id}: the migration is not idempotent -- re-applying it failed"
+      dump 15 /tmp/harness_reapply; STATUS=1
+    fi
+  fi
+
   if psql_file "$REPO/docs/sql/${id}_revert.sql" >/tmp/harness_rev 2>&1; then
     echo "PASS revert ${id}"
     grep -E '^(psql:[^ ]+ )?(NOTICE|WARNING):' /tmp/harness_rev |

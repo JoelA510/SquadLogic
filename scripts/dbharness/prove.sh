@@ -1270,6 +1270,23 @@ plant "M4 the finalize loses SECURITY DEFINER" "$M4" \
   "smoke 20260908000000" \
   "smoke 20260907000000"
 
+# **The apply-time report, which had never run.** A migration that says nothing
+# about what a production database already holds is the silent half of this
+# fix; the plant makes the branch that says it falsifiable.
+plant "M4 the apply-time orphan report never fires" "$M4" \
+  "  IF v_profiles > 0 THEN
+    RAISE WARNING 'PRE-EXISTING:" \
+  "  IF false THEN
+    RAISE WARNING 'PRE-EXISTING:" \
+  "20260908000000: re-applied onto a seeded database and the PRE-EXISTING warning did not name the orphan it found"
+
+# Its count, on the same seeded row: a report that counts the wrong set says
+# zero, which reads exactly like a clean database.
+plant "M4 the apply-time report counts the wrong set" "$M4" \
+  "  SELECT count(*) INTO v_profiles FROM public.field_availability_profiles WHERE field_id IS NULL;" \
+  "  SELECT count(*) INTO v_profiles FROM public.field_availability_profiles WHERE field_id IS NOT NULL;" \
+  "20260908000000: re-applied onto a seeded database and the PRE-EXISTING warning did not name the orphan it found"
+
 # **The revert's count, on the row run.sh plants for it.** Without the seed this
 # would report zero on a fresh database and prove only that the code parses;
 # with the seed, a revert that counts the wrong set prints ORPHANS: 0 and the
@@ -1370,6 +1387,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"]="R3 the restored retire calls a helper the revert also drops|R3 the restored retire's CONFIRMED path calls a dropped helper"
   ["(checked) the revert counted the field-less profile already in the database"]="R4 revert counts no orphans"
   ["(checked) the revert named the import guard it was putting back"]="R4 revert reinstates the unguarded body silently"
+  ["(checked) applying the migration onto a database that already holds a field-less profile warns and counts it"]="M4 the apply-time orphan report never fires|M4 the apply-time report counts the wrong set"
   ["(checked) the revert named the two bundled fixes it also undoes, and counted the rows one of them strands"]="R4 revert does not name the two bundled fixes it also undoes|R4 revert counts no stranded refusals"
   ["(checked) exactly one public.finalize_field_availability_import_job survives the revert, and its body no longer carries the resolution guard"]="R4 revert drops the finalizer instead of restoring it|R4 revert leaves the guard in place|R4 revert restores the finalizer under a second signature"
   ["(checked) the rollback removed every overload of all four admin facility RPCs"]="EMERG the rollback and its own guard drift together"

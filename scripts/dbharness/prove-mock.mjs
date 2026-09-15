@@ -166,16 +166,16 @@ const PLANTS = [
     // CAUGHT and said nothing about whether anything covers it.
     label: 'delete stops seeing assignments reached through their slot',
     suite: 'tests/fieldDeleteGuard.test.js',
-    find: '          (String(row.field_id) === String(fieldId) || viaSlot(row));',
-    replace: '          String(row.field_id) === String(fieldId);',
+    find: '    (String(row.field_id) === String(fieldId) || viaSlot(row));',
+    replace: '    String(row.field_id) === String(fieldId);',
   },
   {
     // `games` carries no field_id; only the cascade closure reaches it.
     // `games` carries no field_id; only the cascade closure reaches it. Both
     // callers enumerate it now, so this is aimed at the shared producer.
     label: 'the enumerator stops seeing the fixtures on its slots',
-    find: '              if (!gameSlotIds.has(String(row.game_slot_id))) return false;',
-    replace: '              if (true) return false;',
+    find: '        if (!gameSlotIds.has(String(row.game_slot_id))) return false;',
+    replace: '        if (true) return false;',
   },
   {
     // **The shared enumerator's `after: null` contract.** `null` means no date
@@ -183,8 +183,8 @@ const PLANTS = [
     // from comparing against the string "null". Get that wrong and every
     // booking reads as past, the count is zero, and the guard is silently off.
     label: 'the enumerator treats "no date at all" as a date',
-    find: '        const past = (value) => after !== null && !undatedValue(value) && String(value) <= after;',
-    replace: '        const past = (value) => value !== null && String(value) <= String(after);',
+    find: '  const past = (value) => after !== null && !undatedValue(value) && String(value) <= after;',
+    replace: '  const past = (value) => value !== null && String(value) <= String(after);',
   },
   {
     // The other half of the same predicate: `''` is what the field-import
@@ -193,9 +193,8 @@ const PLANTS = [
     // refusal -- while the same row still reports `unbounded: true`.
     label: 'an empty valid_until reads as a date before every date',
     suite: 'tests/fieldLifecycleRpcs.test.js',
-    find: `        const undatedValue = (value) =>
-          value === null || value === undefined || String(value) === '';`,
-    replace: '        const undatedValue = (value) => value === null || value === undefined;',
+    find: "  const undatedValue = (value) => value === null || value === undefined || String(value) === '';",
+    replace: '  const undatedValue = (value) => value === null || value === undefined;',
   },
   {
     // Not scenario-table plants: the table states the RPC's OUTCOME and
@@ -311,8 +310,8 @@ const PLANTS = [
     // reading exists for reported `on_date: ''` here and `null` in Postgres.
     label: 'an empty valid_until is projected as an empty string',
     suite: 'tests/fieldLifecycleRpcs.test.js',
-    find: '              on_date: undatedValue(slot.valid_until) ? null : slot.valid_until,',
-    replace: '              on_date: slot.valid_until ?? null,',
+    find: '        on_date: undatedValue(slot.valid_until) ? null : slot.valid_until,',
+    replace: '        on_date: slot.valid_until ?? null,',
   },
   {
     // **A confirmed retirement stops saying what it just closed over.** Its SQL
@@ -329,14 +328,14 @@ const PLANTS = [
     // which is exactly why the scenario table had to state the boundary as data
     // before either could be measured against it.
     label: 'the practice range boundary is read exclusively again',
-    find: `        if (match[3] === ']') return end;
-        const previous = new Date(\`\${end}T00:00:00Z\`);
-        if (Number.isNaN(previous.getTime())) return null;
-        previous.setUTCDate(previous.getUTCDate() - 1);`,
-    replace: `        if (match[3] === ')') return end;
-        const previous = new Date(\`\${end}T00:00:00Z\`);
-        if (Number.isNaN(previous.getTime())) return null;
-        previous.setUTCDate(previous.getUTCDate() + 1);`,
+    find: `  if (match[3] === ']') return end;
+  const previous = new Date(\`\${end}T00:00:00Z\`);
+  if (Number.isNaN(previous.getTime())) return null;
+  previous.setUTCDate(previous.getUTCDate() - 1);`,
+    replace: `  if (match[3] === ')') return end;
+  const previous = new Date(\`\${end}T00:00:00Z\`);
+  if (Number.isNaN(previous.getTime())) return null;
+  previous.setUTCDate(previous.getUTCDate() + 1);`,
   },
   {
     // **The disposition, re-derived from a hard-coded kind list.** The SQL asks

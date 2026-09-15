@@ -108,13 +108,23 @@ const CONTENTS = new Map(
 );
 
 /**
- * Remove SQL and JS comments.
+ * Remove SQL, JS and SHELL comments.
  *
  * Both tables are discussed at length in the migrations' own headers and in
  * this file, and counting prose as a write would make the audit report its own
  * subject matter. Crude in the safe direction: it can only *under* report, and
  * the exactness assertions below then fail on a missing file rather than pass
  * quietly.
+ *
+ * **The shell rule arrived with `.sh` in SCANNED_EXTENSIONS and had to.**
+ * Adding that extension without it broke the direction stated above: `#` was
+ * not stripped, so a comment in `run.sh` or `prove.sh` explaining a seed --
+ * and those files explain everything they do -- registered as a write and the
+ * helper began OVER-reporting. Over-reporting is the unsafe direction here,
+ * because the exact-match assertion then pushes the next person to add the
+ * file to the expected list, which would mask a real write in it later.
+ * Only `#` at the start of a line is stripped, matching the `--` rule, so a
+ * `#` inside a string or a JS private field is left alone.
  *
  * @param {string} source
  * @returns {string}
@@ -123,7 +133,8 @@ function stripComments(source) {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
-    .replace(/^\s*--[^\n]*/gm, ' ');
+    .replace(/^\s*--[^\n]*/gm, ' ')
+    .replace(/^\s*#[^\n]*/gm, ' ');
 }
 
 /**
@@ -183,6 +194,26 @@ describe('blackout freeze :: the scan examined the repository', () => {
     // This file names both tables constantly and writes neither.
     expect(writersOf('field_blackout_windows')).not.toContain('tests/fieldBlackoutFreeze.test.js');
     expect(writersOf('field_blackouts')).not.toContain('tests/fieldBlackoutFreeze.test.js');
+  });
+
+  it('strips shell comments, now that shell scripts are scanned', () => {
+    // The direction the helper promises is under-reporting. Adding `.sh`
+    // without a `#` rule reversed it: the harness scripts explain every seed
+    // they perform, so a sentence about one counted as one.
+    //
+    // **The write phrase is composed rather than written out**, because a
+    // literal one in this file makes THIS file match `writersOf` and the
+    // exactness assertions below then report the audit as a writer of its own
+    // subject -- which is what happened on the first attempt at this test.
+    const write = ['DELETE', 'FROM', 'public.field_blackouts'].join(' ');
+    expect(stripComments(`# ${write} is what the revert does\necho hi`)).not.toMatch(/DELETE/);
+    // ... and a real statement in the same file still counts.
+    expect(stripComments(`# explains the seed below\npsql -c '${write}'`)).toMatch(
+      new RegExp(write.replace('.', '\\.'))
+    );
+    // A `#` that is not a line comment is left alone, so the rule cannot eat
+    // code: JS private fields and anything inside a string survive.
+    expect(stripComments('const x = "a#b";')).toMatch(/a#b/);
   });
 });
 

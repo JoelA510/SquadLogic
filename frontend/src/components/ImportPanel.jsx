@@ -142,6 +142,7 @@ export default function ImportPanel({ onImport }) {
     importedFieldAvailability,
     rollbackImport,
     telemetryLogs,
+    importLogs,
     activeJob,
   } = useImport();
 
@@ -489,6 +490,43 @@ export default function ImportPanel({ onImport }) {
               <AlertCircle size={16} />
               {error}
             </div>
+          )}
+
+          {/*
+            **The import log, on screen.**
+
+            `completeImport` has always told the operator to "check the import
+            log" when a job finishes with warnings, and until this there was no
+            import log to check: `ImportContext` accumulated `importLogs` and no
+            component read them. So a server-side row refusal -- an availability
+            row naming a field the organisation does not have -- produced
+            "Import Applied with Warnings", a count of zero profiles, and no
+            statement anywhere on screen of why. A refusal nobody can read is
+            the same silence as a refusal nobody records.
+
+            Rendered whenever there are lines, which is any run that got past
+            parsing, and always on the screen the operator lands on.
+          */}
+          {importLogs.length > 0 && (
+            <section
+              aria-labelledby="import-log-heading"
+              data-testid="import-log"
+              className="w-full max-w-lg mb-8 text-left"
+            >
+              <h3 id="import-log-heading" className="text-sm font-semibold text-text-primary mb-2">
+                Import log
+              </h3>
+              <ol className="max-h-48 overflow-y-auto rounded-lg border border-border bg-bg-sunken divide-y divide-border-soft">
+                {importLogs.map((entry, index) => (
+                  <li
+                    key={`${index}-${entry.message}`}
+                    className="px-3 py-2 text-xs text-text-secondary"
+                  >
+                    {entry.message}
+                  </li>
+                ))}
+              </ol>
+            </section>
           )}
 
           {isReadyToApply ? (

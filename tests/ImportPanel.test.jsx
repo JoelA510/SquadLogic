@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import ImportPanel from '../frontend/src/components/ImportPanel.jsx';
 
 const mocks = vi.hoisted(() => ({
@@ -75,6 +75,7 @@ describe('ImportPanel', () => {
       importedFieldAvailability: null,
       rollbackImport: mocks.rollbackImport,
       telemetryLogs: [],
+      importLogs: [],
       activeJob: null,
     };
     mocks.parse.mockImplementation((_file, options) => {
@@ -465,5 +466,56 @@ describe('ImportPanel', () => {
 
     fireEvent.click(checkbox);
     expect(mocks.setNotifyOnComplete).toHaveBeenCalledWith(true);
+  });
+  /**
+   * **The refusal has to reach a person.**
+   *
+   * `completeImport` has always told the operator to "check the import log"
+   * when a job finishes with warnings, and until this panel rendered them
+   * there was no import log to check: `ImportContext` accumulated `importLogs`
+   * and no component read them. An availability CSV naming a field the
+   * organisation does not have produced "Import Applied with Warnings", zero
+   * profiles, and no statement on screen of why.
+   *
+   * The text asserted here is `describeFinalizeOutcome`'s, taken from that
+   * function rather than restated, because it owns the wording and
+   * tests/importFinalizeOutcome.test.js pins it against literals.
+   */
+  it('renders the import log so a refused row reaches the operator', async () => {
+    const { describeFinalizeOutcome } =
+      await import('../frontend/src/utils/importDeferredActions.js');
+    const lines = describeFinalizeOutcome(
+      { invalid_rows: 2, unresolved_field_rows: 2 },
+      'field_availability'
+    );
+    expect(lines).toHaveLength(2);
+
+    mocks.importState = {
+      ...mocks.importState,
+      importStatus: 'completed_with_warnings',
+      importLogs: lines.map((message) => ({ timestamp: new Date(), message })),
+    };
+    render(<ImportPanel onImport={vi.fn()} />);
+
+    expect(screen.getByText('Import Applied with Warnings')).toBeInTheDocument();
+    const log = screen.getByTestId('import-log');
+    // The reason, on screen, in the words the operator can act on.
+    lines.forEach((line) => expect(within(log).getByText(line)).toBeInTheDocument());
+    // Labelled rather than a bare box, so a screen reader reaches it by name.
+    expect(log).toHaveAccessibleName('Import log');
+  });
+
+  it('renders no import log region when there is nothing to report', () => {
+    mocks.importState = {
+      ...mocks.importState,
+      importStatus: 'completed',
+      importLogs: [],
+    };
+    render(<ImportPanel onImport={vi.fn()} />);
+
+    expect(screen.getByText('Import Applied')).toBeInTheDocument();
+    // An empty box captioned "Import log" is worse than no box: it reads as
+    // "nothing happened" on a screen that exists to report what did.
+    expect(screen.queryByTestId('import-log')).toBeNull();
   });
 });

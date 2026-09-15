@@ -41,7 +41,23 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
  */
 const SCAN_ROOTS = Object.freeze(['packages', 'frontend', 'supabase', 'scripts', 'tests', 'docs']);
 
-const SCANNED_EXTENSIONS = Object.freeze(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.sql']);
+// **`.sh` is here because a writer landed in one.** `scripts/dbharness/run.sh`
+// seeds a field_blackout_windows row so 20260908000000's revert has an orphan
+// to count, and the scan could not see it -- so "who may write this table is a
+// checked list, scanned out of the source tree" was false in the same PR that
+// added the writer. An extension list is a filter on the universe, and a
+// universe that cannot contain the new writer is the set-derived-from-the-thing
+// -being-checked defect wearing different clothes.
+const SCANNED_EXTENSIONS = Object.freeze([
+  '.js',
+  '.jsx',
+  '.ts',
+  '.tsx',
+  '.mjs',
+  '.cjs',
+  '.sql',
+  '.sh',
+]);
 
 const SKIPPED_DIRECTORIES = Object.freeze([
   'node_modules',
@@ -92,13 +108,23 @@ const CONTENTS = new Map(
 );
 
 /**
- * Remove SQL and JS comments.
+ * Remove SQL, JS and SHELL comments.
  *
  * Both tables are discussed at length in the migrations' own headers and in
  * this file, and counting prose as a write would make the audit report its own
  * subject matter. Crude in the safe direction: it can only *under* report, and
  * the exactness assertions below then fail on a missing file rather than pass
  * quietly.
+ *
+ * **The shell rule arrived with `.sh` in SCANNED_EXTENSIONS and had to.**
+ * Adding that extension without it broke the direction stated above: `#` was
+ * not stripped, so a comment in `run.sh` or `prove.sh` explaining a seed --
+ * and those files explain everything they do -- registered as a write and the
+ * helper began OVER-reporting. Over-reporting is the unsafe direction here,
+ * because the exact-match assertion then pushes the next person to add the
+ * file to the expected list, which would mask a real write in it later.
+ * Only `#` at the start of a line is stripped, matching the `--` rule, so a
+ * `#` inside a string or a JS private field is left alone.
  *
  * @param {string} source
  * @returns {string}
@@ -107,7 +133,8 @@ function stripComments(source) {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
-    .replace(/^\s*--[^\n]*/gm, ' ');
+    .replace(/^\s*--[^\n]*/gm, ' ')
+    .replace(/^\s*#[^\n]*/gm, ' ');
 }
 
 /**
@@ -168,29 +195,73 @@ describe('blackout freeze :: the scan examined the repository', () => {
     expect(writersOf('field_blackout_windows')).not.toContain('tests/fieldBlackoutFreeze.test.js');
     expect(writersOf('field_blackouts')).not.toContain('tests/fieldBlackoutFreeze.test.js');
   });
+
+  it('strips shell comments, now that shell scripts are scanned', () => {
+    // The direction the helper promises is under-reporting. Adding `.sh`
+    // without a `#` rule reversed it: the harness scripts explain every seed
+    // they perform, so a sentence about one counted as one.
+    //
+    // **The write phrase is composed rather than written out**, because a
+    // literal one in this file makes THIS file match `writersOf` and the
+    // exactness assertions below then report the audit as a writer of its own
+    // subject -- which is what happened on the first attempt at this test.
+    const write = ['DELETE', 'FROM', 'public.field_blackouts'].join(' ');
+    expect(stripComments(`# ${write} is what the revert does\necho hi`)).not.toMatch(/DELETE/);
+    // ... and a real statement in the same file still counts.
+    expect(stripComments(`# explains the seed below\npsql -c '${write}'`)).toMatch(
+      new RegExp(write.replace('.', '\\.'))
+    );
+    // A `#` that is not a line comment is left alone, so the rule cannot eat
+    // code: JS private fields and anything inside a string survive.
+    expect(stripComments('const x = "a#b";')).toMatch(/a#b/);
+  });
 });
 
 describe('blackout freeze :: who may write each table is a checked list', () => {
   /**
    * The import path, and nothing else.
    *
-   * Three migrations define `finalize_field_availability_import_job` in
+   * FOUR migrations now define `finalize_field_availability_import_job` in
    * sequence -- the live definition is the last -- and the mock client mirrors
-   * it for the E2E suite. All four are the import path.
+   * it for the E2E suite. All five are the import path.
    *
-   * The fifth is M2's own smoke, which seeds a window so it can assert what
+   * The sixth is M2's own smoke, which seeds a window so it can assert what
    * `field_closures` reports for the import arm. It is a writer by the
    * matcher's definition and is listed rather than excepted: an operator script
    * that runs against a database is exactly the kind of writer a freeze wants
    * visible. It is not a producer -- nothing it writes outlives the `DELETE
    * FROM public.organizations` that ends the block.
+   *
+   * The seventh is the local harness, which seeds one window so
+   * 20260908000000's revert has an orphaned closure to count -- the revert
+   * reports what the database already holds, and on a freshly migrated database
+   * that is nothing, so the count would prove only that the code parses. Same
+   * reasoning as the smoke: a script that seeds a table to check it is a writer
+   * the freeze wants visible, and nothing it writes outlives the run.
+   *
+   * The eighth is 20260908000000's REVERT, which carries the pre-fix body
+   * verbatim in order to restore it. It is listed for the same reason as the
+   * smoke and for one more: a revert is the one artefact that puts an old
+   * writer back, so a freeze that could not see reverts would be blind to
+   * exactly the change that undoes it.
+   *
+   * **This list did its job on the change that added to it.** 20260908000000
+   * re-issues the import path's body, so both the migration and its revert
+   * became writers, and this test failed until they were named here -- which is
+   * what "who may write this table is a checked list" is for. Adding a file
+   * here is a decision to be argued, not a formality: the freeze says
+   * field_blackout_windows is owned SOLELY by the import path, and every entry
+   * below either is that path or is a script that seeds it to check it.
    */
   const EXPECTED_FROZEN_WRITERS = Object.freeze([
     'docs/sql/20260906000100_smoke.sql',
+    'docs/sql/20260908000000_revert.sql',
     'frontend/src/lib/mockSupabaseClient.js',
+    'scripts/dbharness/run.sh',
     'supabase/migrations/20260522120000_field_availability_phase1.sql',
     'supabase/migrations/20260522153000_field_availability_finalize_hardening.sql',
     'supabase/migrations/20260602000000_field_availability_finalize_applied_payload_fix.sql',
+    'supabase/migrations/20260908000000_field_availability_profile_field_resolution.sql',
   ]);
 
   it('holds field_blackout_windows to the import path, in both directions', () => {

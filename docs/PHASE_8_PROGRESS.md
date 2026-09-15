@@ -1489,10 +1489,14 @@ Two further divergences came out of the controls rather than out of reading:
   half, and `field_closures`' comment was rewritten to say so rather than left
   reading as permission to collapse it.
 - **LIVE-4**, unchanged.
-- **Nothing renders `importLogs`.** The context accumulates them and no component
-  reads them, so the refusal reasons this PR added reach a log that is not on
-  screen. `completeImport` has told operators to "check the import log" all
-  along. PR 3's surface.
+- ~~**Nothing renders `importLogs`.**~~ **Closed in this PR, on review.** It was
+  first recorded here as PR 3's surface, and that was the wrong call: the
+  disposition this PR argued for is "refuse the row and report it with a
+  reason", and a reason that reaches three places in the database and no screen
+  is the same silence one level up. `ImportPanel` renders the log on the screen
+  the operator lands on, which is also the screen `completeImport` has always
+  told them to check. Three controls — not rendered, rendered without an
+  accessible name, rendered when empty — all caught.
 - **No UI path re-applies a finished import job**, though the RPC is safe to
   re-run and the rows are staged for exactly that. The operator message was
   worded to avoid promising a button that does not exist, and a test asserts it

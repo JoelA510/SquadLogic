@@ -1522,6 +1522,65 @@ number offered as measured evidence is worth less than no number.
   `npm run test:db`, not here" — true of the harness, and it need not be true of
   a developer checking their own file.
 
+### Merged, and what the second pass was worth
+
+- **Merged:** squash `341c647`, 2026-09-15, from reviewed head `d694ddd`. CI
+  green on that head: Build & Test, Run pgTAP against local Supabase, Deno
+  Mirror, CodeQL (actions / javascript-typescript / python), GitGuardian.
+- **Review rounds: two.** Round 1 at `e4da05d` — **fifteen findings**, all real,
+  none withdrawn, one commit each across `e4da05d..d694ddd`. Round 2 at
+  `d694ddd` — **zero findings**, which is what terminated the loop under the
+  stop rule (a round finding fewer than four).
+
+**Zero findings is a claim about what was checked, not about effort, so here is
+the list.** Round 2 was aimed only at places this project's recurring shapes
+hide, and each probe is one a defect would have failed:
+
+1. **Is the round-1 UI fix reachable in the state the finding was about?**
+   `importLogs` is populated on _both_ finalize arms (`:977` direct, `:1063`
+   deferred); the two `setImportLogs([])` sites are `startImport` and
+   `resetImport`, neither of which fires after finalize; the section's enclosing
+   branch is `isComplete || isReadyToApply`, and `isComplete` covers
+   `completed_with_warnings` — the exact status whose message says to check the
+   log.
+2. **Is the two-arm prose parity real or mutual?** Each arm is pinned to its own
+   literal — `docs/sql/20260908000000_smoke.sql:280` and
+   `tests/fieldAvailabilityLifecycle.test.js:575` — not to the other. This is
+   the mechanism the PR #376 rounds established: compare each arm to the table,
+   never to its sibling.
+3. **What edge did `%L` → `%s` open?** `%s` renders NULL as the empty string,
+   but the `format` is inside `IF v_location IS NOT NULL AND v_field_name IS NOT
+NULL`, so no NULL reaches it.
+4. **Is the new `' row(s)'` branch dead code presented as a guard?** It is
+   unreachable today and says so: unresolved always appends a row error, which
+   increments `v_invalid_rows`, so `unresolved > 0 AND invalid = 0` cannot
+   occur. Declared unreachable rather than left reading as load-bearing.
+5. **Did the `warning_summary` fix invent a third contract?** No — the mock
+   already spread `...(job.warning_summary || {})` at every finalize site. The
+   SQL was the outlier and adopted the sibling's contract.
+6. **Does the revert undo a fourth thing it does not name?** No. Only four
+   migrations ever define `finalize_field_availability_import_job`, and the last
+   before `20260908000000` _is_ `20260602000000`, so restoring that body strands
+   nothing unnamed. This is round-1 finding 2 re-asked one level deeper.
+7. **Does the new pgTAP assert against data that exists?** It seeds locations
+   and fields, and its two zero-counts are anchored by a positive total
+   (`count = 2`), so a wipe fails rather than passes. It also proves the claim
+   the whole disposition rests on: re-running after the field is created takes
+   profiles 2 → 3.
+8. **Is the census derived or hand-listed?** Derived from the health claims
+   `run.sh` actually printed in the baseline transcript. It fails in both
+   directions — a claim with no plant (`prove.sh:1414`) and a plant naming a
+   claim never printed (`:1435`) — rejects duplicate labels so it cannot be
+   inflated (`:263`), and fails outright if the transcript carries no claim line
+   at all (`:1445`).
+
+**The supervisor's own process note.** The stop hook asked for the working tree
+to be committed nine times across this task. It was declined every time, and
+once that mattered: the tree held
+`20260906000000_field_effective_dating.sql` mutated with its `.orig` beside it —
+a plant in flight. Committing would have landed a deliberate defect in a
+migration. Third time this rule has paid out.
+
 ### Still open after LIVE-2
 
 - **LIVE-3**, unchanged, and now with one more reason: `admin_delete_field` is

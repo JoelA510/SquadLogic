@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { ImportProvider, useImport } from '../frontend/src/contexts/ImportContext.jsx';
 
@@ -43,6 +43,14 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
 }));
 
 describe('ImportContext field_availability state hygiene', () => {
+  // The hoisted spy is module-scoped and the vitest config sets no
+  // clearMocks/resetMocks/restoreMocks, so an implementation set by one test
+  // persists into every test appended after it. Harmless while nothing leaked;
+  // this file now sets one, which makes the leak load-bearing.
+  beforeEach(() => {
+    mocks.rpc.mockReset();
+  });
+
   it("resetImport('all') clears importedFieldAvailability", async () => {
     const wrapper = ({ children }) => <ImportProvider>{children}</ImportProvider>;
     const { result } = renderHook(() => useImport(), { wrapper });

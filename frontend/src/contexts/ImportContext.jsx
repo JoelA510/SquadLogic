@@ -1046,7 +1046,8 @@ export function ImportProvider({ children }) {
       addLog(`Applying ${type} import...`);
 
       try {
-        const { finalizeDeferredImportJob } = await import('../utils/importDeferredActions.js');
+        const { finalizeDeferredImportJob, describeFinalizeOutcome } =
+          await import('../utils/importDeferredActions.js');
         const finalizeResult = await finalizeDeferredImportJob({
           supabase,
           type,
@@ -1059,7 +1060,6 @@ export function ImportProvider({ children }) {
         // warnings, and for a server-side row refusal that log had nothing in
         // it to check: the reasons live on the staging rows and in the job's
         // warning_summary, neither of which this flow reads.
-        const { describeFinalizeOutcome } = await import('../utils/importDeferredActions.js');
         describeFinalizeOutcome(finalizeResult, type).forEach(addLog);
 
         const appliedData = {

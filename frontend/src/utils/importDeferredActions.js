@@ -89,8 +89,14 @@ export function describeFinalizeOutcome(result, importType) {
     );
   }
   if (unresolved > 0) {
+    // **"of those" needs the line above it to exist.** The two branches gate
+    // independently, so a result reporting unresolved rows and no invalid ones
+    // produced a sentence with no antecedent. No SQL or mock path yields that
+    // today -- every unresolved row is also counted invalid -- but this is an
+    // exported helper with its own tests, and a caller that reaches the state
+    // should get a sentence rather than a dangling reference.
     lines.push(
-      `${unresolved} of those name a field this organization does not have. Create the field, or correct the location/field spelling, and the rows can be applied without re-uploading.`
+      `${unresolved}${invalid > 0 ? ' of those' : ' row(s)'} name a field this organization does not have. Create the field, or correct the location/field spelling, and the rows can be applied without re-uploading.`
     );
   }
   return lines;

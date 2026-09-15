@@ -73,6 +73,27 @@ describe('describeFinalizeOutcome', () => {
     expect(lines[1]).toContain('without re-uploading');
   });
 
+  it('does not say "of those" when there is no line above it', () => {
+    // The two branches gate independently, so this shape -- unresolved rows
+    // and no invalid ones -- produced a single sentence beginning "2 of those"
+    // with nothing for "those" to refer to. No SQL or mock path reaches it
+    // today, and the inverse case was covered while this one was not.
+    const lines = describeFinalizeOutcome(
+      { invalid_rows: 0, unresolved_field_rows: 2 },
+      'field_availability'
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toMatch(/of those/);
+    expect(lines[0]).toMatch(/^2 row\(s\) name a field this organization does not have/);
+    // And with a line above it, the back-reference is correct.
+    const both = describeFinalizeOutcome(
+      { invalid_rows: 3, unresolved_field_rows: 2 },
+      'field_availability'
+    );
+    expect(both).toHaveLength(2);
+    expect(both[1]).toMatch(/^2 of those name a field/);
+  });
+
   it('reports the unresolved line only when there is one to report', () => {
     const lines = describeFinalizeOutcome(
       { invalid_rows: 2, unresolved_field_rows: 0 },

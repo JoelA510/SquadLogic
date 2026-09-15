@@ -475,9 +475,13 @@ BEGIN
     RAISE EXCEPTION 'the replay reported a delete and the field is still there'; END IF;
 
   -- 5c. **An unhandled target_table raises rather than lying to the ledger.**
-  -- `field_availability_profiles` is a legal `target_table` (20260522120000)
-  -- that this rollback cannot undo, so it is the reachable case rather than a
-  -- hypothetical one.
+  -- The arm is DEFENSIVE: `finalize_field_import_job` only ever writes the
+  -- five tables the switch handles, so nothing the apply path produces reaches
+  -- it. The record below is constructed directly, which is the only way to
+  -- exercise a defensive arm and is said out loud rather than dressed up as a
+  -- reachable case. `field_availability_profiles` is used because it is a
+  -- legal value of the column (20260522120000) that this rollback genuinely
+  -- cannot undo.
   INSERT INTO public.fields (organization_id, location_id, name, active)
   VALUES (v_org, v_loc, 'Profile Pitch', true) RETURNING id INTO v_free;
   INSERT INTO public.field_availability_profiles

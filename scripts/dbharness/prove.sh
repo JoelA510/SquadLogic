@@ -1416,8 +1416,8 @@ plant "M5 an unhandled target_table falls through silently again" "$M5" \
 # count is still right; what the operator loses is which record and why.
 plant "M5 a blocked record stops saying which one and why" "$M5" \
   "                    v_blocked := v_blocked || jsonb_build_object(
-                        'target_table', v_record.target_table,
-                        'target_id', v_record.target_id,
+                        'kind', v_record.target_table,
+                        'id', v_record.target_id,
                         'reason', 'bookings_exist',
                         'affected_count', v_affected_count);" \
   "                    NULL;" \

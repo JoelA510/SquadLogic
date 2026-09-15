@@ -345,7 +345,7 @@ for id in "${NEW_MIGRATIONS[@]}"; do
               VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','daaaaaaa-dddd-dddd-dddd-dddddddddddd','2026-09-01','2026-09-30','blackout_months');
               INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, total_rows, warning_summary)
               VALUES ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','fields','attached/fields.csv','completed_with_warnings',1,
-                      jsonb_build_object('field_rollback', jsonb_build_object('blocked_records',1,'blocked',jsonb_build_array(jsonb_build_object('target_table','fields','reason','bookings_exist')))));" \
+                      jsonb_build_object('field_rollback', jsonb_build_object('blocked_records',1,'blocked',jsonb_build_object('total',1,'omitted',0,'by_kind',jsonb_build_object('fields',1),'sample',jsonb_build_array(jsonb_build_object('kind','fields','reason','bookings_exist'))))));" \
          >/tmp/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the attached profile and blocked-carrying job the revert check requires were never inserted"
       dump 10 /tmp/harness_seed; STATUS=1; continue

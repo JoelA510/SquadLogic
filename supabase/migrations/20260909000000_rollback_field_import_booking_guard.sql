@@ -5,7 +5,7 @@
 -- docs/PHASE_8_PROGRESS.md, carved out of PR #378 rather than absorbed, and
 -- restated by LIVE-2 (#381) with a second reason. Its own PR.
 --
--- ## Two defects, one mechanism
+-- ## Two defects, one mechanism, and three more found in the same function
 --
 -- ### 1. `rollback_field_import_job` guards a field delete with two tables
 --
@@ -112,6 +112,27 @@
 -- `public.field_bookings_digest` counts by -- the CALLER gets the whole list
 -- and the audit row gets that digest, so a rollback refused on a busy season
 -- cannot write an unbounded array into `warning_summary` on every attempt.
+--
+-- ### 5. Two more asymmetries, found by walking the graph rather than the arms
+--
+-- Neither is the subject of this PR and both are in the function it rewrites,
+-- so they are fixed here rather than recorded for a later one. Both were found
+-- by deriving a set from `pg_constraint` instead of reading the code, which is
+-- the rule PR #378 wrote down: a fix whose sibling set cannot be produced by a
+-- command is a fix that is not finished.
+--
+--   * The `game_slots` arm consulted `game_assignments.game_slot_id` and not
+--     `slot_id`. BOTH are ON DELETE CASCADE to `game_slots`
+--     (20260503030000:39-56), and the `practice_slots` arm one branch down has
+--     always read `slot_id OR practice_slot_id` -- so an assignment carrying
+--     only `slot_id` was destroyed by a rollback with nothing refusing, while
+--     its practice twin was protected. One arm corrected and not its sibling,
+--     inside the function this migration exists to correct.
+--   * The `locations` arm refuses while any field remains, which cuts that
+--     table's closure at its only other edge -- but `field_blackouts` gained a
+--     `location_id` in 20260906000100 and nothing noticed. The exclusion is
+--     argued where the arm lives and re-derived by the smoke, so the third
+--     referent cannot arrive in silence the way the second did.
 --
 -- ## `field_subunits` keeps a NARROWER check, and here is why
 --
@@ -432,12 +453,16 @@ COMMENT ON FUNCTION public.admin_delete_field(uuid, uuid, boolean) IS
 --      instead of incrementing a bare counter;
 --   3. both `target_table` switches RAISE on a value they do not handle
 --      instead of stamping the ledger as though they had done the work;
---   4. the blocked list travels in the result and the audit row.
+--   4. the CALLER gets every refusal and the audit row gets a bounded digest
+--      of them.
 --
 -- The `field_subunits` and `locations` branches keep their own single-table
--- checks. `locations` is not a field and has no booking notion: the only thing
--- that can hold a location is a field on it, which is what it checks.
--- `field_subunits` is argued in the header and re-derived by the smoke.
+-- checks, and both are arguments about the referential graph rather than
+-- about the code: each refuses on the one table through which everything else
+-- in its closure must pass. Both are argued where the arm lives and re-derived
+-- by sections 2 and 2b of the smoke, because the `locations` argument went
+-- stale once already -- 20260906000100 gave that table a second referent and
+-- nothing noticed.
 CREATE OR REPLACE FUNCTION public.rollback_field_import_job(p_import_job_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -673,8 +698,14 @@ BEGIN
                 -- 20260522120000 admits fell straight through to the ledger
                 -- UPDATE below and was stamped `{"deleted": true}` having
                 -- deleted nothing -- a lie in the only record of what a
-                -- rollback did. The `ELSE 99` in this statement's own ORDER BY
-                -- already conceded the value is reachable.
+                -- rollback did. DEFENSIVE rather than reachable through the
+                -- apply path, which only ever writes the five with
+                -- `import_type = 'fields'`: arriving here means the ledger
+                -- disagrees with its own import type, and a job whose record
+                -- of what it did cannot be trusted must not be half rolled
+                -- back on the strength of it. The `ELSE 99` in this
+                -- statement's own ORDER BY already conceded the value can
+                -- arrive.
                 RAISE EXCEPTION
                   'rollback_field_import_job cannot undo an insert into %; the field import applies only locations, fields, field_subunits, practice_slots and game_slots (record %)',
                   v_record.target_table, v_record.id

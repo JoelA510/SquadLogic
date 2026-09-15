@@ -4983,9 +4983,17 @@ export const mockSupabase = {
       }
 
       const now = new Date().toISOString();
+      const rollbackOrg = job.organization_id;
+      // **Org-scoped, as the SQL is.** Every other read in this arm goes
+      // through `owned()` below; this one selected on the job id and the
+      // import type alone, so a ledger row belonging to another organisation
+      // but carrying this job id would be processed here and skipped in
+      // Postgres. The hunk that introduced org-scoping is the place to close
+      // the one read it left out.
       const records = (db.import_application_records || []).filter(
         (record) =>
           String(record.import_job_id) === String(p_import_job_id) &&
+          String(record.organization_id) === String(rollbackOrg) &&
           record.import_type === 'fields' &&
           !record.rolled_back_at
       );
@@ -4996,7 +5004,6 @@ export const mockSupabase = {
         };
       }
 
-      const rollbackOrg = job.organization_id;
       /** Rows of `table` belonging to this job's organisation. */
       const owned = (table) =>
         (db[table] || []).filter((row) => String(row.organization_id) === String(rollbackOrg));
@@ -5091,7 +5098,10 @@ export const mockSupabase = {
             if (refusal === undefined) {
               // **The arm that used to be missing, on both runners.** Falling
               // through here stamped the ledger `{deleted: true}` for a table
-              // nothing had deleted from.
+              // nothing had deleted from. Defensive rather than reachable
+              // through the apply path, and the SQL raises 22023 for the same
+              // reason: a ledger that disagrees with its own import type must
+              // not be half rolled back.
               fatal = {
                 code: '22023',
                 message: `rollback_field_import_job cannot undo an insert into ${record.target_table}; the field import applies only locations, fields, field_subunits, practice_slots and game_slots (record ${record.id})`,
@@ -5111,14 +5121,27 @@ export const mockSupabase = {
               // booking and re-running rolls this record back.
               return;
             }
+            // **A hard delete that does not TOMBSTONE resurrects.**
+            // `getDB()` rebuilds from `initialMockData` and `mergeSource` only
+            // adds or updates, so a filtered-out row that is part of the seed
+            // comes back on the next read -- and `initialMockData` seeds
+            // locations, fields, game_slots and practice_slots, which is every
+            // arm of this switch. The sibling `destroy()` in
+            // `admin_delete_field` calls `markMockDeleted` for exactly this
+            // reason and has a plant of its own; this helper was written
+            // without it, so the rollback reported `deleted_fields: 1` for a
+            // seeded field that was still there on the next `getMockData`.
+            // Reproduced before it was fixed. Same contract as the sibling.
             const drop = (table) => {
-              db[table] = (db[table] || []).filter(
+              const doomed = (db[table] || []).filter(
                 (item) =>
-                  !(
-                    String(item.id) === String(record.target_id) &&
-                    String(item.organization_id) === String(rollbackOrg)
-                  )
+                  String(item.id) === String(record.target_id) &&
+                  String(item.organization_id) === String(rollbackOrg)
               );
+              if (doomed.length === 0) return;
+              const ids = new Set(doomed.map((item) => String(item.id)));
+              markMockDeleted(db, table, [...ids]);
+              db[table] = (db[table] || []).filter((item) => !ids.has(String(item.id)));
             };
             if (record.target_table === 'game_slots') {
               drop('game_slots');
@@ -5156,39 +5179,48 @@ export const mockSupabase = {
               String(item.id) === String(record.target_id) &&
               String(item.organization_id) === String(rollbackOrg)
           );
-          const emptyToNull = (value) => (value === '' || value === undefined ? null : value);
+          // **Each column carries the DEFAULT its SQL twin restores it
+          // with.** The migration writes `COALESCE((v_previous->>'active')
+          // ::boolean, true)` and four more like it; mapping every missing key
+          // to `null` here made a payload with no `active` restore a field the
+          // UI reads as inactive under the mock and active in Postgres -- the
+          // same class of divergence this PR exists to remove. `null` is the
+          // default only where the SQL's `->>` or `NULLIF(..., '')` genuinely
+          // yields NULL.
+          const restored = (value, fallback) =>
+            value === '' || value === undefined || value === null ? fallback : value;
           const RESTORE_COLUMNS = {
-            locations: ['name', 'address', 'lighting_available'],
-            fields: [
-              'location_id',
-              'name',
-              'surface_type',
-              'size',
-              'supports_halves',
-              'max_age',
-              'priority_rating',
-              'active',
-            ],
-            practice_slots: [
-              'field_id',
-              'field_subunit_id',
-              'day_of_week',
-              'start_time',
-              'end_time',
-              'capacity',
-              'valid_from',
-              'valid_until',
-              'label',
-            ],
-            game_slots: [
-              'field_id',
-              'division_id',
-              'slot_date',
-              'start_time',
-              'end_time',
-              'week_index',
-              'capacity',
-            ],
+            locations: { name: null, address: null, lighting_available: false },
+            fields: {
+              location_id: null,
+              name: null,
+              surface_type: null,
+              size: null,
+              supports_halves: false,
+              max_age: null,
+              priority_rating: 1,
+              active: true,
+            },
+            practice_slots: {
+              field_id: null,
+              field_subunit_id: null,
+              day_of_week: null,
+              start_time: null,
+              end_time: null,
+              capacity: 1,
+              valid_from: null,
+              valid_until: null,
+              label: null,
+            },
+            game_slots: {
+              field_id: null,
+              division_id: null,
+              slot_date: null,
+              start_time: null,
+              end_time: null,
+              week_index: null,
+              capacity: 1,
+            },
           };
           const columns = RESTORE_COLUMNS[record.target_table];
           if (columns === undefined) {
@@ -5202,8 +5234,8 @@ export const mockSupabase = {
             return;
           }
           if (target) {
-            for (const column of columns) {
-              target[column] = emptyToNull(previous[column]);
+            for (const [column, fallback] of Object.entries(columns)) {
+              target[column] = restored(previous[column], fallback);
             }
             target.updated_at = now;
           }

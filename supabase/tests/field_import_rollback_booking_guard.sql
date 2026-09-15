@@ -302,9 +302,12 @@ SELECT is(
 
 -- ──────────────────────────────────────────────────────────────
 -- 4. A target_table neither switch handles RAISES rather than stamping the
---    ledger as rolled back. `field_availability_profiles` is a legal value of
---    the column (20260522120000) that this rollback cannot undo, so the arm
---    is reachable by data rather than only by a future edit.
+--    ledger as rolled back. The arm is DEFENSIVE: the apply path only ever
+--    writes the five tables the switch handles, so the record below is
+--    CONSTRUCTED rather than produced -- which is the only way to exercise a
+--    defensive arm, and is said out loud rather than dressed up as a reachable
+--    case. `field_availability_profiles` is used because it is a legal value
+--    of the column (20260522120000) that this rollback genuinely cannot undo.
 -- ──────────────────────────────────────────────────────────────
 INSERT INTO public.import_application_records (
     id, organization_id, import_job_id, import_type, target_table, target_id,

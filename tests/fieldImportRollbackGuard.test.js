@@ -312,11 +312,14 @@ describe('field import rollback :: the booking guard the mock never had', () => 
   });
 
   it('refuses a target_table neither switch handles rather than stamping the ledger', async () => {
-    // `field_availability_profiles` is a legal `target_table`
-    // (20260522120000) that this rollback cannot undo, so the arm is
-    // reachable by data rather than only by a future edit. Before LIVE-3 the
-    // record fell through to the ledger UPDATE and was marked rolled back
-    // with `{deleted: true}` having deleted nothing.
+    // The arm is DEFENSIVE: the apply path only ever writes the five tables
+    // the switch handles, so this record is CONSTRUCTED rather than produced.
+    // That is the only way to exercise a defensive arm, and it is said out
+    // loud rather than dressed up as a reachable case.
+    // `field_availability_profiles` is used because it is a legal value of the
+    // column (20260522120000) that this rollback genuinely cannot undo.
+    // Before LIVE-3 such a record fell through to the ledger UPDATE and was
+    // marked rolled back with `{deleted: true}` having deleted nothing.
     await seedJob([AVAILABILITY_PROFILE]);
     await supabase.from('import_application_records').insert([
       {
@@ -343,6 +346,104 @@ describe('field import rollback :: the booking guard the mock never had', () => 
       (r) => String(r.id) === 'rg-record-profile'
     );
     expect(record.rolled_back_at, 'the refused record was stamped rolled back anyway').toBeFalsy();
+  });
+
+  it('keeps a rolled-back SEEDED row gone, instead of letting it resurrect', async () => {
+    // **A hard delete that does not tombstone is undone by the next read.**
+    // `getDB()` rebuilds from `initialMockData` and `mergeSource` only adds or
+    // updates, so a filtered-out seed row comes back -- and `initialMockData`
+    // seeds locations, fields, game_slots and practice_slots, which is every
+    // arm of the insert switch. The RPC reported a deletion for a row that was
+    // still there on the next `getMockData`.
+    //
+    // **The subject is derived from the fixture, not named here.** It has to
+    // be a SEEDED row (one this test inserted has nothing to resurrect from
+    // and would pass without the fix) that nothing else holds (or the guard
+    // refuses it and the case is about the guard instead). Both conditions are
+    // read off the mock, and a fixture that stops satisfying them fails loudly
+    // rather than turning this into a test of the refusal path.
+    await seedJob([]);
+    const held = new Set([
+      ...getMockData('games').map((g) => String(g.game_slot_id)),
+      ...getMockData('game_assignments').flatMap((a) => [
+        String(a.game_slot_id),
+        String(a.slot_id),
+      ]),
+    ]);
+    const seededSlot = getMockData('game_slots').find(
+      (slot) => String(slot.organization_id) === ORG && !held.has(String(slot.id))
+    );
+    expect(
+      seededSlot,
+      'the fixture holds no unbooked seeded game slot; this case has nothing to be about'
+    ).toBeDefined();
+
+    await supabase.from('import_application_records').insert([
+      {
+        id: 'rg-record-seeded',
+        organization_id: ORG,
+        import_job_id: JOB,
+        import_type: 'fields',
+        target_table: 'game_slots',
+        target_id: seededSlot.id,
+        operation: 'inserted',
+      },
+    ]);
+
+    const { data } = await supabase.rpc('rollback_field_import_job', {
+      p_import_job_id: JOB,
+    });
+    expect(data.deleted_game_slots).toBe(1);
+    expect(data.blocked.some((b) => String(b.id) === String(seededSlot.id))).toBe(false);
+    // Read AFTER the call, which is what re-merges the seed.
+    expect(
+      getMockData('game_slots').find((slot) => String(slot.id) === String(seededSlot.id)),
+      'the rollback reported deleting a seeded game slot and it came back'
+    ).toBeUndefined();
+    // ... and the fixture's other slots are untouched, so the assertion above
+    // is a targeted delete rather than an emptied table.
+    expect(getMockData('game_slots').length).toBeGreaterThan(0);
+  });
+
+  it('restores a missing boolean to the default its SQL twin coalesces to', async () => {
+    // The SQL writes `COALESCE((v_previous->>'active')::boolean, true)` and
+    // four more like it. Mapping every missing key to `null` made a payload
+    // with no `active` restore a field the UI reads as inactive here and
+    // active in Postgres. A payload legitimately missing a key is what an
+    // older ledger row looks like.
+    await seedJob([]);
+    await supabase.from('fields').insert([
+      {
+        id: 'rg-defaults',
+        organization_id: ORG,
+        location_id: 'rg-location',
+        name: 'Overwritten',
+        active: false,
+        priority_rating: 9,
+      },
+    ]);
+    await supabase.from('import_application_records').insert([
+      {
+        id: 'rg-record-defaults',
+        organization_id: ORG,
+        import_job_id: JOB,
+        import_type: 'fields',
+        target_table: 'fields',
+        target_id: 'rg-defaults',
+        operation: 'updated',
+        previous_payload: { location_id: 'rg-location', name: 'Older Ledger Row' },
+      },
+    ]);
+
+    await supabase.rpc('rollback_field_import_job', { p_import_job_id: JOB });
+    const restored = getMockData('fields').find((f) => String(f.id) === 'rg-defaults');
+    expect(restored.name).toBe('Older Ledger Row');
+    expect(restored.active).toBe(true);
+    expect(restored.supports_halves).toBe(false);
+    expect(restored.priority_rating).toBe(1);
+    // ... and a column the SQL genuinely restores as NULL still comes back
+    // NULL, so the defaults above are per-column rather than a blanket rule.
+    expect(restored.surface_type).toBeNull();
   });
 
   it('restores an updated row rather than reporting a restore it did not do', async () => {
@@ -377,9 +478,24 @@ describe('field import rollback :: the booking guard the mock never had', () => 
         target_table: 'fields',
         target_id: 'rg-updated',
         operation: 'updated',
+        // **The WHOLE row, because that is what the ledger stores.** The
+        // apply path records `to_jsonb(v_field)`, so a payload carrying four
+        // columns is a shape production never writes -- and asserting on it
+        // hid a divergence: the mock restores every column in its map, so a
+        // missing `location_id` became `null` and passed, while the SQL runs
+        // `location_id = (v_previous->>'location_id')::uuid` against a NOT
+        // NULL column and aborts the whole rollback with 23502. A test that
+        // forges state the production path cannot reach certifies the arm it
+        // was meant to check.
         previous_payload: {
+          id: 'rg-updated',
+          organization_id: ORG,
+          location_id: 'rg-location',
           name: 'Original Pitch',
           surface_type: 'grass',
+          size: '9v9',
+          supports_halves: false,
+          max_age: 'U10',
           priority_rating: 3,
           active: true,
         },
@@ -397,6 +513,8 @@ describe('field import rollback :: the booking guard the mock never had', () => 
     expect(restored.name).toBe('Original Pitch');
     expect(restored.surface_type).toBe('grass');
     expect(restored.priority_rating).toBe(3);
+    // The NOT NULL column the four-column payload used to leave null.
+    expect(restored.location_id).toBe('rg-location');
 
     const record = getMockData('import_application_records').find(
       (r) => String(r.id) === 'rg-record-updated'

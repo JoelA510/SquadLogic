@@ -512,8 +512,8 @@ const PLANTS = [
     label: 'the updated restore goes back to being a counter',
     suite: 'tests/fieldImportRollbackGuard.test.js',
     find: `          if (target) {
-            for (const column of columns) {
-              target[column] = emptyToNull(previous[column]);
+            for (const [column, fallback] of Object.entries(columns)) {
+              target[column] = restored(previous[column], fallback);
             }
             target.updated_at = now;
           }`,
@@ -567,6 +567,26 @@ const PLANTS = [
     suite: 'tests/fieldImportRollbackGuard.test.js',
     find: '        blocked: mockFieldBookingsDigest(blocked),',
     replace: '        blocked,',
+  },
+  {
+    // A hard delete with no tombstone: `getDB()` re-merges the seed, so a
+    // rolled-back SEEDED row comes back on the next read while the RPC has
+    // already reported it deleted.
+    label: 'the rollback deletes without a tombstone and the row resurrects',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: '              markMockDeleted(db, table, [...ids]);',
+    replace: '              void ids;',
+  },
+  {
+    // Every missing key restored as null, dropping the COALESCE defaults the
+    // SQL arm applies -- so a payload with no `active` restores a field the UI
+    // reads as inactive here and active in Postgres.
+    label: 'the restore drops the defaults its SQL twin coalesces to',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: `          const restored = (value, fallback) =>
+            value === '' || value === undefined || value === null ? fallback : value;`,
+    replace: `          const restored = (value, fallback) =>
+            value === '' || value === undefined || value === null ? (void fallback, null) : value;`,
   },
 ];
 

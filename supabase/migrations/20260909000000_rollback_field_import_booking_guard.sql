@@ -5,7 +5,7 @@
 -- docs/PHASE_8_PROGRESS.md, carved out of PR #378 rather than absorbed, and
 -- restated by LIVE-2 (#381) with a second reason. Its own PR.
 --
--- ## Two defects, one mechanism, and three more found in the same function
+-- ## Two defects, one mechanism, and five more found in the same family
 --
 -- ### 1. `rollback_field_import_job` guards a field delete with two tables
 --
@@ -133,6 +133,93 @@
 --     `location_id` in 20260906000100 and nothing noticed. The exclusion is
 --     argued where the arm lives and re-derived by the smoke, so the third
 --     referent cannot arrive in silence the way the second did.
+--
+-- ### 6. The fields arm counted bookings without locking the field
+--
+-- `admin_delete_field` takes `FOR UPDATE` on the `fields` row and then on that
+-- field's `game_slots` and `practice_slots` rows before it counts anything
+-- (20260907000000:493, :518, :521), and its comment says exactly why: a
+-- `FOR UPDATE` on the parent blocks a concurrent INSERT into any table with a
+-- foreign key to it, because such an insert takes a conflicting KEY SHARE
+-- lock -- and locking the SLOTS as well is what covers `games` and an
+-- assignment carrying only a slot id, neither of which references the field.
+--
+-- The rollback's fields arm locked nothing but the `import_jobs` row, so a
+-- booking inserted between its count and its `DELETE FROM public.fields` was
+-- destroyed by the cascade having been counted as nothing. That is one arm of
+-- a pair adopting a documented contract and the other not, inside the
+-- migration whose subject is exactly that. **And this migration made the
+-- window worse**: a profile inserted in it is now CASCADED away rather than
+-- merely unlinked.
+--
+-- The three statements are the sibling's, in the sibling's order, for the
+-- reason the sibling gives: field first, then its slots, so the two functions
+-- acquire in one order and cannot deadlock against each other.
+--
+-- **The other four arms are deliberately NOT locked, and that is a decision
+-- rather than an omission.** Each of them has the same shape of race -- a
+-- `games` row inserted on a game slot between its count and its delete, a
+-- practice slot inserted on a subunit, a field inserted on a location -- and
+-- closing them means taking a lock on a SLOT or a SUBUNIT before the loop
+-- reaches the `fields` record, which is the opposite order to the one
+-- `admin_delete_field` takes. That is a deadlock cycle, not a fix: the
+-- rollback would hold a slot and want a field while the delete held the field
+-- and wanted the slot. Closing those races needs the acquisition order
+-- designed across both functions, which is a change of a different size and a
+-- different subject. `docs/sql/20260909000000_smoke.sql` section 1b asserts
+-- the fields arm holds all three locks and that NO other arm holds one, so the
+-- next person to add one here is stopped and made to answer the ordering
+-- question rather than discovering it in production.
+--
+-- **Not exercised, only asserted.** A lock is only observable from a second
+-- session, and the harness runs one. The check is structural and its plant
+-- removes the lock; the race itself is not reproduced, and saying so is the
+-- point. `admin_delete_field`'s identical lock has the same limit.
+--
+-- ### 7. The cascade could leave a scenario with no members
+--
+-- Section 1 makes deleting a field destroy its availability profiles, which
+-- cascades their `field_availability_scenario_members` rows -- and a scenario
+-- whose last member goes that way is left behind holding nothing.
+--
+-- **The sibling already handles this and its contract is adopted rather than
+-- reinvented.** `rollback_field_availability_import_job`
+-- (20260522153000:214-226) deletes profiles and then deletes exactly those
+-- scenarios that have no remaining members -- narrow, scoped to the scenarios
+-- the deleted profiles belonged to, not every empty scenario in the
+-- organisation. An org-wide sweep would take a scenario created empty by some
+-- other path, which is a different decision nobody has made.
+--
+-- It is not cosmetic, and that was established rather than assumed:
+-- `get_field_availability_scenarios` (20260603000000) LEFT JOINs the members
+-- and reports `member_count`, so it RETURNS a zero-member scenario, and
+-- `admin_select_field_availability_scenario` checks org, season, group and
+-- nothing about membership, so it will ACTIVATE one -- an active scenario
+-- yielding an empty availability set. Both are granted to `authenticated`.
+-- Nothing in `frontend/src` calls either yet, so it is reachable through the
+-- RPC and not through a screen; that bounds the severity and does not remove
+-- it, and the UI that will consume them is the one this would surprise.
+--
+-- Two small helpers below carry the capture and the prune, and
+-- `admin_delete_field` is recreated to call them with nothing else changed.
+--
+-- **Only that one deleter needs them, and the reason is worth stating because
+-- the obvious answer is "both".** `rollback_field_import_job`'s fields arm
+-- reaches its DELETE only when the producer returned NOTHING, and
+-- `availability_profile` is one of the six kinds the producer returns -- so a
+-- profile on that ground is unreachable at that line and a prune there would
+-- be dead code wearing a guard's clothes. `admin_delete_field` has
+-- `p_confirm => true`, which is exactly an override of that refusal, so it is
+-- the one that can delete a field whose profiles are still attached. Section 4
+-- of the smoke derives which deleters need a prune from the presence of a
+-- confirmation override in their bodies rather than from a list.
+--
+-- **The reader is NOT changed here.** `admin_select_field_availability_scenario`
+-- will still activate a zero-member scenario that became empty some other way.
+-- With both field deleters and the availability rollback now pruning, no write
+-- path in the repository produces one -- but that is a statement about the
+-- repository rather than a check, and hardening the reader is a different
+-- function with a different contract. Recorded, not absorbed.
 --
 -- ## `field_subunits` keeps a NARROWER check, and here is why
 --
@@ -438,10 +525,302 @@ REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM service_role
 COMMENT ON FUNCTION public.field_bookings(uuid, uuid, date) IS
   'THE single reading of "what is booked on this ground", shared by admin_retire_field, admin_delete_field and rollback_field_import_job. SIX kinds as of 20260909000000, derived from the cascade closure from fields rather than from the field_id column name. p_after NULL means no date applies (a deletion takes everything); a date means "booked after this" (a retirement), inclusive on the last usable day. cascades says a CASCADE edge reaches the row, which is what decides a deletion disposition. Internal: EXECUTE revoked from PUBLIC, anon, authenticated and service_role, so only the owner may call it and all three callers reach it as SECURITY DEFINER. The revokes are explicit because 20260614000000 grants EXECUTE to authenticated by default privilege, which a revoke from PUBLIC does not remove.';
 
+-- ---------------------------------------------------------------------------
+-- 2c. admin_delete_field, recreated for two lines
+-- ---------------------------------------------------------------------------
+--
+-- 20260907000000's body verbatim with the capture and the prune added around
+-- its DELETE, and `deleted_availability_scenarios` in the returned payload and
+-- the `after` audit row. Nothing else changes -- the guard, the refusal shape,
+-- the `FOR UPDATE` trio and every audit phase are carried across, and that
+-- migration's smoke still asserts all of it against whatever version is
+-- installed.
+--
+-- It is recreated rather than left alone because THIS migration gave it the
+-- consequence: before section 1 the profile was merely unlinked, so no
+-- scenario could be emptied by a field delete. A fix for a consequence this
+-- migration introduces belongs in this migration.
+
+CREATE OR REPLACE FUNCTION public.admin_delete_field(
+    p_organization_id uuid,
+    p_field_id uuid,
+    p_confirm boolean DEFAULT false
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_existing public.fields%ROWTYPE;
+    v_affected jsonb;
+    v_affected_count integer;
+    v_scenario_ids uuid[];
+    v_deleted_scenarios integer := 0;
+BEGIN
+    IF p_organization_id IS NULL THEN
+        RAISE EXCEPTION 'p_organization_id is required'
+            USING ERRCODE = '23502';
+    END IF;
+
+    IF NOT public.is_org_admin(p_organization_id) THEN
+        RAISE EXCEPTION 'Access denied: caller is not an admin of organization %', p_organization_id
+            USING ERRCODE = '42501';
+    END IF;
+
+    IF p_field_id IS NULL THEN
+        RAISE EXCEPTION 'p_field_id is required'
+            USING ERRCODE = '23502';
+    END IF;
+
+    -- **Locked and read BEFORE the delete, not returned by it.** The original
+    -- deleted first and inferred not-found from the RETURNING being empty, so
+    -- there was no window in which the field existed and the bookings could be
+    -- counted.
+    SELECT *
+      INTO v_existing
+      FROM public.fields
+     WHERE id = p_field_id
+       AND organization_id = p_organization_id
+     FOR UPDATE;
+
+    IF v_existing.id IS NULL THEN
+        RAISE EXCEPTION 'field % was not found in organization %', p_field_id, p_organization_id
+            USING ERRCODE = 'P0002';
+    END IF;
+
+    -- **Locking the field is not enough, because not everything the cascade
+    -- reaches has a key to the field.**
+    --
+    -- `FOR UPDATE` on the `fields` row blocks a concurrent INSERT into any
+    -- table with a foreign key TO that row, because such an insert takes a
+    -- conflicting KEY SHARE lock on it. That covers the slot tables and the
+    -- assignments' own `field_id`. It does NOT cover a `games` row, which
+    -- references a game_slot and never the field, nor an assignment carrying
+    -- only a slot id -- and both of those are destroyed by the cascade. So the
+    -- guard would read one set while the delete removed a larger one: the exact
+    -- defect this migration exists to fix, returning as a race.
+    --
+    -- Locking the field's SLOTS closes it: an insert that hangs a game or an
+    -- assignment off one of them takes KEY SHARE on the slot row, which
+    -- conflicts with this. Taken after the field, so the two RPCs acquire in
+    -- one order and cannot deadlock against each other.
+    PERFORM 1 FROM public.game_slots
+     WHERE organization_id = p_organization_id AND field_id = p_field_id
+     FOR UPDATE;
+    PERFORM 1 FROM public.practice_slots
+     WHERE organization_id = p_organization_id AND field_id = p_field_id
+     FOR UPDATE;
+
+    -- **Every booking the deletion would take -- all FIVE kinds**, and what
+    -- it would do to each. The enumeration itself is `public.field_bookings`,
+    -- shared with `admin_retire_field`, so "who is affected" has one answer.
+    -- `p_after => NULL` means no date applies: a deletion takes everything on
+    -- the ground, dated or not.
+    --
+    -- `disposition` turns the producer's `cascades` into the word the operator
+    -- reads. It is decided PER ROW because it differs per row: a slot-linked
+    -- assignment is destroyed by the slot cascade while a free-standing one
+    -- keeps its row and loses its venue.
+    --   'deleted'    -- a CASCADE reaches it; the row goes with the field
+    --   'unassigned' -- only field_id is SET NULL; the row survives, venueless
+    SELECT
+      COALESCE(
+        jsonb_agg(
+          jsonb_build_object(
+            'kind', b.kind, 'id', b.booking_id, 'on_date', b.on_date,
+            'week_index', b.week_index, 'undated', b.undated,
+            'unbounded', b.unbounded,
+            'disposition', CASE WHEN b.cascades THEN 'deleted' ELSE 'unassigned' END
+          )
+          ORDER BY b.on_date NULLS FIRST, b.kind, b.booking_id
+        ),
+        '[]'::jsonb
+      ),
+      COUNT(*)
+    INTO v_affected, v_affected_count
+    FROM public.field_bookings(p_organization_id, p_field_id, NULL) b;
+
+    -- **The refusal lives here, not in the UI.** A confirmation prompt a
+    -- caller can skip by calling the RPC directly is not a guard. Same shape as
+    -- admin_retire_field: RETURN, do not RAISE, and record the refusal.
+    IF v_affected_count > 0 AND NOT COALESCE(p_confirm, false) THEN
+        PERFORM public.record_audit_event(
+            p_organization_id,
+            'settings.updated',
+            'field',
+            p_field_id,
+            jsonb_build_object(
+                'setting', 'facility.field',
+                'operation', 'admin_delete_field',
+                'phase', 'refused',
+                'reason', 'bookings_exist',
+                'affected_count', v_affected_count,
+                -- A bounded rendering: the full list goes back to the CALLER,
+                -- a sample and the per-kind counts go into the trail. A delete
+                -- refused on a busy field would otherwise write an arbitrarily
+                -- large audit row on every attempt.
+                'affected', public.field_bookings_digest(v_affected),
+                'previous', to_jsonb(v_existing)
+            )
+        );
+        RETURN jsonb_build_object(
+            'deleted', false,
+            'reason', 'bookings_exist',
+            'affected_count', v_affected_count,
+            'affected', v_affected
+        );
+    END IF;
+
+    -- Audit BEFORE the delete, so the world the operator decided against is in
+    -- the trail next to the decision. This runs in one transaction, so it does
+    -- NOT survive a failure of the DELETE below -- the refusal above does,
+    -- because that path RETURNs.
+    PERFORM public.record_audit_event(
+        p_organization_id,
+        'settings.updated',
+        'field',
+        p_field_id,
+        jsonb_build_object(
+            'setting', 'facility.field',
+            'operation', 'admin_delete_field',
+            'phase', 'before',
+            'confirmed', COALESCE(p_confirm, false),
+            'affected_count', v_affected_count,
+            'affected', public.field_bookings_digest(v_affected),
+            'previous', to_jsonb(v_existing)
+        )
+    );
+
+    -- **Read BEFORE the delete.** 20260909000000 made the profile FK CASCADE,
+    -- so the membership rows that answer "which scenarios did this field's
+    -- profiles belong to" are gone by the time the DELETE returns.
+    v_scenario_ids := public.field_availability_scenario_ids_on_field(
+                        p_organization_id, p_field_id);
+
+    DELETE FROM public.fields
+     WHERE id = p_field_id
+       AND organization_id = p_organization_id;
+
+    -- ... and pruned after, on the contract
+    -- `rollback_field_availability_import_job` already uses
+    -- (20260522153000:214-226): narrow, so a scenario created empty by some
+    -- other path is untouched. Without this a field delete could leave an
+    -- active scenario holding nothing --
+    -- `admin_select_field_availability_scenario` checks org, season and group
+    -- and nothing about membership.
+    v_deleted_scenarios := public.prune_empty_field_availability_scenarios(
+                             p_organization_id, v_scenario_ids);
+
+    PERFORM public.record_audit_event(
+        p_organization_id,
+        'settings.updated',
+        'field',
+        v_existing.id,
+        jsonb_build_object(
+            'setting', 'facility.field',
+            'operation', 'admin_delete_field',
+            'phase', 'after',
+            'confirmed', COALESCE(p_confirm, false),
+            'affected_count', v_affected_count,
+            'deleted_availability_scenarios', v_deleted_scenarios,
+            'deleted', true,
+            'previous', to_jsonb(v_existing)
+        )
+    );
+
+    RETURN jsonb_build_object(
+        'id', v_existing.id,
+        'organization_id', v_existing.organization_id,
+        'deleted', true,
+        'affected_count', v_affected_count,
+        'deleted_availability_scenarios', v_deleted_scenarios,
+        'affected', v_affected
+    );
+END;
+$$;
+
 -- The RPC's own comment enumerated five kinds. A list of what a destructive
 -- operation takes, one short, is the shape this phase keeps finding.
 COMMENT ON FUNCTION public.admin_delete_field(uuid, uuid, boolean) IS
   'Admin-only org-scoped field deletion. Refuses with everything the delete would take -- game_slots, games, game_assignments, practice_slots, practice_assignments and (as of 20260909000000) field_availability_profiles -- unless p_confirm is true, mirroring admin_retire_field. Each affected row carries a disposition: deleted (a CASCADE reaches it) or unassigned (only its field_id is SET NULL); assignments report this per row, because a slot-linked assignment is destroyed while a free-standing one survives. An availability_profile reports deleted, and its formats, scenario memberships, blackout windows and equipment requirements go with it. Returns {deleted:false, reason:''bookings_exist'', affected_count, affected} on refusal rather than raising, and audits refused/before/after.';
+
+-- ---------------------------------------------------------------------------
+-- 2b. The scenario prune, as TWO helpers rather than two copies
+-- ---------------------------------------------------------------------------
+--
+-- Both field deleters need the same two steps around their DELETE: read which
+-- scenarios the field's profiles belong to BEFORE the rows are gone, and drop
+-- the ones left with no members AFTER. A copy in each is what this migration
+-- exists to stop, so the reading lives here once and both call it.
+--
+-- The contract is `rollback_field_availability_import_job`'s
+-- (20260522153000:214-226): NARROW. Only scenarios the deleted profiles
+-- belonged to are considered, and only those with no remaining members are
+-- removed. An org-wide sweep would also take a scenario created empty by some
+-- other path, which is a decision nobody has made.
+--
+-- SECURITY INVOKER and no grants: both callers are SECURITY DEFINER, so these
+-- run as the definer through them, and nothing outside them may call them.
+CREATE OR REPLACE FUNCTION public.field_availability_scenario_ids_on_field(
+    p_organization_id uuid,
+    p_field_id uuid
+)
+RETURNS uuid[]
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = public
+AS $$
+    SELECT COALESCE(array_agg(DISTINCT m.scenario_id), ARRAY[]::uuid[])
+      FROM public.field_availability_scenario_members m
+      JOIN public.field_availability_profiles p ON p.id = m.profile_id
+     WHERE p.organization_id = p_organization_id
+       AND p.field_id = p_field_id;
+$$;
+
+REVOKE ALL ON FUNCTION public.field_availability_scenario_ids_on_field(uuid, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.field_availability_scenario_ids_on_field(uuid, uuid) FROM anon;
+REVOKE ALL ON FUNCTION public.field_availability_scenario_ids_on_field(uuid, uuid) FROM authenticated;
+REVOKE ALL ON FUNCTION public.field_availability_scenario_ids_on_field(uuid, uuid) FROM service_role;
+
+COMMENT ON FUNCTION public.field_availability_scenario_ids_on_field(uuid, uuid) IS
+  'The availability scenarios that any profile on this field belongs to, read BEFORE the field is deleted because the cascade removes the membership rows that answer the question. Paired with prune_empty_field_availability_scenarios, which is called after. Internal: EXECUTE revoked from every role, and both callers are SECURITY DEFINER.';
+
+CREATE OR REPLACE FUNCTION public.prune_empty_field_availability_scenarios(
+    p_organization_id uuid,
+    p_scenario_ids uuid[]
+)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public
+AS $$
+DECLARE v_removed integer;
+BEGIN
+    IF p_scenario_ids IS NULL OR array_length(p_scenario_ids, 1) IS NULL THEN
+        RETURN 0;
+    END IF;
+
+    DELETE FROM public.field_availability_scenarios s
+     WHERE s.organization_id = p_organization_id
+       AND s.id = ANY(p_scenario_ids)
+       AND NOT EXISTS (
+         SELECT 1 FROM public.field_availability_scenario_members m
+          WHERE m.scenario_id = s.id
+       );
+    GET DIAGNOSTICS v_removed = ROW_COUNT;
+    RETURN v_removed;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.prune_empty_field_availability_scenarios(uuid, uuid[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.prune_empty_field_availability_scenarios(uuid, uuid[]) FROM anon;
+REVOKE ALL ON FUNCTION public.prune_empty_field_availability_scenarios(uuid, uuid[]) FROM authenticated;
+REVOKE ALL ON FUNCTION public.prune_empty_field_availability_scenarios(uuid, uuid[]) FROM service_role;
+
+COMMENT ON FUNCTION public.prune_empty_field_availability_scenarios(uuid, uuid[]) IS
+  'Removes the named scenarios that have no members left, org-scoped. The contract is rollback_field_availability_import_job''s (20260522153000): narrow, so only scenarios the deleted profiles belonged to are considered and a scenario created empty by some other path is untouched. Internal: EXECUTE revoked from every role, and both callers are SECURITY DEFINER.';
 
 -- ---------------------------------------------------------------------------
 -- 3. rollback_field_import_job, on the same producer
@@ -635,6 +1014,34 @@ BEGIN
                 -- `p_after => NULL` because a rollback removes the ground
                 -- outright, exactly as a deletion does: no date applies and
                 -- everything on it counts, dated or not.
+                --
+                -- **Locked before it is counted, in the sibling's form and the
+                -- sibling's order.** Without this a booking inserted between
+                -- the count and the DELETE below is destroyed by the cascade
+                -- having been counted as nothing -- and section 1 of this
+                -- migration made that worse, because an availability profile
+                -- inserted in the window is now CASCADED rather than unlinked.
+                -- `FOR UPDATE` on the field blocks a concurrent INSERT into
+                -- anything with a foreign key to it; locking the field's SLOTS
+                -- as well is what covers `games` and an assignment carrying
+                -- only a slot id, neither of which references the field.
+                -- Field first, then its slots, which is the order
+                -- `admin_delete_field` takes, so the two cannot deadlock
+                -- against each other. The header says why the OTHER arms are
+                -- left unlocked and section 1b of the smoke holds them to it.
+                PERFORM 1 FROM public.fields f
+                 WHERE f.id = v_record.target_id
+                   AND f.organization_id = v_job.organization_id
+                 FOR UPDATE;
+                PERFORM 1 FROM public.game_slots gs
+                 WHERE gs.organization_id = v_job.organization_id
+                   AND gs.field_id = v_record.target_id
+                 FOR UPDATE;
+                PERFORM 1 FROM public.practice_slots ps
+                 WHERE ps.organization_id = v_job.organization_id
+                   AND ps.field_id = v_record.target_id
+                 FOR UPDATE;
+
                 SELECT count(*) INTO v_affected_count
                   FROM public.field_bookings(
                          v_job.organization_id, v_record.target_id, NULL);
@@ -656,6 +1063,17 @@ BEGIN
                     CONTINUE;
                 END IF;
 
+                -- **No scenario prune here, and that is a consequence
+                -- rather than an omission.** `admin_delete_field` needs one
+                -- because `p_confirm => true` lets it delete a field that
+                -- still carries an availability profile. This arm has no
+                -- override: it reaches the DELETE only when the producer
+                -- returned NOTHING, and `availability_profile` is one of the
+                -- six kinds the producer returns, so a profile on this ground
+                -- is unreachable at this line and a prune here would be dead
+                -- code presented as a guard. Section 4 of the smoke derives
+                -- that distinction from the bodies rather than keeping a list
+                -- of which deleter needs one.
                 DELETE FROM public.fields f
                 WHERE f.id = v_record.target_id
                   AND f.organization_id = v_job.organization_id;

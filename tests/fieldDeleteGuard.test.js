@@ -109,6 +109,13 @@ const setMockSession = (userId) => {
 const someField = () => getMockData('fields').find((f) => String(f.organization_id) === ORG);
 
 /**
+ * A SECOND field of the same org, so a scenario can have a member that the
+ * delete under test does not reach. Derived rather than named: the fixture's
+ * ids are not this file's business.
+ */
+const OTHER_FIELD_ID = 'guard-other-field';
+
+/**
  * Every shape a field delete can reach, with ids this file can look up again.
  *
  * Both assignment shapes are seeded: the FREE-STANDING one (a `field_id` and no
@@ -185,6 +192,15 @@ const seedEveryKind = async (fieldId) => {
   // `profile_id` go with the profile rather than with the field -- so a delete
   // that removed the profile and left its blackout window behind would satisfy
   // every `field_id` check in this file and still strand a closure.
+  await supabase.from('fields').insert([
+    {
+      id: OTHER_FIELD_ID,
+      organization_id: ORG,
+      location_id: 'loc-1',
+      name: 'Guard Other Pitch',
+      active: true,
+    },
+  ]);
   await supabase.from('field_availability_profiles').insert([
     {
       id: 'guard-profile',
@@ -209,9 +225,49 @@ const seedEveryKind = async (fieldId) => {
   await supabase
     .from('field_availability_profile_formats')
     .insert([{ id: 'guard-format', organization_id: ORG, profile_id: 'guard-profile' }]);
-  await supabase
-    .from('field_availability_scenario_members')
-    .insert([{ id: 'guard-member', organization_id: ORG, profile_id: 'guard-profile' }]);
+  // **Three scenarios, one of which the cascade empties.** `guard-lonely` has
+  // this field's profile as its only member; `guard-shared` also has a profile
+  // on other ground; `guard-unrelated` is already empty and has nothing to do
+  // with this field. A prune that swept every empty scenario in the
+  // organisation would take the third, and one that took every scenario it was
+  // handed would take the second.
+  await supabase.from('field_availability_profiles').insert([
+    {
+      id: 'guard-other-profile',
+      organization_id: ORG,
+      field_id: OTHER_FIELD_ID,
+      season_label: '2099',
+      location: 'Guard Park',
+      field_name: 'Other Pitch',
+      available_from: '2099-01-01',
+      available_until: '2099-12-31',
+    },
+  ]);
+  await supabase.from('field_availability_scenarios').insert([
+    { id: 'guard-lonely', organization_id: ORG, season_label: '2099', name: 'Lonely' },
+    { id: 'guard-shared', organization_id: ORG, season_label: '2099', name: 'Shared' },
+    { id: 'guard-unrelated', organization_id: ORG, season_label: '2099', name: 'Unrelated' },
+  ]);
+  await supabase.from('field_availability_scenario_members').insert([
+    {
+      id: 'guard-member',
+      organization_id: ORG,
+      scenario_id: 'guard-lonely',
+      profile_id: 'guard-profile',
+    },
+    {
+      id: 'guard-member-shared-a',
+      organization_id: ORG,
+      scenario_id: 'guard-shared',
+      profile_id: 'guard-profile',
+    },
+    {
+      id: 'guard-member-shared-b',
+      organization_id: ORG,
+      scenario_id: 'guard-shared',
+      profile_id: 'guard-other-profile',
+    },
+  ]);
   await supabase
     .from('field_equipment_requirements')
     .insert([{ id: 'guard-equipment', organization_id: ORG, profile_id: 'guard-profile' }]);
@@ -251,6 +307,7 @@ const seedEveryKind = async (fieldId) => {
     ['field_blackout_windows', ['guard-window']],
     ['field_availability_profile_formats', ['guard-format']],
     ['field_availability_scenario_members', ['guard-member']],
+    ['field_availability_scenarios', ['guard-lonely', 'guard-shared', 'guard-unrelated']],
     ['field_equipment_requirements', ['guard-equipment']],
   ]) {
     const rows = getMockData(table);
@@ -298,6 +355,7 @@ const AFFECTED_TABLES = [
   'field_blackouts',
   'field_subunits',
   'field_availability_profiles',
+  'field_availability_scenarios',
   // The profile's own parts. They carry no field_id, so the "nothing still
   // points at the deleted field" sweep below structurally cannot see them --
   // which is why they are asserted on by profile_id separately.
@@ -497,6 +555,19 @@ describe('field delete guard :: the mock agrees with the migration about consequ
       const orphans = after.all(table).filter((r) => String(r.profile_id) === 'guard-profile');
       expect(orphans, `${table} survived the profile it hangs off`).toHaveLength(0);
     }
+
+    // **The scenario the cascade emptied, and the two that must survive.** A
+    // scenario with no members is still listed by
+    // `get_field_availability_scenarios` and still activatable by
+    // `admin_select_field_availability_scenario`, so one left behind is an
+    // active scenario that can yield an empty availability set.
+    const scenarios = after.all('field_availability_scenarios').map((r) => String(r.id));
+    expect(scenarios).not.toContain('guard-lonely');
+    // The prune is NARROW: a scenario that still has a member, and an empty
+    // one this field's profiles never belonged to, are not its business.
+    expect(scenarios).toContain('guard-shared');
+    expect(scenarios).toContain('guard-unrelated');
+    expect(data.deleted_availability_scenarios).toBe(1);
     for (const table of AFFECTED_TABLES.filter((t) => t !== 'fields')) {
       const dangling = after.all(table).filter((r) => String(r.field_id) === String(field.id));
       expect(dangling, `${table} still points at the deleted field`).toHaveLength(0);

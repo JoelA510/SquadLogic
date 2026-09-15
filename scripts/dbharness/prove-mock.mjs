@@ -578,6 +578,31 @@ const PLANTS = [
     replace: '              void ids;',
   },
   {
+    // The prune, removed: a confirmed delete then leaves a scenario holding
+    // nothing, which is still listed and still activatable.
+    label: 'a confirmed delete leaves an emptied scenario standing',
+    suite: 'tests/fieldDeleteGuard.test.js',
+    find: '        const deletedScenarios = mockPruneEmptyScenarios(db, orgId, scenarioIds, destroy);',
+    replace: '        const deletedScenarios = 0;',
+  },
+  {
+    // The capture moved AFTER the profiles are destroyed -- the subtle way to
+    // get this wrong, because the call is still there and always returns
+    // nothing.
+    label: 'the scenario capture happens after the cascade removed its evidence',
+    suite: 'tests/fieldDeleteGuard.test.js',
+    find: '        const scenarioIds = mockScenarioIdsOnField(db, orgId, p.p_field_id);',
+    replace: '        const scenarioIds = [];',
+  },
+  {
+    // The prune widened to a sweep: it would take an empty scenario created by
+    // some other path, which is why the sibling's contract is narrow.
+    label: 'the prune sweeps every empty scenario in the organisation',
+    find: '      named.has(String(scenario.id)) &&',
+    replace: '      true &&',
+    suite: 'tests/fieldDeleteGuard.test.js',
+  },
+  {
     // Every missing key restored as null, dropping the COALESCE defaults the
     // SQL arm applies -- so a payload with no `active` restores a field the UI
     // reads as inactive here and active in Postgres.

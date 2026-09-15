@@ -27,6 +27,7 @@ DO $$
 DECLARE
   v_def text;
   v_fields_arm text;
+  v_lockless text;
   t text;
 BEGIN
   SELECT pg_get_functiondef(p.oid) INTO v_def
@@ -60,13 +61,39 @@ BEGIN
   IF v_fields_arm NOT LIKE '%public.field_bookings(%' THEN
     RAISE EXCEPTION 'the fields arm does not call the producer';
   END IF;
+
+  -- **The LOCK statements are removed before the arm is searched for a
+  -- re-inlined list, and only those.** `PERFORM 1 FROM public.game_slots ...
+  -- FOR UPDATE` legitimately names two booking tables: it is the sibling's
+  -- lock (section 1b asserts all three are present), not an enumeration. A
+  -- pattern that stripped anything looser would hide the defect this check
+  -- exists for, so it is anchored to that exact statement shape -- `PERFORM 1
+  -- FROM public.<table>` through the next semicolon, with `FOR UPDATE` in it.
+  v_lockless := regexp_replace(
+    v_fields_arm,
+    'PERFORM 1 FROM public\.[a-z_]+[^;]+FOR UPDATE;', '', 'g');
+  -- The strip must not have eaten the arm: a pattern that matched too much
+  -- would satisfy every NOT LIKE below by leaving nothing.
+  IF v_lockless NOT LIKE '%public.field_bookings(%' OR length(v_lockless) < 200 THEN
+    RAISE EXCEPTION 'stripping the locks left % characters and no producer call; the pattern matched too much', length(v_lockless);
+  END IF;
+
   FOREACH t IN ARRAY ARRAY['practice_slots','game_slots','games','game_assignments',
-                           'practice_assignments','field_availability_profiles'] LOOP
-    IF v_fields_arm LIKE '%public.' || t || '%' THEN
+                           'practice_assignments'] LOOP
+    IF v_lockless LIKE '%public.' || t || '%' THEN
       RAISE EXCEPTION
-        'the fields arm reads public.% directly; it has re-inlined a list beside the producer', t;
+        'the fields arm reads public.% outside its locks; it has re-inlined a list beside the producer', t;
     END IF;
   END LOOP;
+  -- `field_availability_profiles` is named apart from the loop above because
+  -- the arm legitimately mentions it through
+  -- `field_availability_scenario_ids_on_field`, which is a different question
+  -- from "what is booked here" -- so the ban is on reading the TABLE, not on
+  -- naming the helper.
+  IF v_lockless ~ 'FROM public\.field_availability_profiles' THEN
+    RAISE EXCEPTION
+      'the fields arm reads public.field_availability_profiles directly; the producer is what enumerates it';
+  END IF;
 
   -- **Both silent arms raise.** With no ELSE, an unhandled `target_table` fell
   -- through to the ledger UPDATE and was stamped as rolled back having done
@@ -95,6 +122,64 @@ BEGIN
   END IF;
 
   RAISE NOTICE 'rollback_field_import_job: one producer, no second list, no silent arm';
+END $$;
+
+-- 1b. THE FIELDS ARM HOLDS THE SIBLING'S THREE LOCKS, AND NO OTHER ARM HOLDS ONE
+-- ---------------------------------------------------------------------------
+--
+-- `admin_delete_field` locks the `fields` row and then that field's
+-- `game_slots` and `practice_slots` rows before it counts anything
+-- (20260907000000:493, :518, :521). The rollback's fields arm locked nothing,
+-- so a booking inserted between its count and its DELETE was destroyed by the
+-- cascade having been counted as nothing -- one arm of a pair adopting a
+-- documented contract and the other not.
+--
+-- **Both halves are asserted, and the second is the load-bearing one.** The
+-- other four arms are deliberately unlocked: closing their races means taking
+-- a SLOT or SUBUNIT lock before the loop reaches the `fields` record, which is
+-- the opposite order to `admin_delete_field`'s and is a deadlock cycle rather
+-- than a fix. So a lock appearing in any other arm fails here and the next
+-- person is made to answer the ordering question.
+--
+-- **Structural only, and that is stated rather than implied.** A lock is
+-- observable only from a second session and this harness runs one, so the race
+-- is not reproduced. `admin_delete_field`'s identical lock has the same limit.
+DO $$
+DECLARE
+  v_def text;
+  v_fields_arm text;
+  v_others text;
+  t text;
+BEGIN
+  SELECT pg_get_functiondef(p.oid) INTO v_def
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public' AND p.proname = 'rollback_field_import_job';
+
+  v_fields_arm := (regexp_match(
+    v_def,
+    $re$ELSIF v_record\.target_table = 'fields' THEN(.*?)ELSIF v_record\.target_table = 'locations' THEN$re$))[1];
+  IF v_fields_arm IS NULL OR length(v_fields_arm) < 200 THEN
+    RAISE EXCEPTION 'could not cut the fields arm; the markers have moved';
+  END IF;
+
+  -- The three, each named by the table it locks, so two of three fails.
+  FOREACH t IN ARRAY ARRAY['fields','game_slots','practice_slots'] LOOP
+    IF v_fields_arm !~ ('PERFORM 1 FROM public\.' || t || '[^;]+FOR UPDATE') THEN
+      RAISE EXCEPTION
+        'the fields arm counts bookings without locking public.%; a row inserted between the count and the DELETE is destroyed uncounted', t;
+    END IF;
+  END LOOP;
+
+  -- **And nowhere else.** Everything outside the fields arm, with the arm cut
+  -- out, must hold no row lock at all -- the `import_jobs` SELECT is a
+  -- `FOR UPDATE` on its own line and is matched by neither pattern below.
+  v_others := replace(v_def, v_fields_arm, '');
+  IF v_others ~ 'PERFORM 1 FROM public\.[a-z_]+[^;]+FOR UPDATE' THEN
+    RAISE EXCEPTION
+      'an arm other than the fields arm now takes a row lock. Adding one means acquiring a slot or subunit BEFORE the field, which is the opposite order to admin_delete_field and a deadlock cycle. Decide the acquisition order across both functions before adding it.';
+  END IF;
+
+  RAISE NOTICE 'fields arm: 3 locks in the sibling order; no other arm locks anything';
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -301,6 +386,7 @@ DO $$
 DECLARE
   r record;
   v_deleters text[];
+  v_confirmable int := 0;
 BEGIN
   SELECT array_agg(DISTINCT p.proname::text ORDER BY p.proname::text)
     INTO v_deleters
@@ -325,16 +411,55 @@ BEGIN
   END IF;
 
   FOR r IN
-    SELECT p.proname, pg_get_functiondef(p.oid) AS def
+    SELECT p.proname,
+           pg_get_functiondef(p.oid) AS def,
+           -- **The SIGNATURE, not the body text.** The first version of this
+           -- read `def LIKE '%p_confirm%'` and matched a COMMENT inside the
+           -- rollback explaining why it needs no prune -- a check a sentence
+           -- could flip, in the file whose subject is checks that cannot be
+           -- flipped by prose. A parameter name is a fact about the function.
+           'p_confirm' = ANY(COALESCE(p.proargnames, ARRAY[]::text[])) AS confirmable
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = 'public' AND p.proname = ANY(v_deleters)
   LOOP
     IF r.def NOT LIKE '%public.field_bookings(%' THEN
       RAISE EXCEPTION '% deletes a field without consulting the shared producer', r.proname;
     END IF;
+    -- **Which deleters must PRUNE is derived, not listed.** The profile FK
+    -- cascades, so a delete that proceeds while profiles are attached can
+    -- leave a scenario holding nothing -- and a scenario with no members is
+    -- still listed by `get_field_availability_scenarios` and still activatable
+    -- by `admin_select_field_availability_scenario`.
+    --
+    -- A deleter can only be in that position if it can OVERRIDE the refusal:
+    -- without a `p_confirm` PARAMETER it reaches its DELETE only when the
+    -- producer returned nothing, and `availability_profile` is one of the six
+    -- kinds the producer returns. So the test is the presence of that
+    -- parameter, and a deleter that grows one without growing a prune fails
+    -- here.
+    -- BOTH halves are demanded of the ones that need it: the capture (it reads
+    -- rows the delete destroys) and the prune.
+    IF r.confirmable THEN
+      v_confirmable := v_confirmable + 1;
+      IF r.def NOT LIKE '%public.field_availability_scenario_ids_on_field(%' THEN
+        RAISE EXCEPTION
+          '% can delete a field over a refusal and does not first read which scenarios its profiles belong to; the cascade removes the rows that answer it', r.proname;
+      END IF;
+      IF r.def NOT LIKE '%public.prune_empty_field_availability_scenarios(%' THEN
+        RAISE EXCEPTION
+          '% can delete a field over a refusal and can leave a scenario with no members standing', r.proname;
+      END IF;
+    END IF;
   END LOOP;
 
-  RAISE NOTICE 'field deleters: %, all of them on the shared producer', v_deleters;
+  -- The meta-assertion: a run where NO deleter had an override would satisfy
+  -- the branch above by never entering it.
+  IF v_confirmable <> 1 THEN
+    RAISE EXCEPTION
+      'expected exactly one field deleter with a confirmation override, found % -- the prune requirement above was applied to that many', v_confirmable;
+  END IF;
+
+  RAISE NOTICE 'field deleters: %, all on the shared producer; % with a confirmation override, and it prunes', v_deleters, v_confirmable;
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -546,6 +671,7 @@ DECLARE
   v_org uuid; v_user uuid := gen_random_uuid();
   v_loc uuid; v_field uuid; v_other uuid;
   v_profile uuid; v_window uuid; v_stale uuid;
+  v_lonely uuid; v_shared uuid; v_unrelated uuid;
   v_res jsonb; v_n int; v_row jsonb;
 BEGIN
   INSERT INTO auth.users (id, email, raw_user_meta_data)
@@ -575,6 +701,24 @@ BEGIN
     (organization_id, profile_id, blackout_from, blackout_until, reason)
   VALUES (v_org, v_profile, current_date + 10, current_date + 20, 'resurfacing')
   RETURNING id INTO v_window;
+
+  -- **Two scenarios, and only one of them may go.** `v_lonely` has this
+  -- field's profile as its ONLY member, so the cascade empties it.
+  -- `v_shared` has both this field's profile and the neighbour's, so it keeps
+  -- a member and must survive -- without it a prune that deleted every named
+  -- scenario, or every empty one in the organisation, would pass.
+  INSERT INTO public.field_availability_scenarios
+    (organization_id, season_label, name, exclusivity_group)
+  VALUES (v_org, '2099', 'Lonely Scenario', 'grp-lonely') RETURNING id INTO v_lonely;
+  INSERT INTO public.field_availability_scenarios
+    (organization_id, season_label, name, exclusivity_group)
+  VALUES (v_org, '2099', 'Shared Scenario', 'grp-shared') RETURNING id INTO v_shared;
+  -- A third that is ALREADY empty and has nothing to do with this field. The
+  -- narrow contract leaves it; an org-wide sweep would take it.
+  INSERT INTO public.field_availability_scenarios
+    (organization_id, season_label, name, exclusivity_group)
+  VALUES (v_org, '2099', 'Unrelated Empty Scenario', 'grp-unrelated')
+  RETURNING id INTO v_unrelated;
   -- **A profile on the NEIGHBOURING pitch, which must survive.** Without it a
   -- delete that emptied the whole table would satisfy every count below.
   INSERT INTO public.field_availability_profiles
@@ -582,6 +726,12 @@ BEGIN
   VALUES (v_org, v_other, '2099', 'Profile Park', 'Neighbouring Pitch',
           current_date, current_date + 200)
   RETURNING id INTO v_stale;
+
+  INSERT INTO public.field_availability_scenario_members
+    (organization_id, scenario_id, profile_id)
+  VALUES (v_org, v_lonely, v_profile),
+         (v_org, v_shared, v_profile),
+         (v_org, v_shared, v_stale);
 
   -- 6a. The profile alone makes the delete refuse. Before LIVE-3 this returned
   --     `affected_count: 0` and deleted the field.
@@ -632,7 +782,24 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.field_availability_profiles WHERE id = v_stale) THEN
     RAISE EXCEPTION 'the delete took a profile on a different pitch'; END IF;
 
-  RAISE NOTICE 'profile guard exercised: refused on 1 profile, retirement boundary inclusive, confirmed delete took the profile and its window and left the neighbour';
+  -- 6d. **The scenario the cascade emptied is gone; the other two are not.**
+  -- A scenario with no members is still listed by
+  -- `get_field_availability_scenarios` and still activatable by
+  -- `admin_select_field_availability_scenario`, so leaving one behind leaves
+  -- an active scenario that can yield an empty availability set.
+  IF EXISTS (SELECT 1 FROM public.field_availability_scenarios WHERE id = v_lonely) THEN
+    RAISE EXCEPTION 'the scenario whose only member the cascade removed is still there'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.field_availability_scenarios WHERE id = v_shared) THEN
+    RAISE EXCEPTION 'a scenario that still has a member was pruned'; END IF;
+  -- The narrow contract, held to: an already-empty scenario this field's
+  -- profiles never belonged to is NOT the delete's business.
+  IF NOT EXISTS (SELECT 1 FROM public.field_availability_scenarios WHERE id = v_unrelated) THEN
+    RAISE EXCEPTION 'the prune swept an empty scenario unrelated to this field'; END IF;
+  IF (v_res->>'deleted_availability_scenarios')::int <> 1 THEN
+    RAISE EXCEPTION 'the delete reported % pruned scenarios, expected 1',
+      v_res->>'deleted_availability_scenarios'; END IF;
+
+  RAISE NOTICE 'profile guard exercised: refused on 1 profile, retirement boundary inclusive, confirmed delete took the profile and its window, left the neighbour, pruned 1 emptied scenario and left 2 standing';
   DELETE FROM public.organizations WHERE id = v_org;
   DELETE FROM auth.users WHERE id = v_user;
 END $$;

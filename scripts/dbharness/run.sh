@@ -566,6 +566,28 @@ for id in "${NEW_MIGRATIONS[@]}"; do
       else
         echo "  | (checked) field_availability_profiles.field_id is back to ON DELETE SET NULL"
       fi
+      # **The revert DROPS two helpers, so the body it restores must not call
+      # them.** A restored body that still does raises undefined_function on
+      # every subsequent delete -- present in the catalogue and not callable,
+      # which is the R3 shape one migration along. Enumerated by the ways it
+      # can be wrong rather than tested for the one way it can be right.
+      v_adf_verdict=$(psql_cmd "SELECT CASE
+             WHEN count(*) = 0 THEN 'GONE'
+             WHEN count(*) > 1 THEN 'AMBIGUOUS:' || count(*)
+             WHEN bool_or(p.prosrc LIKE '%field_availability_scenario_ids_on_field%'
+                       OR p.prosrc LIKE '%prune_empty_field_availability_scenarios%')
+               THEN 'STILL-PRUNES'
+             ELSE 'RESTORED'
+           END
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'admin_delete_field'" 2>/dev/null || echo "QUERY-FAILED")
+      if [ "$v_adf_verdict" != "RESTORED" ]; then
+        echo "FAIL revert ${id}: admin_delete_field after the revert reads ${v_adf_verdict}, wanted RESTORED"
+        STATUS=1
+      else
+        echo "  | (checked) exactly one public.admin_delete_field survives the revert, and it no longer calls the dropped scenario helpers"
+      fi
     fi
     if [ "$id" = "20260907000000" ]; then
       if grep -q 'EXPOSING 1 practice_assignment' /tmp/harness_rev; then

@@ -1429,11 +1429,11 @@ plant "M5 a blocked record stops saying which one and why" "$M5" \
 # this, which is the point: section 2 exists because the argument is about the
 # graph rather than about the code.
 plant "M5 a second edge joins the subunit closure unnoticed" "$M5" \
-  "BEGIN
+  "BEGIN;
 
 -- ---------------------------------------------------------------------------
 -- 1. field_availability_profiles.field_id" \
-  "BEGIN
+  "BEGIN;
 
 ALTER TABLE public.game_slots
   ADD COLUMN field_subunit_id uuid REFERENCES public.field_subunits(id) ON DELETE CASCADE;
@@ -1521,6 +1521,68 @@ plant "M5 a third table references locations unnoticed" "$M5" \
 plant "M5 the audit row gets the raw blocked list" "$M5" \
   "        'blocked', public.field_bookings_digest(v_blocked)" \
   "        'blocked', v_blocked" \
+  "smoke 20260909000000"
+
+# **The lock, removed.** Structural only -- a race needs a second session and
+# the harness runs one -- so the plant proves the ASSERTION can fail, not that
+# the race is reproduced. Said out loud rather than implied.
+plant "M5 the fields arm counts bookings without locking the field" "$M5" \
+  "                PERFORM 1 FROM public.fields f
+                 WHERE f.id = v_record.target_id
+                   AND f.organization_id = v_job.organization_id
+                 FOR UPDATE;" \
+  "                -- lock removed" \
+  "smoke 20260909000000"
+
+# Two of three is not three: the field is locked and its slots are not, which
+# is the half that covers `games` and a slot-only assignment.
+plant "M5 the fields arm locks the field but not its slots" "$M5" \
+  "                PERFORM 1 FROM public.game_slots gs
+                 WHERE gs.organization_id = v_job.organization_id
+                   AND gs.field_id = v_record.target_id
+                 FOR UPDATE;" \
+  "                -- slot lock removed" \
+  "smoke 20260909000000"
+
+# **A lock in another arm.** Correct-looking and a deadlock cycle: it acquires
+# a slot before the field, which is the opposite order to admin_delete_field.
+plant "M5 a second arm starts taking a row lock" "$M5" \
+  "            ELSIF v_record.target_table = 'practice_slots' THEN
+                IF EXISTS (" \
+  "            ELSIF v_record.target_table = 'practice_slots' THEN
+                PERFORM 1 FROM public.practice_slots ps
+                 WHERE ps.id = v_record.target_id
+                 FOR UPDATE;
+                IF EXISTS (" \
+  "smoke 20260909000000"
+
+# **The prune, removed.** A confirmed delete then leaves a scenario holding
+# nothing -- still listed by get_field_availability_scenarios and still
+# activatable by admin_select_field_availability_scenario.
+plant "M5 a confirmed delete leaves an emptied scenario standing" "$M5" \
+  "    v_deleted_scenarios := public.prune_empty_field_availability_scenarios(
+                             p_organization_id, v_scenario_ids);" \
+  "    v_deleted_scenarios := 0;" \
+  "smoke 20260909000000"
+
+# **The capture, moved after the delete**, which is the subtle way to get this
+# wrong: the call is there, the helper is there, and by the time it runs the
+# membership rows it reads are already gone, so it always returns nothing.
+plant "M5 the scenario capture happens after the cascade removed its evidence" "$M5" \
+  "    v_scenario_ids := public.field_availability_scenario_ids_on_field(
+                        p_organization_id, p_field_id);
+
+    DELETE FROM public.fields" \
+  "    DELETE FROM public.fields" \
+  "smoke 20260909000000"
+
+# **The prune widened to a sweep.** It would take an empty scenario created by
+# some other path -- a decision nobody has made, and the reason the sibling's
+# contract is narrow.
+plant "M5 the prune sweeps every empty scenario in the organisation" "$M5" \
+  "       AND s.id = ANY(p_scenario_ids)
+       AND NOT EXISTS (" \
+  "       AND NOT EXISTS (" \
   "smoke 20260909000000"
 
 # ---------------------------------------------------------------------------
@@ -1621,6 +1683,28 @@ RETURNS jsonb" \
 # **The constraint the revert exists to put back.** A revert that restores both
 # bodies and leaves the FK CASCADE is a half-revert whose warnings are all
 # true and whose schema does not match them.
+# **The revert drops two helpers, so the body it restores must not call
+# them.** A revert that puts the PRUNING body back and drops the helpers
+# underneath it makes every subsequent delete raise undefined_function -- the
+# R3 shape, one migration along, and the reason that verdict enumerates its red
+# branches instead of testing for the one way it can be right.
+plant "R5 revert restores a body that still calls the dropped helpers" "$R5" \
+  "    DELETE FROM public.fields
+     WHERE id = p_field_id
+       AND organization_id = p_organization_id;" \
+  "    v_scenario_ids := public.field_availability_scenario_ids_on_field(
+                        p_organization_id, p_field_id);
+    DELETE FROM public.fields
+     WHERE id = p_field_id
+       AND organization_id = p_organization_id;" \
+  "revert 20260909000000: admin_delete_field after the revert reads STILL-PRUNES"
+
+plant "R5 revert drops admin_delete_field instead of restoring it" "$R5" \
+  "REVOKE ALL ON FUNCTION public.admin_delete_field(uuid, uuid, boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.admin_delete_field(uuid, uuid, boolean) TO authenticated;" \
+  "DROP FUNCTION public.admin_delete_field(uuid, uuid, boolean);" \
+  "revert 20260909000000: admin_delete_field after the revert reads GONE"
+
 plant "R5 revert leaves the FK cascading" "$R5" \
   "  FOREIGN KEY (field_id) REFERENCES public.fields (id) ON DELETE SET NULL;" \
   "  FOREIGN KEY (field_id) REFERENCES public.fields (id) ON DELETE CASCADE;" \
@@ -1685,6 +1769,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) exactly one public.field_bookings survives the revert, and it no longer enumerates the profile"]="R5 revert drops the producer instead of restoring it|R5 revert leaves the sixth arm in the producer|R5 revert restores the producer under a second signature"
   ["(checked) exactly one public.rollback_field_import_job survives the revert, and it no longer calls the producer"]="R5 revert drops the rollback instead of restoring it|R5 revert leaves the rollback on the producer|R5 revert restores the rollback under a second signature"
   ["(checked) field_availability_profiles.field_id is back to ON DELETE SET NULL"]="R5 revert leaves the FK cascading"
+  ["(checked) exactly one public.admin_delete_field survives the revert, and it no longer calls the dropped scenario helpers"]="R5 revert drops admin_delete_field instead of restoring it|R5 revert restores a body that still calls the dropped helpers"
   ["(checked) the rollback removed every overload of all four admin facility RPCs"]="EMERG the rollback and its own guard drift together"
   ["(checked) it left public.field_bookings standing, which admin_retire_field still calls"]="EMERG rollback takes the producer another RPC still calls"
 )

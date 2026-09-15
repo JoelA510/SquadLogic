@@ -1004,6 +1004,65 @@ const mockFieldBookingsDigest = (affected, limit = 25) => {
   };
 };
 
+/**
+ * The availability scenarios any profile on this field belongs to, and the
+ * prune that follows the delete.
+ *
+ * `public.field_availability_scenario_ids_on_field` and
+ * `public.prune_empty_field_availability_scenarios` (20260909000000). Both
+ * field deleters call them, here as in the database: the capture has to run
+ * BEFORE the delete, because the cascade removes the membership rows that
+ * answer the question, and the prune after.
+ *
+ * The contract is narrow, matching `rollback_field_availability_import_job`:
+ * only scenarios the deleted profiles belonged to are considered, so an empty
+ * scenario created by some other path is left alone.
+ *
+ * @param {Object} db
+ * @param {string} orgId
+ * @param {string} fieldId
+ * @returns {string[]}
+ */
+const mockScenarioIdsOnField = (db, orgId, fieldId) => {
+  const profileIds = new Set(
+    (db.field_availability_profiles || [])
+      .filter(
+        (row) =>
+          String(row.organization_id) === String(orgId) && String(row.field_id) === String(fieldId)
+      )
+      .map((row) => String(row.id))
+  );
+  return [
+    ...new Set(
+      (db.field_availability_scenario_members || [])
+        .filter((row) => profileIds.has(String(row.profile_id)))
+        .map((row) => String(row.scenario_id))
+    ),
+  ];
+};
+
+/**
+ * @param {Object} db
+ * @param {string} orgId
+ * @param {string[]} scenarioIds
+ * @param {(table: string, doomed: Array<Object>) => void} destroy
+ * @returns {number} how many scenarios were removed
+ */
+const mockPruneEmptyScenarios = (db, orgId, scenarioIds, destroy) => {
+  if (!Array.isArray(scenarioIds) || scenarioIds.length === 0) return 0;
+  const named = new Set(scenarioIds.map(String));
+  const doomed = (db.field_availability_scenarios || []).filter(
+    (scenario) =>
+      String(scenario.organization_id) === String(orgId) &&
+      named.has(String(scenario.id)) &&
+      !(db.field_availability_scenario_members || []).some(
+        (member) => String(member.scenario_id) === String(scenario.id)
+      )
+  );
+  destroy('field_availability_scenarios', doomed);
+  return doomed.length;
+};
+
 const saveDB = (db) => {
   if (typeof window !== 'undefined') {
     window.__MOCK_DB__ = db;
@@ -2922,6 +2981,9 @@ export const mockSupabase = {
         // separate booking kinds: the `availability_profile` row in `affected`
         // is what reports all five. The set is derived from the closure and
         // held to it by docs/sql/20260909000000_smoke.sql section 3.
+        // Read BEFORE anything is destroyed: the cascade removes the
+        // membership rows that say which scenarios these profiles belonged to.
+        const scenarioIds = mockScenarioIdsOnField(db, orgId, p.p_field_id);
         const doomedProfiles = reported('field_availability_profiles');
         destroy('field_availability_profiles', doomedProfiles);
         const doomedProfileIds = new Set(doomedProfiles.map((row) => String(row.id)));
@@ -2946,6 +3008,13 @@ export const mockSupabase = {
             if (String(row.field_id) === String(p.p_field_id)) row.field_id = null;
           }
         }
+        // ... and pruned after, on the narrow contract
+        // `rollback_field_availability_import_job` already uses: a scenario
+        // left with no members is still listed by
+        // get_field_availability_scenarios and still activatable by
+        // admin_select_field_availability_scenario.
+        const deletedScenarios = mockPruneEmptyScenarios(db, orgId, scenarioIds, destroy);
+
         markMockDeleted(db, 'fields', [field.id]);
         db.fields = (db.fields || []).filter((item) => String(item.id) !== String(p.p_field_id));
 
@@ -2954,6 +3023,7 @@ export const mockSupabase = {
           phase: 'after',
           confirmed: Boolean(p.p_confirm),
           affected_count: affected.length,
+          deleted_availability_scenarios: deletedScenarios,
           deleted: true,
           previous,
         });
@@ -2964,6 +3034,7 @@ export const mockSupabase = {
             organization_id: orgId,
             deleted: true,
             affected_count: affected.length,
+            deleted_availability_scenarios: deletedScenarios,
             affected,
           },
           error: null,

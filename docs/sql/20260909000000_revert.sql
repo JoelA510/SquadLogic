@@ -26,7 +26,21 @@
 --      destroyed with nothing refusing; and the `locations` arm loses the
 --      written-down reason it excludes `field_blackouts`. A revert that names
 --      the headline and not the riders is the shape LIVE-2's round 1 found.
---   4. Two silent switch arms come back: an `import_application_record`
+--   4. `admin_delete_field` goes back to 20260907000000's body, so it stops
+--      pruning availability scenarios the cascade empties and stops reporting
+--      `deleted_availability_scenarios`. Combined with (1) that is consistent
+--      -- with the FK back to SET NULL no field delete empties a scenario --
+--      but the two must move together, and the helpers
+--      `field_availability_scenario_ids_on_field` and
+--      `prune_empty_field_availability_scenarios` are dropped here for the
+--      same reason. `rollback_field_import_job` never called them -- its
+--      fields arm has no confirmation override, so it reaches its DELETE only
+--      when the producer returned nothing and a profile is unreachable there.
+--   5. The fields arm loses its `FOR UPDATE` on the field and its slots, so a
+--      booking inserted between the count and the delete is destroyed having
+--      been counted as nothing. That is harmless only while (1) also lands:
+--      the window's worst outcome was a CASCADED profile.
+--   6. Two silent switch arms come back: an `import_application_record`
 --      naming a `target_table` neither switch handles is again stamped
 --      `rolled_back_at` with `{"deleted": true}` (insert) or counted in
 --      `restored_records` (update) having done nothing. And `blocked` leaves
@@ -76,6 +90,7 @@ BEGIN
   SELECT count(*) INTO v_blocked_jobs
     FROM public.import_jobs
    WHERE warning_summary -> 'field_rollback' ? 'blocked';
+  RAISE WARNING 'RESTORING admin_delete_field to its 20260907000000 body and DROPPING the two scenario helpers: a field delete stops pruning an availability scenario whose last member it removed, and stops reporting deleted_availability_scenarios. Consistent only because the foreign key above goes back to SET NULL in the same script -- applying one without the other leaves a delete that empties scenarios and never prunes them';
   RAISE WARNING 'ALSO REVERTING two silent switch arms and the blocked list: an import_application_record naming a target_table neither switch handles is again stamped as rolled back having done nothing, and a refusal reports a bare blocked_records count with no table, id or reason -- % existing import job(s) carry a field_rollback.blocked list that nothing will write again', v_blocked_jobs;
 END $revert$;
 
@@ -530,6 +545,200 @@ GRANT EXECUTE ON FUNCTION public.rollback_field_import_job(uuid) TO authenticate
 
 -- 20260503070000 set no COMMENT on this function; 20260909000000 added one.
 COMMENT ON FUNCTION public.rollback_field_import_job(uuid) IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- 3b. admin_delete_field, back to 20260907000000's body, and the helpers gone
+-- ---------------------------------------------------------------------------
+--
+-- Dropped AFTER the body that calls them is replaced, or the drop fails on the
+-- dependency. `CASCADE` is deliberately not used: if anything else has started
+-- calling them, this must fail loudly rather than silently removing that
+-- caller's dependency.
+
+CREATE OR REPLACE FUNCTION public.admin_delete_field(
+    p_organization_id uuid,
+    p_field_id uuid,
+    p_confirm boolean DEFAULT false
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_existing public.fields%ROWTYPE;
+    v_affected jsonb;
+    v_affected_count integer;
+BEGIN
+    IF p_organization_id IS NULL THEN
+        RAISE EXCEPTION 'p_organization_id is required'
+            USING ERRCODE = '23502';
+    END IF;
+
+    IF NOT public.is_org_admin(p_organization_id) THEN
+        RAISE EXCEPTION 'Access denied: caller is not an admin of organization %', p_organization_id
+            USING ERRCODE = '42501';
+    END IF;
+
+    IF p_field_id IS NULL THEN
+        RAISE EXCEPTION 'p_field_id is required'
+            USING ERRCODE = '23502';
+    END IF;
+
+    -- **Locked and read BEFORE the delete, not returned by it.** The original
+    -- deleted first and inferred not-found from the RETURNING being empty, so
+    -- there was no window in which the field existed and the bookings could be
+    -- counted.
+    SELECT *
+      INTO v_existing
+      FROM public.fields
+     WHERE id = p_field_id
+       AND organization_id = p_organization_id
+     FOR UPDATE;
+
+    IF v_existing.id IS NULL THEN
+        RAISE EXCEPTION 'field % was not found in organization %', p_field_id, p_organization_id
+            USING ERRCODE = 'P0002';
+    END IF;
+
+    -- **Locking the field is not enough, because not everything the cascade
+    -- reaches has a key to the field.**
+    --
+    -- `FOR UPDATE` on the `fields` row blocks a concurrent INSERT into any
+    -- table with a foreign key TO that row, because such an insert takes a
+    -- conflicting KEY SHARE lock on it. That covers the slot tables and the
+    -- assignments' own `field_id`. It does NOT cover a `games` row, which
+    -- references a game_slot and never the field, nor an assignment carrying
+    -- only a slot id -- and both of those are destroyed by the cascade. So the
+    -- guard would read one set while the delete removed a larger one: the exact
+    -- defect this migration exists to fix, returning as a race.
+    --
+    -- Locking the field's SLOTS closes it: an insert that hangs a game or an
+    -- assignment off one of them takes KEY SHARE on the slot row, which
+    -- conflicts with this. Taken after the field, so the two RPCs acquire in
+    -- one order and cannot deadlock against each other.
+    PERFORM 1 FROM public.game_slots
+     WHERE organization_id = p_organization_id AND field_id = p_field_id
+     FOR UPDATE;
+    PERFORM 1 FROM public.practice_slots
+     WHERE organization_id = p_organization_id AND field_id = p_field_id
+     FOR UPDATE;
+
+    -- **Every booking the deletion would take -- all FIVE kinds**, and what
+    -- it would do to each. The enumeration itself is `public.field_bookings`,
+    -- shared with `admin_retire_field`, so "who is affected" has one answer.
+    -- `p_after => NULL` means no date applies: a deletion takes everything on
+    -- the ground, dated or not.
+    --
+    -- `disposition` turns the producer's `cascades` into the word the operator
+    -- reads. It is decided PER ROW because it differs per row: a slot-linked
+    -- assignment is destroyed by the slot cascade while a free-standing one
+    -- keeps its row and loses its venue.
+    --   'deleted'    -- a CASCADE reaches it; the row goes with the field
+    --   'unassigned' -- only field_id is SET NULL; the row survives, venueless
+    SELECT
+      COALESCE(
+        jsonb_agg(
+          jsonb_build_object(
+            'kind', b.kind, 'id', b.booking_id, 'on_date', b.on_date,
+            'week_index', b.week_index, 'undated', b.undated,
+            'unbounded', b.unbounded,
+            'disposition', CASE WHEN b.cascades THEN 'deleted' ELSE 'unassigned' END
+          )
+          ORDER BY b.on_date NULLS FIRST, b.kind, b.booking_id
+        ),
+        '[]'::jsonb
+      ),
+      COUNT(*)
+    INTO v_affected, v_affected_count
+    FROM public.field_bookings(p_organization_id, p_field_id, NULL) b;
+
+    -- **The refusal lives here, not in the UI.** A confirmation prompt a
+    -- caller can skip by calling the RPC directly is not a guard. Same shape as
+    -- admin_retire_field: RETURN, do not RAISE, and record the refusal.
+    IF v_affected_count > 0 AND NOT COALESCE(p_confirm, false) THEN
+        PERFORM public.record_audit_event(
+            p_organization_id,
+            'settings.updated',
+            'field',
+            p_field_id,
+            jsonb_build_object(
+                'setting', 'facility.field',
+                'operation', 'admin_delete_field',
+                'phase', 'refused',
+                'reason', 'bookings_exist',
+                'affected_count', v_affected_count,
+                -- A bounded rendering: the full list goes back to the CALLER,
+                -- a sample and the per-kind counts go into the trail. A delete
+                -- refused on a busy field would otherwise write an arbitrarily
+                -- large audit row on every attempt.
+                'affected', public.field_bookings_digest(v_affected),
+                'previous', to_jsonb(v_existing)
+            )
+        );
+        RETURN jsonb_build_object(
+            'deleted', false,
+            'reason', 'bookings_exist',
+            'affected_count', v_affected_count,
+            'affected', v_affected
+        );
+    END IF;
+
+    -- Audit BEFORE the delete, so the world the operator decided against is in
+    -- the trail next to the decision. This runs in one transaction, so it does
+    -- NOT survive a failure of the DELETE below -- the refusal above does,
+    -- because that path RETURNs.
+    PERFORM public.record_audit_event(
+        p_organization_id,
+        'settings.updated',
+        'field',
+        p_field_id,
+        jsonb_build_object(
+            'setting', 'facility.field',
+            'operation', 'admin_delete_field',
+            'phase', 'before',
+            'confirmed', COALESCE(p_confirm, false),
+            'affected_count', v_affected_count,
+            'affected', public.field_bookings_digest(v_affected),
+            'previous', to_jsonb(v_existing)
+        )
+    );
+
+    DELETE FROM public.fields
+     WHERE id = p_field_id
+       AND organization_id = p_organization_id;
+
+    PERFORM public.record_audit_event(
+        p_organization_id,
+        'settings.updated',
+        'field',
+        v_existing.id,
+        jsonb_build_object(
+            'setting', 'facility.field',
+            'operation', 'admin_delete_field',
+            'phase', 'after',
+            'confirmed', COALESCE(p_confirm, false),
+            'affected_count', v_affected_count,
+            'deleted', true,
+            'previous', to_jsonb(v_existing)
+        )
+    );
+
+    RETURN jsonb_build_object(
+        'id', v_existing.id,
+        'organization_id', v_existing.organization_id,
+        'deleted', true,
+        'affected_count', v_affected_count,
+        'affected', v_affected
+    );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.admin_delete_field(uuid, uuid, boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.admin_delete_field(uuid, uuid, boolean) TO authenticated;
+
+DROP FUNCTION IF EXISTS public.prune_empty_field_availability_scenarios(uuid, uuid[]);
+DROP FUNCTION IF EXISTS public.field_availability_scenario_ids_on_field(uuid, uuid);
 
 -- ---------------------------------------------------------------------------
 -- 4. The two collapse-blocker comments, back to 20260908000000's wording

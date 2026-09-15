@@ -17,7 +17,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(28);
+SELECT plan(31);
 
 -- ──────────────────────────────────────────────────────────────
 -- Seed, as superuser, before any SET LOCAL role.
@@ -109,6 +109,31 @@ VALUES ('e0000000-0000-0000-0000-0000000000f5',
         'a1111111-1111-1111-1111-111111111111',
         'e0000000-0000-0000-0000-0000000000f3',
         current_date + 10, current_date + 20, 'resurfacing');
+
+-- Three scenarios, and only ONE of them may go: `...f6` has this field's
+-- profile as its only member, `...f7` also has the neighbour's, and `...f8` is
+-- already empty and has nothing to do with this field. A prune that swept every
+-- empty scenario in the organisation, or every scenario it was handed, would
+-- fail on the third and the second respectively.
+INSERT INTO public.field_availability_scenarios (
+    id, organization_id, season_label, name, exclusivity_group
+)
+VALUES ('e0000000-0000-0000-0000-0000000000f6',
+        'a1111111-1111-1111-1111-111111111111', '2099', 'Lonely', 'grp-lonely'),
+       ('e0000000-0000-0000-0000-0000000000f7',
+        'a1111111-1111-1111-1111-111111111111', '2099', 'Shared', 'grp-shared'),
+       ('e0000000-0000-0000-0000-0000000000f8',
+        'a1111111-1111-1111-1111-111111111111', '2099', 'Unrelated', 'grp-unrelated');
+
+INSERT INTO public.field_availability_scenario_members (
+    organization_id, scenario_id, profile_id
+)
+VALUES ('a1111111-1111-1111-1111-111111111111',
+        'e0000000-0000-0000-0000-0000000000f6', 'e0000000-0000-0000-0000-0000000000f3'),
+       ('a1111111-1111-1111-1111-111111111111',
+        'e0000000-0000-0000-0000-0000000000f7', 'e0000000-0000-0000-0000-0000000000f3'),
+       ('a1111111-1111-1111-1111-111111111111',
+        'e0000000-0000-0000-0000-0000000000f7', 'e0000000-0000-0000-0000-0000000000f4');
 
 -- ──────────────────────────────────────────────────────────────
 -- 0. The constraint the `availability_profile` arm's disposition rests on.
@@ -420,6 +445,38 @@ SELECT is(
         AND field_id IS NULL),
     0,
     'the confirmed delete produced no field-less profile; admin_delete_field is no longer the second producer'
+);
+
+-- **The scenario the cascade emptied, and the two that must survive.** A
+-- scenario with no members is still returned by
+-- `get_field_availability_scenarios` and still activatable by
+-- `admin_select_field_availability_scenario`, so one left behind is an active
+-- scenario that can yield an empty availability set.
+SELECT is(
+    (
+        SELECT count(*)::integer FROM public.field_availability_scenarios
+         WHERE id = 'e0000000-0000-0000-0000-0000000000f6'
+    ),
+    0,
+    'the scenario whose only member the cascade removed was pruned'
+);
+
+SELECT is(
+    (
+        SELECT count(*)::integer FROM public.field_availability_scenarios
+         WHERE id = 'e0000000-0000-0000-0000-0000000000f7'
+    ) * 10 + (
+        SELECT count(*)::integer FROM public.field_availability_scenarios
+         WHERE id = 'e0000000-0000-0000-0000-0000000000f8'
+    ),
+    11,
+    'a scenario that still has a member survives (1), and so does an empty one this field''s profiles never belonged to (1) -- the prune is narrow, not a sweep'
+);
+
+SELECT is(
+    (SELECT r->>'deleted_availability_scenarios' FROM profile_delete),
+    '1',
+    'the delete reports the scenario it pruned rather than removing it silently'
 );
 
 -- **The positive anchor for the zero above.** The neighbouring pitch's

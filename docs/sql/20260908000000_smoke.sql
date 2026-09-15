@@ -5,8 +5,21 @@
 -- smoke on the very function this migration fixes, did: four SELECTs and no
 -- RAISE, printing three reassuring rows for a body with no NOT FOUND guard in
 -- it. (It asserts now, and carries `ON_ERROR_STOP` so the assertions can fail.)
--- Every invariant below RAISEs, so `scripts/dbharness/prove.sh` can plant the
--- defect each one exists to catch and require this file to go red.
+-- Every invariant below RAISEs, and `scripts/dbharness/prove.sh` plants the
+-- defect behind each one that this migration is responsible for: the guard
+-- itself, the tenant filter, the case-insensitive match, the branchable reason
+-- key, the applied-marking, the replay and its cleared refusal, the absent
+-- sibling filter, the warning_summary merge, BOTH comment pins, the
+-- nullability of field_id, and SECURITY DEFINER.
+--
+-- **What is NOT planted, said rather than implied**, because the first version
+-- of this sentence claimed "each one" and four assertions had no control at
+-- all -- including the comment pin the migration itself calls "what stops it
+-- drifting back": the `search_path` pin, the two EXECUTE-privilege checks, the
+-- overload count, the foreign key's `confdeltype`, and the applied_payload
+-- literal inherited from 20260602000000. Each of those guards a property no
+-- mutation of THIS migration can change, so a plant for them would have to
+-- mutate a different file and would be caught by that file's own checks.
 --
 -- **Section 3 is the one that matters: it CALLS the function.** Sections 1 and
 -- 2 read the catalogue, and reading a function says nothing about what it does.

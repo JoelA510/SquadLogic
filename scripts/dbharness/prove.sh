@@ -1235,6 +1235,41 @@ plant "M4 the finalize overwrites warning_summary instead of merging" "$M4" \
   "smoke 20260908000000" \
   "smoke 20260907000000"
 
+# **The comment pins, which the migration calls "what stops it drifting back"
+# and which had no control at all.** Two objects carry the claim and each gets
+# its own plant, because a pin on a pair that only one plant can reach is a pin
+# on one of them. Each restores that object's superseded wording -- the exact
+# regression the pin exists to catch.
+plant "M4 the view comment reverts to the superseded claim" "$M4" \
+  "COLLAPSING THE UNION IS STILL BLOCKED, and only half the obstacle is gone:" \
+  "The union is temporary: it collapses to field_blackouts alone once finalize_field_availability_import_job resolves a profile to a field reliably. Formerly:" \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
+plant "M4 the frozen table comment reverts to the superseded claim" "$M4" \
+  "COLLAPSING THE UNION IS STILL BLOCKED as of 20260908000000" \
+  "The two cannot be collapsed until finalize_field_availability_import_job stops attaching blackouts to profiles whose field_id resolution can be NULL. Formerly blocked as of 20260908000000" \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
+# **The obvious wrong fix for this defect**, and the reason section 2 pins the
+# nullability: `SET NOT NULL` looks like the tidy repair and breaks the
+# ON DELETE SET NULL the fields foreign key relies on.
+plant "M4 field_id is made NOT NULL, the tidy wrong fix" "$M4" \
+  "COMMIT;" \
+  "ALTER TABLE public.field_availability_profiles ALTER COLUMN field_id SET NOT NULL;
+COMMIT;" \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
+# Section 1's hardening checks, which also had no plant. SECURITY DEFINER is
+# what lets this function write past RLS at all.
+plant "M4 the finalize loses SECURITY DEFINER" "$M4" \
+  "LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS \$\$" \
+  "LANGUAGE plpgsql SET search_path = public AS \$\$" \
+  "smoke 20260908000000" \
+  "smoke 20260907000000"
+
 # **The revert's count, on the row run.sh plants for it.** Without the seed this
 # would report zero on a fresh database and prove only that the code parses;
 # with the seed, a revert that counts the wrong set prints ORPHANS: 0 and the

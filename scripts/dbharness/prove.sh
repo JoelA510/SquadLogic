@@ -217,6 +217,102 @@ on_exit() {
 trap on_exit EXIT
 trap on_signal INT TERM
 
+# **A PLANT AIMED AT A SUPERSEDED FUNCTION BODY IS A CHECK OF NOTHING.**
+#
+# Migrations apply in filename order and `CREATE OR REPLACE FUNCTION` is
+# last-one-wins, so when a later migration recreates a function the earlier
+# file's copy of that body never reaches the database. A mutation planted into
+# it applies cleanly, changes the file, and is overwritten before anything
+# runs. The plant then scores NOT CAUGHT -- the correct verdict, and one that
+# costs a whole sweep to reach. This happened: 20260909000000 recreated
+# `field_bookings` and `admin_delete_field`, and eight plants aimed at
+# 20260907000000's copies became inert in one commit.
+#
+# So it is derived and refused here, before the baseline. The superseded set
+# comes from the MIGRATION DIRECTORY, not from a list in this file -- a list
+# would go stale on exactly the change it exists to catch -- and a plant is
+# refused only when its anchor falls INSIDE a superseded body, so a plant
+# against a DDL statement or a comment in the same file is untouched.
+#
+# The meta-assertion is on the other side: if this finds no plants at all it
+# says so and stops, because a parse that matched nothing would clear every
+# plant in the file by looking at none of them.
+echo "=== pre-flight: no plant may target a superseded function body ==="
+python3 - "$REPO" <<'PREFLIGHT'
+import io, os, re, sys
+
+repo = sys.argv[1]
+mig_dir = os.path.join(repo, 'supabase', 'migrations')
+sh = io.open(os.path.join(repo, 'scripts', 'dbharness', 'prove.sh'), encoding='utf8').read()
+
+# `M1="$REPO/..."` -> absolute path, so a plant's file is resolvable from its
+# shell variable without re-implementing the assignments.
+files = {}
+for name, path in re.findall(r'^(\w+)="(\$REPO/[^"]+)"', sh, re.M):
+    files[name] = path.replace('$REPO', repo)
+
+# Which migration defines each function LAST.
+last_def = {}
+for name in sorted(os.listdir(mig_dir)):
+    if not name.endswith('.sql'):
+        continue
+    src = io.open(os.path.join(mig_dir, name), encoding='utf8').read()
+    for fn in re.findall(r'CREATE OR REPLACE FUNCTION public\.([a-z_]+)\(', src):
+        last_def[fn] = name
+if not last_def:
+    print('PRE-FLIGHT FAILED: no CREATE OR REPLACE FUNCTION found in', mig_dir)
+    sys.exit(2)
+
+# Every plant: label, file variable, and the `old` anchor.
+plants = re.findall(
+    r'^plant "([^"]+)" "\$(\w+)" \\\n\s*"((?:[^"\\]|\\.)*)"', sh, re.M | re.S)
+if not plants:
+    print('PRE-FLIGHT FAILED: parsed no plants out of prove.sh; this check looked at nothing')
+    sys.exit(2)
+
+bad = []
+examined = 0
+for label, var, old in plants:
+    path = files.get(var)
+    if path is None or not path.startswith(mig_dir):
+        continue  # reverts and the emergency rollback are not migrations
+    base = os.path.basename(path)
+    src = io.open(path, encoding='utf8').read()
+    pos = src.find(old)
+    if pos < 0:
+        continue  # a moved anchor is ANCHOR-MISS's business, not this check's
+    examined += 1
+    for fn in re.findall(r'CREATE OR REPLACE FUNCTION public\.([a-z_]+)\(', src):
+        start = src.index('CREATE OR REPLACE FUNCTION public.%s(' % fn)
+        end = src.find('\n$$;\n', start)
+        if end < 0:
+            continue
+        if start <= pos < end + 5 and last_def.get(fn) != base:
+            bad.append((label, base, fn, last_def[fn]))
+            break
+
+if examined == 0:
+    print('PRE-FLIGHT FAILED: no plant anchor resolved inside a migration; the walk found nothing to judge')
+    sys.exit(2)
+
+for label, base, fn, winner in bad:
+    print('PRE-FLIGHT REFUSAL: plant "%s"' % label)
+    print('  mutates public.%s in %s, but %s recreates it.' % (fn, base, winner))
+    print('  The installed body is the later one, so this mutation never reaches the database.')
+    print('  Re-aim the plant at %s, or at a part of %s the later migration does not replace.'
+          % (winner, base))
+if bad:
+    sys.exit(1)
+print('pre-flight: %d migration-targeted plant anchors examined, none inside a superseded body'
+      % examined)
+PREFLIGHT
+preflight_status=$?
+if [ "$preflight_status" -ne 0 ]; then
+  echo "REFUSING TO PLANT -- see the pre-flight refusals above." >&2
+  exit 7
+fi
+echo
+
 # **A green baseline, asserted before anything is planted.**
 #
 # Without this the whole proof has the defect it exists to find. Any harness
@@ -622,7 +718,25 @@ plant "ONLY-SCEN half a blackout window accepted" "$M2" \
 # would have caught is the shape this PR removed. `games` carries no field_id,
 # so a census by column name cannot see this arm at all and the cascade closure
 # is the only thing that can -- dropping it must go red.
-plant "M3 the shared producer loses its games arm" "$M3" \
+# **EIGHT PLANTS BELOW MOVED FROM $M3 TO $M5, AND THE MOVE IS THE POINT.**
+#
+# 20260909000000 recreates `public.field_bookings` and
+# `public.admin_delete_field`. Migrations apply in filename order, so the body
+# that ENDS UP INSTALLED is 20260909000000's -- and a mutation planted into
+# 20260907000000's copy is overwritten moments later by the unmutated one. The
+# plant applies, the anchor matches, the file really changes, and the database
+# never sees it. Every such plant silently became a check of nothing.
+#
+# It cost a three-hour sweep to discover, because a plant aimed at a superseded
+# body scores NOT CAUGHT -- which is the right verdict and the slowest possible
+# way to learn it. The pre-flight refusal near the top of this file now derives
+# the superseded bodies from the migration directory and stops the run in
+# seconds instead, so the next migration to recreate a function cannot quietly
+# hollow out the plants aimed at its predecessor.
+#
+# Each anchor below was confirmed to appear exactly once in 20260909000000 as
+# well, because that migration carries both bodies forward verbatim.
+plant "M3 the shared producer loses its games arm" "$M5" \
     "    SELECT 'game'::text, g.id," \
     "    SELECT 'not_a_game'::text, g.id," \
   "smoke 20260907000000" \
@@ -646,7 +760,7 @@ plant "M3 retire reads a NULL confirmation as yes" "$M3" \
                 'operation', 'admin_retire_field'," \
   "scenario table" \
   "smoke 20260906000000"
-plant "M3 delete reads a NULL confirmation as yes" "$M3" \
+plant "M3 delete reads a NULL confirmation as yes" "$M5" \
   "    IF v_affected_count > 0 AND NOT COALESCE(p_confirm, false) THEN
         PERFORM public.record_audit_event(
             p_organization_id,
@@ -678,7 +792,7 @@ plant "M3 retire keeps a union of its own again" "$M3" \
   "scenario table"
 # The audit digest keeps a refusal from writing an unbounded row. Remove the cap
 # and the smoke's bound check goes red.
-plant "M3 the refusal embeds the whole list in the audit row" "$M3" \
+plant "M3 the refusal embeds the whole list in the audit row" "$M5" \
   "                'affected', public.field_bookings_digest(v_affected),
                 'previous', to_jsonb(v_existing)" \
   "                'affected', v_affected,
@@ -695,7 +809,7 @@ plant "M3 the refusal embeds the whole list in the audit row" "$M3" \
 # same shape -- so an anchor that is only that line matches twice and `plant`
 # refuses it. Each is disambiguated by the first key of the audit row beneath
 # it, the same way the two NULL-confirmation plants above are.
-plant "M3 delete loses its booking guard entirely" "$M3" \
+plant "M3 delete loses its booking guard entirely" "$M5" \
   "    IF v_affected_count > 0 AND NOT COALESCE(p_confirm, false) THEN
         PERFORM public.record_audit_event(
             p_organization_id,
@@ -734,7 +848,7 @@ plant "M3 the unguarded two-arg overload is left standing" "$M3" \
 # nothing ELSE. The scenario table names the exact phase set per case, so a
 # refusal that also recorded `before` -- an audit trail claiming a deletion was
 # begun when it was refused -- fails there and nowhere else.
-plant "ONLY-SCEN refusal also audits a phase it never reached" "$M3" \
+plant "ONLY-SCEN refusal also audits a phase it never reached" "$M5" \
   "        );
         RETURN jsonb_build_object(
             'deleted', false," \
@@ -780,7 +894,7 @@ ALTER TABLE public.practice_assignments
 # lives in the producer's `cascades` column, so each plant pins that column to a
 # constant. Both halves get one, since a flat answer in either direction passes
 # the case for the shape it happens to match.
-plant "M3 every game assignment claimed to survive" "$M3" \
+plant "M3 every game assignment claimed to survive" "$M5" \
   "           EXISTS (SELECT 1 FROM public.game_slots s
                     WHERE s.field_id = p_field_id
                       AND s.id IN (ga.game_slot_id, ga.slot_id))
@@ -789,7 +903,7 @@ plant "M3 every game assignment claimed to survive" "$M3" \
     FROM public.game_assignments ga" \
   "smoke 20260907000000" \
   "smoke 20260906000000"
-plant "M3 every practice assignment claimed to be destroyed" "$M3" \
+plant "M3 every practice assignment claimed to be destroyed" "$M5" \
   "           EXISTS (SELECT 1 FROM public.practice_slots s
                     WHERE s.field_id = p_field_id
                       AND s.id IN (pa.practice_slot_id, pa.slot_id))
@@ -806,7 +920,7 @@ plant "M3 every practice assignment claimed to be destroyed" "$M3" \
 # twice -- which is why this plant names the scenario table and requires the
 # smoke to stay green. Agreement is not correctness; only a fixture that states
 # the boundary as data can adjudicate it.
-plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M3" \
+plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M5" \
   "                 ELSE upper(pa.effective_date_range) - 1" \
   "                 ELSE upper(pa.effective_date_range)" \
   "scenario table" \

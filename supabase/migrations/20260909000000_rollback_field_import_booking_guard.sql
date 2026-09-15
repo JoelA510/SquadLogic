@@ -760,8 +760,14 @@ COMMENT ON FUNCTION public.admin_delete_field(uuid, uuid, boolean) IS
 -- removed. An org-wide sweep would also take a scenario created empty by some
 -- other path, which is a decision nobody has made.
 --
--- SECURITY INVOKER and no grants: both callers are SECURITY DEFINER, so these
--- run as the definer through them, and nothing outside them may call them.
+-- SECURITY INVOKER and no grants: their one caller is SECURITY DEFINER, so
+-- these run as the definer through it, and nothing outside it may call them.
+-- The explicit REVOKEs matter for the reason 20260907000000 measured:
+-- 20260614000000 grants EXECUTE to `authenticated` by DEFAULT PRIVILEGE, which
+-- a revoke from PUBLIC does not remove, so a new function arrives reachable.
+-- Section 3b of this migration's smoke reads both ACLs back out of the
+-- catalogue, because a security claim the catalogue contradicts is what that
+-- check was written after.
 CREATE OR REPLACE FUNCTION public.field_availability_scenario_ids_on_field(
     p_organization_id uuid,
     p_field_id uuid
@@ -785,7 +791,7 @@ REVOKE ALL ON FUNCTION public.field_availability_scenario_ids_on_field(uuid, uui
 REVOKE ALL ON FUNCTION public.field_availability_scenario_ids_on_field(uuid, uuid) FROM service_role;
 
 COMMENT ON FUNCTION public.field_availability_scenario_ids_on_field(uuid, uuid) IS
-  'The availability scenarios that any profile on this field belongs to, read BEFORE the field is deleted because the cascade removes the membership rows that answer the question. Paired with prune_empty_field_availability_scenarios, which is called after. Internal: EXECUTE revoked from every role, and both callers are SECURITY DEFINER.';
+  'The availability scenarios that any profile on this field belongs to, read BEFORE the field is deleted because the cascade removes the membership rows that answer the question. Paired with prune_empty_field_availability_scenarios, which is called after. Internal: EXECUTE revoked from PUBLIC, anon, authenticated and service_role, so only the owner may call it and admin_delete_field reaches it as SECURITY DEFINER.';
 
 CREATE OR REPLACE FUNCTION public.prune_empty_field_availability_scenarios(
     p_organization_id uuid,
@@ -820,7 +826,7 @@ REVOKE ALL ON FUNCTION public.prune_empty_field_availability_scenarios(uuid, uui
 REVOKE ALL ON FUNCTION public.prune_empty_field_availability_scenarios(uuid, uuid[]) FROM service_role;
 
 COMMENT ON FUNCTION public.prune_empty_field_availability_scenarios(uuid, uuid[]) IS
-  'Removes the named scenarios that have no members left, org-scoped. The contract is rollback_field_availability_import_job''s (20260522153000): narrow, so only scenarios the deleted profiles belonged to are considered and a scenario created empty by some other path is untouched. Internal: EXECUTE revoked from every role, and both callers are SECURITY DEFINER.';
+  'Removes the named scenarios that have no members left, org-scoped. The contract is rollback_field_availability_import_job''s (20260522153000): narrow, so only scenarios the deleted profiles belonged to are considered and a scenario created empty by some other path is untouched. Internal: EXECUTE revoked from PUBLIC, anon, authenticated and service_role, so only the owner may call it and admin_delete_field reaches it as SECURITY DEFINER.';
 
 -- ---------------------------------------------------------------------------
 -- 3. rollback_field_import_job, on the same producer

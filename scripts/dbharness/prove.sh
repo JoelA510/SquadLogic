@@ -1585,6 +1585,16 @@ plant "M5 the prune sweeps every empty scenario in the organisation" "$M5" \
   "       AND NOT EXISTS (" \
   "smoke 20260909000000"
 
+# **A helper left reachable.** 20260614000000 grants EXECUTE to `authenticated`
+# by default privilege, so dropping the explicit revoke does not merely fail to
+# tighten anything -- it leaves the function callable by every authenticated
+# user while its COMMENT says otherwise. The same claim 20260907000000's
+# section 5c was written after.
+plant "M5 a scenario helper is left callable by authenticated" "$M5" \
+  "REVOKE ALL ON FUNCTION public.prune_empty_field_availability_scenarios(uuid, uuid[]) FROM authenticated;" \
+  "-- revoke removed" \
+  "smoke 20260909000000"
+
 # ---------------------------------------------------------------------------
 # LIVE-3's revert: four warnings, two counts, three verdicts
 # ---------------------------------------------------------------------------

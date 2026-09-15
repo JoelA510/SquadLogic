@@ -1437,18 +1437,19 @@ Two further divergences came out of the controls rather than out of reading:
 - Harness: **HARNESS OK** — 108 migrations, 4 smokes, 42 scenarios, 4 reverts,
   emergency rollback. The new smoke is behavioural: it calls the function on
   three staged rows, including a cross-org decoy, and replays the refused one.
-- `prove`: **54 / 0 / 54**, census **10** health claims all proved (was 41/0/41
-  and 7 claims). `prove:mock`: **40 / 0 / 40** (was 30/0/30). Thirteen of the new
-  plants are LIVE-2's; the three aimed at the revert's verdict name a distinct
-  red branch each — `GONE`, `AMBIGUOUS:2`, `STILL-GUARDED` — because R3's lesson
-  was that a claim with one reachable branch is a claim two-thirds untested.
+- `prove`: **63 / 0 / 63**, census **12** health claims all proved (was 41/0/41
+  and 7 claims). `prove:mock`: **41 / 0 / 41** (was 30/0/30). Twenty-two of the
+  new plants are LIVE-2's; the three aimed at the revert's verdict name a
+  distinct red branch each — `GONE`, `AMBIGUOUS:2`, `STILL-GUARDED` — because
+  R3's lesson was that a claim with one reachable branch is a claim two-thirds
+  untested.
 - pgTAP, run against **real pgTAP 1.3.2** on a locally built PostgreSQL rather
   than read: **21/21** and **15/15**. Two defects in the new file surfaced only
   by executing it — a direct `INSERT` into `public.fields` that RLS refuses for
   the `authenticated` role, and an assertion that added an RPC result to a table
   count in one expression, where SQL does not promise which subquery runs first.
-- Tests **2809 → 2819** (181 files), counted by running the suite. Main entry
-  134.52 → **135.05 KB gz**, measured against `origin/main` built in a worktree.
+- Tests **2809 → 2823** (181 files), counted by running the suite. Main entry
+  134.52 → **135.04 KB gz**, measured against `origin/main` built in a worktree.
 - `/code-review` at high, **twice**: eight findings before opening, then four
   more on the fixes themselves. All twelve real, all fixed in this PR. Three
   were the one-arm-not-its-twin shape again — the direct apply path never
@@ -1459,6 +1460,49 @@ Two further divergences came out of the controls rather than out of reading:
   had introduced.
 - CI green on the merged head, including `Run pgTAP against local Supabase` —
   the job that runs the new suite in the environment it was written for.
+
+### Review round 1 on the PR, and the three findings that mattered
+
+Fifteen findings, all real. The three that mattered were all the same shape as
+the defect the PR exists to fix, which is worth recording as a pattern rather
+than as three incidents.
+
+- **The PR committed its own subject defect.** It rewrote `field_closures`'
+  comment to say collapsing the union is still blocked, and left the FROZEN
+  comment on `field_blackout_windows` itself naming the import resolution as
+  the sole blocker — a condition this migration makes read as SATISFIED. The
+  first place anyone looks before touching a frozen table was telling them to
+  go ahead. M2's own check could not see it: `NOT LIKE 'FROZEN as of …%'` is a
+  prefix match. **One arm corrected and not its twin, in the PR about that.**
+- **The revert named one cost of three.** Restoring the pre-fix body verbatim
+  also reinstates the outright `warning_summary` assignment and drops the
+  `validation_errors` clearing. What made the single warning read as complete
+  was the migration header's own "Behaviour is otherwise identical to
+  20260602000000" — false for exactly those two reasons. A header sentence
+  nobody re-checked after the file grew.
+- **The operator-facing half of the ruling reached no operator.** The
+  disposition argued for was "refuse the row and report it with a reason", and
+  the reason reached three places in the database and no screen: nothing
+  rendered `importLogs`. Recording it under "still open" was honest and was
+  still the wrong call — a refusal nobody can read is the same silence one
+  level up. `ImportPanel` renders it now, on the screen `completeImport` has
+  always told operators to check.
+
+Two more were checks that could not fail: the migration's PRE-EXISTING warning
+branch had **never executed** (the harness builds from scratch, so the table is
+always empty when it applies, and `apply_all` hides migration output), and the
+new closure assertion was a zero-count with no positive anchor. Both now have a
+stage, a seed and plants.
+
+The sweep also found the defect this PR had just named, in two more files:
+`20260611000400_smoke.sql` and `tests/20260502000000_smoke.sql` both RAISE with
+no `ON_ERROR_STOP`. Grepping every smoke for the shape turned up two I did not
+know about; the fix I had already written covered one.
+
+**A figure in one of this round's own commit messages was wrong** — it said the
+census went 11 → 13 when it went 11 → 12. Recorded here rather than quietly
+corrected, because the round included a finding about exactly that: a wrong
+number offered as measured evidence is worth less than no number.
 
 ### Two process notes, both about the harness rather than the fix
 

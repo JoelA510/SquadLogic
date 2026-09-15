@@ -164,8 +164,10 @@
 -- ## What this does NOT do
 --
 -- Collapsing `field_blackouts` and `field_blackout_windows` is not in scope.
--- Both producers of field-less profiles are closed by this migration, but the
--- column is still NULLABLE and may hold legacy rows, and the shipped read path
+-- Both producers of field-less profiles are now closed -- the IMPORT by
+-- 20260908000000, the DELETE by this migration -- but the column is still
+-- NULLABLE and may hold legacy rows from before either, and the shipped read
+-- path
 -- is still a nested PostgREST embed under profiles
 -- (`frontend/src/hooks/useFields.js`) that a venue/surface-keyed table cannot
 -- serve -- the SECOND blocker 20260906000100's header named, untouched here.

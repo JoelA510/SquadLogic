@@ -100,10 +100,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": 30,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -122,10 +119,7 @@
         "ok": true,
         "active": false,
         "effectiveTo": -1,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -144,10 +138,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": 0,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -166,10 +157,7 @@
         "ok": true,
         "active": false,
         "effectiveTo": 30,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -188,10 +176,7 @@
         "ok": true,
         "active": false,
         "effectiveTo": -1,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -210,10 +195,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": 60,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -229,10 +211,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -248,10 +227,7 @@
         "ok": true,
         "active": false,
         "effectiveTo": null,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -267,10 +243,7 @@
         "ok": true,
         "active": false,
         "effectiveTo": null,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -286,10 +259,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -327,10 +297,7 @@
         "deleted": true,
         "affectedCount": 0,
         "exists": false,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -341,9 +308,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "game_slot"
-      ],
+      "bookings": ["game_slot"],
       "args": {
         "confirm": false
       },
@@ -352,13 +317,9 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 1,
-        "dispositions": [
-          "deleted"
-        ],
+        "dispositions": ["deleted"],
         "exists": true,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -369,9 +330,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "game_assignment"
-      ],
+      "bookings": ["game_assignment"],
       "args": {
         "confirm": false
       },
@@ -380,13 +339,9 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 1,
-        "dispositions": [
-          "unassigned"
-        ],
+        "dispositions": ["unassigned"],
         "exists": true,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -397,9 +352,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "practice_slot"
-      ],
+      "bookings": ["practice_slot"],
       "args": {
         "confirm": false
       },
@@ -408,13 +361,9 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 1,
-        "dispositions": [
-          "deleted"
-        ],
+        "dispositions": ["deleted"],
         "exists": true,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -425,9 +374,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "practice_assignment"
-      ],
+      "bookings": ["practice_assignment"],
       "args": {
         "confirm": false
       },
@@ -436,13 +383,9 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 1,
-        "dispositions": [
-          "unassigned"
-        ],
+        "dispositions": ["unassigned"],
         "exists": true,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -453,12 +396,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "game_slot",
-        "game_assignment",
-        "practice_slot",
-        "practice_assignment"
-      ],
+      "bookings": ["game_slot", "game_assignment", "practice_slot", "practice_assignment"],
       "args": {
         "confirm": true
       },
@@ -466,15 +404,9 @@
         "ok": true,
         "deleted": true,
         "affectedCount": 4,
-        "dispositions": [
-          "deleted",
-          "unassigned"
-        ],
+        "dispositions": ["deleted", "unassigned"],
         "exists": false,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -485,9 +417,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "scheduled_game"
-      ],
+      "bookings": ["scheduled_game"],
       "args": {
         "confirm": false
       },
@@ -496,13 +426,9 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 3,
-        "dispositions": [
-          "deleted"
-        ],
+        "dispositions": ["deleted"],
         "exists": true,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -513,9 +439,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "scheduled_practice"
-      ],
+      "bookings": ["scheduled_practice"],
       "args": {
         "confirm": false
       },
@@ -524,13 +448,9 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 2,
-        "dispositions": [
-          "deleted"
-        ],
+        "dispositions": ["deleted"],
         "exists": true,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -541,11 +461,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "scheduled_game",
-        "game_assignment",
-        "practice_assignment"
-      ],
+      "bookings": ["scheduled_game", "game_assignment", "practice_assignment"],
       "args": {
         "confirm": false
       },
@@ -554,14 +470,9 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 5,
-        "dispositions": [
-          "deleted",
-          "unassigned"
-        ],
+        "dispositions": ["deleted", "unassigned"],
         "exists": true,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -572,9 +483,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "game_slot"
-      ],
+      "bookings": ["game_slot"],
       "args": {
         "effectiveTo": 10,
         "confirm": null
@@ -583,9 +492,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -596,9 +503,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "game_slot"
-      ],
+      "bookings": ["game_slot"],
       "args": {
         "confirm": null
       },
@@ -607,13 +512,9 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 1,
-        "dispositions": [
-          "deleted"
-        ],
+        "dispositions": ["deleted"],
         "exists": true,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -642,9 +543,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "availability_profile"
-      ],
+      "bookings": ["availability_profile"],
       "args": {
         "confirm": false
       },
@@ -653,13 +552,9 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 1,
-        "dispositions": [
-          "deleted"
-        ],
+        "dispositions": ["deleted"],
         "exists": true,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -670,9 +565,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "availability_profile"
-      ],
+      "bookings": ["availability_profile"],
       "args": {
         "confirm": true
       },
@@ -680,14 +573,9 @@
         "ok": true,
         "deleted": true,
         "affectedCount": 1,
-        "dispositions": [
-          "deleted"
-        ],
+        "dispositions": ["deleted"],
         "exists": false,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -698,9 +586,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "game_slot"
-      ],
+      "bookings": ["game_slot"],
       "bookingOffset": 30,
       "args": {
         "effectiveTo": 30,
@@ -710,10 +596,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": 30,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -724,9 +607,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "game_slot"
-      ],
+      "bookings": ["game_slot"],
       "bookingOffset": 31,
       "args": {
         "effectiveTo": 30,
@@ -736,9 +617,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -749,9 +628,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "game_assignment"
-      ],
+      "bookings": ["game_assignment"],
       "bookingOffset": 30,
       "args": {
         "effectiveTo": 30,
@@ -761,10 +638,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": 30,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -775,9 +649,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "game_assignment"
-      ],
+      "bookings": ["game_assignment"],
       "bookingOffset": 31,
       "args": {
         "effectiveTo": 30,
@@ -787,9 +659,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -800,9 +670,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "practice_slot"
-      ],
+      "bookings": ["practice_slot"],
       "bookingOffset": 30,
       "args": {
         "effectiveTo": 30,
@@ -812,10 +680,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": 30,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -826,9 +691,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "practice_slot"
-      ],
+      "bookings": ["practice_slot"],
       "bookingOffset": 31,
       "args": {
         "effectiveTo": 30,
@@ -838,9 +701,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -851,9 +712,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "practice_assignment"
-      ],
+      "bookings": ["practice_assignment"],
       "bookingOffset": 30,
       "args": {
         "effectiveTo": 30,
@@ -863,10 +722,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": 30,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -877,9 +733,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "practice_assignment"
-      ],
+      "bookings": ["practice_assignment"],
       "bookingOffset": 31,
       "args": {
         "effectiveTo": 30,
@@ -889,9 +743,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -902,9 +754,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "scheduled_game"
-      ],
+      "bookings": ["scheduled_game"],
       "bookingOffset": 30,
       "args": {
         "effectiveTo": 30,
@@ -914,10 +764,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": 30,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -928,9 +775,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "scheduled_game"
-      ],
+      "bookings": ["scheduled_game"],
       "bookingOffset": 31,
       "args": {
         "effectiveTo": 30,
@@ -940,9 +785,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     },
     {
@@ -953,9 +796,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "availability_profile"
-      ],
+      "bookings": ["availability_profile"],
       "bookingOffset": 30,
       "args": {
         "effectiveTo": 30,
@@ -965,10 +806,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": 30,
-        "auditPhases": [
-          "after",
-          "before"
-        ]
+        "auditPhases": ["after", "before"]
       }
     },
     {
@@ -979,9 +817,7 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": [
-        "availability_profile"
-      ],
+      "bookings": ["availability_profile"],
       "bookingOffset": 31,
       "args": {
         "effectiveTo": 30,
@@ -991,9 +827,7 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": [
-          "refused"
-        ]
+        "auditPhases": ["refused"]
       }
     }
   ],

@@ -16,8 +16,12 @@
 -- loudly here instead of being reported as done.
 --
 -- `public.field_bookings` and `public.field_bookings_digest` are deliberately
--- LEFT IN PLACE: they arrived with 20260907000000 and `admin_retire_field`
--- (20260906000000, which this script is not about) calls the first of them.
+-- LEFT IN PLACE: they arrived with 20260907000000 and TWO functions this
+-- script is not about still call them -- `admin_retire_field`
+-- (20260906000000) and, since 20260909000000, `rollback_field_import_job`
+-- (20260503070000). Dropping either helper here would leave both raising
+-- undefined_function. `rollback_field_import_job` calls the producer only;
+-- `admin_retire_field` calls both.
 -- Dropping them here would break a function this rollback does not own. Roll
 -- 20260907000000 back with `docs/sql/20260907000000_revert.sql`, which does.
 

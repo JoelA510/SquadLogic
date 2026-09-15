@@ -19,7 +19,13 @@
 --   3. `rollback_field_import_job` goes back to its own two-table guard, so
 --      the import rollback again deletes a field that carries a
 --      free-standing game or practice assignment, or an availability
---      profile, without refusing -- LIVE-3 itself.
+--      profile, without refusing -- LIVE-3 itself. Restoring that body
+--      VERBATIM also restores two things 20260909000000 fixed beside it: the
+--      `game_slots` arm goes back to reading `game_assignments.game_slot_id`
+--      and not `slot_id`, so an assignment carrying only the second is
+--      destroyed with nothing refusing; and the `locations` arm loses the
+--      written-down reason it excludes `field_blackouts`. A revert that names
+--      the headline and not the riders is the shape LIVE-2's round 1 found.
 --   4. Two silent switch arms come back: an `import_application_record`
 --      naming a `target_table` neither switch handles is again stamped
 --      `rolled_back_at` with `{"deleted": true}` (insert) or counted in
@@ -60,7 +66,7 @@ BEGIN
 
   RAISE WARNING 'EXPOSING % availability profile(s) currently attached to a field, carrying % blackout window(s): once field_id is ON DELETE SET NULL again, deleting their field strands them instead of destroying them, and % profile(s) in this database are already in that state', v_attached, v_windows, v_already;
   RAISE WARNING 'RESTORING public.field_bookings to five kinds: admin_delete_field and admin_retire_field stop reporting availability profiles, so a field carrying only a profile deletes without refusing and affected_count drops by the number of profiles on the ground';
-  RAISE WARNING 'RESTORING rollback_field_import_job to its two-table guard: an import rollback again deletes a field carrying a free-standing game or practice assignment, or an availability profile, without refusing -- which is LIVE-3';
+  RAISE WARNING 'RESTORING rollback_field_import_job to its two-table guard: an import rollback again deletes a field carrying a free-standing game or practice assignment, or an availability profile, without refusing -- which is LIVE-3. Restoring the body verbatim also takes back the game_slots arm reading game_assignments.slot_id, so an assignment carrying only that column is destroyed with nothing refusing';
 
   -- **The fourth cost, and the one a count can reach.** Any job already
   -- rolled back under 20260909000000 carries `blocked` in its warning_summary

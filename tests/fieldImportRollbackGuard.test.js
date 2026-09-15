@@ -13,10 +13,18 @@
  * that agreed with a broken result, which is the shape LIVE-2 found in the
  * availability import. A parity mechanism assumes both arms exist.
  *
- * Every booking seeded here is one the OLD guard could not see: a
- * FREE-STANDING assignment (a `field_id` and no slot) and an availability
- * profile. Seeding a slot instead would pass against the pre-fix body too and
- * prove nothing.
+ * **Every booking a REFUSAL case seeds is one the old FIELDS guard could not
+ * see**: a free-standing assignment (a `field_id` and no slot) and an
+ * availability profile. Seeding a slot instead would pass against the pre-fix
+ * body too and prove nothing. The later cases are about other arms -- the
+ * `game_slots` arm's missing `slot_id`, the tombstone, the `updated` restore --
+ * and each says which defect it is aimed at.
+ *
+ * **Not covered here, and recorded rather than implied:** the mock arm has no
+ * `is_org_admin` gate where the SQL raises 42501. That is pre-existing and
+ * untouched -- `tests/fieldImportApplyRollback.test.js` calls this RPC with no
+ * mock session at all -- so the org gate is pinned on the SQL side only, by
+ * `supabase/tests/field_import_rollback_booking_guard.sql`.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';

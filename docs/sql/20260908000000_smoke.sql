@@ -94,14 +94,25 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 2. field_id stays NULLABLE, and stays ON DELETE SET NULL
+-- 2. field_id stays NULLABLE, and its ON DELETE action is pinned
 -- ---------------------------------------------------------------------------
 --
 -- **Both halves are load-bearing and they pull in opposite directions.** The
 -- obvious "fix" for this defect is `SET NOT NULL` on the column, and it is
--- wrong: the FK is ON DELETE SET NULL, so a field delete would then fail or
--- cascade instead of unlinking. Pinning the pair here means the next person to
--- reach for NOT NULL is told why, by a failing check rather than by a comment.
+-- wrong: legacy rows predating 20260908000000 and 20260909000000 may already
+-- hold NULL, so the constraint would fail to validate on a real database.
+-- Pinning the pair here means the next person to reach for NOT NULL is told
+-- why, by a failing check rather than by a comment.
+--
+-- **The ACTION half changed with 20260909000000, and this check is why the
+-- change could not be quiet.** It read `SET NULL` and argued that a NOT NULL
+-- column could not then be unlinked. LIVE-3 made the FK ON DELETE CASCADE --
+-- matching `field_blackouts.field_id`, its sibling on the same ground -- so a
+-- confirmed delete destroys the profile instead of stranding it, and
+-- `admin_delete_field` stopped being the second producer of field-less
+-- profiles. This smoke runs on a database built to HEAD, so it went red on
+-- that change rather than silently describing a schema the database no longer
+-- had. It now pins the new action, with the reason it holds.
 DO $$
 DECLARE v_notnull boolean; v_action char; v_seen int;
 BEGIN
@@ -113,7 +124,7 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'field_availability_profiles.field_id does not exist'; END IF;
   IF v_notnull THEN
-    RAISE EXCEPTION 'field_availability_profiles.field_id is NOT NULL; the ON DELETE SET NULL on fields cannot then unlink it'; END IF;
+    RAISE EXCEPTION 'field_availability_profiles.field_id is NOT NULL; legacy rows predating 20260908000000 may hold NULL and the constraint cannot validate'; END IF;
 
   SELECT count(*), min(con.confdeltype) INTO v_seen, v_action
     FROM pg_constraint con
@@ -124,9 +135,9 @@ BEGIN
      AND con.contype='f' AND rf.relname='fields';
   IF v_seen <> 1 THEN
     RAISE EXCEPTION 'expected exactly one field_availability_profiles -> fields foreign key, examined % -- the check found nothing to check', v_seen; END IF;
-  IF v_action <> 'n' THEN
-    RAISE EXCEPTION 'field_availability_profiles.field_id is not ON DELETE SET NULL (confdeltype=%)', v_action; END IF;
-  RAISE NOTICE 'field_id is nullable and ON DELETE SET NULL, so NULL still means "the field was deleted" and nothing else';
+  IF v_action <> 'c' THEN
+    RAISE EXCEPTION 'field_availability_profiles.field_id is not ON DELETE CASCADE (confdeltype=%); a field delete is stranding profiles again', v_action; END IF;
+  RAISE NOTICE 'field_id is nullable (for legacy rows) and ON DELETE CASCADE, so no live write path produces a field-less profile';
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -351,13 +362,26 @@ END $$;
 -- collapses once the import resolves reliably -- the view `field_closures` and
 -- the frozen table `field_blackout_windows` itself, which is the first place
 -- anyone looks before touching it. After this migration that condition reads
--- as satisfied while `admin_delete_field` still makes collapsing unsafe.
+-- as satisfied while a second producer still makes collapsing unsafe -- which
+-- was `admin_delete_field` until 20260909000000 closed it too.
 --
 -- **Both objects are checked, and each check has three parts**, because
 -- `LIKE '%STILL BLOCKED%'` alone is satisfied by a comment that says it and
 -- then goes on to say the obstacle is gone. So: the phrase must be present,
--- the remaining producer must be NAMED, and the superseded condition must be
--- ABSENT -- the last is what actually catches a revert to the old wording.
+-- THIS migration must be named as what closed the import half, and every
+-- superseded condition must be ABSENT -- the last is what actually catches a
+-- revert to an older wording.
+--
+-- **The middle part used to demand the word `admin_delete_field`**, as the
+-- producer that remained. 20260909000000 closed that producer too, so
+-- demanding its name would now force both comments to keep describing a defect
+-- the database no longer has -- and this smoke runs against HEAD, so it went
+-- red rather than going quietly stale. What this file is entitled to assert is
+-- its OWN half: that both comments still say the collapse is blocked, and that
+-- both still credit 20260908000000 with closing the import half. Whether the
+-- DELETE half is correctly described belongs to
+-- `docs/sql/20260909000000_smoke.sql` section 7, which asserts the mirror
+-- image: that neither comment still names a closed producer as blocking.
 DO $$
 DECLARE r record; v_seen int := 0;
 BEGIN
@@ -373,17 +397,18 @@ BEGIN
       RAISE EXCEPTION '% has no comment at all', r.obj; END IF;
     IF r.c NOT LIKE '%STILL BLOCKED%' THEN
       RAISE EXCEPTION '% no longer records that collapsing the union is blocked', r.obj; END IF;
-    IF r.c NOT LIKE '%admin_delete_field%' THEN
-      RAISE EXCEPTION '% does not name admin_delete_field as the producer that remains', r.obj; END IF;
-    -- The superseded claim, in either object's original phrasing. A comment
-    -- that carries this again is telling a reader the precondition is met.
+    IF r.c NOT LIKE '%20260908000000%' THEN
+      RAISE EXCEPTION '% no longer credits 20260908000000 with closing the import half', r.obj; END IF;
+    -- The superseded claims, in each object's original phrasing. A comment
+    -- that carries one of these again is telling a reader a precondition is
+    -- met when it is not.
     IF r.c LIKE '%resolves a profile to a field reliably%'
        OR r.c LIKE '%cannot be collapsed until finalize_field_availability_import_job stops%' THEN
       RAISE EXCEPTION '% carries the superseded claim that the import resolution was the only blocker: %', r.obj, r.c; END IF;
   END LOOP;
   IF v_seen <> 2 THEN
     RAISE EXCEPTION 'expected both comments, examined % -- the check found nothing to check', v_seen; END IF;
-  RAISE NOTICE 'both field_closures and field_blackout_windows record that the import half is closed and the delete half is not';
+  RAISE NOTICE 'both field_closures and field_blackout_windows record that the import half is closed and that collapsing the union is still blocked';
 END $$;
 
 -- ---------------------------------------------------------------------------

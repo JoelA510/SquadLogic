@@ -14,6 +14,9 @@ R3="$REPO/docs/sql/20260907000000_revert.sql"
 EMERG="$REPO/docs/sql/reverts/20260504060000_admin_facility_mutation_rpcs.sql"
 M4="$REPO/supabase/migrations/20260908000000_field_availability_profile_field_resolution.sql"
 R4="$REPO/docs/sql/20260908000000_revert.sql"
+M5="$REPO/supabase/migrations/20260909000000_rollback_field_import_booking_guard.sql"
+R5="$REPO/docs/sql/20260909000000_revert.sql"
+S5="$REPO/docs/sql/20260909000000_smoke.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # What each plant scored, by label, for the census at the bottom of this file.
 # The census asserts that every health claim run.sh prints has a plant that
@@ -1365,6 +1368,245 @@ plant "R4 revert restores the finalizer under a second signature" "$R4" \
   "revert 20260908000000: finalize_field_availability_import_job after the revert reads AMBIGUOUS:2"
 
 # ---------------------------------------------------------------------------
+# LIVE-3: the third deleter, and the profile that outlived its ground
+# ---------------------------------------------------------------------------
+
+# **The defect itself.** Put the two-table union back in front of the field
+# delete. A field held only by a free-standing assignment or an availability
+# profile then rolls back unrefused, which is LIVE-3 exactly.
+plant "M5 the rollback goes back to its two-table guard" "$M5" \
+  "                SELECT count(*) INTO v_affected_count
+                  FROM public.field_bookings(
+                         v_job.organization_id, v_record.target_id, NULL);" \
+  "                SELECT count(*) INTO v_affected_count
+                  FROM public.practice_slots ps
+                 WHERE ps.organization_id = v_job.organization_id
+                   AND ps.field_id = v_record.target_id;" \
+  "smoke 20260909000000"
+
+# **The sixth arm, removed.** `admin_delete_field` then reports nothing for a
+# field carrying only a profile and deletes it, which is the half of LIVE-3
+# LIVE-2 measured. Section 6 of the new smoke is what must see this.
+plant "M5 the producer loses its availability_profile arm" "$M5" \
+  "    SELECT 'availability_profile'::text, fap.id," \
+  "    SELECT 'availability_profile'::text, fap.id
+    FROM public.field_availability_profiles fap WHERE false;
+    SELECT 'never'::text, fap.id," \
+  "smoke 20260907000000"
+
+# **The FK left SET NULL.** Nothing about the reporting changes -- the arm
+# still names the profile -- but a confirmed delete strands it again, and the
+# disposition literal `cascades = true` becomes a lie the catalogue contradicts.
+plant "M5 the profile FK stays SET NULL" "$M5" \
+  "  FOREIGN KEY (field_id) REFERENCES public.fields (id) ON DELETE CASCADE;" \
+  "  FOREIGN KEY (field_id) REFERENCES public.fields (id) ON DELETE SET NULL;" \
+  "smoke 20260907000000"
+
+# **The silent arm, restored.** An unhandled `target_table` is stamped as
+# rolled back having deleted nothing -- the class 8.3 recorded three instances
+# of. Section 5c of the new smoke calls the RPC with exactly such a record.
+plant "M5 an unhandled target_table falls through silently again" "$M5" \
+  "            ELSE
+                -- **The arm that used to be missing.**" \
+  "            ELSIF false THEN
+                -- **The arm that used to be missing.**" \
+  "smoke 20260909000000"
+
+# **The blocked list, reduced to a counter.** The refusal still fires and the
+# count is still right; what the operator loses is which record and why.
+plant "M5 a blocked record stops saying which one and why" "$M5" \
+  "                    v_blocked := v_blocked || jsonb_build_object(
+                        'target_table', v_record.target_table,
+                        'target_id', v_record.target_id,
+                        'reason', 'bookings_exist',
+                        'affected_count', v_affected_count);" \
+  "                    NULL;" \
+  "smoke 20260909000000"
+
+# **The subunit argument, falsified at its root.** Give `game_slots` a
+# `field_subunit_id` and the subunit arm's single `practice_slots` check stops
+# being a complete cut of the closure. Nothing else in the harness looks at
+# this, which is the point: section 2 exists because the argument is about the
+# graph rather than about the code.
+plant "M5 a second edge joins the subunit closure unnoticed" "$M5" \
+  "BEGIN
+
+-- ---------------------------------------------------------------------------
+-- 1. field_availability_profiles.field_id" \
+  "BEGIN
+
+ALTER TABLE public.game_slots
+  ADD COLUMN field_subunit_id uuid REFERENCES public.field_subunits(id) ON DELETE CASCADE;
+
+-- ---------------------------------------------------------------------------
+-- 1. field_availability_profiles.field_id" \
+  "smoke 20260909000000"
+
+# **A fifth dependent on the profile.** It would be destroyed by a confirmed
+# delete with nothing in `affected` accounting for it -- the reason the four
+# parts are excluded from the booking list rather than ignored.
+plant "M5 a fifth table hangs off the profile unnoticed" "$M5" \
+  "COMMENT ON COLUMN public.field_availability_profiles.field_id IS" \
+  "CREATE TABLE public.field_profile_annotations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  profile_id uuid NOT NULL REFERENCES public.field_availability_profiles(id) ON DELETE CASCADE
+);
+COMMENT ON COLUMN public.field_availability_profiles.field_id IS" \
+  "smoke 20260909000000"
+
+# **The derived deleter set, against a fourth deleter.** A new function that
+# removes a field without consulting the producer is precisely how LIVE-3
+# arrived -- the third deleter was on nobody's list.
+plant "M5 a fourth function deletes a field without the producer" "$M5" \
+  "GRANT EXECUTE ON FUNCTION public.rollback_field_import_job(uuid) TO authenticated;" \
+  "GRANT EXECUTE ON FUNCTION public.rollback_field_import_job(uuid) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.admin_purge_field(p_field_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS \$purge\$
+BEGIN
+  DELETE FROM public.fields WHERE id = p_field_id;
+END;
+\$purge\$;" \
+  "smoke 20260909000000"
+
+# **The comment that goes stale.** Leave the view telling the next reader that
+# the profile is excluded from the delete guard, which this migration makes
+# false. Section 7 of the new smoke is the only thing that can see it.
+plant "M5 the collapse-blocker comment is left stale" "$S5" \
+  "  IF v_view LIKE '%excluded from admin_delete_field%' THEN" \
+  "  IF v_view LIKE '%a phrase that appears in no comment anywhere%' THEN" \
+  "smoke 20260909000000" \
+  "smoke 20260908000000"
+
+# **The new smoke's own anchors.** A section whose parse silently matches
+# nothing passes every NOT LIKE below it -- the meta-assertion failure this
+# project has found in its own assertion files twice.
+plant "M5-SMOKE the fields-arm parse is allowed to match nothing" "$S5" \
+  "  IF length(v_fields_arm) < 200 THEN" \
+  "  IF length(COALESCE(v_fields_arm, '')) < 0 THEN" \
+  "smoke 20260909000000"
+
+# ---------------------------------------------------------------------------
+# LIVE-3's revert: four warnings, two counts, three verdicts
+# ---------------------------------------------------------------------------
+
+# It counts the profiles a future delete will strand. Counting the ALREADY
+# stranded ones instead reports the wrong set and reads as reassuring.
+plant "R5 revert counts the wrong profiles" "$R5" \
+  "  SELECT count(*) INTO v_attached
+    FROM public.field_availability_profiles WHERE field_id IS NOT NULL;" \
+  "  SELECT count(*) INTO v_attached
+    FROM public.field_availability_profiles WHERE field_id IS NULL;" \
+  "revert 20260909000000: planted an attached profile with a window and an already-orphaned one, and the revert did not count all three"
+
+# It names the sixth booking kind it is removing. A revert that restores a
+# narrower producer without saying so is the same silence one level up.
+plant "R5 revert removes the sixth kind silently" "$R5" \
+  "  RAISE WARNING 'RESTORING public.field_bookings to five kinds:" \
+  "  RAISE NOTICE 'restoring the previous producer:" \
+  "revert 20260909000000: restored the five-kind producer without naming what that costs"
+
+plant "R5 revert reinstates the two-table rollback guard silently" "$R5" \
+  "  RAISE WARNING 'RESTORING rollback_field_import_job to its two-table guard:" \
+  "  RAISE NOTICE 'restoring the previous rollback body:" \
+  "revert 20260909000000: restored the two-table rollback guard without naming what that costs"
+
+# **A revert that names three costs of four.** The fourth is the pair of silent
+# switch arms and the blocked list, and its count is what run.sh's seeded job
+# makes non-empty.
+plant "R5 revert does not name the silent arms it restores" "$R5" \
+  "  RAISE WARNING 'ALSO REVERTING two silent switch arms and the blocked list:" \
+  "  RAISE NOTICE 'also reverting some other things:" \
+  "revert 20260909000000: planted a job carrying field_rollback.blocked and the revert did not name the silent arms it restores, or did not count it"
+
+plant "R5 revert counts no stranded blocked lists" "$R5" \
+  "  SELECT count(*) INTO v_blocked_jobs
+    FROM public.import_jobs
+   WHERE warning_summary -> 'field_rollback' ? 'blocked';" \
+  "  v_blocked_jobs := 0;" \
+  "revert 20260909000000: planted a job carrying field_rollback.blocked and the revert did not name the silent arms it restores, or did not count it"
+
+# The producer verdict, on each branch it can go red by. STILL-SIX-KINDS: a
+# revert that restores everything else and leaves the sixth arm standing.
+plant "R5 revert leaves the sixth arm in the producer" "$R5" \
+  "    FROM public.practice_assignments pa
+    CROSS JOIN LATERAL (" \
+  "    FROM public.practice_assignments pa
+    CROSS JOIN LATERAL (
+        SELECT NULL::date WHERE 'availability_profile' = ''
+    ) AS unused_marker," \
+  "revert 20260909000000: field_bookings after the revert reads STILL-SIX-KINDS"
+
+# GONE: a revert that removes the producer instead of restoring it. Both
+# callers then raise undefined_function on the next delete.
+plant "R5 revert drops the producer instead of restoring it" "$R5" \
+  "COMMENT ON FUNCTION public.field_bookings(uuid, uuid, date) IS" \
+  "DROP FUNCTION public.field_bookings(uuid, uuid, date) CASCADE;
+COMMENT ON SCHEMA public IS" \
+  "revert 20260909000000: field_bookings after the revert reads GONE"
+
+# AMBIGUOUS: the restored producer arrives under a changed signature, so the
+# six-kind version is left standing beside it and every call is 42725.
+plant "R5 revert restores the producer under a second signature" "$R5" \
+  "    p_after date DEFAULT NULL
+)
+RETURNS TABLE (" \
+  "    p_after date DEFAULT NULL,
+    p_unused integer DEFAULT 0
+)
+RETURNS TABLE (" \
+  "revert 20260909000000: field_bookings after the revert reads AMBIGUOUS:2"
+
+# The rollback verdict. STILL-CALLS-PRODUCER: a revert that restores the two
+# smaller things and leaves the rollback on the producer it also narrows.
+plant "R5 revert leaves the rollback on the producer" "$R5" \
+  "            ELSIF v_record.target_table = 'fields' THEN
+                IF EXISTS (
+                    SELECT 1 FROM public.practice_slots ps" \
+  "            ELSIF v_record.target_table = 'fields' THEN
+                -- public.field_bookings
+                IF EXISTS (
+                    SELECT 1 FROM public.practice_slots ps" \
+  "revert 20260909000000: rollback_field_import_job after the revert reads STILL-CALLS-PRODUCER"
+
+plant "R5 revert drops the rollback instead of restoring it" "$R5" \
+  "GRANT EXECUTE ON FUNCTION public.rollback_field_import_job(uuid) TO authenticated;" \
+  "DROP FUNCTION public.rollback_field_import_job(uuid);" \
+  "revert 20260909000000: rollback_field_import_job after the revert reads GONE"
+
+plant "R5 revert restores the rollback under a second signature" "$R5" \
+  "CREATE OR REPLACE FUNCTION public.rollback_field_import_job(p_import_job_id uuid)
+RETURNS jsonb" \
+  "CREATE OR REPLACE FUNCTION public.rollback_field_import_job(p_import_job_id uuid, p_unused integer DEFAULT 0)
+RETURNS jsonb" \
+  "revert 20260909000000: rollback_field_import_job after the revert reads AMBIGUOUS:2"
+
+# **The constraint the revert exists to put back.** A revert that restores both
+# bodies and leaves the FK CASCADE is a half-revert whose warnings are all
+# true and whose schema does not match them.
+plant "R5 revert leaves the FK cascading" "$R5" \
+  "  FOREIGN KEY (field_id) REFERENCES public.fields (id) ON DELETE SET NULL;" \
+  "  FOREIGN KEY (field_id) REFERENCES public.fields (id) ON DELETE CASCADE;" \
+  "revert 20260909000000: field_availability_profiles.field_id reads ON DELETE 'c' after the revert, wanted n (SET NULL)"
+
+# **The forward migration's own LEAVING report.** run.sh plants a field-less
+# profile and re-applies the migration, because a from-scratch build never
+# reaches that branch -- the unreached-warning defect LIVE-2's round 1 found.
+plant "M5 the LEAVING report never fires" "$M5" \
+  "  IF v_orphans > 0 THEN" \
+  "  IF false THEN" \
+  "20260909000000: re-applied onto a seeded database and the LEAVING warning did not name the orphan it found"
+
+plant "M5 the LEAVING report counts the wrong set" "$M5" \
+  "  SELECT count(*) INTO v_orphans
+    FROM public.field_availability_profiles p
+   WHERE p.field_id IS NULL;" \
+  "  SELECT count(*) INTO v_orphans
+    FROM public.field_availability_profiles p
+   WHERE p.field_id IS NOT NULL;" \
+  "20260909000000: re-applied onto a seeded database and the LEAVING warning did not name the orphan it found"
+
+# ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
 #
@@ -1398,6 +1640,14 @@ declare -A CLAIM_PROVER=(
   ["(checked) applying the migration onto a database that already holds a field-less profile warns and counts it"]="M4 the apply-time orphan report never fires|M4 the apply-time report counts the wrong set"
   ["(checked) the revert named the two bundled fixes it also undoes, and counted the rows one of them strands"]="R4 revert does not name the two bundled fixes it also undoes|R4 revert counts no stranded refusals"
   ["(checked) exactly one public.finalize_field_availability_import_job survives the revert, and its body no longer carries the resolution guard"]="R4 revert drops the finalizer instead of restoring it|R4 revert leaves the guard in place|R4 revert restores the finalizer under a second signature"
+  ["(checked) applying the migration onto a database that already holds a field-less profile counts what it leaves behind"]="M5 the LEAVING report never fires|M5 the LEAVING report counts the wrong set"
+  ["(checked) the revert counted the attached profile and its window it was about to expose, and the orphan already there"]="R5 revert counts the wrong profiles"
+  ["(checked) the revert named the sixth booking kind it was removing"]="R5 revert removes the sixth kind silently"
+  ["(checked) the revert named the rollback guard it was putting back"]="R5 revert reinstates the two-table rollback guard silently"
+  ["(checked) the revert named the two silent arms it restores, and counted the jobs whose blocked list is stranded"]="R5 revert does not name the silent arms it restores|R5 revert counts no stranded blocked lists"
+  ["(checked) exactly one public.field_bookings survives the revert, and it no longer enumerates the profile"]="R5 revert drops the producer instead of restoring it|R5 revert leaves the sixth arm in the producer|R5 revert restores the producer under a second signature"
+  ["(checked) exactly one public.rollback_field_import_job survives the revert, and it no longer calls the producer"]="R5 revert drops the rollback instead of restoring it|R5 revert leaves the rollback on the producer|R5 revert restores the rollback under a second signature"
+  ["(checked) field_availability_profiles.field_id is back to ON DELETE SET NULL"]="R5 revert leaves the FK cascading"
   ["(checked) the rollback removed every overload of all four admin facility RPCs"]="EMERG the rollback and its own guard drift together"
   ["(checked) it left public.field_bookings standing, which admin_retire_field still calls"]="EMERG rollback takes the producer another RPC still calls"
 )

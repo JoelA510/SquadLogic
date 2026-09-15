@@ -70,7 +70,17 @@
     "is NULL in SQL, so a bare `NOT p_confirm` leaves the refusal unfired and the",
     "destructive path runs unconfirmed -- which admin_retire_field did until",
     "20260907000000, while the mock refused it. The one input that turns the guard",
-    "off is now covered on both arms rather than on whichever happened to be right."
+    "off is now covered on both arms rather than on whichever happened to be right.",
+    "",
+    "THE SIXTH BOOKING KIND (LIVE-3). 20260909000000 made",
+    "`field_availability_profiles.field_id` ON DELETE CASCADE and added an",
+    "`availability_profile` arm to the shared producer, because a confirmed",
+    "delete used to leave the profile behind with no field, its blackout windows",
+    "attached, and `affected_count: 0`. The `availability_profile` booking kind",
+    "seeds one; it is dated by `available_until`, which is NOT NULL, so it takes",
+    "the boundary pair every other arm has. A sixth arm silently dropped from the",
+    "producer fails `delete-booked-availability-profile-refused` for that table",
+    "rather than being absorbed by the others."
   ],
   "version": 1,
   "fieldScenarios": [
@@ -90,7 +100,10 @@
         "ok": true,
         "active": true,
         "effectiveTo": 30,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -109,7 +122,10 @@
         "ok": true,
         "active": false,
         "effectiveTo": -1,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -128,7 +144,10 @@
         "ok": true,
         "active": true,
         "effectiveTo": 0,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -147,7 +166,10 @@
         "ok": true,
         "active": false,
         "effectiveTo": 30,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -166,7 +188,10 @@
         "ok": true,
         "active": false,
         "effectiveTo": -1,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -185,7 +210,10 @@
         "ok": true,
         "active": true,
         "effectiveTo": 60,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -201,7 +229,10 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -217,7 +248,10 @@
         "ok": true,
         "active": false,
         "effectiveTo": null,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -233,7 +267,10 @@
         "ok": true,
         "active": false,
         "effectiveTo": null,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -249,7 +286,10 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -287,7 +327,10 @@
         "deleted": true,
         "affectedCount": 0,
         "exists": false,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -298,7 +341,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["game_slot"],
+      "bookings": [
+        "game_slot"
+      ],
       "args": {
         "confirm": false
       },
@@ -307,9 +352,13 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 1,
-        "dispositions": ["deleted"],
+        "dispositions": [
+          "deleted"
+        ],
         "exists": true,
-        "auditPhases": ["refused"]
+        "auditPhases": [
+          "refused"
+        ]
       }
     },
     {
@@ -320,7 +369,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["game_assignment"],
+      "bookings": [
+        "game_assignment"
+      ],
       "args": {
         "confirm": false
       },
@@ -329,9 +380,13 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 1,
-        "dispositions": ["unassigned"],
+        "dispositions": [
+          "unassigned"
+        ],
         "exists": true,
-        "auditPhases": ["refused"]
+        "auditPhases": [
+          "refused"
+        ]
       }
     },
     {
@@ -342,7 +397,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["practice_slot"],
+      "bookings": [
+        "practice_slot"
+      ],
       "args": {
         "confirm": false
       },
@@ -351,9 +408,13 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 1,
-        "dispositions": ["deleted"],
+        "dispositions": [
+          "deleted"
+        ],
         "exists": true,
-        "auditPhases": ["refused"]
+        "auditPhases": [
+          "refused"
+        ]
       }
     },
     {
@@ -364,7 +425,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["practice_assignment"],
+      "bookings": [
+        "practice_assignment"
+      ],
       "args": {
         "confirm": false
       },
@@ -373,9 +436,13 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 1,
-        "dispositions": ["unassigned"],
+        "dispositions": [
+          "unassigned"
+        ],
         "exists": true,
-        "auditPhases": ["refused"]
+        "auditPhases": [
+          "refused"
+        ]
       }
     },
     {
@@ -386,7 +453,12 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["game_slot", "game_assignment", "practice_slot", "practice_assignment"],
+      "bookings": [
+        "game_slot",
+        "game_assignment",
+        "practice_slot",
+        "practice_assignment"
+      ],
       "args": {
         "confirm": true
       },
@@ -394,9 +466,15 @@
         "ok": true,
         "deleted": true,
         "affectedCount": 4,
-        "dispositions": ["deleted", "unassigned"],
+        "dispositions": [
+          "deleted",
+          "unassigned"
+        ],
         "exists": false,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -407,7 +485,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["scheduled_game"],
+      "bookings": [
+        "scheduled_game"
+      ],
       "args": {
         "confirm": false
       },
@@ -416,9 +496,13 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 3,
-        "dispositions": ["deleted"],
+        "dispositions": [
+          "deleted"
+        ],
         "exists": true,
-        "auditPhases": ["refused"]
+        "auditPhases": [
+          "refused"
+        ]
       }
     },
     {
@@ -429,7 +513,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["scheduled_practice"],
+      "bookings": [
+        "scheduled_practice"
+      ],
       "args": {
         "confirm": false
       },
@@ -438,9 +524,13 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 2,
-        "dispositions": ["deleted"],
+        "dispositions": [
+          "deleted"
+        ],
         "exists": true,
-        "auditPhases": ["refused"]
+        "auditPhases": [
+          "refused"
+        ]
       }
     },
     {
@@ -451,7 +541,11 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["scheduled_game", "game_assignment", "practice_assignment"],
+      "bookings": [
+        "scheduled_game",
+        "game_assignment",
+        "practice_assignment"
+      ],
       "args": {
         "confirm": false
       },
@@ -460,9 +554,14 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 5,
-        "dispositions": ["deleted", "unassigned"],
+        "dispositions": [
+          "deleted",
+          "unassigned"
+        ],
         "exists": true,
-        "auditPhases": ["refused"]
+        "auditPhases": [
+          "refused"
+        ]
       }
     },
     {
@@ -473,7 +572,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["game_slot"],
+      "bookings": [
+        "game_slot"
+      ],
       "args": {
         "effectiveTo": 10,
         "confirm": null
@@ -482,7 +583,9 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": ["refused"]
+        "auditPhases": [
+          "refused"
+        ]
       }
     },
     {
@@ -493,7 +596,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["game_slot"],
+      "bookings": [
+        "game_slot"
+      ],
       "args": {
         "confirm": null
       },
@@ -502,9 +607,13 @@
         "deleted": false,
         "reason": "bookings_exist",
         "affectedCount": 1,
-        "dispositions": ["deleted"],
+        "dispositions": [
+          "deleted"
+        ],
         "exists": true,
-        "auditPhases": ["refused"]
+        "auditPhases": [
+          "refused"
+        ]
       }
     },
     {
@@ -526,6 +635,62 @@
       }
     },
     {
+      "id": "delete-booked-availability-profile-refused",
+      "why": "LIVE-3 and the second half of LIVE-2. field_availability_profiles.field_id is ON DELETE CASCADE as of 20260909000000, so the profile is destroyed with the field and the operator must be shown it. Before that it was SET NULL and excluded from the guard entirely, so this exact case returned affected_count 0 and deleted the field, leaving a profile describing ground that no longer existed with its blackout windows still hanging off it. One kind per case: an arm dropped from the six-way union fails HERE rather than being absorbed by the others.",
+      "rpc": "admin_delete_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": [
+        "availability_profile"
+      ],
+      "args": {
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "deleted": false,
+        "reason": "bookings_exist",
+        "affectedCount": 1,
+        "dispositions": [
+          "deleted"
+        ],
+        "exists": true,
+        "auditPhases": [
+          "refused"
+        ]
+      }
+    },
+    {
+      "id": "delete-availability-profile-confirmed",
+      "why": "The confirmed half. A guard that refuses correctly and then fails to destroy what it said it would destroy is the report-and-effect disagreement PR #378 found on the assignment tables; stating the confirmed outcome here keeps the refusal case from being the only thing pinned.",
+      "rpc": "admin_delete_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": [
+        "availability_profile"
+      ],
+      "args": {
+        "confirm": true
+      },
+      "expect": {
+        "ok": true,
+        "deleted": true,
+        "affectedCount": 1,
+        "dispositions": [
+          "deleted"
+        ],
+        "exists": false,
+        "auditPhases": [
+          "after",
+          "before"
+        ]
+      }
+    },
+    {
       "id": "retire-game-slot-on-boundary",
       "why": "THE BOUNDARY, STATED AS DATA. `p_after` is the last day the ground is usable -- the reading `field_is_live_on(effective_to, d) = effective_to >= d` already ships -- so a game slot dated EXACTLY on the retirement date is not stranded and the retirement proceeds. This case exists because the SQL and the mock shared an off-by-one on `practice_assignments` (comparing a daterange's EXCLUSIVE upper bound), and two agreeing implementations compared only to each other cannot see that. One pair per arm, because a single arm getting it right by accident is exactly the state this table was in.",
       "rpc": "admin_retire_field",
@@ -533,7 +698,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["game_slot"],
+      "bookings": [
+        "game_slot"
+      ],
       "bookingOffset": 30,
       "args": {
         "effectiveTo": 30,
@@ -543,7 +710,10 @@
         "ok": true,
         "active": true,
         "effectiveTo": 30,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -554,7 +724,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["game_slot"],
+      "bookings": [
+        "game_slot"
+      ],
       "bookingOffset": 31,
       "args": {
         "effectiveTo": 30,
@@ -564,7 +736,9 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": ["refused"]
+        "auditPhases": [
+          "refused"
+        ]
       }
     },
     {
@@ -575,7 +749,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["game_assignment"],
+      "bookings": [
+        "game_assignment"
+      ],
       "bookingOffset": 30,
       "args": {
         "effectiveTo": 30,
@@ -585,7 +761,10 @@
         "ok": true,
         "active": true,
         "effectiveTo": 30,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -596,7 +775,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["game_assignment"],
+      "bookings": [
+        "game_assignment"
+      ],
       "bookingOffset": 31,
       "args": {
         "effectiveTo": 30,
@@ -606,7 +787,9 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": ["refused"]
+        "auditPhases": [
+          "refused"
+        ]
       }
     },
     {
@@ -617,7 +800,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["practice_slot"],
+      "bookings": [
+        "practice_slot"
+      ],
       "bookingOffset": 30,
       "args": {
         "effectiveTo": 30,
@@ -627,7 +812,10 @@
         "ok": true,
         "active": true,
         "effectiveTo": 30,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -638,7 +826,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["practice_slot"],
+      "bookings": [
+        "practice_slot"
+      ],
       "bookingOffset": 31,
       "args": {
         "effectiveTo": 30,
@@ -648,7 +838,9 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": ["refused"]
+        "auditPhases": [
+          "refused"
+        ]
       }
     },
     {
@@ -659,7 +851,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["practice_assignment"],
+      "bookings": [
+        "practice_assignment"
+      ],
       "bookingOffset": 30,
       "args": {
         "effectiveTo": 30,
@@ -669,7 +863,10 @@
         "ok": true,
         "active": true,
         "effectiveTo": 30,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -680,7 +877,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["practice_assignment"],
+      "bookings": [
+        "practice_assignment"
+      ],
       "bookingOffset": 31,
       "args": {
         "effectiveTo": 30,
@@ -690,7 +889,9 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": ["refused"]
+        "auditPhases": [
+          "refused"
+        ]
       }
     },
     {
@@ -701,7 +902,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["scheduled_game"],
+      "bookings": [
+        "scheduled_game"
+      ],
       "bookingOffset": 30,
       "args": {
         "effectiveTo": 30,
@@ -711,7 +914,10 @@
         "ok": true,
         "active": true,
         "effectiveTo": 30,
-        "auditPhases": ["after", "before"]
+        "auditPhases": [
+          "after",
+          "before"
+        ]
       }
     },
     {
@@ -722,7 +928,9 @@
         "active": true,
         "effectiveTo": null
       },
-      "bookings": ["scheduled_game"],
+      "bookings": [
+        "scheduled_game"
+      ],
       "bookingOffset": 31,
       "args": {
         "effectiveTo": 30,
@@ -732,7 +940,60 @@
         "ok": true,
         "active": true,
         "effectiveTo": null,
-        "auditPhases": ["refused"]
+        "auditPhases": [
+          "refused"
+        ]
+      }
+    },
+    {
+      "id": "retire-availability-profile-on-boundary",
+      "why": "THE BOUNDARY, STATED AS DATA, for the sixth arm. p_after is the last day the ground is usable, so a profile whose available_until falls EXACTLY on the retirement date is not stranded and the retirement proceeds. The five arms that existed before this one each have such a pair; adding a sixth arm without one would leave the new kind the only one whose boundary the two implementations agree about privately.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": [
+        "availability_profile"
+      ],
+      "bookingOffset": 30,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": 30,
+        "auditPhases": [
+          "after",
+          "before"
+        ]
+      }
+    },
+    {
+      "id": "retire-availability-profile-day-after-boundary",
+      "why": "The other half of the pair. A profile claiming availability one day PAST the last usable day is stranded, so an unconfirmed retirement refuses. Without this case an enumerator that had stopped seeing profiles entirely would pass the on-boundary case for the wrong reason.",
+      "rpc": "admin_retire_field",
+      "before": {
+        "active": true,
+        "effectiveTo": null
+      },
+      "bookings": [
+        "availability_profile"
+      ],
+      "bookingOffset": 31,
+      "args": {
+        "effectiveTo": 30,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "active": true,
+        "effectiveTo": null,
+        "auditPhases": [
+          "refused"
+        ]
       }
     }
   ],

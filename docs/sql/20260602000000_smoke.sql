@@ -53,8 +53,22 @@ where n.nspname = 'public' and c.relname = 'import_application_records' and a.at
 -- this file is not in `run.sh`'s NEW_MIGRATIONS, so on its own it would still
 -- be a check nothing executes.
 DO $$
-DECLARE r record;
+DECLARE r record; v_n int;
 BEGIN
+  -- **Count the overloads first.** `SELECT ... INTO` takes the first row and
+  -- says nothing when there are several, so with two definitions present every
+  -- check below reports on whichever one the planner happened to return -- a
+  -- check answering about data other than the data it names. The twin block
+  -- added to `docs/sql/20260908000000_smoke.sql` in this same PR opens with
+  -- exactly this guard, and this one did not: one arm corrected, its twin not,
+  -- by the same hand on the same day.
+  SELECT count(*) INTO v_n
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public' AND p.proname = 'finalize_field_availability_import_job';
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'expected exactly one public.finalize_field_availability_import_job, found % -- a second overload is a route round whichever body a caller means', v_n;
+  END IF;
+
   SELECT p.prosecdef,
          COALESCE(array_to_string(p.proconfig, ','), '') AS cfg,
          p.prosrc AS src

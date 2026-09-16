@@ -237,7 +237,7 @@ trap on_signal INT TERM
 # The meta-assertion is on the other side: if this finds no plants at all it
 # says so and stops, because a parse that matched nothing would clear every
 # plant in the file by looking at none of them.
-echo "=== pre-flight: no plant may target a superseded function body ==="
+echo "=== pre-flight: no plant may target a superseded statement ==="
 python3 - "$REPO" <<'PREFLIGHT'
 import io, os, re, sys
 
@@ -251,17 +251,54 @@ files = {}
 for name, path in re.findall(r'^(\w+)="(\$REPO/[^"]+)"', sh, re.M):
     files[name] = path.replace('$REPO', repo)
 
-# Which migration defines each function LAST.
-last_def = {}
+# **Three statement shapes, not one.** The first version of this check knew
+# only about function bodies, and three plants died of the same disease it was
+# written to cure: `M3 the producer is left callable by authenticated` mutated
+# a REVOKE that 20260909000000 re-issues, and the two M4 comment plants
+# mutated COMMENTs that 20260909000000 rewrites. All three applied cleanly,
+# changed nothing the database ended up holding, and scored NOT CAUGHT --
+# indistinguishable from a missing assertion. A guard that covers one of the
+# three ways a migration supersedes an earlier one is not a guard against the
+# class; it just moves where the class hides.
+def spans(src):
+    """(kind, target, start, end) for every statement a later migration can supersede."""
+    for m in re.finditer(r'CREATE OR REPLACE FUNCTION public\.([a-z_]+)\(', src):
+        begin = m.start()
+        stop = src.find('\n$$;\n', begin)
+        if stop < 0:
+            continue
+        yield ('function', m.group(1), begin, stop + 5)
+    for m in re.finditer(
+            r"COMMENT ON ([A-Z]+(?: [A-Z]+)?) ([\w.(), ]+?) IS\s*(?:'(?:[^']|'')*'|NULL)\s*;",
+            src, re.S):
+        target = m.group(1) + ' ' + re.sub(r'\s+', '', m.group(2))
+        yield ('comment', target, m.start(), m.end())
+    for m in re.finditer(r"^(?:GRANT|REVOKE)\b[^;]*;", src, re.M | re.S):
+        stmt = m.group(0)
+        tm = re.search(r'\bON\s+(?:FUNCTION|TABLE|SCHEMA|SEQUENCE|VIEW|ALL [A-Z ]+)?\s*([\w.]+(?:\([^)]*\))?)',
+                       stmt)
+        target = re.sub(r'\s+', '', tm.group(1)) if tm else stmt[:60]
+        yield ('acl', target, m.start(), m.end())
+
+# Which migration writes each (kind, target) LAST.
+last_writer = {}
+seen_kinds = {}
 for name in sorted(os.listdir(mig_dir)):
     if not name.endswith('.sql'):
         continue
     src = io.open(os.path.join(mig_dir, name), encoding='utf8').read()
-    for fn in re.findall(r'CREATE OR REPLACE FUNCTION public\.([a-z_]+)\(', src):
-        last_def[fn] = name
-if not last_def:
-    print('PRE-FLIGHT FAILED: no CREATE OR REPLACE FUNCTION found in', mig_dir)
-    sys.exit(2)
+    for kind, target, _b, _e in spans(src):
+        last_writer[(kind, target)] = name
+        seen_kinds[kind] = seen_kinds.get(kind, 0) + 1
+
+# **Each arm must have found something to reason about.** An arm that matches
+# nothing across 109 migrations is not covering its shape -- it is the same
+# vacuous pass, one level up, in the check built to stop vacuous passes.
+for kind in ('function', 'comment', 'acl'):
+    if not seen_kinds.get(kind):
+        print('PRE-FLIGHT FAILED: the %s arm matched no statement in %s; it is not covering anything'
+              % (kind, mig_dir))
+        sys.exit(2)
 
 # Every plant: label, file variable, and the `old` anchor.
 plants = re.findall(
@@ -270,41 +307,43 @@ if not plants:
     print('PRE-FLIGHT FAILED: parsed no plants out of prove.sh; this check looked at nothing')
     sys.exit(2)
 
+WHY = {
+    'function': 'recreates it with CREATE OR REPLACE, and the installed body is the later one',
+    'comment':  'rewrites that COMMENT, and the stored comment is the later one',
+    'acl':      'issues its own GRANT/REVOKE on the same object, which decides the final privileges',
+}
+
 bad = []
 examined = 0
-for label, var, old in plants:
+for label, var, old_anchor in plants:
     path = files.get(var)
     if path is None or not path.startswith(mig_dir):
         continue  # reverts and the emergency rollback are not migrations
     base = os.path.basename(path)
     src = io.open(path, encoding='utf8').read()
-    pos = src.find(old)
+    pos = src.find(old_anchor)
     if pos < 0:
         continue  # a moved anchor is ANCHOR-MISS's business, not this check's
     examined += 1
-    for fn in re.findall(r'CREATE OR REPLACE FUNCTION public\.([a-z_]+)\(', src):
-        start = src.index('CREATE OR REPLACE FUNCTION public.%s(' % fn)
-        end = src.find('\n$$;\n', start)
-        if end < 0:
-            continue
-        if start <= pos < end + 5 and last_def.get(fn) != base:
-            bad.append((label, base, fn, last_def[fn]))
+    for kind, target, begin, stop in spans(src):
+        if begin <= pos < stop and last_writer.get((kind, target)) != base:
+            bad.append((label, base, kind, target, last_writer[(kind, target)]))
             break
 
 if examined == 0:
     print('PRE-FLIGHT FAILED: no plant anchor resolved inside a migration; the walk found nothing to judge')
     sys.exit(2)
 
-for label, base, fn, winner in bad:
+for label, base, kind, target, winner in bad:
     print('PRE-FLIGHT REFUSAL: plant "%s"' % label)
-    print('  mutates public.%s in %s, but %s recreates it.' % (fn, base, winner))
-    print('  The installed body is the later one, so this mutation never reaches the database.')
+    print('  mutates the %s %s in %s, but %s %s.' % (kind, target, base, winner, WHY[kind]))
+    print('  This mutation never reaches the database, so a green run proves nothing about it.')
     print('  Re-aim the plant at %s, or at a part of %s the later migration does not replace.'
           % (winner, base))
 if bad:
     sys.exit(1)
-print('pre-flight: %d migration-targeted plant anchors examined, none inside a superseded body'
-      % examined)
+print('pre-flight: %d migration-targeted plant anchors examined against %d function, %d comment and %d acl statements; none inside a superseded one'
+      % (examined, seen_kinds['function'], seen_kinds['comment'], seen_kinds['acl']))
 PREFLIGHT
 preflight_status=$?
 if [ "$preflight_status" -ne 0 ]; then
@@ -874,7 +913,7 @@ plant "ONLY-SCEN refusal also audits a phase it never reached" "$M5" \
 # Drop the explicit revoke and section 5c must go red; the scenario table stays
 # green, because both callers are SECURITY DEFINER and behaviour is unchanged --
 # which is exactly why nothing noticed for two rounds.
-plant "M3 the producer is left callable by authenticated" "$M3" \
+plant "M5 the producer is left callable by authenticated" "$M5" \
   "REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM authenticated;" \
   "-- the default privilege from 20260614000000 is left in place" \
   "smoke 20260907000000" \
@@ -1365,16 +1404,16 @@ plant "M4 the refusal prose reverts to SQL-literal quoting" "$M4" \
 # its own plant, because a pin on a pair that only one plant can reach is a pin
 # on one of them. Each restores that object's superseded wording -- the exact
 # regression the pin exists to catch.
-plant "M4 the view comment reverts to the superseded claim" "$M4" \
-  "COLLAPSING THE UNION IS STILL BLOCKED, and only half the obstacle is gone:" \
-  "The union is temporary: it collapses to field_blackouts alone once finalize_field_availability_import_job resolves a profile to a field reliably. Formerly:" \
-  "smoke 20260908000000" \
+plant "M5 the view comment reverts to the superseded claim" "$M5" \
+  "COLLAPSING THE UNION IS STILL BLOCKED, and the reason has CHANGED as of 20260909000000:" \
+  "COLLAPSING THE UNION IS STILL BLOCKED, and only half the obstacle is gone: field_availability_profiles is deliberately excluded from admin_delete_field''s booking guard, so deleting a field still orphans every profile pointing at it." \
+  "smoke 20260909000000" \
   "smoke 20260907000000"
 
-plant "M4 the frozen table comment reverts to the superseded claim" "$M4" \
-  "COLLAPSING THE UNION IS STILL BLOCKED as of 20260908000000" \
-  "The two cannot be collapsed until finalize_field_availability_import_job stops attaching blackouts to profiles whose field_id resolution can be NULL. Formerly blocked as of 20260908000000" \
-  "smoke 20260908000000" \
+plant "M5 the frozen table comment reverts to the superseded claim" "$M5" \
+  "COLLAPSING THE UNION IS STILL BLOCKED as of 20260909000000, but no longer because anything is still CREATING field-less profiles:" \
+  "COLLAPSING THE UNION IS STILL BLOCKED as of 20260908000000, and deleting a field still orphans the profile this window hangs from:" \
+  "smoke 20260909000000" \
   "smoke 20260907000000"
 
 # **The obvious wrong fix for this defect**, and the reason section 2 pins the
@@ -1502,11 +1541,9 @@ plant "M5 the rollback goes back to its two-table guard" "$M5" \
 # field carrying only a profile and deletes it, which is the half of LIVE-3
 # LIVE-2 measured. Section 6 of the new smoke is what must see this.
 plant "M5 the producer loses its availability_profile arm" "$M5" \
-  "    SELECT 'availability_profile'::text, fap.id," \
-  "    SELECT 'availability_profile'::text, fap.id
-    FROM public.field_availability_profiles fap WHERE false;
-    SELECT 'never'::text, fap.id," \
-  "smoke 20260907000000"
+  "    WHERE fap.organization_id = p_organization_id AND fap.field_id = p_field_id" \
+  "    WHERE fap.organization_id = p_organization_id AND fap.field_id IS NULL" \
+  "smoke 20260909000000"
 
 # **The FK left SET NULL.** Nothing about the reporting changes -- the arm
 # still names the profile -- but a confirmed delete strands it again, and the
@@ -1595,9 +1632,34 @@ plant "M5 the collapse-blocker comment is left stale" "$S5" \
 # **The new smoke's own anchors.** A section whose parse silently matches
 # nothing passes every NOT LIKE below it -- the meta-assertion failure this
 # project has found in its own assertion files twice.
-plant "M5-SMOKE the fields-arm parse is allowed to match nothing" "$S5" \
-  "  IF length(v_fields_arm) < 200 THEN" \
-  "  IF length(COALESCE(v_fields_arm, '')) < 0 THEN" \
+plant "M5-SMOKE section 1's fields-arm parse degenerates to a one-character capture" "$S5" \
+  "\$re\$ELSIF v_record\\.target_table = 'fields' THEN(.*?)ELSIF v_record\\.target_table = 'locations' THEN\$re\$))[1];
+  IF v_fields_arm IS NULL THEN" \
+  "\$re\$ELSIF v_record\\.target_table = 'fields' THEN(.?)\$re\$))[1];
+  IF v_fields_arm IS NULL THEN" \
+  "smoke 20260909000000"
+
+# **The smoke's stale-comment literals are a COPY of the revert's wording.**
+# run.sh reads them out of the smoke and requires each to appear in the
+# revert. Drift the copy and that coupling must break -- otherwise the needle
+# degrades into a phrase that matches only itself, which is the vacuous NOT
+# LIKE this whole section exists to prevent. The replacement keeps the
+# substring the smoke's own first assertion looks for, so what fails here is
+# the coupling and nothing else.
+plant "M5-SMOKE a stale-comment literal drifts from the revert's wording" "$S5" \
+  "  v_stale_view := 'field_availability_profiles is deliberately excluded from admin_delete_field''s booking guard, so deleting a field still orphans every profile pointing at it';" \
+  "  v_stale_view := 'excluded from admin_delete_field, in a sentence the revert never restores';" \
+  "20260909000000: the smoke''s stale-comment needles no longer match the wording its revert puts back"
+
+# Section 1b cuts the same arm with its own copy of the regex and its own
+# combined `IS NULL OR length < 200` guard. One control per guard: the plant
+# above cannot reach this one, and an uncontrolled guard is the thing this
+# whole block exists to stop.
+plant "M5-SMOKE section 1b's fields-arm parse degenerates to a one-character capture" "$S5" \
+  "\$re\$ELSIF v_record\\.target_table = 'fields' THEN(.*?)ELSIF v_record\\.target_table = 'locations' THEN\$re\$))[1];
+  IF v_fields_arm IS NULL OR length(v_fields_arm) < 200 THEN" \
+  "\$re\$ELSIF v_record\\.target_table = 'fields' THEN(.?)\$re\$))[1];
+  IF v_fields_arm IS NULL OR length(v_fields_arm) < 200 THEN" \
   "smoke 20260909000000"
 
 # **The asymmetry inside the fix.** `game_assignments` reaches a game slot
@@ -1756,8 +1818,9 @@ plant "R5 revert leaves the sixth arm in the producer" "$R5" \
     CROSS JOIN LATERAL (" \
   "    FROM public.practice_assignments pa
     CROSS JOIN LATERAL (
-        SELECT NULL::date WHERE 'availability_profile' = ''
-    ) AS unused_marker," \
+        SELECT NULL::date WHERE 'availability_profile' <> ''
+    ) AS unused_marker(marker)
+    CROSS JOIN LATERAL (" \
   "revert 20260909000000: field_bookings after the revert reads STILL-SIX-KINDS"
 
 # GONE: a revert that removes the producer instead of restoring it. Both
@@ -1793,7 +1856,7 @@ plant "R5 revert leaves the rollback on the producer" "$R5" \
   "revert 20260909000000: rollback_field_import_job after the revert reads STILL-CALLS-PRODUCER"
 
 plant "R5 revert drops the rollback instead of restoring it" "$R5" \
-  "GRANT EXECUTE ON FUNCTION public.rollback_field_import_job(uuid) TO authenticated;" \
+  "COMMENT ON FUNCTION public.rollback_field_import_job(uuid) IS NULL;" \
   "DROP FUNCTION public.rollback_field_import_job(uuid);" \
   "revert 20260909000000: rollback_field_import_job after the revert reads GONE"
 
@@ -1816,8 +1879,8 @@ plant "R5 revert restores a body that still calls the dropped helpers" "$R5" \
   "    DELETE FROM public.fields
      WHERE id = p_field_id
        AND organization_id = p_organization_id;" \
-  "    v_scenario_ids := public.field_availability_scenario_ids_on_field(
-                        p_organization_id, p_field_id);
+  "    PERFORM public.field_availability_scenario_ids_on_field(
+              p_organization_id, p_field_id);
     DELETE FROM public.fields
      WHERE id = p_field_id
        AND organization_id = p_organization_id;" \
@@ -1882,6 +1945,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"]="R3 the restored retire calls a helper the revert also drops|R3 the restored retire's CONFIRMED path calls a dropped helper"
   ["(checked) the revert counted the field-less profile already in the database"]="R4 revert counts no orphans"
   ["(checked) the revert named the import guard it was putting back"]="R4 revert reinstates the unguarded body silently"
+  ["(checked) both stale-comment literals in the smoke are wording the revert actually restores"]="M5-SMOKE a stale-comment literal drifts from the revert's wording"
   ["(checked) applying the migration onto a database that already holds a field-less profile warns and counts it"]="M4 the apply-time orphan report never fires|M4 the apply-time report counts the wrong set"
   ["(checked) the revert named the two bundled fixes it also undoes, and counted the rows one of them strands"]="R4 revert does not name the two bundled fixes it also undoes|R4 revert counts no stranded refusals"
   ["(checked) exactly one public.finalize_field_availability_import_job survives the revert, and its body no longer carries the resolution guard"]="R4 revert drops the finalizer instead of restoring it|R4 revert leaves the guard in place|R4 revert restores the finalizer under a second signature"

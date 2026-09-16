@@ -324,6 +324,23 @@ for id in "${NEW_MIGRATIONS[@]}"; do
   # LEAVING behind, and on a database built from scratch that branch has never
   # executed -- the same unreached warning LIVE-2's round 1 found in
   # 20260908000000. The re-apply below runs it against real rows.
+  #
+  # **The cardinalities here are load-bearing and must stay unequal.** This
+  # seed used to be one attached profile with one window and one field-less
+  # profile with one window, and two mutation plants proved that symmetric.
+  # Every count in the migration and its revert -- profiles with field_id
+  # IS NULL, profiles with field_id IS NOT NULL, and the windows each set
+  # carries -- returned 1 against that seed, so a check counting the WRONG set
+  # printed the RIGHT number. `M5 the LEAVING report counts the wrong set` and
+  # `R5 revert counts the wrong profiles` both flip exactly that predicate, and
+  # both scored NOT CAUGHT: the assertions were reading a figure that could not
+  # distinguish the sets it was there to tell apart.
+  #
+  # So: attached = 1 profile carrying 1 window; field-less = 2 profiles
+  # carrying 3 windows. Four figures, no two equal, and each of the two plants
+  # now changes one of them. Do not "tidy" the second field-less profile or its
+  # two windows away, and do not give the attached profile a second window --
+  # any of those restores a coincidence, not a simplification.
   if [ "$id" = "20260909000000" ]; then
     if ! psql_cmd "INSERT INTO public.organizations (id, name, slug)
               VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Attached Org','attached-org');
@@ -343,6 +360,13 @@ for id in "${NEW_MIGRATIONS[@]}"; do
               INSERT INTO public.field_blackout_windows
                 (organization_id, profile_id, blackout_from, blackout_until, reason)
               VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','daaaaaaa-dddd-dddd-dddd-dddddddddddd','2026-09-01','2026-09-30','blackout_months');
+              INSERT INTO public.field_availability_profiles
+                (id, organization_id, season_label, field_id, location, field_name, available_from, available_until)
+              VALUES ('dbbbbbbb-dddd-dddd-dddd-dddddddddddd','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Fall 2026',NULL,'Attached Park','Second Vanished Pitch','2026-08-01','2026-11-30');
+              INSERT INTO public.field_blackout_windows
+                (organization_id, profile_id, blackout_from, blackout_until, reason)
+              VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','dbbbbbbb-dddd-dddd-dddd-dddddddddddd','2026-10-01','2026-10-15','blackout_months'),
+                     ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','dbbbbbbb-dddd-dddd-dddd-dddddddddddd','2026-11-01','2026-11-15','blackout_months');
               INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, total_rows, warning_summary)
               VALUES ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','fields','attached/fields.csv','completed_with_warnings',1,
                       jsonb_build_object('field_rollback', jsonb_build_object('blocked_records',1,'blocked',jsonb_build_object('total',1,'omitted',0,'by_kind',jsonb_build_object('fields',1),'sample',jsonb_build_array(jsonb_build_object('kind','fields','reason','bookings_exist'))))));" \
@@ -394,6 +418,43 @@ for id in "${NEW_MIGRATIONS[@]}"; do
     fi
   fi
 
+  # **The smoke's two stale-comment needles are proved against the revert.**
+  # Section 7 of docs/sql/20260909000000_smoke.sql refuses a comment that still
+  # claims a field delete orphans the profile. A NOT-LIKE needle that matches
+  # nothing passes vacuously -- the plant `M5 the collapse-blocker comment is
+  # left stale` proved exactly that, scoring NOT CAUGHT -- so the smoke now
+  # matches each needle against the superseded sentence it was written from,
+  # held in the smoke as a literal.
+  #
+  # That literal is a COPY of wording owned by the revert, and a copy drifts.
+  # This check reads the two literals OUT OF THE SMOKE and requires each to
+  # appear in the revert. Hard-coding the sentences here instead would have
+  # compared this file against the revert and left the smoke -- the file that
+  # actually uses them -- unexamined, which is the same self-comparison this
+  # harness has been caught making before.
+  if [ "$id" = "20260909000000" ]; then
+    if ! python3 - "$REPO" <<'NEEDLES'
+import io, re, sys
+repo = sys.argv[1]
+smoke = io.open(repo + '/docs/sql/20260909000000_smoke.sql', encoding='utf8').read()
+revert = io.open(repo + '/docs/sql/20260909000000_revert.sql', encoding='utf8').read()
+found = re.findall(r"v_stale_(?:view|table) := '((?:[^']|'')*)'", smoke)
+if len(found) != 2:
+    print('the smoke no longer declares exactly two stale-comment literals; found %d' % len(found))
+    sys.exit(1)
+bad = [n for n in found if n not in revert]
+for n in bad:
+    print('the smoke pins a needle to wording the revert does not restore: %s' % n[:90])
+sys.exit(1 if bad else 0)
+NEEDLES
+    then
+      echo "FAIL ${id}: the smoke's stale-comment needles no longer match the wording its revert puts back"
+      STATUS=1
+    else
+      echo "  | (checked) both stale-comment literals in the smoke are wording the revert actually restores"
+    fi
+  fi
+
   # **The same reasoning for 20260909000000**, whose own WARNING branch counts
   # the field-less profiles it is leaving in place. The seed above planted one,
   # so re-applying here runs the branch that a from-scratch build never
@@ -403,7 +464,7 @@ for id in "${NEW_MIGRATIONS[@]}"; do
   if [ "$id" = "20260909000000" ]; then
     if psql_file "$REPO/supabase/migrations/20260909000000_rollback_field_import_booking_guard.sql" \
          >/tmp/harness_reapply 2>&1; then
-      if grep -q 'LEAVING 1 field-less availability profile(s), carrying 1 blackout window(s)' /tmp/harness_reapply; then
+      if grep -q 'LEAVING 2 field-less availability profile(s), carrying 3 blackout window(s)' /tmp/harness_reapply; then
         echo "  | (checked) applying the migration onto a database that already holds a field-less profile counts what it leaves behind"
       else
         echo "FAIL ${id}: re-applied onto a seeded database and the LEAVING warning did not name the orphan it found"
@@ -491,7 +552,7 @@ for id in "${NEW_MIGRATIONS[@]}"; do
       # planted exactly one attached profile with one window, and exactly one
       # import job carrying a field_rollback.blocked list.
       if grep -q 'EXPOSING 1 availability profile(s) currently attached to a field, carrying 1 blackout window' /tmp/harness_rev &&
-         grep -q '1 profile(s) in this database are already in that state' /tmp/harness_rev; then
+         grep -q '2 profile(s) in this database are already in that state' /tmp/harness_rev; then
         echo "  | (checked) the revert counted the attached profile and its window it was about to expose, and the orphan already there"
       else
         echo "FAIL revert ${id}: planted an attached profile with a window and an already-orphaned one, and the revert did not count all three"

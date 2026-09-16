@@ -868,6 +868,8 @@ DO $$
 DECLARE
   v_view text;
   v_table text;
+  v_stale_view text;
+  v_stale_table text;
 BEGIN
   SELECT obj_description('public.field_closures'::regclass, 'pg_class') INTO v_view;
   SELECT obj_description('public.field_blackout_windows'::regclass, 'pg_class') INTO v_table;
@@ -880,6 +882,33 @@ BEGIN
   -- producers are closed, so any comment still saying so is out of date --
   -- and a prefix or exact-string match would not have caught the view's
   -- rewording, which is how this class went unnoticed once already.
+  --
+  -- **Each needle is proved live before it is trusted.** A NOT-LIKE guard
+  -- whose needle matches nothing is not a guard: it passes against every
+  -- comment ever written, including the stale one it exists to reject, and
+  -- a single typo inside the quotes silently retires it. The plant
+  -- `M5 the collapse-blocker comment is left stale` rewrites the first needle
+  -- to a phrase that appears in no comment anywhere and scored NOT CAUGHT,
+  -- which is that failure measured rather than argued.
+  --
+  -- So each needle is first matched against the superseded wording it was
+  -- written from -- the exact sentences docs/sql/20260909000000_revert.sql
+  -- puts back -- and only then required to be absent from the live comment.
+  -- Change a needle to something that cannot match and the FIRST assertion
+  -- fires, before the second one has a chance to pass vacuously.
+  -- Verbatim from docs/sql/20260909000000_revert.sql, which is the only thing
+  -- that puts these sentences back. run.sh greps the revert for both literals,
+  -- so this is not a copy that can drift into a paraphrase unnoticed.
+  v_stale_view := 'field_availability_profiles is deliberately excluded from admin_delete_field''s booking guard, so deleting a field still orphans every profile pointing at it';
+  v_stale_table := 'field_availability_profiles is excluded from admin_delete_field''s booking guard, so deleting a field still orphans every profile pointing at it';
+
+  IF v_stale_view NOT LIKE '%excluded from admin_delete_field%' THEN
+    RAISE EXCEPTION 'the field_closures needle matches nothing, not even the wording it was written from';
+  END IF;
+  IF v_stale_table NOT LIKE '%deleting a field still orphans%' THEN
+    RAISE EXCEPTION 'the field_blackout_windows needle matches nothing, not even the wording it was written from';
+  END IF;
+
   IF v_view LIKE '%excluded from admin_delete_field%' THEN
     RAISE EXCEPTION 'field_closures'' comment still says the profile is excluded from the delete guard';
   END IF;
@@ -894,5 +923,5 @@ BEGIN
   IF v_table NOT LIKE '%FROZEN as of 20260906000100%' THEN
     RAISE EXCEPTION '20260906000100''s smoke requires this comment to open with its freeze sentence';
   END IF;
-  RAISE NOTICE 'both collapse-blocker comments name what actually remains';
+  RAISE NOTICE 'both collapse-blocker comments name what actually remains, and both stale needles still match the wording they reject';
 END $$;

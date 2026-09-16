@@ -1854,3 +1854,139 @@ LIVE-1 `07b5227`, LIVE-2 `341c647`, LIVE-3 `648c17e`, LIVE-4 `bffaeca`. All four
 were found by adversarial review of work that had already passed its own tests,
 and all four were the same shape: a guarantee that held in the arm someone
 looked at.
+
+---
+
+## 8.4 PR 3 of 3 — field and blackout administration in the app — **merged**
+
+The last PR of the 8.4 stack. **8.4 is now done against both of its stated
+acceptance criteria**, and two parts of its capability-3 prose are not —
+see the gate decision below.
+
+- **PR:** [#387](https://github.com/JoelA510/SquadLogic/pull/387), branch
+  `feat/phase8-4-field-blackout-admin-ui`.
+- **Merged:** squash `ec1d16b`, 2026-09-16, from reviewed head `6ad581f`.
+- **Tests 2868 → 2945** (183 → 189 files). **E2E 76 → 78.** First-paint
+  220.93 → **222.23 KB gz** against a 244.14 budget, delta +1.30 KB.
+- **No migration was written.** Every persistence path is an RPC that already
+  existed from PR 2 and LIVE-1 through LIVE-3.
+
+### Two design calls worth keeping
+
+- **The disposition column renders only on the arm that produces one.** A
+  supervisor claim said "each affected row carries a disposition"; that is
+  **false for the retire arm**, and `20260907000000:663-666` says so in as many
+  words — "a retirement writes a date and destroys nothing, so 'what would
+  happen to this row' has no answer to give". Rendering an em dash or defaulting
+  to a word would have put a claim the database never made in front of the
+  person deciding. Plant P11 makes the column appear unconditionally and is
+  caught.
+- **8.6 does not exist, so the repair proposal says so by name.**
+  `REPAIR_PROPOSAL_UNAVAILABLE` renders on **both** the affected and unaffected
+  paths and is registered in the reason-code reachability driver, so it is
+  proved emittable rather than merely declared. A blank panel where a repair
+  belongs reads as "no repair needed", which is a lie — the declared-is-not-
+  enforced rule applied to a screen.
+
+### The review pass: 8 findings, three of them twin-arm
+
+`/code-review` at high before opening. Every finding was a hollow guarantee
+rather than a broken feature. The three that matter most:
+
+- **A half-specified booking clock read as all day.** `game_slots.start_time`
+  and `end_time` are independently nullable and a single null meant "all day",
+  so a 09:00 slot with no end time was a _blocking_ conflict against an
+  18:00-20:00 closure it does not touch — reported with `timesKnown: true`,
+  because that flag inspected only the start. Now normalised both-or-neither in
+  the analysis schemas, one producer.
+- **`slot_date` read alone.** `public.field_bookings`, `normalizeGameSlot` and
+  the mock all `COALESCE(slot_date, start)`. This was a fourth reading of one
+  question, disagreeing with the other three: a slot persisted with `start` only
+  rendered on the grid and was invisible to the blackout check.
+- **`useFields().error` dropped**, so a failed field read left an empty registry
+  and **every venue-scoped closure reporting zero conflicts** — a clean-looking
+  grid on a failed read.
+
+### 31 plants, 30 caught — and two defects in the plant harness itself
+
+The one miss was **mis-aimed, not a gap**: it targeted an unreadable-payload
+guard through the E2E suite, where the mock cannot produce an unreadable
+payload, so the branch is unreachable there by construction. Re-aimed at the
+unit level it catches.
+
+More usefully, the agent found two defects **in its own plant harness**, both
+the shape this phase keeps recording:
+
+- The restore check used `git diff --quiet -- FILE`, which is **vacuous for an
+  untracked file** and for any file with legitimate uncommitted changes — so
+  "restore verified clean" was printed for plants where nothing had been checked.
+- The failure grep was anchored `^\s*[0-9]+ failed`, which never matched because
+  Playwright's output carries ANSI escapes before the count, so **two real
+  catches were reported as NOT CAUGHT**.
+
+A check that passes on the failure it names, inside the harness built to find
+exactly that. Both now checksum and grep unanchored.
+
+### Scope: the ceiling was blown, and the agent's own analysis of why is right
+
+**+4254 insertions against a ~1500 ceiling.** The agent proposed, after the
+fact, the split it should have offered before writing a line: 3a lifecycle
+(≈1500, acceptance criterion 1) and 3b blackouts (≈1700, criterion 2). Its
+reason for not splitting mid-flight — that by the time the size was measurable
+the E2E suite was unwritten, so stopping would have handed over 3200 lines with
+neither criterion driven end to end — is a fair account of the position it was
+in, and it named it a justification rather than an excuse.
+
+**The ceiling was right and the evidence is the review**: one pass found eight
+findings, which is what a too-large diff produces. Future tasks in this family
+get the split proposed at the planning step, not measured at the end.
+
+### Accessibility, verified rather than asserted
+
+Controls are located through the accessibility tree (`getByLabelText` /
+`getByRole`), so an unbound `htmlFor` fails to find its element — plant P10
+removes one and takes down five tests. Date and time entry is native
+`<input type="date">` / `type="time"`, keyboard-operable by construction rather
+than a bespoke calendar that would have to re-earn it. The dialog moves focus in
+on open (asserted via `dialog.contains(document.activeElement)`), closes on
+Escape, and returns focus to its trigger (asserted by identity). The preview
+sits in an `aria-live="polite"` region; the affected list is a real `<table>`
+with a caption and `scope="col"` headers, asserted by counting `columnheader`
+roles. Zero colour, radius or spacing literals in new files; `index.css` and
+`styles/*.css` byte-identical. Both themes rendered and looked at.
+
+### Supervisor review
+
+Round 1, five probes, **zero findings**: the reason code's reachability
+(declared, severity-assigned, emitted, and asserted at unit, component and E2E
+level); the retire arm genuinely carrying no disposition, confirming the agent's
+correction of my claim; the both-or-neither normalisation living in the analysis
+schemas and not the display path, so `timesKnown: startMinutes !== null` is
+correct after it; and the bundle delta.
+
+One open item was **bounded more tightly than the agent stated**: a venue-scoped
+closure missing a practice whose field row carries no `location_id` is
+unreachable through the database — `fields.location_id` is `uuid NOT NULL`
+(`20260331000000:328`). The residual is only a read that fails to select the
+column.
+
+### Still open after 8.4
+
+1. **No `admin_update_field_blackout`** — editing a blackout is remove-and-
+   re-add, with a new id and two audit rows. **Operator decision: follow-up PR
+   before 8.5.**
+2. **Venues and sub-surfaces cannot be retired** — `locations` and
+   `field_subunits` carry no effective dates and no retire RPC. Same follow-up.
+3. **`ConsequencePreview`'s `operation="delete"` arm is exercised by tests and
+   by no screen.** `FieldManagementPage.handleDelete` still uses `window.confirm`
+   with hand-built prose — pre-existing, not WCAG-conformant, and now duplicating
+   a component that does the job properly.
+4. `minutesToClock(1440)` renders `24:00`, which `<input type="time">` cannot
+   hold, so such a window is readable and not re-enterable through the editor.
+5. `toFieldBookings`' `start` fallback takes the UTC day where `gs.start::date`
+   takes the session's. They differ only for the last hours of a local day west
+   of UTC, and only for rows whose writer left no `slot_date`. The real fix is a
+   season timezone, which belongs with 8.5.
+6. `GameConflictBanner` gained two types with nothing enumerating that table
+   against its producers, so a third added without registering it falls silently
+   into the soft-warnings bucket. Pre-existing shape, two more members.

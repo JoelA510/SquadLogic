@@ -93,6 +93,7 @@ Given('I am on the {string}', async ({ page }, pageName: string) => {
 Given('I am on the {string} page', async ({ page }, pageName: string) => {
   const routeMap: Record<string, string> = {
     'Field Management': '/fields',
+    'Blackout Dates': '/scheduling/blackouts',
     Dashboard: '/',
     'Team Management': '/teams',
     'Data Import': '/import',

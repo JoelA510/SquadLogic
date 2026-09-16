@@ -251,6 +251,29 @@ export const FIELD_ADMIN_REASON = Object.freeze({
    */
   REGISTRY_NOT_PERSISTED: 'REGISTRY_NOT_PERSISTED',
 
+  /* -- consequences of an administrative change -------------------------- */
+  /**
+   * A blackout window covers ground a booking already holds.
+   *
+   * Emitted by `consequences.js` `findBlackoutConflicts()`, per closure and
+   * booking. `blocking` because the two statements cannot both be honoured: the
+   * ground is either closed or played on.
+   */
+  BLACKOUT_BLOCKS_BOOKING: 'BLACKOUT_BLOCKS_BOOKING',
+  /**
+   * No repair could be proposed for an affected booking, because the repair
+   * engine does not exist.
+   *
+   * 8.4's third capability asks a consequence preview to show "what the repair
+   * from 8.6 proposes". 8.6 is unbuilt, so the honest rendering is this code
+   * rather than an empty panel -- blank space where a repair belongs reads as
+   * "no repair is needed", which is a stronger and false claim.
+   *
+   * `compromise`: the operator can still decide, and is told what they are
+   * deciding without.
+   */
+  REPAIR_PROPOSAL_UNAVAILABLE: 'REPAIR_PROPOSAL_UNAVAILABLE',
+
   // **Privacy is enforced by refusal, not by a finding.** An earlier draft of
   // this table carried a `NOTE_IDENTITY_SHAPE` code. `NoteSchema` in
   // `schemas.js` refuses the value outright, which is a stronger guarantee than
@@ -260,10 +283,12 @@ export const FIELD_ADMIN_REASON = Object.freeze({
   // guarantee is proved in `tests/fieldAdminChangeSet.test.js`, generated from
   // `privacy/textShapes.js`'s own samples.
   //
-  // `REPAIR_PROPOSAL_UNAVAILABLE` is likewise absent here rather than declared
+  // `REPAIR_PROPOSAL_UNAVAILABLE` was likewise absent here rather than declared
   // and unemittable: the consequence report it belongs to needs the persistence
   // and app layers, so the code arrives with its producer rather than ahead of
-  // it.
+  // it. **PR 3 is that producer** -- `consequences.js` `repairProposal()` -- so
+  // it is declared above, beside the conflict code it appears next to on the
+  // screen.
 });
 
 /**
@@ -292,6 +317,9 @@ export const FIELD_ADMIN_REASON_SEVERITY = Object.freeze({
 
   [FIELD_ADMIN_REASON.CHANGE_SET_NOT_APPLIED]: FIELD_ADMIN_SEVERITY.INFO,
   [FIELD_ADMIN_REASON.REGISTRY_NOT_PERSISTED]: FIELD_ADMIN_SEVERITY.INFO,
+
+  [FIELD_ADMIN_REASON.BLACKOUT_BLOCKS_BOOKING]: FIELD_ADMIN_SEVERITY.BLOCKING,
+  [FIELD_ADMIN_REASON.REPAIR_PROPOSAL_UNAVAILABLE]: FIELD_ADMIN_SEVERITY.COMPROMISE,
 });
 
 /**

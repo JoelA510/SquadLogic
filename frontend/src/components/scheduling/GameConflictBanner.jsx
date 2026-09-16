@@ -10,6 +10,14 @@ const SEVERITY_MAP = {
   'field-overlap': 'error',
   'coach-conflict': 'error',
   'team-double-booked': 'error',
+  // A persisted booking standing inside a closed window. An error, not an
+  // advisory: the two statements cannot both be honoured -- the ground is
+  // either shut or played on.
+  'field-blackout': 'error',
+  // A booking that could not be placed on a calendar at all, so the blackout
+  // check could not judge it. An advisory, not an error: nothing is known to
+  // clash, and silence would read as "checked, and clean".
+  'blackout-unjudged': 'warning',
   'unknown-team': 'warning',
   'unscheduled-matchups': 'warning',
   'shared-slot-imbalance': 'warning',
@@ -22,6 +30,8 @@ const TYPE_LABELS = {
   'field-overlap': 'Field Overlap',
   'coach-conflict': 'Coach Conflict',
   'team-double-booked': 'Double-Booked',
+  'field-blackout': 'Blackout',
+  'blackout-unjudged': 'Not Judged',
   'unknown-team': 'Unknown Team',
   'unscheduled-matchups': 'Unscheduled',
   'shared-slot-imbalance': 'Imbalance',

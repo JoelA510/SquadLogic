@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import Button from '../components/ui/Button.jsx';
-import { MapPin, Plus, Edit2, Trash2, X, Check } from 'lucide-react';
+import { MapPin, Plus, Edit2, Trash2, X, Check, CalendarX, RotateCcw } from 'lucide-react';
 import { useFields } from '../hooks/useFields.js';
+import RetireFieldDialog from '../components/setup/RetireFieldDialog.jsx';
+import { todayIso } from '../utils/today.js';
 import { logger } from '../lib/logger.js';
 
 const MONTH_MARKERS = [
@@ -31,12 +33,16 @@ export default function FieldManagementPage() {
     addField,
     updateField,
     deleteField,
+    retireField,
+    unretireField,
   } = useFields();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingField, setEditingField] = useState(null);
   const [isAddingLocation, setIsAddingLocation] = useState(false);
   const [newLocationName, setNewLocationName] = useState('');
+  const [retiringField, setRetiringField] = useState(/** @type {any} */ (null));
+  const [lifecycleError, setLifecycleError] = useState(/** @type {string|null} */ (null));
 
   // Default form state
   const [formData, setFormData] = useState({
@@ -157,6 +163,23 @@ export default function FieldManagementPage() {
     } catch (err) {
       logger.error('Delete failed', err);
       alert('Failed to delete field: ' + err.message);
+    }
+  };
+
+  /**
+   * Clear a field's end date.
+   *
+   * Un-retiring leaves `active` exactly as it found it, so a field that was
+   * ordinarily deactivated stays deactivated -- both arms carried the opposite
+   * defect once, and a passing test certified it.
+   */
+  const handleUnretire = async (field) => {
+    setLifecycleError(null);
+    try {
+      await unretireField(field.id);
+    } catch (err) {
+      logger.error('Unretire failed', err);
+      setLifecycleError(err?.message || 'The end date could not be cleared.');
     }
   };
 
@@ -322,6 +345,11 @@ export default function FieldManagementPage() {
                 INACTIVE
               </div>
             )}
+            {field.effective_to && (
+              <div className="text-xs text-text-secondary mb-2" data-testid={`retired-${field.id}`}>
+                Retires after {field.effective_to}
+              </div>
+            )}
 
             <div className="flex justify-between items-start mb-4">
               <div className="p-3 bg-blue-500/20 rounded-lg text-blue-400">
@@ -335,6 +363,26 @@ export default function FieldManagementPage() {
                 >
                   <Edit2 size={16} />
                 </button>
+                {field.effective_to ? (
+                  <button
+                    onClick={() => handleUnretire(field)}
+                    aria-label={`Clear the end date on ${field.name}`}
+                    className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-primary transition-colors"
+                  >
+                    <RotateCcw size={16} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setLifecycleError(null);
+                      setRetiringField(field);
+                    }}
+                    aria-label={`Retire ${field.name}`}
+                    className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-primary transition-colors"
+                  >
+                    <CalendarX size={16} />
+                  </button>
+                )}
                 <button
                   onClick={() => handleDelete(field)}
                   aria-label={`Delete ${field.name}`}
@@ -419,6 +467,22 @@ export default function FieldManagementPage() {
           <span className="font-semibold">Add New Field</span>
         </button>
       </div>
+
+      {lifecycleError && (
+        <div className="badge danger" role="alert">
+          {lifecycleError}
+        </div>
+      )}
+
+      {retiringField && (
+        <RetireFieldDialog
+          open
+          field={retiringField}
+          defaultDate={todayIso()}
+          onRetire={retireField}
+          onClose={() => setRetiringField(null)}
+        />
+      )}
 
       {/* Edit Modal */}
       {isModalOpen && (

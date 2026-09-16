@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 20 vocabularies, 467 codes, of
- * which 456 are shown to be producible and 11 are named as holes.
+ * `tests/attribution.test.js` already carries. 20 vocabularies, 469 codes, of
+ * which 458 are shown to be producible and 11 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -124,6 +124,8 @@ import {
   buildChangeSet,
   buildFieldRegistry,
   changeSetPartitionFindings,
+  findBlackoutConflicts,
+  repairProposal,
 } from '@squadlogic/core/fieldAdmin/index.js';
 import {
   FACILITY_REASON,
@@ -5403,6 +5405,28 @@ harvest(
     records: [fieldAdminBlackout('b1')],
   })
 );
+
+// The consequence half of 8.4 PR 3. Both codes come from plain input objects:
+// a closure over ground a game and a practice already hold, and the repair
+// proposal that cannot be computed because 8.6 does not exist.
+harvest(
+  'findBlackoutConflicts(a closure over booked ground)',
+  findBlackoutConflicts({
+    closures: [
+      {
+        id: 'c1',
+        source: 'field_blackouts',
+        closesLocationId: 'loc-1',
+        blackoutFrom: '2026-09-14',
+        blackoutUntil: '2026-09-20',
+      },
+    ],
+    fields: [{ id: 'f1', locationId: 'loc-1' }],
+    dated: [{ kind: 'game', id: 'g1', fieldId: 'f1', onDate: '2026-09-16' }],
+    recurring: [{ kind: 'practice', id: 'p1', fieldId: 'f1', dayOfWeek: 3 }],
+  }).findings
+);
+harvest('repairProposal(8.6 does not exist)', repairProposal({ affectedCount: 2 }).finding);
 
 /* -------------------------------------------------------------------------- */
 /* The audit                                                                   */

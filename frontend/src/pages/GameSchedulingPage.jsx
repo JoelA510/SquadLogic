@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { DndContext, DragOverlay } from '@dnd-kit/core';
 import { generateRoundRobinWeeks, scheduleGames } from '@squadlogic/core/gameScheduling.js';
 import { evaluateGameSchedule } from '@squadlogic/core/gameMetrics.js';
+import { findBlackoutConflicts } from '@squadlogic/core/fieldAdmin/index.js';
 import { useDashboardData } from '../hooks/useDashboardData.js';
 import { useAutoRunOnNavigate } from '../hooks/useAutoRunOnNavigate.js';
 import TeamScheduleView from '../components/TeamScheduleView.jsx';
@@ -27,6 +28,10 @@ import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { persistGameScheduleReview } from '../utils/gamePersistenceClient.js';
+import { useFieldClosures } from '../hooks/useFieldClosures.js';
+import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
+import { todayIso } from '../utils/today.js';
+import { isFieldOfferableOn } from '../utils/fieldLifecycle.js';
 
 function normalizeAssignmentSource(source) {
   return source === 'manual' || source === 'locked' ? 'manual' : 'auto';
@@ -213,6 +218,14 @@ export default function GameSchedulingPage() {
   const [statusMessage, setStatusMessage] = useState(null);
   const [lastRollbackAssignments, setLastRollbackAssignments] = useState(null);
   const [fields, setFields] = useState([]);
+  // **Every field the organisation holds, live or retired.** The scheduler's
+  // list above is filtered to live ground; a venue-scoped blackout still has to
+  // reach a slot sitting on a retired pitch, and enumerating that ground from
+  // the filtered list -- or from the slots themselves -- is the shape
+  // CLAUDE.md section 3 names: a subject set derived from the data a break
+  // would corrupt.
+  const [allFields, setAllFields] = useState([]);
+  const { closures: fieldClosures } = useFieldClosures();
   const [gameSlotRows, setGameSlotRows] = useState([]);
   const [referenceError, setReferenceError] = useState(null);
   const [activeGame, setActiveGame] = useState(null);
@@ -236,6 +249,7 @@ export default function GameSchedulingPage() {
     async function loadGridReferenceData() {
       if (!currentOrganization?.id) {
         setFields([]);
+        setAllFields([]);
         setGameSlotRows([]);
         setReferenceError(null);
         return;
@@ -246,11 +260,19 @@ export default function GameSchedulingPage() {
       try {
         const [{ data: fieldRows, error: fieldError }, { data: slotRows, error: slotError }] =
           await Promise.all([
-            supabase
-              .from('fields')
-              .select('*')
-              .eq('organization_id', currentOrganization.id)
-              .eq('active', true),
+            // **No `.eq('active', true)` any more.** `fields.active` is a
+            // WRITE-TIME CACHE of `effective_to`, not a continuously true
+            // derivation: 20260906000000's trigger fires on write and reads
+            // `current_date`, so a field retired with a FUTURE date keeps
+            // `active = true` until something writes the row again. Filtering
+            // on the column alone therefore kept formally retired ground in the
+            // scheduler's list on and after the day the retirement took effect
+            // -- which is exactly the guarantee 8.4's retire path exists to
+            // make. The migration's own header names repointing this read as PR
+            // 3's work. `isLiveOn()` is the reading `field_is_live_on` gives in
+            // SQL; `active` is still honoured, because it also means
+            // "deactivated" for every field deactivated before dating existed.
+            supabase.from('fields').select('*').eq('organization_id', currentOrganization.id),
             supabase
               .from('game_slots')
               .select('*, divisions(id, name)')
@@ -263,11 +285,17 @@ export default function GameSchedulingPage() {
         if (fieldError) throw fieldError;
         if (slotError) throw slotError;
 
-        setFields(fieldRows ?? []);
+        setAllFields(fieldRows ?? []);
+        // The two halves of "may the scheduler still offer this" live in one
+        // testable producer, because the reading is the point of the change and
+        // an inline predicate on a 1000-line page is a reading nothing can pin.
+        const asOf = todayIso();
+        setFields((fieldRows ?? []).filter((row) => isFieldOfferableOn(row, asOf)));
         setGameSlotRows(slotRows ?? []);
       } catch (err) {
         if (!isMounted) return;
         setFields([]);
+        setAllFields([]);
         setGameSlotRows([]);
         setReferenceError(err.message || 'Game schedule reference data could not be loaded.');
       }
@@ -350,6 +378,33 @@ export default function GameSchedulingPage() {
   useEffect(() => {
     displayedAssignmentsRef.current = displayedAssignments;
   }, [displayedAssignments]);
+
+  /**
+   * Blackout conflicts, merged into the same banner the scheduler's own
+   * warnings use.
+   *
+   * 8.4's acceptance criterion is that a blackout added through the UI makes
+   * the affected games show as conflicts and removing it clears them. This is
+   * where "show as conflicts" happens for games: the reading is
+   * `findBlackoutConflicts()` over `public.field_closures` and the slots this
+   * page already holds, and it does not need a scheduler run -- a persisted
+   * slot inside a closure is wrong whether or not anything was generated today.
+   */
+  const blackoutWarnings = useMemo(() => {
+    const { dated, recurring, unreadable } = toFieldBookings({ gameSlots: gameSlotRows });
+    const { findings } = findBlackoutConflicts({
+      closures: toClosureInputs(fieldClosures),
+      fields: allFields.map((row) => ({
+        id: String(row.id),
+        locationId: row.location_id ? String(row.location_id) : null,
+      })),
+      dated,
+      recurring,
+    });
+    // `unreadable` is carried, not dropped: a slot nothing could place produces
+    // no conflict, and a banner that says nothing about it reads as clean.
+    return toBlackoutWarnings(findings, unreadable);
+  }, [fieldClosures, allFields, gameSlotRows]);
 
   const conflictSet = useMemo(() => {
     const ids = new Set();
@@ -730,7 +785,9 @@ export default function GameSchedulingPage() {
         )}
       </div>
 
-      <GameConflictBanner warnings={reviewSnapshot?.warnings ?? game?.warnings ?? []} />
+      <GameConflictBanner
+        warnings={[...(reviewSnapshot?.warnings ?? game?.warnings ?? []), ...blackoutWarnings]}
+      />
 
       {(applyStatus !== 'idle' || statusMessage || applyError || schedulerReadinessMessage) && (
         <section className="glass-panel p-4 border border-border-subtle" aria-live="polite">

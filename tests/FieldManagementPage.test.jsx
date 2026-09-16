@@ -31,6 +31,8 @@ const baseHook = {
   addField: vi.fn(),
   updateField: vi.fn(),
   deleteField: vi.fn(),
+  retireField: vi.fn(),
+  unretireField: vi.fn(),
   refresh: vi.fn(),
 };
 

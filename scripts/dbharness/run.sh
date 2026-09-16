@@ -160,7 +160,7 @@ fresh_db || { echo "HARNESS FAILED"; exit 1; }
 apply_all || { echo "HARNESS FAILED"; exit 1; }
 echo "=== smokes for this PR's migrations ==="
 #
-# **Scoped to the migrations this PR adds** (`NEW_MIGRATIONS`, three of them),
+# **Scoped to the migrations this PR adds** (`NEW_MIGRATIONS`),
 # and that is a deliberate limit
 # worth stating. Several pre-existing smokes are BEHAVIOURAL: they seed an org,
 # assume an authenticated admin session, and exercise an RPC. They fail here for

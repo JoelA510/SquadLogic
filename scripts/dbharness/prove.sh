@@ -1968,6 +1968,14 @@ plant "M6 the import-owned refusal is folded into not-found" "$M6" \
 # location-scoped one, and this refuses exactly those. The green check names the
 # smoke, so a run where the smoke caught it instead would score BORROWED rather
 # than passing for the wrong reason.
+#
+# **The green argument is the stage NAME, with no verdict on it.** `plant()`
+# prepends `PASS ` itself, so passing "PASS smoke 20260910000000" made it look
+# for "PASS PASS smoke 20260910000000" -- a line no run can print. This plant
+# therefore scored BORROWED unconditionally, whatever the harness did: a plant
+# that cannot report a catch is the "check that cannot pass" twin of the check
+# that cannot fail, inside the sweep built to find exactly that. Caught by the
+# sweep itself, on the first run anybody gave it.
 plant "M6 the edit refuses a location-scoped window" "$M6" \
   "    IF NOT FOUND THEN" \
   "    IF v_before.location_id IS NOT NULL THEN
@@ -1976,7 +1984,7 @@ plant "M6 the edit refuses a location-scoped window" "$M6" \
     END IF;
     IF NOT FOUND THEN" \
   "scenario table" \
-  "PASS smoke 20260910000000"
+  "smoke 20260910000000"
 
 # The revert names three costs and counts all three. One plant per count, each
 # aimed at its own claim, because a warning naming one cost of three is what

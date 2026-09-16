@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mockSupabase as supabase, getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
@@ -141,6 +141,71 @@ const isCovered = (source, site) => {
   return false;
 };
 
+/**
+ * Every `markMockDeleted(` call, with its full argument text.
+ *
+ * **A tombstone with the wrong key is a silent no-op**: it records something
+ * `getDB` can never match, so the delete looks durable and is not. Thirteen
+ * call sites built the key by hand as `String(row.id)` or a literal, which was
+ * right only for as long as the table had no composite identity -- and
+ * `team_players` gaining one in this PR is exactly how that stops being true.
+ */
+const scanTombstoneCalls = (source) => {
+  const lines = source.split('\n');
+  const calls = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/markMockDeleted\(/.test(lines[i]) || /const markMockDeleted/.test(lines[i])) continue;
+    let depth = 0;
+    let text = '';
+    let j = i;
+    do {
+      text += lines[j];
+      for (const character of lines[j]) {
+        if (character === '(') depth += 1;
+        else if (character === ')') depth -= 1;
+      }
+      j += 1;
+    } while (depth > 0 && j < lines.length && j < i + 14);
+    calls.push({ line: i + 1, text });
+  }
+  return calls;
+};
+
+/**
+ * Every place outside `saveDB` that writes the mock db straight into the page.
+ *
+ * Such a write skips `liftMockTombstonesForPresentRows`, so a row a previous
+ * step deleted stays tombstoned when a later step seeds it back. The E2E steps
+ * seed this way throughout, which is why `window.__saveMockDB__` exists: a
+ * `page.evaluate` cannot import, so the producer is published on `window`.
+ */
+const SEARCH_ROOTS = ['frontend/src', 'tests'];
+const scanDirectDbWrites = () => {
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+        walk(full);
+        continue;
+      }
+      if (!/\.(js|jsx|ts|tsx)$/.test(entry.name)) continue;
+      readFileSync(full, 'utf8')
+        .split('\n')
+        .forEach((line, index) => {
+          const assigns = /__MOCK_DB__\s*=(?!=)/.test(line) && !/=\s*undefined/.test(line);
+          const stores = /setItem\(\s*'__MOCK_DB__'/.test(line);
+          if (assigns || stores) {
+            found.push({ file: path.relative(REPO, full), line: index + 1 });
+          }
+        });
+    }
+  };
+  for (const root of SEARCH_ROOTS) walk(path.join(REPO, root));
+  return found;
+};
+
 /** The removal sites: every table write that no BENIGN rule accounts for. */
 const removalSites = (source) =>
   scanTableWrites(source).filter((write) => !BENIGN.some((rule) => rule.matches(write)));
@@ -239,6 +304,114 @@ describe('mock delete census :: every hard delete records a tombstone', () => {
   it('POSITIVE CONTROL: a scan that matches nothing fails the anchor', () => {
     const blinded = SOURCE.replace(/\n(\s*)db\./g, '\n$1notdb.');
     expect(scanTableWrites(blinded).length).toBeLessThan(90);
+  });
+
+  it('builds every tombstone key through tombstoneKey, never by hand', () => {
+    const calls = scanTombstoneCalls(SOURCE);
+    expect(calls.length, 'the call scanner matched nothing').toBeGreaterThanOrEqual(24);
+    const handBuilt = calls
+      .filter((call) => !/tombstoneKey\(/.test(call.text))
+      .map((call) => `${call.line}: ${call.text.trim().slice(0, 80)}`);
+    expect(handBuilt).toEqual([]);
+  });
+
+  it('POSITIVE CONTROL: rejects a tombstone key built by hand', () => {
+    const planted = SOURCE.replace(
+      "      markMockDeleted(db, 'teams', [tombstoneKey('teams', team)]);",
+      "      markMockDeleted(db, 'teams', [p_team_id]);"
+    );
+    expect(planted, 'the plant did not apply; this control proves nothing').not.toEqual(SOURCE);
+    const handBuilt = scanTombstoneCalls(planted).filter(
+      (call) => !/tombstoneKey\(/.test(call.text)
+    );
+    expect(handBuilt).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Writes that go past saveDB, and therefore past the lift
+// ---------------------------------------------------------------------------
+//
+// **This is a ratchet, not an elimination, and saying which it is matters.**
+// The E2E suite's seeding convention is to read the db out of the page, mutate
+// it and assign it back, which skips `liftMockTombstonesForPresentRows`. That
+// is not five sites in one file: it is 65 sites across 17 files, the whole
+// convention. `window.__saveMockDB__` is the sanctioned replacement and
+// `tests/e2e/steps/facility_management.ts` -- the file this PR's subject sits
+// in -- is converted to it. The inventory below pins every remaining one by
+// file and count, so a NEW bypass fails this test while the known debt stays
+// visible and countable rather than buried in a PR description.
+
+const SANCTIONED_WRITES = {
+  // saveDB's own two writes, plus the module-scope initial load.
+  'frontend/src/lib/mockSupabaseClient.js': 3,
+  // A node-side seeder that runs before any client call; it cannot reach
+  // saveDB, which is not exported.
+  'tests/helpers/seedMockDb.js': 1,
+  // Two deliberate injections that test what getDB does with a stale window
+  // copy against a fresh sessionStorage one.
+  'tests/importStaleJobCleanup.test.js': 2,
+};
+
+const KNOWN_E2E_DEBT = {
+  'tests/e2e/steps/async_and_optimistic_ui.ts': 7,
+  'tests/e2e/steps/auth_setup.ts': 1,
+  'tests/e2e/steps/auto_scheduler.ts': 1,
+  'tests/e2e/steps/coach_and_calendar.ts': 4,
+  'tests/e2e/steps/dashboard_and_sidebar.ts': 10,
+  'tests/e2e/steps/data_and_output.ts': 1,
+  'tests/e2e/steps/network_resilience.ts': 2,
+  'tests/e2e/steps/onboarding.ts': 2,
+  'tests/e2e/steps/rbac_and_fields.ts': 3,
+  'tests/e2e/steps/registration_compliance.ts': 2,
+  'tests/e2e/steps/reporting.ts': 1,
+  'tests/e2e/steps/scheduling_and_overrides.ts': 14,
+  'tests/e2e/steps/team_and_roster.ts': 7,
+  'tests/e2e/steps/team_communication.ts': 3,
+  'tests/e2e/steps/visual_rbac_enforcement.ts': 1,
+};
+
+describe('mock db writes :: nothing new may go past saveDB', () => {
+  it('finds the writes, and would fail if it found none', () => {
+    const writes = scanDirectDbWrites();
+    expect(writes.length).toBeGreaterThanOrEqual(60);
+    expect(new Set(writes.map((write) => write.file))).toContain(
+      'frontend/src/lib/mockSupabaseClient.js'
+    );
+  });
+
+  it('accounts for every direct write, by file and by count', () => {
+    const expected = { ...SANCTIONED_WRITES, ...KNOWN_E2E_DEBT };
+    const actual = {};
+    for (const write of scanDirectDbWrites()) {
+      actual[write.file] = (actual[write.file] || 0) + 1;
+    }
+    // Exact, both ways: a new bypass fails, and so does a stale entry for a
+    // file that has since been converted.
+    expect(actual).toEqual(expected);
+  });
+
+  it('has converted the facility steps to the sanctioned producer', () => {
+    const steps = readFileSync(path.join(REPO, 'tests/e2e/steps/facility_management.ts'), 'utf8');
+    expect(steps).toContain('window.__saveMockDB__(db);');
+    expect(steps).not.toMatch(/__MOCK_DB__\s*=(?!=)/);
+    expect(SOURCE).toContain('window.__saveMockDB__ = saveDB;');
+  });
+
+  it('POSITIVE CONTROL: a file gaining a bypass is not silently absorbed', () => {
+    const expected = { ...SANCTIONED_WRITES, ...KNOWN_E2E_DEBT };
+    const actual = {};
+    for (const write of scanDirectDbWrites()) {
+      actual[write.file] = (actual[write.file] || 0) + 1;
+    }
+    // The shape a future edit takes: one more write in a file already listed.
+    const drifted = {
+      ...actual,
+      'tests/e2e/steps/onboarding.ts': actual['tests/e2e/steps/onboarding.ts'] + 1,
+    };
+    expect(drifted).not.toEqual(expected);
+    // ... and a file that is not listed at all.
+    expect({ ...actual, 'tests/e2e/steps/brand_new.ts': 1 }).not.toEqual(expected);
   });
 });
 
@@ -452,19 +625,23 @@ describe('mock .delete() :: only .eq() exists, and says so', () => {
     expect(after.filter((row) => row.player_id === 'player-2')).toHaveLength(1);
   });
 
-  it('re-pushes a membership on sign-in without the old tombstone eating it', async () => {
-    // **Not every write goes through `saveDB`, and the lift only runs there.**
-    // `signInWithPassword` re-creates a missing `organization_members` row and
-    // used to assign `window.__MOCK_DB__` directly, so a member removed
-    // earlier signed back in with the tombstone still standing and no
-    // organisation at all.
+  it('leaves a removed member removed when they sign back in', async () => {
+    // **A seeding convenience must not reverse an administrative action.**
+    // The sign-in block creates an `organization_members` row for any profile
+    // that has none, hardcoded to `org-1` -- the exact composite key
+    // `admin_remove_member` tombstones. Routing sign-in through `saveDB` made
+    // the lift see that key present and drop it, so a removed member came
+    // back, carrying `app_metadata.role` rather than the role the admin had
+    // assigned. Signing in does not create a membership in real Supabase, and
+    // it must not here.
     const { error } = await supabase.rpc('admin_remove_member', {
       p_organization_id: ORG,
       p_profile_id: 'mock-coach-id',
     });
     expect(error).toBeNull();
     expect(
-      getMockData('organization_members').filter((m) => m.profile_id === 'mock-coach-id')
+      getMockData('organization_members').filter((m) => m.profile_id === 'mock-coach-id'),
+      'the member was not removed, so the sign-in below proves nothing'
     ).toHaveLength(0);
 
     await supabase.auth.signInWithPassword({
@@ -474,6 +651,41 @@ describe('mock .delete() :: only .eq() exists, and says so', () => {
 
     expect(
       getMockData('organization_members').filter((m) => m.profile_id === 'mock-coach-id')
+    ).toHaveLength(0);
+  });
+
+  it('still seeds a membership for a profile that was never a member', async () => {
+    // The other half of the same branch, so the tombstone check cannot be
+    // "fixed" by deleting the seeding push outright.
+    expect(
+      getMockData('organization_members').filter((m) => m.profile_id === 'mock-parent-id')
+    ).toHaveLength(1);
+    await supabase.rpc('admin_remove_member', {
+      p_organization_id: ORG,
+      p_profile_id: 'mock-parent-id',
+    });
+
+    await supabase.auth.signInWithPassword({
+      email: 'staff@example.com',
+      password: 'test-password-123',
+    });
+
+    expect(
+      getMockData('organization_members').filter((m) => m.profile_id === 'mock-staff-id')
+    ).toHaveLength(1);
+  });
+
+  it('persists what sign-in seeds, which writing past saveDB did not', async () => {
+    // The real half of the finding that produced the resurrection: the direct
+    // assignment never reached sessionStorage, so rows sign-in created were
+    // lost on the next reload.
+    await supabase.auth.signInWithPassword({
+      email: 'staff@example.com',
+      password: 'test-password-123',
+    });
+    const stored = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    expect(
+      (stored.organization_members || []).filter((m) => m.profile_id === 'mock-staff-id')
     ).toHaveLength(1);
   });
 

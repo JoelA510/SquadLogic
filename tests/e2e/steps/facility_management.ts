@@ -32,8 +32,7 @@ Given('I have an organization labeled {string}', async ({ page }, orgName: strin
       (f: Record<string, unknown>) => f.organization_id !== uniqueOrgId
     );
 
-    window.__MOCK_DB__ = db;
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    window.__saveMockDB__(db);
     localStorage.setItem('squadlogic_active_org', uniqueOrgId);
   }, orgName);
 });
@@ -159,8 +158,7 @@ Given(
           size: '11v11',
           priority_rating: 1,
         });
-        window.__MOCK_DB__ = db;
-        sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+        window.__saveMockDB__(db);
       },
       { fName: f, lName: l }
     );
@@ -306,8 +304,7 @@ Given(
           label: 'B',
           organization_id: uniqueOrgId,
         });
-        (window as { __MOCK_DB__?: unknown }).__MOCK_DB__ = db;
-        sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+        window.__saveMockDB__(db);
       },
       { fName: f, lName: l }
     );
@@ -354,8 +351,7 @@ Given(
           active: true,
           supports_halves: false,
         });
-        window.__MOCK_DB__ = db;
-        sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+        window.__saveMockDB__(db);
       },
       { fName: f, lName: l }
     );
@@ -380,8 +376,7 @@ Given('another organization {string} exists', async ({ page }, orgName: string) 
     );
     db.organizations = db.organizations || [];
     db.organizations.push({ id: 'org-rival', name: name, status: 'active', is_onboarded: true });
-    window.__MOCK_DB__ = db;
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    window.__saveMockDB__(db);
   }, orgName);
   if (page.url() !== 'about:blank') await page.reload();
 });
@@ -415,8 +410,7 @@ Given(
             supports_halves: false,
           });
         }
-        window.__MOCK_DB__ = db;
-        sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+        window.__saveMockDB__(db);
       },
       { oName: orgName, lName: locName, fName: fieldName }
     );

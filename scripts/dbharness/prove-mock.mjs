@@ -230,8 +230,8 @@ const PLANTS = [
     // row is back on the next read -- the defect this file's own test found.
     label: 'the deleted field is not tombstoned and resurrects',
     suite: 'tests/fieldDeleteGuard.test.js',
-    find: "        markMockDeleted(db, 'fields', [field.id]);",
-    replace: "        // markMockDeleted(db, 'fields', [field.id]);",
+    find: "        markMockDeleted(db, 'fields', [tombstoneKey('fields', field)]);",
+    replace: "        // markMockDeleted(db, 'fields', [tombstoneKey('fields', field)]);",
   },
   {
     // **A NULL confirmation is not a confirmation.** It must read as
@@ -256,8 +256,8 @@ const PLANTS = [
     // because the scenario table says nothing about durability.
     label: 'a deleted blackout is not tombstoned',
     suite: 'tests/fieldBlackoutMockContract.test.js',
-    find: "        markMockDeleted(db, 'field_blackouts', [existing.id]);",
-    replace: "        // markMockDeleted(db, 'field_blackouts', [existing.id]);",
+    find: "        markMockDeleted(db, 'field_blackouts', [tombstoneKey('field_blackouts', existing)]);",
+    replace: "        // markMockDeleted(db, 'field_blackouts', [tombstoneKey(existing)]);",
   },
   {
     // `cascades` is the producer's internal answer; retire's payload must not
@@ -574,8 +574,13 @@ const PLANTS = [
     // already reported it deleted.
     label: 'the rollback deletes without a tombstone and the row resurrects',
     suite: 'tests/fieldImportRollbackGuard.test.js',
-    find: '              markMockDeleted(db, table, [...ids]);',
-    replace: '              void ids;',
+    find: `              const ids = new Set(doomed.map((item) => String(item.id)));
+              markMockDeleted(
+                db,
+                table,
+                doomed.map((item) => tombstoneKey(table, item))
+              );`,
+    replace: '              const ids = new Set(doomed.map((item) => String(item.id)));',
   },
   {
     // The prune, removed: a confirmed delete then leaves a scenario holding
@@ -657,12 +662,8 @@ const PLANTS = [
   {
     label: 'the generic .delete().eq() does not tombstone',
     suite: 'tests/mockDeleteTombstones.test.js',
-    find: `              markMockDeleted(
-                db,
-                table,
-                doomed.map((item) => tombstoneKey(table, item))
-              );`,
-    replace: '              void doomed;',
+    find: `              const doomed = db[table].filter((item) => String(item[col]) === String(val));`,
+    replace: `              const doomed = [];`,
   },
   {
     label: 'a revoked invite is not tombstoned',
@@ -687,12 +688,55 @@ const PLANTS = [
     replace: '  void db;',
   },
   {
-    label: 'sign-in writes the db past saveDB and past the tombstone lift',
+    // Round 1's blocking finding: routing sign-in through `saveDB` let the
+    // lift drop the tombstone `admin_remove_member` had written, so a removed
+    // member signed back in and was silently reinstated.
+    label: 'sign-in seeds a membership over an admin s removal',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: `        if (
+          !typedDb.organization_members.find((m) => m.profile_id === userId) &&
+          !isMockDeleted(
+            typedDb,
+            'organization_members',
+            tombstoneKey('organization_members', seededMembership)
+          )
+        ) {`,
+    replace: `        if (!typedDb.organization_members.find((m) => m.profile_id === userId)) {`,
+  },
+  {
+    // The other half of that branch: deleting the seeding push outright would
+    // make the plant above pass while breaking a user who was never a member.
+    label: 'sign-in stops seeding a membership at all',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: `          typedDb.organization_members.push({
+            ...seededMembership,
+            role: session.user.app_metadata.role,
+          });`,
+    replace: '          void seededMembership;',
+  },
+  {
+    // The sessionStorage half of the same finding, which was real.
+    label: 'sign-in stops persisting what it seeds',
     suite: 'tests/mockDeleteTombstones.test.js',
     find: `          sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify(session));`,
     replace: `          sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify(session));
           window.__MOCK_DB__ = db;
           if (db) return { data: { session, user: session.user }, error: null };`,
+  },
+  {
+    // A tombstone key built by hand is a silent no-op the moment its table
+    // gains a composite identity -- which is what happened to team_players.
+    label: 'a tombstone key is built by hand instead of by tombstoneKey',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: "      markMockDeleted(db, 'teams', [tombstoneKey('teams', team)]);",
+    replace: "      markMockDeleted(db, 'teams', [p_team_id]);",
+  },
+  {
+    // The E2E seeding convention writing past saveDB, and past the lift.
+    label: 'the facility steps go back to writing the db by hand',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: '  window.__saveMockDB__ = saveDB;',
+    replace: '  void saveDB;',
   },
   {
     label: 'a keyless table loses the identity its tombstone needs',

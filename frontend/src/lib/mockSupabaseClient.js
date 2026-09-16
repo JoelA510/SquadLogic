@@ -724,6 +724,23 @@ const markMockDeleted = (db, table, keys) => {
 };
 
 /**
+ * Is this row's key already tombstoned?
+ *
+ * **A seeding convenience must not undo an administrative action.** The
+ * sign-in block below creates an `organization_members` row for any profile
+ * that has none, which is right for a user who was never a member and wrong
+ * for one an admin removed -- and it cannot tell the two apart from the rows
+ * alone. The tombstone is what tells them apart.
+ *
+ * @param {Record<string, any>} db
+ * @param {string} table
+ * @param {string} key - a tombstone key, per `tombstoneKey`
+ * @returns {boolean}
+ */
+const isMockDeleted = (db, table, key) =>
+  Array.isArray(db.__deleted__?.[table]) && db.__deleted__[table].includes(String(key));
+
+/**
  * Drop the tombstone for any row that is BACK in the table, on every save.
  *
  * **A tombstone outlives the row it was written for, and composite keys
@@ -1183,6 +1200,12 @@ const syncMockFieldSubunits = (db, field, supportsHalves) => {
 // Initial state load
 if (typeof window !== 'undefined') {
   window.__MOCK_DB__ = getDB();
+  // **The sanctioned page-side writer.** The E2E steps seed by reading the db
+  // out of the page, mutating it and writing it back; done by hand that
+  // assignment skips `saveDB`, and with it the tombstone lift. There is no way
+  // to `import` from a `page.evaluate`, so the producer is published here
+  // instead of copied into every step file.
+  window.__saveMockDB__ = saveDB;
 }
 
 /**
@@ -1582,10 +1605,24 @@ export const mockSupabase = {
           });
         }
 
-        if (!typedDb.organization_members.find((m) => m.profile_id === userId)) {
+        // **Seeding, not reinstatement.** This push exists so a demo user who
+        // was never a member lands somewhere; it hardcodes `org-1`, so for the
+        // demo organisation it re-creates the exact composite key
+        // `admin_remove_member` tombstones. Pushing it back would silently
+        // reverse a removal AND hand the user `app_metadata.role` rather than
+        // the role the admin had assigned. A removed member signs in with no
+        // organisation, which is what real Supabase does.
+        const seededMembership = { organization_id: 'org-1', profile_id: userId };
+        if (
+          !typedDb.organization_members.find((m) => m.profile_id === userId) &&
+          !isMockDeleted(
+            typedDb,
+            'organization_members',
+            tombstoneKey('organization_members', seededMembership)
+          )
+        ) {
           typedDb.organization_members.push({
-            organization_id: 'org-1',
-            profile_id: userId,
+            ...seededMembership,
             role: session.user.app_metadata.role,
           });
         }
@@ -2760,7 +2797,7 @@ export const mockSupabase = {
         // blackout that came from an E2E injection resurrected on the next
         // call. `admin_delete_field` got this fix and its blackout twin did
         // not -- the same sibling gap, one function along.
-        markMockDeleted(db, 'field_blackouts', [existing.id]);
+        markMockDeleted(db, 'field_blackouts', [tombstoneKey('field_blackouts', existing)]);
         db.field_blackouts = (db.field_blackouts || []).filter(
           (item) => String(item.id) !== String(p.p_blackout_id)
         );
@@ -3030,7 +3067,11 @@ export const mockSupabase = {
         const destroy = (table, doomed) => {
           if (doomed.length === 0) return;
           const ids = new Set(doomed.map((item) => String(item.id)));
-          markMockDeleted(db, table, [...ids]);
+          markMockDeleted(
+            db,
+            table,
+            doomed.map((item) => tombstoneKey(table, item))
+          );
           db[table] = (db[table] || []).filter((item) => !ids.has(String(item.id)));
         };
         const onField = (table) =>
@@ -3117,7 +3158,7 @@ export const mockSupabase = {
         // admin_select_field_availability_scenario.
         const deletedScenarios = mockPruneEmptyScenarios(db, orgId, scenarioIds, destroy);
 
-        markMockDeleted(db, 'fields', [field.id]);
+        markMockDeleted(db, 'fields', [tombstoneKey('fields', field)]);
         db.fields = (db.fields || []).filter((item) => String(item.id) !== String(p.p_field_id));
 
         audit('field', field.id, 'deleted', {
@@ -3833,6 +3874,7 @@ export const mockSupabase = {
       const { p_player_ids } = params || {};
       const ids = (p_player_ids || []).map(String);
       const before = (db.players || []).length;
+      const doomedPlayers = (db.players || []).filter((player) => ids.includes(String(player.id)));
       db.players = (db.players || []).filter((player) => !ids.includes(String(player.id)));
       markMockDeleted(
         db,
@@ -3844,7 +3886,11 @@ export const mockSupabase = {
       db.team_players = (db.team_players || []).filter(
         (row) => !ids.includes(String(row.player_id))
       );
-      markMockDeleted(db, 'players', ids);
+      markMockDeleted(
+        db,
+        'players',
+        doomedPlayers.map((player) => tombstoneKey('players', player))
+      );
       const count = before - db.players.length;
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
@@ -5340,7 +5386,11 @@ export const mockSupabase = {
               );
               if (doomed.length === 0) return;
               const ids = new Set(doomed.map((item) => String(item.id)));
-              markMockDeleted(db, table, [...ids]);
+              markMockDeleted(
+                db,
+                table,
+                doomed.map((item) => tombstoneKey(table, item))
+              );
               db[table] = (db[table] || []).filter((item) => !ids.has(String(item.id)));
             };
             if (record.target_table === 'game_slots') {
@@ -5657,29 +5707,34 @@ export const mockSupabase = {
       const droppedInterests = (db.coach_interested_programs || []).filter((row) =>
         idSet.has(String(row.coach_id))
       );
+      markMockDeleted(
+        db,
+        'coach_interested_programs',
+        droppedInterests.map((row) => tombstoneKey('coach_interested_programs', row))
+      );
       db.coach_interested_programs = (db.coach_interested_programs || []).filter(
         (row) => !idSet.has(String(row.coach_id))
       );
       const droppedRequests = (db.coach_team_requests || []).filter((row) =>
         idSet.has(String(row.coach_id))
       );
+      markMockDeleted(
+        db,
+        'coach_team_requests',
+        droppedRequests.map((row) => tombstoneKey('coach_team_requests', row))
+      );
       db.coach_team_requests = (db.coach_team_requests || []).filter(
         (row) => !idSet.has(String(row.coach_id))
       );
       const before = (db.coaches || []).length;
+      const droppedCoaches = (db.coaches || []).filter((coach) => idSet.has(String(coach.id)));
+      markMockDeleted(
+        db,
+        'coaches',
+        droppedCoaches.map((coach) => tombstoneKey('coaches', coach))
+      );
       db.coaches = (db.coaches || []).filter((coach) => !idSet.has(String(coach.id)));
       const count = before - db.coaches.length;
-      markMockDeleted(db, 'coaches', ids);
-      markMockDeleted(
-        db,
-        'coach_interested_programs',
-        droppedInterests.map((row) => row.id).filter(Boolean)
-      );
-      markMockDeleted(
-        db,
-        'coach_team_requests',
-        droppedRequests.map((row) => row.id).filter(Boolean)
-      );
 
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
@@ -5970,7 +6025,7 @@ export const mockSupabase = {
       db.registration_forms = (db.registration_forms || []).filter(
         (f) => String(f.id) !== String(p_form_id)
       );
-      markMockDeleted(db, 'registration_forms', [p_form_id]);
+      markMockDeleted(db, 'registration_forms', [tombstoneKey('registration_forms', form)]);
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
         id: mockId(),
@@ -6026,7 +6081,7 @@ export const mockSupabase = {
             String(item.profile_id) === String(p_profile_id)
           )
       );
-      markMockDeleted(db, 'organization_members', [`${p_organization_id}:${p_profile_id}`]);
+      markMockDeleted(db, 'organization_members', [tombstoneKey('organization_members', target)]);
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
         id: mockId(),
@@ -6113,7 +6168,7 @@ export const mockSupabase = {
       db.game_assignments = (db.game_assignments || []).filter(
         (a) => String(a.id) !== String(p_assignment_id)
       );
-      markMockDeleted(db, 'game_assignments', [p_assignment_id]);
+      markMockDeleted(db, 'game_assignments', [tombstoneKey('game_assignments', assignment)]);
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
         id: mockId(),
@@ -6150,7 +6205,9 @@ export const mockSupabase = {
       db.practice_assignments = (db.practice_assignments || []).filter(
         (a) => String(a.id) !== String(p_assignment_id)
       );
-      markMockDeleted(db, 'practice_assignments', [p_assignment_id]);
+      markMockDeleted(db, 'practice_assignments', [
+        tombstoneKey('practice_assignments', assignment),
+      ]);
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
         id: mockId(),
@@ -6270,7 +6327,7 @@ export const mockSupabase = {
       );
       cascadeDoomed('practice_assignments', (a) => String(a.team_id) === String(p_team_id));
       db.teams = (db.teams || []).filter((t) => String(t.id) !== String(p_team_id));
-      markMockDeleted(db, 'teams', [p_team_id]);
+      markMockDeleted(db, 'teams', [tombstoneKey('teams', team)]);
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
         id: mockId(),

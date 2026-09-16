@@ -613,6 +613,115 @@ const PLANTS = [
     replace: `          const restored = (value, fallback) =>
             value === '' || value === undefined || value === null ? (void fallback, null) : value;`,
   },
+
+  // ── LIVE-4: hard deletes that do not tombstone ────────────────────────────
+  //
+  // One plant per delete path the census found untombstoned, plus one for the
+  // census itself and one for the lift that makes a composite tombstone safe.
+  // The two the supervisor's brief could not reach -- `field_subunits` and
+  // `organization_invites` -- are here too: their tables are absent from
+  // `initialMockData`, so only the MECHANISM is assertable, and a plant is the
+  // only way to show that assertion can fail.
+  {
+    label: 'a deleted player s roster rows are not tombstoned',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: `      markMockDeleted(
+        db,
+        'team_players',
+        (db.team_players || [])
+          .filter((row) => ids.includes(String(row.player_id)))
+          .map((row) => tombstoneKey('team_players', row))
+      );`,
+    replace: '      void ids;',
+  },
+  {
+    label: 'a team delete tombstones the team and not its cascades',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: "      cascadeDoomed('team_players', (tp) => String(tp.team_id) === String(p_team_id));",
+    replace: `      db.team_players = (db.team_players || []).filter(
+        (tp) => String(tp.team_id) !== String(p_team_id)
+      );`,
+  },
+  {
+    label: 'a deleted form s submissions are not tombstoned',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: `      markMockDeleted(
+        db,
+        'registrations',
+        (db.registrations || [])
+          .filter((r) => String(r.form_id) === String(p_form_id))
+          .map((r) => tombstoneKey('registrations', r))
+      );`,
+    replace: '      void p_form_id;',
+  },
+  {
+    label: 'the generic .delete().eq() does not tombstone',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: `              markMockDeleted(
+                db,
+                table,
+                doomed.map((item) => tombstoneKey(table, item))
+              );`,
+    replace: '              void doomed;',
+  },
+  {
+    label: 'a revoked invite is not tombstoned',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: "      markMockDeleted(db, 'organization_invites', [tombstoneKey('organization_invites', invite)]);",
+    replace: '      void inviteId;',
+  },
+  {
+    label: 'dropped field subunits are not tombstoned',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: `  markMockDeleted(
+    db,
+    'field_subunits',
+    doomed.map((subunit) => tombstoneKey('field_subunits', subunit))
+  );`,
+    replace: '  void doomed;',
+  },
+  {
+    label: 'a player moved off a roster row cannot move back',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: '  liftMockTombstonesForPresentRows(db);',
+    replace: '  void db;',
+  },
+  {
+    label: 'sign-in writes the db past saveDB and past the tombstone lift',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: `          sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify(session));`,
+    replace: `          sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify(session));
+          window.__MOCK_DB__ = db;
+          if (db) return { data: { session, user: session.user }, error: null };`,
+  },
+  {
+    label: 'a keyless table loses the identity its tombstone needs',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: '  profile_players: (row) => `${row.profile_id}:${row.player_id}`,',
+    replace: '',
+  },
+  {
+    // The shape a `.filter(`-keyed census cannot see, and the one this PR's
+    // own helpers make likely.
+    label: 'an untombstoned delete is routed through a helper',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: "    if (name === 'admin_delete_players') {",
+    replace: `    if (name === 'admin_delete_players') {
+      db.divisions = withoutDivision(db.divisions, 'planted');`,
+  },
+  {
+    // The census is the mechanism; a census that cannot see a new
+    // untombstoned delete is the one-time audit it replaced.
+    label: 'a new untombstoned delete is added beside a tombstoned one',
+    suite: 'tests/mockDeleteTombstones.test.js',
+    find: `      db.registrations = (db.registrations || []).filter(
+        (r) => String(r.form_id) !== String(p_form_id)
+      );`,
+    replace: `      db.divisions = (db.divisions || []).filter((d) => String(d.id) !== 'nope');
+      db.registrations = (db.registrations || []).filter(
+        (r) => String(r.form_id) !== String(p_form_id)
+      );`,
+  },
 ];
 
 const original = readFileSync(MOCK, 'utf8');

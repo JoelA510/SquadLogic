@@ -200,4 +200,107 @@ describe('useFields', () => {
     await expect(result.current.deleteField('field-1')).rejects.toThrow(/no readable result/);
     expect(result.current.fields).toHaveLength(1);
   });
+
+  it('retires through the RPC, unconfirmed first, and hands the refusal back', async () => {
+    // **The unconfirmed call IS the dry run.** `public.field_bookings` has
+    // EXECUTE revoked from `authenticated`, so the only reading of "what is
+    // booked here" a browser can get is the one the guard computed. A refusal
+    // is therefore a successful question, not a failure.
+    const refusal = {
+      retired: false,
+      reason: 'bookings_after_effective_to',
+      affected_count: 2,
+      affected: [
+        { kind: 'game_slot', id: 'gs-1', on_date: '2026-10-01', undated: false, unbounded: false },
+        { kind: 'practice_slot', id: 'ps-1', on_date: null, undated: false, unbounded: true },
+      ],
+    };
+    // @ts-expect-error [MOCK] - partial RPC response is enough for this assertion.
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: refusal, error: null });
+
+    const { result } = renderHook(() => useFields());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    /** @type {any} */
+    let outcome;
+    await act(async () => {
+      outcome = await result.current.retireField('field-1', { effectiveTo: '2026-09-30' });
+    });
+
+    expect(supabase.rpc).toHaveBeenCalledWith('admin_retire_field', {
+      p_organization_id: 'org-1',
+      p_field_id: 'field-1',
+      p_effective_to: '2026-09-30',
+      p_confirm: false,
+    });
+    expect(outcome).toEqual(refusal);
+    // **No `disposition` on this arm, and nothing here invents one.** A
+    // retirement destroys nothing, so the SQL twin emits six keys and not that
+    // one; a caller filling it in would put a word the database never said in
+    // front of the person deciding.
+    for (const row of outcome.affected) {
+      expect(row).not.toHaveProperty('disposition');
+    }
+
+    // @ts-expect-error [MOCK] - partial RPC response is enough for this assertion.
+    vi.mocked(supabase.rpc).mockResolvedValue({
+      data: { retired: true, affected_count: 2, field: { id: 'field-1' } },
+      error: null,
+    });
+    await act(async () => {
+      await result.current.retireField('field-1', {
+        effectiveTo: '2026-09-30',
+        confirm: true,
+      });
+    });
+    expect(supabase.rpc).toHaveBeenCalledWith('admin_retire_field', {
+      p_organization_id: 'org-1',
+      p_field_id: 'field-1',
+      p_effective_to: '2026-09-30',
+      p_confirm: true,
+    });
+  });
+
+  it('refuses to retire with no end date, before the RPC is called', async () => {
+    const { result } = renderHook(() => useFields());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    vi.mocked(supabase.rpc).mockClear();
+
+    await expect(
+      // @ts-expect-error [MOCK] - the point of this case is the missing date.
+      result.current.retireField('field-1', {})
+    ).rejects.toThrow(/end date is required/);
+    // The positive control for the sentence above: the guard fired BEFORE any
+    // call, rather than after one the database refused.
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it('raises on a retirement response it cannot read', async () => {
+    // @ts-expect-error [MOCK] - the point of this case is an unreadable payload.
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: { affected_count: 3 }, error: null });
+    const { result } = renderHook(() => useFields());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await expect(
+      result.current.retireField('field-1', { effectiveTo: '2026-09-30' })
+    ).rejects.toThrow(/no readable result/);
+  });
+
+  it('clears an end date through admin_unretire_field', async () => {
+    // @ts-expect-error [MOCK] - partial RPC response is enough for this assertion.
+    vi.mocked(supabase.rpc).mockResolvedValue({
+      data: { retired: false, field: { id: 'field-1', effective_to: null } },
+      error: null,
+    });
+    const { result } = renderHook(() => useFields());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.unretireField('field-1');
+    });
+    expect(supabase.rpc).toHaveBeenCalledWith('admin_unretire_field', {
+      p_organization_id: 'org-1',
+      p_field_id: 'field-1',
+    });
+  });
 });

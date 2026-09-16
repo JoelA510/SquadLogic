@@ -176,6 +176,83 @@ export function useFields() {
     return data;
   };
 
+  /**
+   * Retire a field, or find out what retiring it on a date would strand.
+   *
+   * **Retire is an END DATE, never a delete.** `admin_retire_field` writes
+   * `fields.effective_to` and keeps `fields.active` in step; nothing is
+   * removed. With bookings after the date and no confirmation it RETURNS
+   * `{retired:false, reason:'bookings_after_effective_to', affected_count,
+   * affected}` and writes a `refused` audit row, exactly as `admin_delete_field`
+   * does with `reason:'bookings_exist'`.
+   *
+   * **The affected rows carry SIX keys and NO `disposition`**, which is not an
+   * oversight and callers must not render one. A retirement destroys nothing,
+   * so "what would happen to this row" has no answer to give; the delete arm
+   * computes `deleted`/`unassigned` from the producer's `cascades` and this arm
+   * deliberately drops it (see the comment above `admin_retire_field` in
+   * `20260907000000_field_delete_booking_guard.sql`).
+   *
+   * The result is RETURNED rather than thrown so the caller can show the
+   * operator the list and offer to confirm.
+   *
+   * @param {string} fieldId
+   * @param {{ effectiveTo: string, confirm?: boolean }} options `effectiveTo`
+   *   is the inclusive LAST DAY the ground is usable — the same reading
+   *   `field_is_live_on` and `facility/lifecycle.js isLiveOn()` give, so a
+   *   booking ON that date is left alone.
+   * @returns {Promise<{ retired: boolean, reason?: string, affected_count?: number,
+   *   affected?: Array<{ kind: string, id: string, on_date: string|null,
+   *   week_index: number|null, undated: boolean, unbounded: boolean }> }>}
+   */
+  const retireField = async (fieldId, { effectiveTo, confirm = false }) => {
+    if (!currentOrganization?.id) throw new Error('No active organization');
+    if (!effectiveTo) {
+      throw new Error('An end date is required; retiring with no end date is a deletion');
+    }
+
+    const { data, error: rpcError } = await supabase.rpc('admin_retire_field', {
+      p_organization_id: currentOrganization.id,
+      p_field_id: fieldId,
+      p_effective_to: effectiveTo,
+      p_confirm: confirm,
+    });
+
+    if (rpcError) throw rpcError;
+    // Same guard as `deleteField`: a response we cannot read is an error, not a
+    // refusal and not a success. Rendering "0 booking(s) affected" for it would
+    // tell the operator the ground is clear when the truth is that we do not
+    // know.
+    if (data === null || data === undefined || typeof data.retired !== 'boolean') {
+      throw new Error('admin_retire_field returned no readable result');
+    }
+    if (data.retired) await fetchLocationsAndFields();
+    return data;
+  };
+
+  /**
+   * Clear a field's end date.
+   *
+   * `admin_unretire_field` restores `effective_to` to NULL and leaves `active`
+   * exactly as it found it — un-retiring an ordinarily deactivated field does
+   * not reactivate it, which is a defect both arms carried once.
+   *
+   * @param {string} fieldId
+   */
+  const unretireField = async (fieldId) => {
+    if (!currentOrganization?.id) throw new Error('No active organization');
+    const { data, error: rpcError } = await supabase.rpc('admin_unretire_field', {
+      p_organization_id: currentOrganization.id,
+      p_field_id: fieldId,
+    });
+    if (rpcError) throw rpcError;
+    if (!data || !data.field) {
+      throw new Error('admin_unretire_field returned no readable result');
+    }
+    await fetchLocationsAndFields();
+    return data;
+  };
+
   return {
     locations,
     fields,
@@ -186,6 +263,8 @@ export function useFields() {
     addField,
     updateField,
     deleteField,
+    retireField,
+    unretireField,
     refresh: fetchLocationsAndFields,
   };
 }

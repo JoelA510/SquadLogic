@@ -7,6 +7,10 @@ import PracticeReadinessPanel from '../components/PracticeReadinessPanel.jsx';
 import Button from '../components/ui/Button.jsx';
 import { Edit2, Save, Sparkles, Calendar, CheckCircle, RotateCcw } from 'lucide-react';
 import EvaluationPanel from '../components/EvaluationPanel.jsx';
+import GameConflictBanner from '../components/scheduling/GameConflictBanner.jsx';
+import { findBlackoutConflicts } from '@squadlogic/core/fieldAdmin/index.js';
+import { useFieldClosures } from '../hooks/useFieldClosures.js';
+import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
@@ -216,6 +220,7 @@ export default function PracticeSchedulingPage() {
   const [assignments, setAssignments] = useState(practice?.assignments ?? []);
   const [reviewAssignments, setReviewAssignments] = useState(null);
   const [practiceSlotRows, setPracticeSlotRows] = useState([]);
+  const { closures: fieldClosures } = useFieldClosures();
   const [practiceSlotsLoading, setPracticeSlotsLoading] = useState(false);
   const [practiceSlotsError, setPracticeSlotsError] = useState(null);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -274,7 +279,8 @@ export default function PracticeSchedulingPage() {
             field_subunit_id,
             fields (
               id,
-              name
+              name,
+              location_id
             )
           `
           )
@@ -633,6 +639,40 @@ export default function PracticeSchedulingPage() {
     ]
   );
 
+  /**
+   * Blackout conflicts for practices -- the other half of 8.4's second
+   * acceptance criterion, rendered through the same banner the game page uses
+   * rather than a second component that would drift from it.
+   *
+   * **The ground is enumerated from the slots' own embedded field rows**, not
+   * from a separate registry read. That is safe in the direction the rule
+   * cares about -- no slot can be missed, because every slot carries its field
+   * -- and it is stated because the reverse enumeration would not be. What it
+   * cannot do is reach a slot whose field row carries no `location_id` with a
+   * VENUE-scoped closure; such a slot is still reached by a field-scoped one.
+   */
+  const blackoutWarnings = useMemo(() => {
+    const { recurring, unreadable } = toFieldBookings({ practiceSlots: practiceSlotRows });
+    const fieldRows = [];
+    const seen = new Set();
+    for (const row of practiceSlotRows) {
+      const id = row?.fields?.id ?? row?.field_id;
+      if (!id || seen.has(String(id))) continue;
+      seen.add(String(id));
+      fieldRows.push({
+        id: String(id),
+        locationId: row?.fields?.location_id ? String(row.fields.location_id) : null,
+      });
+    }
+    const { findings } = findBlackoutConflicts({
+      closures: toClosureInputs(fieldClosures),
+      fields: fieldRows,
+      dated: [],
+      recurring,
+    });
+    return toBlackoutWarnings(findings, unreadable);
+  }, [fieldClosures, practiceSlotRows]);
+
   return (
     <div className="animate-fadeIn space-y-8 max-w-[65ch] mx-auto w-full">
       <div className="flex justify-between items-start mb-8">
@@ -655,6 +695,8 @@ export default function PracticeSchedulingPage() {
           </div>
         )}
       </div>
+
+      <GameConflictBanner warnings={blackoutWarnings} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2">

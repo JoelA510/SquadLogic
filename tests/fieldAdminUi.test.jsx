@@ -447,3 +447,142 @@ describe('BlackoutEditor', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+/** The window the edit cases open on: timed, field-scoped, with a note. */
+const EDITING = {
+  id: 'bo-1',
+  source: 'field_blackouts',
+  closesFieldId: 'field-1',
+  closesLocationId: null,
+  blackoutFrom: '2026-09-16',
+  blackoutUntil: '2026-09-18',
+  startMinutes: 960,
+  endMinutes: 1170,
+  reason: 'weather',
+  note: 'storm damage',
+};
+
+function renderEdit(overrides = {}) {
+  const onUpdate = overrides.onUpdate ?? vi.fn().mockResolvedValue({ id: 'bo-1' });
+  const onCreate = overrides.onCreate ?? vi.fn();
+  const onClose = overrides.onClose ?? vi.fn();
+  render(
+    <BlackoutEditor
+      open
+      onClose={onClose}
+      onCreate={onCreate}
+      onUpdate={onUpdate}
+      editing={overrides.editing ?? EDITING}
+      locations={LOCATIONS}
+      fields={FIELDS}
+      dated={DATED}
+      recurring={RECURRING}
+      defaultDate="2026-09-16"
+    />
+  );
+  return { onCreate, onUpdate, onClose };
+}
+
+describe('BlackoutEditor :: editing an existing window', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('opens on the window it was given, times and all', () => {
+    renderEdit();
+    expect(screen.getByLabelText(/^First day/)).toHaveValue('2026-09-16');
+    expect(screen.getByLabelText(/^Last day/)).toHaveValue('2026-09-18');
+    // A timed window opens with the all-day switch OFF and both boxes filled --
+    // an editor that opened every window as all-day would silently offer to
+    // clear the times.
+    expect(screen.getByLabelText(/Closed all day/)).not.toBeChecked();
+    expect(screen.getByLabelText(/^Closed from/)).toHaveValue('16:00');
+    expect(screen.getByLabelText(/^Closed until/)).toHaveValue('19:30');
+    expect(screen.getByLabelText('Reason')).toHaveValue('weather');
+    expect(screen.getByLabelText('Note')).toHaveValue('storm damage');
+  });
+
+  it('keeps every accessibility property the add path has', () => {
+    renderEdit();
+    // Focus moves INTO the dialog on open, on this path as much as the other.
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    // Labels still bind, so every control is reachable through the tree.
+    expect(screen.getByLabelText('What does this close?')).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Field/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Reason')).toBeInTheDocument();
+    // The locked scope is DISABLED with an explanation bound by
+    // `aria-describedby`, not silently read-only: a control a screen reader
+    // announces as ordinary and that refuses input is worse than one announced
+    // as unavailable.
+    const scope = screen.getByLabelText('What does this close?');
+    expect(scope).toBeDisabled();
+    expect(scope.getAttribute('aria-describedby')).toBe('blackout-scope-help');
+    expect(document.getElementById('blackout-scope-help')).toHaveTextContent(/cannot be changed/i);
+    // The live region survives, and the preview is inside it.
+    fireEvent.change(screen.getByLabelText(/^Last day/), { target: { value: '2026-09-16' } });
+    const preview = screen.getByTestId('blackout-consequence');
+    expect(preview.closest('[aria-live="polite"]')).not.toBeNull();
+  });
+
+  it('previews the consequence of the EDIT, exactly as the add path does', () => {
+    const { onUpdate } = renderEdit();
+    // Widen the window to all day over the 16th: the seeded game is inside it.
+    fireEvent.click(screen.getByLabelText(/Closed all day/));
+    const panel = screen.getByTestId('blackout-consequence');
+    expect(panel).toHaveTextContent(/As edited, this window would close/);
+    expect(panel).toHaveTextContent('U12 game');
+    // Preview only: nothing was written to get it.
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it('submits the whole editable shape through onUpdate, and never through onCreate', async () => {
+    const { onCreate, onUpdate } = renderEdit();
+    fireEvent.click(screen.getByLabelText(/Closed all day/));
+    fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'maintenance' } });
+    fireEvent.change(screen.getByLabelText('Note'), { target: { value: '' } });
+    fireEvent.click(screen.getByText('Save changes'));
+
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
+    // **Every editable column, including the ones now NULL.** A form that sent
+    // only what changed could not express "all day" or "no note".
+    expect(onUpdate).toHaveBeenCalledWith({
+      scope: 'field',
+      scopeId: 'field-1',
+      blackoutFrom: '2026-09-16',
+      blackoutUntil: '2026-09-18',
+      allDay: true,
+      startMinutes: null,
+      endMinutes: null,
+      reason: 'maintenance',
+      note: null,
+    });
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it('opens a location-scoped window on the venue select, not the field one', () => {
+    renderEdit({
+      editing: {
+        ...EDITING,
+        closesFieldId: null,
+        closesLocationId: 'loc-1',
+        startMinutes: null,
+        endMinutes: null,
+      },
+    });
+    // The scope is derived from which column the closure fills. Reading the
+    // wrong one would open a venue closure as a field closure and the hook's
+    // move guard would then refuse a save the operator never asked to change.
+    expect(screen.getByLabelText('What does this close?')).toHaveValue('location');
+    expect(screen.getByLabelText(/^Venue/)).toHaveValue('loc-1');
+  });
+
+  it('reports a failed edit instead of closing as though it worked', async () => {
+    const onUpdate = vi.fn().mockRejectedValue(new Error('Access denied'));
+    const onClose = vi.fn();
+    renderEdit({ onUpdate, onClose });
+    fireEvent.click(screen.getByText('Save changes'));
+    await waitFor(() =>
+      expect(screen.getByTestId('blackout-issues')).toHaveTextContent('Access denied')
+    );
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});

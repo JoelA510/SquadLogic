@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarOff, Plus, Trash2 } from 'lucide-react';
+import { CalendarOff, Pencil, Plus, Trash2 } from 'lucide-react';
 import {
   CLOSURE_SOURCE,
   findBlackoutConflicts,
@@ -23,14 +23,19 @@ import LoadingScreen from '../components/LoadingScreen.jsx';
 
 /**
  * Blackout Dates — every closure over the club's ground, and the place an
- * administrator adds and removes one.
+ * administrator adds, edits and removes one.
  *
  * **Reads `public.field_closures`, the single reader.** Windows authored here
  * (`field_blackouts`) and windows that arrived with a field-availability import
  * (`field_blackout_windows`) both appear, each labelled with its source. Only
- * the first kind is removable: the import table is FROZEN and no RPC deletes
- * from it, so a delete control on one of its rows would be a button that
- * cannot work. The row says why instead.
+ * the first kind is editable or removable: the import table is FROZEN and no
+ * RPC writes or deletes a row in it, so either control on one of its rows would
+ * be a button that cannot work. The row says why instead.
+ *
+ * **Editing is an edit.** `admin_update_field_blackout` (20260910000000)
+ * changes the window in place, so it keeps its id and leaves one audit entry.
+ * Until that RPC existed, changing a window here meant removing it and adding
+ * another: a new id, four audit rows, and nothing joining the two.
  *
  * The page used to read the import's windows through the availability-profile
  * embed on `useFields`. That embed is still what Fields & Venues uses to review
@@ -44,11 +49,13 @@ export default function BlackoutsPage() {
     loading: closuresLoading,
     error,
     createBlackout,
+    updateBlackout,
     removeBlackout,
   } = useFieldClosures();
   const { currentOrganization } = useOrganization();
   const [search, setSearch] = useState('');
   const [editorOpen, setEditorOpen] = useState(false);
+  const [editing, setEditing] = useState(/** @type {any|null} */ (null));
   const [actionError, setActionError] = useState(/** @type {string|null} */ (null));
   const [bookings, setBookings] = useState({ dated: [], recurring: [], unreadable: [] });
 
@@ -176,6 +183,17 @@ export default function BlackoutsPage() {
     return created;
   };
 
+  // **The dialog's own error surface handles the failure**, which is why this
+  // does not catch: `BlackoutEditor.submit` renders the thrown message in its
+  // `role="alert"` summary and leaves the dialog open on the operator's own
+  // work. `onRemove` catches because its failure has no dialog to land in.
+  const onUpdate = async (draft) => {
+    setActionError(null);
+    const updated = await updateBlackout(editing, draft);
+    await loadBookings();
+    return updated;
+  };
+
   const columns = useMemo(
     () =>
       /** @type {any[]} */ ([
@@ -208,18 +226,35 @@ export default function BlackoutsPage() {
         {
           key: 'actions',
           label: 'Actions',
-          width: 120,
+          width: 200,
           render: (row) =>
             row.source === CLOSURE_SOURCE.ADMIN ? (
-              <Button
-                variant="ghost-danger"
-                size="sm"
-                icon={Trash2}
-                onClick={() => onRemove(row.closure)}
-                aria-label={`Remove the blackout on ${row.ground} from ${row.from}`}
-              >
-                Remove
-              </Button>
+              <>
+                {/*
+                  **Each label names its own row.** A grid of buttons all
+                  reading "Edit" is a screen reader announcing the same thing
+                  every time; the ground and the start date are what tell them
+                  apart, and they are what the E2E suite locates by.
+                */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={Pencil}
+                  onClick={() => setEditing(row.closure)}
+                  aria-label={`Edit the blackout on ${row.ground} from ${row.from}`}
+                >
+                  Edit
+                </Button>{' '}
+                <Button
+                  variant="ghost-danger"
+                  size="sm"
+                  icon={Trash2}
+                  onClick={() => onRemove(row.closure)}
+                  aria-label={`Remove the blackout on ${row.ground} from ${row.from}`}
+                >
+                  Remove
+                </Button>
+              </>
             ) : (
               <span
                 className="text-text-muted"
@@ -303,11 +338,24 @@ export default function BlackoutsPage() {
         searchKeys={['ground', 'reason', 'from', 'until', 'source']}
         emptyText="No closures on file — add one, or import field availability"
       />
-      {editorOpen && (
+      {/*
+        **One dialog, two operations, and it is MOUNTED per operation.** The
+        editor reads its initial form state once, at mount, so switching
+        `editing` under a mounted dialog would leave the previous window's dates
+        in the boxes. Keying it on the closure under edit makes React remount it
+        instead -- and unmounting on close is what already resets the add path.
+      */}
+      {(editorOpen || editing) && (
         <BlackoutEditor
-          open={editorOpen}
-          onClose={() => setEditorOpen(false)}
+          key={editing ? `edit-${editing.id}` : 'add'}
+          open={editorOpen || Boolean(editing)}
+          onClose={() => {
+            setEditorOpen(false);
+            setEditing(null);
+          }}
           onCreate={onCreate}
+          onUpdate={onUpdate}
+          editing={editing}
           locations={locations || []}
           fields={fields || []}
           dated={bookings.dated}

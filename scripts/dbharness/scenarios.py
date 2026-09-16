@@ -55,6 +55,11 @@ CONDITION_FOR_SQLSTATE = {
     '23514': 'check_violation',
     'P0002': 'no_data_found',
     '42501': 'insufficient_privilege',
+    # 8.4 gap A: an id owned by the FROZEN `field_blackout_windows` is refused
+    # as unsupported rather than as missing, so "not yours to edit" and "no such
+    # window" stay two answers. A scenario naming this code and a runner
+    # catching `no_data_found` would score the conflation as a pass.
+    '0A000': 'feature_not_supported',
 }
 
 
@@ -267,7 +272,7 @@ def emit_bookings(scenario, target):
     return lines, counts
 
 
-def emit_audit_phases(scenario):
+def emit_audit_phases(scenario, subject='v_field'):
     """The audit phases the table names for this case, compared as a set.
 
     Read from the table rather than written into each runner: that was fine
@@ -281,7 +286,7 @@ def emit_audit_phases(scenario):
     return [
         "  SELECT array_agg(DISTINCT metadata->>'phase' ORDER BY metadata->>'phase')",
         "    INTO v_phases FROM public.audit_log",
-        f"   WHERE resource_id = v_field AND metadata->>'operation' = {lit(scenario['rpc'])};",
+        f"   WHERE resource_id = {subject} AND metadata->>'operation' = {lit(scenario['rpc'])};",
         f"  IF v_phases IS DISTINCT FROM {literal} THEN",
         # **No Python repr in a SQL string literal.** `sorted(expected)` renders
         # as ['after', 'before'] -- single quotes inside a single-quoted
@@ -460,6 +465,130 @@ def emit_field(scenario, index):
     return lines
 
 
+# **The one field on a blackout scenario that says which RPC it drives.** The
+# blackout half had no `rpc` key at all while the field half did, so adding a
+# second blackout RPC would have been read as another `create` case by both
+# runners -- silently, because neither had a switch to fall off. Every case now
+# names it and both runners refuse a name they do not know.
+KNOWN_BLACKOUT_RPCS = ('admin_create_field_blackout', 'admin_update_field_blackout')
+
+
+def blackout_column_check(scenario, column, expr, wanted):
+    """One `IS DISTINCT FROM` assertion on the edited row, with its message."""
+    return [
+        f"  IF v_bl.{column} IS DISTINCT FROM {expr} THEN",
+        f"    RAISE EXCEPTION '{scenario['id']}: expected {column}={wanted}, got %', v_bl.{column};",
+        "  END IF;",
+    ]
+
+
+def emit_blackout_update(scenario, loc, fld):
+    """An edit case: seed a window through the create RPC, then edit it.
+
+    **The subject is created through `admin_create_field_blackout`, not
+    INSERTed.** A row this file hand-built could carry a shape the production
+    path never produces, which is the defect LIVE-1 found certified by a passing
+    test. It also means the seed is judged by the create RPC's own gates, so a
+    scenario whose seed is invalid fails at the seed rather than being read as
+    an edit that refused.
+    """
+    s = scenario
+    seed = s['seed']
+    a = s['args']
+    lines = [
+        f"  -- {s['id']}: {s['why']}",
+        "  v_res := public.admin_create_field_blackout("
+        f"p_organization_id => v_org, p_location_id => {loc}, p_field_id => {fld}, "
+        f"p_blackout_from => {date_expr(seed['from'])}, p_blackout_until => {date_expr(seed['until'])}, "
+        f"p_start_minutes => {lit(seed.get('startMinutes'))}, "
+        f"p_end_minutes => {lit(seed.get('endMinutes'))}, "
+        f"p_reason => {lit(seed.get('reason'))}, p_note => {lit(seed.get('note'))});",
+        "  v_edit_id := (v_res->>'id')::uuid;",
+        "  IF v_edit_id IS NULL THEN",
+        f"    RAISE EXCEPTION '{s['id']}: the window this edit acts on was never seeded';",
+        "  END IF;",
+        "  SELECT count(*) INTO v_before_n FROM public.field_blackouts WHERE organization_id = v_org;",
+    ]
+    # Which id the edit is aimed at. `import` and `missing` are the two ways an
+    # id can fail to be an editable window, and they must NOT get one answer.
+    target = s.get('target', 'self')
+    if target == 'self':
+        lines.append("  v_target := v_edit_id;")
+    elif target == 'import':
+        lines.append("  v_target := v_import_window;")
+    elif target == 'missing':
+        lines.append("  v_target := '00000000-0000-0000-0000-0000000000aa'::uuid;")
+    else:
+        raise SystemExit(f"unknown target {target!r} in scenario {s['id']!r}")
+
+    call = (
+        "public.admin_update_field_blackout("
+        "p_organization_id => v_org, p_blackout_id => v_target, "
+        f"p_blackout_from => {date_expr(a['from'])}, p_blackout_until => {date_expr(a['until'])}, "
+        f"p_start_minutes => {lit(a.get('startMinutes'))}, "
+        f"p_end_minutes => {lit(a.get('endMinutes'))}, "
+        f"p_reason => {lit(a.get('reason'))}, p_note => {lit(a.get('note'))})"
+    )
+
+    if not s['expect']['ok']:
+        lines += [
+            "  BEGIN",
+            f"    v_res := {call};",
+            f"    RAISE EXCEPTION '{s['id']}: expected a refusal and the edit SUCCEEDED';",
+            f"  EXCEPTION WHEN {condition_for(s)} THEN NULL;",
+            "  END;",
+            # A refusal writes NOTHING -- checked on the SEEDED window, which is
+            # the row a half-applied edit would have damaged, and read back from
+            # the table rather than from the payload.
+            "  SELECT * INTO v_bl FROM public.field_blackouts WHERE id = v_edit_id;",
+        ]
+        lines += blackout_column_check(s, 'blackout_from', date_expr(seed['from']),
+                                       f"seed day {seed['from']}")
+        lines += blackout_column_check(s, 'blackout_until', date_expr(seed['until']),
+                                       f"seed day {seed['until']}")
+        lines += blackout_column_check(s, 'start_minutes', lit(seed.get('startMinutes')),
+                                       f"seed {seed.get('startMinutes')}")
+        lines += [
+            "  SELECT count(*) INTO v_n FROM public.field_blackouts WHERE organization_id = v_org;",
+            "  IF v_n <> v_before_n THEN",
+            f"    RAISE EXCEPTION '{s['id']}: a refused edit changed the window count (% -> %)',",
+            "      v_before_n, v_n;",
+            "  END IF;",
+            "  v_ran := v_ran + 1;",
+            "",
+        ]
+        return lines
+
+    e = s['expect']['after']
+    lines += [
+        f"  v_res := {call};",
+        # **The id is the whole migration.** A delete-and-re-add returns a new
+        # one; this must return the one that went in.
+        "  IF (v_res->>'id')::uuid IS DISTINCT FROM v_edit_id THEN",
+        f"    RAISE EXCEPTION '{s['id']}: the edit returned a different id (% vs %)',",
+        "      v_res->>'id', v_edit_id;",
+        "  END IF;",
+        # ... and the payload is never believed about the row count.
+        "  SELECT count(*) INTO v_n FROM public.field_blackouts WHERE organization_id = v_org;",
+        "  IF v_n <> v_before_n THEN",
+        f"    RAISE EXCEPTION '{s['id']}: the edit changed the window count (% -> %)',",
+        "      v_before_n, v_n;",
+        "  END IF;",
+        "  SELECT * INTO v_bl FROM public.field_blackouts WHERE id = v_edit_id;",
+    ]
+    lines += blackout_column_check(s, 'blackout_from', date_expr(e['from']), f"day {e['from']}")
+    lines += blackout_column_check(s, 'blackout_until', date_expr(e['until']), f"day {e['until']}")
+    lines += blackout_column_check(s, 'start_minutes', lit(e.get('startMinutes')),
+                                   str(e.get('startMinutes')))
+    lines += blackout_column_check(s, 'end_minutes', lit(e.get('endMinutes')),
+                                   str(e.get('endMinutes')))
+    lines += blackout_column_check(s, 'reason', lit(e.get('reason')), str(e.get('reason')))
+    lines += blackout_column_check(s, 'note', lit(e.get('note')), str(e.get('note')))
+    lines += emit_audit_phases(s, subject='v_edit_id')
+    lines += ["  v_ran := v_ran + 1;", ""]
+    return lines
+
+
 def emit_blackout(scenario, index):
     s = scenario
     scopes = {
@@ -471,6 +600,11 @@ def emit_blackout(scenario, index):
     if s['scope'] not in scopes:
         raise SystemExit(f"unknown scope {s['scope']!r} in scenario {s['id']!r}")
     loc, fld = scopes[s['scope']]
+    # Every switch over a union throws on the value it does not know.
+    if s.get('rpc') not in KNOWN_BLACKOUT_RPCS:
+        raise SystemExit(f"unknown blackout rpc {s.get('rpc')!r} in scenario {s['id']!r}")
+    if s['rpc'] == 'admin_update_field_blackout':
+        return emit_blackout_update(s, loc, fld)
     a = s['args']
     # **Named notation, not positional.** The first version passed these
     # positionally and put `p_reason` where `p_start_minutes` belongs, so every
@@ -545,6 +679,11 @@ def main():
         '  v_res jsonb; v_active boolean; v_eff date; v_n int; v_before_n int; v_ran int := 0;',
         '  v_team uuid; v_team_b uuid; v_season uuid; v_div uuid;',
         '  v_phases text[]; v_words text[]; v_seed_slot uuid;',
+        # 8.4 gap A: the edit cases need the window they edit, the id the call
+        # is aimed at, the row read back from the table, and one import-owned
+        # window to be refused on.
+        '  v_edit_id uuid; v_target uuid; v_import_window uuid;',
+        '  v_bl public.field_blackouts%ROWTYPE; v_profile uuid;',
         'BEGIN',
         "  INSERT INTO auth.users (id, email, raw_user_meta_data)",
         "  VALUES (v_user, 'scenarios@example.test', jsonb_build_object('password_length', 16))",
@@ -583,6 +722,21 @@ def main():
         '  -- One pitch for the blackout scenarios to scope to.',
         "  INSERT INTO public.fields (organization_id, location_id, name)",
         "  VALUES (v_org, v_loc, 'Blackout Pitch') RETURNING id INTO v_field;",
+        # **One import-owned window, so the frozen refusal has a real subject.**
+        # `field_blackout_windows` is the FROZEN table, written only by the
+        # import path, so this is INSERTed directly -- there is no RPC that
+        # would, which is the whole reason the edit path has to refuse it.
+        '  INSERT INTO public.field_availability_profiles',
+        '    (organization_id, season_label, field_id, location, field_name, available_from, available_until)',
+        "  VALUES (v_org, 'Scenario Season', v_field, 'Scenario Park', 'Blackout Pitch',",
+        '          current_date, current_date + 120) RETURNING id INTO v_profile;',
+        '  INSERT INTO public.field_blackout_windows',
+        '    (organization_id, profile_id, blackout_from, blackout_until, reason)',
+        "  VALUES (v_org, v_profile, current_date + 40, current_date + 50, 'blackout_months')",
+        '  RETURNING id INTO v_import_window;',
+        '  IF v_import_window IS NULL THEN',
+        "    RAISE EXCEPTION 'the import-owned window the frozen-refusal case needs was not seeded';",
+        '  END IF;',
         '',
     ]
     for i, scenario in enumerate(blackouts, start=1):
@@ -611,6 +765,25 @@ def main():
     def markers_for(scenario, half):
         """Every assertion message this scenario must have emitted."""
         sid = scenario['id']
+        # 8.4 gap A: the edit cases owe a different set from the create cases,
+        # and listing them here is what stops an edit case running with fewer
+        # assertions than its shape requires -- the `v_ran` hole this whole
+        # guard exists for, one RPC along.
+        if half == 'blackout' and scenario['rpc'] == 'admin_update_field_blackout':
+            if not scenario['expect']['ok']:
+                return [
+                    f'{sid}: expected a refusal and the edit SUCCEEDED',
+                    f'{sid}: expected blackout_from=',
+                    f'{sid}: a refused edit changed the window count',
+                ]
+            return [
+                f'{sid}: the edit returned a different id',
+                f'{sid}: the edit changed the window count',
+                f'{sid}: expected blackout_from=',
+                f'{sid}: expected start_minutes=',
+                f'{sid}: expected note=',
+                f'{sid}: audit phases were',
+            ]
         if not scenario['expect']['ok']:
             # A refusal case owes its "expected a refusal" assertion, and on the
             # blackout half also the "nothing was written" one.

@@ -28,6 +28,11 @@ const MIGRATION = readFileSync(
   path.join(REPO_ROOT, 'supabase/migrations/20260906000100_field_blackouts.sql'),
   'utf8'
 );
+/** 8.4 gap A. Its audit shape deliberately differs from its siblings'. */
+const EDIT_MIGRATION = readFileSync(
+  path.join(REPO_ROOT, 'supabase/migrations/20260910000000_admin_update_field_blackout.sql'),
+  'utf8'
+);
 
 const ORG = 'org-1';
 const setMockSession = (userId) =>
@@ -156,6 +161,107 @@ describe('blackout mock contract :: the migration is the source of the shape', (
     // migration text rather than against this file's own expectation.
     expect(MIGRATION).toContain("'phase', 'before'");
     expect(MIGRATION).toContain("'phase', 'after'");
+  });
+
+  it('records ONE audit entry for an edit, carrying before and after', async () => {
+    sessionStorage.clear();
+    delete window.__MOCK_DB__;
+    setMockSession('mock-admin-id');
+    const field = getMockData('fields').find((f) => String(f.organization_id) === ORG);
+    const { data: created } = await supabase.rpc('admin_create_field_blackout', {
+      p_organization_id: ORG,
+      p_location_id: null,
+      p_field_id: field.id,
+      p_blackout_from: '2026-08-01',
+      p_blackout_until: '2026-08-31',
+      p_start_minutes: 540,
+      p_end_minutes: 720,
+      p_reason: 'maintenance',
+      p_note: 'resurfacing',
+    });
+
+    const { data: edited, error } = await supabase.rpc('admin_update_field_blackout', {
+      p_organization_id: ORG,
+      p_blackout_id: created.id,
+      p_blackout_from: '2026-09-01',
+      p_blackout_until: '2026-09-02',
+      p_start_minutes: null,
+      p_end_minutes: null,
+      p_reason: 'weather',
+      p_note: null,
+    });
+    expect(error).toBeNull();
+    // The id survives, and the table still holds one row: a delete-and-re-add
+    // that reused the id would pass the first assertion and fail the second.
+    expect(edited.id).toBe(created.id);
+    expect(getMockData('field_blackouts')).toHaveLength(1);
+
+    const entries = getMockData('audit_log').filter(
+      (e) => e.metadata?.operation === 'admin_update_field_blackout'
+    );
+    expect(entries).toHaveLength(1);
+    expect(entries[0].metadata.phase).toBe('update');
+    // Both halves, and they are a DIFF: a row recording before === after is a
+    // record nobody can read.
+    expect(entries[0].metadata.before.blackout_from).toBe('2026-08-01');
+    expect(entries[0].metadata.after.blackout_from).toBe('2026-09-01');
+    // ... and NULL meant NULL, on the arm the E2E suite runs against.
+    expect(entries[0].metadata.after.start_minutes).toBeNull();
+    expect(entries[0].metadata.after.note).toBeNull();
+
+    // **The divergence is checked against the MIGRATION, not against this
+    // file's own opinion.** The header says one entry carrying both halves; if
+    // somebody "restores consistency" with the siblings, this fails on the side
+    // that changed rather than the two arms quietly agreeing on something new.
+    expect(EDIT_MIGRATION).toContain("'phase', 'update'");
+    expect(EDIT_MIGRATION).not.toContain("'phase', 'before'");
+    expect(EDIT_MIGRATION).not.toContain("'phase', 'after'");
+  });
+
+  it('refuses an import-owned id as frozen, and an unknown one as missing', async () => {
+    sessionStorage.clear();
+    delete window.__MOCK_DB__;
+    setMockSession('mock-admin-id');
+    await supabase.from('field_blackout_windows').insert({
+      id: 'contract-import-window',
+      organization_id: ORG,
+      profile_id: 'contract-import-profile',
+      blackout_from: '2026-10-01',
+      blackout_until: '2026-10-07',
+      reason: 'blackout_months',
+    });
+
+    const args = {
+      p_organization_id: ORG,
+      p_blackout_from: '2026-11-01',
+      p_blackout_until: '2026-11-02',
+      p_start_minutes: null,
+      p_end_minutes: null,
+      p_reason: 'closed',
+      p_note: null,
+    };
+    const frozen = await supabase.rpc('admin_update_field_blackout', {
+      ...args,
+      p_blackout_id: 'contract-import-window',
+    });
+    const missing = await supabase.rpc('admin_update_field_blackout', {
+      ...args,
+      p_blackout_id: 'no-such-window',
+    });
+    // **Two answers, not one.** Conflating them is what the 0A000 branch
+    // exists to stop, and asserting both is what makes the distinction real
+    // rather than a message nobody compares.
+    expect(frozen.error?.code).toBe('0A000');
+    expect(missing.error?.code).toBe('P0002');
+    expect(frozen.error.code).not.toBe(missing.error.code);
+    // Nothing was written to the frozen table either way.
+    const frozenRow = getMockData('field_blackout_windows').find(
+      (w) => w.id === 'contract-import-window'
+    );
+    expect(frozenRow.blackout_from).toBe('2026-10-01');
+    // ... and the migration really does raise the code this arm mirrors.
+    expect(EDIT_MIGRATION).toContain("ERRCODE = '0A000'");
+    expect(EDIT_MIGRATION).toContain("ERRCODE = 'P0002'");
   });
 });
 

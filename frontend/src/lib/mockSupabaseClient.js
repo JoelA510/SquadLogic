@@ -2533,6 +2533,7 @@ export const mockSupabase = {
         'admin_retire_field',
         'admin_unretire_field',
         'admin_create_field_blackout',
+        'admin_update_field_blackout',
         'admin_delete_field_blackout',
       ].includes(name)
     ) {
@@ -2781,6 +2782,127 @@ export const mockSupabase = {
         });
         saveDB(db);
         return { data: blackout, error: null };
+      }
+
+      if (name === 'admin_update_field_blackout') {
+        // **The mock's own literals, not the SQL's.** Both arms are compared
+        // with `tests/fixtures/fieldLifecycleScenarios.json`, never with each
+        // other, so the codes below are this arm's statement of the contract
+        // and a divergence has the table to fail against.
+        const existing = (db.field_blackouts || []).find(
+          (item) =>
+            String(item.id) === String(p.p_blackout_id) &&
+            String(item.organization_id) === String(orgId)
+        );
+        if (!existing) {
+          // **Frozen and absent are different answers.** Org-scoped first, so
+          // another organisation's window is "not found" rather than confirmed
+          // to exist -- the same ordering the SQL body uses.
+          const imported = (db.field_blackout_windows || []).some(
+            (item) =>
+              String(item.id) === String(p.p_blackout_id) &&
+              String(item.organization_id) === String(orgId)
+          );
+          if (imported) {
+            return {
+              data: null,
+              error: {
+                code: '0A000',
+                message:
+                  'this window came from a field-availability import and is owned by the frozen field_blackout_windows',
+              },
+            };
+          }
+          return {
+            data: null,
+            error: { code: 'P0002', message: 'Blackout not found in organization' },
+          };
+        }
+        // The table's CHECK constraints, mirrored -- the same set the create
+        // arm mirrors, because an edit is judged by exactly the constraints a
+        // create is. Scope is absent from both the parameters and the checks:
+        // this RPC cannot move a window to other ground.
+        //
+        // **Its own wording, deliberately unlike the create arm's.** Two arms
+        // sharing a message string is not "one contract": it makes every plant
+        // aimed at either of them ANCHOR-MISS -- which is exactly what the
+        // first version of this arm did to the pre-existing
+        // `blackout refusals lose their SQLSTATE` plant. What the two arms must
+        // share is the CODE, and that is what the scenario table adjudicates.
+        if (!p.p_blackout_from || !p.p_blackout_until) {
+          return {
+            data: null,
+            error: { code: '22023', message: 'an edited window still needs both of its dates' },
+          };
+        }
+        const EDIT_REASONS = ['maintenance', 'weather', 'event', 'permit', 'closed', 'other'];
+        if (p.p_reason !== null && p.p_reason !== undefined && !EDIT_REASONS.includes(p.p_reason)) {
+          return {
+            data: null,
+            error: {
+              code: '23514',
+              message: `an edited reason must be one of ${EDIT_REASONS.join(', ')}`,
+            },
+          };
+        }
+        if (String(p.p_blackout_until) < String(p.p_blackout_from)) {
+          return {
+            data: null,
+            error: { code: '23514', message: 'an edit must not put the last day before the first' },
+          };
+        }
+        const editTimes = [p.p_start_minutes, p.p_end_minutes].filter(
+          (value) => value !== null && value !== undefined
+        ).length;
+        if (editTimes === 1) {
+          return {
+            data: null,
+            error: { code: '23514', message: 'an edited window needs both times or neither' },
+          };
+        }
+        if (
+          editTimes === 2 &&
+          !(
+            p.p_start_minutes >= 0 &&
+            p.p_start_minutes <= 1440 &&
+            p.p_end_minutes >= 0 &&
+            p.p_end_minutes <= 1440 &&
+            p.p_end_minutes > p.p_start_minutes
+          )
+        ) {
+          return {
+            data: null,
+            error: { code: '23514', message: 'edited times must be within 0..1440 and ordered' },
+          };
+        }
+        const previous = { ...existing };
+        // **In place, so the id survives** -- the whole point of the RPC. This
+        // is also why there is no table write to tombstone: nothing is removed.
+        // **And NULL means NULL.** Writing `p.p_x ?? existing.x` here would
+        // make the mock unable to express "all day" or "no note" while the
+        // database can, which is the divergence the scenario table would then
+        // be the only thing standing between.
+        Object.assign(existing, {
+          blackout_from: p.p_blackout_from,
+          blackout_until: p.p_blackout_until,
+          start_minutes: editTimes === 2 ? p.p_start_minutes : null,
+          end_minutes: editTimes === 2 ? p.p_end_minutes : null,
+          reason: p.p_reason || 'other',
+          // NULL is NULL here too; `?? existing.note` would be the partial
+          // update the SQL body's header argues against.
+          note: p.p_note ?? null,
+          updated_at: new Date().toISOString(),
+        });
+        // ONE entry carrying both halves, diverging from the create/delete
+        // pair for the reason the migration header gives: an update has both.
+        audit('field_blackout', existing.id, 'updated', {
+          operation: 'admin_update_field_blackout',
+          phase: 'update',
+          before: previous,
+          after: { ...existing },
+        });
+        saveDB(db);
+        return { data: { ...existing }, error: null };
       }
 
       if (name === 'admin_delete_field_blackout') {

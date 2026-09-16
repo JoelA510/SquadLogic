@@ -73,11 +73,15 @@ export const BLACKOUT_DB_REASON = Object.freeze([
 /**
  * Which table a `field_closures` row came from.
  *
- * `field_blackouts` rows are admin-authored and removable through
+ * `field_blackouts` rows are admin-authored: editable through
+ * `admin_update_field_blackout` and removable through
  * `admin_delete_field_blackout`. `field_blackout_windows` rows belong to the
- * import path and that table is FROZEN, so the UI must not offer to delete one:
- * there is no RPC that would, and inventing a direct delete would write the
- * table the freeze exists to protect.
+ * import path and that table is FROZEN, so the UI must not offer to edit or
+ * delete one: there is no RPC that would, and inventing a direct write would
+ * touch the table the freeze exists to protect. `admin_update_field_blackout`
+ * refuses such an id with `0A000` naming the table, rather than with the
+ * `P0002` an unknown id gets -- "not yours to edit" and "no such window" are
+ * different answers.
  *
  * @readonly
  */

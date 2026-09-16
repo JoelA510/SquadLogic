@@ -48,6 +48,15 @@ const SCAN_ROOTS = Object.freeze(['packages', 'frontend', 'supabase', 'scripts',
 // added the writer. An extension list is a filter on the universe, and a
 // universe that cannot contain the new writer is the set-derived-from-the-thing
 // -being-checked defect wearing different clothes.
+//
+// **`.py` is here for the same reason, and the same way.** The scenario
+// generator `scripts/dbharness/scenarios.py` emits an `INSERT INTO
+// public.field_blackout_windows` so 8.4 gap A's frozen-refusal case has a real
+// window to be refused on -- and the walk could not see it, so "who may write
+// this table is a checked list, scanned out of the source tree" was false in
+// the same PR that added the writer. The second time exactly that happened, and
+// the `.sh` entry above is the first. The `#` rule that `.sh` needed already
+// covers Python's line comments.
 const SCANNED_EXTENSIONS = Object.freeze([
   '.js',
   '.jsx',
@@ -57,6 +66,7 @@ const SCANNED_EXTENSIONS = Object.freeze([
   '.cjs',
   '.sql',
   '.sh',
+  '.py',
 ]);
 
 const SKIPPED_DIRECTORIES = Object.freeze([
@@ -268,18 +278,37 @@ describe('blackout freeze :: who may write each table is a checked list', () => 
    * field_blackout_windows is owned SOLELY by the import path, and every entry
    * below either is that path or is a script that seeds it to check it.
    */
+  //
+  // **Four arrive with 8.4 gap A, and all four SEED a window to be refused on.**
+  // `admin_update_field_blackout` must refuse an id belonging to the frozen
+  // table by name rather than as "not found", and an assertion that a refusal
+  // happened is worth nothing unless there was a real window to refuse. Its
+  // smoke, its pgTAP twin (inside a ROLLBACK), the scenario generator and the
+  // mock-contract suite each seed exactly one or two. The fifth is the shared
+  // scenario runner, for the same case on the mock arm.
+  //
+  // **None of them is a producer, and the new RPC is not one either**: it takes
+  // a `field_blackouts` id and its only interaction with the frozen table is a
+  // `SELECT 1 ... WHERE id = ...` that decides which refusal to raise. No code
+  // path a user can reach gained the ability to create or change a window in
+  // this PR, which is the claim the freeze makes.
   const EXPECTED_FROZEN_WRITERS = Object.freeze([
     'docs/sql/20260906000100_smoke.sql',
     'docs/sql/20260908000000_revert.sql',
     'docs/sql/20260909000000_smoke.sql',
+    'docs/sql/20260910000000_smoke.sql',
     'frontend/src/lib/mockSupabaseClient.js',
     'scripts/dbharness/run.sh',
+    'scripts/dbharness/scenarios.py',
     'supabase/migrations/20260522120000_field_availability_phase1.sql',
     'supabase/migrations/20260522153000_field_availability_finalize_hardening.sql',
     'supabase/migrations/20260602000000_field_availability_finalize_applied_payload_fix.sql',
     'supabase/migrations/20260908000000_field_availability_profile_field_resolution.sql',
+    'supabase/tests/admin_update_field_blackout.sql',
     'supabase/tests/field_import_rollback_booking_guard.sql',
+    'tests/fieldBlackoutMockContract.test.js',
     'tests/fieldDeleteGuard.test.js',
+    'tests/fieldLifecycleScenarios.test.js',
   ]);
 
   it('holds field_blackout_windows to the import path, in both directions', () => {
@@ -298,10 +327,21 @@ describe('blackout freeze :: who may write each table is a checked list', () => 
     // excepted, like the smoke: a test that writes the table is a writer by the
     // matcher's definition, and the freeze wants every one of them visible. It
     // is not a producer -- the whole file runs inside a ROLLBACK.
+    //
+    // 8.4 gap A adds three: the migration that adds
+    // `admin_update_field_blackout` (an `UPDATE`, which is what an edit in
+    // place IS), its pgTAP suite, and the local harness, which seeds two
+    // admin-authored windows so 20260910000000's revert has something to count
+    // rather than reporting a reassuring zero. Its smoke is NOT here: it goes
+    // through the create RPC rather than writing the table, which is the shape
+    // this PR's own rule asks of a test.
     expect(writersOf('field_blackouts')).toEqual([
       'docs/sql/20260906000100_smoke.sql',
       'frontend/src/lib/mockSupabaseClient.js',
+      'scripts/dbharness/run.sh',
       'supabase/migrations/20260906000100_field_blackouts.sql',
+      'supabase/migrations/20260910000000_admin_update_field_blackout.sql',
+      'supabase/tests/admin_update_field_blackout.sql',
       'supabase/tests/rls_field_blackouts.sql',
     ]);
   });
@@ -313,10 +353,18 @@ describe('blackout freeze :: who may write each table is a checked list', () => 
     // the single reader unions. Exact, so a genuine third writer of both -- the
     // thing the freeze exists to prevent -- fails here.
     const frozen = new Set(writersOf('field_blackout_windows'));
+    //
+    // 8.4 gap A adds two more, and neither is a producer either: the local
+    // harness seeds both tables so 20260910000000's revert has all three of its
+    // costs to count, and that revert's pgTAP suite seeds both so it can prove
+    // the two refusals stay two answers. A genuine third PRODUCER of both --
+    // the thing the freeze exists to prevent -- still fails here.
     const shared = writersOf('field_blackouts').filter((file) => frozen.has(file));
     expect(shared).toEqual([
       'docs/sql/20260906000100_smoke.sql',
       'frontend/src/lib/mockSupabaseClient.js',
+      'scripts/dbharness/run.sh',
+      'supabase/tests/admin_update_field_blackout.sql',
     ]);
   });
 

@@ -16,6 +16,9 @@ M4="$REPO/supabase/migrations/20260908000000_field_availability_profile_field_re
 R4="$REPO/docs/sql/20260908000000_revert.sql"
 M5="$REPO/supabase/migrations/20260909000000_rollback_field_import_booking_guard.sql"
 R5="$REPO/docs/sql/20260909000000_revert.sql"
+# 8.4 gap A.
+M6="$REPO/supabase/migrations/20260910000000_admin_update_field_blackout.sql"
+R6="$REPO/docs/sql/20260910000000_revert.sql"
 S5="$REPO/docs/sql/20260909000000_smoke.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # What each plant scored, by label, for the census at the bottom of this file.
@@ -1931,6 +1934,86 @@ plant "M5 the LEAVING report counts the wrong set" "$M5" \
   "20260909000000: re-applied onto a seeded database and the LEAVING warning did not name the orphan it found"
 
 # ---------------------------------------------------------------------------
+# 8.4 gap A -- admin_update_field_blackout
+# ---------------------------------------------------------------------------
+#
+# **The edit path's one lethal defect is a partial update**, so it is planted
+# first: `COALESCE(p_x, x)` reads NULL as "leave unchanged", which makes "this
+# window is now closed all day" and "the note is gone" inexpressible while the
+# operator is told both happened. Every other assertion in the file passes.
+plant "M6 the edit reads NULL as leave-unchanged" "$M6" \
+  "           start_minutes = p_start_minutes,
+           end_minutes = p_end_minutes," \
+  "           start_minutes = COALESCE(p_start_minutes, start_minutes),
+           end_minutes = COALESCE(p_end_minutes, end_minutes)," \
+  "smoke 20260910000000"
+
+# The audit divergence is deliberate and therefore has to be pinned as one: a
+# body "restored to consistency" with the create/delete siblings stops writing
+# the single entry the whole migration argues for.
+plant "M6 the edit audits with the siblings phase pair" "$M6" \
+  "'operation', 'admin_update_field_blackout', 'phase', 'update'," \
+  "'operation', 'admin_update_field_blackout', 'phase', 'before'," \
+  "smoke 20260910000000"
+
+# Frozen and absent collapsed into one answer -- the conflation the 0A000 branch
+# exists to remove, and the one `admin_delete_field_blackout` still has.
+plant "M6 the import-owned refusal is folded into not-found" "$M6" \
+  "                USING ERRCODE = '0A000';" \
+  "                USING ERRCODE = 'P0002';" \
+  "smoke 20260910000000"
+
+# **A defect the smoke structurally cannot see**, so the scenario table has to.
+# The smoke edits a FIELD-scoped window; only the shared table edits a
+# location-scoped one, and this refuses exactly those. The green check names the
+# smoke, so a run where the smoke caught it instead would score BORROWED rather
+# than passing for the wrong reason.
+plant "M6 the edit refuses a location-scoped window" "$M6" \
+  "    IF NOT FOUND THEN" \
+  "    IF v_before.location_id IS NOT NULL THEN
+        RAISE EXCEPTION 'location-scoped windows cannot be edited'
+            USING ERRCODE = 'P0002';
+    END IF;
+    IF NOT FOUND THEN" \
+  "scenario table" \
+  "PASS smoke 20260910000000"
+
+# The revert names three costs and counts all three. One plant per count, each
+# aimed at its own claim, because a warning naming one cost of three is what
+# LIVE-2's round 1 found.
+plant "R6 revert counts no admin-authored windows" "$R6" \
+  "SELECT count(*) INTO v_admin FROM public.field_blackouts;" \
+  "SELECT count(*) INTO v_admin FROM public.field_blackouts WHERE false;" \
+  "revert 20260910000000: planted 2 admin-authored blackouts"
+
+plant "R6 revert counts the wrong audit operation" "$R6" \
+  "   WHERE metadata->>'operation' = 'admin_update_field_blackout';" \
+  "   WHERE metadata->>'operation' = 'admin_create_field_blackout';" \
+  "revert 20260910000000: planted an admin_update_field_blackout audit row"
+
+plant "R6 revert counts no frozen import windows" "$R6" \
+  "SELECT count(*) INTO v_import FROM public.field_blackout_windows;" \
+  "SELECT count(*) INTO v_import FROM public.field_blackout_windows WHERE false;" \
+  "revert 20260910000000: planted 3 import-owned windows"
+
+# **A DROP whose argument list drifted from the CREATE's is a silent no-op**,
+# which is exactly how docs/sql/reverts/20260504060000 came to report success
+# over a function it had not removed.
+plant "R6 revert drops a signature that does not exist" "$R6" \
+  "DROP FUNCTION IF EXISTS public.admin_update_field_blackout(uuid, uuid, date, date, integer, integer, text, text);" \
+  "DROP FUNCTION IF EXISTS public.admin_update_field_blackout(uuid, uuid, date, date);" \
+  "revert 20260910000000: admin_update_field_blackout after the revert reads SURVIVES"
+
+# ... and the other direction: a revert that takes a sibling with it destroys
+# capability the operator never asked to lose, and every other check in this
+# stage is about the new function and would not notice.
+plant "R6 revert takes a blackout sibling with it" "$R6" \
+  "DROP FUNCTION IF EXISTS public.admin_update_field_blackout(uuid, uuid, date, date, integer, integer, text, text);" \
+  "DROP FUNCTION IF EXISTS public.admin_update_field_blackout(uuid, uuid, date, date, integer, integer, text, text);
+DROP FUNCTION IF EXISTS public.admin_delete_field_blackout(uuid, uuid);" \
+  "revert 20260910000000: the create/delete siblings read 1 after the revert"
+
+# ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
 #
@@ -1974,6 +2057,11 @@ declare -A CLAIM_PROVER=(
   ["(checked) exactly one public.rollback_field_import_job survives the revert, and it no longer calls the producer"]="R5 revert drops the rollback instead of restoring it|R5 revert leaves the rollback on the producer|R5 revert restores the rollback under a second signature"
   ["(checked) field_availability_profiles.field_id is back to ON DELETE SET NULL"]="R5 revert leaves the FK cascading"
   ["(checked) exactly one public.admin_delete_field survives the revert, and it no longer calls the dropped scenario helpers"]="R5 revert drops admin_delete_field instead of restoring it|R5 revert restores a body that still calls the dropped helpers"
+  ["(checked) the revert counted the admin-authored windows that go back to losing their id on an edit"]="R6 revert counts no admin-authored windows"
+  ["(checked) the revert counted the edit audit rows whose operation stops having a writer"]="R6 revert counts the wrong audit operation"
+  ["(checked) the revert counted the frozen import windows that lose their server-side refusal"]="R6 revert counts no frozen import windows"
+  ["(checked) no overload of public.admin_update_field_blackout survives the revert"]="R6 revert drops a signature that does not exist"
+  ["(checked) both blackout siblings survive the revert untouched"]="R6 revert takes a blackout sibling with it"
   ["(checked) the rollback removed every overload of all four admin facility RPCs"]="EMERG the rollback and its own guard drift together"
   ["(checked) it left public.field_bookings standing, which admin_retire_field still calls"]="EMERG rollback takes the producer another RPC still calls"
 )

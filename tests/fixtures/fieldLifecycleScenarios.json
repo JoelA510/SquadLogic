@@ -835,6 +835,7 @@
     {
       "id": "blackout-location-scoped",
       "why": "A site-wide closure.",
+      "rpc": "admin_create_field_blackout",
       "scope": "location",
       "args": {
         "from": 10,
@@ -848,6 +849,7 @@
     {
       "id": "blackout-field-scoped",
       "why": "A closure on one pitch.",
+      "rpc": "admin_create_field_blackout",
       "scope": "field",
       "args": {
         "from": 10,
@@ -861,6 +863,7 @@
     {
       "id": "blackout-timed",
       "why": "Minutes past midnight, both bounds present.",
+      "rpc": "admin_create_field_blackout",
       "scope": "field",
       "args": {
         "from": 10,
@@ -876,6 +879,7 @@
     {
       "id": "blackout-both-scopes",
       "why": "num_nonnulls(location_id, field_id) = 1: exactly one, never both.",
+      "rpc": "admin_create_field_blackout",
       "scope": "both",
       "args": {
         "from": 10,
@@ -890,6 +894,7 @@
     {
       "id": "blackout-no-scope",
       "why": "... and never neither.",
+      "rpc": "admin_create_field_blackout",
       "scope": "neither",
       "args": {
         "from": 10,
@@ -904,6 +909,7 @@
     {
       "id": "blackout-undeclared-reason",
       "why": "The reason is a closed enum, so free text cannot arrive through it.",
+      "rpc": "admin_create_field_blackout",
       "scope": "field",
       "args": {
         "from": 10,
@@ -918,6 +924,7 @@
     {
       "id": "blackout-inverted-dates",
       "why": "blackout_until >= blackout_from.",
+      "rpc": "admin_create_field_blackout",
       "scope": "field",
       "args": {
         "from": 20,
@@ -932,6 +939,7 @@
     {
       "id": "blackout-half-a-time",
       "why": "Both minutes or neither; one alone is a window with no other end.",
+      "rpc": "admin_create_field_blackout",
       "scope": "field",
       "args": {
         "from": 10,
@@ -947,6 +955,7 @@
     {
       "id": "blackout-inverted-times",
       "why": "end_minutes > start_minutes.",
+      "rpc": "admin_create_field_blackout",
       "scope": "field",
       "args": {
         "from": 10,
@@ -959,6 +968,145 @@
         "ok": false,
         "sqlstate": "23514"
       }
+    },
+    {
+      "id": "blackout-update-dates-and-clears-times",
+      "why": "The edit moves the range and turns a timed window into an all-day one; NULL must mean NULL, not leave-unchanged.",
+      "rpc": "admin_update_field_blackout",
+      "scope": "field",
+      "seed": {
+        "from": 10,
+        "until": 20,
+        "reason": "maintenance",
+        "startMinutes": 540,
+        "endMinutes": 720,
+        "note": "resurfacing"
+      },
+      "args": {
+        "from": 30,
+        "until": 31,
+        "reason": "weather",
+        "startMinutes": null,
+        "endMinutes": null,
+        "note": null
+      },
+      "expect": {
+        "ok": true,
+        "auditPhases": ["update"],
+        "after": {
+          "from": 30,
+          "until": 31,
+          "reason": "weather",
+          "startMinutes": null,
+          "endMinutes": null,
+          "note": null
+        }
+      }
+    },
+    {
+      "id": "blackout-update-sets-times",
+      "why": "The other direction: an all-day window becomes a timed one, so neither direction is the only one exercised.",
+      "rpc": "admin_update_field_blackout",
+      "scope": "location",
+      "seed": {
+        "from": 10,
+        "until": 20,
+        "reason": "closed",
+        "startMinutes": null,
+        "endMinutes": null,
+        "note": null
+      },
+      "args": {
+        "from": 10,
+        "until": 10,
+        "reason": "event",
+        "startMinutes": 1020,
+        "endMinutes": 1140,
+        "note": "lights out"
+      },
+      "expect": {
+        "ok": true,
+        "auditPhases": ["update"],
+        "after": {
+          "from": 10,
+          "until": 10,
+          "reason": "event",
+          "startMinutes": 1020,
+          "endMinutes": 1140,
+          "note": "lights out"
+        }
+      }
+    },
+    {
+      "id": "blackout-update-inverted-times-refused",
+      "why": "An edit is judged by the same CHECK constraints a create is; a refused edit must leave the window exactly as it was.",
+      "rpc": "admin_update_field_blackout",
+      "scope": "field",
+      "seed": {
+        "from": 10,
+        "until": 20,
+        "reason": "maintenance",
+        "startMinutes": 540,
+        "endMinutes": 720,
+        "note": null
+      },
+      "args": {
+        "from": 10,
+        "until": 10,
+        "reason": "maintenance",
+        "startMinutes": 720,
+        "endMinutes": 540,
+        "note": null
+      },
+      "expect": { "ok": false, "sqlstate": "23514" }
+    },
+    {
+      "id": "blackout-update-import-owned-refused",
+      "why": "field_blackout_windows is FROZEN, so an id belonging to it is refused as frozen -- 0A000 -- and not as missing.",
+      "rpc": "admin_update_field_blackout",
+      "scope": "field",
+      "target": "import",
+      "seed": {
+        "from": 10,
+        "until": 20,
+        "reason": "maintenance",
+        "startMinutes": null,
+        "endMinutes": null,
+        "note": null
+      },
+      "args": {
+        "from": 30,
+        "until": 31,
+        "reason": "weather",
+        "startMinutes": null,
+        "endMinutes": null,
+        "note": null
+      },
+      "expect": { "ok": false, "sqlstate": "0A000" }
+    },
+    {
+      "id": "blackout-update-unknown-id-refused",
+      "why": "An id that is neither admin-authored nor import-owned is NOT FOUND, so frozen and absent stay two answers.",
+      "rpc": "admin_update_field_blackout",
+      "scope": "field",
+      "target": "missing",
+      "seed": {
+        "from": 10,
+        "until": 20,
+        "reason": "maintenance",
+        "startMinutes": null,
+        "endMinutes": null,
+        "note": null
+      },
+      "args": {
+        "from": 30,
+        "until": 31,
+        "reason": "weather",
+        "startMinutes": null,
+        "endMinutes": null,
+        "note": null
+      },
+      "expect": { "ok": false, "sqlstate": "P0002" }
     }
   ]
 }

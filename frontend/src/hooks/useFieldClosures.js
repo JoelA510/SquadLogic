@@ -22,16 +22,18 @@ import { logger } from '../lib/logger.js';
  *
  * **Writes only through the RPCs.** `field_blackouts` has a SELECT policy for
  * members and no write policy at all, so a direct insert is refused by RLS.
- * `admin_create_field_blackout` and `admin_delete_field_blackout` are
- * SECURITY DEFINER, gate on `is_org_admin`, re-check that the scope belongs to
- * the caller's organisation, and audit before and after.
+ * `admin_create_field_blackout`, `admin_update_field_blackout` and
+ * `admin_delete_field_blackout` are SECURITY DEFINER, gate on `is_org_admin`,
+ * re-check that the scope belongs to the caller's organisation, and audit.
  *
- * **An import-derived closure is not deletable, and this hook says so by
- * refusing rather than by hiding the button.** `field_blackout_windows` is
- * FROZEN: no RPC removes a row from it, and writing it directly would be the
- * thing the freeze exists to stop. A caller asking for one gets an error naming
- * the source, which is a better answer than a button that silently does
- * nothing.
+ * **An import-derived closure is neither editable nor deletable, and this hook
+ * says so by refusing rather than by hiding the button.**
+ * `field_blackout_windows` is FROZEN: no RPC writes or removes a row in it, and
+ * writing it directly would be the thing the freeze exists to stop. A caller
+ * asking for one gets an error naming the source, which is a better answer than
+ * a button that silently does nothing. `admin_update_field_blackout` refuses it
+ * server-side too, with its own `0A000` -- the guard here saves a round trip
+ * and is not the only thing standing between the freeze and a caller.
  */
 
 /** The date/time half of a blackout, validated before the RPC ever sees it. */
@@ -190,6 +192,64 @@ export function useFieldClosures() {
   );
 
   /**
+   * Edit one admin-authored blackout IN PLACE.
+   *
+   * **The whole editable shape goes every time.** `admin_update_field_blackout`
+   * reads NULL as NULL rather than as "leave unchanged", because a partial
+   * update cannot express "this is now an all-day closure" or "the note is
+   * gone". The same {@link BlackoutDraftSchema} validates it, so an edit and a
+   * create are judged by one set of rules rather than two that can drift.
+   *
+   * **Scope is not sent and cannot be changed.** The RPC has no parameter for
+   * it: moving a closure to other ground is a different closure, not an edit of
+   * this one. The draft still carries `scope`/`scopeId` because the schema is
+   * shared and the editor displays them; they are read here only to refuse an
+   * edit that tries to move the window, rather than being quietly dropped.
+   *
+   * @param {{ id: string, source: string, closesFieldId: string|null, closesLocationId: string|null }} closure
+   * @param {unknown} draft - validated against {@link BlackoutDraftSchema}
+   */
+  const updateBlackout = useCallback(
+    async (closure, draft) => {
+      if (!currentOrganization?.id) throw new Error('No active organization');
+      if (closure?.source !== CLOSURE_SOURCE.ADMIN) {
+        throw new Error(
+          'This window came from a field-availability import and is not editable here. ' +
+            'Roll the import back or re-import to change it.'
+        );
+      }
+      const parsed = BlackoutDraftSchema.parse(draft);
+      const currentScopeId =
+        parsed.scope === 'field' ? closure.closesFieldId : closure.closesLocationId;
+      if (String(parsed.scopeId) !== String(currentScopeId ?? '')) {
+        throw new Error(
+          'A blackout cannot be moved to different ground. Remove this window and add one on the ' +
+            'new ground instead — the closure that was recorded here really did apply here.'
+        );
+      }
+      const { data, error: rpcError } = await supabase.rpc('admin_update_field_blackout', {
+        p_organization_id: currentOrganization.id,
+        p_blackout_id: closure.id,
+        p_blackout_from: parsed.blackoutFrom,
+        p_blackout_until: parsed.blackoutUntil,
+        p_start_minutes: parsed.allDay ? null : parsed.startMinutes,
+        p_end_minutes: parsed.allDay ? null : parsed.endMinutes,
+        p_reason: parsed.reason,
+        p_note: parsed.note,
+      });
+      if (rpcError) throw rpcError;
+      // A payload we cannot read is an error, not a success -- the same reading
+      // `createBlackout` takes, and for the same reason.
+      if (!data || typeof data !== 'object' || !data.id) {
+        throw new Error('admin_update_field_blackout returned no readable result');
+      }
+      await refresh();
+      return data;
+    },
+    [currentOrganization?.id, refresh]
+  );
+
+  /**
    * Remove one admin-authored blackout.
    *
    * @param {{ id: string, source: string }} closure
@@ -217,5 +277,5 @@ export function useFieldClosures() {
     [currentOrganization?.id, refresh]
   );
 
-  return { closures, loading, error, refresh, createBlackout, removeBlackout };
+  return { closures, loading, error, refresh, createBlackout, updateBlackout, removeBlackout };
 }

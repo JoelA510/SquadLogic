@@ -686,8 +686,16 @@ const getDB = () => {
 
 // Tables without a single `id` column get a composite tombstone key here;
 // everything else keys on String(row.id).
+//
+// **A key is only useful if `getDB` can recompute it from the re-merged row.**
+// `team_players` has no `id`, so `String(row.id)` would key every one of its
+// rows to the literal 'undefined' -- one tombstone that matches the whole
+// table. The composite below is the same pair `mergeSource` treats as one row.
 const TOMBSTONE_KEY_FNS = {
   organization_members: (row) => `${row.organization_id}:${row.profile_id}`,
+  team_players: (row) => `${row.team_id}:${row.player_id}`,
+  profile_players: (row) => `${row.profile_id}:${row.player_id}`,
+  player_buddies: (row) => `${row.player_id}:${row.buddy_player_id}`,
 };
 const tombstoneKey = (table, row) =>
   TOMBSTONE_KEY_FNS[table] ? TOMBSTONE_KEY_FNS[table](row) : String(row.id);
@@ -697,7 +705,67 @@ const tombstoneKey = (table, row) =>
 const markMockDeleted = (db, table, keys) => {
   db.__deleted__ = db.__deleted__ || {};
   const existing = db.__deleted__[table] || [];
-  db.__deleted__[table] = Array.from(new Set([...existing, ...keys.map(String)]));
+  // **`String(undefined)` is a key, and it matches every keyless row.** A row
+  // with no `id` and no `TOMBSTONE_KEY_FNS` entry keys to the literal
+  // `'undefined'`, and one such tombstone would make `getDB()` drop the whole
+  // table's keyless rows on the next read.
+  //
+  // **Stated plainly: no test can currently make this fail.**
+  // `liftMockTombstonesForPresentRows` clears an `'undefined'` key on the same
+  // save, because such a row always resurrects and is therefore always
+  // "present" again -- so the bad key never survives to be observed. This is a
+  // guard on the producer, not an enforced invariant, and it is here because
+  // the lift is the only thing standing between one keyless delete and an
+  // emptied table.
+  const usable = keys
+    .map(String)
+    .filter((key) => key !== '' && key !== 'undefined' && key !== 'null');
+  db.__deleted__[table] = Array.from(new Set([...existing, ...usable]));
+};
+
+/**
+ * Is this row's key already tombstoned?
+ *
+ * **A seeding convenience must not undo an administrative action.** The
+ * sign-in block below creates an `organization_members` row for any profile
+ * that has none, which is right for a user who was never a member and wrong
+ * for one an admin removed -- and it cannot tell the two apart from the rows
+ * alone. The tombstone is what tells them apart.
+ *
+ * @param {Record<string, any>} db
+ * @param {string} table
+ * @param {string} key - a tombstone key, per `tombstoneKey`
+ * @returns {boolean}
+ */
+const isMockDeleted = (db, table, key) =>
+  Array.isArray(db.__deleted__?.[table]) && db.__deleted__[table].includes(String(key));
+
+/**
+ * Drop the tombstone for any row that is BACK in the table, on every save.
+ *
+ * **A tombstone outlives the row it was written for, and composite keys
+ * recur.** `team_players` is keyed `team_id:player_id`, so moving player-1 off
+ * team A and back onto it re-creates the exact key a previous delete
+ * tombstoned -- and `getDB()` would then filter out a row that is genuinely
+ * there, turning a fixed resurrection into a silent disappearance. The
+ * id-keyed tables hid this because `mockId()` never repeats.
+ *
+ * Presence is read from `db[table]` AFTER the caller has filtered it, so the
+ * rows a delete just removed are absent and keep their tombstones; only a row
+ * that was written back survives this. One producer, in `saveDB`, rather than
+ * a `clearMockDeleted` call to remember beside every insert.
+ *
+ * @param {Record<string, any>} db - mutated in place
+ */
+const liftMockTombstonesForPresentRows = (db) => {
+  const tombstones = db.__deleted__;
+  if (!tombstones || typeof tombstones !== 'object') return;
+  for (const [table, keys] of Object.entries(tombstones)) {
+    if (!Array.isArray(keys) || keys.length === 0) continue;
+    const present = new Set((db[table] || []).map((row) => tombstoneKey(table, row)));
+    const kept = keys.filter((key) => !present.has(String(key)));
+    if (kept.length !== keys.length) tombstones[table] = kept;
+  }
 };
 
 /**
@@ -1064,10 +1132,43 @@ const mockPruneEmptyScenarios = (db, orgId, scenarioIds, destroy) => {
 };
 
 const saveDB = (db) => {
+  liftMockTombstonesForPresentRows(db);
   if (typeof window !== 'undefined') {
     window.__MOCK_DB__ = db;
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
   }
+};
+
+/**
+ * Drop every subunit of one field: tombstoned, then announced.
+ *
+ * **Three call sites filtered `db.field_subunits` and fired a DELETE event
+ * without recording a tombstone** -- this sync helper, the `fields` insert
+ * path and the `fields` update path -- so the mock announced a deletion it
+ * could not make durable. `field_subunits` is ON DELETE CASCADE from `fields`
+ * and `admin_delete_field` already tombstones it (`drop('field_subunits')`),
+ * which is the contract the halves paths were missing. One producer for all
+ * three rather than a fourth spelling of the same three lines.
+ *
+ * @param {Record<string, any>} db - mutated in place
+ * @param {string} fieldId
+ */
+const dropMockFieldSubunits = (db, fieldId) => {
+  const doomed = (db.field_subunits || []).filter(
+    (subunit) => String(subunit.field_id) === String(fieldId)
+  );
+  if (doomed.length === 0) return;
+  markMockDeleted(
+    db,
+    'field_subunits',
+    doomed.map((subunit) => tombstoneKey('field_subunits', subunit))
+  );
+  db.field_subunits = (db.field_subunits || []).filter(
+    (subunit) => String(subunit.field_id) !== String(fieldId)
+  );
+  doomed.forEach((subunit) =>
+    triggerRealtimeEvent('field_subunits', 'DELETE', { new: null, old: subunit })
+  );
 };
 
 const syncMockFieldSubunits = (db, field, supportsHalves) => {
@@ -1093,17 +1194,18 @@ const syncMockFieldSubunits = (db, field, supportsHalves) => {
     return;
   }
 
-  db.field_subunits = db.field_subunits.filter((subunit) => {
-    if (String(subunit.field_id) !== String(field.id)) return true;
-
-    triggerRealtimeEvent('field_subunits', 'DELETE', { new: null, old: subunit });
-    return false;
-  });
+  dropMockFieldSubunits(db, field.id);
 };
 
 // Initial state load
 if (typeof window !== 'undefined') {
   window.__MOCK_DB__ = getDB();
+  // **The sanctioned page-side writer.** The E2E steps seed by reading the db
+  // out of the page, mutating it and writing it back; done by hand that
+  // assignment skips `saveDB`, and with it the tombstone lift. There is no way
+  // to `import` from a `page.evaluate`, so the producer is published here
+  // instead of copied into every step file.
+  window.__saveMockDB__ = saveDB;
 }
 
 /**
@@ -1503,17 +1605,37 @@ export const mockSupabase = {
           });
         }
 
-        if (!typedDb.organization_members.find((m) => m.profile_id === userId)) {
+        // **Seeding, not reinstatement.** This push exists so a demo user who
+        // was never a member lands somewhere; it hardcodes `org-1`, so for the
+        // demo organisation it re-creates the exact composite key
+        // `admin_remove_member` tombstones. Pushing it back would silently
+        // reverse a removal AND hand the user `app_metadata.role` rather than
+        // the role the admin had assigned. A removed member signs in with no
+        // organisation, which is what real Supabase does.
+        const seededMembership = { organization_id: 'org-1', profile_id: userId };
+        if (
+          !typedDb.organization_members.find((m) => m.profile_id === userId) &&
+          !isMockDeleted(
+            typedDb,
+            'organization_members',
+            tombstoneKey('organization_members', seededMembership)
+          )
+        ) {
           typedDb.organization_members.push({
-            organization_id: 'org-1',
-            profile_id: userId,
+            ...seededMembership,
             role: session.user.app_metadata.role,
           });
         }
 
         if (typeof window !== 'undefined') {
           sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify(session));
-          window.__MOCK_DB__ = db;
+          // **Through `saveDB`, not past it.** This wrote `window.__MOCK_DB__`
+          // directly, which skips the tombstone lift -- so a member removed by
+          // `admin_remove_member` and then re-pushed by this very block came
+          // back tombstoned, and the user signed in with no organisation. It
+          // also never reached sessionStorage, so the rows it adds were lost
+          // on the next reload.
+          saveDB(db);
         }
 
         setTimeout(() => triggerAuthEvent('SIGNED_IN', session), 50);
@@ -1690,13 +1812,7 @@ export const mockSupabase = {
                 });
               }
             } else {
-              db.field_subunits = (db.field_subunits || []).filter((s) => {
-                if (String(s.field_id) === String(rec.id)) {
-                  triggerRealtimeEvent('field_subunits', 'DELETE', { new: null, old: s });
-                  return false;
-                }
-                return true;
-              });
+              dropMockFieldSubunits(db, rec.id);
             }
           }
         });
@@ -1800,13 +1916,7 @@ export const mockSupabase = {
                         triggerRealtimeEvent('field_subunits', 'INSERT', { new: subB, old: null });
                       }
                     } else {
-                      db.field_subunits = (db.field_subunits || []).filter((s) => {
-                        if (String(s.field_id) === String(item.id)) {
-                          triggerRealtimeEvent('field_subunits', 'DELETE', { new: null, old: s });
-                          return false;
-                        }
-                        return true;
-                      });
+                      dropMockFieldSubunits(db, item.id);
                     }
                   }
                   return updatedItem;
@@ -1827,15 +1937,41 @@ export const mockSupabase = {
         };
       },
       delete: () => {
+        // **Only `.eq()` exists here, and that is deliberate rather than
+        // silent.** Any other PostgREST filter (`.neq`, `.in`, `.match`,
+        // `.like`, ...) is absent from this object, so chaining one throws
+        // `... is not a function` naming the method -- a loud failure, which
+        // is what we want until a caller needs it. The one genuinely silent
+        // shape was `await from(t).delete()` with NO filter: the builder is
+        // not a promise, so awaiting it resolved to the builder itself and
+        // deleted nothing without an error. `then` below turns that into a
+        // named error instead.
         return {
           eq: (col, val) => {
             const db = getDB();
             if (db[table]) {
+              const doomed = db[table].filter((item) => String(item[col]) === String(val));
+              // A hard delete with no tombstone resurrects: `getDB()` rebuilds
+              // from `initialMockData` and `mergeSource` only adds or updates.
+              // The RPCs tombstone; this generic path did not, so a direct
+              // delete of a SEEDED row came straight back on the next read.
+              markMockDeleted(
+                db,
+                table,
+                doomed.map((item) => tombstoneKey(table, item))
+              );
               db[table] = db[table].filter((item) => String(item[col]) !== String(val));
               saveDB(db);
             }
             return Promise.resolve({ data: [], error: null });
           },
+          then: (onFulfilled, onRejected) =>
+            Promise.resolve({
+              data: null,
+              error: {
+                message: `[Mock Supabase] delete() on '${table}' was awaited with no filter; only .eq(column, value) is implemented`,
+              },
+            }).then(onFulfilled, onRejected),
         };
       },
     };
@@ -2068,6 +2204,9 @@ export const mockSupabase = {
       }
 
       db.organization_invites = db.organization_invites.filter(({ id }) => id !== inviteId);
+      // Without the tombstone a revoked invite comes back on the next
+      // `getDB()` -- an invitation an admin revoked becomes usable again.
+      markMockDeleted(db, 'organization_invites', [tombstoneKey('organization_invites', invite)]);
       saveDB(db);
 
       return { data: inviteId, error: null };
@@ -2658,7 +2797,7 @@ export const mockSupabase = {
         // blackout that came from an E2E injection resurrected on the next
         // call. `admin_delete_field` got this fix and its blackout twin did
         // not -- the same sibling gap, one function along.
-        markMockDeleted(db, 'field_blackouts', [existing.id]);
+        markMockDeleted(db, 'field_blackouts', [tombstoneKey('field_blackouts', existing)]);
         db.field_blackouts = (db.field_blackouts || []).filter(
           (item) => String(item.id) !== String(p.p_blackout_id)
         );
@@ -2928,7 +3067,11 @@ export const mockSupabase = {
         const destroy = (table, doomed) => {
           if (doomed.length === 0) return;
           const ids = new Set(doomed.map((item) => String(item.id)));
-          markMockDeleted(db, table, [...ids]);
+          markMockDeleted(
+            db,
+            table,
+            doomed.map((item) => tombstoneKey(table, item))
+          );
           db[table] = (db[table] || []).filter((item) => !ids.has(String(item.id)));
         };
         const onField = (table) =>
@@ -3015,7 +3158,7 @@ export const mockSupabase = {
         // admin_select_field_availability_scenario.
         const deletedScenarios = mockPruneEmptyScenarios(db, orgId, scenarioIds, destroy);
 
-        markMockDeleted(db, 'fields', [field.id]);
+        markMockDeleted(db, 'fields', [tombstoneKey('fields', field)]);
         db.fields = (db.fields || []).filter((item) => String(item.id) !== String(p.p_field_id));
 
         audit('field', field.id, 'deleted', {
@@ -3639,6 +3782,17 @@ export const mockSupabase = {
       // Mirror apply_player_patch: team_players is the relational roster
       // source of truth, kept in sync with the denormalized team_id.
       if (has('team_id')) {
+        // The rows this drops are SEEDED (`team_players` has no `id`, so they
+        // key on `team_id:player_id`): without the tombstone the old roster
+        // row returns on the next read and the player is on two teams. The
+        // tombstone is lifted again by `saveDB` if the player moves back.
+        markMockDeleted(
+          db,
+          'team_players',
+          (db.team_players || [])
+            .filter((row) => String(row.player_id) === String(p_player_id))
+            .map((row) => tombstoneKey('team_players', row))
+        );
         db.team_players = (db.team_players || []).filter(
           (row) => String(row.player_id) !== String(p_player_id)
         );
@@ -3720,11 +3874,23 @@ export const mockSupabase = {
       const { p_player_ids } = params || {};
       const ids = (p_player_ids || []).map(String);
       const before = (db.players || []).length;
+      const doomedPlayers = (db.players || []).filter((player) => ids.includes(String(player.id)));
       db.players = (db.players || []).filter((player) => !ids.includes(String(player.id)));
+      markMockDeleted(
+        db,
+        'team_players',
+        (db.team_players || [])
+          .filter((row) => ids.includes(String(row.player_id)))
+          .map((row) => tombstoneKey('team_players', row))
+      );
       db.team_players = (db.team_players || []).filter(
         (row) => !ids.includes(String(row.player_id))
       );
-      markMockDeleted(db, 'players', ids);
+      markMockDeleted(
+        db,
+        'players',
+        doomedPlayers.map((player) => tombstoneKey('players', player))
+      );
       const count = before - db.players.length;
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
@@ -4368,6 +4534,7 @@ export const mockSupabase = {
         .reverse()
         .forEach((record) => {
           if (record.operation === 'inserted') {
+            markMockDeleted(db, 'coaches', [tombstoneKey('coaches', { id: record.target_id })]);
             db.coaches = (db.coaches || []).filter(
               (coach) => String(coach.id) !== String(record.target_id)
             );
@@ -5023,21 +5190,29 @@ export const mockSupabase = {
           !r.rolled_back_at
       );
       records.forEach((record) => {
-        db.field_availability_profiles = (db.field_availability_profiles || []).filter(
-          (p) => String(p.id) !== String(record.target_id)
-        );
-        db.field_availability_profile_formats = (
-          db.field_availability_profile_formats || []
-        ).filter((f) => String(f.profile_id) !== String(record.target_id));
-        db.field_blackout_windows = (db.field_blackout_windows || []).filter(
-          (b) => String(b.profile_id) !== String(record.target_id)
-        );
-        db.field_equipment_requirements = (db.field_equipment_requirements || []).filter(
-          (e) => String(e.profile_id) !== String(record.target_id)
-        );
-        db.field_availability_scenario_members = (
-          db.field_availability_scenario_members || []
-        ).filter((m) => String(m.profile_id) !== String(record.target_id));
+        // Every table here is a hard delete, so every one needs the tombstone
+        // `getDB()`'s re-merge respects -- the profile by its own id, the four
+        // children by `profile_id`. `rollback_field_import_job`'s `drop()`
+        // helper is the same contract; this sibling filtered without it.
+        const dropByProfile = (table, column) => {
+          const doomed = (db[table] || []).filter(
+            (row) => String(row[column]) === String(record.target_id)
+          );
+          if (doomed.length === 0) return;
+          markMockDeleted(
+            db,
+            table,
+            doomed.map((row) => tombstoneKey(table, row))
+          );
+          db[table] = (db[table] || []).filter(
+            (row) => String(row[column]) !== String(record.target_id)
+          );
+        };
+        dropByProfile('field_availability_profiles', 'id');
+        dropByProfile('field_availability_profile_formats', 'profile_id');
+        dropByProfile('field_blackout_windows', 'profile_id');
+        dropByProfile('field_equipment_requirements', 'profile_id');
+        dropByProfile('field_availability_scenario_members', 'profile_id');
         record.rolled_back_at = now;
       });
       saveDB(db);
@@ -5211,7 +5386,11 @@ export const mockSupabase = {
               );
               if (doomed.length === 0) return;
               const ids = new Set(doomed.map((item) => String(item.id)));
-              markMockDeleted(db, table, [...ids]);
+              markMockDeleted(
+                db,
+                table,
+                doomed.map((item) => tombstoneKey(table, item))
+              );
               db[table] = (db[table] || []).filter((item) => !ids.has(String(item.id)));
             };
             if (record.target_table === 'game_slots') {
@@ -5528,29 +5707,34 @@ export const mockSupabase = {
       const droppedInterests = (db.coach_interested_programs || []).filter((row) =>
         idSet.has(String(row.coach_id))
       );
+      markMockDeleted(
+        db,
+        'coach_interested_programs',
+        droppedInterests.map((row) => tombstoneKey('coach_interested_programs', row))
+      );
       db.coach_interested_programs = (db.coach_interested_programs || []).filter(
         (row) => !idSet.has(String(row.coach_id))
       );
       const droppedRequests = (db.coach_team_requests || []).filter((row) =>
         idSet.has(String(row.coach_id))
       );
+      markMockDeleted(
+        db,
+        'coach_team_requests',
+        droppedRequests.map((row) => tombstoneKey('coach_team_requests', row))
+      );
       db.coach_team_requests = (db.coach_team_requests || []).filter(
         (row) => !idSet.has(String(row.coach_id))
       );
       const before = (db.coaches || []).length;
+      const droppedCoaches = (db.coaches || []).filter((coach) => idSet.has(String(coach.id)));
+      markMockDeleted(
+        db,
+        'coaches',
+        droppedCoaches.map((coach) => tombstoneKey('coaches', coach))
+      );
       db.coaches = (db.coaches || []).filter((coach) => !idSet.has(String(coach.id)));
       const count = before - db.coaches.length;
-      markMockDeleted(db, 'coaches', ids);
-      markMockDeleted(
-        db,
-        'coach_interested_programs',
-        droppedInterests.map((row) => row.id).filter(Boolean)
-      );
-      markMockDeleted(
-        db,
-        'coach_team_requests',
-        droppedRequests.map((row) => row.id).filter(Boolean)
-      );
 
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
@@ -5826,13 +6010,22 @@ export const mockSupabase = {
       const subCount = (db.registrations || []).filter(
         (r) => String(r.form_id) === String(p_form_id)
       ).length;
+      // The form was tombstoned and its submissions were not, so a SEEDED
+      // registration came back attached to a form that no longer exists.
+      markMockDeleted(
+        db,
+        'registrations',
+        (db.registrations || [])
+          .filter((r) => String(r.form_id) === String(p_form_id))
+          .map((r) => tombstoneKey('registrations', r))
+      );
       db.registrations = (db.registrations || []).filter(
         (r) => String(r.form_id) !== String(p_form_id)
       );
       db.registration_forms = (db.registration_forms || []).filter(
         (f) => String(f.id) !== String(p_form_id)
       );
-      markMockDeleted(db, 'registration_forms', [p_form_id]);
+      markMockDeleted(db, 'registration_forms', [tombstoneKey('registration_forms', form)]);
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
         id: mockId(),
@@ -5888,7 +6081,7 @@ export const mockSupabase = {
             String(item.profile_id) === String(p_profile_id)
           )
       );
-      markMockDeleted(db, 'organization_members', [`${p_organization_id}:${p_profile_id}`]);
+      markMockDeleted(db, 'organization_members', [tombstoneKey('organization_members', target)]);
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
         id: mockId(),
@@ -5975,7 +6168,7 @@ export const mockSupabase = {
       db.game_assignments = (db.game_assignments || []).filter(
         (a) => String(a.id) !== String(p_assignment_id)
       );
-      markMockDeleted(db, 'game_assignments', [p_assignment_id]);
+      markMockDeleted(db, 'game_assignments', [tombstoneKey('game_assignments', assignment)]);
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
         id: mockId(),
@@ -6012,7 +6205,9 @@ export const mockSupabase = {
       db.practice_assignments = (db.practice_assignments || []).filter(
         (a) => String(a.id) !== String(p_assignment_id)
       );
-      markMockDeleted(db, 'practice_assignments', [p_assignment_id]);
+      markMockDeleted(db, 'practice_assignments', [
+        tombstoneKey('practice_assignments', assignment),
+      ]);
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
         id: mockId(),
@@ -6111,19 +6306,28 @@ export const mockSupabase = {
         if (String(player.team_id) === String(p_team_id)) player.team_id = null;
       }
       // Cascade: remove team_players, game_assignments, practice_assignments
-      db.team_players = (db.team_players || []).filter(
-        (tp) => String(tp.team_id) !== String(p_team_id)
-      );
-      db.game_assignments = (db.game_assignments || []).filter(
+      // Only the team itself was tombstoned, so the three cascades came back
+      // on the next read pointing at a team that is gone.
+      const cascadeDoomed = (table, matches) => {
+        const doomed = (db[table] || []).filter(matches);
+        if (doomed.length === 0) return;
+        markMockDeleted(
+          db,
+          table,
+          doomed.map((row) => tombstoneKey(table, row))
+        );
+        db[table] = (db[table] || []).filter((row) => !matches(row));
+      };
+      cascadeDoomed('team_players', (tp) => String(tp.team_id) === String(p_team_id));
+      cascadeDoomed(
+        'game_assignments',
         (a) =>
-          String(a.home_team_id) !== String(p_team_id) &&
-          String(a.away_team_id) !== String(p_team_id)
+          String(a.home_team_id) === String(p_team_id) ||
+          String(a.away_team_id) === String(p_team_id)
       );
-      db.practice_assignments = (db.practice_assignments || []).filter(
-        (a) => String(a.team_id) !== String(p_team_id)
-      );
+      cascadeDoomed('practice_assignments', (a) => String(a.team_id) === String(p_team_id));
       db.teams = (db.teams || []).filter((t) => String(t.id) !== String(p_team_id));
-      markMockDeleted(db, 'teams', [p_team_id]);
+      markMockDeleted(db, 'teams', [tombstoneKey('teams', team)]);
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
         id: mockId(),
@@ -6231,6 +6435,19 @@ export const mockSupabase = {
           const db = getDB();
           if (stagedRows.length > 0) {
             const rowNumbers = new Set(stagedRows.map((row) => String(row.source_row_number)));
+            const supersededPlayers = (db.staging_players || []).filter(
+              (row) =>
+                String(row.import_job_id) === String(body.import_job_id) &&
+                rowNumbers.has(String(row.source_row_number))
+            );
+            // A re-stage REPLACES the previous rows for these row numbers with
+            // new ids. Without the tombstone the superseded rows come back
+            // beside their replacements and the job stages each row twice.
+            markMockDeleted(
+              db,
+              'staging_players',
+              supersededPlayers.map((row) => tombstoneKey('staging_players', row))
+            );
             db.staging_players = (db.staging_players || []).filter(
               (row) =>
                 String(row.import_job_id) !== String(body.import_job_id) ||
@@ -6241,6 +6458,16 @@ export const mockSupabase = {
           if (stagedImportRows.length > 0) {
             const rowNumbers = new Set(
               stagedImportRows.map((row) => String(row.source_row_number))
+            );
+            const supersededRows = (db.staging_import_rows || []).filter(
+              (row) =>
+                String(row.import_job_id) === String(body.import_job_id) &&
+                rowNumbers.has(String(row.source_row_number))
+            );
+            markMockDeleted(
+              db,
+              'staging_import_rows',
+              supersededRows.map((row) => tombstoneKey('staging_import_rows', row))
             );
             db.staging_import_rows = (db.staging_import_rows || []).filter(
               (row) =>

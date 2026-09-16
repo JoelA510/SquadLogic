@@ -425,9 +425,8 @@ describe('scenario table :: the table itself', () => {
  *
  * @param {any} scenario
  * @param {{p_location_id: any, p_field_id: any}} scope
- * @param {any} field
  */
-const runBlackoutEdit = async (scenario, scope, field) => {
+const runBlackoutEdit = async (scenario, scope) => {
   const { data: seeded, error: seedError } = await supabase.rpc('admin_create_field_blackout', {
     p_organization_id: ORG,
     ...scope,
@@ -660,7 +659,7 @@ describe('scenario table :: the mock honours it', () => {
       throw new Error(`unknown rpc "${scenario.rpc}" in scenario "${scenario.id}"`);
     }
     if (scenario.rpc === 'admin_update_field_blackout') {
-      await runBlackoutEdit(scenario, scope, field);
+      await runBlackoutEdit(scenario, scope);
       return;
     }
 

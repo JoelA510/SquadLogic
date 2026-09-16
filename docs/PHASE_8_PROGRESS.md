@@ -1608,3 +1608,128 @@ migration. Third time this rule has paid out.
   has no unique constraint, so a second upload re-inserts already-applied rows.
   Pre-existing and not touched here; the reason the message does not suggest
   re-uploading as the recovery.
+
+---
+
+## LIVE-3 — one reading of what is booked on a field — **fixed, own PR**
+
+Third and last of the field-delete family. Written by the supervisor rather than
+by the implementing agent: a container restart killed that agent mid-verification,
+before it delivered its report.
+
+- **PR:** [#383](https://github.com/JoelA510/SquadLogic/pull/383), branch
+  `fix/rollback-field-import-booking-guard`.
+- **Merged:** squash `648c17e`, 2026-09-16, from reviewed head `1676dd5`.
+- **Migration:** `20260909000000_rollback_field_import_booking_guard.sql`, with
+  `docs/sql/20260909000000_{smoke,revert}.sql`.
+- **New pgTAP:** `supabase/tests/field_import_rollback_booking_guard.sql`.
+- **Tests 2823 → 2838** (181 → 182 files). Main entry 135.04 → 136.62 KB gz;
+  total first-paint 220.38 KB gz against a 244.14 budget.
+
+### The defect
+
+`rollback_field_import_job` deleted a field behind a hand-written guard reading
+`practice_slots` and `game_slots` only — two of the six kinds a field delete
+reaches. An import rollback therefore destroyed free-standing assignments and
+availability profiles without refusing. It now calls `public.field_bookings`,
+the reading `admin_delete_field` and `admin_retire_field` already shared, rather
+than becoming the third hand-written list that guarantees the next correction
+lands on two of three.
+
+`field_availability_profiles.field_id` moves from ON DELETE SET NULL to CASCADE,
+closing the **second producer of field-less profiles** — 20260908000000 closed
+the import half, and this closes the delete half.
+
+### Supervisor claims: four held, one did not
+
+Sent as claims to verify, per the standing rule. **The name did not hold:** I
+carried the function as `rollback_field_import_apply`, which does not exist in
+the repository; it is `rollback_field_import_job`. Caught by checking before
+briefing rather than by the agent afterwards — the third briefing figure of mine
+to be wrong in this phase, and the first caught before it reached an agent.
+
+The other four held: the two-table guard, its location, the shared enumerator's
+identity, and `admin_delete_field` orphaning profiles.
+
+### Review: four sources, and what each was worth
+
+- **The agent's own `/code-review`** — six findings, fixed in `41087e0`.
+- **A Codex bot review** — two findings, both verified against source by the
+  supervisor before relay, both real, and **both now exist as mutation plants**
+  so the fix cannot silently regress. The P1 was understated by the bot: the
+  fields arm enumerated bookings without locking the field, while the sibling
+  `admin_delete_field` takes `FOR UPDATE` on the `fields` row at
+  `20260907000000:493` with a comment at `:503` giving the reason. One arm
+  adopting a documented contract and the other not — inside the PR whose subject
+  is that failure mode. It interacted badly with the CASCADE change: a profile
+  inserted in that window is not counted and is then destroyed.
+- **Three rounds of harness self-repair, converged 8 → 11 → 3.** The PR's own
+  fixes had hollowed out existing plants — checks that still ran but could no
+  longer fail. `1676dd5` notes one of the last three was "my repair reproducing
+  the defect it repaired". The mechanism that ended it is a pre-flight that makes
+  a hollowed plant fail loudly at sweep time rather than pass quietly.
+- **Two supervisor passes, nothing blocking.** Pass 1 ran seven probes and found
+  nothing; pass 2 found one minor item, below.
+
+### Verified by the supervisor on the merged head, not taken on report
+
+The agent died before reporting, so every figure here was executed rather than
+relayed: lint 0 errors / 1 baseline warning, typecheck 0, 2838 tests across 182
+files, build clean, advisors PASS over 109 migrations, bundle PASS,
+`test:db:local` HARNESS OK, `prove` **attempted 101, anchor-miss 0, caught 101,
+not caught 0** with a census of 22 health claims each reaching a red branch, and
+`prove:mock` **56/56 caught**.
+
+What the probes actually checked, since "no findings" is worth only the list
+behind it: the `20260504060000` edit is a revert script, not the applied
+migration, and correctly names the new caller; `bookings_exist` has three real
+producers per arm and the fourth SQL hit is a COMMENT; the scenario table went
+33 → 37 with both runners reading it, the counts pinned so adding or dropping a
+row fails, every row executed by `it.each`, and both outcomes required; the
+revert names five reversion costs, counts three against live rows, and flags
+that applying half of it leaves deletes that empty scenarios and never prune
+them; and the operator-facing chain holds by design — a refusal returns
+`status=completed_with_warnings` (`:1240`), so `rollbackSucceeded` is false,
+`isComplete` is true, and the log renders on the screen LIVE-2 built, with the
+mock matching at `mockSupabaseClient.js:5324`.
+
+### Two process notes, both about the supervisor
+
+- **I disturbed a live mutation sweep.** Finding a plant and a `.orig` in the
+  tree while the agent's turn had ended, I read it as debris from a dead agent
+  and restored the file. The agent was not dead — it was waiting on a background
+  harness run with a trap that would have restored the plant itself, and both
+  notifications had said so. The cost was a full re-run. **The rule, learned:
+  declining to COMMIT such a tree is always right; RESTORING it is right only
+  when the agent is genuinely dead, as after a container restart.**
+- **The stop hook asked for the tree to be committed roughly thirty times across
+  this task and was declined every time.** Twice the tree held a plant that would
+  have landed a deliberate defect in a migration. That is now four occasions in
+  this phase.
+
+### Still open after LIVE-3
+
+- **LIVE-4**, unchanged: mock deletes without `markMockDeleted` resurrect seeded
+  rows.
+- **`rollback_coach_import_job` has the rollback family's reporting gap.** It
+  returns `blocked_assigned_coaches` and `blocked_assignment_rows`, neither of
+  which reaches the import log. Recorded rather than absorbed, because it is a
+  different RPC with a different refusal contract.
+- **A comment imprecision left deliberately unfixed.** The new `field_bookings`
+  arm says it judges `available_until` "exactly the way `practice_slots.valid_until`
+  is". It does not quite: the sibling arms carry an `IS NULL` disjunct because
+  their columns are nullable, and this one omits it because `available_until` is
+  `date NOT NULL`. The code is correct and the omission is unreachable, but if
+  that column is ever made nullable the guard silently stops reporting
+  open-ended profiles, and nothing pins that. Judged not worth an hour-long
+  hand-back round and another harness run for a comment on correct code.
+- **Collapsing `field_blackouts` and `field_blackout_windows` is STILL blocked**,
+  and for a new reason. Both producers of field-less profiles are now closed, so
+  the obstacle LIVE-2 named is gone — but the shipped read path is a nested
+  PostgREST embed under profiles (`frontend/src/hooks/useFields.js`) that a
+  venue/surface-keyed table cannot serve. That is the second blocker
+  20260906000100's header named, and it is untouched.
+- **The PR was 6386 insertions.** The brief offered a split if the two halves
+  made it unreviewably large and the agent did not take it. It held together, but
+  it is more than one reviewer should be asked to hold at once, and future live
+  defects in this family should be split on the offer rather than on request.

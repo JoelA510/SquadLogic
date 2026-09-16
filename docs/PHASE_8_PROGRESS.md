@@ -1733,3 +1733,124 @@ mock matching at `mockSupabaseClient.js:5324`.
   made it unreviewably large and the agent did not take it. It held together, but
   it is more than one reviewer should be asked to hold at once, and future live
   defects in this family should be split on the offer rather than on request.
+
+---
+
+## LIVE-4 — every hard delete in the mock now leaves a tombstone — **fixed, own PR**
+
+Last of the four live defects. `mergeSource` only adds and updates, so a seed
+row removed by an RPC returned on the next `getDB()`.
+
+- **PR:** [#385](https://github.com/JoelA510/SquadLogic/pull/385), branch
+  `fix/mock-delete-tombstones`.
+- **Merged:** squash `bffaeca`, 2026-09-16, from reviewed head `3bfdb2f`.
+- **Tests 2838 → 2868** (182 → 183 files). First-paint 220.38 → 220.93 KB gz
+  against a 244.14 budget.
+
+### The supervisor's figure was wrong twice more, and the agent's is better
+
+I briefed this as "~30 mock deletes without `markMockDeleted`". Before briefing I
+checked and found **three**, and said so. **Both numbers were wrong: it is 19**,
+derived by classifying every write to a db table rather than grepping for
+`.filter(`. Four are reachable against today's seed — `admin_delete_team`
+stranding a seeded `practice_assignment` among them.
+
+I was also wrong that four pre-existing calls built their key by hand (thirteen
+did), and that the `saveDB` bypass was five sites in one E2E file (it is **65
+across 16**). That is four supervisor figures corrected in this task alone, and
+the seventh this phase. The reason the count keeps moving is that I measured by
+grep and the agent measured by classification; **the classification is the
+method, and it is now the test.**
+
+### Two things the tombstone needed before it could be applied
+
+Neither was in the brief, and a naive fix would have been worse than the defect:
+
+- **`team_players` has no `id`**, so `tombstoneKey` fell through to `String(row.id)`
+  — the literal `'undefined'`, a key matching _every_ keyless row. One tombstone
+  would have emptied the table.
+- **A composite key recurs.** Moving a player off a roster row and back re-creates
+  the exact key an earlier delete tombstoned, turning a fixed resurrection into a
+  **silent disappearance**. `saveDB` now lifts the tombstone of any row present
+  again.
+
+### Review round 1: the fix for a `/code-review` finding was a regression
+
+The agent's `/code-review` found six items. Its fix for the first introduced the
+one blocking finding of this task, and it is the sharpest example this phase of
+why a fix needs its own adversarial pass:
+
+`admin_remove_member` tombstones the membership — **that predates this PR**. The
+sign-in block reseeds `{organization_id: 'org-1', profile_id}` for any profile
+without a membership, reproducing exactly that tombstone's composite key. On
+`main`, sign-in wrote `window.__MOCK_DB__` directly, no lift existed, and the
+next `getDB()` re-applied the tombstone: **the removal stood.** Routing sign-in
+through `saveDB` made the new lift drop the tombstone, so **a removed member
+signing in was silently restored** — carrying `app_metadata.role` rather than
+the role the admin had assigned.
+
+The agent had framed `main`'s behaviour as the bug ("signed in with no
+organisation"). For a genuinely removed member that outcome is _correct_, and is
+what real Supabase does: signing in does not create a membership. The decisive
+argument was internal to the PR — **it made a revoked invite stay revoked and a
+removed member come back**, two revocation semantics resolved opposite ways in
+one change. The agent accepted it in full without arguing.
+
+The seeding push now consults the tombstone rather than lifting it, with
+**plants on both sides of the branch**: a single plant on the guard would have
+been satisfiable by deleting the seeding push outright, which breaks a genuine
+new user.
+
+### The mechanism, not an audit
+
+`tests/mockDeleteTombstones.test.js` classifies every table write **by
+exclusion** — lazy initialiser, append-only spread, row-preserving `.map`,
+`mergeSource`'s non-array branches, `getDB`'s own tombstone application, the
+in-place upsert — and anything left over must tombstone, naming its own table
+and building its key through `tombstoneKey`. Every benign rule must still
+classify a real write, so a dead rule fails; a scanner matching nothing fails
+its anchor.
+
+It is keyed on **assignment, not on `.filter(`**, because this PR makes helpers
+the house style for a delete and a `.filter(`-keyed version was blind to
+`db.x = withoutX(db.x, id)`. The agent's first version had that blindness and
+its own `/code-review` caught it. During the key conversion **the census caught
+a misplaced tombstone itself** — the first time the mechanism paid for itself.
+
+### Two supervisor rulings
+
+- **The remaining 65 E2E bypasses go in their own PR, not this one.** The PR was
+  already at 1164 insertions against a ceiling of 800 I had set, and converting
+  15 step files touches the entire E2E suite — a large regression surface inside
+  a PR about delete semantics. The ratchet that pins them by file and exact
+  count **in both directions** (a new bypass fails; a stale entry for a converted
+  file also fails) is the durable property; conversion is cleanup. **Queued as a
+  follow-up.**
+- **The budget overage is accepted and is mine.** Both overrunning items were
+  demanded by my own round-1 findings. The agent flagged the overage rather than
+  trimming a positive control to reach a number, which is the right trade; had it
+  cut a control to hit my ceiling, that would have been a finding.
+
+### Still open after LIVE-4
+
+- **65 direct `window.__MOCK_DB__` writes across 15 E2E step files**, counted and
+  pinned rather than converted. Follow-up PR.
+- **`markMockDeleted` discards `''`/`'undefined'`/`'null'` keys and no test can
+  make that fail** — the lift clears such a key on the same save. Kept as a
+  producer guard and **commented as unenforceable**, per the rule that a line
+  reading as load-bearing and not being so is how a guarantee gets believed.
+- The census checks a delete tombstones its own table, **not that the tombstone
+  covers the same rows**. Stated in the file; only the behavioural cases catch it.
+- The census requires `tombstoneKey(` inside each call but does not check the
+  table argument _within_ that call matches. Same family as the row gap above;
+  judged not worth a round.
+- `mergeSource` prefers `id` where both exist, `tombstoneKey` prefers the
+  composite. They agree today because no composite-keyed row carries an id.
+  Unifying them is a merge-path change.
+
+### The four live defects, closed
+
+LIVE-1 `07b5227`, LIVE-2 `341c647`, LIVE-3 `648c17e`, LIVE-4 `bffaeca`. All four
+were found by adversarial review of work that had already passed its own tests,
+and all four were the same shape: a guarantee that held in the arm someone
+looked at.

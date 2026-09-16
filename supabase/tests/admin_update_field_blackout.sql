@@ -77,7 +77,7 @@ VALUES
     ('bb222222-2222-2222-2222-2222222222bb', 'b2222222-2222-2222-2222-222222222222',
      'f2222222-2222-2222-2222-2222222222bb', '2026-09-01', '2026-09-30', 'blackout_months');
 
-SELECT plan(14);
+SELECT plan(15);
 
 -- ── Meta: the subjects exist, so every count below is about behaviour rather
 --    than about an empty table. LIVE-2's suite asserted the outcome of a broken

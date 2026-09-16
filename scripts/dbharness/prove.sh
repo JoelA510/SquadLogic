@@ -913,9 +913,25 @@ plant "ONLY-SCEN refusal also audits a phase it never reached" "$M5" \
 # Drop the explicit revoke and section 5c must go red; the scenario table stays
 # green, because both callers are SECURITY DEFINER and behaviour is unchanged --
 # which is exactly why nothing noticed for two rounds.
+#
+# **This plant must ADD a grant, not remove a revoke, and the reason is
+# measured.** `pg_default_acl` in the harness database grants EXECUTE on new
+# public functions to `authenticated` and `service_role`, so the REVOKEs are
+# load-bearing -- but they are issued TWICE, once in 20260907000000 where the
+# producer is first created and again here. `CREATE OR REPLACE` preserves an
+# existing ACL, so by the time this migration runs the grant is already gone,
+# and deleting EITHER site alone leaves `field_bookings` reading
+# `{postgres=X/postgres}` exactly as before. The deletion form of this plant
+# scored NOT CAUGHT twice, once on each site, and both times the check was
+# sound and the mutation was the thing that could not matter. A guarantee
+# established redundantly is not falsifiable by a single-site deletion.
+#
+# So the mutation adds the privilege back instead. That is one site, it is
+# reachable, and it is the state the smoke's ACL assertion exists to reject.
 plant "M5 the producer is left callable by authenticated" "$M5" \
-  "REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM authenticated;" \
-  "-- the default privilege from 20260614000000 is left in place" \
+  "REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM service_role;" \
+  "REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM service_role;
+GRANT EXECUTE ON FUNCTION public.field_bookings(uuid, uuid, date) TO authenticated;" \
   "smoke 20260907000000" \
   "scenario table"
 plant "M3 an eighth table joins the field_id family unnoticed" "$M3" \
@@ -1623,9 +1639,9 @@ END;
 # **The comment that goes stale.** Leave the view telling the next reader that
 # the profile is excluded from the delete guard, which this migration makes
 # false. Section 7 of the new smoke is the only thing that can see it.
-plant "M5 the collapse-blocker comment is left stale" "$S5" \
-  "  IF v_view LIKE '%excluded from admin_delete_field%' THEN" \
-  "  IF v_view LIKE '%a phrase that appears in no comment anywhere%' THEN" \
+plant "M5 the collapse-blocker needle is retired by a typo" "$S5" \
+  "  v_needle_view := '%excluded from admin_delete_field%';" \
+  "  v_needle_view := '%a phrase that appears in no comment anywhere%';" \
   "smoke 20260909000000" \
   "smoke 20260908000000"
 
@@ -1649,7 +1665,7 @@ plant "M5-SMOKE section 1's fields-arm parse degenerates to a one-character capt
 plant "M5-SMOKE a stale-comment literal drifts from the revert's wording" "$S5" \
   "  v_stale_view := 'field_availability_profiles is deliberately excluded from admin_delete_field''s booking guard, so deleting a field still orphans every profile pointing at it';" \
   "  v_stale_view := 'excluded from admin_delete_field, in a sentence the revert never restores';" \
-  "20260909000000: the smoke''s stale-comment needles no longer match the wording its revert puts back"
+  "20260909000000: the smoke's stale-comment needles no longer match the wording its revert puts back"
 
 # Section 1b cuts the same arm with its own copy of the regex and its own
 # combined `IS NULL OR length < 200` guard. One control per guard: the plant

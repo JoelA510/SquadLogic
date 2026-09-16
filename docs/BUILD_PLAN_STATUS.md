@@ -306,7 +306,11 @@ either answer.
 
 **Also decided at the same gate:** the two parts of 8.4's capability 3 that need
 migrations — no `admin_update_field_blackout` (so editing a blackout is
-remove-and-re-add, with a new id and two audit rows) and effective dating on
+remove-and-re-add, with a new id and **four** audit rows — _amended on the
+8.4-gap-A branch: this entry said two. The delete RPC writes a before/after
+pair and the create RPC writes another, so it is four. Corrected here rather
+than silently, and `20260910000000`'s header and revert both say four_) and
+effective dating on
 `fields` only (so `locations` and `field_subunits` cannot be retired) — land in a
 **follow-up PR before 8.5**, rather than being folded into 8.8 or left as
 recorded gaps. Both of 8.4's stated acceptance criteria were met without them;

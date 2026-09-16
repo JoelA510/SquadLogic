@@ -231,17 +231,26 @@ export default function BlackoutsPage() {
             row.source === CLOSURE_SOURCE.ADMIN ? (
               <>
                 {/*
-                  **Each label names its own row.** A grid of buttons all
-                  reading "Edit" is a screen reader announcing the same thing
-                  every time; the ground and the start date are what tell them
-                  apart, and they are what the E2E suite locates by.
+                  **Each label names its own row, and "its own" has to mean
+                  UNIQUE.** A grid of buttons all reading "Edit" is a screen
+                  reader announcing the same thing every time.
+
+                  Ground and first day are not enough to tell them apart: two
+                  closures on the same pitch on the same day are legal and
+                  ordinary -- a 09:00-11:00 and an 18:00-20:00 window cannot be
+                  one row, because one row holds one range. Those produce two
+                  buttons with one name between them, which is the defect the
+                  label exists to avoid rather than a smaller version of it,
+                  and it makes the E2E locator ambiguous under strict mode.
+                  So the whole of what distinguishes the row goes in: ground,
+                  both dates, and the hours.
                 */}
                 <Button
                   variant="ghost"
                   size="sm"
                   icon={Pencil}
                   onClick={() => setEditing(row.closure)}
-                  aria-label={`Edit the blackout on ${row.ground} from ${row.from}`}
+                  aria-label={`Edit the blackout on ${row.ground}, ${row.from} to ${row.until}, ${row.hours}`}
                 >
                   Edit
                 </Button>{' '}
@@ -250,7 +259,7 @@ export default function BlackoutsPage() {
                   size="sm"
                   icon={Trash2}
                   onClick={() => onRemove(row.closure)}
-                  aria-label={`Remove the blackout on ${row.ground} from ${row.from}`}
+                  aria-label={`Remove the blackout on ${row.ground}, ${row.from} to ${row.until}, ${row.hours}`}
                 >
                   Remove
                 </Button>

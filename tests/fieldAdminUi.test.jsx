@@ -575,6 +575,27 @@ describe('BlackoutEditor :: editing an existing window', () => {
     expect(screen.getByLabelText(/^Venue/)).toHaveValue('loc-1');
   });
 
+  it('keeps the times when the all-day switch is turned on and off again', () => {
+    // **The regression this exists for.** The toggle used to clear both clocks
+    // on EVERY change, which cost nothing while the dialog could only add --
+    // the boxes started empty. On the edit path an operator who ticks "closed
+    // all day", thinks better of it and unticks would have found both boxes
+    // emptied, the consequence panel gone (the draft no longer parses) and
+    // Save refusing a window they never touched, with Cancel-and-reopen the
+    // only way back.
+    renderEdit();
+    expect(screen.getByLabelText(/^Closed from/)).toHaveValue('16:00');
+    fireEvent.click(screen.getByLabelText(/Closed all day/));
+    expect(screen.queryByLabelText(/^Closed from/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText(/Closed all day/));
+    expect(screen.getByLabelText(/^Closed from/)).toHaveValue('16:00');
+    expect(screen.getByLabelText(/^Closed until/)).toHaveValue('19:30');
+    // ... and the round trip leaves a draft that still parses, so the preview
+    // is back too. An empty box and a missing panel are the two halves of the
+    // same failure and both are asserted.
+    expect(screen.getByTestId('blackout-consequence')).toBeInTheDocument();
+  });
+
   it('reports a failed edit instead of closing as though it worked', async () => {
     const onUpdate = vi.fn().mockRejectedValue(new Error('Access denied'));
     const onClose = vi.fn();

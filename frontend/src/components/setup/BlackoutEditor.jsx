@@ -313,9 +313,20 @@ export default function BlackoutEditor({
             id="blackout-all-day"
             type="checkbox"
             checked={form.allDay}
-            onChange={(event) =>
-              set({ allDay: event.target.checked, startClock: '', endClock: '' })
-            }
+            /*
+              **The clocks survive the toggle, in both directions.** This
+              cleared them on every change, which cost nothing while the dialog
+              could only ADD -- the boxes started empty. On the edit path it is
+              destructive: tick "closed all day" on a 16:00-19:30 window,
+              change your mind, untick, and both boxes are now empty, the
+              consequence panel has vanished because the draft no longer
+              parses, and Save reports "a timed closure needs both a start and
+              an end" for a window the operator never touched. Clearing is not
+              needed for correctness either -- `draft` already sends NULL for
+              both times whenever `allDay` is set, so what sits in the boxes
+              behind the switch reaches neither the preview nor the RPC.
+            */
+            onChange={(event) => set({ allDay: event.target.checked })}
           />{' '}
           Closed all day
         </label>

@@ -188,7 +188,7 @@ describe('BlackoutsPage', () => {
     // Located through the accessibility tree, so an unlabelled control fails to
     // be found rather than being silently clicked by test id.
     const edit = await screen.findByRole('button', {
-      name: 'Edit the blackout on North Field from 2026-09-14',
+      name: 'Edit the blackout on North Field, 2026-09-14 to 2026-09-18, All day',
     });
     fireEvent.click(edit);
 
@@ -220,6 +220,52 @@ describe('BlackoutsPage', () => {
     expect(createBlackout).not.toHaveBeenCalled();
   });
 
+  it('gives two closures on the same ground and the same day different button names', async () => {
+    // **Ground and first day do not tell two rows apart.** A 09:00-11:00 and
+    // an 18:00-20:00 closure on the same pitch on the same day are ordinary --
+    // one row holds one range, so this is two rows -- and they shared a single
+    // accessible name until the hours went into the label. A screen-reader
+    // user then had two "Edit the blackout on North Field from 2026-09-14"
+    // buttons and no way to tell which row either belonged to, and the E2E
+    // locator matched both under strict mode.
+    mockHooks({
+      closures: {
+        closures: [
+          {
+            ...CLOSURE,
+            id: 'bo-a',
+            blackoutUntil: '2026-09-14',
+            startMinutes: 540,
+            endMinutes: 660,
+          },
+          {
+            ...CLOSURE,
+            id: 'bo-b',
+            blackoutUntil: '2026-09-14',
+            startMinutes: 1080,
+            endMinutes: 1200,
+          },
+        ],
+      },
+    });
+    renderPage();
+    const edits = await screen.findAllByRole('button', { name: /^Edit the blackout on/ });
+    const removes = screen.getAllByRole('button', { name: /^Remove the blackout on/ });
+    // Both rows rendered -- otherwise "the names are distinct" would be true
+    // of a single button and prove nothing.
+    expect(edits).toHaveLength(2);
+    expect(removes).toHaveLength(2);
+    const names = (buttons) => new Set(buttons.map((b) => b.getAttribute('aria-label')));
+    expect(names(edits).size).toBe(2);
+    expect(names(removes).size).toBe(2);
+    // ... and what distinguishes them is the thing that distinguishes the
+    // rows, not an index the operator cannot see.
+    expect([...names(edits)].sort()).toEqual([
+      'Edit the blackout on North Field, 2026-09-14 to 2026-09-14, 09:00\u201311:00',
+      'Edit the blackout on North Field, 2026-09-14 to 2026-09-14, 18:00\u201320:00',
+    ]);
+  });
+
   it('refuses to open an editor on a window ending at 24:00, rather than blanking the box', async () => {
     // `minutesToClock(1440)` is `24:00`, which `<input type="time">` cannot
     // hold. Nothing loaded an existing window into this form before this PR, so
@@ -231,7 +277,7 @@ describe('BlackoutsPage', () => {
     renderPage();
     fireEvent.click(
       await screen.findByRole('button', {
-        name: 'Edit the blackout on North Field from 2026-09-14',
+        name: 'Edit the blackout on North Field, 2026-09-14 to 2026-09-18, 18:00\u201324:00',
       })
     );
     expect(await screen.findByTestId('blackout-unrepresentable')).toBeInTheDocument();

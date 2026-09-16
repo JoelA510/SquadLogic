@@ -262,3 +262,52 @@ Recorded because they were learned the hard way and are cheap to keep.
 - **The corpus caught our own reproductions of its own incidents**, twice: the
   loader dropping unknown-footprint scrimmages (incident 5) and an uncoached team
   losing its fixtures (incident 10).
+
+---
+
+## 5. The wiring decision — put to the operator at the 8.4/8.5 gate, 2026-09-16
+
+`docs/PHASE_8_PLAN.md` gates everything from 8.5 on a choice between the two
+schedulers that do not meet. It was put to the operator at that gate, with the
+plan's figures re-verified against the repository rather than quoted from the
+plan, because the plan predates 8.0-8.4.
+
+**What was verified at the time of asking:**
+
+- The games engine is still imported by **zero** `frontend/` modules.
+- It still persists nothing. `publication/snapshot.js:181` continues to emit
+  `SNAPSHOT_IN_MEMORY_ONLY`, naming both GAP-29 (persistence) and GAP-30
+  (timezone-lossy schemas) in its own message.
+- **GAP-30 is open.** `SlotSchema` and `AssignmentSchema` in
+  `packages/core/src/schemas/index.js` still normalise through `z.coerce.date()`
+  — lines 33-34 and 52-53. The plan is explicit that this must close before any
+  snapshot persists, or the parity checker causes the very divergence it exists
+  to detect.
+
+**The operator's decision: neither branch yet — close GAP-29 and GAP-30 first,
+then decide.**
+
+This is itself a decision and is recorded as one. The reasoning it reflects: as
+things stand the engine branch is not genuinely available, only theoretical.
+Choosing it today would commit 8.5-8.10 to a surface that cannot persist and
+whose parity checker cannot be trusted. Closing the two gaps first makes the
+choice real in both directions, and makes the parity checker trustworthy under
+either answer.
+
+**Consequences for the plan:**
+
+1. A GAP-29/GAP-30 task lands before 8.5. Its size is **not yet scoped**; that is
+   the first thing to establish, and the operator was told so when the question
+   was put.
+2. The wiring question is **re-put to the operator once those gaps close.** It is
+   not settled, and no later task may treat it as settled.
+3. 8.5-8.10 do not start until it is answered. 8.0-8.4 were worth doing under
+   either answer, which is why they went first.
+
+**Also decided at the same gate:** the two parts of 8.4's capability 3 that need
+migrations — no `admin_update_field_blackout` (so editing a blackout is
+remove-and-re-add, with a new id and two audit rows) and effective dating on
+`fields` only (so `locations` and `field_subunits` cannot be retired) — land in a
+**follow-up PR before 8.5**, rather than being folded into 8.8 or left as
+recorded gaps. Both of 8.4's stated acceptance criteria were met without them;
+this closes 8.4 against its own prose as well.

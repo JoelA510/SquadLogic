@@ -245,6 +245,21 @@ describe('blackout freeze :: who may write each table is a checked list', () => 
    * writer back, so a freeze that could not see reverts would be blind to
    * exactly the change that undoes it.
    *
+   * The last three arrive with LIVE-3, and all three seed a window in order to
+   * CHECK something about it rather than to produce one. 20260909000000 makes
+   * `field_availability_profiles.field_id` ON DELETE CASCADE, so a window now
+   * dies with its profile when the ground is deleted -- and an assertion that
+   * a window is gone is worth nothing unless a window was there. Each of the
+   * three seeds exactly one: 20260909000000's smoke, its pgTAP twin (inside a
+   * ROLLBACK), and the mock-client test of the same delete. Listed rather than
+   * excepted, like the smoke above: the freeze wants every writer visible, and
+   * "it is only a test" is the argument that would let the next real writer in.
+   *
+   * **The freeze is still exactly what it was.** None of the three writes a
+   * window that outlives its own transaction or test run, and none of them is
+   * a PRODUCER: no code path a user can reach gained the ability to create a
+   * blackout window in this PR.
+   *
    * **This list did its job on the change that added to it.** 20260908000000
    * re-issues the import path's body, so both the migration and its revert
    * became writers, and this test failed until they were named here -- which is
@@ -256,12 +271,15 @@ describe('blackout freeze :: who may write each table is a checked list', () => 
   const EXPECTED_FROZEN_WRITERS = Object.freeze([
     'docs/sql/20260906000100_smoke.sql',
     'docs/sql/20260908000000_revert.sql',
+    'docs/sql/20260909000000_smoke.sql',
     'frontend/src/lib/mockSupabaseClient.js',
     'scripts/dbharness/run.sh',
     'supabase/migrations/20260522120000_field_availability_phase1.sql',
     'supabase/migrations/20260522153000_field_availability_finalize_hardening.sql',
     'supabase/migrations/20260602000000_field_availability_finalize_applied_payload_fix.sql',
     'supabase/migrations/20260908000000_field_availability_profile_field_resolution.sql',
+    'supabase/tests/field_import_rollback_booking_guard.sql',
+    'tests/fieldDeleteGuard.test.js',
   ]);
 
   it('holds field_blackout_windows to the import path, in both directions', () => {

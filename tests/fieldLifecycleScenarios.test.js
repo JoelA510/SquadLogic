@@ -125,6 +125,7 @@ const DEFAULT_BOOKING_OFFSET = {
   practice_assignment: 60,
   scheduled_game: 30,
   scheduled_practice: 60,
+  availability_profile: 45,
 };
 
 const BOOKING_SEEDS = {
@@ -164,6 +165,24 @@ const BOOKING_SEEDS = {
       // `]` on the upper bound: the range covers `at` itself, so its LAST DAY
       // is `at` -- the value the boundary cases compare against effectiveTo.
       effective_date_range: `[${dateAt(0)},${dateAt(at)}]`,
+    },
+  ],
+  // **The sixth kind (LIVE-3).** `available_until` is the date the producer
+  // judges against, and both date columns are NOT NULL in Postgres, so the
+  // mock writes both rather than leaving `available_from` for the schema to
+  // default -- there is no default, and a row the database would refuse is a
+  // row the two runners cannot be compared on.
+  availability_profile: (id, fieldId, at) => [
+    'field_availability_profiles',
+    {
+      id,
+      organization_id: ORG,
+      field_id: fieldId,
+      season_label: 'Scenario Season',
+      location: 'Scenario Park',
+      field_name: 'Scenario Pitch',
+      available_from: dateAt(0),
+      available_until: dateAt(at),
     },
   ],
 };
@@ -278,10 +297,10 @@ describe('scenario table :: the table itself', () => {
     // The meta-assertion. A table that failed to parse, or that lost its
     // entries, would make every `it.each` below run zero cases and the file
     // would pass green having asserted nothing at all.
-    expect(TABLE.fieldScenarios.length).toBe(33);
+    expect(TABLE.fieldScenarios.length).toBe(37);
     expect(TABLE.blackoutScenarios.length).toBe(9);
     const all = [...TABLE.fieldScenarios, ...TABLE.blackoutScenarios];
-    expect(all.length).toBe(42);
+    expect(all.length).toBe(46);
     for (const scenario of all) {
       expect(typeof scenario.id).toBe('string');
       expect(scenario.why.length).toBeGreaterThan(10);
@@ -353,6 +372,10 @@ describe('scenario table :: the table itself', () => {
         // the defect a review found here -- passes every case.
         'scheduled_game',
         'scheduled_practice',
+        // LIVE-3's sixth arm. Its FK is CASCADE, so a delete destroys the
+        // profile and its blackout windows; before 20260909000000 it was
+        // excluded from the guard altogether and this case did not exist.
+        'availability_profile',
       ])
     );
     // ... and both disposition words are demanded by at least one case, on a

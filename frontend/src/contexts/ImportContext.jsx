@@ -36,6 +36,56 @@ const PLAYER_LOOKUP_CHUNK_SIZE = 500;
 const canDeferImport = (type) =>
   type === 'coaches' || type === 'fields' || type === 'field_availability';
 
+/**
+ * The refused half of a field-import rollback, as a sentence for the log.
+ *
+ * **A refusal that reaches the database and no screen is the same silence one
+ * level up.** `rollback_field_import_job` has always returned
+ * `blocked_records`, and this context turned its result into a line naming
+ * only what was DELETED -- so an operator rolling back an import whose ground
+ * is booked read "0 fields, 0 practice slots, 0 game slots deleted", which
+ * says "there was nothing to remove" where the truth is "we refused to remove
+ * it, and here is what is holding it". 20260909000000 gave each refusal a
+ * table, an id and a reason precisely so this line could say which and why;
+ * LIVE-2 closed the same gap one import along, on the screen `ImportPanel`
+ * already renders.
+ *
+ * Returns the empty string when nothing was refused, so the common case reads
+ * exactly as it did before.
+ *
+ * **The coach rollback has the same gap and is deliberately not touched here.**
+ * `rollback_coach_import_job` returns `blocked_assigned_coaches` and
+ * `blocked_assignment_rows`, and neither reaches this log either. It is a
+ * different RPC with a different refusal contract, so it is recorded rather
+ * than absorbed into a field-import fix.
+ *
+ * @param {{ blocked_records?: number, blocked?: Array<Record<string, any>> }} [result]
+ * @returns {string}
+ */
+const describeBlockedRollback = (result) => {
+  const blocked = Array.isArray(result?.blocked) ? result.blocked : [];
+  const count = Number(result?.blocked_records ?? blocked.length) || 0;
+  if (count === 0) return '';
+  // The count is the RPC's own; the detail is whatever it gave us. A database
+  // that reported a count and no list still produces a sentence saying how
+  // many were refused, because "N refused" is worth more than silence.
+  const detail = blocked
+    .map((row) => {
+      // `kind`/`id`, the names every affected-row payload in the field
+      // family uses. The RPC's stored summary is a digest of this list; what
+      // arrives here is the whole list.
+      const where = [row?.kind, row?.id].filter(Boolean).join(' ');
+      const why = row?.reason ? ` (${row.reason})` : '';
+      const held =
+        row?.affected_count === undefined || row?.affected_count === null
+          ? ''
+          : ` — ${row.affected_count} booking(s)`;
+      return `${where || 'record'}${why}${held}`;
+    })
+    .join('; ');
+  return ` ${count} record(s) refused and left in place for a retry${detail ? `: ${detail}` : ''}.`;
+};
+
 const ImportContext = createContext({
   isImporting: false,
   progress: 0,
@@ -1215,7 +1265,7 @@ export function ImportProvider({ children }) {
             ? `Coach import rolled back: ${rollbackResult?.deleted_coaches ?? 0} deleted, ${rollbackResult?.restored_coaches ?? 0} restored.`
             : type === 'field_availability'
               ? `Field availability import rolled back: ${rollbackResult?.deleted_profiles ?? 0} profiles deleted.`
-              : `Field import rolled back: ${rollbackResult?.deleted_fields ?? 0} fields, ${rollbackResult?.deleted_practice_slots ?? 0} practice slots, ${rollbackResult?.deleted_game_slots ?? 0} game slots deleted.`
+              : `Field import rolled back: ${rollbackResult?.deleted_fields ?? 0} fields, ${rollbackResult?.deleted_practice_slots ?? 0} practice slots, ${rollbackResult?.deleted_game_slots ?? 0} game slots deleted.${describeBlockedRollback(rollbackResult)}`
         );
         return rollbackResult;
       } catch (err) {

@@ -610,6 +610,28 @@ const mergeSource = (db, source) => {
               String(r.player_id) === String(record.player_id) &&
               String(r.buddy_player_id) === String(record.buddy_player_id)
             );
+          // **`team_players` and `profile_players` are the same shape as the
+          // two above and did not have the same contract**, which made every
+          // write EXPONENTIAL rather than merely wrong. They are join rows
+          // with a composite key and no `id`, so the `r.id && record.id`
+          // branch never fires, no other branch matched them, and each merge
+          // re-PUSHED the seed's rows beside the stored copy: 2 rows became
+          // 6, then 14, then 30, doubling on every `getDB()`/`saveDB()` pair.
+          // Six extra writes in one test took `getDB` from 0ms to 1.8s and a
+          // 33ms case to 26s -- a suite that grows quadratically with how
+          // much a test does, which reads as a flaky timeout rather than as
+          // the defect it is. Found by adding five seeds to
+          // tests/fieldDeleteGuard.test.js and measuring why.
+          if (key === 'team_players')
+            return (
+              String(r.team_id) === String(record.team_id) &&
+              String(r.player_id) === String(record.player_id)
+            );
+          if (key === 'profile_players')
+            return (
+              String(r.profile_id) === String(record.profile_id) &&
+              String(r.player_id) === String(record.player_id)
+            );
           if (key === 'view_org_metrics')
             return String(r.organization_id) === String(record.organization_id);
           if (key === 'view_compliance_stats')
@@ -699,6 +721,346 @@ const applyFieldRetirementTrigger = (row) => {
   const today = new Date().toISOString().slice(0, 10);
   if (row && row.effective_to && String(row.effective_to) < today) row.active = false;
   return row;
+};
+
+/**
+ * The LAST DAY a practice range covers, and the two producers that read it.
+ *
+ * **These three were declared INSIDE the facility-RPC block**, where
+ * `rollback_field_import_job` -- the third path in this file that deletes a
+ * field -- could not see them. LIVE-3 is that path having its own two-table
+ * answer to "what is booked on this ground" while the other two shared one,
+ * and a producer only two of its three callers can reach is how that happens
+ * again. They are at module scope for the same reason
+ * `applyFieldRetirementTrigger` is: one producer, every call site.
+ *
+ * `db` and `orgId` were closed over and are parameters now. Nothing else
+ * changed.
+ */
+/**
+ * The LAST DAY a practice range covers, or null when it covers no end.
+ *
+ * **This used to return the exclusive upper bound**, mirroring Postgres
+ * `upper()`, and both arms then compared that to the retirement date --
+ * so a practice running through the 30th, whose range canonicalises to
+ * `[.., 31st)`, was reported stranded by a retirement on the 30th while a
+ * game slot the same day was not. The two implementations AGREED, which
+ * is why the shared scenario table could not see it: agreement is not
+ * correctness. The boundary is now stated as data in the fixture, in the
+ * `retire-*-on-boundary` / `retire-*-day-after-boundary` pairs.
+ *
+ * Postgres normalises a discrete range to `[lower, upper)`, so both
+ * spellings in this repo's fixtures reduce to one rule: `[a,b]` covers
+ * through b, `[a,b)` covers through the day before b. Null when there is
+ * no upper bound at all, which is what `upper_inf` is true for.
+ *
+ * @param {string|null} range a daterange literal
+ * @returns {string|null} ISO date of the last covered day
+ */
+const rangeLastDay = (range) => {
+  const text = String(range || '');
+  const match = /^[[(]([^,]*),([^,]*)([\])])$/.exec(text);
+  if (match === null) return null;
+  const end = match[2].trim();
+  if (end === '') return null;
+  // `]` means the bound itself is covered; `)` means the day before it is.
+  if (match[3] === ']') return end;
+  const previous = new Date(`${end}T00:00:00Z`);
+  if (Number.isNaN(previous.getTime())) return null;
+  previous.setUTCDate(previous.getUTCDate() - 1);
+  return previous.toISOString().slice(0, 10);
+};
+
+// **One enumerator for "what is booked on this field", used by both
+// admin_retire_field and admin_delete_field.**
+//
+// The booking tables were written out twice in the SQL -- once in
+// each RPC -- and writing them out twice HERE as well is the shape that
+// produced every HIGH in three consecutive rounds of PR 2: a correction
+// landing on one arm and not its twin. The two callers differ in exactly
+// one thing, the date, so that is the parameter.
+//
+// `after` is an ISO date: bookings on or before it are unaffected. `null`
+// means NO date applies -- a deletion takes everything on the ground,
+// dated or not -- which is a different answer from an empty filter.
+//
+// `undated` means the row records no date at all, so it cannot be judged
+// (and, for a deletion, cannot be shown to the operator). `unbounded`
+// means it runs forever and is therefore CERTAINLY affected. Two
+// different answers, never collapsed into one.
+//
+// **One enumerator, no options -- both callers see the same five kinds.**
+//
+// An earlier version made `games` and slot-reached assignments DELETE-only
+// on the reasoning that a retirement destroys nothing. That was wrong in
+// the same way the SQL was: a retirement that cannot see the fixture on
+// its ground UNDER-REPORTS, and the operator confirms against an
+// incomplete list. What differs between the two callers is the DATE and
+// nothing else, so that is the only parameter.
+//
+// Mirrors `public.field_bookings(p_organization_id, p_field_id, p_after)`.
+//
+// @param {string} fieldId
+// @param {string|null} after `null` means no date applies -- a deletion
+//   takes everything on the ground, which is not the same as an empty
+//   filter.
+const mockFieldBookings = (db, orgId, fieldId, after) => {
+  // A row with no date of its own is affected whatever `after` says.
+  // **An empty string is "no date", not a date before every date.** The
+  // field-import apply path writes `valid_until: ''` for an open-ended
+  // practice slot, and `'' <= anything` is true -- so a slot that is
+  // certainly stranded was being dropped from the affected list while
+  // the same row still reported `unbounded: true`. The pre-diff filters
+  // used `!slot.valid_until`, which treats '' as absent; this restores
+  // that meaning for every kind at once.
+  const undatedValue = (value) => value === null || value === undefined || String(value) === '';
+  const past = (value) => after !== null && !undatedValue(value) && String(value) <= after;
+  const gameDate = (slot) =>
+    slot.slot_date || (slot.start ? String(slot.start).slice(0, 10) : null);
+  const mine = (row) =>
+    String(row.organization_id) === String(orgId) && String(row.field_id) === String(fieldId);
+
+  const slotIdsOn = (table) =>
+    new Set(
+      (db[table] || [])
+        .filter((row) => String(row.field_id) === String(fieldId))
+        .map((row) => String(row.id))
+    );
+  const gameSlotIds = slotIdsOn('game_slots');
+  const practiceSlotIds = slotIdsOn('practice_slots');
+  const onGameSlot = (row) =>
+    gameSlotIds.has(String(row.game_slot_id)) || gameSlotIds.has(String(row.slot_id));
+  const onPracticeSlot = (row) =>
+    practiceSlotIds.has(String(row.practice_slot_id)) || practiceSlotIds.has(String(row.slot_id));
+  const inScope = (row, viaSlot) =>
+    String(row.organization_id) === String(orgId) &&
+    (String(row.field_id) === String(fieldId) || viaSlot(row));
+
+  return [
+    ...(db.game_slots || [])
+      .filter((slot) => mine(slot) && !past(gameDate(slot)))
+      .map((slot) => ({
+        kind: 'game_slot',
+        id: slot.id,
+        on_date: gameDate(slot),
+        week_index: slot.week_index ?? null,
+        undated: !gameDate(slot),
+        unbounded: false,
+        cascades: true,
+      })),
+    ...(db.practice_slots || [])
+      .filter((slot) => mine(slot) && !past(slot.valid_until ?? null))
+      .map((slot) => ({
+        kind: 'practice_slot',
+        id: slot.id,
+        // **`undatedValue` is the single reading, projection included.**
+        // The filter above already treats `valid_until: ''` -- what the
+        // field-import apply path writes for an open-ended slot -- as no
+        // date, but the projection still passed the `''` through, so this
+        // row read `{on_date: '', unbounded: true}` here and
+        // `{on_date: null, unbounded: true}` in Postgres, where an empty
+        // string is not a storable date. A consumer branching on
+        // `on_date === null` took different paths on the two arms for
+        // precisely the row this hunk was written for.
+        on_date: undatedValue(slot.valid_until) ? null : slot.valid_until,
+        week_index: null,
+        // Unbounded, therefore CERTAINLY stranded -- not unjudged.
+        undated: false,
+        unbounded: undatedValue(slot.valid_until),
+        cascades: true,
+      })),
+    // **The assignment tables.** The mock enumerated the two SLOT tables
+    // only, so the E2E client reported `affected_count: 0` for a field
+    // with every game assigned to it -- the migration's own header calls
+    // that out as gutting the acceptance criterion, and the mock
+    // reproduced the defect the SQL had already been fixed for. A mock
+    // that disagrees with the database about who is affected is a second
+    // answer to a question that is supposed to have one.
+    // `games` carries no field_id and dies with the slot, score and all.
+    // A census by column name could not see it; this list comes from the
+    // cascade closure instead. Its date is its slot's, so a retirement
+    // judges it against the same day the slot is judged against.
+    ...(db.games || [])
+      .filter((row) => {
+        if (!gameSlotIds.has(String(row.game_slot_id))) return false;
+        const slot = (db.game_slots || []).find(
+          (candidate) => String(candidate.id) === String(row.game_slot_id)
+        );
+        return !past(slot ? gameDate(slot) : null);
+      })
+      .map((row) => {
+        const slot = (db.game_slots || []).find(
+          (candidate) => String(candidate.id) === String(row.game_slot_id)
+        );
+        return {
+          kind: 'game',
+          id: row.id,
+          on_date: slot ? gameDate(slot) : null,
+          week_index: slot?.week_index ?? null,
+          undated: !(slot && gameDate(slot)),
+          unbounded: false,
+          cascades: true,
+        };
+      }),
+    ...(db.game_assignments || [])
+      .filter(
+        (row) =>
+          inScope(row, onGameSlot) && !past(row.start ? String(row.start).slice(0, 10) : null)
+      )
+      .map((row) => ({
+        kind: 'game_assignment',
+        id: row.id,
+        on_date: row.start ? String(row.start).slice(0, 10) : null,
+        week_index: row.week_index ?? null,
+        undated: !row.start,
+        unbounded: false,
+        // **Per row, not per table.** `field_id` is SET NULL, but the
+        // slot columns are CASCADE, so a scheduler-produced assignment is
+        // destroyed while a free-standing one survives venueless. The
+        // producer computes it for both callers; retire ignores it,
+        // because a retirement destroys nothing.
+        cascades: onGameSlot(row),
+      })),
+    ...(db.practice_assignments || [])
+      .filter(
+        (row) => inScope(row, onPracticeSlot) && !past(rangeLastDay(row.effective_date_range))
+      )
+      .map((row) => {
+        // `null` covers both "no range at all" and an unbounded one; the
+        // SQL treats both as running forever. The LAST COVERED DAY is
+        // what the other four arms report and compare, so this arm
+        // reports and compares it too.
+        const upper = rangeLastDay(row.effective_date_range);
+        return {
+          kind: 'practice_assignment',
+          id: row.id,
+          on_date: upper,
+          week_index: null,
+          undated: false,
+          unbounded: upper === null,
+          cascades: onPracticeSlot(row),
+        };
+      }),
+    // **The sixth kind, added with 20260909000000 (LIVE-3).** The migration
+    // excluded this table on the reasoning that nothing is destroyed, which
+    // the SET NULL made false in effect: the profile survived describing
+    // ground that no longer existed, with its blackout windows attached, and
+    // the delete reported `affected_count: 0`. The FK is CASCADE now, so the
+    // profile IS destroyed and the operator is shown it.
+    //
+    // Dated by `available_until`, which is NOT NULL in Postgres, so this arm
+    // can be neither undated nor unbounded -- and that is the reason no new
+    // parameter was needed to fit it into the shared producer.
+    //
+    // **The filter is spelled out rather than reusing `past()`.** `past()`
+    // reads a missing date as "never past, therefore always affected", which
+    // is right for the five arms whose date columns are nullable. Postgres
+    // cannot hold a profile without an `available_until`, and if one appeared
+    // here anyway `available_until > p_after` would be NULL and the SQL would
+    // EXCLUDE it. Writing the comparison out makes the two arms agree on a row
+    // neither can legitimately see, instead of leaving a divergence that only
+    // a corrupt mock fixture would reveal.
+    ...(db.field_availability_profiles || [])
+      .filter(
+        (row) =>
+          mine(row) &&
+          (after === null ||
+            (!undatedValue(row.available_until) && String(row.available_until) > after))
+      )
+      .map((row) => ({
+        kind: 'availability_profile',
+        id: row.id,
+        on_date: row.available_until ?? null,
+        week_index: null,
+        undated: false,
+        unbounded: false,
+        cascades: true,
+      })),
+  ];
+};
+
+// **The audit row is BOUNDED, here as in the database.** A refusal writes
+// the affected list into `audit_log.metadata`, and a delete refused on a
+// busy field would otherwise write an arbitrarily large row on every
+// attempt. `public.field_bookings_digest` caps it at a sample plus the
+// totals the sample is a sample of, and this is that function -- same
+// keys, same limit, same reading of an empty list.
+//
+// Writing the raw array here while the database wrote the digest is the
+// exact divergence this PR exists to remove, one level up: a consumer
+// reading `metadata.affected.total` would get `undefined` under the mock
+// and a number in production, or read `.length` and get the reverse.
+const mockFieldBookingsDigest = (affected, limit = 25) => {
+  const rows = Array.isArray(affected) ? affected : [];
+  const byKind = {};
+  for (const row of rows) {
+    byKind[row.kind] = (byKind[row.kind] || 0) + 1;
+  }
+  return {
+    total: rows.length,
+    omitted: Math.max(rows.length - limit, 0),
+    by_kind: byKind,
+    sample: rows.slice(0, limit),
+  };
+};
+
+/**
+ * The availability scenarios any profile on this field belongs to, and the
+ * prune that follows the delete.
+ *
+ * `public.field_availability_scenario_ids_on_field` and
+ * `public.prune_empty_field_availability_scenarios` (20260909000000). Both
+ * field deleters call them, here as in the database: the capture has to run
+ * BEFORE the delete, because the cascade removes the membership rows that
+ * answer the question, and the prune after.
+ *
+ * The contract is narrow, matching `rollback_field_availability_import_job`:
+ * only scenarios the deleted profiles belonged to are considered, so an empty
+ * scenario created by some other path is left alone.
+ *
+ * @param {Object} db
+ * @param {string} orgId
+ * @param {string} fieldId
+ * @returns {string[]}
+ */
+const mockScenarioIdsOnField = (db, orgId, fieldId) => {
+  const profileIds = new Set(
+    (db.field_availability_profiles || [])
+      .filter(
+        (row) =>
+          String(row.organization_id) === String(orgId) && String(row.field_id) === String(fieldId)
+      )
+      .map((row) => String(row.id))
+  );
+  return [
+    ...new Set(
+      (db.field_availability_scenario_members || [])
+        .filter((row) => profileIds.has(String(row.profile_id)))
+        .map((row) => String(row.scenario_id))
+    ),
+  ];
+};
+
+/**
+ * @param {Object} db
+ * @param {string} orgId
+ * @param {string[]} scenarioIds
+ * @param {(table: string, doomed: Array<Object>) => void} destroy
+ * @returns {number} how many scenarios were removed
+ */
+const mockPruneEmptyScenarios = (db, orgId, scenarioIds, destroy) => {
+  if (!Array.isArray(scenarioIds) || scenarioIds.length === 0) return 0;
+  const named = new Set(scenarioIds.map(String));
+  const doomed = (db.field_availability_scenarios || []).filter(
+    (scenario) =>
+      String(scenario.organization_id) === String(orgId) &&
+      named.has(String(scenario.id)) &&
+      !(db.field_availability_scenario_members || []).some(
+        (member) => String(member.scenario_id) === String(scenario.id)
+      )
+  );
+  destroy('field_availability_scenarios', doomed);
+  return doomed.length;
 };
 
 const saveDB = (db) => {
@@ -2065,40 +2427,6 @@ export const mockSupabase = {
       // others did not.
       const applyRetirementTrigger = applyFieldRetirementTrigger;
 
-      /**
-       * The LAST DAY a practice range covers, or null when it covers no end.
-       *
-       * **This used to return the exclusive upper bound**, mirroring Postgres
-       * `upper()`, and both arms then compared that to the retirement date --
-       * so a practice running through the 30th, whose range canonicalises to
-       * `[.., 31st)`, was reported stranded by a retirement on the 30th while a
-       * game slot the same day was not. The two implementations AGREED, which
-       * is why the shared scenario table could not see it: agreement is not
-       * correctness. The boundary is now stated as data in the fixture, in the
-       * `retire-*-on-boundary` / `retire-*-day-after-boundary` pairs.
-       *
-       * Postgres normalises a discrete range to `[lower, upper)`, so both
-       * spellings in this repo's fixtures reduce to one rule: `[a,b]` covers
-       * through b, `[a,b)` covers through the day before b. Null when there is
-       * no upper bound at all, which is what `upper_inf` is true for.
-       *
-       * @param {string|null} range a daterange literal
-       * @returns {string|null} ISO date of the last covered day
-       */
-      const rangeLastDay = (range) => {
-        const text = String(range || '');
-        const match = /^[[(]([^,]*),([^,]*)([\])])$/.exec(text);
-        if (match === null) return null;
-        const end = match[2].trim();
-        if (end === '') return null;
-        // `]` means the bound itself is covered; `)` means the day before it is.
-        if (match[3] === ']') return end;
-        const previous = new Date(`${end}T00:00:00Z`);
-        if (Number.isNaN(previous.getTime())) return null;
-        previous.setUTCDate(previous.getUTCDate() - 1);
-        return previous.toISOString().slice(0, 10);
-      };
-
       const audit = (resourceType, resourceId, operation, payload) => {
         db.audit_log = db.audit_log || [];
         db.audit_log.push({
@@ -2359,205 +2687,12 @@ export const mockSupabase = {
         };
       }
 
-      // **One enumerator for "what is booked on this field", used by both
-      // admin_retire_field and admin_delete_field.**
-      //
-      // The booking tables were written out twice in the SQL -- once in
-      // each RPC -- and writing them out twice HERE as well is the shape that
-      // produced every HIGH in three consecutive rounds of PR 2: a correction
-      // landing on one arm and not its twin. The two callers differ in exactly
-      // one thing, the date, so that is the parameter.
-      //
-      // `after` is an ISO date: bookings on or before it are unaffected. `null`
-      // means NO date applies -- a deletion takes everything on the ground,
-      // dated or not -- which is a different answer from an empty filter.
-      //
-      // `undated` means the row records no date at all, so it cannot be judged
-      // (and, for a deletion, cannot be shown to the operator). `unbounded`
-      // means it runs forever and is therefore CERTAINLY affected. Two
-      // different answers, never collapsed into one.
-      //
-      // **One enumerator, no options -- both callers see the same five kinds.**
-      //
-      // An earlier version made `games` and slot-reached assignments DELETE-only
-      // on the reasoning that a retirement destroys nothing. That was wrong in
-      // the same way the SQL was: a retirement that cannot see the fixture on
-      // its ground UNDER-REPORTS, and the operator confirms against an
-      // incomplete list. What differs between the two callers is the DATE and
-      // nothing else, so that is the only parameter.
-      //
-      // Mirrors `public.field_bookings(p_organization_id, p_field_id, p_after)`.
-      //
-      // @param {string} fieldId
-      // @param {string|null} after `null` means no date applies -- a deletion
-      //   takes everything on the ground, which is not the same as an empty
-      //   filter.
-      const fieldBookings = (fieldId, after) => {
-        // A row with no date of its own is affected whatever `after` says.
-        // **An empty string is "no date", not a date before every date.** The
-        // field-import apply path writes `valid_until: ''` for an open-ended
-        // practice slot, and `'' <= anything` is true -- so a slot that is
-        // certainly stranded was being dropped from the affected list while
-        // the same row still reported `unbounded: true`. The pre-diff filters
-        // used `!slot.valid_until`, which treats '' as absent; this restores
-        // that meaning for every kind at once.
-        const undatedValue = (value) =>
-          value === null || value === undefined || String(value) === '';
-        const past = (value) => after !== null && !undatedValue(value) && String(value) <= after;
-        const gameDate = (slot) =>
-          slot.slot_date || (slot.start ? String(slot.start).slice(0, 10) : null);
-        const mine = (row) =>
-          String(row.organization_id) === String(orgId) && String(row.field_id) === String(fieldId);
-
-        const slotIdsOn = (table) =>
-          new Set(
-            (db[table] || [])
-              .filter((row) => String(row.field_id) === String(fieldId))
-              .map((row) => String(row.id))
-          );
-        const gameSlotIds = slotIdsOn('game_slots');
-        const practiceSlotIds = slotIdsOn('practice_slots');
-        const onGameSlot = (row) =>
-          gameSlotIds.has(String(row.game_slot_id)) || gameSlotIds.has(String(row.slot_id));
-        const onPracticeSlot = (row) =>
-          practiceSlotIds.has(String(row.practice_slot_id)) ||
-          practiceSlotIds.has(String(row.slot_id));
-        const inScope = (row, viaSlot) =>
-          String(row.organization_id) === String(orgId) &&
-          (String(row.field_id) === String(fieldId) || viaSlot(row));
-
-        return [
-          ...(db.game_slots || [])
-            .filter((slot) => mine(slot) && !past(gameDate(slot)))
-            .map((slot) => ({
-              kind: 'game_slot',
-              id: slot.id,
-              on_date: gameDate(slot),
-              week_index: slot.week_index ?? null,
-              undated: !gameDate(slot),
-              unbounded: false,
-              cascades: true,
-            })),
-          ...(db.practice_slots || [])
-            .filter((slot) => mine(slot) && !past(slot.valid_until ?? null))
-            .map((slot) => ({
-              kind: 'practice_slot',
-              id: slot.id,
-              // **`undatedValue` is the single reading, projection included.**
-              // The filter above already treats `valid_until: ''` -- what the
-              // field-import apply path writes for an open-ended slot -- as no
-              // date, but the projection still passed the `''` through, so this
-              // row read `{on_date: '', unbounded: true}` here and
-              // `{on_date: null, unbounded: true}` in Postgres, where an empty
-              // string is not a storable date. A consumer branching on
-              // `on_date === null` took different paths on the two arms for
-              // precisely the row this hunk was written for.
-              on_date: undatedValue(slot.valid_until) ? null : slot.valid_until,
-              week_index: null,
-              // Unbounded, therefore CERTAINLY stranded -- not unjudged.
-              undated: false,
-              unbounded: undatedValue(slot.valid_until),
-              cascades: true,
-            })),
-          // **The assignment tables.** The mock enumerated the two SLOT tables
-          // only, so the E2E client reported `affected_count: 0` for a field
-          // with every game assigned to it -- the migration's own header calls
-          // that out as gutting the acceptance criterion, and the mock
-          // reproduced the defect the SQL had already been fixed for. A mock
-          // that disagrees with the database about who is affected is a second
-          // answer to a question that is supposed to have one.
-          // `games` carries no field_id and dies with the slot, score and all.
-          // A census by column name could not see it; this list comes from the
-          // cascade closure instead. Its date is its slot's, so a retirement
-          // judges it against the same day the slot is judged against.
-          ...(db.games || [])
-            .filter((row) => {
-              if (!gameSlotIds.has(String(row.game_slot_id))) return false;
-              const slot = (db.game_slots || []).find(
-                (candidate) => String(candidate.id) === String(row.game_slot_id)
-              );
-              return !past(slot ? gameDate(slot) : null);
-            })
-            .map((row) => {
-              const slot = (db.game_slots || []).find(
-                (candidate) => String(candidate.id) === String(row.game_slot_id)
-              );
-              return {
-                kind: 'game',
-                id: row.id,
-                on_date: slot ? gameDate(slot) : null,
-                week_index: slot?.week_index ?? null,
-                undated: !(slot && gameDate(slot)),
-                unbounded: false,
-                cascades: true,
-              };
-            }),
-          ...(db.game_assignments || [])
-            .filter(
-              (row) =>
-                inScope(row, onGameSlot) && !past(row.start ? String(row.start).slice(0, 10) : null)
-            )
-            .map((row) => ({
-              kind: 'game_assignment',
-              id: row.id,
-              on_date: row.start ? String(row.start).slice(0, 10) : null,
-              week_index: row.week_index ?? null,
-              undated: !row.start,
-              unbounded: false,
-              // **Per row, not per table.** `field_id` is SET NULL, but the
-              // slot columns are CASCADE, so a scheduler-produced assignment is
-              // destroyed while a free-standing one survives venueless. The
-              // producer computes it for both callers; retire ignores it,
-              // because a retirement destroys nothing.
-              cascades: onGameSlot(row),
-            })),
-          ...(db.practice_assignments || [])
-            .filter(
-              (row) => inScope(row, onPracticeSlot) && !past(rangeLastDay(row.effective_date_range))
-            )
-            .map((row) => {
-              // `null` covers both "no range at all" and an unbounded one; the
-              // SQL treats both as running forever. The LAST COVERED DAY is
-              // what the other four arms report and compare, so this arm
-              // reports and compares it too.
-              const upper = rangeLastDay(row.effective_date_range);
-              return {
-                kind: 'practice_assignment',
-                id: row.id,
-                on_date: upper,
-                week_index: null,
-                undated: false,
-                unbounded: upper === null,
-                cascades: onPracticeSlot(row),
-              };
-            }),
-        ];
-      };
-
-      // **The audit row is BOUNDED, here as in the database.** A refusal writes
-      // the affected list into `audit_log.metadata`, and a delete refused on a
-      // busy field would otherwise write an arbitrarily large row on every
-      // attempt. `public.field_bookings_digest` caps it at a sample plus the
-      // totals the sample is a sample of, and this is that function -- same
-      // keys, same limit, same reading of an empty list.
-      //
-      // Writing the raw array here while the database wrote the digest is the
-      // exact divergence this PR exists to remove, one level up: a consumer
-      // reading `metadata.affected.total` would get `undefined` under the mock
-      // and a number in production, or read `.length` and get the reverse.
-      const fieldBookingsDigest = (affected, limit = 25) => {
-        const rows = Array.isArray(affected) ? affected : [];
-        const byKind = {};
-        for (const row of rows) {
-          byKind[row.kind] = (byKind[row.kind] || 0) + 1;
-        }
-        return {
-          total: rows.length,
-          omitted: Math.max(rows.length - limit, 0),
-          by_kind: byKind,
-          sample: rows.slice(0, limit),
-        };
-      };
+      // The three producers above live at module scope so that
+      // `rollback_field_import_job` -- outside this block -- reaches the same
+      // answer. These bind the two this block's callers use to its `db` and
+      // `orgId`; they are not a second implementation.
+      const fieldBookings = (fieldId, after) => mockFieldBookings(db, orgId, fieldId, after);
+      const fieldBookingsDigest = mockFieldBookingsDigest;
 
       if (name === 'admin_retire_field') {
         if (!p.p_effective_to) {
@@ -2812,6 +2947,7 @@ export const mockSupabase = {
           game: 'games',
           game_assignment: 'game_assignments',
           practice_assignment: 'practice_assignments',
+          availability_profile: 'field_availability_profiles',
         };
         /** @type {Record<string, Set<string>>} */
         const doomedByTable = {};
@@ -2832,20 +2968,53 @@ export const mockSupabase = {
         destroy('game_slots', onField('game_slots'));
         destroy('practice_slots', onField('practice_slots'));
 
-        // Whatever survived keeps its row and loses its venue. That covers the
-        // free-standing assignments and `field_availability_profiles`, whose
-        // field_id is ON DELETE SET NULL (20260522120000) and which the mock
-        // left pointing at a deleted field -- visible on the /fields page,
-        // which renders those profiles.
+        // **The profile, and the four tables that are its own parts.**
+        // 20260909000000 made `field_availability_profiles.field_id` ON DELETE
+        // CASCADE -- it was SET NULL, and the mock mirrored that by moving the
+        // profile to the "survives, venueless" list below. That state is the
+        // LIVE-3 defect: a profile describing ground that no longer exists,
+        // with its blackout windows attached, surfaced by `field_closures`
+        // with a NULL scope and reported to the operator as nothing at all.
+        //
+        // The profile's own dependents are keyed on `profile_id`, so they are
+        // destroyed by the profile rather than by the field, and they are not
+        // separate booking kinds: the `availability_profile` row in `affected`
+        // is what reports all five. The set is derived from the closure and
+        // held to it by docs/sql/20260909000000_smoke.sql section 3.
+        // Read BEFORE anything is destroyed: the cascade removes the
+        // membership rows that say which scenarios these profiles belonged to.
+        const scenarioIds = mockScenarioIdsOnField(db, orgId, p.p_field_id);
+        const doomedProfiles = reported('field_availability_profiles');
+        destroy('field_availability_profiles', doomedProfiles);
+        const doomedProfileIds = new Set(doomedProfiles.map((row) => String(row.id)));
         for (const table of [
-          'game_assignments',
-          'practice_assignments',
-          'field_availability_profiles',
+          'field_availability_profile_formats',
+          'field_availability_scenario_members',
+          'field_blackout_windows',
+          'field_equipment_requirements',
         ]) {
+          destroy(
+            table,
+            (db[table] || []).filter((row) => doomedProfileIds.has(String(row.profile_id)))
+          );
+        }
+
+        // Whatever survived keeps its row and loses its venue. That is the two
+        // free-standing assignment shapes and nothing else now: their
+        // `field_id` is the only edge from `fields` in the closure that is
+        // still ON DELETE SET NULL.
+        for (const table of ['game_assignments', 'practice_assignments']) {
           for (const row of db[table] || []) {
             if (String(row.field_id) === String(p.p_field_id)) row.field_id = null;
           }
         }
+        // ... and pruned after, on the narrow contract
+        // `rollback_field_availability_import_job` already uses: a scenario
+        // left with no members is still listed by
+        // get_field_availability_scenarios and still activatable by
+        // admin_select_field_availability_scenario.
+        const deletedScenarios = mockPruneEmptyScenarios(db, orgId, scenarioIds, destroy);
+
         markMockDeleted(db, 'fields', [field.id]);
         db.fields = (db.fields || []).filter((item) => String(item.id) !== String(p.p_field_id));
 
@@ -2854,6 +3023,7 @@ export const mockSupabase = {
           phase: 'after',
           confirmed: Boolean(p.p_confirm),
           affected_count: affected.length,
+          deleted_availability_scenarios: deletedScenarios,
           deleted: true,
           previous,
         });
@@ -2864,6 +3034,7 @@ export const mockSupabase = {
             organization_id: orgId,
             deleted: true,
             affected_count: affected.length,
+            deleted_availability_scenarios: deletedScenarios,
             affected,
           },
           error: null,
@@ -4883,9 +5054,17 @@ export const mockSupabase = {
       }
 
       const now = new Date().toISOString();
+      const rollbackOrg = job.organization_id;
+      // **Org-scoped, as the SQL is.** Every other read in this arm goes
+      // through `owned()` below; this one selected on the job id and the
+      // import type alone, so a ledger row belonging to another organisation
+      // but carrying this job id would be processed here and skipped in
+      // Postgres. The hunk that introduced org-scoping is the place to close
+      // the one read it left out.
       const records = (db.import_application_records || []).filter(
         (record) =>
           String(record.import_job_id) === String(p_import_job_id) &&
+          String(record.organization_id) === String(rollbackOrg) &&
           record.import_type === 'fields' &&
           !record.rolled_back_at
       );
@@ -4896,11 +5075,18 @@ export const mockSupabase = {
         };
       }
 
+      /** Rows of `table` belonging to this job's organisation. */
+      const owned = (table) =>
+        (db[table] || []).filter((row) => String(row.organization_id) === String(rollbackOrg));
+
       let deletedLocations = 0;
       let deletedFields = 0;
       let deletedSubunits = 0;
       let deletedPracticeSlots = 0;
       let deletedGameSlots = 0;
+      let restoredRecords = 0;
+      /** @type {Array<Record<string, any>>} */
+      const blocked = [];
       const order = {
         game_slots: 1,
         practice_slots: 2,
@@ -4909,54 +5095,250 @@ export const mockSupabase = {
         locations: 5,
       };
 
+      // **The guards this arm did not have at all.** The SQL refused a field
+      // whose ground was booked -- badly, on two tables of six, which is
+      // LIVE-3 -- and the mock refused nothing: it deleted every inserted row
+      // unconditionally and returned a hard-coded `blocked_records: 0`. That
+      // is not two implementations of one contract drifting, it is one
+      // implementation and a placeholder that agreed with a broken result,
+      // the same shape LIVE-2 found in the availability import. A parity
+      // mechanism assumes both arms exist.
+      //
+      // The field guard is `mockFieldBookings`, the module-scope producer the
+      // other two field RPCs read, called with `after = null` because a
+      // rollback removes the ground outright and no date applies. It is NOT a
+      // third list.
+      /** @param {Record<string, any>} record */
+      const blockedReason = (record) => {
+        if (record.target_table === 'game_slots') {
+          // **Both CASCADE columns, matching the SQL and the practice arm one
+          // branch down.** `game_assignments` reaches a slot through
+          // `game_slot_id` AND `slot_id`, and this read only the first.
+          const inUse =
+            owned('games').some((g) => String(g.game_slot_id) === String(record.target_id)) ||
+            owned('game_assignments').some(
+              (ga) =>
+                String(ga.game_slot_id) === String(record.target_id) ||
+                String(ga.slot_id) === String(record.target_id)
+            );
+          return inUse ? { reason: 'game_slot_in_use' } : null;
+        }
+        if (record.target_table === 'practice_slots') {
+          const inUse = owned('practice_assignments').some(
+            (pa) =>
+              String(pa.slot_id) === String(record.target_id) ||
+              String(pa.practice_slot_id) === String(record.target_id)
+          );
+          return inUse ? { reason: 'practice_slot_in_use' } : null;
+        }
+        if (record.target_table === 'field_subunits') {
+          // A COMPLETE cut of the subunit closure, not a narrower guard:
+          // `practice_slots.field_subunit_id` is the only edge into it, and
+          // `practice_assignments` hangs off the slot. See the migration
+          // header and docs/sql/20260909000000_smoke.sql section 2.
+          const inUse = owned('practice_slots').some(
+            (ps) => String(ps.field_subunit_id) === String(record.target_id)
+          );
+          return inUse ? { reason: 'subunit_in_use' } : null;
+        }
+        if (record.target_table === 'fields') {
+          const affected = mockFieldBookings(db, rollbackOrg, record.target_id, null);
+          return affected.length > 0
+            ? { reason: 'bookings_exist', affected_count: affected.length }
+            : null;
+        }
+        if (record.target_table === 'locations') {
+          const inUse = owned('fields').some(
+            (f) => String(f.location_id) === String(record.target_id)
+          );
+          return inUse ? { reason: 'location_has_fields' } : null;
+        }
+        return undefined;
+      };
+
+      /** @type {{ code: string, message: string } | null} */
+      let fatal = null;
+
       records
         .slice()
         .sort((a, b) => (order[a.target_table] || 99) - (order[b.target_table] || 99))
         .forEach((record) => {
+          if (fatal) return;
           if (record.operation === 'inserted') {
-            if (record.target_table === 'game_slots') {
-              db.game_slots = (db.game_slots || []).filter(
-                (item) => String(item.id) !== String(record.target_id)
+            const refusal = blockedReason(record);
+            if (refusal === undefined) {
+              // **The arm that used to be missing, on both runners.** Falling
+              // through here stamped the ledger `{deleted: true}` for a table
+              // nothing had deleted from. Defensive rather than reachable
+              // through the apply path, and the SQL raises 22023 for the same
+              // reason: a ledger that disagrees with its own import type must
+              // not be half rolled back.
+              fatal = {
+                code: '22023',
+                message: `rollback_field_import_job cannot undo an insert into ${record.target_table}; the field import applies only locations, fields, field_subunits, practice_slots and game_slots (record ${record.id})`,
+              };
+              return;
+            }
+            if (refusal !== null) {
+              // `kind`/`id`, the names the affected rows of the other two
+              // field RPCs already carry, and the names
+              // `field_bookings_digest` counts by.
+              blocked.push({
+                kind: record.target_table,
+                id: record.target_id,
+                ...refusal,
+              });
+              // Left replayable: `rolled_back_at` stays unset, so clearing the
+              // booking and re-running rolls this record back.
+              return;
+            }
+            // **A hard delete that does not TOMBSTONE resurrects.**
+            // `getDB()` rebuilds from `initialMockData` and `mergeSource` only
+            // adds or updates, so a filtered-out row that is part of the seed
+            // comes back on the next read -- and `initialMockData` seeds
+            // locations, fields, game_slots and practice_slots, which is every
+            // arm of this switch. The sibling `destroy()` in
+            // `admin_delete_field` calls `markMockDeleted` for exactly this
+            // reason and has a plant of its own; this helper was written
+            // without it, so the rollback reported `deleted_fields: 1` for a
+            // seeded field that was still there on the next `getMockData`.
+            // Reproduced before it was fixed. Same contract as the sibling.
+            const drop = (table) => {
+              const doomed = (db[table] || []).filter(
+                (item) =>
+                  String(item.id) === String(record.target_id) &&
+                  String(item.organization_id) === String(rollbackOrg)
               );
+              if (doomed.length === 0) return;
+              const ids = new Set(doomed.map((item) => String(item.id)));
+              markMockDeleted(db, table, [...ids]);
+              db[table] = (db[table] || []).filter((item) => !ids.has(String(item.id)));
+            };
+            if (record.target_table === 'game_slots') {
+              drop('game_slots');
               deletedGameSlots += 1;
             } else if (record.target_table === 'practice_slots') {
-              db.practice_slots = (db.practice_slots || []).filter(
-                (item) => String(item.id) !== String(record.target_id)
-              );
+              drop('practice_slots');
               deletedPracticeSlots += 1;
             } else if (record.target_table === 'field_subunits') {
-              db.field_subunits = (db.field_subunits || []).filter(
-                (item) => String(item.id) !== String(record.target_id)
-              );
+              drop('field_subunits');
               deletedSubunits += 1;
             } else if (record.target_table === 'fields') {
-              db.fields = (db.fields || []).filter(
-                (item) => String(item.id) !== String(record.target_id)
-              );
+              drop('fields');
               deletedFields += 1;
-            } else if (record.target_table === 'locations') {
-              db.locations = (db.locations || []).filter(
-                (item) => String(item.id) !== String(record.target_id)
-              );
+            } else {
+              drop('locations');
               deletedLocations += 1;
             }
+            record.rolled_back_at = now;
+            record.rolled_back_by = 'mock-admin-id';
+            record.rollback_payload = { deleted: true };
+            return;
+          }
+
+          if (record.operation !== 'updated') return;
+
+          // **The restore, which this arm reported and never performed.**
+          // `restored_records` was the literal `0` and no column was ever put
+          // back, so an operator rolling back an import that UPDATED an
+          // existing field kept the imported values in the mock and got the
+          // originals in Postgres. Nothing diverged loudly because nothing
+          // read it: the counter agreed with an empty implementation.
+          const previous = record.previous_payload || {};
+          const target = (db[record.target_table] || []).find(
+            (item) =>
+              String(item.id) === String(record.target_id) &&
+              String(item.organization_id) === String(rollbackOrg)
+          );
+          // **Each column carries the DEFAULT its SQL twin restores it
+          // with.** The migration writes `COALESCE((v_previous->>'active')
+          // ::boolean, true)` and four more like it; mapping every missing key
+          // to `null` here made a payload with no `active` restore a field the
+          // UI reads as inactive under the mock and active in Postgres -- the
+          // same class of divergence this PR exists to remove. `null` is the
+          // default only where the SQL's `->>` or `NULLIF(..., '')` genuinely
+          // yields NULL.
+          const restored = (value, fallback) =>
+            value === '' || value === undefined || value === null ? fallback : value;
+          const RESTORE_COLUMNS = {
+            locations: { name: null, address: null, lighting_available: false },
+            fields: {
+              location_id: null,
+              name: null,
+              surface_type: null,
+              size: null,
+              supports_halves: false,
+              max_age: null,
+              priority_rating: 1,
+              active: true,
+            },
+            practice_slots: {
+              field_id: null,
+              field_subunit_id: null,
+              day_of_week: null,
+              start_time: null,
+              end_time: null,
+              capacity: 1,
+              valid_from: null,
+              valid_until: null,
+              label: null,
+            },
+            game_slots: {
+              field_id: null,
+              division_id: null,
+              slot_date: null,
+              start_time: null,
+              end_time: null,
+              week_index: null,
+              capacity: 1,
+            },
+          };
+          const columns = RESTORE_COLUMNS[record.target_table];
+          if (columns === undefined) {
+            // `field_subunits` is genuinely absent: the apply path inserts a
+            // subunit or leaves it, and never updates one, which is why this
+            // union is four where the insert union above is five.
+            fatal = {
+              code: '22023',
+              message: `rollback_field_import_job cannot restore an update to ${record.target_table}; the field import updates only locations, fields, practice_slots and game_slots (record ${record.id})`,
+            };
+            return;
+          }
+          if (target) {
+            for (const [column, fallback] of Object.entries(columns)) {
+              target[column] = restored(previous[column], fallback);
+            }
+            target.updated_at = now;
           }
           record.rolled_back_at = now;
           record.rolled_back_by = 'mock-admin-id';
+          record.rollback_payload = previous;
+          restoredRecords += 1;
         });
 
+      if (fatal) {
+        return { data: null, error: { code: fatal.code, message: fatal.message } };
+      }
+
       const result = {
-        status: 'rolled_back',
+        status: blocked.length > 0 ? 'completed_with_warnings' : 'rolled_back',
         deleted_locations: deletedLocations,
         deleted_fields: deletedFields,
         deleted_field_subunits: deletedSubunits,
         deleted_practice_slots: deletedPracticeSlots,
         deleted_game_slots: deletedGameSlots,
-        restored_records: 0,
-        blocked_records: 0,
+        restored_records: restoredRecords,
+        blocked_records: blocked.length,
+        // **Bounded here as in the database.** The SQL writes
+        // `field_bookings_digest(v_blocked)` into warning_summary and the
+        // audit row and RETURNS the whole list, because one job's ledger can
+        // hold a row per CSV line. Writing the raw array into the stored
+        // summary while the database wrote a digest is the divergence
+        // PR #378's review found one refusal path along.
+        blocked: mockFieldBookingsDigest(blocked),
       };
       Object.assign(job, {
-        status: 'needs_fix',
+        status: blocked.length > 0 ? 'completed_with_warnings' : 'needs_fix',
         warning_summary: {
           ...(job.warning_summary || {}),
           field_rollback: result,
@@ -4964,7 +5346,8 @@ export const mockSupabase = {
       });
 
       saveDB(db);
-      return { data: result, error: null };
+      // The caller renders every refusal, so it gets all of them.
+      return { data: { ...result, blocked }, error: null };
     }
 
     if (name === 'set_import_job_coach_lead_summary') {

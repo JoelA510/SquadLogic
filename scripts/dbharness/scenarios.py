@@ -103,6 +103,7 @@ DEFAULT_BOOKING_OFFSET = {
     'practice_assignment': 60,
     'scheduled_game': 30,
     'scheduled_practice': 60,
+    'availability_profile': 45,
 }
 
 BOOKING_SEEDS = {
@@ -127,6 +128,16 @@ BOOKING_SEEDS = {
         "(organization_id, team_id, field_id, effective_date_range) "
         "VALUES (v_org, v_team, %(field)s, "
         "daterange(current_date, current_date + %(at)s, '[]'));",
+    # **The sixth kind (LIVE-3).** `available_from` and `available_until` are
+    # both NOT NULL with no default, and `available_until >= available_from`
+    # is a CHECK, so every column the constraint touches is written here
+    # rather than left to the schema.
+    'availability_profile':
+        "INSERT INTO public.field_availability_profiles "
+        "(organization_id, field_id, season_label, location, field_name, "
+        " available_from, available_until) "
+        "VALUES (v_org, %(field)s, 'Scenario Season', 'Scenario Park', "
+        "'Scenario Pitch', current_date, current_date + %(at)s);",
 }
 
 # The table each kind lives in, for counting survivors after a refusal.
@@ -135,6 +146,7 @@ BOOKING_TABLES = {
     'game_assignment': 'game_assignments',
     'practice_slot': 'practice_slots',
     'practice_assignment': 'practice_assignments',
+    'availability_profile': 'field_availability_profiles',
 }
 
 # **Composite kinds: the shapes the persistence RPCs actually write.**

@@ -20,7 +20,7 @@
  * copied from.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -45,22 +45,48 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
  *
  * @returns {Record<string, string>}
  */
+const PRODUCER_SIGNATURE = 'CREATE OR REPLACE FUNCTION public.field_bookings(';
+
+/**
+ * The migration that defines `public.field_bookings` LAST, and its text.
+ *
+ * **The filename was hard-coded here** and 20260909000000 superseded the
+ * function, so this parse would have gone on grading the mock against an
+ * enumerator the database no longer runs -- five arms where six are installed,
+ * and the new kind reported as "not a kind the migration enumerates". The set
+ * is derived from the migrations directory instead, because a fix whose
+ * sibling set cannot be produced by a command is a fix that is not finished.
+ *
+ * @returns {{ file: string, sql: string }}
+ */
+const producerMigration = () => {
+  const dir = path.join(REPO_ROOT, 'supabase/migrations');
+  const defining = readdirSync(dir)
+    .filter((name) => name.endsWith('.sql'))
+    .sort()
+    .filter((name) => readFileSync(path.join(dir, name), 'utf8').includes(PRODUCER_SIGNATURE));
+  // Migrations run in filename order, so the LAST definition is the live one.
+  // An empty list means the producer was renamed or removed, which must fail
+  // loudly rather than leave every comparison below comparing nothing.
+  expect(defining.length, 'no migration defines public.field_bookings').toBeGreaterThan(0);
+  const file = defining[defining.length - 1];
+  return { file, sql: readFileSync(path.join(dir, file), 'utf8') };
+};
+
 const migrationDispositions = () => {
-  const sql = readFileSync(
-    path.join(REPO_ROOT, 'supabase/migrations/20260907000000_field_delete_booking_guard.sql'),
-    'utf8'
-  );
+  const { sql } = producerMigration();
   // **The producer, not the RPC.** The union moved into `public.field_bookings`
   // so retire and delete give one answer; reading the RPC body would now match
   // no table name at all and pass by looking at nothing.
-  const start = sql.indexOf('CREATE OR REPLACE FUNCTION public.field_bookings(');
+  const start = sql.indexOf(PRODUCER_SIGNATURE);
   const end = sql.indexOf('REVOKE ALL ON FUNCTION public.field_bookings');
   expect(start, 'the shared enumerator moved; this parse is stale').toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
   const arms = sql.slice(start, end).split('UNION ALL');
   // The meta-assertion. A parse that found no arms would produce an empty map
   // and every comparison below would pass by comparing nothing with nothing.
-  expect(arms.length).toBe(5);
+  // Six as of 20260909000000, which added `availability_profile`.
+  expect(arms.length).toBe(6);
   /** @type {Record<string, string>} */
   const map = {};
   for (const arm of arms) {
@@ -81,6 +107,13 @@ const setMockSession = (userId) => {
 
 /** The first field of the seeded org, whatever it is. */
 const someField = () => getMockData('fields').find((f) => String(f.organization_id) === ORG);
+
+/**
+ * A SECOND field of the same org, so a scenario can have a member that the
+ * delete under test does not reach. Derived rather than named: the fixture's
+ * ids are not this file's business.
+ */
+const OTHER_FIELD_ID = 'guard-other-field';
 
 /**
  * Every shape a field delete can reach, with ids this file can look up again.
@@ -154,6 +187,90 @@ const seedEveryKind = async (fieldId) => {
       week_index: 1,
     },
   ]);
+  // **The sixth kind and its four parts.** `field_availability_profiles.field_id`
+  // is ON DELETE CASCADE as of 20260909000000, and the four tables keyed on
+  // `profile_id` go with the profile rather than with the field -- so a delete
+  // that removed the profile and left its blackout window behind would satisfy
+  // every `field_id` check in this file and still strand a closure.
+  await supabase.from('fields').insert([
+    {
+      id: OTHER_FIELD_ID,
+      organization_id: ORG,
+      location_id: 'loc-1',
+      name: 'Guard Other Pitch',
+      active: true,
+    },
+  ]);
+  await supabase.from('field_availability_profiles').insert([
+    {
+      id: 'guard-profile',
+      organization_id: ORG,
+      field_id: fieldId,
+      season_label: '2099',
+      location: 'Guard Park',
+      field_name: 'Guard Pitch',
+      available_from: '2099-01-01',
+      available_until: '2099-12-31',
+    },
+  ]);
+  await supabase.from('field_blackout_windows').insert([
+    {
+      id: 'guard-window',
+      organization_id: ORG,
+      profile_id: 'guard-profile',
+      blackout_from: '2099-08-01',
+      blackout_until: '2099-08-31',
+    },
+  ]);
+  await supabase
+    .from('field_availability_profile_formats')
+    .insert([{ id: 'guard-format', organization_id: ORG, profile_id: 'guard-profile' }]);
+  // **Three scenarios, one of which the cascade empties.** `guard-lonely` has
+  // this field's profile as its only member; `guard-shared` also has a profile
+  // on other ground; `guard-unrelated` is already empty and has nothing to do
+  // with this field. A prune that swept every empty scenario in the
+  // organisation would take the third, and one that took every scenario it was
+  // handed would take the second.
+  await supabase.from('field_availability_profiles').insert([
+    {
+      id: 'guard-other-profile',
+      organization_id: ORG,
+      field_id: OTHER_FIELD_ID,
+      season_label: '2099',
+      location: 'Guard Park',
+      field_name: 'Other Pitch',
+      available_from: '2099-01-01',
+      available_until: '2099-12-31',
+    },
+  ]);
+  await supabase.from('field_availability_scenarios').insert([
+    { id: 'guard-lonely', organization_id: ORG, season_label: '2099', name: 'Lonely' },
+    { id: 'guard-shared', organization_id: ORG, season_label: '2099', name: 'Shared' },
+    { id: 'guard-unrelated', organization_id: ORG, season_label: '2099', name: 'Unrelated' },
+  ]);
+  await supabase.from('field_availability_scenario_members').insert([
+    {
+      id: 'guard-member',
+      organization_id: ORG,
+      scenario_id: 'guard-lonely',
+      profile_id: 'guard-profile',
+    },
+    {
+      id: 'guard-member-shared-a',
+      organization_id: ORG,
+      scenario_id: 'guard-shared',
+      profile_id: 'guard-profile',
+    },
+    {
+      id: 'guard-member-shared-b',
+      organization_id: ORG,
+      scenario_id: 'guard-shared',
+      profile_id: 'guard-other-profile',
+    },
+  ]);
+  await supabase
+    .from('field_equipment_requirements')
+    .insert([{ id: 'guard-equipment', organization_id: ORG, profile_id: 'guard-profile' }]);
   await supabase.from('practice_assignments').insert([
     {
       id: 'guard-practice-assignment',
@@ -186,6 +303,12 @@ const seedEveryKind = async (fieldId) => {
       ['guard-game-assignment', 'guard-game-assignment-slotted', 'guard-game-assignment-slot-only'],
     ],
     ['practice_assignments', ['guard-practice-assignment', 'guard-practice-assignment-slotted']],
+    ['field_availability_profiles', ['guard-profile']],
+    ['field_blackout_windows', ['guard-window']],
+    ['field_availability_profile_formats', ['guard-format']],
+    ['field_availability_scenario_members', ['guard-member']],
+    ['field_availability_scenarios', ['guard-lonely', 'guard-shared', 'guard-unrelated']],
+    ['field_equipment_requirements', ['guard-equipment']],
   ]) {
     const rows = getMockData(table);
     for (const id of ids) {
@@ -232,6 +355,14 @@ const AFFECTED_TABLES = [
   'field_blackouts',
   'field_subunits',
   'field_availability_profiles',
+  'field_availability_scenarios',
+  // The profile's own parts. They carry no field_id, so the "nothing still
+  // points at the deleted field" sweep below structurally cannot see them --
+  // which is why they are asserted on by profile_id separately.
+  'field_blackout_windows',
+  'field_availability_profile_formats',
+  'field_availability_scenario_members',
+  'field_equipment_requirements',
 ];
 
 describe('field delete guard :: the mock agrees with the migration about consequences', () => {
@@ -254,6 +385,7 @@ describe('field delete guard :: the mock agrees with the migration about consequ
 
     const expected = migrationDispositions();
     expect(Object.keys(expected).sort()).toEqual([
+      'availability_profile',
       'game',
       'game_assignment',
       'game_slot',
@@ -268,6 +400,7 @@ describe('field delete guard :: the mock agrees with the migration about consequ
     expect(expected.game_slot).toBe('deleted');
     expect(expected.practice_slot).toBe('deleted');
     expect(expected.game).toBe('deleted');
+    expect(expected.availability_profile).toBe('deleted');
 
     const byId = new Map(data.affected.map((row) => [String(row.id), row]));
     const seen = new Set();
@@ -282,6 +415,7 @@ describe('field delete guard :: the mock agrees with the migration about consequ
       seen.add(row.kind);
     }
     expect([...seen].sort()).toEqual([
+      'availability_profile',
       'game',
       'game_assignment',
       'game_slot',
@@ -324,9 +458,15 @@ describe('field delete guard :: the mock agrees with the migration about consequ
       ['game_assignments', 'guard-game-assignment-slot-only'],
       ['practice_assignments', 'guard-practice-assignment'],
       ['practice_assignments', 'guard-practice-assignment-slotted'],
+      ['field_availability_profiles', 'guard-profile'],
+      ['field_blackout_windows', 'guard-window'],
+      ['field_availability_profile_formats', 'guard-format'],
+      ['field_availability_scenario_members', 'guard-member'],
+      ['field_equipment_requirements', 'guard-equipment'],
     ]) {
       expect(after.row(table, id), `${id} was destroyed by a REFUSED delete`).toBeDefined();
     }
+    expect(after.row('field_availability_profiles', 'guard-profile').field_id).toBe(field.id);
     expect(after.row('game_assignments', 'guard-game-assignment').field_id).toBe(field.id);
     expect(after.row('practice_assignments', 'guard-practice-assignment').field_id).toBe(field.id);
   });
@@ -361,13 +501,14 @@ describe('field delete guard :: the mock agrees with the migration about consequ
     // payload rather than restating it here is what makes a wrong report fail:
     // the RPC cannot be graded against its own restatement.
     const affected = data.affected;
-    expect(affected.length).toBeGreaterThanOrEqual(8);
+    expect(affected.length).toBeGreaterThanOrEqual(9);
     const TABLE_FOR_KIND = {
       game_slot: 'game_slots',
       practice_slot: 'practice_slots',
       game: 'games',
       game_assignment: 'game_assignments',
       practice_assignment: 'practice_assignments',
+      availability_profile: 'field_availability_profiles',
     };
     let destroyed = 0;
     let kept = 0;
@@ -394,6 +535,39 @@ describe('field delete guard :: the mock agrees with the migration about consequ
 
     // Blackouts cascade too, and nothing anywhere still points at the field.
     expect(after.all('field_blackouts')).toHaveLength(0);
+
+    // **The profile's own parts, which carry no field_id.** The sweep below
+    // walks `field_id` and is structurally blind to them, so they are checked
+    // by the key they actually hold. A delete that took the profile and left
+    // its blackout window would leave a closure attached to a profile that no
+    // longer exists -- LIVE-2's "visible and unattributable" row, one level
+    // further along -- and every other assertion in this file would pass.
+    //
+    // The anchor is the positive one: the seed put a row in each of the four
+    // tables and `seedEveryKind` proved each landed, so a zero here is a
+    // destruction rather than an empty table nobody filled.
+    for (const table of [
+      'field_blackout_windows',
+      'field_availability_profile_formats',
+      'field_availability_scenario_members',
+      'field_equipment_requirements',
+    ]) {
+      const orphans = after.all(table).filter((r) => String(r.profile_id) === 'guard-profile');
+      expect(orphans, `${table} survived the profile it hangs off`).toHaveLength(0);
+    }
+
+    // **The scenario the cascade emptied, and the two that must survive.** A
+    // scenario with no members is still listed by
+    // `get_field_availability_scenarios` and still activatable by
+    // `admin_select_field_availability_scenario`, so one left behind is an
+    // active scenario that can yield an empty availability set.
+    const scenarios = after.all('field_availability_scenarios').map((r) => String(r.id));
+    expect(scenarios).not.toContain('guard-lonely');
+    // The prune is NARROW: a scenario that still has a member, and an empty
+    // one this field's profiles never belonged to, are not its business.
+    expect(scenarios).toContain('guard-shared');
+    expect(scenarios).toContain('guard-unrelated');
+    expect(data.deleted_availability_scenarios).toBe(1);
     for (const table of AFFECTED_TABLES.filter((t) => t !== 'fields')) {
       const dangling = after.all(table).filter((r) => String(r.field_id) === String(field.id));
       expect(dangling, `${table} still points at the deleted field`).toHaveLength(0);

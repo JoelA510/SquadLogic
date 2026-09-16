@@ -166,16 +166,16 @@ const PLANTS = [
     // CAUGHT and said nothing about whether anything covers it.
     label: 'delete stops seeing assignments reached through their slot',
     suite: 'tests/fieldDeleteGuard.test.js',
-    find: '          (String(row.field_id) === String(fieldId) || viaSlot(row));',
-    replace: '          String(row.field_id) === String(fieldId);',
+    find: '    (String(row.field_id) === String(fieldId) || viaSlot(row));',
+    replace: '    String(row.field_id) === String(fieldId);',
   },
   {
     // `games` carries no field_id; only the cascade closure reaches it.
     // `games` carries no field_id; only the cascade closure reaches it. Both
     // callers enumerate it now, so this is aimed at the shared producer.
     label: 'the enumerator stops seeing the fixtures on its slots',
-    find: '              if (!gameSlotIds.has(String(row.game_slot_id))) return false;',
-    replace: '              if (true) return false;',
+    find: '        if (!gameSlotIds.has(String(row.game_slot_id))) return false;',
+    replace: '        if (true) return false;',
   },
   {
     // **The shared enumerator's `after: null` contract.** `null` means no date
@@ -183,8 +183,8 @@ const PLANTS = [
     // from comparing against the string "null". Get that wrong and every
     // booking reads as past, the count is zero, and the guard is silently off.
     label: 'the enumerator treats "no date at all" as a date',
-    find: '        const past = (value) => after !== null && !undatedValue(value) && String(value) <= after;',
-    replace: '        const past = (value) => value !== null && String(value) <= String(after);',
+    find: '  const past = (value) => after !== null && !undatedValue(value) && String(value) <= after;',
+    replace: '  const past = (value) => value !== null && String(value) <= String(after);',
   },
   {
     // The other half of the same predicate: `''` is what the field-import
@@ -193,9 +193,8 @@ const PLANTS = [
     // refusal -- while the same row still reports `unbounded: true`.
     label: 'an empty valid_until reads as a date before every date',
     suite: 'tests/fieldLifecycleRpcs.test.js',
-    find: `        const undatedValue = (value) =>
-          value === null || value === undefined || String(value) === '';`,
-    replace: '        const undatedValue = (value) => value === null || value === undefined;',
+    find: "  const undatedValue = (value) => value === null || value === undefined || String(value) === '';",
+    replace: '  const undatedValue = (value) => value === null || value === undefined;',
   },
   {
     // Not scenario-table plants: the table states the RPC's OUTCOME and
@@ -311,8 +310,8 @@ const PLANTS = [
     // reading exists for reported `on_date: ''` here and `null` in Postgres.
     label: 'an empty valid_until is projected as an empty string',
     suite: 'tests/fieldLifecycleRpcs.test.js',
-    find: '              on_date: undatedValue(slot.valid_until) ? null : slot.valid_until,',
-    replace: '              on_date: slot.valid_until ?? null,',
+    find: '        on_date: undatedValue(slot.valid_until) ? null : slot.valid_until,',
+    replace: '        on_date: slot.valid_until ?? null,',
   },
   {
     // **A confirmed retirement stops saying what it just closed over.** Its SQL
@@ -329,14 +328,14 @@ const PLANTS = [
     // which is exactly why the scenario table had to state the boundary as data
     // before either could be measured against it.
     label: 'the practice range boundary is read exclusively again',
-    find: `        if (match[3] === ']') return end;
-        const previous = new Date(\`\${end}T00:00:00Z\`);
-        if (Number.isNaN(previous.getTime())) return null;
-        previous.setUTCDate(previous.getUTCDate() - 1);`,
-    replace: `        if (match[3] === ')') return end;
-        const previous = new Date(\`\${end}T00:00:00Z\`);
-        if (Number.isNaN(previous.getTime())) return null;
-        previous.setUTCDate(previous.getUTCDate() + 1);`,
+    find: `  if (match[3] === ']') return end;
+  const previous = new Date(\`\${end}T00:00:00Z\`);
+  if (Number.isNaN(previous.getTime())) return null;
+  previous.setUTCDate(previous.getUTCDate() - 1);`,
+    replace: `  if (match[3] === ')') return end;
+  const previous = new Date(\`\${end}T00:00:00Z\`);
+  if (Number.isNaN(previous.getTime())) return null;
+  previous.setUTCDate(previous.getUTCDate() + 1);`,
   },
   {
     // **The disposition, re-derived from a hard-coded kind list.** The SQL asks
@@ -459,6 +458,160 @@ const PLANTS = [
     suite: 'tests/fieldAvailabilityLifecycle.test.js',
     find: '        row.validation_errors = [];\n        inserted += 1;',
     replace: '        inserted += 1;',
+  },
+  // -------------------------------------------------------------------------
+  // LIVE-3: the third deleter, and the profile that outlived its ground
+  //
+  // The rollback arm is aimed at its OWN suite rather than at the shared
+  // scenario table, because the table has no rollback cases: it states what
+  // the three lifecycle RPCs must do and `rollback_field_import_job` is not
+  // one of them. Naming the suite is what keeps that honest -- a plant scored
+  // against a table that cannot see it is the borrowed-evidence mode this
+  // file exists to refuse.
+  // -------------------------------------------------------------------------
+  {
+    // The defect itself, on this arm: the mock had NO guard, so this is the
+    // state the file shipped in before LIVE-3.
+    label: 'the rollback goes back to deleting whatever the import inserted',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: '            const refusal = blockedReason(record);',
+    replace: '            const refusal = null;',
+  },
+  {
+    // The producer, reached from the third caller. A rollback that consults a
+    // narrower reading than the other two RPCs is LIVE-3 exactly.
+    label: 'the rollback stops asking the shared producer',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: '          const affected = mockFieldBookings(db, rollbackOrg, record.target_id, null);',
+    replace: `          const affected = owned('practice_slots').filter(
+            (ps) => String(ps.field_id) === String(record.target_id)
+          );`,
+  },
+  {
+    // A blocked record that says how many and not which.
+    label: 'a blocked record stops saying which one and why',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: `              blocked.push({
+                kind: record.target_table,
+                id: record.target_id,
+                ...refusal,
+              });`,
+    replace: '              blocked.push({});',
+  },
+  {
+    // The game arm's missing column, which its practice sibling always had.
+    label: 'the game_slots arm forgets slot_id again',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: `              (ga) =>
+                String(ga.game_slot_id) === String(record.target_id) ||
+                String(ga.slot_id) === String(record.target_id)`,
+    replace: '              (ga) => String(ga.game_slot_id) === String(record.target_id)',
+  },
+  {
+    // The counter that testified to a restore nobody performed.
+    label: 'the updated restore goes back to being a counter',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: `          if (target) {
+            for (const [column, fallback] of Object.entries(columns)) {
+              target[column] = restored(previous[column], fallback);
+            }
+            target.updated_at = now;
+          }`,
+    replace: '          if (target) target.updated_at = now;',
+  },
+  {
+    // The unhandled `target_table` that was stamped as rolled back.
+    label: 'an unhandled target_table falls through silently again',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: `            if (refusal === undefined) {`,
+    replace: `            if (false) {`,
+  },
+  {
+    // The sixth kind, removed from the enumerator. The shared scenario table
+    // is what must see this, because it states the delete outcome.
+    label: 'the enumerator stops seeing availability profiles',
+    find: `    ...(db.field_availability_profiles || [])
+      .filter(
+        (row) =>
+          mine(row) &&`,
+    replace: `    ...(db.field_availability_profiles || [])
+      .filter(
+        (row) =>
+          false &&
+          mine(row) &&`,
+  },
+  {
+    // The profile survives the field, which is the LIVE-2 state this PR
+    // closed: a profile describing ground that no longer exists.
+    label: 'a confirmed delete strands the profile again',
+    suite: 'tests/fieldDeleteGuard.test.js',
+    find: `        const doomedProfiles = reported('field_availability_profiles');
+        destroy('field_availability_profiles', doomedProfiles);`,
+    replace: `        const doomedProfiles = reported('field_availability_profiles');`,
+  },
+  {
+    // Its parts survive it, which is the same row one level down: a blackout
+    // window attached to a profile that no longer exists.
+    label: "a confirmed delete leaves the profile's blackout window behind",
+    suite: 'tests/fieldDeleteGuard.test.js',
+    find: `          destroy(
+            table,
+            (db[table] || []).filter((row) => doomedProfileIds.has(String(row.profile_id)))
+          );`,
+    replace: '          void table;',
+  },
+  {
+    // The stored summary takes the raw list where the database stores a
+    // digest -- the divergence PR #378's review found one refusal path along.
+    label: 'the stored rollback summary takes the raw blocked list',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: '        blocked: mockFieldBookingsDigest(blocked),',
+    replace: '        blocked,',
+  },
+  {
+    // A hard delete with no tombstone: `getDB()` re-merges the seed, so a
+    // rolled-back SEEDED row comes back on the next read while the RPC has
+    // already reported it deleted.
+    label: 'the rollback deletes without a tombstone and the row resurrects',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: '              markMockDeleted(db, table, [...ids]);',
+    replace: '              void ids;',
+  },
+  {
+    // The prune, removed: a confirmed delete then leaves a scenario holding
+    // nothing, which is still listed and still activatable.
+    label: 'a confirmed delete leaves an emptied scenario standing',
+    suite: 'tests/fieldDeleteGuard.test.js',
+    find: '        const deletedScenarios = mockPruneEmptyScenarios(db, orgId, scenarioIds, destroy);',
+    replace: '        const deletedScenarios = 0;',
+  },
+  {
+    // The capture moved AFTER the profiles are destroyed -- the subtle way to
+    // get this wrong, because the call is still there and always returns
+    // nothing.
+    label: 'the scenario capture happens after the cascade removed its evidence',
+    suite: 'tests/fieldDeleteGuard.test.js',
+    find: '        const scenarioIds = mockScenarioIdsOnField(db, orgId, p.p_field_id);',
+    replace: '        const scenarioIds = [];',
+  },
+  {
+    // The prune widened to a sweep: it would take an empty scenario created by
+    // some other path, which is why the sibling's contract is narrow.
+    label: 'the prune sweeps every empty scenario in the organisation',
+    find: '      named.has(String(scenario.id)) &&',
+    replace: '      true &&',
+    suite: 'tests/fieldDeleteGuard.test.js',
+  },
+  {
+    // Every missing key restored as null, dropping the COALESCE defaults the
+    // SQL arm applies -- so a payload with no `active` restores a field the UI
+    // reads as inactive here and active in Postgres.
+    label: 'the restore drops the defaults its SQL twin coalesces to',
+    suite: 'tests/fieldImportRollbackGuard.test.js',
+    find: `          const restored = (value, fallback) =>
+            value === '' || value === undefined || value === null ? fallback : value;`,
+    replace: `          const restored = (value, fallback) =>
+            value === '' || value === undefined || value === null ? (void fallback, null) : value;`,
   },
 ];
 

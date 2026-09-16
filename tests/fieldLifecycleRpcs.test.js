@@ -13,7 +13,7 @@
  * the way it is bounded is that nothing writes one without the other.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,6 +22,34 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { mockSupabase as supabase, getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
 
 const ORG = 'org-1';
+
+/**
+ * The text of the migration that defines `public.<fnName>` LAST.
+ *
+ * **Three reads in this file hard-coded `20260907000000`**, and
+ * `20260909000000` superseded two of the functions they parse -- so the
+ * `field_bookings` parse expected five arms while six were installed, and the
+ * `admin_delete_field` parse certified a success payload one key short. A
+ * check keyed to a superseded file agrees with a database nobody is running.
+ * Migrations apply in filename order, so the last definition is the live one,
+ * and the set is derived from the directory rather than named.
+ *
+ * @param {string} fnName
+ * @returns {string} the defining migration's source
+ */
+const definingMigration = (fnName) => {
+  const dir = path.join(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
+    'supabase/migrations'
+  );
+  const signature = `CREATE OR REPLACE FUNCTION public.${fnName}(`;
+  const defining = readdirSync(dir)
+    .filter((name) => name.endsWith('.sql'))
+    .sort()
+    .filter((name) => readFileSync(path.join(dir, name), 'utf8').includes(signature));
+  expect(defining.length, `no migration defines public.${fnName}`).toBeGreaterThan(0);
+  return readFileSync(path.join(dir, defining[defining.length - 1]), 'utf8');
+};
 
 /**
  * The booking kinds `admin_retire_field` enumerates, read out of the
@@ -42,13 +70,7 @@ const migrationKinds = () => {
   // arms where the delete had five, so a retirement under-reported and this
   // helper certified the shortfall as the expected set. 20260907000000 moved
   // both RPCs onto `public.field_bookings`, and this reads that.
-  const sql = readFileSync(
-    path.join(
-      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
-      'supabase/migrations/20260907000000_field_delete_booking_guard.sql'
-    ),
-    'utf8'
-  );
+  const sql = definingMigration('field_bookings');
   const body = sql.slice(
     sql.indexOf('CREATE OR REPLACE FUNCTION public.field_bookings('),
     sql.indexOf('REVOKE ALL ON FUNCTION public.field_bookings')
@@ -57,7 +79,8 @@ const migrationKinds = () => {
   const kinds = [...new Set([...body.matchAll(/SELECT '([a-z_]+)'::text/g)].map((m) => m[1]))];
   // A parse that matched nothing would make every `kinds.includes(...)` below
   // fail loudly rather than pass, but an empty set is still a stale parse.
-  expect(kinds.length).toBe(5);
+  // Six as of 20260909000000, which added `availability_profile`.
+  expect(kinds.length).toBe(6);
   return kinds.sort();
 };
 
@@ -639,8 +662,12 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
     // FIVE, not four. `games` carries no field_id and is destroyed with its
     // slot anyway, so a retirement that could not see it under-reported what it
     // stranded -- and this assertion, pinned at four, certified the shortfall.
-    expect(kinds.length).toBe(5);
+    // SIX as of 20260909000000, which added `availability_profile`: the FK to
+    // `fields` became CASCADE, so a delete destroys the profile rather than
+    // stranding it, and an operator must be shown that before confirming.
+    expect(kinds.length).toBe(6);
     expect(kinds).toEqual([
+      'availability_profile',
       'game',
       'game_assignment',
       'game_slot',
@@ -713,13 +740,6 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
     // refusal would strand but not what a confirmation just did.
     //
     // The expected sets are read out of the migration's own RETURN blocks.
-    const sql = readFileSync(
-      path.join(
-        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
-        'supabase/migrations/20260907000000_field_delete_booking_guard.sql'
-      ),
-      'utf8'
-    );
     /**
      * The keys of the LAST `RETURN jsonb_build_object(...)` in one RPC -- the
      * success path, every earlier return being a refusal or a not-found.
@@ -728,6 +748,7 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
      * @returns {string[]} sorted key literals
      */
     const successKeys = (fnName) => {
+      const sql = definingMigration(fnName);
       const start = sql.indexOf(`CREATE OR REPLACE FUNCTION public.${fnName}(`);
       expect(start, `${fnName} is not in this migration`).toBeGreaterThan(-1);
       const body = sql.slice(start, sql.indexOf('REVOKE ALL ON FUNCTION', start));
@@ -780,13 +801,7 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
     // The expected key set is READ OUT OF THE MIGRATION, not written here: a
     // list copied from either arm would agree with whichever it was copied
     // from, which is how the shortfall above got certified once already.
-    const sql = readFileSync(
-      path.join(
-        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
-        'supabase/migrations/20260907000000_field_delete_booking_guard.sql'
-      ),
-      'utf8'
-    );
+    const sql = definingMigration('field_bookings_digest');
     const digestBody = sql.slice(
       sql.indexOf('CREATE OR REPLACE FUNCTION public.field_bookings_digest('),
       sql.indexOf('REVOKE ALL ON FUNCTION public.field_bookings_digest')
@@ -911,6 +926,19 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
       organization_id: ORG,
       game_slot_id: 'fam-gs',
     });
+    // The sixth, added by 20260909000000: an availability profile claiming
+    // ground past the retirement date. Its FK is CASCADE now, so a delete
+    // destroys it and a retirement must at least say it is stranded.
+    await supabase.from('field_availability_profiles').insert({
+      id: 'fam-fap',
+      organization_id: ORG,
+      field_id: field.id,
+      season_label: '2099',
+      location: 'Anywhere',
+      field_name: 'Anything',
+      available_from: '2098-01-01',
+      available_until: '2099-11-30',
+    });
 
     const { data, error } = await supabase.rpc('admin_retire_field', {
       p_organization_id: ORG,
@@ -927,7 +955,7 @@ describe('field lifecycle RPCs :: the affected-booking family is the migration s
     // ... and each seeded row is there by id, so "the kind appeared" is not
     // satisfied by some other row of the same kind already in the corpus.
     const byId = new Map(data.affected.map((a) => [String(a.id), a]));
-    for (const id of ['fam-gs', 'fam-ga', 'fam-ps', 'fam-pa', 'fam-g']) {
+    for (const id of ['fam-gs', 'fam-ga', 'fam-ps', 'fam-pa', 'fam-g', 'fam-fap']) {
       expect(byId.has(id)).toBe(true);
     }
     expect(byId.get('fam-ga').on_date).toBe('2099-01-02');

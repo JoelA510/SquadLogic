@@ -14,6 +14,9 @@ R3="$REPO/docs/sql/20260907000000_revert.sql"
 EMERG="$REPO/docs/sql/reverts/20260504060000_admin_facility_mutation_rpcs.sql"
 M4="$REPO/supabase/migrations/20260908000000_field_availability_profile_field_resolution.sql"
 R4="$REPO/docs/sql/20260908000000_revert.sql"
+M5="$REPO/supabase/migrations/20260909000000_rollback_field_import_booking_guard.sql"
+R5="$REPO/docs/sql/20260909000000_revert.sql"
+S5="$REPO/docs/sql/20260909000000_smoke.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # What each plant scored, by label, for the census at the bottom of this file.
 # The census asserts that every health claim run.sh prints has a plant that
@@ -213,6 +216,141 @@ on_exit() {
 }
 trap on_exit EXIT
 trap on_signal INT TERM
+
+# **A PLANT AIMED AT A SUPERSEDED FUNCTION BODY IS A CHECK OF NOTHING.**
+#
+# Migrations apply in filename order and `CREATE OR REPLACE FUNCTION` is
+# last-one-wins, so when a later migration recreates a function the earlier
+# file's copy of that body never reaches the database. A mutation planted into
+# it applies cleanly, changes the file, and is overwritten before anything
+# runs. The plant then scores NOT CAUGHT -- the correct verdict, and one that
+# costs a whole sweep to reach. This happened: 20260909000000 recreated
+# `field_bookings` and `admin_delete_field`, and eight plants aimed at
+# 20260907000000's copies became inert in one commit.
+#
+# So it is derived and refused here, before the baseline. The superseded set
+# comes from the MIGRATION DIRECTORY, not from a list in this file -- a list
+# would go stale on exactly the change it exists to catch -- and a plant is
+# refused only when its anchor falls INSIDE a superseded body, so a plant
+# against a DDL statement or a comment in the same file is untouched.
+#
+# The meta-assertion is on the other side: if this finds no plants at all it
+# says so and stops, because a parse that matched nothing would clear every
+# plant in the file by looking at none of them.
+echo "=== pre-flight: no plant may target a superseded statement ==="
+python3 - "$REPO" <<'PREFLIGHT'
+import io, os, re, sys
+
+repo = sys.argv[1]
+mig_dir = os.path.join(repo, 'supabase', 'migrations')
+sh = io.open(os.path.join(repo, 'scripts', 'dbharness', 'prove.sh'), encoding='utf8').read()
+
+# `M1="$REPO/..."` -> absolute path, so a plant's file is resolvable from its
+# shell variable without re-implementing the assignments.
+files = {}
+for name, path in re.findall(r'^(\w+)="(\$REPO/[^"]+)"', sh, re.M):
+    files[name] = path.replace('$REPO', repo)
+
+# **Three statement shapes, not one.** The first version of this check knew
+# only about function bodies, and three plants died of the same disease it was
+# written to cure: `M3 the producer is left callable by authenticated` mutated
+# a REVOKE that 20260909000000 re-issues, and the two M4 comment plants
+# mutated COMMENTs that 20260909000000 rewrites. All three applied cleanly,
+# changed nothing the database ended up holding, and scored NOT CAUGHT --
+# indistinguishable from a missing assertion. A guard that covers one of the
+# three ways a migration supersedes an earlier one is not a guard against the
+# class; it just moves where the class hides.
+def spans(src):
+    """(kind, target, start, end) for every statement a later migration can supersede."""
+    for m in re.finditer(r'CREATE OR REPLACE FUNCTION public\.([a-z_]+)\(', src):
+        begin = m.start()
+        stop = src.find('\n$$;\n', begin)
+        if stop < 0:
+            continue
+        yield ('function', m.group(1), begin, stop + 5)
+    for m in re.finditer(
+            r"COMMENT ON ([A-Z]+(?: [A-Z]+)?) ([\w.(), ]+?) IS\s*(?:'(?:[^']|'')*'|NULL)\s*;",
+            src, re.S):
+        target = m.group(1) + ' ' + re.sub(r'\s+', '', m.group(2))
+        yield ('comment', target, m.start(), m.end())
+    for m in re.finditer(r"^(?:GRANT|REVOKE)\b[^;]*;", src, re.M | re.S):
+        stmt = m.group(0)
+        tm = re.search(r'\bON\s+(?:FUNCTION|TABLE|SCHEMA|SEQUENCE|VIEW|ALL [A-Z ]+)?\s*([\w.]+(?:\([^)]*\))?)',
+                       stmt)
+        target = re.sub(r'\s+', '', tm.group(1)) if tm else stmt[:60]
+        yield ('acl', target, m.start(), m.end())
+
+# Which migration writes each (kind, target) LAST.
+last_writer = {}
+seen_kinds = {}
+for name in sorted(os.listdir(mig_dir)):
+    if not name.endswith('.sql'):
+        continue
+    src = io.open(os.path.join(mig_dir, name), encoding='utf8').read()
+    for kind, target, _b, _e in spans(src):
+        last_writer[(kind, target)] = name
+        seen_kinds[kind] = seen_kinds.get(kind, 0) + 1
+
+# **Each arm must have found something to reason about.** An arm that matches
+# nothing across 109 migrations is not covering its shape -- it is the same
+# vacuous pass, one level up, in the check built to stop vacuous passes.
+for kind in ('function', 'comment', 'acl'):
+    if not seen_kinds.get(kind):
+        print('PRE-FLIGHT FAILED: the %s arm matched no statement in %s; it is not covering anything'
+              % (kind, mig_dir))
+        sys.exit(2)
+
+# Every plant: label, file variable, and the `old` anchor.
+plants = re.findall(
+    r'^plant "([^"]+)" "\$(\w+)" \\\n\s*"((?:[^"\\]|\\.)*)"', sh, re.M | re.S)
+if not plants:
+    print('PRE-FLIGHT FAILED: parsed no plants out of prove.sh; this check looked at nothing')
+    sys.exit(2)
+
+WHY = {
+    'function': 'recreates it with CREATE OR REPLACE, and the installed body is the later one',
+    'comment':  'rewrites that COMMENT, and the stored comment is the later one',
+    'acl':      'issues its own GRANT/REVOKE on the same object, which decides the final privileges',
+}
+
+bad = []
+examined = 0
+for label, var, old_anchor in plants:
+    path = files.get(var)
+    if path is None or not path.startswith(mig_dir):
+        continue  # reverts and the emergency rollback are not migrations
+    base = os.path.basename(path)
+    src = io.open(path, encoding='utf8').read()
+    pos = src.find(old_anchor)
+    if pos < 0:
+        continue  # a moved anchor is ANCHOR-MISS's business, not this check's
+    examined += 1
+    for kind, target, begin, stop in spans(src):
+        if begin <= pos < stop and last_writer.get((kind, target)) != base:
+            bad.append((label, base, kind, target, last_writer[(kind, target)]))
+            break
+
+if examined == 0:
+    print('PRE-FLIGHT FAILED: no plant anchor resolved inside a migration; the walk found nothing to judge')
+    sys.exit(2)
+
+for label, base, kind, target, winner in bad:
+    print('PRE-FLIGHT REFUSAL: plant "%s"' % label)
+    print('  mutates the %s %s in %s, but %s %s.' % (kind, target, base, winner, WHY[kind]))
+    print('  This mutation never reaches the database, so a green run proves nothing about it.')
+    print('  Re-aim the plant at %s, or at a part of %s the later migration does not replace.'
+          % (winner, base))
+if bad:
+    sys.exit(1)
+print('pre-flight: %d migration-targeted plant anchors examined against %d function, %d comment and %d acl statements; none inside a superseded one'
+      % (examined, seen_kinds['function'], seen_kinds['comment'], seen_kinds['acl']))
+PREFLIGHT
+preflight_status=$?
+if [ "$preflight_status" -ne 0 ]; then
+  echo "REFUSING TO PLANT -- see the pre-flight refusals above." >&2
+  exit 7
+fi
+echo
 
 # **A green baseline, asserted before anything is planted.**
 #
@@ -619,7 +757,25 @@ plant "ONLY-SCEN half a blackout window accepted" "$M2" \
 # would have caught is the shape this PR removed. `games` carries no field_id,
 # so a census by column name cannot see this arm at all and the cascade closure
 # is the only thing that can -- dropping it must go red.
-plant "M3 the shared producer loses its games arm" "$M3" \
+# **EIGHT PLANTS BELOW MOVED FROM $M3 TO $M5, AND THE MOVE IS THE POINT.**
+#
+# 20260909000000 recreates `public.field_bookings` and
+# `public.admin_delete_field`. Migrations apply in filename order, so the body
+# that ENDS UP INSTALLED is 20260909000000's -- and a mutation planted into
+# 20260907000000's copy is overwritten moments later by the unmutated one. The
+# plant applies, the anchor matches, the file really changes, and the database
+# never sees it. Every such plant silently became a check of nothing.
+#
+# It cost a three-hour sweep to discover, because a plant aimed at a superseded
+# body scores NOT CAUGHT -- which is the right verdict and the slowest possible
+# way to learn it. The pre-flight refusal near the top of this file now derives
+# the superseded bodies from the migration directory and stops the run in
+# seconds instead, so the next migration to recreate a function cannot quietly
+# hollow out the plants aimed at its predecessor.
+#
+# Each anchor below was confirmed to appear exactly once in 20260909000000 as
+# well, because that migration carries both bodies forward verbatim.
+plant "M3 the shared producer loses its games arm" "$M5" \
     "    SELECT 'game'::text, g.id," \
     "    SELECT 'not_a_game'::text, g.id," \
   "smoke 20260907000000" \
@@ -643,7 +799,7 @@ plant "M3 retire reads a NULL confirmation as yes" "$M3" \
                 'operation', 'admin_retire_field'," \
   "scenario table" \
   "smoke 20260906000000"
-plant "M3 delete reads a NULL confirmation as yes" "$M3" \
+plant "M3 delete reads a NULL confirmation as yes" "$M5" \
   "    IF v_affected_count > 0 AND NOT COALESCE(p_confirm, false) THEN
         PERFORM public.record_audit_event(
             p_organization_id,
@@ -675,7 +831,7 @@ plant "M3 retire keeps a union of its own again" "$M3" \
   "scenario table"
 # The audit digest keeps a refusal from writing an unbounded row. Remove the cap
 # and the smoke's bound check goes red.
-plant "M3 the refusal embeds the whole list in the audit row" "$M3" \
+plant "M3 the refusal embeds the whole list in the audit row" "$M5" \
   "                'affected', public.field_bookings_digest(v_affected),
                 'previous', to_jsonb(v_existing)" \
   "                'affected', v_affected,
@@ -692,7 +848,7 @@ plant "M3 the refusal embeds the whole list in the audit row" "$M3" \
 # same shape -- so an anchor that is only that line matches twice and `plant`
 # refuses it. Each is disambiguated by the first key of the audit row beneath
 # it, the same way the two NULL-confirmation plants above are.
-plant "M3 delete loses its booking guard entirely" "$M3" \
+plant "M3 delete loses its booking guard entirely" "$M5" \
   "    IF v_affected_count > 0 AND NOT COALESCE(p_confirm, false) THEN
         PERFORM public.record_audit_event(
             p_organization_id,
@@ -731,7 +887,7 @@ plant "M3 the unguarded two-arg overload is left standing" "$M3" \
 # nothing ELSE. The scenario table names the exact phase set per case, so a
 # refusal that also recorded `before` -- an audit trail claiming a deletion was
 # begun when it was refused -- fails there and nowhere else.
-plant "ONLY-SCEN refusal also audits a phase it never reached" "$M3" \
+plant "ONLY-SCEN refusal also audits a phase it never reached" "$M5" \
   "        );
         RETURN jsonb_build_object(
             'deleted', false," \
@@ -757,9 +913,25 @@ plant "ONLY-SCEN refusal also audits a phase it never reached" "$M3" \
 # Drop the explicit revoke and section 5c must go red; the scenario table stays
 # green, because both callers are SECURITY DEFINER and behaviour is unchanged --
 # which is exactly why nothing noticed for two rounds.
-plant "M3 the producer is left callable by authenticated" "$M3" \
-  "REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM authenticated;" \
-  "-- the default privilege from 20260614000000 is left in place" \
+#
+# **This plant must ADD a grant, not remove a revoke, and the reason is
+# measured.** `pg_default_acl` in the harness database grants EXECUTE on new
+# public functions to `authenticated` and `service_role`, so the REVOKEs are
+# load-bearing -- but they are issued TWICE, once in 20260907000000 where the
+# producer is first created and again here. `CREATE OR REPLACE` preserves an
+# existing ACL, so by the time this migration runs the grant is already gone,
+# and deleting EITHER site alone leaves `field_bookings` reading
+# `{postgres=X/postgres}` exactly as before. The deletion form of this plant
+# scored NOT CAUGHT twice, once on each site, and both times the check was
+# sound and the mutation was the thing that could not matter. A guarantee
+# established redundantly is not falsifiable by a single-site deletion.
+#
+# So the mutation adds the privilege back instead. That is one site, it is
+# reachable, and it is the state the smoke's ACL assertion exists to reject.
+plant "M5 the producer is left callable by authenticated" "$M5" \
+  "REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM service_role;" \
+  "REVOKE ALL ON FUNCTION public.field_bookings(uuid, uuid, date) FROM service_role;
+GRANT EXECUTE ON FUNCTION public.field_bookings(uuid, uuid, date) TO authenticated;" \
   "smoke 20260907000000" \
   "scenario table"
 plant "M3 an eighth table joins the field_id family unnoticed" "$M3" \
@@ -777,7 +949,7 @@ ALTER TABLE public.practice_assignments
 # lives in the producer's `cascades` column, so each plant pins that column to a
 # constant. Both halves get one, since a flat answer in either direction passes
 # the case for the shape it happens to match.
-plant "M3 every game assignment claimed to survive" "$M3" \
+plant "M3 every game assignment claimed to survive" "$M5" \
   "           EXISTS (SELECT 1 FROM public.game_slots s
                     WHERE s.field_id = p_field_id
                       AND s.id IN (ga.game_slot_id, ga.slot_id))
@@ -786,7 +958,7 @@ plant "M3 every game assignment claimed to survive" "$M3" \
     FROM public.game_assignments ga" \
   "smoke 20260907000000" \
   "smoke 20260906000000"
-plant "M3 every practice assignment claimed to be destroyed" "$M3" \
+plant "M3 every practice assignment claimed to be destroyed" "$M5" \
   "           EXISTS (SELECT 1 FROM public.practice_slots s
                     WHERE s.field_id = p_field_id
                       AND s.id IN (pa.practice_slot_id, pa.slot_id))
@@ -803,7 +975,7 @@ plant "M3 every practice assignment claimed to be destroyed" "$M3" \
 # twice -- which is why this plant names the scenario table and requires the
 # smoke to stay green. Agreement is not correctness; only a fixture that states
 # the boundary as data can adjudicate it.
-plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M3" \
+plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M5" \
   "                 ELSE upper(pa.effective_date_range) - 1" \
   "                 ELSE upper(pa.effective_date_range)" \
   "scenario table" \
@@ -1248,16 +1420,16 @@ plant "M4 the refusal prose reverts to SQL-literal quoting" "$M4" \
 # its own plant, because a pin on a pair that only one plant can reach is a pin
 # on one of them. Each restores that object's superseded wording -- the exact
 # regression the pin exists to catch.
-plant "M4 the view comment reverts to the superseded claim" "$M4" \
-  "COLLAPSING THE UNION IS STILL BLOCKED, and only half the obstacle is gone:" \
-  "The union is temporary: it collapses to field_blackouts alone once finalize_field_availability_import_job resolves a profile to a field reliably. Formerly:" \
-  "smoke 20260908000000" \
+plant "M5 the view comment reverts to the superseded claim" "$M5" \
+  "COLLAPSING THE UNION IS STILL BLOCKED, and the reason has CHANGED as of 20260909000000:" \
+  "COLLAPSING THE UNION IS STILL BLOCKED, and only half the obstacle is gone: field_availability_profiles is deliberately excluded from admin_delete_field''s booking guard, so deleting a field still orphans every profile pointing at it." \
+  "smoke 20260909000000" \
   "smoke 20260907000000"
 
-plant "M4 the frozen table comment reverts to the superseded claim" "$M4" \
-  "COLLAPSING THE UNION IS STILL BLOCKED as of 20260908000000" \
-  "The two cannot be collapsed until finalize_field_availability_import_job stops attaching blackouts to profiles whose field_id resolution can be NULL. Formerly blocked as of 20260908000000" \
-  "smoke 20260908000000" \
+plant "M5 the frozen table comment reverts to the superseded claim" "$M5" \
+  "COLLAPSING THE UNION IS STILL BLOCKED as of 20260909000000, but no longer because anything is still CREATING field-less profiles:" \
+  "COLLAPSING THE UNION IS STILL BLOCKED as of 20260908000000, and deleting a field still orphans the profile this window hangs from:" \
+  "smoke 20260909000000" \
   "smoke 20260907000000"
 
 # **The obvious wrong fix for this defect**, and the reason section 2 pins the
@@ -1365,6 +1537,400 @@ plant "R4 revert restores the finalizer under a second signature" "$R4" \
   "revert 20260908000000: finalize_field_availability_import_job after the revert reads AMBIGUOUS:2"
 
 # ---------------------------------------------------------------------------
+# LIVE-3: the third deleter, and the profile that outlived its ground
+# ---------------------------------------------------------------------------
+
+# **The defect itself.** Put the two-table union back in front of the field
+# delete. A field held only by a free-standing assignment or an availability
+# profile then rolls back unrefused, which is LIVE-3 exactly.
+plant "M5 the rollback goes back to its two-table guard" "$M5" \
+  "                SELECT count(*) INTO v_affected_count
+                  FROM public.field_bookings(
+                         v_job.organization_id, v_record.target_id, NULL);" \
+  "                SELECT count(*) INTO v_affected_count
+                  FROM public.practice_slots ps
+                 WHERE ps.organization_id = v_job.organization_id
+                   AND ps.field_id = v_record.target_id;" \
+  "smoke 20260909000000"
+
+# **The sixth arm, removed.** `admin_delete_field` then reports nothing for a
+# field carrying only a profile and deletes it, which is the half of LIVE-3
+# LIVE-2 measured. Section 6 of the new smoke is what must see this.
+plant "M5 the producer loses its availability_profile arm" "$M5" \
+  "    WHERE fap.organization_id = p_organization_id AND fap.field_id = p_field_id" \
+  "    WHERE fap.organization_id = p_organization_id AND fap.field_id IS NULL" \
+  "smoke 20260909000000"
+
+# **The FK left SET NULL.** Nothing about the reporting changes -- the arm
+# still names the profile -- but a confirmed delete strands it again, and the
+# disposition literal `cascades = true` becomes a lie the catalogue contradicts.
+plant "M5 the profile FK stays SET NULL" "$M5" \
+  "  FOREIGN KEY (field_id) REFERENCES public.fields (id) ON DELETE CASCADE;" \
+  "  FOREIGN KEY (field_id) REFERENCES public.fields (id) ON DELETE SET NULL;" \
+  "smoke 20260907000000"
+
+# **The silent arm, restored.** An unhandled `target_table` is stamped as
+# rolled back having deleted nothing -- the class 8.3 recorded three instances
+# of. Section 5c of the new smoke calls the RPC with exactly such a record.
+plant "M5 an unhandled target_table falls through silently again" "$M5" \
+  "            ELSE
+                -- **The arm that used to be missing.**" \
+  "            ELSIF false THEN
+                -- **The arm that used to be missing.**" \
+  "smoke 20260909000000"
+
+# **The blocked list, reduced to a counter.** The refusal still fires and the
+# count is still right; what the operator loses is which record and why.
+plant "M5 a blocked record stops saying which one and why" "$M5" \
+  "                    v_blocked := v_blocked || jsonb_build_object(
+                        'kind', v_record.target_table,
+                        'id', v_record.target_id,
+                        'reason', 'bookings_exist',
+                        'affected_count', v_affected_count);" \
+  "                    NULL;" \
+  "smoke 20260909000000"
+
+# **The subunit argument, falsified at its root.** Give `game_slots` a
+# `field_subunit_id` and the subunit arm's single `practice_slots` check stops
+# being a complete cut of the closure. Nothing else in the harness looks at
+# this, which is the point: section 2 exists because the argument is about the
+# graph rather than about the code.
+plant "M5 a second edge joins the subunit closure unnoticed" "$M5" \
+  "BEGIN;
+
+-- ---------------------------------------------------------------------------
+-- 1. field_availability_profiles.field_id" \
+  "BEGIN;
+
+ALTER TABLE public.game_slots
+  ADD COLUMN field_subunit_id uuid REFERENCES public.field_subunits(id) ON DELETE CASCADE;
+
+-- ---------------------------------------------------------------------------
+-- 1. field_availability_profiles.field_id" \
+  "smoke 20260909000000"
+
+# **A fifth dependent on the profile.** It would be destroyed by a confirmed
+# delete with nothing in `affected` accounting for it -- the reason the four
+# parts are excluded from the booking list rather than ignored.
+plant "M5 a fifth table hangs off the profile unnoticed" "$M5" \
+  "COMMENT ON COLUMN public.field_availability_profiles.field_id IS" \
+  "CREATE TABLE public.field_profile_annotations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  profile_id uuid NOT NULL REFERENCES public.field_availability_profiles(id) ON DELETE CASCADE
+);
+COMMENT ON COLUMN public.field_availability_profiles.field_id IS" \
+  "smoke 20260909000000"
+
+# **The derived deleter set, against a fourth deleter.** A new function that
+# removes a field without consulting the producer is precisely how LIVE-3
+# arrived -- the third deleter was on nobody's list.
+plant "M5 a fourth function deletes a field without the producer" "$M5" \
+  "GRANT EXECUTE ON FUNCTION public.rollback_field_import_job(uuid) TO authenticated;" \
+  "GRANT EXECUTE ON FUNCTION public.rollback_field_import_job(uuid) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.admin_purge_field(p_field_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS \$purge\$
+BEGIN
+  DELETE FROM public.fields WHERE id = p_field_id;
+END;
+\$purge\$;" \
+  "smoke 20260909000000"
+
+# **The comment that goes stale.** Leave the view telling the next reader that
+# the profile is excluded from the delete guard, which this migration makes
+# false. Section 7 of the new smoke is the only thing that can see it.
+plant "M5 the collapse-blocker needle is retired by a typo" "$S5" \
+  "  v_needle_view := '%excluded from admin_delete_field%';" \
+  "  v_needle_view := '%a phrase that appears in no comment anywhere%';" \
+  "smoke 20260909000000" \
+  "smoke 20260908000000"
+
+# **The new smoke's own anchors.** A section whose parse silently matches
+# nothing passes every NOT LIKE below it -- the meta-assertion failure this
+# project has found in its own assertion files twice.
+plant "M5-SMOKE section 1's fields-arm parse degenerates to a one-character capture" "$S5" \
+  "\$re\$ELSIF v_record\\.target_table = 'fields' THEN(.*?)ELSIF v_record\\.target_table = 'locations' THEN\$re\$))[1];
+  IF v_fields_arm IS NULL THEN" \
+  "\$re\$ELSIF v_record\\.target_table = 'fields' THEN(.?)\$re\$))[1];
+  IF v_fields_arm IS NULL THEN" \
+  "smoke 20260909000000"
+
+# **The smoke's stale-comment literals are a COPY of the revert's wording.**
+# run.sh reads them out of the smoke and requires each to appear in the
+# revert. Drift the copy and that coupling must break -- otherwise the needle
+# degrades into a phrase that matches only itself, which is the vacuous NOT
+# LIKE this whole section exists to prevent. The replacement keeps the
+# substring the smoke's own first assertion looks for, so what fails here is
+# the coupling and nothing else.
+plant "M5-SMOKE a stale-comment literal drifts from the revert's wording" "$S5" \
+  "  v_stale_view := 'field_availability_profiles is deliberately excluded from admin_delete_field''s booking guard, so deleting a field still orphans every profile pointing at it';" \
+  "  v_stale_view := 'excluded from admin_delete_field, in a sentence the revert never restores';" \
+  "20260909000000: the smoke's stale-comment needles no longer match the wording its revert puts back"
+
+# Section 1b cuts the same arm with its own copy of the regex and its own
+# combined `IS NULL OR length < 200` guard. One control per guard: the plant
+# above cannot reach this one, and an uncontrolled guard is the thing this
+# whole block exists to stop.
+plant "M5-SMOKE section 1b's fields-arm parse degenerates to a one-character capture" "$S5" \
+  "\$re\$ELSIF v_record\\.target_table = 'fields' THEN(.*?)ELSIF v_record\\.target_table = 'locations' THEN\$re\$))[1];
+  IF v_fields_arm IS NULL OR length(v_fields_arm) < 200 THEN" \
+  "\$re\$ELSIF v_record\\.target_table = 'fields' THEN(.?)\$re\$))[1];
+  IF v_fields_arm IS NULL OR length(v_fields_arm) < 200 THEN" \
+  "smoke 20260909000000"
+
+# **The asymmetry inside the fix.** `game_assignments` reaches a game slot
+# through `game_slot_id` AND `slot_id`, both CASCADE, and the arm read only the
+# first while its practice sibling read both. Put it back and an assignment
+# carrying `slot_id` alone is destroyed by the rollback with nothing refusing.
+plant "M5 the game_slots arm forgets slot_id again" "$M5" \
+  "                      AND (
+                        ga.game_slot_id = v_record.target_id
+                        OR ga.slot_id = v_record.target_id
+                      )" \
+  "                      AND ga.game_slot_id = v_record.target_id" \
+  "smoke 20260909000000"
+
+# **A third table referencing `locations`.** The arm refuses only while a FIELD
+# remains, so a new referent that is not under `fields` would be destroyed by a
+# rollback in silence -- which is exactly what happened when 20260906000100
+# added `field_blackouts.location_id` and nothing noticed.
+plant "M5 a third table references locations unnoticed" "$M5" \
+  "-- ---------------------------------------------------------------------------
+-- 2. The producer gains a SIXTH kind" \
+  "CREATE TABLE public.location_notices (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  location_id uuid NOT NULL REFERENCES public.locations(id) ON DELETE CASCADE
+);
+
+-- ---------------------------------------------------------------------------
+-- 2. The producer gains a SIXTH kind" \
+  "smoke 20260909000000"
+
+# **The unbounded audit row.** Write the raw list where the digest goes and a
+# rollback refused on a busy season stores an arbitrarily large array in
+# `warning_summary` and the audit row on every attempt -- the hazard
+# 20260907000000 built `field_bookings_digest` for.
+plant "M5 the audit row gets the raw blocked list" "$M5" \
+  "        'blocked', public.field_bookings_digest(v_blocked)" \
+  "        'blocked', v_blocked" \
+  "smoke 20260909000000"
+
+# **The lock, removed.** Structural only -- a race needs a second session and
+# the harness runs one -- so the plant proves the ASSERTION can fail, not that
+# the race is reproduced. Said out loud rather than implied.
+plant "M5 the fields arm counts bookings without locking the field" "$M5" \
+  "                PERFORM 1 FROM public.fields f
+                 WHERE f.id = v_record.target_id
+                   AND f.organization_id = v_job.organization_id
+                 FOR UPDATE;" \
+  "                -- lock removed" \
+  "smoke 20260909000000"
+
+# Two of three is not three: the field is locked and its slots are not, which
+# is the half that covers `games` and a slot-only assignment.
+plant "M5 the fields arm locks the field but not its slots" "$M5" \
+  "                PERFORM 1 FROM public.game_slots gs
+                 WHERE gs.organization_id = v_job.organization_id
+                   AND gs.field_id = v_record.target_id
+                 FOR UPDATE;" \
+  "                -- slot lock removed" \
+  "smoke 20260909000000"
+
+# **A lock in another arm.** Correct-looking and a deadlock cycle: it acquires
+# a slot before the field, which is the opposite order to admin_delete_field.
+plant "M5 a second arm starts taking a row lock" "$M5" \
+  "            ELSIF v_record.target_table = 'practice_slots' THEN
+                IF EXISTS (" \
+  "            ELSIF v_record.target_table = 'practice_slots' THEN
+                PERFORM 1 FROM public.practice_slots ps
+                 WHERE ps.id = v_record.target_id
+                 FOR UPDATE;
+                IF EXISTS (" \
+  "smoke 20260909000000"
+
+# **The prune, removed.** A confirmed delete then leaves a scenario holding
+# nothing -- still listed by get_field_availability_scenarios and still
+# activatable by admin_select_field_availability_scenario.
+plant "M5 a confirmed delete leaves an emptied scenario standing" "$M5" \
+  "    v_deleted_scenarios := public.prune_empty_field_availability_scenarios(
+                             p_organization_id, v_scenario_ids);" \
+  "    v_deleted_scenarios := 0;" \
+  "smoke 20260909000000"
+
+# **The capture, moved after the delete**, which is the subtle way to get this
+# wrong: the call is there, the helper is there, and by the time it runs the
+# membership rows it reads are already gone, so it always returns nothing.
+plant "M5 the scenario capture happens after the cascade removed its evidence" "$M5" \
+  "    v_scenario_ids := public.field_availability_scenario_ids_on_field(
+                        p_organization_id, p_field_id);
+
+    DELETE FROM public.fields" \
+  "    DELETE FROM public.fields" \
+  "smoke 20260909000000"
+
+# **The prune widened to a sweep.** It would take an empty scenario created by
+# some other path -- a decision nobody has made, and the reason the sibling's
+# contract is narrow.
+plant "M5 the prune sweeps every empty scenario in the organisation" "$M5" \
+  "       AND s.id = ANY(p_scenario_ids)
+       AND NOT EXISTS (" \
+  "       AND NOT EXISTS (" \
+  "smoke 20260909000000"
+
+# **A helper left reachable.** 20260614000000 grants EXECUTE to `authenticated`
+# by default privilege, so dropping the explicit revoke does not merely fail to
+# tighten anything -- it leaves the function callable by every authenticated
+# user while its COMMENT says otherwise. The same claim 20260907000000's
+# section 5c was written after.
+plant "M5 a scenario helper is left callable by authenticated" "$M5" \
+  "REVOKE ALL ON FUNCTION public.prune_empty_field_availability_scenarios(uuid, uuid[]) FROM authenticated;" \
+  "-- revoke removed" \
+  "smoke 20260909000000"
+
+# ---------------------------------------------------------------------------
+# LIVE-3's revert: four warnings, two counts, three verdicts
+# ---------------------------------------------------------------------------
+
+# It counts the profiles a future delete will strand. Counting the ALREADY
+# stranded ones instead reports the wrong set and reads as reassuring.
+plant "R5 revert counts the wrong profiles" "$R5" \
+  "  SELECT count(*) INTO v_attached
+    FROM public.field_availability_profiles WHERE field_id IS NOT NULL;" \
+  "  SELECT count(*) INTO v_attached
+    FROM public.field_availability_profiles WHERE field_id IS NULL;" \
+  "revert 20260909000000: planted an attached profile with a window and an already-orphaned one, and the revert did not count all three"
+
+# It names the sixth booking kind it is removing. A revert that restores a
+# narrower producer without saying so is the same silence one level up.
+plant "R5 revert removes the sixth kind silently" "$R5" \
+  "  RAISE WARNING 'RESTORING public.field_bookings to five kinds:" \
+  "  RAISE NOTICE 'restoring the previous producer:" \
+  "revert 20260909000000: restored the five-kind producer without naming what that costs"
+
+plant "R5 revert reinstates the two-table rollback guard silently" "$R5" \
+  "  RAISE WARNING 'RESTORING rollback_field_import_job to its two-table guard:" \
+  "  RAISE NOTICE 'restoring the previous rollback body:" \
+  "revert 20260909000000: restored the two-table rollback guard without naming what that costs"
+
+# **A revert that names three costs of four.** The fourth is the pair of silent
+# switch arms and the blocked list, and its count is what run.sh's seeded job
+# makes non-empty.
+plant "R5 revert does not name the silent arms it restores" "$R5" \
+  "  RAISE WARNING 'ALSO REVERTING two silent switch arms and the blocked list:" \
+  "  RAISE NOTICE 'also reverting some other things:" \
+  "revert 20260909000000: planted a job carrying field_rollback.blocked and the revert did not name the silent arms it restores, or did not count it"
+
+plant "R5 revert counts no stranded blocked lists" "$R5" \
+  "  SELECT count(*) INTO v_blocked_jobs
+    FROM public.import_jobs
+   WHERE warning_summary -> 'field_rollback' ? 'blocked';" \
+  "  v_blocked_jobs := 0;" \
+  "revert 20260909000000: planted a job carrying field_rollback.blocked and the revert did not name the silent arms it restores, or did not count it"
+
+# The producer verdict, on each branch it can go red by. STILL-SIX-KINDS: a
+# revert that restores everything else and leaves the sixth arm standing.
+plant "R5 revert leaves the sixth arm in the producer" "$R5" \
+  "    FROM public.practice_assignments pa
+    CROSS JOIN LATERAL (" \
+  "    FROM public.practice_assignments pa
+    CROSS JOIN LATERAL (
+        SELECT NULL::date WHERE 'availability_profile' <> ''
+    ) AS unused_marker(marker)
+    CROSS JOIN LATERAL (" \
+  "revert 20260909000000: field_bookings after the revert reads STILL-SIX-KINDS"
+
+# GONE: a revert that removes the producer instead of restoring it. Both
+# callers then raise undefined_function on the next delete.
+plant "R5 revert drops the producer instead of restoring it" "$R5" \
+  "COMMENT ON FUNCTION public.field_bookings(uuid, uuid, date) IS" \
+  "DROP FUNCTION public.field_bookings(uuid, uuid, date) CASCADE;
+COMMENT ON SCHEMA public IS" \
+  "revert 20260909000000: field_bookings after the revert reads GONE"
+
+# AMBIGUOUS: the restored producer arrives under a changed signature, so the
+# six-kind version is left standing beside it and every call is 42725.
+plant "R5 revert restores the producer under a second signature" "$R5" \
+  "    p_after date DEFAULT NULL
+)
+RETURNS TABLE (" \
+  "    p_after date DEFAULT NULL,
+    p_unused integer DEFAULT 0
+)
+RETURNS TABLE (" \
+  "revert 20260909000000: field_bookings after the revert reads AMBIGUOUS:2"
+
+# The rollback verdict. STILL-CALLS-PRODUCER: a revert that restores the two
+# smaller things and leaves the rollback on the producer it also narrows.
+plant "R5 revert leaves the rollback on the producer" "$R5" \
+  "            ELSIF v_record.target_table = 'fields' THEN
+                IF EXISTS (
+                    SELECT 1 FROM public.practice_slots ps" \
+  "            ELSIF v_record.target_table = 'fields' THEN
+                -- public.field_bookings
+                IF EXISTS (
+                    SELECT 1 FROM public.practice_slots ps" \
+  "revert 20260909000000: rollback_field_import_job after the revert reads STILL-CALLS-PRODUCER"
+
+plant "R5 revert drops the rollback instead of restoring it" "$R5" \
+  "COMMENT ON FUNCTION public.rollback_field_import_job(uuid) IS NULL;" \
+  "DROP FUNCTION public.rollback_field_import_job(uuid);" \
+  "revert 20260909000000: rollback_field_import_job after the revert reads GONE"
+
+plant "R5 revert restores the rollback under a second signature" "$R5" \
+  "CREATE OR REPLACE FUNCTION public.rollback_field_import_job(p_import_job_id uuid)
+RETURNS jsonb" \
+  "CREATE OR REPLACE FUNCTION public.rollback_field_import_job(p_import_job_id uuid, p_unused integer DEFAULT 0)
+RETURNS jsonb" \
+  "revert 20260909000000: rollback_field_import_job after the revert reads AMBIGUOUS:2"
+
+# **The constraint the revert exists to put back.** A revert that restores both
+# bodies and leaves the FK CASCADE is a half-revert whose warnings are all
+# true and whose schema does not match them.
+# **The revert drops two helpers, so the body it restores must not call
+# them.** A revert that puts the PRUNING body back and drops the helpers
+# underneath it makes every subsequent delete raise undefined_function -- the
+# R3 shape, one migration along, and the reason that verdict enumerates its red
+# branches instead of testing for the one way it can be right.
+plant "R5 revert restores a body that still calls the dropped helpers" "$R5" \
+  "    DELETE FROM public.fields
+     WHERE id = p_field_id
+       AND organization_id = p_organization_id;" \
+  "    PERFORM public.field_availability_scenario_ids_on_field(
+              p_organization_id, p_field_id);
+    DELETE FROM public.fields
+     WHERE id = p_field_id
+       AND organization_id = p_organization_id;" \
+  "revert 20260909000000: admin_delete_field after the revert reads STILL-PRUNES"
+
+plant "R5 revert drops admin_delete_field instead of restoring it" "$R5" \
+  "REVOKE ALL ON FUNCTION public.admin_delete_field(uuid, uuid, boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.admin_delete_field(uuid, uuid, boolean) TO authenticated;" \
+  "DROP FUNCTION public.admin_delete_field(uuid, uuid, boolean);" \
+  "revert 20260909000000: admin_delete_field after the revert reads GONE"
+
+plant "R5 revert leaves the FK cascading" "$R5" \
+  "  FOREIGN KEY (field_id) REFERENCES public.fields (id) ON DELETE SET NULL;" \
+  "  FOREIGN KEY (field_id) REFERENCES public.fields (id) ON DELETE CASCADE;" \
+  "revert 20260909000000: field_availability_profiles.field_id reads ON DELETE 'c' after the revert, wanted n (SET NULL)"
+
+# **The forward migration's own LEAVING report.** run.sh plants a field-less
+# profile and re-applies the migration, because a from-scratch build never
+# reaches that branch -- the unreached-warning defect LIVE-2's round 1 found.
+plant "M5 the LEAVING report never fires" "$M5" \
+  "  IF v_orphans > 0 THEN" \
+  "  IF false THEN" \
+  "20260909000000: re-applied onto a seeded database and the LEAVING warning did not name the orphan it found"
+
+plant "M5 the LEAVING report counts the wrong set" "$M5" \
+  "  SELECT count(*) INTO v_orphans
+    FROM public.field_availability_profiles p
+   WHERE p.field_id IS NULL;" \
+  "  SELECT count(*) INTO v_orphans
+    FROM public.field_availability_profiles p
+   WHERE p.field_id IS NOT NULL;" \
+  "20260909000000: re-applied onto a seeded database and the LEAVING warning did not name the orphan it found"
+
+# ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
 #
@@ -1395,9 +1961,19 @@ declare -A CLAIM_PROVER=(
   ["(checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"]="R3 the restored retire calls a helper the revert also drops|R3 the restored retire's CONFIRMED path calls a dropped helper"
   ["(checked) the revert counted the field-less profile already in the database"]="R4 revert counts no orphans"
   ["(checked) the revert named the import guard it was putting back"]="R4 revert reinstates the unguarded body silently"
+  ["(checked) both stale-comment literals in the smoke are wording the revert actually restores"]="M5-SMOKE a stale-comment literal drifts from the revert's wording"
   ["(checked) applying the migration onto a database that already holds a field-less profile warns and counts it"]="M4 the apply-time orphan report never fires|M4 the apply-time report counts the wrong set"
   ["(checked) the revert named the two bundled fixes it also undoes, and counted the rows one of them strands"]="R4 revert does not name the two bundled fixes it also undoes|R4 revert counts no stranded refusals"
   ["(checked) exactly one public.finalize_field_availability_import_job survives the revert, and its body no longer carries the resolution guard"]="R4 revert drops the finalizer instead of restoring it|R4 revert leaves the guard in place|R4 revert restores the finalizer under a second signature"
+  ["(checked) applying the migration onto a database that already holds a field-less profile counts what it leaves behind"]="M5 the LEAVING report never fires|M5 the LEAVING report counts the wrong set"
+  ["(checked) the revert counted the attached profile and its window it was about to expose, and the orphan already there"]="R5 revert counts the wrong profiles"
+  ["(checked) the revert named the sixth booking kind it was removing"]="R5 revert removes the sixth kind silently"
+  ["(checked) the revert named the rollback guard it was putting back"]="R5 revert reinstates the two-table rollback guard silently"
+  ["(checked) the revert named the two silent arms it restores, and counted the jobs whose blocked list is stranded"]="R5 revert does not name the silent arms it restores|R5 revert counts no stranded blocked lists"
+  ["(checked) exactly one public.field_bookings survives the revert, and it no longer enumerates the profile"]="R5 revert drops the producer instead of restoring it|R5 revert leaves the sixth arm in the producer|R5 revert restores the producer under a second signature"
+  ["(checked) exactly one public.rollback_field_import_job survives the revert, and it no longer calls the producer"]="R5 revert drops the rollback instead of restoring it|R5 revert leaves the rollback on the producer|R5 revert restores the rollback under a second signature"
+  ["(checked) field_availability_profiles.field_id is back to ON DELETE SET NULL"]="R5 revert leaves the FK cascading"
+  ["(checked) exactly one public.admin_delete_field survives the revert, and it no longer calls the dropped scenario helpers"]="R5 revert drops admin_delete_field instead of restoring it|R5 revert restores a body that still calls the dropped helpers"
   ["(checked) the rollback removed every overload of all four admin facility RPCs"]="EMERG the rollback and its own guard drift together"
   ["(checked) it left public.field_bookings standing, which admin_retire_field still calls"]="EMERG rollback takes the producer another RPC still calls"
 )

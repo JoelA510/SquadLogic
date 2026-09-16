@@ -499,6 +499,13 @@ CREATE TABLE IF NOT EXISTS public.field_blackout_windows (
 );
 ```
 
+The `field_id` line above is quoted from `20260522120000` and is **no longer the live action**:
+`20260909000000_rollback_field_import_booking_guard.sql` (LIVE-3) changes it to `ON DELETE CASCADE`,
+matching `field_blackouts.field_id`, so deleting a field destroys its availability profile and the
+four tables keyed on that profile rather than leaving the profile describing ground that no longer
+exists. The column stays nullable only for rows predating that migration and `20260908000000`; no
+current write path produces a field-less profile.
+
 Availability is **date-range granular, not time-of-day granular**, and there is no per-date
 override row (a blackout is a date range, not "this venue opens at 5 PM on 08/22"). Sibling tables:
 `field_availability_profile_formats` (`:61-70`, a format code per profile), `field_equipment_requirements`

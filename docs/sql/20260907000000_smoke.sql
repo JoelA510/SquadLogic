@@ -131,17 +131,37 @@ END $$;
 DO $$
 DECLARE
   v_actual text[];
+  -- **Twelve as of 20260909000000, and the growth is the check working.**
+  -- LIVE-3 made `field_availability_profiles.field_id` ON DELETE CASCADE, so
+  -- the closure grew by that table's own four dependents. This list was
+  -- eight; the walk below returned twelve and failed the run, which is what
+  -- it exists for.
   v_declared text[] := ARRAY[
-    'field_availability_profiles','field_blackouts','field_subunits',
+    'field_availability_profile_formats','field_availability_profiles',
+    'field_availability_scenario_members','field_blackout_windows',
+    'field_blackouts','field_equipment_requirements','field_subunits',
     'game_assignments','game_slots','games',
     'practice_assignments','practice_slots'
   ];
-  -- Read by admin_delete_field. The other three are excluded for reasons the
-  -- migration header states; section 4b holds it to both halves.
+  -- Read by admin_delete_field. The other six are excluded for reasons the
+  -- two migration headers state; section 4b holds it to both halves.
   v_bookings text[] := ARRAY[
+    'field_availability_profiles',
     'game_assignments','game_slots','games','practice_assignments','practice_slots'
   ];
-  v_excluded text[] := ARRAY['field_availability_profiles','field_blackouts','field_subunits'];
+  -- `field_blackouts` and `field_subunits` are excluded by 20260907000000's
+  -- header: a closure is not a booking, and a subunit is part of the field
+  -- rather than a use of it. The four profile-keyed tables are excluded by
+  -- 20260909000000's: they are the PROFILE's own parts, destroyed with it and
+  -- reported through the `availability_profile` arm rather than as four more
+  -- rows. `docs/sql/20260909000000_smoke.sql` section 3 holds that reason to
+  -- account by requiring each of them to reach `fields` ONLY through the
+  -- profile -- an independent path would make it a member in its own right.
+  v_excluded text[] := ARRAY[
+    'field_availability_profile_formats','field_availability_scenario_members',
+    'field_blackout_windows','field_blackouts','field_equipment_requirements',
+    'field_subunits'
+  ];
   v_def text;
   t text;
 BEGIN
@@ -223,7 +243,7 @@ BEGIN
                        'game_assignments','game_slots','practice_assignments','practice_slots'] THEN
     RAISE EXCEPTION 'the field_id family changed: %', v_actual;
   END IF;
-  RAISE NOTICE 'field_id family: 7 tables, a subset of the 8-table cascade closure';
+  RAISE NOTICE 'field_id family: 7 tables, a subset of the 12-table cascade closure';
 END $$;
 
 -- ---------------------------------------------------------------------------
@@ -254,8 +274,9 @@ BEGIN
   END IF;
 
   v_arms := regexp_split_to_array(v_cte, 'UNION ALL');
-  IF array_length(v_arms, 1) <> 5 THEN
-    RAISE EXCEPTION 'expected 5 arms in the affected-booking union, parsed %', array_length(v_arms, 1);
+  -- Six as of 20260909000000, which added the `availability_profile` arm.
+  IF array_length(v_arms, 1) <> 6 THEN
+    RAISE EXCEPTION 'expected 6 arms in the affected-booking union, parsed %', array_length(v_arms, 1);
   END IF;
 
   FOREACH v_arm IN ARRAY v_arms LOOP
@@ -350,8 +371,8 @@ BEGIN
     RAISE EXCEPTION 'admin_delete_field does not turn the producer''s cascades flag into a disposition';
   END IF;
 
-  IF v_checked <> 5 THEN
-    RAISE EXCEPTION 'checked % dispositions, expected 5', v_checked;
+  IF v_checked <> 6 THEN
+    RAISE EXCEPTION 'checked % dispositions, expected 6', v_checked;
   END IF;
   RAISE NOTICE 'disposition literals checked against pg_constraint on % arms', v_checked;
 END $$;
@@ -460,16 +481,23 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 6. THE RPC ITSELF, called rather than read, on all five booking kinds
+-- 6. THE RPC ITSELF, called rather than read, on the five SCHEDULE kinds
 -- ---------------------------------------------------------------------------
 --
 -- Sections 1-5 read the function. Reading it says nothing about what it does,
 -- and PR 2's lesson was exactly that: planting a behavioural defect into
 -- admin_retire_field left every structural assertion green. This calls it.
 --
--- One booking of EACH of the five kinds is seeded on one field -- and BOTH
--- shapes of assignment -- so an arm dropped from the union changes the count
--- and fails here rather than being absorbed by the others.
+-- One booking of EACH of the five schedule kinds is seeded on one field -- and
+-- BOTH shapes of assignment -- so an arm dropped from the union changes the
+-- count and fails here rather than being absorbed by the others.
+--
+-- The sixth kind, `availability_profile`, is deliberately NOT seeded here and
+-- the counts below stay at 8 / 5 because of it. It arrived with
+-- 20260909000000 and is exercised behaviourally by that migration's own smoke,
+-- which is where its FK, its four dependents and its retirement boundary are
+-- also asserted. Widening this block instead would have moved LIVE-3's
+-- evidence into LIVE-1's file and left LIVE-3's own smoke passing on less.
 DO $$
 DECLARE
   v_org uuid; v_loc uuid; v_field uuid; v_bare uuid; v_user uuid := gen_random_uuid();

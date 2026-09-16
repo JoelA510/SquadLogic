@@ -169,7 +169,7 @@ echo "=== smokes for this PR's migrations ==="
 # pgTAP suite already does. Claiming to verify them would be the hollow kind of
 # green this whole phase exists to stop.
 STATUS=0
-NEW_MIGRATIONS=(20260906000000 20260906000100 20260907000000 20260908000000)
+NEW_MIGRATIONS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000)
 
 for id in "${NEW_MIGRATIONS[@]}"; do
   smoke="$REPO/docs/sql/${id}_smoke.sql"
@@ -307,6 +307,75 @@ for id in "${NEW_MIGRATIONS[@]}"; do
     fi
   fi
 
+  # **The same reasoning for 20260909000000's revert**, and it needs the
+  # OPPOSITE seed to 20260908000000's. That revert counts profiles that have
+  # ALREADY lost their field; this one counts profiles that are still
+  # ATTACHED to one, because those are the rows a future delete will strand
+  # once the foreign key goes back to SET NULL. On a freshly migrated database
+  # both counts are zero and the warning reads as reassuring.
+  #
+  # The import job with a `field_rollback.blocked` list is the second seed,
+  # for the fourth warning: `blocked` is a key 20260909000000 added to the
+  # rollback result and the revert removes, and a count of zero would prove
+  # only that the jsonb operator parses.
+  #
+  # The THIRD seed is a field-less profile, and it is there for the forward
+  # migration rather than the revert: 20260909000000 counts the profiles it is
+  # LEAVING behind, and on a database built from scratch that branch has never
+  # executed -- the same unreached warning LIVE-2's round 1 found in
+  # 20260908000000. The re-apply below runs it against real rows.
+  #
+  # **The cardinalities here are load-bearing and must stay unequal.** This
+  # seed used to be one attached profile with one window and one field-less
+  # profile with one window, and two mutation plants proved that symmetric.
+  # Every count in the migration and its revert -- profiles with field_id
+  # IS NULL, profiles with field_id IS NOT NULL, and the windows each set
+  # carries -- returned 1 against that seed, so a check counting the WRONG set
+  # printed the RIGHT number. `M5 the LEAVING report counts the wrong set` and
+  # `R5 revert counts the wrong profiles` both flip exactly that predicate, and
+  # both scored NOT CAUGHT: the assertions were reading a figure that could not
+  # distinguish the sets it was there to tell apart.
+  #
+  # So: attached = 1 profile carrying 1 window; field-less = 2 profiles
+  # carrying 3 windows. Four figures, no two equal, and each of the two plants
+  # now changes one of them. Do not "tidy" the second field-less profile or its
+  # two windows away, and do not give the attached profile a second window --
+  # any of those restores a coincidence, not a simplification.
+  if [ "$id" = "20260909000000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug)
+              VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Attached Org','attached-org');
+              INSERT INTO public.locations (id, organization_id, name)
+              VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Attached Park');
+              INSERT INTO public.fields (id, organization_id, location_id, name, active)
+              VALUES ('cccccccc-cccc-cccc-cccc-cccccccccccc','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','Attached Pitch', true);
+              INSERT INTO public.field_availability_profiles
+                (id, organization_id, season_label, field_id, location, field_name, available_from, available_until)
+              VALUES ('dddddddd-dddd-dddd-dddd-dddddddddddd','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Fall 2026','cccccccc-cccc-cccc-cccc-cccccccccccc','Attached Park','Attached Pitch','2026-08-01','2026-11-30');
+              INSERT INTO public.field_blackout_windows
+                (organization_id, profile_id, blackout_from, blackout_until, reason)
+              VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','dddddddd-dddd-dddd-dddd-dddddddddddd','2026-09-01','2026-09-30','blackout_months');
+              INSERT INTO public.field_availability_profiles
+                (id, organization_id, season_label, field_id, location, field_name, available_from, available_until)
+              VALUES ('daaaaaaa-dddd-dddd-dddd-dddddddddddd','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Fall 2026',NULL,'Attached Park','Vanished Pitch','2026-08-01','2026-11-30');
+              INSERT INTO public.field_blackout_windows
+                (organization_id, profile_id, blackout_from, blackout_until, reason)
+              VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','daaaaaaa-dddd-dddd-dddd-dddddddddddd','2026-09-01','2026-09-30','blackout_months');
+              INSERT INTO public.field_availability_profiles
+                (id, organization_id, season_label, field_id, location, field_name, available_from, available_until)
+              VALUES ('dbbbbbbb-dddd-dddd-dddd-dddddddddddd','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','Fall 2026',NULL,'Attached Park','Second Vanished Pitch','2026-08-01','2026-11-30');
+              INSERT INTO public.field_blackout_windows
+                (organization_id, profile_id, blackout_from, blackout_until, reason)
+              VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','dbbbbbbb-dddd-dddd-dddd-dddddddddddd','2026-10-01','2026-10-15','blackout_months'),
+                     ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','dbbbbbbb-dddd-dddd-dddd-dddddddddddd','2026-11-01','2026-11-15','blackout_months');
+              INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, total_rows, warning_summary)
+              VALUES ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','fields','attached/fields.csv','completed_with_warnings',1,
+                      jsonb_build_object('field_rollback', jsonb_build_object('blocked_records',1,'blocked',jsonb_build_object('total',1,'omitted',0,'by_kind',jsonb_build_object('fields',1),'sample',jsonb_build_array(jsonb_build_object('kind','fields','reason','bookings_exist'))))));" \
+         >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the attached profile and blocked-carrying job the revert check requires were never inserted"
+      dump 10 /tmp/harness_seed; STATUS=1; continue
+    fi
+  fi
+
   if [ "$id" = "20260906000000" ]; then
     if ! psql_cmd "INSERT INTO public.organizations (id, name, slug)
               VALUES ('11111111-1111-1111-1111-111111111111','Revert Org','revert-org');
@@ -341,6 +410,64 @@ for id in "${NEW_MIGRATIONS[@]}"; do
         echo "  | (checked) applying the migration onto a database that already holds a field-less profile warns and counts it"
       else
         echo "FAIL ${id}: re-applied onto a seeded database and the PRE-EXISTING warning did not name the orphan it found"
+        dump 10 /tmp/harness_reapply; STATUS=1
+      fi
+    else
+      echo "FAIL ${id}: the migration is not idempotent -- re-applying it failed"
+      dump 15 /tmp/harness_reapply; STATUS=1
+    fi
+  fi
+
+  # **The smoke's two stale-comment needles are proved against the revert.**
+  # Section 7 of docs/sql/20260909000000_smoke.sql refuses a comment that still
+  # claims a field delete orphans the profile. A NOT-LIKE needle that matches
+  # nothing passes vacuously -- the plant `M5 the collapse-blocker comment is
+  # left stale` proved exactly that, scoring NOT CAUGHT -- so the smoke now
+  # matches each needle against the superseded sentence it was written from,
+  # held in the smoke as a literal.
+  #
+  # That literal is a COPY of wording owned by the revert, and a copy drifts.
+  # This check reads the two literals OUT OF THE SMOKE and requires each to
+  # appear in the revert. Hard-coding the sentences here instead would have
+  # compared this file against the revert and left the smoke -- the file that
+  # actually uses them -- unexamined, which is the same self-comparison this
+  # harness has been caught making before.
+  if [ "$id" = "20260909000000" ]; then
+    if ! python3 - "$REPO" <<'NEEDLES'
+import io, re, sys
+repo = sys.argv[1]
+smoke = io.open(repo + '/docs/sql/20260909000000_smoke.sql', encoding='utf8').read()
+revert = io.open(repo + '/docs/sql/20260909000000_revert.sql', encoding='utf8').read()
+found = re.findall(r"v_stale_(?:view|table) := '((?:[^']|'')*)'", smoke)
+if len(found) != 2:
+    print('the smoke no longer declares exactly two stale-comment literals; found %d' % len(found))
+    sys.exit(1)
+bad = [n for n in found if n not in revert]
+for n in bad:
+    print('the smoke pins a needle to wording the revert does not restore: %s' % n[:90])
+sys.exit(1 if bad else 0)
+NEEDLES
+    then
+      echo "FAIL ${id}: the smoke's stale-comment needles no longer match the wording its revert puts back"
+      STATUS=1
+    else
+      echo "  | (checked) both stale-comment literals in the smoke are wording the revert actually restores"
+    fi
+  fi
+
+  # **The same reasoning for 20260909000000**, whose own WARNING branch counts
+  # the field-less profiles it is leaving in place. The seed above planted one,
+  # so re-applying here runs the branch that a from-scratch build never
+  # reaches. The migration is idempotent -- a reporting DO block, a
+  # DROP/ADD CONSTRAINT pair, CREATE OR REPLACE and COMMENT ON -- so this
+  # leaves the database exactly as the revert expects to find it.
+  if [ "$id" = "20260909000000" ]; then
+    if psql_file "$REPO/supabase/migrations/20260909000000_rollback_field_import_booking_guard.sql" \
+         >/tmp/harness_reapply 2>&1; then
+      if grep -q 'LEAVING 2 field-less availability profile(s), carrying 3 blackout window(s)' /tmp/harness_reapply; then
+        echo "  | (checked) applying the migration onto a database that already holds a field-less profile counts what it leaves behind"
+      else
+        echo "FAIL ${id}: re-applied onto a seeded database and the LEAVING warning did not name the orphan it found"
         dump 10 /tmp/harness_reapply; STATUS=1
       fi
     else
@@ -415,6 +542,112 @@ for id in "${NEW_MIGRATIONS[@]}"; do
         STATUS=1
       else
         echo "  | (checked) exactly one public.finalize_field_availability_import_job survives the revert, and its body no longer carries the resolution guard"
+      fi
+    fi
+    if [ "$id" = "20260909000000" ]; then
+      # **Four warnings, four checks, and two of them carry a count.** LIVE-2's
+      # round 1 found a revert naming one cost of three; the answer was not
+      # "write three sentences" but "make each sentence a check, and make the
+      # countable ones count something that is really there". The seed above
+      # planted exactly one attached profile with one window, and exactly one
+      # import job carrying a field_rollback.blocked list.
+      if grep -q 'EXPOSING 1 availability profile(s) currently attached to a field, carrying 1 blackout window' /tmp/harness_rev &&
+         grep -q '2 profile(s) in this database are already in that state' /tmp/harness_rev; then
+        echo "  | (checked) the revert counted the attached profile and its window it was about to expose, and the orphan already there"
+      else
+        echo "FAIL revert ${id}: planted an attached profile with a window and an already-orphaned one, and the revert did not count all three"
+        STATUS=1
+      fi
+      if grep -q 'RESTORING public.field_bookings to five kinds' /tmp/harness_rev; then
+        echo "  | (checked) the revert named the sixth booking kind it was removing"
+      else
+        echo "FAIL revert ${id}: restored the five-kind producer without naming what that costs"
+        STATUS=1
+      fi
+      if grep -q 'RESTORING rollback_field_import_job to its two-table guard' /tmp/harness_rev; then
+        echo "  | (checked) the revert named the rollback guard it was putting back"
+      else
+        echo "FAIL revert ${id}: restored the two-table rollback guard without naming what that costs"
+        STATUS=1
+      fi
+      if grep -q 'ALSO REVERTING two silent switch arms and the blocked list' /tmp/harness_rev &&
+         grep -q '1 existing import job(s) carry a field_rollback.blocked list' /tmp/harness_rev; then
+        echo "  | (checked) the revert named the two silent arms it restores, and counted the jobs whose blocked list is stranded"
+      else
+        echo "FAIL revert ${id}: planted a job carrying field_rollback.blocked and the revert did not name the silent arms it restores, or did not count it"
+        STATUS=1
+      fi
+      # **Present in the catalogue is not the same as reverted**, and the two
+      # functions fail differently. The producer can be gone, duplicated, or
+      # still carrying the sixth arm; the rollback can be gone, duplicated, or
+      # still calling the producer. `availability_profile` has no
+      # prefix-sibling in this schema, so unlike field_bookings /
+      # field_bookings_digest this LIKE cannot fire on a different identifier.
+      v_prod_verdict=$(psql_cmd "SELECT CASE
+             WHEN count(*) = 0 THEN 'GONE'
+             WHEN count(*) > 1 THEN 'AMBIGUOUS:' || count(*)
+             WHEN bool_or(p.prosrc LIKE '%availability_profile%') THEN 'STILL-SIX-KINDS'
+             ELSE 'RESTORED'
+           END
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'field_bookings'" 2>/dev/null || echo "QUERY-FAILED")
+      if [ "$v_prod_verdict" != "RESTORED" ]; then
+        echo "FAIL revert ${id}: field_bookings after the revert reads ${v_prod_verdict}, wanted RESTORED"
+        STATUS=1
+      else
+        echo "  | (checked) exactly one public.field_bookings survives the revert, and it no longer enumerates the profile"
+      fi
+      v_roll_verdict=$(psql_cmd "SELECT CASE
+             WHEN count(*) = 0 THEN 'GONE'
+             WHEN count(*) > 1 THEN 'AMBIGUOUS:' || count(*)
+             WHEN bool_or(p.prosrc LIKE '%field_bookings%') THEN 'STILL-CALLS-PRODUCER'
+             ELSE 'RESTORED'
+           END
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'rollback_field_import_job'" 2>/dev/null || echo "QUERY-FAILED")
+      if [ "$v_roll_verdict" != "RESTORED" ]; then
+        echo "FAIL revert ${id}: rollback_field_import_job after the revert reads ${v_roll_verdict}, wanted RESTORED"
+        STATUS=1
+      else
+        echo "  | (checked) exactly one public.rollback_field_import_job survives the revert, and it no longer calls the producer"
+      fi
+      # And the restored constraint is the one that matters, read from the
+      # catalogue rather than inferred from the ALTER having parsed.
+      v_fk=$(psql_cmd "SELECT COALESCE(max(con.confdeltype::text), 'MISSING')
+        FROM pg_constraint con
+        JOIN pg_class src ON src.oid = con.conrelid
+        JOIN pg_class tgt ON tgt.oid = con.confrelid
+       WHERE con.contype = 'f' AND src.relname = 'field_availability_profiles'
+         AND tgt.relname = 'fields'" 2>/dev/null || echo "QUERY-FAILED")
+      if [ "$v_fk" != "n" ]; then
+        echo "FAIL revert ${id}: field_availability_profiles.field_id reads ON DELETE '${v_fk}' after the revert, wanted n (SET NULL)"
+        STATUS=1
+      else
+        echo "  | (checked) field_availability_profiles.field_id is back to ON DELETE SET NULL"
+      fi
+      # **The revert DROPS two helpers, so the body it restores must not call
+      # them.** A restored body that still does raises undefined_function on
+      # every subsequent delete -- present in the catalogue and not callable,
+      # which is the R3 shape one migration along. Enumerated by the ways it
+      # can be wrong rather than tested for the one way it can be right.
+      v_adf_verdict=$(psql_cmd "SELECT CASE
+             WHEN count(*) = 0 THEN 'GONE'
+             WHEN count(*) > 1 THEN 'AMBIGUOUS:' || count(*)
+             WHEN bool_or(p.prosrc LIKE '%field_availability_scenario_ids_on_field%'
+                       OR p.prosrc LIKE '%prune_empty_field_availability_scenarios%')
+               THEN 'STILL-PRUNES'
+             ELSE 'RESTORED'
+           END
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'admin_delete_field'" 2>/dev/null || echo "QUERY-FAILED")
+      if [ "$v_adf_verdict" != "RESTORED" ]; then
+        echo "FAIL revert ${id}: admin_delete_field after the revert reads ${v_adf_verdict}, wanted RESTORED"
+        STATUS=1
+      else
+        echo "  | (checked) exactly one public.admin_delete_field survives the revert, and it no longer calls the dropped scenario helpers"
       fi
     fi
     if [ "$id" = "20260907000000" ]; then

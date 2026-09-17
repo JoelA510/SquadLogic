@@ -116,7 +116,11 @@ When('I click the "Retire" button for {string}', async ({ page }, fieldName: str
 When('I set the retirement end date to {string}', async ({ page }, date: string) => {
   // Found through its LABEL, so a broken `htmlFor` fails the scenario rather
   // than being papered over by a css selector.
-  const input = page.getByLabel(/Last day this ground is usable/);
+  // **The label names the DEPTH as of 8.4 gap B part 2**: "field", "venue" or
+  // "sub-surface", because one dialog now serves all three and a label reading
+  // "this ground" at every depth told the operator nothing about which node
+  // they were closing. This scenario is the FIELD depth.
+  const input = page.getByLabel(/Last day this field is usable/);
   await expect(input).toBeVisible();
   await input.fill(date);
 });

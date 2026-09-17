@@ -473,6 +473,220 @@ def emit_field(scenario, index):
 KNOWN_BLACKOUT_RPCS = ('admin_create_field_blackout', 'admin_update_field_blackout')
 
 
+def emit_estate(scenario, index):
+    """One gap B case: the venue and sub-surface depths, against Postgres.
+
+    **The estate is rebuilt for every case.** Half of them WRITE a date, so a
+    shared estate would make each case depend on the order the generator
+    happened to emit. One venue, two pitches, a sub-surface on the first, and
+    three bookings -- a game slot on pitch A at +40, a practice slot on pitch B
+    at +50, and a practice slot NAMING the sub-surface at +60. That last one
+    also carries pitch A's field_id, because `practice_slots.field_id` is NOT
+    NULL, which is precisely why the venue scope and the sub-surface scope
+    disagree about it.
+
+    The JS runner in `tests/fieldLifecycleScenarios.test.js` builds the same
+    estate from the same table. Neither is measured against the other: both are
+    measured against the literals in the JSON.
+    """
+    sid = scenario['id']
+    expect = scenario['expect']
+    before = scenario.get('before') or {}
+    rpc = scenario['rpc']
+    is_venue = rpc.endswith('_location')
+    n = index
+    out = [f'  -- estate scenario {index}: {sid}']
+    out += [
+        f"  INSERT INTO public.locations (organization_id, name, effective_to)",
+        f"  VALUES (v_org, 'Estate Scenario {n}', {date_expr(before.get('effectiveTo'))})",
+        '  RETURNING id INTO v_est_venue;',
+        "  INSERT INTO public.fields (organization_id, location_id, name, active)",
+        f"  VALUES (v_org, v_est_venue, 'Estate Scenario {n} Pitch A', true)",
+        '  RETURNING id INTO v_est_pitch_a;',
+        "  INSERT INTO public.fields (organization_id, location_id, name, active)",
+        f"  VALUES (v_org, v_est_venue, 'Estate Scenario {n} Pitch B', true)",
+        '  RETURNING id INTO v_est_pitch_b;',
+        '  INSERT INTO public.field_subunits (organization_id, field_id, label, effective_to)',
+        f"  VALUES (v_org, v_est_pitch_a, 'Estate Scenario {n} Pitch A North',"
+        f" {date_expr(before.get('subunitEffectiveTo'))})",
+        '  RETURNING id INTO v_est_sub;',
+        '  INSERT INTO public.game_slots (organization_id, field_id, slot_date, week_index)',
+        '  VALUES (v_org, v_est_pitch_a, current_date + 40, 1);',
+        '  INSERT INTO public.practice_slots'
+        ' (organization_id, field_id, day_of_week, start_time, end_time, valid_until)',
+        "  VALUES (v_org, v_est_pitch_b, 'tue', '18:00', '19:30', current_date + 50);",
+        '  INSERT INTO public.practice_slots'
+        ' (organization_id, field_id, field_subunit_id, day_of_week, start_time, end_time, valid_until)',
+        "  VALUES (v_org, v_est_pitch_a, v_est_sub, 'wed', '17:00', '18:30', current_date + 60)",
+        '  RETURNING id INTO v_est_slot;',
+        # The seed really landed. A refusal case whose bookings were never
+        # inserted would proceed, and the assertion would be about nothing.
+        '  IF v_est_venue IS NULL OR v_est_sub IS NULL OR v_est_slot IS NULL THEN',
+        f"    RAISE EXCEPTION '{sid}: the estate this case runs against was never seeded';",
+        '  END IF;',
+    ]
+
+    subject = 'v_est_venue' if is_venue else 'v_est_sub'
+    if scenario.get('target') == 'missing':
+        out.append(f"  {subject} := '00000000-0000-0000-0000-0000000000ff'::uuid;")
+
+    if is_venue:
+        call = (f"public.admin_retire_location(v_org, {subject},"
+                f" {date_expr(scenario['args'].get('effectiveTo'))}, {confirm_expr(scenario)})"
+                if rpc == 'admin_retire_location'
+                else f"public.admin_unretire_location(v_org, {subject})")
+    else:
+        call = (f"public.admin_retire_field_subunit(v_org, {subject},"
+                f" {date_expr(scenario['args'].get('effectiveTo'))}, {confirm_expr(scenario)})"
+                if rpc == 'admin_retire_field_subunit'
+                else f"public.admin_unretire_field_subunit(v_org, {subject})")
+
+    if not expect['ok']:
+        out += [
+            '  BEGIN',
+            f'    v_res := {call};',
+            f"    RAISE EXCEPTION '{sid}: expected a refusal and the call SUCCEEDED';",
+            f'  EXCEPTION WHEN {condition_for(scenario)} THEN NULL;',
+            '  END;',
+        ]
+    else:
+        out += [f'  v_res := {call};']
+        out += [
+            f"  IF (v_res->>'retired')::boolean <> {lit(expect['retired'])} THEN",
+            f"    RAISE EXCEPTION '{sid}: expected retired={expect['retired']}, got %',"
+            " v_res->>'retired';",
+            '  END IF;',
+        ]
+        if 'reason' in expect:
+            out += [
+                f"  IF v_res->>'reason' IS DISTINCT FROM {lit(expect['reason'])} THEN",
+                f"    RAISE EXCEPTION '{sid}: expected reason={expect['reason']}, got %',"
+                " v_res->>'reason';",
+                '  END IF;',
+            ]
+        if 'affectedCount' in expect:
+            out += [
+                f"  IF (v_res->>'affected_count')::int <> {int(expect['affectedCount'])} THEN",
+                f"    RAISE EXCEPTION '{sid}: expected {int(expect['affectedCount'])}"
+                " affected bookings, got %', v_res->>'affected_count';",
+                '  END IF;',
+                "  IF jsonb_array_length(v_res->'affected') <>"
+                " (v_res->>'affected_count')::int THEN",
+                f"    RAISE EXCEPTION '{sid}: affected_count and the affected list disagree';",
+                '  END IF;',
+            ]
+        if 'distinctFields' in expect:
+            # **The venue discriminator.** A field-scoped implementation
+            # returns rows from one pitch and fails here whatever its count.
+            out += [
+                "  SELECT count(DISTINCT x->>'field_id') INTO v_n"
+                "    FROM jsonb_array_elements(v_res->'affected') x;",
+                f"  IF v_n <> {int(expect['distinctFields'])} THEN",
+                f"    RAISE EXCEPTION '{sid}: the refusal named % pitch(es), expected"
+                f" {int(expect['distinctFields'])}', v_n;",
+                '  END IF;',
+            ]
+        if 'affectedIds' in expect:
+            # **The sub-surface discriminator**, by id rather than by count.
+            out += [
+                "  IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_res->'affected') x"
+                "                  WHERE x->>'id' = v_est_slot::text) THEN",
+                f"    RAISE EXCEPTION '{sid}: the refusal did not name the slot that names"
+                " the sub-surface';",
+                '  END IF;',
+            ]
+        if 'containedCount' in expect:
+            out += [
+                f"  IF (v_res->>'contained_count')::int <> {int(expect['containedCount'])} THEN",
+                f"    RAISE EXCEPTION '{sid}: expected contained_count"
+                f" {int(expect['containedCount'])}, got %', v_res->>'contained_count';",
+                '  END IF;',
+                "  IF jsonb_array_length(v_res->'contained') <> 3 THEN",
+                f"    RAISE EXCEPTION '{sid}: expected 3 contained nodes, got %',"
+                " jsonb_array_length(v_res->'contained');",
+                '  END IF;',
+            ]
+        out += emit_estate_audit(scenario, subject)
+
+    # The node's own date AFTER the call, asserted on every case including the
+    # refusals -- a refusal that wrote the date anyway is the worst outcome.
+    if scenario.get('target') == 'missing':
+        # `subject` was overwritten with the id that resolves to nothing, so
+        # the real node cannot be read through it. It is re-resolved by the
+        # name this case seeded -- enumerated from the estate rather than from
+        # the variable the case deliberately corrupted.
+        read_back = ('SELECT l.effective_to INTO v_eff FROM public.locations l'
+                     f" WHERE l.name = 'Estate Scenario {n}';"
+                     if is_venue
+                     else 'SELECT su.effective_to INTO v_eff FROM public.field_subunits su'
+                          f" WHERE su.label = 'Estate Scenario {n} Pitch A North';")
+    else:
+        read_back = (f'SELECT effective_to INTO v_eff FROM public.locations WHERE id = {subject};'
+                     if is_venue
+                     else 'SELECT effective_to INTO v_eff FROM public.field_subunits'
+                          f' WHERE id = {subject};')
+    out += [
+        f'  {read_back}',
+        f"  IF v_eff IS DISTINCT FROM {date_expr(expect['effectiveTo'])} THEN",
+        f"    RAISE EXCEPTION '{sid}: expected effective_to={expect['effectiveTo']}, got %',"
+        ' v_eff;',
+        '  END IF;',
+    ]
+
+    if 'childDates' in expect:
+        # **Containment, not copy-down.** An implementation that pushed the
+        # venue's date onto its fields passes every count above and fails here.
+        out += [
+            '  SELECT (SELECT count(*) FROM public.fields f'
+            f" WHERE f.location_id = v_est_venue AND f.effective_to IS NOT NULL)",
+            '       + (SELECT count(*) FROM public.field_subunits su'
+            '          JOIN public.fields f2 ON f2.id = su.field_id'
+            f"          WHERE f2.location_id = v_est_venue AND su.effective_to IS NOT NULL)",
+            '    INTO v_n;',
+            f"  IF v_n <> {int(expect['childDates'])} THEN",
+            f"    RAISE EXCEPTION '{sid}: expected {int(expect['childDates'])} child node(s)"
+            " carrying a date, got %', v_n;",
+            '  END IF;',
+        ]
+    if 'parentDated' in expect:
+        out += [
+            '  SELECT effective_to INTO v_eff FROM public.fields WHERE id = v_est_pitch_a;',
+            f"  IF (v_eff IS NOT NULL) <> {lit(expect['parentDated'])} THEN",
+            f"    RAISE EXCEPTION '{sid}: retiring downward wrote upward; the parent pitch"
+            " reads %', v_eff;",
+            '  END IF;',
+        ]
+
+    out += ['  v_ran := v_ran + 1;', '']
+    return out
+
+
+def emit_estate_audit(scenario, subject):
+    """The audit phases this estate case must have left behind.
+
+    Read from the table rather than hard-coded in the runner, for the reason
+    the field half records: a refused retirement writes `refused` where an
+    accepted one writes `before` and `after`, and each runner hard-coding that
+    is how the two came to disagree.
+    """
+    sid = scenario['id']
+    wanted = sorted(scenario['expect']['auditPhases'])
+    array = ', '.join(lit(phase) for phase in wanted)
+    # **Not `{wanted}`.** A Python list repr carries single quotes, which end
+    # the SQL string literal they are embedded in -- the generated script did
+    # not parse. The message spells the phases without them.
+    wanted_text = '+'.join(wanted)
+    return [
+        "  SELECT array_agg(DISTINCT a.metadata->>'phase' ORDER BY a.metadata->>'phase')",
+        '    INTO v_phases FROM public.audit_log a',
+        f"   WHERE a.resource_id = {subject} AND a.organization_id = v_org",
+        f"     AND a.metadata->>'operation' = {lit(scenario['rpc'])};",
+        f'  IF v_phases IS DISTINCT FROM ARRAY[{array}]::text[] THEN',
+        f"    RAISE EXCEPTION '{sid}: audit phases were %, expected {wanted_text}', v_phases;",
+        '  END IF;',
+    ]
+
+
 def blackout_column_check(scenario, column, expr, wanted):
     """One `IS DISTINCT FROM` assertion on the edited row, with its message."""
     return [
@@ -665,7 +879,12 @@ def main():
 
     fields = table['fieldScenarios']
     blackouts = table['blackoutScenarios']
-    total = len(fields) + len(blackouts)
+    # 8.4 gap B: the venue and sub-surface depths. A third section rather than
+    # more `fieldScenarios`, because their SUBJECT is a different node -- a
+    # case naming a venue cannot be run by an emitter that seeds a field and
+    # passes p_field_id.
+    estates = table['estateScenarios']
+    total = len(fields) + len(blackouts) + len(estates)
     if total == 0:
         raise SystemExit('the scenario table is empty; refusing to emit a script that tests nothing')
 
@@ -684,6 +903,11 @@ def main():
         # window to be refused on.
         '  v_edit_id uuid; v_target uuid; v_import_window uuid;',
         '  v_bl public.field_blackouts%ROWTYPE; v_profile uuid;',
+        # 8.4 gap B: one venue, two pitches and a sub-surface per estate case,
+        # rebuilt for each so a case that writes a date cannot change the one
+        # after it.
+        '  v_est_venue uuid; v_est_pitch_a uuid; v_est_pitch_b uuid;',
+        '  v_est_sub uuid; v_est_slot uuid;',
         'BEGIN',
         "  INSERT INTO auth.users (id, email, raw_user_meta_data)",
         "  VALUES (v_user, 'scenarios@example.test', jsonb_build_object('password_length', 16))",
@@ -742,6 +966,9 @@ def main():
     for i, scenario in enumerate(blackouts, start=1):
         out += emit_blackout(scenario, i)
 
+    for i, scenario in enumerate(estates, start=1):
+        out += emit_estate(scenario, i)
+
     # **Every accepted scenario must EMIT the assertion its shape requires.**
     #
     # `v_ran` counts cases that RAN, not cases that were checked, so a case
@@ -784,6 +1011,37 @@ def main():
                 f'{sid}: expected note=',
                 f'{sid}: audit phases were',
             ]
+        if half == 'estate':
+            # **Every assertion an estate case owes, listed per shape.** The
+            # `v_ran` hole this guard exists for is a case that runs with its
+            # checks deleted and still reports "N of N executed"; listing the
+            # markers per case is what stops it, and the discriminators
+            # (`distinctFields`, `affectedIds`, `childDates`) are listed
+            # separately from the counts because those are the three
+            # assertions the wrong implementations fail.
+            expect = scenario['expect']
+            if not expect['ok']:
+                markers = [f'{sid}: expected a refusal and the call SUCCEEDED']
+            else:
+                markers = [
+                    f'{sid}: expected retired=',
+                    f'{sid}: audit phases were',
+                ]
+                if 'affectedCount' in expect:
+                    markers.append(f'{sid}: expected {int(expect["affectedCount"])} affected')
+                    markers.append(f'{sid}: affected_count and the affected list disagree')
+                if 'distinctFields' in expect:
+                    markers.append(f'{sid}: the refusal named % pitch(es)')
+                if 'affectedIds' in expect:
+                    markers.append(f'{sid}: the refusal did not name the slot')
+                if 'containedCount' in expect:
+                    markers.append(f'{sid}: expected contained_count')
+            markers.append(f'{sid}: expected effective_to=')
+            if 'childDates' in expect:
+                markers.append(f'{sid}: expected {int(expect["childDates"])} child node(s)')
+            if 'parentDated' in expect:
+                markers.append(f'{sid}: retiring downward wrote upward')
+            return markers
         if not scenario['expect']['ok']:
             # A refusal case owes its "expected a refusal" assertion, and on the
             # blackout half also the "nothing was written" one.
@@ -838,7 +1096,7 @@ def main():
             f'{sid}: audit phases were',
         ]
 
-    for half, cases in (('field', fields), ('blackout', blackouts)):
+    for half, cases in (('field', fields), ('blackout', blackouts), ('estate', estates)):
         for scenario in cases:
             for marker in markers_for(scenario, half):
                 if marker not in body:

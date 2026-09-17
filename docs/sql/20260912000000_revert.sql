@@ -72,10 +72,25 @@ BEGIN
   RAISE NOTICE 'audit rows recording a containment-only refusal: %', v_reasoned;
   RAISE NOTICE '  (these stay readable; the restored definition can no longer emit them)';
 
-  -- **The exposure this revert creates, measured rather than described.** Every
-  -- live venue that holds at least one node with no end date of its own is a
-  -- venue whose retirement will, from now on, commit unconfirmed whenever
-  -- nothing is booked after the date.
+  -- **The exposure this revert creates, measured rather than described --
+  -- and measured as a FLOOR, by construction.**
+  --
+  -- The VENUE-level claim is exact: any live venue holding at least one node
+  -- with no end date of its own does lose its gate, because such a node is
+  -- exposed for every retirement date that could ever be chosen. `v_exposed`
+  -- and the summary line below are therefore complete.
+  --
+  -- The PER-VENUE MAGNITUDE is a lower bound, and deliberately so. A child
+  -- ending 2027-06-30 is also exposed -- but only by a retirement dated before
+  -- then, and **a revert has no retirement date to measure against**. Counting
+  -- those children would state an exposure against a date nobody has picked;
+  -- counting only the undated ones states the part that holds whatever date is
+  -- chosen. The NOTICE says "at least" for exactly that reason, and the line
+  -- after the loop names the direction the bound is loose in, so the number
+  -- cannot be read as a total.
+  --
+  -- This is the honest shape for a figure that depends on a decision the
+  -- operator has not made yet: state the floor, and say which way it moves.
   FOR r IN
     SELECT l.id, l.organization_id, l.name,
            (SELECT count(*)
@@ -88,11 +103,13 @@ BEGIN
     v_venues := v_venues + 1;
     IF r.live_nodes > 0 THEN
       v_exposed := v_exposed + 1;
-      RAISE NOTICE 'venue % (%) holds % undated node(s) and loses its containment gate',
+      RAISE NOTICE
+        'venue % (%) loses its containment gate: at least % node(s) have no end date of their own',
         r.name, r.id, r.live_nodes;
     END IF;
   END LOOP;
   RAISE NOTICE 'live venues examined: %, of which % lose a gate', v_venues, v_exposed;
+  RAISE NOTICE '  (the per-venue counts are a FLOOR: a retirement dated before a child''s own end date exposes that child too)';
 
   -- **A count that matches zero records is a loud failure, never a silent
   -- pass.** A revert rehearsed on a database with no live venue in it printed

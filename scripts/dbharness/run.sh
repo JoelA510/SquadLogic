@@ -445,7 +445,7 @@ for id in "${NEW_MIGRATIONS[@]}"; do
   # pitches and a sub-surface); one live but holding only a node that already
   # carries a date, so it is examined and NOT counted as exposed; and one
   # already retired, which the revert's `effective_to IS NULL` loop skips
-  # entirely. So the transcript must say examined 2, exposed 1, undated nodes 3
+  # entirely. So the transcript must say examined 2, exposed 1, floor 3
   # -- and a check reading the wrong set cannot print the right number for any
   # of the three. That is the defect the 20260909000000 seed's own comment
   # records two plants finding, which happened because every figure in that
@@ -601,8 +601,8 @@ NEEDLES
       # Two figures, both made unique by the seed: the venue that loses a gate
       # is NAMED, and the totals separate "examined" from "exposed".
       if grep -q 'venue Gate Exposed Park' /tmp/harness_rev &&
-         grep -q 'holds 3 undated node(s) and loses its containment gate' /tmp/harness_rev; then
-        echo "  | (checked) the revert named the venue that loses its containment gate and counted its undated nodes"
+         grep -q 'loses its containment gate: at least 3 node(s) have no end date of their own' /tmp/harness_rev; then
+        echo "  | (checked) the revert named the venue that loses its containment gate and counted the nodes exposed whatever date is chosen"
       else
         echo "FAIL revert ${id}: planted a live venue with three undated nodes and the revert did not name it, or miscounted them"
         STATUS=1
@@ -613,10 +613,25 @@ NEEDLES
       # of these wrong: the already-retired venue must be excluded from BOTH,
       # and the venue whose only child carries its own date must be examined and
       # NOT exposed.
+      # **The venue-level claim is EXACT and needs no bound.** A venue holding
+      # at least one undated node loses its gate for every date that could be
+      # chosen, so `examined` and `of which` are totals rather than floors --
+      # which is why the reword that turned the PER-VENUE figure into a stated
+      # lower bound left this line untouched.
       if grep -q 'live venues examined: 2, of which 1 lose a gate' /tmp/harness_rev; then
         echo "  | (checked) the revert examined both live venues and counted only the one that loses a gate"
       else
         echo "FAIL revert ${id}: the revert's examined/exposed totals do not match the planted estate"
+        STATUS=1
+      fi
+      # **The bound is STATED, not merely intended.** The per-venue figure is a
+      # floor; a transcript that prints the floor without saying which way it is
+      # loose reads as a total, which is the overclaim the reword removed. If
+      # this clause is ever dropped the numbers silently go back to overclaiming.
+      if grep -q 'the per-venue counts are a FLOOR' /tmp/harness_rev; then
+        echo "  | (checked) the revert says its per-venue exposure figure is a floor and which way it moves"
+      else
+        echo "FAIL revert ${id}: the revert printed a per-venue exposure count without naming it a floor"
         STATUS=1
       fi
       # The restore really happened, confirmed from the catalogue rather than

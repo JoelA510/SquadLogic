@@ -1,13 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import {
-  buildDateTime,
-  normalizeGameSlot,
-} from '../frontend/src/pages/GameSchedulingPage.jsx';
+import { buildDateTime, normalizeGameSlot } from '../frontend/src/pages/GameSchedulingPage.jsx';
 import { buildGameAssignmentRows } from '../packages/core/src/gameSupabase.js';
-import {
-  generateRoundRobinWeeks,
-  scheduleGames,
-} from '../packages/core/src/gameScheduling.js';
+import { generateRoundRobinWeeks, scheduleGames } from '../packages/core/src/gameScheduling.js';
 import { formatDateTime } from '../frontend/src/utils/formatters.js';
 import { TIMING_REASON } from '../packages/core/src/timing/index.js';
 
@@ -142,8 +136,9 @@ describe('GAP-30 no-op guard: browser zone equals season zone', () => {
   });
 
   it('renders the identical label for a Pacific season on a Pacific browser', () => {
-    const label = inHostZone('America/Los_Angeles', () =>
-      normalize(slotRow(), 'America/Los_Angeles').label
+    const label = inHostZone(
+      'America/Los_Angeles',
+      () => normalize(slotRow(), 'America/Los_Angeles').label
     );
     expect(label).toBe('Sat, 11/7/2026 · 4:44 PM');
   });
@@ -221,8 +216,8 @@ describe('GAP-30: a season with no timezone refuses rather than guessing', () =>
 describe('GAP-30: the solver needed no change, verified rather than assumed', () => {
   it('scheduleGames round-trips a zone-carrying slot to the same instant', () => {
     const teams = [
-      { id: 'team-1', division: 'U10' },
-      { id: 'team-2', division: 'U10' },
+      { id: 'team-1', name: 'Team 1', division: 'U10' },
+      { id: 'team-2', name: 'Team 2', division: 'U10' },
     ];
     const slot = normalize(slotRow(), SEASON_TZ);
     const results = ['UTC', 'America/Los_Angeles', 'Australia/Sydney'].map((zone) =>

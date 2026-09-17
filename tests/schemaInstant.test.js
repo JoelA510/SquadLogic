@@ -49,21 +49,20 @@ describe('InstantSchema: what an instant is allowed to be', () => {
     expect(parsed.start.toISOString()).toBe('2026-11-07T21:44:00.000Z');
   });
 
-  it.each([
-    ['2026-11-07T16:44:00'],
-    ['2026-11-07T16:44'],
-    ['2026-11-07T16:44:00.000'],
-  ])('refuses the naive wall reading %s', (start) => {
-    let thrown = null;
-    try {
-      SlotSchema.parse({ ...SLOT, start, end: '2026-11-07T23:14:00Z' });
-    } catch (error) {
-      thrown = error;
+  it.each([['2026-11-07T16:44:00'], ['2026-11-07T16:44'], ['2026-11-07T16:44:00.000']])(
+    'refuses the naive wall reading %s',
+    (start) => {
+      let thrown = null;
+      try {
+        SlotSchema.parse({ ...SLOT, start, end: '2026-11-07T23:14:00Z' });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).not.toBeNull();
+      expect(thrown.issues[0].message).toMatch(/must carry a timezone/);
+      expect(thrown.issues[0].path).toEqual(['start']);
     }
-    expect(thrown).not.toBeNull();
-    expect(thrown.issues[0].message).toMatch(/must carry a timezone/);
-    expect(thrown.issues[0].path).toEqual(['start']);
-  });
+  );
 
   it('refuses an unreadable value', () => {
     expect(() => SlotSchema.parse({ ...SLOT, start: 'nope', end: 'nope' })).toThrow(
@@ -132,12 +131,10 @@ describe('InstantSchema: the solver refuses a naive slot rather than guessing', 
     expect(() =>
       scheduleGames({
         teams: [
-          { id: 'team-1', division: 'U10' },
-          { id: 'team-2', division: 'U10' },
+          { id: 'team-1', name: 'Team 1', division: 'U10' },
+          { id: 'team-2', name: 'Team 2', division: 'U10' },
         ],
-        slots: [
-          { ...SLOT, start: '2026-11-07T16:44:00', end: '2026-11-07T18:14:00' },
-        ],
+        slots: [{ ...SLOT, start: '2026-11-07T16:44:00', end: '2026-11-07T18:14:00' }],
         roundRobinByDivision: {
           U10: generateRoundRobinWeeks({ teamIds: ['team-1', 'team-2'] }),
         },
@@ -150,8 +147,8 @@ describe('InstantSchema: the solver refuses a naive slot rather than guessing', 
     // would satisfy it and be useless.
     const { assignments } = scheduleGames({
       teams: [
-        { id: 'team-1', division: 'U10' },
-        { id: 'team-2', division: 'U10' },
+        { id: 'team-1', name: 'Team 1', division: 'U10' },
+        { id: 'team-2', name: 'Team 2', division: 'U10' },
       ],
       slots: [{ ...SLOT, start: '2026-11-07T16:44:00-05:00', end: '2026-11-07T18:14:00-05:00' }],
       roundRobinByDivision: {

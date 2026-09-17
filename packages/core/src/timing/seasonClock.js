@@ -216,7 +216,7 @@ function toOffsetIso(epochMs, offsetMs) {
  * @param {Object} input
  * @param {string} input.date - `YYYY-MM-DD`, the season-local calendar date.
  * @param {string|number} input.time - `HH:MM[:SS]` or minutes past midnight.
- * @param {string|null|undefined} input.timeZone - an IANA zone name. Today
+ * @param {string|null} [input.timeZone] - an IANA zone name. Today
  *   always `season_settings.timezone`; see the module note on why this module
  *   does not read it itself.
  * @param {string} [input.label] - what the caller calls this value, for the

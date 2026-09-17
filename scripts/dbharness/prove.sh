@@ -2125,10 +2125,17 @@ plant "R7 revert never restores the three-argument producer" "$R7" \
 # is how docs/sql/reverts/20260504060000 came to report success over a function
 # it had not removed. Here it leaves TWO field_bookings standing, and a
 # three-argument call then resolves to neither.
+#
+# **The expected failure is the REVERT's own assertion, not a catalogue
+# verdict in run.sh.** This plant was first aimed at such a verdict and scored
+# CAUGHT ELSEWHERE, which is how it was discovered that the verdict could not
+# fire at all: the revert's scalar subquery over `proargtypes` raises 21000 on
+# two rows long before run.sh reads the catalogue. The verdict is gone and this
+# now names what really catches it.
 plant "R7 revert drops a producer signature that does not exist" "$R7" \
   "DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date, text);" \
   "DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date, boolean);" \
-  "revert 20260911000000: field_bookings after the revert reads"
+  "FAIL revert 20260911000000"
 
 # A revert that leaves an RPC standing over a producer that can no longer
 # answer its question is worse than one that leaves nothing.
@@ -2140,7 +2147,7 @@ plant "R7 revert leaves a lifecycle RPC standing" "$R7" \
 plant "R7 revert leaves the venue column behind" "$R7" \
   "ALTER TABLE public.locations DROP COLUMN IF EXISTS effective_to;" \
   "-- plant: the venue column is left behind" \
-  "revert 20260911000000: effective_to survived on"
+  "revert 20260911000000: expected none/1"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
@@ -2189,7 +2196,6 @@ declare -A CLAIM_PROVER=(
   ["(checked) the revert named the venue retirement it was about to erase and the fields its containment was closing"]="R7 revert counts no venue retirements|R7 revert counts containment from child state"
   ["(checked) the revert named both sub-surface retirements and totalled the two kinds separately"]="R7 revert counts no sub-surface retirements"
   ["(checked) the revert proved its own restore of the three-argument producer"]="R7 revert never restores the three-argument producer"
-  ["(checked) exactly one public.field_bookings survives the revert, at the three-argument field-scoped signature its three callers use"]="R7 revert drops a producer signature that does not exist"
   ["(checked) all six lifecycle objects this migration added are gone"]="R7 revert leaves a lifecycle RPC standing"
   ["(checked) both effective_to columns are gone, and fields.effective_to is untouched"]="R7 revert leaves the venue column behind"
   ["(checked) the revert counted the admin-authored windows that go back to losing their id on an edit"]="R6 revert counts no admin-authored windows"

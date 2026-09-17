@@ -584,21 +584,24 @@ NEEDLES
         echo "FAIL revert ${id}: the revert did not prove it restored the three-argument producer"
         STATUS=1
       fi
-      v_scope_verdict=$(psql_cmd "SELECT CASE
-             WHEN count(*) = 0 THEN 'GONE'
-             WHEN count(*) > 1 THEN 'AMBIGUOUS:' || count(*)
-             WHEN bool_or(oidvectortypes(p.proargtypes) <> 'uuid, uuid, date') THEN 'STILL-SCOPED'
-             ELSE 'RESTORED'
-           END
-      FROM pg_proc p
-      JOIN pg_namespace n ON n.oid = p.pronamespace
-      WHERE n.nspname = 'public' AND p.proname = 'field_bookings'" 2>/dev/null || echo "QUERY-FAILED")
-      if [ "$v_scope_verdict" != "RESTORED" ]; then
-        echo "FAIL revert ${id}: field_bookings after the revert reads ${v_scope_verdict}, wanted RESTORED"
-        STATUS=1
-      else
-        echo "  | (checked) exactly one public.field_bookings survives the revert, at the three-argument field-scoped signature its three callers use"
-      fi
+      # **There is deliberately NO catalogue verdict on field_bookings here**,
+      # and its absence is the finding rather than an omission. The first
+      # version of this stage asked the catalogue for GONE / AMBIGUOUS:n /
+      # STILL-SCOPED / RESTORED exactly as the 20260909000000 stage does --
+      # and it could not fail. The revert asserts its own restore IN THE SAME
+      # TRANSACTION: a missing function raises, a wrong signature raises, and
+      # two functions make its `oidvectortypes((SELECT proargtypes ...))`
+      # scalar subquery raise 21000. Every state this verdict could have
+      # reported fails the revert before the verdict runs.
+      #
+      # Measured, not reasoned about: the plant `R7 revert drops a producer
+      # signature that does not exist` leaves two functions standing, and it
+      # is CAUGHT by the revert's own assertion -- so the verdict scored
+      # CAUGHT ELSEWHERE, which is how a check that cannot fail announces
+      # itself. Deleting it is right; keeping it with a prover that exercises
+      # something else would be the hollow guarantee this harness exists to
+      # find. The claim it printed is covered by `R7 revert never restores the
+      # three-argument producer`, against the assertion that really runs.
       # And every lifecycle object this migration added is gone. A revert that
       # leaves an RPC calling a producer that can no longer answer its question
       # is worse than one that leaves nothing.

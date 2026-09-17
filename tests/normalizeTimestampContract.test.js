@@ -72,6 +72,31 @@ describe('LIVE-6: normalizeTimestamp takes an index, never a fallback', () => {
     expect(() => normalizeTimestamp('', 'start', 2)).toThrow(/at index 2/);
   });
 
+  it('refuses a naive wall string at the boundary that writes the column', () => {
+    // This function is what actually produces `game_assignments.start`. Left
+    // host-parsing, it reproduced GAP-30 one layer below the page that was
+    // fixed, and it was stricter upstream (`InstantSchema`) than at the write.
+    expect(() => normalizeTimestamp('2026-11-07T16:44:00', 'start', 0)).toThrow(
+      /must carry a timezone at index 0/
+    );
+    expect(() => normalizeTimestamp('2026-11-07 16:44:00', 'start', 0)).toThrow(
+      /must carry a timezone/
+    );
+    // …and the whole builder refuses it, from every host zone.
+    for (const zone of ['UTC', 'America/Los_Angeles', 'America/New_York']) {
+      const previous = process.env.TZ;
+      process.env.TZ = zone;
+      try {
+        expect(() => build({ start: '2026-11-07T16:44:00' }), zone).toThrow(
+          /must carry a timezone/
+        );
+      } finally {
+        if (previous === undefined) delete process.env.TZ;
+        else process.env.TZ = previous;
+      }
+    }
+  });
+
   it('still normalises a Date, an ISO string and an epoch number', () => {
     const iso = '2026-11-07T21:44:00.000Z';
     expect(normalizeTimestamp(new Date(iso), 'start', 0)).toBe(iso);

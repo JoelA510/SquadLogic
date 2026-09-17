@@ -2,6 +2,8 @@
  * Shared normalization utilities for data persistence and processing.
  */
 
+import { isNaiveDateTime } from '../timing/seasonClock.js';
+
 export function normalizeString(value, label, index) {
   if (typeof value !== 'string') {
     throw new TypeError(
@@ -52,17 +54,33 @@ export function normalizeId(value, label, index) {
  * it always was: an error, not a defaultable value. Nothing in the codebase ever
  * wanted a fallback here.
  *
- * @param {*} value - a `Date`, an ISO string, or an epoch number.
+ * ## Why a naive wall string is refused here too (GAP-30)
+ *
+ * This is the function that actually produces `game_assignments.start` and
+ * `end`, both `timestamptz`. `new Date('2026-11-07T16:44:00')` reads that string
+ * in the **host's** zone, so this boundary -- not the page above it -- is where
+ * the same 4:44 PM slot became three instants eight hours apart. Refusing the
+ * naive form means the last step before the column cannot guess a zone even if
+ * something upstream hands it one, and it matches `SlotSchema`/`AssignmentSchema`,
+ * which refuse it too. A wall time is composed by `timing/seasonClock.js` first.
+ *
+ * @param {*} value - a `Date`, an epoch number, or a string carrying a zone.
  * @param {string} label - what the caller calls this value.
  * @param {number} [index] - the row it came from, for the message.
  * @returns {string} an ISO instant.
- * @throws {TypeError} when the value is missing or unreadable.
+ * @throws {TypeError} when the value is missing, unreadable, or zone-less.
  */
 export function normalizeTimestamp(value, label, index) {
   const at = index !== undefined ? ` at index ${index}` : '';
 
   if (value === undefined || value === null) {
     throw new TypeError(`${label} is required${at}`);
+  }
+
+  if (isNaiveDateTime(value)) {
+    throw new TypeError(
+      `${label} must carry a timezone${at}; compose a wall time with timing/seasonClock.js first`
+    );
   }
 
   const date = value instanceof Date ? value : new Date(value);

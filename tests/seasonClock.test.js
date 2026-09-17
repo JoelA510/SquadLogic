@@ -130,13 +130,43 @@ describe('seasonClock: composing a wall time onto the season clock', () => {
     expect(fromClock.iso).toBe('2026-06-13T09:30:00-07:00');
   });
 
-  it('throws on a wall reading that is not a wall reading', () => {
-    expect(() =>
-      resolveZonedInstant({ date: '13/06/2026', time: '09:30', timeZone: 'UTC' })
-    ).toThrow(/YYYY-MM-DD/);
-    expect(() =>
-      resolveZonedInstant({ date: '2026-06-13', time: '25:70', timeZone: 'UTC' })
-    ).toThrow(/clock reading or minutes/);
+  it('carries the seconds a Postgres `time` can hold', () => {
+    // Validated-and-dropped is the shape CLAUDE.md names. `16:44:30` composing
+    // to `16:44:00` would shift the slot and then be compared against `end`.
+    const { iso } = resolveZonedInstant({
+      date: '2026-11-07',
+      time: '16:44:30',
+      timeZone: 'America/New_York',
+    });
+    expect(iso).toBe('2026-11-07T16:44:30-05:00');
+    expect(new Date(/** @type {string} */ (iso)).toISOString()).toBe('2026-11-07T21:44:30.000Z');
+  });
+
+  it('reports an unreadable wall reading rather than throwing', () => {
+    // These arrive from the database and are read on a render path, so a throw
+    // would take a panel down. `24:00:00` is a value Postgres `time` legally
+    // stores, so this is reachable from data nobody typed wrong.
+    for (const [date, time] of [
+      ['13/06/2026', '09:30'],
+      ['2026-06-13', '25:70'],
+      ['2026-06-13', '24:00:00'],
+      ['2026-06-13', 'kickoff'],
+      [null, '09:30'],
+    ]) {
+      const { iso, findings } = resolveZonedInstant({ date, time, timeZone: 'UTC' });
+      expect(iso, `${date} ${time}`).toBeNull();
+      expect(findings.map((f) => f.code)).toEqual([TIMING_REASON.WALL_TIME_UNREADABLE]);
+      expect(findings[0].severity).toBe(TIMING_SEVERITY.BLOCKING);
+    }
+  });
+
+  it('never throws, for any input at all', () => {
+    // The blanket form of the contract, because the JSDoc now states it
+    // absolutely. A single reachable throw makes the display layer fragile.
+    for (const bad of [undefined, null, 42, {}, [], new Date(), 'nonsense']) {
+      const input = /** @type {any} */ ({ date: bad, time: bad, timeZone: bad });
+      expect(() => resolveZonedInstant(input)).not.toThrow();
+    }
   });
 });
 
@@ -259,14 +289,23 @@ describe('seasonClock: a season with no timezone refuses rather than guessing', 
     expect(findings[0].details.date).toBe('2026-11-07');
   });
 
-  it('refuses a timezone the runtime does not recognise', () => {
-    const { iso, findings } = resolveZonedInstant({
+  it('distinguishes an unrecognised timezone from a missing one', () => {
+    // Different remedies: "set the season's timezone" versus "the timezone you
+    // set is not a zone". Folding them into one code would tell an operator who
+    // typed `Americas/New_York` that they had set nothing.
+    const typo = resolveZonedInstant({
       date: '2026-11-07',
       time: '16:44',
-      timeZone: 'Mars/Olympus_Mons',
+      timeZone: 'Americas/New_York',
     });
-    expect(iso).toBeNull();
-    expect(findings.map((f) => f.code)).toEqual([TIMING_REASON.SEASON_TIMEZONE_MISSING]);
+    expect(typo.iso).toBeNull();
+    expect(typo.findings.map((f) => f.code)).toEqual([TIMING_REASON.SEASON_TIMEZONE_UNKNOWN]);
+    expect(typo.findings[0].severity).toBe(TIMING_SEVERITY.BLOCKING);
+    expect(typo.findings[0].details.timeZone).toBe('Americas/New_York');
+
+    const missing = resolveZonedInstant({ date: '2026-11-07', time: '16:44', timeZone: null });
+    expect(missing.findings[0].code).toBe(TIMING_REASON.SEASON_TIMEZONE_MISSING);
+    expect(missing.findings[0].code).not.toBe(typo.findings[0].code);
   });
 
   it('refuses identically from every host zone (no silent browser fallback)', () => {
@@ -297,6 +336,9 @@ describe('seasonClock: a season with no timezone refuses rather than guessing', 
 
 describe('seasonClock: recognising what still needs a clock', () => {
   it.each([
+    ['2026-11-07 16:44:00', true, false],
+    ['2026-11-07 16:44:00Z', false, true],
+    ['2026-11-07 16:44:00-05:00', false, true],
     ['2026-11-07T16:44:00', true, false],
     ['2026-11-07T16:44', true, false],
     ['2026-11-07T16:44:00Z', false, true],
@@ -317,6 +359,11 @@ describe('seasonClock: recognising what still needs a clock', () => {
 
   it('anchorToSeasonClock composes a naive value and leaves everything else alone', () => {
     expect(anchorToSeasonClock('2026-11-07T16:44:00', 'America/New_York').iso).toBe(
+      '2026-11-07T16:44:00-05:00'
+    );
+    // Postgres renders a zone-less timestamp with a space, and that form is
+    // exactly as zone-less as the ISO one.
+    expect(anchorToSeasonClock('2026-11-07 16:44:00', 'America/New_York').iso).toBe(
       '2026-11-07T16:44:00-05:00'
     );
     expect(anchorToSeasonClock('2026-11-07T21:44:00.000Z', 'America/New_York').iso).toBe(
@@ -348,6 +395,8 @@ describe('seasonClock: recognising what still needs a clock', () => {
 describe('seasonClock: the codes are registered, not invented', () => {
   it.each([
     TIMING_REASON.SEASON_TIMEZONE_MISSING,
+    TIMING_REASON.SEASON_TIMEZONE_UNKNOWN,
+    TIMING_REASON.WALL_TIME_UNREADABLE,
     TIMING_REASON.WALL_TIME_NONEXISTENT,
     TIMING_REASON.WALL_TIME_AMBIGUOUS,
   ])('%s has a registered severity', (code) => {

@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 20 vocabularies, 472 codes, of
- * which 461 are shown to be producible and 11 are named as holes.
+ * `tests/attribution.test.js` already carries. 20 vocabularies, 474 codes, of
+ * which 463 are shown to be producible and 11 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -806,7 +806,12 @@ harvest(
 );
 harvest(
   'resolveZonedInstant(unknown timezone)',
-  resolveZonedInstant({ date: '2026-11-07', time: '16:44', timeZone: 'Mars/Olympus_Mons' })
+  resolveZonedInstant({ date: '2026-11-07', time: '16:44', timeZone: 'Americas/New_York' })
+);
+harvest(
+  'resolveZonedInstant(unreadable wall time)',
+  // `24:00:00` is a value Postgres `time` legally stores.
+  resolveZonedInstant({ date: '2026-11-07', time: '24:00:00', timeZone: 'America/New_York' })
 );
 harvest(
   'resolveZonedInstant(daylight saving skips the hour)',

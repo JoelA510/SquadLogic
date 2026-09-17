@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildDateTime, normalizeGameSlot } from '../frontend/src/pages/GameSchedulingPage.jsx';
+import {
+  buildDateTime,
+  describeUnplaceableSlots,
+  normalizeGameSlot,
+  partitionGameSlots,
+} from '../frontend/src/pages/GameSchedulingPage.jsx';
 import { buildGameAssignmentRows } from '../packages/core/src/gameSupabase.js';
 import { generateRoundRobinWeeks, scheduleGames } from '../packages/core/src/gameScheduling.js';
 import { formatDateTime } from '../frontend/src/utils/formatters.js';
@@ -246,5 +251,85 @@ describe('GAP-30: the solver needed no change, verified rather than assumed', ()
     );
     expect(new Set(results).size).toBe(1);
     expect(results[0]).toBe('2026-11-07T21:44:00.000Z');
+  });
+});
+
+describe('GAP-30: one unplaceable slot does not void the grid', () => {
+  // The page used to wrap the whole map in one try/catch. A single slot that
+  // could not be placed returned no slots at all, so 400 good slots vanished
+  // behind one bad one -- CLAUDE.md's "never silently drop an unplaceable
+  // fixture" inverted into dropping every placeable one.
+  const good = [
+    slotRow({ id: 'good-1' }),
+    slotRow({ id: 'good-2', start_time: '18:30:00', end_time: '20:00:00' }),
+  ];
+  const dstGap = slotRow({ id: 'tbd-1', slot_date: '2026-03-08', start_time: '02:30:00' });
+
+  it('keeps the placeable slots and reports the rest as TIME TBD', () => {
+    const { gameSlots, slotById, unplaceableSlots } = partitionGameSlots([...good, dstGap], {
+      ...REFERENCE,
+      timezone: SEASON_TZ,
+    });
+    expect(gameSlots.map((s) => s.id)).toEqual(['good-1', 'good-2']);
+    expect(slotById.size).toBe(2);
+    expect(unplaceableSlots).toHaveLength(1);
+    expect(unplaceableSlots[0]).toMatchObject({
+      id: 'tbd-1',
+      date: '2026-03-08',
+      time: '02:30:00',
+      code: TIMING_REASON.WALL_TIME_NONEXISTENT,
+    });
+  });
+
+  it('reports a malformed row without a reason code under its own label', () => {
+    const { gameSlots, unplaceableSlots } = partitionGameSlots(
+      [...good, { ...slotRow(), id: null }],
+      { ...REFERENCE, timezone: SEASON_TZ }
+    );
+    expect(gameSlots).toHaveLength(2);
+    expect(unplaceableSlots[0].code).toBe('SLOT_SHAPE_INVALID');
+  });
+
+  it('still blocks the whole season when the season has no clock', () => {
+    // Not by a special rule: one season, one clock, so every row is unplaceable
+    // and `gameSlots` is empty, which is what the page's existing guard reads.
+    const { gameSlots, unplaceableSlots } = partitionGameSlots([...good, dstGap], {
+      ...REFERENCE,
+      timezone: null,
+    });
+    expect(gameSlots).toEqual([]);
+    expect(unplaceableSlots).toHaveLength(3);
+    expect(new Set(unplaceableSlots.map((u) => u.code))).toEqual(
+      new Set([TIMING_REASON.SEASON_TIMEZONE_MISSING])
+    );
+  });
+
+  it('collapses one cause shared by many slots into one line', () => {
+    const { unplaceableSlots } = partitionGameSlots(
+      Array.from({ length: 40 }, (_, i) => slotRow({ id: `s${i}` })),
+      { ...REFERENCE, timezone: null }
+    );
+    const message = describeUnplaceableSlots(unplaceableSlots);
+    expect(message).toMatch(/^40 slots shown as TIME TBD \(SEASON_TIMEZONE_MISSING\)/);
+    expect(message.split('\u00b7')).toHaveLength(1);
+  });
+
+  it('names each distinct cause once, and says nothing when there is none', () => {
+    const { unplaceableSlots } = partitionGameSlots(
+      [dstGap, slotRow({ id: 'bad', start_time: '99:99:99' })],
+      { ...REFERENCE, timezone: SEASON_TZ }
+    );
+    const message = describeUnplaceableSlots(unplaceableSlots);
+    expect(message).toMatch(new RegExp(TIMING_REASON.WALL_TIME_NONEXISTENT));
+    expect(message).toMatch(new RegExp(TIMING_REASON.WALL_TIME_UNREADABLE));
+    expect(message.split('\u00b7')).toHaveLength(2);
+    // The meta-assertion: a describer that always produced a line would pass
+    // every assertion above.
+    expect(describeUnplaceableSlots([])).toBeNull();
+    expect(
+      describeUnplaceableSlots(
+        partitionGameSlots(good, { ...REFERENCE, timezone: SEASON_TZ }).unplaceableSlots
+      )
+    ).toBeNull();
   });
 });

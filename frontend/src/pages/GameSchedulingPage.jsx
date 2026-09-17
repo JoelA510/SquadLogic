@@ -169,6 +169,74 @@ export function normalizeGameSlot(row, { fieldById, divisionById, timezone }) {
   };
 }
 
+/**
+ * Split `game_slots` rows into the ones that can be placed on a clock and the
+ * ones that cannot.
+ *
+ * **Per row, never per page.** The page used to wrap the whole `map` in one
+ * try/catch, so a single slot that could not be placed returned no slots at all
+ * and the operator lost 400 good ones behind one bad one's message -- CLAUDE.md
+ * §3's "never silently drop an unplaceable fixture" inverted into dropping every
+ * placeable one. Unplaceable slots come back carrying their reason code and are
+ * shown as TIME TBD; the rest schedule.
+ *
+ * The season-wide case still blocks, and blocks by arithmetic rather than by a
+ * special rule: a season with no timezone has no clock for *any* slot, so every
+ * row lands in `unplaceableSlots`, `gameSlots` is empty, and the page's existing
+ * `!gameSlots.length` guard disables the scheduler.
+ *
+ * @param {Array<Object>} rows
+ * @param {{ fieldById: Map<any, any>, divisionById: Map<any, any>, timezone: string|null|undefined }} reference
+ * @returns {{ gameSlots: Array<Object>, slotById: Map<any, Object>, unplaceableSlots: Array<Object> }}
+ */
+export function partitionGameSlots(rows, { fieldById, divisionById, timezone }) {
+  const gameSlots = [];
+  const unplaceableSlots = [];
+  for (const row of rows ?? []) {
+    try {
+      gameSlots.push(normalizeGameSlot({ ...row }, { fieldById, divisionById, timezone }));
+    } catch (err) {
+      unplaceableSlots.push({
+        id: row?.id ?? null,
+        date: row?.slot_date ?? row?.slotDate ?? null,
+        time: row?.start_time ?? row?.startTime ?? null,
+        // `code` is the contract; `SLOT_SHAPE_INVALID` covers the pre-existing
+        // shape throws (no id, no week index), which carry no reason code.
+        code: err?.code ?? 'SLOT_SHAPE_INVALID',
+        reason: err?.message ?? 'Slot could not be read.',
+      });
+    }
+  }
+  return {
+    gameSlots,
+    slotById: new Map(gameSlots.map((slot) => [slot.id, slot])),
+    unplaceableSlots,
+  };
+}
+
+/**
+ * One line per distinct reason, with a count, so a hundred slots sharing one
+ * cause read as one fact rather than a hundred.
+ *
+ * @param {Array<{ code: string, reason: string }>} entries
+ * @returns {string|null}
+ */
+export function describeUnplaceableSlots(entries) {
+  if (!entries || entries.length === 0) return null;
+  const byReason = new Map();
+  for (const entry of entries) {
+    const bucket = byReason.get(entry.reason) ?? { count: 0, code: entry.code };
+    bucket.count += 1;
+    byReason.set(entry.reason, bucket);
+  }
+  return [...byReason.entries()]
+    .map(
+      ([reason, { count, code }]) =>
+        `${count} slot${count === 1 ? '' : 's'} shown as TIME TBD (${code}): ${reason}`
+    )
+    .join(' \u00b7 ');
+}
+
 function buildRoundRobinByDivision(teams) {
   const teamsByDivision = new Map();
   for (const team of teams) {
@@ -440,24 +508,15 @@ export default function GameSchedulingPage() {
 
   const fieldById = useMemo(() => new Map(fields.map((field) => [field.id, field])), [fields]);
 
-  const { gameSlots, slotById, slotShapeError } = useMemo(() => {
-    try {
-      const normalized = gameSlotRows.map((row) =>
-        normalizeGameSlot({ ...row }, { fieldById, divisionById, timezone })
-      );
-      return {
-        gameSlots: normalized,
-        slotById: new Map(normalized.map((slot) => [slot.id, slot])),
-        slotShapeError: null,
-      };
-    } catch (err) {
-      return {
-        gameSlots: [],
-        slotById: new Map(),
-        slotShapeError: err.message,
-      };
-    }
-  }, [divisionById, fieldById, gameSlotRows, timezone]);
+  const { gameSlots, slotById, unplaceableSlots } = useMemo(
+    () => partitionGameSlots(gameSlotRows, { fieldById, divisionById, timezone }),
+    [divisionById, fieldById, gameSlotRows, timezone]
+  );
+
+  const unplaceableSlotMessage = useMemo(
+    () => describeUnplaceableSlots(unplaceableSlots),
+    [unplaceableSlots]
+  );
 
   useEffect(() => {
     const nextAssignments = (game?.assignments ?? []).map((assignment, index) =>
@@ -524,14 +583,22 @@ export default function GameSchedulingPage() {
     schedulerStatus === 'running' ||
     !schedulerTeams.length ||
     !gameSlots.length ||
-    Boolean(referenceError) ||
-    Boolean(slotShapeError);
+    Boolean(referenceError);
 
+  // The unplaceable summary is appended rather than substituted: a page with
+  // both no teams and three TIME TBD slots has to say both, and the readiness
+  // banner reporting only the first was how the second went unseen.
   const schedulerReadinessMessage =
-    referenceError ||
-    slotShapeError ||
-    (!schedulerTeams.length ? 'No generated teams are available for game scheduling.' : null) ||
-    (!gameSlots.length ? 'No game slots are available for this organization.' : null);
+    [
+      referenceError,
+      !schedulerTeams.length ? 'No generated teams are available for game scheduling.' : null,
+      !gameSlots.length && !unplaceableSlots.length
+        ? 'No game slots are available for this organization.'
+        : null,
+      unplaceableSlotMessage,
+    ]
+      .filter(Boolean)
+      .join(' · ') || null;
 
   const reviewSnapshot = useMemo(() => {
     const source = schedulerResult?.evaluation;

@@ -18,7 +18,9 @@
  * the single documented exception, and the exception is the point: the domain
  * keeps wall times as `YYYY-MM-DD` plus minutes-past-midnight, and `Date` is
  * confined to the inside of this boundary. Nothing else in `packages/core` may
- * turn a naive wall string into an instant.
+ * turn a naive wall string into an instant: `SlotSchema`, `AssignmentSchema`
+ * and `normalizeTimestamp()` all refuse one outright, and
+ * `tests/sourceHygiene.test.js` holds the line inside `timing/`.
  *
  * ## The zone is a parameter, not a lookup
  *
@@ -52,7 +54,18 @@ import { TIMING_REASON, makeTimingFinding } from './reasonCodes.js';
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 /** `HH:MM`, `HH:MM:SS`, or `HH:MM:SS.sss` — Postgres `time` renders the middle one. */
 const TIME_PATTERN = /^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/;
+/**
+ * The separator between a date and a wall time.
+ *
+ * `T` is the ISO spelling; a single space is what Postgres renders a
+ * `timestamp without time zone` as, and a value in that spelling is exactly as
+ * zone-less as the ISO one. Accepting only `T` classified
+ * `'2026-11-07 16:44:00'` as *not* naive, which let it through to a host-zone
+ * parse -- the one answer this module exists to give, given wrong.
+ */
+const DATE_TIME_SEPARATOR = '[T ]';
 
+const MS_PER_SECOND = 1_000;
 const MS_PER_MINUTE = 60_000;
 const MS_PER_DAY = 86_400_000;
 
@@ -69,7 +82,9 @@ const MS_PER_DAY = 86_400_000;
  */
 export function carriesZoneOffset(value) {
   if (typeof value !== 'string') return false;
-  return /T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/.test(value.trim());
+  return new RegExp(
+    `${DATE_TIME_SEPARATOR}\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})$`
+  ).test(value.trim());
 }
 
 /**
@@ -80,33 +95,46 @@ export function carriesZoneOffset(value) {
  */
 export function isNaiveDateTime(value) {
   if (typeof value !== 'string') return false;
-  return /^\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?$/.test(value.trim());
+  return new RegExp(
+    `^\\d{4}-\\d{2}-\\d{2}${DATE_TIME_SEPARATOR}\\d{1,2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?$`
+  ).test(value.trim());
 }
 
 /**
  * Split a naive `YYYY-MM-DDTHH:MM[:SS]` string into its date and time halves.
  *
+ * Deliberately **not** exported. `publication/rows.js` already exports a
+ * `splitNaiveDateTime` with a different return shape (`{ date, startMinutes }`),
+ * and two functions of the same name reachable from two barrels is a caller
+ * destructuring `undefined` under `strict: false`. The one public entry point
+ * for a naive value is {@link anchorToSeasonClock}.
+ *
  * @param {string} value
  * @returns {{ date: string, time: string }}
  */
-export function splitNaiveDateTime(value) {
-  const [date, time] = String(value).trim().split('T');
-  return { date, time };
+function splitNaiveDateTime(value) {
+  const trimmed = String(value).trim();
+  const at = trimmed.search(/[T ]/);
+  return { date: trimmed.slice(0, at), time: trimmed.slice(at + 1) };
 }
 
 /**
- * Parse a wall time into minutes past midnight.
+ * Parse a wall time into **seconds** past midnight.
  *
- * Accepts `HH:MM[:SS]` or a non-negative number already in minutes, so a caller
- * holding the domain representation does not have to render it to a string
- * first.
+ * Seconds rather than minutes because `game_slots.start_time` is a Postgres
+ * `time`, which carries them: reading `16:44:30` and composing `16:44:00` would
+ * shift a slot by up to 59 seconds and then evaluate `end > start` against the
+ * shifted values. The field is honoured rather than validated-and-dropped.
+ *
+ * A number is taken as the domain representation -- minutes past midnight -- so
+ * a caller holding that does not have to render it to a string first.
  *
  * @param {string|number} time
- * @returns {number|null} minutes past midnight, or `null` if unreadable.
+ * @returns {number|null} seconds past midnight, or `null` if unreadable.
  */
-export function wallMinutesOf(time) {
+function wallSecondsOf(time) {
   if (typeof time === 'number') {
-    return Number.isFinite(time) && time >= 0 ? Math.trunc(time) : null;
+    return Number.isFinite(time) && time >= 0 ? Math.trunc(time) * 60 : null;
   }
   if (typeof time !== 'string') return null;
   const match = TIME_PATTERN.exec(time.trim());
@@ -115,7 +143,21 @@ export function wallMinutesOf(time) {
   const minutes = Number.parseInt(match[2], 10);
   const seconds = match[3] ? Number.parseInt(match[3], 10) : 0;
   if (hours > 23 || minutes > 59 || seconds > 59) return null;
-  return hours * 60 + minutes;
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+/**
+ * Parse a wall time into minutes past midnight -- the domain's own reading.
+ *
+ * Truncates toward the minute by name and by contract; composition uses
+ * {@link wallSecondsOf} so nothing is lost at the boundary that matters.
+ *
+ * @param {string|number} time
+ * @returns {number|null} minutes past midnight, or `null` if unreadable.
+ */
+export function wallMinutesOf(time) {
+  const seconds = wallSecondsOf(time);
+  return seconds === null ? null : Math.floor(seconds / 60);
 }
 
 /**
@@ -206,12 +248,15 @@ function toOffsetIso(epochMs, offsetMs) {
 /**
  * Turn a season-local wall time into an absolute instant.
  *
- * Never throws for a domain refusal: a caller that cannot proceed gets
- * `iso: null` and a finding saying why, exactly as
- * `formatTimingOrUnknown()` returns an explicit unknown rather than inventing a
- * plausible number. Malformed input (a date that is not `YYYY-MM-DD`, a time
- * that is not a clock reading) is also a finding, not a throw, because it
- * arrives from the database and one bad row must not take the page down.
+ * **Never throws.** A caller that cannot proceed gets `iso: null` and a finding
+ * saying why, exactly as `formatTimingOrUnknown()` returns an explicit unknown
+ * rather than inventing a plausible number. Malformed input -- a date that is
+ * not `YYYY-MM-DD`, a clock the day does not contain -- is a finding too, and
+ * that is not politeness: these values arrive from the database and are read on
+ * a React render path. Postgres's `time` legally stores `24:00:00`, so the
+ * unreadable case is reachable from data nobody typed wrong, and a throw there
+ * would take a panel down where the old code printed "unspecified time".
+ * {@link requireZonedInstant} is the wrapper for call sites that must stop.
  *
  * @param {Object} input
  * @param {string} input.date - `YYYY-MM-DD`, the season-local calendar date.
@@ -227,17 +272,21 @@ export function resolveZonedInstant({ date, time, timeZone, label = 'wall time' 
   /** @type {Array<import('./types.js').TimingFinding>} */
   const findings = [];
 
-  // A wall reading that is not a wall reading is malformed input, not a timing
-  // decision, so it throws rather than earning a reason code. Inventing a code
-  // for it would put "the database handed us garbage" in the same list as "this
-  // season has no clock", and an operator cannot act on the two the same way.
+  // A wall reading that is not a wall reading gets its own code rather than
+  // sharing SEASON_TIMEZONE_MISSING: an operator cannot act on "the database
+  // handed us a time the day does not contain" and "this season has no clock"
+  // the same way, and `code` is the contract.
   const dateMatch = typeof date === 'string' ? DATE_PATTERN.exec(date.trim()) : null;
-  if (!dateMatch) {
-    throw new TypeError(`${label} date must be YYYY-MM-DD, received: ${String(date)}`);
-  }
-  const minutes = wallMinutesOf(time);
-  if (minutes === null) {
-    throw new TypeError(`${label} must be a clock reading or minutes, received: ${String(time)}`);
+  const seconds = wallSecondsOf(time);
+  if (!dateMatch || seconds === null) {
+    findings.push(
+      makeTimingFinding(
+        TIMING_REASON.WALL_TIME_UNREADABLE,
+        `${label} is not a readable wall time: ${String(date)} ${String(time)}`,
+        { label, date: String(date), time: String(time) }
+      )
+    );
+    return { iso: null, findings };
   }
 
   if (typeof timeZone !== 'string' || !timeZone.trim()) {
@@ -255,8 +304,8 @@ export function resolveZonedInstant({ date, time, timeZone, label = 'wall time' 
   if (!formatter) {
     findings.push(
       makeTimingFinding(
-        TIMING_REASON.SEASON_TIMEZONE_MISSING,
-        `${label} ${date} ${String(time)} names an unknown timezone "${timeZone}"`,
+        TIMING_REASON.SEASON_TIMEZONE_UNKNOWN,
+        `${label} ${date} ${String(time)} names a timezone this runtime does not know: "${timeZone}"`,
         { label, date: String(date), time: String(time), timeZone: String(timeZone) }
       )
     );
@@ -270,7 +319,7 @@ export function resolveZonedInstant({ date, time, timeZone, label = 'wall time' 
       Number.parseInt(dateMatch[2], 10) - 1,
       Number.parseInt(dateMatch[3], 10)
     ) +
-    minutes * MS_PER_MINUTE;
+    seconds * MS_PER_SECOND;
 
   // Probe the offset a day either side of the target as well as at the target
   // itself. Probing only at the target finds one offset even across a

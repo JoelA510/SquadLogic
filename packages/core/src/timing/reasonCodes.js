@@ -138,6 +138,27 @@ export const TIMING_REASON = Object.freeze({
    */
   SEASON_TIMEZONE_MISSING: 'SEASON_TIMEZONE_MISSING',
   /**
+   * The season names a timezone the runtime cannot resolve -- a typo, or a zone
+   * the host's ICU data does not carry.
+   *
+   * A separate code from {@link SEASON_TIMEZONE_MISSING} because `code` is the
+   * contract and the two remedies differ: one is "set the season's timezone",
+   * the other is "the timezone you set is not a zone". Folding them would tell
+   * an operator who typed `Americas/New_York` that they had set nothing.
+   */
+  SEASON_TIMEZONE_UNKNOWN: 'SEASON_TIMEZONE_UNKNOWN',
+  /**
+   * The value handed over is not a wall reading at all: a date that is not
+   * `YYYY-MM-DD`, or a clock the day does not contain.
+   *
+   * This is a finding rather than a throw because the value arrives from the
+   * database and is read on a React render path. Postgres's `time` legally
+   * stores `24:00:00`, so this is reachable from data nobody typed wrong, and a
+   * throw there takes a panel down where the old code printed
+   * "unspecified time".
+   */
+  WALL_TIME_UNREADABLE: 'WALL_TIME_UNREADABLE',
+  /**
    * The wall time does not exist in the zone: it falls in the hour a
    * spring-forward skips (`America/New_York` 2026-03-08 02:30).
    *
@@ -206,6 +227,8 @@ export const TIMING_REASON_SEVERITY = Object.freeze({
   [TIMING_REASON.WARMUP_FOOTPRINT_UNKNOWN]: TIMING_SEVERITY.COMPROMISE,
 
   [TIMING_REASON.SEASON_TIMEZONE_MISSING]: TIMING_SEVERITY.BLOCKING,
+  [TIMING_REASON.SEASON_TIMEZONE_UNKNOWN]: TIMING_SEVERITY.BLOCKING,
+  [TIMING_REASON.WALL_TIME_UNREADABLE]: TIMING_SEVERITY.BLOCKING,
   [TIMING_REASON.WALL_TIME_NONEXISTENT]: TIMING_SEVERITY.BLOCKING,
   [TIMING_REASON.WALL_TIME_AMBIGUOUS]: TIMING_SEVERITY.INFO,
 

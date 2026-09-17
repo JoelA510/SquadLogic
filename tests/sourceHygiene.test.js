@@ -277,3 +277,57 @@ describe('source hygiene :: a carried trace field has a production reader', () =
     }
   });
 });
+
+/**
+ * `timing/index.js` declares that `Date` construction inside `timing/` lives in
+ * exactly one file. Declared is not enforced (CLAUDE.md §3), and a carve-out is
+ * easier to breach than a blanket ban precisely because it reads as already
+ * broken, so the claim is checked rather than trusted.
+ */
+describe('the timing package keeps its Date construction in one file', () => {
+  const TIMING_DIR = path.join(CORE_SRC, 'timing');
+  /** The one file the barrel names as the boundary. */
+  const BOUNDARY = 'seasonClock.js';
+
+  /**
+   * Lines that construct a `Date`, ignoring comments and JSDoc.
+   *
+   * @param {string} file
+   * @returns {string[]}
+   */
+  function dateConstructionsIn(file) {
+    return readFileSync(file, 'utf8')
+      .split('\n')
+      .filter((line) => !/^\s*(\*|\/\/)/.test(line))
+      .filter((line) => /\bnew Date\s*\(/.test(line));
+  }
+
+  const timingFiles = sourceFilesUnder(TIMING_DIR);
+
+  it('finds the timing package at all', () => {
+    // Meta-assertion: a walk that matched nothing would make the rule below
+    // pass over an empty set, which is the shape this whole file exists for.
+    expect(timingFiles.length).toBeGreaterThan(5);
+    expect(timingFiles.map((f) => path.basename(f))).toContain(BOUNDARY);
+  });
+
+  it('can see a Date construction when there is one (positive control)', () => {
+    // The boundary file must itself trip the detector, or the rule below is a
+    // regex that never matches dressed up as a clean result.
+    expect(dateConstructionsIn(path.join(TIMING_DIR, BOUNDARY)).length).toBeGreaterThan(0);
+  });
+
+  it('constructs no Date anywhere else under timing/', () => {
+    const offenders = timingFiles
+      .filter((file) => path.basename(file) !== BOUNDARY)
+      .flatMap((file) =>
+        dateConstructionsIn(file).map(
+          (line) => `${path.relative(CORE_SRC, file).split(path.sep).join('/')}: ${line.trim()}`
+        )
+      );
+    expect(
+      offenders,
+      `timing/index.js states that ${BOUNDARY} is the only place in this package that turns a value into a Date. Either compose through timing/seasonClock.js or change the claim in the barrel -- a stated invariant nothing checks is how GAP-30 survived.`
+    ).toEqual([]);
+  });
+});

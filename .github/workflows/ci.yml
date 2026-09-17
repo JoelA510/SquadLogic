@@ -266,6 +266,7 @@ jobs:
           --import-map supabase/functions/import_map.json
           supabase/functions/_shared/tests/season-clock_test.ts
           supabase/functions/_shared/tests/ics-feed_test.ts
+          supabase/functions/_shared/tests/anchor-wall-times_test.ts
 
       - name: Season clock + calendar feed (TZ=America/Los_Angeles)
         env:
@@ -277,6 +278,7 @@ jobs:
           --import-map supabase/functions/import_map.json
           supabase/functions/_shared/tests/season-clock_test.ts
           supabase/functions/_shared/tests/ics-feed_test.ts
+          supabase/functions/_shared/tests/anchor-wall-times_test.ts
 
   # ── Deploy Edge Functions (main only) ────────────────────────
   # Prevents edge-function drift: redeploys all Supabase edge functions whenever

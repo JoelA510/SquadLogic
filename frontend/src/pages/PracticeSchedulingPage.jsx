@@ -156,6 +156,60 @@ function normalizePracticeSlot(row, seasonSetting, timezone) {
   };
 }
 
+/**
+ * Split `practice_slots` rows into the ones that can be placed on a clock and
+ * the ones that cannot.
+ *
+ * **Per row, never per page.** The page used to wrap the whole `map` in one
+ * try/catch, so a single slot that could not be read returned no slots at all
+ * and the operator lost four hundred good ones behind one bad one -- CLAUDE.md
+ * §3's "never silently drop an unplaceable fixture" inverted into dropping
+ * every placeable one. Putting `buildDateTime` on the season clock is what
+ * makes that matter: a DST spring-forward slot now refuses where it used to
+ * compose a naive string, so the per-page catch would have turned a
+ * one-slot problem into a dead page.
+ *
+ * `GameSchedulingPage.partitionGameSlots` reached this shape first and this is
+ * that contract, not a second one -- same entry fields, same `code`-is-the-
+ * contract rule, same `SLOT_SHAPE_INVALID` fallback for the pre-existing shape
+ * throws that carry no reason code.
+ *
+ * The season-wide case still blocks, and blocks by arithmetic rather than by a
+ * special rule: a season with no timezone has no clock for *any* slot, so every
+ * row lands in `unplaceableSlots`, `schedulerSlots` is empty, and the page's
+ * existing `!schedulerSlots.length` guard disables the scheduler.
+ *
+ * Exported and pure so the partition can be tested without a render.
+ *
+ * @param {Array<Record<string, any>>} rows
+ * @param {{ seasonSetting: Record<string, any>|null|undefined, timezone: string|null|undefined }} reference
+ * @returns {{ schedulerSlots: Array<Object>, slotById: Map<any, Object>, unplaceableSlots: Array<Object> }}
+ */
+export function partitionPracticeSlots(rows, { seasonSetting, timezone }) {
+  const schedulerSlots = [];
+  const unplaceableSlots = [];
+  for (const row of rows ?? []) {
+    try {
+      schedulerSlots.push(normalizePracticeSlot(row, seasonSetting, timezone));
+    } catch (err) {
+      unplaceableSlots.push({
+        id: row?.id ?? null,
+        // The wall date is derived inside `normalizePracticeSlot`, which is the
+        // call that threw, so only the row's own columns are safe to read here.
+        date: row?.valid_from ?? row?.validFrom ?? null,
+        time: normalizeTime(row?.start_time ?? row?.startTime),
+        code: err?.code ?? 'SLOT_SHAPE_INVALID',
+        reason: err?.message ?? 'Practice slot could not be read.',
+      });
+    }
+  }
+  return {
+    schedulerSlots,
+    slotById: new Map(schedulerSlots.map((slot) => [slot.id, slot])),
+    unplaceableSlots,
+  };
+}
+
 export function normalizeTeam(team) {
   const id = team?.id ?? team?.teamId;
   if (!id) return null;
@@ -385,46 +439,11 @@ export default function PracticeSchedulingPage() {
     return map;
   }, [assignments, schedulerTeams]);
 
-  /**
-   * **Per row, never per page.** This `map` used to sit inside one try/catch,
-   * so a single unreadable slot returned no slots at all -- CLAUDE.md's "never
-   * silently drop an unplaceable fixture" inverted into dropping every
-   * placeable one. Putting `buildDateTime` on the season clock makes that
-   * matter: a DST spring-forward slot now refuses, and refusing one slot must
-   * not cost the operator the other four hundred.
-   *
-   * `GameSchedulingPage.partitionGameSlots` reached this shape first; this is
-   * the same contract, not a second one. The season-wide case still blocks by
-   * arithmetic rather than by a special rule: a season with no timezone has no
-   * clock for *any* slot, so every row lands in `unplaceableSlots`,
-   * `schedulerSlots` is empty, and the existing `!schedulerSlots.length` guard
-   * disables the scheduler.
-   */
-  const { schedulerSlots, slotById, unplaceableSlots } = useMemo(() => {
-    const placeable = [];
-    const unplaceable = [];
-    for (const row of practiceSlotRows) {
-      try {
-        placeable.push(normalizePracticeSlot(row, currentSeasonSetting, timezone));
-      } catch (err) {
-        unplaceable.push({
-          id: row?.id ?? null,
-          date: null,
-          time: normalizeTime(row?.start_time ?? row?.startTime),
-          // `code` is the contract; `SLOT_SHAPE_INVALID` covers the pre-existing
-          // shape throws (missing id, time window or date range), which carry
-          // no reason code.
-          code: err?.code ?? 'SLOT_SHAPE_INVALID',
-          reason: err?.message ?? 'Practice slot could not be read.',
-        });
-      }
-    }
-    return {
-      schedulerSlots: placeable,
-      slotById: new Map(placeable.map((slot) => [slot.id, slot])),
-      unplaceableSlots: unplaceable,
-    };
-  }, [currentSeasonSetting, practiceSlotRows, timezone]);
+  const { schedulerSlots, slotById, unplaceableSlots } = useMemo(
+    () =>
+      partitionPracticeSlots(practiceSlotRows, { seasonSetting: currentSeasonSetting, timezone }),
+    [currentSeasonSetting, practiceSlotRows, timezone]
+  );
 
   // Held back until the season row has landed: before then every entry says
   // `SEASON_TIMEZONE_MISSING` about a season whose clock nobody has read yet,

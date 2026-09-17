@@ -80,7 +80,40 @@
     "seeds one; it is dated by `available_until`, which is NOT NULL, so it takes",
     "the boundary pair every other arm has. A sixth arm silently dropped from the",
     "producer fails `delete-booked-availability-profile-refused` for that table",
-    "rather than being absorbed by the others."
+    "rather than being absorbed by the others.",
+    "",
+    "ESTATE SCENARIOS (8.4 gap B). `estateScenarios` covers the two depths",
+    "20260911000000 added: admin_retire_location / admin_unretire_location and",
+    "admin_retire_field_subunit / admin_unretire_field_subunit. They are a third",
+    "section rather than more `fieldScenarios` because their SUBJECT is a",
+    "different node: a case naming a venue cannot be run by a runner that seeds",
+    "a field and passes p_field_id.",
+    "",
+    "Every case runs against the SAME estate, rebuilt fresh for each one: one",
+    "venue with TWO pitches, a sub-surface on the first, and three bookings --",
+    "a game slot on pitch A at +40, a practice slot on pitch B at +50, and a",
+    "practice slot NAMING the sub-surface at +60 (which also carries pitch A's",
+    "field_id, because practice_slots.field_id is NOT NULL).",
+    "",
+    "That shape is chosen so the two scopes disagree, and the disagreement is",
+    "what the table pins:",
+    "",
+    "  * `expect.distinctFields` is the venue arm's whole point. A venue",
+    "    retirement must reach EVERY pitch at the site, so a refusal spanning",
+    "    one field is the field-scoped implementation this codebase has",
+    "    hand-written three times, and it fails here rather than shipping.",
+    "  * `expect.affectedIds` on the sub-surface arm names the ONE booking that",
+    "    names the sub-surface. A game on the full pitch is not a booking on its",
+    "    half; an implementation that widened the subunit scope to its parent",
+    "    would report 2 and be caught by the count AND by the id.",
+    "  * `expect.childDates` is the containment decision as data: a venue",
+    "    retirement writes ONE date on ONE row. An implementation that copied",
+    "    the date onto its fields passes every count above and fails this.",
+    "",
+    "`before.effectiveTo` seeds the NODE's own date before the call, which is",
+    "how the unretire cases get something to clear. `target: \"missing\"` aims the",
+    "call at an id that does not exist, so the not-found refusal is exercised",
+    "rather than assumed."
   ],
   "version": 1,
   "fieldScenarios": [
@@ -1058,7 +1091,10 @@
         "endMinutes": 540,
         "note": null
       },
-      "expect": { "ok": false, "sqlstate": "23514" }
+      "expect": {
+        "ok": false,
+        "sqlstate": "23514"
+      }
     },
     {
       "id": "blackout-update-import-owned-refused",
@@ -1082,7 +1118,10 @@
         "endMinutes": null,
         "note": null
       },
-      "expect": { "ok": false, "sqlstate": "0A000" }
+      "expect": {
+        "ok": false,
+        "sqlstate": "0A000"
+      }
     },
     {
       "id": "blackout-update-unknown-id-refused",
@@ -1106,7 +1145,299 @@
         "endMinutes": null,
         "note": null
       },
-      "expect": { "ok": false, "sqlstate": "P0002" }
+      "expect": {
+        "ok": false,
+        "sqlstate": "P0002"
+      }
+    }
+  ],
+  "estateScenarios": [
+    {
+      "id": "venue-retire-refused-spans-both-pitches",
+      "why": "THE case this whole migration exists for. A venue retirement asks a VENUE-SCOPED question: bookings on every pitch at the site, not on one. A field-scoped implementation reports 1 pitch and 1 or 2 bookings and fails on distinctFields as well as on the count.",
+      "rpc": "admin_retire_location",
+      "before": {
+        "effectiveTo": null
+      },
+      "args": {
+        "effectiveTo": 10,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "retired": false,
+        "reason": "bookings_after_effective_to",
+        "affectedCount": 3,
+        "distinctFields": 2,
+        "containedCount": 3,
+        "effectiveTo": null,
+        "childDates": 0,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "venue-retire-confirmed-writes-only-the-venue",
+      "why": "Containment, not copy-down. The confirmed retirement writes locations.effective_to and NOTHING onto its two fields or its sub-surface. An implementation that pushed the date down satisfies every count here and fails childDates.",
+      "rpc": "admin_retire_location",
+      "before": {
+        "effectiveTo": null
+      },
+      "args": {
+        "effectiveTo": 10,
+        "confirm": true
+      },
+      "expect": {
+        "ok": true,
+        "retired": true,
+        "affectedCount": 3,
+        "distinctFields": 2,
+        "containedCount": 3,
+        "effectiveTo": 10,
+        "childDates": 0,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "venue-retire-on-boundary",
+      "why": "INCLUSIVE. The last booking at this site runs to +60; retiring ON that day strands nothing and proceeds unconfirmed. Pinned to the literal 60 rather than to the other arm, so two implementations agreeing on the wrong boundary cannot both pass.",
+      "rpc": "admin_retire_location",
+      "before": {
+        "effectiveTo": null
+      },
+      "args": {
+        "effectiveTo": 60,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "retired": true,
+        "affectedCount": 0,
+        "containedCount": 3,
+        "effectiveTo": 60,
+        "childDates": 0,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "venue-retire-day-before-boundary",
+      "why": "The twin of the case above, pinned to 59 independently. One day earlier and exactly the +60 practice is stranded, so the boundary is measured from both sides rather than asserted once.",
+      "rpc": "admin_retire_location",
+      "before": {
+        "effectiveTo": null
+      },
+      "args": {
+        "effectiveTo": 59,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "retired": false,
+        "reason": "bookings_after_effective_to",
+        "affectedCount": 1,
+        "distinctFields": 1,
+        "containedCount": 3,
+        "effectiveTo": null,
+        "childDates": 0,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "venue-retire-null-confirm-refused",
+      "why": "p_confirm => NULL reads as UNCONFIRMED. A bare `NOT p_confirm` let a NULL through and retired booked ground with nobody confirming; that was one of the two live defects folded into LIVE-1, and this is its venue twin.",
+      "rpc": "admin_retire_location",
+      "before": {
+        "effectiveTo": null
+      },
+      "args": {
+        "effectiveTo": 10,
+        "confirm": null
+      },
+      "expect": {
+        "ok": true,
+        "retired": false,
+        "reason": "bookings_after_effective_to",
+        "affectedCount": 3,
+        "distinctFields": 2,
+        "containedCount": 3,
+        "effectiveTo": null,
+        "childDates": 0,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "venue-retire-already-retired-child-not-counted",
+      "why": "The sub-surface carries its own EARLIER date, so the venue retirement does not claim credit for closing it: containedCount is 2 of 3 contained nodes. A count that overstates what a decision does is a wrong number in front of an operator, not a rounding.",
+      "rpc": "admin_retire_location",
+      "before": {
+        "effectiveTo": null,
+        "subunitEffectiveTo": 5
+      },
+      "args": {
+        "effectiveTo": 70,
+        "confirm": true
+      },
+      "expect": {
+        "ok": true,
+        "retired": true,
+        "affectedCount": 0,
+        "containedCount": 2,
+        "effectiveTo": 70,
+        "childDates": 1,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "venue-retire-no-date-refused",
+      "why": "Retiring with no end date is a deletion, not a retirement, and the RPC says so with 22023 rather than writing a NULL.",
+      "rpc": "admin_retire_location",
+      "before": {
+        "effectiveTo": null
+      },
+      "args": {
+        "effectiveTo": null,
+        "confirm": false
+      },
+      "expect": {
+        "ok": false,
+        "sqlstate": "22023",
+        "effectiveTo": null,
+        "childDates": 0
+      }
+    },
+    {
+      "id": "venue-retire-unknown-id-refused",
+      "why": "An id that resolves to nothing in this organization is P0002. The lookup is org-scoped, so a stranger's venue gets the same answer as a venue that never existed.",
+      "rpc": "admin_retire_location",
+      "before": {
+        "effectiveTo": null
+      },
+      "target": "missing",
+      "args": {
+        "effectiveTo": 10,
+        "confirm": false
+      },
+      "expect": {
+        "ok": false,
+        "sqlstate": "P0002",
+        "effectiveTo": null,
+        "childDates": 0
+      }
+    },
+    {
+      "id": "venue-unretire-clears-only-the-venue",
+      "why": "The exact inverse, which is only possible because the retirement wrote no child state to guess at. The sub-surface's own date survives: unretiring the site does not restore a child nobody asked it to.",
+      "rpc": "admin_unretire_location",
+      "before": {
+        "effectiveTo": 30,
+        "subunitEffectiveTo": 20
+      },
+      "args": {},
+      "expect": {
+        "ok": true,
+        "retired": false,
+        "effectiveTo": null,
+        "childDates": 1,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "subunit-retire-refused-on-its-own-booking-only",
+      "why": "The third scope, and the one that is NARROWER than its parent. Only the practice slot that NAMES the sub-surface counts; the game slot on the full pitch at +40 does not. An implementation that widened this to the parent pitch reports 2 and is caught by the count and by the id.",
+      "rpc": "admin_retire_field_subunit",
+      "before": {
+        "effectiveTo": null
+      },
+      "args": {
+        "effectiveTo": 10,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "retired": false,
+        "reason": "bookings_after_effective_to",
+        "affectedCount": 1,
+        "affectedIds": ["subunitSlot"],
+        "effectiveTo": null,
+        "parentDated": false,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "subunit-retire-on-boundary-leaves-the-parent-alone",
+      "why": "Inclusive again, and retiring downward writes nothing upward: the parent pitch keeps a NULL effective_to.",
+      "rpc": "admin_retire_field_subunit",
+      "before": {
+        "effectiveTo": null
+      },
+      "args": {
+        "effectiveTo": 60,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "retired": true,
+        "affectedCount": 0,
+        "effectiveTo": 60,
+        "parentDated": false,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "subunit-retire-null-confirm-refused",
+      "why": "The NULL-confirmation twin at the third depth. Three RPCs now share this guard and all three are measured, because a correction landing on two of three is this family's signature.",
+      "rpc": "admin_retire_field_subunit",
+      "before": {
+        "effectiveTo": null
+      },
+      "args": {
+        "effectiveTo": 10,
+        "confirm": null
+      },
+      "expect": {
+        "ok": true,
+        "retired": false,
+        "reason": "bookings_after_effective_to",
+        "affectedCount": 1,
+        "affectedIds": ["subunitSlot"],
+        "effectiveTo": null,
+        "parentDated": false,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "subunit-retire-unknown-id-refused",
+      "why": "P0002 at the third depth, org-scoped like its siblings.",
+      "rpc": "admin_retire_field_subunit",
+      "before": {
+        "effectiveTo": null
+      },
+      "target": "missing",
+      "args": {
+        "effectiveTo": 10,
+        "confirm": false
+      },
+      "expect": {
+        "ok": false,
+        "sqlstate": "P0002",
+        "effectiveTo": null,
+        "parentDated": false
+      }
+    },
+    {
+      "id": "subunit-unretire-clears-the-date",
+      "why": "Clears field_subunits.effective_to and touches nothing else. **`subunitEffectiveTo`, not `effectiveTo`.** This case was written with `before.effectiveTo: 25`, which both runners apply to the VENUE -- so the node under test started NULL and `expect.effectiveTo: null` held whatever the RPC did. A no-op unretire kept all 70 mock cases green. Caught by /code-review at high; the seed now dates the node the call is about.",
+      "rpc": "admin_unretire_field_subunit",
+      "before": {
+        "subunitEffectiveTo": 25
+      },
+      "args": {},
+      "expect": {
+        "ok": true,
+        "retired": false,
+        "effectiveTo": null,
+        "parentDated": false,
+        "auditPhases": ["after", "before"]
+      }
     }
   ]
 }

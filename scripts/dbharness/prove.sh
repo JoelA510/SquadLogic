@@ -19,8 +19,19 @@ R5="$REPO/docs/sql/20260909000000_revert.sql"
 # 8.4 gap A.
 M6="$REPO/supabase/migrations/20260910000000_admin_update_field_blackout.sql"
 R6="$REPO/docs/sql/20260910000000_revert.sql"
+# 8.4 gap B: the venue and sub-surface depths, and the scoped producer.
+M7="$REPO/supabase/migrations/20260911000000_venue_subunit_effective_dating.sql"
+R7="$REPO/docs/sql/20260911000000_revert.sql"
 S5="$REPO/docs/sql/20260909000000_smoke.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
+# **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
+# occur exactly once -- but it does so at PLANT time, one full harness run into
+# a sweep that takes 5.4 hours, so the signal exists and nothing surfaces it.
+# Set this and every `plant` call resolves its anchor and returns without
+# mutating anything or starting a database: minutes, not hours. See the stage
+# below for why that division stopped being reasonable.
+ANCHORS_ONLY="${PLANT_ANCHORS_ONLY:-}"
+ANCHOR_OK=0
 # What each plant scored, by label, for the census at the bottom of this file.
 # The census asserts that every health claim run.sh prints has a plant that
 # reached one of its RED branches, and it reads THIS run's results rather than a
@@ -240,6 +251,48 @@ trap on_signal INT TERM
 # The meta-assertion is on the other side: if this finds no plants at all it
 # says so and stops, because a parse that matched nothing would clear every
 # plant in the file by looking at none of them.
+# **Pre-flight one: every plant anchor still resolves, exactly once.**
+#
+# `plant()` has always refused an anchor that does not -- at PLANT time, one
+# full harness run into a sweep. That division was reasonable while the sweep
+# was something somebody ran. It is not reasonable at 121 plants and ~2.7
+# minutes each: **a loud failure nobody triggers is a quiet one.**
+#
+# It is not hypothetical, and the evidence is this very PR. 8.4 gap B changed
+# `public.field_bookings`' signature and renamed its second parameter, and that
+# one change moved two existing plants' anchors into ANCHOR-MISS -- scored
+# "meaningless" rather than failing -- and hollowed out an arm parser in
+# `docs/sql/20260907000000_smoke.sql` at the same time. Three verification
+# artifacts broken by one signature change, none of them noticed by reading.
+# A change to a SHARED enumerator ripples into the text other plants match on,
+# and that is exactly when the anchors need checking and exactly when nobody
+# can afford the sweep that checks them.
+#
+# This runs the real `plant` calls with `PLANT_ANCHORS_ONLY=1`, so the anchors
+# it resolves are the bash-expanded strings `plant()` itself would receive.
+# **Deliberately not a parser over this file's source.** The superseded-
+# statement check below does parse the source, and its own comment records that
+# a moved anchor is invisible to it ("ANCHOR-MISS's business") -- which is the
+# coupling this stage closes: a plant whose anchor has moved is silently SKIPPED
+# by that check, so an unverified anchor takes a second guard down with it.
+# This runs first for that reason.
+if [ -z "$ANCHORS_ONLY" ]; then
+  echo "=== pre-flight: every plant anchor resolves, exactly once ==="
+  PLANT_ANCHORS_ONLY=1 bash "${BASH_SOURCE[0]}"
+  anchor_status=$?
+  if [ "$anchor_status" -ne 0 ]; then
+    echo "REFUSING TO PLANT -- re-anchor the plants above before sweeping." >&2
+    echo "  Every one of them would score ANCHOR-MISS (meaningless) hours from now." >&2
+    exit 8
+  fi
+  echo
+fi
+
+# Skipped in anchors-only mode: this is the parent's stage, and running it in
+# the child too would print it twice for one sweep.
+if [ -n "$ANCHORS_ONLY" ]; then
+  :
+else
 echo "=== pre-flight: no plant may target a superseded statement ==="
 python3 - "$REPO" <<'PREFLIGHT'
 import io, os, re, sys
@@ -354,6 +407,7 @@ if [ "$preflight_status" -ne 0 ]; then
   exit 7
 fi
 echo
+fi
 
 # **A green baseline, asserted before anything is planted.**
 #
@@ -367,6 +421,12 @@ echo
 #
 # So: the unmutated harness must pass first. If it does not, nothing below is
 # evidence of anything and the run stops rather than printing eleven CAUGHTs.
+if [ -n "$ANCHORS_ONLY" ]; then
+  # No baseline in anchors-only mode: nothing is planted, so there is nothing
+  # for a red baseline to make look caught. Skipping it is what makes this
+  # check cost minutes.
+  :
+else
 echo "=== baseline: the unmutated harness must pass before any plant ==="
 bash "$REPO/scripts/dbharness/run.sh" >/tmp/harness_baseline_out 2>&1 &
 HARNESS_PID=$!
@@ -379,6 +439,7 @@ else
   echo "BASELINE RED -- refusing to plant. Every plant would report CAUGHT and prove nothing." >&2
   echo "$baseline_out" | tail -25 >&2
   exit 3
+fi
 fi
 
 # **A plant is CAUGHT only if the check it targets goes red.**
@@ -434,6 +495,30 @@ plant() { # label file old new [expected-failing-check] [check-that-must-stay-gr
   # **What the file looked like before this run touched it.** See the restore
   # check below for why a checksum rather than trust.
   local before_sum
+  # **Anchor resolution, and nothing else.** The count is the SAME count the
+  # planting step below makes, from the same `$old` after the same shell
+  # expansion -- deliberately, because a second parser reading the anchors out
+  # of this file's source text would be a second reading of what a plant
+  # targets, and the one that drifted would be the one nobody ran. `$$`, `\"`
+  # and friends are expanded by bash before `plant` ever sees them, and only
+  # this side of that expansion is the truth.
+  if [ -n "$ANCHORS_ONLY" ]; then
+    local n
+    n="$(python3 -c "
+import io,sys
+print(io.open(sys.argv[1],encoding='utf8').read().count(sys.argv[2]))" "$file" "$old")"
+    if [ "$n" = "1" ]; then
+      ANCHOR_OK=$((ANCHOR_OK+1))
+      RESULT["$label"]=ANCHOR-OK
+    else
+      printf '%-52s ANCHOR RESOLVES %s TIMES (expected exactly 1)\n' "$label" "$n"
+      printf '  in %s\n' "${file#$REPO/}"
+      RESULT["$label"]=ANCHOR-MISS
+      MISS=$((MISS+1)); FAIL=$((FAIL+1))
+    fi
+    return
+  fi
+
   before_sum="$(sha256sum "$file" | cut -d' ' -f1)"
   # **An empty checksum compares equal to an empty checksum.** `sha256sum`'s
   # status is eaten by the pipe and was never read, so a file this could not
@@ -2022,6 +2107,131 @@ DROP FUNCTION IF EXISTS public.admin_delete_field_blackout(uuid, uuid);" \
   "revert 20260910000000: the create/delete siblings read 1 after the revert"
 
 # ---------------------------------------------------------------------------
+# 8.4 gap B: the scope, the containment, and the restore
+# ---------------------------------------------------------------------------
+#
+# **The one defect this whole migration exists to prevent**, planted so the
+# prevention is proved rather than asserted: the venue arm asking a
+# FIELD-scoped question. It is one word, it is what LIVE-1, LIVE-2 and LIVE-3
+# each were, and every structural assertion in the file stays green.
+plant "M7 the venue guard asks a field-scoped question" "$M7" \
+  "FROM public.field_bookings(p_organization_id, p_location_id, p_effective_to, 'location') b;" \
+  "FROM public.field_bookings(p_organization_id, p_location_id, p_effective_to, 'field') b;" \
+  "smoke 20260911000000"
+
+# **The containment decision, planted from the other side.** Copying the date
+# onto the children satisfies every count the refusal reports and every audit
+# phase; only the "no child carries a date" assertions can see it, and they
+# exist in both the smoke and the shared table.
+plant "M7 the venue retirement copies its date onto its children" "$M7" \
+  "    WHERE id = p_location_id AND organization_id = p_organization_id
+    RETURNING * INTO v_after;
+
+    PERFORM public.record_audit_event(
+        p_organization_id, 'settings.updated', 'location', p_location_id,
+        jsonb_build_object(
+            'setting', 'facility.location',
+            'operation', 'admin_retire_location',
+            'phase', 'after'," \
+  "    WHERE id = p_location_id AND organization_id = p_organization_id
+    RETURNING * INTO v_after;
+
+    UPDATE public.fields SET effective_to = p_effective_to
+     WHERE location_id = p_location_id AND organization_id = p_organization_id;
+
+    PERFORM public.record_audit_event(
+        p_organization_id, 'settings.updated', 'location', p_location_id,
+        jsonb_build_object(
+            'setting', 'facility.location',
+            'operation', 'admin_retire_location',
+            'phase', 'after'," \
+  "smoke 20260911000000"
+
+# The third scope, widened to its parent pitch: a sub-surface retirement that
+# refuses over a game on the full pitch refuses retirements that strand
+# nothing, and the operator learns to confirm past it.
+plant "M7 the sub-surface scope widens to its parent pitch" "$M7" \
+  "    WHEN 'subunit' THEN p_field_subunit_id IS NOT NULL AND p_field_subunit_id = p_scope_id" \
+  "    WHEN 'subunit' THEN EXISTS (
+      SELECT 1 FROM public.field_subunits su
+       WHERE su.id = p_scope_id AND su.field_id = p_field_id
+    )" \
+  "smoke 20260911000000"
+
+# **An unknown scope answered with an empty set** rather than refused: a guard
+# reporting "nothing is booked here" because its scope was misspelled is the
+# loudest form of the silent pass, and it is the entire reason the producer is
+# plpgsql rather than sql.
+plant "M7 an unknown scope returns an empty set instead of refusing" "$M7" \
+  "    IF p_scope IS NULL OR p_scope NOT IN ('field', 'location', 'subunit') THEN" \
+  "    IF false THEN" \
+  "smoke 20260911000000"
+
+# The revert names five costs and counts three. One plant per count, each aimed
+# at its own claim, because a warning naming one cost of three is what LIVE-2's
+# round 1 found.
+plant "R7 revert counts no venue retirements" "$R7" \
+  "       WHERE l.effective_to IS NOT NULL" \
+  "       WHERE false" \
+  "revert 20260911000000: planted a retired venue with three fields"
+
+# **The containment count derived from the data a break corrupts.** A venue
+# retirement writes nothing to a child, so counting only children that carry a
+# date reports zero for every venue -- a total loss printed as no loss. The
+# revert counts from `fields` unconditionally, and this proves it.
+plant "R7 revert counts containment from child state" "$R7" \
+  "       WHERE f.location_id = r.id AND f.organization_id = r.organization_id;" \
+  "       WHERE f.location_id = r.id AND f.organization_id = r.organization_id
+         AND f.effective_to IS NOT NULL;" \
+  "revert 20260911000000: planted a retired venue with three fields"
+
+plant "R7 revert counts no sub-surface retirements" "$R7" \
+  "       WHERE su.effective_to IS NOT NULL" \
+  "       WHERE false" \
+  "revert 20260911000000: planted two retired sub-surfaces"
+
+# **The dangerous half.** Dropping the scoped producer without putting the
+# three-argument one back leaves admin_retire_field, admin_delete_field and
+# rollback_field_import_job raising 42883 on every call. The revert asserts its
+# own restore; this makes that assertion earn its place.
+plant "R7 revert never restores the three-argument producer" "$R7" \
+  "CREATE OR REPLACE FUNCTION public.field_bookings(
+    p_organization_id uuid,
+    p_field_id uuid," \
+  "CREATE OR REPLACE FUNCTION public.field_bookings_not_restored(
+    p_organization_id uuid,
+    p_field_id uuid," \
+  "FAIL revert 20260911000000"
+
+# A DROP whose argument list drifted from the CREATE's is a silent no-op, which
+# is how docs/sql/reverts/20260504060000 came to report success over a function
+# it had not removed. Here it leaves TWO field_bookings standing, and a
+# three-argument call then resolves to neither.
+#
+# **The expected failure is the REVERT's own assertion, not a catalogue
+# verdict in run.sh.** This plant was first aimed at such a verdict and scored
+# CAUGHT ELSEWHERE, which is how it was discovered that the verdict could not
+# fire at all: the revert's scalar subquery over `proargtypes` raises 21000 on
+# two rows long before run.sh reads the catalogue. The verdict is gone and this
+# now names what really catches it.
+plant "R7 revert drops a producer signature that does not exist" "$R7" \
+  "DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date, text);" \
+  "DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date, boolean);" \
+  "FAIL revert 20260911000000"
+
+# A revert that leaves an RPC standing over a producer that can no longer
+# answer its question is worse than one that leaves nothing.
+plant "R7 revert leaves a lifecycle RPC standing" "$R7" \
+  "DROP FUNCTION IF EXISTS public.admin_unretire_location(uuid, uuid);" \
+  "-- plant: the unretire arm is left behind" \
+  "revert 20260911000000: these objects survived the revert"
+
+plant "R7 revert leaves the venue column behind" "$R7" \
+  "ALTER TABLE public.locations DROP COLUMN IF EXISTS effective_to;" \
+  "-- plant: the venue column is left behind" \
+  "revert 20260911000000: expected none/1"
+
+# ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
 #
@@ -2065,6 +2275,11 @@ declare -A CLAIM_PROVER=(
   ["(checked) exactly one public.rollback_field_import_job survives the revert, and it no longer calls the producer"]="R5 revert drops the rollback instead of restoring it|R5 revert leaves the rollback on the producer|R5 revert restores the rollback under a second signature"
   ["(checked) field_availability_profiles.field_id is back to ON DELETE SET NULL"]="R5 revert leaves the FK cascading"
   ["(checked) exactly one public.admin_delete_field survives the revert, and it no longer calls the dropped scenario helpers"]="R5 revert drops admin_delete_field instead of restoring it|R5 revert restores a body that still calls the dropped helpers"
+  ["(checked) the revert named the venue retirement it was about to erase and the fields its containment was closing"]="R7 revert counts no venue retirements|R7 revert counts containment from child state"
+  ["(checked) the revert named both sub-surface retirements and totalled the two kinds separately"]="R7 revert counts no sub-surface retirements"
+  ["(checked) the revert proved its own restore of the three-argument producer"]="R7 revert never restores the three-argument producer"
+  ["(checked) all six lifecycle objects this migration added are gone"]="R7 revert leaves a lifecycle RPC standing"
+  ["(checked) both effective_to columns are gone, and fields.effective_to is untouched"]="R7 revert leaves the venue column behind"
   ["(checked) the revert counted the admin-authored windows that go back to losing their id on an edit"]="R6 revert counts no admin-authored windows"
   ["(checked) the revert counted the edit audit rows whose operation stops having a writer"]="R6 revert counts the wrong audit operation"
   ["(checked) the revert counted the frozen import windows that lose their server-side refusal"]="R6 revert counts no frozen import windows"
@@ -2073,6 +2288,24 @@ declare -A CLAIM_PROVER=(
   ["(checked) the rollback removed every overload of all four admin facility RPCs"]="EMERG the rollback and its own guard drift together"
   ["(checked) it left public.field_bookings standing, which admin_retire_field still calls"]="EMERG rollback takes the producer another RPC still calls"
 )
+
+# **The anchor pre-flight's own verdict, with the meta-assertion the others
+# have.** A run that examined ZERO plants would clear all 121 by looking at
+# none of them -- the vacuous pass this whole file exists to stop, in the check
+# added to stop a vacuous pass one level down.
+if [ -n "$ANCHORS_ONLY" ]; then
+  echo
+  if [ "$ATTEMPTED" -eq 0 ]; then
+    echo "ANCHOR PRE-FLIGHT FAILED: examined no plants at all; this check looked at nothing" >&2
+    exit 9
+  fi
+  if [ "$MISS" -ne 0 ]; then
+    echo "ANCHOR PRE-FLIGHT FAILED: $MISS of $ATTEMPTED plant anchors do not resolve exactly once" >&2
+    exit 9
+  fi
+  echo "anchor pre-flight: $ANCHOR_OK of $ATTEMPTED plant anchors resolve exactly once in their target file"
+  exit 0
+fi
 
 echo
 census_ok=1

@@ -266,7 +266,19 @@ BEGIN
   -- **The union lives in the shared producer now**, which is the whole point:
   -- two enumerators is two answers, and retire's copy was the one missing
   -- `games` and slot-reached assignments.
-  SELECT pg_get_functiondef(p.oid) INTO v_cte
+  --
+  -- **`prosrc`, not `pg_get_functiondef`, and the difference is not cosmetic.**
+  -- 20260911000000 gave the producer a scope with `p_scope text DEFAULT
+  -- 'field'`, and `pg_get_functiondef` renders that default as
+  -- `'field'::text` -- inside the SIGNATURE, which lands in the first arm when
+  -- the definition is split on `UNION ALL`. The `v_kind` regex below would
+  -- then read `field` as arm one's kind instead of `game_slot`, every error
+  -- message about that arm would name the wrong thing, and worse, the
+  -- `v_kind IS NULL` guard could no longer fail for arm one at all: the
+  -- signature supplies a literal whatever the arm does. A check hollowed out
+  -- by a default value. `prosrc` is the body between the dollar quotes and
+  -- contains no signature, so an arm's kind can only come from the arm.
+  SELECT p.prosrc INTO v_cte
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'public' AND p.proname = 'field_bookings';
   IF v_cte IS NULL OR length(v_cte) < 100 THEN

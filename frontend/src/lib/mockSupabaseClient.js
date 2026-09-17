@@ -866,13 +866,66 @@ const rangeLastDay = (range) => {
 // incomplete list. What differs between the two callers is the DATE and
 // nothing else, so that is the only parameter.
 //
-// Mirrors `public.field_bookings(p_organization_id, p_field_id, p_after)`.
+// **SCOPED as of 20260911000000, and scoped HERE rather than twinned.**
+// Retiring a venue asks about every pitch at the site and retiring a
+// sub-surface asks about the rows that NAME it, which is narrower than the
+// parent pitch. Writing a venue-scoped enumerator beside this one is
+// precisely how LIVE-1, LIVE-2 and LIVE-3 happened -- one arm of a guard
+// corrected while its sibling was not -- so this producer gains a scope and
+// keeps being the only one.
 //
-// @param {string} fieldId
+// An UNRECOGNISED scope THROWS rather than matching nothing, mirroring the
+// 22023 the SQL raises. A guard that answers "nothing is booked here" because
+// its scope was misspelled is the loudest form of the silent pass this
+// repository keeps finding.
+//
+// Mirrors `public.field_bookings(p_organization_id, p_scope_id, p_after, p_scope)`.
+//
+// @param {string} scopeId the field, location or field_subunit being judged
 // @param {string|null} after `null` means no date applies -- a deletion
 //   takes everything on the ground, which is not the same as an empty
 //   filter.
-const mockFieldBookings = (db, orgId, fieldId, after) => {
+// @param {'field'|'location'|'subunit'} [scope]
+// **Exported for tests, and that is a decision rather than convenience.** The
+// unknown-scope throw below is unreachable through any RPC arm, because every
+// arm passes a literal -- so a behavioural test cannot make it fire, and the
+// mutation sweep scored a plant that removed it NOT CAUGHT. A guard nothing
+// can make fail is the shape this whole phase exists around. Exporting the
+// producer lets `tests/estateBookingScopes.test.js` reach it directly, which
+// turns the throw from an unenforced assertion into an enforced one. The mock
+// is test infrastructure; widening its surface for a test is not the same
+// compromise it would be in production code.
+export const mockFieldBookings = (db, orgId, scopeId, after, scope = 'field') => {
+  if (!['field', 'location', 'subunit'].includes(scope)) {
+    throw new Error(`unknown booking scope ${scope}; expected field, location or subunit`);
+  }
+  if (orgId === null || orgId === undefined || scopeId === null || scopeId === undefined) {
+    throw new Error('mockFieldBookings requires an organization and a scope id');
+  }
+  // `public.estate_scope_covers`, in JavaScript. One rule, three scopes, and
+  // the five kinds that cannot name a sub-surface pass `null` for the second
+  // argument -- which is why they match nothing at subunit scope, as a fact
+  // about the schema rather than an oversight.
+  const scopeCovers = (rowFieldId, rowSubunitId) => {
+    if (scope === 'field') {
+      return (
+        rowFieldId !== null && rowFieldId !== undefined && String(rowFieldId) === String(scopeId)
+      );
+    }
+    if (scope === 'location') {
+      return (db.fields || []).some(
+        (f) =>
+          String(f.id) === String(rowFieldId) &&
+          String(f.location_id) === String(scopeId) &&
+          String(f.organization_id) === String(orgId)
+      );
+    }
+    return (
+      rowSubunitId !== null &&
+      rowSubunitId !== undefined &&
+      String(rowSubunitId) === String(scopeId)
+    );
+  };
   // A row with no date of its own is affected whatever `after` says.
   // **An empty string is "no date", not a date before every date.** The
   // field-import apply path writes `valid_until: ''` for an open-ended
@@ -886,23 +939,27 @@ const mockFieldBookings = (db, orgId, fieldId, after) => {
   const gameDate = (slot) =>
     slot.slot_date || (slot.start ? String(slot.start).slice(0, 10) : null);
   const mine = (row) =>
-    String(row.organization_id) === String(orgId) && String(row.field_id) === String(fieldId);
+    String(row.organization_id) === String(orgId) && scopeCovers(row.field_id, null);
 
-  const slotIdsOn = (table) =>
-    new Set(
-      (db[table] || [])
-        .filter((row) => String(row.field_id) === String(fieldId))
-        .map((row) => String(row.id))
-    );
-  const gameSlotIds = slotIdsOn('game_slots');
-  const practiceSlotIds = slotIdsOn('practice_slots');
+  const gameSlotIds = new Set(
+    (db.game_slots || [])
+      .filter((row) => scopeCovers(row.field_id, null))
+      .map((row) => String(row.id))
+  );
+  // The only slot table that can name a sub-surface, so the only one whose
+  // membership is asked with both facts.
+  const practiceSlotIds = new Set(
+    (db.practice_slots || [])
+      .filter((row) => scopeCovers(row.field_id, row.field_subunit_id ?? null))
+      .map((row) => String(row.id))
+  );
   const onGameSlot = (row) =>
     gameSlotIds.has(String(row.game_slot_id)) || gameSlotIds.has(String(row.slot_id));
   const onPracticeSlot = (row) =>
     practiceSlotIds.has(String(row.practice_slot_id)) || practiceSlotIds.has(String(row.slot_id));
   const inScope = (row, viaSlot) =>
     String(row.organization_id) === String(orgId) &&
-    (String(row.field_id) === String(fieldId) || viaSlot(row));
+    (scopeCovers(row.field_id, null) || viaSlot(row));
 
   return [
     ...(db.game_slots || [])
@@ -915,9 +972,19 @@ const mockFieldBookings = (db, orgId, fieldId, after) => {
         undated: !gameDate(slot),
         unbounded: false,
         cascades: true,
+        // **The pitch, reported as well as the booking.** At venue scope an
+        // affected list with no field on it is unattributable: the operator
+        // is shown "4 game slots" with no way to tell which ground. Mirrors
+        // the `field_id` column 20260911000000 added to the producer.
+        field_id: slot.field_id ?? null,
       })),
     ...(db.practice_slots || [])
-      .filter((slot) => mine(slot) && !past(slot.valid_until ?? null))
+      .filter(
+        (slot) =>
+          String(slot.organization_id) === String(orgId) &&
+          scopeCovers(slot.field_id, slot.field_subunit_id ?? null) &&
+          !past(slot.valid_until ?? null)
+      )
       .map((slot) => ({
         kind: 'practice_slot',
         id: slot.id,
@@ -936,6 +1003,7 @@ const mockFieldBookings = (db, orgId, fieldId, after) => {
         undated: false,
         unbounded: undatedValue(slot.valid_until),
         cascades: true,
+        field_id: slot.field_id ?? null,
       })),
     // **The assignment tables.** The mock enumerated the two SLOT tables
     // only, so the E2E client reported `affected_count: 0` for a field
@@ -968,6 +1036,9 @@ const mockFieldBookings = (db, orgId, fieldId, after) => {
           undated: !(slot && gameDate(slot)),
           unbounded: false,
           cascades: true,
+          // `games` carries no field_id of its own; its ground is its slot's,
+          // exactly as the SQL arm projects `gs.field_id`.
+          field_id: slot?.field_id ?? null,
         };
       }),
     ...(db.game_assignments || [])
@@ -988,6 +1059,7 @@ const mockFieldBookings = (db, orgId, fieldId, after) => {
         // producer computes it for both callers; retire ignores it,
         // because a retirement destroys nothing.
         cascades: onGameSlot(row),
+        field_id: row.field_id ?? null,
       })),
     ...(db.practice_assignments || [])
       .filter(
@@ -1007,6 +1079,7 @@ const mockFieldBookings = (db, orgId, fieldId, after) => {
           undated: false,
           unbounded: upper === null,
           cascades: onPracticeSlot(row),
+          field_id: row.field_id ?? null,
         };
       }),
     // **The sixth kind, added with 20260909000000 (LIVE-3).** The migration
@@ -1043,8 +1116,75 @@ const mockFieldBookings = (db, orgId, fieldId, after) => {
         undated: false,
         unbounded: false,
         cascades: true,
+        field_id: row.field_id ?? null,
       })),
   ];
+};
+
+/**
+ * `public.estate_contained_nodes` in JavaScript: every field and sub-surface a
+ * venue holds, and whether each one's own window already ends no later than
+ * the date being applied.
+ *
+ * **One producer, shared by the retire and the unretire arm**, for the reason
+ * the SQL gives: two arms reporting different children is the twin-arm failure
+ * this phase keeps recording.
+ *
+ * `alreadyRetired` exists so a retirement does not claim credit for closing
+ * something that was already closed. A number in front of a decision that
+ * overstates what the decision does is a wrong number, not a rounding.
+ *
+ * @param {Record<string, any>} db
+ * @param {string} orgId
+ * @param {string} locationId
+ * @param {string|null} effectiveTo `null` when no date is being applied
+ * @returns {Array<Record<string, any>>}
+ */
+export const mockEstateContainedNodes = (db, orgId, locationId, effectiveTo) => {
+  const already = (own) =>
+    own !== null &&
+    own !== undefined &&
+    String(own) !== '' &&
+    effectiveTo !== null &&
+    effectiveTo !== undefined &&
+    String(own) <= String(effectiveTo);
+  const fields = (db.fields || []).filter(
+    (f) =>
+      String(f.organization_id) === String(orgId) && String(f.location_id) === String(locationId)
+  );
+  const fieldIds = new Set(fields.map((f) => String(f.id)));
+  const rows = [
+    ...fields.map((f) => ({
+      kind: 'field',
+      id: f.id,
+      name: f.name,
+      own_effective_to: f.effective_to ?? null,
+      already_retired: already(f.effective_to),
+    })),
+    // **Enumerated from `field_subunits` and filtered by their parent's id**,
+    // not gathered from anything a retirement writes. A retirement writes
+    // nothing to a child, so deriving this set from child state would report
+    // an empty containment for every venue.
+    ...(db.field_subunits || [])
+      .filter(
+        (su) => String(su.organization_id) === String(orgId) && fieldIds.has(String(su.field_id))
+      )
+      .map((su) => ({
+        kind: 'field_subunit',
+        id: su.id,
+        name: su.label,
+        own_effective_to: su.effective_to ?? null,
+        already_retired: already(su.effective_to),
+      })),
+  ];
+  // The SQL orders by kind, then name, then id. A consumer comparing the two
+  // arms' output element by element needs one order, not two.
+  return rows.sort(
+    (a, b) =>
+      String(a.kind).localeCompare(String(b.kind)) ||
+      String(a.name).localeCompare(String(b.name)) ||
+      String(a.id).localeCompare(String(b.id))
+  );
 };
 
 // **The audit row is BOUNDED, here as in the database.** A refusal writes
@@ -2535,6 +2675,10 @@ export const mockSupabase = {
         'admin_create_field_blackout',
         'admin_update_field_blackout',
         'admin_delete_field_blackout',
+        'admin_retire_location',
+        'admin_unretire_location',
+        'admin_retire_field_subunit',
+        'admin_unretire_field_subunit',
       ].includes(name)
     ) {
       const p = params || {};
@@ -2937,6 +3081,250 @@ export const mockSupabase = {
         return { data: { deleted: true, blackout: existing }, error: null };
       }
 
+      // ---------------------------------------------------------------
+      // 8.4 gap B: the venue and sub-surface lifecycle arms
+      // ---------------------------------------------------------------
+      //
+      // **These sit ABOVE the `p_field_id` resolution below deliberately.**
+      // That block answers "Field not found in organization" for every RPC
+      // after it, and neither of these takes a field. Falling through to it
+      // would have made a venue retirement fail with the wrong noun and the
+      // wrong code -- the mock disagreeing with the database about WHY it
+      // refused, which the scenario table pins with `expect.sqlstate`.
+      if (name === 'admin_retire_location' || name === 'admin_unretire_location') {
+        // **The DATE is refused before the lookup, because that is the order
+        // the SQL takes** (20260911000000: the `p_effective_to IS NULL` raise
+        // precedes the `SELECT ... FOR UPDATE`). The mock had the lookup
+        // first, so a call with an unknown id AND a null date answered P0002
+        // here and 22023 in Postgres -- two arms disagreeing on an input the
+        // scenario table does not vary in combination. Caught by
+        // /code-review at high.
+        if (name === 'admin_retire_location' && !p.p_effective_to) {
+          return {
+            data: null,
+            error: {
+              code: '22023',
+              message:
+                'p_effective_to is required; retiring with no end date is a deletion, not a retirement',
+            },
+          };
+        }
+        const node = (db.locations || []).find(
+          (item) =>
+            String(item.id) === String(p.p_location_id) &&
+            String(item.organization_id) === String(orgId)
+        );
+        // Org-scoped lookup, so a stranger's venue is NOT FOUND rather than
+        // forbidden-by-another-name -- the same order the SQL takes.
+        if (!node) {
+          return {
+            data: null,
+            error: { code: 'P0002', message: 'Location not found in organization' },
+          };
+        }
+        const previous = { ...node };
+
+        if (name === 'admin_unretire_location') {
+          // `null` for the date: no date is being applied, so no child can be
+          // `already_retired` by this call, and a child with its own window
+          // stays retired by that window rather than being claimed as restored.
+          const contained = mockEstateContainedNodes(db, orgId, node.id, null);
+          audit('location', node.id, 'admin_unretire_location', {
+            phase: 'before',
+            contained,
+            before: previous,
+          });
+          Object.assign(node, { effective_to: null, updated_at: new Date().toISOString() });
+          audit('location', node.id, 'admin_unretire_location', {
+            phase: 'after',
+            contained,
+            after: { ...node },
+          });
+          saveDB(db);
+          return { data: { retired: false, contained, location: node }, error: null };
+        }
+
+        const effectiveTo = String(p.p_effective_to);
+        // **The venue-scoped question, asked of the SHARED producer.** Not a
+        // second enumerator: the scope is a parameter, so a correction to who
+        // counts as booked reaches all three depths at once.
+        const affected = mockFieldBookings(db, orgId, node.id, effectiveTo, 'location').map(
+          ({ cascades: _cascades, ...row }) => row
+        );
+        const contained = mockEstateContainedNodes(db, orgId, node.id, effectiveTo);
+        const containedCount = contained.filter((row) => !row.already_retired).length;
+
+        // `p_confirm` NULL or undefined reads as UNCONFIRMED, matching
+        // `NOT COALESCE(p_confirm, false)`.
+        if (affected.length > 0 && p.p_confirm !== true) {
+          audit('location', node.id, 'admin_retire_location', {
+            phase: 'refused',
+            reason: 'bookings_after_effective_to',
+            effective_to: effectiveTo,
+            affected_count: affected.length,
+            affected: mockFieldBookingsDigest(affected),
+            contained_count: containedCount,
+            contained,
+            before: previous,
+          });
+          saveDB(db);
+          return {
+            data: {
+              retired: false,
+              reason: 'bookings_after_effective_to',
+              affected_count: affected.length,
+              affected,
+              contained_count: containedCount,
+              contained,
+            },
+            error: null,
+          };
+        }
+
+        audit('location', node.id, 'admin_retire_location', {
+          phase: 'before',
+          effective_to: effectiveTo,
+          confirmed: p.p_confirm === true,
+          affected_count: affected.length,
+          affected: mockFieldBookingsDigest(affected),
+          contained_count: containedCount,
+          contained,
+          before: previous,
+        });
+        // **Only the venue's own row.** No date is copied down and no child
+        // flag is flipped; containment is resolved on read. An implementation
+        // that pushed the date onto the children would pass every other
+        // assertion in the suite and fail the `expect.childDates` cases in
+        // `tests/fieldLifecycleScenarios.test.js`. (This named a file that has
+        // never existed -- a guard cited as coverage that was not there.
+        // Caught by /code-review at high.)
+        Object.assign(node, {
+          effective_to: effectiveTo,
+          updated_at: new Date().toISOString(),
+        });
+        audit('location', node.id, 'admin_retire_location', {
+          phase: 'after',
+          effective_to: effectiveTo,
+          confirmed: p.p_confirm === true,
+          affected_count: affected.length,
+          contained_count: containedCount,
+          contained,
+          after: { ...node },
+        });
+        saveDB(db);
+        return {
+          data: {
+            retired: true,
+            affected_count: affected.length,
+            affected,
+            contained_count: containedCount,
+            contained,
+            location: node,
+          },
+          error: null,
+        };
+      }
+
+      if (name === 'admin_retire_field_subunit' || name === 'admin_unretire_field_subunit') {
+        // The date before the lookup, as above and for the same reason.
+        if (name === 'admin_retire_field_subunit' && !p.p_effective_to) {
+          return {
+            data: null,
+            error: {
+              code: '22023',
+              message:
+                'p_effective_to is required; retiring with no end date is a deletion, not a retirement',
+            },
+          };
+        }
+        const node = (db.field_subunits || []).find(
+          (item) =>
+            String(item.id) === String(p.p_field_subunit_id) &&
+            String(item.organization_id) === String(orgId)
+        );
+        if (!node) {
+          return {
+            data: null,
+            error: { code: 'P0002', message: 'Sub-surface not found in organization' },
+          };
+        }
+        const previous = { ...node };
+
+        if (name === 'admin_unretire_field_subunit') {
+          audit('field_subunit', node.id, 'admin_unretire_field_subunit', {
+            phase: 'before',
+            before: previous,
+          });
+          Object.assign(node, { effective_to: null, updated_at: new Date().toISOString() });
+          audit('field_subunit', node.id, 'admin_unretire_field_subunit', {
+            phase: 'after',
+            after: { ...node },
+          });
+          saveDB(db);
+          return { data: { retired: false, field_subunit: node }, error: null };
+        }
+
+        const effectiveTo = String(p.p_effective_to);
+        // **Narrower than the parent pitch.** Only rows that NAME this
+        // sub-surface. A game on the full pitch is not a booking on its half,
+        // and reporting it as one would refuse a retirement that strands
+        // nothing.
+        const affected = mockFieldBookings(db, orgId, node.id, effectiveTo, 'subunit').map(
+          ({ cascades: _cascades, ...row }) => row
+        );
+
+        if (affected.length > 0 && p.p_confirm !== true) {
+          audit('field_subunit', node.id, 'admin_retire_field_subunit', {
+            phase: 'refused',
+            reason: 'bookings_after_effective_to',
+            effective_to: effectiveTo,
+            affected_count: affected.length,
+            affected: mockFieldBookingsDigest(affected),
+            before: previous,
+          });
+          saveDB(db);
+          return {
+            data: {
+              retired: false,
+              reason: 'bookings_after_effective_to',
+              affected_count: affected.length,
+              affected,
+            },
+            error: null,
+          };
+        }
+
+        audit('field_subunit', node.id, 'admin_retire_field_subunit', {
+          phase: 'before',
+          effective_to: effectiveTo,
+          confirmed: p.p_confirm === true,
+          affected_count: affected.length,
+          affected: mockFieldBookingsDigest(affected),
+          before: previous,
+        });
+        Object.assign(node, {
+          effective_to: effectiveTo,
+          updated_at: new Date().toISOString(),
+        });
+        audit('field_subunit', node.id, 'admin_retire_field_subunit', {
+          phase: 'after',
+          effective_to: effectiveTo,
+          confirmed: p.p_confirm === true,
+          affected_count: affected.length,
+          after: { ...node },
+        });
+        saveDB(db);
+        return {
+          data: {
+            retired: true,
+            affected_count: affected.length,
+            affected,
+            field_subunit: node,
+          },
+          error: null,
+        };
+      }
+
       const field = (db.fields || []).find(
         (item) =>
           String(item.id) === String(p.p_field_id) && String(item.organization_id) === String(orgId)
@@ -2967,8 +3355,16 @@ export const mockSupabase = {
         // The shared enumerator, then the six keys retire's payload carries:
         // `cascades` is the producer's answer to "would a delete destroy this",
         // which a retirement has no use for and whose SQL twin never emits.
+        //
+        // **`field_id` is dropped here and KEPT by the venue and sub-surface
+        // arms, and that asymmetry is the SQL's.** The producer reports the
+        // pitch because at venue scope an affected list without it is
+        // unattributable. A FIELD-scoped caller already knows the pitch -- it
+        // is the argument -- so `admin_retire_field`'s SQL builds its jsonb
+        // without the key, and emitting it here would be the mock inventing a
+        // seventh key its twin never sends.
         const affected = fieldBookings(p.p_field_id, String(p.p_effective_to)).map(
-          ({ cascades: _cascades, ...row }) => row
+          ({ cascades: _cascades, field_id: _fieldId, ...row }) => row
         );
         // `p_confirm` NULL or undefined reads as UNCONFIRMED, matching
         // `NOT COALESCE(p_confirm, false)`. The SQL used a bare `NOT p_confirm`
@@ -3124,8 +3520,11 @@ export const mockSupabase = {
         const affected = fieldBookings(p.p_field_id, null).map((row) => {
           // `cascades` is stripped on EVERY arm. Leaving it on put a key in the
           // payload that the SQL never emits -- the same leak as retire's, and
-          // caught only once something asserted the key set.
-          const { cascades, ...rest } = row;
+          // caught only once something asserted the key set. `field_id` goes
+          // the same way and for the same reason: a field-scoped caller was
+          // given the pitch and `admin_delete_field`'s SQL does not echo it
+          // back.
+          const { cascades, field_id: _fieldId, ...rest } = row;
           if (typeof cascades !== 'boolean') {
             throw new Error(
               `the producer returned no cascades for a ${row.kind} row; ` +

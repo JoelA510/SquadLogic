@@ -299,8 +299,9 @@ describe('scenario table :: the table itself', () => {
     // would pass green having asserted nothing at all.
     expect(TABLE.fieldScenarios.length).toBe(37);
     expect(TABLE.blackoutScenarios.length).toBe(14);
-    const all = [...TABLE.fieldScenarios, ...TABLE.blackoutScenarios];
-    expect(all.length).toBe(51);
+    expect(TABLE.estateScenarios.length).toBe(14);
+    const all = [...TABLE.fieldScenarios, ...TABLE.blackoutScenarios, ...TABLE.estateScenarios];
+    expect(all.length).toBe(65);
     for (const scenario of all) {
       expect(typeof scenario.id).toBe('string');
       expect(scenario.why.length).toBeGreaterThan(10);
@@ -371,6 +372,73 @@ describe('scenario table :: the table itself', () => {
       accepted.some((s) => s.seed.startMinutes === null && s.expect.after.startMinutes !== null),
       'no edit case turns an all-day window into a timed one'
     ).toBe(true);
+  });
+
+  it('exercises all four estate RPCs, both outcomes, and the two scope discriminators', () => {
+    // **A table covering three of the four would say nothing about the fourth
+    // while looking complete.** Naming the set means dropping a depth fails
+    // loudly rather than shrinking the suite quietly.
+    expect(new Set(TABLE.estateScenarios.map((s) => s.rpc))).toEqual(
+      new Set([
+        'admin_retire_location',
+        'admin_unretire_location',
+        'admin_retire_field_subunit',
+        'admin_unretire_field_subunit',
+      ])
+    );
+    // Accepted AND refused, on both retire arms. All-refused is satisfied by
+    // an RPC that never retires; all-accepted by one with no guard at all.
+    for (const rpc of ['admin_retire_location', 'admin_retire_field_subunit']) {
+      const cases = TABLE.estateScenarios.filter((s) => s.rpc === rpc);
+      expect(cases.length, `${rpc} has no cases`).toBeGreaterThan(2);
+      expect(new Set(cases.filter((s) => s.expect.ok).map((s) => s.expect.retired))).toEqual(
+        new Set([true, false])
+      );
+    }
+    // **The venue discriminator.** At least one case must demand a refusal
+    // spanning MORE THAN ONE pitch. Without it the whole table is satisfiable
+    // by the field-scoped implementation this migration exists to replace.
+    expect(
+      TABLE.estateScenarios.some((s) => (s.expect.distinctFields ?? 0) > 1),
+      'no case demands that a venue refusal reach more than one pitch'
+    ).toBe(true);
+    // **The sub-surface discriminator.** At least one case must name the
+    // affected rows by id, so a scope widened to the parent pitch is caught by
+    // more than a count.
+    expect(
+      TABLE.estateScenarios.some((s) => (s.expect.affectedIds ?? []).length > 0),
+      'no case names the sub-surface bookings by id'
+    ).toBe(true);
+    // **The containment discriminator.** At least one ACCEPTED retirement must
+    // demand that no child carries a date afterwards. An implementation that
+    // copied the venue date down passes every count and fails only this.
+    expect(
+      TABLE.estateScenarios.some(
+        (s) =>
+          s.rpc === 'admin_retire_location' &&
+          s.expect.retired === true &&
+          s.expect.childDates === 0
+      ),
+      'no accepted venue retirement demands that its children stay undated'
+    ).toBe(true);
+    // Both refusal codes are exercised, and they must stay DIFFERENT answers.
+    expect(
+      new Set(TABLE.estateScenarios.filter((s) => !s.expect.ok).map((s) => s.expect.sqlstate))
+    ).toEqual(new Set(['22023', 'P0002']));
+    // Every accepted case names the audit phases it must leave behind, and a
+    // refused retirement records `refused` where an accepted one records two.
+    for (const scenario of TABLE.estateScenarios) {
+      if (!scenario.expect.ok) continue;
+      expect(scenario.expect.auditPhases, `${scenario.id}: names no audit phases`).toBeInstanceOf(
+        Array
+      );
+      expect(scenario.expect.auditPhases.length).toBeGreaterThan(0);
+    }
+    expect(
+      new Set(
+        TABLE.estateScenarios.filter((s) => s.expect.ok).map((s) => s.expect.auditPhases.join('+'))
+      )
+    ).toEqual(new Set(['refused', 'after+before']));
   });
 
   it('exercises all three field RPCs, and both delete outcomes', () => {
@@ -690,6 +758,240 @@ describe('scenario table :: the mock honours it', () => {
       // **Refused means nothing was written.** A refusal that half-applied
       // would be worse than no constraint at all.
       expect(after).toBe(before);
+    }
+  });
+});
+
+/**
+ * **The estate a gap B case runs against, rebuilt for every one of them.**
+ *
+ * One venue, TWO pitches, a sub-surface on the first, and three bookings:
+ * a game slot on pitch A at +40, a practice slot on pitch B at +50, and a
+ * practice slot NAMING the sub-surface at +60. `practice_slots.field_id` is
+ * NOT NULL, so that last one carries pitch A's id as well as the sub-surface's
+ * -- which is exactly why the two scopes disagree about it, and the
+ * disagreement is what `expect.distinctFields` and `expect.affectedIds` pin.
+ *
+ * Rebuilt per case rather than shared, because half of these cases WRITE a
+ * date and a shared estate would make every later case depend on the order the
+ * runner happened to use.
+ */
+let estateSeq = 0;
+const estateInState = async (before) => {
+  estateSeq += 1;
+  const n = estateSeq;
+  const ids = {
+    venue: `scenario-venue-${n}`,
+    pitchA: `scenario-venue-${n}-pitch-a`,
+    pitchB: `scenario-venue-${n}-pitch-b`,
+    subunit: `scenario-venue-${n}-sub`,
+    pitchASlot: `scenario-venue-${n}-game-a`,
+    pitchBSlot: `scenario-venue-${n}-practice-b`,
+    subunitSlot: `scenario-venue-${n}-practice-sub`,
+  };
+  await supabase.from('locations').insert({
+    id: ids.venue,
+    organization_id: ORG,
+    name: `Scenario Estate ${n}`,
+    effective_to: dateAt(before.effectiveTo ?? null),
+  });
+  for (const [id, name] of [
+    [ids.pitchA, `Scenario Estate ${n} Pitch A`],
+    [ids.pitchB, `Scenario Estate ${n} Pitch B`],
+  ]) {
+    await supabase
+      .from('fields')
+      .insert({ id, organization_id: ORG, location_id: ids.venue, name, active: true });
+  }
+  await supabase.from('field_subunits').insert({
+    id: ids.subunit,
+    organization_id: ORG,
+    field_id: ids.pitchA,
+    label: `Scenario Estate ${n} Pitch A North`,
+    effective_to: dateAt(before.subunitEffectiveTo ?? null),
+  });
+  await supabase.from('game_slots').insert({
+    id: ids.pitchASlot,
+    organization_id: ORG,
+    field_id: ids.pitchA,
+    slot_date: dateAt(40),
+    week_index: 1,
+  });
+  await supabase.from('practice_slots').insert({
+    id: ids.pitchBSlot,
+    organization_id: ORG,
+    field_id: ids.pitchB,
+    day_of_week: 'tue',
+    start_time: '18:00',
+    end_time: '19:30',
+    valid_until: dateAt(50),
+  });
+  await supabase.from('practice_slots').insert({
+    id: ids.subunitSlot,
+    organization_id: ORG,
+    field_id: ids.pitchA,
+    field_subunit_id: ids.subunit,
+    day_of_week: 'wed',
+    start_time: '17:00',
+    end_time: '18:30',
+    valid_until: dateAt(60),
+  });
+
+  // **Every row of the estate really landed.** A seed that failed would turn a
+  // refusal case into an unbooked one: the retirement would proceed, the
+  // assertion would be about nothing, and the scope could be wrong.
+  const venue = getMockData('locations').find((row) => String(row.id) === ids.venue);
+  expect(venue, 'the estate venue was never seeded').toBeDefined();
+  expect(venue.effective_to ?? null).toBe(dateAt(before.effectiveTo ?? null));
+  const subunit = getMockData('field_subunits').find((row) => String(row.id) === ids.subunit);
+  expect(subunit, 'the estate sub-surface was never seeded').toBeDefined();
+  expect(subunit.effective_to ?? null).toBe(dateAt(before.subunitEffectiveTo ?? null));
+  expect(getMockData('fields').filter((row) => String(row.location_id) === ids.venue)).toHaveLength(
+    2
+  );
+  for (const id of [ids.pitchASlot, ids.pitchBSlot]) {
+    expect(
+      getMockData(id === ids.pitchASlot ? 'game_slots' : 'practice_slots').some(
+        (row) => String(row.id) === id
+      ),
+      `the estate booking ${id} was never seeded`
+    ).toBe(true);
+  }
+  expect(
+    getMockData('practice_slots').find((row) => String(row.id) === ids.subunitSlot)
+      ?.field_subunit_id
+  ).toBe(ids.subunit);
+  return ids;
+};
+
+describe('scenario table :: the estate half, against the mock', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    delete window.__MOCK_DB__;
+    setMockSession('mock-admin-id');
+  });
+
+  it.each(TABLE.estateScenarios.map((s) => [s.id, s]))('%s', async (_id, scenario) => {
+    const ids = await estateInState(scenario.before ?? {});
+
+    // **Every switch over a union throws on the value it does not know.**
+    // A scenario naming a fifth RPC would otherwise be called with the wrong
+    // parameters and score a pass.
+    const KNOWN = [
+      'admin_retire_location',
+      'admin_unretire_location',
+      'admin_retire_field_subunit',
+      'admin_unretire_field_subunit',
+    ];
+    if (!KNOWN.includes(scenario.rpc)) {
+      throw new Error(`unknown rpc "${scenario.rpc}" in scenario "${scenario.id}"`);
+    }
+    const isVenue = scenario.rpc.endsWith('_location');
+    const subjectId =
+      scenario.target === 'missing' ? 'no-such-estate-node-id' : ids[isVenue ? 'venue' : 'subunit'];
+    const args = isVenue
+      ? { p_organization_id: ORG, p_location_id: subjectId }
+      : { p_organization_id: ORG, p_field_subunit_id: subjectId };
+    if (scenario.rpc.startsWith('admin_retire_')) {
+      args.p_effective_to = dateAt(scenario.args.effectiveTo ?? null);
+      // Passed THROUGH, not coerced: `Boolean(null)` is the answer the guard
+      // has to reach on its own, and coercing here would supply the very
+      // behaviour the `*-null-confirm-refused` cases exist to demand.
+      args.p_confirm = 'confirm' in scenario.args ? scenario.args.confirm : false;
+    }
+
+    const { data, error } = await supabase.rpc(scenario.rpc, args);
+
+    // The node is read back from the TABLE, never from the payload: the
+    // payload is what a broken RPC would get wrong.
+    const readBack = () =>
+      isVenue
+        ? getMockData('locations').find((row) => String(row.id) === ids.venue)
+        : getMockData('field_subunits').find((row) => String(row.id) === ids.subunit);
+
+    if (!scenario.expect.ok) {
+      expectRefusal(error, scenario);
+    } else {
+      expect(error, `${scenario.id}: expected no error`).toBeNull();
+      expect(data?.retired, `${scenario.id}: retired`).toBe(scenario.expect.retired);
+      if ('reason' in scenario.expect) {
+        expect(data?.reason).toBe(scenario.expect.reason);
+      }
+      if ('affectedCount' in scenario.expect) {
+        expect(data?.affected_count, `${scenario.id}: affected_count`).toBe(
+          scenario.expect.affectedCount
+        );
+        expect(data?.affected ?? []).toHaveLength(scenario.expect.affectedCount);
+      }
+      // **THE venue assertion.** A field-scoped implementation returns rows
+      // from one pitch and fails here, whatever its count says.
+      if ('distinctFields' in scenario.expect) {
+        const spread = new Set((data?.affected ?? []).map((row) => String(row.field_id)));
+        expect(spread.size, `${scenario.id}: pitches named by the refusal`).toBe(
+          scenario.expect.distinctFields
+        );
+      }
+      // **THE sub-surface assertion.** Named by id, not just counted: a scope
+      // widened to the parent pitch reports the +40 game and is caught twice.
+      if ('affectedIds' in scenario.expect) {
+        expect((data?.affected ?? []).map((row) => String(row.id)).sort()).toEqual(
+          scenario.expect.affectedIds.map((key) => ids[key]).sort()
+        );
+      }
+      if ('containedCount' in scenario.expect) {
+        expect(data?.contained_count, `${scenario.id}: contained_count`).toBe(
+          scenario.expect.containedCount
+        );
+        // Two fields plus one sub-surface are always CONTAINED; the count is
+        // how many this call newly closes. Reporting the same number for both
+        // would hide an `already_retired` arm that never fires.
+        expect(data?.contained ?? []).toHaveLength(3);
+      }
+      const phases = [
+        ...new Set(
+          getMockData('audit_log')
+            .filter(
+              (row) =>
+                String(row.resource_id) === String(subjectId) &&
+                row.metadata?.operation === scenario.rpc
+            )
+            .map((row) => row.metadata.phase)
+        ),
+      ].sort();
+      expect(phases, `${scenario.id}: audit phases`).toEqual(
+        [...scenario.expect.auditPhases].sort()
+      );
+    }
+
+    // The node's own date, after the call -- asserted on EVERY case including
+    // the refusals, because a refusal that wrote the date anyway is the worst
+    // outcome of all.
+    expect(readBack().effective_to ?? null, `${scenario.id}: the node's own date`).toBe(
+      dateAt(scenario.expect.effectiveTo)
+    );
+
+    // **Containment, not copy-down.** The number of CHILDREN carrying a date
+    // of their own. Only a `before.subunitEffectiveTo` seed can make this
+    // non-zero; a venue retirement that pushed its date down makes it 3 and
+    // every case with `childDates: 0` fails.
+    if ('childDates' in scenario.expect) {
+      const dated =
+        getMockData('fields').filter(
+          (row) => String(row.location_id) === ids.venue && (row.effective_to ?? null) !== null
+        ).length +
+        getMockData('field_subunits').filter(
+          (row) =>
+            [ids.pitchA, ids.pitchB].includes(String(row.field_id)) &&
+            (row.effective_to ?? null) !== null
+        ).length;
+      expect(dated, `${scenario.id}: children carrying a date`).toBe(scenario.expect.childDates);
+    }
+    // Retiring downward writes nothing upward.
+    if ('parentDated' in scenario.expect) {
+      const parent = getMockData('fields').find((row) => String(row.id) === ids.pitchA);
+      expect((parent.effective_to ?? null) !== null, `${scenario.id}: the parent pitch`).toBe(
+        scenario.expect.parentDated
+      );
     }
   });
 });

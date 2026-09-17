@@ -139,6 +139,106 @@ const PLANTS = [
           operation: 'admin_update_field_blackout',`,
     suite: 'tests/fieldBlackoutMockContract.test.js',
   },
+  // -------------------------------------------------------------------
+  // 8.4 gap B: the venue and sub-surface depths in the mock
+  // -------------------------------------------------------------------
+  //
+  // **The defect the migration exists to prevent**, on the arm the E2E suite
+  // actually runs. One word, and it is what LIVE-1, LIVE-2 and LIVE-3 each
+  // were: the venue guard asking a FIELD-scoped question.
+  {
+    label: 'the venue guard asks a field-scoped question',
+    find: "const affected = mockFieldBookings(db, orgId, node.id, effectiveTo, 'location').map(",
+    replace: "const affected = mockFieldBookings(db, orgId, node.id, effectiveTo, 'field').map(",
+  },
+  // Containment from the other side: copying the date down satisfies every
+  // count the refusal reports and only the child-date assertions can see it.
+  {
+    label: 'the venue retirement copies its date onto its children',
+    find: `        Object.assign(node, {
+          effective_to: effectiveTo,
+          updated_at: new Date().toISOString(),
+        });
+        audit('location', node.id, 'admin_retire_location', {
+          phase: 'after',`,
+    replace: `        Object.assign(node, {
+          effective_to: effectiveTo,
+          updated_at: new Date().toISOString(),
+        });
+        for (const f of db.fields || []) {
+          if (String(f.location_id) === String(node.id)) f.effective_to = effectiveTo;
+        }
+        audit('location', node.id, 'admin_retire_location', {
+          phase: 'after',`,
+  },
+  // The third scope, widened to its parent pitch: it then refuses
+  // retirements that strand nothing, and the operator learns to confirm past
+  // the guard.
+  {
+    label: 'the sub-surface scope widens to its parent pitch',
+    find: "const affected = mockFieldBookings(db, orgId, node.id, effectiveTo, 'subunit').map(",
+    replace:
+      "const affected = mockFieldBookings(db, orgId, node.field_id, effectiveTo, 'field').map(",
+  },
+  // An unrecognised scope answered with an empty set rather than thrown: a
+  // guard reporting "nothing is booked here" because its scope was misspelled.
+  // **The two unretire arms had no prover at all**, and the sub-surface case
+  // that was supposed to cover one of them seeded the VENUE's date -- so the
+  // node under test started NULL, `expect.effectiveTo: null` held whatever the
+  // RPC did, and a complete no-op kept all 70 cases green. The fixture is
+  // fixed; these are what stop it drifting back.
+  {
+    label: 'the sub-surface unretire does not clear the date',
+    find: `          Object.assign(node, { effective_to: null, updated_at: new Date().toISOString() });
+          audit('field_subunit', node.id, 'admin_unretire_field_subunit', {`,
+    replace: `          Object.assign(node, { updated_at: new Date().toISOString() });
+          audit('field_subunit', node.id, 'admin_unretire_field_subunit', {`,
+  },
+  {
+    label: 'the venue unretire does not clear the date',
+    find: `          Object.assign(node, { effective_to: null, updated_at: new Date().toISOString() });
+          audit('location', node.id, 'admin_unretire_location', {`,
+    replace: `          Object.assign(node, { updated_at: new Date().toISOString() });
+          audit('location', node.id, 'admin_unretire_location', {`,
+  },
+  {
+    // **Scored NOT CAUGHT on its first sweep, and that was the finding.** No
+    // RPC arm can produce an unknown scope -- every one passes a literal --
+    // so no behavioural test could make this guard fire, and a guard nothing
+    // can make fail is not a guard. The producer is exported now and
+    // `tests/estateBookingScopes.test.js` reaches it directly.
+    suite: 'tests/estateBookingScopes.test.js',
+    label: 'an unknown booking scope returns nothing instead of throwing',
+    find: `  if (!['field', 'location', 'subunit'].includes(scope)) {
+    throw new Error(\`unknown booking scope \${scope}; expected field, location or subunit\`);
+  }`,
+    replace: `  if (false) {
+    throw new Error('unreachable');
+  }`,
+  },
+  // The containment report, derived from the data a break corrupts. A venue
+  // retirement writes nothing to a child, so a set gathered from child state
+  // is empty for every venue.
+  {
+    label: 'the containment set is derived from child state',
+    find: `  const fields = (db.fields || []).filter(
+    (f) =>
+      String(f.organization_id) === String(orgId) && String(f.location_id) === String(locationId)
+  );`,
+    replace: `  const fields = (db.fields || []).filter(
+    (f) =>
+      String(f.organization_id) === String(orgId) &&
+      String(f.location_id) === String(locationId) &&
+      (f.effective_to ?? null) !== null
+  );`,
+  },
+  // `already_retired` inverted: a retirement claiming credit for closing what
+  // was already closed, which is a wrong number in front of a decision.
+  {
+    label: 'already_retired counts the nodes this call really closes',
+    find: '        const containedCount = contained.filter((row) => !row.already_retired).length;',
+    replace: '        const containedCount = contained.length;',
+  },
   {
     label: 'retire un-deactivates an inactive field',
     find: 'active: previous.active !== false && fieldIsLiveOn(p.p_effective_to),',
@@ -224,8 +324,14 @@ const PLANTS = [
     // CAUGHT and said nothing about whether anything covers it.
     label: 'delete stops seeing assignments reached through their slot',
     suite: 'tests/fieldDeleteGuard.test.js',
-    find: '    (String(row.field_id) === String(fieldId) || viaSlot(row));',
-    replace: '    String(row.field_id) === String(fieldId);',
+    // **Re-anchored by 8.4 gap B**, which replaced the bare field comparison
+    // with the shared scope predicate. The old anchor stopped matching and
+    // this plant went ANCHOR-MISS -- a plant hollowed out by the change it was
+    // standing guard over, which is the shape LIVE-3's harness rounds
+    // recorded. The mutation is the same one: the arm stops seeing an
+    // assignment reached through its slot.
+    find: '    (scopeCovers(row.field_id, null) || viaSlot(row));',
+    replace: '    scopeCovers(row.field_id, null);',
   },
   {
     // `games` carries no field_id; only the cascade closure reaches it.
@@ -322,8 +428,11 @@ const PLANTS = [
     // carry it, because its SQL twin emits no such key.
     label: 'retire leaks the producer cascades flag into its payload',
     suite: 'tests/fieldLifecycleRpcs.test.js',
+    // **Re-anchored by 8.4 gap B**, which added `field_id` to the keys the
+    // field-scoped arms strip. Same mutation, same leak: the producer's
+    // internal flags reach a payload whose SQL twin never sends them.
     find: `        const affected = fieldBookings(p.p_field_id, String(p.p_effective_to)).map(
-          ({ cascades: _cascades, ...row }) => row
+          ({ cascades: _cascades, field_id: _fieldId, ...row }) => row
         );`,
     replace: '        const affected = fieldBookings(p.p_field_id, String(p.p_effective_to));',
   },

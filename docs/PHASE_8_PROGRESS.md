@@ -2121,3 +2121,251 @@ empty diff.
   Both exist; the requirement is met, just not where it looks like it is.
 - **Gap B is not started**: `locations` and `field_subunits` still carry no
   effective dates and no retire RPC.
+
+---
+
+## 8.4 gap B — effective dating for venues and sub-surfaces — **database and contract layer done; the UI is carved out**
+
+Second of the two follow-ups the operator asked for at the 8.4/8.5 gate.
+
+- **Branch:** `feat/venue-subunit-effective-dating`, cut from `d87c081`.
+- **Migration:** `20260911000000_venue_subunit_effective_dating.sql`, with
+  revert, smoke and `supabase/tests/estate_lifecycle_rpcs.sql`.
+- **Tests 2968 → 3004** (191 → 192 files). **E2E 78, unchanged.** Bundle
+  222.25 → **222.38 KB gz** (+0.13) against a 244.14 budget. Advisors PASS over
+  **111** migrations. Harness OK; scenario table **51 → 65**, all 65 executed
+  against Postgres. `prove:mock` **85 of 85 caught**, anchor-miss 0.
+
+### The enumerator: scoped, not twinned
+
+`public.field_bookings` was field-scoped, and a venue-scoped booking count
+written beside it is exactly what LIVE-1, LIVE-2 and LIVE-3 each were. So the
+producer **gained a scope** rather than gaining siblings:
+`field_bookings(org, scope_id, after, scope DEFAULT 'field')`, where the scope
+is `field`, `location` or `subunit` and an unknown one **raises 22023** rather
+than matching nothing — which is why it is plpgsql now.
+
+The default is what keeps the three pre-existing callers untouched. Their
+bodies run to **619 lines** between them, and a change requiring a new
+positional argument would have forced all three to be recreated verbatim here
+for the sake of appending one literal — 619 lines of transcription in the one
+family where a transcription slip is the recurring defect. The smoke asserts
+that all three are scope-free and that the two new RPCs name theirs.
+
+The scope rule lives in `public.estate_scope_covers` rather than inline,
+and that is load-bearing: inlining it would have put
+`EXISTS (SELECT 1 FROM public.fields ...)` inside every arm, and
+`docs/sql/20260907000000_smoke.sql` section 5a reads each arm's `EXISTS` to
+decide whether it claims a per-row disposition. Six arms would have started
+claiming they route through `fields`.
+
+**Four arms are structurally empty at subunit scope**, and that is asserted
+from `information_schema` rather than stated: `practice_slots.field_subunit_id`
+is the only column in the schema that names a sub-surface, so if `game_slots`
+ever gains one the smoke fails until somebody revisits the arm.
+
+### Claim 3, decided: containment
+
+The plan did not say what retiring a parent means for its children. Three
+answers were considered and the argument is in section 2 of the migration.
+
+**Retiring a venue retires its fields and their sub-surfaces by CONTAINMENT,
+resolved where the estate is read.** It writes no date onto a child and flips
+no child flag, and it does not refuse while a child is live.
+
+- _Refuse while any field is live_ was rejected: every venue has live pitches,
+  so it makes retiring a venue impossible in the ordinary case and substitutes
+  a rule for the operator's decision.
+- _Copy the date down_ was rejected on `admin_unretire_field`'s own argument: a
+  reversal cannot know which children the operator had already retired, so
+  restoring them discards a decision it never made and leaving them retired
+  makes unretire not the inverse of retire.
+- _Containment_ is **already this codebase's contract** —
+  `packages/core/src/facility/lifecycle.js` `surfaceIsLiveOn()` walks a
+  surface's lineage plus its venue, and its header records two review rounds
+  spent getting that right. Adopting a sibling's contract rather than inventing
+  a third is CLAUDE.md's rule.
+
+It is made falsifiable rather than asserted. `admin_retire_location` reports
+`contained` — every field and sub-surface the venue holds, with
+`already_retired` for those whose own window already ends no later than this
+date, so the retirement does not claim credit for closing what was closed. The
+smoke asserts no child carries a date after a confirmed retirement, the shared
+scenario table pins it as `expect.childDates`, and a plant that copies the date
+down is CAUGHT on both arms.
+
+**Containment is read by `frontend/src/utils/fieldLifecycle.js`**, whose third
+argument is now the venue and is **required** — `undefined` throws. A parameter
+defaulting to "unbounded" would have let every existing call site keep the
+pre-containment answer while reading as though it had been updated: the
+quietest possible way to ship a retirement that retires nothing.
+
+### The four supervisor claims: three held, one held with a correction
+
+- **Claim 1 held.** `locations` (`20260331000000:308-317`) and `field_subunits`
+  (`:347-355`) carried only `created_at`/`updated_at`. The only later ALTERs on
+  either table add `organization_id`.
+- **Claim 2 held, and one part of the pattern is deliberately NOT followed.**
+  The refusal-object contract, the refused audit row and the absence of a
+  `disposition` on the retire arm are all adopted. The
+  `fields_retirement_deactivates` trigger is **not**, and its absence is
+  asserted: that trigger exists only to hold `fields.active` and
+  `fields.effective_to` in step, and neither new table has an `active` column.
+  Giving them one would be manufacturing the hazard 20260906000000 spends
+  eighty lines bounding.
+- **Claim 3 held** as a description (`field_subunits.field_id` is CASCADE from
+  `fields`, `locations` cascades to `fields`), and the question it asks is
+  answered above.
+- **Claim 4 held.** The producer returns six kinds including
+  `availability_profile`, and the venue and sub-surface scopes report the same
+  six family — the scope is the only parameter that differs.
+
+### What the harness found that review did not
+
+- **A prior smoke hollowed out by this PR's own change.**
+  `docs/sql/20260907000000_smoke.sql` parsed the producer's arms out of
+  `pg_get_functiondef`, and the new `p_scope text DEFAULT 'field'` renders as
+  `'field'::text` in the SIGNATURE — which lands in arm one when the definition
+  is split on `UNION ALL`. Arm one's kind would have read `field` instead of
+  `game_slot`, and the `v_kind IS NULL` guard could no longer fail for it at
+  all: the signature supplies a literal whatever the arm does. It reads
+  `prosrc` now.
+- **Two mutation plants hollowed out the same way**, scored ANCHOR-MISS rather
+  than failing: one anchored on the bare field comparison the scope predicate
+  replaced, one on the key list that gained `field_id`. Both re-anchored.
+- **A guard nothing could make fail.** A plant removing the producer's
+  unknown-scope throw scored NOT CAUGHT, because every RPC arm passes a literal
+  and no behavioural test can reach it. `mockFieldBookings` is exported now and
+  `tests/estateBookingScopes.test.js` reaches it directly.
+
+### Eleven plants, and the two that came back CAUGHT ELSEWHERE
+
+The full sweep is 121 plants at ~2.7 minutes each -- **5.4 hours**, which this
+session could not spend. The eleven this PR adds were driven directly against
+the harness instead, taking their find/replace text and their expected failure
+string **out of `prove.sh`** rather than restating them: a copy would be a
+second definition of the mutation, and the one that drifted would be the one
+nobody ran. All eleven are CAUGHT; two needed a correction first, and both
+corrections are worth more than the plants.
+
+- **`R7 revert leaves the venue column behind`** wanted a message
+  `/code-review`'s finding 3 had just changed. A stale expectation scores
+  CAUGHT ELSEWHERE rather than failing, which is the quieter half of a
+  mis-aimed plant.
+- **`R7 revert drops a producer signature that does not exist` exposed a check
+  in `run.sh` that could not fail.** That stage asked the catalogue for
+  `GONE / AMBIGUOUS:n / STILL-SCOPED / RESTORED`, copying the shape the
+  20260909000000 stage uses -- but this revert asserts its own restore IN THE
+  SAME TRANSACTION, and every state the verdict could report raises there
+  first: a missing function, a wrong signature, and two functions (the scalar
+  subquery over `proargtypes` raises 21000). The verdict is deleted, its claim
+  with it, and `run.sh` says why where it stood. **Copying a verdict from a
+  sibling stage without asking whether anything can still reach it is how a
+  check that cannot fail gets written**, and the only reason this one was found
+  is that its plant was run.
+
+### Review round 1: the anchor pre-flight, and why static review was not enough
+
+The supervisor refused the premise that the 110 unchanged plants were fine
+because they were last green on `main`, and was right to: **this PR disproved
+that premise three times over.** Changing a shared enumerator's signature and
+renaming its second parameter hollowed out an arm parser in
+`20260907000000_smoke.sql` and moved two existing plants' anchors into
+ANCHOR-MISS. Three verification artifacts broken by one change, none of them
+noticed by reading. Asserting the other 110 were fine was an assumption.
+
+`plant()` has always refused an anchor that does not resolve **exactly once**
+-- at PLANT time, one full harness run into a sweep that takes 5.4 hours. That
+division was reasonable while the sweep was something somebody ran. **A loud
+failure nobody triggers is a quiet one.**
+
+`PLANT_ANCHORS_ONLY=1` (`npm run test:db:local:prove:anchors`) runs the real
+`plant` calls and resolves each anchor without mutating anything or starting a
+database. It is **deliberately not a parser over `prove.sh`'s source**: the
+anchors it checks are the bash-expanded strings `plant()` itself receives, so
+`$$`, `\"` and friends cannot make a second reading disagree with the one that
+matters. It runs first in every sweep, ahead of the superseded-statement
+check, because that check SKIPS a plant whose anchor has moved -- its own
+comment says so -- and an unverified anchor therefore takes a second guard
+down with it.
+
+**It found nothing: 121 of 121 anchors resolve exactly once.** That is the
+result, and a check reporting nothing is only worth the controls behind it:
+
+- an anchor moved by one word -> `ANCHOR RESOLVES 0 TIMES`, exit 9;
+- an anchor pointed at text occurring 7 times -> `ANCHOR RESOLVES 7 TIMES`,
+  exit 9, which proves the **exactly once** half rather than "at least once";
+- the meta-assertion, run against a copy with all 121 plant calls stripped ->
+  `examined no plants at all; this check looked at nothing`, exit 9.
+
+### `/code-review` at high: seven findings, all fixed
+
+Not one was in the RPCs or the containment reading; every one was in the
+verification layer or at its edges. **Three were checks that could not fail:**
+
+- `subunit-unretire-clears-the-date` seeded `before.effectiveTo`, which both
+  runners apply to the **venue** — so the node under test started NULL and
+  `expect.effectiveTo: null` held whatever the RPC did. A no-op unretire kept
+  all 70 mock cases green. Both unretire arms now have plants, and both are
+  CAUGHT.
+- The SQL generator's `childDates` block read `v_est_venue`, which a
+  `target: "missing"` case deliberately clobbers — so it counted the children
+  of a venue that does not exist and could only return 0, while the JS runner
+  really checked it. **Two runners silently proving different things.**
+- `run.sh` printed "and fields.effective_to is untouched" while querying only
+  the two new tables. A revert that also dropped it — destroying every
+  retirement 20260906000000 recorded — would have printed that reassurance.
+
+Two more were arms disagreeing (the mock refused an unknown id before a null
+date where the SQL refuses the date first; a comment cited a test file that has
+never existed), and two were traps rather than defects (a 42703 on
+`locations.effective_to` was fatal, so an SPA shipped ahead of the migration
+would render its error state; two E2E steps seed fields with no `location_id`,
+which now makes them silently unofferable).
+
+### Scope: the ceiling was passed, and the split is proposed rather than measured after
+
+**+4278 insertions against a ~2000 ceiling**, and the brief's instruction was
+to stop and say so. The point it was passed is recorded: the database, revert,
+smoke and mock arms alone came to **+2449**, before a line of the UI.
+
+The split this delivers is by LAYER, and the cut is where 8.4's own PR 2/PR 3
+split was: **everything that decides, and nothing that renders.**
+
+**What is NOT in it, and is gap B part 2:**
+
+1. **The UI at both depths.** No screen retires a venue or a sub-surface.
+   `RetireFieldDialog` generalises to take a node and a kind; `FieldManagement-
+Page` needs the two controls, and `ConsequencePreview` needs to render
+   `contained` beside `affected` — a venue retirement's consequence has two
+   halves and only one of them is a booking list.
+2. **`useFields` wrappers** for the four RPCs. Deliberately absent: a hook with
+   no screen is the same declared-not-enforced shape one level up.
+3. **E2E coverage** of the two new paths.
+
+**A stated residual, not a gap discovered later:** `field_subunits.effective_to`
+is written by its RPC pair and read by `estate_contained_nodes` (which reports
+it, and decides `already_retired`), and by **no offerability read** — because
+no surface in the app offers a sub-surface to book onto. `locations.effective_to`
+has one, in `isFieldOfferableOn`. The sub-surface half of the honour-it-or-
+delete-it rule is met by the containment report and not yet by a scheduler.
+
+### Still open after gap B part 1
+
+- **Gap B part 2**, above.
+- **The full SQL mutation sweep was not run to completion.** At ~2.7 minutes
+  per plant over 121 plants it is ~5.4 hours. The eleven plants this PR adds
+  were driven directly against the harness and are **11 of 11 CAUGHT**. The
+  other 110 are unchanged; their ANCHORS are now verified by the pre-flight
+  above (121 of 121), which closes the part of the gap this change could
+  plausibly have opened, but **whether each still CATCHES its defect is
+  unexecuted**. The census was verified statically rather than executed: 121
+  plant labels, 32 claim rows, no unresolved prover.
+- **`field_subunits.effective_to` has no scheduler reader, by ruling.** It is
+  read by its own RPC pair and by `estate_contained_nodes`, so the
+  honour-it-or-delete-it rule is met; nothing in the app offers a sub-surface
+  to book onto, so an offerability read would be speculative work justified by
+  symmetry alone. The boundary is now in the column's own COMMENT, naming its
+  readers, the asymmetry with `locations.effective_to`, and **8.8** as the
+  likely home for enforcement.
+- Everything still open after gap A, unchanged.

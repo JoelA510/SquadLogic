@@ -262,7 +262,10 @@ function indexSlots(slots) {
   const slotRecords = new Map();
 
   for (const slot of slots) {
-    SlotSchema.parse(slot);
+    // The parse result is the *only* source of `start`/`end` below. It used to
+    // be discarded and `new Date(slot.start)` written out by hand one line
+    // later, which left the schema's coercion decorative (GAP-30).
+    const parsed = SlotSchema.parse(slot);
 
     if (
       typeof slot.weekIndex !== 'number' ||
@@ -280,8 +283,8 @@ function indexSlots(slots) {
       id: slot.id,
       division: slot.division ?? null,
       weekIndex: slot.weekIndex,
-      start: new Date(slot.start),
-      end: new Date(slot.end),
+      start: parsed.start,
+      end: parsed.end,
       remainingCapacity: slot.capacity,
       fieldId: slot.fieldId ?? null,
       priority: slot.priority ?? 1,

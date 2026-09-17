@@ -26,11 +26,14 @@
  *   cryptographic and a determined forger can collide it. It catches the
  *   accident, which is the failure mode that actually happens.
  * - **`durability: 'in-memory'` on the record.** Phase 6 does not persist, and
- *   the reason is on the record rather than only in the docs: `SlotSchema` and
- *   `AssignmentSchema` still normalise through `z.coerce.date()` (GAP-30), so
- *   a snapshot round-tripped through them would come back with its wall-clock
- *   times reinterpreted in the host timezone — the parity checker causing the
- *   divergence it exists to detect. Two corpus dates fall after DST ends.
+ *   the reason is on the record rather than only in the docs. It used to be two
+ *   reasons; GAP-30 is no longer one of them. `SlotSchema` and
+ *   `AssignmentSchema` normalised through `z.coerce.date()`, so a snapshot
+ *   round-tripped through them came back with its wall-clock times
+ *   reinterpreted in the host timezone — the parity checker causing the
+ *   divergence it exists to detect. Those schemas now refuse a naive wall
+ *   reading. What remains is GAP-29: there is no persistence seam to store
+ *   through.
  *
  * ## Not the teaming snapshot
  *
@@ -179,7 +182,7 @@ export function makePublicationSnapshot(input) {
     ),
     makePublicationFinding(
       PUBLICATION_REASON.SNAPSHOT_IN_MEMORY_ONLY,
-      `snapshot "${parsed.snapshotId}" is held in memory only and is lost when this process ends (GAP-29 persistence, GAP-30 timezone-lossy schemas)`,
+      `snapshot "${parsed.snapshotId}" is held in memory only and is lost when this process ends (GAP-29 persistence)`,
       { snapshotId: parsed.snapshotId, durability: PUBLICATION_DURABILITY.IN_MEMORY }
     ),
   ];

@@ -46,6 +46,7 @@ begin
         season_year,
         season_start,
         season_end,
+        timezone,
         roster_formula,
         daylight_adjustments,
         exports_config
@@ -54,6 +55,9 @@ begin
         2024,
         date '2024-08-05',
         date '2024-10-26',
+        -- The season's clock. A seeded season without one has no clock to place
+        -- a slot on and the game scheduler refuses (GAP-30).
+        'America/Los_Angeles',
         jsonb_build_object(
             'u8', jsonb_build_object('min', 10, 'max', 12),
             'u10', jsonb_build_object('min', 12, 'max', 14)
@@ -66,6 +70,7 @@ begin
     on conflict (season_label, season_year) do update set
         season_start = excluded.season_start,
         season_end = excluded.season_end,
+        timezone = excluded.timezone,
         roster_formula = excluded.roster_formula,
         daylight_adjustments = excluded.daylight_adjustments,
         exports_config = excluded.exports_config

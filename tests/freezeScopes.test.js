@@ -2344,8 +2344,11 @@ describe('scheduleGames() refuses a freeze rather than ignoring one', () => {
       id: 's1',
       division: 'U10',
       weekIndex: 1,
-      start: '2026-08-22T09:00:00',
-      end: '2026-08-22T10:00:00',
+      // Zone-carrying, because `SlotSchema` now refuses a naive wall reading
+      // (GAP-30). This fixture was the suite's one naive slot, and it passed
+      // only by every runner agreeing to guess the same way.
+      start: '2026-08-22T09:00:00Z',
+      end: '2026-08-22T10:00:00Z',
       capacity: 1,
       fieldId: 'f1',
     },

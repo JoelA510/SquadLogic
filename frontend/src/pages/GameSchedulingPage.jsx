@@ -24,6 +24,11 @@ import {
 import GameReadinessPanel from '../components/GameReadinessPanel.jsx';
 import GameConflictBanner from '../components/scheduling/GameConflictBanner.jsx';
 import { formatDateTime } from '../utils/formatters.js';
+import {
+  SeasonClockError,
+  anchorToSeasonClock,
+  requireZonedInstant,
+} from '@squadlogic/core/timing/index.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
@@ -79,21 +84,70 @@ function normalizeTeam(team) {
   };
 }
 
-function buildDateTime(date, time) {
+/**
+ * Compose a `game_slots` wall reading onto the season's clock.
+ *
+ * `slot_date` is a `date` and `start_time` is a `time` -- naive wall values with
+ * no zone. The result has to be an instant, because `game_assignments.start` is
+ * a `timestamptz`. This used to return `` `${date}T${time}` `` and let
+ * `new Date()` downstream read it in whatever zone the admin's browser sat in,
+ * which persisted the same 4:44 PM slot as three instants eight hours apart.
+ *
+ * The zone is a parameter rather than a lookup: today it is always the season's
+ * (`season_settings.timezone`), and that is the ruling -- the season has one
+ * clock, not the venue.
+ *
+ * @param {string|null|undefined} date - `YYYY-MM-DD`
+ * @param {string|null|undefined} time - `HH:MM[:SS]`
+ * @param {string|null|undefined} timezone - IANA zone name
+ * @returns {string|null} an ISO instant carrying the season's offset, or `null`
+ *   when there is no wall reading to compose.
+ * @throws {import('@squadlogic/core/timing/index.js').SeasonClockError} when a
+ *   wall reading exists but cannot be placed: no season timezone, or a time
+ *   daylight saving skips.
+ */
+export function buildDateTime(date, time, timezone) {
   if (!date || !time) return null;
-  return `${date}T${time}`;
+  return requireZonedInstant({ date, time, timeZone: timezone, label: 'slot time' });
 }
 
-function normalizeGameSlot(row, { fieldById, divisionById, timezone }) {
+/**
+ * Place a value that may already be an instant onto the season clock.
+ *
+ * A zone-carrying value comes back untouched; a naive wall string is composed;
+ * a nullish one stays nullish so the caller's `??` chain still reaches the
+ * `slot_date` + `start_time` pair.
+ *
+ * @param {unknown} value
+ * @param {string|null|undefined} timezone
+ * @returns {string|null|undefined}
+ */
+function anchorOrThrow(value, timezone) {
+  if (value === null || value === undefined) return /** @type {null|undefined} */ (value);
+  const { iso, findings } = anchorToSeasonClock(value, timezone);
+  if (iso === null && findings.length > 0) {
+    throw new SeasonClockError(findings[0].message, findings[0].code, findings);
+  }
+  return /** @type {string} */ (iso);
+}
+
+export function normalizeGameSlot(row, { fieldById, divisionById, timezone }) {
   const field = fieldById.get(row.field_id ?? row.fieldId);
   const division =
     row.divisions?.name ??
     divisionById.get(row.division_id ?? row.divisionId) ??
     row.division ??
     null;
+  const slotDate = row.slot_date ?? row.slotDate;
+  // A row that already carries an instant keeps it; a naive one still needs the
+  // season clock whichever column it arrived in. `anchorOrThrow` keeps that
+  // judgement in the core helper instead of a second `includes('Z')` here.
   const start =
-    row.start ?? buildDateTime(row.slot_date ?? row.slotDate, row.start_time ?? row.startTime);
-  const end = row.end ?? buildDateTime(row.slot_date ?? row.slotDate, row.end_time ?? row.endTime);
+    anchorOrThrow(row.start, timezone) ??
+    buildDateTime(slotDate, row.start_time ?? row.startTime, timezone);
+  const end =
+    anchorOrThrow(row.end, timezone) ??
+    buildDateTime(slotDate, row.end_time ?? row.endTime, timezone);
   const weekIndex = Number(row.week_index ?? row.weekIndex ?? 1);
 
   if (!row.id || !start || !end || !Number.isInteger(weekIndex) || weekIndex <= 0) {
@@ -113,6 +167,77 @@ function normalizeGameSlot(row, { fieldById, divisionById, timezone }) {
     priority: Number(field?.priority_rating ?? field?.priority ?? row.priority ?? 1),
     label: formatDateTime(start, timezone),
   };
+}
+
+/**
+ * Split `game_slots` rows into the ones that can be placed on a clock and the
+ * ones that cannot.
+ *
+ * **Per row, never per page.** The page used to wrap the whole `map` in one
+ * try/catch, so a single slot that could not be placed returned no slots at all
+ * and the operator lost 400 good ones behind one bad one's message -- CLAUDE.md
+ * §3's "never silently drop an unplaceable fixture" inverted into dropping every
+ * placeable one. Unplaceable slots come back carrying their reason code and are
+ * **reported** as TIME TBD in the readiness banner, with a count and a cause;
+ * the rest schedule. Precisely: no row is rendered for them in the grid -- they
+ * are absent from it, and the banner is where they exist. Rendering a
+ * placeholder row is a larger change than this one.
+ *
+ * The season-wide case still blocks, and blocks by arithmetic rather than by a
+ * special rule: a season with no timezone has no clock for *any* slot, so every
+ * row lands in `unplaceableSlots`, `gameSlots` is empty, and the page's existing
+ * `!gameSlots.length` guard disables the scheduler.
+ *
+ * @param {Array<Object>} rows
+ * @param {{ fieldById: Map<any, any>, divisionById: Map<any, any>, timezone: string|null|undefined }} reference
+ * @returns {{ gameSlots: Array<Object>, slotById: Map<any, Object>, unplaceableSlots: Array<Object> }}
+ */
+export function partitionGameSlots(rows, { fieldById, divisionById, timezone }) {
+  const gameSlots = [];
+  const unplaceableSlots = [];
+  for (const row of rows ?? []) {
+    try {
+      gameSlots.push(normalizeGameSlot({ ...row }, { fieldById, divisionById, timezone }));
+    } catch (err) {
+      unplaceableSlots.push({
+        id: row?.id ?? null,
+        date: row?.slot_date ?? row?.slotDate ?? null,
+        time: row?.start_time ?? row?.startTime ?? null,
+        // `code` is the contract; `SLOT_SHAPE_INVALID` covers the pre-existing
+        // shape throws (no id, no week index), which carry no reason code.
+        code: err?.code ?? 'SLOT_SHAPE_INVALID',
+        reason: err?.message ?? 'Slot could not be read.',
+      });
+    }
+  }
+  return {
+    gameSlots,
+    slotById: new Map(gameSlots.map((slot) => [slot.id, slot])),
+    unplaceableSlots,
+  };
+}
+
+/**
+ * One line per distinct reason, with a count, so a hundred slots sharing one
+ * cause read as one fact rather than a hundred.
+ *
+ * @param {Array<{ code: string, reason: string }>} entries
+ * @returns {string|null}
+ */
+export function describeUnplaceableSlots(entries) {
+  if (!entries || entries.length === 0) return null;
+  const byReason = new Map();
+  for (const entry of entries) {
+    const bucket = byReason.get(entry.reason) ?? { count: 0, code: entry.code };
+    bucket.count += 1;
+    byReason.set(entry.reason, bucket);
+  }
+  return [...byReason.entries()]
+    .map(
+      ([reason, { count, code }]) =>
+        `${count} slot${count === 1 ? '' : 's'} shown as TIME TBD (${code}): ${reason}`
+    )
+    .join(' \u00b7 ');
 }
 
 function buildRoundRobinByDivision(teams) {
@@ -386,24 +511,15 @@ export default function GameSchedulingPage() {
 
   const fieldById = useMemo(() => new Map(fields.map((field) => [field.id, field])), [fields]);
 
-  const { gameSlots, slotById, slotShapeError } = useMemo(() => {
-    try {
-      const normalized = gameSlotRows.map((row) =>
-        normalizeGameSlot({ ...row }, { fieldById, divisionById, timezone })
-      );
-      return {
-        gameSlots: normalized,
-        slotById: new Map(normalized.map((slot) => [slot.id, slot])),
-        slotShapeError: null,
-      };
-    } catch (err) {
-      return {
-        gameSlots: [],
-        slotById: new Map(),
-        slotShapeError: err.message,
-      };
-    }
-  }, [divisionById, fieldById, gameSlotRows, timezone]);
+  const { gameSlots, slotById, unplaceableSlots } = useMemo(
+    () => partitionGameSlots(gameSlotRows, { fieldById, divisionById, timezone }),
+    [divisionById, fieldById, gameSlotRows, timezone]
+  );
+
+  const unplaceableSlotMessage = useMemo(
+    () => describeUnplaceableSlots(unplaceableSlots),
+    [unplaceableSlots]
+  );
 
   useEffect(() => {
     const nextAssignments = (game?.assignments ?? []).map((assignment, index) =>
@@ -470,14 +586,22 @@ export default function GameSchedulingPage() {
     schedulerStatus === 'running' ||
     !schedulerTeams.length ||
     !gameSlots.length ||
-    Boolean(referenceError) ||
-    Boolean(slotShapeError);
+    Boolean(referenceError);
 
+  // The unplaceable summary is appended rather than substituted: a page with
+  // both no teams and three TIME TBD slots has to say both, and the readiness
+  // banner reporting only the first was how the second went unseen.
   const schedulerReadinessMessage =
-    referenceError ||
-    slotShapeError ||
-    (!schedulerTeams.length ? 'No generated teams are available for game scheduling.' : null) ||
-    (!gameSlots.length ? 'No game slots are available for this organization.' : null);
+    [
+      referenceError,
+      !schedulerTeams.length ? 'No generated teams are available for game scheduling.' : null,
+      !gameSlots.length && !unplaceableSlots.length
+        ? 'No game slots are available for this organization.'
+        : null,
+      unplaceableSlotMessage,
+    ]
+      .filter(Boolean)
+      .join(' · ') || null;
 
   const reviewSnapshot = useMemo(() => {
     const source = schedulerResult?.evaluation;
@@ -837,7 +961,11 @@ export default function GameSchedulingPage() {
         warnings={[...(reviewSnapshot?.warnings ?? game?.warnings ?? []), ...blackoutWarnings]}
       />
 
-      {(applyStatus !== 'idle' || statusMessage || applyError || schedulerReadinessMessage) && (
+      {(applyStatus !== 'idle' ||
+        statusMessage ||
+        applyError ||
+        schedulerReadinessMessage ||
+        unplaceableSlotMessage) && (
         <section className="glass-panel p-4 border border-border-subtle" aria-live="polite">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3 text-sm">
@@ -866,6 +994,14 @@ export default function GameSchedulingPage() {
                     schedulerReadinessMessage ||
                     'Review the staged schedule before applying it.'}
                 </p>
+                {/* Its own line, not an `||` arm. A slot with no clock is still
+                    unplaceable after an apply succeeds, so a message that
+                    `statusMessage` displaces the moment anything else happens
+                    reports the fact once and then stops -- a silent drop
+                    wearing a banner. */}
+                {unplaceableSlotMessage && (
+                  <p className="text-amber-300 mt-1">{unplaceableSlotMessage}</p>
+                )}
               </div>
             </div>
             {isReviewing && canManageSchedule && (

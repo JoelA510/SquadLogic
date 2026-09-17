@@ -35,13 +35,16 @@
  * ## Persistence: a seam, declared, and deliberately unwired
  *
  * The build plan's own record (`docs/BUILD_PLAN_STATUS.md` §3) says **nothing in
- * phases 1-7 is persisted**, GAP-29's stored half is open, and `z.coerce.date()`
- * in `SlotSchema`/`AssignmentSchema` (GAP-30) must be closed before anything is
- * persisted safely. A mapping registry stored through a timezone-lossy layer
- * would come back describing different ground on the two corpus dates after DST
- * ends — and this module's whole job is to detect a difference between two
- * artifacts, so a store that *created* one would be the parity defect
- * `publication/index.js` refuses for the same reason.
+ * phases 1-7 is persisted** and GAP-29's stored half is open. GAP-30 used to be
+ * the other half of this sentence: `z.coerce.date()` in
+ * `SlotSchema`/`AssignmentSchema` meant a registry stored through a
+ * timezone-lossy layer came back describing different ground after DST ends —
+ * and this module's whole job is to detect a difference between two artifacts,
+ * so a store that *created* one would be the parity defect
+ * `publication/index.js` refuses for the same reason. **GAP-30 is closed.**
+ * Those schemas refuse a naive wall reading and `timing/seasonClock.js` is the
+ * one place a wall time becomes an instant, so the remaining blocker is GAP-29
+ * alone.
  *
  * What is built here instead, and what is claimed for it:
  *
@@ -54,8 +57,8 @@
  *   directions;
  * - the round trip is an identity — `serialise(read(serialise(r)))` is
  *   byte-identical to `serialise(r)` — and that is asserted over the corpus
- *   registry, because it is the property a store needs and the one GAP-30
- *   threatens;
+ *   registry, because it is the property a store needs and the one GAP-30 used
+ *   to threaten;
  * - every registry publishes
  *   {@link import('./reasonCodes.js').EXTERNAL_IMPORT_REASON.EXTERNAL_MAPPING_NOT_PERSISTED}
  *   at `info`, so no report can imply durability this module does not have.
@@ -340,7 +343,7 @@ export function buildExternalMappingRegistry(rawInput, options = {}) {
   findings.push(
     makeExternalImportFinding(
       EXTERNAL_IMPORT_REASON.EXTERNAL_MAPPING_NOT_PERSISTED,
-      `mapping registry ${input.registryId} lives in memory only; serialiseExternalMappingRegistry() and readExternalMappingRegistry() are the declared persistence seam and nothing in this repository stores through it (GAP-29, and GAP-30 must close first)`,
+      `mapping registry ${input.registryId} lives in memory only; serialiseExternalMappingRegistry() and readExternalMappingRegistry() are the declared persistence seam and nothing in this repository stores through it (GAP-29)`,
       {
         registryId: input.registryId,
         durability: EXTERNAL_MAPPING_DURABILITY.IN_MEMORY,

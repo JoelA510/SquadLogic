@@ -124,6 +124,64 @@ export const TIMING_REASON = Object.freeze({
   WARMUP_OCCUPIED_SPATIAL_OVERLAP: 'WARMUP_OCCUPIED_SPATIAL_OVERLAP',
   WARMUP_FOOTPRINT_UNKNOWN: 'WARMUP_FOOTPRINT_UNKNOWN',
 
+  /* -- wall time -> instant (the season clock) ----------------------------- */
+  /**
+   * A wall time was handed over with no IANA zone to place it on, because the
+   * season carries none (`season_settings.timezone` is nullable).
+   *
+   * `blocking`, and deliberately not `compromise`: the alternative to refusing
+   * is reading the wall time in whatever zone the host happens to sit in, which
+   * is how the same 4:44 PM slot persisted as three instants eight hours apart.
+   * There is no partially-right answer to fall back to -- a `timestamptz` column
+   * has no representation for "no clock" -- so nothing is composed and the
+   * operator is told which slots have no clock to stand on.
+   */
+  SEASON_TIMEZONE_MISSING: 'SEASON_TIMEZONE_MISSING',
+  /**
+   * The season names a timezone the runtime cannot resolve -- a typo, or a zone
+   * the host's ICU data does not carry.
+   *
+   * A separate code from {@link SEASON_TIMEZONE_MISSING} because `code` is the
+   * contract and the two remedies differ: one is "set the season's timezone",
+   * the other is "the timezone you set is not a zone". Folding them would tell
+   * an operator who typed `Americas/New_York` that they had set nothing.
+   */
+  SEASON_TIMEZONE_UNKNOWN: 'SEASON_TIMEZONE_UNKNOWN',
+  /**
+   * The value handed over is not a wall reading at all: a date that is not
+   * `YYYY-MM-DD`, or a clock the day does not contain.
+   *
+   * This is a finding rather than a throw because the value arrives from the
+   * database and is read on a React render path. Postgres's `time` legally
+   * stores `24:00:00`, so this is reachable from data nobody typed wrong, and a
+   * throw there takes a panel down where the old code printed
+   * "unspecified time".
+   */
+  WALL_TIME_UNREADABLE: 'WALL_TIME_UNREADABLE',
+  /**
+   * The wall time does not exist in the zone: it falls in the hour a
+   * spring-forward skips (`America/New_York` 2026-03-08 02:30).
+   *
+   * `blocking`, and this is the asymmetry with the ambiguous case below. A
+   * repeated hour has two real instants and a documented rule picks one; a
+   * skipped hour has *none*, and the two readings a shift could produce
+   * (01:30 EST, 03:30 EDT) are an hour apart with nothing in the data saying
+   * which the operator meant. Shifting silently would be the same invented
+   * instant in a smaller disguise, so this refuses.
+   */
+  WALL_TIME_NONEXISTENT: 'WALL_TIME_NONEXISTENT',
+  /**
+   * The wall time occurs twice in the zone: it falls in the hour a fall-back
+   * repeats (`America/New_York` 2026-11-01 01:30).
+   *
+   * `info`, not `compromise`: an instant **is** composed, by the rule stated in
+   * {@link import('./seasonClock.js').resolveZonedInstant} -- the first
+   * occurrence, the offset in force before the transition. The finding is on
+   * the record so an operator can see that a stated rule and not a coin toss
+   * chose between 05:30Z and 06:30Z.
+   */
+  WALL_TIME_AMBIGUOUS: 'WALL_TIME_AMBIGUOUS',
+
   /* -- inverse ("what kickoff would work?") queries ------------------------ */
   /** No kickoff in the searched horizon yields the requested warm-up. */
   KICKOFF_SEARCH_EXHAUSTED: 'KICKOFF_SEARCH_EXHAUSTED',
@@ -167,6 +225,12 @@ export const TIMING_REASON_SEVERITY = Object.freeze({
   [TIMING_REASON.WARMUP_OCCUPIED_PARENT_CHILD]: TIMING_SEVERITY.BLOCKING,
   [TIMING_REASON.WARMUP_OCCUPIED_SPATIAL_OVERLAP]: TIMING_SEVERITY.BLOCKING,
   [TIMING_REASON.WARMUP_FOOTPRINT_UNKNOWN]: TIMING_SEVERITY.COMPROMISE,
+
+  [TIMING_REASON.SEASON_TIMEZONE_MISSING]: TIMING_SEVERITY.BLOCKING,
+  [TIMING_REASON.SEASON_TIMEZONE_UNKNOWN]: TIMING_SEVERITY.BLOCKING,
+  [TIMING_REASON.WALL_TIME_UNREADABLE]: TIMING_SEVERITY.BLOCKING,
+  [TIMING_REASON.WALL_TIME_NONEXISTENT]: TIMING_SEVERITY.BLOCKING,
+  [TIMING_REASON.WALL_TIME_AMBIGUOUS]: TIMING_SEVERITY.INFO,
 
   [TIMING_REASON.KICKOFF_SEARCH_EXHAUSTED]: TIMING_SEVERITY.BLOCKING,
   [TIMING_REASON.KICKOFF_BOUND_BY_OTHER_SURFACE]: TIMING_SEVERITY.INFO,

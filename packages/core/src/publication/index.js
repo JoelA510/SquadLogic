@@ -22,13 +22,14 @@
  * ## What it deliberately is not
  *
  * - **Not persisted.** `PublicationSnapshot.durability` says `in-memory` on the
- *   record. The reason is GAP-30 rather than consistency with earlier phases:
- *   `SlotSchema` and `AssignmentSchema` still normalise through
- *   `z.coerce.date()`, so a snapshot round-tripped through them would come back
- *   with its wall-clock times reinterpreted in the host timezone, and two
- *   corpus dates fall after DST ends. A parity checker that stored its ground
- *   truth through a timezone-lossy schema would **cause the divergence it
- *   exists to detect**.
+ *   record, and the reason is now GAP-29 alone. It used to be GAP-30 as well:
+ *   `SlotSchema` and `AssignmentSchema` normalised through `z.coerce.date()`,
+ *   so a snapshot round-tripped through them came back with its wall-clock
+ *   times reinterpreted in the host timezone, and a parity checker storing its
+ *   ground truth that way would have **caused the divergence it exists to
+ *   detect**. That is closed: those schemas now refuse a naive wall reading
+ *   outright and `timing/seasonClock.js` composes one against the season's
+ *   zone. Persistence still waits on GAP-29, and on nothing else here.
  * - **Not a second diff.** `compareParityRows()` is the only row comparator
  *   here; `resolve/state.js` `diffAgainstBaseline()` remains the only
  *   game-by-game baseline diff, over a resolve run rather than over two

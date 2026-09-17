@@ -2172,6 +2172,76 @@ export const mockSupabase = {
       return ['admin', 'tenant_admin'].includes(String(member?.role || ''));
     };
 
+    if (name === 'admin_set_season_timezone') {
+      // Mirrors `admin_set_season_timezone` in
+      // `20260913000000_season_timezone_writer.sql`. The Settings control used
+      // to write only localStorage, so `season_settings.timezone` had no writer
+      // anywhere and every season read as having no clock (GAP-30).
+      const { p_organization_id, p_season_settings_id, p_timezone } = params || {};
+      if (!p_organization_id) {
+        return { data: null, error: { message: 'p_organization_id is required' } };
+      }
+      if (!p_season_settings_id) {
+        return { data: null, error: { message: 'p_season_settings_id is required' } };
+      }
+      const zone = typeof p_timezone === 'string' ? p_timezone.trim() : '';
+      if (!zone) {
+        return { data: null, error: { message: 'p_timezone is required' } };
+      }
+      // The real function validates against `pg_timezone_names`; `Intl` is the
+      // closest thing the browser has, and refusing a typo here rather than
+      // storing it is the same "refuse, do not guess" rule.
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone: zone });
+      } catch {
+        return { data: null, error: { message: `Unknown IANA timezone: ${zone}` } };
+      }
+      if (!isOrgAdmin(p_organization_id)) {
+        return {
+          data: null,
+          error: {
+            message: `Access denied: caller is not an admin of organization ${p_organization_id}`,
+          },
+        };
+      }
+      const season = (db.season_settings || []).find(
+        (row) => String(row.id) === String(p_season_settings_id)
+      );
+      if (!season) {
+        return {
+          data: null,
+          error: { message: `Season settings not found in organization ${p_organization_id}` },
+        };
+      }
+      if (String(season.organization_id) !== String(p_organization_id)) {
+        return {
+          data: null,
+          error: { message: `Season settings do not belong to organization ${p_organization_id}` },
+        };
+      }
+      const previous = season.timezone ?? null;
+      season.timezone = zone;
+      db.audit_log = db.audit_log || [];
+      db.audit_log.push({
+        id: mockId(),
+        organization_id: p_organization_id,
+        action: 'settings.timezone_updated',
+        user_id: currentUserId,
+        metadata: { timezone: zone, previous_timezone: previous },
+        created_at: new Date().toISOString(),
+      });
+      saveDB(db);
+      return {
+        data: {
+          season_settings_id: p_season_settings_id,
+          timezone: zone,
+          previous_timezone: previous,
+          changed: previous !== zone,
+        },
+        error: null,
+      };
+    }
+
     if (name === 'initialize_new_tenant') {
       const { p_name, p_slug, p_timezone, p_season_year } = params || {};
       const storedSession =
@@ -2227,6 +2297,12 @@ export const mockSupabase = {
         status: 'active',
         season_year: p_season_year,
         season_label: `${p_season_year} Season`,
+        // The season's clock. Mirrors `initialize_new_tenant` in
+        // `20260913000000_season_timezone_writer.sql`: a season created without
+        // one has no clock to place a slot on and the game scheduler refuses
+        // (GAP-30). The mock drifting from the real schema here is exactly
+        // LESSONS_LEARNED #13.
+        timezone: p_timezone.trim(),
         created_at: new Date().toISOString(),
       });
       db.audit_log.push({

@@ -33,6 +33,7 @@ Given('I have been assigned to the {string}', async ({ page }, teamName: string)
         organization_id: orgId,
         name: 'Team Portal Season',
         status: 'active',
+        timezone: 'America/Los_Angeles',
       });
     }
 

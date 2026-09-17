@@ -21,6 +21,7 @@ const seedDatabase = async (page: { addInitScript: (fn: () => void) => Promise<v
         organization_id: orgId,
         name: 'Fall 2026',
         status: 'active',
+        timezone: 'America/Los_Angeles',
         created_at: new Date().toISOString(),
       });
     }

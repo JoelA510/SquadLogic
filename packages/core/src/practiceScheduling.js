@@ -200,7 +200,8 @@ export function schedulePractices({
   const slotAssignmentsMap = new Map();
 
   const sanitizedSlots = effectiveSlots.map((slot) => {
-    SlotSchema.parse(slot);
+    // Read, not discarded -- see the note in `schemas/index.js` (GAP-30).
+    const parsed = SlotSchema.parse(slot);
 
     const slotRecord = {
       id: slot.id,
@@ -209,8 +210,8 @@ export function schedulePractices({
       effectiveFrom: slot.effectiveFrom ?? null,
       effectiveUntil: slot.effectiveUntil ?? null,
       day: slot.day ?? null,
-      start: new Date(slot.start),
-      end: new Date(slot.end),
+      start: parsed.start,
+      end: parsed.end,
       capacity: slot.capacity,
     };
 
@@ -222,6 +223,9 @@ export function schedulePractices({
 
   const slotsById = new Map();
   for (const slot of sanitizedSlots) {
+    // Deliberately an assertion with no field read: these records were built
+    // from already-parsed slots two blocks up, so there is no conversion to
+    // honour here, only a shape re-check. Not the GAP-30 shape.
     SlotSchema.parse(slot);
     if (slotsById.has(slot.id)) {
       throw new Error(`duplicate slot id detected: ${slot.id}`);

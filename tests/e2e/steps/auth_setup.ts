@@ -78,6 +78,10 @@ async function setupIsolatedTenant(page: Page, role: string = 'admin') {
             organization_id: orgId,
             name: 'Fall 2026',
             status: 'active',
+            // A season with no timezone has no clock to place a slot on and
+            // the grid refuses rather than guessing (GAP-30), so the seed has
+            // to carry one exactly as a real season does.
+            timezone: (activeSeason.timezone as string) || 'America/Los_Angeles',
             created_at: activeSeason.created_at || new Date().toISOString(),
           });
         } else {
@@ -86,6 +90,7 @@ async function setupIsolatedTenant(page: Page, role: string = 'admin') {
             organization_id: orgId,
             name: 'Fall 2026',
             status: 'active',
+            timezone: 'America/Los_Angeles',
             created_at: new Date().toISOString(),
           });
         }

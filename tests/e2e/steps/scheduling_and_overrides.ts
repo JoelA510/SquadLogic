@@ -222,6 +222,7 @@ Given('a target roster size of {int}', async ({ page }, targetSize: number) => {
           organization_id: orgId,
           name: 'Fall 2026',
           status: 'active',
+          timezone: 'America/Los_Angeles',
           target_roster_size: size,
         });
       }

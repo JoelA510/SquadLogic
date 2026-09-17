@@ -17,7 +17,9 @@ Given('an organization and season are active', async ({ page }) => {
         organizations: { id: orgId, name: 'SquadLogic FC', is_onboarded: true },
       },
     ];
-    db.season_settings = [{ id: 's1', name: 'Fall 2024', organization_id: orgId }];
+    db.season_settings = [
+      { id: 's1', name: 'Fall 2024', organization_id: orgId, timezone: 'America/Los_Angeles' },
+    ];
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
     localStorage.setItem('squadlogic_active_org', orgId);
     localStorage.setItem('squadlogic-current-season', 'Fall 2024');
@@ -339,9 +341,19 @@ Given(
           { id: org2Id, name: o2, status: 'active', is_onboarded: true },
         ];
         db.season_settings = [
-          { id: 's1', name: 'Fall 2024', organization_id: org1Id },
-          { id: 's2', name: 'Spring 2024', organization_id: org1Id },
-          { id: 's3', name: 'Winter 2024', organization_id: org2Id },
+          { id: 's1', name: 'Fall 2024', organization_id: org1Id, timezone: 'America/Los_Angeles' },
+          {
+            id: 's2',
+            name: 'Spring 2024',
+            organization_id: org1Id,
+            timezone: 'America/Los_Angeles',
+          },
+          {
+            id: 's3',
+            name: 'Winter 2024',
+            organization_id: org2Id,
+            timezone: 'America/Los_Angeles',
+          },
         ];
         db.organization_members = [
           {

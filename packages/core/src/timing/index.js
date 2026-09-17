@@ -65,6 +65,7 @@ export {
   SeasonClockError,
   anchorToSeasonClock,
   isNaiveDateTime,
+  isZonelessTimestamp,
   requireZonedInstant,
   resolveZonedInstant,
 } from './seasonClock.js';

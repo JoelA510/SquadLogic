@@ -2,7 +2,7 @@
  * Shared normalization utilities for data persistence and processing.
  */
 
-import { isNaiveDateTime } from '../timing/seasonClock.js';
+import { isZonelessTimestamp } from '../timing/seasonClock.js';
 
 export function normalizeString(value, label, index) {
   if (typeof value !== 'string') {
@@ -64,6 +64,12 @@ export function normalizeId(value, label, index) {
  * something upstream hands it one, and it matches `SlotSchema`/`AssignmentSchema`,
  * which refuse it too. A wall time is composed by `timing/seasonClock.js` first.
  *
+ * A bare `'2026-11-07'` is refused on the same predicate. It is not host-zone
+ * dependent -- `new Date()` reads a date-only string as UTC midnight -- but it
+ * is still an instant nobody chose, five in the evening the day before for a
+ * Pacific season, and `start`/`end` have no reading in which a date without a
+ * clock is the value that was meant.
+ *
  * @param {*} value - a `Date`, an epoch number, or a string carrying a zone.
  * @param {string} label - what the caller calls this value.
  * @param {number} [index] - the row it came from, for the message.
@@ -77,7 +83,7 @@ export function normalizeTimestamp(value, label, index) {
     throw new TypeError(`${label} is required${at}`);
   }
 
-  if (isNaiveDateTime(value)) {
+  if (isZonelessTimestamp(value)) {
     throw new TypeError(
       `${label} must carry a timezone${at}; compose a wall time with timing/seasonClock.js first`
     );

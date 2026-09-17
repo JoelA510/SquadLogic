@@ -18,9 +18,14 @@
  * the single documented exception, and the exception is the point: the domain
  * keeps wall times as `YYYY-MM-DD` plus minutes-past-midnight, and `Date` is
  * confined to the inside of this boundary. Nothing else in `packages/core` may
- * turn a naive wall string into an instant: `SlotSchema`, `AssignmentSchema`
- * and `normalizeTimestamp()` all refuse one outright, and
- * `tests/sourceHygiene.test.js` holds the line inside `timing/`.
+ * turn a **zone-less** string into an instant: `SlotSchema`, `AssignmentSchema`
+ * and `normalizeTimestamp()` all refuse one outright — a naive wall date-time
+ * *and* a bare `YYYY-MM-DD`, which `new Date()` reads as UTC midnight and which
+ * therefore used to slip past a sentence that named only the first. The
+ * predicate all three read is {@link isZonelessTimestamp}, which states why the
+ * two cases are refused together and why {@link anchorToSeasonClock} still
+ * leaves the date-only one alone. `tests/sourceHygiene.test.js` holds the line
+ * inside `timing/`.
  *
  * ## The zone is a parameter, not a lookup
  *
@@ -80,6 +85,43 @@ export function isNaiveDateTime(value) {
   return new RegExp(
     `^\\d{4}-\\d{2}-\\d{2}${DATE_TIME_SEPARATOR}\\d{1,2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?$`
   ).test(value.trim());
+}
+
+/** A bare `YYYY-MM-DD` with no clock of any kind. */
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Is this string a moment with **no zone attached at all** — either a naive
+ * wall date-time, or a bare calendar date?
+ *
+ * ## Why this is a second predicate rather than a wider `isNaiveDateTime`
+ *
+ * The two callers want different answers about `'2026-11-07'`, and both are
+ * right:
+ *
+ * - {@link anchorToSeasonClock} must leave it alone. A date with no clock is
+ *   not a wall *reading*; there is nothing to compose and
+ *   {@link splitNaiveDateTime} would hand `resolveZonedInstant` an empty time.
+ *   Its own contract says so by name.
+ * - `InstantSchema` and `normalizeTimestamp()` must refuse it. Both stand in
+ *   front of a `timestamptz`, and `new Date('2026-11-07')` is spec'd as UTC
+ *   midnight -- so the value did not fail, it silently acquired a zone nobody
+ *   chose. For a season on `America/Los_Angeles` that instant is 5 PM on the
+ *   **previous day** locally: not the host-dependent spread GAP-30 was about,
+ *   but the same class of answer, confidently wrong and impossible to see.
+ *   A slot or an assignment has no reading in which a start time of "some
+ *   moment on the 7th" is the value that was meant.
+ *
+ * Until this existed, the module header's claim that those schemas "refuse
+ * [a zone-less value] outright" was true of `'2026-11-07T00:00'` and false of
+ * `'2026-11-07'`, which is the narrower half of the same hole.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isZonelessTimestamp(value) {
+  if (typeof value !== 'string') return false;
+  return isNaiveDateTime(value) || DATE_ONLY_PATTERN.test(value.trim());
 }
 
 /**

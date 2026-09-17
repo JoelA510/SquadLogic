@@ -26,6 +26,7 @@ import GameConflictBanner from '../components/scheduling/GameConflictBanner.jsx'
 import { formatDateTime } from '../utils/formatters.js';
 import {
   SeasonClockError,
+  TIMING_REASON,
   anchorToSeasonClock,
   requireZonedInstant,
 } from '@squadlogic/core/timing/index.js';
@@ -218,26 +219,119 @@ export function partitionGameSlots(rows, { fieldById, divisionById, timezone }) 
 }
 
 /**
- * One line per distinct reason, with a count, so a hundred slots sharing one
- * cause read as one fact rather than a hundred.
+ * The cause behind each reason code, phrased **without any one slot in it**.
  *
- * @param {Array<{ code: string, reason: string }>} entries
+ * This table is the fix for the bucketing defect below and not decoration: the
+ * per-slot `reason` strings `resolveZonedInstant` builds all embed that slot's
+ * own date and time, so there is no way to bucket on them AND keep a
+ * slot-independent line. The aggregate needs a sentence that is true of the
+ * whole bucket; the per-slot detail stays on the entries, where the grid and a
+ * future TIME TBD row can read it.
+ *
+ * Keyed by every code `partitionGameSlots` can emit. `WALL_TIME_AMBIGUOUS` is
+ * deliberately absent: it never refuses, so it never reaches an unplaceable
+ * entry. `tests/gameSchedulingSeasonClock.test.js` enumerates the codes from
+ * the registry and requires each to be covered here, so a new refusal code
+ * cannot quietly fall through to the generic arm.
+ */
+const UNPLACEABLE_CAUSE = Object.freeze({
+  [TIMING_REASON.SEASON_TIMEZONE_MISSING]:
+    "this season has no timezone to place them on; set the season's timezone in Settings before scheduling",
+  [TIMING_REASON.SEASON_TIMEZONE_UNKNOWN]:
+    "this season's timezone is not a zone this browser can resolve",
+  [TIMING_REASON.WALL_TIME_NONEXISTENT]:
+    "daylight saving skips that hour in the season's timezone, so the stored time names no instant",
+  [TIMING_REASON.WALL_TIME_UNREADABLE]:
+    'the stored date or time is not a readable wall time',
+  SLOT_SHAPE_INVALID: 'the row is missing an id, a start/end, or a positive week index',
+});
+
+/**
+ * One line per distinct **reason code**, with a count, so a hundred slots
+ * sharing one cause read as one fact rather than a hundred.
+ *
+ * ## Why the key is `code` and not `reason`
+ *
+ * It was `reason`, and every reason string `resolveZonedInstant` produces
+ * carries that slot's own date and time -- `"slot time 2026-11-07 16:44:00 has
+ * no season timezone..."`. No two real slots ever share one, so the "collapse"
+ * collapsed nothing: measured on `main`, 5 slots produced 5 lines and 50
+ * produced 50 over 8 KB, and a season whose `timezone` is null makes **every**
+ * row unplaceable, so a 400-slot season rendered tens of kilobytes of text into
+ * a single `<p>`. `code` is the contract everywhere else in this codebase and
+ * it is the contract here; the date and time stay on the entry, which is the
+ * detail payload, and one example is named per bucket so the line still points
+ * somewhere without growing with the season.
+ *
+ * @param {Array<{ code?: string, reason?: string, date?: string|null, time?: string|null }>} entries
  * @returns {string|null}
  */
 export function describeUnplaceableSlots(entries) {
   if (!entries || entries.length === 0) return null;
-  const byReason = new Map();
+  /** @type {Map<string, { count: number, example: any }>} */
+  const byCode = new Map();
   for (const entry of entries) {
-    const bucket = byReason.get(entry.reason) ?? { count: 0, code: entry.code };
+    const code = entry?.code ?? 'SLOT_SHAPE_INVALID';
+    const bucket = byCode.get(code) ?? { count: 0, example: entry };
     bucket.count += 1;
-    byReason.set(entry.reason, bucket);
+    byCode.set(code, bucket);
   }
-  return [...byReason.entries()]
-    .map(
-      ([reason, { count, code }]) =>
-        `${count} slot${count === 1 ? '' : 's'} shown as TIME TBD (${code}): ${reason}`
-    )
+  return [...byCode.entries()]
+    .map(([code, { count, example }]) => {
+      // A code with no entry in the table above still says something true --
+      // its own first reason -- rather than nothing. Bounded either way,
+      // because it is one line per code and not one per slot.
+      const cause = UNPLACEABLE_CAUSE[code] ?? example?.reason ?? 'the slot could not be placed.';
+      const when = [example?.date, example?.time].filter(Boolean).join(' ');
+      const firstly = when ? ` (first: ${when})` : '';
+      return `${count} slot${count === 1 ? '' : 's'} shown as TIME TBD (${code}): ${cause}${firstly}`;
+    })
     .join(' \u00b7 ');
+}
+
+/**
+ * The readiness banner's sentence, composed away from React so it can be
+ * tested without one.
+ *
+ * Two things it deliberately does NOT say:
+ *
+ * 1. **The unplaceable summary.** It used to be appended here *and* rendered on
+ *    its own line below, so in the common case -- no apply error, no status
+ *    message -- the operator read the same sentence twice. The separate line is
+ *    the one that stays, because it survives an `applyStatus` change that
+ *    displaces this message entirely.
+ * 2. **Anything about the season's clock while the season row is still in
+ *    flight.** `currentSeasonSetting` is null both when the season has no
+ *    timezone and before `OrganizationContext` has answered, and the slot read
+ *    is keyed only on the organisation, so the two land in either order. On the
+ *    losing order every slot is unplaceable and the banner told the operator to
+ *    set a timezone that was already set. "Not loaded yet" is not "no clock".
+ *
+ * @param {Object} input
+ * @param {string|null} [input.referenceError]
+ * @param {number} input.teamCount
+ * @param {number} input.placeableSlotCount
+ * @param {number} input.unplaceableSlotCount
+ * @param {boolean} input.seasonClockLoading
+ * @returns {string|null}
+ */
+export function composeSchedulerReadinessMessage({
+  referenceError,
+  teamCount,
+  placeableSlotCount,
+  unplaceableSlotCount,
+  seasonClockLoading,
+}) {
+  const parts = seasonClockLoading
+    ? [referenceError, 'Loading this season\u2019s settings\u2026']
+    : [
+        referenceError,
+        teamCount === 0 ? 'No generated teams are available for game scheduling.' : null,
+        placeableSlotCount === 0 && unplaceableSlotCount === 0
+          ? 'No game slots are available for this organization.'
+          : null,
+      ];
+  return parts.filter(Boolean).join(' \u00b7 ') || null;
 }
 
 function buildRoundRobinByDivision(teams) {
@@ -329,7 +423,12 @@ function toPersistenceAssignment(assignment) {
 
 export default function GameSchedulingPage() {
   const { game, team, loading } = useDashboardData();
-  const { currentOrganization, currentSeasonSetting, permissions = [] } = useOrganization();
+  const {
+    currentOrganization,
+    currentSeasonSetting,
+    permissions = [],
+    loading: organizationLoading,
+  } = useOrganization();
   const [localAssignments, setLocalAssignments] = useState([]);
   const [reviewAssignments, setReviewAssignments] = useState(null);
   const [selectedTeamId, setSelectedTeamId] = useState(null);
@@ -357,6 +456,27 @@ export default function GameSchedulingPage() {
   const [activeGame, setActiveGame] = useState(null);
 
   const timezone = currentSeasonSetting?.timezone;
+  // **"No clock yet" and "no clock at all" are different facts.** `timezone` is
+  // `undefined` for both, and the slot read below is keyed only on
+  // `currentOrganization?.id`, so the season row and the slots resolve in
+  // whichever order the network gives them. On the losing order every slot is
+  // unplaceable with `SEASON_TIMEZONE_MISSING` and the operator is told to set
+  // a timezone the season already has.
+  //
+  // Two states count as "still loading", and the second is not the initial
+  // fetch: `switchOrganization()` swaps `currentOrganization` immediately and
+  // re-fetches the seasons WITHOUT raising `loading`, so between those two the
+  // held season row belongs to the organisation we just left. Reading a clock
+  // off another organisation's season is worse than reading none, so an
+  // organisation mismatch is "not loaded yet" too.
+  const seasonClockLoading =
+    Boolean(organizationLoading) ||
+    Boolean(
+      currentOrganization?.id &&
+        currentSeasonSetting &&
+        currentSeasonSetting.organization_id &&
+        currentSeasonSetting.organization_id !== currentOrganization.id
+    );
   const canManageSchedule =
     permissions.includes(PERMISSIONS.MANAGE_SCHEDULE) ||
     permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);
@@ -516,9 +636,13 @@ export default function GameSchedulingPage() {
     [divisionById, fieldById, gameSlotRows, timezone]
   );
 
+  // Held back until the season row has landed: before then every entry in
+  // `unplaceableSlots` says `SEASON_TIMEZONE_MISSING` about a season whose
+  // clock nobody has read yet, and printing that is the false alarm finding 8
+  // names.
   const unplaceableSlotMessage = useMemo(
-    () => describeUnplaceableSlots(unplaceableSlots),
-    [unplaceableSlots]
+    () => (seasonClockLoading ? null : describeUnplaceableSlots(unplaceableSlots)),
+    [seasonClockLoading, unplaceableSlots]
   );
 
   useEffect(() => {
@@ -588,20 +712,16 @@ export default function GameSchedulingPage() {
     !gameSlots.length ||
     Boolean(referenceError);
 
-  // The unplaceable summary is appended rather than substituted: a page with
-  // both no teams and three TIME TBD slots has to say both, and the readiness
-  // banner reporting only the first was how the second went unseen.
-  const schedulerReadinessMessage =
-    [
-      referenceError,
-      !schedulerTeams.length ? 'No generated teams are available for game scheduling.' : null,
-      !gameSlots.length && !unplaceableSlots.length
-        ? 'No game slots are available for this organization.'
-        : null,
-      unplaceableSlotMessage,
-    ]
-      .filter(Boolean)
-      .join(' · ') || null;
+  // The unplaceable summary is NOT part of this sentence; it has its own line
+  // below. See `composeSchedulerReadinessMessage` for why both halves of that
+  // arrangement are needed and why appending it here printed it twice.
+  const schedulerReadinessMessage = composeSchedulerReadinessMessage({
+    referenceError,
+    teamCount: schedulerTeams.length,
+    placeableSlotCount: gameSlots.length,
+    unplaceableSlotCount: unplaceableSlots.length,
+    seasonClockLoading,
+  });
 
   const reviewSnapshot = useMemo(() => {
     const source = schedulerResult?.evaluation;
@@ -994,11 +1114,14 @@ export default function GameSchedulingPage() {
                     schedulerReadinessMessage ||
                     'Review the staged schedule before applying it.'}
                 </p>
-                {/* Its own line, not an `||` arm. A slot with no clock is still
-                    unplaceable after an apply succeeds, so a message that
-                    `statusMessage` displaces the moment anything else happens
-                    reports the fact once and then stops -- a silent drop
-                    wearing a banner. */}
+                {/* Its own line, not an `||` arm, and **only** here. A slot with
+                    no clock is still unplaceable after an apply succeeds, so a
+                    message that `statusMessage` displaces the moment anything
+                    else happens reports the fact once and then stops -- a
+                    silent drop wearing a banner. It used to ALSO be appended
+                    into `schedulerReadinessMessage`, which is the arm directly
+                    above, so whenever there was no apply error and no status
+                    message -- the common case -- the operator read it twice. */}
                 {unplaceableSlotMessage && (
                   <p className="text-amber-300 mt-1">{unplaceableSlotMessage}</p>
                 )}

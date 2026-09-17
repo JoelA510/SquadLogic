@@ -169,7 +169,7 @@ echo "=== smokes for this PR's migrations ==="
 # pgTAP suite already does. Claiming to verify them would be the hollow kind of
 # green this whole phase exists to stop.
 STATUS=0
-NEW_MIGRATIONS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000)
+NEW_MIGRATIONS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000)
 
 for id in "${NEW_MIGRATIONS[@]}"; do
   smoke="$REPO/docs/sql/${id}_smoke.sql"
@@ -415,6 +415,38 @@ for id in "${NEW_MIGRATIONS[@]}"; do
     fi
   fi
 
+  # **The same reasoning for 20260911000000's revert**, which names five costs
+  # and counts three of them: the venues losing a recorded closure, the
+  # sub-surfaces losing theirs, and the fields each venue's date was closing by
+  # containment. On a freshly migrated database all three are zero and the
+  # revert reads as costless.
+  #
+  # **The three cardinalities are deliberately unequal -- 1, 2, 3.** 20260909's
+  # seed records why: with every count at 1 a check reading the WRONG set
+  # prints the RIGHT number. One venue retired, THREE fields at it, TWO of
+  # those fields carrying a retired sub-surface. A second venue is left
+  # unretired so the loop cannot pass by printing every row it sees.
+  # Do not "tidy" the third field or the second sub-surface away.
+  if [ "$id" = "20260911000000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug)
+              VALUES ('c1111111-1111-1111-1111-11111111111c','Gap B Org','gap-b-org');
+              INSERT INTO public.locations (id, organization_id, name, effective_to)
+              VALUES ('c2222222-2222-2222-2222-22222222222c','c1111111-1111-1111-1111-11111111111c','Gap B Park', current_date + 30);
+              INSERT INTO public.locations (id, organization_id, name)
+              VALUES ('c2aaaaaa-2222-2222-2222-22222222222c','c1111111-1111-1111-1111-11111111111c','Gap B Control Park');
+              INSERT INTO public.fields (id, organization_id, location_id, name, active)
+              VALUES ('c3333333-3333-3333-3333-33333333333c','c1111111-1111-1111-1111-11111111111c','c2222222-2222-2222-2222-22222222222c','Gap B Pitch One', true),
+                     ('c4444444-4444-4444-4444-44444444444c','c1111111-1111-1111-1111-11111111111c','c2222222-2222-2222-2222-22222222222c','Gap B Pitch Two', true),
+                     ('c5555555-5555-5555-5555-55555555555c','c1111111-1111-1111-1111-11111111111c','c2222222-2222-2222-2222-22222222222c','Gap B Pitch Three', true);
+              INSERT INTO public.field_subunits (id, organization_id, field_id, label, effective_to)
+              VALUES ('c6666666-6666-6666-6666-66666666666c','c1111111-1111-1111-1111-11111111111c','c3333333-3333-3333-3333-33333333333c','Gap B Pitch One North', current_date + 45),
+                     ('c7777777-7777-7777-7777-77777777777c','c1111111-1111-1111-1111-11111111111c','c4444444-4444-4444-4444-44444444444c','Gap B Pitch Two North', current_date + 50);" \
+         >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the venue and sub-surface retirements the revert check requires were never inserted"
+      dump 10 /tmp/harness_seed; STATUS=1; continue
+    fi
+  fi
+
   if [ "$id" = "20260906000000" ]; then
     if ! psql_cmd "INSERT INTO public.organizations (id, name, slug)
               VALUES ('11111111-1111-1111-1111-111111111111','Revert Org','revert-org');
@@ -519,6 +551,80 @@ NEEDLES
     echo "PASS revert ${id}"
     grep -E '^(psql:[^ ]+ )?(NOTICE|WARNING):' /tmp/harness_rev |
       sed -E 's/^psql:[^ ]+ //; s/^/  | /' || true
+    if [ "$id" = "20260911000000" ]; then
+      # Three counts, three checks, each against a figure the seed above made
+      # unique. `closing 3 field(s)` is the containment figure, and it is
+      # derived from `fields` rather than from anything the retirement wrote --
+      # a retirement writes nothing to a child, so a check reading child state
+      # would report zero for a total loss.
+      if grep -q 'LOSING venue retirement: Gap B Park' /tmp/harness_rev &&
+         grep -q 'closing 3 field(s)' /tmp/harness_rev; then
+        echo "  | (checked) the revert named the venue retirement it was about to erase and the fields its containment was closing"
+      else
+        echo "FAIL revert ${id}: planted a retired venue with three fields and the revert did not name it, or miscounted the containment"
+        STATUS=1
+      fi
+      if grep -q 'LOSING sub-surface retirement: Gap B Pitch One North' /tmp/harness_rev &&
+         grep -q 'erasing 1 venue retirement(s) and 2 sub-surface retirement(s)' /tmp/harness_rev; then
+        echo "  | (checked) the revert named both sub-surface retirements and totalled the two kinds separately"
+      else
+        echo "FAIL revert ${id}: planted two retired sub-surfaces and the revert did not name or total them"
+        STATUS=1
+      fi
+      # **The restore is the dangerous half.** Dropping the scoped producer
+      # without putting the three-argument one back leaves admin_retire_field,
+      # admin_delete_field and rollback_field_import_job raising 42883 on every
+      # call -- the three guards standing between an admin click and a
+      # destroyed schedule. The revert asserts this itself; this is the
+      # independent confirmation, read from the catalogue rather than from the
+      # revert's own NOTICE.
+      if grep -q 'the three-argument producer is restored with all 6 arms' /tmp/harness_rev; then
+        echo "  | (checked) the revert proved its own restore of the three-argument producer"
+      else
+        echo "FAIL revert ${id}: the revert did not prove it restored the three-argument producer"
+        STATUS=1
+      fi
+      v_scope_verdict=$(psql_cmd "SELECT CASE
+             WHEN count(*) = 0 THEN 'GONE'
+             WHEN count(*) > 1 THEN 'AMBIGUOUS:' || count(*)
+             WHEN bool_or(oidvectortypes(p.proargtypes) <> 'uuid, uuid, date') THEN 'STILL-SCOPED'
+             ELSE 'RESTORED'
+           END
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'field_bookings'" 2>/dev/null || echo "QUERY-FAILED")
+      if [ "$v_scope_verdict" != "RESTORED" ]; then
+        echo "FAIL revert ${id}: field_bookings after the revert reads ${v_scope_verdict}, wanted RESTORED"
+        STATUS=1
+      else
+        echo "  | (checked) exactly one public.field_bookings survives the revert, at the three-argument field-scoped signature its three callers use"
+      fi
+      # And every lifecycle object this migration added is gone. A revert that
+      # leaves an RPC calling a producer that can no longer answer its question
+      # is worse than one that leaves nothing.
+      v_left=$(psql_cmd "SELECT coalesce(string_agg(p.proname, ',' ORDER BY p.proname), 'none')
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+        AND p.proname IN ('admin_retire_location','admin_unretire_location',
+                          'admin_retire_field_subunit','admin_unretire_field_subunit',
+                          'estate_scope_covers','estate_contained_nodes')" 2>/dev/null || echo "QUERY-FAILED")
+      if [ "$v_left" != "none" ]; then
+        echo "FAIL revert ${id}: these objects survived the revert: ${v_left}"
+        STATUS=1
+      else
+        echo "  | (checked) all six lifecycle objects this migration added are gone"
+      fi
+      v_cols=$(psql_cmd "SELECT coalesce(string_agg(table_name, ',' ORDER BY table_name), 'none')
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND column_name = 'effective_to'
+        AND table_name IN ('locations','field_subunits')" 2>/dev/null || echo "QUERY-FAILED")
+      if [ "$v_cols" != "none" ]; then
+        echo "FAIL revert ${id}: effective_to survived on ${v_cols}"
+        STATUS=1
+      else
+        echo "  | (checked) both effective_to columns are gone, and fields.effective_to is untouched"
+      fi
+    fi
     if [ "$id" = "20260906000000" ]; then
       if grep -q 'LOSING future retirement: field Closing Soon' /tmp/harness_rev; then
         echo "  | (checked) the revert named the retirement it was about to erase"

@@ -54,3 +54,11 @@ dist.old/
 # stale one, and these patterns stop a survivor being committed regardless.
 *.orig
 *.bak
+
+# Agent worktrees. `isolation: "worktree"` places an agent's checkout at
+# `.claude/worktrees/<agent>/`, INSIDE this repository, and it is a complete
+# second copy of SquadLogic -- 376 MB when this entry was written. Untracked
+# and unignored, it sat one `git add -A` away from being committed. The same
+# belt-and-braces reasoning as the `*.orig` entry above: the harness cleans
+# these up, and this stops a survivor being committed when it does not.
+.claude/

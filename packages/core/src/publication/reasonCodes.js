@@ -53,12 +53,14 @@ export const PUBLICATION_STATUS = CONSTRAINT_STATUS;
  *
  * One member, and it is on the record rather than only in the docs, because a
  * consumer holding the object has to be able to learn the limitation from the
- * object. Phase 6 is deliberately in-memory: `SlotSchema` and
- * `AssignmentSchema` still normalise through `z.coerce.date()` (GAP-30), which
- * turns a published wall-clock `8:30 AM` into an absolute instant using the
- * host timezone, and two corpus dates fall after DST ends. Persisting a
- * snapshot through a timezone-lossy schema would make the parity checker
- * **cause the divergence it exists to detect**.
+ * object. Phase 6 is deliberately in-memory, and the reason is now GAP-29
+ * alone. It used to include GAP-30: `SlotSchema` and `AssignmentSchema`
+ * normalised through `z.coerce.date()`, which turned a published wall-clock
+ * `8:30 AM` into an absolute instant using the host timezone, and persisting a
+ * snapshot through a timezone-lossy schema would have made the parity checker
+ * **cause the divergence it exists to detect**. Those schemas now refuse a
+ * naive wall reading, so what is left is simply that no persistence seam
+ * exists.
  *
  * @readonly
  * @enum {string}

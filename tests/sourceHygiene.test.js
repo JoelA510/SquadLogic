@@ -279,28 +279,98 @@ describe('source hygiene :: a carried trace field has a production reader', () =
 });
 
 /**
- * `timing/index.js` declares that `Date` construction inside `timing/` lives in
- * exactly one file. Declared is not enforced (CLAUDE.md §3), and a carve-out is
- * easier to breach than a blanket ban precisely because it reads as already
- * broken, so the claim is checked rather than trusted.
+ * `timing/index.js` declares that turning a value into an instant inside
+ * `timing/` happens in exactly one file. Declared is not enforced (CLAUDE.md
+ * §3), and a carve-out is easier to breach than a blanket ban precisely because
+ * it reads as already broken, so the claim is checked rather than trusted.
+ *
+ * ## The first version of this guard was a spelling, not a behaviour
+ *
+ * It matched `/\bnew Date\s*\(/` and exempted files by **basename**. Three
+ * ways GAP-30 verbatim walked straight past it, all found by review rather than
+ * by the guard:
+ *
+ *   1. `Date.parse('2026-11-07T16:44:00')` is the same host-zone parse with a
+ *      different spelling, and scored zero offenders.
+ *   2. `new  Date(` with two spaces did not match `new Date`.
+ *   3. `path.basename(file) !== 'seasonClock.js'` exempts a file of that name
+ *      **anywhere** under `timing/`, so `timing/adapters/seasonClock.js` would
+ *      have been an unguarded second boundary.
+ *
+ * All three are closed below, and {@link DETECTOR_FIXTURES} proves it against
+ * synthetic source rather than by planting code in a real module.
  */
-describe('the timing package keeps its Date construction in one file', () => {
+describe('the timing package keeps its instant construction in one file', () => {
   const TIMING_DIR = path.join(CORE_SRC, 'timing');
-  /** The one file the barrel names as the boundary. */
+  /**
+   * The one file the barrel names as the boundary, as a path **relative to
+   * `timing/`** rather than a basename — see point 3 in the block above.
+   */
   const BOUNDARY = 'seasonClock.js';
 
   /**
-   * Lines that construct a `Date`, ignoring comments and JSDoc.
+   * Every way a value becomes an instant, in one place.
    *
-   * @param {string} file
+   * `Date.UTC(...)` is deliberately absent: it takes explicit numeric fields
+   * and returns a number, so it cannot read a naive string in the host's zone,
+   * which is the thing being guarded against. `new Date(...)` and
+   * `Date.parse(...)` both can.
+   */
+  const INSTANT_CONSTRUCTORS = [/\bnew\s+Date\s*\(/, /\bDate\s*\.\s*parse\s*\(/];
+  // `\s` in those patterns spans newlines, which is the point: see
+  // `withoutComments` below for why this scans whole files rather than lines.
+
+  /**
+   * Strip comments so a mention of `new Date(` in prose is not an offence.
+   *
+   * Block comments are removed wholesale rather than line-by-line, because the
+   * scan below is over the **whole file**: a line-oriented reader cannot see
+   * `new\n  Date(value)`, and "the defect is legal if you press Enter" is not a
+   * guard.
+   *
+   * @param {string} source
+   * @returns {string}
+   */
+  function withoutComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  }
+
+  /**
+   * Snippets that turn a value into an instant, ignoring comments and JSDoc.
+   *
+   * @param {string} source - file contents
    * @returns {string[]}
    */
-  function dateConstructionsIn(file) {
-    return readFileSync(file, 'utf8')
-      .split('\n')
-      .filter((line) => !/^\s*(\*|\/\/)/.test(line))
-      .filter((line) => /\bnew Date\s*\(/.test(line));
+  function instantConstructionsIn(source) {
+    const stripped = withoutComments(source);
+    /** @type {string[]} */
+    const hits = [];
+    for (const pattern of INSTANT_CONSTRUCTORS) {
+      for (const match of stripped.matchAll(new RegExp(pattern.source, 'g'))) {
+        hits.push(match[0].replace(/\s+/g, ' '));
+      }
+    }
+    return hits;
   }
+
+  /**
+   * Synthetic source, so the detector's reach is proved without planting a real
+   * defect in a real module. Each entry is [label, source, shouldMatch].
+   *
+   * @type {Array<[string, string, boolean]>}
+   */
+  const DETECTOR_FIXTURES = [
+    ['plain construction', 'const d = new Date(value);', true],
+    ['two spaces', 'const d = new  Date(value);', true],
+    ['newline between', 'const d = new\n  Date(value);', true],
+    ['Date.parse', "const t = Date.parse('2026-11-07T16:44:00');", true],
+    ['Date . parse with spaces', 'const t = Date . parse(value);', true],
+    ['Date.UTC is allowed', 'const ms = Date.UTC(2026, 10, 7);', false],
+    ['a JSDoc block mentioning new Date', '/**\n * uses new Date(x) internally\n */', false],
+    ['a trailing block comment', 'const x = 1; /* new Date(y) */', false],
+    ['a line comment', '// new Date(x)', false],
+    ['an unrelated identifier', 'const updated = updateDate(value);', false],
+  ];
 
   const timingFiles = sourceFilesUnder(TIMING_DIR);
 
@@ -311,23 +381,39 @@ describe('the timing package keeps its Date construction in one file', () => {
     expect(timingFiles.map((f) => path.basename(f))).toContain(BOUNDARY);
   });
 
-  it('can see a Date construction when there is one (positive control)', () => {
-    // The boundary file must itself trip the detector, or the rule below is a
-    // regex that never matches dressed up as a clean result.
-    expect(dateConstructionsIn(path.join(TIMING_DIR, BOUNDARY)).length).toBeGreaterThan(0);
+  it.each(DETECTOR_FIXTURES)('detector: %s', (_label, source, shouldMatch) => {
+    // The controls. Every one of these is a case the first version of this
+    // guard got wrong or could plausibly get wrong; asserting both directions
+    // is what stops it becoming a regex that never matches.
+    expect(instantConstructionsIn(source).length > 0).toBe(shouldMatch);
   });
 
-  it('constructs no Date anywhere else under timing/', () => {
+  it('can see an instant construction in the boundary file (positive control)', () => {
+    // The boundary file must itself trip the detector against real source, or
+    // the rule below is a clean result produced by a broken reader.
+    const source = readFileSync(path.join(TIMING_DIR, BOUNDARY), 'utf8');
+    expect(instantConstructionsIn(source).length).toBeGreaterThan(0);
+  });
+
+  it('exempts the boundary by path, not by basename', () => {
+    // `timing/adapters/seasonClock.js` must NOT be exempt. Asserted on the
+    // predicate directly, since no such file exists to test against.
+    const isExempt = (relative) => relative === BOUNDARY;
+    expect(isExempt('seasonClock.js')).toBe(true);
+    expect(isExempt('adapters/seasonClock.js')).toBe(false);
+  });
+
+  it('constructs no instant anywhere else under timing/', () => {
     const offenders = timingFiles
-      .filter((file) => path.basename(file) !== BOUNDARY)
+      .filter((file) => path.relative(TIMING_DIR, file).split(path.sep).join('/') !== BOUNDARY)
       .flatMap((file) =>
-        dateConstructionsIn(file).map(
-          (line) => `${path.relative(CORE_SRC, file).split(path.sep).join('/')}: ${line.trim()}`
+        instantConstructionsIn(readFileSync(file, 'utf8')).map(
+          (hit) => `${path.relative(CORE_SRC, file).split(path.sep).join('/')}: ${hit.trim()}`
         )
       );
     expect(
       offenders,
-      `timing/index.js states that ${BOUNDARY} is the only place in this package that turns a value into a Date. Either compose through timing/seasonClock.js or change the claim in the barrel -- a stated invariant nothing checks is how GAP-30 survived.`
+      `timing/index.js states that ${BOUNDARY} is the only place in this package that turns a value into an instant. Either compose through timing/seasonClock.js or change the claim in the barrel -- a stated invariant nothing checks is how GAP-30 survived.`
     ).toEqual([]);
   });
 });

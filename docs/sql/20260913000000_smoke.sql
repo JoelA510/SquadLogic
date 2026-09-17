@@ -17,6 +17,35 @@
 \set ON_ERROR_STOP on
 
 -- ---------------------------------------------------------------------------
+-- 0. The columns exist at all
+-- ---------------------------------------------------------------------------
+--
+-- First, because everything below assumes it and because it was false: the
+-- table was dropped and recreated by `20260331000000_definitive_schema` without
+-- `timezone` or `school_day_end`, and nothing re-added them. pgTAP found this,
+-- not a reading of the file.
+DO $$
+DECLARE
+    v_missing text[];
+BEGIN
+    SELECT array_agg(c)
+      INTO v_missing
+      FROM unnest(ARRAY['timezone', 'school_day_end']) AS c
+     WHERE NOT EXISTS (
+         SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'season_settings'
+            AND column_name = c
+     );
+
+    IF v_missing IS NOT NULL THEN
+        RAISE EXCEPTION
+            'season_settings is missing %; the app reads both and practice-persistence selects them in one query', v_missing;
+    END IF;
+END;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- 1. The column is written by at least one live function, read from prosrc
 -- ---------------------------------------------------------------------------
 --

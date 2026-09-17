@@ -246,6 +246,9 @@ function toOffsetIso(epochMs, offsetMs) {
  *
  * @param {Object} input
  * @param {string} input.date - `YYYY-MM-DD`, the season-local calendar date.
+ *   A day the calendar does not contain (`2026-02-30`, `2026-13-45`) is
+ *   {@link TIMING_REASON.WALL_TIME_UNREADABLE}, not a silently rolled-over
+ *   instant.
  * @param {string|number} input.time - `HH:MM[:SS]` or minutes past midnight.
  *   `24:00[:00]` (and `1440`) is midnight ending the day and composes to the
  *   next day's start; `24:30` names no instant and is refused.
@@ -266,7 +269,25 @@ export function resolveZonedInstant({ date, time, timeZone, label = 'wall time' 
   // the same way, and `code` is the contract.
   const dateMatch = typeof date === 'string' ? DATE_PATTERN.exec(date.trim()) : null;
   const seconds = wallSecondsOf(time);
-  if (!dateMatch || seconds === null) {
+  // A day that does not exist is not a shape error, so the pattern alone cannot
+  // see it: `Date.UTC` rolls `2026-02-30` forward to March 2nd and
+  // `2026-13-45` to February 2027, silently, and the composer would return a
+  // confidently wrong instant -- the exact result this module exists to
+  // prevent. Reading the fields back is the only way to catch it.
+  const calendarIsReal =
+    dateMatch !== null &&
+    (() => {
+      const year = Number.parseInt(dateMatch[1], 10);
+      const month = Number.parseInt(dateMatch[2], 10);
+      const day = Number.parseInt(dateMatch[3], 10);
+      const probe = new Date(Date.UTC(year, month - 1, day));
+      return (
+        probe.getUTCFullYear() === year &&
+        probe.getUTCMonth() === month - 1 &&
+        probe.getUTCDate() === day
+      );
+    })();
+  if (!dateMatch || !calendarIsReal || seconds === null) {
     findings.push(
       makeTimingFinding(
         TIMING_REASON.WALL_TIME_UNREADABLE,

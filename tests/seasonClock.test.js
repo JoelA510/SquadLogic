@@ -151,20 +151,56 @@ describe('seasonClock: composing a wall time onto the season clock', () => {
     );
   });
 
-  it('takes the post-transition offset for a 24:00 that rolls across a DST boundary', () => {
-    // The one case where hour-24 and daylight saving interact. 2026-11-01
-    // 24:00 New York is 2026-11-02 00:00, after the fall-back, so -05:00 and
-    // not the -04:00 in force when the day began.
-    const { iso, findings } = resolveZonedInstant({
-      date: '2026-11-01',
-      time: '24:00:00',
-      timeZone: 'America/New_York',
-    });
-    expect(iso).toBe('2026-11-02T00:00:00-05:00');
-    expect(new Date(/** @type {string} */ (iso)).toISOString()).toBe('2026-11-02T05:00:00.000Z');
-    expect(findings).toEqual([]);
+  it('handles a 24:00 that rolls INTO a transition, in zones that transition at midnight', () => {
+    // The earlier version of this test claimed to cover "the one case where
+    // hour-24 and daylight saving interact" and asserted only against
+    // `America/New_York`, which transitions at 02:00 — the rolled midnight can
+    // never land in a gap there, so the claim could not fail. These zones
+    // transition AT midnight, which is where the interaction actually lives.
 
-    // …and the spring-forward side, where the roll lands the day before the gap.
+    // Spring-forward: 2026-03-08 00:00 does not exist in Havana, so 03-07 24:00
+    // names nothing and is refused rather than shifted.
+    const havanaGap = resolveZonedInstant({
+      date: '2026-03-07',
+      time: '24:00:00',
+      timeZone: 'America/Havana',
+    });
+    expect(havanaGap.iso).toBeNull();
+    expect(havanaGap.findings.map((f) => f.code)).toEqual([TIMING_REASON.WALL_TIME_NONEXISTENT]);
+
+    // Same shape, two more zones, so the result is the rule and not one zone's
+    // quirk.
+    for (const [date, zone] of [
+      ['2026-03-28', 'Asia/Beirut'],
+      ['2026-09-05', 'America/Santiago'],
+    ]) {
+      const gap = resolveZonedInstant({ date, time: '24:00:00', timeZone: zone });
+      expect(gap.iso, zone).toBeNull();
+      expect(
+        gap.findings.map((f) => f.code),
+        zone
+      ).toEqual([TIMING_REASON.WALL_TIME_NONEXISTENT]);
+    }
+
+    // Fall-back: 2026-11-01 00:00 happens twice in Havana, so 10-31 24:00 is
+    // ambiguous and takes the first occurrence (-04:00, before the transition).
+    const havanaRepeat = resolveZonedInstant({
+      date: '2026-10-31',
+      time: '24:00:00',
+      timeZone: 'America/Havana',
+    });
+    expect(havanaRepeat.iso).toBe('2026-11-01T00:00:00-04:00');
+    expect(havanaRepeat.findings.map((f) => f.code)).toEqual([TIMING_REASON.WALL_TIME_AMBIGUOUS]);
+  });
+
+  it('rolls a 24:00 to the next day in a zone that transitions away from midnight', () => {
+    // `America/New_York` transitions at 02:00, so a rolled midnight always
+    // exists there. This is the ordinary case, kept separate from the one above
+    // rather than dressed up as the DST interaction it is not.
+    expect(
+      resolveZonedInstant({ date: '2026-11-01', time: '24:00:00', timeZone: 'America/New_York' })
+        .iso
+    ).toBe('2026-11-02T00:00:00-05:00');
     expect(
       resolveZonedInstant({ date: '2026-03-07', time: '24:00:00', timeZone: 'America/New_York' })
         .iso
@@ -233,6 +269,46 @@ describe('seasonClock: composing a wall time onto the season clock', () => {
       expect(iso, `${date} ${time}`).toBeNull();
       expect(findings.map((f) => f.code)).toEqual([TIMING_REASON.WALL_TIME_UNREADABLE]);
       expect(findings[0].severity).toBe(TIMING_SEVERITY.BLOCKING);
+    }
+  });
+
+  it('refuses a day the calendar does not contain', () => {
+    // Shape is not calendar. `DATE_PATTERN` accepts any \d{4}-\d{2}-\d{2} and
+    // `Date.UTC` rolls the rest forward in silence: 2026-02-30 used to compose
+    // as March 2nd with no finding at all, which is a confidently wrong instant
+    // — the result this module exists to prevent.
+    for (const date of [
+      '2026-02-30',
+      '2026-02-29', // 2026 is not a leap year
+      '2026-04-31',
+      '2026-13-45',
+      '2026-00-10',
+      '2026-01-00',
+    ]) {
+      const { iso, findings } = resolveZonedInstant({
+        date,
+        time: '16:44',
+        timeZone: 'America/New_York',
+      });
+      expect(iso, date).toBeNull();
+      expect(
+        findings.map((f) => f.code),
+        date
+      ).toEqual([TIMING_REASON.WALL_TIME_UNREADABLE]);
+    }
+  });
+
+  it('accepts the days the calendar does contain, including a leap day', () => {
+    // The control for the refusal above: a check that rejected every date would
+    // satisfy it and be useless. 2028 IS a leap year, so Feb 29 must compose.
+    for (const date of ['2028-02-29', '2026-02-28', '2026-12-31', '2026-01-01']) {
+      const { iso, findings } = resolveZonedInstant({
+        date,
+        time: '16:44',
+        timeZone: 'America/New_York',
+      });
+      expect(iso, date).toMatch(new RegExp(`^${date}T16:44:00`));
+      expect(findings, date).toEqual([]);
     }
   });
 

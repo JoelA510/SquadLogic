@@ -96,9 +96,11 @@ function addDays(date, days) {
  * The first place in Phases 1-5 that renders a time for a human, and it stays
  * **naive**: the wall clock is never turned into an instant and no offset is
  * applied to it, because the corpus is wall-clock only and two of its dates fall
- * after DST ends (GAP-30). Turning these into absolute instants before the
- * domain model carries a venue timezone is how an evening kickoff moves an hour
- * without anybody asking.
+ * after DST ends. GAP-30 has since given the repository a composer
+ * (`timing/seasonClock.js`), but a renderer is the wrong place to call it: this
+ * function is handed minutes and a date and no zone, and turning those into an
+ * instant without one is how an evening kickoff moves an hour without anybody
+ * asking.
  *
  * A time at or past midnight rolls onto the next calendar date rather than
  * printing a 24th hour. `${date}T24:00:00` is not a time, and an `End` column

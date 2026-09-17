@@ -20,7 +20,14 @@
 --      change unless the frontend is reverted with it. This is deliberate: a
 --      silent no-op is what the control did before GAP-30, and re-creating a
 --      silent no-op is what made the gap invisible for as long as it was.
---   3. **The backfill is NOT undone.** Rows this migration filled from
+--   3. **The restored columns are NOT dropped.** `20260913000000` re-added
+--      `season_settings.timezone` and `school_day_end`, which
+--      `20260331000000_definitive_schema` had dropped along with the table and
+--      never re-created. Dropping them here would take the app's readers down
+--      with them -- `practice-persistence` selects both in one statement -- and
+--      would destroy operator data. A revert of a *writer* does not get to
+--      delete a column.
+--   4. **The backfill is NOT undone.** Rows this migration filled from
 --      `organizations.contact_info` keep their timezone. Nothing rewrites
 --      history, and blanking them would turn a revert of a *writer* into a
 --      destruction of operator data — those values are correct and are the

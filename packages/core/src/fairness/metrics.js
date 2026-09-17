@@ -112,9 +112,10 @@ export const FAIRNESS_METRIC_ORDER = Object.freeze([
  * The unit of every metric, stated once. There is no unitless metric.
  *
  * `mean-kickoff` is **minutes past local midnight** and never a `Date`: the
- * corpus is wall-clock only, two of its dates fall after DST ends, and GAP-30
- * forbids turning either into an absolute instant. Averaging `Date` objects
- * across a DST boundary is how a schedule acquires a phantom hour.
+ * corpus is wall-clock only and two of its dates fall after DST ends. The rule
+ * outlives GAP-30's closure rather than depending on it — averaging `Date`
+ * objects across a DST boundary is how a schedule acquires a phantom hour, and
+ * that is true whether or not a composer exists.
  *
  * @type {Readonly<Record<string, string>>}
  */

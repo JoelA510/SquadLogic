@@ -178,7 +178,10 @@ export function normalizeGameSlot(row, { fieldById, divisionById, timezone }) {
  * and the operator lost 400 good ones behind one bad one's message -- CLAUDE.md
  * §3's "never silently drop an unplaceable fixture" inverted into dropping every
  * placeable one. Unplaceable slots come back carrying their reason code and are
- * shown as TIME TBD; the rest schedule.
+ * **reported** as TIME TBD in the readiness banner, with a count and a cause;
+ * the rest schedule. Precisely: no row is rendered for them in the grid -- they
+ * are absent from it, and the banner is where they exist. Rendering a
+ * placeholder row is a larger change than this one.
  *
  * The season-wide case still blocks, and blocks by arithmetic rather than by a
  * special rule: a season with no timezone has no clock for *any* slot, so every
@@ -958,7 +961,11 @@ export default function GameSchedulingPage() {
         warnings={[...(reviewSnapshot?.warnings ?? game?.warnings ?? []), ...blackoutWarnings]}
       />
 
-      {(applyStatus !== 'idle' || statusMessage || applyError || schedulerReadinessMessage) && (
+      {(applyStatus !== 'idle' ||
+        statusMessage ||
+        applyError ||
+        schedulerReadinessMessage ||
+        unplaceableSlotMessage) && (
         <section className="glass-panel p-4 border border-border-subtle" aria-live="polite">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3 text-sm">
@@ -987,6 +994,14 @@ export default function GameSchedulingPage() {
                     schedulerReadinessMessage ||
                     'Review the staged schedule before applying it.'}
                 </p>
+                {/* Its own line, not an `||` arm. A slot with no clock is still
+                    unplaceable after an apply succeeds, so a message that
+                    `statusMessage` displaces the moment anything else happens
+                    reports the fact once and then stops -- a silent drop
+                    wearing a banner. */}
+                {unplaceableSlotMessage && (
+                  <p className="text-amber-300 mt-1">{unplaceableSlotMessage}</p>
+                )}
               </div>
             </div>
             {isReviewing && canManageSchedule && (

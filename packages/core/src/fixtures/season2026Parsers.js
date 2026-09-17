@@ -135,9 +135,12 @@ export function formatClockMinutes(minutes) {
  * Combine an ISO date with minutes past midnight into a **naive** local
  * datetime string (no offset, no `Z`).
  *
- * TODO(GAP-30): the corpus is wall-clock only and two dates fall after DST
- * ends, so these must not be turned into absolute instants until the domain
- * model carries a venue/organization timezone.
+ * **Stays naive, and GAP-30 closing does not change that.** The composer now
+ * exists — `timing/seasonClock.js` turns a wall time into an instant against a
+ * season's zone — but the arrow points fixtures -> timing and never back, so
+ * this parser has no zone to pass it and must not invent one. The corpus is
+ * wall-clock only and two of its dates fall after DST ends. A caller that holds
+ * the season's timezone composes these; nothing here does.
  *
  * @param {string} isoDate - e.g. `2026-11-07`
  * @param {number|null} minutes

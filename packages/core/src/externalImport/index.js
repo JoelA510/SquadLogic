@@ -39,13 +39,13 @@
  *   `EXTERNAL_MAPPING_NOT_PERSISTED` at `info` on every build, and exposes
  *   `serialiseExternalMappingRegistry()` / `readExternalMappingRegistry()` as
  *   the seam a store would use. There is no SQL migration and no storage
- *   adapter. The reason is GAP-30 rather than consistency with earlier phases:
- *   `SlotSchema` and `AssignmentSchema` still normalise through
- *   `z.coerce.date()`, so a registry round-tripped through them would come back
- *   with its dates reinterpreted, and a module whose whole job is to *detect* a
- *   difference between two artifacts must not be built on a store that
- *   **creates** one. `publication/index.js` refuses persistence for the same
- *   reason in the same words.
+ *   adapter. The reason used to be GAP-30: `SlotSchema` and `AssignmentSchema`
+ *   normalised through `z.coerce.date()`, so a registry round-tripped through
+ *   them came back with its dates reinterpreted, and a module whose whole job is
+ *   to *detect* a difference between two artifacts must not be built on a store
+ *   that **creates** one. That is closed — those schemas now refuse a naive wall
+ *   reading — and what is left is GAP-29's open stored half.
+ *   `publication/index.js` states the same position for the same reason.
  *
  * ## What it deliberately is not
  *

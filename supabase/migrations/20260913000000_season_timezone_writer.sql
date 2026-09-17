@@ -35,6 +35,36 @@
 BEGIN;
 
 -- --------------------------------------------------------------------------
+-- 0. The column has to exist first. On a fresh database it does not.
+--
+-- Found by pgTAP, not by reading: `20251214000002` added `timezone` and
+-- `school_day_end` to `season_settings`, and `20260331000000_definitive_schema`
+-- then DROPped the table (its guard at `:74-82` fires when `season_settings.id`
+-- is still `bigint`, which `20251208000000` made it) and recreated it at
+-- `:260-274` **without either column**. Nothing re-adds them. So on CI, on
+-- pgTAP, on `test:db:local` and on any new Supabase project the columns are
+-- absent, while a database already migrated to uuid ids before `20260331`
+-- landed kept them.
+--
+-- `IF NOT EXISTS` is what makes this correct in both worlds, which matters
+-- because which world production is in is not answerable from the repository.
+--
+-- **`school_day_end` comes back too, and that is not scope creep.** The two
+-- were lost together by one accident, and `practice-persistence/index.ts:112`
+-- does `.select('timezone, school_day_end')` — one query, both columns. Adding
+-- only `timezone` would leave that select failing on the missing sibling, so
+-- the column I am restoring still would not be readable there.
+-- --------------------------------------------------------------------------
+ALTER TABLE public.season_settings
+    ADD COLUMN IF NOT EXISTS timezone text;
+
+ALTER TABLE public.season_settings
+    ADD COLUMN IF NOT EXISTS school_day_end time DEFAULT '16:00';
+
+COMMENT ON COLUMN public.season_settings.timezone IS
+    'IANA zone name. The season''s clock: the one zone a wall time is placed on (GAP-30). Null means the season has no clock and game scheduling refuses rather than guessing the host''s zone.';
+
+-- --------------------------------------------------------------------------
 -- 1. The onboarding RPC writes the timezone it already receives.
 --
 -- Replaced wholesale from the latest full revision (`20260416000001`) rather

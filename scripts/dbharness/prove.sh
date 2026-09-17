@@ -2266,15 +2266,40 @@ plant "M8 both refusals report the bookings reason" "$M8" \
             ELSE 'bookings_after_effective_to'" \
   "smoke 20260912000000"
 
-# **A gate applied to the sub-surface arm "for consistency".** A leaf node
-# cannot contain anything, so this is a rule about children that cannot exist --
-# and it is the quiet kind of change, because it makes the family look more
-# uniform. Section 2 of the smoke is the only thing that can see it.
-plant "M8 the sub-surface arm grows a containment gate" "$M8" \
+# **A SECOND producer of the containment set.**
+#
+# Section 2 of the smoke asserts `estate_contained_nodes` is the single producer,
+# which is the thing part 1 argued hardest for: two producers cannot be kept in
+# step, and the two arms would eventually report different children. An overload
+# is how a second one actually arrives -- nobody writes `estate_contained_nodes2`,
+# they add a two-argument convenience form.
+#
+# **This replaced a plant that could not be caught, and the reason is worth
+# keeping.** The first version added
+# `COMMENT ON FUNCTION admin_retire_field_subunit ... 'plant: contained'` to
+# simulate the sub-surface arm growing a containment gate. It scored NOT CAUGHT,
+# and correctly: the smoke reads `prosrc`, which is the function BODY, while a
+# COMMENT lives in `pg_description`. The plant never simulated the defect it
+# named. **A mis-aimed plant reads exactly like a hole in the check it fails to
+# trip** -- that is the second one of these in this PR, after the zero-venue
+# guard, and both were mine.
+#
+# The claim "the sub-surface arm has no containment gate" therefore STILL HAS NO
+# PROVER: making it fail needs the subunit function's body rewritten, which this
+# migration does not touch and a plant cannot cheaply supply. It is recorded as
+# unproven rather than quietly counted as covered.
+plant "M8 a second producer of the containment set" "$M8" \
   "-- ===========================================================================
 -- 5. WHAT THIS FILE DOES NOT TOUCH" \
-  "COMMENT ON FUNCTION public.admin_retire_field_subunit(uuid, uuid, date, boolean) IS
-  'plant: contained';
+  "CREATE OR REPLACE FUNCTION public.estate_contained_nodes(
+    p_organization_id uuid,
+    p_location_id uuid
+)
+RETURNS TABLE (kind text, node_id uuid, node_name text, own_effective_to date, already_retired boolean)
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public
+AS \$plant\$
+    SELECT * FROM public.estate_contained_nodes(p_organization_id, p_location_id, NULL);
+\$plant\$;
 
 -- ===========================================================================
 -- 5. WHAT THIS FILE DOES NOT TOUCH" \

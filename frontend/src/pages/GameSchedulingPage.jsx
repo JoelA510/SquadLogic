@@ -31,7 +31,7 @@ import { persistGameScheduleReview } from '../utils/gamePersistenceClient.js';
 import { useFieldClosures } from '../hooks/useFieldClosures.js';
 import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
 import { todayIso } from '../utils/today.js';
-import { isFieldOfferableOn } from '../utils/fieldLifecycle.js';
+import { isFieldOfferableOn, venueOf, venueRegistry } from '../utils/fieldLifecycle.js';
 
 function normalizeAssignmentSource(source) {
   return source === 'manual' || source === 'locked' ? 'manual' : 'auto';
@@ -258,39 +258,61 @@ export default function GameSchedulingPage() {
       setReferenceError(null);
 
       try {
-        const [{ data: fieldRows, error: fieldError }, { data: slotRows, error: slotError }] =
-          await Promise.all([
-            // **No `.eq('active', true)` any more.** `fields.active` is a
-            // WRITE-TIME CACHE of `effective_to`, not a continuously true
-            // derivation: 20260906000000's trigger fires on write and reads
-            // `current_date`, so a field retired with a FUTURE date keeps
-            // `active = true` until something writes the row again. Filtering
-            // on the column alone therefore kept formally retired ground in the
-            // scheduler's list on and after the day the retirement took effect
-            // -- which is exactly the guarantee 8.4's retire path exists to
-            // make. The migration's own header names repointing this read as PR
-            // 3's work. `isLiveOn()` is the reading `field_is_live_on` gives in
-            // SQL; `active` is still honoured, because it also means
-            // "deactivated" for every field deactivated before dating existed.
-            supabase.from('fields').select('*').eq('organization_id', currentOrganization.id),
-            supabase
-              .from('game_slots')
-              .select('*, divisions(id, name)')
-              .eq('organization_id', currentOrganization.id)
-              .order('week_index', { ascending: true })
-              .order('start', { ascending: true }),
-          ]);
+        const [
+          { data: fieldRows, error: fieldError },
+          { data: slotRows, error: slotError },
+          { data: venueRows, error: venueError },
+        ] = await Promise.all([
+          // **No `.eq('active', true)` any more.** `fields.active` is a
+          // WRITE-TIME CACHE of `effective_to`, not a continuously true
+          // derivation: 20260906000000's trigger fires on write and reads
+          // `current_date`, so a field retired with a FUTURE date keeps
+          // `active = true` until something writes the row again. Filtering
+          // on the column alone therefore kept formally retired ground in the
+          // scheduler's list on and after the day the retirement took effect
+          // -- which is exactly the guarantee 8.4's retire path exists to
+          // make. The migration's own header names repointing this read as PR
+          // 3's work. `isLiveOn()` is the reading `field_is_live_on` gives in
+          // SQL; `active` is still honoured, because it also means
+          // "deactivated" for every field deactivated before dating existed.
+          supabase.from('fields').select('*').eq('organization_id', currentOrganization.id),
+          supabase
+            .from('game_slots')
+            .select('*, divisions(id, name)')
+            .eq('organization_id', currentOrganization.id)
+            .order('week_index', { ascending: true })
+            .order('start', { ascending: true }),
+          // **The venues, because a pitch at a closed site is closed.**
+          // 20260911000000 retires a venue by writing one date on one row
+          // and copying nothing down, so the containment half of
+          // `isFieldOfferableOn` has to be read from here. Loading the
+          // fields alone and passing `null` would report every pitch
+          // unoffered; not loading them at all no longer compiles, because
+          // the third argument throws on `undefined`.
+          supabase
+            .from('locations')
+            .select('id, effective_to')
+            .eq('organization_id', currentOrganization.id),
+        ]);
 
         if (!isMounted) return;
         if (fieldError) throw fieldError;
         if (slotError) throw slotError;
+        // **A failed venue read is an ERROR, not an empty registry.** The 8.4
+        // PR 3 review found `useFields().error` being dropped, which left a
+        // clean-looking grid on a failed read; swallowing this one would hide
+        // every pitch instead, which looks different and is the same defect.
+        if (venueError) throw venueError;
 
         setAllFields(fieldRows ?? []);
         // The two halves of "may the scheduler still offer this" live in one
         // testable producer, because the reading is the point of the change and
         // an inline predicate on a 1000-line page is a reading nothing can pin.
         const asOf = todayIso();
-        setFields((fieldRows ?? []).filter((row) => isFieldOfferableOn(row, asOf)));
+        const venues = venueRegistry(venueRows ?? []);
+        setFields(
+          (fieldRows ?? []).filter((row) => isFieldOfferableOn(row, asOf, venueOf(row, venues)))
+        );
         setGameSlotRows(slotRows ?? []);
       } catch (err) {
         if (!isMounted) return;

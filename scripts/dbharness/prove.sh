@@ -22,6 +22,8 @@ R6="$REPO/docs/sql/20260910000000_revert.sql"
 # 8.4 gap B: the venue and sub-surface depths, and the scoped producer.
 M7="$REPO/supabase/migrations/20260911000000_venue_subunit_effective_dating.sql"
 R7="$REPO/docs/sql/20260911000000_revert.sql"
+M8="$REPO/supabase/migrations/20260912000000_retire_refuses_on_contained_estate.sql"
+R8="$REPO/docs/sql/20260912000000_revert.sql"
 S5="$REPO/docs/sql/20260909000000_smoke.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -2230,6 +2232,84 @@ plant "R7 revert leaves the venue column behind" "$R7" \
   "ALTER TABLE public.locations DROP COLUMN IF EXISTS effective_to;" \
   "-- plant: the venue column is left behind" \
   "revert 20260911000000: expected none/1"
+
+# ---------------------------------------------------------------------------
+# 8.4 gap B part 2: the containment GATE
+# ---------------------------------------------------------------------------
+#
+# **The defect this migration exists to close, planted as it stood on main.**
+# `20260911000000` computed, audited and returned the containment and gated on
+# the bookings alone, so a venue holding live pitches with nothing booked
+# committed on the first call. Every structural assertion in the smoke stays
+# green under this; only the behavioural section can see it.
+plant "M8 the venue gate ignores the contained estate" "$M8" \
+  "IF (v_affected_count > 0 OR v_contained_count > 0) AND NOT COALESCE(p_confirm, false) THEN" \
+  "IF v_affected_count > 0 AND NOT COALESCE(p_confirm, false) THEN" \
+  "smoke 20260912000000"
+
+# **The empty case, from the other side.** Gating on the LIST rather than the
+# COUNT refuses a venue that holds nothing to close -- an operator made to
+# confirm a refusal about nothing, and `admin_delete_field`'s contract broken
+# in the direction nobody notices because it only ever adds a click.
+plant "M8 the gate reads the contained list instead of the count" "$M8" \
+  "IF (v_affected_count > 0 OR v_contained_count > 0) AND NOT COALESCE(p_confirm, false) THEN" \
+  "IF (v_affected_count > 0 OR jsonb_array_length(v_contained) > 0) AND NOT COALESCE(p_confirm, false) THEN" \
+  "smoke 20260912000000"
+
+# **The two refusal reasons collapsed into one.** Every count stays right and
+# every audit phase stays right; what is lost is the ability to tell "this
+# venue has games on it" from "this venue holds live pitches" in the trail.
+plant "M8 both refusals report the bookings reason" "$M8" \
+  "            WHEN v_affected_count > 0 THEN 'bookings_after_effective_to'
+            ELSE 'contained_estate_after_effective_to'" \
+  "            WHEN v_affected_count > 0 THEN 'bookings_after_effective_to'
+            ELSE 'bookings_after_effective_to'" \
+  "smoke 20260912000000"
+
+# **A gate applied to the sub-surface arm "for consistency".** A leaf node
+# cannot contain anything, so this is a rule about children that cannot exist --
+# and it is the quiet kind of change, because it makes the family look more
+# uniform. Section 2 of the smoke is the only thing that can see it.
+plant "M8 the sub-surface arm grows a containment gate" "$M8" \
+  "-- ===========================================================================
+-- 5. WHAT THIS FILE DOES NOT TOUCH" \
+  "COMMENT ON FUNCTION public.admin_retire_field_subunit(uuid, uuid, date, boolean) IS
+  'plant: contained';
+
+-- ===========================================================================
+-- 5. WHAT THIS FILE DOES NOT TOUCH" \
+  "smoke 20260912000000"
+
+# The revert names one cost and counts two figures. One plant per figure.
+#
+# **The exposure count reading the wrong set.** Counting the venues that are
+# ALREADY retired instead of the live ones reports on venues that cannot lose a
+# gate they will never reach -- and against a seed where every figure was equal
+# it would have printed the right number anyway. That is why the harness seed
+# for this revert makes examined, exposed and undated-nodes 2, 1 and 3.
+plant "R8 revert counts retired venues instead of exposed ones" "$R8" \
+  "     WHERE l.effective_to IS NULL
+     ORDER BY l.name" \
+  "     WHERE l.effective_to IS NOT NULL
+     ORDER BY l.name" \
+  "examined/exposed totals do not match the planted estate"
+
+# **The undated-node count derived from the data the loss corrupts.** Counting
+# only the children that DO carry a date reports zero undated nodes for every
+# venue -- a total loss of the gate printed as no exposure at all. This is the
+# same shape as R7's containment-count plant, one migration along.
+plant "R8 revert counts dated nodes instead of undated ones" "$R8" \
+  "             WHERE c.own_effective_to IS NULL) AS live_nodes" \
+  "             WHERE c.own_effective_to IS NOT NULL) AS live_nodes" \
+  "revert 20260912000000: planted a live venue with three undated nodes"
+
+# **The zero-guard removed.** Without it a revert rehearsed on an empty database
+# prints reassuring zeroes and proves only that the code parses, which is the
+# failure its own comment describes.
+plant "R8 revert accepts having examined zero venues" "$R8" \
+  "  IF v_venues = 0 AND COALESCE(current_setting('revert.allow_empty', true), 'off') <> 'on' THEN" \
+  "  IF false THEN" \
+  "examined/exposed totals do not match the planted estate"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

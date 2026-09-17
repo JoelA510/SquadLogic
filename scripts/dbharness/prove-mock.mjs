@@ -139,6 +139,81 @@ const PLANTS = [
           operation: 'admin_update_field_blackout',`,
     suite: 'tests/fieldBlackoutMockContract.test.js',
   },
+  // -------------------------------------------------------------------
+  // 8.4 gap B: the venue and sub-surface depths in the mock
+  // -------------------------------------------------------------------
+  //
+  // **The defect the migration exists to prevent**, on the arm the E2E suite
+  // actually runs. One word, and it is what LIVE-1, LIVE-2 and LIVE-3 each
+  // were: the venue guard asking a FIELD-scoped question.
+  {
+    label: 'the venue guard asks a field-scoped question',
+    find: "const affected = mockFieldBookings(db, orgId, node.id, effectiveTo, 'location').map(",
+    replace: "const affected = mockFieldBookings(db, orgId, node.id, effectiveTo, 'field').map(",
+  },
+  // Containment from the other side: copying the date down satisfies every
+  // count the refusal reports and only the child-date assertions can see it.
+  {
+    label: 'the venue retirement copies its date onto its children',
+    find: `        Object.assign(node, {
+          effective_to: effectiveTo,
+          updated_at: new Date().toISOString(),
+        });
+        audit('location', node.id, 'admin_retire_location', {
+          phase: 'after',`,
+    replace: `        Object.assign(node, {
+          effective_to: effectiveTo,
+          updated_at: new Date().toISOString(),
+        });
+        for (const f of db.fields || []) {
+          if (String(f.location_id) === String(node.id)) f.effective_to = effectiveTo;
+        }
+        audit('location', node.id, 'admin_retire_location', {
+          phase: 'after',`,
+  },
+  // The third scope, widened to its parent pitch: it then refuses
+  // retirements that strand nothing, and the operator learns to confirm past
+  // the guard.
+  {
+    label: 'the sub-surface scope widens to its parent pitch',
+    find: "const affected = mockFieldBookings(db, orgId, node.id, effectiveTo, 'subunit').map(",
+    replace:
+      "const affected = mockFieldBookings(db, orgId, node.field_id, effectiveTo, 'field').map(",
+  },
+  // An unrecognised scope answered with an empty set rather than thrown: a
+  // guard reporting "nothing is booked here" because its scope was misspelled.
+  {
+    label: 'an unknown booking scope returns nothing instead of throwing',
+    find: `  if (!['field', 'location', 'subunit'].includes(scope)) {
+    throw new Error(\`unknown booking scope \${scope}; expected field, location or subunit\`);
+  }`,
+    replace: `  if (false) {
+    throw new Error('unreachable');
+  }`,
+  },
+  // The containment report, derived from the data a break corrupts. A venue
+  // retirement writes nothing to a child, so a set gathered from child state
+  // is empty for every venue.
+  {
+    label: 'the containment set is derived from child state',
+    find: `  const fields = (db.fields || []).filter(
+    (f) =>
+      String(f.organization_id) === String(orgId) && String(f.location_id) === String(locationId)
+  );`,
+    replace: `  const fields = (db.fields || []).filter(
+    (f) =>
+      String(f.organization_id) === String(orgId) &&
+      String(f.location_id) === String(locationId) &&
+      (f.effective_to ?? null) !== null
+  );`,
+  },
+  // `already_retired` inverted: a retirement claiming credit for closing what
+  // was already closed, which is a wrong number in front of a decision.
+  {
+    label: 'already_retired counts the nodes this call really closes',
+    find: '        const containedCount = contained.filter((row) => !row.already_retired).length;',
+    replace: '        const containedCount = contained.length;',
+  },
   {
     label: 'retire un-deactivates an inactive field',
     find: 'active: previous.active !== false && fieldIsLiveOn(p.p_effective_to),',

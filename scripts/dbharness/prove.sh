@@ -19,6 +19,9 @@ R5="$REPO/docs/sql/20260909000000_revert.sql"
 # 8.4 gap A.
 M6="$REPO/supabase/migrations/20260910000000_admin_update_field_blackout.sql"
 R6="$REPO/docs/sql/20260910000000_revert.sql"
+# 8.4 gap B: the venue and sub-surface depths, and the scoped producer.
+M7="$REPO/supabase/migrations/20260911000000_venue_subunit_effective_dating.sql"
+R7="$REPO/docs/sql/20260911000000_revert.sql"
 S5="$REPO/docs/sql/20260909000000_smoke.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # What each plant scored, by label, for the census at the bottom of this file.
@@ -2022,6 +2025,124 @@ DROP FUNCTION IF EXISTS public.admin_delete_field_blackout(uuid, uuid);" \
   "revert 20260910000000: the create/delete siblings read 1 after the revert"
 
 # ---------------------------------------------------------------------------
+# 8.4 gap B: the scope, the containment, and the restore
+# ---------------------------------------------------------------------------
+#
+# **The one defect this whole migration exists to prevent**, planted so the
+# prevention is proved rather than asserted: the venue arm asking a
+# FIELD-scoped question. It is one word, it is what LIVE-1, LIVE-2 and LIVE-3
+# each were, and every structural assertion in the file stays green.
+plant "M7 the venue guard asks a field-scoped question" "$M7" \
+  "FROM public.field_bookings(p_organization_id, p_location_id, p_effective_to, 'location') b;" \
+  "FROM public.field_bookings(p_organization_id, p_location_id, p_effective_to, 'field') b;" \
+  "smoke 20260911000000"
+
+# **The containment decision, planted from the other side.** Copying the date
+# onto the children satisfies every count the refusal reports and every audit
+# phase; only the "no child carries a date" assertions can see it, and they
+# exist in both the smoke and the shared table.
+plant "M7 the venue retirement copies its date onto its children" "$M7" \
+  "    WHERE id = p_location_id AND organization_id = p_organization_id
+    RETURNING * INTO v_after;
+
+    PERFORM public.record_audit_event(
+        p_organization_id, 'settings.updated', 'location', p_location_id,
+        jsonb_build_object(
+            'setting', 'facility.location',
+            'operation', 'admin_retire_location',
+            'phase', 'after'," \
+  "    WHERE id = p_location_id AND organization_id = p_organization_id
+    RETURNING * INTO v_after;
+
+    UPDATE public.fields SET effective_to = p_effective_to
+     WHERE location_id = p_location_id AND organization_id = p_organization_id;
+
+    PERFORM public.record_audit_event(
+        p_organization_id, 'settings.updated', 'location', p_location_id,
+        jsonb_build_object(
+            'setting', 'facility.location',
+            'operation', 'admin_retire_location',
+            'phase', 'after'," \
+  "smoke 20260911000000"
+
+# The third scope, widened to its parent pitch: a sub-surface retirement that
+# refuses over a game on the full pitch refuses retirements that strand
+# nothing, and the operator learns to confirm past it.
+plant "M7 the sub-surface scope widens to its parent pitch" "$M7" \
+  "    WHEN 'subunit' THEN p_field_subunit_id IS NOT NULL AND p_field_subunit_id = p_scope_id" \
+  "    WHEN 'subunit' THEN EXISTS (
+      SELECT 1 FROM public.field_subunits su
+       WHERE su.id = p_scope_id AND su.field_id = p_field_id
+    )" \
+  "smoke 20260911000000"
+
+# **An unknown scope answered with an empty set** rather than refused: a guard
+# reporting "nothing is booked here" because its scope was misspelled is the
+# loudest form of the silent pass, and it is the entire reason the producer is
+# plpgsql rather than sql.
+plant "M7 an unknown scope returns an empty set instead of refusing" "$M7" \
+  "    IF p_scope IS NULL OR p_scope NOT IN ('field', 'location', 'subunit') THEN" \
+  "    IF false THEN" \
+  "smoke 20260911000000"
+
+# The revert names five costs and counts three. One plant per count, each aimed
+# at its own claim, because a warning naming one cost of three is what LIVE-2's
+# round 1 found.
+plant "R7 revert counts no venue retirements" "$R7" \
+  "       WHERE l.effective_to IS NOT NULL" \
+  "       WHERE false" \
+  "revert 20260911000000: planted a retired venue with three fields"
+
+# **The containment count derived from the data a break corrupts.** A venue
+# retirement writes nothing to a child, so counting only children that carry a
+# date reports zero for every venue -- a total loss printed as no loss. The
+# revert counts from `fields` unconditionally, and this proves it.
+plant "R7 revert counts containment from child state" "$R7" \
+  "       WHERE f.location_id = r.id AND f.organization_id = r.organization_id;" \
+  "       WHERE f.location_id = r.id AND f.organization_id = r.organization_id
+         AND f.effective_to IS NOT NULL;" \
+  "revert 20260911000000: planted a retired venue with three fields"
+
+plant "R7 revert counts no sub-surface retirements" "$R7" \
+  "       WHERE su.effective_to IS NOT NULL" \
+  "       WHERE false" \
+  "revert 20260911000000: planted two retired sub-surfaces"
+
+# **The dangerous half.** Dropping the scoped producer without putting the
+# three-argument one back leaves admin_retire_field, admin_delete_field and
+# rollback_field_import_job raising 42883 on every call. The revert asserts its
+# own restore; this makes that assertion earn its place.
+plant "R7 revert never restores the three-argument producer" "$R7" \
+  "CREATE OR REPLACE FUNCTION public.field_bookings(
+    p_organization_id uuid,
+    p_field_id uuid," \
+  "CREATE OR REPLACE FUNCTION public.field_bookings_not_restored(
+    p_organization_id uuid,
+    p_field_id uuid," \
+  "FAIL revert 20260911000000"
+
+# A DROP whose argument list drifted from the CREATE's is a silent no-op, which
+# is how docs/sql/reverts/20260504060000 came to report success over a function
+# it had not removed. Here it leaves TWO field_bookings standing, and a
+# three-argument call then resolves to neither.
+plant "R7 revert drops a producer signature that does not exist" "$R7" \
+  "DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date, text);" \
+  "DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date, boolean);" \
+  "revert 20260911000000: field_bookings after the revert reads"
+
+# A revert that leaves an RPC standing over a producer that can no longer
+# answer its question is worse than one that leaves nothing.
+plant "R7 revert leaves a lifecycle RPC standing" "$R7" \
+  "DROP FUNCTION IF EXISTS public.admin_unretire_location(uuid, uuid);" \
+  "-- plant: the unretire arm is left behind" \
+  "revert 20260911000000: these objects survived the revert"
+
+plant "R7 revert leaves the venue column behind" "$R7" \
+  "ALTER TABLE public.locations DROP COLUMN IF EXISTS effective_to;" \
+  "-- plant: the venue column is left behind" \
+  "revert 20260911000000: effective_to survived on"
+
+# ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
 #
@@ -2065,6 +2186,12 @@ declare -A CLAIM_PROVER=(
   ["(checked) exactly one public.rollback_field_import_job survives the revert, and it no longer calls the producer"]="R5 revert drops the rollback instead of restoring it|R5 revert leaves the rollback on the producer|R5 revert restores the rollback under a second signature"
   ["(checked) field_availability_profiles.field_id is back to ON DELETE SET NULL"]="R5 revert leaves the FK cascading"
   ["(checked) exactly one public.admin_delete_field survives the revert, and it no longer calls the dropped scenario helpers"]="R5 revert drops admin_delete_field instead of restoring it|R5 revert restores a body that still calls the dropped helpers"
+  ["(checked) the revert named the venue retirement it was about to erase and the fields its containment was closing"]="R7 revert counts no venue retirements|R7 revert counts containment from child state"
+  ["(checked) the revert named both sub-surface retirements and totalled the two kinds separately"]="R7 revert counts no sub-surface retirements"
+  ["(checked) the revert proved its own restore of the three-argument producer"]="R7 revert never restores the three-argument producer"
+  ["(checked) exactly one public.field_bookings survives the revert, at the three-argument field-scoped signature its three callers use"]="R7 revert drops a producer signature that does not exist"
+  ["(checked) all six lifecycle objects this migration added are gone"]="R7 revert leaves a lifecycle RPC standing"
+  ["(checked) both effective_to columns are gone, and fields.effective_to is untouched"]="R7 revert leaves the venue column behind"
   ["(checked) the revert counted the admin-authored windows that go back to losing their id on an edit"]="R6 revert counts no admin-authored windows"
   ["(checked) the revert counted the edit audit rows whose operation stops having a writer"]="R6 revert counts the wrong audit operation"
   ["(checked) the revert counted the frozen import windows that lose their server-side refusal"]="R6 revert counts no frozen import windows"

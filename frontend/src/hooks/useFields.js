@@ -253,6 +253,155 @@ export function useFields() {
     return data;
   };
 
+  /**
+   * The two estate depths `admin_retire_field` does not cover, described once.
+   *
+   * **Four wrappers, one implementation, and that is the point.** The defects
+   * this family keeps producing — LIVE-1, LIVE-2, LIVE-3 — are each one arm of
+   * a guard corrected while its sibling was not. `admin_retire_location` and
+   * `admin_retire_field_subunit` ship the SAME contract at two depths
+   * (refusal object rather than raise, `retired` boolean, `affected` with no
+   * per-row `disposition`), so the differences are named as data here and the
+   * behaviour is written once. A correction to how a refusal is read reaches
+   * both depths or neither.
+   *
+   * What genuinely differs is only: which parameter carries the id, which key
+   * carries the row back, and whether the depth has anything BELOW it.
+   *
+   * @type {Record<string, { noun: string, retireRpc: string, unretireRpc: string,
+   *   idParam: string, rowKey: string, contains: boolean }>}
+   */
+  const ESTATE_DEPTHS = {
+    location: {
+      noun: 'venue',
+      retireRpc: 'admin_retire_location',
+      unretireRpc: 'admin_unretire_location',
+      idParam: 'p_location_id',
+      rowKey: 'location',
+      // A venue HOLDS fields and sub-surfaces, and retiring it closes them by
+      // containment rather than by writing a date onto each. `contained` is
+      // the half of the consequence that is not a booking list.
+      contains: true,
+    },
+    field_subunit: {
+      noun: 'sub-surface',
+      retireRpc: 'admin_retire_field_subunit',
+      unretireRpc: 'admin_unretire_field_subunit',
+      idParam: 'p_field_subunit_id',
+      rowKey: 'field_subunit',
+      // **The leaf of the estate, and the absence is deliberate.**
+      // `admin_retire_field_subunit` returns NO `contained` key —
+      // 20260911000000 section 7 argues that an empty one would be "a promise
+      // with no producer", and its smoke asserts the key is absent. So this
+      // depth must not manufacture one either: "nothing below" and "nobody
+      // looked" have to stay distinguishable in the UI as well as in the RPC.
+      contains: false,
+    },
+  };
+
+  /**
+   * Retire a venue or a sub-surface, or find out what retiring it would strand.
+   *
+   * Mirrors {@link retireField} exactly, because the RPCs do: an unconfirmed
+   * call IS the dry run, a refusal arrives with `error` null and
+   * `{retired:false, reason:'bookings_after_effective_to', ...}`, and a
+   * `refused` audit row is written for the world the operator decided against.
+   *
+   * **The affected rows carry no `disposition`** at either depth, for the same
+   * reason the field arm drops it: a retirement writes a date and destroys
+   * nothing, so "what would happen to this row" has no answer to give.
+   *
+   * **`contained` is returned untouched at venue depth and is absent at
+   * sub-surface depth.** It is NOT a booking list: each entry is a field or a
+   * sub-surface the venue holds, with `already_retired` true where that node's
+   * own window already ends no later than this date. Rendering it as bookings,
+   * or defaulting it to `[]` here so a caller can render it uniformly, would
+   * both misreport what the operator is about to do.
+   *
+   * @param {'location'|'field_subunit'} depth
+   * @param {string} nodeId
+   * @param {{ effectiveTo: string, confirm?: boolean }} options `effectiveTo`
+   *   is the inclusive LAST DAY the ground is usable.
+   * @returns {Promise<Record<string, any>>}
+   */
+  const retireEstateNode = async (depth, nodeId, { effectiveTo, confirm = false }) => {
+    const spec = ESTATE_DEPTHS[depth];
+    if (!spec) throw new Error(`Unknown estate depth: ${depth}`);
+    if (!currentOrganization?.id) throw new Error('No active organization');
+    if (!effectiveTo) {
+      throw new Error('An end date is required; retiring with no end date is a deletion');
+    }
+
+    const { data, error: rpcError } = await supabase.rpc(spec.retireRpc, {
+      p_organization_id: currentOrganization.id,
+      [spec.idParam]: nodeId,
+      p_effective_to: effectiveTo,
+      p_confirm: confirm,
+    });
+
+    if (rpcError) throw rpcError;
+    // The same guard `retireField` carries: a response we cannot read is an
+    // error, not a refusal and not a success. "0 bookings affected" for an
+    // unreadable answer tells the operator the ground is clear when the truth
+    // is that we do not know.
+    if (data === null || data === undefined || typeof data.retired !== 'boolean') {
+      throw new Error(`${spec.retireRpc} returned no readable result`);
+    }
+    if (data.retired) await fetchLocationsAndFields();
+    return data;
+  };
+
+  /**
+   * Clear a venue's or a sub-surface's end date.
+   *
+   * **A venue unretire is the exact inverse of its retire, and a field's is
+   * not.** `admin_unretire_field` cannot restore `fields.active` because it
+   * cannot know whether the inactivity came from the retirement; a venue
+   * retirement wrote one date on one row and copied nothing down, so clearing
+   * it restores every child that has no date of its own and leaves alone every
+   * child that has. `contained` comes back with `already_retired` false for
+   * every row — no date is being applied, so this call claims to have restored
+   * nobody's own window.
+   *
+   * @param {'location'|'field_subunit'} depth
+   * @param {string} nodeId
+   * @returns {Promise<Record<string, any>>}
+   */
+  const unretireEstateNode = async (depth, nodeId) => {
+    const spec = ESTATE_DEPTHS[depth];
+    if (!spec) throw new Error(`Unknown estate depth: ${depth}`);
+    if (!currentOrganization?.id) throw new Error('No active organization');
+
+    const { data, error: rpcError } = await supabase.rpc(spec.unretireRpc, {
+      p_organization_id: currentOrganization.id,
+      [spec.idParam]: nodeId,
+    });
+
+    if (rpcError) throw rpcError;
+    // The unretire arms return `{retired:false, <rowKey>: <row>}`. The ROW is
+    // what makes the answer readable — `retired:false` alone is also what a
+    // refusal says — so this checks for the row, as `unretireField` checks for
+    // `data.field`.
+    if (!data || !data[spec.rowKey]) {
+      throw new Error(`${spec.unretireRpc} returned no readable result`);
+    }
+    await fetchLocationsAndFields();
+    return data;
+  };
+
+  /** @param {string} locationId @param {{ effectiveTo: string, confirm?: boolean }} options */
+  const retireLocation = (locationId, options) => retireEstateNode('location', locationId, options);
+
+  /** @param {string} locationId */
+  const unretireLocation = (locationId) => unretireEstateNode('location', locationId);
+
+  /** @param {string} subunitId @param {{ effectiveTo: string, confirm?: boolean }} options */
+  const retireFieldSubunit = (subunitId, options) =>
+    retireEstateNode('field_subunit', subunitId, options);
+
+  /** @param {string} subunitId */
+  const unretireFieldSubunit = (subunitId) => unretireEstateNode('field_subunit', subunitId);
+
   return {
     locations,
     fields,
@@ -265,6 +414,10 @@ export function useFields() {
     deleteField,
     retireField,
     unretireField,
+    retireLocation,
+    unretireLocation,
+    retireFieldSubunit,
+    unretireFieldSubunit,
     refresh: fetchLocationsAndFields,
   };
 }

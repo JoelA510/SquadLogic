@@ -3221,3 +3221,100 @@ host-zone reading — a 9pm Saturday New York practice buckets as Sunday on a UT
 host), LIVE-8, the `NEW_MIGRATIONS` list, the eight post-merge findings, and
 GAP-29. GATE 2 — the engine wiring question — was gated on GAP-29 and GAP-30
 together and is now half-unblocked.
+
+## GAP-30 follow-ups — the reporting layer — **merged (#398, `2bfa44c`)**
+
+Eight findings from `/code-review` on #396 after it merged, plus six that
+`/code-review` raised against the follow-up PR itself. All fourteen fixed.
+
+**Where they all were is the point.** #396's twelve positive controls each
+perturbed the composer, and the composer survived three adversarial passes
+without a scratch. Every significant post-merge finding was in the **reporting
+layer** those controls never touched.
+
+### The headline: a banner that could not be read
+
+`describeUnplaceableSlots` bucketed on `entry.reason`, and every reason
+`resolveZonedInstant` builds embeds that slot's own date and time — so no two
+real slots ever shared a bucket. Executed against merged code:
+
+```
+slots    5  ->     832 chars
+slots   50  ->   8,347 chars
+slots  400  ->  66,797 chars      all in one <p>
+```
+
+A season with a null `timezone` makes **every** row unplaceable, so that is the
+normal case for the exact failure the banner exists to report: the operator who
+most needs to read it gets 66 KB of near-identical sentences.
+
+After the fix, executed the same way: 400 slots → **1,021 characters**, 5,000 →
+1,036, and three slots still named in full at 481. A code the cause table does
+not carry falls back to a generic sentence rather than the slot's own reason,
+so boundedness does not depend on the table being maintained — the structural
+answer rather than a list someone must remember to extend.
+
+**The test was the more important half.** It asserted the message did not split
+over 40 slots that all shared one `slot_date` and one `start_time` — a state
+the production path cannot produce, propping up a claim the production path did
+not satisfy. That is the shape CLAUDE.md names, written by the agent who spent
+that PR building controls against it.
+
+### Twice more, the same shape one layer down
+
+- **The smoke's writer check could pass on a function that never writes.** It
+  tested `prosrc ~* 'season_settings'` AND `~* 'timezone'`, and
+  `timezone('utc', now())` appears throughout this schema. The check written to
+  prove the column has a writer would have passed on any function that merely
+  touched the table. Now the column must be named in the INSERT's column list
+  or assigned in the UPDATE's SET clause — and the meta-assertion is
+  **constructed rather than observed**: three decoys are created inside a
+  rolled-back transaction, two that only mention `timezone()` and must not
+  count, one that assigns the column and must, with discrimination asserted in
+  both directions. Counting the loose predicate against the strict one would
+  have rested on whether some unrelated function happens to say
+  `timezone('utc', now())`.
+- **The cause table's own JSDoc claimed a registry-driven coverage test that
+  did not exist** — a guarantee asserted in a comment and enforced nowhere, in
+  the very PR fixing that shape. Caught by `/code-review` on the follow-up.
+
+### A pre-existing defect surfaced by doing what was asked
+
+The brief said to _prove_ the seed opt-in rather than revert the hunk and move
+on. Doing so found that with `squadlogic.seed_sample_data=on` the **whole
+migration chain aborts** at `20260310000002_unified_rls_schema`:
+`column "organization_id" of relation "divisions" contains null values`. The
+2024 sample season predates multi-tenancy and names no `organization_id` in any
+of its 31 INSERTs; `supabase/seed.sql` is the same script without the guard and
+has the same gap.
+
+Out of scope to repair (it needs an organisation threaded through the entire
+seed, and both scripts must move together), and **pinned rather than hidden**:
+the harness stage fails if the build starts succeeding _and_ fails if it breaks
+anywhere else, so the pin cannot rot into a permanent excuse. Both seed headers
+say so. Recorded as an owned task, because a pin nobody owns outlives everyone
+who understood it.
+
+### Two things the agent did that are worth copying
+
+- **It improved on the brief and said so.** The instruction was to move the
+  per-slot date and time out of the aggregate line. It kept up to three
+  examples per bucket plus a remainder count instead, because collapsing to one
+  line per code would leave three DST casualties in a 400-slot season
+  unfindable while buying boundedness that three examples already buy. The
+  deviation was flagged, not quietly taken.
+- **It caught itself verifying on the wrong head.** The `TZ=America/Los_Angeles`
+  run had been done on an earlier commit; it re-ran on the final head before
+  claiming it. That is precisely the failure #396 shipped a red CI on, corrected
+  without being told twice.
+
+### The rule this pair of PRs earned
+
+> The controls I built all perturbed the thing I was thinking about. The gaps
+> were in the things I was not.
+
+_"Break the production path and watch the check go red"_ only covers the paths
+you think to break. **Choosing what to break is a separate skill from building
+the control, and it is the one that was missing.** The composer was reviewed
+three times because it was interesting; the banner shipped a 66 KB paragraph
+because it was not.

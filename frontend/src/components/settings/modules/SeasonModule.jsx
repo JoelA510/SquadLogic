@@ -11,8 +11,14 @@ export default function SeasonModule() {
   // localStorage-backed and ThemeContext's own header calls it legacy state
   // slated for removal. Until GAP-30 it was the only thing this control wrote,
   // so the column three surfaces read had no writer at all and every season
-  // read as having no clock. One source of truth, and this is it.
-  const { currentOrganization, currentSeasonSetting, reflectSeasonTimezone } = useOrganization();
+  // read as having no clock.
+  //
+  // The select renders straight from the season row and `refetchOrgs()` is the
+  // update. No local mirror of the value: a copy held in context state and a
+  // column in the database are two answers to "what is this season's clock",
+  // and they disagree for exactly as long as a refetch is in flight. That is
+  // the same second-source-of-truth this gap is made of, one layer up.
+  const { currentOrganization, currentSeasonSetting, refetchOrgs } = useOrganization();
   const timezone = currentSeasonSetting?.timezone ?? '';
 
   const [seasonFormat, setSeasonFormat] = useState('single');
@@ -191,7 +197,7 @@ export default function SeasonModule() {
                 setTimezoneError(error.message || 'Season timezone could not be saved.');
                 return;
               }
-              reflectSeasonTimezone(seasonId, newVal);
+              refetchOrgs();
               if (isImpersonating) {
                 await supabase.rpc('record_audit_event', {
                   p_organization_id: orgId,

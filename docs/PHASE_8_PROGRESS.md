@@ -2523,7 +2523,8 @@ mutation harness is not work in progress".
 The half part 1 carved out: the screen, the hooks, and — found by building the
 screen — a gate the database was missing.
 
-- **PR:** _pending_, branch `feat/venue-subunit-retire-ui`.
+- **PR:** [#393](https://github.com/JoelA510/SquadLogic/pull/393), branch
+  `feat/venue-subunit-retire-ui`.
 - **Migration:** `20260912000000_retire_refuses_on_contained_estate.sql`.
 - **Tests 3004 → 3033** (192 → 193 files), **E2E 78 → 80**, scenario table
   **65 → 68** rows all executed against Postgres, `test:db:local` **HARNESS OK**

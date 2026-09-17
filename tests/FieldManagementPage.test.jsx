@@ -255,3 +255,134 @@ describe('FieldManagementPage delete flow', () => {
     confirmSpy.mockRestore();
   });
 });
+
+describe('FieldManagementPage: the two new estate depths', () => {
+  /** Venue and sub-surface state the page has to render controls for. */
+  const ESTATE = {
+    locations: [
+      { id: 'loc-1', name: 'Canyon Park', effective_to: null },
+      { id: 'loc-2', name: 'Closed Site', effective_to: '2026-08-31' },
+    ],
+    subunits: [
+      { id: 'su-1', label: 'North A', effective_to: null },
+      { id: 'su-2', label: 'North B', effective_to: '2026-08-31' },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(useFields).mockReturnValue({
+      ...baseHook,
+      locations: ESTATE.locations,
+      fields: [
+        {
+          ...baseHook.fields[0],
+          supports_halves: true,
+          field_subunits: ESTATE.subunits,
+        },
+      ],
+    });
+  });
+
+  it('offers a control at venue depth for every venue, keyed on its own end date', () => {
+    render(<FieldManagementPage />);
+    // **Enumerated from ESTATE, not from the rendered list.** A venue dropped
+    // by the renderer is a control that cannot be found, not an expectation
+    // that quietly went away.
+    expect(ESTATE.locations.length).toBeGreaterThan(0);
+    for (const loc of ESTATE.locations) {
+      expect(screen.getByTestId(`venue-${loc.id}`)).toBeInTheDocument();
+      if (loc.effective_to) {
+        expect(screen.getByTestId(`venue-retired-${loc.id}`)).toHaveTextContent(loc.effective_to);
+        // A retired venue offers the reversal, never a second retirement.
+        expect(
+          screen.getByRole('button', { name: `Clear the end date on ${loc.name}` })
+        ).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: `Retire ${loc.name}` })).toBeNull();
+      } else {
+        expect(screen.getByRole('button', { name: `Retire ${loc.name}` })).toBeInTheDocument();
+      }
+    }
+  });
+
+  it('offers a control at sub-surface depth for every sub-surface', () => {
+    render(<FieldManagementPage />);
+    expect(ESTATE.subunits.length).toBeGreaterThan(0);
+    for (const su of ESTATE.subunits) {
+      expect(screen.getByTestId(`subunit-${su.id}`)).toBeInTheDocument();
+      const name = `${su.label} of North Field`;
+      if (su.effective_to) {
+        expect(
+          screen.getByRole('button', {
+            name: `Clear the end date on ${su.label} of North Field`,
+          })
+        ).toBeInTheDocument();
+      } else {
+        expect(screen.getByRole('button', { name: `Retire ${name}` })).toBeInTheDocument();
+      }
+    }
+  });
+
+  it('opens the venue dialog on the venue RPC, and the sub-surface dialog on its own', async () => {
+    const retireLocation = vi.fn().mockResolvedValue({ retired: true, contained: [] });
+    const retireFieldSubunit = vi.fn().mockResolvedValue({ retired: true });
+    vi.mocked(useFields).mockReturnValue({
+      ...baseHook,
+      locations: ESTATE.locations,
+      fields: [{ ...baseHook.fields[0], supports_halves: true, field_subunits: ESTATE.subunits }],
+      retireLocation,
+      retireFieldSubunit,
+    });
+
+    render(<FieldManagementPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Retire Canyon Park' }));
+    // The dialog is the VENUE one: its date label names the depth.
+    expect(await screen.findByLabelText(/Last day this venue is usable/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Check and retire'));
+    await waitFor(() =>
+      expect(retireLocation).toHaveBeenCalledWith('loc-1', {
+        effectiveTo: expect.any(String),
+        confirm: false,
+      })
+    );
+    // A venue that holds nothing still reports that it holds nothing.
+    expect(await screen.findByTestId('contained-none')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Done'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retire North A of North Field' }));
+    expect(await screen.findByLabelText(/Last day this sub-surface is usable/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Check and retire'));
+    await waitFor(() =>
+      expect(retireFieldSubunit).toHaveBeenCalledWith('su-1', {
+        effectiveTo: expect.any(String),
+        confirm: false,
+      })
+    );
+    // **The two depths did not cross.** The venue RPC was not called a second
+    // time by the sub-surface control.
+    expect(retireLocation).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears an end date through the RPC for that depth', async () => {
+    const unretireLocation = vi.fn().mockResolvedValue({ retired: false, location: {} });
+    const unretireFieldSubunit = vi.fn().mockResolvedValue({ retired: false, field_subunit: {} });
+    vi.mocked(useFields).mockReturnValue({
+      ...baseHook,
+      locations: ESTATE.locations,
+      fields: [{ ...baseHook.fields[0], supports_halves: true, field_subunits: ESTATE.subunits }],
+      unretireLocation,
+      unretireFieldSubunit,
+    });
+
+    render(<FieldManagementPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the end date on Closed Site' }));
+    await waitFor(() => expect(unretireLocation).toHaveBeenCalledWith('loc-2'));
+    expect(unretireFieldSubunit).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Clear the end date on North B of North Field' })
+    );
+    await waitFor(() => expect(unretireFieldSubunit).toHaveBeenCalledWith('su-2'));
+  });
+});

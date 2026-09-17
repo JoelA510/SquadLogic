@@ -303,4 +303,175 @@ describe('useFields', () => {
       p_field_id: 'field-1',
     });
   });
+
+  /**
+   * The two depths 20260911000000 added.
+   *
+   * **The four wrappers are ONE implementation parameterised by depth, so the
+   * table below is what stops that generalisation from quietly collapsing.**
+   * Every case is driven from `DEPTHS`, which names the RPC and the id
+   * parameter for each depth: a wrapper wired to the wrong RPC, or passing
+   * `p_location_id` where `p_field_subunit_id` belongs, fails its own row
+   * rather than being covered by a sibling's passing test.
+   */
+  const DEPTHS = [
+    {
+      label: 'venue',
+      retire: 'retireLocation',
+      unretire: 'unretireLocation',
+      retireRpc: 'admin_retire_location',
+      unretireRpc: 'admin_unretire_location',
+      idParam: 'p_location_id',
+      id: 'location-1',
+      rowKey: 'location',
+    },
+    {
+      label: 'sub-surface',
+      retire: 'retireFieldSubunit',
+      unretire: 'unretireFieldSubunit',
+      retireRpc: 'admin_retire_field_subunit',
+      unretireRpc: 'admin_unretire_field_subunit',
+      idParam: 'p_field_subunit_id',
+      id: 'subunit-1',
+      rowKey: 'field_subunit',
+    },
+  ];
+
+  // The meta-assertion for the table itself: a `DEPTHS` emptied by a bad edit
+  // would make every `it.each` below vanish silently and the file would still
+  // report green.
+  it('covers both new depths', () => {
+    expect(DEPTHS).toHaveLength(2);
+  });
+
+  it.each(DEPTHS)('$label: retires through its own RPC, unconfirmed first', async (depth) => {
+    // @ts-expect-error [MOCK] - partial RPC response is enough for this assertion.
+    vi.mocked(supabase.rpc).mockResolvedValue({
+      data: { retired: false, reason: 'bookings_after_effective_to', affected_count: 1 },
+      error: null,
+    });
+    const { result } = renderHook(() => useFields());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let refusal = /** @type {any} */ (undefined);
+    await act(async () => {
+      refusal = await result.current[depth.retire](depth.id, { effectiveTo: '2026-09-30' });
+    });
+
+    expect(supabase.rpc).toHaveBeenCalledWith(depth.retireRpc, {
+      p_organization_id: 'org-1',
+      [depth.idParam]: depth.id,
+      p_effective_to: '2026-09-30',
+      p_confirm: false,
+    });
+    // **A refusal is handed back, not thrown and not read as success.** It
+    // arrives with PostgREST's `error` null, which is how four separate tools
+    // in PR 2 read a refusal as a commit.
+    expect(refusal).toMatchObject({ retired: false, reason: 'bookings_after_effective_to' });
+  });
+
+  it.each(DEPTHS)('$label: refuses to retire with no end date, before the RPC', async (depth) => {
+    const { result } = renderHook(() => useFields());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    vi.mocked(supabase.rpc).mockClear();
+
+    await expect(result.current[depth.retire](depth.id, { effectiveTo: '' })).rejects.toThrow(
+      /end date is required/i
+    );
+    // Not attempted at all: an end date is what makes it a retirement rather
+    // than a deletion.
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each(DEPTHS)('$label: raises on a response it cannot read', async (depth) => {
+    // @ts-expect-error [MOCK] - the point of the test is the unreadable shape.
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: { something_else: true }, error: null });
+    const { result } = renderHook(() => useFields());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    // "0 bookings affected" for an answer we cannot read tells the operator the
+    // ground is clear when the truth is that we do not know.
+    await expect(
+      result.current[depth.retire](depth.id, { effectiveTo: '2026-09-30' })
+    ).rejects.toThrow(new RegExp(depth.retireRpc));
+    await expect(result.current[depth.unretire](depth.id)).rejects.toThrow(
+      new RegExp(depth.unretireRpc)
+    );
+  });
+
+  it.each(DEPTHS)('$label: clears an end date through its own RPC', async (depth) => {
+    // @ts-expect-error [MOCK] - partial RPC response is enough for this assertion.
+    vi.mocked(supabase.rpc).mockResolvedValue({
+      data: { retired: false, [depth.rowKey]: { id: depth.id, effective_to: null } },
+      error: null,
+    });
+    const { result } = renderHook(() => useFields());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current[depth.unretire](depth.id);
+    });
+    expect(supabase.rpc).toHaveBeenCalledWith(depth.unretireRpc, {
+      p_organization_id: 'org-1',
+      [depth.idParam]: depth.id,
+    });
+  });
+
+  it('hands `contained` back untouched at venue depth, and manufactures none at sub-surface depth', async () => {
+    const CONTAINED = [
+      { kind: 'field', id: 'f-1', name: 'North', own_effective_to: null, already_retired: false },
+      {
+        kind: 'field_subunit',
+        id: 'su-1',
+        name: 'North A',
+        own_effective_to: '2026-08-01',
+        already_retired: true,
+      },
+    ];
+    // @ts-expect-error [MOCK] - partial RPC response is enough for this assertion.
+    vi.mocked(supabase.rpc).mockResolvedValue({
+      data: {
+        retired: false,
+        reason: 'bookings_after_effective_to',
+        affected_count: 1,
+        affected: [{ kind: 'game_slot', id: 'gs-1' }],
+        contained_count: 1,
+        contained: CONTAINED,
+      },
+      error: null,
+    });
+    const { result } = renderHook(() => useFields());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let refusal = /** @type {any} */ (undefined);
+    await act(async () => {
+      refusal = await result.current.retireLocation('location-1', { effectiveTo: '2026-09-30' });
+    });
+    // Enumerated from the fixture, not from what came back: a node dropped in
+    // transit is a missing entry rather than an absent expectation.
+    expect(refusal.contained).toHaveLength(CONTAINED.length);
+    for (const node of CONTAINED) {
+      expect(refusal.contained).toContainEqual(node);
+    }
+    // The count is the RPC's own -- it counts only the NOT-already-retired
+    // nodes, so it is 1 where the list is 2, and a wrapper that recomputed it
+    // from the list would have said 2.
+    expect(refusal.contained_count).toBe(1);
+
+    // **The sub-surface arm ships no `contained` key**, and the wrapper must
+    // not invent an empty one: absent means "the leaf of the estate holds
+    // nothing", `[]` would mean "we looked and found none".
+    // @ts-expect-error [MOCK] - partial RPC response is enough for this assertion.
+    vi.mocked(supabase.rpc).mockResolvedValue({
+      data: { retired: false, reason: 'bookings_after_effective_to', affected_count: 1 },
+      error: null,
+    });
+    let subRefusal = /** @type {any} */ (undefined);
+    await act(async () => {
+      subRefusal = await result.current.retireFieldSubunit('subunit-1', {
+        effectiveTo: '2026-09-30',
+      });
+    });
+    expect('contained' in subRefusal).toBe(false);
+  });
 });

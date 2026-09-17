@@ -519,16 +519,73 @@ def emit_estate(scenario, index):
         ' (organization_id, field_id, field_subunit_id, day_of_week, start_time, end_time, valid_until)',
         "  VALUES (v_org, v_est_pitch_a, v_est_sub, 'wed', '17:00', '18:30', current_date + 60)",
         '  RETURNING id INTO v_est_slot;',
+        # A venue that holds NOTHING: no fields, so no sub-surfaces and no
+        # bookings. 20260912000000's empty case runs against this one, and it
+        # cannot be the main venue -- that one always holds three nodes by
+        # design, because every containment assertion is about a NON-empty
+        # estate.
+        "  INSERT INTO public.locations (organization_id, name, effective_to)",
+        f"  VALUES (v_org, 'Estate Scenario {n} Empty', NULL)",
+        '  RETURNING id INTO v_est_empty;',
+        # A venue holding three nodes whose windows ALL end at +70, so a
+        # retirement dated +80 newly closes none of them: three contained
+        # entries, contained_count 0. The pair that separates the COUNT from
+        # the LIST.
+        "  INSERT INTO public.locations (organization_id, name, effective_to)",
+        f"  VALUES (v_org, 'Estate Scenario {n} Closed', NULL)",
+        '  RETURNING id INTO v_est_closed;',
+        "  INSERT INTO public.fields (organization_id, location_id, name, active, effective_to)",
+        f"  VALUES (v_org, v_est_closed, 'Estate Scenario {n} Closed Pitch A', true,"
+        '   current_date + 70)',
+        '  RETURNING id INTO v_est_closed_a;',
+        "  INSERT INTO public.fields (organization_id, location_id, name, active, effective_to)",
+        f"  VALUES (v_org, v_est_closed, 'Estate Scenario {n} Closed Pitch B', true,"
+        '   current_date + 70);',
+        '  INSERT INTO public.field_subunits (organization_id, field_id, label, effective_to)',
+        f"  VALUES (v_org, v_est_closed_a, 'Estate Scenario {n} Closed Pitch A North',"
+        '   current_date + 70);',
         # The seed really landed. A refusal case whose bookings were never
         # inserted would proceed, and the assertion would be about nothing.
-        '  IF v_est_venue IS NULL OR v_est_sub IS NULL OR v_est_slot IS NULL THEN',
+        '  IF v_est_venue IS NULL OR v_est_sub IS NULL OR v_est_slot IS NULL',
+        '     OR v_est_empty IS NULL OR v_est_closed IS NULL OR v_est_closed_a IS NULL THEN',
         f"    RAISE EXCEPTION '{sid}: the estate this case runs against was never seeded';",
+        '  END IF;',
+        # **The two empty-case venues are what they claim to be.** An empty
+        # venue that silently acquired a field, or a closed venue whose
+        # children landed undated, would turn those two cases into tests of the
+        # ordinary path scoring a pass.
+        '  IF (SELECT count(*) FROM public.fields f WHERE f.location_id = v_est_empty) <> 0 THEN',
+        f"    RAISE EXCEPTION '{sid}: the empty venue is not empty';",
+        '  END IF;',
+        '  IF (SELECT count(*) FROM public.fields f WHERE f.location_id = v_est_closed'
+        '      AND f.effective_to = current_date + 70) <> 2 THEN',
+        f"    RAISE EXCEPTION '{sid}: the closed venue does not hold two dated pitches';",
         '  END IF;',
     ]
 
     subject = 'v_est_venue' if is_venue else 'v_est_sub'
-    if scenario.get('target') == 'missing':
+    # **An unknown target raises at GENERATION time** rather than silently
+    # running the case against the default estate, which is how the blackout
+    # generator already handles its own target union.
+    target = scenario.get('target')
+    if target == 'missing':
         out.append(f"  {subject} := '00000000-0000-0000-0000-0000000000ff'::uuid;")
+    elif target in ('emptyVenue', 'allChildrenDatedVenue'):
+        # **Both are VENUE targets, and assigning one into a sub-surface
+        # scenario's `v_est_sub` would write a location id into a field_subunits
+        # lookup -- a case that runs, finds nothing, and proves whatever the
+        # NOT FOUND path proves.** Refused at generation time rather than left
+        # to be noticed in a transcript.
+        if not is_venue:
+            raise SystemExit(
+                f"target {target!r} is a venue target but scenario {sid!r} addresses a sub-surface"
+            )
+        out.append(
+            f"  {subject} := "
+            + ('v_est_empty;' if target == 'emptyVenue' else 'v_est_closed;')
+        )
+    elif target is not None:
+        raise SystemExit(f"unknown target {target!r} in estate scenario {sid!r}")
 
     if is_venue:
         call = (f"public.admin_retire_location(v_org, {subject},"
@@ -596,13 +653,21 @@ def emit_estate(scenario, index):
                 '  END IF;',
             ]
         if 'containedCount' in expect:
+            contained_total = int(expect.get('containedTotal', 3))
             out += [
                 f"  IF (v_res->>'contained_count')::int <> {int(expect['containedCount'])} THEN",
                 f"    RAISE EXCEPTION '{sid}: expected contained_count"
                 f" {int(expect['containedCount'])}, got %', v_res->>'contained_count';",
                 '  END IF;',
-                "  IF jsonb_array_length(v_res->'contained') <> 3 THEN",
-                f"    RAISE EXCEPTION '{sid}: expected 3 contained nodes, got %',"
+                # **The LIST and the COUNT are different numbers.** The
+                # default estate holds three nodes whatever the count says;
+                # the count is how many this call NEWLY closes. Pinning both
+                # to 3 would hide an `already_retired` arm that never fires,
+                # and the two 20260912000000 cases whose count is 0 while
+                # their list is 0 and 3 are the pair that proves the gate
+                # reads the count.
+                f"  IF jsonb_array_length(v_res->'contained') <> {contained_total} THEN",
+                f"    RAISE EXCEPTION '{sid}: expected {contained_total} contained nodes, got %',"
                 " jsonb_array_length(v_res->'contained');",
                 '  END IF;',
             ]
@@ -610,7 +675,7 @@ def emit_estate(scenario, index):
 
     # The node's own date AFTER the call, asserted on every case including the
     # refusals -- a refusal that wrote the date anyway is the worst outcome.
-    if scenario.get('target') == 'missing':
+    if target == 'missing':
         # `subject` was overwritten with the id that resolves to nothing, so
         # the real node cannot be read through it. It is re-resolved by the
         # name this case seeded -- enumerated from the estate rather than from
@@ -644,9 +709,24 @@ def emit_estate(scenario, index):
         # passing vacuously on exactly the cases that corrupt the variable,
         # while the JS runner (which keeps `ids.venue`) really checked it. Two
         # runners silently proving different things. Caught by /code-review.
-        venue_ref = (f"(SELECT l2.id FROM public.locations l2"
-                     f" WHERE l2.name = 'Estate Scenario {n}')"
-                     if scenario.get('target') == 'missing' else 'v_est_venue')
+        # **The venue whose children are counted is the one the case
+        # ADDRESSED**, which for a venue case is whatever `subject` now holds.
+        #
+        # For the two 20260912000000 empty cases that is `v_est_empty` or
+        # `v_est_closed` -- but ONLY because the target block above ASSIGNS into
+        # `v_est_venue` (`v_est_venue := v_est_empty;`). The `is_venue` branch
+        # below is therefore the same string the old code hard-coded, and it is
+        # kept for what it says rather than what it changes: the correctness of
+        # those two cases lives in that assignment, not here. Claiming otherwise
+        # would advertise a protection that is not present -- caught by
+        # /code-review at high.
+        if target == 'missing':
+            venue_ref = (f"(SELECT l2.id FROM public.locations l2"
+                         f" WHERE l2.name = 'Estate Scenario {n}')")
+        elif is_venue:
+            venue_ref = subject
+        else:
+            venue_ref = 'v_est_venue'
         out += [
             '  SELECT (SELECT count(*) FROM public.fields f'
             f" WHERE f.location_id = {venue_ref} AND f.effective_to IS NOT NULL)",
@@ -919,6 +999,7 @@ def main():
         # after it.
         '  v_est_venue uuid; v_est_pitch_a uuid; v_est_pitch_b uuid;',
         '  v_est_sub uuid; v_est_slot uuid;',
+        '  v_est_empty uuid; v_est_closed uuid; v_est_closed_a uuid;',
         'BEGIN',
         "  INSERT INTO auth.users (id, email, raw_user_meta_data)",
         "  VALUES (v_user, 'scenarios@example.test', jsonb_build_object('password_length', 16))",

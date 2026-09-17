@@ -2515,3 +2515,288 @@ mutation harness is not work in progress".
   pre-flight covers the resolution half; the other 110 plants are unchanged and
   statically reviewed only.
 - Everything still open after gap A, unchanged.
+
+---
+
+## 8.4 gap B (part 2 of 2) — the UI at every depth, and the gate that made it honest — **PR open, not merged**
+
+The half part 1 carved out: the screen, the hooks, and — found by building the
+screen — a gate the database was missing.
+
+- **PR:** [#393](https://github.com/JoelA510/SquadLogic/pull/393), branch
+  `feat/venue-subunit-retire-ui`.
+- **Migration:** `20260912000000_retire_refuses_on_contained_estate.sql`.
+- **Tests 3004 → 3033** (192 → 193 files), **E2E 78 → 80**, scenario table
+  **65 → 68** rows all executed against Postgres, `test:db:local` **HARNESS OK**
+  over **112** migrations, `prove:mock` **85/85 caught**, bundle **222.40 KB gz**
+  against 244.14, advisors PASS over 112.
+
+### The best result in this PR: a revert that lied by agreeing with itself
+
+`R8 revert counts dated nodes instead of undated ones` flips one predicate in the
+revert's exposure loop — `own_effective_to IS NULL` becomes `IS NOT NULL`. What
+the mutated revert printed:
+
+```text
+NOTICE:  venue Gate Closed Children Park (d333…) loses its containment gate: at least 1 node(s) have no end date of their own
+NOTICE:  live venues examined: 2, of which 1 lose a gate
+```
+
+It named **the wrong venue** with **the wrong count**, and the summary line came
+out **byte-identical to the correct run**. An operator reading that transcript
+sees a revert that did its job. A total loss of the gate rendered as no exposure
+at all.
+
+**It was caught only because the seed's cardinalities are unequal.** The harness
+plants three venues: one exposed holding THREE undated nodes, one live whose only
+child already carries a date, one already retired. So the transcript must read
+examined 2, exposed 1, undated 3 — and no check reading the wrong set can print
+the right number for any of them. Had the exposed venue held one node like its
+neighbour, both the name and the count would have been plausible and the stage
+would have passed.
+
+That is `20260909000000`'s lesson applied **before** it bit rather than after:
+every figure in that seed was 1, and two plants scored NOT CAUGHT because a check
+counting the wrong set printed the right number. **A seed whose numbers are all
+the same cannot tell a right answer from a wrong one.**
+
+### A third shape for the collection: a check whose failure is uninformative
+
+This phase has collected _a check that cannot fail_ and _a check that cannot
+pass_. This PR adds the third: **a check whose failure is uninformative while
+looking informative.**
+
+The harness stage asserting the containment gate is gone after the revert used
+`DO $chk$ … $chk$`. `psql_cmd` reaches the cluster through
+`runuser -- bash -lc "…"` — a **second** shell expansion — so `$chk` expanded to
+empty, PostgreSQL received `DO $ BEGIN`, and the stage printed its own message:
+_"admin_retire_location still carries the containment gate"_. A syntax error was
+reported as evidence about the thing the check was pointed at.
+
+**A check that fails for the wrong reason is worse than no check**, because its
+failure is read as a finding. It is now a single printed verdict token with three
+values — `true` / `false` / `unreadable` — and only `false` passes, so a MISSING
+function cannot masquerade as a clean revert the way a bare no-match test would
+have allowed.
+
+### An assertion amended because this change broke it — and the proof it got stronger
+
+The containment gate broke section 6b of **`20260911000000`'s** smoke, a migration
+this PR does not edit. 6b asserted that a retirement ON the last booked day
+_proceeds unconfirmed_ — true while the gate read the bookings half alone. That
+venue holds two live pitches and a live sub-surface, so it now refuses on its
+contained estate.
+
+"I amended an assertion my change broke" reads badly on its own, so the proof is
+attached: **the amended 6b then caught plant `M8 the venue gate ignores the
+contained estate`**, failing with _"a venue holding live pitches retired
+unconfirmed with nothing booked"_ and printing `affected_count: 0,
+contained_count: 3`. The amendment kept the `affected_count = 0` assertion that is
+the inclusive-boundary fact the section exists to pin, and **added** a confirmed
+call so the section cannot be satisfied by a guard that refuses the boundary
+outright. It is strictly stronger than what it replaced.
+
+**Reading could not have reached this.** There was no reason to open a smoke for a
+migration this PR does not touch; only executing found it.
+
+### Two plants that could not be caught, inside the file that hunts them
+
+Both were written in the same sittings as the comments insisting checks be
+makeable-to-fail.
+
+- **`R8 revert accepts having examined zero venues`** replaced the guard with
+  `IF false THEN`. Nothing could have caught it: the harness always seeds that
+  revert with three venues, so `v_venues` is never 0, so the guard never fires.
+  Retargeted to the guard's CONDITION — `v_venues = 0` → `v_venues > 0` — which
+  fires against the seeded estate and **is caught**. It proves something the
+  original never could: that `v_venues` is really populated by the loop and
+  really reaches the guard.
+- **`M8 the sub-surface arm grows a containment gate`** added a
+  `COMMENT ON FUNCTION … 'plant: contained'`. It scored **NOT CAUGHT**, and
+  correctly: the smoke reads `prosrc`, the function BODY, while a COMMENT lives
+  in `pg_description`. The plant never simulated the defect it named.
+
+#### The rule: a positive control that does not perturb the thing under test is indistinguishable from a hole in the check it fails to trip
+
+**Three instances in this phase, across two agents and a supervisor**, which is
+why it is a rule and not an anecdote:
+
+1. Gap B part 1's anchor pre-flight: the supervisor's control mutated
+   `20260906000000` while the plant targets `20260907000000`, so "121 of 121"
+   was the correct answer to a file no plant anchors text in — and it looked
+   exactly like a hollow guard. A false HIGH was very nearly filed against a
+   guard that works.
+2. `R8 revert accepts having examined zero venues`: the harness always seeds, so
+   the guard could never fire and removing it changed nothing observable.
+3. `M8 the sub-surface arm grows a containment gate`: a `COMMENT ON FUNCTION`
+   against a smoke that reads `prosrc`.
+
+In all three the control never reached the thing it named, and in all three the
+result — NOT CAUGHT — is **the same output a genuinely missing check produces**.
+It is the same family as the uninformative failure above: the verdict looks like
+evidence about the target and is not. Before filing NOT CAUGHT as a finding,
+check the innocent explanation first: **did the mutation actually reach the code
+the check reads?**
+
+### What the containment gate is, and why the empty case needed no new rule
+
+`admin_retire_location` now refuses when
+`(v_affected_count > 0 OR v_contained_count > 0)`. Part 1 computed, audited and
+returned `contained` and gated on the bookings alone, so a venue with four live
+pitches and nothing booked **committed on the first call** — half the consequence
+enforced, half merely described.
+
+Only the gate changed. The function body was **derived from the merged
+`20260911000000` text by substitution rather than retranscribed**, and a
+comment-stripped diff of the two bodies shows exactly four hunks: the
+`v_reason` declare, the gate, the `CASE`, and two `'reason'` sites. Retranscription
+is this family's documented origin of its worst defects.
+
+The empty case fell out of the counter that already existed: `v_contained_count`
+counts only the NOT-`already_retired` nodes, so a venue holding nothing and a
+venue whose children all already end by then both commit unconfirmed — which is
+`admin_delete_field`'s "nothing to take" contract adopted, not a new rule.
+
+The two refusal reasons stay two. `bookings_after_effective_to` keeps its exact
+meaning; `contained_estate_after_effective_to` is reached only when the bookings
+half is empty. One literal for both would make "this venue has games on it" and
+"this venue holds live pitches" read identically in the audit trail.
+
+### The UI, and the state the gate let us delete
+
+`RetireFieldDialog` is generalised to a **node and a kind** and renamed
+`RetireEstateNodeDialog` — one dialog parameterised by depth, not three copies,
+because copying it per depth is the exact shape that produced LIVE-1, LIVE-2 and
+LIVE-3. `ConsequencePreview` renders `contained` **beside** `affected`, as its own
+table with its own caption and column headers: it is ground, not bookings.
+`undefined` and `[]` stay distinguishable, because `admin_retire_field_subunit`
+ships no `contained` key at all and "nothing below" must not render as "nobody
+looked".
+
+Before the gate existed, the dialog carried a **post-commit** state that rendered
+`contained` after the fact, because a quiet venue committed on the first call and
+there was nowhere honest to show it. That was a UI apology for a gate in the
+database. With the gate, containment arrives on the same refusal path the
+bookings already use, and the special state is **deleted rather than kept beside
+the general one**.
+
+### A commit-hygiene rule, earned twice from opposite directions
+
+**A mutation harness in flight makes both `git add -A` and `git checkout --`
+unsafe on its files.**
+
+- `git checkout --` restoring a plant also reverted an **uncommitted** edit in the
+  same file. Caught on the next `git status`; the work was redone and committed
+  before the next plant ran.
+- `git add -A` while `prove:mock` was live would have committed a **live
+  mutation** of `mockSupabaseClient.js`; `git status` showed it modified at the
+  moment of the commit.
+
+Every commit made with a plant live in this PR was staged **by name**. This
+belongs beside part 1's `node --check` lesson: `node -e "import(...)"` intended as
+a syntax check **runs** the harness.
+
+### Checking one surface and generalising to "cannot run anywhere"
+
+The SQL half of this PR was reported as unexecutable because `pg_isready` found
+nothing on `/var/run/postgresql:5432` and there is no docker socket. That
+conclusion did not follow: `scripts/dbharness/run.sh` never uses the system
+server — it `initdb`s its own cluster and starts it on a **private unix socket
+with no TCP**, which `pg_isready` cannot see by construction.
+
+The cost was not hypothetical. The first SQL execution found **four** defects,
+including the amended 6b above, which nothing in a reading pass would have
+reached. **This is the second time in the phase that one surface was checked and
+the conclusion generalised**; the supervisor made the same error earlier about
+pgTAP in CI.
+
+### `bddgen` refusing a step was the mechanism working
+
+The first draft of the E2E steps reused _"{string} should not yet show a
+retirement date"_, which `field_blackout_admin.ts` already owns at field depth.
+`bddgen` refused rather than binding one. That refusal was correct: the venue
+scenario would have checked a **field card** for a **venue** retirement, found no
+"Retires after" because the venue's date lives elsewhere, and **passed while
+testing nothing**.
+
+The E2E containment step is itself proven: planting the copy-down defect in the
+mock's venue arm — the retirement writing its date onto every field at the site —
+fails exactly _"no pitch at Maplewood Park should carry a retirement date of its
+own"_, and the sibling scenario stays green.
+
+### Plant results
+
+| Plant                                                       | Verdict                                                                                                         |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `M8 the venue gate ignores the contained estate`            | **CAUGHT** — by its own smoke, by `20260911000000`'s amended 6b, and by `venue-retire-on-boundary`              |
+| `M8 the gate reads the contained list instead of the count` | **CAUGHT** — behaviourally by `venue-retire-all-children-already-closed-commits-unconfirmed`                    |
+| `M8 both refusals report the bookings reason`               | **CAUGHT** at the JS level by `venue-retire-on-boundary` (scenario table), not deferred                         |
+| `M8 a second producer of the containment set`               | **CAUGHT** — by its own smoke (_"estate_contained_nodes is not the single producer"_) and by `20260911000000`'s |
+| `R8 revert counts retired venues instead of exposed ones`   | **CAUGHT** — by both the naming check and the totals check                                                      |
+| `R8 revert counts dated nodes instead of undated ones`      | **CAUGHT** — the headline result above                                                                          |
+| `R8 the zero-venue guard is wired to a dead counter`        | **CAUGHT**                                                                                                      |
+
+**Manual control, because the harness cannot express it**: the revert run with its
+harness seed removed raises `This revert examined ZERO venues`, and the transcript
+shows what it would otherwise have printed — `live venues examined: 0, of which 0
+lose a gate`. Reassuring zeroes, which is exactly the failure the guard exists to
+prevent.
+
+### `/code-review` at high: nine findings, two of them medium, eight fixed
+
+The two mediums were both in the verification layer, which is where every defect
+in this PR has been:
+
+- **The revert had no `\set ON_ERROR_STOP on`**, unlike its three siblings. The
+  harness passes `-v ON_ERROR_STOP=1` so it was safe there — but an operator
+  running it by hand gets the "examined ZERO venues" exception, an aborted
+  transaction, every later statement failing 25P02, COMMIT degrading to
+  ROLLBACK, and **psql exiting 0**. The guard whose entire premise is "fail
+  loudly on an empty estate" would have reported success to any script reading
+  the exit code, with nothing reverted.
+- **A plant that IS caught would have been scored as one that is not.** The
+  zero-guard plant named the totals message as its expected check, but the
+  flipped guard RAISES, so run.sh takes its bare `FAIL revert` branch and the
+  totals grep — which lives in the success branch — is never reached.
+  `prove.sh` would have recorded MISATTRIBUTED. That is the mirror of the two
+  mis-aimed plants above and just as misleading.
+
+**The ninth was ruled on separately, and the ruling was neither option put to
+the supervisor.** The exposure NOTICE counted children with no end date of their
+own while the gate fires on every child not already retired _by the date
+applied_, so the per-venue figure read as a total while being a floor. Widening
+the query would have matched the gate — and collapsed "exposed" into "examined"
+against the harness seed, blunting the unequal cardinalities that caught the
+headline R8 plant.
+
+**Fix the claim, not the query.** `own_effective_to IS NULL` is exactly right as
+"nodes exposed whatever date is chosen", and the venue-level claim was already
+exact: a venue holding one such node does lose its gate, so `examined` and
+`of which` are totals and needed no change. Only the magnitude overclaimed, and
+only because the line read as a total. It now says _"loses its containment gate:
+at least N node(s) have no end date of their own"_, with a line after the loop
+naming the direction the bound is loose in — **a revert has no retirement date to
+measure against, so the honest figure is a floor with its direction stated**. No
+behavioural change, no query change, no seed reshape, and a new harness check
+requires the floor clause to be printed, because a floor printed without its
+direction reads as a total again.
+
+Three more findings were the **declared-is-not-enforced** shape in this PR's own
+new code: `ESTATE_DEPTHS[*].noun` was never read (deleted), and `contains` was never
+consulted by either the hook or the dialog although both carried comments
+asserting the invariant it describes. Both now enforce it — the hook throws if a
+depth declared to contain nothing returns a `contained` key, and the dialog
+gates the prop spread on it.
+
+### Still open after gap B part 2
+
+- **The claim "the sub-surface arm has no containment gate" has no prover.**
+  Making it fail needs `admin_retire_field_subunit`'s body rewritten, which this
+  migration does not touch and a plant cannot cheaply supply. Recorded as
+  unproven rather than quietly counted as covered.
+- **No visual check in either theme.** Design-system classes only, no new tokens,
+  `index.css` untouched — which is the check that actually holds — but no eyeball
+  pass was made.
+- **The full 121-plant SQL sweep has not been run** (~5.4 hours). Unchanged from
+  part 1.
+- Everything still open after gap A, unchanged.

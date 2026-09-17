@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import Button from '../components/ui/Button.jsx';
 import { MapPin, Plus, Edit2, Trash2, X, Check, CalendarX, RotateCcw } from 'lucide-react';
 import { useFields } from '../hooks/useFields.js';
-import RetireFieldDialog from '../components/setup/RetireFieldDialog.jsx';
+import RetireEstateNodeDialog from '../components/setup/RetireEstateNodeDialog.jsx';
 import { todayIso } from '../utils/today.js';
 import { logger } from '../lib/logger.js';
 
@@ -35,13 +35,27 @@ export default function FieldManagementPage() {
     deleteField,
     retireField,
     unretireField,
+    retireLocation,
+    unretireLocation,
+    retireFieldSubunit,
+    unretireFieldSubunit,
   } = useFields();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingField, setEditingField] = useState(null);
   const [isAddingLocation, setIsAddingLocation] = useState(false);
   const [newLocationName, setNewLocationName] = useState('');
-  const [retiringField, setRetiringField] = useState(/** @type {any} */ (null));
+  /**
+   * The one dialog target, carrying the depth it belongs to.
+   *
+   * **One piece of state, not three.** Three booleans could each be true at
+   * once and the last render would win; a single `{ kind, node }` cannot
+   * express two open dialogs, so the impossible state is unrepresentable
+   * rather than merely unlikely.
+   *
+   * @type {[{ kind: 'location'|'field'|'field_subunit', node: any }|null, Function]}
+   */
+  const [retiring, setRetiring] = useState(/** @type {any} */ (null));
   const [lifecycleError, setLifecycleError] = useState(/** @type {string|null} */ (null));
 
   // Default form state
@@ -167,16 +181,36 @@ export default function FieldManagementPage() {
   };
 
   /**
-   * Clear a field's end date.
+   * The retire RPC for a depth, and the unretire handler for a depth.
    *
-   * Un-retiring leaves `active` exactly as it found it, so a field that was
-   * ordinarily deactivated stays deactivated -- both arms carried the opposite
-   * defect once, and a passing test certified it.
+   * The dialog is passed the function rather than the kind so that it never
+   * learns which RPC exists at which depth -- it knows only that an
+   * unconfirmed call is the dry run.
+   *
+   * @type {Record<string, {
+   *   retire: (nodeId: string, options: { effectiveTo: string, confirm?: boolean }) => Promise<any>,
+   *   unretire: (nodeId: string) => Promise<any>
+   * }>}
    */
-  const handleUnretire = async (field) => {
+  const RETIRE_BY_KIND = {
+    location: { retire: retireLocation, unretire: unretireLocation },
+    field: { retire: retireField, unretire: unretireField },
+    field_subunit: { retire: retireFieldSubunit, unretire: unretireFieldSubunit },
+  };
+
+  /**
+   * Clear an end date at any depth.
+   *
+   * @param {'location'|'field'|'field_subunit'} kind
+   * @param {{ id: string, name: string }} node
+   */
+  const handleUnretireNode = async (kind, node) => {
+    // Un-retiring leaves `active` exactly as it found it, so a field that was
+    // ordinarily deactivated stays deactivated -- both arms carried the
+    // opposite defect once, and a passing test certified it.
     setLifecycleError(null);
     try {
-      await unretireField(field.id);
+      await RETIRE_BY_KIND[kind].unretire(node.id);
     } catch (err) {
       logger.error('Unretire failed', err);
       setLifecycleError(err?.message || 'The end date could not be cleared.');
@@ -334,6 +368,67 @@ export default function FieldManagementPage() {
         </div>
       </section>
 
+      <section
+        className="bg-bg-surface border border-border-subtle rounded-xl p-5"
+        aria-labelledby="venues-heading"
+      >
+        <h2 id="venues-heading" className="text-lg font-semibold text-text-primary mb-1">
+          Venues
+        </h2>
+        <p className="text-sm text-text-secondary mb-4">
+          Retiring a venue is an end date on the site itself. Every field and sub-surface it holds
+          stops being offered with it, by containment — no end date is written onto any of them, and
+          clearing the venue&rsquo;s date brings back every one that has no end date of its own.
+        </p>
+        {locations.length === 0 ? (
+          <div className="text-sm text-text-muted" role="status">
+            No venues yet.
+          </div>
+        ) : (
+          <ul className="space-y-2" data-testid="venue-list">
+            {locations.map((loc) => (
+              <li
+                key={loc.id}
+                className="flex items-center justify-between gap-3 border border-border-subtle rounded-lg px-3 py-2"
+                data-testid={`venue-${loc.id}`}
+              >
+                <div>
+                  <div className="text-sm font-semibold text-text-primary">{loc.name}</div>
+                  {loc.effective_to && (
+                    <div
+                      className="text-xs text-text-secondary"
+                      data-testid={`venue-retired-${loc.id}`}
+                    >
+                      Retires after {loc.effective_to}
+                    </div>
+                  )}
+                </div>
+                {loc.effective_to ? (
+                  <button
+                    onClick={() => handleUnretireNode('location', loc)}
+                    aria-label={`Clear the end date on ${loc.name}`}
+                    className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-primary transition-colors"
+                  >
+                    <RotateCcw size={16} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setLifecycleError(null);
+                      setRetiring({ kind: 'location', node: loc });
+                    }}
+                    aria-label={`Retire ${loc.name}`}
+                    className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-primary transition-colors"
+                  >
+                    <CalendarX size={16} />
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {fields.map((field) => (
           <div
@@ -365,7 +460,7 @@ export default function FieldManagementPage() {
                 </button>
                 {field.effective_to ? (
                   <button
-                    onClick={() => handleUnretire(field)}
+                    onClick={() => handleUnretireNode('field', field)}
                     aria-label={`Clear the end date on ${field.name}`}
                     className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-primary transition-colors"
                   >
@@ -375,7 +470,7 @@ export default function FieldManagementPage() {
                   <button
                     onClick={() => {
                       setLifecycleError(null);
-                      setRetiringField(field);
+                      setRetiring({ kind: 'field', node: field });
                     }}
                     aria-label={`Retire ${field.name}`}
                     className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-primary transition-colors"
@@ -417,6 +512,64 @@ export default function FieldManagementPage() {
                 </span>
               )}
             </div>
+
+            {field.field_subunits?.length > 0 && (
+              <div className="mb-4" data-testid={`subunit-list-${field.id}`}>
+                <h3 className="text-xs font-semibold uppercase text-text-muted mb-1">
+                  Sub-surfaces
+                </h3>
+                <ul className="space-y-1">
+                  {field.field_subunits.map((su) => (
+                    <li
+                      key={su.id}
+                      className="flex items-center justify-between gap-2 text-sm text-text-secondary"
+                      data-testid={`subunit-${su.id}`}
+                    >
+                      <span>
+                        {su.label}
+                        {su.effective_to && (
+                          <span
+                            className="text-xs text-text-muted"
+                            data-testid={`subunit-retired-${su.id}`}
+                          >
+                            {' '}
+                            — retires after {su.effective_to}
+                          </span>
+                        )}
+                      </span>
+                      {su.effective_to ? (
+                        <button
+                          onClick={() =>
+                            handleUnretireNode('field_subunit', { ...su, name: su.label })
+                          }
+                          aria-label={`Clear the end date on ${su.label} of ${field.name}`}
+                          className="p-1.5 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-primary transition-colors"
+                        >
+                          <RotateCcw size={14} />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setLifecycleError(null);
+                            // The dialog reads `name`; `field_subunits` calls it
+                            // `label`. Mapped at the one call site rather than
+                            // teaching the dialog a second vocabulary.
+                            setRetiring({
+                              kind: 'field_subunit',
+                              node: { ...su, name: `${su.label} of ${field.name}` },
+                            });
+                          }}
+                          aria-label={`Retire ${su.label} of ${field.name}`}
+                          className="p-1.5 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-primary transition-colors"
+                        >
+                          <CalendarX size={14} />
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Visual 7-Day Grid */}
             <div className="grid grid-cols-7 gap-1 mt-4 pt-4 border-t border-border-subtle">
@@ -474,13 +627,14 @@ export default function FieldManagementPage() {
         </div>
       )}
 
-      {retiringField && (
-        <RetireFieldDialog
+      {retiring && (
+        <RetireEstateNodeDialog
           open
-          field={retiringField}
+          node={retiring.node}
+          kind={retiring.kind}
           defaultDate={todayIso()}
-          onRetire={retireField}
-          onClose={() => setRetiringField(null)}
+          onRetire={RETIRE_BY_KIND[retiring.kind].retire}
+          onClose={() => setRetiring(null)}
         />
       )}
 

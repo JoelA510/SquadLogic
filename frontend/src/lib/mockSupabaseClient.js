@@ -3156,10 +3156,28 @@ export const mockSupabase = {
 
         // `p_confirm` NULL or undefined reads as UNCONFIRMED, matching
         // `NOT COALESCE(p_confirm, false)`.
-        if (affected.length > 0 && p.p_confirm !== true) {
+        //
+        // **BOTH halves gate, as of 20260912000000.** The venue arm computes
+        // and returns a booking list AND a containment report, and until that
+        // migration it refused on the bookings alone -- so a venue with live
+        // pitches and nothing booked committed on the first call and the
+        // containment report was returned to nobody. `containedCount` counts
+        // only the NOT-already-retired nodes, so a venue that holds nothing,
+        // and a venue whose children all already end by then, still commit
+        // unconfirmed exactly as `admin_delete_field` does with nothing to
+        // take.
+        //
+        // The two reasons stay two: the existing literal keeps meaning
+        // "bookings stand after this date", and the new one is reached only
+        // when the bookings half is empty.
+        if ((affected.length > 0 || containedCount > 0) && p.p_confirm !== true) {
+          const reason =
+            affected.length > 0
+              ? 'bookings_after_effective_to'
+              : 'contained_estate_after_effective_to';
           audit('location', node.id, 'admin_retire_location', {
             phase: 'refused',
-            reason: 'bookings_after_effective_to',
+            reason,
             effective_to: effectiveTo,
             affected_count: affected.length,
             affected: mockFieldBookingsDigest(affected),
@@ -3171,7 +3189,7 @@ export const mockSupabase = {
           return {
             data: {
               retired: false,
-              reason: 'bookings_after_effective_to',
+              reason,
               affected_count: affected.length,
               affected,
               contained_count: containedCount,

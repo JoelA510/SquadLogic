@@ -169,7 +169,7 @@ echo "=== smokes for this PR's migrations ==="
 # pgTAP suite already does. Claiming to verify them would be the hollow kind of
 # green this whole phase exists to stop.
 STATUS=0
-NEW_MIGRATIONS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000)
+NEW_MIGRATIONS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000)
 
 for id in "${NEW_MIGRATIONS[@]}"; do
   smoke="$REPO/docs/sql/${id}_smoke.sql"
@@ -427,6 +427,51 @@ for id in "${NEW_MIGRATIONS[@]}"; do
   # those fields carrying a retired sub-surface. A second venue is left
   # unretired so the loop cannot pass by printing every row it sees.
   # Do not "tidy" the third field or the second sub-surface away.
+  # **The same reasoning for 20260912000000's revert**, and its seed has to be
+  # the OPPOSITE shape to 20260911000000's. That revert counts venues that ARE
+  # retired, because their retirements are what the dropped column erases. This
+  # one counts venues that are NOT retired and still hold an undated node,
+  # because those are the venues that lose a GATE: from the moment the revert
+  # runs, retiring one of them with nothing booked commits unconfirmed.
+  #
+  # On a freshly migrated database there are no venues at all -- and the revert
+  # RAISES on that rather than printing reassuring zeroes, so an unseeded run
+  # fails loudly here instead of proving only that the code parses. The seed is
+  # what lets it run, and the grep below is what makes the figure mean
+  # something.
+  #
+  # **The cardinalities are load-bearing and no two PRINTED figures are equal.**
+  # Three venues are planted: one exposed, holding THREE undated nodes (two
+  # pitches and a sub-surface); one live but holding only a node that already
+  # carries a date, so it is examined and NOT counted as exposed; and one
+  # already retired, which the revert's `effective_to IS NULL` loop skips
+  # entirely. So the transcript must say examined 2, exposed 1, floor 3
+  # -- and a check reading the wrong set cannot print the right number for any
+  # of the three. That is the defect the 20260909000000 seed's own comment
+  # records two plants finding, which happened because every figure in that
+  # seed was 1.
+  if [ "$id" = "20260912000000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug)
+              VALUES ('d1111111-1111-1111-1111-11111111111d','Gate Org','gate-org');
+              INSERT INTO public.locations (id, organization_id, name)
+              VALUES ('d2222222-2222-2222-2222-22222222222d','d1111111-1111-1111-1111-11111111111d','Gate Exposed Park');
+              INSERT INTO public.locations (id, organization_id, name)
+              VALUES ('d3333333-3333-3333-3333-33333333333d','d1111111-1111-1111-1111-11111111111d','Gate Closed Children Park');
+              INSERT INTO public.locations (id, organization_id, name, effective_to)
+              VALUES ('d4444444-4444-4444-4444-44444444444d','d1111111-1111-1111-1111-11111111111d','Gate Already Retired Park', current_date + 30);
+              INSERT INTO public.fields (id, organization_id, location_id, name, active)
+              VALUES ('d5555555-5555-5555-5555-55555555555d','d1111111-1111-1111-1111-11111111111d','d2222222-2222-2222-2222-22222222222d','Gate Exposed Pitch', true),
+                     ('d8888888-8888-8888-8888-88888888888d','d1111111-1111-1111-1111-11111111111d','d2222222-2222-2222-2222-22222222222d','Gate Exposed Pitch Two', true);
+              INSERT INTO public.field_subunits (id, organization_id, field_id, label)
+              VALUES ('d6666666-6666-6666-6666-66666666666d','d1111111-1111-1111-1111-11111111111d','d5555555-5555-5555-5555-55555555555d','Gate Exposed Pitch North');
+              INSERT INTO public.fields (id, organization_id, location_id, name, active, effective_to)
+              VALUES ('d7777777-7777-7777-7777-77777777777d','d1111111-1111-1111-1111-11111111111d','d3333333-3333-3333-3333-33333333333d','Gate Dated Pitch', true, current_date + 20);" \
+         >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the venues the revert's exposure count requires were never inserted"
+      dump 10 /tmp/harness_seed; STATUS=1; continue
+    fi
+  fi
+
   if [ "$id" = "20260911000000" ]; then
     if ! psql_cmd "INSERT INTO public.organizations (id, name, slug)
               VALUES ('c1111111-1111-1111-1111-11111111111c','Gap B Org','gap-b-org');
@@ -551,6 +596,73 @@ NEEDLES
     echo "PASS revert ${id}"
     grep -E '^(psql:[^ ]+ )?(NOTICE|WARNING):' /tmp/harness_rev |
       sed -E 's/^psql:[^ ]+ //; s/^/  | /' || true
+    if [ "$id" = "20260912000000" ]; then
+      # **The exposure the revert creates, read back from its own transcript.**
+      # Two figures, both made unique by the seed: the venue that loses a gate
+      # is NAMED, and the totals separate "examined" from "exposed".
+      if grep -q 'venue Gate Exposed Park' /tmp/harness_rev &&
+         grep -q 'loses its containment gate: at least 3 node(s) have no end date of their own' /tmp/harness_rev; then
+        echo "  | (checked) the revert named the venue that loses its containment gate and counted the nodes exposed whatever date is chosen"
+      else
+        echo "FAIL revert ${id}: planted a live venue with three undated nodes and the revert did not name it, or miscounted them"
+        STATUS=1
+      fi
+      # **Examined 2, exposed 1** -- three venues are PLANTED, and the
+      # already-retired one is skipped by the revert's `effective_to IS NULL`
+      # loop, so only two are examined. A check reading the wrong set gets one
+      # of these wrong: the already-retired venue must be excluded from BOTH,
+      # and the venue whose only child carries its own date must be examined and
+      # NOT exposed.
+      # **The venue-level claim is EXACT and needs no bound.** A venue holding
+      # at least one undated node loses its gate for every date that could be
+      # chosen, so `examined` and `of which` are totals rather than floors --
+      # which is why the reword that turned the PER-VENUE figure into a stated
+      # lower bound left this line untouched.
+      if grep -q 'live venues examined: 2, of which 1 lose a gate' /tmp/harness_rev; then
+        echo "  | (checked) the revert examined both live venues and counted only the one that loses a gate"
+      else
+        echo "FAIL revert ${id}: the revert's examined/exposed totals do not match the planted estate"
+        STATUS=1
+      fi
+      # **The bound is STATED, not merely intended.** The per-venue figure is a
+      # floor; a transcript that prints the floor without saying which way it is
+      # loose reads as a total, which is the overclaim the reword removed. If
+      # this clause is ever dropped the numbers silently go back to overclaiming.
+      if grep -q 'the per-venue counts are a FLOOR' /tmp/harness_rev; then
+        echo "  | (checked) the revert says its per-venue exposure figure is a floor and which way it moves"
+      else
+        echo "FAIL revert ${id}: the revert printed a per-venue exposure count without naming it a floor"
+        STATUS=1
+      fi
+      # The restore really happened, confirmed from the catalogue rather than
+      # from the revert's own NOTICE.
+      # **No dollar-quoted block here, and that is not a style choice.** The
+      # first version used `DO $chk$ ... $chk$`, and `psql_cmd` reaches the
+      # cluster through `runuser -- bash -lc "..."`, so the string is expanded
+      # by a SECOND shell: `$chk` became empty and PostgreSQL received
+      # `DO $ BEGIN`, a syntax error the stage then reported as "the gate
+      # survived the revert". A check that fails for a reason other than the
+      # one it names is worse than no check, because its failure is read as
+      # evidence about the thing it was pointed at.
+      #
+      # So the verdict is a single printed token, and there are THREE of them:
+      # `true` (the gate survived), `false` (it is gone) and `unreadable` (the
+      # function is missing, so `prosrc` is NULL and `LIKE` yields NULL). Only
+      # `false` passes -- a missing function cannot masquerade as a clean
+      # revert, which is exactly what a bare "no match" test would have let it
+      # do.
+      if psql_cmd "SELECT 'GATE-VERDICT:' || COALESCE((
+             (SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+               WHERE n.nspname='public' AND p.proname='admin_retire_location')
+             LIKE '%contained_estate_after_effective_to%')::text, 'unreadable') AS verdict;" \
+         >/tmp/harness_gate 2>&1 && grep -q 'GATE-VERDICT:false' /tmp/harness_gate; then
+        echo "  | (checked) the containment gate is gone from admin_retire_location after the revert"
+      else
+        echo "FAIL revert ${id}: admin_retire_location did not come back without the containment gate"
+        dump 10 /tmp/harness_gate; STATUS=1
+      fi
+    fi
+
     if [ "$id" = "20260911000000" ]; then
       # Three counts, three checks, each against a figure the seed above made
       # unique. `closing 3 field(s)` is the containment figure, and it is

@@ -299,9 +299,9 @@ describe('scenario table :: the table itself', () => {
     // would pass green having asserted nothing at all.
     expect(TABLE.fieldScenarios.length).toBe(37);
     expect(TABLE.blackoutScenarios.length).toBe(14);
-    expect(TABLE.estateScenarios.length).toBe(14);
+    expect(TABLE.estateScenarios.length).toBe(17);
     const all = [...TABLE.fieldScenarios, ...TABLE.blackoutScenarios, ...TABLE.estateScenarios];
-    expect(all.length).toBe(65);
+    expect(all.length).toBe(68);
     for (const scenario of all) {
       expect(typeof scenario.id).toBe('string');
       expect(scenario.why.length).toBeGreaterThan(10);
@@ -788,6 +788,15 @@ const estateInState = async (before) => {
     pitchASlot: `scenario-venue-${n}-game-a`,
     pitchBSlot: `scenario-venue-${n}-practice-b`,
     subunitSlot: `scenario-venue-${n}-practice-sub`,
+    // **The two empty cases 20260912000000 needs, and they cannot be the main
+    // venue.** That one always holds two pitches and a sub-surface, by design,
+    // because the containment assertions are about a NON-empty estate. An
+    // empty estate is a different venue, not a different date on this one.
+    emptyVenue: `scenario-venue-${n}-empty`,
+    allChildrenDatedVenue: `scenario-venue-${n}-closed`,
+    closedPitchA: `scenario-venue-${n}-closed-pitch-a`,
+    closedPitchB: `scenario-venue-${n}-closed-pitch-b`,
+    closedSubunit: `scenario-venue-${n}-closed-sub`,
   };
   await supabase.from('locations').insert({
     id: ids.venue,
@@ -837,6 +846,46 @@ const estateInState = async (before) => {
     valid_until: dateAt(60),
   });
 
+  // A venue that holds NOTHING: no fields, so no sub-surfaces and no bookings.
+  await supabase.from('locations').insert({
+    id: ids.emptyVenue,
+    organization_id: ORG,
+    name: `Scenario Empty Estate ${n}`,
+    effective_to: null,
+  });
+
+  // A venue holding three nodes whose windows ALL end at +70, so a retirement
+  // dated +80 newly closes none of them: `contained` has three entries and
+  // `contained_count` is 0. This is the pair that separates the COUNT from the
+  // LIST, and it cannot be built from the main venue without breaking the
+  // childDates assertions every other case makes about it.
+  await supabase.from('locations').insert({
+    id: ids.allChildrenDatedVenue,
+    organization_id: ORG,
+    name: `Scenario Closed Estate ${n}`,
+    effective_to: null,
+  });
+  for (const [id, name] of [
+    [ids.closedPitchA, `Scenario Closed Estate ${n} Pitch A`],
+    [ids.closedPitchB, `Scenario Closed Estate ${n} Pitch B`],
+  ]) {
+    await supabase.from('fields').insert({
+      id,
+      organization_id: ORG,
+      location_id: ids.allChildrenDatedVenue,
+      name,
+      active: true,
+      effective_to: dateAt(70),
+    });
+  }
+  await supabase.from('field_subunits').insert({
+    id: ids.closedSubunit,
+    organization_id: ORG,
+    field_id: ids.closedPitchA,
+    label: `Scenario Closed Estate ${n} Pitch A North`,
+    effective_to: dateAt(70),
+  });
+
   // **Every row of the estate really landed.** A seed that failed would turn a
   // refusal case into an unbooked one: the retirement would proceed, the
   // assertion would be about nothing, and the scope could be wrong.
@@ -861,6 +910,28 @@ const estateInState = async (before) => {
     getMockData('practice_slots').find((row) => String(row.id) === ids.subunitSlot)
       ?.field_subunit_id
   ).toBe(ids.subunit);
+
+  // **The two empty-case venues are asserted to BE what they claim.** An empty
+  // venue that silently acquired a field, or a closed venue whose children
+  // landed undated, would turn `venue-retire-empty-estate-commits-unconfirmed`
+  // and its sibling into tests of the ordinary path scoring a pass. Enumerated
+  // from the ids, not from whatever the tables happen to hold.
+  expect(
+    getMockData('fields').filter((row) => String(row.location_id) === ids.emptyVenue),
+    'the empty venue is not empty'
+  ).toHaveLength(0);
+  const closedFields = getMockData('fields').filter(
+    (row) => String(row.location_id) === ids.allChildrenDatedVenue
+  );
+  expect(closedFields, 'the closed venue lost its pitches').toHaveLength(2);
+  for (const row of closedFields) {
+    expect(row.effective_to ?? null, 'a closed-venue pitch landed undated').toBe(dateAt(70));
+  }
+  expect(
+    getMockData('field_subunits').find((row) => String(row.id) === ids.closedSubunit)
+      ?.effective_to ?? null,
+    'the closed-venue sub-surface landed undated'
+  ).toBe(dateAt(70));
   return ids;
 };
 
@@ -887,8 +958,20 @@ describe('scenario table :: the estate half, against the mock', () => {
       throw new Error(`unknown rpc "${scenario.rpc}" in scenario "${scenario.id}"`);
     }
     const isVenue = scenario.rpc.endsWith('_location');
-    const subjectId =
-      scenario.target === 'missing' ? 'no-such-estate-node-id' : ids[isVenue ? 'venue' : 'subunit'];
+    // **A named target that does not resolve throws** rather than falling back
+    // to the default venue, which would run the case against the wrong estate
+    // and score a pass. `missing` is the one target that deliberately has no id.
+    let subjectId;
+    if (scenario.target === 'missing') {
+      subjectId = 'no-such-estate-node-id';
+    } else if (scenario.target) {
+      subjectId = ids[scenario.target];
+      if (!subjectId) {
+        throw new Error(`unknown target "${scenario.target}" in scenario "${scenario.id}"`);
+      }
+    } else {
+      subjectId = ids[isVenue ? 'venue' : 'subunit'];
+    }
     const args = isVenue
       ? { p_organization_id: ORG, p_location_id: subjectId }
       : { p_organization_id: ORG, p_field_subunit_id: subjectId };
@@ -904,10 +987,19 @@ describe('scenario table :: the estate half, against the mock', () => {
 
     // The node is read back from the TABLE, never from the payload: the
     // payload is what a broken RPC would get wrong.
+    // **The node the AFTERMATH is read from is not always the node the call
+    // addressed.** A `target: "missing"` case addresses an id that does not
+    // exist, and what it has to prove is that the REAL node was not written;
+    // reading back the missing id would read nothing and could only ever
+    // agree. This is the shape /code-review found in the SQL generator during
+    // part 1 -- a check counting the children of a venue that does not exist --
+    // and it is the same trap one level along.
+    const readBackId =
+      scenario.target === 'missing' ? ids[isVenue ? 'venue' : 'subunit'] : subjectId;
     const readBack = () =>
       isVenue
-        ? getMockData('locations').find((row) => String(row.id) === ids.venue)
-        : getMockData('field_subunits').find((row) => String(row.id) === ids.subunit);
+        ? getMockData('locations').find((row) => String(row.id) === String(readBackId))
+        : getMockData('field_subunits').find((row) => String(row.id) === String(readBackId));
 
     if (!scenario.expect.ok) {
       expectRefusal(error, scenario);
@@ -942,10 +1034,17 @@ describe('scenario table :: the estate half, against the mock', () => {
         expect(data?.contained_count, `${scenario.id}: contained_count`).toBe(
           scenario.expect.containedCount
         );
-        // Two fields plus one sub-surface are always CONTAINED; the count is
-        // how many this call newly closes. Reporting the same number for both
-        // would hide an `already_retired` arm that never fires.
-        expect(data?.contained ?? []).toHaveLength(3);
+        // **The LIST and the COUNT are different numbers and are pinned
+        // separately.** The default estate holds two fields plus one
+        // sub-surface, so `contained` has three entries whatever the count
+        // says; the count is how many this call NEWLY closes. Reporting the
+        // same number for both would hide an `already_retired` arm that never
+        // fires -- and the two 20260912000000 cases whose count is 0 while
+        // their list is 0 and 3 respectively are the pair that proves the gate
+        // reads the count.
+        expect(data?.contained ?? [], `${scenario.id}: contained list`).toHaveLength(
+          scenario.expect.containedTotal ?? 3
+        );
       }
       const phases = [
         ...new Set(
@@ -975,14 +1074,22 @@ describe('scenario table :: the estate half, against the mock', () => {
     // non-zero; a venue retirement that pushed its date down makes it 3 and
     // every case with `childDates: 0` fails.
     if ('childDates' in scenario.expect) {
+      // **Counted under the venue this case actually addressed.** Hard-coding
+      // `ids.venue` here would have counted the DEFAULT estate's children for
+      // the two empty-case scenarios, which address other venues -- a check
+      // reading a venue the case never touched, and therefore one that could
+      // only ever return 0.
+      const subjectVenue = isVenue ? String(readBackId) : ids.venue;
+      const venueFieldIds = getMockData('fields')
+        .filter((row) => String(row.location_id) === subjectVenue)
+        .map((row) => String(row.id));
       const dated =
         getMockData('fields').filter(
-          (row) => String(row.location_id) === ids.venue && (row.effective_to ?? null) !== null
+          (row) => String(row.location_id) === subjectVenue && (row.effective_to ?? null) !== null
         ).length +
         getMockData('field_subunits').filter(
           (row) =>
-            [ids.pitchA, ids.pitchB].includes(String(row.field_id)) &&
-            (row.effective_to ?? null) !== null
+            venueFieldIds.includes(String(row.field_id)) && (row.effective_to ?? null) !== null
         ).length;
       expect(dated, `${scenario.id}: children carrying a date`).toBe(scenario.expect.childDates);
     }

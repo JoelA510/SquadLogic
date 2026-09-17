@@ -16,7 +16,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { repairProposal } from '@squadlogic/core/fieldAdmin/index.js';
 import ConsequencePreview from '../frontend/src/components/scheduling/ConsequencePreview.jsx';
-import RetireFieldDialog from '../frontend/src/components/setup/RetireFieldDialog.jsx';
+import RetireEstateNodeDialog from '../frontend/src/components/setup/RetireEstateNodeDialog.jsx';
 import BlackoutEditor from '../frontend/src/components/setup/BlackoutEditor.jsx';
 
 const FIELD = { id: 'field-1', name: 'North Field' };
@@ -156,9 +156,10 @@ function RetireHost({ onRetire }) {
         Retire North Field
       </button>
       {open && (
-        <RetireFieldDialog
+        <RetireEstateNodeDialog
           open
-          field={FIELD}
+          node={FIELD}
+          kind="field"
           defaultDate="2026-09-30"
           onRetire={onRetire}
           onClose={() => setOpen(false)}
@@ -168,7 +169,7 @@ function RetireHost({ onRetire }) {
   );
 }
 
-describe('RetireFieldDialog', () => {
+describe('RetireEstateNodeDialog', () => {
   it('refuses first, shows what stands, then retires on confirmation', async () => {
     const onRetire = vi
       .fn()
@@ -180,7 +181,7 @@ describe('RetireFieldDialog', () => {
 
     // The date is found through its LABEL, which only works if `htmlFor`
     // reaches the input.
-    const date = screen.getByLabelText(/Last day this ground is usable/);
+    const date = screen.getByLabelText(/Last day this field is usable/);
     expect(date).toHaveAttribute('type', 'date');
 
     fireEvent.click(screen.getByText('Check and retire'));
@@ -224,7 +225,7 @@ describe('RetireFieldDialog', () => {
     fireEvent.click(screen.getByText('Check and retire'));
     await waitFor(() => expect(screen.getByTestId('consequence-preview')).toBeInTheDocument());
 
-    fireEvent.change(screen.getByLabelText(/Last day this ground is usable/), {
+    fireEvent.change(screen.getByLabelText(/Last day this field is usable/), {
       target: { value: '2026-11-30' },
     });
     // **A new date is a new question.** Confirming against a list computed for

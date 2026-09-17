@@ -2966,6 +2966,12 @@ Not yet filed as a PR. It waits on the composer from GAP-30 PR A, and Edge
 Functions are Deno/TS and cannot import `packages/core`, so it needs the mirror
 treatment `supabase/functions/_shared/engines/` already uses.
 
+> **A fourth defect in this same function was found while fixing these three,
+> and it is more severe than any of them: the practice recurrence loop did not
+> terminate.** See **LIVE-11**. It also answers a question this entry does not
+> ask — why a `NaN` described as affecting "every game" was only ever observed
+> on teams that had no practices.
+
 ### LIVE-7 — the practice arm sends the season timezone and the engine never reads it
 
 Found while scoping GAP-30 PR A's carve-out, and recorded here because a defect
@@ -3214,13 +3220,16 @@ Two supervisor-specific rules earned here:
 
 ### Still open
 
-LIVE-5 (`calendar-feed`: `NaN DTSTART`, plus a hardcoded `America/New_York`
-fallback that means the calendar's zone has never once been the season's),
-LIVE-7 (the practice arm, and `scoring-engine.ts` deriving a **weekday** from a
-host-zone reading — a 9pm Saturday New York practice buckets as Sunday on a UTC
-host), LIVE-8, the `NEW_MIGRATIONS` list, the eight post-merge findings, and
-GAP-29. GATE 2 — the engine wiring question — was gated on GAP-29 and GAP-30
-together and is now half-unblocked.
+LIVE-8, the `NEW_MIGRATIONS` list, GAP-29, and the sample-seed migration chain
+#399 pinned. GATE 2 — the engine wiring question — was gated on GAP-29 and
+GAP-30 together and is now half-unblocked. The eight post-merge findings closed
+in #398; LIVE-5, LIVE-7 and LIVE-11 close below.
+
+**Merge note.** Two workstreams appended to the end of this file at once: #399
+(the GAP-30 follow-ups entry) and the LIVE-5/LIVE-7 entry below. Both are kept,
+#399 first, and this paragraph is the merge of the two "Still open" lists rather
+than either side's — LIVE-5 and LIVE-7 are no longer open, and neither are the
+eight findings #398 fixed.
 
 ## GAP-30 follow-ups — the reporting layer — **merged (#398, `2bfa44c`)**
 
@@ -3318,3 +3327,315 @@ you think to break. **Choosing what to break is a separate skill from building
 the control, and it is the one that was missing.** The composer was reviewed
 three times because it was interesting; the banner shipped a 66 KB paragraph
 because it was not.
+
+## LIVE-5 and LIVE-7 — the Edge Functions' season clock
+
+Both were open pending "the mirror treatment": Edge Functions are Deno/TS and
+cannot import `packages/core`, so the season clock GAP-30 built could not reach
+them. Closed together, in one PR, because they need the same mirror.
+
+### The mirror, and the reason it is not a fourth silent twin
+
+`supabase/functions/_shared/timing/seasonClock.ts` is a second implementation
+of `packages/core/src/timing/seasonClock.js`. The alternative — importing the
+JS module — was considered and rejected on a deployment risk rather than a
+stylistic one: `supabase functions deploy` bundles from `supabase/`, a relative
+import climbing to `packages/core/` leaves that root, and the module pulls in
+`timing/reasonCodes.js -> facility/reasonCodes.js`. The only thing that
+exercises that bundler path is the `deploy-edge-functions` job on `main`, which
+has no local reproduction and whose failure mode is a broken production
+function. `_shared/engines/` already mirrors core for the same reason.
+
+**Twin-arm half-application is this codebase's most recurrent defect family**
+(LIVE-1, LIVE-2, LIVE-3, and LIVE-7 itself), so the mirror ships with the check
+the earlier ones lacked. `_shared/timing/seasonClock.vectors.json` is 27 rows of
+(date, wall time, IANA zone) -> expected instant, covering the DST gap, the DST
+ambiguity, `:45` offsets (Kathmandu, Chatham), `Australia/Lord_Howe`'s
+thirty-minute shift in both directions, `24:00` on and off a transition, an
+invalid calendar date, a missing zone and an unknown one. **Both arms are run
+against it** — the JS one from `tests/seasonClockVectors.test.js`, the TS one
+from `supabase/functions/_shared/tests/season-clock_test.ts` under Deno, which
+CI runs twice, under `TZ=UTC` (the edge default) and `TZ=America/Los_Angeles`.
+
+Every row was verified **independently of both clocks**, by brute-force
+`Intl.DateTimeFormat` round-tripping over the 72 hours around each naive value:
+zero matching instants must be `WALL_TIME_NONEXISTENT`, two must be
+`WALL_TIME_AMBIGUOUS` resolving to the earlier, one must be a clean compose. The
+table is not a recording of what the implementation does.
+
+Three controls, all watched going red and then reverted:
+
+1. Ambiguity resolved to the LAST candidate in the TS arm only → the TS arm red
+   in both runners, the JS arm green. The arms are separable.
+2. One vector corrupted (`Asia/Kathmandu` +05:45 → +05:30) → **both** arms red
+   in both runners. Both sides really read the table.
+3. The four `half-hour-dst` rows deleted → the literal case count and the
+   literal required-tag list go red on both sides. A table quietly shrunk to its
+   easy rows cannot pass.
+
+### LIVE-5 — and the fourth defect nobody had found
+
+Three defects were named. A fourth was found while fixing them, and it is the
+worst of the four. **It has its own entry as LIVE-11**, because it is not the
+same defect family and a reader looking up why the feed hung should not have to
+find it inside a paragraph about timezones. Summarised here because it was
+found here:
+
+`p.effective_date_range.replace(/[[]()]/g, '')` is not the character class it
+looks like: `[[]` is a class containing `[`, `()` is an empty group, `]` is a
+literal — so the pattern matches the two-character string `"[]"` and strips
+**nothing** from the `[2026-11-02,2026-11-17)` PostgREST renders a `daterange`
+as. `startStr` came out `'[2026-11-02'`, `new Date('[2026-11-02T12:00:00Z')` is
+Invalid Date, `getUTCDay()` is `NaN`, and `while (NaN !== targetDay)` with
+`setUTCDate` on an invalid Date **never terminates**. Executed: 100,000
+iterations with no progress. **Every team with a practice assignment hung the
+feed until the isolate was killed** — which is why the "NaN DTSTART for every
+game" was only ever visible to teams that had no practices.
+
+The bound markers are now honoured rather than stripped, adopting
+`rangeLastDay` in `mockSupabaseClient.js`: a canonical `[a,b)` stops the day
+before `b`, so the feed no longer schedules one practice a week after the
+assignment ends.
+
+The other three:
+
+- The games select never asked for `slot_date` at all. It now selects the
+  wall-clock pair **and** the `timestamptz` pair, and prefers the instant when
+  a row carries one — `normalizeGameSlot`'s order, not a fourth reading of
+  "when is this slot".
+- `let timezone = 'America/New_York'` is gone. There were **three** routes to
+  that fallback, not the two LIVE-5 named: the missing column (LIVE-9), the
+  missing writer (LIVE-10), and `.single()` erroring outright for any
+  organization with more than one `season_settings` row — which the season
+  switcher makes ordinary. `X-WR-TIMEZONE` is now emitted only when the season
+  has a zone.
+- The practice arm's `` `${isoDate}T${start_time}Z` `` composes on the season
+  clock instead.
+
+**What the feed says when it cannot place an event.** No timed VEVENT, because
+a DTSTART an hour wrong sends a family to an empty field; but not silence
+either. Where the wall date is known — the normal case, since what is usually
+missing is the zone and not the date — an **all-day** VEVENT is emitted:
+`DTSTART;VALUE=DATE`, `SUMMARY:TIME TBD - …`, the reason code in the
+DESCRIPTION, `STATUS:TENTATIVE`. A date-valued DTSTART is floating by
+definition, so it claims a day and no instant, which is exactly what is known.
+Where not even a date is known the event is counted and logged. Either way
+`X-WR-CALDESC` carries a count bucketed **by reason code** — the GAP-30
+post-merge review found the equivalent banner emitting one line per slot and
+66,797 characters, and a season with a null timezone makes every event
+unplaceable, so that is this line's normal case too. The feed still answers 200:
+refusing the whole response would break every subscribed family's calendar app
+over a setting only an admin can fix.
+
+**The generation moved to `_shared/calendar/icsFeed.ts`.**
+`tests/calendarFeed.test.js` "covered" this file by re-declaring `formatIcsDate`
+and the generator **inside the test** and asserting against the copy. It passed
+for the entire life of the NaN, because the copy was never handed a bare
+Postgres `time`. There is now one implementation, imported by the function and
+by both test arms.
+
+### LIVE-7 — and what "honour it or delete it" turned out to mean
+
+`PracticeSchedulingPage:62`'s `buildDateTime` returned the naive
+`` `${date}T${time}` ``; those strings went to `auto-scheduler`, which did
+`new Date(s.start)` on them; and the request carried `timezone`, which that
+file never mentioned.
+
+CLAUDE.md allows two outcomes for a field parsed and unread. This is **both**,
+and the split is the design decision worth recording: the field is **deleted
+from the wire**, and the value is **honoured from the place that actually holds
+it**. `auto-scheduler` and `fairness-scoring` now read
+`season_settings.timezone` themselves. Accepting it from the body as well would
+be a second answer to the same question — precisely the drift the
+`20260913000000` migration refuses when it declines a read-time
+`contact_info->>'timezone'` fallback.
+
+- `_shared/timing/seasonSettings.ts` is the one server-side read, `newest
+first` and never `.single()`. A caller that names a season gets that one,
+  **still filtered by `organization_id`**: an id in a request body is not a
+  capability and this runs under the service role.
+- `_shared/timing/anchorWallTimes.ts` places every request wall time before
+  anything calls `new Date()`. An instant passes through, a naive wall reading
+  is composed, a bare `YYYY-MM-DD` is refused exactly as core's `InstantSchema`
+  refuses it, and a naive value with no season zone is a 422 with a reason code.
+  Per row: one spring-forward slot must not cost the request.
+- `SlotSchema.start`'s `z.string().or(z.date())` became
+  `WallTimeOrInstantSchema`. It is deliberately **not** core's `InstantSchema`:
+  core has no season zone at hand when it validates, so refusing a naive string
+  outright is the only honest answer there; the edge reads one from the
+  database, so refusing would discard a value it can place. The invariant that
+  nothing zone-less reaches an evaluator is enforced by the anchor pass, which
+  runs first.
+- `scoring-engine.ts:147` stopped deriving a weekday from a host-zone reading
+  and reads `slot.day ?? 'unknown'`, which is what its core twin
+  `practiceMetrics.js:582` does. Deriving it _correctly_ would have been a
+  fourth contract for one field. The Deno test logs the defect live: under
+  `TZ=UTC` the old line derives **"Sunday"** for a 9pm Saturday New York
+  practice, under `TZ=America/Los_Angeles` it derives "Saturday".
+
+On the page, `buildDateTime` now composes through `requireZonedInstant`, and
+the slot `map` moved from one try/catch around the whole list to a per-row
+partition — the shape `partitionGameSlots` reached first. That change is load
+bearing rather than tidy: putting the clock in makes a DST-gap slot _refuse_
+where it used to compose a naive string, and the per-page catch would have
+turned one bad slot into a dead page. `describeUnplaceableSlots` and
+`isSeasonClockLoading` moved to `utils/seasonClockSlots.js` rather than being
+copied into a second page.
+
+### What this pair is worth carrying forward
+
+**The claim that travelled as background was wrong again, and in the same
+direction.** LIVE-7 states that a 9pm Saturday New York practice buckets as
+Sunday on a UTC host. Reproduced before building on it: that is true of an
+_instant_ (`2026-04-05T01:00:00Z`), which is the shape `fairness-scoring`'s own
+fixtures use — and **false of the naive string** the page was sending, because
+a naive read and a host-zone format round-trip to the same weekday. The defect
+is real and the code was wrong; the mechanism named in the entry was the
+complement of the one on the arm the entry was about. Verifying it cost ten
+minutes and changed which test proves it.
+
+**A file gets read past the defect it was opened for.** The infinite loop was
+four lines below the `Z`-appending line LIVE-5 named, in the same function, and
+three adversarial passes over this area had not found it — because each was
+looking for the timezone defect it had been told about.
+
+### The `/code-review` round, and what it says about this PR's controls
+
+Twelve findings, all real, all fixed in the same PR. Three of them are worth
+recording because of what they were, not that they existed:
+
+1. **The fix reintroduced its own defect, through the column the fix added.**
+   `placeSlotTime` returned whatever the anchor passed through and let the
+   caller call `new Date()` on it. A `game_slots.start` of `'16:00:00'` is not
+   a naive _date-time_, so the anchor correctly leaves it alone — and
+   `new Date('16:00:00')` is Invalid Date. **`NaNNaNNaNTNaNNaNNaNZ`, back in the
+   feed, reached through the `start` column this very change added to the
+   select.** A bare `'2026-11-07'` went through the same hole and silently
+   became UTC midnight. The sibling predicate `toInstant` in
+   `anchorWallTimes.ts` already decided both correctly; `placeSlotTime`
+   invented a third answer thirty lines away from it, in the same PR, on the
+   same afternoon. Twin-arm half-application is not something other people do.
+
+2. **Every control in this PR pointed at the clock.** The vector table, the
+   three drift controls, the anchor tests, the weekday test — all aimed at
+   "is the arithmetic right". The review's findings were almost entirely
+   _elsewhere_: a dropped advisory, three silently dropped rows, a readiness
+   message asserting "no practice slots are available" while the season row was
+   still loading, an unfolded 224-character `X-WR-CALDESC` in the one case it
+   exists to report, and `timingFindings` returned by the function, documented
+   as "always present so a consumer cannot mistake none for unreported", and
+   then dropped by the only consumer — the `timezone`-shaped defect, recreated
+   one layer up, in the change that exists to fix it. GAP-30's lesson held
+   exactly: _choosing what to break is the judgement, and it is a separate
+   skill from building the control._
+
+3. **A test that named the regression could not fail on it.** The first
+   weekday case supplied `day: 'Saturday'` on its slots — and the old
+   expression was `slot.day || derived`, so the derived branch is unreachable
+   whenever a day is present. It asserted the right thing about the wrong
+   input. Reworked to omit `day`, which is the only input on which the two
+   expressions differ, and then watched failing against `main`'s expression
+   under both `TZ=UTC` and `TZ=America/Los_Angeles`.
+
+Two findings were pre-existing and are fixed here because this change
+documents the exact fields involved: `ScoringInputSchema.games.slots` was
+**required** while `EvaluationPanel` sends the object without it (so every game
+evaluation from that panel 400'd on a mandatory field nothing reads), and
+`await recordAudit(...)` is a no-op because `recordAudit` returns `void` —
+harmless mid-handler, not harmless immediately before a `return` on an edge
+isolate, which is where this change's new refusal path put it. `recordAuditNow`
+is the awaitable variant; every existing call site is unchanged.
+
+## LIVE-11 — the practice feed did not terminate — **fixed (#400)**
+
+Found while fixing LIVE-5, four lines below the line LIVE-5 named, in the same
+function. Filed separately because it is not the same defect family and is more
+severe than either of the two the task was opened for: **a denial of service on
+the calendar feed for every team with a practice assignment.**
+
+### The defect
+
+`calendar-feed/index.ts` expanded a practice assignment's recurrence from
+`practice_assignments.effective_date_range`, a Postgres `daterange`, which
+PostgREST renders in its canonical form `[2026-11-02,2026-11-17)`. The first
+line of the expansion stripped the bounds:
+
+```js
+const [startStr, endStr] = p.effective_date_range.replace(/[[]()]/g, '').split(',');
+```
+
+`/[[]()]/` is not the character class it looks like. `[[]` is a character class
+containing `[`; `()` is an empty group; `]` is a literal. The pattern therefore
+matches the two-character string `"[]"` and **nothing that appears in a real
+`daterange`**. Executed:
+
+```
+pattern source : [[]()]
+input          : "[2026-11-02,2026-11-17)"
+after replace  : "[2026-11-02,2026-11-17)"     <- strips nothing
+matches "[]"?  : true
+new Date(...)  : Invalid Date
+getUTCDay()    : NaN
+NaN !== 1      : true
+```
+
+So `startStr` was `'[2026-11-02'`, the anchor
+``new Date(`${startStr}T12:00:00Z`)`` was Invalid Date, `getUTCDay()` was `NaN`,
+and:
+
+```js
+while (currentDate.getUTCDay() !== targetDay) {
+  currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+}
+```
+
+`NaN !== targetDay` is always true and `setUTCDate` on an invalid `Date` leaves
+it invalid, so the loop **never terminates**. Measured: 100,000 iterations with
+no progress. The isolate spun until the runtime killed it, and the subscriber
+got nothing.
+
+### Why it was invisible, and what that explains
+
+Only teams **with** a practice assignment reached the loop. A team with games
+only fell through to the games arm and got LIVE-5's `NaN` DTSTART — a visible,
+reportable, wrong-looking calendar. **That is why the NaN was the defect anyone
+could see: the teams that would have shown the worse one never rendered a feed
+at all.** The question nobody had asked was why a bug described as affecting
+"every game" was only ever observed on teams with no practices.
+
+### Why no test caught it
+
+Every fixture in `tests/calendarFeed.test.js` was constructed by the test
+itself, and that file re-declared the generator rather than importing it (see
+the LIVE-5 entry), so no fixture ever carried the bracket spelling PostgREST
+actually emits. `tests/calendarFeed.test.js` and
+`supabase/functions/_shared/tests/ics-feed_test.ts` now both spell
+`effective_date_range` as `[2026-11-02,2026-11-17)` for exactly this reason, and
+the case that drives an unreadable range through the expansion completing at all
+is the assertion.
+
+### The fix, and the second half of it
+
+`dateRangeBounds` in `_shared/calendar/icsFeed.ts` parses the range with
+`/^([[(])([^,]*),([^,]*)([\])])$/` and **honours the bound markers rather than
+stripping them** — adopting `rangeLastDay` in `mockSupabaseClient.js`, which had
+this right already. That is not incidental: Postgres canonicalises a `daterange`
+to `[inclusive,exclusive)`, so treating the upper bound as inclusive schedules
+one practice a week **after** the assignment ends. Both halves were wrong; only
+one of them hung.
+
+A range that cannot be read is now reported as an unplaceable event carrying
+`PRACTICE_RANGE_UNREADABLE`, not dropped — including the unbounded `[a,)` that
+is storable today, since `effective_date_range` has no NOT NULL upper bound.
+
+### The rule
+
+**A regex is not read, it is executed.** `/[[]()]/` reads as "strip brackets and
+parens" to every human who has looked at this file, including three adversarial
+passes over this exact area. None of them ran it against a real value. A
+character class with a literal `[` in it is worth a one-line node check every
+time.
+
+And the one the supervisor named: **read the file past the defect it was opened
+for.** Three reviews found nothing here because each was looking for the
+timezone defect it had been told about.

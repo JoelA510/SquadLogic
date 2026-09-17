@@ -23,6 +23,10 @@ const DEFAULT_LOCAL_FUNCTIONS_URL = 'http://localhost:54321/functions/v1';
  * @property {Object} evaluation
  * @property {Object} optimization
  * @property {string|null} runId
+ * @property {Array<{ code: string, message: string, path?: string, id?: string|null }>} timingFindings
+ *   Non-blocking timing advisories from the Edge Function -- today only
+ *   `WALL_TIME_AMBIGUOUS`, a wall time that occurs twice on a fall-back night
+ *   and was resolved to its first occurrence. Always an array, never absent.
  */
 
 /**
@@ -89,7 +93,6 @@ export function useAutoScheduler({ organizationId }) {
       lockedAssignments,
       scoringWeights,
       schoolDayEnd,
-      timezone,
       seasonSettingsId,
       config,
     }) => {
@@ -115,7 +118,6 @@ export function useAutoScheduler({ organizationId }) {
         lockedAssignments: lockedAssignments ?? [],
         scoringWeights: scoringWeights ?? {},
         schoolDayEnd,
-        timezone,
         config: config ?? {},
       });
       const cached = edgeFunctionCache.get(cacheKey);
@@ -198,7 +200,6 @@ export function useAutoScheduler({ organizationId }) {
             lockedAssignments: lockedAssignments ?? [],
             scoringWeights: scoringWeights ?? {},
             schoolDayEnd,
-            timezone,
             config: config ?? {},
           }),
           signal: controller.signal,
@@ -217,6 +218,12 @@ export function useAutoScheduler({ organizationId }) {
           evaluation: data.evaluation,
           optimization: data.optimization,
           runId: data.runId,
+          // Carried through, not dropped. The function returns these on every
+          // run precisely so a consumer cannot read "none" as "this build does
+          // not report them" -- and a hook that leaves them on the floor makes
+          // that promise false one layer up, which is the `timezone`-shaped
+          // defect this whole change is about.
+          timingFindings: data.timingFindings ?? [],
         };
         // Wave 6b Task 1: cache the successful run. Errors are intentionally
         // NOT cached so retries after a failed run go back to the Edge Function.

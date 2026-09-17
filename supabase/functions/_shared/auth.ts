@@ -132,21 +132,32 @@ export async function resolveOrgIdsFromTeamIds(
   return [...new Set(data.map((row: { organization_id: string }) => row.organization_id))];
 }
 
+export interface AuditParams {
+  organizationId: string;
+  action: string;
+  resourceType?: string;
+  resourceId?: string;
+  metadata?: Record<string, unknown>;
+}
+
 /**
- * Fire-and-forget audit log entry via the record_audit_event RPC (Phase 4, 4.6).
- * Failures are logged but never block the response to the client.
+ * The audit write, **awaitable**.
+ *
+ * `recordAudit` below returns `void`, so `await recordAudit(...)` is a no-op
+ * that reads exactly like a wait. That is harmless where the handler keeps
+ * working for seconds afterwards and the insert lands anyway, and it is not
+ * harmless immediately before a `return`: on the Supabase edge runtime the
+ * isolate can be frozen once the response is sent, so the row is lost. A
+ * handler refusing a request is precisely the case CLAUDE.md's audit
+ * immutability rule most wants recorded, so the refusal paths await this.
+ *
+ * Never rejects: an audit failure must not turn into a 500.
  */
-export function recordAudit(
+export async function recordAuditNow(
   serviceClient: SupabaseClient,
-  params: {
-    organizationId: string;
-    action: string;
-    resourceType?: string;
-    resourceId?: string;
-    metadata?: Record<string, unknown>;
-  }
-): void {
-  void (async () => {
+  params: AuditParams
+): Promise<void> {
+  try {
     const { error } = await serviceClient.rpc('record_audit_event', {
       p_organization_id: params.organizationId,
       p_action: params.action,
@@ -154,9 +165,21 @@ export function recordAudit(
       p_resource_id: params.resourceId ?? null,
       p_metadata: params.metadata ?? {},
     });
-
     if (error) console.error('Audit log write failed:', error.message);
-  })().catch((err: Error) => console.error('Audit log write failed:', err.message));
+  } catch (err) {
+    console.error('Audit log write failed:', (err as Error).message);
+  }
+}
+
+/**
+ * Fire-and-forget audit log entry via the record_audit_event RPC (Phase 4, 4.6).
+ * Failures are logged but never block the response to the client.
+ *
+ * Returns `void` deliberately and historically. Use {@link recordAuditNow}
+ * anywhere the handler is about to return.
+ */
+export function recordAudit(serviceClient: SupabaseClient, params: AuditParams): void {
+  void recordAuditNow(serviceClient, params);
 }
 
 /**

@@ -242,9 +242,25 @@ Deno.test(
   }
 );
 
+// `day` is carried on the slot, as every production caller carries it:
+// `PracticeSchedulingPage` normalises `practice_slots.day_of_week` and sends it.
+// The engine reads `slot.day ?? 'unknown'` and derives nothing -- see the
+// LIVE-7 cases at the bottom of this file for why deriving was the defect.
 const scoringSlots: Slot[] = [
-  { id: 'early', capacity: 1, start: '2026-04-06T17:00:00Z', end: '2026-04-06T18:00:00Z' },
-  { id: 'overlap', capacity: 1, start: '2026-04-06T17:00:00Z', end: '2026-04-06T18:00:00Z' },
+  {
+    id: 'early',
+    capacity: 1,
+    day: 'Monday',
+    start: '2026-04-06T17:00:00Z',
+    end: '2026-04-06T18:00:00Z',
+  },
+  {
+    id: 'overlap',
+    capacity: 1,
+    day: 'Monday',
+    start: '2026-04-06T17:00:00Z',
+    end: '2026-04-06T18:00:00Z',
+  },
 ];
 const scoringAssignments: PracticeAssignment[] = [
   { teamId: 'T1', slotId: 'early' },
@@ -493,4 +509,83 @@ Deno.test('conflictPairKey - the same key whichever side is named first', () => 
     assertEquals(result.coachConflicts.length, 1);
     assertEquals(result.coachConflicts[0].coachIds, ['h', 'shared']);
   }
+});
+
+// ---------------------------------------------------------------------------
+// LIVE-7: the weekday the engine used to derive from a host-zone reading
+// ---------------------------------------------------------------------------
+
+Deno.test('scoring-engine - LIVE-7: the weekday is never derived from the host zone', () => {
+  // The defect: `slot.day || start.toLocaleDateString('en-US', {weekday:'long'})`
+  // reads the HOST's zone. These slots are a 9pm SATURDAY practice in
+  // America/New_York; on a UTC host -- the Supabase edge default -- that
+  // instant reads back as SUNDAY.
+  //
+  // The slots deliberately carry **no `day`**, because that is the only input
+  // on which the old expression and the new one differ: `||` short-circuits
+  // whenever a day is present, so a fixture that supplies one cannot fail on
+  // `main` no matter what it asserts. This one can, and does, under TZ=UTC.
+  const saturdayNightInNewYork = '2026-04-05T01:00:00Z'; // Sat 2026-04-04 21:00 EDT
+  const hostDerived = new Date(saturdayNightInNewYork).toLocaleDateString('en-US', {
+    weekday: 'long',
+  });
+  const hostZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  console.log(`[LIVE-7] host ${hostZone} derives "${hostDerived}" for a Saturday NY practice`);
+
+  const slots: Slot[] = [
+    { id: 'a', capacity: 1, start: saturdayNightInNewYork, end: '2026-04-05T02:30:00Z' },
+    { id: 'b', capacity: 1, start: saturdayNightInNewYork, end: '2026-04-05T02:30:00Z' },
+  ];
+  const teams: Team[] = [
+    { id: 'T1', division: 'U10', coachId: 'h' },
+    { id: 'T2', division: 'U12', coachId: 'h' },
+  ];
+  const assignments: PracticeAssignment[] = [
+    { teamId: 'T1', slotId: 'a' },
+    { teamId: 'T2', slotId: 'b' },
+  ];
+  const result = evaluatePracticeSchedule({ teams, slots, assignments });
+
+  assertEquals(conflictIssues(result).length, 1);
+  // No day was supplied, so none is invented -- not the host's reading, and
+  // not a corrected one either, which would be a fourth contract for one
+  // field. `packages/core/src/practiceMetrics.js:582` says `?? 'unknown'`.
+  assertEquals(result.coachConflicts[0].day, 'unknown');
+  assertEquals(conflictIssues(result)[0].message, 'Coach h has overlapping practices on unknown');
+  // Named explicitly: "Sunday" is the string `main` produced on a UTC host,
+  // and "Saturday" is what it produced in a US zone -- which is why nobody in
+  // a US zone ever saw the defect.
+  assertEquals(conflictIssues(result)[0].message.includes('Sunday'), false);
+  assertEquals(conflictIssues(result)[0].message.includes('Saturday'), false);
+});
+
+Deno.test("scoring-engine - the caller's day is honoured when it sends one", () => {
+  // The other half of the contract, and deliberately NOT a regression test:
+  // `||` and `??` agree whenever a day is present, so this case passes on
+  // `main` too. It pins the behaviour every production caller relies on --
+  // `PracticeSchedulingPage` normalises `day_of_week` and sends it -- so that
+  // a later "simplification" to always derive has something to break.
+  const slots: Slot[] = [
+    { id: 'a', capacity: 1, start: '2026-04-06T17:00:00Z', end: '2026-04-06T18:00:00Z' },
+    { id: 'b', capacity: 1, start: '2026-04-06T17:00:00Z', end: '2026-04-06T18:00:00Z' },
+  ];
+  const assignments: PracticeAssignment[] = [
+    { teamId: 'T1', slotId: 'a' },
+    { teamId: 'T2', slotId: 'b' },
+  ];
+  const teams: Team[] = [
+    { id: 'T1', division: 'U10', coachId: 'h' },
+    { id: 'T2', division: 'U12', coachId: 'h' },
+  ];
+  const result = evaluatePracticeSchedule({ teams, slots, assignments });
+  assertEquals(conflictIssues(result)[0].message, 'Coach h has overlapping practices on unknown');
+
+  // Control: the same pair WITH a day renders that day, so 'unknown' is the
+  // absence of a value and not a hardcoded string.
+  const withDay = evaluatePracticeSchedule({
+    teams,
+    slots: slots.map((s) => ({ ...s, day: 'Thursday' })),
+    assignments,
+  });
+  assertEquals(conflictIssues(withDay)[0].message, 'Coach h has overlapping practices on Thursday');
 });

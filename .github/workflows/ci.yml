@@ -242,6 +242,44 @@ jobs:
           --import-map supabase/functions/import_map.json
           supabase/functions/_shared/tests/practice-coaches_test.ts
 
+      # The Deno arm of the season clock's cross-arm drift check (LIVE-5/LIVE-7).
+      # `_shared/timing/seasonClock.ts` mirrors packages/core's season clock
+      # because an Edge Function cannot import packages/core; both arms are run
+      # against _shared/timing/seasonClock.vectors.json, the JS one from Vitest.
+      #
+      # Run TWICE, under the two host zones that matter. UTC is the Supabase
+      # edge default and is exactly where a host-zone reading hides: the
+      # expectations in the table are absolute instants, so an arm that consults
+      # the host zone fails one of the two runs. A single run could not tell the
+      # difference.
+      #
+      # --allow-read is for the two sibling-file assertions (the check that the
+      # JS arm reads the same table); the vectors arrive as a JSON module import
+      # and need no permission.
+      - name: Season clock + calendar feed (TZ=UTC — the edge default)
+        env:
+          DENO_NO_PACKAGE_JSON: '1'
+          TZ: UTC
+        run: >-
+          deno test
+          --allow-read=.
+          --import-map supabase/functions/import_map.json
+          supabase/functions/_shared/tests/season-clock_test.ts
+          supabase/functions/_shared/tests/ics-feed_test.ts
+          supabase/functions/_shared/tests/anchor-wall-times_test.ts
+
+      - name: Season clock + calendar feed (TZ=America/Los_Angeles)
+        env:
+          DENO_NO_PACKAGE_JSON: '1'
+          TZ: America/Los_Angeles
+        run: >-
+          deno test
+          --allow-read=.
+          --import-map supabase/functions/import_map.json
+          supabase/functions/_shared/tests/season-clock_test.ts
+          supabase/functions/_shared/tests/ics-feed_test.ts
+          supabase/functions/_shared/tests/anchor-wall-times_test.ts
+
   # ── Deploy Edge Functions (main only) ────────────────────────
   # Prevents edge-function drift: redeploys all Supabase edge functions whenever
   # main changes and CI is green (the import-validation outage was caused by the

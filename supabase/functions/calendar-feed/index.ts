@@ -1,25 +1,64 @@
+/**
+ * Edge Function: calendar-feed
+ *
+ * The ICS feed a family subscribes to in Apple/Google Calendar. Every game and
+ * practice a team plays, as VEVENTs.
+ *
+ * ## LIVE-5: what this file used to emit
+ *
+ * Three defects, all of them reaching subscribers:
+ *
+ * 1. The games select asked for `game_slots ( start_time, end_time )` -- bare
+ *    Postgres `time` columns -- and then did `new Date(slot.start_time)`.
+ *    `new Date('16:00:00')` is **Invalid Date**, so `formatIcsDate` emitted
+ *    `NaNNaNNaNTNaNNaNNaNZ` into DTSTART and DTEND **for every game**. The
+ *    select never asked for `slot_date` at all, so there was nothing to
+ *    compose a date from.
+ * 2. `timezone` defaulted to a hardcoded `'America/New_York'`, overridden only
+ *    `if (settings?.timezone)`. The column did not exist on a freshly built
+ *    database (LIVE-9), had no writer anywhere (LIVE-10), and the `.single()`
+ *    errored outright for any organization with more than one season -- three
+ *    independent routes to the fallback, so **every club in the world got
+ *    Eastern**, silently. The calendar's timezone had never once been the
+ *    season's.
+ * 3. The practice arm built ``new Date(`${isoDate}T${slot.start_time}Z`)`` --
+ *    appending `Z` to a naive local time, asserting the club practises in UTC.
+ *    Its own comment admitted this and deferred it.
+ *
+ * All three are one root: a wall reading turned into an instant with no zone.
+ * The fix is `_shared/timing/seasonClock.ts`, the Deno arm of the season clock,
+ * which takes the zone as a parameter and refuses rather than guessing.
+ *
+ * ## What the feed says when it cannot place an event
+ *
+ * See `_shared/calendar/icsFeed.ts`, which holds the whole decision: an
+ * unplaceable event becomes an all-day `TIME TBD` VEVENT carrying its reason
+ * code, the calendar's `X-WR-CALDESC` carries a bucketed count, and
+ * `X-WR-TIMEZONE` is emitted only when the season actually has a zone.
+ *
+ * The feed still answers 200 with a valid VCALENDAR in that case. Refusing the
+ * whole response would break the calendar app of every subscribed family over
+ * a setting only an admin can fix.
+ *
+ * ## Why the generation lives in `_shared`
+ *
+ * `tests/calendarFeed.test.js` used to "cover" this file by re-declaring
+ * `formatIcsDate` and the generator inside the test and asserting against the
+ * copy. It passed for the entire life of defect 1 above, because the copy was
+ * never handed a bare `time`. The logic is now imported by the function and by
+ * both test arms, so there is one implementation to be wrong.
+ */
+
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.87.1';
-
-// Phase 1 Security: Sanitize ICS field values to prevent header injection.
-// ICS fields must not contain newlines that could inject extra headers.
-const sanitizeIcsValue = (val: string): string =>
-  val
-    .replace(/[\r\n]+/g, ' ')
-    .replace(/[\\;,]/g, '\\$&')
-    .trim();
-
-// Simple padded string helper
-const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-
-// Format date to DTSTART UTC format: 20240805T170000Z
-// Strict RFC 5545 requires specific string configurations.
-const formatIcsDate = (dateOb: Date): string => {
-  return `${dateOb.getUTCFullYear()}${pad(dateOb.getUTCMonth() + 1)}${pad(dateOb.getUTCDate())}T${pad(dateOb.getUTCHours())}${pad(dateOb.getUTCMinutes())}${pad(dateOb.getUTCSeconds())}Z`;
-};
-
-// Generates a random UID for the ICS event
-const _generateUid = () => crypto.randomUUID();
+import {
+  buildFeedEvents,
+  renderIcsCalendar,
+  summariseUnplaceable,
+  type GameRow,
+  type PracticeRow,
+} from '../_shared/calendar/icsFeed.ts';
+import { readSeasonTimezone } from '../_shared/timing/seasonSettings.ts';
 
 serve(async (req) => {
   try {
@@ -69,33 +108,51 @@ serve(async (req) => {
     const organizationId = team.organization_id;
     const orgName = team.organizations?.name || 'SquadLogic';
 
-    // 2. Fetch Timezone Settings
-    // We need to resolve the timezone for practice expansion
-    let timezone = 'America/New_York';
-    if (organizationId) {
-      const { data: settings } = await supabase
-        .from('season_settings')
-        .select('timezone')
-        .eq('organization_id', organizationId)
-        .single();
-      if (settings?.timezone) timezone = settings.timezone;
+    // 2. Fetch the season's timezone.
+    //
+    // No default. A season with no timezone refuses rather than guessing; the
+    // hardcoded `America/New_York` this replaced was the bug, not the safety
+    // net.
+    //
+    // `readSeasonTimezone` rather than a query written out here: its own header
+    // calls itself "the one server-side read of a season's clock", and a second
+    // copy in this file is how `.single()` ends up fixed on one arm and not the
+    // other -- the twin-arm shape this whole change exists to stop.
+    const season = await readSeasonTimezone(supabase, organizationId);
+    if (season.errored) {
+      // Not fatal. A feed that 500s takes every family's calendar down; every
+      // event becomes TIME TBD instead, which says the true thing.
+      console.error('calendar-feed: season_settings read failed', {
+        organizationId,
+        message: season.message,
+      });
     }
+    const timezone = season.timezone;
 
-    // 3. Fetch Games
-    const { data: games } = await supabase
+    // 3. Fetch Games.
+    //
+    // `slot_date` is the column this select was missing entirely: it asked for
+    // the two `time` columns alone and fed them straight to `new Date()`.
+    // `start`/`end` are the `timestamptz` pair, preferred when a row carries
+    // them -- the order `normalizeGameSlot` already uses.
+    const { data: games, error: gamesError } = await supabase
       .from('games')
       .select(
         `
           id,
-          game_slots ( start_time, end_time, fields(name, locations(name)) ),
+          game_slots ( slot_date, start_time, end_time, start, end, fields(name, locations(name)) ),
           teams!games_home_team_id_fkey(name),
           teams!games_away_team_id_fkey(name)
       `
       )
       .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
 
+    if (gamesError) {
+      console.error('calendar-feed: games read failed', { teamId, message: gamesError.message });
+    }
+
     // 4. Fetch Practice Assignments
-    const { data: practices } = await supabase
+    const { data: practices, error: practicesError } = await supabase
       .from('practice_assignments')
       .select(
         `
@@ -106,106 +163,43 @@ serve(async (req) => {
       )
       .eq('team_id', teamId);
 
-    // 5. Expand Practice Dates (Copied core logic from hook, localized for Deno)
-    const expandedEvents = [];
-
-    // Day offset map JS getUTCDay
-    const dayMap: Record<string, number> = {
-      sun: 0,
-      mon: 1,
-      tue: 2,
-      wed: 3,
-      thu: 4,
-      fri: 5,
-      sat: 6,
-    };
-
-    practices?.forEach((p) => {
-      const [startStr, endStr] = p.effective_date_range.replace(/[[]()]/g, '').split(',');
-      if (!startStr || !endStr) return;
-
-      const slot = p.practice_slots;
-      if (!slot) return;
-
-      const targetDay = dayMap[slot.day_of_week.toLowerCase()];
-      const currentDate = new Date(`${startStr.trim()}T12:00:00Z`);
-      const endDate = new Date(`${endStr.trim()}T12:00:00Z`);
-
-      while (currentDate.getUTCDay() !== targetDay) {
-        currentDate.setUTCDate(currentDate.getUTCDate() + 1);
-      }
-
-      while (currentDate <= endDate) {
-        const isoDateStr = currentDate.toISOString().split('T')[0];
-
-        // Construct proper UTC Date objects for the start and end times
-        // This requires passing the string into Date constructor assuming local wall time, then mapping
-        // For simplicity in generating strict UTC ICS, we append Z if we know the offset, or rely
-        // on the DB's timezone bindings. Assuming slot.start_time is purely a time without TZ "17:00:00".
-        // In a full prod app we'd use moment-timezone or Day.js to map `isoDateStr` + `start_time` in `timezone` to a UTC Date.
-        // For this exercise, we will assume standard parsing.
-        const startDt = new Date(`${isoDateStr}T${slot.start_time}Z`);
-        const endDt = new Date(`${isoDateStr}T${slot.end_time}Z`);
-
-        expandedEvents.push({
-          uid: `${p.id}_${isoDateStr}`,
-          title: `Practice - ${team.name}`,
-          dtstart: formatIcsDate(startDt),
-          dtend: formatIcsDate(endDt),
-          description: `Practice session for ${team.name}`,
-          location: `${slot.fields?.locations?.name || 'Venue'}, ${slot.fields?.name || 'Field'}`,
-        });
-
-        currentDate.setUTCDate(currentDate.getUTCDate() + 7);
-      }
-    });
-
-    games?.forEach((g) => {
-      const slot = g.game_slots;
-      if (!slot) return;
-
-      const startDt = new Date(slot.start_time);
-      const endDt = new Date(slot.end_time || slot.start_time); // Fallback
-
-      expandedEvents.push({
-        uid: g.id,
-        title: `Game: ${team.name}`,
-        dtstart: formatIcsDate(startDt),
-        dtend: formatIcsDate(endDt),
-        description: `Game matchup`,
-        location: `${slot.fields?.locations?.name || 'Venue'}, ${slot.fields?.name || 'Field'}`,
+    if (practicesError) {
+      console.error('calendar-feed: practice_assignments read failed', {
+        teamId,
+        message: practicesError.message,
       });
+    }
+
+    // 5. Place every occurrence on the season clock.
+    const events = buildFeedEvents({
+      teamName: team.name,
+      timezone,
+      games: (games ?? []) as unknown as GameRow[],
+      practices: (practices ?? []) as unknown as PracticeRow[],
     });
 
-    // 6. Generate ICS String Strict Mode (CRLF)
-    const CRLF = '\r\n';
-    let icsString = `BEGIN:VCALENDAR${CRLF}`;
-    icsString += `VERSION:2.0${CRLF}`;
-    icsString += `PRODID:-//${orgName}//SquadLogic//EN${CRLF}`;
-    icsString += `CALSCALE:GREGORIAN${CRLF}`;
-    icsString += `METHOD:PUBLISH${CRLF}`;
-    icsString += `X-WR-CALNAME:${team.name} Schedule${CRLF}`;
-    icsString += `X-WR-TIMEZONE:${timezone}${CRLF}`;
+    const unplaceable = summariseUnplaceable(events);
+    if (unplaceable.count > 0) {
+      // Logged as well as rendered: the CALDESC reaches the family, this
+      // reaches whoever can fix it.
+      console.error('calendar-feed: events could not be placed on the season clock', {
+        teamId,
+        organizationId,
+        timezone,
+        unplaceableCount: unplaceable.count,
+        totalCount: events.length,
+        byCode: unplaceable.byCode,
+      });
+    }
 
-    const nowStamp = formatIcsDate(new Date());
-
-    expandedEvents.forEach((ev) => {
-      icsString += `BEGIN:VEVENT${CRLF}`;
-      icsString += `UID:${sanitizeIcsValue(String(ev.uid))}@squadlogic.app${CRLF}`;
-      icsString += `DTSTAMP:${nowStamp}${CRLF}`;
-      icsString += `DTSTART:${ev.dtstart}${CRLF}`;
-      icsString += `DTEND:${ev.dtend}${CRLF}`;
-      icsString += `SUMMARY:${sanitizeIcsValue(ev.title)}${CRLF}`;
-      icsString += `DESCRIPTION:${sanitizeIcsValue(ev.description)}${CRLF}`;
-      if (ev.location) {
-        icsString += `LOCATION:${sanitizeIcsValue(ev.location)}${CRLF}`;
-      }
-      icsString += `END:VEVENT${CRLF}`;
+    // 6. Render (strict RFC 5545, CRLF).
+    const icsString = renderIcsCalendar({
+      orgName,
+      teamName: team.name,
+      timezone,
+      events,
     });
 
-    icsString += `END:VCALENDAR${CRLF}`;
-
-    // Return the response
     return new Response(icsString, {
       headers: {
         'Content-Type': 'text/calendar; charset=utf-8',

@@ -1,0 +1,250 @@
+{
+  "$comment": [
+    "The season clock's cross-arm vector table. (date, wall time, IANA zone) -> expected instant.",
+    "",
+    "There are two season clocks, because an Edge Function cannot import packages/core:",
+    "  packages/core/src/timing/seasonClock.js        (JS, canonical)",
+    "  supabase/functions/_shared/timing/seasonClock.ts (Deno/TS mirror)",
+    "Twin-arm half-application -- a fix landing on one arm and not its sibling -- is this",
+    "repository's most recurrent defect family (LIVE-1, LIVE-2, LIVE-3, LIVE-7). This file is",
+    "the check that fails when the two drift, and it is a cross-check only because BOTH arms",
+    "are run against it:",
+    "  tests/seasonClockVectors.test.js                 runs the JS arm under Vitest",
+    "  supabase/functions/_shared/tests/season-clock_test.ts  runs the TS arm under Deno",
+    "A table only one side reads proves nothing, so each runner also asserts that the other",
+    "runner's file exists and names this table.",
+    "",
+    "`expect.iso` is the exact string the arm must return -- the offset spelling, not the Z",
+    "spelling, because that is the contract both arms state. `expect.codes` is the ordered list",
+    "of finding codes; [] means a clean compose.",
+    "",
+    "Every row was verified independently of both arms by brute force: scanning the 72 hours",
+    "around the naive value at one-minute resolution with Intl.DateTimeFormat and counting how",
+    "many instants the zone reads back as the requested wall time. Zero instants must be",
+    "WALL_TIME_NONEXISTENT; two must be WALL_TIME_AMBIGUOUS resolving to the earlier; one must",
+    "be a clean compose. Do not regenerate this file from either implementation -- that would",
+    "make it a copy of the thing it is checking.",
+    "",
+    "`requiredTags` is deliberately NOT declared here. Both runners hold their own literal list",
+    "of tags the table must cover and their own literal case count, so deleting a hard case",
+    "turns them red instead of silently shrinking the table."
+  ],
+  "cases": [
+    {
+      "id": "ny-standard-afternoon",
+      "tags": ["baseline"],
+      "date": "2026-11-07",
+      "time": "16:44:00",
+      "timeZone": "America/New_York",
+      "expect": { "iso": "2026-11-07T16:44:00-05:00", "codes": [] }
+    },
+    {
+      "id": "ny-dst-afternoon",
+      "tags": ["baseline"],
+      "date": "2026-06-13",
+      "time": "09:30",
+      "timeZone": "America/New_York",
+      "expect": { "iso": "2026-06-13T09:30:00-04:00", "codes": [] }
+    },
+    {
+      "id": "ny-gap-0230",
+      "tags": ["dst-gap"],
+      "date": "2026-03-08",
+      "time": "02:30:00",
+      "timeZone": "America/New_York",
+      "expect": { "iso": null, "codes": ["WALL_TIME_NONEXISTENT"] }
+    },
+    {
+      "id": "ny-gap-0200-exact",
+      "tags": ["dst-gap"],
+      "date": "2026-03-08",
+      "time": "02:00:00",
+      "timeZone": "America/New_York",
+      "expect": { "iso": null, "codes": ["WALL_TIME_NONEXISTENT"] }
+    },
+    {
+      "id": "ny-ambiguous-0130",
+      "tags": ["dst-ambiguous"],
+      "date": "2026-11-01",
+      "time": "01:30:00",
+      "timeZone": "America/New_York",
+      "expect": { "iso": "2026-11-01T01:30:00-04:00", "codes": ["WALL_TIME_AMBIGUOUS"] }
+    },
+    {
+      "id": "la-ambiguous-0130",
+      "tags": ["dst-ambiguous"],
+      "date": "2026-11-01",
+      "time": "01:30:00",
+      "timeZone": "America/Los_Angeles",
+      "expect": { "iso": "2026-11-01T01:30:00-07:00", "codes": ["WALL_TIME_AMBIGUOUS"] }
+    },
+    {
+      "id": "kathmandu-45",
+      "tags": ["offset-45"],
+      "date": "2026-06-01",
+      "time": "09:00:00",
+      "timeZone": "Asia/Kathmandu",
+      "expect": { "iso": "2026-06-01T09:00:00+05:45", "codes": [] }
+    },
+    {
+      "id": "chatham-45-dst",
+      "tags": ["offset-45"],
+      "date": "2026-01-17",
+      "time": "10:15:00",
+      "timeZone": "Pacific/Chatham",
+      "expect": { "iso": "2026-01-17T10:15:00+13:45", "codes": [] }
+    },
+    {
+      "id": "chatham-45-standard",
+      "tags": ["offset-45"],
+      "date": "2026-06-17",
+      "time": "10:15:00",
+      "timeZone": "Pacific/Chatham",
+      "expect": { "iso": "2026-06-17T10:15:00+12:45", "codes": [] }
+    },
+    {
+      "id": "lord-howe-standard",
+      "tags": ["half-hour-dst"],
+      "date": "2026-06-20",
+      "time": "15:00:00",
+      "timeZone": "Australia/Lord_Howe",
+      "expect": { "iso": "2026-06-20T15:00:00+10:30", "codes": [] }
+    },
+    {
+      "id": "lord-howe-dst",
+      "tags": ["half-hour-dst"],
+      "date": "2026-12-20",
+      "time": "15:00:00",
+      "timeZone": "Australia/Lord_Howe",
+      "expect": { "iso": "2026-12-20T15:00:00+11:00", "codes": [] }
+    },
+    {
+      "id": "lord-howe-gap-0215",
+      "tags": ["half-hour-dst", "dst-gap"],
+      "date": "2026-10-04",
+      "time": "02:15:00",
+      "timeZone": "Australia/Lord_Howe",
+      "expect": { "iso": null, "codes": ["WALL_TIME_NONEXISTENT"] }
+    },
+    {
+      "id": "lord-howe-ambiguous-0145",
+      "tags": ["half-hour-dst", "dst-ambiguous"],
+      "date": "2026-04-05",
+      "time": "01:45:00",
+      "timeZone": "Australia/Lord_Howe",
+      "expect": { "iso": "2026-04-05T01:45:00+11:00", "codes": ["WALL_TIME_AMBIGUOUS"] }
+    },
+    {
+      "id": "ny-hour-24",
+      "tags": ["hour-24"],
+      "date": "2026-07-04",
+      "time": "24:00:00",
+      "timeZone": "America/New_York",
+      "expect": { "iso": "2026-07-05T00:00:00-04:00", "codes": [] }
+    },
+    {
+      "id": "ny-hour-24-pre-transition",
+      "tags": ["hour-24", "dst-boundary"],
+      "date": "2026-10-31",
+      "time": "24:00:00",
+      "timeZone": "America/New_York",
+      "expect": { "iso": "2026-11-01T00:00:00-04:00", "codes": [] }
+    },
+    {
+      "id": "ny-hour-24-post-transition",
+      "tags": ["hour-24", "dst-boundary"],
+      "date": "2026-11-01",
+      "time": "24:00:00",
+      "timeZone": "America/New_York",
+      "expect": { "iso": "2026-11-02T00:00:00-05:00", "codes": [] }
+    },
+    {
+      "id": "ny-hour-24-30-refused",
+      "tags": ["hour-24"],
+      "date": "2026-07-04",
+      "time": "24:30:00",
+      "timeZone": "America/New_York",
+      "expect": { "iso": null, "codes": ["WALL_TIME_UNREADABLE"] }
+    },
+    {
+      "id": "feb-30-invalid",
+      "tags": ["invalid-calendar-date"],
+      "date": "2026-02-30",
+      "time": "10:00:00",
+      "timeZone": "America/New_York",
+      "expect": { "iso": null, "codes": ["WALL_TIME_UNREADABLE"] }
+    },
+    {
+      "id": "month-13-invalid",
+      "tags": ["invalid-calendar-date"],
+      "date": "2026-13-45",
+      "time": "10:00:00",
+      "timeZone": "America/New_York",
+      "expect": { "iso": null, "codes": ["WALL_TIME_UNREADABLE"] }
+    },
+    {
+      "id": "no-timezone",
+      "tags": ["no-timezone"],
+      "date": "2026-11-07",
+      "time": "16:44:00",
+      "timeZone": null,
+      "expect": { "iso": null, "codes": ["SEASON_TIMEZONE_MISSING"] }
+    },
+    {
+      "id": "blank-timezone",
+      "tags": ["no-timezone"],
+      "date": "2026-11-07",
+      "time": "16:44:00",
+      "timeZone": "   ",
+      "expect": { "iso": null, "codes": ["SEASON_TIMEZONE_MISSING"] }
+    },
+    {
+      "id": "unknown-timezone",
+      "tags": ["unknown-timezone"],
+      "date": "2026-11-07",
+      "time": "16:44:00",
+      "timeZone": "Mars/Olympus_Mons",
+      "expect": { "iso": null, "codes": ["SEASON_TIMEZONE_UNKNOWN"] }
+    },
+    {
+      "id": "utc-plain",
+      "tags": ["baseline"],
+      "date": "2026-04-06",
+      "time": "18:00:00",
+      "timeZone": "UTC",
+      "expect": { "iso": "2026-04-06T18:00:00+00:00", "codes": [] }
+    },
+    {
+      "id": "tokyo-no-dst",
+      "tags": ["baseline"],
+      "date": "2026-04-06",
+      "time": "18:00:00",
+      "timeZone": "Asia/Tokyo",
+      "expect": { "iso": "2026-04-06T18:00:00+09:00", "codes": [] }
+    },
+    {
+      "id": "minutes-number-input",
+      "tags": ["minutes-number"],
+      "date": "2026-11-07",
+      "time": 1004,
+      "timeZone": "America/New_York",
+      "expect": { "iso": "2026-11-07T16:44:00-05:00", "codes": [] }
+    },
+    {
+      "id": "hhmm-no-seconds",
+      "tags": ["baseline"],
+      "date": "2026-11-07",
+      "time": "16:44",
+      "timeZone": "America/New_York",
+      "expect": { "iso": "2026-11-07T16:44:00-05:00", "codes": [] }
+    },
+    {
+      "id": "seconds-are-honoured",
+      "tags": ["baseline"],
+      "date": "2026-11-07",
+      "time": "16:44:30",
+      "timeZone": "America/New_York",
+      "expect": { "iso": "2026-11-07T16:44:30-05:00", "codes": [] }
+    }
+  ]
+}

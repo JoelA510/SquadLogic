@@ -228,11 +228,20 @@ Then('the contained ground should not be listed as bookings', async ({ page }) =
 
 /* -- after the commit ---------------------------------------------------- */
 
-Then('{string} should not yet show a retirement date', async ({ page }, name: string) => {
-  await expect(page.getByTestId(`venue-retired-${VENUE_ID}`)).toHaveCount(0);
-  await expect(page.getByRole('dialog')).toBeVisible();
-  expect(name.length).toBeGreaterThan(0);
-});
+// **Named for the DEPTH, because `field_blackout_admin.ts` already owns the
+// bare phrasing.** playwright-bdd refuses a step two definitions match rather
+// than picking one, which is the right refusal: a scenario silently bound to
+// the other file's field-depth assertion would have checked the wrong thing
+// and passed.
+Then(
+  'the venue {string} should not yet show a retirement date',
+  async ({ page }, venueName: string) => {
+    await expect(page.getByTestId(`venue-retired-${VENUE_ID}`)).toHaveCount(0);
+    // Still open, so the refusal did not commit behind the operator.
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('dialog')).toContainText(venueName);
+  }
+);
 
 Then(
   'the venue {string} should show a retirement date of {string}',

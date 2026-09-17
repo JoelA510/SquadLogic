@@ -27,7 +27,7 @@ Feature: Retiring a venue and a sub-surface
     And the consequence preview should name the missing repair engine
     And the consequence preview should list the ground the venue contains
     And the contained ground should not be listed as bookings
-    And "Maplewood Park" should not yet show a retirement date
+    And the venue "Maplewood Park" should not yet show a retirement date
     When I click "Retire anyway"
     Then the venue "Maplewood Park" should show a retirement date of "2026-09-30"
     And no pitch at "Maplewood Park" should carry a retirement date of its own

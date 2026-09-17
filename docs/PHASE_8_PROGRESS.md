@@ -2966,6 +2966,12 @@ Not yet filed as a PR. It waits on the composer from GAP-30 PR A, and Edge
 Functions are Deno/TS and cannot import `packages/core`, so it needs the mirror
 treatment `supabase/functions/_shared/engines/` already uses.
 
+> **A fourth defect in this same function was found while fixing these three,
+> and it is more severe than any of them: the practice recurrence loop did not
+> terminate.** See **LIVE-11**. It also answers a question this entry does not
+> ask — why a `NaN` described as affecting "every game" was only ever observed
+> on teams that had no practices.
+
 ### LIVE-7 — the practice arm sends the season timezone and the engine never reads it
 
 Found while scoping GAP-30 PR A's carve-out, and recorded here because a defect
@@ -3214,9 +3220,113 @@ Two supervisor-specific rules earned here:
 
 ### Still open
 
-LIVE-8, the `NEW_MIGRATIONS` list, the eight post-merge findings, and GAP-29.
-GATE 2 — the engine wiring question — was gated on GAP-29 and GAP-30 together
-and is now half-unblocked. LIVE-5 and LIVE-7 are closed below.
+LIVE-8, the `NEW_MIGRATIONS` list, GAP-29, and the sample-seed migration chain
+#399 pinned. GATE 2 — the engine wiring question — was gated on GAP-29 and
+GAP-30 together and is now half-unblocked. The eight post-merge findings closed
+in #398; LIVE-5, LIVE-7 and LIVE-11 close below.
+
+**Merge note.** Two workstreams appended to the end of this file at once: #399
+(the GAP-30 follow-ups entry) and the LIVE-5/LIVE-7 entry below. Both are kept,
+#399 first, and this paragraph is the merge of the two "Still open" lists rather
+than either side's — LIVE-5 and LIVE-7 are no longer open, and neither are the
+eight findings #398 fixed.
+
+## GAP-30 follow-ups — the reporting layer — **merged (#398, `2bfa44c`)**
+
+Eight findings from `/code-review` on #396 after it merged, plus six that
+`/code-review` raised against the follow-up PR itself. All fourteen fixed.
+
+**Where they all were is the point.** #396's twelve positive controls each
+perturbed the composer, and the composer survived three adversarial passes
+without a scratch. Every significant post-merge finding was in the **reporting
+layer** those controls never touched.
+
+### The headline: a banner that could not be read
+
+`describeUnplaceableSlots` bucketed on `entry.reason`, and every reason
+`resolveZonedInstant` builds embeds that slot's own date and time — so no two
+real slots ever shared a bucket. Executed against merged code:
+
+```
+slots    5  ->     832 chars
+slots   50  ->   8,347 chars
+slots  400  ->  66,797 chars      all in one <p>
+```
+
+A season with a null `timezone` makes **every** row unplaceable, so that is the
+normal case for the exact failure the banner exists to report: the operator who
+most needs to read it gets 66 KB of near-identical sentences.
+
+After the fix, executed the same way: 400 slots → **1,021 characters**, 5,000 →
+1,036, and three slots still named in full at 481. A code the cause table does
+not carry falls back to a generic sentence rather than the slot's own reason,
+so boundedness does not depend on the table being maintained — the structural
+answer rather than a list someone must remember to extend.
+
+**The test was the more important half.** It asserted the message did not split
+over 40 slots that all shared one `slot_date` and one `start_time` — a state
+the production path cannot produce, propping up a claim the production path did
+not satisfy. That is the shape CLAUDE.md names, written by the agent who spent
+that PR building controls against it.
+
+### Twice more, the same shape one layer down
+
+- **The smoke's writer check could pass on a function that never writes.** It
+  tested `prosrc ~* 'season_settings'` AND `~* 'timezone'`, and
+  `timezone('utc', now())` appears throughout this schema. The check written to
+  prove the column has a writer would have passed on any function that merely
+  touched the table. Now the column must be named in the INSERT's column list
+  or assigned in the UPDATE's SET clause — and the meta-assertion is
+  **constructed rather than observed**: three decoys are created inside a
+  rolled-back transaction, two that only mention `timezone()` and must not
+  count, one that assigns the column and must, with discrimination asserted in
+  both directions. Counting the loose predicate against the strict one would
+  have rested on whether some unrelated function happens to say
+  `timezone('utc', now())`.
+- **The cause table's own JSDoc claimed a registry-driven coverage test that
+  did not exist** — a guarantee asserted in a comment and enforced nowhere, in
+  the very PR fixing that shape. Caught by `/code-review` on the follow-up.
+
+### A pre-existing defect surfaced by doing what was asked
+
+The brief said to _prove_ the seed opt-in rather than revert the hunk and move
+on. Doing so found that with `squadlogic.seed_sample_data=on` the **whole
+migration chain aborts** at `20260310000002_unified_rls_schema`:
+`column "organization_id" of relation "divisions" contains null values`. The
+2024 sample season predates multi-tenancy and names no `organization_id` in any
+of its 31 INSERTs; `supabase/seed.sql` is the same script without the guard and
+has the same gap.
+
+Out of scope to repair (it needs an organisation threaded through the entire
+seed, and both scripts must move together), and **pinned rather than hidden**:
+the harness stage fails if the build starts succeeding _and_ fails if it breaks
+anywhere else, so the pin cannot rot into a permanent excuse. Both seed headers
+say so. Recorded as an owned task, because a pin nobody owns outlives everyone
+who understood it.
+
+### Two things the agent did that are worth copying
+
+- **It improved on the brief and said so.** The instruction was to move the
+  per-slot date and time out of the aggregate line. It kept up to three
+  examples per bucket plus a remainder count instead, because collapsing to one
+  line per code would leave three DST casualties in a 400-slot season
+  unfindable while buying boundedness that three examples already buy. The
+  deviation was flagged, not quietly taken.
+- **It caught itself verifying on the wrong head.** The `TZ=America/Los_Angeles`
+  run had been done on an earlier commit; it re-ran on the final head before
+  claiming it. That is precisely the failure #396 shipped a red CI on, corrected
+  without being told twice.
+
+### The rule this pair of PRs earned
+
+> The controls I built all perturbed the thing I was thinking about. The gaps
+> were in the things I was not.
+
+_"Break the production path and watch the check go red"_ only covers the paths
+you think to break. **Choosing what to break is a separate skill from building
+the control, and it is the one that was missing.** The composer was reviewed
+three times because it was interesting; the banner shipped a 66 KB paragraph
+because it was not.
 
 ## LIVE-5 and LIVE-7 — the Edge Functions' season clock
 
@@ -3266,7 +3376,10 @@ Three controls, all watched going red and then reverted:
 ### LIVE-5 — and the fourth defect nobody had found
 
 Three defects were named. A fourth was found while fixing them, and it is the
-worst of the four.
+worst of the four. **It has its own entry as LIVE-11**, because it is not the
+same defect family and a reader looking up why the feed hung should not have to
+find it inside a paragraph about timezones. Summarised here because it was
+found here:
 
 `p.effective_date_range.replace(/[[]()]/g, '')` is not the character class it
 looks like: `[[]` is a class containing `[`, `()` is an empty group, `]` is a
@@ -3432,3 +3545,97 @@ evaluation from that panel 400'd on a mandatory field nothing reads), and
 harmless mid-handler, not harmless immediately before a `return` on an edge
 isolate, which is where this change's new refusal path put it. `recordAuditNow`
 is the awaitable variant; every existing call site is unchanged.
+
+## LIVE-11 — the practice feed did not terminate — **fixed (#400)**
+
+Found while fixing LIVE-5, four lines below the line LIVE-5 named, in the same
+function. Filed separately because it is not the same defect family and is more
+severe than either of the two the task was opened for: **a denial of service on
+the calendar feed for every team with a practice assignment.**
+
+### The defect
+
+`calendar-feed/index.ts` expanded a practice assignment's recurrence from
+`practice_assignments.effective_date_range`, a Postgres `daterange`, which
+PostgREST renders in its canonical form `[2026-11-02,2026-11-17)`. The first
+line of the expansion stripped the bounds:
+
+```js
+const [startStr, endStr] = p.effective_date_range.replace(/[[]()]/g, '').split(',');
+```
+
+`/[[]()]/` is not the character class it looks like. `[[]` is a character class
+containing `[`; `()` is an empty group; `]` is a literal. The pattern therefore
+matches the two-character string `"[]"` and **nothing that appears in a real
+`daterange`**. Executed:
+
+```
+pattern source : [[]()]
+input          : "[2026-11-02,2026-11-17)"
+after replace  : "[2026-11-02,2026-11-17)"     <- strips nothing
+matches "[]"?  : true
+new Date(...)  : Invalid Date
+getUTCDay()    : NaN
+NaN !== 1      : true
+```
+
+So `startStr` was `'[2026-11-02'`, the anchor
+``new Date(`${startStr}T12:00:00Z`)`` was Invalid Date, `getUTCDay()` was `NaN`,
+and:
+
+```js
+while (currentDate.getUTCDay() !== targetDay) {
+  currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+}
+```
+
+`NaN !== targetDay` is always true and `setUTCDate` on an invalid `Date` leaves
+it invalid, so the loop **never terminates**. Measured: 100,000 iterations with
+no progress. The isolate spun until the runtime killed it, and the subscriber
+got nothing.
+
+### Why it was invisible, and what that explains
+
+Only teams **with** a practice assignment reached the loop. A team with games
+only fell through to the games arm and got LIVE-5's `NaN` DTSTART — a visible,
+reportable, wrong-looking calendar. **That is why the NaN was the defect anyone
+could see: the teams that would have shown the worse one never rendered a feed
+at all.** The question nobody had asked was why a bug described as affecting
+"every game" was only ever observed on teams with no practices.
+
+### Why no test caught it
+
+Every fixture in `tests/calendarFeed.test.js` was constructed by the test
+itself, and that file re-declared the generator rather than importing it (see
+the LIVE-5 entry), so no fixture ever carried the bracket spelling PostgREST
+actually emits. `tests/calendarFeed.test.js` and
+`supabase/functions/_shared/tests/ics-feed_test.ts` now both spell
+`effective_date_range` as `[2026-11-02,2026-11-17)` for exactly this reason, and
+the case that drives an unreadable range through the expansion completing at all
+is the assertion.
+
+### The fix, and the second half of it
+
+`dateRangeBounds` in `_shared/calendar/icsFeed.ts` parses the range with
+`/^([[(])([^,]*),([^,]*)([\])])$/` and **honours the bound markers rather than
+stripping them** — adopting `rangeLastDay` in `mockSupabaseClient.js`, which had
+this right already. That is not incidental: Postgres canonicalises a `daterange`
+to `[inclusive,exclusive)`, so treating the upper bound as inclusive schedules
+one practice a week **after** the assignment ends. Both halves were wrong; only
+one of them hung.
+
+A range that cannot be read is now reported as an unplaceable event carrying
+`PRACTICE_RANGE_UNREADABLE`, not dropped — including the unbounded `[a,)` that
+is storable today, since `effective_date_range` has no NOT NULL upper bound.
+
+### The rule
+
+**A regex is not read, it is executed.** `/[[]()]/` reads as "strip brackets and
+parens" to every human who has looked at this file, including three adversarial
+passes over this exact area. None of them ran it against a real value. A
+character class with a literal `[` in it is worth a one-line node check every
+time.
+
+And the one the supervisor named: **read the file past the defect it was opened
+for.** Three reviews found nothing here because each was looking for the
+timezone defect it had been told about.

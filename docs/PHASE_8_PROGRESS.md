@@ -2956,6 +2956,35 @@ Not yet filed as a PR. It waits on the composer from GAP-30 PR A, and Edge
 Functions are Deno/TS and cannot import `packages/core`, so it needs the mirror
 treatment `supabase/functions/_shared/engines/` already uses.
 
+### LIVE-7 — the practice arm sends the season timezone and the engine never reads it
+
+Found while scoping GAP-30 PR A's carve-out, and recorded here because a defect
+that lives only in a PR body is a defect nobody finds again.
+
+`frontend/src/pages/PracticeSchedulingPage.jsx:62` has its own
+`buildDateTime(date, time)` returning the naive `` `${date}T${time}` ``, used at
+`:109-110` to build every practice slot's `start` and `end`. Those naive strings
+are shipped to the `auto-scheduler` edge function — **and so is `timezone`**, at
+`:436`, read from `currentSeasonSetting?.timezone` at `:374`.
+
+`supabase/functions/auto-scheduler/index.ts` contains **zero** occurrences of the
+string `timezone` (`grep -c` → 0) while doing `new Date(s.start)` and
+`new Date(s.end)` at `:434-435` on those naive values. The season's clock is
+handed to the one piece of code that needs it and is never read: CLAUDE.md's
+"never leave a field parsed and unread", live, on the persistence path for every
+practice in the season. A field that reads as load-bearing and is not.
+
+The consequence is GAP-30's, one arm over: every practice instant is a function
+of whatever zone the Deno runtime sits in rather than of the season.
+
+Deliberately **not** widened into GAP-30 PR A. That PR's composer is the thing
+LIVE-7 needs, the practice path does not reach `packages/core`'s schemas so
+nothing in PR A breaks it, and Edge Functions are Deno/TS and cannot import
+`packages/core` — so like LIVE-5 it needs the mirror treatment
+`supabase/functions/_shared/engines/` already uses. PR A's display fix does reach
+it incidentally: practice labels now render against the season zone instead of
+double-shifting. Persistence does not.
+
 ### The ruling made without putting it to the operator
 
 **The season has one timezone, not the venue.** `season_settings.timezone`
@@ -2979,6 +3008,8 @@ never silently drop an unplaceable fixture; surface it with a reason.
 GAP-30 PR A is dispatched: the zone-aware composer, `buildDateTime` /
 `normalizeGameSlot`, the display double-shift, LIVE-6, and a verdict on the
 `z.coerce.date()` lines — with DST spring-forward and fall-back named by date,
-and a positive control that actually perturbs the production path. LIVE-5 and
-GAP-29 (the publication snapshot is still in-memory only) remain open. GATE 2 —
-the engine wiring question — stays closed until GAP-29 and GAP-30 both land.
+and a positive control that actually perturbs the production path. LIVE-5,
+LIVE-7 and GAP-29 (the publication snapshot is still in-memory only) remain
+open; LIVE-5 and LIVE-7 both wait on PR A's composer and both need the Deno
+mirror. GATE 2 — the engine wiring question — stays closed until GAP-29 and
+GAP-30 both land.

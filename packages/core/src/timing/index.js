@@ -64,11 +64,9 @@ export {
 export {
   SeasonClockError,
   anchorToSeasonClock,
-  carriesZoneOffset,
   isNaiveDateTime,
   requireZonedInstant,
   resolveZonedInstant,
-  wallMinutesOf,
 } from './seasonClock.js';
 
 export { computeGameWindows } from './windows.js';

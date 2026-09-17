@@ -342,8 +342,18 @@ Given(
         ];
         db.season_settings = [
           { id: 's1', name: 'Fall 2024', organization_id: org1Id, timezone: 'America/Los_Angeles' },
-          { id: 's2', name: 'Spring 2024', organization_id: org1Id, timezone: 'America/Los_Angeles' },
-          { id: 's3', name: 'Winter 2024', organization_id: org2Id, timezone: 'America/Los_Angeles' },
+          {
+            id: 's2',
+            name: 'Spring 2024',
+            organization_id: org1Id,
+            timezone: 'America/Los_Angeles',
+          },
+          {
+            id: 's3',
+            name: 'Winter 2024',
+            organization_id: org2Id,
+            timezone: 'America/Los_Angeles',
+          },
         ];
         db.organization_members = [
           {

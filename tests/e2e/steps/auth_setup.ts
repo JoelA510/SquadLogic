@@ -90,7 +90,7 @@ async function setupIsolatedTenant(page: Page, role: string = 'admin') {
             organization_id: orgId,
             name: 'Fall 2026',
             status: 'active',
-        timezone: 'America/Los_Angeles',
+            timezone: 'America/Los_Angeles',
             created_at: new Date().toISOString(),
           });
         }

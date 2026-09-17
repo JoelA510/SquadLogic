@@ -70,24 +70,6 @@ const MS_PER_MINUTE = 60_000;
 const MS_PER_DAY = 86_400_000;
 
 /**
- * Does this string already carry a zone (a trailing `Z` or `±HH:MM` offset)?
- *
- * Exported because the display layer needs the same question answered the same
- * way: a value that already carries an offset is an instant and must be left
- * alone, and a naive one is a wall reading that needs a clock. Two independent
- * answers to "is this naive?" is exactly the drift CLAUDE.md warns about.
- *
- * @param {unknown} value
- * @returns {boolean} `true` only for a date-time **string** with an explicit zone.
- */
-export function carriesZoneOffset(value) {
-  if (typeof value !== 'string') return false;
-  return new RegExp(
-    `${DATE_TIME_SEPARATOR}\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})$`
-  ).test(value.trim());
-}
-
-/**
  * Is this string a naive (zone-less) `YYYY-MM-DDTHH:MM[:SS]` date-time?
  *
  * @param {unknown} value
@@ -129,12 +111,29 @@ function splitNaiveDateTime(value) {
  * A number is taken as the domain representation -- minutes past midnight -- so
  * a caller holding that does not have to render it to a string first.
  *
+ * ## `24:00:00` is midnight *ending* the day, and it composes
+ *
+ * Postgres's `time` legally stores `24:00:00`, and `game_slots_time_check
+ * (end_time > start_time)` permits a `22:00` -> `24:00` slot, so an end time of
+ * midnight is data nobody typed wrong. `new Date('2026-07-04T24:00:00')`
+ * composed it as the next day's midnight, and refusing it here would be a
+ * regression dressed as strictness.
+ *
+ * It is the *only* hour-24 value that means anything: `24:30` names no instant,
+ * so it still refuses. The day roll needs no special case downstream -- the
+ * pseudo-UTC arithmetic in {@link resolveZonedInstant} carries
+ * `Date.UTC(y, m, d) + 86400s` into the next day's midnight, which the zone
+ * reads back as exactly that, so the candidate check matches normally. That
+ * includes a `24:00` on a DST boundary, which lands on the post-transition
+ * offset because that is the offset in force at the instant it names.
+ *
  * @param {string|number} time
- * @returns {number|null} seconds past midnight, or `null` if unreadable.
+ * @returns {number|null} seconds past midnight (0 to 86400), or `null` if
+ *   unreadable.
  */
 function wallSecondsOf(time) {
   if (typeof time === 'number') {
-    return Number.isFinite(time) && time >= 0 ? Math.trunc(time) * 60 : null;
+    return Number.isFinite(time) && time >= 0 && time <= 1440 ? Math.trunc(time) * 60 : null;
   }
   if (typeof time !== 'string') return null;
   const match = TIME_PATTERN.exec(time.trim());
@@ -142,22 +141,9 @@ function wallSecondsOf(time) {
   const hours = Number.parseInt(match[1], 10);
   const minutes = Number.parseInt(match[2], 10);
   const seconds = match[3] ? Number.parseInt(match[3], 10) : 0;
-  if (hours > 23 || minutes > 59 || seconds > 59) return null;
+  if (hours > 24 || minutes > 59 || seconds > 59) return null;
+  if (hours === 24 && (minutes > 0 || seconds > 0)) return null;
   return hours * 3600 + minutes * 60 + seconds;
-}
-
-/**
- * Parse a wall time into minutes past midnight -- the domain's own reading.
- *
- * Truncates toward the minute by name and by contract; composition uses
- * {@link wallSecondsOf} so nothing is lost at the boundary that matters.
- *
- * @param {string|number} time
- * @returns {number|null} minutes past midnight, or `null` if unreadable.
- */
-export function wallMinutesOf(time) {
-  const seconds = wallSecondsOf(time);
-  return seconds === null ? null : Math.floor(seconds / 60);
 }
 
 /**
@@ -261,6 +247,8 @@ function toOffsetIso(epochMs, offsetMs) {
  * @param {Object} input
  * @param {string} input.date - `YYYY-MM-DD`, the season-local calendar date.
  * @param {string|number} input.time - `HH:MM[:SS]` or minutes past midnight.
+ *   `24:00[:00]` (and `1440`) is midnight ending the day and composes to the
+ *   next day's start; `24:30` names no instant and is refused.
  * @param {string|null} [input.timeZone] - an IANA zone name. Today
  *   always `season_settings.timezone`; see the module note on why this module
  *   does not read it itself.

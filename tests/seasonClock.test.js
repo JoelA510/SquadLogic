@@ -2,11 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   SeasonClockError,
   anchorToSeasonClock,
-  carriesZoneOffset,
   isNaiveDateTime,
   requireZonedInstant,
   resolveZonedInstant,
-  wallMinutesOf,
 } from '../packages/core/src/timing/seasonClock.js';
 import {
   TIMING_REASON,
@@ -115,6 +113,79 @@ describe('seasonClock: composing a wall time onto the season clock', () => {
     expect(new Set(instants).size).toBe(3);
   });
 
+  it('reads the clock forms Postgres can hand over', () => {
+    // The meta-assertion for the refusals below: a parser that rejected
+    // everything would satisfy every "unreadable" case and be useless.
+    for (const [time, expected] of [
+      ['00:00', '2026-06-13T00:00:00-07:00'],
+      ['09:30:00', '2026-06-13T09:30:00-07:00'],
+      ['09:30:00.000', '2026-06-13T09:30:00-07:00'],
+      ['23:59:59', '2026-06-13T23:59:59-07:00'],
+    ]) {
+      const { iso, findings } = resolveZonedInstant({
+        date: '2026-06-13',
+        time,
+        timeZone: 'America/Los_Angeles',
+      });
+      expect(iso, String(time)).toBe(expected);
+      expect(findings).toEqual([]);
+    }
+  });
+
+  it('composes 24:00 as midnight ending the day', () => {
+    // Postgres `time` legally stores it, and `game_slots_time_check
+    // (end_time > start_time)` permits a 22:00 -> 24:00 slot, so an end time
+    // of midnight is data nobody typed wrong. `new Date('...T24:00:00')`
+    // composed it on `main`; refusing it here would be a regression dressed
+    // as strictness.
+    expect(
+      resolveZonedInstant({ date: '2026-07-04', time: '24:00:00', timeZone: 'America/New_York' })
+        .iso
+    ).toBe('2026-07-05T00:00:00-04:00');
+    expect(resolveZonedInstant({ date: '2026-07-04', time: '24:00', timeZone: 'UTC' }).iso).toBe(
+      '2026-07-05T00:00:00+00:00'
+    );
+    // The domain spelling of the same thing.
+    expect(resolveZonedInstant({ date: '2026-07-04', time: 1440, timeZone: 'UTC' }).iso).toBe(
+      '2026-07-05T00:00:00+00:00'
+    );
+  });
+
+  it('takes the post-transition offset for a 24:00 that rolls across a DST boundary', () => {
+    // The one case where hour-24 and daylight saving interact. 2026-11-01
+    // 24:00 New York is 2026-11-02 00:00, after the fall-back, so -05:00 and
+    // not the -04:00 in force when the day began.
+    const { iso, findings } = resolveZonedInstant({
+      date: '2026-11-01',
+      time: '24:00:00',
+      timeZone: 'America/New_York',
+    });
+    expect(iso).toBe('2026-11-02T00:00:00-05:00');
+    expect(new Date(/** @type {string} */ (iso)).toISOString()).toBe('2026-11-02T05:00:00.000Z');
+    expect(findings).toEqual([]);
+
+    // …and the spring-forward side, where the roll lands the day before the gap.
+    expect(
+      resolveZonedInstant({ date: '2026-03-07', time: '24:00:00', timeZone: 'America/New_York' })
+        .iso
+    ).toBe('2026-03-08T00:00:00-05:00');
+  });
+
+  it('refuses every hour-24 value that is not exactly midnight', () => {
+    // The control for the two tests above: an implementation that simply
+    // raised the hour ceiling would accept 24:30, which names no instant.
+    for (const time of ['24:30', '24:00:01', '24:59:59', '25:00:00']) {
+      const { iso, findings } = resolveZonedInstant({
+        date: '2026-07-04',
+        time,
+        timeZone: 'UTC',
+      });
+      expect(iso, time).toBeNull();
+      expect(findings[0].code, time).toBe(TIMING_REASON.WALL_TIME_UNREADABLE);
+    }
+    expect(resolveZonedInstant({ date: '2026-07-04', time: 1441, timeZone: 'UTC' }).iso).toBeNull();
+  });
+
   it('accepts minutes past midnight as well as a clock reading', () => {
     const fromClock = resolveZonedInstant({
       date: '2026-06-13',
@@ -149,11 +220,16 @@ describe('seasonClock: composing a wall time onto the season clock', () => {
     for (const [date, time] of [
       ['13/06/2026', '09:30'],
       ['2026-06-13', '25:70'],
-      ['2026-06-13', '24:00:00'],
+      ['2026-06-13', '24:30:00'],
+      ['2026-06-13', '25:00:00'],
+      ['2026-06-13', '16:60'],
       ['2026-06-13', 'kickoff'],
+      ['2026-06-13', -1],
       [null, '09:30'],
     ]) {
-      const { iso, findings } = resolveZonedInstant({ date, time, timeZone: 'UTC' });
+      const { iso, findings } = resolveZonedInstant(
+        /** @type {any} */ ({ date, time, timeZone: 'UTC' })
+      );
       expect(iso, `${date} ${time}`).toBeNull();
       expect(findings.map((f) => f.code)).toEqual([TIMING_REASON.WALL_TIME_UNREADABLE]);
       expect(findings[0].severity).toBe(TIMING_SEVERITY.BLOCKING);
@@ -336,24 +412,25 @@ describe('seasonClock: a season with no timezone refuses rather than guessing', 
 
 describe('seasonClock: recognising what still needs a clock', () => {
   it.each([
-    ['2026-11-07 16:44:00', true, false],
-    ['2026-11-07 16:44:00Z', false, true],
-    ['2026-11-07 16:44:00-05:00', false, true],
-    ['2026-11-07T16:44:00', true, false],
-    ['2026-11-07T16:44', true, false],
-    ['2026-11-07T16:44:00Z', false, true],
-    ['2026-11-07T16:44:00.000Z', false, true],
-    ['2026-11-07T16:44:00-05:00', false, true],
-    ['2026-11-07T16:44:00+0530', false, true],
-    ['2026-11-07', false, false],
-  ])('classifies %s', (value, naive, zoned) => {
+    // Postgres renders a zone-less timestamp with a space; that form is
+    // exactly as zone-less as the ISO one, and calling it "not naive" is the
+    // one answer this predicate exists to give, given wrong.
+    ['2026-11-07 16:44:00', true],
+    ['2026-11-07 16:44:00Z', false],
+    ['2026-11-07 16:44:00-05:00', false],
+    ['2026-11-07T16:44:00', true],
+    ['2026-11-07T16:44', true],
+    ['2026-11-07T16:44:00Z', false],
+    ['2026-11-07T16:44:00.000Z', false],
+    ['2026-11-07T16:44:00-05:00', false],
+    ['2026-11-07T16:44:00+0530', false],
+    ['2026-11-07', false],
+  ])('classifies %s', (value, naive) => {
     expect(isNaiveDateTime(value)).toBe(naive);
-    expect(carriesZoneOffset(value)).toBe(zoned);
   });
 
-  it('treats a Date and a number as neither', () => {
+  it('treats a Date and a number as not naive', () => {
     expect(isNaiveDateTime(new Date())).toBe(false);
-    expect(carriesZoneOffset(new Date())).toBe(false);
     expect(isNaiveDateTime(1_762_544_640_000)).toBe(false);
   });
 
@@ -378,17 +455,6 @@ describe('seasonClock: recognising what still needs a clock', () => {
     const { iso, findings } = anchorToSeasonClock('2026-11-07T16:44:00', null);
     expect(iso).toBeNull();
     expect(findings.map((f) => f.code)).toEqual([TIMING_REASON.SEASON_TIMEZONE_MISSING]);
-  });
-
-  it('wallMinutesOf reads clocks and rejects nonsense', () => {
-    expect(wallMinutesOf('00:00')).toBe(0);
-    expect(wallMinutesOf('16:44:00')).toBe(16 * 60 + 44);
-    expect(wallMinutesOf('16:44:00.000')).toBe(16 * 60 + 44);
-    expect(wallMinutesOf(930)).toBe(930);
-    expect(wallMinutesOf('24:00')).toBeNull();
-    expect(wallMinutesOf('16:60')).toBeNull();
-    expect(wallMinutesOf('nope')).toBeNull();
-    expect(wallMinutesOf(-1)).toBeNull();
   });
 });
 

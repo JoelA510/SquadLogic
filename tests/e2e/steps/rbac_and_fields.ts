@@ -67,14 +67,14 @@ Given(
           organization_id: id1,
           name: 'Fall 2026',
           status: 'active',
-        timezone: 'America/Los_Angeles',
+          timezone: 'America/Los_Angeles',
         });
         db.season_settings.push({
           id: 'season-b',
           organization_id: id2,
           name: 'Fall 2026',
           status: 'active',
-        timezone: 'America/Los_Angeles',
+          timezone: 'America/Los_Angeles',
         });
 
         // Seed scheduler runs correctly formatted for the frontend data mapper

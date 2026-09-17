@@ -79,12 +79,12 @@ function normalizeTeam(team) {
   };
 }
 
-function buildDateTime(date, time) {
+export function buildDateTime(date, time) {
   if (!date || !time) return null;
   return `${date}T${time}`;
 }
 
-function normalizeGameSlot(row, { fieldById, divisionById, timezone }) {
+export function normalizeGameSlot(row, { fieldById, divisionById, timezone }) {
   const field = fieldById.get(row.field_id ?? row.fieldId);
   const division =
     row.divisions?.name ??

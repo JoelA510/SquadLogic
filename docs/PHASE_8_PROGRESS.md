@@ -3385,3 +3385,50 @@ minutes and changed which test proves it.
 four lines below the `Z`-appending line LIVE-5 named, in the same function, and
 three adversarial passes over this area had not found it — because each was
 looking for the timezone defect it had been told about.
+
+### The `/code-review` round, and what it says about this PR's controls
+
+Twelve findings, all real, all fixed in the same PR. Three of them are worth
+recording because of what they were, not that they existed:
+
+1. **The fix reintroduced its own defect, through the column the fix added.**
+   `placeSlotTime` returned whatever the anchor passed through and let the
+   caller call `new Date()` on it. A `game_slots.start` of `'16:00:00'` is not
+   a naive _date-time_, so the anchor correctly leaves it alone — and
+   `new Date('16:00:00')` is Invalid Date. **`NaNNaNNaNTNaNNaNNaNZ`, back in the
+   feed, reached through the `start` column this very change added to the
+   select.** A bare `'2026-11-07'` went through the same hole and silently
+   became UTC midnight. The sibling predicate `toInstant` in
+   `anchorWallTimes.ts` already decided both correctly; `placeSlotTime`
+   invented a third answer thirty lines away from it, in the same PR, on the
+   same afternoon. Twin-arm half-application is not something other people do.
+
+2. **Every control in this PR pointed at the clock.** The vector table, the
+   three drift controls, the anchor tests, the weekday test — all aimed at
+   "is the arithmetic right". The review's findings were almost entirely
+   _elsewhere_: a dropped advisory, three silently dropped rows, a readiness
+   message asserting "no practice slots are available" while the season row was
+   still loading, an unfolded 224-character `X-WR-CALDESC` in the one case it
+   exists to report, and `timingFindings` returned by the function, documented
+   as "always present so a consumer cannot mistake none for unreported", and
+   then dropped by the only consumer — the `timezone`-shaped defect, recreated
+   one layer up, in the change that exists to fix it. GAP-30's lesson held
+   exactly: _choosing what to break is the judgement, and it is a separate
+   skill from building the control._
+
+3. **A test that named the regression could not fail on it.** The first
+   weekday case supplied `day: 'Saturday'` on its slots — and the old
+   expression was `slot.day || derived`, so the derived branch is unreachable
+   whenever a day is present. It asserted the right thing about the wrong
+   input. Reworked to omit `day`, which is the only input on which the two
+   expressions differ, and then watched failing against `main`'s expression
+   under both `TZ=UTC` and `TZ=America/Los_Angeles`.
+
+Two findings were pre-existing and are fixed here because this change
+documents the exact fields involved: `ScoringInputSchema.games.slots` was
+**required** while `EvaluationPanel` sends the object without it (so every game
+evaluation from that panel 400'd on a mandatory field nothing reads), and
+`await recordAudit(...)` is a no-op because `recordAudit` returns `void` —
+harmless mid-handler, not harmless immediately before a `return` on an edge
+isolate, which is where this change's new refusal path put it. `recordAuditNow`
+is the awaitable variant; every existing call site is unchanged.

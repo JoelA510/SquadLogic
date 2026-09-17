@@ -108,16 +108,23 @@ export const ScoringInputSchema = z.object({
     .object({
       teams: z.array(TeamSchema),
       /**
-       * **Parsed and unread.** `evaluateGameSchedule` takes only `assignments`
-       * and `teams`; nothing in either Edge Function reads `games.slots`.
-       * Named here rather than quietly validated, because a field that reads as
-       * load-bearing and is not is how a waiver gets lost. It is therefore also
-       * NOT placed on the season clock by `fairness-scoring` -- refusing a
-       * request over a field no evaluator consumes would be strictness with no
-       * subject. Honour it or delete it: deciding which is a games-engine
+       * **Parsed and unread, and it was also REQUIRED.**
+       *
+       * `evaluateGameSchedule` takes only `assignments` and `teams`; nothing in
+       * either Edge Function reads `games.slots`. Named here rather than
+       * quietly validated, because a field that reads as load-bearing and is
+       * not is how a waiver gets lost. It is therefore also not placed on the
+       * season clock by `fairness-scoring` -- refusing a request over a field
+       * no evaluator consumes would be strictness with no subject.
+       *
+       * It being required was worse than decorative: `EvaluationPanel.jsx`
+       * sends `games: { games, teams }` with no `slots` at all, so every game
+       * evaluation from that panel failed `safeParse` and came back 400 -- a
+       * mandatory field nothing reads, rejecting the one caller that sends the
+       * object. Made optional here; deleting it outright is a games-engine
        * change, not a timing one.
        */
-      slots: z.array(SlotSchema),
+      slots: z.array(SlotSchema).optional().default([]),
       games: z.array(GameAssignmentSchema),
     })
     .nullable(),

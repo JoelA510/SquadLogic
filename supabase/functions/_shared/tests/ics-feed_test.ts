@@ -130,16 +130,20 @@ Deno.test('calendar-feed - an unreadable daterange refuses instead of looping fo
   // On main the unstripped `[` made the anchor an Invalid Date and
   // `while (NaN !== targetDay)` never terminated. This test completing is the
   // assertion; the control below stops it passing vacuously.
-  for (const range of ['', 'garbage', '[not-a-date,2026-11-17)']) {
+  //
+  // `[2026-11-02,)` is in the list because a `daterange` has no NOT NULL upper
+  // bound, so an unbounded value is storable today.
+  for (const range of ['', 'garbage', '[not-a-date,2026-11-17)', '[2026-11-02,)']) {
     assertEquals(dateRangeBounds(range), null);
-    assertEquals(
-      buildFeedEvents({
-        teamName: 'Tigers',
-        timezone: 'America/New_York',
-        practices: [practiceRow({ effective_date_range: range })],
-      }),
-      []
-    );
+    const refused = buildFeedEvents({
+      teamName: 'Tigers',
+      timezone: 'America/New_York',
+      practices: [practiceRow({ effective_date_range: range })],
+    });
+    // Reported, not dropped: no occurrences, but one entry saying why.
+    assertEquals(refused.length, 1);
+    assertEquals(refused[0].kind, 'unplaceable');
+    assertEquals((refused[0] as { code: string }).code, 'PRACTICE_RANGE_UNREADABLE');
   }
   const good = buildFeedEvents({
     teamName: 'Tigers',
@@ -173,4 +177,44 @@ Deno.test('calendar-feed - the unplaceable summary collapses by code, not by eve
   assertEquals(Object.keys(summary.byCode), ['SEASON_TIMEZONE_MISSING']);
   assertEquals(summary.sentence.split(';').length, 1);
   assert(summary.sentence.length < 400, 'the summary grew with the season');
+});
+
+Deno.test('calendar-feed - a bare `time` in the timestamptz column does not re-emit NaN', () => {
+  // `placeSlotTime` used to pass through whatever the anchor returned and let
+  // the caller call `new Date()` on it. A `game_slots.start` of '16:00:00' is
+  // not a naive DATE-TIME, so the anchor leaves it alone -- and that is the
+  // original LIVE-5 symptom, back through the column the fix added.
+  const events = buildFeedEvents({
+    teamName: 'Tigers',
+    timezone: 'America/New_York',
+    games: [gameRow({ start: '16:00:00', end: '17:30:00' })],
+  });
+  assertEquals(events[0].kind, 'unplaceable');
+  assertEquals((events[0] as { code: string }).code, 'WALL_TIME_UNREADABLE');
+  const ics = renderIcsCalendar({
+    orgName: 'Test Org',
+    teamName: 'Tigers',
+    timezone: 'America/New_York',
+    events,
+    now: NOW,
+  });
+  assert(!ics.includes('NaN'), 'the NaN came back');
+});
+
+Deno.test('calendar-feed - every content line is folded at 75 octets (RFC 5545 3.1)', () => {
+  const games: GameRow[] = Array.from({ length: 40 }, (_, i) => ({ ...gameRow(), id: `g${i}` }));
+  const ics = renderIcsCalendar({
+    orgName: 'Test Org',
+    teamName: 'Tigers',
+    timezone: null,
+    events: buildFeedEvents({ teamName: 'Tigers', timezone: null, games }),
+    now: NOW,
+  });
+  const encoder = new TextEncoder();
+  const over = ics.split('\r\n').filter((l) => encoder.encode(l).length > 75);
+  assertEquals(over, [], `unfolded lines: ${over.length}`);
+  // Meta-assertion: something needed folding, or the check above is satisfied
+  // by a calendar that happened to be short.
+  assert(ics.includes('\r\n '), 'nothing was folded — the check proves nothing');
+  assertStringIncludes(ics.replace(/\r\n /g, ''), '40 of 40 events have no confirmed time');
 });

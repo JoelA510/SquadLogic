@@ -27,7 +27,9 @@ import { describe, it, expect } from 'vitest';
 import {
   buildFeedEvents,
   dateRangeBounds,
+  foldIcsLine,
   renderIcsCalendar,
+  summariseNotes,
   summariseUnplaceable,
   sanitizeIcsValue,
 } from '../supabase/functions/_shared/calendar/icsFeed.ts';
@@ -260,14 +262,28 @@ describe('the daterange the practice arm never actually parsed', () => {
     // and `while (NaN !== targetDay)` never terminated — so every team with a
     // practice assignment hung the feed until the isolate was killed. This
     // test completing at all is the assertion.
-    for (const range of ['', 'garbage', '[not-a-date,2026-11-17)', '[2026-11-17,2026-11-02)']) {
+    for (const range of [
+      '',
+      'garbage',
+      '[not-a-date,2026-11-17)',
+      '[2026-11-17,2026-11-02)',
+      // A `daterange` has no NOT NULL upper bound, so this is storable today.
+      '[2026-11-02,)',
+    ]) {
       expect(dateRangeBounds(range)).toBeNull();
       const events = buildFeedEvents({
         teamName: 'Tigers',
         timezone: 'America/New_York',
         practices: [practiceRow({}, { effective_date_range: range })],
       });
-      expect(events).toEqual([]);
+      // Reported, not dropped: no occurrences, but one entry saying why.
+      expect(events).toHaveLength(1);
+      expect(tbd(events[0]).code).toBe('PRACTICE_RANGE_UNREADABLE');
+      expect(tbd(events[0]).date).toBeNull();
+      // ...and with no day to put it on, no VEVENT is written — only the count.
+      const ics = render(events, 'America/New_York');
+      expect(ics).not.toContain('BEGIN:VEVENT');
+      expect(ics).toContain('X-WR-CALDESC:');
     }
   });
 
@@ -406,5 +422,169 @@ describe('ICS Generator (RFC 5545)', () => {
     const output = render(events, 'America/New_York');
     expect(output).toContain('LOCATION:North Park\\, Field\\, 1\\;A');
     expect(output.match(/[^\r]\n/g)).toBeNull();
+  });
+});
+
+describe('the /code-review findings, kept red-able', () => {
+  it('a bare `time` in the timestamptz column does not reintroduce the NaN', () => {
+    // `placeSlotTime` used to hand its caller whatever `anchorToSeasonClock`
+    // passed through, and the caller did `new Date(iso)`. A `game_slots.start`
+    // of '16:00:00' is not a naive DATE-TIME, so the anchor leaves it alone,
+    // and `new Date('16:00:00')` is Invalid Date — the original LIVE-5 symptom,
+    // straight back, through the column the fix added to the select.
+    const events = buildFeedEvents({
+      teamName: 'Tigers',
+      timezone: 'America/New_York',
+      games: [gameRow({ start: '16:00:00', end: '17:30:00' })],
+    });
+    expect(tbd(events[0]).code).toBe('WALL_TIME_UNREADABLE');
+    expect(render(events, 'America/New_York')).not.toMatch(/NaN/);
+  });
+
+  it('a bare calendar date in that column is refused, not read as UTC midnight', () => {
+    const events = buildFeedEvents({
+      teamName: 'Tigers',
+      timezone: 'America/New_York',
+      games: [gameRow({ start: '2026-11-07', end: '2026-11-08' })],
+    });
+    expect(events[0].kind).toBe('unplaceable');
+    // The control: the old path produced a real-looking instant for this.
+    expect(render(events, 'America/New_York')).not.toContain('DTSTART:20261107T000000Z');
+  });
+
+  it('names the BLOCKING finding, not merely the first one', () => {
+    // A fall-back-night practice whose end time is unreadable produces
+    // [WALL_TIME_AMBIGUOUS, WALL_TIME_UNREADABLE]. `findings[0]` reported the
+    // ambiguity — a code that never refuses, and one deliberately absent from
+    // the cause table, so the VEVENT explained itself with the generic
+    // fallback while the real cause was thrown away.
+    const events = buildFeedEvents({
+      teamName: 'Tigers',
+      timezone: 'America/New_York',
+      practices: [
+        practiceRow(
+          { day_of_week: 'sun', start_time: '01:30:00', end_time: '25:61:00' },
+          { effective_date_range: '[2026-11-01,2026-11-02)' }
+        ),
+      ],
+    });
+    // The start is ambiguous (placed, informational); the END is unreadable
+    // (blocking). `findings[0]` is the ambiguity, which never refuses.
+    expect(tbd(events[0]).code).toBe('WALL_TIME_UNREADABLE');
+    expect(tbd(events[0]).code).not.toBe('WALL_TIME_AMBIGUOUS');
+    const ics = render(events, 'America/New_York').replace(/\r\n /g, '');
+    expect(ics).toContain('the scheduled date or time could not be read');
+  });
+
+  it('reports an ambiguous hour on a placed event instead of swallowing it', () => {
+    // 01:30 on 2026-11-01 in New York happens twice. The event IS placed, at
+    // the first occurrence, and the note rides along — in the VEVENT and in
+    // the calendar description.
+    const events = buildFeedEvents({
+      teamName: 'Tigers',
+      timezone: 'America/New_York',
+      practices: [
+        practiceRow(
+          { day_of_week: 'sun', start_time: '01:30:00', end_time: '01:45:00' },
+          { effective_date_range: '[2026-11-01,2026-11-02)' }
+        ),
+      ],
+    });
+    expect(timed(events[0]).dtstart).toBe('20261101T053000Z'); // EDT, the first
+    expect(timed(events[0]).notes).toEqual(['WALL_TIME_AMBIGUOUS']);
+
+    // Unfolded: RFC 5545 folds at 75 octets, so a long line is split and a
+    // raw `toContain` on the wire format would be asserting the wrapping.
+    const ics = render(events, 'America/New_York').replace(/\r\n /g, '');
+    expect(ics).toContain('WALL_TIME_AMBIGUOUS');
+    expect(ics).toContain('1 placed events needed a note');
+
+    // Control: an unambiguous event carries no note and adds no CALDESC line.
+    const clean = buildFeedEvents({
+      teamName: 'Tigers',
+      timezone: 'America/New_York',
+      games: [gameRow()],
+    });
+    expect(timed(clean[0]).notes).toEqual([]);
+    expect(render(clean, 'America/New_York')).not.toContain('X-WR-CALDESC');
+  });
+
+  it('reports a practice assignment it cannot expand at all, rather than dropping it', () => {
+    const cases = [
+      { row: { ...practiceRow(), practice_slots: null }, code: 'PRACTICE_SLOT_MISSING' },
+      { row: practiceRow({ day_of_week: 'noneday' }), code: 'PRACTICE_DAY_UNREADABLE' },
+      {
+        row: practiceRow({}, { effective_date_range: '[2026-11-02,)' }),
+        code: 'PRACTICE_RANGE_UNREADABLE',
+      },
+    ];
+    for (const { row, code } of cases) {
+      const events = buildFeedEvents({
+        teamName: 'Tigers',
+        timezone: 'America/New_York',
+        practices: [row],
+      });
+      expect(events).toHaveLength(1);
+      expect(tbd(events[0]).code).toBe(code);
+    }
+    // ...and a game with no slot row, same rule.
+    const noSlot = buildFeedEvents({
+      teamName: 'Tigers',
+      timezone: 'America/New_York',
+      games: [{ id: 'g1', game_slots: null }],
+    });
+    expect(tbd(noSlot[0]).code).toBe('GAME_SLOT_MISSING');
+  });
+
+  it('folds every content line at 75 octets, RFC 5545 §3.1', () => {
+    // The header claimed strict RFC 5545 and folded nothing. X-WR-CALDESC is
+    // by construction the longest line in the file AND the line that explains
+    // the failure case, so an unfolded one is lost exactly when it matters.
+    const games = Array.from({ length: 40 }, (_, i) => ({ ...gameRow(), id: `g${i}` }));
+    const ics = render(buildFeedEvents({ teamName: 'Tigers', timezone: null, games }), null);
+
+    const encoder = new TextEncoder();
+    const over = ics
+      .split('\r\n')
+      .filter((l) => encoder.encode(l).length > 75)
+      .map((l) => `${encoder.encode(l).length}: ${l.slice(0, 40)}…`);
+    expect(over).toEqual([]);
+
+    // Meta-assertion: something actually needed folding, or the check above is
+    // satisfied by a calendar of short lines.
+    expect(ics).toContain('\r\n ');
+    const caldesc = ics.slice(ics.indexOf('X-WR-CALDESC:'));
+    expect(caldesc.slice(0, caldesc.indexOf('\r\n'))).toBeTruthy();
+    // Unfolding restores the sentence intact.
+    const unfolded = ics.replace(/\r\n /g, '');
+    expect(unfolded).toContain('40 of 40 events have no confirmed time');
+  });
+
+  it('folds on octets, never mid-character', () => {
+    const line = `SUMMARY:${'é'.repeat(80)}`;
+    const folded = foldIcsLine(line);
+    const encoder = new TextEncoder();
+    for (const segment of folded.split('\r\n')) {
+      expect(encoder.encode(segment).length).toBeLessThanOrEqual(75);
+    }
+    expect(folded.replace(/\r\n /g, '')).toBe(line);
+    // Control: a short line is returned untouched.
+    expect(foldIcsLine('VERSION:2.0')).toBe('VERSION:2.0');
+  });
+
+  it('the note summary is bounded by codes, not by events', () => {
+    const practices = Array.from({ length: 200 }, (_, i) => ({
+      ...practiceRow(
+        { day_of_week: 'sun', start_time: '01:30:00', end_time: '01:45:00' },
+        { effective_date_range: '[2026-11-01,2026-11-02)' }
+      ),
+      id: `p${i}`,
+    }));
+    const notes = summariseNotes(
+      buildFeedEvents({ teamName: 'Tigers', timezone: 'America/New_York', practices })
+    );
+    expect(notes.count).toBe(200);
+    expect(notes.sentence.split(';')).toHaveLength(1);
+    expect(notes.sentence.length).toBeLessThan(200);
   });
 });

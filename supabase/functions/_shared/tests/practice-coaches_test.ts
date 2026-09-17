@@ -515,56 +515,56 @@ Deno.test('conflictPairKey - the same key whichever side is named first', () => 
 // LIVE-7: the weekday the engine used to derive from a host-zone reading
 // ---------------------------------------------------------------------------
 
-Deno.test('scoring-engine - the conflict day is the caller’s, never derived', () => {
-  // `new Date(slot.start).toLocaleDateString('en-US', { weekday: 'long' })`
-  // reads the HOST's zone. These two slots are a 9pm Saturday practice in
+Deno.test('scoring-engine - LIVE-7: the weekday is never derived from the host zone', () => {
+  // The defect: `slot.day || start.toLocaleDateString('en-US', {weekday:'long'})`
+  // reads the HOST's zone. These slots are a 9pm SATURDAY practice in
   // America/New_York; on a UTC host -- the Supabase edge default -- that
-  // instant reads as SUNDAY, and the coach was told the wrong day.
+  // instant reads back as SUNDAY.
+  //
+  // The slots deliberately carry **no `day`**, because that is the only input
+  // on which the old expression and the new one differ: `||` short-circuits
+  // whenever a day is present, so a fixture that supplies one cannot fail on
+  // `main` no matter what it asserts. This one can, and does, under TZ=UTC.
   const saturdayNightInNewYork = '2026-04-05T01:00:00Z'; // Sat 2026-04-04 21:00 EDT
   const hostDerived = new Date(saturdayNightInNewYork).toLocaleDateString('en-US', {
     weekday: 'long',
   });
   const hostZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  console.log(`[LIVE-7] host ${hostZone} would derive "${hostDerived}" for a Saturday practice`);
+  console.log(`[LIVE-7] host ${hostZone} derives "${hostDerived}" for a Saturday NY practice`);
 
   const slots: Slot[] = [
-    {
-      id: 'a',
-      capacity: 1,
-      day: 'Saturday',
-      start: saturdayNightInNewYork,
-      end: '2026-04-05T02:30:00Z',
-    },
-    {
-      id: 'b',
-      capacity: 1,
-      day: 'Saturday',
-      start: saturdayNightInNewYork,
-      end: '2026-04-05T02:30:00Z',
-    },
+    { id: 'a', capacity: 1, start: saturdayNightInNewYork, end: '2026-04-05T02:30:00Z' },
+    { id: 'b', capacity: 1, start: saturdayNightInNewYork, end: '2026-04-05T02:30:00Z' },
   ];
-  const result = evaluatePracticeSchedule({
-    teams: [
-      { id: 'T1', division: 'U10', coachId: 'h' },
-      { id: 'T2', division: 'U12', coachId: 'h' },
-    ],
-    slots,
-    assignments: [
-      { teamId: 'T1', slotId: 'a' },
-      { teamId: 'T2', slotId: 'b' },
-    ],
-  });
+  const teams: Team[] = [
+    { id: 'T1', division: 'U10', coachId: 'h' },
+    { id: 'T2', division: 'U12', coachId: 'h' },
+  ];
+  const assignments: PracticeAssignment[] = [
+    { teamId: 'T1', slotId: 'a' },
+    { teamId: 'T2', slotId: 'b' },
+  ];
+  const result = evaluatePracticeSchedule({ teams, slots, assignments });
 
   assertEquals(conflictIssues(result).length, 1);
-  assertEquals(conflictIssues(result)[0].message, 'Coach h has overlapping practices on Saturday');
-  assertEquals(result.coachConflicts[0].day, 'Saturday');
+  // No day was supplied, so none is invented -- not the host's reading, and
+  // not a corrected one either, which would be a fourth contract for one
+  // field. `packages/core/src/practiceMetrics.js:582` says `?? 'unknown'`.
+  assertEquals(result.coachConflicts[0].day, 'unknown');
+  assertEquals(conflictIssues(result)[0].message, 'Coach h has overlapping practices on unknown');
+  // Named explicitly: "Sunday" is the string `main` produced on a UTC host,
+  // and "Saturday" is what it produced in a US zone -- which is why nobody in
+  // a US zone ever saw the defect.
+  assertEquals(conflictIssues(result)[0].message.includes('Sunday'), false);
+  assertEquals(conflictIssues(result)[0].message.includes('Saturday'), false);
 });
 
-Deno.test("scoring-engine - a slot with no day says 'unknown', matching practiceMetrics.js", () => {
-  // The core twin (`packages/core/src/practiceMetrics.js:582`) reads
-  // `slot.day ?? 'unknown'` and never derives one. Inventing a weekday here
-  // would be a third contract for one field; inventing a CORRECT one would be
-  // a fourth. The caller that has a weekday sends it.
+Deno.test("scoring-engine - the caller's day is honoured when it sends one", () => {
+  // The other half of the contract, and deliberately NOT a regression test:
+  // `||` and `??` agree whenever a day is present, so this case passes on
+  // `main` too. It pins the behaviour every production caller relies on --
+  // `PracticeSchedulingPage` normalises `day_of_week` and sends it -- so that
+  // a later "simplification" to always derive has something to break.
   const slots: Slot[] = [
     { id: 'a', capacity: 1, start: '2026-04-06T17:00:00Z', end: '2026-04-06T18:00:00Z' },
     { id: 'b', capacity: 1, start: '2026-04-06T17:00:00Z', end: '2026-04-06T18:00:00Z' },

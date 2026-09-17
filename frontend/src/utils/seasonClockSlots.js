@@ -62,6 +62,58 @@ export const UNPLACEABLE_CAUSE_UNKNOWN = 'this slot could not be placed on the s
 export const UNPLACEABLE_EXAMPLES = 3;
 
 /**
+ * The advisories a run can carry although it succeeded.
+ *
+ * A separate table from {@link UNPLACEABLE_CAUSE} because these codes never
+ * refuse: listing `WALL_TIME_AMBIGUOUS` there would make a code that DID
+ * compose an instant read as a reason one could not be.
+ */
+export const TIMING_NOTE_CAUSE = Object.freeze({
+  [TIMING_REASON.WALL_TIME_AMBIGUOUS]:
+    'the clock goes back that night, so that hour happens twice — the earlier one was used',
+});
+
+/**
+ * What a note code with no entry above says. Same rule and same reason as
+ * {@link UNPLACEABLE_CAUSE_UNKNOWN}: generic, code-independent, and the code
+ * itself is printed alongside it.
+ */
+export const TIMING_NOTE_UNKNOWN = 'the season clock needed a judgement call on that time';
+
+/**
+ * One line per distinct **reason code** for the non-blocking findings an Edge
+ * Function returns alongside a successful run.
+ *
+ * `auto-scheduler` returns `timingFindings` on every run so a consumer cannot
+ * read "none" as "this build does not report them" — which only holds if a
+ * consumer reads them. This is that consumer's rendering, and it buckets by
+ * `code` for the same reason {@link describeUnplaceableSlots} does: every
+ * finding's `message` carries its own slot's date and time, so one line per
+ * finding is one line per slot.
+ *
+ * @param {Array<{ code?: string, path?: string, id?: string|null }>|null|undefined} findings
+ * @returns {string|null}
+ */
+export function describeTimingFindings(findings) {
+  if (!findings || findings.length === 0) return null;
+  /** @type {Map<string, number>} */
+  const byCode = new Map();
+  for (const finding of findings) {
+    const code = finding?.code ?? 'UNKNOWN';
+    byCode.set(code, (byCode.get(code) ?? 0) + 1);
+  }
+  return [...byCode.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(
+      ([code, count]) =>
+        `${count} scheduled time${count === 1 ? '' : 's'} needed a note (${code}): ${
+          TIMING_NOTE_CAUSE[code] ?? TIMING_NOTE_UNKNOWN
+        }`
+    )
+    .join(' · ');
+}
+
+/**
  * One line per distinct **reason code**, with a count, so a hundred slots
  * sharing one cause read as one fact rather than a hundred.
  *

@@ -58,6 +58,7 @@ import {
   type GameRow,
   type PracticeRow,
 } from '../_shared/calendar/icsFeed.ts';
+import { readSeasonTimezone } from '../_shared/timing/seasonSettings.ts';
 
 serve(async (req) => {
   try {
@@ -113,30 +114,20 @@ serve(async (req) => {
     // hardcoded `America/New_York` this replaced was the bug, not the safety
     // net.
     //
-    // `.order(created_at desc).limit(1)` rather than `.single()`: an
-    // organization legitimately has several `season_settings` rows -- the
-    // season switcher in `OrganizationContext` lists them and defaults to the
-    // newest -- and `.single()` errors on more than one row, which yielded
-    // `settings: null` and fell through to Eastern. Newest-first is the
-    // contract the frontend already uses for "the current season".
-    let timezone: string | null = null;
-    if (organizationId) {
-      const { data: settings, error: settingsError } = await supabase
-        .from('season_settings')
-        .select('timezone, created_at')
-        .eq('organization_id', organizationId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (settingsError) {
-        console.error('calendar-feed: season_settings read failed', {
-          organizationId,
-          message: settingsError.message,
-        });
-      }
-      const value = settings?.timezone;
-      timezone = typeof value === 'string' && value.trim() ? value.trim() : null;
+    // `readSeasonTimezone` rather than a query written out here: its own header
+    // calls itself "the one server-side read of a season's clock", and a second
+    // copy in this file is how `.single()` ends up fixed on one arm and not the
+    // other -- the twin-arm shape this whole change exists to stop.
+    const season = await readSeasonTimezone(supabase, organizationId);
+    if (season.errored) {
+      // Not fatal. A feed that 500s takes every family's calendar down; every
+      // event becomes TIME TBD instead, which says the true thing.
+      console.error('calendar-feed: season_settings read failed', {
+        organizationId,
+        message: season.message,
+      });
     }
+    const timezone = season.timezone;
 
     // 3. Fetch Games.
     //

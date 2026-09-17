@@ -29,6 +29,7 @@ import {
   corsHeaders,
   jsonResponse,
   recordAudit,
+  recordAuditNow,
 } from '../_shared/auth.ts';
 import { checkRateLimit } from '../_shared/rateLimit.ts';
 import { edgeLogger } from '../_shared/logtail.ts';
@@ -451,7 +452,11 @@ serve(async (req) => {
         refusedCount: anchored.blocking.length,
         byCode: failure.byCode,
       });
-      await recordAudit(supabase, {
+      // `recordAuditNow`, not `recordAudit`: this path returns immediately,
+      // and `recordAudit` is fire-and-forget returning `void`, so awaiting it
+      // waits for nothing and the isolate can be frozen before the insert
+      // lands. A refusal is the audit row most worth keeping.
+      await recordAuditNow(supabase, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',

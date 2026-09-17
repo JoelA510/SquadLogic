@@ -27,9 +27,11 @@
 import {
   TIMING_REASON,
   anchorToSeasonClock,
+  isBlockingFinding,
   resolveZonedInstant,
   type TimingFinding,
 } from '../timing/seasonClock.ts';
+import { toInstant } from '../timing/anchorWallTimes.ts';
 
 /**
  * Sanitize ICS field values to prevent header injection (Phase 1 Security).
@@ -61,6 +63,19 @@ export interface TimedEvent {
   dtend: string;
   description: string;
   location: string;
+  /**
+   * Non-blocking reason codes raised while placing this event -- today only
+   * `WALL_TIME_AMBIGUOUS`, a wall time that occurs twice on a fall-back night
+   * and was resolved to its first occurrence.
+   *
+   * These were dropped on the floor in the first cut of this module: the event
+   * went down the placed branch and the finding was neither rendered nor
+   * logged. Both other Edge Functions in this change return them as
+   * `timingFindings`; a feed that swallows them is the same falsely-clean
+   * result in a smaller disguise. Always an array, never absent, so a consumer
+   * cannot read "none" as "this build does not report them".
+   */
+  notes: string[];
 }
 
 /**
@@ -83,6 +98,14 @@ export type FeedEvent = TimedEvent | UnplaceableEvent;
 
 /** Reported when a row carries neither an instant nor a wall date-and-time. */
 export const SLOT_TIME_MISSING = 'SLOT_TIME_MISSING';
+/** A `practice_assignments` row whose `practice_slots` join came back empty. */
+export const PRACTICE_SLOT_MISSING = 'PRACTICE_SLOT_MISSING';
+/** An `effective_date_range` this feed cannot read, including an unbounded one. */
+export const PRACTICE_RANGE_UNREADABLE = 'PRACTICE_RANGE_UNREADABLE';
+/** A `day_of_week` outside the enum the recurrence walk knows. */
+export const PRACTICE_DAY_UNREADABLE = 'PRACTICE_DAY_UNREADABLE';
+/** A `games` row whose `game_slots` join came back empty. */
+export const GAME_SLOT_MISSING = 'GAME_SLOT_MISSING';
 
 /**
  * The cause behind each reason code, phrased **without any one event in it**.
@@ -104,7 +127,26 @@ export const UNPLACEABLE_CAUSES: Record<string, string> = {
     'the scheduled time does not exist on that date, because daylight saving skips that hour',
   [TIMING_REASON.WALL_TIME_UNREADABLE]: 'the scheduled date or time could not be read',
   [SLOT_TIME_MISSING]: 'the slot carries no date or time to place',
+  [PRACTICE_SLOT_MISSING]: 'the practice assignment has no slot attached to expand',
+  [PRACTICE_RANGE_UNREADABLE]: 'the practice assignment has no readable start and end date',
+  [PRACTICE_DAY_UNREADABLE]: 'the practice slot names a day of the week this feed cannot read',
+  [GAME_SLOT_MISSING]: 'the game has no scheduled slot yet',
 };
+
+/**
+ * The advisories a placed event can still carry.
+ *
+ * Deliberately a separate table from {@link UNPLACEABLE_CAUSES}: these codes
+ * never refuse, so putting them there would make a code that composes an
+ * instant read as a reason one could not be composed.
+ */
+export const NOTE_CAUSES: Record<string, string> = {
+  [TIMING_REASON.WALL_TIME_AMBIGUOUS]:
+    'the clock goes back that night, so this hour happens twice - the earlier one is shown',
+};
+
+export const noteCauseFor = (code: string): string =>
+  NOTE_CAUSES[code] ?? 'this time needed a judgement call on the season clock';
 
 export const causeFor = (code: string): string =>
   UNPLACEABLE_CAUSES[code] ?? 'the scheduled time could not be placed on the season clock';
@@ -128,16 +170,69 @@ export function placeSlotTime(
   time: unknown,
   timezone: string | null,
   label: string
-): { iso: string | null; findings: TimingFinding[] } {
+): { at: Date | null; findings: TimingFinding[] } {
   if (instant !== null && instant !== undefined && instant !== '') {
     const anchored = anchorToSeasonClock(instant, timezone);
-    if (anchored.iso !== null && anchored.iso !== undefined) {
-      return { iso: String(anchored.iso), findings: anchored.findings };
-    }
-    if (anchored.findings.length > 0) return { iso: null, findings: anchored.findings };
+    const blocking = anchored.findings.find(isBlockingFinding);
+    if (blocking) return { at: null, findings: anchored.findings };
+    // **`toInstant`, not `new Date`.** The first cut of this function returned
+    // whatever `anchorToSeasonClock` passed through and let the caller do
+    // `new Date(iso)`, which put the ORIGINAL LIVE-5 DEFECT straight back: a
+    // `game_slots.start` of `'16:00:00'` is not a naive date-time, so the
+    // anchor leaves it alone, `new Date('16:00:00')` is Invalid Date, and the
+    // feed emitted `NaNNaNNaNTNaNNaNNaNZ` again. A bare `'2026-11-07'` slipped
+    // through the same hole and silently became UTC midnight -- the case this
+    // module's header says it refuses. `toInstant` is the sibling predicate
+    // that already decides both, in `_shared/timing/anchorWallTimes.ts`;
+    // inventing a third answer here is what went wrong.
+    const { date: at, code } = toInstant(anchored.iso);
+    if (at) return { at, findings: anchored.findings };
+    return {
+      at: null,
+      findings: [
+        ...anchored.findings,
+        {
+          code: (code ?? TIMING_REASON.WALL_TIME_UNREADABLE) as TimingFinding['code'],
+          message: `${label} carries a value that is not an instant: ${String(instant)}`,
+          details: { label, value: String(instant) },
+        },
+      ],
+    };
   }
-  if (!date || !time) return { iso: null, findings: [] };
-  return resolveZonedInstant({ date, time, timeZone: timezone, label });
+  if (!date || !time) {
+    return {
+      at: null,
+      findings: [
+        {
+          code: TIMING_REASON.WALL_TIME_UNREADABLE,
+          message: `${label} has no date or time to place`,
+          details: { label, date: String(date), time: String(time) },
+        },
+      ],
+    };
+  }
+  const composed = resolveZonedInstant({ date, time, timeZone: timezone, label });
+  if (composed.iso === null) return { at: null, findings: composed.findings };
+  return { at: toInstant(composed.iso).date, findings: composed.findings };
+}
+
+/**
+ * The first finding that means nothing was composed.
+ *
+ * `findings[0]` is not that: a fall-back-night slot whose END time is
+ * unreadable produces `[WALL_TIME_AMBIGUOUS, WALL_TIME_UNREADABLE]`, and
+ * taking the head reported the ambiguity as the cause -- a code that never
+ * refuses, and one deliberately absent from {@link UNPLACEABLE_CAUSES}, so the
+ * VEVENT explained itself with the generic fallback sentence while the real
+ * cause was discarded.
+ */
+function blockingCodeOf(findings: TimingFinding[]): TimingFinding | undefined {
+  return findings.find(isBlockingFinding);
+}
+
+/** The non-blocking codes worth telling a subscriber about. */
+function noteCodesOf(findings: TimingFinding[]): string[] {
+  return [...new Set(findings.filter((f) => !isBlockingFinding(f)).map((f) => f.code))];
 }
 
 /** `getUTCDay()` offsets for the `day_of_week` enum. */
@@ -246,16 +341,63 @@ export function buildFeedEvents(input: {
 
   practices?.forEach((p) => {
     const slot = p.practice_slots;
-    if (!slot) return;
+    const location = locationOf(slot?.fields);
+    const title = `Practice - ${teamName}`;
+
+    /**
+     * An assignment that cannot be expanded at all.
+     *
+     * **Reported, not `return`ed.** The first cut of this function dropped
+     * three of these on the floor -- a missing `practice_slots` join, an
+     * unreadable `effective_date_range` (a `daterange` has no NOT NULL upper
+     * bound, so `[2026-11-02,)` is storable today) and a `day_of_week` outside
+     * the enum -- while the module header claimed nothing was dropped. A
+     * family whose practices vanish from the feed with nothing said is the
+     * exact failure CLAUDE.md §3 names. `date: null` means no VEVENT is
+     * written, because there is no day to write one on; the CALDESC count and
+     * the server log are where it exists.
+     */
+    const refuseAssignment = (code: string, reason: string) => {
+      events.push({
+        kind: 'unplaceable',
+        uid: String(p.id),
+        title,
+        date: null,
+        code,
+        reason,
+        location,
+      });
+    };
+
+    if (!slot) {
+      refuseAssignment(
+        PRACTICE_SLOT_MISSING,
+        `practice assignment ${p.id} has no practice slot to expand`
+      );
+      return;
+    }
 
     const bounds = dateRangeBounds(p.effective_date_range);
-    if (!bounds) return;
+    if (!bounds) {
+      refuseAssignment(
+        PRACTICE_RANGE_UNREADABLE,
+        `practice assignment ${p.id} has an effective date range this feed cannot read: ${String(
+          p.effective_date_range
+        )}`
+      );
+      return;
+    }
 
     const targetDay = DAY_MAP[String(slot.day_of_week ?? '').toLowerCase()];
-    if (targetDay === undefined) return;
-
-    const location = locationOf(slot.fields);
-    const title = `Practice - ${teamName}`;
+    if (targetDay === undefined) {
+      refuseAssignment(
+        PRACTICE_DAY_UNREADABLE,
+        `practice assignment ${p.id} names a day of week this feed does not know: ${String(
+          slot.day_of_week
+        )}`
+      );
+      return;
+    }
 
     // The recurrence walk stays on a UTC-noon anchor: it enumerates CALENDAR
     // DATES only, and noon keeps the date stable under any offset. The instant
@@ -289,18 +431,23 @@ export function buildFeedEvents(input: {
         label: 'practice end',
       });
 
-      if (start.iso && end.iso) {
+      const findings = [...start.findings, ...end.findings];
+      const startAt = start.iso ? toInstant(start.iso).date : null;
+      const endAt = end.iso ? toInstant(end.iso).date : null;
+
+      if (startAt && endAt) {
         events.push({
           kind: 'timed',
           uid,
           title,
-          dtstart: formatIcsDate(new Date(start.iso)),
-          dtend: formatIcsDate(new Date(end.iso)),
+          dtstart: formatIcsDate(startAt),
+          dtend: formatIcsDate(endAt),
           description: `Practice session for ${teamName}`,
           location,
+          notes: noteCodesOf(findings),
         });
       } else {
-        const blocking = [...start.findings, ...end.findings][0];
+        const blocking = blockingCodeOf(findings);
         events.push({
           kind: 'unplaceable',
           uid,
@@ -318,10 +465,24 @@ export function buildFeedEvents(input: {
 
   games?.forEach((g) => {
     const slot = g.game_slots;
-    if (!slot) return;
-
-    const location = locationOf(slot.fields);
+    const location = locationOf(slot?.fields);
     const title = `Game: ${teamName}`;
+
+    if (!slot) {
+      // Reported, not dropped -- see `refuseAssignment` above. A game with no
+      // `game_slots` row is a game nobody can attend, and silence about it is
+      // how a family learns of a fixture from someone else's parent.
+      events.push({
+        kind: 'unplaceable',
+        uid: g.id,
+        title,
+        date: null,
+        code: GAME_SLOT_MISSING,
+        reason: `game ${g.id} has no scheduled slot`,
+        location,
+      });
+      return;
+    }
 
     const start = placeSlotTime(
       slot.start,
@@ -340,18 +501,21 @@ export function buildFeedEvents(input: {
       'game end'
     );
 
-    if (start.iso && end.iso) {
+    const findings = [...start.findings, ...end.findings];
+
+    if (start.at && end.at) {
       events.push({
         kind: 'timed',
         uid: g.id,
         title,
-        dtstart: formatIcsDate(new Date(start.iso)),
-        dtend: formatIcsDate(new Date(end.iso)),
+        dtstart: formatIcsDate(start.at),
+        dtend: formatIcsDate(end.at),
         description: `Game matchup`,
         location,
+        notes: noteCodesOf(findings),
       });
     } else {
-      const blocking = [...start.findings, ...end.findings][0];
+      const blocking = blockingCodeOf(findings);
       events.push({
         kind: 'unplaceable',
         uid: g.id,
@@ -389,7 +553,76 @@ export function summariseUnplaceable(events: FeedEvent[]): {
 }
 
 /**
- * Render the VCALENDAR. Strict RFC 5545: CRLF everywhere.
+ * One line per advisory code, counted. Same shape and same reason as
+ * {@link summariseUnplaceable}: bounded by the number of CODES, never by the
+ * number of events.
+ */
+export function summariseNotes(events: FeedEvent[]): {
+  count: number;
+  byCode: Record<string, number>;
+  sentence: string;
+} {
+  const byCode: Record<string, number> = {};
+  let count = 0;
+  for (const ev of events) {
+    if (ev.kind !== 'timed') continue;
+    for (const code of ev.notes) {
+      byCode[code] = (byCode[code] ?? 0) + 1;
+      count += 1;
+    }
+  }
+  const sentence = Object.entries(byCode)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([code, n]) => `${n} where ${noteCauseFor(code)}`)
+    .join('; ');
+  return { count, byCode, sentence };
+}
+
+/**
+ * RFC 5545 §3.1 content-line folding: no line may exceed 75 **octets**, and a
+ * continuation begins with a single space.
+ *
+ * The header claimed "strict RFC 5545" and folded nothing. That was harmless
+ * while every line was a UID or a DTSTART, and stopped being harmless when
+ * `X-WR-CALDESC` arrived: it is by construction the longest line in the file,
+ * it is the line that explains the failure case, and a strict parser truncates
+ * or rejects it. Measured before this existed: a 40-event feed with
+ * `SEASON_TIMEZONE_MISSING` produced a 224-character CALDESC.
+ *
+ * Octets, not characters: the limit is on the UTF-8 encoding, and a club name
+ * with an accent would otherwise fold one byte late. A multi-byte character is
+ * never split across the boundary.
+ */
+export function foldIcsLine(line: string): string {
+  const CRLF = '\r\n';
+  const bytes = new TextEncoder().encode(line);
+  if (bytes.length <= 75) return line;
+
+  const out: string[] = [];
+  let used = 0; // octets on the current output line
+  let current = '';
+  let first = true;
+  // A continuation line starts with one space, which itself counts toward 75.
+  const limitFor = () => (first ? 75 : 74);
+
+  for (const char of line) {
+    const width = new TextEncoder().encode(char).length;
+    if (used + width > limitFor()) {
+      out.push(current);
+      first = false;
+      current = '';
+      used = 0;
+    }
+    current += char;
+    used += width;
+  }
+  out.push(current);
+  return out.join(`${CRLF} `);
+}
+
+/**
+ * Render the VCALENDAR. Strict RFC 5545: CRLF everywhere, and every content
+ * line folded at 75 octets.
  *
  * `now` is a parameter so a test pins DTSTAMP instead of asserting around it.
  */
@@ -403,23 +636,35 @@ export function renderIcsCalendar(input: {
   const { orgName, teamName, timezone, events, now = new Date() } = input;
   const CRLF = '\r\n';
 
-  let ics = `BEGIN:VCALENDAR${CRLF}`;
-  ics += `VERSION:2.0${CRLF}`;
-  ics += `PRODID:-//${orgName}//SquadLogic//EN${CRLF}`;
-  ics += `CALSCALE:GREGORIAN${CRLF}`;
-  ics += `METHOD:PUBLISH${CRLF}`;
-  ics += `X-WR-CALNAME:${sanitizeIcsValue(`${teamName} Schedule`)}${CRLF}`;
+  /** Every content line goes through here, so none can be written unfolded. */
+  const lines: string[] = [];
+  const line = (value: string) => lines.push(foldIcsLine(value));
+
+  line('BEGIN:VCALENDAR');
+  line('VERSION:2.0');
+  line(`PRODID:-//${sanitizeIcsValue(orgName)}//SquadLogic//EN`);
+  line('CALSCALE:GREGORIAN');
+  line('METHOD:PUBLISH');
+  line(`X-WR-CALNAME:${sanitizeIcsValue(`${teamName} Schedule`)}`);
   // Only when the season actually has one. Naming a zone we guessed at is the
   // original defect in a single header line.
   if (timezone) {
-    ics += `X-WR-TIMEZONE:${sanitizeIcsValue(timezone)}${CRLF}`;
+    line(`X-WR-TIMEZONE:${sanitizeIcsValue(timezone)}`);
   }
 
   const summary = summariseUnplaceable(events);
+  const notes = summariseNotes(events);
+  const calDesc: string[] = [];
   if (summary.count > 0) {
-    ics += `X-WR-CALDESC:${sanitizeIcsValue(
+    calDesc.push(
       `${summary.count} of ${events.length} events have no confirmed time: ${summary.sentence}. They appear as all-day "TIME TBD" entries.`
-    )}${CRLF}`;
+    );
+  }
+  if (notes.count > 0) {
+    calDesc.push(`${notes.count} placed events needed a note: ${notes.sentence}.`);
+  }
+  if (calDesc.length > 0) {
+    line(`X-WR-CALDESC:${sanitizeIcsValue(calDesc.join(' '))}`);
   }
 
   const nowStamp = formatIcsDate(now);
@@ -430,36 +675,39 @@ export function renderIcsCalendar(input: {
     // log instead. Every VEVENT spelling would assert a time we do not have.
     if (ev.kind === 'unplaceable' && ev.date === null) continue;
 
-    ics += `BEGIN:VEVENT${CRLF}`;
-    ics += `UID:${sanitizeIcsValue(String(ev.uid))}@squadlogic.app${CRLF}`;
-    ics += `DTSTAMP:${nowStamp}${CRLF}`;
+    line('BEGIN:VEVENT');
+    line(`UID:${sanitizeIcsValue(String(ev.uid))}@squadlogic.app`);
+    line(`DTSTAMP:${nowStamp}`);
 
     if (ev.kind === 'timed') {
-      ics += `DTSTART:${ev.dtstart}${CRLF}`;
-      ics += `DTEND:${ev.dtend}${CRLF}`;
-      ics += `SUMMARY:${sanitizeIcsValue(ev.title)}${CRLF}`;
-      ics += `DESCRIPTION:${sanitizeIcsValue(ev.description)}${CRLF}`;
+      line(`DTSTART:${ev.dtstart}`);
+      line(`DTEND:${ev.dtend}`);
+      line(`SUMMARY:${sanitizeIcsValue(ev.title)}`);
+      const note = ev.notes.length
+        ? ` Note: ${ev.notes.map((code) => `${noteCauseFor(code)} (${code})`).join('; ')}.`
+        : '';
+      line(`DESCRIPTION:${sanitizeIcsValue(`${ev.description}${note}`)}`);
     } else {
       // An all-day VEVENT. A date-valued DTSTART is floating by definition, so
       // it claims a DAY and no instant -- exactly what is known. DTEND is
       // exclusive for VALUE=DATE, hence the next day.
       const date = ev.date as string;
       const endDate = new Date(new Date(`${date}T00:00:00Z`).getTime() + 86_400_000);
-      ics += `DTSTART;VALUE=DATE:${formatIcsDateOnly(date)}${CRLF}`;
-      ics += `DTEND;VALUE=DATE:${formatIcsDateOnly(endDate.toISOString().slice(0, 10))}${CRLF}`;
-      ics += `SUMMARY:${sanitizeIcsValue(`TIME TBD - ${ev.title}`)}${CRLF}`;
-      ics += `DESCRIPTION:${sanitizeIcsValue(
-        `No confirmed time: ${causeFor(ev.code)} (${ev.code}).`
-      )}${CRLF}`;
-      ics += `STATUS:TENTATIVE${CRLF}`;
+      line(`DTSTART;VALUE=DATE:${formatIcsDateOnly(date)}`);
+      line(`DTEND;VALUE=DATE:${formatIcsDateOnly(endDate.toISOString().slice(0, 10))}`);
+      line(`SUMMARY:${sanitizeIcsValue(`TIME TBD - ${ev.title}`)}`);
+      line(
+        `DESCRIPTION:${sanitizeIcsValue(`No confirmed time: ${causeFor(ev.code)} (${ev.code}).`)}`
+      );
+      line('STATUS:TENTATIVE');
     }
 
     if (ev.location) {
-      ics += `LOCATION:${sanitizeIcsValue(ev.location)}${CRLF}`;
+      line(`LOCATION:${sanitizeIcsValue(ev.location)}`);
     }
-    ics += `END:VEVENT${CRLF}`;
+    line('END:VEVENT');
   }
 
-  ics += `END:VCALENDAR${CRLF}`;
-  return ics;
+  line('END:VCALENDAR');
+  return `${lines.join(CRLF)}${CRLF}`;
 }

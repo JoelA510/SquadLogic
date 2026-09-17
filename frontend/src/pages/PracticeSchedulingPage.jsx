@@ -12,7 +12,11 @@ import { findBlackoutConflicts } from '@squadlogic/core/fieldAdmin/index.js';
 import { useFieldClosures } from '../hooks/useFieldClosures.js';
 import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
 import { requireZonedInstant } from '@squadlogic/core/timing/index.js';
-import { describeUnplaceableSlots, isSeasonClockLoading } from '../utils/seasonClockSlots.js';
+import {
+  describeTimingFindings,
+  describeUnplaceableSlots,
+  isSeasonClockLoading,
+} from '../utils/seasonClockSlots.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
@@ -119,6 +123,24 @@ function getSeasonDateRange(seasonSetting) {
 }
 
 /**
+ * The season-local calendar date a slot row actually falls on.
+ *
+ * The same two steps `normalizePracticeSlot` takes before it composes, so a
+ * refusal and the banner that reports it name the same day. Returns `null`
+ * rather than guessing when the row has no effective start at all.
+ *
+ * @param {Record<string, any>} row
+ * @param {Record<string, any>|null|undefined} seasonSetting
+ * @returns {string|null} `YYYY-MM-DD`
+ */
+function slotDateOf(row, seasonSetting) {
+  const effectiveFrom =
+    row?.valid_from ?? row?.validFrom ?? getSeasonDateRange(seasonSetting).start ?? null;
+  if (!effectiveFrom) return null;
+  return getSlotDateForDay(effectiveFrom, normalizeDay(row?.day_of_week ?? row?.dayOfWeek));
+}
+
+/**
  * @param {Record<string, any>} row
  * @param {Record<string, any>|null|undefined} seasonSetting
  * @param {string|null|undefined} timezone - the season's IANA zone. A parameter
@@ -194,9 +216,14 @@ export function partitionPracticeSlots(rows, { seasonSetting, timezone }) {
     } catch (err) {
       unplaceableSlots.push({
         id: row?.id ?? null,
-        // The wall date is derived inside `normalizePracticeSlot`, which is the
-        // call that threw, so only the row's own columns are safe to read here.
-        date: row?.valid_from ?? row?.validFrom ?? null,
+        // **The date that failed, not the row's `valid_from`.**
+        // `normalizePracticeSlot` shifts `valid_from` forward to the slot's
+        // weekday before composing, so a DST-gap Sunday slot with
+        // `valid_from = 2026-03-01` refuses about 2026-03-08 -- and naming
+        // 2026-03-01 in the banner points the operator at a date on which
+        // nothing is wrong. Recomputed with the same helper the throwing call
+        // used, so the two cannot disagree; `null` when even that is unknown.
+        date: slotDateOf(row, seasonSetting),
         time: normalizeTime(row?.start_time ?? row?.startTime),
         code: err?.code ?? 'SLOT_SHAPE_INVALID',
         reason: err?.message ?? 'Practice slot could not be read.',
@@ -522,14 +549,46 @@ export default function PracticeSchedulingPage() {
   const schedulerDisabled =
     dashboardLoading.practice ||
     practiceSlotsLoading ||
+    seasonClockLoading ||
     isColdStart ||
     !schedulerSlots.length ||
     !canManageSchedule;
 
+  /**
+   * **"No slots" is a claim, and it was being made when it was false.**
+   *
+   * Two arms guard it, both taken from `composeSchedulerReadinessMessage` in
+   * `GameSchedulingPage.jsx`:
+   *
+   * - While the season row is in flight, `seasonClockLoading` suppresses
+   *   `unplaceableSlotMessage` -- correctly, since every entry would say
+   *   `SEASON_TIMEZONE_MISSING` about a clock nobody has read yet -- but
+   *   `schedulerSlots` is empty for the same reason, so the third arm fired
+   *   and the operator was told there are no practice slots. There are; they
+   *   have not been placed yet.
+   * - Once it has landed, slots refused for a real reason are reported BY
+   *   that reason. Saying "no slots are available" alongside "3 slots shown as
+   *   TIME TBD" is two answers to one question, and the unhelpful one is the
+   *   one that reads like a data problem.
+   */
+  /**
+   * The Edge Function's non-blocking timing advisories, bucketed by **code**.
+   *
+   * Bucketed for the reason everything else in this change is: each finding's
+   * `message` embeds that slot's own date and time, so one line per finding is
+   * one line per slot, and the case that produces them at scale is a whole
+   * season of practices on a fall-back night.
+   */
+  const timingFindingMessage = useMemo(
+    () => describeTimingFindings(autoScheduler.result?.timingFindings),
+    [autoScheduler.result]
+  );
+
   const schedulerReadinessMessage =
     practiceSlotsError ||
+    (seasonClockLoading ? "Loading this season's settings…" : null) ||
     unplaceableSlotMessage ||
-    (!practiceSlotsLoading && !schedulerSlots.length && !isColdStart
+    (!practiceSlotsLoading && !schedulerSlots.length && !isColdStart && !unplaceableSlots.length
       ? 'No practice slots are available for this organization.'
       : null);
 
@@ -836,6 +895,21 @@ export default function PracticeSchedulingPage() {
               className="mt-4 rounded-lg border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
             >
               {schedulerReadinessMessage}
+            </div>
+          )}
+
+          {/*
+            Its own line, not appended to the readiness sentence: the run
+            succeeded, so this is advice rather than a blocker, and appending
+            it would make a completed run read like a failed one. `role="status"`
+            for the same reason -- polite, not assertive.
+          */}
+          {timingFindingMessage && (
+            <div
+              role="status"
+              className="mt-4 rounded-lg border border-border-subtle bg-bg-glass px-4 py-3 text-sm text-text-secondary"
+            >
+              {timingFindingMessage}
             </div>
           )}
 

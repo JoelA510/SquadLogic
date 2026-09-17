@@ -162,7 +162,15 @@ describe('what the page sends to the auto-scheduler', () => {
     // nobody reads leaves every reader perfectly intact, which is how LIVE-7
     // survived. `useAutoScheduler` is the one writer of that fetch body.
     expect(hook).toContain('/auto-scheduler');
-    expect(hook).not.toMatch(/\btimezone\b/);
+    // The BODY, not the file: a comment naming the field it no longer sends is
+    // the point of the comment. `body: JSON.stringify({ … })` is the one writer.
+    const bodyStart = hook.indexOf('body: JSON.stringify({');
+    expect(bodyStart).toBeGreaterThan(-1);
+    const body = hook.slice(bodyStart, hook.indexOf('}),', bodyStart));
+    expect(body).toContain('slots,');
+    expect(body).not.toMatch(/^\s*timezone,\s*$/m);
+    // Control: the key it DOES still send, so the regex is known to match.
+    expect(body).toMatch(/^\s*schoolDayEnd,\s*$/m);
     // The page still needs the zone locally, to compose with. It must not be
     // in the trigger payload.
     const triggerCall = page.slice(

@@ -2,12 +2,32 @@
  * **Every pgTAP suite's `plan(N)` against the assertions it actually runs.**
  *
  * `supabase/tests/admin_update_field_blackout.sql` arrived from 8.4 gap A
- * declaring `plan(14)` over fifteen assertions. pgTAP would have reported
- * "Looks like you planned 14 tests but ran 15" -- but nothing in `npm run
- * lint`, `npm run test`, `npm run test:db:local` or the plant harness executes
- * a pgTAP suite, so the only thing standing between that file and `main` was
- * somebody counting `SELECT is(` by eye. Forty-four of the forty-five suites
- * already agreed exactly; the one that did not was the one nobody had run.
+ * declaring `plan(14)` over fifteen assertions, which pgTAP reports as
+ * "Looks like you planned 14 tests but ran 15".
+ *
+ * **pgTAP is gated in CI, and this file does not exist because it is not.**
+ * `.github/workflows/pgtap.yml` triggers on `supabase/migrations/**`,
+ * `supabase/tests/**` and `supabase/config.toml`, starts a local Supabase and
+ * runs `npm run test:db` -- `supabase test db`, every suite in the directory.
+ * A PR that touches SQL at all therefore runs all forty-five, and a plan that
+ * does not match would turn that job red before merge. Saying otherwise is
+ * how a reader concludes pgTAP is ungated and skips it, and it is an error
+ * this phase has already made once and recorded.
+ *
+ * What was missing is nearer and faster. NOTHING an agent runs before pushing
+ * executes a pgTAP suite: not `npm run lint`, not `npm run test`, not
+ * `npm run test:db:local`, and neither plant sweep. So the mismatch was
+ * invisible to every local check, survived a full Definition of Done, and
+ * would have been found only by a three-to-five-minute container-starting job
+ * that fires on SQL paths after the push. This moves that to a millisecond
+ * assertion in the fast suite -- and, because it parses text rather than
+ * executing SQL, it holds in an environment with no Supabase CLI at all,
+ * which is the environment the defect was actually found in.
+ *
+ * **Forty-four of the forty-five already agreed exactly, and that is the CI
+ * job's doing rather than a coincidence.** The one that did not was the one
+ * suite new in this PR -- it had never been through that gate, because it had
+ * never been on a PR before. The gate works; it just works later than this.
  *
  * **A declared count is not an enforced one.** That is the rule this phase
  * keeps rediscovering, and a plan is a declared count in the most literal

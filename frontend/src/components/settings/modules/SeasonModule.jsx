@@ -4,6 +4,30 @@ import { useAuth } from '../../../contexts/AuthContext.jsx';
 import { useOrganization } from '../../../contexts/OrganizationContext.jsx';
 import { supabase } from '../../../lib/supabaseClient.js';
 
+/**
+ * The zones this control offers by name.
+ *
+ * It is a shortlist, not the domain. `season_settings.timezone` holds any IANA
+ * name the server recognises: `initialize_new_tenant` stores whatever
+ * `Intl.DateTimeFormat().resolvedOptions().timeZone` reported in the admin's
+ * browser, and 20260913000000's backfill copies `organizations.contact_info`
+ * verbatim. A season on `Europe/London` therefore has a perfectly good clock
+ * and no option to render it against -- the select showed **blank**, and
+ * `!timezone` is false so the "Not set" hint did not fire either. The operator
+ * saw an empty control over a season that was working.
+ *
+ * `OrganizationCreation.jsx` already answers this by injecting an option for an
+ * out-of-list value; that contract is adopted below rather than a third one
+ * invented.
+ */
+const SEASON_TIMEZONE_OPTIONS = Object.freeze([
+  { value: 'America/Los_Angeles', label: 'Pacific Time (US & Canada)' },
+  { value: 'America/Denver', label: 'Mountain Time (US & Canada)' },
+  { value: 'America/Chicago', label: 'Central Time (US & Canada)' },
+  { value: 'America/New_York', label: 'Eastern Time (US & Canada)' },
+  { value: 'UTC', label: 'UTC' },
+]);
+
 export default function SeasonModule() {
   const { currentSeason, updateCurrentSeason, availableSeasons } = useTheme();
   const { user, isImpersonating } = useAuth();
@@ -185,10 +209,24 @@ export default function SeasonModule() {
               // The audit row is written inside the RPC, atomically with the
               // column, rather than beside it from here: a timezone change that
               // is audited but not persisted is the shape this control had.
+              //
+              // **One row, not two.** Under impersonation this used to fire a
+              // second `record_audit_event` of the SAME action beside the RPC,
+              // and neither row was complete -- the RPC's carried
+              // `previous_timezone` and nothing about the impersonation, the
+              // client's carried the impersonation and nothing about what the
+              // value had been. `p_actor_context` (20260917000000) carries the
+              // one fact the server cannot know, the profile being viewed as;
+              // the RPC derives `impersonated_by` from `auth.uid()` and the
+              // admin's email from `profiles`, because a client-asserted actor
+              // in an audit row is decoration.
               const { error } = await supabase.rpc('admin_set_season_timezone', {
                 p_organization_id: orgId,
                 p_season_settings_id: seasonId,
                 p_timezone: newVal,
+                p_actor_context: isImpersonating
+                  ? { target_user_id: user?.profile?.id ?? null }
+                  : {},
               });
               setTimezoneSaving(false);
               if (error) {
@@ -198,18 +236,6 @@ export default function SeasonModule() {
                 return;
               }
               refetchOrgs();
-              if (isImpersonating) {
-                await supabase.rpc('record_audit_event', {
-                  p_organization_id: orgId,
-                  p_action: 'settings.timezone_updated',
-                  p_metadata: {
-                    timezone: newVal,
-                    target_user_id: user.profile.id,
-                    impersonated_by: user.id,
-                    admin_email: user.email,
-                  },
-                });
-              }
             }}
             className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-3 text-text-primary focus:outline-none focus:border-brand-400 transition-colors"
           >
@@ -217,11 +243,17 @@ export default function SeasonModule() {
                 (GAP-30), so the empty state is named rather than defaulted to a
                 zone nobody chose. */}
             {!timezone && <option value="">Not set — game scheduling is disabled</option>}
-            <option value="America/Los_Angeles">Pacific Time (US & Canada)</option>
-            <option value="America/Denver">Mountain Time (US & Canada)</option>
-            <option value="America/Chicago">Central Time (US & Canada)</option>
-            <option value="America/New_York">Eastern Time (US & Canada)</option>
-            <option value="UTC">UTC</option>
+            {/* A stored zone the shortlist does not carry gets its own option,
+                the same contract OrganizationCreation.jsx uses. Without it the
+                control renders blank over a season that has a clock. */}
+            {timezone && !SEASON_TIMEZONE_OPTIONS.some((tz) => tz.value === timezone) && (
+              <option value={timezone}>{timezone}</option>
+            )}
+            {SEASON_TIMEZONE_OPTIONS.map((tz) => (
+              <option key={tz.value} value={tz.value}>
+                {tz.label}
+              </option>
+            ))}
           </select>
           {timezoneError && (
             <p id="season-timezone-error" role="alert" className="mt-2 text-sm text-danger">

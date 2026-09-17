@@ -44,6 +44,13 @@ BEGIN;
 -- 1. Drop the Settings writer.
 -- ---------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS public.admin_set_season_timezone(uuid, uuid, text);
+-- **Both arities.** `20260917000000` re-created this function with a fourth
+-- `p_actor_context jsonb` argument, so on a database migrated past that point
+-- the DROP above matches nothing and this revert would report success over a
+-- writer still standing -- the silent-no-op shape
+-- `docs/sql/reverts/20260504060000` was fixed for. Naming the later signature
+-- here keeps this revert correct at head as well as at its own migration.
+DROP FUNCTION IF EXISTS public.admin_set_season_timezone(uuid, uuid, text, jsonb);
 
 -- ---------------------------------------------------------------------------
 -- 2. Restore `initialize_new_tenant` to its 20260416000001 definition, verbatim.

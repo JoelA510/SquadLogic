@@ -8,6 +8,27 @@
 -- assignments.  It is idempotent: running it multiple times refreshes the
 -- sample rows without creating duplicates.  Existing production data should
 -- be backed up before executing this file.
+--
+-- ## The opt-in does NOT apply to a current database, and this is the warning
+--
+-- Executed, not reasoned about: with `squadlogic.seed_sample_data=on` set on a
+-- fresh database, the migration chain aborts a few files later at
+-- `20260310000002_unified_rls_schema` with `column "organization_id" of
+-- relation "divisions" contains null values`. This season predates
+-- multi-tenancy -- none of the 31 INSERTs below names an `organization_id` --
+-- so the rows cannot survive the migration that makes the column NOT NULL.
+--
+-- The guard below is therefore the only reason the set applies at all, and
+-- that is a state worth naming rather than leaving for the next person to
+-- discover: an opt-in whose documented use aborts the chain is not a feature
+-- with a switch, it is dead code with an invitation.
+-- `scripts/dbharness/run.sh` pins this exact failure so it cannot drift
+-- silently, and fails if it ever starts succeeding.
+--
+-- `supabase/seed.sql` is the same script without the guard and has the same
+-- gap. Fixing it means threading an organization through every table here;
+-- both copies should be done together.
+--
 
 do $$
 declare
@@ -47,7 +68,6 @@ begin
         season_year,
         season_start,
         season_end,
-        timezone,
         roster_formula,
         daylight_adjustments,
         exports_config
@@ -56,9 +76,6 @@ begin
         2024,
         date '2024-08-05',
         date '2024-10-26',
-        -- The season's clock. A seeded season without one has no clock to place
-        -- a slot on and the game scheduler refuses (GAP-30).
-        'America/Los_Angeles',
         jsonb_build_object(
             'u8', jsonb_build_object('min', 10, 'max', 12),
             'u10', jsonb_build_object('min', 12, 'max', 14)
@@ -71,7 +88,6 @@ begin
     on conflict (season_label, season_year) do update set
         season_start = excluded.season_start,
         season_end = excluded.season_end,
-        timezone = excluded.timezone,
         roster_formula = excluded.roster_formula,
         daylight_adjustments = excluded.daylight_adjustments,
         exports_config = excluded.exports_config

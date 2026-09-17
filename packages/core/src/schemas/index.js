@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { isNaiveDateTime } from '../timing/seasonClock.js';
+import { isZonelessTimestamp } from '../timing/seasonClock.js';
 
 /**
  * An absolute instant.
@@ -25,11 +25,17 @@ import { isNaiveDateTime } from '../timing/seasonClock.js';
  * Accepted: a `Date`, an epoch number, or a string carrying `Z` or a `+HH:MM` /
  * `-HH:MM` offset. Produces a `Date`, so the `end > start` refinements keep
  * comparing instants rather than strings.
+ *
+ * A bare `'2026-11-07'` is refused for the same reason and was not, until
+ * `isZonelessTimestamp` replaced `isNaiveDateTime` here: `new Date()` reads a
+ * date-only string as UTC midnight, so the sentence above was a description of
+ * the intent rather than of the check. See `isZonelessTimestamp` for why
+ * `anchorToSeasonClock` still leaves that form alone.
  */
 const InstantSchema = z
   .union([z.date(), z.number(), z.string()])
   .superRefine((value, ctx) => {
-    if (isNaiveDateTime(value)) {
+    if (isZonelessTimestamp(value)) {
       ctx.addIssue({
         code: 'custom',
         message:

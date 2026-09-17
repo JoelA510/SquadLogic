@@ -8,6 +8,17 @@
 -- assignments.  It is idempotent: running it multiple times refreshes the
 -- sample rows without creating duplicates.  Existing production data should
 -- be backed up before executing this file.
+--
+-- ## Known gap: this script predates multi-tenancy
+--
+-- None of the INSERTs below names an `organization_id`, and
+-- `20260310000002_unified_rls_schema` makes `divisions.organization_id` NOT
+-- NULL, so running this against a current schema fails. Verified by executing
+-- the migration-embedded copy (`supabase/migrations/20251208000001_seed_data.sql`)
+-- with its documented opt-in turned on; `scripts/dbharness/run.sh` pins that
+-- failure. Both copies need an organization threading through them, and
+-- should be fixed together.
+--
 
 set search_path = public;
 

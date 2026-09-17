@@ -3,9 +3,12 @@ import {
   SeasonClockError,
   anchorToSeasonClock,
   isNaiveDateTime,
+  isZonelessTimestamp,
   requireZonedInstant,
   resolveZonedInstant,
 } from '../packages/core/src/timing/seasonClock.js';
+import { AssignmentSchema, SlotSchema } from '../packages/core/src/schemas/index.js';
+import { normalizeTimestamp } from '../packages/core/src/utils/normalization.js';
 import {
   TIMING_REASON,
   TIMING_REASON_SEVERITY,
@@ -550,5 +553,89 @@ describe('seasonClock: the codes are registered, not invented', () => {
     // Without this, "has a registered severity" would pass for a registry that
     // hands out `info` for anything at all.
     expect(() => timingSeverityOf('WALL_TIME_INVENTED')).toThrow(/no registered severity/);
+  });
+});
+
+/**
+ * A bare `YYYY-MM-DD` is zone-less too.
+ *
+ * `seasonClock.js`'s header claimed `SlotSchema`, `AssignmentSchema` and
+ * `normalizeTimestamp()` "all refuse [a zone-less value] outright", and
+ * `isNaiveDateTime` requires a clock -- so `'2026-11-07'` walked through all
+ * three and `new Date()` gave it UTC midnight. Not the host-dependent spread
+ * GAP-30 was about (date-only parsing is spec'd as UTC, so it is at least the
+ * same everywhere), but the same class of answer: an instant nobody chose,
+ * five in the evening the day before for a Pacific season.
+ *
+ * `anchorToSeasonClock` must still leave it alone, and that split is why there
+ * are two predicates rather than a wider one.
+ */
+describe('seasonClock: a date with no clock is refused at the schemas, not composed', () => {
+  it.each([
+    ['2026-11-07', true],
+    ['2026-11-07T16:44:00', true],
+    ['2026-11-07 16:44:00', true],
+    ['2026-11-07T16:44:00Z', false],
+    ['2026-11-07T16:44:00-05:00', false],
+    ['not a date', false],
+    ['', false],
+  ])('isZonelessTimestamp(%s)', (value, zoneless) => {
+    expect(isZonelessTimestamp(value)).toBe(zoneless);
+  });
+
+  it('is strictly wider than isNaiveDateTime, and only by the date-only form', () => {
+    // The meta-assertion: a predicate identical to its sibling would pass
+    // every row above and change nothing.
+    expect(isNaiveDateTime('2026-11-07')).toBe(false);
+    expect(isZonelessTimestamp('2026-11-07')).toBe(true);
+    expect(isZonelessTimestamp(new Date())).toBe(false);
+    expect(isZonelessTimestamp(1_762_544_640_000)).toBe(false);
+  });
+
+  it('anchorToSeasonClock still leaves a date-only value alone', () => {
+    // Deliberate and stated in its own contract: there is no wall reading to
+    // compose, and splitting it would hand `resolveZonedInstant` an empty
+    // time. The refusal belongs at the schemas, which is where an instant is
+    // actually required.
+    expect(anchorToSeasonClock('2026-11-07', 'America/New_York').iso).toBe('2026-11-07');
+    expect(anchorToSeasonClock('2026-11-07', 'America/New_York').findings).toEqual([]);
+  });
+
+  it('SlotSchema refuses it rather than yielding UTC midnight', () => {
+    const slot = { id: 'slot-1', capacity: 1, start: '2026-11-07', end: '2026-11-08' };
+    expect(() => SlotSchema.parse(slot)).toThrow(/must carry a timezone/);
+    // The control: the same slot on the season clock parses, so the refusal is
+    // about the zone and not about the shape.
+    expect(() =>
+      SlotSchema.parse({
+        ...slot,
+        start: '2026-11-07T16:44:00-05:00',
+        end: '2026-11-07T18:14:00-05:00',
+      })
+    ).not.toThrow();
+  });
+
+  it('AssignmentSchema refuses it too', () => {
+    const assignment = {
+      weekIndex: 1,
+      division: 'U10',
+      slotId: 'slot-1',
+      homeTeamId: 'team-1',
+      awayTeamId: 'team-2',
+      start: '2026-11-07',
+      end: '2026-11-08',
+    };
+    expect(() => AssignmentSchema.parse(assignment)).toThrow(/must carry a timezone/);
+  });
+
+  it('normalizeTimestamp refuses it at the boundary before the timestamptz', () => {
+    expect(() => normalizeTimestamp('2026-11-07', 'start', 0)).toThrow(/must carry a timezone/);
+    // ...and still accepts everything it always did.
+    expect(normalizeTimestamp('2026-11-07T16:44:00-05:00', 'start', 0)).toBe(
+      '2026-11-07T21:44:00.000Z'
+    );
+    expect(normalizeTimestamp(new Date('2026-11-07T21:44:00Z'), 'start', 0)).toBe(
+      '2026-11-07T21:44:00.000Z'
+    );
   });
 });

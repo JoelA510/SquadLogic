@@ -12,6 +12,11 @@ import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js
 
 const mockId = (prefix = '') =>
   prefix + (crypto.randomUUID?.() || crypto.getRandomValues(new Uint32Array(4)).join('-'));
+/**
+ * What Postgres accepts for a `uuid` cast. Used where a mocked RPC mirrors a
+ * real one that casts and raises `22023` rather than dropping the value.
+ */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SCHEMA_ENTITIES = new Set(['player', 'coach', 'team']);
 const SCHEMA_VALUE_TYPES = new Set(['string', 'number', 'boolean', 'date']);
 const stableSchemaKey = (schema) =>
@@ -2174,10 +2179,19 @@ export const mockSupabase = {
 
     if (name === 'admin_set_season_timezone') {
       // Mirrors `admin_set_season_timezone` in
-      // `20260913000000_season_timezone_writer.sql`. The Settings control used
-      // to write only localStorage, so `season_settings.timezone` had no writer
-      // anywhere and every season read as having no clock (GAP-30).
-      const { p_organization_id, p_season_settings_id, p_timezone } = params || {};
+      // `20260913000000_season_timezone_writer.sql`, as amended by
+      // `20260917000000_season_timezone_actor_context.sql`. The Settings
+      // control used to write only localStorage, so `season_settings.timezone`
+      // had no writer anywhere and every season read as having no clock
+      // (GAP-30).
+      //
+      // **Including the refusals, not just the happy path** (LESSONS_LEARNED
+      // #13). The first version of this mock accepted a non-object
+      // `p_actor_context` and wrote any truthy `target_user_id` verbatim,
+      // while the RPC raises 22023 for both -- so a test asserting the refusal
+      // would have passed here and failed against Postgres, which is the one
+      // thing a mock must never do.
+      const { p_organization_id, p_season_settings_id, p_timezone, p_actor_context } = params || {};
       if (!p_organization_id) {
         return { data: null, error: { message: 'p_organization_id is required' } };
       }
@@ -2219,6 +2233,38 @@ export const mockSupabase = {
           error: { message: `Season settings do not belong to organization ${p_organization_id}` },
         };
       }
+      // Mirrors 20260917000000: ONE audit row, carrying both the value half
+      // and -- when the caller is viewing as another profile -- the
+      // impersonation half. `impersonated_by` and `admin_email` are derived
+      // here as they are in the RPC, never taken from the caller.
+      const context = p_actor_context ?? {};
+      if (typeof context !== 'object' || Array.isArray(context)) {
+        return { data: null, error: { message: 'p_actor_context must be a JSON object' } };
+      }
+      const target = String(context.target_user_id ?? '').trim();
+      // The RPC casts to uuid and raises 22023 on failure rather than dropping
+      // the key: an impersonated change recorded without its target reads as a
+      // direct one.
+      if (target && !UUID_PATTERN.test(target)) {
+        return {
+          data: null,
+          error: { message: `p_actor_context.target_user_id is not a uuid: ${target}` },
+        };
+      }
+      const actorEmail = (db.profiles || []).find(
+        (row) => String(row.id) === String(currentUserId)
+      )?.email;
+      // `jsonb_strip_nulls` in the RPC OMITS a key it has no value for. An
+      // `undefined` property is not the same thing -- it survives in memory
+      // and vanishes across the sessionStorage round-trip, so `'admin_email'
+      // in metadata` would depend on when you asked.
+      const actor = target
+        ? {
+            target_user_id: target,
+            impersonated_by: currentUserId,
+            ...(actorEmail ? { admin_email: actorEmail } : {}),
+          }
+        : {};
       const previous = season.timezone ?? null;
       season.timezone = zone;
       db.audit_log = db.audit_log || [];
@@ -2227,7 +2273,7 @@ export const mockSupabase = {
         organization_id: p_organization_id,
         action: 'settings.timezone_updated',
         user_id: currentUserId,
-        metadata: { timezone: zone, previous_timezone: previous },
+        metadata: { timezone: zone, previous_timezone: previous, ...actor },
         created_at: new Date().toISOString(),
       });
       saveDB(db);

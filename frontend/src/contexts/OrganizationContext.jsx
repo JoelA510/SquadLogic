@@ -13,6 +13,13 @@ import { FeatureFlagSchema } from '../constants/featureFlags.js';
  * @property {any[]} availableSeasons - season_settings rows for the current org
  * @property {any} currentSeasonSetting - the active season_settings row
  * @property {boolean} loading
+ * @property {boolean} seasonSettingsLoading - true while the season_settings
+ *   read for the CURRENT organization is in flight. Distinct from `loading`,
+ *   which gates `ProtectedRoute` and therefore unmounts the page: an
+ *   organization switch must not do that, but it does leave
+ *   `currentSeasonSetting` stale or null for as long as the fetch takes, and a
+ *   consumer that reads the season's clock has to be able to tell "not yet"
+ *   from "there is none".
  * @property {Error | null} fetchError - surfaces org-fetch failures to AppContent
  * @property {() => void} refetchOrgs - re-runs the initial organization_members fetch
  * @property {function} switchOrganization
@@ -39,6 +46,16 @@ export const OrganizationProvider = ({ children }) => {
   const [availableSeasons, setAvailableSeasons] = useState([]);
   const [currentSeasonSetting, setCurrentSeasonSetting] = useState(null);
   const [loading, setLoading] = useState(true);
+  // **A second, narrower flag, and not a widening of `loading`.** `loading`
+  // gates `ProtectedRoute`, so raising it around an organization switch would
+  // unmount whatever page the operator is on. `switchOrganization()` swaps
+  // `currentOrganization` synchronously and then awaits the season read, so
+  // between those two the held season row belongs to the organization just
+  // left -- or, if that one had no season, is null while the new one's is on
+  // its way. A consumer reading `currentSeasonSetting?.timezone` cannot tell
+  // either state from "this season has no clock", and GameSchedulingPage was
+  // telling the operator to set a timezone that was already set.
+  const [seasonSettingsLoading, setSeasonSettingsLoading] = useState(false);
   // Surfaced so AppContent can render a diagnostic instead of hanging on a
   // stuck LoadingScreen when the initial org fetch fails (e.g. stale RLS
   // policy returning 500 before the latest migration is applied).
@@ -54,6 +71,7 @@ export const OrganizationProvider = ({ children }) => {
   // prior user / prior refetch / unmount) cannot clobber fresh state.
   /** @type {(orgId: string, isCancelled?: () => boolean) => Promise<void>} */
   const fetchSeasonsForOrg = useCallback(async (orgId, isCancelled = () => false) => {
+    setSeasonSettingsLoading(true);
     try {
       const { data, error } = await supabase
         .from('season_settings')
@@ -86,6 +104,12 @@ export const OrganizationProvider = ({ children }) => {
       logger.error('Error fetching season_settings:', err);
       setAvailableSeasons([]);
       setCurrentSeasonSetting(null);
+    } finally {
+      // Lowered even when cancelled. A cancelled fetch is one a newer fetch
+      // has already superseded, and that newer one raised the flag again on
+      // its own way in; leaving it raised here would strand every consumer on
+      // "still loading" for the rest of the session.
+      setSeasonSettingsLoading(false);
     }
   }, []);
 
@@ -243,6 +267,7 @@ export const OrganizationProvider = ({ children }) => {
       availableSeasons,
       currentSeasonSetting,
       loading,
+      seasonSettingsLoading,
       fetchError,
       refetchOrgs,
       switchOrganization,
@@ -258,6 +283,7 @@ export const OrganizationProvider = ({ children }) => {
       availableSeasons,
       currentSeasonSetting,
       loading,
+      seasonSettingsLoading,
       fetchError,
       refetchOrgs,
       switchOrganization,

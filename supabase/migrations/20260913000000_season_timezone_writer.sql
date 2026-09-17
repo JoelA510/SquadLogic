@@ -271,6 +271,14 @@ $$;
 COMMENT ON FUNCTION public.admin_set_season_timezone(uuid, uuid, text) IS
     'Admin-only org-scoped writer for season_settings.timezone, validated against pg_timezone_names and audited as settings.timezone_updated (GAP-30).';
 
+-- **Explicit, not inherited.** `20260614000000` sets ALTER DEFAULT PRIVILEGES
+-- `FOR ROLE postgres`, so a function created by any other role -- which is what
+-- the local harness does, and what a differently-configured deployment may do --
+-- still lands with PUBLIC EXECUTE. Caught by this migration's own smoke §4
+-- failing, which is the difference between a stated default and an enforced one
+-- (LESSONS_LEARNED #5). `20260910000000` revokes explicitly for the same reason.
+REVOKE ALL ON FUNCTION public.admin_set_season_timezone(uuid, uuid, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.admin_set_season_timezone(uuid, uuid, text) FROM anon;
 GRANT EXECUTE ON FUNCTION public.admin_set_season_timezone(uuid, uuid, text) TO authenticated;
 
 COMMIT;

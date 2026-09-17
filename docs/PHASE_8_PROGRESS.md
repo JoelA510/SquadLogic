@@ -2538,7 +2538,7 @@ revert's exposure loop — `own_effective_to IS NULL` becomes `IS NOT NULL`. Wha
 the mutated revert printed:
 
 ```text
-NOTICE:  venue Gate Closed Children Park (d333…) holds 1 undated node(s) and loses its containment gate
+NOTICE:  venue Gate Closed Children Park (d333…) loses its containment gate: at least 1 node(s) have no end date of their own
 NOTICE:  live venues examined: 2, of which 1 lose a gate
 ```
 
@@ -2616,9 +2616,27 @@ makeable-to-fail.
   correctly: the smoke reads `prosrc`, the function BODY, while a COMMENT lives
   in `pg_description`. The plant never simulated the defect it named.
 
-**A mis-aimed plant reads exactly like a hole in the check it fails to trip.**
-That is the trap in both, and it is the same family as the uninformative failure
-above: the verdict looks like evidence about the target and is not.
+#### The rule: a positive control that does not perturb the thing under test is indistinguishable from a hole in the check it fails to trip
+
+**Three instances in this phase, across two agents and a supervisor**, which is
+why it is a rule and not an anecdote:
+
+1. Gap B part 1's anchor pre-flight: the supervisor's control mutated
+   `20260906000000` while the plant targets `20260907000000`, so "121 of 121"
+   was the correct answer to a file no plant anchors text in — and it looked
+   exactly like a hollow guard. A false HIGH was very nearly filed against a
+   guard that works.
+2. `R8 revert accepts having examined zero venues`: the harness always seeds, so
+   the guard could never fire and removing it changed nothing observable.
+3. `M8 the sub-surface arm grows a containment gate`: a `COMMENT ON FUNCTION`
+   against a smoke that reads `prosrc`.
+
+In all three the control never reached the thing it named, and in all three the
+result — NOT CAUGHT — is **the same output a genuinely missing check produces**.
+It is the same family as the uninformative failure above: the verdict looks like
+evidence about the target and is not. Before filing NOT CAUGHT as a finding,
+check the innocent explanation first: **did the mutation actually reach the code
+the check reads?**
 
 ### What the containment gate is, and why the empty case needed no new rule
 
@@ -2743,8 +2761,28 @@ in this PR has been:
   `prove.sh` would have recorded MISATTRIBUTED. That is the mirror of the two
   mis-aimed plants above and just as misleading.
 
-Three more were the **declared-is-not-enforced** shape in this PR's own new
-code: `ESTATE_DEPTHS[*].noun` was never read (deleted), and `contains` was never
+**The ninth was ruled on separately, and the ruling was neither option put to
+the supervisor.** The exposure NOTICE counted children with no end date of their
+own while the gate fires on every child not already retired _by the date
+applied_, so the per-venue figure read as a total while being a floor. Widening
+the query would have matched the gate — and collapsed "exposed" into "examined"
+against the harness seed, blunting the unequal cardinalities that caught the
+headline R8 plant.
+
+**Fix the claim, not the query.** `own_effective_to IS NULL` is exactly right as
+"nodes exposed whatever date is chosen", and the venue-level claim was already
+exact: a venue holding one such node does lose its gate, so `examined` and
+`of which` are totals and needed no change. Only the magnitude overclaimed, and
+only because the line read as a total. It now says _"loses its containment gate:
+at least N node(s) have no end date of their own"_, with a line after the loop
+naming the direction the bound is loose in — **a revert has no retirement date to
+measure against, so the honest figure is a floor with its direction stated**. No
+behavioural change, no query change, no seed reshape, and a new harness check
+requires the floor clause to be printed, because a floor printed without its
+direction reads as a total again.
+
+Three more findings were the **declared-is-not-enforced** shape in this PR's own
+new code: `ESTATE_DEPTHS[*].noun` was never read (deleted), and `contains` was never
 consulted by either the hook or the dialog although both carried comments
 asserting the invariant it describes. Both now enforce it — the hook throws if a
 depth declared to contain nothing returns a `contained` key, and the dialog
@@ -2752,17 +2790,6 @@ gates the prop spread on it.
 
 ### Still open after gap B part 2
 
-- **The revert's exposure NOTICE understates what it measures, and is not
-  fixed.** It counts children with `own_effective_to IS NULL`, but the gate
-  being removed fires on `contained_count`, which counts every child not already
-  retired _by the date being applied_. A venue whose only pitch ends at +100
-  loses its gate for any retirement dated before then, yet is reported as not
-  exposed. Counting every row `estate_contained_nodes(..., NULL)` returns would
-  match the gate — but it makes "exposed" equal "examined" against the current
-  harness seed, and the unequal cardinalities are what caught the headline R8
-  plant. Fixing it properly means re-shaping the seed (a childless live venue,
-  and a fourth node on the exposed one) and re-aiming one plant. Recorded rather
-  than patched in a way that would blunt the check that works.
 - **The claim "the sub-surface arm has no containment gate" has no prover.**
   Making it fail needs `admin_retire_field_subunit`'s body rewritten, which this
   migration does not touch and a plant cannot cheaply supply. Recorded as

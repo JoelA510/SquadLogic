@@ -2518,7 +2518,7 @@ mutation harness is not work in progress".
 
 ---
 
-## 8.4 gap B (part 2 of 2) — the UI at every depth, and the gate that made it honest — **PR open, not merged**
+## 8.4 gap B (part 2 of 2) — the UI at every depth, and the gate that made it honest — **merged**
 
 The half part 1 carved out: the screen, the hooks, and — found by building the
 screen — a gate the database was missing.
@@ -2800,3 +2800,185 @@ gates the prop spread on it.
 - **The full 121-plant SQL sweep has not been run** (~5.4 hours). Unchanged from
   part 1.
 - Everything still open after gap A, unchanged.
+
+## The gate's own check was hollow — **merged (#394)**
+
+Merged as `d18eba5`, squashed. Docs-only, purely additive: §6 appended to
+`docs/BUILD_PLAN_STATUS.md`, no line removed.
+
+At the games-engine gate the supervisor reported "zero frontend imports of the
+engine" as measured fact. The grep behind it was:
+
+```
+grep -rn "from '@squadlogic/core/games\|from '@/games\|core/src/games" frontend/src
+```
+
+`packages/core/src/games` does not exist in this repository. The pattern could
+not match anything, so the zero proved nothing. It is this phase's own recurring
+shape — **a check that cannot fail** — applied by the supervisor to the
+supervisor's own gate, in the one place where the whole phase's sequencing turned
+on the answer.
+
+Measured with a pattern first shown to match: `frontend/src` carries **32**
+imports of `@squadlogic/core`. The solver core (`publication/`, `reserve/`,
+`scenario/`, `resolve/`, `freeze/`) is genuinely still at zero, so the gate's
+subject is unaffected and the wiring decision stands unchanged. But the
+engine/app boundary is no longer hermetic, and **Phase 8's own work breached
+it**: `people/coachList.js` (8.2, #368), `facility/index.js` (8.4 gap B, #391 —
+landed the same day the gate figures were "re-verified"), and seven
+`fieldAdmin/` imports across 8.4.
+
+Two stale figures corrected in the same section: the suite is **3,033 tests
+across 193 files** (not 2,165), and the engine measures **172 files / 64,118
+lines** (not 161 / 58,199).
+
+**The rule, promoted:** _a grep that returns zero proves nothing until the
+pattern is shown to match something._ This belongs beside the four hollow-check
+shapes already collected; it is the first shape reached by getting the _subject_
+of a check wrong rather than its logic.
+
+A second, smaller note from the same merge, worth recording because it will
+recur on every docs PR: **`ci.yml` has a deliberate `docs_only` fast path.** A
+change touching only `docs/**` and `*.md` runs `git diff --check` and skips the
+matrix, finishing in ~15 seconds. That green is legitimate and designed — but it
+means "the docs-only checks passed", not "the suite ran", and a 15-second green
+on a code PR would be a bug.
+
+## GAP-29 / GAP-30 scoping — **complete; GAP-30 is live, not latent**
+
+Scoping only. No production code was written, no PR opened. Two claims from the
+scoping agent were re-verified by the supervisor by execution rather than
+accepted; one of them (below) did not hold.
+
+### GAP-30 is not latent in the games engine. It ships on the MVP path and it corrupts persisted data.
+
+`game_assignments.start` is a `timestamptz`
+(`supabase/migrations/20260503030000_repair_game_persistence_rpc.sql:14`). The
+instant written into it is **a function of the admin's browser timezone**:
+
+| where                       | what                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------ |
+| `game_slots`                | `slot_date date` + `start_time time` — naive wall time, no zone (`20251208000000:171-173`) |
+| `GameSchedulingPage.jsx:82` | `buildDateTime` returns `` `${date}T${time}` `` — still naive                              |
+| `gameScheduling.js:283`     | `new Date(naive)` — read as **browser-local**                                              |
+| `gameSupabase.js:46`        | `normalizeTimestamp` → `.toISOString()` → persisted                                        |
+
+Executed against the real `buildGameAssignmentRows()`, `start: '2026-11-07T16:44:00'`:
+
+```
+TZ=UTC                 -> 2026-11-07T16:44:00.000Z
+TZ=America/Los_Angeles -> 2026-11-08T00:44:00.000Z
+TZ=America/New_York    -> 2026-11-07T21:44:00.000Z
+```
+
+An eight-hour spread for one slot, decided by whose laptop pressed the button.
+
+`normalizeGameSlot` already receives the season timezone as a parameter. It
+spends it on the display label (`:114`) and not on the value.
+
+**The display is wrong too, and differently wrong.** `formatDateTime`
+(`frontend/src/utils/formatters.js:77`) parses the naive string browser-local and
+_then_ renders it with `timeZone: seasonTz` — a double shift. Executed, same
+naive string against an `America/New_York` season:
+
+```
+browser America/New_York     -> label "4:44 PM"    stored 2026-11-07T21:44:00.000Z
+browser America/Los_Angeles  -> label "7:44 PM"    stored 2026-11-08T00:44:00.000Z
+browser Europe/London        -> label "11:44 AM"   stored 2026-11-07T16:44:00.000Z
+```
+
+Everything is correct **exactly when the admin's browser zone equals the season
+zone** — which is why this has never been reported, and which is the regression
+guard the fix has to honour above all else.
+
+**GAP-30's nominal subject is the least of it.** The ticket names the
+`z.coerce.date()` lines at `packages/core/src/schemas/index.js:33-34` and
+`:52-53`. Scoping found the core call sites discard the parse result and
+reconstruct the identical `Date` by hand on the next line, so editing those four
+lines changes no behaviour. The real defect is three layers upstream. The
+coercion still has to be honoured or deleted — _never leave a field parsed and
+unread_ — but it is a footnote, not the fix.
+
+### The suite cannot express this defect
+
+The full suite passes under `TZ=America/Los_Angeles` — 3,033 tests, in the very
+zone where the corruption is provable. Not a gap in coverage: every timestamp
+fixture in the suite is either already a `Date` or already carries a `Z`, so no
+test can reach the naive-string path. **The suite is structurally incapable of
+failing on this.** The first requirement on the fix is a test watched failing on
+`main` under a non-UTC zone.
+
+### Claim 3 of the scoping report did not hold
+
+The agent reported "zero frontend imports of the engine", carrying forward the
+supervisor's own figure. It was wrong for the reason recorded in the section
+above. Corrected before any work was built on it. Recorded here because the
+shape is worth naming: **a figure the supervisor supplies as a CLAIM TO VERIFY
+gets verified; a figure the supervisor supplies as background gets repeated.**
+This one travelled as background.
+
+### LIVE-6 — `normalizeTimestamp` called with an index in the `fallbackIso` slot
+
+Found while verifying the above, not by reading the file it is in.
+
+`packages/core/src/utils/normalization.js:33` is
+`normalizeTimestamp(value, label, fallbackIso)`. Both call sites in the repo —
+`gameSupabase.js:46` and `:47` — pass `index` (a number) as `fallbackIso`.
+Executed:
+
+```
+start null, end set => start: 0                            end: "2026-11-07T18:14:00.000Z"
+start set, end null => start: "2026-11-07T16:44:00.000Z"   end: 0
+both null           => threw: assignments[0] end must be after start
+```
+
+A missing `start` writes the integer `0` into a `timestamptz`, and the
+`end <= start` guard is defeated because `"2026-…" <= 0` coerces to `NaN <= 0`,
+which is false. The "both null" case throws only **by accident** — both
+fallbacks are the same index, so the guard happens to catch it. Two defects from
+one signature mismatch: the silent integer, and an error message that never
+carries the index it was written to carry.
+
+### LIVE-5 — every game in every family's calendar carries a NaN DTSTART
+
+`supabase/functions/calendar-feed/index.ts:90` selects
+`game_slots ( start_time, end_time, … )` — the bare `time` columns — and `:167`
+does `new Date(slot.start_time)`. `new Date('16:00:00')` is **Invalid Date**
+(verified by execution), so `formatIcsDate` emits `NaN` into `DTSTART` and
+`DTEND` for every game, in a feed families subscribe to.
+
+The practice arm at `:147` is a different defect with the same root: it builds
+``new Date(`${isoDateStr}T${slot.start_time}Z`)`` — appending `Z` to a naive
+local time, asserting the club practises in UTC. Its own comment at `:141-146`
+admits this and defers it.
+
+Not yet filed as a PR. It waits on the composer from GAP-30 PR A, and Edge
+Functions are Deno/TS and cannot import `packages/core`, so it needs the mirror
+treatment `supabase/functions/_shared/engines/` already uses.
+
+### The ruling made without putting it to the operator
+
+**The season has one timezone, not the venue.** `season_settings.timezone`
+exists (`20251214000002_timezone_settings.sql:6`, IANA text), is populated, and
+is already read at `GameSchedulingPage.jsx:234` and by `calendar-feed`. A
+per-venue timezone has no schema, no UI, and no import support anywhere; a
+club's venues sit in one metro. A multi-timezone league is a later schema change
+that this fix does not foreclose — the composer takes the zone as a parameter, so
+a per-venue override becomes a fallback chain and nothing else.
+
+The operator was told the ruling and the cost of reversing it (roughly double
+the work, and it pulls SQL in) rather than being blocked on it.
+
+**Second ruling: where a season has no timezone, refuse with a named reason
+code.** The nullable column may be null on existing rows. The current behaviour
+silently falls back to the browser's zone — which _is_ the bug. CLAUDE.md §3:
+never silently drop an unplaceable fixture; surface it with a reason.
+
+### Status
+
+GAP-30 PR A is dispatched: the zone-aware composer, `buildDateTime` /
+`normalizeGameSlot`, the display double-shift, LIVE-6, and a verdict on the
+`z.coerce.date()` lines — with DST spring-forward and fall-back named by date,
+and a positive control that actually perturbs the production path. LIVE-5 and
+GAP-29 (the publication snapshot is still in-memory only) remain open. GATE 2 —
+the engine wiring question — stays closed until GAP-29 and GAP-30 both land.

@@ -4,8 +4,11 @@
  * Every public export of `timing/` goes through this file, exactly as
  * `packages/core/src/facility/index.js` does for the facility graph.
  *
- * The package is pure domain logic: no React, no `node:*`, no `Date`
- * construction, and **no import from `fixtures/`**. The arrow points
+ * The package is pure domain logic: no React, no `node:*`, and **no import from
+ * `fixtures/`**. `Date` construction has exactly one home — `seasonClock.js`,
+ * the boundary where a season-local wall time becomes an absolute instant. That
+ * carve-out is the module's whole purpose and is documented in its header; no
+ * other file here may construct a `Date`. The arrow points
  * fixtures -> timing, never back; the season-2026 adapter takes the
  * already-parsed format rows as an argument, so this module never learns where
  * the corpus lives or how it is read. It *does* import `facility/`, and that is
@@ -51,6 +54,17 @@ export {
   unknownFormatTiming,
   warmupMinutesFor,
 } from './formatTiming.js';
+
+export {
+  SeasonClockError,
+  anchorToSeasonClock,
+  carriesZoneOffset,
+  isNaiveDateTime,
+  requireZonedInstant,
+  resolveZonedInstant,
+  splitNaiveDateTime,
+  wallMinutesOf,
+} from './seasonClock.js';
 
 export { computeGameWindows } from './windows.js';
 

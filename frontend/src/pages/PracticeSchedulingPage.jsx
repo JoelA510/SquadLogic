@@ -11,6 +11,8 @@ import GameConflictBanner from '../components/scheduling/GameConflictBanner.jsx'
 import { findBlackoutConflicts } from '@squadlogic/core/fieldAdmin/index.js';
 import { useFieldClosures } from '../hooks/useFieldClosures.js';
 import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
+import { requireZonedInstant } from '@squadlogic/core/timing/index.js';
+import { describeUnplaceableSlots, isSeasonClockLoading } from '../utils/seasonClockSlots.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
@@ -59,8 +61,35 @@ function normalizeTime(value) {
   return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:${seconds.padStart(2, '0')}`;
 }
 
-function buildDateTime(date, time) {
-  return `${date}T${time}`;
+/**
+ * Compose a `practice_slots` wall reading onto the season's clock.
+ *
+ * ## LIVE-7
+ *
+ * This returned `` `${date}T${time}` `` -- a naive wall reading with no zone --
+ * and those strings were shipped to the `auto-scheduler` Edge Function, which
+ * did `new Date(s.start)` on them. That is the **host's** zone, and the
+ * Supabase edge runtime is UTC, so every practice instant was a function of
+ * where the code ran rather than of the season. The request even carried
+ * `timezone`; the function contained zero occurrences of the string.
+ *
+ * Identical to `buildDateTime` in `GameSchedulingPage.jsx`, deliberately: the
+ * two pages compose the same kind of value and the twin-arm shape -- a fix
+ * landing on one and not its sibling -- is what this codebase keeps paying for.
+ * Both call `requireZonedInstant`, which throws a `SeasonClockError` carrying a
+ * reason code rather than inventing an instant.
+ *
+ * @param {string|null|undefined} date - `YYYY-MM-DD`
+ * @param {string|null|undefined} time - `HH:MM[:SS]`
+ * @param {string|null|undefined} timezone - the season's IANA zone
+ * @returns {string|null} an ISO instant carrying the season's offset, or `null`
+ *   when there is no wall reading to compose.
+ * @throws {import('@squadlogic/core/timing/index.js').SeasonClockError} when a
+ *   wall reading exists but cannot be placed.
+ */
+function buildDateTime(date, time, timezone) {
+  if (!date || !time) return null;
+  return requireZonedInstant({ date, time, timeZone: timezone, label: 'practice slot time' });
 }
 
 function parseDateOnly(date) {
@@ -89,7 +118,14 @@ function getSeasonDateRange(seasonSetting) {
   };
 }
 
-function normalizePracticeSlot(row, seasonSetting) {
+/**
+ * @param {Record<string, any>} row
+ * @param {Record<string, any>|null|undefined} seasonSetting
+ * @param {string|null|undefined} timezone - the season's IANA zone. A parameter
+ *   rather than a lookup off `seasonSetting`, so the one caller decides where
+ *   the clock comes from and a per-venue override would be a call-site change.
+ */
+function normalizePracticeSlot(row, seasonSetting, timezone) {
   const seasonRange = getSeasonDateRange(seasonSetting);
   const effectiveFrom = row.valid_from ?? row.validFrom ?? seasonRange.start;
   const effectiveUntil = row.valid_until ?? row.validUntil ?? seasonRange.end;
@@ -106,8 +142,8 @@ function normalizePracticeSlot(row, seasonSetting) {
   return {
     id: row.id,
     day,
-    start: buildDateTime(slotDate, startTime),
-    end: buildDateTime(slotDate, endTime),
+    start: buildDateTime(slotDate, startTime, timezone),
+    end: buildDateTime(slotDate, endTime, timezone),
     startTime,
     endTime,
     capacity: Math.max(1, Number(row.capacity ?? row.slotCapacity ?? 1)),
@@ -216,7 +252,30 @@ function toPersistenceAssignment(assignment) {
 
 export default function PracticeSchedulingPage() {
   const { practice, team, loading: dashboardLoading } = useDashboardData();
-  const { currentOrganization, currentSeasonSetting, permissions = [] } = useOrganization();
+  const {
+    currentOrganization,
+    currentSeasonSetting,
+    permissions = [],
+    loading: organizationLoading,
+    seasonSettingsLoading,
+  } = useOrganization();
+
+  // The season's clock. Declared here rather than beside the other scheduler
+  // inputs below because `normalizePracticeSlot` needs it, and that runs before
+  // them. The season has one timezone, not the venue -- the ruling GAP-30 made.
+  const timezone = currentSeasonSetting?.timezone ?? undefined;
+  // **"No clock yet" and "no clock at all" are different facts.** The practice
+  // slot read below is keyed only on `currentOrganization?.id`, so the season
+  // row and the slots resolve in whichever order the network gives them; on the
+  // losing order every slot is unplaceable with `SEASON_TIMEZONE_MISSING` and
+  // the operator is told to set a timezone the season already has.
+  const seasonClockLoading = isSeasonClockLoading({
+    organizationLoading,
+    seasonSettingsLoading,
+    currentOrganization,
+    currentSeasonSetting,
+  });
+
   const [assignments, setAssignments] = useState(practice?.assignments ?? []);
   const [reviewAssignments, setReviewAssignments] = useState(null);
   const [practiceSlotRows, setPracticeSlotRows] = useState([]);
@@ -326,24 +385,55 @@ export default function PracticeSchedulingPage() {
     return map;
   }, [assignments, schedulerTeams]);
 
-  const { schedulerSlots, slotById, slotShapeError } = useMemo(() => {
-    try {
-      const normalized = practiceSlotRows.map((row) =>
-        normalizePracticeSlot(row, currentSeasonSetting)
-      );
-      return {
-        schedulerSlots: normalized,
-        slotById: new Map(normalized.map((slot) => [slot.id, slot])),
-        slotShapeError: null,
-      };
-    } catch (err) {
-      return {
-        schedulerSlots: [],
-        slotById: new Map(),
-        slotShapeError: err.message,
-      };
+  /**
+   * **Per row, never per page.** This `map` used to sit inside one try/catch,
+   * so a single unreadable slot returned no slots at all -- CLAUDE.md's "never
+   * silently drop an unplaceable fixture" inverted into dropping every
+   * placeable one. Putting `buildDateTime` on the season clock makes that
+   * matter: a DST spring-forward slot now refuses, and refusing one slot must
+   * not cost the operator the other four hundred.
+   *
+   * `GameSchedulingPage.partitionGameSlots` reached this shape first; this is
+   * the same contract, not a second one. The season-wide case still blocks by
+   * arithmetic rather than by a special rule: a season with no timezone has no
+   * clock for *any* slot, so every row lands in `unplaceableSlots`,
+   * `schedulerSlots` is empty, and the existing `!schedulerSlots.length` guard
+   * disables the scheduler.
+   */
+  const { schedulerSlots, slotById, unplaceableSlots } = useMemo(() => {
+    const placeable = [];
+    const unplaceable = [];
+    for (const row of practiceSlotRows) {
+      try {
+        placeable.push(normalizePracticeSlot(row, currentSeasonSetting, timezone));
+      } catch (err) {
+        unplaceable.push({
+          id: row?.id ?? null,
+          date: null,
+          time: normalizeTime(row?.start_time ?? row?.startTime),
+          // `code` is the contract; `SLOT_SHAPE_INVALID` covers the pre-existing
+          // shape throws (missing id, time window or date range), which carry
+          // no reason code.
+          code: err?.code ?? 'SLOT_SHAPE_INVALID',
+          reason: err?.message ?? 'Practice slot could not be read.',
+        });
+      }
     }
-  }, [currentSeasonSetting, practiceSlotRows]);
+    return {
+      schedulerSlots: placeable,
+      slotById: new Map(placeable.map((slot) => [slot.id, slot])),
+      unplaceableSlots: unplaceable,
+    };
+  }, [currentSeasonSetting, practiceSlotRows, timezone]);
+
+  // Held back until the season row has landed: before then every entry says
+  // `SEASON_TIMEZONE_MISSING` about a season whose clock nobody has read yet,
+  // and printing that tells the operator to set a timezone the season may
+  // already have. `isSeasonClockLoading` states the three ways that happens.
+  const unplaceableSlotMessage = useMemo(
+    () => (seasonClockLoading ? null : describeUnplaceableSlots(unplaceableSlots)),
+    [seasonClockLoading, unplaceableSlots]
+  );
 
   useEffect(() => {
     if (autoScheduler.status !== 'completed' || !autoScheduler.result) return;
@@ -371,7 +461,6 @@ export default function PracticeSchedulingPage() {
   const isColdStart = !schedulerTeams.length;
   const schoolDayEnd =
     currentSeasonSetting?.school_day_end ?? currentSeasonSetting?.schoolDayEnd ?? undefined;
-  const timezone = currentSeasonSetting?.timezone ?? undefined;
 
   const lockedAssignments = useMemo(
     () =>
@@ -403,17 +492,24 @@ export default function PracticeSchedulingPage() {
     }));
   }, [localAssignments, schedulerSlots]);
 
+  // **Unplaceable slots no longer disable the scheduler by themselves.** They
+  // used to (`Boolean(slotShapeError)`), back when one unreadable row emptied
+  // the whole list; now a refusal is per row, so blocking on one would cost the
+  // operator the other four hundred. The season-wide case still blocks, and
+  // blocks by arithmetic rather than by a special rule: a season with no
+  // timezone has no clock for any slot, so `schedulerSlots` is empty and the
+  // `!schedulerSlots.length` arm fires. That is `GameSchedulingPage`'s
+  // contract, not a second one.
   const schedulerDisabled =
     dashboardLoading.practice ||
     practiceSlotsLoading ||
     isColdStart ||
     !schedulerSlots.length ||
-    Boolean(slotShapeError) ||
     !canManageSchedule;
 
   const schedulerReadinessMessage =
     practiceSlotsError ||
-    slotShapeError ||
+    unplaceableSlotMessage ||
     (!practiceSlotsLoading && !schedulerSlots.length && !isColdStart
       ? 'No practice slots are available for this organization.'
       : null);
@@ -427,13 +523,18 @@ export default function PracticeSchedulingPage() {
     setApplyError(null);
     setStatusMessage(null);
 
+    // `timezone` is deliberately NOT sent. It used to be, and
+    // `auto-scheduler/index.ts` contained zero occurrences of the string
+    // (LIVE-7). The function now reads `season_settings.timezone` itself, which
+    // makes the value authoritative as well as read; sending it too would be a
+    // second answer to the same question. What goes over the wire is
+    // `schedulerSlots`, whose `start`/`end` are already instants on that clock.
     await autoScheduler.trigger({
       teams: schedulerTeams,
       slots: schedulerSlots,
       lockedAssignments,
       scoringWeights: {},
       schoolDayEnd,
-      timezone,
       seasonSettingsId: currentSeasonSetting?.id,
       config: {
         timeBudgetMs: 8000,
@@ -450,7 +551,6 @@ export default function PracticeSchedulingPage() {
     schedulerSlots,
     schedulerTeams,
     schoolDayEnd,
-    timezone,
   ]);
 
   // Auto-run when arriving from the dashboard "Run Practice Scheduling" button.

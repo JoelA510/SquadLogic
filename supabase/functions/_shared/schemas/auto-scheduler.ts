@@ -4,7 +4,7 @@
  * `TeamSchema` in ./scoring.ts (Phase 8.1: `assistantCoachIds`, nullable).
  */
 import { z } from 'zod';
-import { TeamSchema } from './scoring.ts';
+import { TeamSchema, WallTimeOrInstantSchema } from './scoring.ts';
 
 // ---------------------------------------------------------------------------
 // Input schema
@@ -13,9 +13,18 @@ import { TeamSchema } from './scoring.ts';
 const SlotSchema = z
   .object({
     id: z.string(),
+    /**
+     * The weekday, as the caller names it. Never derived here or in the engine
+     * -- see the note on `SlotSchema.day` in `./scoring.ts`.
+     */
     day: z.string().nullable().optional(),
-    start: z.string().or(z.date()),
-    end: z.string().or(z.date()),
+    /**
+     * A wall reading or an instant. `index.ts` composes it on the season's
+     * clock (read from `season_settings`, not from this body) before anything
+     * calls `new Date()` on it. See `_shared/timing/anchorWallTimes.ts`.
+     */
+    start: WallTimeOrInstantSchema,
+    end: WallTimeOrInstantSchema,
     capacity: z.number().int().min(0),
     baseSlotId: z.string().optional(),
   })
@@ -56,8 +65,30 @@ export const AutoSchedulerInputSchema = z.object({
     .optional()
     .default([]),
   scoringWeights: z.record(z.string(), z.number()).optional().default({}),
+  /**
+   * **Declared, not enforced.** `index.ts` has never filtered slots by the
+   * school day; `packages/core/src/practiceScheduling.js` does. Named here so
+   * a reader is not misled into thinking the edge honours it, and left in the
+   * schema so a client sending it is not rejected. Not fixed in this PR --
+   * doing so is a solver change, not a timing one.
+   */
   schoolDayEnd: z.string().optional(),
-  timezone: z.string().optional(),
+  /**
+   * `timezone` used to live here, and `index.ts` contained **zero occurrences
+   * of the string** while composing every practice instant with `new Date()`
+   * on a naive value -- a field sent and ignored, on the persistence path for
+   * every practice in the season (LIVE-7).
+   *
+   * Removed rather than honoured from the body. The season's clock is
+   * `season_settings.timezone`, and `index.ts` now reads it there via
+   * `_shared/timing/seasonSettings.ts`. Accepting it here as well would be a
+   * second answer to the same question, which is exactly the drift the
+   * `20260913000000` migration refuses when it declines a read-time
+   * `contact_info->>'timezone'` fallback.
+   *
+   * The field is not listed at all, and this object is not `.passthrough()`,
+   * so an older client that still sends it is not rejected -- Zod strips it.
+   */
   config: z
     .object({
       timeBudgetMs: z.number().int().min(1000).max(25000).optional().default(25000),

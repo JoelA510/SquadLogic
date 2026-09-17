@@ -20,6 +20,8 @@ import {
   type PreparedTeam,
   type TimeWindow,
 } from '../_shared/engines/practice-coaches.ts';
+import { anchorWallTimes, describeAnchorFailure } from '../_shared/timing/anchorWallTimes.ts';
+import { readSeasonTimezone } from '../_shared/timing/seasonSettings.ts';
 import {
   getUserFromRequest,
   getUserOrgIds,
@@ -403,6 +405,67 @@ serve(async (req) => {
       return jsonResponse({ error: 'Not authorized for this organization' }, 403);
     }
 
+    // 5b. Place every slot on the SEASON's clock, before anything calls
+    //     `new Date()` on it (LIVE-7).
+    //
+    // The zone is read from `season_settings` here rather than taken from the
+    // request body. The body used to carry `timezone` and this file contained
+    // zero occurrences of the string, so every practice instant was a function
+    // of the Deno runtime's zone -- UTC on the edge -- instead of the season's.
+    // Reading it server-side makes it authoritative as well as read; see
+    // `_shared/timing/seasonSettings.ts`.
+    //
+    // This runs AFTER the membership check, so a caller cannot probe another
+    // organization's season by sending its id.
+    const season = await readSeasonTimezone(
+      supabase,
+      input.organizationId,
+      input.seasonSettingsId ?? null
+    );
+    if (season.errored) {
+      edgeLogger.error('Auto-scheduler could not read the season timezone', {
+        orgId: input.organizationId,
+        seasonSettingsId: input.seasonSettingsId ?? null,
+        message: season.message,
+      });
+      await edgeLogger.flush();
+      return jsonResponse(
+        {
+          error: "The season's timezone could not be read, so practice times cannot be placed.",
+          code: 'SEASON_SETTINGS_UNREADABLE',
+        },
+        503
+      );
+    }
+
+    const anchored = anchorWallTimes(input.slots, season.timezone, 'slots');
+    if (anchored.blocking.length > 0) {
+      // A season with no timezone makes every slot unplaceable, so this is the
+      // normal shape of the failure rather than an edge case. It is refused
+      // with a reason code, never scheduled against a guessed zone.
+      const failure = describeAnchorFailure(anchored.blocking);
+      edgeLogger.error('Auto-scheduler refused: slots could not be placed', {
+        orgId: input.organizationId,
+        timezone: season.timezone,
+        slotCount: input.slots.length,
+        refusedCount: anchored.blocking.length,
+        byCode: failure.byCode,
+      });
+      await recordAudit(supabase, {
+        organizationId: input.organizationId,
+        action: 'scheduler.auto_refused',
+        resourceType: 'practice_schedule',
+        metadata: {
+          reason: failure.code,
+          byCode: failure.byCode,
+          refusedCount: anchored.blocking.length,
+          slotCount: input.slots.length,
+        },
+      });
+      await edgeLogger.flush();
+      return jsonResponse(failure, 422);
+    }
+
     // 6. Audit + structured logging: scheduler started
     edgeLogger.info('Auto-scheduler invoked', {
       userId: user.id,
@@ -428,11 +491,14 @@ serve(async (req) => {
     // 7. Prepare data
     const teams = input.teams.map((t) => prepareTeam(t));
 
-    const slots = input.slots.map((s) => ({
+    // `anchored.rows` already carries `start`/`end` as instants on the season's
+    // clock. `new Date(s.start)` here is what LIVE-7 was: a host-zone read of a
+    // naive string.
+    const slots = anchored.rows.map((s) => ({
       id: s.id,
       day: s.day ?? null,
-      start: new Date(s.start),
-      end: new Date(s.end),
+      start: s.start,
+      end: s.end,
       capacity: s.capacity,
       baseSlotId: s.baseSlotId,
     }));
@@ -674,6 +740,13 @@ serve(async (req) => {
         assignments: bestAssignments,
         unassigned: bestUnassigned,
         evaluation: bestEvaluation,
+        // Non-blocking timing findings -- today only WALL_TIME_AMBIGUOUS, a
+        // wall time that occurs twice on a fall-back night and was resolved to
+        // its first occurrence. Reported rather than swallowed: the instant is
+        // real, and an operator scheduling into a repeated hour wants to know.
+        // Always present (as `[]` when clean) so a consumer cannot mistake
+        // "none" for "this build does not report them".
+        timingFindings: anchored.findings,
         optimization: {
           seedScore: seedScoring.score,
           bestScore,

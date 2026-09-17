@@ -6,6 +6,8 @@ import {
   evaluateGameSchedule,
   EvaluationResult,
 } from '../_shared/engines/scoring-engine.ts';
+import { anchorWallTimes, describeAnchorFailure } from '../_shared/timing/anchorWallTimes.ts';
+import { readSeasonTimezone } from '../_shared/timing/seasonSettings.ts';
 import {
   getUserFromRequest,
   getUserOrgIds as _getUserOrgIds,
@@ -70,6 +72,58 @@ serve(async (req) => {
 
     const { practice, games, persist = false, metadata = {} } = parseResult.data;
 
+    // 3b. Place every wall reading on the SEASON's clock before the engine
+    //     calls `new Date()` on it (LIVE-7).
+    //
+    // The engine's twin, `packages/core/src/practiceMetrics.js`, is fronted by
+    // `SlotSchema`/`AssignmentSchema`, which refuse a zone-less value outright.
+    // This arm had `z.string().or(z.date())` and no clock at all, so a naive
+    // wall string was read in the host's zone -- UTC on the edge. The zone is
+    // read from `season_settings` here, after the membership check above.
+    const seasonSettingsId =
+      typeof metadata?.seasonSettingsId === 'string' ? metadata.seasonSettingsId : null;
+    const season = await readSeasonTimezone(supabase, organizationId, seasonSettingsId);
+    if (season.errored) {
+      console.error('fairness-scoring: season_settings read failed', {
+        organizationId,
+        message: season.message,
+      });
+      return jsonResponse(
+        {
+          error: "The season's timezone could not be read, so times cannot be placed.",
+          code: 'SEASON_SETTINGS_UNREADABLE',
+        },
+        503
+      );
+    }
+
+    const anchoredPracticeSlots = anchorWallTimes(
+      practice?.slots ?? [],
+      season.timezone,
+      'practice.slots'
+    );
+    const anchoredGames = anchorWallTimes(games?.games ?? [], season.timezone, 'games.games');
+    // `games.slots` is deliberately NOT anchored: `evaluateGameSchedule` takes
+    // only assignments and teams, so nothing ever reads it. Refusing a request
+    // over a field no evaluator consumes would be a regression dressed as
+    // strictness. It is named as parsed-and-unread in `schemas/scoring.ts`
+    // rather than quietly validated.
+    const timingFindings = [...anchoredPracticeSlots.findings, ...anchoredGames.findings];
+    const blocking = [...anchoredPracticeSlots.blocking, ...anchoredGames.blocking];
+    if (blocking.length > 0) {
+      // Refuse rather than score against instants nobody chose. A scored run
+      // persisted under a guessed zone is worse than no run: it reads as
+      // evidence the schedule was checked.
+      const failure = describeAnchorFailure(blocking);
+      console.error('fairness-scoring: refused, times could not be placed', {
+        organizationId,
+        timezone: season.timezone,
+        refusedCount: blocking.length,
+        byCode: failure.byCode,
+      });
+      return jsonResponse(failure, 422);
+    }
+
     // 4. Heavy Computation (Isomorphic Scoring Engine)
     const startTime = performance.now();
 
@@ -78,14 +132,14 @@ serve(async (req) => {
       ? evaluatePracticeSchedule({
           assignments: practice.assignments,
           teams: practice.teams,
-          slots: practice.slots,
+          slots: anchoredPracticeSlots.rows,
           unassigned: practice.unassigned,
         })
       : null;
 
     const gameResults = games
       ? evaluateGameSchedule({
-          assignments: games.games,
+          assignments: anchoredGames.rows,
           teams: games.teams,
         })
       : null;
@@ -215,8 +269,14 @@ serve(async (req) => {
     return jsonResponse({
       ...evaluationPayload,
       runId,
+      // Non-blocking timing findings -- today only WALL_TIME_AMBIGUOUS, a wall
+      // time that occurs twice on a fall-back night, resolved to its first
+      // occurrence. Always present (as `[]` when clean) so a consumer cannot
+      // read "none" as "this build does not report them".
+      timingFindings,
       metadata: {
         ...metadata,
+        seasonTimezone: season.timezone,
         engineVersion: '2.5.0-composite',
         generatedAt: new Date().toISOString(),
       },

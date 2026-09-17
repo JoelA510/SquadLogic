@@ -144,7 +144,22 @@ export function evaluatePracticeSchedule(params: {
 
     const start = new Date(slot.start);
     const end = new Date(slot.end);
-    const day = slot.day || start.toLocaleDateString('en-US', { weekday: 'long' });
+    // `slot.day ?? 'unknown'`, which is what `practiceMetrics.js:582` does.
+    //
+    // This used to be
+    // `slot.day || start.toLocaleDateString('en-US', { weekday: 'long' })` --
+    // a weekday derived from a **host-zone** reading of the instant. Executed:
+    // a 9pm Saturday New York practice reads back as Sunday on a UTC host,
+    // which is the Supabase edge default, so the conflict a coach was shown
+    // named the wrong day. That made three contracts for one field: the page
+    // sends a day, core reads `slot.day ?? …` and never derives, and this
+    // derived a different one whenever the page's was absent.
+    //
+    // Deriving it correctly is not the fix either -- it would be a fourth
+    // contract, and the season's clock is not this function's to know. The
+    // caller that has a weekday sends it; a caller that does not gets
+    // 'unknown', visibly, in the conflict message.
+    const day = slot.day ?? 'unknown';
 
     // Recomputed from the validated fields on every call: a request-supplied `coachIds` key
     // would otherwise pass through the schema and override the conflict set.

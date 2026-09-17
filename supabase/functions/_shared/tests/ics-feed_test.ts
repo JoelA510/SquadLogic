@@ -9,7 +9,11 @@
  * so a host-zone reading fails one of the two.
  */
 
-import { assert, assertEquals, assertStringIncludes } from 'https://deno.land/std@0.203.0/assert/mod.ts';
+import {
+  assert,
+  assertEquals,
+  assertStringIncludes,
+} from 'https://deno.land/std@0.203.0/assert/mod.ts';
 import {
   buildFeedEvents,
   dateRangeBounds,
@@ -78,9 +82,11 @@ Deno.test('calendar-feed - a bare Postgres `time` composes instead of becoming N
 
 Deno.test('calendar-feed - the zone is the season’s, and it is read', () => {
   const at = (tz: string) =>
-    (buildFeedEvents({ teamName: 'Tigers', timezone: tz, games: [gameRow()] })[0] as {
-      dtstart: string;
-    }).dtstart;
+    (
+      buildFeedEvents({ teamName: 'Tigers', timezone: tz, games: [gameRow()] })[0] as {
+        dtstart: string;
+      }
+    ).dtstart;
   // If the zone were ignored (the hardcoded America/New_York), these would match.
   assertEquals(at('America/New_York'), '20261107T210000Z');
   assertEquals(at('America/Los_Angeles'), '20261108T000000Z');
@@ -142,7 +148,10 @@ Deno.test('calendar-feed - an unreadable daterange refuses instead of looping fo
   });
   assert(good.length > 0, 'control: a readable range must still produce occurrences');
   // The upper bound is exclusive, so Nov 17 is out and only two Tuesdays remain.
-  assertEquals(good.map((e) => e.uid), ['practice-1_2026-11-03', 'practice-1_2026-11-10']);
+  assertEquals(
+    good.map((e) => e.uid),
+    ['practice-1_2026-11-03', 'practice-1_2026-11-10']
+  );
 });
 
 Deno.test('calendar-feed - the unplaceable summary collapses by code, not by event', () => {

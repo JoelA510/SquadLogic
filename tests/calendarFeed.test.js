@@ -76,6 +76,33 @@ function practiceRow(overrides = {}, rowOverrides = {}) {
 const render = (events, timezone) =>
   renderIcsCalendar({ orgName: 'Test Org', teamName: 'Tigers', timezone, events, now: NOW });
 
+/**
+ * Narrow a `FeedEvent` to the placed arm, asserting the discriminant on the
+ * way. `checkJs` will not let `.dtstart` be read off the union, and that is the
+ * point of the union -- so every read of a time here also states that the event
+ * was placed at all.
+ *
+ * @param {import('../supabase/functions/_shared/calendar/icsFeed.ts').FeedEvent} ev
+ * @returns {import('../supabase/functions/_shared/calendar/icsFeed.ts').TimedEvent}
+ */
+function timed(ev) {
+  expect(ev?.kind).toBe('timed');
+  return /** @type {import('../supabase/functions/_shared/calendar/icsFeed.ts').TimedEvent} */ (ev);
+}
+
+/**
+ * The other arm: an event carrying a reason code instead of an instant.
+ *
+ * @param {import('../supabase/functions/_shared/calendar/icsFeed.ts').FeedEvent} ev
+ * @returns {import('../supabase/functions/_shared/calendar/icsFeed.ts').UnplaceableEvent}
+ */
+function tbd(ev) {
+  expect(ev?.kind).toBe('unplaceable');
+  return /** @type {import('../supabase/functions/_shared/calendar/icsFeed.ts').UnplaceableEvent} */ (
+    ev
+  );
+}
+
 describe('LIVE-5 — the NaN DTSTART every family subscribed to', () => {
   it('composes a bare Postgres `time` into a real instant instead of Invalid Date', () => {
     // The literal defect: `new Date('16:00:00')` is Invalid Date. Asserted here
@@ -89,10 +116,9 @@ describe('LIVE-5 — the NaN DTSTART every family subscribed to', () => {
     });
 
     expect(events).toHaveLength(1);
-    expect(events[0].kind).toBe('timed');
     // 2026-11-07 16:00 New York is EST (-05:00) — DST ended on Nov 1.
-    expect(events[0].dtstart).toBe('20261107T210000Z');
-    expect(events[0].dtend).toBe('20261107T223000Z');
+    expect(timed(events[0]).dtstart).toBe('20261107T210000Z');
+    expect(timed(events[0]).dtend).toBe('20261107T223000Z');
   });
 
   it('emits no NaN anywhere in the rendered calendar', () => {
@@ -124,7 +150,7 @@ describe('LIVE-5 — the NaN DTSTART every family subscribed to', () => {
         }),
       ],
     });
-    expect(events[0].dtstart).toBe('20261108T000000Z');
+    expect(timed(events[0]).dtstart).toBe('20261108T000000Z');
   });
 
   it('places a game that has only the timestamptz pair, with no wall columns', () => {
@@ -141,8 +167,7 @@ describe('LIVE-5 — the NaN DTSTART every family subscribed to', () => {
         }),
       ],
     });
-    expect(events[0].kind).toBe('timed');
-    expect(events[0].dtstart).toBe('20260613T133000Z');
+    expect(timed(events[0]).dtstart).toBe('20260613T133000Z');
   });
 });
 
@@ -169,7 +194,7 @@ describe('LIVE-5 — the calendar timezone was never the season is', () => {
 
   it('shifts with the zone — the control that proves the zone is read at all', () => {
     const at = (tz) =>
-      buildFeedEvents({ teamName: 'Tigers', timezone: tz, games: [gameRow()] })[0].dtstart;
+      timed(buildFeedEvents({ teamName: 'Tigers', timezone: tz, games: [gameRow()] })[0]).dtstart;
     const east = at('America/New_York');
     const west = at('America/Los_Angeles');
     expect(east).not.toBe(west);
@@ -188,13 +213,10 @@ describe('LIVE-5 — the practice arm no longer asserts the club practises in UT
 
     // 2026-11-02 is a Monday, so the first Tuesday in range is the 3rd; the
     // range's upper bound is exclusive, so the 17th is out.
-    expect(events.map((e) => e.uid)).toEqual([
-      'practice-1_2026-11-03',
-      'practice-1_2026-11-10',
-    ]);
+    expect(events.map((e) => e.uid)).toEqual(['practice-1_2026-11-03', 'practice-1_2026-11-10']);
     // 17:00 EST is 22:00Z. The old code emitted 17:00Z — a five-hour error.
-    expect(events[0].dtstart).toBe('20261103T220000Z');
-    expect(events[0].dtstart).not.toBe('20261103T170000Z');
+    expect(timed(events[0]).dtstart).toBe('20261103T220000Z');
+    expect(timed(events[0]).dtstart).not.toBe('20261103T170000Z');
   });
 
   it('follows the offset across a DST boundary within one recurrence', () => {
@@ -206,7 +228,7 @@ describe('LIVE-5 — the practice arm no longer asserts the club practises in UT
       timezone: 'America/New_York',
       practices: [practiceRow({}, { effective_date_range: '[2026-10-26,2026-11-05)' })],
     });
-    expect(events.map((e) => e.dtstart)).toEqual(['20261027T210000Z', '20261103T220000Z']);
+    expect(events.map((e) => timed(e).dtstart)).toEqual(['20261027T210000Z', '20261103T220000Z']);
   });
 });
 
@@ -264,8 +286,7 @@ describe('the daterange the practice arm never actually parsed', () => {
 describe('LIVE-5 — an event that cannot be placed says so', () => {
   it('becomes an all-day TIME TBD VEVENT carrying its reason code', () => {
     const events = buildFeedEvents({ teamName: 'Tigers', timezone: null, games: [gameRow()] });
-    expect(events[0].kind).toBe('unplaceable');
-    expect(events[0].code).toBe('SEASON_TIMEZONE_MISSING');
+    expect(tbd(events[0]).code).toBe('SEASON_TIMEZONE_MISSING');
 
     const ics = render(events, null);
     expect(ics).toContain('DTSTART;VALUE=DATE:20261107');
@@ -283,8 +304,7 @@ describe('LIVE-5 — an event that cannot be placed says so', () => {
       timezone: 'America/New_York',
       games: [gameRow({ slot_date: '2026-03-08', start_time: '02:30:00', end_time: '04:00:00' })],
     });
-    expect(events[0].kind).toBe('unplaceable');
-    expect(events[0].code).toBe('WALL_TIME_NONEXISTENT');
+    expect(tbd(events[0]).code).toBe('WALL_TIME_NONEXISTENT');
   });
 
   it('writes no VEVENT at all when not even the day is known', () => {
@@ -293,8 +313,7 @@ describe('LIVE-5 — an event that cannot be placed says so', () => {
       timezone: 'America/New_York',
       games: [gameRow({ slot_date: null, start_time: null, end_time: null })],
     });
-    expect(events[0].kind).toBe('unplaceable');
-    expect(events[0].date).toBeNull();
+    expect(tbd(events[0]).date).toBeNull();
 
     const ics = render(events, 'America/New_York');
     expect(ics).not.toContain('BEGIN:VEVENT');
@@ -382,9 +401,7 @@ describe('ICS Generator (RFC 5545)', () => {
     const events = buildFeedEvents({
       teamName: 'Tigers',
       timezone: 'America/New_York',
-      games: [
-        gameRow({ fields: { name: 'Field, 1;A', locations: { name: 'North\nPark' } } }),
-      ],
+      games: [gameRow({ fields: { name: 'Field, 1;A', locations: { name: 'North\nPark' } } })],
     });
     const output = render(events, 'America/New_York');
     expect(output).toContain('LOCATION:North Park\\, Field\\, 1\\;A');

@@ -323,7 +323,13 @@ export function buildFeedEvents(input: {
     const location = locationOf(slot.fields);
     const title = `Game: ${teamName}`;
 
-    const start = placeSlotTime(slot.start, slot.slot_date, slot.start_time, timezone, 'game start');
+    const start = placeSlotTime(
+      slot.start,
+      slot.slot_date,
+      slot.start_time,
+      timezone,
+      'game start'
+    );
     // The pre-existing fallback `end_time || start_time` is kept: a slot with
     // no end is a zero-length event, not a dropped one.
     const end = placeSlotTime(

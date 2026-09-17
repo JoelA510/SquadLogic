@@ -73,11 +73,14 @@ Deno.test('season clock vectors - every hard case the mirror was built for is st
   }
 });
 
-Deno.test('season clock vectors - the JS arm reads the same table, or this is not a cross-check', () => {
-  const sibling = Deno.readTextFileSync(SIBLING_RUNNER);
-  assertStringIncludes(sibling, VECTORS_PATH);
-  assertStringIncludes(sibling, 'packages/core/src/timing/seasonClock.js');
-});
+Deno.test(
+  'season clock vectors - the JS arm reads the same table, or this is not a cross-check',
+  () => {
+    const sibling = Deno.readTextFileSync(SIBLING_RUNNER);
+    assertStringIncludes(sibling, VECTORS_PATH);
+    assertStringIncludes(sibling, 'packages/core/src/timing/seasonClock.js');
+  }
+);
 
 Deno.test('season clock vectors - the TS mirror matches every expected instant', () => {
   let exercised = 0;
@@ -93,7 +96,9 @@ Deno.test('season clock vectors - the TS mirror matches every expected instant',
     // Compared as a string: the offset spelling is part of the contract, and
     // `...-05:00` and `...Z` are the same instant while only one is the answer.
     if (iso !== testCase.expect.iso) {
-      failures.push(`${testCase.id}: iso ${JSON.stringify(iso)} != ${JSON.stringify(testCase.expect.iso)}`);
+      failures.push(
+        `${testCase.id}: iso ${JSON.stringify(iso)} != ${JSON.stringify(testCase.expect.iso)}`
+      );
     }
     const codes = findings.map((f) => f.code);
     if (codes.join(',') !== testCase.expect.codes.join(',')) {

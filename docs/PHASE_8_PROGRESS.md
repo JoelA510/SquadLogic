@@ -2264,6 +2264,40 @@ corrections are worth more than the plants.
   check that cannot fail gets written**, and the only reason this one was found
   is that its plant was run.
 
+### Review round 1: the anchor pre-flight, and why static review was not enough
+
+The supervisor refused the premise that the 110 unchanged plants were fine
+because they were last green on `main`, and was right to: **this PR disproved
+that premise three times over.** Changing a shared enumerator's signature and
+renaming its second parameter hollowed out an arm parser in
+`20260907000000_smoke.sql` and moved two existing plants' anchors into
+ANCHOR-MISS. Three verification artifacts broken by one change, none of them
+noticed by reading. Asserting the other 110 were fine was an assumption.
+
+`plant()` has always refused an anchor that does not resolve **exactly once**
+-- at PLANT time, one full harness run into a sweep that takes 5.4 hours. That
+division was reasonable while the sweep was something somebody ran. **A loud
+failure nobody triggers is a quiet one.**
+
+`PLANT_ANCHORS_ONLY=1` (`npm run test:db:local:prove:anchors`) runs the real
+`plant` calls and resolves each anchor without mutating anything or starting a
+database. It is **deliberately not a parser over `prove.sh`'s source**: the
+anchors it checks are the bash-expanded strings `plant()` itself receives, so
+`$$`, `\"` and friends cannot make a second reading disagree with the one that
+matters. It runs first in every sweep, ahead of the superseded-statement
+check, because that check SKIPS a plant whose anchor has moved -- its own
+comment says so -- and an unverified anchor therefore takes a second guard
+down with it.
+
+**It found nothing: 121 of 121 anchors resolve exactly once.** That is the
+result, and a check reporting nothing is only worth the controls behind it:
+
+- an anchor moved by one word -> `ANCHOR RESOLVES 0 TIMES`, exit 9;
+- an anchor pointed at text occurring 7 times -> `ANCHOR RESOLVES 7 TIMES`,
+  exit 9, which proves the **exactly once** half rather than "at least once";
+- the meta-assertion, run against a copy with all 121 plant calls stripped ->
+  `examined no plants at all; this check looked at nothing`, exit 9.
+
 ### `/code-review` at high: seven findings, all fixed
 
 Not one was in the RPCs or the containment reading; every one was in the
@@ -2321,9 +2355,17 @@ delete-it rule is met by the containment report and not yet by a scheduler.
 - **Gap B part 2**, above.
 - **The full SQL mutation sweep was not run to completion.** At ~2.7 minutes
   per plant over 121 plants it is ~5.4 hours. The eleven plants this PR adds
-  were driven directly against the harness and are **11 of 11 CAUGHT**; the
-  other 110 are unchanged and were last green on `main`. The census, which
-  requires every health claim `run.sh` prints to have a prover, was verified
-  statically rather than executed: 121 plant labels, 32 claim rows, no
-  unresolved prover.
+  were driven directly against the harness and are **11 of 11 CAUGHT**. The
+  other 110 are unchanged; their ANCHORS are now verified by the pre-flight
+  above (121 of 121), which closes the part of the gap this change could
+  plausibly have opened, but **whether each still CATCHES its defect is
+  unexecuted**. The census was verified statically rather than executed: 121
+  plant labels, 32 claim rows, no unresolved prover.
+- **`field_subunits.effective_to` has no scheduler reader, by ruling.** It is
+  read by its own RPC pair and by `estate_contained_nodes`, so the
+  honour-it-or-delete-it rule is met; nothing in the app offers a sub-surface
+  to book onto, so an offerability read would be speculative work justified by
+  symmetry alone. The boundary is now in the column's own COMMENT, naming its
+  readers, the asymmetry with `locations.effective_to`, and **8.8** as the
+  likely home for enforcement.
 - Everything still open after gap A, unchanged.

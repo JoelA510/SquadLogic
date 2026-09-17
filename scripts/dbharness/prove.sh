@@ -24,6 +24,14 @@ M7="$REPO/supabase/migrations/20260911000000_venue_subunit_effective_dating.sql"
 R7="$REPO/docs/sql/20260911000000_revert.sql"
 S5="$REPO/docs/sql/20260909000000_smoke.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
+# **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
+# occur exactly once -- but it does so at PLANT time, one full harness run into
+# a sweep that takes 5.4 hours, so the signal exists and nothing surfaces it.
+# Set this and every `plant` call resolves its anchor and returns without
+# mutating anything or starting a database: minutes, not hours. See the stage
+# below for why that division stopped being reasonable.
+ANCHORS_ONLY="${PLANT_ANCHORS_ONLY:-}"
+ANCHOR_OK=0
 # What each plant scored, by label, for the census at the bottom of this file.
 # The census asserts that every health claim run.sh prints has a plant that
 # reached one of its RED branches, and it reads THIS run's results rather than a
@@ -243,6 +251,48 @@ trap on_signal INT TERM
 # The meta-assertion is on the other side: if this finds no plants at all it
 # says so and stops, because a parse that matched nothing would clear every
 # plant in the file by looking at none of them.
+# **Pre-flight one: every plant anchor still resolves, exactly once.**
+#
+# `plant()` has always refused an anchor that does not -- at PLANT time, one
+# full harness run into a sweep. That division was reasonable while the sweep
+# was something somebody ran. It is not reasonable at 121 plants and ~2.7
+# minutes each: **a loud failure nobody triggers is a quiet one.**
+#
+# It is not hypothetical, and the evidence is this very PR. 8.4 gap B changed
+# `public.field_bookings`' signature and renamed its second parameter, and that
+# one change moved two existing plants' anchors into ANCHOR-MISS -- scored
+# "meaningless" rather than failing -- and hollowed out an arm parser in
+# `docs/sql/20260907000000_smoke.sql` at the same time. Three verification
+# artifacts broken by one signature change, none of them noticed by reading.
+# A change to a SHARED enumerator ripples into the text other plants match on,
+# and that is exactly when the anchors need checking and exactly when nobody
+# can afford the sweep that checks them.
+#
+# This runs the real `plant` calls with `PLANT_ANCHORS_ONLY=1`, so the anchors
+# it resolves are the bash-expanded strings `plant()` itself would receive.
+# **Deliberately not a parser over this file's source.** The superseded-
+# statement check below does parse the source, and its own comment records that
+# a moved anchor is invisible to it ("ANCHOR-MISS's business") -- which is the
+# coupling this stage closes: a plant whose anchor has moved is silently SKIPPED
+# by that check, so an unverified anchor takes a second guard down with it.
+# This runs first for that reason.
+if [ -z "$ANCHORS_ONLY" ]; then
+  echo "=== pre-flight: every plant anchor resolves, exactly once ==="
+  PLANT_ANCHORS_ONLY=1 bash "${BASH_SOURCE[0]}"
+  anchor_status=$?
+  if [ "$anchor_status" -ne 0 ]; then
+    echo "REFUSING TO PLANT -- re-anchor the plants above before sweeping." >&2
+    echo "  Every one of them would score ANCHOR-MISS (meaningless) hours from now." >&2
+    exit 8
+  fi
+  echo
+fi
+
+# Skipped in anchors-only mode: this is the parent's stage, and running it in
+# the child too would print it twice for one sweep.
+if [ -n "$ANCHORS_ONLY" ]; then
+  :
+else
 echo "=== pre-flight: no plant may target a superseded statement ==="
 python3 - "$REPO" <<'PREFLIGHT'
 import io, os, re, sys
@@ -357,6 +407,7 @@ if [ "$preflight_status" -ne 0 ]; then
   exit 7
 fi
 echo
+fi
 
 # **A green baseline, asserted before anything is planted.**
 #
@@ -370,6 +421,12 @@ echo
 #
 # So: the unmutated harness must pass first. If it does not, nothing below is
 # evidence of anything and the run stops rather than printing eleven CAUGHTs.
+if [ -n "$ANCHORS_ONLY" ]; then
+  # No baseline in anchors-only mode: nothing is planted, so there is nothing
+  # for a red baseline to make look caught. Skipping it is what makes this
+  # check cost minutes.
+  :
+else
 echo "=== baseline: the unmutated harness must pass before any plant ==="
 bash "$REPO/scripts/dbharness/run.sh" >/tmp/harness_baseline_out 2>&1 &
 HARNESS_PID=$!
@@ -382,6 +439,7 @@ else
   echo "BASELINE RED -- refusing to plant. Every plant would report CAUGHT and prove nothing." >&2
   echo "$baseline_out" | tail -25 >&2
   exit 3
+fi
 fi
 
 # **A plant is CAUGHT only if the check it targets goes red.**
@@ -437,6 +495,30 @@ plant() { # label file old new [expected-failing-check] [check-that-must-stay-gr
   # **What the file looked like before this run touched it.** See the restore
   # check below for why a checksum rather than trust.
   local before_sum
+  # **Anchor resolution, and nothing else.** The count is the SAME count the
+  # planting step below makes, from the same `$old` after the same shell
+  # expansion -- deliberately, because a second parser reading the anchors out
+  # of this file's source text would be a second reading of what a plant
+  # targets, and the one that drifted would be the one nobody ran. `$$`, `\"`
+  # and friends are expanded by bash before `plant` ever sees them, and only
+  # this side of that expansion is the truth.
+  if [ -n "$ANCHORS_ONLY" ]; then
+    local n
+    n="$(python3 -c "
+import io,sys
+print(io.open(sys.argv[1],encoding='utf8').read().count(sys.argv[2]))" "$file" "$old")"
+    if [ "$n" = "1" ]; then
+      ANCHOR_OK=$((ANCHOR_OK+1))
+      RESULT["$label"]=ANCHOR-OK
+    else
+      printf '%-52s ANCHOR RESOLVES %s TIMES (expected exactly 1)\n' "$label" "$n"
+      printf '  in %s\n' "${file#$REPO/}"
+      RESULT["$label"]=ANCHOR-MISS
+      MISS=$((MISS+1)); FAIL=$((FAIL+1))
+    fi
+    return
+  fi
+
   before_sum="$(sha256sum "$file" | cut -d' ' -f1)"
   # **An empty checksum compares equal to an empty checksum.** `sha256sum`'s
   # status is eaten by the pipe and was never read, so a file this could not
@@ -2206,6 +2288,24 @@ declare -A CLAIM_PROVER=(
   ["(checked) the rollback removed every overload of all four admin facility RPCs"]="EMERG the rollback and its own guard drift together"
   ["(checked) it left public.field_bookings standing, which admin_retire_field still calls"]="EMERG rollback takes the producer another RPC still calls"
 )
+
+# **The anchor pre-flight's own verdict, with the meta-assertion the others
+# have.** A run that examined ZERO plants would clear all 121 by looking at
+# none of them -- the vacuous pass this whole file exists to stop, in the check
+# added to stop a vacuous pass one level down.
+if [ -n "$ANCHORS_ONLY" ]; then
+  echo
+  if [ "$ATTEMPTED" -eq 0 ]; then
+    echo "ANCHOR PRE-FLIGHT FAILED: examined no plants at all; this check looked at nothing" >&2
+    exit 9
+  fi
+  if [ "$MISS" -ne 0 ]; then
+    echo "ANCHOR PRE-FLIGHT FAILED: $MISS of $ATTEMPTED plant anchors do not resolve exactly once" >&2
+    exit 9
+  fi
+  echo "anchor pre-flight: $ANCHOR_OK of $ATTEMPTED plant anchors resolve exactly once in their target file"
+  exit 0
+fi
 
 echo
 census_ok=1

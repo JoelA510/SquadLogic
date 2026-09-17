@@ -185,8 +185,12 @@ ALTER TABLE public.field_subunits
 COMMENT ON COLUMN public.locations.effective_to IS
   'Inclusive last date this venue is part of the estate. NULL means unbounded. Written only by admin_retire_location/admin_unretire_location. There is deliberately no locations.active: see 20260911000000 section 3. A field at a retired venue is not offerable whatever its own window says -- containment, resolved on read by frontend/src/utils/fieldLifecycle.js and packages/core/src/facility/lifecycle.js, never by a date copied onto the child.';
 
+-- **Its readers, named, and the one kind of reader it deliberately has not
+-- got.** This column is asymmetric with locations.effective_to and the
+-- asymmetry is a decision, so it is stated where the next person meets it
+-- rather than left to be rediscovered.
 COMMENT ON COLUMN public.field_subunits.effective_to IS
-  'Inclusive last date this sub-surface is part of the estate. NULL means unbounded. Written only by admin_retire_field_subunit/admin_unretire_field_subunit. Retiring it strands only bookings that NAME it -- practice_slots.field_subunit_id is the one column in the schema that does -- not everything on the parent pitch.';
+  'Inclusive last date this sub-surface is part of the estate. NULL means unbounded. Written only by admin_retire_field_subunit/admin_unretire_field_subunit. Retiring it strands only bookings that NAME it -- practice_slots.field_subunit_id is the one column in the schema that does -- not everything on the parent pitch. READERS: its own RPC pair, and estate_contained_nodes, which reports it and decides already_retired when a venue above it is retired. There is deliberately NO SCHEDULER reader, unlike locations.effective_to, which frontend/src/utils/fieldLifecycle.js consults before offering a pitch: nothing in the app offers a sub-surface to book onto, so an offerability read would be speculative work justified by symmetry alone. When sub-surfaces become bookable -- 8.8 is the likely home -- enforcing this window is that task, and it should adopt the containment reading in packages/core/src/facility/lifecycle.js rather than inventing a second one.';
 
 CREATE INDEX IF NOT EXISTS idx_locations_effective_to
   ON public.locations (organization_id, effective_to)

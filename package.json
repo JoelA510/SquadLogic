@@ -24,6 +24,7 @@
     "test:db:once": "supabase test db supabase/tests/_fixtures.sql",
     "test:db:local": "bash scripts/dbharness/run.sh",
     "test:db:local:prove": "bash scripts/dbharness/prove.sh",
+    "test:db:local:prove:anchors": "PLANT_ANCHORS_ONLY=1 bash scripts/dbharness/prove.sh",
     "test:db:local:prove:mock": "node scripts/dbharness/prove-mock.mjs"
   },
   "directories": {

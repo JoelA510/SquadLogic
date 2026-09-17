@@ -183,6 +183,12 @@ const PLANTS = [
   // An unrecognised scope answered with an empty set rather than thrown: a
   // guard reporting "nothing is booked here" because its scope was misspelled.
   {
+    // **Scored NOT CAUGHT on its first sweep, and that was the finding.** No
+    // RPC arm can produce an unknown scope -- every one passes a literal --
+    // so no behavioural test could make this guard fire, and a guard nothing
+    // can make fail is not a guard. The producer is exported now and
+    // `tests/estateBookingScopes.test.js` reaches it directly.
+    suite: 'tests/estateBookingScopes.test.js',
     label: 'an unknown booking scope returns nothing instead of throwing',
     find: `  if (!['field', 'location', 'subunit'].includes(scope)) {
     throw new Error(\`unknown booking scope \${scope}; expected field, location or subunit\`);
@@ -299,8 +305,14 @@ const PLANTS = [
     // CAUGHT and said nothing about whether anything covers it.
     label: 'delete stops seeing assignments reached through their slot',
     suite: 'tests/fieldDeleteGuard.test.js',
-    find: '    (String(row.field_id) === String(fieldId) || viaSlot(row));',
-    replace: '    String(row.field_id) === String(fieldId);',
+    // **Re-anchored by 8.4 gap B**, which replaced the bare field comparison
+    // with the shared scope predicate. The old anchor stopped matching and
+    // this plant went ANCHOR-MISS -- a plant hollowed out by the change it was
+    // standing guard over, which is the shape LIVE-3's harness rounds
+    // recorded. The mutation is the same one: the arm stops seeing an
+    // assignment reached through its slot.
+    find: '    (scopeCovers(row.field_id, null) || viaSlot(row));',
+    replace: '    scopeCovers(row.field_id, null);',
   },
   {
     // `games` carries no field_id; only the cascade closure reaches it.
@@ -397,8 +409,11 @@ const PLANTS = [
     // carry it, because its SQL twin emits no such key.
     label: 'retire leaks the producer cascades flag into its payload',
     suite: 'tests/fieldLifecycleRpcs.test.js',
+    // **Re-anchored by 8.4 gap B**, which added `field_id` to the keys the
+    // field-scoped arms strip. Same mutation, same leak: the producer's
+    // internal flags reach a payload whose SQL twin never sends them.
     find: `        const affected = fieldBookings(p.p_field_id, String(p.p_effective_to)).map(
-          ({ cascades: _cascades, ...row }) => row
+          ({ cascades: _cascades, field_id: _fieldId, ...row }) => row
         );`,
     replace: '        const affected = fieldBookings(p.p_field_id, String(p.p_effective_to));',
   },

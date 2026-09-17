@@ -886,7 +886,16 @@ const rangeLastDay = (range) => {
 //   takes everything on the ground, which is not the same as an empty
 //   filter.
 // @param {'field'|'location'|'subunit'} [scope]
-const mockFieldBookings = (db, orgId, scopeId, after, scope = 'field') => {
+// **Exported for tests, and that is a decision rather than convenience.** The
+// unknown-scope throw below is unreachable through any RPC arm, because every
+// arm passes a literal -- so a behavioural test cannot make it fire, and the
+// mutation sweep scored a plant that removed it NOT CAUGHT. A guard nothing
+// can make fail is the shape this whole phase exists around. Exporting the
+// producer lets `tests/estateBookingScopes.test.js` reach it directly, which
+// turns the throw from an unenforced assertion into an enforced one. The mock
+// is test infrastructure; widening its surface for a test is not the same
+// compromise it would be in production code.
+export const mockFieldBookings = (db, orgId, scopeId, after, scope = 'field') => {
   if (!['field', 'location', 'subunit'].includes(scope)) {
     throw new Error(`unknown booking scope ${scope}; expected field, location or subunit`);
   }
@@ -1131,7 +1140,7 @@ const mockFieldBookings = (db, orgId, scopeId, after, scope = 'field') => {
  * @param {string|null} effectiveTo `null` when no date is being applied
  * @returns {Array<Record<string, any>>}
  */
-const mockEstateContainedNodes = (db, orgId, locationId, effectiveTo) => {
+export const mockEstateContainedNodes = (db, orgId, locationId, effectiveTo) => {
   const already = (own) =>
     own !== null &&
     own !== undefined &&

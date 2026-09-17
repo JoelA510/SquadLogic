@@ -1,6 +1,6 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import { AlertTriangle, HelpCircle } from 'lucide-react';
+import { AlertTriangle, HelpCircle, Layers } from 'lucide-react';
 
 /**
  * What a mutation would cost, shown BEFORE it is committed.
@@ -26,6 +26,19 @@ import { AlertTriangle, HelpCircle } from 'lucide-react';
  * 3. **The repair proposal is named as unavailable.** 8.6 does not exist. A
  *    blank space where a repair belongs reads as "no repair is needed", which
  *    is a stronger claim than "nothing has been computed" and a false one.
+ * 4. **A venue retirement's consequence has TWO halves, and only one is a
+ *    booking list.** `admin_retire_location` returns `contained` beside
+ *    `affected`: every field and sub-surface the venue holds, each flagged
+ *    `already_retired` where its own window already ends no later than this
+ *    date. These are not bookings -- they are ground -- and they are the
+ *    *point* of the containment decision (20260911000000 section 2): the
+ *    retirement writes one date on one row and copies nothing down, so the
+ *    only way an operator can act on "this closes those pitches too" is to be
+ *    shown which. It is rendered as its own table with its own caption, never
+ *    folded into the bookings table, and **it is absent rather than empty at
+ *    sub-surface depth** -- `admin_retire_field_subunit` ships no `contained`
+ *    key at all, because a sub-surface is the leaf of the estate, and "nothing
+ *    below" must not render as "nobody looked" or vice versa.
  *
  * @param {object} props
  * @param {string} props.subject - what is about to change, e.g. a field name
@@ -34,6 +47,11 @@ import { AlertTriangle, HelpCircle } from 'lucide-react';
  * @param {Array<Record<string, any>>} props.rows - the RPC's `affected` array
  * @param {{ available: false, finding: { code: string, message: string } }} props.repair
  * @param {string} [props.titleId] - id of the heading paragraph, for `aria-labelledby`
+ * @param {Array<Record<string, any>>} [props.contained] - the RPC's `contained`
+ *   array. **Pass it only when the RPC produced one**; leave it `undefined` at
+ *   a depth that contains nothing, and never substitute `[]`.
+ * @param {number} [props.containedCount] - the RPC's own `contained_count`,
+ *   which counts only the nodes NOT already retired. Not derived from `contained`.
  */
 export default function ConsequencePreview({
   subject,
@@ -42,6 +60,8 @@ export default function ConsequencePreview({
   rows,
   repair,
   titleId = undefined,
+  contained = undefined,
+  containedCount = undefined,
 }) {
   const list = rows || [];
   // **The count comes from the RPC, the list is what it sent.** They should
@@ -50,6 +70,27 @@ export default function ConsequencePreview({
   // whichever number the layout happened to use.
   const undercounted = affectedCount > list.length;
   const hasDisposition = list.some((row) => typeof row.disposition === 'string');
+
+  // **`undefined` and `[]` are different answers and stay different here.**
+  // `undefined` is "this depth reports no containment" -- a sub-surface, or a
+  // field, neither of which holds anything. `[]` is "this venue holds nothing",
+  // which an operator retiring a site they believe has four pitches needs to
+  // see. Collapsing them with `contained || []` would render the second as the
+  // first, and the whole section would vanish for the case that most needs a
+  // sentence.
+  const containedRows = Array.isArray(contained) ? contained : null;
+  const containedStillLive = containedRows
+    ? containedRows.filter((row) => !row.already_retired)
+    : [];
+  // A cross-check between the two readings the RPC sent -- its own aggregate
+  // count and the rows it serialised -- not a derivation of one from the other.
+  // They are produced by separate expressions over `estate_contained_nodes`, so
+  // a disagreement is real news and is stated rather than papered over with
+  // whichever number the layout happened to reach for.
+  const containedCountDisagrees =
+    containedRows !== null &&
+    typeof containedCount === 'number' &&
+    containedCount !== containedStillLive.length;
 
   return (
     <section aria-labelledby={titleId} data-testid="consequence-preview">
@@ -127,6 +168,79 @@ export default function ConsequencePreview({
         </>
       )}
 
+      {containedRows !== null && (
+        <div data-testid="consequence-contained" style={{ marginTop: 12 }}>
+          <p className="text-sm" style={{ marginBottom: 6 }}>
+            <Layers size={15} aria-hidden="true" style={{ verticalAlign: '-2px' }} />{' '}
+            <strong>{subject}</strong> holds{' '}
+            <strong data-testid="contained-total">{containedRows.length}</strong> field
+            {containedRows.length === 1 ? '' : 's'} and sub-surface
+            {containedRows.length === 1 ? '' : 's'}.{' '}
+            {containedRows.length === 0 ? (
+              <span data-testid="contained-none">
+                Nothing sits at this venue, so this retirement closes only the venue itself.
+              </span>
+            ) : (
+              <span data-testid="contained-live">
+                <strong>{containedStillLive.length}</strong> of them stop being offered after that
+                date.
+              </span>
+            )}
+          </p>
+          {containedRows.length > 0 && (
+            <>
+              <p className="text-sm" data-testid="consequence-contained-note">
+                These are ground, not bookings. No end date is written onto any of them and nothing
+                below is changed — they stop being offered because the venue above them has closed,
+                and clearing the venue&rsquo;s date brings back every one that has no date of its
+                own.
+              </p>
+              <div style={{ maxHeight: 220, overflow: 'auto', marginTop: 8 }}>
+                <table className="grid" data-testid="contained-rows">
+                  <caption className="sr-only">
+                    Fields and sub-surfaces contained by {subject}, and whether each already ends on
+                    or before that date
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Kind</th>
+                      <th scope="col">Name</th>
+                      <th scope="col">Its own end date</th>
+                      <th scope="col">Effect</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {containedRows.map((row) => (
+                      <tr key={`${row.kind}-${row.id}`} data-testid={`contained-row-${row.kind}`}>
+                        <td>{row.kind === 'field_subunit' ? 'sub-surface' : 'field'}</td>
+                        <td>{row.name || '(unnamed)'}</td>
+                        <td>{row.own_effective_to || 'none'}</td>
+                        <td>
+                          {row.already_retired ? (
+                            <span className="badge neutral" data-testid="contained-already-retired">
+                              already ends by then
+                            </span>
+                          ) : (
+                            <span className="badge warning">closes with the venue</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+          {containedCountDisagrees && (
+            <p className="text-sm" data-testid="contained-count-disagrees">
+              The database counted {containedCount} still-live node
+              {containedCount === 1 ? '' : 's'} but sent {containedStillLive.length}. Treat the
+              count as the authority.
+            </p>
+          )}
+        </div>
+      )}
+
       {/*
         The repair half of the clause. Rendered whether or not anything is
         affected, because "there is no repair engine" is true either way and an
@@ -158,4 +272,6 @@ ConsequencePreview.propTypes = {
     }).isRequired,
   }).isRequired,
   titleId: PropTypes.string,
+  contained: PropTypes.array,
+  containedCount: PropTypes.number,
 };

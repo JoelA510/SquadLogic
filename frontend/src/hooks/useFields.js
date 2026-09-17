@@ -39,7 +39,7 @@ export function useFields() {
         .select(
           `
           *,
-          field_subunits ( id, label ),
+          field_subunits ( id, label, effective_to ),
           practice_slots ( id, day_of_week, start_time, end_time, capacity )
         `
         )

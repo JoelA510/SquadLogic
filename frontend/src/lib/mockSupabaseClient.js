@@ -2177,8 +2177,7 @@ export const mockSupabase = {
       // `20260913000000_season_timezone_writer.sql`. The Settings control used
       // to write only localStorage, so `season_settings.timezone` had no writer
       // anywhere and every season read as having no clock (GAP-30).
-      const { p_organization_id, p_season_settings_id, p_timezone, p_actor_context } =
-        params || {};
+      const { p_organization_id, p_season_settings_id, p_timezone, p_actor_context } = params || {};
       if (!p_organization_id) {
         return { data: null, error: { message: 'p_organization_id is required' } };
       }

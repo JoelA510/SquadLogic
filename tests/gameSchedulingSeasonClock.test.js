@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildDateTime,
+  composeSchedulerReadinessMessage,
   describeUnplaceableSlots,
   normalizeGameSlot,
   partitionGameSlots,
@@ -304,14 +305,131 @@ describe('GAP-30: one unplaceable slot does not void the grid', () => {
     );
   });
 
-  it('collapses one cause shared by many slots into one line', () => {
-    const { unplaceableSlots } = partitionGameSlots(
-      Array.from({ length: 40 }, (_, i) => slotRow({ id: `s${i}` })),
-      { ...REFERENCE, timezone: null }
+  /**
+   * `count` distinct slots, each at its own wall time, all unplaceable for the
+   * same reason -- which is what a season with a null `timezone` produces for
+   * every row it holds.
+   *
+   * **The times have to differ.** This test used to build 40 rows that shared
+   * one `slot_date` and one `start_time` and differed only by `id`, and every
+   * reason string `resolveZonedInstant` writes embeds the date and the time --
+   * so the forty entries shared one reason, the `reason`-keyed bucketing
+   * collapsed them, and the assertion passed over a state the production path
+   * cannot reach. Two rows at the same second on the same pitch are not a
+   * season. Measured on the real shape: 5 slots produced 5 lines, 50 produced
+   * 50 over 8 KB, and a 400-slot season rendered tens of kilobytes into one
+   * `<p>`.
+   */
+  function slotsAtDistinctTimes(count) {
+    return Array.from({ length: count }, (_, i) =>
+      slotRow({
+        id: `s${i}`,
+        // 07:00 onward in one-minute steps: distinct dates AND distinct times,
+        // so nothing about the bucketing can be satisfied by a coincidence.
+        slot_date: `2026-${String(4 + Math.floor(i / 400)).padStart(2, '0')}-${String((Math.floor(i / 20) % 28) + 1).padStart(2, '0')}`,
+        start_time: `${String(7 + Math.floor((i % 20) / 4)).padStart(2, '0')}:${String((i % 4) * 15).padStart(2, '0')}:00`,
+        end_time: '23:30:00',
+      })
     );
+  }
+
+  it('collapses one cause shared by many slots into one line', () => {
+    const { unplaceableSlots } = partitionGameSlots(slotsAtDistinctTimes(40), {
+      ...REFERENCE,
+      timezone: null,
+    });
+    // The meta-assertion the old version lacked: the forty entries really do
+    // carry forty different reason strings, so bucketing on `reason` could not
+    // collapse them and this test is exercising the change rather than a
+    // coincidence.
+    expect(new Set(unplaceableSlots.map((entry) => entry.reason)).size).toBe(40);
+
     const message = describeUnplaceableSlots(unplaceableSlots);
     expect(message).toMatch(/^40 slots shown as TIME TBD \(SEASON_TIMEZONE_MISSING\)/);
-    expect(message.split('\u00b7')).toHaveLength(1);
+    expect(message.split('·')).toHaveLength(1);
+  });
+
+  it('does not grow with the size of the season', () => {
+    // The HIGH finding, as a number rather than a shape. One line per distinct
+    // code means the banner is bounded by the code registry, not by the slot
+    // count -- so five slots and four hundred differ only in the count they
+    // print.
+    const sizes = [5, 50, 400];
+    const messages = sizes.map((n) => {
+      const { unplaceableSlots } = partitionGameSlots(slotsAtDistinctTimes(n), {
+        ...REFERENCE,
+        timezone: null,
+      });
+      expect(unplaceableSlots).toHaveLength(n);
+      return describeUnplaceableSlots(unplaceableSlots);
+    });
+
+    for (const [index, message] of messages.entries()) {
+      expect(message.split('·'), `${sizes[index]} slots`).toHaveLength(1);
+      expect(message.length, `${sizes[index]} slots`).toBeLessThan(300);
+    }
+    // Identical once the count is normalised away: the 400-slot line says
+    // nothing the 5-slot line does not.
+    const normalised = messages.map((message) => message.replace(/^\d+ slots?/, 'N slots'));
+    expect(new Set(normalised).size).toBe(1);
+  });
+
+  it('names one example per cause and no more', () => {
+    const { unplaceableSlots } = partitionGameSlots(slotsAtDistinctTimes(50), {
+      ...REFERENCE,
+      timezone: null,
+    });
+    const message = describeUnplaceableSlots(unplaceableSlots);
+    // The per-slot detail belongs on the entries, which the grid and any
+    // future TIME TBD row read. The aggregate names one, so the line still
+    // points somewhere.
+    expect(message).toContain(`(first: ${unplaceableSlots[0].date} ${unplaceableSlots[0].time})`);
+    expect(message.match(/first:/g)).toHaveLength(1);
+    for (const entry of unplaceableSlots) {
+      expect(entry.date).toBeTruthy();
+      expect(entry.time).toBeTruthy();
+    }
+  });
+
+  it('has a slot-independent cause for every code the page can produce', () => {
+    // **Driven through `partitionGameSlots`, not asserted against a list.**
+    // Each case below is a real refusal the production path emits; a code with
+    // no cause of its own falls back to the entry's own `reason`, which
+    // carries that slot's date and time, so the check is simply that no line
+    // repeats the raw reason string.
+    /** @type {Array<{ code: string, rows: Array<Object>, timezone: string|null }>} */
+    const cases = [
+      { code: TIMING_REASON.SEASON_TIMEZONE_MISSING, rows: [slotRow()], timezone: null },
+      { code: TIMING_REASON.SEASON_TIMEZONE_UNKNOWN, rows: [slotRow()], timezone: 'Mars/Phobos' },
+      {
+        code: TIMING_REASON.WALL_TIME_NONEXISTENT,
+        rows: [slotRow({ slot_date: '2026-03-08', start_time: '02:30:00' })],
+        timezone: SEASON_TZ,
+      },
+      {
+        code: TIMING_REASON.WALL_TIME_UNREADABLE,
+        rows: [slotRow({ start_time: '99:99:99' })],
+        timezone: SEASON_TZ,
+      },
+      { code: 'SLOT_SHAPE_INVALID', rows: [slotRow({ id: null })], timezone: SEASON_TZ },
+    ];
+
+    for (const { code, rows, timezone } of cases) {
+      const { unplaceableSlots } = partitionGameSlots(rows, { ...REFERENCE, timezone });
+      // Meta-assertion: the case really does produce the code it claims. A
+      // typo here would otherwise test the generic arm five times over.
+      expect(
+        unplaceableSlots.map((entry) => entry.code),
+        String(code)
+      ).toEqual([code]);
+
+      const message = describeUnplaceableSlots(unplaceableSlots);
+      expect(message, String(code)).toContain(`(${code})`);
+      expect(
+        message,
+        `${code} has no cause of its own, so the banner falls back to the slot-specific reason and grows with the season`
+      ).not.toContain(unplaceableSlots[0].reason);
+    }
   });
 
   it('names each distinct cause once, and says nothing when there is none', () => {
@@ -331,5 +449,103 @@ describe('GAP-30: one unplaceable slot does not void the grid', () => {
         partitionGameSlots(good, { ...REFERENCE, timezone: SEASON_TZ }).unplaceableSlots
       )
     ).toBeNull();
+  });
+});
+
+/**
+ * The readiness banner's sentence.
+ *
+ * Both defects here were in the REPORTING layer, which is the layer #396's own
+ * twelve positive controls never perturbed: they all pushed on the composer,
+ * and the composer had been right for three reviews.
+ */
+describe('GAP-30 follow-up: the readiness banner says each thing once', () => {
+  const READY = {
+    referenceError: null,
+    teamCount: 8,
+    placeableSlotCount: 24,
+    unplaceableSlotCount: 0,
+    seasonClockLoading: false,
+  };
+
+  it('says nothing when there is nothing to say', () => {
+    expect(composeSchedulerReadinessMessage(READY)).toBeNull();
+  });
+
+  it('does not carry the unplaceable summary, which has its own line', () => {
+    // The finding: this sentence is rendered at `GameSchedulingPage.jsx`'s
+    // `applyError || statusMessage || schedulerReadinessMessage` arm, and the
+    // unplaceable summary is rendered again directly below it. Appending it
+    // here printed it twice in the common case -- no apply error, no status
+    // message.
+    const message = composeSchedulerReadinessMessage({
+      ...READY,
+      placeableSlotCount: 0,
+      unplaceableSlotCount: 40,
+    });
+    expect(message).toBeNull();
+    // And with a genuine second fact to report, the sentence carries that one
+    // and still not the summary.
+    const withNoTeams = composeSchedulerReadinessMessage({
+      ...READY,
+      teamCount: 0,
+      placeableSlotCount: 0,
+      unplaceableSlotCount: 40,
+    });
+    expect(withNoTeams).toBe('No generated teams are available for game scheduling.');
+    expect(withNoTeams).not.toMatch(/TIME TBD/);
+  });
+
+  it('still distinguishes "no slots at all" from "slots nothing can place"', () => {
+    // The arm that was already right, kept: 40 unplaceable slots are not the
+    // same fact as an organisation with no slots, and reporting the second for
+    // the first would send the operator to the wrong screen.
+    expect(
+      composeSchedulerReadinessMessage({ ...READY, teamCount: 0, placeableSlotCount: 0 })
+    ).toBe(
+      'No generated teams are available for game scheduling. · No game slots are available for this organization.'
+    );
+  });
+
+  it('joins several facts rather than reporting only the first', () => {
+    expect(
+      composeSchedulerReadinessMessage({
+        ...READY,
+        referenceError: 'Game schedule reference data could not be loaded.',
+        teamCount: 0,
+        placeableSlotCount: 0,
+      })
+    ).toBe(
+      'Game schedule reference data could not be loaded. · No generated teams are available for game scheduling. · No game slots are available for this organization.'
+    );
+  });
+
+  it('does not accuse a season of having no clock before the season has loaded', () => {
+    // `currentSeasonSetting` is null both when the season has no timezone and
+    // before OrganizationContext has answered, and the slot read is keyed only
+    // on the organisation -- so on the losing order every slot is unplaceable
+    // and the operator was told to set a timezone that was already set.
+    const loading = composeSchedulerReadinessMessage({
+      ...READY,
+      teamCount: 0,
+      placeableSlotCount: 0,
+      unplaceableSlotCount: 40,
+      seasonClockLoading: true,
+    });
+    expect(loading).toBe('Loading this season’s settings…');
+    expect(loading).not.toMatch(/No game slots/);
+    expect(loading).not.toMatch(/timezone/i);
+  });
+
+  it('still reports a failed reference read while the season is loading', () => {
+    // A read that already failed is a fact about now, not about a pending
+    // fetch, and suppressing it would be the opposite mistake.
+    expect(
+      composeSchedulerReadinessMessage({
+        ...READY,
+        referenceError: 'Game schedule reference data could not be loaded.',
+        seasonClockLoading: true,
+      })
+    ).toBe('Game schedule reference data could not be loaded. · Loading this season’s settings…');
   });
 });

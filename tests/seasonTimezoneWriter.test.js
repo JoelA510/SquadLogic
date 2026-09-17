@@ -154,6 +154,78 @@ describe('season_settings.timezone has a writer (GAP-30 precondition)', () => {
   });
 });
 
+/**
+ * No migration writes the column before the migration that adds it.
+ *
+ * `20251208000001_seed_data.sql` named `season_settings.timezone` in its
+ * INSERT, and `20251214000002` is what adds that column -- six days later in
+ * migration order. It was latent rather than broken because the seed's `DO`
+ * block returns at its fourth statement unless `squadlogic.seed_sample_data`
+ * is `on`, and **PL/pgSQL prepares a statement the first time it runs it**, so
+ * the migration applied cleanly everywhere while carrying a `42703` behind a
+ * guard nothing ever opened. The local harness passed it. pgTAP passed it.
+ *
+ * This is the cheap half of the answer -- it runs in CI with no Postgres. The
+ * expensive half is `scripts/dbharness/run.sh`, which now builds the set with
+ * the flag ON so the guarded path is executed rather than merely parsed.
+ *
+ * Scoped to this one column deliberately: a general "no migration references a
+ * column before it exists" check needs a schema model, and a check that
+ * pretends to that scope while implementing this one would be the larger
+ * falsely-perfect result CLAUDE.md §3 warns about.
+ */
+describe('season_settings.timezone is not written before it exists', () => {
+  const files = migrationFiles();
+
+  /** The first migration that ADDs the column. */
+  const addsColumn = files.findIndex(({ text }) =>
+    /ALTER\s+TABLE\s+(?:public\.)?season_settings\s+ADD\s+COLUMN(?:\s+IF\s+NOT\s+EXISTS)?\s+timezone\b/is.test(
+      text
+    )
+  );
+
+  it('finds the migration that adds the column at all', () => {
+    // The meta-assertion, and it is about the REGEX: a pattern that matched
+    // nothing would make the assertion below iterate over an empty prefix and
+    // pass while proving nothing.
+    expect(
+      addsColumn,
+      'no migration ALTERs season_settings to ADD COLUMN timezone'
+    ).toBeGreaterThan(-1);
+    expect(files[addsColumn].name).toMatch(/^20251214000002/);
+    // ...and there really are migrations before it, or the loop below has
+    // nothing to examine.
+    expect(addsColumn).toBeGreaterThan(0);
+  });
+
+  it('no earlier migration names the column in a write', () => {
+    const offenders = [];
+    for (const { name, text } of files.slice(0, addsColumn)) {
+      for (const match of text.matchAll(
+        /INSERT\s+INTO\s+(?:public\.)?season_settings\s*\(([^)]*)\)/gis
+      )) {
+        if (/\btimezone\b/i.test(match[1])) offenders.push(`${name} (insert column list)`);
+      }
+      for (const match of text.matchAll(/UPDATE\s+(?:public\.)?season_settings\b([\s\S]*?);/gi)) {
+        if (/\btimezone\s*=/i.test(match[1])) offenders.push(`${name} (update set)`);
+      }
+      // `on conflict ... do update set timezone = excluded.timezone` hangs off
+      // the INSERT, not off an `UPDATE` keyword, so neither loop above sees
+      // it -- and that is exactly the second half of the hunk this test
+      // exists for.
+      for (const match of text.matchAll(
+        /ON\s+CONFLICT\b[\s\S]*?DO\s+UPDATE\s+SET\b([\s\S]*?);/gi
+      )) {
+        if (/\btimezone\s*=/i.test(match[1])) offenders.push(`${name} (on conflict do update)`);
+      }
+    }
+    expect(
+      offenders,
+      `These migrations write season_settings.timezone before ${files[addsColumn].name} adds it. On a fresh database the chain aborts with 42703 the moment the statement is reached -- which, behind an opt-in guard, is not at apply time.`
+    ).toEqual([]);
+  });
+});
+
 describe('the mock client agrees with the real schema', () => {
   // LESSONS_LEARNED #13: the mock and the real schema drift apart silently, and
   // a column that exists only in one of them passes every test and fails in

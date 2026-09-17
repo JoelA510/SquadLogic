@@ -241,8 +241,7 @@ const UNPLACEABLE_CAUSE = Object.freeze({
     "this season's timezone is not a zone this browser can resolve",
   [TIMING_REASON.WALL_TIME_NONEXISTENT]:
     "daylight saving skips that hour in the season's timezone, so the stored time names no instant",
-  [TIMING_REASON.WALL_TIME_UNREADABLE]:
-    'the stored date or time is not a readable wall time',
+  [TIMING_REASON.WALL_TIME_UNREADABLE]: 'the stored date or time is not a readable wall time',
   SLOT_SHAPE_INVALID: 'the row is missing an id, a start/end, or a positive week index',
 });
 
@@ -473,9 +472,9 @@ export default function GameSchedulingPage() {
     Boolean(organizationLoading) ||
     Boolean(
       currentOrganization?.id &&
-        currentSeasonSetting &&
-        currentSeasonSetting.organization_id &&
-        currentSeasonSetting.organization_id !== currentOrganization.id
+      currentSeasonSetting &&
+      currentSeasonSetting.organization_id &&
+      currentSeasonSetting.organization_id !== currentOrganization.id
     );
   const canManageSchedule =
     permissions.includes(PERMISSIONS.MANAGE_SCHEDULE) ||

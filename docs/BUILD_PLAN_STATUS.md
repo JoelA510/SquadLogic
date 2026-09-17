@@ -315,3 +315,53 @@ effective dating on
 **follow-up PR before 8.5**, rather than being folded into 8.8 or left as
 recorded gaps. Both of 8.4's stated acceptance criteria were met without them;
 this closes 8.4 against its own prose as well.
+
+---
+
+## 6. CORRECTION to §5 — "zero frontend imports" was a hollow check
+
+**Recorded 2026-09-17, against §5's own verification, by the supervisor who wrote it.**
+
+§5 states, as a fact verified at the gate: *"The games engine is still imported by
+**zero** `frontend/` modules."* **That verification was hollow and the figure is
+wrong.** The check run was a grep for `@squadlogic/core/games`, `@/games` and
+`core/src/games` — **paths that do not exist in this repository.** It returned
+zero because the pattern was wrong, not because the imports were absent, and the
+zero was reported as evidence.
+
+That is the exact shape CLAUDE.md §3 names first — *a check that matches zero
+records is a loud failure, never a silent pass* — committed into the document the
+operator's gate decision rests on.
+
+**Measured: `frontend/src` carries 32 imports of `@squadlogic/core`.**
+
+What the corrected picture is, since the distinction still matters:
+
+- **The solver core remains at zero.** No `frontend/` module imports
+  `publication/`, `reserve/`, `scenario/`, `resolve/`, `freeze/`,
+  `externalImport/`, `feasibility/`, `fairness/`, `ruleEngine/`, `constraints/`,
+  `waivers/`, `timing/`, `availability/`, `placement/` or `attribution/`. The
+  spirit of the plan's claim holds **for the thing the gate is about.**
+- **The engine/app boundary is no longer hermetic**, and **Phase 8's own work is
+  what breached it**: `people/coachList.js` (8.2, #368, 2026-09-05),
+  `facility/index.js` (8.4 gap B, #391, 2026-09-16 — the same day the gate
+  figures were "re-verified"), and seven imports of `fieldAdmin/` across 8.4's
+  PRs.
+
+**Why this matters to the decision and not merely to the record.** The operator
+chose "close GAP-29/30 first, then decide" partly on the premise that the engine
+is unreachable from the app. It is *partially* reachable, it became more so
+during the very phase that asked the question, and the direction of travel is a
+fact the decision should weigh. The gate is **not** reopened by this correction —
+the solver core is still unwired and still unpersisted — but §5's premise list is
+amended rather than left standing.
+
+**Two further figures in §5 and in `PHASE_8_PLAN.md`'s table are stale**, measured
+the same day: the suite is **3,033 tests across 193 files** (the table's 2,165 was
+the 0.1-7.3 engine's own count at `06a1b97`), and the engine measures **172 files
+/ 64,118 lines** against the table's 161 / 58,199.
+
+**The rule this earns, recorded because the supervisor has now made this error in
+the same phase that collected it four times from agents:** a grep that returns
+zero proves nothing until the pattern is shown to match something. Before
+reporting a zero as evidence, run the pattern against a case it *must* hit.

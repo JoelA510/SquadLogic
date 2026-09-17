@@ -810,8 +810,9 @@ harvest(
 );
 harvest(
   'resolveZonedInstant(unreadable wall time)',
-  // `24:00:00` is a value Postgres `time` legally stores.
-  resolveZonedInstant({ date: '2026-11-07', time: '24:00:00', timeZone: 'America/New_York' })
+  // `24:00:00` composes -- it is midnight ending the day, which Postgres `time`
+  // legally stores. `24:30` is the hour-24 value that names no instant.
+  resolveZonedInstant({ date: '2026-11-07', time: '24:30:00', timeZone: 'America/New_York' })
 );
 harvest(
   'resolveZonedInstant(daylight saving skips the hour)',

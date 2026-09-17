@@ -32,6 +32,7 @@ import { useFieldClosures } from '../hooks/useFieldClosures.js';
 import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
 import { todayIso } from '../utils/today.js';
 import { isFieldOfferableOn, venueOf, venueRegistry } from '../utils/fieldLifecycle.js';
+import { logger } from '../lib/logger.js';
 
 function normalizeAssignmentSource(source) {
   return source === 'manual' || source === 'locked' ? 'manual' : 'auto';
@@ -298,20 +299,45 @@ export default function GameSchedulingPage() {
         if (!isMounted) return;
         if (fieldError) throw fieldError;
         if (slotError) throw slotError;
+
+        // **The one deploy order this read cannot survive, handled by name.**
+        // If the SPA ships ahead of migration 20260911000000 the column does
+        // not exist and PostgREST answers 42703 -- which, treated as fatal
+        // below, takes down the whole reference load and renders the error
+        // state for a page that worked yesterday. A venue with no window IS
+        // the pre-migration world, so the fallback re-reads the ids alone and
+        // every site reads as unbounded. Every OTHER venue error stays fatal:
+        // swallowing them would hide every pitch instead, which looks
+        // different and is the same defect.
+        /** @type {Array<{ id: any, effective_to?: any }>|null} */
+        let venues = venueRows;
+        let venueFault = venueError;
+        if (venueFault?.code === '42703') {
+          logger.warn(
+            'locations.effective_to is absent, so venue retirement is not migrated yet and every site reads as unbounded'
+          );
+          const retry = await supabase
+            .from('locations')
+            .select('id')
+            .eq('organization_id', currentOrganization.id);
+          if (!isMounted) return;
+          venues = retry.data;
+          venueFault = retry.error;
+        }
         // **A failed venue read is an ERROR, not an empty registry.** The 8.4
         // PR 3 review found `useFields().error` being dropped, which left a
         // clean-looking grid on a failed read; swallowing this one would hide
         // every pitch instead, which looks different and is the same defect.
-        if (venueError) throw venueError;
+        if (venueFault) throw venueFault;
 
         setAllFields(fieldRows ?? []);
         // The two halves of "may the scheduler still offer this" live in one
         // testable producer, because the reading is the point of the change and
         // an inline predicate on a 1000-line page is a reading nothing can pin.
         const asOf = todayIso();
-        const venues = venueRegistry(venueRows ?? []);
+        const venuesById = venueRegistry(venues ?? []);
         setFields(
-          (fieldRows ?? []).filter((row) => isFieldOfferableOn(row, asOf, venueOf(row, venues)))
+          (fieldRows ?? []).filter((row) => isFieldOfferableOn(row, asOf, venueOf(row, venuesById)))
         );
         setGameSlotRows(slotRows ?? []);
       } catch (err) {

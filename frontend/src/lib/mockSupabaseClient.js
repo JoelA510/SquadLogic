@@ -3092,6 +3092,23 @@ export const mockSupabase = {
       // wrong code -- the mock disagreeing with the database about WHY it
       // refused, which the scenario table pins with `expect.sqlstate`.
       if (name === 'admin_retire_location' || name === 'admin_unretire_location') {
+        // **The DATE is refused before the lookup, because that is the order
+        // the SQL takes** (20260911000000: the `p_effective_to IS NULL` raise
+        // precedes the `SELECT ... FOR UPDATE`). The mock had the lookup
+        // first, so a call with an unknown id AND a null date answered P0002
+        // here and 22023 in Postgres -- two arms disagreeing on an input the
+        // scenario table does not vary in combination. Caught by
+        // /code-review at high.
+        if (name === 'admin_retire_location' && !p.p_effective_to) {
+          return {
+            data: null,
+            error: {
+              code: '22023',
+              message:
+                'p_effective_to is required; retiring with no end date is a deletion, not a retirement',
+            },
+          };
+        }
         const node = (db.locations || []).find(
           (item) =>
             String(item.id) === String(p.p_location_id) &&
@@ -3127,16 +3144,6 @@ export const mockSupabase = {
           return { data: { retired: false, contained, location: node }, error: null };
         }
 
-        if (!p.p_effective_to) {
-          return {
-            data: null,
-            error: {
-              code: '22023',
-              message:
-                'p_effective_to is required; retiring with no end date is a deletion, not a retirement',
-            },
-          };
-        }
         const effectiveTo = String(p.p_effective_to);
         // **The venue-scoped question, asked of the SHARED producer.** Not a
         // second enumerator: the scope is a parameter, so a correction to who
@@ -3187,7 +3194,10 @@ export const mockSupabase = {
         // **Only the venue's own row.** No date is copied down and no child
         // flag is flipped; containment is resolved on read. An implementation
         // that pushed the date onto the children would pass every other
-        // assertion in the suite and fail `tests/estateLifecycleRpcs.test.js`.
+        // assertion in the suite and fail the `expect.childDates` cases in
+        // `tests/fieldLifecycleScenarios.test.js`. (This named a file that has
+        // never existed -- a guard cited as coverage that was not there.
+        // Caught by /code-review at high.)
         Object.assign(node, {
           effective_to: effectiveTo,
           updated_at: new Date().toISOString(),
@@ -3216,6 +3226,17 @@ export const mockSupabase = {
       }
 
       if (name === 'admin_retire_field_subunit' || name === 'admin_unretire_field_subunit') {
+        // The date before the lookup, as above and for the same reason.
+        if (name === 'admin_retire_field_subunit' && !p.p_effective_to) {
+          return {
+            data: null,
+            error: {
+              code: '22023',
+              message:
+                'p_effective_to is required; retiring with no end date is a deletion, not a retirement',
+            },
+          };
+        }
         const node = (db.field_subunits || []).find(
           (item) =>
             String(item.id) === String(p.p_field_subunit_id) &&
@@ -3243,16 +3264,6 @@ export const mockSupabase = {
           return { data: { retired: false, field_subunit: node }, error: null };
         }
 
-        if (!p.p_effective_to) {
-          return {
-            data: null,
-            error: {
-              code: '22023',
-              message:
-                'p_effective_to is required; retiring with no end date is a deletion, not a retirement',
-            },
-          };
-        }
         const effectiveTo = String(p.p_effective_to);
         // **Narrower than the parent pitch.** Only rows that NAME this
         // sub-surface. A game on the full pitch is not a booking on its half,

@@ -614,12 +614,23 @@ NEEDLES
       else
         echo "  | (checked) all six lifecycle objects this migration added are gone"
       fi
-      v_cols=$(psql_cmd "SELECT coalesce(string_agg(table_name, ',' ORDER BY table_name), 'none')
-      FROM information_schema.columns
-      WHERE table_schema = 'public' AND column_name = 'effective_to'
-        AND table_name IN ('locations','field_subunits')" 2>/dev/null || echo "QUERY-FAILED")
-      if [ "$v_cols" != "none" ]; then
-        echo "FAIL revert ${id}: effective_to survived on ${v_cols}"
+      # **Both halves, because the claim names both.** This printed "and
+      # fields.effective_to is untouched" while querying only the two tables
+      # this migration adds -- a revert that also dropped `fields.effective_to`,
+      # destroying every retirement 20260906000000 recorded, would have printed
+      # that reassurance and exited green. Caught by /code-review at high. The
+      # verdict is one string so a survivor and a casualty are distinguishable.
+      v_cols=$(psql_cmd "SELECT
+        coalesce((SELECT string_agg(table_name, ',' ORDER BY table_name)
+                    FROM information_schema.columns
+                   WHERE table_schema = 'public' AND column_name = 'effective_to'
+                     AND table_name IN ('locations','field_subunits')), 'none')
+        || '/' ||
+        (SELECT count(*)::text FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'fields'
+            AND column_name = 'effective_to')" 2>/dev/null || echo "QUERY-FAILED")
+      if [ "$v_cols" != "none/1" ]; then
+        echo "FAIL revert ${id}: expected none/1 (both new columns gone, fields.effective_to intact), got ${v_cols}"
         STATUS=1
       else
         echo "  | (checked) both effective_to columns are gone, and fields.effective_to is untouched"

@@ -182,6 +182,25 @@ const PLANTS = [
   },
   // An unrecognised scope answered with an empty set rather than thrown: a
   // guard reporting "nothing is booked here" because its scope was misspelled.
+  // **The two unretire arms had no prover at all**, and the sub-surface case
+  // that was supposed to cover one of them seeded the VENUE's date -- so the
+  // node under test started NULL, `expect.effectiveTo: null` held whatever the
+  // RPC did, and a complete no-op kept all 70 cases green. The fixture is
+  // fixed; these are what stop it drifting back.
+  {
+    label: 'the sub-surface unretire does not clear the date',
+    find: `          Object.assign(node, { effective_to: null, updated_at: new Date().toISOString() });
+          audit('field_subunit', node.id, 'admin_unretire_field_subunit', {`,
+    replace: `          Object.assign(node, { updated_at: new Date().toISOString() });
+          audit('field_subunit', node.id, 'admin_unretire_field_subunit', {`,
+  },
+  {
+    label: 'the venue unretire does not clear the date',
+    find: `          Object.assign(node, { effective_to: null, updated_at: new Date().toISOString() });
+          audit('location', node.id, 'admin_unretire_location', {`,
+    replace: `          Object.assign(node, { updated_at: new Date().toISOString() });
+          audit('location', node.id, 'admin_unretire_location', {`,
+  },
   {
     // **Scored NOT CAUGHT on its first sweep, and that was the finding.** No
     // RPC arm can produce an unknown scope -- every one passes a literal --

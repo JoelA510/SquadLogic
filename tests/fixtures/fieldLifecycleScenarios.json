@@ -1425,10 +1425,10 @@
     },
     {
       "id": "subunit-unretire-clears-the-date",
-      "why": "Clears field_subunits.effective_to and touches nothing else.",
+      "why": "Clears field_subunits.effective_to and touches nothing else. **`subunitEffectiveTo`, not `effectiveTo`.** This case was written with `before.effectiveTo: 25`, which both runners apply to the VENUE -- so the node under test started NULL and `expect.effectiveTo: null` held whatever the RPC did. A no-op unretire kept all 70 mock cases green. Caught by /code-review at high; the seed now dates the node the call is about.",
       "rpc": "admin_unretire_field_subunit",
       "before": {
-        "effectiveTo": 25
+        "subunitEffectiveTo": 25
       },
       "args": {},
       "expect": {

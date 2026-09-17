@@ -636,12 +636,23 @@ def emit_estate(scenario, index):
     if 'childDates' in expect:
         # **Containment, not copy-down.** An implementation that pushed the
         # venue's date onto its fields passes every count above and fails here.
+        #
+        # **The venue is re-resolved by name, like `read_back` above.** A
+        # `target: "missing"` case CLOBBERS `v_est_venue`, so counting children
+        # `WHERE f.location_id = v_est_venue` counted the children of a venue
+        # that does not exist and could only ever return 0 -- `childDates: 0`
+        # passing vacuously on exactly the cases that corrupt the variable,
+        # while the JS runner (which keeps `ids.venue`) really checked it. Two
+        # runners silently proving different things. Caught by /code-review.
+        venue_ref = (f"(SELECT l2.id FROM public.locations l2"
+                     f" WHERE l2.name = 'Estate Scenario {n}')"
+                     if scenario.get('target') == 'missing' else 'v_est_venue')
         out += [
             '  SELECT (SELECT count(*) FROM public.fields f'
-            f" WHERE f.location_id = v_est_venue AND f.effective_to IS NOT NULL)",
+            f" WHERE f.location_id = {venue_ref} AND f.effective_to IS NOT NULL)",
             '       + (SELECT count(*) FROM public.field_subunits su'
             '          JOIN public.fields f2 ON f2.id = su.field_id'
-            f"          WHERE f2.location_id = v_est_venue AND su.effective_to IS NOT NULL)",
+            f"          WHERE f2.location_id = {venue_ref} AND su.effective_to IS NOT NULL)",
             '    INTO v_n;',
             f"  IF v_n <> {int(expect['childDates'])} THEN",
             f"    RAISE EXCEPTION '{sid}: expected {int(expect['childDates'])} child node(s)"

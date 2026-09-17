@@ -373,12 +373,18 @@ Given('an organization has multiple fields configured', async ({ page }) => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
 
+    // **`location_id` is not decoration.** 20260911000000 made the scheduler
+    // resolve a pitch's venue before offering it, and a field with no venue
+    // is a failed read rather than an unbounded one -- so a row seeded
+    // without one silently vanishes from the list with no error. `location`
+    // here is free text and is not the foreign key. Caught by /code-review.
     db.fields = db.fields || [];
     db.fields.push(
       {
         id: 'field-1',
         name: 'Main Field',
         location: 'Central Park',
+        location_id: 'loc-1',
         organization_id: orgId,
         is_active: true,
         surface: 'grass',
@@ -388,6 +394,7 @@ Given('an organization has multiple fields configured', async ({ page }) => {
         id: 'field-2',
         name: 'Practice Field A',
         location: 'Central Park',
+        location_id: 'loc-1',
         organization_id: orgId,
         is_active: true,
         surface: 'turf',

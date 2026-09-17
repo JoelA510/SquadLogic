@@ -90,11 +90,32 @@ Given('a set of registered players and available field slots', async ({ page }) 
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
 
-    // Seed fields
+    // Seed fields.
+    //
+    // **`location_id` is not decoration.** 20260911000000 made the scheduler
+    // resolve a pitch's venue before offering it, and a field with no venue
+    // is a failed read rather than an unbounded one -- so a row seeded
+    // without one silently vanishes from the list with no error. Nothing here
+    // asserts on that list today; the next fixture that does would have spent
+    // an afternoon on it. Caught by /code-review at high.
     db.fields = db.fields || [];
     db.fields.push(
-      { id: 'field-1', name: 'Main Stadium', organization_id: orgId, is_active: true, priority: 1 },
-      { id: 'field-2', name: 'Practice Turf', organization_id: orgId, is_active: true, priority: 2 }
+      {
+        id: 'field-1',
+        name: 'Main Stadium',
+        organization_id: orgId,
+        location_id: 'loc-1',
+        is_active: true,
+        priority: 1,
+      },
+      {
+        id: 'field-2',
+        name: 'Practice Turf',
+        organization_id: orgId,
+        location_id: 'loc-1',
+        is_active: true,
+        priority: 2,
+      }
     );
 
     // Seed practice slots

@@ -3,6 +3,7 @@ import {
   buildDateTime,
   composeSchedulerReadinessMessage,
   describeUnplaceableSlots,
+  isSeasonClockLoading,
   normalizeGameSlot,
   partitionGameSlots,
 } from '../frontend/src/pages/GameSchedulingPage.jsx';
@@ -368,26 +369,72 @@ describe('GAP-30: one unplaceable slot does not void the grid', () => {
       expect(message.split('·'), `${sizes[index]} slots`).toHaveLength(1);
       expect(message.length, `${sizes[index]} slots`).toBeLessThan(300);
     }
-    // Identical once the count is normalised away: the 400-slot line says
-    // nothing the 5-slot line does not.
-    const normalised = messages.map((message) => message.replace(/^\d+ slots?/, 'N slots'));
+    // Identical once the counts are normalised away: the 400-slot line says
+    // nothing structural the 5-slot line does not, and in particular it does
+    // not carry 395 more wall times.
+    const normalised = messages.map((message) =>
+      message.replace(/^\d+ slots?/, 'N slots').replace(/and \d+ more/, 'and N more')
+    );
     expect(new Set(normalised).size).toBe(1);
   });
 
-  it('names one example per cause and no more', () => {
-    const { unplaceableSlots } = partitionGameSlots(slotsAtDistinctTimes(50), {
+  it('names a small bucket in full and counts the remainder of a large one', () => {
+    // The trade-off, stated. Three DST casualties in a 400-slot season are
+    // useless as "3 slots, here is one of them", and 400 named slots are the
+    // defect this whole change is about. Up to three are named either way.
+    const wallTimeOf = (entry) => `${entry.date} ${entry.time}`;
+
+    const small = partitionGameSlots(slotsAtDistinctTimes(3), {
       ...REFERENCE,
       timezone: null,
-    });
-    const message = describeUnplaceableSlots(unplaceableSlots);
-    // The per-slot detail belongs on the entries, which the grid and any
-    // future TIME TBD row read. The aggregate names one, so the line still
-    // points somewhere.
-    expect(message).toContain(`(first: ${unplaceableSlots[0].date} ${unplaceableSlots[0].time})`);
-    expect(message.match(/first:/g)).toHaveLength(1);
-    for (const entry of unplaceableSlots) {
+    }).unplaceableSlots;
+    const smallMessage = describeUnplaceableSlots(small);
+    for (const entry of small) {
+      expect(smallMessage).toContain(wallTimeOf(entry));
+    }
+    expect(smallMessage).not.toMatch(/more/);
+
+    const large = partitionGameSlots(slotsAtDistinctTimes(50), {
+      ...REFERENCE,
+      timezone: null,
+    }).unplaceableSlots;
+    const largeMessage = describeUnplaceableSlots(large);
+    expect(largeMessage).toContain(`(${large.slice(0, 3).map(wallTimeOf).join(', ')} and 47 more)`);
+    // ...and only three, so the line cannot grow with the bucket.
+    for (const entry of large.slice(3)) {
+      expect(largeMessage).not.toContain(wallTimeOf(entry));
+    }
+
+    // Every entry still carries its own date and time, which is where a TIME
+    // TBD row would read them from.
+    for (const entry of large) {
       expect(entry.date).toBeTruthy();
       expect(entry.time).toBeTruthy();
+    }
+  });
+
+  it('keeps a code it has never heard of bounded, and off the slot-specific reason', () => {
+    // **The structural half, and the one that has to hold without
+    // maintenance.** A refusal code added to `timing/reasonCodes.js` later
+    // will not be in the page's cause table, and falling back to the entry's
+    // own `reason` -- which embeds that slot's date and time -- would
+    // reintroduce the unbounded banner with every test still green. Forged
+    // entries here on purpose: the production path cannot yet produce such a
+    // code, and the point is what happens the day it can.
+    const forged = Array.from({ length: 200 }, (_, i) => ({
+      id: `s${i}`,
+      date: '2026-11-07',
+      time: `${String(7 + (i % 12)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}:00`,
+      code: 'SEASON_WINDOW_EXCLUDED',
+      reason: `slot time 2026-11-07 ${i}:00 falls outside the season window`,
+    }));
+    const message = describeUnplaceableSlots(forged);
+
+    expect(message.split('·')).toHaveLength(1);
+    expect(message).toContain('(SEASON_WINDOW_EXCLUDED)');
+    expect(message.length).toBeLessThan(300);
+    for (const entry of forged) {
+      expect(message).not.toContain(entry.reason);
     }
   });
 
@@ -547,5 +594,97 @@ describe('GAP-30 follow-up: the readiness banner says each thing once', () => {
         seasonClockLoading: true,
       })
     ).toBe('Game schedule reference data could not be loaded. · Loading this season’s settings…');
+  });
+});
+
+/**
+ * `isSeasonClockLoading`, the input the banner's suppression rests on.
+ *
+ * Pulled out of the component because all three of its cases are races, and a
+ * race is not something a render test reproduces on demand. Stating the
+ * conditions is what makes them checkable.
+ */
+describe('GAP-30 follow-up: "not loaded yet" is not "no clock"', () => {
+  const ORG = { id: 'org-a' };
+  const SEASON = { id: 'season-a', organization_id: 'org-a', timezone: 'America/New_York' };
+
+  it('is false once the season row for this organisation is in hand', () => {
+    expect(
+      isSeasonClockLoading({
+        organizationLoading: false,
+        seasonSettingsLoading: false,
+        currentOrganization: ORG,
+        currentSeasonSetting: SEASON,
+      })
+    ).toBe(false);
+  });
+
+  it('is false for an organisation whose season genuinely has no clock', () => {
+    // The state the banner exists to report. If this read as "loading" the
+    // fix would have silenced the message it was written to keep.
+    expect(
+      isSeasonClockLoading({
+        organizationLoading: false,
+        seasonSettingsLoading: false,
+        currentOrganization: ORG,
+        currentSeasonSetting: { ...SEASON, timezone: null },
+      })
+    ).toBe(false);
+    // ...including an organisation with no season row at all.
+    expect(
+      isSeasonClockLoading({
+        organizationLoading: false,
+        seasonSettingsLoading: false,
+        currentOrganization: ORG,
+        currentSeasonSetting: null,
+      })
+    ).toBe(false);
+  });
+
+  it('is true during the first organisation fetch', () => {
+    expect(
+      isSeasonClockLoading({
+        organizationLoading: true,
+        seasonSettingsLoading: false,
+        currentOrganization: null,
+        currentSeasonSetting: null,
+      })
+    ).toBe(true);
+  });
+
+  it('is true while a switch re-reads the seasons, in BOTH directions', () => {
+    // Leaving an organisation that HAD a season: the stale row is detectable.
+    expect(
+      isSeasonClockLoading({
+        organizationLoading: false,
+        seasonSettingsLoading: true,
+        currentOrganization: { id: 'org-b' },
+        currentSeasonSetting: SEASON,
+      })
+    ).toBe(true);
+    // Leaving one that had NONE: `currentSeasonSetting` is null, so there is
+    // no stale row to compare and only the flag can tell. This is the order
+    // the first version of the guard missed.
+    expect(
+      isSeasonClockLoading({
+        organizationLoading: false,
+        seasonSettingsLoading: true,
+        currentOrganization: { id: 'org-b' },
+        currentSeasonSetting: null,
+      })
+    ).toBe(true);
+  });
+
+  it('is true when the held season belongs to another organisation', () => {
+    // Derived from the data rather than from a flag, so it holds even if some
+    // future writer sets `currentSeasonSetting` outside `fetchSeasonsForOrg`.
+    expect(
+      isSeasonClockLoading({
+        organizationLoading: false,
+        seasonSettingsLoading: false,
+        currentOrganization: { id: 'org-b' },
+        currentSeasonSetting: SEASON,
+      })
+    ).toBe(true);
   });
 });

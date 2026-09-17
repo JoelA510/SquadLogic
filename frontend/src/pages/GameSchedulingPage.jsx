@@ -228,11 +228,19 @@ export function partitionGameSlots(rows, { fieldById, divisionById, timezone }) 
  * whole bucket; the per-slot detail stays on the entries, where the grid and a
  * future TIME TBD row can read it.
  *
- * Keyed by every code `partitionGameSlots` can emit. `WALL_TIME_AMBIGUOUS` is
- * deliberately absent: it never refuses, so it never reaches an unplaceable
- * entry. `tests/gameSchedulingSeasonClock.test.js` enumerates the codes from
- * the registry and requires each to be covered here, so a new refusal code
- * cannot quietly fall through to the generic arm.
+ * Keyed by every code `partitionGameSlots` can emit today.
+ * `WALL_TIME_AMBIGUOUS` is deliberately absent: it never refuses, so it never
+ * reaches an unplaceable entry.
+ *
+ * **A code this table does not carry gets {@link UNPLACEABLE_CAUSE_UNKNOWN},
+ * not the slot's own `reason`.** That is the structural half of the fix and it
+ * matters more than the table: a future refusal code added to
+ * `timing/reasonCodes.js` would otherwise fall through to a per-slot string
+ * and reintroduce the unbounded banner, silently, with every test still
+ * green. Boundedness must not depend on this table being kept up to date --
+ * the table only makes the line more useful, and
+ * `tests/gameSchedulingSeasonClock.test.js` drives an unregistered code
+ * through to prove the fallback holds.
  */
 const UNPLACEABLE_CAUSE = Object.freeze({
   [TIMING_REASON.SEASON_TIMEZONE_MISSING]:
@@ -244,6 +252,16 @@ const UNPLACEABLE_CAUSE = Object.freeze({
   [TIMING_REASON.WALL_TIME_UNREADABLE]: 'the stored date or time is not a readable wall time',
   SLOT_SHAPE_INVALID: 'the row is missing an id, a start/end, or a positive week index',
 });
+
+/**
+ * What a code with no entry above says. Deliberately generic AND deliberately
+ * slot-independent -- see the note on {@link UNPLACEABLE_CAUSE}. The code
+ * itself is printed alongside it, and `code` is the contract.
+ */
+const UNPLACEABLE_CAUSE_UNKNOWN = 'this slot could not be placed on the season clock';
+
+/** How many slots a bucket names before it summarises the rest. */
+const UNPLACEABLE_EXAMPLES = 3;
 
 /**
  * One line per distinct **reason code**, with a count, so a hundred slots
@@ -258,34 +276,89 @@ const UNPLACEABLE_CAUSE = Object.freeze({
  * produced 50 over 8 KB, and a season whose `timezone` is null makes **every**
  * row unplaceable, so a 400-slot season rendered tens of kilobytes of text into
  * a single `<p>`. `code` is the contract everywhere else in this codebase and
- * it is the contract here; the date and time stay on the entry, which is the
- * detail payload, and one example is named per bucket so the line still points
- * somewhere without growing with the season.
+ * it is the contract here.
+ *
+ * ## What the operator loses, and what is done about it
+ *
+ * On `main` every unplaceable slot was named, once, in its own sentence --
+ * useless at 400 and genuinely useful at 3. `partitionGameSlots`'s contract
+ * says these slots get no grid row and "the banner is where they exist", so
+ * collapsing to one line per code would leave three DST casualties in a
+ * 400-slot season with one of the three identified and no way to find the
+ * others. So a bucket names up to {@link UNPLACEABLE_EXAMPLES} slots and then
+ * counts the remainder: the small case is named in full, the catastrophic case
+ * stays bounded, and the entries keep every date and time for a TIME TBD row
+ * to render when one exists.
  *
  * @param {Array<{ code?: string, reason?: string, date?: string|null, time?: string|null }>} entries
  * @returns {string|null}
  */
 export function describeUnplaceableSlots(entries) {
   if (!entries || entries.length === 0) return null;
-  /** @type {Map<string, { count: number, example: any }>} */
+  /** @type {Map<string, { count: number, examples: Array<string> }>} */
   const byCode = new Map();
   for (const entry of entries) {
     const code = entry?.code ?? 'SLOT_SHAPE_INVALID';
-    const bucket = byCode.get(code) ?? { count: 0, example: entry };
+    const bucket = byCode.get(code) ?? { count: 0, examples: [] };
     bucket.count += 1;
+    if (bucket.examples.length < UNPLACEABLE_EXAMPLES) {
+      const when = [entry?.date, entry?.time].filter(Boolean).join(' ');
+      if (when) bucket.examples.push(when);
+    }
     byCode.set(code, bucket);
   }
   return [...byCode.entries()]
-    .map(([code, { count, example }]) => {
-      // A code with no entry in the table above still says something true --
-      // its own first reason -- rather than nothing. Bounded either way,
-      // because it is one line per code and not one per slot.
-      const cause = UNPLACEABLE_CAUSE[code] ?? example?.reason ?? 'the slot could not be placed.';
-      const when = [example?.date, example?.time].filter(Boolean).join(' ');
-      const firstly = when ? ` (first: ${when})` : '';
-      return `${count} slot${count === 1 ? '' : 's'} shown as TIME TBD (${code}): ${cause}${firstly}`;
+    .map(([code, { count, examples }]) => {
+      const cause = UNPLACEABLE_CAUSE[code] ?? UNPLACEABLE_CAUSE_UNKNOWN;
+      const remainder = count - examples.length;
+      const named = examples.length
+        ? ` (${examples.join(', ')}${remainder > 0 ? ` and ${remainder} more` : ''})`
+        : '';
+      return `${count} slot${count === 1 ? '' : 's'} shown as TIME TBD (${code}): ${cause}${named}`;
     })
     .join(' \u00b7 ');
+}
+
+/**
+ * Is the season's clock simply not known yet, as opposed to absent?
+ *
+ * `currentSeasonSetting?.timezone` is `undefined` for three different reasons
+ * and only one of them is "this season has no clock". Exported and pure
+ * because the other two are races, and a race is not something a render test
+ * reliably reproduces -- the conditions have to be stateable to be checkable.
+ *
+ * 1. `OrganizationContext`'s first fetch has not answered. `loading` covers it.
+ * 2. `switchOrganization()` swaps the organization synchronously and then
+ *    awaits the season read WITHOUT raising `loading` -- deliberately, since
+ *    `loading` gates `ProtectedRoute` and would unmount the page.
+ *    `seasonSettingsLoading` is the narrow flag for exactly that window, and
+ *    it is the arm that covers the case where the organization being left had
+ *    no season at all, so there is no stale row to detect a mismatch on.
+ * 3. The held row belongs to the organization just left. Redundant with (2)
+ *    today and kept anyway: it is derived from the data rather than from a
+ *    flag, so it still holds if a future writer sets `currentSeasonSetting`
+ *    without going through `fetchSeasonsForOrg`.
+ *
+ * @param {Object} input
+ * @param {boolean} [input.organizationLoading]
+ * @param {boolean} [input.seasonSettingsLoading]
+ * @param {{ id?: any }|null|undefined} input.currentOrganization
+ * @param {{ organization_id?: any, [k: string]: any }|null|undefined} input.currentSeasonSetting
+ * @returns {boolean}
+ */
+export function isSeasonClockLoading({
+  organizationLoading,
+  seasonSettingsLoading,
+  currentOrganization,
+  currentSeasonSetting,
+}) {
+  if (organizationLoading || seasonSettingsLoading) return true;
+  return Boolean(
+    currentOrganization?.id &&
+    currentSeasonSetting &&
+    currentSeasonSetting.organization_id &&
+    currentSeasonSetting.organization_id !== currentOrganization.id
+  );
 }
 
 /**
@@ -427,6 +500,7 @@ export default function GameSchedulingPage() {
     currentSeasonSetting,
     permissions = [],
     loading: organizationLoading,
+    seasonSettingsLoading,
   } = useOrganization();
   const [localAssignments, setLocalAssignments] = useState([]);
   const [reviewAssignments, setReviewAssignments] = useState(null);
@@ -455,27 +529,18 @@ export default function GameSchedulingPage() {
   const [activeGame, setActiveGame] = useState(null);
 
   const timezone = currentSeasonSetting?.timezone;
-  // **"No clock yet" and "no clock at all" are different facts.** `timezone` is
-  // `undefined` for both, and the slot read below is keyed only on
-  // `currentOrganization?.id`, so the season row and the slots resolve in
-  // whichever order the network gives them. On the losing order every slot is
-  // unplaceable with `SEASON_TIMEZONE_MISSING` and the operator is told to set
-  // a timezone the season already has.
-  //
-  // Two states count as "still loading", and the second is not the initial
-  // fetch: `switchOrganization()` swaps `currentOrganization` immediately and
-  // re-fetches the seasons WITHOUT raising `loading`, so between those two the
-  // held season row belongs to the organisation we just left. Reading a clock
-  // off another organisation's season is worse than reading none, so an
-  // organisation mismatch is "not loaded yet" too.
-  const seasonClockLoading =
-    Boolean(organizationLoading) ||
-    Boolean(
-      currentOrganization?.id &&
-      currentSeasonSetting &&
-      currentSeasonSetting.organization_id &&
-      currentSeasonSetting.organization_id !== currentOrganization.id
-    );
+  // **"No clock yet" and "no clock at all" are different facts**, and the slot
+  // read below is keyed only on `currentOrganization?.id`, so the season row
+  // and the slots resolve in whichever order the network gives them. On the
+  // losing order every slot is unplaceable with `SEASON_TIMEZONE_MISSING` and
+  // the operator is told to set a timezone the season already has.
+  // `isSeasonClockLoading` states the three ways that happens.
+  const seasonClockLoading = isSeasonClockLoading({
+    organizationLoading,
+    seasonSettingsLoading,
+    currentOrganization,
+    currentSeasonSetting,
+  });
   const canManageSchedule =
     permissions.includes(PERMISSIONS.MANAGE_SCHEDULE) ||
     permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);

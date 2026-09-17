@@ -246,8 +246,8 @@ fi
 # Truncated at the seed migration rather than built to head: later migrations
 # reshape `season_settings`, so a count taken at head would be measuring their
 # behaviour and not the seed's.
-seed_opt_in_build() { # on|off
-  local setting="$1" applied=0 reached=0 m
+seed_opt_in_build() { # on|off  [full]
+  local setting="$1" scope="${2:-truncated}" applied=0 reached=0 m
   fresh_db || return 1
   if [ "$setting" = "on" ]; then
     if ! as_pg "psql -v ON_ERROR_STOP=1 -h ~/sock -U postgres -q -c \"ALTER DATABASE $DB SET squadlogic.seed_sample_data = 'on'\"" \
@@ -262,13 +262,23 @@ seed_opt_in_build() { # on|off
       return 1
     fi
     applied=$((applied + 1))
-    if [[ "$(basename "$m")" == 20251208000001* ]]; then reached=1; break; fi
+    if [[ "$(basename "$m")" == 20251208000001* ]]; then
+      reached=1
+      [ "$scope" = "truncated" ] && break
+    fi
   done
   # Meta-assertion: a glob that matched nothing, or a renamed seed migration,
   # would build a database the counts below then pass against for the wrong
   # reason -- the empty-database shape `apply_all` already guards.
   if [ "$reached" -ne 1 ]; then
     echo "FAIL: no 20251208000001* in the migration set, so the seed opt-in was never reached (applied ${applied})"
+    return 1
+  fi
+  # Its twin for the full build: `apply_all` refuses a set of under 100, and a
+  # loop that stopped early here would report a clean full run having built a
+  # fraction of the schema.
+  if [ "$scope" = "full" ] && [ "$applied" -lt 100 ]; then
+    echo "FAIL: the seeded full build applied only ${applied} migrations"
     return 1
   fi
   return 0
@@ -302,6 +312,41 @@ else
     else
       echo "  | (checked) with the flag on the seed migration applies and inserts its sample season"
     fi
+  fi
+
+  # **And the whole chain, seeded -- which does NOT apply, and that is the
+  # finding rather than an omission.**
+  #
+  # The two builds above stop at the seed, so between them they prove the
+  # guard works and that the seed's own statements apply. They do not prove
+  # the chain survives the rows. Running it does, and it does not: the sample
+  # season predates multi-tenancy entirely -- 31 INSERTs, not one of them
+  # naming `organization_id` -- so `20260310000002_unified_rls_schema` aborts
+  # with `column "organization_id" of relation "divisions" contains null
+  # values` the moment it tries to make the column NOT NULL.
+  #
+  # That is a pre-existing defect in the documented opt-in, not something this
+  # PR introduced, and repairing it means threading an organization through
+  # every table of a historical seed -- a different change. `supabase/seed.sql`
+  # is the same script without the guard and has the same gap; the live sample
+  # path is the one to fix, together, when someone takes it on.
+  #
+  # **So the failure is PINNED rather than tolerated.** This stage fails if the
+  # build starts succeeding (good news -- promote it to a plain "must apply"
+  # and delete this paragraph) and fails if it breaks anywhere ELSE (the pin
+  # has gone stale and is no longer describing what it claims). The one thing
+  # it will not do is print a reassuring PASS over an opt-in that aborts, which
+  # is what leaving the third build out would have done.
+  if seed_opt_in_build on full >/tmp/harness_seedfull 2>&1; then
+    echo "FAIL the seeded full build now SUCCEEDS. This is good news and a stale pin: the sample seed has been given organization_id, so replace this branch with a plain 'must apply' assertion."
+    STATUS=1
+  elif grep -q 'FAIL applying 20260310000002_unified_rls_schema.sql' /tmp/harness_seedfull &&
+       grep -q 'organization_id' /tmp/harness_seedfull; then
+    echo "  | (known gap, pinned) the seeded full build still aborts at 20260310000002: the 2024 sample seed predates multi-tenancy and names no organization_id. supabase/seed.sql has the same gap."
+  else
+    echo "FAIL the seeded full build failed somewhere other than the known 20260310000002 organization_id gap"
+    dump 25 /tmp/harness_seedfull
+    STATUS=1
   fi
 fi
 

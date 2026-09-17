@@ -155,7 +155,7 @@ describe('season_settings.timezone has a writer (GAP-30 precondition)', () => {
 });
 
 /**
- * No migration writes the column before the migration that adds it.
+ * No migration writes the column at a point where the column does not exist.
  *
  * `20251208000001_seed_data.sql` named `season_settings.timezone` in its
  * INSERT, and `20251214000002` is what adds that column -- six days later in
@@ -165,49 +165,123 @@ describe('season_settings.timezone has a writer (GAP-30 precondition)', () => {
  * the migration applied cleanly everywhere while carrying a `42703` behind a
  * guard nothing ever opened. The local harness passed it. pgTAP passed it.
  *
+ * ## Why this tracks a window rather than an "added at" point
+ *
+ * The first draft took the first `ADD COLUMN timezone` and scanned only the
+ * migrations before it. That is wrong in a way the history makes concrete:
+ * `20260331000000_definitive_schema` DROPS `season_settings` and recreates it
+ * **without** the column, and nothing re-adds it until `20260913000000` --
+ * about six months and twenty-five migrations during which the column does
+ * not exist on a fresh database and which the "before the first ADD" reading
+ * calls safe. A backdated hotfix or a rebased branch landing in that range
+ * would pass the check and abort the fresh chain with the very `42703` the
+ * check is for. LIVE-9 is that drop; it is in this repository's own history,
+ * not a hypothetical.
+ *
+ * So: walk the migrations in order, carry whether the column exists, and flag
+ * a write taken while it does not.
+ *
  * This is the cheap half of the answer -- it runs in CI with no Postgres. The
  * expensive half is `scripts/dbharness/run.sh`, which now builds the set with
- * the flag ON so the guarded path is executed rather than merely parsed.
+ * `squadlogic.seed_sample_data=on` so the guarded path is executed rather than
+ * merely parsed.
  *
  * Scoped to this one column deliberately: a general "no migration references a
  * column before it exists" check needs a schema model, and a check that
  * pretends to that scope while implementing this one would be the larger
  * falsely-perfect result CLAUDE.md §3 warns about.
  */
-describe('season_settings.timezone is not written before it exists', () => {
+describe('season_settings.timezone is not written while it does not exist', () => {
   const files = migrationFiles();
 
-  /** The first migration that ADDs the column. */
-  const addsColumn = files.findIndex(({ text }) =>
-    /ALTER\s+TABLE\s+(?:public\.)?season_settings\s+ADD\s+COLUMN(?:\s+IF\s+NOT\s+EXISTS)?\s+timezone\b/is.test(
-      text
-    )
-  );
+  /**
+   * Replay the migrations, carrying whether `season_settings.timezone` exists
+   * on a database built from scratch.
+   *
+   * @returns {Array<{ name: string, existsBefore: boolean, existsAfter: boolean }>}
+   */
+  function columnTimeline() {
+    let exists = false;
+    return files.map(({ name, text }) => {
+      const existsBefore = exists;
+      // A CREATE TABLE that carries the column, or an ALTER that adds it.
+      if (
+        /ALTER\s+TABLE\s+(?:public\.)?season_settings\s+ADD\s+COLUMN(?:\s+IF\s+NOT\s+EXISTS)?\s+timezone\b/is.test(
+          text
+        )
+      ) {
+        exists = true;
+      }
+      // A DROP that takes the table with it. `20260331000000` lists the table
+      // among many in one multi-table DROP, inside a guard that fires on a
+      // fresh database -- so the conservative reading is the right one: if the
+      // table can be dropped here, treat the column as gone unless this same
+      // migration puts it back.
+      if (/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?[^;]*\bseason_settings\b/is.test(text)) {
+        const recreated = [
+          ...text.matchAll(
+            /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?season_settings\s*\(([\s\S]*?)\n\);/gi
+          ),
+        ];
+        exists = recreated.some((match) => /^\s*timezone\b/im.test(match[1]));
+      }
+      return { name, existsBefore, existsAfter: exists };
+    });
+  }
 
-  it('finds the migration that adds the column at all', () => {
-    // The meta-assertion, and it is about the REGEX: a pattern that matched
-    // nothing would make the assertion below iterate over an empty prefix and
-    // pass while proving nothing.
-    expect(
-      addsColumn,
-      'no migration ALTERs season_settings to ADD COLUMN timezone'
-    ).toBeGreaterThan(-1);
-    expect(files[addsColumn].name).toMatch(/^20251214000002/);
-    // ...and there really are migrations before it, or the loop below has
-    // nothing to examine.
-    expect(addsColumn).toBeGreaterThan(0);
+  const timeline = columnTimeline();
+
+  it('the timeline really moves, in both directions', () => {
+    // **The meta-assertion, and it is about the replay rather than the data.**
+    // A timeline stuck at `false` would flag everything; one stuck at `true`
+    // would flag nothing and pass in silence, which is the failure mode that
+    // matters. Both transitions are pinned to the migrations that cause them,
+    // so a rename breaks this test rather than quietly widening the window.
+    const adds = timeline.filter((entry) => !entry.existsBefore && entry.existsAfter);
+    const removes = timeline.filter((entry) => entry.existsBefore && !entry.existsAfter);
+
+    expect(adds.map((entry) => entry.name)).toEqual([
+      '20251214000002_timezone_settings.sql',
+      '20260913000000_season_timezone_writer.sql',
+    ]);
+    expect(removes.map((entry) => entry.name)).toEqual(['20260331000000_definitive_schema.sql']);
+    // And the column exists at head, or every reader in the app is broken.
+    expect(timeline[timeline.length - 1].existsAfter).toBe(true);
+    // The gap LIVE-9 opened is real and is examined: more than twenty
+    // migrations run with the column absent.
+    const absent = timeline.filter((entry) => !entry.existsBefore);
+    expect(absent.length).toBeGreaterThan(20);
   });
 
-  it('no earlier migration names the column in a write', () => {
+  it('no migration writes the column while it does not exist', () => {
     const offenders = [];
-    for (const { name, text } of files.slice(0, addsColumn)) {
+    for (const { name, existsBefore } of timeline) {
+      if (existsBefore) continue;
+      const text = files.find((file) => file.name === name).text;
+      // **A migration that adds the column may then write it**, and
+      // `20260913000000` does exactly that: ADD COLUMN IF NOT EXISTS at the
+      // top, the backfill UPDATE below it. So within such a file the question
+      // is not whether it writes but WHERE: a write before the statement that
+      // establishes the column still aborts the chain. `Infinity` for a file
+      // that never establishes it, which makes every write in it an offender
+      // -- the seed's case.
+      const establishes =
+        /ALTER\s+TABLE\s+(?:public\.)?season_settings\s+ADD\s+COLUMN(?:\s+IF\s+NOT\s+EXISTS)?\s+timezone\b/is.exec(
+          text
+        );
+      const establishedAt = establishes ? establishes.index : Number.POSITIVE_INFINITY;
+      const offends = (match) => match.index < establishedAt;
       for (const match of text.matchAll(
         /INSERT\s+INTO\s+(?:public\.)?season_settings\s*\(([^)]*)\)/gis
       )) {
-        if (/\btimezone\b/i.test(match[1])) offenders.push(`${name} (insert column list)`);
+        if (/\btimezone\b/i.test(match[1]) && offends(match)) {
+          offenders.push(`${name} (insert column list)`);
+        }
       }
       for (const match of text.matchAll(/UPDATE\s+(?:public\.)?season_settings\b([\s\S]*?);/gi)) {
-        if (/\btimezone\s*=/i.test(match[1])) offenders.push(`${name} (update set)`);
+        if (/\btimezone\s*=/i.test(match[1]) && offends(match)) {
+          offenders.push(`${name} (update set)`);
+        }
       }
       // `on conflict ... do update set timezone = excluded.timezone` hangs off
       // the INSERT, not off an `UPDATE` keyword, so neither loop above sees
@@ -216,12 +290,14 @@ describe('season_settings.timezone is not written before it exists', () => {
       for (const match of text.matchAll(
         /ON\s+CONFLICT\b[\s\S]*?DO\s+UPDATE\s+SET\b([\s\S]*?);/gi
       )) {
-        if (/\btimezone\s*=/i.test(match[1])) offenders.push(`${name} (on conflict do update)`);
+        if (/\btimezone\s*=/i.test(match[1]) && offends(match)) {
+          offenders.push(`${name} (on conflict do update)`);
+        }
       }
     }
     expect(
       offenders,
-      `These migrations write season_settings.timezone before ${files[addsColumn].name} adds it. On a fresh database the chain aborts with 42703 the moment the statement is reached -- which, behind an opt-in guard, is not at apply time.`
+      'These migrations write season_settings.timezone at a point in the order where the column does not exist on a database built from scratch. The chain aborts with 42703 the moment the statement is reached -- which, behind an opt-in guard, is not at apply time.'
     ).toEqual([]);
   });
 });

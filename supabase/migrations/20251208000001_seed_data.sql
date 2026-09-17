@@ -8,6 +8,27 @@
 -- assignments.  It is idempotent: running it multiple times refreshes the
 -- sample rows without creating duplicates.  Existing production data should
 -- be backed up before executing this file.
+--
+-- ## The opt-in does NOT apply to a current database, and this is the warning
+--
+-- Executed, not reasoned about: with `squadlogic.seed_sample_data=on` set on a
+-- fresh database, the migration chain aborts a few files later at
+-- `20260310000002_unified_rls_schema` with `column "organization_id" of
+-- relation "divisions" contains null values`. This season predates
+-- multi-tenancy -- none of the 31 INSERTs below names an `organization_id` --
+-- so the rows cannot survive the migration that makes the column NOT NULL.
+--
+-- The guard below is therefore the only reason the set applies at all, and
+-- that is a state worth naming rather than leaving for the next person to
+-- discover: an opt-in whose documented use aborts the chain is not a feature
+-- with a switch, it is dead code with an invitation.
+-- `scripts/dbharness/run.sh` pins this exact failure so it cannot drift
+-- silently, and fails if it ever starts succeeding.
+--
+-- `supabase/seed.sql` is the same script without the guard and has the same
+-- gap. Fixing it means threading an organization through every table here;
+-- both copies should be done together.
+--
 
 do $$
 declare

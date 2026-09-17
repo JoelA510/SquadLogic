@@ -2707,15 +2707,15 @@ own"_, and the sibling scenario stays green.
 
 ### Plant results
 
-| Plant                                                       | Verdict                                                                                            |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `M8 the venue gate ignores the contained estate`            | **CAUGHT** — by its own smoke, by `20260911000000`'s amended 6b, and by `venue-retire-on-boundary` |
-| `M8 the gate reads the contained list instead of the count` | **CAUGHT** — behaviourally by `venue-retire-all-children-already-closed-commits-unconfirmed`       |
-| `M8 both refusals report the bookings reason`               | **CAUGHT** at the JS level by `venue-retire-on-boundary` (scenario table), not deferred            |
-| `M8 a second producer of the containment set`               | see the run log; replaced a mis-aimed plant                                                        |
-| `R8 revert counts retired venues instead of exposed ones`   | **CAUGHT** — by both the naming check and the totals check                                         |
-| `R8 revert counts dated nodes instead of undated ones`      | **CAUGHT** — the headline result above                                                             |
-| `R8 the zero-venue guard is wired to a dead counter`        | **CAUGHT**                                                                                         |
+| Plant                                                       | Verdict                                                                                                         |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `M8 the venue gate ignores the contained estate`            | **CAUGHT** — by its own smoke, by `20260911000000`'s amended 6b, and by `venue-retire-on-boundary`              |
+| `M8 the gate reads the contained list instead of the count` | **CAUGHT** — behaviourally by `venue-retire-all-children-already-closed-commits-unconfirmed`                    |
+| `M8 both refusals report the bookings reason`               | **CAUGHT** at the JS level by `venue-retire-on-boundary` (scenario table), not deferred                         |
+| `M8 a second producer of the containment set`               | **CAUGHT** — by its own smoke (_"estate_contained_nodes is not the single producer"_) and by `20260911000000`'s |
+| `R8 revert counts retired venues instead of exposed ones`   | **CAUGHT** — by both the naming check and the totals check                                                      |
+| `R8 revert counts dated nodes instead of undated ones`      | **CAUGHT** — the headline result above                                                                          |
+| `R8 the zero-venue guard is wired to a dead counter`        | **CAUGHT**                                                                                                      |
 
 **Manual control, because the harness cannot express it**: the revert run with its
 harness seed removed raises `This revert examined ZERO venues`, and the transcript

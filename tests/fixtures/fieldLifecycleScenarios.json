@@ -1199,7 +1199,7 @@
     },
     {
       "id": "venue-retire-on-boundary",
-      "why": "INCLUSIVE. The last booking at this site runs to +60; retiring ON that day strands nothing and proceeds unconfirmed. Pinned to the literal 60 rather than to the other arm, so two implementations agreeing on the wrong boundary cannot both pass.",
+      "why": "On the boundary NOTHING is booked after the date -- and until 20260912000000 that committed on the first call although three live nodes were about to stop being offered. The bookings half is empty, so the refusal names the OTHER half: this is the case that proves the contained gate fires on its own rather than only ever riding along behind a booking.",
       "rpc": "admin_retire_location",
       "before": {
         "effectiveTo": null
@@ -1210,11 +1210,79 @@
       },
       "expect": {
         "ok": true,
+        "retired": false,
+        "reason": "contained_estate_after_effective_to",
+        "affectedCount": 0,
+        "containedCount": 3,
+        "effectiveTo": null,
+        "childDates": 0,
+        "auditPhases": ["refused"]
+      }
+    },
+    {
+      "id": "venue-retire-on-boundary-confirmed",
+      "why": "The other side of venue-retire-on-boundary. Confirming past the containment refusal commits, writes locations.effective_to and still copies NOTHING onto the two pitches or the sub-surface. Without this case the new gate would be satisfiable by an arm that refuses unconditionally and never retires a quiet venue at all.",
+      "rpc": "admin_retire_location",
+      "before": {
+        "effectiveTo": null
+      },
+      "args": {
+        "effectiveTo": 60,
+        "confirm": true
+      },
+      "expect": {
+        "ok": true,
         "retired": true,
         "affectedCount": 0,
         "containedCount": 3,
         "effectiveTo": 60,
         "childDates": 0,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "venue-retire-empty-estate-commits-unconfirmed",
+      "why": "admin_delete_field's empty case, adopted rather than re-ruled. A venue that holds NOTHING has nothing this call newly closes and nothing booked on it, so it must commit on the first call rather than make the operator confirm a refusal about nothing. A gate written as `contained IS NOT NULL` or as `contained.length > 0` instead of on the NOT-already-retired COUNT passes every other case in this table and fails only this one.",
+      "rpc": "admin_retire_location",
+      "target": "emptyVenue",
+      "before": {
+        "effectiveTo": null
+      },
+      "args": {
+        "effectiveTo": 10,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "retired": true,
+        "affectedCount": 0,
+        "containedCount": 0,
+        "containedTotal": 0,
+        "effectiveTo": 10,
+        "childDates": 0,
+        "auditPhases": ["after", "before"]
+      }
+    },
+    {
+      "id": "venue-retire-all-children-already-closed-commits-unconfirmed",
+      "why": "The second empty case, and the one that distinguishes the COUNT from the LIST. The venue holds three nodes, so `contained` has three entries -- but every one of them is already_retired by this date, so contained_count is 0 and there is nothing this call newly closes. An implementation gating on the list's length refuses here and is caught; one gating on the count commits, which is the contract.",
+      "rpc": "admin_retire_location",
+      "target": "allChildrenDatedVenue",
+      "before": {
+        "effectiveTo": null
+      },
+      "args": {
+        "effectiveTo": 80,
+        "confirm": false
+      },
+      "expect": {
+        "ok": true,
+        "retired": true,
+        "affectedCount": 0,
+        "containedCount": 0,
+        "containedTotal": 3,
+        "effectiveTo": 80,
+        "childDates": 3,
         "auditPhases": ["after", "before"]
       }
     },

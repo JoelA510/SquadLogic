@@ -107,7 +107,7 @@ BEGIN
   RETURNING id INTO v_org;
   INSERT INTO public.profiles (id, email) VALUES (v_user, 'smoke-20260912@example.test')
   ON CONFLICT DO NOTHING;
-  INSERT INTO public.organization_members (organization_id, user_id, role)
+  INSERT INTO public.organization_members (organization_id, profile_id, role)
   VALUES (v_org, v_user, 'admin');
   PERFORM set_config('request.jwt.claim.sub', v_user::text, true);
 

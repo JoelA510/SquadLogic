@@ -619,16 +619,29 @@ NEEDLES
       fi
       # The restore really happened, confirmed from the catalogue rather than
       # from the revert's own NOTICE.
-      if psql_cmd "DO \$chk\$ BEGIN
-             IF (SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-                  WHERE n.nspname='public' AND p.proname='admin_retire_location')
-                LIKE '%contained_estate_after_effective_to%' THEN
-               RAISE EXCEPTION 'the containment gate survived the revert';
-             END IF;
-           END \$chk\$;" >/tmp/harness_gate 2>&1; then
+      # **No dollar-quoted block here, and that is not a style choice.** The
+      # first version used `DO $chk$ ... $chk$`, and `psql_cmd` reaches the
+      # cluster through `runuser -- bash -lc "..."`, so the string is expanded
+      # by a SECOND shell: `$chk` became empty and PostgreSQL received
+      # `DO $ BEGIN`, a syntax error the stage then reported as "the gate
+      # survived the revert". A check that fails for a reason other than the
+      # one it names is worse than no check, because its failure is read as
+      # evidence about the thing it was pointed at.
+      #
+      # So the verdict is a single printed token, and there are THREE of them:
+      # `true` (the gate survived), `false` (it is gone) and `unreadable` (the
+      # function is missing, so `prosrc` is NULL and `LIKE` yields NULL). Only
+      # `false` passes -- a missing function cannot masquerade as a clean
+      # revert, which is exactly what a bare "no match" test would have let it
+      # do.
+      if psql_cmd "SELECT 'GATE-VERDICT:' || COALESCE((
+             (SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+               WHERE n.nspname='public' AND p.proname='admin_retire_location')
+             LIKE '%contained_estate_after_effective_to%')::text, 'unreadable') AS verdict;" \
+         >/tmp/harness_gate 2>&1 && grep -q 'GATE-VERDICT:false' /tmp/harness_gate; then
         echo "  | (checked) the containment gate is gone from admin_retire_location after the revert"
       else
-        echo "FAIL revert ${id}: admin_retire_location still carries the containment gate"
+        echo "FAIL revert ${id}: admin_retire_location did not come back without the containment gate"
         dump 10 /tmp/harness_gate; STATUS=1
       fi
     fi

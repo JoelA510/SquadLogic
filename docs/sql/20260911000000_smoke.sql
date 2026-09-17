@@ -436,11 +436,31 @@ BEGIN
 
   -- 6b. The boundary is INCLUSIVE, and it is measured on both sides.
   --     The last booking at this venue is the sub-surface practice at +60.
+  --
+  -- **Amended by 20260912000000, and the boundary reading is unchanged.** This
+  -- asserted that a retirement ON the last booked day PROCEEDS unconfirmed,
+  -- which was true while the gate read the bookings half alone. This venue
+  -- holds two live pitches and a live sub-surface, so it now refuses on its
+  -- CONTAINED ESTATE -- with `affected_count` still 0, which is the
+  -- inclusive-boundary fact this section exists to pin and which is asserted
+  -- below exactly as before. What changed is which half of the consequence
+  -- asks for a confirmation, not which day is the last usable one.
   v_res := public.admin_retire_location(v_org, v_venue, current_date + 60, false);
-  IF NOT (v_res->>'retired')::boolean THEN
-    RAISE EXCEPTION 'a retirement ON the last booked day must proceed: %', v_res; END IF;
+  IF (v_res->>'retired')::boolean THEN
+    RAISE EXCEPTION
+      'a venue holding live pitches retired unconfirmed with nothing booked: %', v_res; END IF;
   IF (v_res->>'affected_count')::int <> 0 THEN
     RAISE EXCEPTION 'a retirement on the boundary stranded %', v_res->>'affected_count'; END IF;
+  IF v_res->>'reason' <> 'contained_estate_after_effective_to' THEN
+    RAISE EXCEPTION
+      'the boundary refusal must name the containment half, got %', v_res->>'reason'; END IF;
+  -- Confirmed, it proceeds -- which is what makes the refusal above a statement
+  -- about CONTAINMENT rather than about the date. Without this second call the
+  -- section would be satisfied by a guard that refuses the boundary outright.
+  v_res := public.admin_retire_location(v_org, v_venue, current_date + 60, true);
+  IF NOT (v_res->>'retired')::boolean THEN
+    RAISE EXCEPTION
+      'a retirement ON the last booked day must proceed once confirmed: %', v_res; END IF;
   PERFORM public.admin_unretire_location(v_org, v_venue);
 
   v_res := public.admin_retire_location(v_org, v_venue, current_date + 59, false);

@@ -81,6 +81,64 @@ const runSuite = (suite) => {
  * the code makes the plant report ANCHOR-MISS -- meaningless, never a pass.
  */
 const PLANTS = [
+  // -------------------------------------------------------------------------
+  // 8.4 gap A: the edit arm
+  // -------------------------------------------------------------------------
+  //
+  // **The mock is the arm PR 3's UI and the whole E2E suite run against**, so a
+  // mock looser than the database is a defect generator for the next screen.
+  // Each of these is the mock-side twin of a plant `prove.sh` aims at the SQL,
+  // and both sides are scored against the shared scenario table rather than
+  // against each other.
+  {
+    label: 'the edit reads NULL as leave-unchanged',
+    find: `          start_minutes: editTimes === 2 ? p.p_start_minutes : null,
+          end_minutes: editTimes === 2 ? p.p_end_minutes : null,`,
+    replace: `          start_minutes: editTimes === 2 ? p.p_start_minutes : existing.start_minutes,
+          end_minutes: editTimes === 2 ? p.p_end_minutes : existing.end_minutes,`,
+  },
+  {
+    label: 'the edit drops a cleared note',
+    find: `          // NULL is NULL here too; \`?? existing.note\` would be the partial
+          // update the SQL body's header argues against.
+          note: p.p_note ?? null,`,
+    replace: '          note: p.p_note ?? existing.note ?? null,',
+  },
+  {
+    label: 'the edit replaces the row instead of editing it',
+    find: '        return { data: { ...existing }, error: null };',
+    replace: "        return { data: { ...existing, id: 'a-brand-new-id' }, error: null };",
+  },
+  {
+    label: 'the import-owned refusal is folded into not-found',
+    find: `              error: {
+                code: '0A000',`,
+    replace: `              error: {
+                code: 'P0002',`,
+  },
+  {
+    label: 'the edit audits with the siblings phase pair',
+    find: `          operation: 'admin_update_field_blackout',
+          phase: 'update',`,
+    replace: `          operation: 'admin_update_field_blackout',
+          phase: 'before',`,
+  },
+  {
+    // The contract suite is what holds the mock's audit shape to the migration
+    // text, so its own plant is aimed there rather than at the scenario table.
+    label: 'the edit writes two audit entries instead of one',
+    find: `        audit('field_blackout', existing.id, 'updated', {
+          operation: 'admin_update_field_blackout',`,
+    replace: `        audit('field_blackout', existing.id, 'updated', {
+          operation: 'admin_update_field_blackout',
+          phase: 'update',
+          before: previous,
+          after: { ...existing },
+        });
+        audit('field_blackout', existing.id, 'updated', {
+          operation: 'admin_update_field_blackout',`,
+    suite: 'tests/fieldBlackoutMockContract.test.js',
+  },
   {
     label: 'retire un-deactivates an inactive field',
     find: 'active: previous.active !== false && fieldIsLiveOn(p.p_effective_to),',

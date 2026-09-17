@@ -5,6 +5,7 @@ import {
   BLACKOUT_DB_REASON,
   clockToMinutes,
   findBlackoutConflicts,
+  minutesToClock,
   repairProposal,
 } from '@squadlogic/core/fieldAdmin/index.js';
 import Modal from '../ui/Modal.jsx';
@@ -12,7 +13,22 @@ import Button from '../ui/Button.jsx';
 import { BlackoutDraftSchema } from '../../hooks/useFieldClosures.js';
 
 /**
- * Add a blackout window, with what it would close shown before it is written.
+ * Add or EDIT a blackout window, with what it would close shown before it is
+ * written.
+ *
+ * **An edit is an edit.** `editing` switches this dialog from
+ * `admin_create_field_blackout` to `admin_update_field_blackout`, which changes
+ * the window in place: the same id, one audit entry, and a window that can be
+ * followed across the change. Before 20260910000000 there was no update RPC, so
+ * this screen only added, and changing a window meant removing it and adding
+ * another.
+ *
+ * **Scope is displayed and not editable on that path**, because the RPC has no
+ * parameter for it: moving a closure to other ground is a different closure,
+ * whose consequence is computed over different bookings. The selects stay
+ * visible and `disabled` rather than being hidden, so the operator can see what
+ * they are editing; a sentence beside them says why, and the hook refuses a
+ * draft whose scope has moved rather than silently sending the old one.
  *
  * **The consequence here is computed, not returned.**
  * `admin_create_field_blackout` has no dry run and does not refuse: a closure
@@ -35,6 +51,8 @@ import { BlackoutDraftSchema } from '../../hooks/useFieldClosures.js';
  * @param {boolean} props.open
  * @param {() => void} props.onClose
  * @param {(draft: any) => Promise<any>} props.onCreate
+ * @param {(draft: any) => Promise<any>} [props.onUpdate] - required when `editing` is set
+ * @param {Record<string, any>|null} [props.editing] - the closure being edited, or null to add
  * @param {Array<{id: string, name: string}>} props.locations
  * @param {Array<{id: string, name: string, location_id: string}>} props.fields
  * @param {Array<Record<string, any>>} props.dated - dated bookings for the preview
@@ -45,6 +63,8 @@ export default function BlackoutEditor({
   open,
   onClose,
   onCreate,
+  onUpdate,
+  editing,
   locations,
   fields,
   dated,
@@ -66,7 +86,47 @@ export default function BlackoutEditor({
     [defaultDate]
   );
 
-  const [form, setForm] = useState(blank);
+  // The window under edit, in the form's own shape. `blank` when adding.
+  //
+  // **`reason` falls back to 'closed' rather than to ''.** An admin-authored
+  // row always carries one -- `field_blackouts.reason` is NOT NULL -- but the
+  // camelCase closure shape declares it nullable because the IMPORT arm of
+  // `field_closures` has none, and a `<select>` given a value no `<option>`
+  // holds renders as the first option instead. That silently rewrites the
+  // reason of any window whose value did not arrive.
+  const initial = useMemo(() => {
+    if (!editing) return blank;
+    return {
+      scope: /** @type {'location'|'field'} */ (editing.closesFieldId ? 'field' : 'location'),
+      scopeId: String(editing.closesFieldId ?? editing.closesLocationId ?? ''),
+      blackoutFrom: editing.blackoutFrom,
+      blackoutUntil: editing.blackoutUntil,
+      allDay: editing.startMinutes === null || editing.startMinutes === undefined,
+      startClock: minutesToClock(editing.startMinutes),
+      endClock: minutesToClock(editing.endMinutes),
+      reason: editing.reason ?? 'closed',
+      note: editing.note ?? '',
+    };
+  }, [editing, blank]);
+
+  /**
+   * A time this dialog cannot round-trip.
+   *
+   * `minutesToClock(1440)` is `24:00`, which `<input type="time">` will not
+   * hold: the browser blanks the box, the operator sees an empty "Closed
+   * until", and saving would either fail validation for a reason that is not
+   * their fault or -- worse -- write a window they did not ask for. The window
+   * was writable before this dialog could open one, so the case is real.
+   *
+   * Recorded as open item 4 of the 8.4 PR 3 entry, where it was unreachable
+   * because nothing loaded an existing window into this form. This screen makes
+   * it reachable, so it is named here rather than left to a blank box.
+   */
+  const unrepresentable = editing
+    ? [editing.startMinutes, editing.endMinutes].includes(1440)
+    : false;
+
+  const [form, setForm] = useState(initial);
   const [issues, setIssues] = useState(/** @type {string[]} */ ([]));
   const [busy, setBusy] = useState(false);
 
@@ -116,7 +176,7 @@ export default function BlackoutEditor({
   }, [draft, fields, dated, recurring]);
 
   const close = () => {
-    setForm(blank);
+    setForm(initial);
     setIssues([]);
     onClose();
   };
@@ -129,12 +189,12 @@ export default function BlackoutEditor({
     }
     setBusy(true);
     try {
-      await onCreate(parsed.data);
-      setForm(blank);
+      await (editing ? onUpdate(parsed.data) : onCreate(parsed.data));
+      setForm(initial);
       setIssues([]);
       onClose();
     } catch (err) {
-      setIssues([err?.message || 'The blackout could not be saved.']);
+      setIssues([err?.message || `The blackout could not be ${editing ? 'updated' : 'saved'}.`]);
     } finally {
       setBusy(false);
     }
@@ -146,19 +206,26 @@ export default function BlackoutEditor({
     <Modal
       open={open}
       onClose={close}
-      title="Add a blackout window"
+      title={editing ? 'Edit this blackout window' : 'Add a blackout window'}
       icon={<CalendarOff size={18} aria-hidden="true" />}
       footer={
         <>
           <Button variant="secondary" onClick={close} disabled={busy}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={submit} disabled={busy}>
-            Save blackout
+          <Button variant="primary" onClick={submit} disabled={busy || unrepresentable}>
+            {editing ? 'Save changes' : 'Save blackout'}
           </Button>
         </>
       }
     >
+      {unrepresentable && (
+        <p className="badge danger" role="alert" data-testid="blackout-unrepresentable">
+          This window ends at 24:00, which the time boxes below cannot hold. Remove it and add the
+          replacement instead — editing it here would change a time you did not choose.
+        </p>
+      )}
+
       {issues.length > 0 && (
         <ul className="badge danger" role="alert" data-testid="blackout-issues">
           {issues.map((issue) => (
@@ -173,6 +240,8 @@ export default function BlackoutEditor({
           id="blackout-scope"
           className="select"
           value={form.scope}
+          disabled={Boolean(editing)}
+          aria-describedby={editing ? 'blackout-scope-help' : undefined}
           onChange={(event) => set({ scope: event.target.value, scopeId: '' })}
         >
           <option value="field">One field</option>
@@ -188,6 +257,8 @@ export default function BlackoutEditor({
           id="blackout-scope-id"
           className="select"
           value={form.scopeId}
+          disabled={Boolean(editing)}
+          aria-describedby={editing ? 'blackout-scope-help' : undefined}
           onChange={(event) => set({ scopeId: event.target.value })}
         >
           <option value="">Select {form.scope === 'location' ? 'a venue' : 'a field'}</option>
@@ -197,6 +268,12 @@ export default function BlackoutEditor({
             </option>
           ))}
         </select>
+        {editing && (
+          <p id="blackout-scope-help" className="text-sm" data-testid="blackout-scope-locked">
+            The ground a closure covers cannot be changed by editing it — the closure recorded here
+            really did apply here. Remove this window and add one on the new ground instead.
+          </p>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
@@ -236,9 +313,20 @@ export default function BlackoutEditor({
             id="blackout-all-day"
             type="checkbox"
             checked={form.allDay}
-            onChange={(event) =>
-              set({ allDay: event.target.checked, startClock: '', endClock: '' })
-            }
+            /*
+              **The clocks survive the toggle, in both directions.** This
+              cleared them on every change, which cost nothing while the dialog
+              could only ADD -- the boxes started empty. On the edit path it is
+              destructive: tick "closed all day" on a 16:00-19:30 window,
+              change your mind, untick, and both boxes are now empty, the
+              consequence panel has vanished because the draft no longer
+              parses, and Save reports "a timed closure needs both a start and
+              an end" for a window the operator never touched. Clearing is not
+              needed for correctness either -- `draft` already sends NULL for
+              both times whenever `allDay` is set, so what sits in the boxes
+              behind the switch reaches neither the preview nor the RPC.
+            */
+            onChange={(event) => set({ allDay: event.target.checked })}
           />{' '}
           Closed all day
         </label>
@@ -315,16 +403,29 @@ export default function BlackoutEditor({
       */}
       <p className="text-sm" style={{ marginTop: 10 }} data-testid="blackout-source">
         Source: entered here by an administrator. Windows that arrived through a field-availability
-        import are listed with their own source and are not editable on this screen.
+        import are listed with their own source and are neither editable nor removable on this
+        screen.
       </p>
 
       <div aria-live="polite" style={{ marginTop: 12 }}>
         {preview && (
           <div data-testid="blackout-consequence">
+            {/*
+              **An edit is previewed exactly as a create is, and for the same
+              reason.** Moving a window onto a date somebody has booked
+              invalidates that booking just as surely as creating one there
+              does, so the same `findBlackoutConflicts()` run over the DRAFT
+              answers both. What this does NOT do is difference the draft
+              against the window as it stands: a booking that a shrunk window
+              stops closing is a restoration rather than a consequence, and the
+              grid's own "Bookings closed" column reports the after state once
+              the edit lands.
+            */}
             <p className="text-sm">
-              This window would close <strong>{preview.meta.conflictsFound}</strong> existing
-              booking{preview.meta.conflictsFound === 1 ? '' : 's'}, out of{' '}
-              {preview.meta.pairsCompared} on this ground that were checked.
+              {editing ? 'As edited, this window' : 'This window'} would close{' '}
+              <strong>{preview.meta.conflictsFound}</strong> existing booking
+              {preview.meta.conflictsFound === 1 ? '' : 's'}, out of {preview.meta.pairsCompared} on
+              this ground that were checked.
             </p>
             {preview.meta.pairsCompared === 0 && (
               <p className="text-sm" data-testid="blackout-nothing-compared">
@@ -353,6 +454,8 @@ BlackoutEditor.propTypes = {
   open: PropTypes.bool.isRequired,
   onClose: PropTypes.func.isRequired,
   onCreate: PropTypes.func.isRequired,
+  onUpdate: PropTypes.func,
+  editing: PropTypes.object,
   locations: PropTypes.array.isRequired,
   fields: PropTypes.array.isRequired,
   dated: PropTypes.array.isRequired,

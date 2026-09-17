@@ -298,9 +298,9 @@ describe('scenario table :: the table itself', () => {
     // entries, would make every `it.each` below run zero cases and the file
     // would pass green having asserted nothing at all.
     expect(TABLE.fieldScenarios.length).toBe(37);
-    expect(TABLE.blackoutScenarios.length).toBe(9);
+    expect(TABLE.blackoutScenarios.length).toBe(14);
     const all = [...TABLE.fieldScenarios, ...TABLE.blackoutScenarios];
-    expect(all.length).toBe(46);
+    expect(all.length).toBe(51);
     for (const scenario of all) {
       expect(typeof scenario.id).toBe('string');
       expect(scenario.why.length).toBeGreaterThan(10);
@@ -341,6 +341,36 @@ describe('scenario table :: the table itself', () => {
         .map((s) => s.expect.active)
     );
     expect(activities).toEqual(new Set([true, false]));
+  });
+
+  it('exercises both blackout RPCs, and both outcomes of the edit', () => {
+    // **The blackout half had no `rpc` key at all until 8.4 gap A.** Naming the
+    // set here means dropping the edit cases fails loudly rather than shrinking
+    // the suite quietly -- the same reason the field half names its three.
+    expect(new Set(TABLE.blackoutScenarios.map((s) => s.rpc))).toEqual(
+      new Set(['admin_create_field_blackout', 'admin_update_field_blackout'])
+    );
+    const edits = TABLE.blackoutScenarios.filter((s) => s.rpc === 'admin_update_field_blackout');
+    // Accepted AND refused. All-refused would be satisfied by an RPC that never
+    // edits; all-accepted by one with no guard at all.
+    expect(new Set(edits.map((s) => s.expect.ok))).toEqual(new Set([true, false]));
+    // ... and the two refusals that must stay DIFFERENT answers are both here.
+    // One code for both is the conflation the 0A000 branch exists to remove.
+    expect(new Set(edits.filter((s) => !s.expect.ok).map((s) => s.expect.sqlstate))).toEqual(
+      new Set(['23514', '0A000', 'P0002'])
+    );
+    // ... and both time directions are demanded: a window that loses its times
+    // and one that gains them. Only the first can catch a COALESCE-partial
+    // body, and only the second catches one that always writes NULL.
+    const accepted = edits.filter((s) => s.expect.ok);
+    expect(
+      accepted.some((s) => s.seed.startMinutes !== null && s.expect.after.startMinutes === null),
+      'no edit case turns a timed window into an all-day one'
+    ).toBe(true);
+    expect(
+      accepted.some((s) => s.seed.startMinutes === null && s.expect.after.startMinutes !== null),
+      'no edit case turns an all-day window into a timed one'
+    ).toBe(true);
   });
 
   it('exercises all three field RPCs, and both delete outcomes', () => {
@@ -384,6 +414,107 @@ describe('scenario table :: the table itself', () => {
     expect(mixed, 'no case requires both dispositions in one refusal').toBeDefined();
   });
 });
+
+/**
+ * One edit case, against the mock.
+ *
+ * **The subject is created through the create RPC**, not inserted, for the same
+ * reason `scenarios.py` does it that way: a row this file hand-built could
+ * carry a shape the production path never produces, which is how a passing test
+ * came to certify a defect in LIVE-1.
+ *
+ * @param {any} scenario
+ * @param {{p_location_id: any, p_field_id: any}} scope
+ */
+const runBlackoutEdit = async (scenario, scope) => {
+  const { data: seeded, error: seedError } = await supabase.rpc('admin_create_field_blackout', {
+    p_organization_id: ORG,
+    ...scope,
+    p_blackout_from: dateAt(scenario.seed.from),
+    p_blackout_until: dateAt(scenario.seed.until),
+    p_reason: scenario.seed.reason ?? null,
+    p_start_minutes: scenario.seed.startMinutes ?? null,
+    p_end_minutes: scenario.seed.endMinutes ?? null,
+    p_note: scenario.seed.note ?? null,
+  });
+  // A seed that never landed would turn every assertion below into one about
+  // nothing -- and the refusal cases would pass with no window to damage.
+  expect(seedError, `${scenario.id}: the window this edit acts on was never seeded`).toBeNull();
+  expect(seeded?.id).toBeTruthy();
+
+  // An import-owned window to be refused on. `field_blackout_windows` is
+  // FROZEN and has no RPC, which is exactly why the edit path must refuse it,
+  // so it is inserted the way the import path would have left it.
+  const importWindowId = 'scenario-import-window';
+  if (!getMockData('field_blackout_windows').some((w) => String(w.id) === importWindowId)) {
+    await supabase.from('field_blackout_windows').insert({
+      id: importWindowId,
+      organization_id: ORG,
+      profile_id: 'scenario-import-profile',
+      blackout_from: dateAt(40),
+      blackout_until: dateAt(50),
+      reason: 'blackout_months',
+    });
+  }
+  const targets = {
+    self: seeded.id,
+    import: importWindowId,
+    missing: 'no-such-blackout-id',
+  };
+  const target = targets[scenario.target ?? 'self'];
+  if (target === undefined) throw new Error(`unknown target "${scenario.target}"`);
+
+  const before = getMockData('field_blackouts').length;
+  const { data, error } = await supabase.rpc('admin_update_field_blackout', {
+    p_organization_id: ORG,
+    p_blackout_id: target,
+    p_blackout_from: dateAt(scenario.args.from),
+    p_blackout_until: dateAt(scenario.args.until),
+    p_reason: scenario.args.reason ?? null,
+    p_start_minutes: scenario.args.startMinutes ?? null,
+    p_end_minutes: scenario.args.endMinutes ?? null,
+    p_note: scenario.args.note ?? null,
+  });
+  // The row is read back from the table, never from the payload: the payload is
+  // what a broken RPC would get wrong.
+  const row = getMockData('field_blackouts').find((b) => String(b.id) === String(seeded.id));
+
+  if (!scenario.expect.ok) {
+    expectRefusal(error, scenario);
+    // A refusal writes NOTHING -- checked on the seeded window, which is the
+    // row a half-applied edit would have damaged.
+    expect(row.blackout_from).toBe(dateAt(scenario.seed.from));
+    expect(row.blackout_until).toBe(dateAt(scenario.seed.until));
+    expect(row.start_minutes ?? null).toBe(scenario.seed.startMinutes ?? null);
+    expect(getMockData('field_blackouts').length).toBe(before);
+    return;
+  }
+
+  expect(error).toBeNull();
+  // **The id is the whole migration.** A delete-and-re-add returns a new one.
+  expect(data?.id).toBe(seeded.id);
+  expect(getMockData('field_blackouts').length).toBe(before);
+  const after = scenario.expect.after;
+  expect(row.blackout_from).toBe(dateAt(after.from));
+  expect(row.blackout_until).toBe(dateAt(after.until));
+  expect(row.start_minutes ?? null).toBe(after.startMinutes ?? null);
+  expect(row.end_minutes ?? null).toBe(after.endMinutes ?? null);
+  expect(row.reason).toBe(after.reason);
+  expect(row.note ?? null).toBe(after.note ?? null);
+
+  const phases = [
+    ...new Set(
+      getMockData('audit_log')
+        .filter(
+          (entry) =>
+            String(entry.resource_id) === String(seeded.id) &&
+            entry.metadata?.operation === 'admin_update_field_blackout'
+        )
+        .map((entry) => entry.metadata.phase)
+    ),
+  ].sort();
+  expect(phases).toEqual([...scenario.expect.auditPhases].sort());
+};
 
 describe('scenario table :: the mock honours it', () => {
   beforeEach(() => {
@@ -520,6 +651,17 @@ describe('scenario table :: the mock honours it', () => {
     // scenario naming a scope this file has never heard of must stop the run,
     // not quietly test the field-scoped case.
     if (scope === undefined) throw new Error(`unknown scope "${scenario.scope}"`);
+    // ... and the same for the RPC, which this half had no key for at all
+    // before 8.4 gap A. A second blackout RPC would otherwise have been run as
+    // another create, silently, because there was no switch to fall off.
+    const KNOWN_BLACKOUT_RPCS = ['admin_create_field_blackout', 'admin_update_field_blackout'];
+    if (!KNOWN_BLACKOUT_RPCS.includes(scenario.rpc)) {
+      throw new Error(`unknown rpc "${scenario.rpc}" in scenario "${scenario.id}"`);
+    }
+    if (scenario.rpc === 'admin_update_field_blackout') {
+      await runBlackoutEdit(scenario, scope);
+      return;
+    }
 
     const before = getMockData('field_blackouts').length;
     const { data, error } = await supabase.rpc('admin_create_field_blackout', {

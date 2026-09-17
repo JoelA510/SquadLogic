@@ -197,6 +197,45 @@ Then('the blackout grid should report {int} bookings closed', async ({ page }, c
   await expect(row).toContainText('entered here');
 });
 
+When('I edit the blackout to cover {string} instead', async ({ page }, day: string) => {
+  // The previous steps navigated away to the two schedule pages, so come back.
+  await page.goto('/scheduling/blackouts');
+  await page.waitForLoadState('networkidle');
+  const edit = page.getByRole('button', { name: /^Edit the blackout on/ });
+  await expect(edit).toBeVisible();
+  await edit.click();
+
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('Edit this blackout window');
+  // It opened on the window that was there, not on a blank form.
+  await expect(page.getByLabel(/^First day/)).toHaveValue('2026-09-16');
+  // The ground cannot be changed by editing, and the dialog says so rather
+  // than quietly ignoring a change.
+  await expect(page.getByLabel('What does this close?')).toBeDisabled();
+
+  // Both ends move: the window is a single day and it is moving off the 16th,
+  // which is the date the game and the practice sit on.
+  await page.getByLabel(/^First day/).fill(day);
+  await page.getByLabel(/^Last day/).fill(day);
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+Then(
+  'the blackout grid should hold exactly {int} window, moved to {string}',
+  async ({ page }, count: number, day: string) => {
+    // **The observable half of "an edit is an edit".** One row still, with the
+    // new dates in it -- the count never went to two, and the window it points
+    // at is the one that was already there. The id half is not visible on this
+    // screen and is asserted at the unit, smoke, scenario and pgTAP levels.
+    await expect(page.getByRole('button', { name: /^Edit the blackout on/ })).toHaveCount(count);
+    const row = page.getByRole('row').filter({ hasText: 'Back Pitch' });
+    await expect(row).toContainText(day);
+    await expect(row).not.toContainText('2026-09-16');
+  }
+);
+
 When('I remove the blackout from the blackout grid', async ({ page }) => {
   // The previous steps navigated away to the two schedule pages, so come back.
   await page.goto('/scheduling/blackouts');

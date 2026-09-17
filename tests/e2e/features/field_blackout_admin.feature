@@ -31,6 +31,10 @@ Feature: Field lifecycle and blackout administration
     Then the blackout grid should report 2 bookings closed
     And the game schedule should show a blackout conflict
     And the practice schedule should show a blackout conflict
+    When I edit the blackout to cover "2026-09-15" instead
+    Then the blackout grid should hold exactly 1 window, moved to "2026-09-15"
+    And the game schedule should show no blackout conflict
+    And the practice schedule should show no blackout conflict
     When I remove the blackout from the blackout grid
     Then the game schedule should show no blackout conflict
     And the practice schedule should show no blackout conflict

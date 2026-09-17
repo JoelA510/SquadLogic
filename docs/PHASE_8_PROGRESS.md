@@ -1973,8 +1973,9 @@ column.
 ### Still open after 8.4
 
 1. **No `admin_update_field_blackout`** — editing a blackout is remove-and-
-   re-add, with a new id and two audit rows. **Operator decision: follow-up PR
-   before 8.5.**
+   re-add, with a new id and **four** audit rows (_amended on the 8.4-gap-A
+   branch: this said two. A delete writes a before/after pair and a create
+   writes another_). **Operator decision: follow-up PR before 8.5.**
 2. **Venues and sub-surfaces cannot be retired** — `locations` and
    `field_subunits` carry no effective dates and no retire RPC. Same follow-up.
 3. **`ConsequencePreview`'s `operation="delete"` arm is exercised by tests and

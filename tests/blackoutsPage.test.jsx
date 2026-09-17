@@ -15,7 +15,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import BlackoutsPage from '../frontend/src/pages/BlackoutsPage.jsx';
@@ -25,7 +25,13 @@ import { supabase } from '../frontend/src/lib/supabaseClient.js';
 import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
 
 vi.mock('../frontend/src/hooks/useFields.js', () => ({ useFields: vi.fn() }));
-vi.mock('../frontend/src/hooks/useFieldClosures.js', () => ({ useFieldClosures: vi.fn() }));
+// **Partial**, because the editor imports `BlackoutDraftSchema` from this same
+// module. Replacing the whole module would have left the dialog validating
+// against nothing -- and the edit cases below drive it through the dialog.
+vi.mock('../frontend/src/hooks/useFieldClosures.js', async (importOriginal) => ({
+  .../** @type {any} */ (await importOriginal()),
+  useFieldClosures: vi.fn(),
+}));
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({ supabase: { from: vi.fn() } }));
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({ useOrganization: vi.fn() }));
 vi.mock('../frontend/src/lib/logger.js', () => ({ logger: { error: vi.fn() } }));
@@ -73,6 +79,7 @@ function mockHooks({ fields = {}, closures = {} } = {}) {
       error: null,
       refresh: vi.fn(),
       createBlackout: vi.fn(),
+      updateBlackout: vi.fn(),
       removeBlackout: vi.fn(),
       ...closures,
     })
@@ -158,15 +165,122 @@ describe('BlackoutsPage', () => {
     expect(messages).toContain('closures could not be loaded');
   });
 
-  it('offers no Remove control on an import-owned window', async () => {
+  it('offers no Remove or Edit control on an import-owned window', async () => {
     mockHooks({
       closures: { closures: [{ ...CLOSURE, id: 'win-1', source: 'field_blackout_windows' }] },
     });
     renderPage();
     await waitFor(() => expect(screen.getByText('from an import')).toBeInTheDocument());
-    // `field_blackout_windows` is FROZEN and no RPC deletes from it, so a
-    // control here would be a button that cannot work.
+    // `field_blackout_windows` is FROZEN and no RPC writes or deletes a row in
+    // it, so either control here would be a button that cannot work.
     expect(screen.queryByRole('button', { name: /^Remove the blackout/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Edit the blackout/ })).not.toBeInTheDocument();
     expect(screen.getByText('import-owned')).toBeInTheDocument();
+  });
+
+  it('edits a window in place through updateBlackout, never through remove-and-re-add', async () => {
+    const updateBlackout = vi.fn().mockResolvedValue({ id: 'bo-1' });
+    const createBlackout = vi.fn();
+    const removeBlackout = vi.fn();
+    mockHooks({ closures: { updateBlackout, createBlackout, removeBlackout } });
+    renderPage();
+
+    // Located through the accessibility tree, so an unlabelled control fails to
+    // be found rather than being silently clicked by test id.
+    const edit = await screen.findByRole('button', {
+      name: 'Edit the blackout on North Field, 2026-09-14 to 2026-09-18, All day',
+    });
+    fireEvent.click(edit);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Edit this blackout window');
+    // The form opened on THIS window rather than on a blank one.
+    expect(screen.getByLabelText(/^First day/)).toHaveValue('2026-09-14');
+    expect(screen.getByLabelText(/^Last day/)).toHaveValue('2026-09-18');
+    expect(screen.getByLabelText('Reason')).toHaveValue('maintenance');
+    // Scope is shown and locked: the RPC has no parameter for it.
+    expect(screen.getByLabelText('What does this close?')).toBeDisabled();
+    expect(screen.getByLabelText(/^Field/)).toBeDisabled();
+    expect(screen.getByTestId('blackout-scope-locked')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/^Last day/), { target: { value: '2026-09-20' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(updateBlackout).toHaveBeenCalledTimes(1));
+    expect(updateBlackout.mock.calls[0][0]).toMatchObject({ id: 'bo-1' });
+    expect(updateBlackout.mock.calls[0][1]).toMatchObject({
+      blackoutFrom: '2026-09-14',
+      blackoutUntil: '2026-09-20',
+      scopeId: 'field-1',
+    });
+    // **The positive control for "an edit is an edit".** Before 20260910000000
+    // this screen could only have done it as a remove followed by a create, and
+    // that is the outcome this case exists to refuse.
+    expect(removeBlackout).not.toHaveBeenCalled();
+    expect(createBlackout).not.toHaveBeenCalled();
+  });
+
+  it('gives two closures on the same ground and the same day different button names', async () => {
+    // **Ground and first day do not tell two rows apart.** A 09:00-11:00 and
+    // an 18:00-20:00 closure on the same pitch on the same day are ordinary --
+    // one row holds one range, so this is two rows -- and they shared a single
+    // accessible name until the hours went into the label. A screen-reader
+    // user then had two "Edit the blackout on North Field from 2026-09-14"
+    // buttons and no way to tell which row either belonged to, and the E2E
+    // locator matched both under strict mode.
+    mockHooks({
+      closures: {
+        closures: [
+          {
+            ...CLOSURE,
+            id: 'bo-a',
+            blackoutUntil: '2026-09-14',
+            startMinutes: 540,
+            endMinutes: 660,
+          },
+          {
+            ...CLOSURE,
+            id: 'bo-b',
+            blackoutUntil: '2026-09-14',
+            startMinutes: 1080,
+            endMinutes: 1200,
+          },
+        ],
+      },
+    });
+    renderPage();
+    const edits = await screen.findAllByRole('button', { name: /^Edit the blackout on/ });
+    const removes = screen.getAllByRole('button', { name: /^Remove the blackout on/ });
+    // Both rows rendered -- otherwise "the names are distinct" would be true
+    // of a single button and prove nothing.
+    expect(edits).toHaveLength(2);
+    expect(removes).toHaveLength(2);
+    const names = (buttons) => new Set(buttons.map((b) => b.getAttribute('aria-label')));
+    expect(names(edits).size).toBe(2);
+    expect(names(removes).size).toBe(2);
+    // ... and what distinguishes them is the thing that distinguishes the
+    // rows, not an index the operator cannot see.
+    expect([...names(edits)].sort()).toEqual([
+      'Edit the blackout on North Field, 2026-09-14 to 2026-09-14, 09:00\u201311:00',
+      'Edit the blackout on North Field, 2026-09-14 to 2026-09-14, 18:00\u201320:00',
+    ]);
+  });
+
+  it('refuses to open an editor on a window ending at 24:00, rather than blanking the box', async () => {
+    // `minutesToClock(1440)` is `24:00`, which `<input type="time">` cannot
+    // hold. Nothing loaded an existing window into this form before this PR, so
+    // the case was unreachable; it is reachable now and is named rather than
+    // left as an empty "Closed until" the operator did not empty.
+    mockHooks({
+      closures: { closures: [{ ...CLOSURE, startMinutes: 1080, endMinutes: 1440 }] },
+    });
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Edit the blackout on North Field, 2026-09-14 to 2026-09-18, 18:00\u201324:00',
+      })
+    );
+    expect(await screen.findByTestId('blackout-unrepresentable')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
   });
 });

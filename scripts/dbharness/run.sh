@@ -160,7 +160,7 @@ fresh_db || { echo "HARNESS FAILED"; exit 1; }
 apply_all || { echo "HARNESS FAILED"; exit 1; }
 echo "=== smokes for this PR's migrations ==="
 #
-# **Scoped to the migrations this PR adds** (`NEW_MIGRATIONS`, three of them),
+# **Scoped to the migrations this PR adds** (`NEW_MIGRATIONS`),
 # and that is a deliberate limit
 # worth stating. Several pre-existing smokes are BEHAVIOURAL: they seed an org,
 # assume an authenticated admin session, and exercise an RPC. They fail here for
@@ -169,7 +169,7 @@ echo "=== smokes for this PR's migrations ==="
 # pgTAP suite already does. Claiming to verify them would be the hollow kind of
 # green this whole phase exists to stop.
 STATUS=0
-NEW_MIGRATIONS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000)
+NEW_MIGRATIONS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000)
 
 for id in "${NEW_MIGRATIONS[@]}"; do
   smoke="$REPO/docs/sql/${id}_smoke.sql"
@@ -372,6 +372,45 @@ for id in "${NEW_MIGRATIONS[@]}"; do
                       jsonb_build_object('field_rollback', jsonb_build_object('blocked_records',1,'blocked',jsonb_build_object('total',1,'omitted',0,'by_kind',jsonb_build_object('fields',1),'sample',jsonb_build_array(jsonb_build_object('kind','fields','reason','bookings_exist'))))));" \
          >/tmp/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the attached profile and blocked-carrying job the revert check requires were never inserted"
+      dump 10 /tmp/harness_seed; STATUS=1; continue
+    fi
+  fi
+
+  # **The same reasoning for 20260910000000's revert**, which names three costs
+  # and counts all three: the admin-authored windows that go back to losing
+  # their id on an edit, the audit rows whose `admin_update_field_blackout`
+  # vocabulary stops having a writer, and the frozen import windows that lose
+  # their server-side "not yours to edit" answer. On a freshly migrated database
+  # all three are zero and the revert reads as costless.
+  #
+  # **The three cardinalities are deliberately unequal -- 2, 1, 3.** 20260909's
+  # seed records why: with every count at 1 a check reading the WRONG set prints
+  # the RIGHT number, and two plants proved exactly that. Do not "tidy" the
+  # second blackout or the second and third windows away.
+  if [ "$id" = "20260910000000" ]; then
+    if ! psql_cmd "INSERT INTO auth.users (id, email, raw_user_meta_data)
+              VALUES ('f0000000-0000-0000-0000-00000000000f','revert-edit@example.test', jsonb_build_object('password_length', 16));
+              INSERT INTO public.organizations (id, name, slug)
+              VALUES ('f1111111-1111-1111-1111-111111111111','Edit Org','edit-org');
+              INSERT INTO public.locations (id, organization_id, name)
+              VALUES ('f2222222-2222-2222-2222-222222222222','f1111111-1111-1111-1111-111111111111','Edit Park');
+              INSERT INTO public.fields (id, organization_id, location_id, name)
+              VALUES ('f3333333-3333-3333-3333-333333333333','f1111111-1111-1111-1111-111111111111','f2222222-2222-2222-2222-222222222222','Edit Pitch');
+              INSERT INTO public.field_blackouts (id, organization_id, field_id, blackout_from, blackout_until, reason)
+              VALUES ('f4444444-4444-4444-4444-444444444444','f1111111-1111-1111-1111-111111111111','f3333333-3333-3333-3333-333333333333','2026-09-01','2026-09-02','maintenance'),
+                     ('f5555555-5555-5555-5555-555555555555','f1111111-1111-1111-1111-111111111111','f3333333-3333-3333-3333-333333333333','2026-10-01','2026-10-02','weather');
+              INSERT INTO public.audit_log (user_id, organization_id, action, resource_type, resource_id, metadata)
+              VALUES ('f0000000-0000-0000-0000-00000000000f','f1111111-1111-1111-1111-111111111111','settings.updated','field_blackout','f4444444-4444-4444-4444-444444444444',
+                      jsonb_build_object('operation','admin_update_field_blackout','phase','update','before','{}'::jsonb,'after','{}'::jsonb));
+              INSERT INTO public.field_availability_profiles
+                (id, organization_id, season_label, field_id, location, field_name, available_from, available_until)
+              VALUES ('f6666666-6666-6666-6666-666666666666','f1111111-1111-1111-1111-111111111111','Fall 2026','f3333333-3333-3333-3333-333333333333','Edit Park','Edit Pitch','2026-08-01','2026-11-30');
+              INSERT INTO public.field_blackout_windows (organization_id, profile_id, blackout_from, blackout_until, reason)
+              VALUES ('f1111111-1111-1111-1111-111111111111','f6666666-6666-6666-6666-666666666666','2026-09-01','2026-09-30','blackout_months'),
+                     ('f1111111-1111-1111-1111-111111111111','f6666666-6666-6666-6666-666666666666','2026-10-01','2026-10-31','blackout_months'),
+                     ('f1111111-1111-1111-1111-111111111111','f6666666-6666-6666-6666-666666666666','2026-11-01','2026-11-30','blackout_months');" \
+         >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the windows, the edit audit row and the import windows the revert check requires were never inserted"
       dump 10 /tmp/harness_seed; STATUS=1; continue
     fi
   fi
@@ -648,6 +687,63 @@ NEEDLES
         STATUS=1
       else
         echo "  | (checked) exactly one public.admin_delete_field survives the revert, and it no longer calls the dropped scenario helpers"
+      fi
+    fi
+    if [ "$id" = "20260910000000" ]; then
+      # **Three costs, three checks, and every one of them counts.** The seed
+      # above planted 2 admin windows, 1 edit audit row and 3 import windows --
+      # three different figures, so a warning counting the WRONG set cannot
+      # print the RIGHT number.
+      if grep -q 'RESTORING remove-and-re-add as the only way to change a blackout: each of the 2 admin-authored window(s)' /tmp/harness_rev; then
+        echo "  | (checked) the revert counted the admin-authored windows that go back to losing their id on an edit"
+      else
+        echo "FAIL revert ${id}: planted 2 admin-authored blackouts and the revert did not name or count what they lose"
+        STATUS=1
+      fi
+      if grep -q 'ALSO REVERTING the single-entry edit audit shape: 1 existing audit row(s)' /tmp/harness_rev; then
+        echo "  | (checked) the revert counted the edit audit rows whose operation stops having a writer"
+      else
+        echo "FAIL revert ${id}: planted an admin_update_field_blackout audit row and the revert did not name or count the vocabulary it closes"
+        STATUS=1
+      fi
+      if grep -q 'ALSO REVERTING the 0A000 import-owned refusal: 3 window(s)' /tmp/harness_rev; then
+        echo "  | (checked) the revert counted the frozen import windows that lose their server-side refusal"
+      else
+        echo "FAIL revert ${id}: planted 3 import-owned windows and the revert did not name or count the refusal they lose"
+        STATUS=1
+      fi
+      # **Present in the catalogue is not the same as reverted.** This revert
+      # drops a function, so the only right answer is GONE -- and the ways it
+      # can be wrong are enumerated rather than one way it can be right, the
+      # shape LIVE-2's R3 plants established. `SURVIVES` covers a DROP whose
+      # argument list drifted from the CREATE's, which is exactly how
+      # docs/sql/reverts/20260504060000 became a silent no-op.
+      v_upd_verdict=$(psql_cmd "SELECT CASE
+             WHEN count(*) = 0 THEN 'GONE'
+             WHEN count(*) > 1 THEN 'AMBIGUOUS:' || count(*)
+             ELSE 'SURVIVES'
+           END
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'admin_update_field_blackout'" 2>/dev/null || echo "QUERY-FAILED")
+      if [ "$v_upd_verdict" != "GONE" ]; then
+        echo "FAIL revert ${id}: admin_update_field_blackout after the revert reads ${v_upd_verdict}, wanted GONE"
+        STATUS=1
+      else
+        echo "  | (checked) no overload of public.admin_update_field_blackout survives the revert"
+      fi
+      # ... and its two siblings are untouched. This migration adds a function
+      # and changes none, so a revert that took a sibling with it would be
+      # destroying capability the operator never asked to lose -- and nothing
+      # else here would notice, because every check above is about the new one.
+      v_sib=$(psql_cmd "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public'
+         AND p.proname IN ('admin_create_field_blackout','admin_delete_field_blackout')" 2>/dev/null || echo "QUERY-FAILED")
+      if [ "$v_sib" != "2" ]; then
+        echo "FAIL revert ${id}: the create/delete siblings read ${v_sib} after the revert, wanted 2"
+        STATUS=1
+      else
+        echo "  | (checked) both blackout siblings survive the revert untouched"
       fi
     fi
     if [ "$id" = "20260907000000" ]; then

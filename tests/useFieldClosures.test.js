@@ -54,6 +54,14 @@ function readBuilder(result) {
   return builder;
 }
 
+/** The admin-authored row from `CLOSURE_ROWS`, in the shape the hook returns. */
+const ADMIN_CLOSURE = {
+  id: 'bo-1',
+  source: 'field_blackouts',
+  closesFieldId: 'field-1',
+  closesLocationId: null,
+};
+
 const draft = (overrides = {}) => ({
   scope: 'field',
   scopeId: 'field-1',
@@ -151,7 +159,64 @@ describe('useFieldClosures', () => {
     });
   });
 
-  it('raises on a payload it cannot read, on both writes', async () => {
+  it('edits in place through the update RPC, sending the whole editable shape', async () => {
+    const { result } = renderHook(() => useFieldClosures());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    // @ts-expect-error [MOCK] - partial RPC response is enough for this assertion.
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: { id: 'bo-1' }, error: null });
+
+    await act(async () => {
+      await result.current.updateBlackout(ADMIN_CLOSURE, draft({ allDay: true }));
+    });
+    // **Every editable column goes, and no scope does.** A partial call would
+    // make "all day" and "no note" inexpressible; a scope parameter would be a
+    // field the RPC has nowhere to put.
+    expect(supabase.rpc).toHaveBeenCalledWith('admin_update_field_blackout', {
+      p_organization_id: 'org-1',
+      p_blackout_id: 'bo-1',
+      p_blackout_from: '2026-09-14',
+      p_blackout_until: '2026-09-18',
+      p_start_minutes: null,
+      p_end_minutes: null,
+      p_reason: 'maintenance',
+      p_note: null,
+    });
+    const sent = vi.mocked(supabase.rpc).mock.calls.at(-1)?.[1];
+    expect(sent).not.toHaveProperty('p_field_id');
+    expect(sent).not.toHaveProperty('p_location_id');
+  });
+
+  it('refuses to edit an import-owned window, or to move a window to other ground', async () => {
+    const { result } = renderHook(() => useFieldClosures());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    vi.mocked(supabase.rpc).mockClear();
+
+    await expect(
+      result.current.updateBlackout(
+        {
+          id: 'win-1',
+          source: 'field_blackout_windows',
+          closesFieldId: 'field-1',
+          closesLocationId: null,
+        },
+        draft()
+      )
+    ).rejects.toThrow(/import/i);
+    // **The positive control.** The guard has to fire BEFORE a call. The RPC
+    // refuses this too, with its own 0A000 -- this saves a round trip and is
+    // not the only thing standing between the freeze and a caller.
+    expect(supabase.rpc).not.toHaveBeenCalled();
+
+    // Moving the window to another pitch is refused here rather than being
+    // silently dropped: the RPC has no scope parameter, so a draft whose scope
+    // has changed would otherwise be sent as an edit that did something else.
+    await expect(
+      result.current.updateBlackout(ADMIN_CLOSURE, draft({ scopeId: 'field-9' }))
+    ).rejects.toThrow(/cannot be moved/i);
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it('raises on a payload it cannot read, on all three writes', async () => {
     const { result } = renderHook(() => useFieldClosures());
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -164,6 +229,15 @@ describe('useFieldClosures', () => {
     await expect(
       result.current.removeBlackout({ id: 'bo-1', source: 'field_blackouts' })
     ).rejects.toThrow(/no readable result/);
+
+    // **All THREE writes**, not the two that existed when this case was
+    // written. An edit that returned an unreadable payload and was reported as
+    // saved is the same defect `useFields.deleteField` had, one RPC along.
+    // @ts-expect-error [MOCK] - an edit that reports no row at all.
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: null, error: null });
+    await expect(result.current.updateBlackout(ADMIN_CLOSURE, draft())).rejects.toThrow(
+      /no readable result/
+    );
   });
 });
 

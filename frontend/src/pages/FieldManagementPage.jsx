@@ -187,16 +187,6 @@ export default function FieldManagementPage() {
    * ordinarily deactivated stays deactivated -- both arms carried the opposite
    * defect once, and a passing test certified it.
    */
-  const handleUnretire = async (field) => {
-    setLifecycleError(null);
-    try {
-      await unretireField(field.id);
-    } catch (err) {
-      logger.error('Unretire failed', err);
-      setLifecycleError(err?.message || 'The end date could not be cleared.');
-    }
-  };
-
   /**
    * The retire RPC for a depth, and the unretire handler for a depth.
    *
@@ -474,7 +464,7 @@ export default function FieldManagementPage() {
                 </button>
                 {field.effective_to ? (
                   <button
-                    onClick={() => handleUnretire(field)}
+                    onClick={() => handleUnretireNode('field', field)}
                     aria-label={`Clear the end date on ${field.name}`}
                     className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-primary transition-colors"
                   >

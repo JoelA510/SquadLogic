@@ -281,28 +281,68 @@ describe('RetireEstateNodeDialog at venue and sub-surface depth', () => {
     );
   });
 
-  it('does not close on a quiet venue: the containment is the half no guard refuses on', async () => {
+  it('refuses a quiet venue on its containment alone, then commits on confirmation', async () => {
     const onRetired = vi.fn();
-    // Nothing is booked, so the RPC commits on the FIRST call. The containment
-    // report is the only account of what that closed, and closing the dialog
-    // here would discard it unseen.
-    const onRetire = vi.fn().mockResolvedValue(VENUE_COMMITTED);
+    // **Nothing is booked, and the retirement still refuses.** Until
+    // 20260912000000 the venue arm gated on the bookings half alone, so this
+    // committed on the first call and the containment report reached nobody.
+    // The refusal now names the other half by its own reason.
+    const QUIET_REFUSAL = {
+      retired: false,
+      reason: 'contained_estate_after_effective_to',
+      affected_count: 0,
+      affected: [],
+      contained_count: 2,
+      contained: CONTAINED_NODES,
+    };
+    const onRetire = vi
+      .fn()
+      .mockResolvedValueOnce(QUIET_REFUSAL)
+      .mockResolvedValueOnce({ ...VENUE_COMMITTED });
 
     render(<Host kind="location" node={VENUE} onRetire={onRetire} onRetired={onRetired} />);
     fireEvent.click(screen.getByText('Open Maplewood Park'));
     fireEvent.click(screen.getByText('Check and retire'));
 
-    const committed = await screen.findByTestId('retire-committed');
-    expect(committed).toHaveTextContent(/is retired after 2026-09-30/i);
-    expect(within(committed).getByTestId('contained-rows')).toBeInTheDocument();
-    expect(onRetired).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
-    // The date field is gone: the decision is made, so re-editing it would
-    // offer a control that can no longer change anything.
-    expect(screen.queryByLabelText(/Last day this venue is usable/)).toBeNull();
+    // The bookings half is empty and says so; the containment half is the
+    // reason the operator is being asked.
+    await waitFor(() => expect(screen.getByTestId('consequence-none')).toBeInTheDocument());
+    expect(screen.getByTestId('contained-rows')).toBeInTheDocument();
+    for (const node of CONTAINED_NODES) {
+      expect(screen.getByText(node.name)).toBeInTheDocument();
+    }
+    expect(onRetired).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByText('Done'));
+    // **One path, not two.** The containment arrives through the same refusal
+    // the bookings already used, so confirming is the same button.
+    fireEvent.click(screen.getByText('Retire anyway'));
+    await waitFor(() =>
+      expect(onRetire).toHaveBeenNthCalledWith(2, 'loc-1', {
+        effectiveTo: '2026-09-30',
+        confirm: true,
+      })
+    );
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(onRetired).toHaveBeenCalledTimes(1);
+  });
+
+  it('commits on the first call when the estate has nothing live left to close', async () => {
+    // The empty case: no bookings and no still-live contained node, so the RPC
+    // commits unconfirmed and there is nothing to confirm. `admin_delete_field`
+    // behaves the same way with nothing to take.
+    const onRetire = vi.fn().mockResolvedValue({
+      retired: true,
+      affected_count: 0,
+      affected: [],
+      contained_count: 0,
+      contained: [],
+      location: { id: 'loc-1', effective_to: '2026-09-30' },
+    });
+    render(<Host kind="location" node={VENUE} onRetire={onRetire} />);
+    fireEvent.click(screen.getByText('Open Maplewood Park'));
+    fireEvent.click(screen.getByText('Check and retire'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(onRetire).toHaveBeenCalledTimes(1);
   });
 
   it('closes straight through at sub-surface depth, where there is no containment to show', async () => {

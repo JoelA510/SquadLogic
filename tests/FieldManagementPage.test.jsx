@@ -324,7 +324,17 @@ describe('FieldManagementPage: the two new estate depths', () => {
   });
 
   it('opens the venue dialog on the venue RPC, and the sub-surface dialog on its own', async () => {
-    const retireLocation = vi.fn().mockResolvedValue({ retired: true, contained: [] });
+    // A containment refusal, so the dialog stays open long enough to be
+    // identified as the VENUE one. 20260912000000 is what makes this the
+    // first call's answer rather than a silent commit.
+    const retireLocation = vi.fn().mockResolvedValue({
+      retired: false,
+      reason: 'contained_estate_after_effective_to',
+      affected_count: 0,
+      affected: [],
+      contained_count: 0,
+      contained: [],
+    });
     const retireFieldSubunit = vi.fn().mockResolvedValue({ retired: true });
     vi.mocked(useFields).mockReturnValue({
       ...baseHook,
@@ -347,7 +357,7 @@ describe('FieldManagementPage: the two new estate depths', () => {
     );
     // A venue that holds nothing still reports that it holds nothing.
     expect(await screen.findByTestId('contained-none')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Done'));
+    fireEvent.click(screen.getByText('Cancel'));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: 'Retire North A of North Field' }));

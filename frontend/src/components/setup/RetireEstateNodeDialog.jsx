@@ -58,12 +58,16 @@ export const ESTATE_KINDS = {
  * `estate_contained_nodes` is likewise revoked, and this component never
  * assembles a containment list from the fields it happens to have in state.
  *
- * **The one case a pre-commit preview cannot cover, stated rather than hidden.**
- * The RPCs refuse on BOOKINGS only. Retiring a venue with nothing booked after
- * the date commits on the first call — so an operator closing a quiet site with
- * four live pitches would otherwise never be shown the four. This dialog
- * therefore renders `contained` on the COMMITTED result too, and stays open to
- * show it, instead of closing on a silence that hid half the consequence.
+ * **This component used to carry a post-commit state, and 20260912000000 is
+ * why it no longer does.** The venue arm refused on the bookings half alone, so
+ * retiring a quiet site with four live pitches committed on the first call and
+ * the containment report — computed, audited and returned — reached nobody. The
+ * dialog compensated by rendering `contained` on the COMMITTED result and
+ * staying open. That compensation was a UI apology for a gate in the database,
+ * and the fix belonged where the decision is made: the RPC now refuses on the
+ * contained estate too, so the containment arrives on the SAME refusal path the
+ * bookings already used, and the special state is deleted rather than kept
+ * beside the general one.
  *
  * **Accessibility.** The date is a native `<input type="date">`, which is
  * keyboard-operable by construction — typed digits, arrow keys, and the
@@ -93,7 +97,6 @@ export default function RetireEstateNodeDialog({
   const spec = ESTATE_KINDS[kind];
   const [effectiveTo, setEffectiveTo] = useState(defaultDate);
   const [preview, setPreview] = useState(/** @type {any} */ (null));
-  const [committed, setCommitted] = useState(/** @type {any} */ (null));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(/** @type {string|null} */ (null));
 
@@ -112,7 +115,6 @@ export default function RetireEstateNodeDialog({
 
   const reset = () => {
     setPreview(null);
-    setCommitted(null);
     setError(null);
     setBusy(false);
   };
@@ -145,19 +147,8 @@ export default function RetireEstateNodeDialog({
     try {
       const result = await onRetire(node.id, { effectiveTo, confirm });
       if (result.retired) {
-        onRetired?.();
-        // **A commit with a containment report does not close silently.** The
-        // guards refuse on bookings, never on containment, so this is the only
-        // moment the operator can be shown which pitches and half-pitches the
-        // venue took with it.
-        if (spec.contains && Array.isArray(result.contained)) {
-          setPreview(null);
-          setError(null);
-          setBusy(false);
-          setCommitted(result);
-          return;
-        }
         reset();
+        onRetired?.();
         onClose();
         return;
       }
@@ -177,86 +168,58 @@ export default function RetireEstateNodeDialog({
       title={`Retire ${node?.name ?? spec.noun}`}
       icon={<CalendarX size={18} aria-hidden="true" />}
       footer={
-        committed ? (
-          <Button variant="primary" onClick={close}>
-            Done
+        <>
+          <Button variant="secondary" onClick={close} disabled={busy}>
+            Cancel
           </Button>
-        ) : (
-          <>
-            <Button variant="secondary" onClick={close} disabled={busy}>
-              Cancel
+          {preview ? (
+            <Button variant="danger" onClick={() => attempt(true)} disabled={busy}>
+              Retire anyway
             </Button>
-            {preview ? (
-              <Button variant="danger" onClick={() => attempt(true)} disabled={busy}>
-                Retire anyway
-              </Button>
-            ) : (
-              <Button
-                variant="primary"
-                onClick={() => attempt(false)}
-                disabled={busy || !effectiveTo}
-              >
-                Check and retire
-              </Button>
-            )}
-          </>
-        )
+          ) : (
+            <Button
+              variant="primary"
+              onClick={() => attempt(false)}
+              disabled={busy || !effectiveTo}
+            >
+              Check and retire
+            </Button>
+          )}
+        </>
       }
     >
-      {!committed && (
-        <div className="field">
-          <label htmlFor="retire-effective-to">
-            Last day this {spec.noun} is usable <span className="req">*</span>
-          </label>
-          <input
-            id="retire-effective-to"
-            className="input"
-            type="date"
-            value={effectiveTo}
-            onChange={(event) => {
-              setEffectiveTo(event.target.value);
-              // A new date is a new question. Keeping the old answer on screen
-              // beside a changed date is how an operator confirms against a list
-              // that was never computed for it.
-              setPreview(null);
-            }}
-            aria-describedby="retire-effective-to-help"
-          />
-          <p id="retire-effective-to-help" className="text-sm">
-            Inclusive. A booking ON this date is left alone; {spec.ground} stops being offered the
-            day after. Retiring is an end date — nothing is deleted, and it can be cleared again.
-            {spec.contains
-              ? ' Every field and sub-surface at this venue closes with it, by containment: no end date is written onto any of them.'
-              : ''}
-          </p>
-        </div>
-      )}
+      <div className="field">
+        <label htmlFor="retire-effective-to">
+          Last day this {spec.noun} is usable <span className="req">*</span>
+        </label>
+        <input
+          id="retire-effective-to"
+          className="input"
+          type="date"
+          value={effectiveTo}
+          onChange={(event) => {
+            setEffectiveTo(event.target.value);
+            // A new date is a new question. Keeping the old answer on screen
+            // beside a changed date is how an operator confirms against a list
+            // that was never computed for it.
+            setPreview(null);
+          }}
+          aria-describedby="retire-effective-to-help"
+        />
+        <p id="retire-effective-to-help" className="text-sm">
+          Inclusive. A booking ON this date is left alone; {spec.ground} stops being offered the day
+          after. Retiring is an end date — nothing is deleted, and it can be cleared again.
+          {spec.contains
+            ? ' Every field and sub-surface at this venue closes with it, by containment: no end date is written onto any of them.'
+            : ''}
+        </p>
+      </div>
 
       <div aria-live="polite">
         {error && (
           <p className="badge danger" role="alert" style={{ marginTop: 10 }}>
             {error}
           </p>
-        )}
-        {committed && (
-          <div style={{ marginTop: 12 }} data-testid="retire-committed">
-            <p className="text-sm" style={{ marginBottom: 8 }}>
-              <strong>{node.name}</strong> is retired after {effectiveTo}. This is what that closed
-              — nothing was deleted, and clearing the end date brings back every node that has no
-              end date of its own.
-            </p>
-            <ConsequencePreview
-              subject={node.name}
-              operation="retire"
-              affectedCount={committed.affected_count ?? (committed.affected || []).length}
-              rows={committed.affected || []}
-              repair={repairProposal({
-                affectedCount: committed.affected_count ?? (committed.affected || []).length,
-              })}
-              titleId="retire-committed-title"
-              {...containedProps(committed)}
-            />
-          </div>
         )}
         {preview && (
           <div style={{ marginTop: 12 }}>

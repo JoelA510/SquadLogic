@@ -2303,12 +2303,30 @@ plant "R8 revert counts dated nodes instead of undated ones" "$R8" \
   "             WHERE c.own_effective_to IS NOT NULL) AS live_nodes" \
   "revert 20260912000000: planted a live venue with three undated nodes"
 
-# **The zero-guard removed.** Without it a revert rehearsed on an empty database
-# prints reassuring zeroes and proves only that the code parses, which is the
-# failure its own comment describes.
-plant "R8 revert accepts having examined zero venues" "$R8" \
+# **The zero-guard, planted at its CONDITION rather than at its presence.**
+#
+# The first version of this plant replaced the guard with `IF false THEN`, and
+# it could not be caught -- **a plant that cannot be caught is the same defect
+# this file exists to hunt, sitting inside the hunter.** The harness always
+# seeds this revert with three venues, so `v_venues` is never 0, so the guard
+# never fires, so removing it changes nothing any stage can observe. It would
+# have scored NOT CAUGHT and been read as a hole in the revert rather than as a
+# mis-aimed plant.
+#
+# Flipping the COMPARISON is catchable and proves something the other version
+# never could: that `v_venues` really is populated by the loop and really does
+# reach the guard. A counter that was never incremented -- a live possibility,
+# since it is `v_venues := v_venues + 1` inside a FOR -- would leave the flipped
+# guard silent too, and THAT would score NOT CAUGHT and be worth knowing.
+#
+# What this plant does NOT prove is that the guard fires on a genuinely empty
+# estate; the harness cannot express that, because its seed is what lets the
+# revert run at all. That direction is a manual control, recorded in the
+# progress entry: the revert run with its harness seed removed raises
+# `This revert examined ZERO venues`.
+plant "R8 the zero-venue guard is wired to a dead counter" "$R8" \
   "  IF v_venues = 0 AND COALESCE(current_setting('revert.allow_empty', true), 'off') <> 'on' THEN" \
-  "  IF false THEN" \
+  "  IF v_venues > 0 AND COALESCE(current_setting('revert.allow_empty', true), 'off') <> 'on' THEN" \
   "examined/exposed totals do not match the planted estate"
 
 # ---------------------------------------------------------------------------

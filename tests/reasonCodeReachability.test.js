@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 20 vocabularies, 469 codes, of
- * which 458 are shown to be producible and 11 are named as holes.
+ * `tests/attribution.test.js` already carries. 20 vocabularies, 472 codes, of
+ * which 461 are shown to be producible and 11 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -294,6 +294,7 @@ import {
   checkFixtureTiming,
   computeGameWindows,
   earliestKickoffWithWarmup,
+  resolveZonedInstant,
   warmupWindowAvailability,
 } from '@squadlogic/core/timing/index.js';
 import {
@@ -788,6 +789,33 @@ for (const [label, windows] of /** @type {Array<[string, Array<Object>]>} */ ([
 }
 
 /* -- timing --------------------------------------------------------------- */
+
+/* -- the season clock ----------------------------------------------------- */
+
+/**
+ * `resolveZonedInstant()` is the boundary where a `game_slots` wall reading
+ * becomes an instant, and all three of its refusals are driven from plain input
+ * — a date, a clock reading and a zone — with nothing reached into.
+ *
+ * The dates are the real ones: `America/New_York` repeats 01:30 on 2026-11-01
+ * and skips 02:30 on 2026-03-08.
+ */
+harvest(
+  'resolveZonedInstant(no season timezone)',
+  resolveZonedInstant({ date: '2026-11-07', time: '16:44', timeZone: null })
+);
+harvest(
+  'resolveZonedInstant(unknown timezone)',
+  resolveZonedInstant({ date: '2026-11-07', time: '16:44', timeZone: 'Mars/Olympus_Mons' })
+);
+harvest(
+  'resolveZonedInstant(daylight saving skips the hour)',
+  resolveZonedInstant({ date: '2026-03-08', time: '02:30', timeZone: 'America/New_York' })
+);
+harvest(
+  'resolveZonedInstant(daylight saving repeats the hour)',
+  resolveZonedInstant({ date: '2026-11-01', time: '01:30', timeZone: 'America/New_York' })
+);
 
 /* -- the alias layer ------------------------------------------------------ */
 

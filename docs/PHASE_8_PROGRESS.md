@@ -2369,3 +2369,149 @@ delete-it rule is met by the containment report and not yet by a scheduler.
   readers, the asymmetry with `locations.effective_to`, and **8.8** as the
   likely home for enforcement.
 - Everything still open after gap A, unchanged.
+
+---
+
+## 8.4 gap B (part 1 of 2) — venues and sub-surfaces get effective dating — **merged**
+
+Second of the two follow-ups the operator asked for at the gate. **Part 1 only:
+everything that decides, nothing that renders.**
+
+- **PR:** [#391](https://github.com/JoelA510/SquadLogic/pull/391), branch
+  `feat/venue-subunit-effective-dating`.
+- **Merged:** squash `3ec872a`, 2026-09-17, from reviewed head `b767e1f`.
+- **Migration:** `20260911000000_venue_subunit_effective_dating.sql`.
+- **Tests 2968 → 3004** (191 → 192 files), E2E 78, season fixtures 204, bundle
+  222.25 → **222.39 KB gz** against 244.14, advisors PASS over **111**
+  migrations, scenario table **51 → 65** rows all executed against Postgres,
+  `prove:mock` **85/85 caught**, gap B's own plants **11/11 caught**.
+
+### Containment, decided and argued
+
+Retiring a venue retires its fields and their sub-surfaces **by containment,
+resolved where the estate is read** — no date written onto a child, no child
+flag flipped, no refusal while a child is live.
+
+- _Refuse while any field is live_ — rejected: every venue has live pitches, so
+  it substitutes a rule for the operator's decision.
+- _Copy the date down_ — rejected on `admin_unretire_field`'s **own** argument: a
+  reversal cannot know which children the operator had already retired, so
+  restoring them discards a decision it never made and leaving them retired
+  makes unretire not the inverse of retire. Silent either way.
+- _Containment_ — **already this codebase's contract.** `surfaceIsLiveOn()` in
+  `packages/core/src/facility/lifecycle.js` already walks a surface's lineage
+  plus its venue. Adopt the sibling rather than invent a fourth answer.
+
+**The best decision in the PR is the smallest.** The venue argument in
+`frontend/src/utils/fieldLifecycle.js` is **required** and throws on
+`undefined`. A third parameter defaulting to "unbounded" would have let every
+existing call site keep the pre-containment answer while reading as though
+updated — the quietest possible way to ship a retirement that retires nothing.
+
+### The enumerator extended, not twinned
+
+`public.field_bookings(org, scope_id, after, scope DEFAULT 'field')`, scope ∈
+`field | location | subunit`, **an unknown scope raises 22023** rather than
+matching nothing.
+
+The supervisor's brief permitted changing the signature and every caller. That
+would have cost **619 lines** — `admin_delete_field` (198) and
+`rollback_field_import_job` (421) recreated verbatim to append one literal, in
+the one family where a transcription slip is _the_ recurring defect. Appending a
+defaulted parameter leaves all three existing callers meaning exactly the
+field-scoped question they already ask, and the smoke asserts they pass no scope
+while the two new RPCs name theirs.
+
+**Scopes examined, not scopes fixed**: the smoke asserts four arms are
+structurally empty at subunit scope, read from `information_schema`, so a
+`field_subunit_id` appearing on `game_slots` fails the run.
+
+**One part of the pattern deliberately not copied.** The
+`fields_retirement_deactivates` trigger exists to hold `fields.active` and
+`fields.effective_to` in step. Neither new table has an `active` column, so a
+trigger would enforce nothing and adding the column would manufacture the hazard
+`20260906000000` spends eighty lines bounding. The smoke asserts its absence —
+argued in the migration header rather than done quietly.
+
+### Four defects only running found, one of them in the author's own check
+
+- **A prior smoke hollowed out by this change.** `20260907000000_smoke.sql`
+  parsed the producer's arms from `pg_get_functiondef`, and
+  `p_scope text DEFAULT 'field'` renders as `'field'::text` **in the signature**,
+  landing in arm one when the definition is split on `UNION ALL`. Arm one's kind
+  would have read `field`, and its `v_kind IS NULL` guard could no longer fail
+  **at all**. It reads `prosrc` now.
+- **Two existing plants anchored on text this change replaced**, scoring
+  ANCHOR-MISS rather than failing.
+- **A guard nothing could make fail**: every RPC arm passes a literal scope, so
+  no behavioural test could reach the unknown-scope throw. `mockFieldBookings`
+  is exported and reached directly now.
+- **A check in `run.sh` that could not fail, written by the agent itself.** It
+  copied a sibling stage's catalogue verdict, but this revert asserts its own
+  restore in the same transaction, so every failure mode raises earlier. Its
+  plant came back CAUGHT ELSEWHERE, which is how such a check announces itself.
+  **Copying a verdict from a sibling stage without asking whether anything can
+  still reach it is how this gets written.**
+
+### `/code-review` at high: seven findings, three of them checks that could not fail
+
+The sharpest: a scenario case seeded `before.effectiveTo`, which **both runners
+apply to the venue** — so the node under test started NULL and
+`expect.effectiveTo: null` held whatever the RPC did. **A no-op unretire kept all
+70 mock cases green.** Also: the SQL generator's `childDates` block read a
+variable a `target: "missing"` case deliberately clobbers, so it counted the
+children of a venue that does not exist and could only return 0 while the JS
+runner really checked it — **two runners silently proving different things**. And
+`run.sh` printed "and fields.effective_to is untouched" while querying only the
+two new tables, so a revert that also dropped it would have printed that
+reassurance and exited green.
+
+### The supervisor's round 1, and a false alarm caught before it was filed
+
+**Finding: 110 plant anchors were unverified on a change known to move anchors.**
+The agent statically reviewed them on the premise that they were last green on
+`main`; its own findings disprove that premise. Rather than demand the 5.4-hour
+sweep, the ask was the cheap half — an **anchor-resolution pre-flight** over all
+121 plants. It runs the **real** `plant` calls under `PLANT_ANCHORS_ONLY=1`
+rather than reimplementing the anchor list, so there is no second reading to
+drift.
+
+Verified by the supervisor: **121 of 121 resolve exactly once**; with an anchor
+deliberately moved, exit 9 naming the two plants that matched that text.
+
+**The first attempt at that control was wrong, and the error is worth keeping.**
+It mutated `20260906000000` while the plant targets `20260907000000`, so "121 of
+121" was the _correct_ answer to a file no plant anchors text in — and it looked
+exactly like a hollow guard. Caught by checking the innocent explanation before
+writing the finding. **A positive control that does not perturb the thing under
+test proves nothing**, and this one would have filed a false HIGH against a
+guard that works.
+
+**Ruling given on the open question:** keep `field_subunits.effective_to`. It is
+read — by `estate_contained_nodes`, for containment and `already_retired` — so
+honour-it-or-delete-it is satisfied. What it lacks is a _scheduler_ reader, and
+correctly so: nothing in the app offers a sub-surface to book onto, and building
+an offerability read for that would be speculative work justified by symmetry
+alone. The boundary is now in the column's COMMENT, which names
+`practice_slots.field_subunit_id` as the one column that references a
+sub-surface, names the asymmetry with `locations.effective_to`, and directs 8.8
+to adopt the existing containment reading rather than invent a second.
+
+### A process rule earned the hard way
+
+`node -e "import('./scripts/dbharness/prove-mock.mjs')"` intended as a syntax
+check **runs the harness**. It timed out mid-sweep and left a mutation on disk in
+`mockSupabaseClient.js`, caught on the next `git status`. **`node --check` is the
+one that does not execute.** This belongs beside "work in progress under a
+mutation harness is not work in progress".
+
+### Still open after gap B part 1
+
+- **Gap B part 2**: the UI at both depths (`RetireFieldDialog` generalised to a
+  node and a kind, the two `FieldManagementPage` controls, `ConsequencePreview`
+  rendering `contained` beside `affected` — a venue retirement's consequence has
+  two halves and only one is a booking list), the `useFields` wrappers, and E2E.
+- **The full 121-plant SQL sweep has not been run** (~5.4 hours). The anchor
+  pre-flight covers the resolution half; the other 110 plants are unchanged and
+  statically reviewed only.
+- Everything still open after gap A, unchanged.

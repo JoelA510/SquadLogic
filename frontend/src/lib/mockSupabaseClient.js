@@ -2177,7 +2177,8 @@ export const mockSupabase = {
       // `20260913000000_season_timezone_writer.sql`. The Settings control used
       // to write only localStorage, so `season_settings.timezone` had no writer
       // anywhere and every season read as having no clock (GAP-30).
-      const { p_organization_id, p_season_settings_id, p_timezone } = params || {};
+      const { p_organization_id, p_season_settings_id, p_timezone, p_actor_context } =
+        params || {};
       if (!p_organization_id) {
         return { data: null, error: { message: 'p_organization_id is required' } };
       }
@@ -2219,6 +2220,23 @@ export const mockSupabase = {
           error: { message: `Season settings do not belong to organization ${p_organization_id}` },
         };
       }
+      // Mirrors 20260917000000: ONE audit row, carrying both the value half
+      // and -- when the caller is viewing as another profile -- the
+      // impersonation half. `impersonated_by` and `admin_email` are derived
+      // here as they are in the RPC, never taken from the caller.
+      const target =
+        p_actor_context && typeof p_actor_context === 'object'
+          ? (p_actor_context.target_user_id ?? null)
+          : null;
+      const actor = target
+        ? {
+            target_user_id: target,
+            impersonated_by: currentUserId,
+            admin_email:
+              (db.profiles || []).find((row) => String(row.id) === String(currentUserId))?.email ??
+              undefined,
+          }
+        : {};
       const previous = season.timezone ?? null;
       season.timezone = zone;
       db.audit_log = db.audit_log || [];
@@ -2227,7 +2245,7 @@ export const mockSupabase = {
         organization_id: p_organization_id,
         action: 'settings.timezone_updated',
         user_id: currentUserId,
-        metadata: { timezone: zone, previous_timezone: previous },
+        metadata: { timezone: zone, previous_timezone: previous, ...actor },
         created_at: new Date().toISOString(),
       });
       saveDB(db);

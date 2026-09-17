@@ -235,6 +235,25 @@ export const OrganizationProvider = ({ children }) => {
     return orgMember?.role ? ROLE_PERMISSIONS[orgMember.role] || [] : [];
   }, [orgMember?.role]);
 
+  /**
+   * Reflect a season timezone that has just been persisted.
+   *
+   * Narrow on purpose: `season_settings.timezone` is the season's clock and the
+   * single source of truth for it (GAP-30). This exists so the Settings control
+   * can show the value it just wrote without a full refetch; it is **not** a
+   * way to set a timezone the database does not have. The writer is
+   * `admin_set_season_timezone`, and a caller that updates this without calling
+   * that RPC has invented a second answer to the question this column exists to
+   * answer.
+   */
+  const reflectSeasonTimezone = useCallback((seasonSettingsId, nextTimezone) => {
+    setCurrentSeasonSetting((previous) =>
+      previous && String(previous.id) === String(seasonSettingsId)
+        ? { ...previous, timezone: nextTimezone }
+        : previous
+    );
+  }, []);
+
   const value = useMemo(
     () => ({
       organizations,
@@ -242,6 +261,7 @@ export const OrganizationProvider = ({ children }) => {
       orgMember,
       availableSeasons,
       currentSeasonSetting,
+      reflectSeasonTimezone,
       loading,
       fetchError,
       refetchOrgs,
@@ -257,6 +277,7 @@ export const OrganizationProvider = ({ children }) => {
       orgMember,
       availableSeasons,
       currentSeasonSetting,
+      reflectSeasonTimezone,
       loading,
       fetchError,
       refetchOrgs,

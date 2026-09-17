@@ -1,15 +1,24 @@
 import React, { useState } from 'react';
 import { useTheme } from '../../../contexts/ThemeContext.jsx';
 import { useAuth } from '../../../contexts/AuthContext.jsx';
+import { useOrganization } from '../../../contexts/OrganizationContext.jsx';
 import { supabase } from '../../../lib/supabaseClient.js';
 
 export default function SeasonModule() {
-  const { currentSeason, updateCurrentSeason, availableSeasons, timezone, updateTimezone } =
-    useTheme();
+  const { currentSeason, updateCurrentSeason, availableSeasons } = useTheme();
   const { user, isImpersonating } = useAuth();
+  // **`season_settings.timezone`, not the ThemeContext copy.** That copy is
+  // localStorage-backed and ThemeContext's own header calls it legacy state
+  // slated for removal. Until GAP-30 it was the only thing this control wrote,
+  // so the column three surfaces read had no writer at all and every season
+  // read as having no clock. One source of truth, and this is it.
+  const { currentOrganization, currentSeasonSetting, reflectSeasonTimezone } = useOrganization();
+  const timezone = currentSeasonSetting?.timezone ?? '';
 
   const [seasonFormat, setSeasonFormat] = useState('single');
   const [localCurrentSeason, setLocalCurrentSeason] = useState(currentSeason);
+  const [timezoneError, setTimezoneError] = useState(null);
+  const [timezoneSaving, setTimezoneSaving] = useState(false);
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -154,33 +163,65 @@ export default function SeasonModule() {
           <select
             id="season-timezone"
             value={timezone}
+            disabled={timezoneSaving || !currentSeasonSetting?.id}
+            aria-describedby={timezoneError ? 'season-timezone-error' : undefined}
+            aria-invalid={timezoneError ? 'true' : undefined}
             onChange={async (e) => {
               const newVal = e.target.value;
-              updateTimezone(newVal);
-              const orgId = user?.profile?.organization_id;
-              if (orgId) {
+              const orgId = currentOrganization?.id ?? user?.profile?.organization_id;
+              const seasonId = currentSeasonSetting?.id;
+              if (!orgId || !seasonId) {
+                setTimezoneError('No active season to set a timezone on.');
+                return;
+              }
+              setTimezoneSaving(true);
+              setTimezoneError(null);
+              // The audit row is written inside the RPC, atomically with the
+              // column, rather than beside it from here: a timezone change that
+              // is audited but not persisted is the shape this control had.
+              const { error } = await supabase.rpc('admin_set_season_timezone', {
+                p_organization_id: orgId,
+                p_season_settings_id: seasonId,
+                p_timezone: newVal,
+              });
+              setTimezoneSaving(false);
+              if (error) {
+                // Surface it. The previous version could not fail, because it
+                // never reached the database.
+                setTimezoneError(error.message || 'Season timezone could not be saved.');
+                return;
+              }
+              reflectSeasonTimezone(seasonId, newVal);
+              if (isImpersonating) {
                 await supabase.rpc('record_audit_event', {
                   p_organization_id: orgId,
                   p_action: 'settings.timezone_updated',
                   p_metadata: {
                     timezone: newVal,
-                    ...(isImpersonating && {
-                      target_user_id: user.profile.id,
-                      impersonated_by: user.id,
-                      admin_email: user.email,
-                    }),
+                    target_user_id: user.profile.id,
+                    impersonated_by: user.id,
+                    admin_email: user.email,
                   },
                 });
               }
             }}
             className="w-full bg-bg-surface border border-border-subtle rounded-lg px-4 py-3 text-text-primary focus:outline-none focus:border-brand-400 transition-colors"
           >
+            {/* An unset season has no clock and the game scheduler refuses
+                (GAP-30), so the empty state is named rather than defaulted to a
+                zone nobody chose. */}
+            {!timezone && <option value="">Not set — game scheduling is disabled</option>}
             <option value="America/Los_Angeles">Pacific Time (US & Canada)</option>
             <option value="America/Denver">Mountain Time (US & Canada)</option>
             <option value="America/Chicago">Central Time (US & Canada)</option>
             <option value="America/New_York">Eastern Time (US & Canada)</option>
             <option value="UTC">UTC</option>
           </select>
+          {timezoneError && (
+            <p id="season-timezone-error" role="alert" className="mt-2 text-sm text-danger">
+              {timezoneError}
+            </p>
+          )}
         </div>
 
         <div>

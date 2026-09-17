@@ -1991,3 +1991,133 @@ column.
 6. `GameConflictBanner` gained two types with nothing enumerating that table
    against its producers, so a third added without registering it falls silently
    into the soft-warnings bucket. Pre-existing shape, two more members.
+
+---
+
+## 8.4 gap A — editing a blackout keeps its identity — **fixed, own PR**
+
+First of the two follow-ups the operator asked for at the 8.4/8.5 gate.
+
+- **PR:** [#389](https://github.com/JoelA510/SquadLogic/pull/389), branch
+  `feat/admin-update-field-blackout`.
+- **Merged:** squash `c4b79be`, 2026-09-17, from reviewed head `81b20e3`.
+- **Migration:** `20260910000000_admin_update_field_blackout.sql`, with revert,
+  smoke and `supabase/tests/admin_update_field_blackout.sql`.
+- **Tests 2945 → 2968** (189 → 191 files). Bundle 222.23 → **222.25 KB gz**
+  (+0.02) against a 244.14 budget. Harness: `prove` **110/110 caught**, 27-claim
+  census; `prove:mock` **77/77 caught**; `test:db:local` OK with **51 of 51**
+  scenario rows.
+
+### The fix
+
+Editing an admin-authored blackout was remove-and-re-add: a new id, **four**
+audit rows, and a window that lost its identity across an edit. The RPC edits in
+place, the id survives, and it writes **one** audit entry with before and after.
+Scope is deliberately not a parameter — moving a closure to other ground is a
+different closure, not an edit of this one. An id owned by the frozen
+`field_blackout_windows` is refused with `0A000` naming that table and the
+recovery, not the `P0002` an unknown id gets; **both** the lookup and the
+frozen-table probe are org-scoped, so a stranger gets not-found either way, and
+the edited row is taken `FOR UPDATE` — the LIVE-3 locking lesson applied without
+being asked for.
+
+### Recovered from a container restart, and the two states kept apart
+
+The implementing agent was killed mid-task with ~2285 insertions uncommitted and
+nothing pushed. The supervisor committed the tree as `e7c4de7` with an
+**`[UNVERIFIED]`** prefix whose message stated exactly what had been checked (no
+plant in flight, typecheck clean, one new lint warning) and that **nothing else
+had been run**. A second agent then took ownership, read the recovered diff
+adversarially before running anything, and established the figures above rather
+than inheriting them. Third restart this session; the per-fix commit-and-push
+rule meant the other two cost nothing.
+
+### Two defects in the verification apparatus itself
+
+Both are checks that could not do their job, inside machinery built to catch
+exactly that:
+
+- **A pgTAP suite declared `plan(14)` over fifteen assertions** and would have
+  failed outright. `tests/pgtapPlanCounts.test.js` now compares every suite's
+  plan to its assertion count, with the defect itself as its positive control.
+- **A harness plant passed `"PASS smoke 20260910000000"` as its stay-green
+  string**, which `plant()` prefixes with `PASS ` again — so it searched for a
+  line no run can print and scored BORROWED unconditionally. The **"check that
+  cannot pass"** twin of the check that cannot fail. The sweep found it on the
+  first run anyone gave the work.
+
+### A supervisor correction, and a better version of it from the agent
+
+The agent's first framing said nothing executes a pgTAP suite, so "the only
+thing standing between that file and `main` was somebody counting by eye" — and
+put that in the docblock of the very file whose subject is that a declared
+guarantee is not an enforced one. **False**: `.github/workflows/pgtap.yml` runs
+`supabase test db` on SQL paths, and it turned this suite green in 2m01s.
+
+This is the same error the supervisor made during 8.4 PR 2, asserting three
+times that a PR's SQL had never executed until `pgtap.yml` disproved it.
+
+**The agent's corrected version is sharper than either original.** The other
+forty-four suites agree exactly **because** that CI job has been enforcing them
+— not by coincidence and not because anyone counts carefully. This suite was new
+in this PR and had never reached the gate. The guard's real value is that
+**nothing an agent runs before pushing** executes pgTAP, so the mismatch
+survived a full Definition of Done and would have been caught only by a
+container-starting job firing after the push; the guard moves that to a
+millisecond assertion, and because it parses text rather than executing SQL it
+works where there is no Supabase CLI at all — which is this environment, and
+where the defect was in fact found.
+
+### The supervisor's ninth wrong figure, and its reusable cause
+
+The recovered work was reported to the second agent as **~1566 insertions**; it
+is **2285**. The cause is worth more than the correction: `git diff --stat` was
+read **before staging**, and it excludes untracked files — four of the largest
+files in that commit (migration, revert, smoke, pgTAP suite) were untracked. A
+diff of the tracked subset was quoted as the whole, and the ceiling set from it
+was breached before the agent started.
+
+**`git diff --stat` does not measure a change that adds files.** Use
+`git show --numstat <sha>`, or stage first.
+
+### `/code-review` at high: four findings, all fixed
+
+- **The all-day toggle destroyed the times on the way back.** Tick "closed all
+  day" on a 16:00-19:30 window, change your mind, untick: both boxes empty, the
+  consequence panel gone, Save refusing a window the operator never touched, and
+  cancel-and-reopen the only escape. Clearing was never needed — the draft
+  already sends NULL for both when `allDay` is set.
+- **`20260906000100`'s revert would have orphaned this function.** A plpgsql
+  body is not a catalogue dependency, so `DROP TABLE public.field_blackouts`
+  would leave a SECURITY DEFINER function `authenticated` may still execute,
+  answering 42P01 forever. Dropped there now, `IF EXISTS` so normal-order
+  reverts are unaffected, and **labelled unproven in the file** because the
+  harness builds each revert's database only up to its own migration and
+  structurally cannot exercise it.
+- Two Edit buttons on one pitch on one day could share an accessible name.
+- Two records said remove-and-re-add costs two audit rows. It costs four.
+
+### Supervisor review: two passes
+
+Round 1 found the docblock falsehood above. Round 2 ran four probes and found
+nothing: the SQL refusal ordering and its org scoping; the `FOR UPDATE`; the
+older revert's `DROP FUNCTION` and its unproven label; and the new plan-count
+guard, which was **falsified independently** — `plan(14)` reintroduced by hand,
+the guard failed with `plan(14) over 15 assertions`, the file restored to an
+empty diff.
+
+### Still open after gap A
+
+- **`admin_delete_field_blackout` still answers `P0002` for an import-owned
+  id** — the twin of the gap just closed.
+- The mock's `22023` for a missing date has no SQL twin (the column is NOT NULL
+  → `23502`), is unpinned by the scenario table, and is unreachable through the
+  hook because Zod requires both dates. A declared code with no counterpart.
+- Cross-org refusal is proved on the SQL arm only; the mock is org-scoped in the
+  same order but no case exercises it.
+- The SQL runner's scenario-count guard derives its total from the same JSON, so
+  it catches a generator emitting fewer cases than the table holds, **not** a
+  table that shrank. The vitest `toBe(14)`/`toBe(51)` pins are what catch that.
+  Both exist; the requirement is met, just not where it looks like it is.
+- **Gap B is not started**: `locations` and `field_subunits` still carry no
+  effective dates and no retire RPC.

@@ -3101,3 +3101,123 @@ mirror. LIVE-9 (the dropped columns) and LIVE-10 (the missing writer) are closed
 in PR A -- they were GAP-30's precondition, not a follow-up: the feature refuses
 without a season clock, and nothing could set one. GATE 2 — the engine wiring question — stays closed until GAP-29 and
 GAP-30 both land.
+
+## GAP-30 — the season clock — **merged (#396, `4a912eb`)**
+
+The implementation record is the PR body and the LIVE-5/7/9/10 entries the
+implementing agent wrote. This is the supervisor's record: what the review
+rounds cost, what they caught, and what merged anyway.
+
+Three review rounds, and **the round that mattered was the one nobody asked
+for**.
+
+### Round 1 — supervisor, 2 findings
+
+Verified the composer by execution rather than reading its test file: fifteen
+cases against independently constructed expectations, including
+`Australia/Lord_Howe` (a **thirty-minute** DST shift, where naive offset-probe
+implementations usually break) and the `:45` zones. All fifteen correct. The
+arithmetic was never the problem in this PR and was not the problem in any
+later round either.
+
+Two findings. `24:00:00` was refused where `main` composed it — a regression,
+and one the module's own JSDoc contradicted, since it cited that exact value as
+the reason `resolveZonedInstant` never throws. And the practice arm's carve-out
+was understated: the page _sends_ `timezone` to the `auto-scheduler` edge
+function, which contains zero occurrences of the word.
+
+### Round 2 — an independent adversarial pass, 8 findings, one a blocker
+
+Dispatched because 2,031 insertions across 24 files deserved a second reader,
+with the first pass's verified ground handed over so the second would not
+re-derive it.
+
+It found that **nothing in the repository writes `season_settings.timezone`.**
+Confirmed independently before acting: `initialize_new_tenant` parks
+`p_timezone` in `organizations.contact_info` as jsonb nothing reads back, the
+Settings control wrote `localStorage` and an audit row, and repo-wide the only
+hits were doc comments and the `ADD COLUMN`. The PR made a missing season clock
+blocking, so every self-serve organisation would have got a disabled scheduler
+and a banner naming a field no UI persisted.
+
+**How it got that far is the finding behind the finding.** The e2e seeds failed;
+the fix was to patch the seeds; the suite went green over a production path that
+was still broken. Not a hollow _check_ this time — a hollow _response to a
+failing check_. Nobody asked what the seeds were standing in for.
+
+### Round 3 — the implementing agent, unprompted
+
+Fixing the blocker produced a migration, which switched on `pgtap.yml` for the
+first time in this PR, which immediately failed: **the column did not exist.**
+`20251214000002` added `timezone` and `school_day_end`;
+`20260331000000_definitive_schema` drops `season_settings` when its bigint-id
+guard fires and recreates it without either; nothing re-adds them. Absent on CI,
+pgTAP, `test:db:local` and any new project — present where the database reached
+uuid ids first. **Production and a reproducible build may differ, and the
+repository cannot say which side production is on.**
+
+Then registering that migration's smoke with the local harness revealed the
+harness scopes smokes to a hardcoded `NEW_MIGRATIONS` list the migration was not
+in — so it was being _applied_ while its check was _skipped_. Registered, it
+failed on the first run:
+
+```
+ERROR: anon can EXECUTE admin_set_season_timezone; a definer function
+that writes org state must not be reachable anonymously
+```
+
+`20260614000000` sets `ALTER DEFAULT PRIVILEGES` **`FOR ROLE postgres`**, so a
+function created by any other role still lands with `PUBLIC EXECUTE`. Declared
+is not enforced. **A check nobody was running, made to run, catching a real
+security hole in the code of the agent who ran it.**
+
+### Merged, then two more — including one the merge should have caught
+
+`/code-review` returned after the merge. Two findings were real and are now on
+`main`, both mine to have caught:
+
+- **`describeUnplaceableSlots` never collapses.** It buckets by `entry.reason`,
+  and every reason embeds that slot's own date and time, so no two real slots
+  share a bucket. Executed against merged code: 400 slots → 400 lines → **66,797
+  characters in a single `<p>`**. A season with a null timezone makes every row
+  unplaceable, so that is the normal case for the exact failure the banner
+  exists to report.
+- **`20251208000001_seed_data.sql` names `timezone` before `20251214000002`
+  adds it.** Latent only because the seed returns early unless
+  `squadlogic.seed_sample_data=on` and PL/pgSQL prepares lazily — which is
+  precisely why the harness and pgTAP both passed it.
+
+### What to carry forward
+
+The implementing agent wrote the lesson better than the supervisor did:
+
+> Every defect this PR found was a check that could not fail, and in three of
+> four cases a _test of mine_ was what made it look fine. The controls I built
+> all perturbed the thing I was thinking about. The gaps were in the things I
+> was not.
+
+Its twelve positive controls all perturbed the composer, which is why the
+composer survived three adversarial passes unscathed and the **reporting layer**
+shipped a 66 KB paragraph. _"Break it and watch the check go red"_ only covers
+the paths you think to break. **Choosing what to break is the judgement, and it
+is a separate skill from building the control.**
+
+Two supervisor-specific rules earned here:
+
+- **A grep that returns zero proves nothing until the pattern is shown to match
+  something** (#394, and the reason round 2's Claim 3 was wrong).
+- **Never run a tree-mutating git command in a working directory a live agent
+  shares.** A `git reset --hard` on a shared checkout destroyed an agent's
+  uncommitted work mid-task. The narrow rule recorded earlier — do not _restore_
+  files under a live agent — was too small. Later dispatches used
+  `isolation: "worktree"`, which is the actual fix.
+
+### Still open
+
+LIVE-5 (`calendar-feed`: `NaN DTSTART`, plus a hardcoded `America/New_York`
+fallback that means the calendar's zone has never once been the season's),
+LIVE-7 (the practice arm, and `scoring-engine.ts` deriving a **weekday** from a
+host-zone reading — a 9pm Saturday New York practice buckets as Sunday on a UTC
+host), LIVE-8, the `NEW_MIGRATIONS` list, the eight post-merge findings, and
+GAP-29. GATE 2 — the engine wiring question — was gated on GAP-29 and GAP-30
+together and is now half-unblocked.

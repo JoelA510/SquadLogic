@@ -570,10 +570,20 @@ def emit_estate(scenario, index):
     target = scenario.get('target')
     if target == 'missing':
         out.append(f"  {subject} := '00000000-0000-0000-0000-0000000000ff'::uuid;")
-    elif target == 'emptyVenue':
-        out.append(f"  {subject} := v_est_empty;")
-    elif target == 'allChildrenDatedVenue':
-        out.append(f"  {subject} := v_est_closed;")
+    elif target in ('emptyVenue', 'allChildrenDatedVenue'):
+        # **Both are VENUE targets, and assigning one into a sub-surface
+        # scenario's `v_est_sub` would write a location id into a field_subunits
+        # lookup -- a case that runs, finds nothing, and proves whatever the
+        # NOT FOUND path proves.** Refused at generation time rather than left
+        # to be noticed in a transcript.
+        if not is_venue:
+            raise SystemExit(
+                f"target {target!r} is a venue target but scenario {sid!r} addresses a sub-surface"
+            )
+        out.append(
+            f"  {subject} := "
+            + ('v_est_empty;' if target == 'emptyVenue' else 'v_est_closed;')
+        )
     elif target is not None:
         raise SystemExit(f"unknown target {target!r} in estate scenario {sid!r}")
 
@@ -700,10 +710,16 @@ def emit_estate(scenario, index):
         # while the JS runner (which keeps `ids.venue`) really checked it. Two
         # runners silently proving different things. Caught by /code-review.
         # **The venue whose children are counted is the one the case
-        # ADDRESSED.** Hard-coding `v_est_venue` counted the default estate's
-        # children for the two 20260912000000 empty cases, which address other
-        # venues -- a check reading a venue the case never touched. `subject`
-        # already holds the addressed venue for those.
+        # ADDRESSED**, which for a venue case is whatever `subject` now holds.
+        #
+        # For the two 20260912000000 empty cases that is `v_est_empty` or
+        # `v_est_closed` -- but ONLY because the target block above ASSIGNS into
+        # `v_est_venue` (`v_est_venue := v_est_empty;`). The `is_venue` branch
+        # below is therefore the same string the old code hard-coded, and it is
+        # kept for what it says rather than what it changes: the correctness of
+        # those two cases lives in that assignment, not here. Claiming otherwise
+        # would advertise a protection that is not present -- caught by
+        # /code-review at high.
         if target == 'missing':
             venue_ref = (f"(SELECT l2.id FROM public.locations l2"
                          f" WHERE l2.name = 'Estate Scenario {n}')")

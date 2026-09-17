@@ -191,8 +191,11 @@ BEGIN
     RAISE EXCEPTION 'the empty venue reported % contained nodes', jsonb_array_length(v_res->'contained');
   END IF;
 
-  -- D: three-in-the-list, zero-in-the-count. The pair that proves the gate
-  -- reads the COUNT and not the length of the list.
+  -- D: one-in-the-list, zero-in-the-count. The pair that proves the gate reads
+  -- the COUNT and not the length of the list. (The scenario table's
+  -- `venue-retire-all-children-already-closed-commits-unconfirmed` makes the
+  -- same point with three in the list; the figures differ because the fixtures
+  -- differ, and this comment used to quote that one's.)
   v_res := public.admin_retire_location(v_org, v_d, current_date + 30, false);
   IF NOT (v_res->>'retired')::boolean THEN
     RAISE EXCEPTION 'a venue whose every child already ends by the date was refused';

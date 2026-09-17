@@ -135,11 +135,19 @@ export default function RetireEstateNodeDialog({
    *
    * @param {any} result
    */
-  const containedProps = (result) => ({
-    contained: Array.isArray(result?.contained) ? result.contained : undefined,
-    containedCount:
-      typeof result?.contained_count === 'number' ? result.contained_count : undefined,
-  });
+  const containedProps = (result) => {
+    // **`spec.contains` is consulted, not just declared.** Spreading these at
+    // every depth made the header's claim -- "a depth that reports no
+    // containment must render no containment section" -- true only by accident,
+    // because the leaf RPC happens to send no key. If it ever grew one, the
+    // section would render at leaf depth and the invariant would fail silently.
+    if (!spec.contains) return {};
+    return {
+      contained: Array.isArray(result?.contained) ? result.contained : undefined,
+      containedCount:
+        typeof result?.contained_count === 'number' ? result.contained_count : undefined,
+    };
+  };
 
   const attempt = async (confirm) => {
     setBusy(true);

@@ -2723,8 +2723,45 @@ shows what it would otherwise have printed — `live venues examined: 0, of whic
 lose a gate`. Reassuring zeroes, which is exactly the failure the guard exists to
 prevent.
 
+### `/code-review` at high: nine findings, two of them medium, eight fixed
+
+The two mediums were both in the verification layer, which is where every defect
+in this PR has been:
+
+- **The revert had no `\set ON_ERROR_STOP on`**, unlike its three siblings. The
+  harness passes `-v ON_ERROR_STOP=1` so it was safe there — but an operator
+  running it by hand gets the "examined ZERO venues" exception, an aborted
+  transaction, every later statement failing 25P02, COMMIT degrading to
+  ROLLBACK, and **psql exiting 0**. The guard whose entire premise is "fail
+  loudly on an empty estate" would have reported success to any script reading
+  the exit code, with nothing reverted.
+- **A plant that IS caught would have been scored as one that is not.** The
+  zero-guard plant named the totals message as its expected check, but the
+  flipped guard RAISES, so run.sh takes its bare `FAIL revert` branch and the
+  totals grep — which lives in the success branch — is never reached.
+  `prove.sh` would have recorded MISATTRIBUTED. That is the mirror of the two
+  mis-aimed plants above and just as misleading.
+
+Three more were the **declared-is-not-enforced** shape in this PR's own new
+code: `ESTATE_DEPTHS[*].noun` was never read (deleted), and `contains` was never
+consulted by either the hook or the dialog although both carried comments
+asserting the invariant it describes. Both now enforce it — the hook throws if a
+depth declared to contain nothing returns a `contained` key, and the dialog
+gates the prop spread on it.
+
 ### Still open after gap B part 2
 
+- **The revert's exposure NOTICE understates what it measures, and is not
+  fixed.** It counts children with `own_effective_to IS NULL`, but the gate
+  being removed fires on `contained_count`, which counts every child not already
+  retired _by the date being applied_. A venue whose only pitch ends at +100
+  loses its gate for any retirement dated before then, yet is reported as not
+  exposed. Counting every row `estate_contained_nodes(..., NULL)` returns would
+  match the gate — but it makes "exposed" equal "examined" against the current
+  harness seed, and the unequal cardinalities are what caught the headline R8
+  plant. Fixing it properly means re-shaping the seed (a childless live venue,
+  and a fourth node on the exposed one) and re-aiming one plant. Recorded rather
+  than patched in a way that would blunt the check that works.
 - **The claim "the sub-surface arm has no containment gate" has no prover.**
   Making it fail needs `admin_retire_field_subunit`'s body rewritten, which this
   migration does not touch and a plant cannot cheaply supply. Recorded as

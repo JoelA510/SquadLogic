@@ -41,6 +41,17 @@
 -- and it FAILS LOUDLY on an empty one**: a revert rehearsed against a seed with
 -- no retired venue in it proves only that the script parses.
 
+-- **`ON_ERROR_STOP`, and the guard below is exactly why.** Without it, an
+-- operator running this file by hand gets: the "examined ZERO venues" exception
+-- fires, the transaction aborts, every later statement fails with 25P02, COMMIT
+-- degrades to ROLLBACK -- and **psql exits 0**. A guard whose whole premise is
+-- "fail loudly on an empty estate" would report SUCCESS to any script reading
+-- the exit code, with nothing reverted. The harness passes `-v ON_ERROR_STOP=1`
+-- itself, so this line is for the hand-run path, which is the one an operator
+-- actually takes. Its siblings 20260908000000, 20260909000000 and
+-- 20260910000000 all carry it; this file was the odd one out.
+\set ON_ERROR_STOP on
+
 BEGIN;
 
 -- ---------------------------------------------------------------------------

@@ -181,13 +181,6 @@ export default function FieldManagementPage() {
   };
 
   /**
-   * Clear a field's end date.
-   *
-   * Un-retiring leaves `active` exactly as it found it, so a field that was
-   * ordinarily deactivated stays deactivated -- both arms carried the opposite
-   * defect once, and a passing test certified it.
-   */
-  /**
    * The retire RPC for a depth, and the unretire handler for a depth.
    *
    * The dialog is passed the function rather than the kind so that it never
@@ -212,6 +205,9 @@ export default function FieldManagementPage() {
    * @param {{ id: string, name: string }} node
    */
   const handleUnretireNode = async (kind, node) => {
+    // Un-retiring leaves `active` exactly as it found it, so a field that was
+    // ordinarily deactivated stays deactivated -- both arms carried the
+    // opposite defect once, and a passing test certified it.
     setLifecycleError(null);
     try {
       await RETIRE_BY_KIND[kind].unretire(node.id);

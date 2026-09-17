@@ -2349,10 +2349,17 @@ plant "R8 revert counts dated nodes instead of undated ones" "$R8" \
 # revert run at all. That direction is a manual control, recorded in the
 # progress entry: the revert run with its harness seed removed raises
 # `This revert examined ZERO venues`.
+#
+# **The expected check is the BARE verdict line, and that is not a detail.** The
+# flipped guard RAISES, so `psql_file` returns non-zero and run.sh takes its
+# bare `echo "FAIL revert ${id}"` branch; the totals grep lives in the SUCCESS
+# branch and is never reached. Naming the totals message here would have scored
+# this MISATTRIBUTED -- a plant that IS caught, recorded as one that is not,
+# which is the mirror of the mis-aimed plants above and just as misleading.
 plant "R8 the zero-venue guard is wired to a dead counter" "$R8" \
   "  IF v_venues = 0 AND COALESCE(current_setting('revert.allow_empty', true), 'off') <> 'on' THEN" \
   "  IF v_venues > 0 AND COALESCE(current_setting('revert.allow_empty', true), 'off') <> 'on' THEN" \
-  "examined/exposed totals do not match the planted estate"
+  "FAIL revert 20260912000000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

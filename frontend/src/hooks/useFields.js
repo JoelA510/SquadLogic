@@ -268,12 +268,18 @@ export function useFields() {
    * What genuinely differs is only: which parameter carries the id, which key
    * carries the row back, and whether the depth has anything BELOW it.
    *
-   * @type {Record<string, { noun: string, retireRpc: string, unretireRpc: string,
+   * **`contains` is READ, not decoration.** `retireEstateNode` asserts on it:
+   * a depth declared not to contain anything must not come back with a
+   * `contained` key. CLAUDE.md's rule is honour it or delete it, and a nine-line
+   * comment claiming an invariant that nothing consults is the "declared is not
+   * enforced" shape one layer below where it usually hides. `noun` was the
+   * other half of that and is gone -- the dialog owns the vocabulary.
+   *
+   * @type {Record<string, { retireRpc: string, unretireRpc: string,
    *   idParam: string, rowKey: string, contains: boolean }>}
    */
   const ESTATE_DEPTHS = {
     location: {
-      noun: 'venue',
       retireRpc: 'admin_retire_location',
       unretireRpc: 'admin_unretire_location',
       idParam: 'p_location_id',
@@ -284,7 +290,6 @@ export function useFields() {
       contains: true,
     },
     field_subunit: {
-      noun: 'sub-surface',
       retireRpc: 'admin_retire_field_subunit',
       unretireRpc: 'admin_unretire_field_subunit',
       idParam: 'p_field_subunit_id',
@@ -346,6 +351,16 @@ export function useFields() {
     // is that we do not know.
     if (data === null || data === undefined || typeof data.retired !== 'boolean') {
       throw new Error(`${spec.retireRpc} returned no readable result`);
+    }
+    // **The `contains` declaration, enforced.** A depth that says it contains
+    // nothing must not return a containment set: 20260911000000 section 7
+    // argues the absent key is the difference between "nothing below" and
+    // "nobody looked", and a key appearing here would mean the SQL and this
+    // table disagree about the shape of the estate.
+    if (!spec.contains && data.contained !== undefined) {
+      throw new Error(
+        `${spec.retireRpc} returned a contained set at a depth that contains nothing`
+      );
     }
     if (data.retired) await fetchLocationsAndFields();
     return data;

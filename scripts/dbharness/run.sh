@@ -607,9 +607,11 @@ NEEDLES
         echo "FAIL revert ${id}: planted a live venue with three undated nodes and the revert did not name it, or miscounted them"
         STATUS=1
       fi
-      # **Examined 3, exposed 1.** A check reading the wrong set gets one of
-      # these wrong: the already-retired venue must be excluded from BOTH, and
-      # the venue whose only child carries its own date must be examined and
+      # **Examined 2, exposed 1** -- three venues are PLANTED, and the
+      # already-retired one is skipped by the revert's `effective_to IS NULL`
+      # loop, so only two are examined. A check reading the wrong set gets one
+      # of these wrong: the already-retired venue must be excluded from BOTH,
+      # and the venue whose only child carries its own date must be examined and
       # NOT exposed.
       if grep -q 'live venues examined: 2, of which 1 lose a gate' /tmp/harness_rev; then
         echo "  | (checked) the revert examined both live venues and counted only the one that loses a gate"

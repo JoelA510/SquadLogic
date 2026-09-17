@@ -1,3 +1,5 @@
+import { anchorToSeasonClock } from '@squadlogic/core/timing/index.js';
+
 export const formatPercent = (value) => `${Math.round((value ?? 0) * 100)}%`;
 
 export const formatPercentPrecise = (value) => {
@@ -16,12 +18,47 @@ export const formatReasons = (reasons) =>
     .map(([reason, count]) => `${reason}: ${count}`)
     .join(', ');
 
+/**
+ * Place a value on the season clock before it is read as an instant.
+ *
+ * `formatDate`/`formatTime`/`formatDateTime` used to call `new Date(value)` --
+ * a **browser-local** parse -- and then render the result with
+ * `timeZone: timezone`. For a naive wall string that is a double shift: the
+ * same 4:44 PM slot read "4:44 PM", "7:44 PM" or "11:44 AM" depending on where
+ * the admin sat. Composing first removes it.
+ *
+ * Two behaviours are deliberately preserved:
+ *
+ * - **A value that already carries a zone is untouched.** Once a slot is a real
+ *   instant, `new Date(value)` plus `timeZone` was already correct and stays so.
+ * - **A caller that passes no timezone still renders browser-local.**
+ *   `PersistenceHistoryList`, `TeamPersistencePanel`, `PracticeReadinessPanel`
+ *   and `TeamOverviewPanel` format audit timestamps that already carry a `Z`,
+ *   and the viewer's own clock is the right one for those.
+ *
+ * A naive wall string with no zone to place it on has no honest reading, so it
+ * comes back `null` and the caller renders its `unspecified` sentinel rather
+ * than a browser-derived guess.
+ *
+ * @param {*} value
+ * @param {string} [timezone]
+ * @returns {Date|null}
+ */
+const toSeasonInstant = (value, timezone) => {
+  const { iso } = anchorToSeasonClock(value, timezone);
+  if (iso === null || iso === undefined) {
+    return null;
+  }
+  const date = new Date(/** @type {string|number|Date} */ (iso));
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 export const formatTime = (value, timezone) => {
   if (!value) {
     return 'unspecified time';
   }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  const date = toSeasonInstant(value, timezone);
+  if (date === null) {
     return 'unspecified time';
   }
   /** @type {Intl.DateTimeFormatOptions} */
@@ -36,8 +73,8 @@ export const formatDate = (value, timezone) => {
   if (!value) {
     return 'unspecified date';
   }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  const date = toSeasonInstant(value, timezone);
+  if (date === null) {
     return 'unspecified date';
   }
   /** @type {Intl.DateTimeFormatOptions} */
@@ -78,11 +115,13 @@ export const formatDateTime = (value, timezone) => {
   if (!value) {
     return 'unspecified time';
   }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  // One composition, read twice: deriving the two halves independently would let
+  // a value that is a date but not a time (or vice versa) print half a label.
+  const date = toSeasonInstant(value, timezone);
+  if (date === null) {
     return 'unspecified time';
   }
-  const datePart = formatDate(value, timezone);
-  const timePart = formatTime(value, timezone);
+  const datePart = formatDate(date, timezone);
+  const timePart = formatTime(date, timezone);
   return `${datePart} · ${timePart}`;
 };

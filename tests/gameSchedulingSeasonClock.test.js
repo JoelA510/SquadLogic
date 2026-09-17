@@ -4,7 +4,10 @@ import {
   normalizeGameSlot,
 } from '../frontend/src/pages/GameSchedulingPage.jsx';
 import { buildGameAssignmentRows } from '../packages/core/src/gameSupabase.js';
-import { scheduleGames } from '../packages/core/src/gameScheduling.js';
+import {
+  generateRoundRobinWeeks,
+  scheduleGames,
+} from '../packages/core/src/gameScheduling.js';
 import { formatDateTime } from '../frontend/src/utils/formatters.js';
 import { TIMING_REASON } from '../packages/core/src/timing/index.js';
 
@@ -236,7 +239,11 @@ describe('GAP-30: the solver needed no change, verified rather than assumed', ()
               fieldId: slot.fieldId,
             },
           ],
-          roundRobinByDivision: { U10: [[{ homeTeamId: 'team-1', awayTeamId: 'team-2' }]] },
+          // Built by the production producer rather than hand-forged, so the
+          // week shape cannot drift away from what the solver really receives.
+          roundRobinByDivision: {
+            U10: generateRoundRobinWeeks({ teamIds: ['team-1', 'team-2'] }),
+          },
         });
         expect(assignments).toHaveLength(1);
         return assignments[0].start;

@@ -24,6 +24,11 @@ import {
 import GameReadinessPanel from '../components/GameReadinessPanel.jsx';
 import GameConflictBanner from '../components/scheduling/GameConflictBanner.jsx';
 import { formatDateTime } from '../utils/formatters.js';
+import {
+  SeasonClockError,
+  anchorToSeasonClock,
+  requireZonedInstant,
+} from '@squadlogic/core/timing/index.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
@@ -79,9 +84,51 @@ function normalizeTeam(team) {
   };
 }
 
-export function buildDateTime(date, time) {
+/**
+ * Compose a `game_slots` wall reading onto the season's clock.
+ *
+ * `slot_date` is a `date` and `start_time` is a `time` -- naive wall values with
+ * no zone. The result has to be an instant, because `game_assignments.start` is
+ * a `timestamptz`. This used to return `` `${date}T${time}` `` and let
+ * `new Date()` downstream read it in whatever zone the admin's browser sat in,
+ * which persisted the same 4:44 PM slot as three instants eight hours apart.
+ *
+ * The zone is a parameter rather than a lookup: today it is always the season's
+ * (`season_settings.timezone`), and that is the ruling -- the season has one
+ * clock, not the venue.
+ *
+ * @param {string|null|undefined} date - `YYYY-MM-DD`
+ * @param {string|null|undefined} time - `HH:MM[:SS]`
+ * @param {string|null|undefined} timezone - IANA zone name
+ * @returns {string|null} an ISO instant carrying the season's offset, or `null`
+ *   when there is no wall reading to compose.
+ * @throws {import('@squadlogic/core/timing/index.js').SeasonClockError} when a
+ *   wall reading exists but cannot be placed: no season timezone, or a time
+ *   daylight saving skips.
+ */
+export function buildDateTime(date, time, timezone) {
   if (!date || !time) return null;
-  return `${date}T${time}`;
+  return requireZonedInstant({ date, time, timeZone: timezone, label: 'slot time' });
+}
+
+/**
+ * Place a value that may already be an instant onto the season clock.
+ *
+ * A zone-carrying value comes back untouched; a naive wall string is composed;
+ * a nullish one stays nullish so the caller's `??` chain still reaches the
+ * `slot_date` + `start_time` pair.
+ *
+ * @param {unknown} value
+ * @param {string|null|undefined} timezone
+ * @returns {string|null|undefined}
+ */
+function anchorOrThrow(value, timezone) {
+  if (value === null || value === undefined) return /** @type {null|undefined} */ (value);
+  const { iso, findings } = anchorToSeasonClock(value, timezone);
+  if (iso === null && findings.length > 0) {
+    throw new SeasonClockError(findings[0].message, findings[0].code, findings);
+  }
+  return /** @type {string} */ (iso);
 }
 
 export function normalizeGameSlot(row, { fieldById, divisionById, timezone }) {
@@ -91,9 +138,16 @@ export function normalizeGameSlot(row, { fieldById, divisionById, timezone }) {
     divisionById.get(row.division_id ?? row.divisionId) ??
     row.division ??
     null;
+  const slotDate = row.slot_date ?? row.slotDate;
+  // A row that already carries an instant keeps it; a naive one still needs the
+  // season clock whichever column it arrived in. `anchorOrThrow` keeps that
+  // judgement in the core helper instead of a second `includes('Z')` here.
   const start =
-    row.start ?? buildDateTime(row.slot_date ?? row.slotDate, row.start_time ?? row.startTime);
-  const end = row.end ?? buildDateTime(row.slot_date ?? row.slotDate, row.end_time ?? row.endTime);
+    anchorOrThrow(row.start, timezone) ??
+    buildDateTime(slotDate, row.start_time ?? row.startTime, timezone);
+  const end =
+    anchorOrThrow(row.end, timezone) ??
+    buildDateTime(slotDate, row.end_time ?? row.endTime, timezone);
   const weekIndex = Number(row.week_index ?? row.weekIndex ?? 1);
 
   if (!row.id || !start || !end || !Number.isInteger(weekIndex) || weekIndex <= 0) {

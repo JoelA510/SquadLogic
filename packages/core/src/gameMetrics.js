@@ -145,10 +145,11 @@ export function evaluateGameSchedule({
   const teamGameLoad = new Map();
 
   for (const assignment of assignments) {
-    AssignmentSchema.parse(assignment);
+    // Read, not discarded -- see the note in `schemas/index.js` (GAP-30).
+    const parsed = AssignmentSchema.parse(assignment);
 
-    const start = new Date(assignment.start);
-    const end = new Date(assignment.end);
+    const start = parsed.start;
+    const end = parsed.end;
     const division = assignment.division;
     const weekIndex = assignment.weekIndex;
     const fieldKey = assignment.fieldId ?? 'unassigned';

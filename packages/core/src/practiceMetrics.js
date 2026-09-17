@@ -268,10 +268,11 @@ export function evaluatePracticeSchedule({
   const slotsById = new Map();
   const baseSlotMetadata = new Map();
   for (const slot of slots) {
-    SlotSchema.parse(slot);
+    // Read, not discarded -- see the note in `schemas/index.js` (GAP-30).
+    const parsed = SlotSchema.parse(slot);
 
-    const startDate = new Date(slot.start);
-    const endDate = new Date(slot.end);
+    const startDate = parsed.start;
+    const endDate = parsed.end;
     const baseSlotId = slot.baseSlotId ?? slot.id;
 
     slotsById.set(slot.id, {

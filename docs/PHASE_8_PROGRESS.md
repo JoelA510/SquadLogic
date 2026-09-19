@@ -3789,3 +3789,115 @@ Seven statements repeated one sentence for three days after it stopped being
 true, in the registry that is supposed to be the answer to "what is still open".
 A cited blocker is worth re-executing before it is quoted, exactly as §6 of
 `BUILD_PLAN_STATUS.md` says of a grep that returns zero.
+
+## Four open findings — three fixed, one measured — **merged (#402, `dac0817`)**
+
+Two of the four briefs were wrong. Both were disproved by **execution rather
+than argument**, and the corrections are worth more than the fixes.
+
+### The harness was running ten smokes and reporting thirty-three green
+
+`scripts/dbharness/run.sh` scoped smoke execution to a hand-maintained
+`NEW_MIGRATIONS` list. A migration left off it was still **applied**, its smoke
+**silently skipped**, and the harness reported OK. That is how
+`20260913000000`'s smoke went unrun for the whole of #396 and failed on the
+first run after it was registered — catching an `anon` EXECUTE grant on a
+`SECURITY DEFINER` function that writes organisation state.
+
+The default is now inverted: the subject set is every `docs/sql/*_smoke.sql`,
+and a smoke is skipped only by being **written down as debt**, with a stale
+debt entry failing the run in its own right.
+
+**The excuse was never checked.** The old comment claimed the unregistered
+smokes were behavioural and failed for want of fixtures and a JWT. Twenty-nine
+of thirty-three run clean against a plain head build. **Ten ran before; all
+thirty-three run now**, and every other stage's PASS/FAIL line is identical to
+baseline.
+
+One of them, `docs/sql/20260613000005_smoke.sql`, raised `42702` on its first
+statement — a check that **could not execute at all**, reading as one that
+passed, for as long as it had existed.
+
+And the fix instruments its own strength rather than claiming it: 21 of the 33
+contain no `RAISE` and print PASS whatever the catalogue says, so the harness
+now prints the split — **14 of 33 can go red** — with a floor. "33/33 green" is
+not allowed to read as a guarantee it does not give.
+
+### The twin-arm divergence resolved the other way
+
+The brief said `PracticeSchedulingPage`'s `seasonClockLoading` clause was
+redundant against `!schedulerSlots.length` and should be dropped to match
+`GameSchedulingPage`. That reading was **wrong**, and taking it would have
+shipped a defect rather than removed one.
+
+It holds for reason (1) of `isSeasonClockLoading` and fails for reason (3).
+After an organisation switch the season row still in hand belongs to the
+organisation being _left_ — it is a valid row and it **has a timezone**, so
+every slot places against it and the count arm is false. The slot fetch keys on
+`currentOrganization?.id`, so the rows in hand are the departing organisation's.
+
+`GameSchedulingPage` therefore enabled auto-generate in a window where it would
+run **for the arriving organisation, over the departing one's slots, on the
+departing one's clock** — while its own banner read "Loading this season's
+settings…". The game arm grows the clause; the divergence closes upward.
+
+_The lesson is about the shape of the reasoning, not the clause._ "A already
+covers B" is a claim about a subset relation, and the supervisor asserted one
+without enumerating the cases. The count arm covers slots that **fail** to
+place; a stale-but-valid clock places them perfectly.
+
+### The seed's briefed repair was not the one it needs
+
+"Both copies must move together" does not hold, and neither does "backfill
+`organization_id`".
+
+Executed: backfilling carries the chain exactly one migration further, to
+`20260331000000_definitive_schema`, which drops and recreates every table and
+**refuses outright** — _"Refusing definitive schema replay reset because
+public.organizations contains data"_ — if any of thirty listed tables holds a
+row. `season_settings` is on that list, so **any** data inserted at
+`20251208000001` aborts the chain whatever columns it names. The migration is
+not missing a column; it writes rows before a barrier that permits none.
+
+`supabase/seed.sql` is a different defect entirely. It runs _after_ the chain,
+so the barrier never applies — and it fails on its own **first** statement,
+because seven of its thirteen `ON CONFLICT` targets name constraints the head
+schema no longer has.
+
+Two copies, two unrelated failures, two different repairs. The pin stays; its
+comment now states the measurement instead of the wrong fix.
+
+### LIVE-8 — honoured, and two of its three readers were live defects
+
+The panel guarded its "Generated …" header on a field nothing writes. The
+information was wanted and already existed, so the run's `completed_at` is
+lifted as `generatedAt` — the name `GameReadinessPanel` already uses, adopting
+the sibling contract rather than inventing a third.
+
+The readers were not dead code. `WorkflowPage`'s status item said
+**"Unscheduled" over a scheduled season** while the readiness score three
+declarations above counted the same season 30% done, and
+`PracticeSchedulingPage` had an effect dependency that could never change.
+
+### Reported, not fixed
+
+- `WorkflowPage.jsx:25` destructures `timezone` and `error` from a hook that
+  returns **neither** — so every dashboard timestamp renders browser-local
+  instead of on the season clock, quietly undoing part of what GAP-30 shipped,
+  and a failed fetch never reaches `setError`.
+- Four `PracticeReadinessPanel` KPI cards read fields `practiceMetrics` does not
+  produce and render permanent zeros. A KPI that is structurally always zero is
+  worse than an absent one, because it reads as a measurement.
+
+### A hollow check the supervisor was running against its own work
+
+`git diff -U0 | grep '^-[^-]'` — used as the "purely additive" proof on #394,
+#395, #397 and #399 — **silently drops removed markdown bullets**: a deleted
+`- **Status**: …` renders as `-- **Status**` and `[^-]` excludes it. On #401 it
+reported 18 of 26.
+
+Re-audited with `grep '^-' | grep -v '^--- '`: **0, 1, 0, 0** — exactly what was
+published each time. Nothing was lost. But that is the outputs being right, not
+the check being right; none of those four happened to delete a bullet. A phase
+spent filing findings against checks that cannot fail had one running against
+its own verification the whole time.

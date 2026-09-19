@@ -549,6 +549,14 @@ export default function PracticeSchedulingPage() {
   // timezone has no clock for any slot, so `schedulerSlots` is empty and the
   // `!schedulerSlots.length` arm fires. That is `GameSchedulingPage`'s
   // contract, not a second one.
+  //
+  // **`seasonClockLoading` is NOT redundant with that arm**, which is why it
+  // stays and why `GameSchedulingPage` has now grown it too. The arithmetic
+  // above covers reason (1) of `isSeasonClockLoading` -- no clock read yet, so
+  // no slot places. It does not cover reason (3): after an organisation switch
+  // the season row still in hand belongs to the one just left, so it HAS a
+  // timezone, every slot places against it, and the count arm is false while
+  // the clock is another tenant's.
   const schedulerDisabled =
     dashboardLoading.practice ||
     practiceSlotsLoading ||

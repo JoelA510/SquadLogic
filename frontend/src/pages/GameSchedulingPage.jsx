@@ -643,10 +643,25 @@ export default function GameSchedulingPage() {
     return ids;
   }, [game?.warnings]);
 
+  // **`seasonClockLoading` is here because the slot count cannot cover it**,
+  // and this arm was the one missing it. `PracticeSchedulingPage` has carried
+  // the clause since #400; the argument for dropping it there was that a
+  // season with no timezone refuses every slot, so `!gameSlots.length` fires
+  // anyway. True for reason (1) of `isSeasonClockLoading` -- and false for
+  // reason (3), which is the whole point of that helper: the organisation has
+  // switched and the season row still in hand belongs to the one just left, so
+  // it HAS a timezone, every slot places against it, and the count arm is
+  // false while the clock is another tenant's. Enabling auto-generate there
+  // runs `useAutoScheduler({ organizationId: currentOrganization?.id })` -- the
+  // NEW organisation -- over the previous one's slots on the previous one's
+  // clock. The banner already says "Loading this season's settings…" in that
+  // window (see `composeSchedulerReadinessMessage`), so this makes the button
+  // agree with the sentence beside it rather than inventing a new rule.
   const schedulerDisabled =
     loading.game ||
     !canManageSchedule ||
     schedulerStatus === 'running' ||
+    seasonClockLoading ||
     !schedulerTeams.length ||
     !gameSlots.length ||
     Boolean(referenceError);

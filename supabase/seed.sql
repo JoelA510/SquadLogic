@@ -9,15 +9,39 @@
 -- sample rows without creating duplicates.  Existing production data should
 -- be backed up before executing this file.
 --
--- ## Known gap: this script predates multi-tenancy
+-- ## Known gap: this script predates multi-tenancy, and has drifted further
 --
--- None of the INSERTs below names an `organization_id`, and
--- `20260310000002_unified_rls_schema` makes `divisions.organization_id` NOT
--- NULL, so running this against a current schema fails. Verified by executing
--- the migration-embedded copy (`supabase/migrations/20251208000001_seed_data.sql`)
--- with its documented opt-in turned on; `scripts/dbharness/run.sh` pins that
--- failure. Both copies need an organization threading through them, and
--- should be fixed together.
+-- Executed against a database built to head -- the context this file is
+-- actually used in, since `supabase db reset` applies every migration and
+-- then runs this -- and it fails on its FIRST statement, before the
+-- multi-tenancy gap is even reached:
+--
+--   ERROR: there is no unique or exclusion constraint matching the ON CONFLICT
+--   specification            (insert into season_settings ... on conflict
+--                             (season_label, season_year))
+--
+-- Seven of the thirteen distinct ON CONFLICT targets below name constraints
+-- the head schema no longer has: `season_settings (season_label,
+-- season_year)`, `locations (name)` (now `(organization_id, name)`),
+-- `practice_slots (field_subunit_id, day_of_week, start_time, valid_from)`,
+-- `game_slots (field_id, slot_date, start_time)`, `game_assignments
+-- (game_slot_id)`, `players (division_id, external_registration_id)`, and
+-- `practice_assignments (team_id, practice_slot_id, effective_date_range)`
+-- (now a PARTIAL unique index, so it needs the predicate to be inferable).
+-- On top of that none of the INSERTs names an `organization_id`, which is NOT
+-- NULL on divisions, teams and players.
+--
+-- So the repair here is: thread an organization through, and re-derive every
+-- ON CONFLICT target from the head schema. It is a bounded job and this file
+-- is where it can be done.
+--
+-- **The migration-embedded copy
+-- (`supabase/migrations/20251208000001_seed_data.sql`) cannot be repaired the
+-- same way and the two no longer move together.** That one sits INSIDE the
+-- chain, and `20260331000000_definitive_schema` refuses to run if any of
+-- thirty tables holds a row, so data inserted at 20251208000001 aborts the
+-- chain whatever columns it names. `scripts/dbharness/run.sh` pins that
+-- failure and states the measurement.
 --
 
 set search_path = public;

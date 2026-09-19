@@ -3,9 +3,12 @@
 --
 -- **ON_ERROR_STOP, or the RAISEs below cannot fail.** psql exits 0 after a
 -- statement error unless it is set, so a DO block that raises prints red and
--- returns green -- a file that looks like a gate and reports success. This one
--- is not in `run.sh`'s NEW_MIGRATIONS, so its only caller is a person running
--- psql by hand, which is exactly the caller that would have been fooled. Same
+-- returns green -- a file that looks like a gate and reports success. This one used
+-- to have no caller but a person running psql by hand -- exactly the caller
+-- that would have been fooled -- because `run.sh` scoped smoke execution to a
+-- hand-kept `NEW_MIGRATIONS` list it was not on. It now runs there, against an
+-- organisation and division the harness plants for it (`smoke_plant`), since
+-- the SELECT ... LIMIT 1 below needs a seeded estate. Same
 -- defect and same fix as `docs/sql/20260602000000_smoke.sql`, found by
 -- grepping every smoke for RAISE without the flag rather than by memory.
 \set ON_ERROR_STOP on

@@ -62,11 +62,12 @@ BEGIN
   IF r.src NOT LIKE '%unresolved_field_rows%' THEN
     RAISE EXCEPTION 'finalize_field_availability_import_job does not report unresolved_field_rows'; END IF;
 
-  -- **20260602000000's guarantee, enforced for the first time.** Its own smoke
-  -- is three bare SELECTs and cannot go red, and it is not in run.sh's
-  -- NEW_MIGRATIONS either -- so the fix that made finalize able to complete at
-  -- all has never been checked by anything that runs. This migration re-issues
-  -- the same body, so the invariant is this file's to keep.
+  -- **20260602000000's guarantee, kept here as well as there.** Its own smoke
+  -- had three bare SELECTs that could not go red, and the harness did not run
+  -- it at all -- smoke execution was scoped to a hand-kept `NEW_MIGRATIONS`
+  -- list that id was not on. Both have since been fixed: it has a DO block and
+  -- the harness enumerates every smoke. This migration re-issues the same
+  -- body, so the invariant is this file's to keep too.
   IF position($needle$,NULL,v_now,auth.uid())$needle$ in r.src) <> 0 THEN
     RAISE EXCEPTION 'the applied_payload NULL literal from before 20260602000000 is back; finalizing a job with child rows will abort on the NOT NULL'; END IF;
   IF NOT EXISTS (

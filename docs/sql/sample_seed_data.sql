@@ -8,6 +8,16 @@
 -- assignments.  It is idempotent: running it multiple times refreshes the
 -- Existing production data should
 -- be backed up before executing this file.
+--
+-- ## Known gap: it does not apply to the current schema
+--
+-- This is a third copy of the same 2024 season, alongside `supabase/seed.sql`
+-- and `supabase/migrations/20251208000001_seed_data.sql`. None of its INSERTs
+-- names an `organization_id`, which is NOT NULL on divisions, teams and
+-- players since `20260310000002_unified_rls_schema`, and its ON CONFLICT
+-- targets have drifted from the head schema -- see the header of
+-- `supabase/seed.sql`, where the failure is enumerated from an executed run
+-- and where the repair belongs.
 
 do $$
 declare

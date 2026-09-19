@@ -35,7 +35,10 @@
  * ## Persistence: a seam, declared, and deliberately unwired
  *
  * The build plan's own record (`docs/BUILD_PLAN_STATUS.md` §3) says **nothing in
- * phases 1-7 is persisted** and GAP-29's stored half is open. GAP-30 used to be
+ * phases 1-7 is persisted**, and this registry's own stored half is
+ * [GAP-34](../../../../docs/MODEL_GAPS.md#gap-34) — not GAP-29, which keeps the
+ * published baseline and was never the mapping registry's home (the citation
+ * here said GAP-29 until the 2026-09-19 scope ruling corrected it). GAP-30 used to be
  * the other half of this sentence: `z.coerce.date()` in
  * `SlotSchema`/`AssignmentSchema` meant a registry stored through a
  * timezone-lossy layer came back describing different ground after DST ends —
@@ -43,7 +46,7 @@
  * so a store that *created* one would be the parity defect
  * `publication/index.js` refuses for the same reason. **GAP-30 is closed.**
  * Those schemas refuse a naive wall reading and `timing/seasonClock.js` is the
- * one place a wall time becomes an instant, so the remaining blocker is GAP-29
+ * one place a wall time becomes an instant, so the remaining blocker is GAP-34
  * alone.
  *
  * What is built here instead, and what is claimed for it:
@@ -343,7 +346,7 @@ export function buildExternalMappingRegistry(rawInput, options = {}) {
   findings.push(
     makeExternalImportFinding(
       EXTERNAL_IMPORT_REASON.EXTERNAL_MAPPING_NOT_PERSISTED,
-      `mapping registry ${input.registryId} lives in memory only; serialiseExternalMappingRegistry() and readExternalMappingRegistry() are the declared persistence seam and nothing in this repository stores through it (GAP-29)`,
+      `mapping registry ${input.registryId} lives in memory only; serialiseExternalMappingRegistry() and readExternalMappingRegistry() are the declared persistence seam and nothing in this repository stores through it (GAP-34)`,
       {
         registryId: input.registryId,
         durability: EXTERNAL_MAPPING_DURABILITY.IN_MEMORY,

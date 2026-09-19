@@ -2373,7 +2373,7 @@ describe('scheduleGames() refuses a freeze rather than ignoring one', () => {
     const raised = /** @type {any} */ (error);
     expect(raised.message).toContain('resolve/applyChangeRequest()');
     expect(raised.message).toContain('resolve/reoptimiseWholeSeason()');
-    expect(raised.message).toContain('GAP-29');
+    expect(raised.message).toContain('GAP-35');
     expect(raised.message).toContain('GAP-32');
     // It refuses `null` too: "no freeze" is not something a caller says by
     // passing a falsy value.

@@ -10,7 +10,17 @@ const COLOR_CLASSES = {
   purple: 'text-accent-400 bg-accent-500/10 border-accent-500/30',
 };
 
-export default function TeamOverviewPanel({ totals, divisions, generatedAt, timezone: _timezone }) {
+/**
+ * **There is no `timezone` prop, and its absence is the contract.**
+ * `generatedAt` is a `scheduler_runs` timestamp carrying a zone, and the
+ * viewer's own clock is the right one to read it on -- the `toSeasonInstant`
+ * docblock in `utils/formatters.js` names this panel as one of the callers
+ * that deliberately passes none. It used to be declared, typed and discarded
+ * as `_timezone`, which reads as load-bearing and is not. Its sibling
+ * `TeamListView` DOES honour a `timezone`, and that difference is real: the
+ * two render different timestamps, not the same one two ways.
+ */
+export default function TeamOverviewPanel({ totals, divisions, generatedAt }) {
   const summaryItems = [
     {
       label: 'Assigned Players',
@@ -111,5 +121,4 @@ TeamOverviewPanel.propTypes = {
   totals: PropTypes.object.isRequired,
   divisions: PropTypes.array.isRequired,
   generatedAt: PropTypes.string,
-  timezone: PropTypes.string,
 };

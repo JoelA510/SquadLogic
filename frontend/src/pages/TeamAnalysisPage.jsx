@@ -306,7 +306,11 @@ function collectPlayerLookupKeys(rowsForProgram) {
 }
 
 export default function TeamAnalysisPage() {
-  const { team, loading, error: _error, timezone } = useDashboardData();
+  // No `timezone` here: the one consumer was `TeamOverviewPanel`, which
+  // deliberately renders its `generatedAt` on the viewer's clock and no longer
+  // declares the prop. `useDashboardData` does not return a `timezone` either,
+  // so the binding was `undefined` in every render this page has ever had.
+  const { team, loading, error: _error } = useDashboardData();
   const {
     persistenceSnapshot,
     loading: persistenceLoading,
@@ -1312,7 +1316,6 @@ export default function TeamAnalysisPage() {
             totals={activeTeamData.totals}
             divisions={activeTeamData.divisions}
             generatedAt={activeTeamData.generatedAt}
-            timezone={timezone}
           />
           {(stagedReview || reviewMessage) && (
             <section className="bg-bg-surface border border-border-subtle rounded-xl p-5">

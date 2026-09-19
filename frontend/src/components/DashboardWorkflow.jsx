@@ -189,7 +189,6 @@ const DashboardWorkflow = ({
                       totals={teamData.totals}
                       divisions={teamData.divisions}
                       generatedAt={teamData.generatedAt}
-                      timezone={timezone}
                     />
                   }
                 >

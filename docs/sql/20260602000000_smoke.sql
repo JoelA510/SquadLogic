@@ -49,9 +49,12 @@ where n.nspname = 'public' and c.relname = 'import_application_records' and a.at
 -- The SELECTs are kept: they are the evidence half, and a reader running this
 -- by hand wants to see the values. What follows is the gate half. The same
 -- applied_payload invariant is also asserted in
--- `docs/sql/20260908000000_smoke.sql`, which the local harness DOES run --
--- this file is not in `run.sh`'s NEW_MIGRATIONS, so on its own it would still
--- be a check nothing executes.
+-- `docs/sql/20260908000000_smoke.sql`. That duplication was written when this
+-- file was not run at all: `run.sh` scoped smoke execution to a hand-kept
+-- `NEW_MIGRATIONS` list this id was not on. The harness now enumerates every
+-- `docs/sql/*_smoke.sql`, so this file executes on its own -- the duplicate in
+-- 20260908000000 is kept because that migration re-issues the same body and
+-- the invariant is its to keep too.
 DO $$
 DECLARE r record; v_n int;
 BEGIN

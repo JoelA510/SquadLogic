@@ -25,9 +25,25 @@
 -- `scripts/dbharness/run.sh` pins this exact failure so it cannot drift
 -- silently, and fails if it ever starts succeeding.
 --
--- `supabase/seed.sql` is the same script without the guard and has the same
--- gap. Fixing it means threading an organization through every table here;
--- both copies should be done together.
+-- ## The repair is not the one this header used to name
+--
+-- It said "fixing it means threading an organization through every table
+-- here". Executed, and it does not: with `organization_id` backfilled onto
+-- the seeded rows the chain reaches ONE migration further and then stops at
+-- `20260331000000_definitive_schema`, which drops and recreates every table
+-- and refuses -- `Refusing definitive schema replay reset because
+-- public.organizations contains data` -- if any of thirty listed tables holds
+-- a row. `season_settings` is one of them. So any data this file inserts
+-- aborts the chain at 20260331000000 whatever columns it names: the problem
+-- is not a missing column, it is that this migration writes rows before a
+-- barrier that requires none. The coherent repairs are to drop the seed from
+-- the chain, or to re-issue it as a new migration AFTER 20260331000000 --
+-- neither of which is an edit to the INSERTs below.
+--
+-- `supabase/seed.sql` is the same script without the guard, and it is not in
+-- the chain: it runs against the finished schema, so the barrier never
+-- applies and threading an organization through it really is its repair. The
+-- two copies need different repairs and no longer move together.
 --
 
 do $$

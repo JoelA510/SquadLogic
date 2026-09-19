@@ -158,23 +158,246 @@ start_cluster || { echo "FAIL: could not start cluster"; exit 1; }
 echo "=== applying migration set ==="
 fresh_db || { echo "HARNESS FAILED"; exit 1; }
 apply_all || { echo "HARNESS FAILED"; exit 1; }
-echo "=== smokes for this PR's migrations ==="
+echo "=== smokes, enumerated from docs/sql/ ==="
 #
-# **Scoped to the migrations this PR adds** (`NEW_MIGRATIONS`),
-# and that is a deliberate limit
-# worth stating. Several pre-existing smokes are BEHAVIOURAL: they seed an org,
-# assume an authenticated admin session, and exercise an RPC. They fail here for
-# want of fixtures and a real JWT, not because anything is wrong with them --
-# running them would need a seeding layer this harness does not have and the
-# pgTAP suite already does. Claiming to verify them would be the hollow kind of
-# green this whole phase exists to stop.
+# **The set used to be a hand-maintained list of "the migrations this PR
+# adds", and a list you have to remember to add to is a hollow-check
+# generator.** A migration left off it was still APPLIED, its smoke was
+# SILENTLY SKIPPED, and the stage printed nothing about either -- so the
+# harness reported OK over a smoke nobody had ever run. That is not
+# hypothetical: `20260913000000`'s smoke sat unregistered for the whole of
+# #396, and the first time it was put on the list it went red on an `anon`
+# EXECUTE grant on a SECURITY DEFINER function that writes organisation state.
+# Every future migration inherited the same trap.
+#
+# So the default is inverted. The subject set is every `*_smoke.sql` under
+# `docs/sql/` -- the registry a break leaves intact -- and each one is either
+# EXECUTED or named here with the reason it cannot be, in a table that is
+# itself checked. Nothing can be skipped by omission any more; a smoke is
+# skipped only by being written down, and writing one down that does not need
+# to be there fails the stage too.
+#
+# **What the previous comment claimed, measured rather than assumed.** It said
+# several pre-existing smokes are behavioural and "fail here for want of
+# fixtures and a real JWT". Twenty-nine of the thirty-three run clean against
+# the plain head build; the claim was true of four, two of which are fixed or
+# seeded below. Ten smokes ran before this change and thirty-three run after it.
+#
+# **These stage lines are deliberately NOT `  | (checked) ` claims.**
+# `prove.sh`'s census takes every `(checked)` line in the baseline transcript
+# as a health claim and fails unless a registered plant makes it go red. The
+# lines below are about this harness's own bookkeeping -- which files exist,
+# which ran -- rather than about migration behaviour, and registering a plant
+# for each would mean adding six entries to a prover this change cannot
+# execute (`test:db:local:prove` is a 5.4-hour run). An unverified
+# registration fails the census exactly as loudly as no registration, so they
+# use `(coverage)`/`(refused)` and stay out of the universe rather than
+# joining it unproven. Each one's red branch WAS exercised, by hand, against
+# a copy of this file truncated after the smoke stage:
+#
+#   A  a migration with no smoke              -> the coverage FAIL names it
+#   B  a SMOKE_DEBT id that now has a smoke   -> the stale-debt FAIL
+#   C  an in-era smoke file removed           -> the coverage FAIL names it
+#   D  a refusal smoke made to succeed        -> "the guard did not fire"
+#   D2 a refusal smoke failing differently    -> "not with its documented refusal"
+#   E  a passing smoke made to raise          -> FAIL smoke, and the total
+#   F  a smoke whose migration does not exist -> the orphan FAIL
+#
+# Registering them properly in `prove.sh` is follow-up work for a change that
+# can afford to run it.
 STATUS=0
-NEW_MIGRATIONS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000)
 
-for id in "${NEW_MIGRATIONS[@]}"; do
-  smoke="$REPO/docs/sql/${id}_smoke.sql"
+SMOKE_DIR="$REPO/docs/sql"
+MIGRATION_DIR="$REPO/supabase/migrations"
+
+# **Stated, not derived from the smoke files.** Migrations before this one
+# predate the convention and have no smoke; from it onwards a migration
+# without one is a defect. A baseline read off the smokes themselves would
+# move the moment the earliest smoke was deleted -- deriving the subject set
+# from the data a break corrupts is the shape this file keeps finding.
+SMOKE_ERA_BASELINE=20260530000000
+
+# Migrations inside the smoke era that never got one. Debt, not dispensation:
+# each entry is checked to still name a real migration that still has no
+# smoke, so an entry cannot outlive the gap it records, and a new migration
+# cannot join this list by accident -- only by being typed in.
+SMOKE_DEBT=(
+  20260602010000 # field_availability_scenarios backfill
+  20260603190000 # registration form waiver text
+  20260612000000 # min_uuid aggregate
+  20260612000001 # min_uuid aggregate hardening
+)
+
+# Smokes whose PASS is a REFUSAL. Their last statement calls an admin RPC with
+# no authenticated session and the file documents the expected error; under
+# ON_ERROR_STOP a non-zero exit is the correct outcome, so scoring them by
+# exit status alone would mark a working guard as broken. They are run, and
+# the refusal has to carry the documented text -- which makes them checks on
+# the guard rather than skips.
+smoke_refusal_needle() {
+  case "$1" in
+    20260530000100) printf '%s' 'Access denied: admin required' ;;
+    20260603000000) printf '%s' 'Access denied' ;;
+    *) printf '' ;;
+  esac
+}
+
+# **The message alone is not enough to say WHICH guard fired**, and
+# 20260603000000's is the word "Access denied" entire -- a prefix of its
+# sibling's, and a phrase an RLS denial or a permission error on one of the
+# three catalogue SELECTs above it would also produce. psql prints a CONTEXT
+# line naming the PL/pgSQL function that raised, so the refusal is pinned to
+# the function whose guard the smoke is about and both needles must match.
+smoke_refusal_context() {
+  case "$1" in
+    20260530000100) printf '%s' 'PL/pgSQL function upsert_division_for_import(' ;;
+    20260603000000) printf '%s' 'PL/pgSQL function admin_select_field_availability_scenario(' ;;
+    *) printf '' ;;
+  esac
+}
+
+# Smokes that read a row the harness's empty schema does not have. The plant
+# is committed (psql_cmd is its own connection) because the smoke runs inside
+# BEGIN/ROLLBACK, and removed afterwards so no later stage inherits it.
+smoke_needs_seed() {
+  case "$1" in
+    20260611000400) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+smoke_plant() { # id -- leaves the estate 20260611000400 reads with SELECT ... LIMIT 1
+  case "$1" in
+    20260611000400)
+      psql_cmd "INSERT INTO public.organizations (id, name, slug)
+                VALUES ('5e5e5e5e-0000-0000-0000-00000000000a','Smoke Seed Org','smoke-seed-org');
+                INSERT INTO public.season_settings (id, organization_id, name)
+                VALUES ('5e5e5e5e-0000-0000-0000-00000000000b','5e5e5e5e-0000-0000-0000-00000000000a','Smoke Seed Season');
+                INSERT INTO public.divisions (id, organization_id, season_settings_id, name)
+                VALUES ('5e5e5e5e-0000-0000-0000-00000000000c','5e5e5e5e-0000-0000-0000-00000000000a','5e5e5e5e-0000-0000-0000-00000000000b','Smoke Seed Division');"
+      ;;
+    *) return 0 ;;
+  esac
+}
+
+smoke_unplant() { # id
+  case "$1" in
+    20260611000400)
+      psql_cmd "DELETE FROM public.organizations WHERE id = '5e5e5e5e-0000-0000-0000-00000000000a';"
+      ;;
+    *) return 0 ;;
+  esac
+}
+
+in_list() { # needle list...
+  local needle="$1"; shift
+  local item
+  for item in "$@"; do [ "$item" = "$needle" ] && return 0; done
+  return 1
+}
+
+# --- coverage: a migration in the smoke era without a smoke fails the run ----
+#
+# This is the half the old list could not express at all. `apply_all` applies
+# every migration; until now nothing asked whether each one had brought a
+# smoke with it.
+v_era=0 v_missing=()
+for m in "$MIGRATION_DIR"/*.sql; do
+  b="$(basename "$m")"; id="${b%%_*}"
+  [ "$id" \< "$SMOKE_ERA_BASELINE" ] && continue
+  v_era=$((v_era + 1))
+  [ -r "$SMOKE_DIR/${id}_smoke.sql" ] && continue
+  in_list "$id" "${SMOKE_DEBT[@]}" && continue
+  v_missing+=("$b")
+done
+# Meta-assertion: a baseline naming no migration, or a glob that matched
+# nothing, would leave `v_missing` empty for the wrong reason and this check
+# would pass over every migration in the repository.
+if [ "$v_era" -lt 30 ]; then
+  echo "FAIL: only ${v_era} migration(s) at or after ${SMOKE_ERA_BASELINE}; the baseline or the migration glob is wrong"
+  STATUS=1
+elif [ "${#v_missing[@]}" -ne 0 ]; then
+  echo "FAIL: ${#v_missing[@]} migration(s) at or after ${SMOKE_ERA_BASELINE} have no docs/sql/<id>_smoke.sql:"
+  printf '    %s\n' "${v_missing[@]}"
+  echo "    Write one, or add the id to SMOKE_DEBT in this file with the reason."
+  STATUS=1
+else
+  echo "  | (coverage) all ${v_era} migration(s) at or after ${SMOKE_ERA_BASELINE} carry a smoke, bar ${#SMOKE_DEBT[@]} recorded as debt"
+fi
+
+# --- the debt list cannot outlive the gaps it records -----------------------
+for id in "${SMOKE_DEBT[@]}"; do
+  if ! ls "$MIGRATION_DIR/${id}"_*.sql >/dev/null 2>&1; then
+    echo "FAIL: SMOKE_DEBT names ${id}, which is not a migration in this repository"
+    STATUS=1
+  elif [ -r "$SMOKE_DIR/${id}_smoke.sql" ]; then
+    echo "FAIL: SMOKE_DEBT names ${id}, which now HAS a smoke -- remove it from the list so the smoke runs"
+    STATUS=1
+  fi
+done
+
+# --- the exclusion cannot quietly widen ------------------------------------
+#
+# `docs/sql/tests/` holds eighteen more smokes, for migrations from before the
+# baseline, and the loop below does not read that directory. Saying so is not
+# enough: a smoke for a NEW migration dropped in there would satisfy nothing
+# and be run by nothing, which is the defect this rewrite exists to remove,
+# one directory along. So the rule is asserted rather than described -- every
+# smoke under `docs/sql/tests/` must be for a pre-baseline migration.
+v_hidden=()
+for smoke in "$SMOKE_DIR"/tests/*_smoke.sql; do
+  [ -e "$smoke" ] || continue
+  b="$(basename "$smoke")"; id="${b%%_*}"
+  [ "$id" \< "$SMOKE_ERA_BASELINE" ] || v_hidden+=("$b")
+done
+if [ "${#v_hidden[@]}" -ne 0 ]; then
+  echo "FAIL: ${#v_hidden[@]} smoke(s) in docs/sql/tests/ are for migrations at or after ${SMOKE_ERA_BASELINE}, where nothing runs them:"
+  printf '    %s\n' "${v_hidden[@]}"
+  echo "    Move them to docs/sql/ so the loop below picks them up."
+  STATUS=1
+else
+  echo "  | (coverage) every smoke in docs/sql/tests/ is for a migration before ${SMOKE_ERA_BASELINE}"
+fi
+
+# --- execution: every smoke under docs/sql/ runs ----------------------------
+v_smokes=0 v_ran=0
+for smoke in "$SMOKE_DIR"/*_smoke.sql; do
+  b="$(basename "$smoke")"; id="${b%%_smoke.sql}"
+  v_smokes=$((v_smokes + 1))
+
+  # An orphan smoke is a rename nobody finished, and it would otherwise run
+  # against a migration that is no longer applied.
+  if ! ls "$MIGRATION_DIR/${id}"_*.sql >/dev/null 2>&1; then
+    echo "FAIL smoke ${id}: no migration of that id exists, so this smoke tests nothing that was applied"
+    STATUS=1
+    continue
+  fi
+
+  needle="$(smoke_refusal_needle "$id")"
+  ctx="$(smoke_refusal_context "$id")"
+  if [ -n "$needle" ] && [ -z "$ctx" ]; then
+    echo "FAIL smoke ${id}: it is recorded as ending in a refusal but no CONTEXT needle pins it to a function"
+    STATUS=1
+  fi
+  seeded=0
+  if smoke_needs_seed "$id"; then
+    if ! smoke_plant "$id" >/tmp/harness_smoke_seed 2>&1; then
+      echo "FAIL smoke ${id}: the estate it reads could not be planted"
+      dump 10 /tmp/harness_smoke_seed; STATUS=1; continue
+    fi
+    seeded=1
+  fi
+
   if psql_file "$smoke" >/tmp/harness_smoke 2>&1; then
-    echo "PASS smoke ${id}"
+    if [ -n "$needle" ]; then
+      # A refusal smoke that SUCCEEDS is the alarming direction: the admin
+      # guard its last statement calls did not fire.
+      echo "FAIL smoke ${id}: it is recorded as ending in a refusal (\"${needle}\") and it succeeded -- the guard did not fire"
+      STATUS=1
+    else
+      echo "PASS smoke ${id}"
+      v_ran=$((v_ran + 1))
+    fi
     # **Print what it exercised, not just that it exited 0.** Each smoke has two
     # halves: assertions that RAISE, and reporting SELECTs that are evidence
     # rather than gates. Swallowing the output on PASS threw the evidence half
@@ -184,10 +407,64 @@ for id in "${NEW_MIGRATIONS[@]}"; do
     # instead of being indistinguishable from a run that exercised hundreds.
     grep -E '^(psql:[^ ]+ )?(NOTICE|WARNING):' /tmp/harness_smoke |
       sed -E 's/^psql:[^ ]+ //; s/^/  | /' || true
+  elif [ -n "$needle" ] && grep -qF "$needle" /tmp/harness_smoke &&
+       grep -qF "$ctx" /tmp/harness_smoke; then
+    echo "PASS smoke ${id} (refused, as recorded)"
+    v_ran=$((v_ran + 1))
+    echo "  | (refused) it raised its documented refusal: ${needle}"
+  elif [ -n "$needle" ]; then
+    echo "FAIL smoke ${id}: it failed, but not with its documented refusal (\"${needle}\") raised by ${ctx}...)"
+    dump 15 /tmp/harness_smoke; STATUS=1
   else
     echo "FAIL smoke ${id}"; dump 15 /tmp/harness_smoke; STATUS=1
   fi
+
+  [ "$seeded" -eq 1 ] && { smoke_unplant "$id" >/tmp/harness_smoke_seed 2>&1 || {
+    echo "FAIL smoke ${id}: the planted estate could not be removed, so later stages would inherit it"
+    dump 10 /tmp/harness_smoke_seed; STATUS=1; }; }
 done
+
+# --- executed is not asserted, and the split is stated ----------------------
+#
+# **"33 of 33 executed" is a true sentence that would read as a stronger one
+# than it is.** Twenty-one of the thirty-three smokes contain no
+# `RAISE EXCEPTION` at all: they are reporting SELECTs with `-- Expected: 1
+# row` in a comment, and they print PASS whatever the catalogue says.
+# `docs/sql/20260613000005_smoke.sql` is the sharpest case -- this run repaired
+# the 42702 that stopped it executing at all, and it still cannot go red if
+# `admin_create_registration_form` loses `p_waiver_text`. Rewriting twenty-one
+# smokes is not this change; printing the figure so nobody reads the total as
+# a guarantee is, and the floor stops the gated count being quietly reduced.
+v_gated=0
+for smoke in "$SMOKE_DIR"/*_smoke.sql; do
+  b="$(basename "$smoke")"; id="${b%%_smoke.sql}"
+  if grep -qiE 'raise[[:space:]]+exception' "$smoke" || [ -n "$(smoke_refusal_needle "$id")" ]; then
+    v_gated=$((v_gated + 1))
+  fi
+done
+echo "  | (coverage) ${v_gated} of ${v_smokes} smoke(s) can go red at all (a RAISE, or a required refusal); the rest are reporting SELECTs"
+if [ "$v_gated" -lt 14 ]; then
+  echo "FAIL: only ${v_gated} smoke(s) carry an assertion, down from the 14 this harness was left with"
+  STATUS=1
+fi
+
+# Meta-assertions on the loop itself. A glob that matched nothing would print
+# no FAIL and the stage would read as clean, which is the whole class of
+# defect this rewrite is about; and a run that executed fewer smokes than it
+# found has skipped some silently, which is the old bug in a new hat.
+if [ "$v_smokes" -lt 30 ]; then
+  echo "FAIL: only ${v_smokes} smoke(s) found under docs/sql/ -- the glob is wrong"
+  STATUS=1
+elif [ "$v_ran" -ne "$v_smokes" ]; then
+  # Unconditional, and NOT suppressed when something above already failed: a
+  # per-smoke FAIL and a shortfall in the total are different facts, and the
+  # reassuring "32 of 33" the else branch would otherwise print over
+  # a red run is the shape this whole rewrite is about.
+  echo "FAIL: ${v_smokes} smoke(s) found under docs/sql/ and only ${v_ran} executed cleanly"
+  STATUS=1
+else
+  echo "  | (coverage) ${v_ran} of ${v_smokes} smoke(s) under docs/sql/ executed"
+fi
 
 echo "=== shared scenario table, against Postgres ==="
 #
@@ -326,10 +603,30 @@ else
   # values` the moment it tries to make the column NOT NULL.
   #
   # That is a pre-existing defect in the documented opt-in, not something this
-  # PR introduced, and repairing it means threading an organization through
-  # every table of a historical seed -- a different change. `supabase/seed.sql`
-  # is the same script without the guard and has the same gap; the live sample
-  # path is the one to fix, together, when someone takes it on.
+  # PR introduced.
+  #
+  # **The repair is NOT "thread an organization through the seed", and that
+  # was measured rather than assumed.** Backfilling `organization_id` onto the
+  # seeded rows carries the chain exactly one migration further, to
+  # `20260331000000_definitive_schema`, which DROPs and recreates every table
+  # and refuses outright -- `Refusing definitive schema replay reset because
+  # public.organizations contains data` -- if any of thirty listed tables holds
+  # a row. `season_settings` is on that list, so ANY data inserted at
+  # 20251208000001 aborts the chain at 20260331000000 whatever columns it
+  # names. The seed migration is not missing a column; it is inserting rows
+  # before a barrier that requires emptiness, and no edit to its INSERTs can
+  # fix that. The two candidate repairs are to drop the seed from the chain
+  # (it is inert by construction) or to re-issue it as a new migration after
+  # the barrier.
+  #
+  # `supabase/seed.sql` is the same script without the guard and is NOT in the
+  # chain -- it runs against the finished schema, so the barrier never applies
+  # to it and threading an organization through really is its repair. It has
+  # further drift of its own: run against a head build it fails on its first
+  # statement, `on conflict (season_label, season_year)`, a unique constraint
+  # the current `season_settings` no longer has, and seven of its thirteen
+  # ON CONFLICT targets are likewise gone. The two copies need different
+  # repairs and no longer move together.
   #
   # **So the failure is PINNED rather than tolerated.** This stage fails if the
   # build starts succeeding (good news -- promote it to a plain "must apply"
@@ -342,7 +639,7 @@ else
     STATUS=1
   elif grep -q 'FAIL applying 20260310000002_unified_rls_schema.sql' /tmp/harness_seedfull &&
        grep -q 'organization_id' /tmp/harness_seedfull; then
-    echo "  | (known gap, pinned) the seeded full build still aborts at 20260310000002: the 2024 sample seed predates multi-tenancy and names no organization_id. supabase/seed.sql has the same gap."
+    echo "  | (known gap, pinned) the seeded full build still aborts at 20260310000002: the 2024 sample seed predates multi-tenancy and names no organization_id. Backfilling one only moves the abort to 20260331000000, which refuses to replay over any data at all -- see the comment above."
   else
     echo "FAIL the seeded full build failed somewhere other than the known 20260310000002 organization_id gap"
     dump 25 /tmp/harness_seedfull
@@ -352,12 +649,97 @@ fi
 
 echo "=== reverts (each applied on a database built up to its own migration) ==="
 #
+# **This stage keeps a list, which needs saying now that the smoke stage above
+# does not.** The list used to be called `NEW_MIGRATIONS` and scoped BOTH
+# stages, which is how a smoke came to be skipped by omission. Reverts are
+# genuinely different: each one below is checked against a bespoke planted
+# estate written for that migration, on a fresh database migrated up to the
+# revert's own forward migration. A revert with no plant reports zeroes and
+# proves only that the code parses -- the failure every seed in this loop
+# exists to prevent. So the list names the reverts that have that scaffolding,
+# it is checked below to name only real ones, and the coverage question --
+# does every smoke-era migration HAVE a revert -- is asserted rather than left
+# to whoever remembered.
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000)
+
+# Every migration that must carry a smoke must carry a revert too, and the
+# reverts named for execution must exist. The first is the coverage the old
+# list could not state; the second stops a rename leaving an entry pointing at
+# nothing, which would skip its stage in silence.
+# The reverts that exist but are NOT applied here. This list is what stops
+# `REVERT_CHECKS` reproducing the smoke stage's defect one column along:
+# every smoke-era migration's revert must be in ONE of the two lists, so a new
+# migration's revert cannot be skipped by omission -- only by being typed in
+# here, with the plant it is still owed.
+REVERT_DEBT=(
+  20260530000000 20260530000100 20260602000000 20260603000000 20260603120000
+  20260610000000 20260611000000 20260611000100 20260611000200 20260611000300
+  20260611000400 20260613000000 20260613000001 20260613000002 20260613000003
+  20260613000004 20260613000005 20260613000006 20260614000000
+  20260726000000 20260726000100 20260726000200 20260726000300
+)
+
+v_rev_era=0 v_norevert=() v_unlisted=()
+for m in "$MIGRATION_DIR"/*.sql; do
+  b="$(basename "$m")"; id="${b%%_*}"
+  [ "$id" \< "$SMOKE_ERA_BASELINE" ] && continue
+  in_list "$id" "${SMOKE_DEBT[@]}" && continue
+  v_rev_era=$((v_rev_era + 1))
+  if [ ! -r "$SMOKE_DIR/${id}_revert.sql" ]; then
+    v_norevert+=("$b")
+    continue
+  fi
+  in_list "$id" "${REVERT_CHECKS[@]}" && continue
+  in_list "$id" "${REVERT_DEBT[@]}" && continue
+  v_unlisted+=("$b")
+done
+# Meta-assertion, the twin of the smoke stage's: a baseline naming no
+# migration, or a glob that matched nothing, leaves every array below empty
+# and this stage reports health having examined nothing.
+if [ "$v_rev_era" -lt 30 ]; then
+  echo "FAIL: the revert coverage check examined only ${v_rev_era} migration(s); the baseline or the migration glob is wrong"
+  STATUS=1
+fi
+if [ "${#v_norevert[@]}" -ne 0 ]; then
+  echo "FAIL: ${#v_norevert[@]} migration(s) at or after ${SMOKE_ERA_BASELINE} have no docs/sql/<id>_revert.sql:"
+  printf '    %s\n' "${v_norevert[@]}"
+  STATUS=1
+fi
+if [ "${#v_unlisted[@]}" -ne 0 ]; then
+  echo "FAIL: ${#v_unlisted[@]} revert(s) are in neither REVERT_CHECKS nor REVERT_DEBT, so nothing applies them and nothing records that:"
+  printf '    %s\n' "${v_unlisted[@]}"
+  echo "    Add the id to REVERT_CHECKS with the estate its checks need planted, or to REVERT_DEBT."
+  STATUS=1
+fi
+if [ "${#v_norevert[@]}" -eq 0 ] && [ "${#v_unlisted[@]}" -eq 0 ] && [ "$v_rev_era" -ge 30 ]; then
+  echo "  | (coverage) ${v_rev_era} smoke-era migration(s) all carry a revert; ${#REVERT_CHECKS[@]} applied here, ${#REVERT_DEBT[@]} recorded as debt"
+fi
+# A list entry that names nothing is the unread field this project keeps
+# finding, in both directions.
+for id in "${REVERT_CHECKS[@]}"; do
+  [ -r "$SMOKE_DIR/${id}_revert.sql" ] ||
+    { echo "FAIL: REVERT_CHECKS names ${id}, which has no docs/sql/${id}_revert.sql"; STATUS=1; }
+done
+for id in "${REVERT_DEBT[@]}"; do
+  if [ ! -r "$SMOKE_DIR/${id}_revert.sql" ]; then
+    echo "FAIL: REVERT_DEBT names ${id}, which has no docs/sql/${id}_revert.sql"
+    STATUS=1
+  elif in_list "$id" "${REVERT_CHECKS[@]}"; then
+    echo "FAIL: ${id} is in both REVERT_CHECKS and REVERT_DEBT -- it is applied here, so remove the debt entry"
+    STATUS=1
+  fi
+done
+if [ "${#REVERT_CHECKS[@]}" -lt 10 ]; then
+  echo "FAIL: REVERT_CHECKS has shrunk to ${#REVERT_CHECKS[@]} entries"
+  STATUS=1
+fi
+#
 # A revert is only meaningful directly after its forward migration. Applying
 # every revert to a fully-migrated database, as the first draft did, fails on
 # ordering that says nothing about the revert -- 20260610's revert cannot drop a
 # column a later migration built a view on. So each revert is checked on a fresh
 # database migrated up to and including its own forward migration.
-for id in "${NEW_MIGRATIONS[@]}"; do
+for id in "${REVERT_CHECKS[@]}"; do
   if ! fresh_db; then echo "FAIL building a fresh database for ${id}"; STATUS=1; continue; fi
   if ! apply_all "$id"; then echo "FAIL building up to ${id}"; STATUS=1; continue; fi
 

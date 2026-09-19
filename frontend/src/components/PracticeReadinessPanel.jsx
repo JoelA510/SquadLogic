@@ -24,23 +24,41 @@ KpiCard.propTypes = {
 };
 
 /**
+ * **`generatedAt` is a prop, not a field of the snapshot.**
+ *
+ * This header used to read `practiceReadinessSnapshot.lastCalculated`, and
+ * nothing anywhere ever wrote that field: the snapshot is `run.results`
+ * verbatim (`practiceSummaryMapper`), i.e. `practiceMetrics`' report, which has
+ * no timestamp in it at all. So the guard was permanently false and
+ * "Generated ..." never rendered -- a line that reads as load-bearing and is
+ * not. The run's timestamp does exist; the mapper already lifts it as
+ * `generatedAt`, and `GameReadinessPanel` already takes it as a prop of that
+ * name. That contract is adopted here rather than a third one invented.
+ *
+ * **There is no `timezone` prop, and its absence is the contract.**
+ * `generatedAt` is `scheduler_runs.completed_at`/`created_at`, a real instant
+ * carrying a zone, and the viewer's own clock is the right one to read it on
+ * -- the `toSeasonInstant` docblock in `utils/formatters.js` names this panel
+ * as one of the callers that deliberately passes none. The prop used to be
+ * declared, typed and destructured as `_timezone`, which is the same
+ * reads-as-load-bearing-and-is-not shape as the `lastCalculated` above it.
+ *
  * @param {{
  *   practiceReadinessSnapshot?: {
  *     balancedScore?: number,
  *     manualActionRequiredCount?: number,
  *     venueSaturation?: string,
  *     conflictFreeTeams?: number,
- *     lastCalculated?: string,
  *     unassignedByReason?: Array<{ reason: string, count: number }>,
  *   },
  *   dashboardLoading?: { practice?: boolean },
- *   timezone?: string,
+ *   generatedAt?: string|null,
  * }} props
  */
 export default function PracticeReadinessPanel({
   practiceReadinessSnapshot = {},
   dashboardLoading = {},
-  timezone: _timezone = undefined,
+  generatedAt = undefined,
 }) {
   if (dashboardLoading.practice) {
     return (
@@ -59,9 +77,9 @@ export default function PracticeReadinessPanel({
     <div className="space-y-6">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold text-text-primary">Practice Readiness</h2>
-        {practiceReadinessSnapshot.lastCalculated && (
+        {generatedAt && (
           <span className="text-sm text-text-secondary">
-            Generated {formatDateTime(practiceReadinessSnapshot.lastCalculated)}
+            Generated {formatDateTime(generatedAt)}
           </span>
         )}
       </div>
@@ -120,5 +138,5 @@ export default function PracticeReadinessPanel({
 PracticeReadinessPanel.propTypes = {
   practiceReadinessSnapshot: PropTypes.object,
   dashboardLoading: PropTypes.object,
-  timezone: PropTypes.string,
+  generatedAt: PropTypes.string,
 };

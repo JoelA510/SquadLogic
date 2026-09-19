@@ -1,7 +1,12 @@
 -- Smoke test for 20260613000005_crud_review_fixes.sql
 
 -- Exactly one create-form overload, now with p_waiver_text
-SELECT proname, pg_get_function_identity_arguments(oid) AS args
+-- `pg_proc.oid`, not a bare `oid`: pg_namespace is joined in, both catalogues
+-- have an `oid` column, and the unqualified reference made this file raise
+-- 42702 on its very first statement. Nothing ran it -- `run.sh` scoped smoke
+-- execution to a hand-maintained list this id was not on -- so a smoke that
+-- could not execute at all read as a smoke that passed.
+SELECT proname, pg_get_function_identity_arguments(pg_proc.oid) AS args
 FROM pg_proc
 JOIN pg_namespace ON pg_namespace.oid = pg_proc.pronamespace
 WHERE nspname = 'public' AND proname = 'admin_create_registration_form';

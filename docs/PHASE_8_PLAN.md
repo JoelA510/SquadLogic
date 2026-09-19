@@ -30,9 +30,17 @@ either extends an engine nobody can reach, or moves the engine under the app.
 **Decide before 8.5**, and record the decision in `BUILD_PLAN_STATUS.md`.
 
 Two open items from §3 are really this decision in disguise: _"Nothing is
-persisted"_ and _"Nothing is wired into the shipping app"_. GAP-30
-(`z.coerce.date()` in `SlotSchema`/`AssignmentSchema`) must close before any
-snapshot persists, or the parity checker causes the divergence it detects.
+persisted"_ and _"Nothing is wired into the shipping app"_. This paragraph used
+to add that GAP-30 (`z.coerce.date()` in `SlotSchema`/`AssignmentSchema`) must
+close before any snapshot persists, or the parity checker causes the divergence
+it detects. **GAP-30 closed on 2026-09-19** (#396, #398, #400): `InstantSchema`
+replaced the coercion and refuses a zoneless timestamp, `season_settings.timezone`
+has a writer, and `calendar-feed` composes through the season clock — verified by
+execution, see [`BUILD_PLAN_STATUS.md`](BUILD_PLAN_STATUS.md) §7. **So nothing
+now blocks a snapshot from persisting except that no store has been built.** The
+remaining precondition is GAP-29, which was narrowed the same day to the
+published baseline, with freeze plans, resolve runs and scenarios split out as
+[GAP-35](MODEL_GAPS.md#gap-35).
 
 ---
 

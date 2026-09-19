@@ -66,6 +66,17 @@ independently by:
 
 These four schema copies have already diverged. Compare the slot definition:
 
+> **Dated correction, 2026-09-19.** The two `packages/core` excerpts below are
+> **as they stood when this section was written** and their line citations are
+> stale. `z.coerce.date()` is gone: GAP-30 closed across #396, #398 and #400, and
+> `SlotSchema.start/end` and `AssignmentSchema.start/end` are now `InstantSchema`,
+> which refuses a zoneless timestamp rather than reading it in the host zone
+> (`packages/core/src/schemas/index.js:35`, `:77-88`, `:94-106`). The excerpts are
+> left as written because the **point of this section** — that four hand-kept
+> copies of one schema have diverged — is unchanged and is if anything sharper:
+> the two Deno copies still accept `z.string().or(z.date())` and have not
+> followed. See [`MODEL_GAPS.md` GAP-30](MODEL_GAPS.md#gap-30).
+
 ```js
 // packages/core/src/schemas/index.js:28-40
 export const SlotSchema = z

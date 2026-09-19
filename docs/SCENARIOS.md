@@ -2,7 +2,9 @@
 
 **Module**: [`packages/core/src/scenario/`](../packages/core/src/scenario/) ·
 **Tests**: [`tests/scenarioBranching.test.js`](../tests/scenarioBranching.test.js) ·
-**Gaps**: [GAP-28](MODEL_GAPS.md#gap-28), [GAP-29](MODEL_GAPS.md#gap-29)
+**Gaps**: [GAP-28](MODEL_GAPS.md#gap-28), [GAP-29](MODEL_GAPS.md#gap-29),
+[GAP-35](MODEL_GAPS.md#gap-35) — scenario and promotion persistence moved from
+GAP-29 to GAP-35 on 2026-09-19
 
 > _"The source project needed parallel schedules for 'with/without venue A',
 > 'with/without venue B', and 'with/without equipment at one site on one date'.

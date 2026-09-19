@@ -386,7 +386,10 @@ export default function PracticeSchedulingPage() {
   }, [
     practice.assignments,
     practice?.assignments?.length,
-    practice?.snapshot?.lastCalculated,
+    // `practice?.snapshot?.lastCalculated` stood here and could never change:
+    // the snapshot is `run.results` verbatim and nothing writes that field.
+    // `generatedAt` is the run timestamp the mapper really produces.
+    practice?.generatedAt,
     practice?.runId,
   ]);
 
@@ -1033,6 +1036,7 @@ export default function PracticeSchedulingPage() {
           <PracticeReadinessPanel
             practiceReadinessSnapshot={practice?.snapshot || {}}
             dashboardLoading={dashboardLoading || {}}
+            generatedAt={practice?.generatedAt}
           />
         </div>
       </div>

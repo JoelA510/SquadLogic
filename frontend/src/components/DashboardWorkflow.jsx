@@ -269,6 +269,7 @@ const DashboardWorkflow = ({
           <PracticeReadinessPanel
             practiceReadinessSnapshot={practiceData.snapshot}
             dashboardLoading={{ practice: false }}
+            generatedAt={practiceData?.generatedAt}
             timezone={timezone}
           />
           <div className="flex justify-end pt-4 mt-6 border-t border-border-subtle">

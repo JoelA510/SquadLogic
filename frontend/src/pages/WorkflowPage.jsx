@@ -173,8 +173,8 @@ export default function WorkflowPage() {
                 <StatusItem
                   icon={<Calendar size={18} />}
                   label="Practice Slots"
-                  status={practice?.lastCalculated ? 'Optimized' : 'Unscheduled'}
-                  isReady={!!practice?.lastCalculated}
+                  status={practice?.generatedAt ? 'Optimized' : 'Unscheduled'}
+                  isReady={!!practice?.generatedAt}
                 />
                 <StatusItem
                   icon={<Trophy size={18} />}

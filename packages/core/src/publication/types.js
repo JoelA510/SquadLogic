@@ -23,6 +23,7 @@
  * @typedef {Object} PublicationMeta
  * @property {number} snapshotsCreated
  * @property {number} snapshotRowsFrozen
+ * @property {number} snapshotsRead
  * @property {number} publishedRowsRead
  * @property {number} currentRowsRead
  * @property {number} rowsCompared

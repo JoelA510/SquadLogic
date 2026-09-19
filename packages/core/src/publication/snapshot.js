@@ -32,8 +32,19 @@
  *   round-tripped through them came back with its wall-clock times
  *   reinterpreted in the host timezone — the parity checker causing the
  *   divergence it exists to detect. Those schemas now refuse a naive wall
- *   reading. What remains is GAP-29: there is no persistence seam to store
- *   through.
+ *   reading. What remains is GAP-29: {@link import('./serialise.js').serialisePublicationSnapshot}
+ *   and {@link import('./serialise.js').readPublicationSnapshot} are the
+ *   declared persistence seam, and **nothing in this repository stores through
+ *   it** — the same sentence `externalImport` and `fieldAdmin` have each said
+ *   about their own seam since Phase 5. Until 2026-09-19 this module said
+ *   something different, that there was no seam at all; the three subsystems
+ *   were in one situation and describing it three ways. What makes the new
+ *   sentence checkable rather than decorative is that both of its halves are
+ *   enumerated from the repository in `tests/publicationParity.test.js`: the
+ *   seam is exported from the barrel, and no file outside this module, the
+ *   barrel, the tests and the docs names either function. Write a production
+ *   caller and the finding's message becomes false and the test red — which is
+ *   exactly what closing GAP-29 has to do.
  *
  * ## Not the teaming snapshot
  *
@@ -182,7 +193,7 @@ export function makePublicationSnapshot(input) {
     ),
     makePublicationFinding(
       PUBLICATION_REASON.SNAPSHOT_IN_MEMORY_ONLY,
-      `snapshot "${parsed.snapshotId}" is held in memory only and is lost when this process ends (GAP-29 persistence)`,
+      `snapshot "${parsed.snapshotId}" lives in memory only and is lost when this process ends; serialisePublicationSnapshot() and readPublicationSnapshot() are the declared persistence seam and nothing in this repository stores through it (GAP-29)`,
       { snapshotId: parsed.snapshotId, durability: PUBLICATION_DURABILITY.IN_MEMORY }
     ),
   ];

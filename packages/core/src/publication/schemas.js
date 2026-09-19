@@ -155,6 +155,62 @@ export const PublicationSnapshotInputSchema = z
   });
 
 /**
+ * Bumped when the document shape changes in a way a reader must know about.
+ *
+ * Declared here beside the schema that pins it rather than in `serialise.js`,
+ * so the literal in {@link PublicationSnapshotDocumentSchema} and the stamp the
+ * writer writes are the same constant. `externalImport` keeps the two apart
+ * (`MAPPING_DOCUMENT_VERSION` in `mapping.js`, `z.literal(1)` in its schema) and
+ * `fieldAdmin` keeps them together; one constant is the reading under which the
+ * two cannot disagree.
+ */
+export const PUBLICATION_SNAPSHOT_DOCUMENT_VERSION = 1;
+
+/**
+ * **The serialised form of a snapshot** — the persistence seam, and the only
+ * shape a store would ever hold.
+ *
+ * Deliberately the same field names as the snapshot itself plus a `version`,
+ * exactly as {@link import('../externalImport/schemas.js').MappingDocumentSchema}
+ * is, so that reading a document is validation rather than translation.
+ * Everything in it is a JSON primitive: no `Date`, no `Map`, no function.
+ *
+ * ## The two snapshot fields this document drops, and the one it keeps anyway
+ *
+ * - **`durability`.** It describes the record in this process, not the
+ *   document. A stored document that carried `in-memory` would be asserting a
+ *   durability it cannot know, and a read back into memory is `in-memory`
+ *   again by construction — so the reader derives it rather than trusting it.
+ * - **`rowCount`.** `rows.length` is the same number, and a document carrying
+ *   both invites the one case where they disagree.
+ * - Nothing else. `digest` **is** carried, unlike the two sibling seams, and
+ *   that is the one deliberate divergence: it is not a reconstruction input —
+ *   the reader recomputes it — it is the stored claim the recomputation is
+ *   checked against. Without it a document whose rows were edited in the store
+ *   would be read back, re-digested from the edited rows, and agree with
+ *   itself. `SNAPSHOT_DIGEST_MISMATCH` exists precisely to catch the artifact
+ *   that drifted, and dropping the stored digest would be dropping the only
+ *   thing it can be compared to.
+ */
+export const PublicationSnapshotDocumentSchema = z
+  .object({
+    version: z.literal(PUBLICATION_SNAPSHOT_DOCUMENT_VERSION),
+    snapshotId: IdSchema,
+    label: z.string().min(1),
+    channel: z.string().min(1),
+    publishedAt: PublicationStampSchema,
+    publishedBy: z.string().min(1),
+    notes: z.string().min(1).nullable(),
+    columns: z.array(z.string().min(1)).min(1),
+    rows: z.array(ArtifactRowSchema).min(1),
+    /** The digest the snapshot carried when it was written. See above. */
+    digest: z.string().regex(/^[0-9a-f]{16}$/, {
+      message: 'expected 16 lowercase hex characters from publicationDigest()',
+    }),
+  })
+  .strict();
+
+/**
  * One destination that consumes this schedule.
  *
  * `destinationSyncedAt` is `nullable()` and **not** `optional()`: the key must

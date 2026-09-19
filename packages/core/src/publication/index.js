@@ -30,6 +30,13 @@
  *   detect**. That is closed: those schemas now refuse a naive wall reading
  *   outright and `timing/seasonClock.js` composes one against the season's
  *   zone. Persistence still waits on GAP-29, and on nothing else here.
+ * - **Seamed, but not stored.** `serialise.js` moves a snapshot through a
+ *   version-stamped document and back, validated in both directions, so this
+ *   package now says what `externalImport` and `fieldAdmin` say about their own
+ *   registries rather than a third thing. Nothing calls it: a
+ *   `serialise*()` / `read*()` pair in this repository is a declaration that a
+ *   store is **missing**, and `fieldAdmin` — the one package that got a real
+ *   store — bypassed its own seam and went table + RPC + RLS + audit.
  * - **Not a second diff.** `compareParityRows()` is the only row comparator
  *   here; `resolve/state.js` `diffAgainstBaseline()` remains the only
  *   game-by-game baseline diff, over a resolve run rather than over two
@@ -70,6 +77,8 @@ export {
   MAPPABLE_PARITY_FIELDS,
   MappingRuleSchema,
   NoticeTeamSchema,
+  PUBLICATION_SNAPSHOT_DOCUMENT_VERSION,
+  PublicationSnapshotDocumentSchema,
   PublicationSnapshotInputSchema,
   PublicationStampSchema,
   SyncDestinationSchema,
@@ -95,6 +104,8 @@ export {
   snapshotRowsFromPublication,
   verifySnapshotDigest,
 } from './snapshot.js';
+
+export { readPublicationSnapshot, serialisePublicationSnapshot } from './serialise.js';
 
 export {
   applyMappingRules,

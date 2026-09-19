@@ -73,6 +73,7 @@
  * @module externalImport/mapping
  */
 
+import { sortRecordsById } from '../documentOrder.js';
 import { getSurface } from '../facility/facilityGraph.js';
 
 import {
@@ -639,6 +640,33 @@ export function mappingUsageFindings(registry, usage) {
  * `tests/externalFixtureImport.test.js` a real check rather than a deep-equal
  * that would pass on a lossy transform.
  *
+ * ## Record order is a declared sort, not the caller's insertion order
+ *
+ * **This used to preserve insertion order, and its sibling did not.**
+ * `fieldAdmin/serialise.js` — written after this file and explicitly modelled on
+ * it — sorts by record id in code-unit order and documents byte-stability as a
+ * rule, because a registry assembled in a different order is the same registry.
+ * Two logically identical registries therefore produced two different documents
+ * here and one document there. That difference is harmless while nothing stores
+ * either, and stops being harmless the moment something does: a table is a set,
+ * so "has this registry changed since we stored it?" answered by comparing
+ * documents would report a re-ordered read as an edit.
+ *
+ * So the contract is the sibling's, unchanged in substance from
+ * {@link import('../fieldAdmin/serialise.js').serialiseFieldRegistry}: sorted by
+ * `id`, in **code-unit order** rather than `localeCompare`, because
+ * `localeCompare` varies with the runtime's default locale and ICU build — and
+ * these ids are full of the punctuation locales disagree about
+ * (`season-2026/external/alder-back-pitch-2`).
+ *
+ * The consequence is stated rather than discovered: a registry read back from a
+ * document carries its records in id order, which need not be the order the
+ * registry that wrote it held them in. Nothing in this package reads
+ * `registry.records` positionally — every lookup filters and every reported list
+ * is `.sort()`ed — so the re-ordering is invisible to behaviour, and
+ * `tests/externalFixtureImport.test.js` holds that claim to a registry built in
+ * deliberately reversed order.
+ *
  * @param {import('./types.js').ExternalMappingRegistry} registry
  * @returns {Object} an `MappingDocumentSchema` value
  */
@@ -648,7 +676,7 @@ export function serialiseExternalMappingRegistry(registry) {
     registryId: registry.registryId,
     label: registry.label,
     party: registry.party,
-    records: registry.records.map((record) => ({
+    records: sortRecordsById(registry.records).map((record) => ({
       id: record.id,
       kind: record.kind,
       externalLabel: record.externalLabel,

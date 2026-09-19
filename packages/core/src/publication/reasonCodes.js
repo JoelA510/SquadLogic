@@ -59,8 +59,8 @@ export const PUBLICATION_STATUS = CONSTRAINT_STATUS;
  * `8:30 AM` into an absolute instant using the host timezone, and persisting a
  * snapshot through a timezone-lossy schema would have made the parity checker
  * **cause the divergence it exists to detect**. Those schemas now refuse a
- * naive wall reading, so what is left is simply that no persistence seam
- * exists.
+ * naive wall reading, so what is left is that nothing stores through the seam
+ * `serialise.js` declares.
  *
  * @readonly
  * @enum {string}
@@ -152,6 +152,22 @@ export const PUBLICATION_REASON = Object.freeze({
    * `info`, because it is a stated property of this phase rather than a defect
    * — but it is stated, in the findings and on the record's `durability` field,
    * so nobody reads a snapshot as a durable audit artifact.
+   *
+   * **What would make it stop firing**, stated because a finding nothing can
+   * silence is decoration rather than a report: a store. Concretely, the thing
+   * Stage 2 of GAP-29 has to produce — a table with RLS, an RPC that writes it,
+   * an audit row, and a second member of {@link PUBLICATION_DURABILITY} that a
+   * snapshot loaded from that store carries. The emission is unconditional
+   * today for the honest reason that `PUBLICATION_DURABILITY` has exactly one
+   * member, so there is no snapshot this could truthfully be omitted from; a
+   * conditional here now would be a branch no input can take, which this
+   * repository counts as evidence of a missing feature rather than as coverage.
+   *
+   * The *message* is falsifiable today, and that is the part a reader can
+   * check: it names `serialisePublicationSnapshot()` /
+   * `readPublicationSnapshot()` as the declared seam and says nothing stores
+   * through it, and `tests/publicationParity.test.js` enumerates the
+   * repository to hold both halves true.
    */
   SNAPSHOT_IN_MEMORY_ONLY: 'SNAPSHOT_IN_MEMORY_ONLY',
   /** A snapshot was created. Provenance, with the row count and the digest. */
@@ -415,6 +431,13 @@ export function createPublicationMeta() {
     snapshotsCreated: 0,
     /** Rows frozen into snapshots. */
     snapshotRowsFrozen: 0,
+    /**
+     * Snapshots read back through {@link import('./serialise.js').readPublicationSnapshot}.
+     *
+     * Counted rather than assumed, so a round-trip assertion cannot pass over a
+     * read that never happened.
+     */
+    snapshotsRead: 0,
     /** Rows on the published side of a comparison. */
     publishedRowsRead: 0,
     /** Rows on the current side of a comparison. */

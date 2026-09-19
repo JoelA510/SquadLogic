@@ -53,11 +53,15 @@ import {
   parityRowFromExportRow,
   parityRowKey,
   parityRowsFromExportRows,
+  PUBLICATION_SNAPSHOT_DOCUMENT_VERSION,
+  PublicationSnapshotDocumentSchema,
   publicationDigest,
+  readPublicationSnapshot,
   season2026ExternalParityInput,
   season2026ExternalVenueMapping,
   season2026ParityRows,
   season2026PublishedParityInput,
+  serialisePublicationSnapshot,
   snapshotRowsFromPublication,
   splitNaiveDateTime,
   verifySnapshotDigest,
@@ -203,6 +207,284 @@ describe('publication :: snapshots are immutable, stamped and attributed', () =>
     expect(publicationDigest(columns, [{ a: '1', b: '2' }])).not.toBe(
       publicationDigest(columns, [{ a: '2', b: '1' }])
     );
+  });
+});
+
+/* ========================================================================== */
+/* The persistence seam                                                        */
+/* ========================================================================== */
+
+describe('publication :: the seam exists, and nothing stores through it', () => {
+  /**
+   * A snapshot in the shipping export vocabulary, built through the production
+   * projection rather than from hand-written cells, so the round trip is
+   * asserted over rows something actually emits.
+   */
+  const seamTeams = [
+    { id: 'T1', name: 'Tigers', division: 'U10B', coachName: '', coachEmail: '' },
+    { id: 'T2', name: 'Bears', division: 'U10B', coachName: '', coachEmail: '' },
+  ];
+  const seamProjection = publicationRowsFor({
+    slots: [
+      makeReservedSlot({
+        id: 'slot-seam-1',
+        kind: RESERVE_KIND.UNNAMED_FIXTURE,
+        label: 'Select Game 1',
+        date: '2026-09-12',
+        venueId: 'venue:alder',
+        surfaceId: 'surface:alder:pitch-2',
+        startMinutes: 600,
+        endMinutes: 720,
+        format: '11v11',
+        homeSide: FIXTURE_SIDE.TEAM,
+        awaySide: FIXTURE_SIDE.TEAM,
+        homeTeamId: 'T1',
+        awayTeamId: 'T2',
+      }),
+    ],
+    unplaced: [],
+    teams: seamTeams,
+  });
+  const seamInput = {
+    snapshotId: 'pub-seam-1',
+    label: 'select layer v1',
+    channel: 'public site',
+    publishedAt: PUBLISHED_AT,
+    publishedBy: 'registrar',
+    rows: snapshotRowsFromPublication(seamProjection),
+  };
+  const seamSnapshot = (over = {}) => makePublicationSnapshot({ ...seamInput, ...over }).snapshot;
+
+  it('round-trips a snapshot through the seam byte-identically', () => {
+    const snapshot = seamSnapshot();
+    expect(snapshot.columns).toEqual([...SCHEDULE_EXPORT_COLUMNS]);
+
+    const document = serialisePublicationSnapshot(snapshot);
+    const readBack = readPublicationSnapshot(document);
+    const again = serialisePublicationSnapshot(readBack.snapshot);
+
+    // Byte-identical, not deep-equal: a lossy transform can pass a deep-equal
+    // and cannot pass this.
+    expect(JSON.stringify(again)).toBe(JSON.stringify(document));
+    expect(readBack.snapshot.rows).toEqual(snapshot.rows);
+    expect(readBack.snapshot.digest).toBe(snapshot.digest);
+    expect(readBack.snapshot.rowCount).toBe(snapshot.rowCount);
+    // Durability is derived on read, never carried by the document: a stored
+    // document cannot assert how durable the thing reading it is.
+    expect(readBack.snapshot.durability).toBe(PUBLICATION_DURABILITY.IN_MEMORY);
+    expect(document.durability).toBeUndefined();
+    expect(readBack.status).toBe(PUBLICATION_STATUS.ALLOWED);
+    // Counted rather than assumed: a round-trip assertion over a read that
+    // never happened is the vacuous shape this file is full of controls for.
+    expect(readBack.meta.snapshotsRead).toBe(1);
+    expect(readBack.meta.snapshotRowsFrozen).toBe(snapshot.rowCount);
+  });
+
+  it('writes cells in declared column order, so key insertion order cannot reach the document', () => {
+    const forward = seamSnapshot();
+    // The same rows with their keys inserted in the reverse order. Two
+    // snapshots of one artifact; one document.
+    const reversedKeys = seamInput.rows.map((row) => {
+      /** @type {Record<string, string>} */
+      const copy = {};
+      for (const column of [...SCHEDULE_EXPORT_COLUMNS].reverse()) copy[column] = row[column];
+      return copy;
+    });
+    const backward = seamSnapshot({ rows: reversedKeys });
+    expect(Object.keys(reversedKeys[0])).not.toEqual(Object.keys(seamInput.rows[0]));
+    expect(JSON.stringify(serialisePublicationSnapshot(backward))).toBe(
+      JSON.stringify(serialisePublicationSnapshot(forward))
+    );
+  });
+
+  it('carries no Date, no function and nothing exotic', () => {
+    const document = serialisePublicationSnapshot(seamSnapshot());
+    const walk = (value, at) => {
+      if (value === null) return;
+      const kind = typeof value;
+      if (kind === 'string' || kind === 'number' || kind === 'boolean') return;
+      expect(kind, `${at} is a ${kind}`).toBe('object');
+      expect(value instanceof Date, `${at} is a Date`).toBe(false);
+      if (Array.isArray(value)) {
+        value.forEach((entry, index) => walk(entry, `${at}[${index}]`));
+        return;
+      }
+      expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+      for (const [key, entry] of Object.entries(value)) walk(entry, `${at}.${key}`);
+    };
+    walk(document, 'document');
+    expect(() => PublicationSnapshotDocumentSchema.parse(document)).not.toThrow();
+    expect(document.version).toBe(PUBLICATION_SNAPSHOT_DOCUMENT_VERSION);
+  });
+
+  it('carries a non-ASCII cell through unchanged', () => {
+    // Nothing in the corpus exercises this, and a seam that normalised or
+    // re-encoded a name would be silently rewriting what a family was told.
+    const snapshot = seamSnapshot({
+      snapshotId: 'pub-seam-ünïcode',
+      label: 'Düsseldorf tour — v1',
+      channel: 'e-mail (families) ✉',
+      notes: 'renamed 対戦相手 after the league merge',
+      rows: seamInput.rows.map((row) => ({
+        ...row,
+        [SCHEDULE_EXPORT_HEADERS.TEAM_NAME]: 'Tigres Ñandú',
+        [SCHEDULE_EXPORT_HEADERS.NOTES]: 'kickoff moved — see 案内',
+      })),
+    });
+    const readBack = readPublicationSnapshot(serialisePublicationSnapshot(snapshot));
+    expect(readBack.snapshot.rows[0][SCHEDULE_EXPORT_HEADERS.TEAM_NAME]).toBe(
+      'Tigres Ñandú'
+    );
+    expect(readBack.snapshot.rows[0][SCHEDULE_EXPORT_HEADERS.NOTES]).toBe(
+      'kickoff moved — see 案内'
+    );
+    expect(readBack.snapshot.label).toBe('Düsseldorf tour — v1');
+    expect(readBack.snapshot.notes).toBe('renamed 対戦相手 after the league merge');
+    expect(readBack.snapshot.digest).toBe(snapshot.digest);
+    expect(readBack.status).toBe(PUBLICATION_STATUS.ALLOWED);
+  });
+
+  it('refuses a document from another version, or one with a field added or removed', () => {
+    const document = serialisePublicationSnapshot(seamSnapshot());
+    // Each of these is the positive control for one schema clause; a seam
+    // whose refusals are never fired is a schema nobody has read.
+    expect(() => readPublicationSnapshot({ ...document, version: 2 })).toThrow();
+    expect(() => readPublicationSnapshot({ ...document, extra: 1 })).toThrow();
+    const { channel: _channel, ...noChannel } = document;
+    expect(() => readPublicationSnapshot(noChannel)).toThrow();
+    const { digest: _digest, ...noDigest } = document;
+    expect(() => readPublicationSnapshot(noDigest)).toThrow();
+    // A row that is no longer written in the document's own vocabulary.
+    expect(() =>
+      readPublicationSnapshot({
+        ...document,
+        rows: document.rows.map(({ [SCHEDULE_EXPORT_HEADERS.FIELD]: _drop, ...rest }) => rest),
+      })
+    ).toThrow();
+    // And a digest that is not a digest at all.
+    expect(() => readPublicationSnapshot({ ...document, digest: 'nope' })).toThrow();
+  });
+
+  it('reports an edited cell as a digest mismatch rather than agreeing with itself', () => {
+    const document = serialisePublicationSnapshot(seamSnapshot());
+    const tampered = {
+      ...document,
+      rows: document.rows.map((row, index) =>
+        index === 0 ? { ...row, [SCHEDULE_EXPORT_HEADERS.START]: '2026-09-12T11:30:00' } : row
+      ),
+    };
+    const readBack = readPublicationSnapshot(tampered);
+    const mismatch = findingsWith(readBack.findings, PUBLICATION_REASON.SNAPSHOT_DIGEST_MISMATCH);
+    expect(mismatch).toHaveLength(1);
+    expect(mismatch[0].severity).toBe(PUBLICATION_SEVERITY.BLOCKING);
+    expect(mismatch[0].details.stored).toBe(document.digest);
+    expect(readBack.status).toBe(PUBLICATION_STATUS.REJECTED);
+    // The snapshot handed back carries the digest of the rows that arrived, not
+    // the claim that failed, so a caller cannot re-store the lie.
+    expect(readBack.snapshot.digest).not.toBe(document.digest);
+  });
+
+  it('reports re-ordered rows as a mismatch, because the digest covers their order', () => {
+    // The asymmetry with the two sibling seams, made visible rather than left
+    // for a store to discover: a registry is a set and is sorted; a snapshot's
+    // rows are positional and are not. `serialise.js`'s header says so.
+    const snapshot = seamSnapshot();
+    expect(snapshot.rowCount).toBeGreaterThan(1);
+    const document = serialisePublicationSnapshot(snapshot);
+    const reordered = { ...document, rows: [...document.rows].reverse() };
+    const readBack = readPublicationSnapshot(reordered);
+    expect(codesOf(readBack.findings)).toContain(PUBLICATION_REASON.SNAPSHOT_DIGEST_MISMATCH);
+    expect(readBack.status).toBe(PUBLICATION_STATUS.REJECTED);
+  });
+
+  it('says on every snapshot that the seam exists and nothing stores through it', () => {
+    const { findings } = makePublicationSnapshot(seamInput);
+    const stated = findingsWith(findings, PUBLICATION_REASON.SNAPSHOT_IN_MEMORY_ONLY)[0];
+    expect(stated).toBeDefined();
+    expect(stated.severity).toBe(PUBLICATION_SEVERITY.INFO);
+    // The message names the seam by both of its function names, and the two
+    // assertions below hold that naming to the repository. A message naming a
+    // seam nobody can find would be the decoration this change exists to avoid.
+    expect(stated.message).toContain('serialisePublicationSnapshot()');
+    expect(stated.message).toContain('readPublicationSnapshot()');
+    expect(stated.message).toContain('nothing in this repository stores through it');
+  });
+
+  /* ---- the message's two halves, enumerated from the repository ---------- */
+
+  const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  /** Production roots only: tests and docs may name the seam freely. */
+  const PRODUCTION_ROOTS = Object.freeze(['packages', 'frontend', 'supabase', 'scripts']);
+  const SOURCE_EXTENSIONS = Object.freeze(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs']);
+  const SKIPPED = Object.freeze(['node_modules', 'dist', 'coverage', '.features-gen']);
+  /**
+   * The floor a healthy scan must clear. A walk that found nothing would make
+   * both assertions below pass by looking at zero files.
+   */
+  const MIN_FILES_SCANNED = 200;
+  /** The package the seam belongs to; every legitimate mention is inside it. */
+  const SEAM_PACKAGE = 'packages/core/src/publication/';
+
+  /** @type {Map<string, string>} */
+  const productionSources = new Map();
+  const collectSources = (absolute) => {
+    for (const entry of readdirSync(absolute).sort()) {
+      if (SKIPPED.includes(entry)) continue;
+      const full = path.join(absolute, entry);
+      if (statSync(full).isDirectory()) collectSources(full);
+      else if (SOURCE_EXTENSIONS.includes(path.extname(entry))) {
+        const relative = path.relative(REPO_ROOT, full).split(path.sep).join('/');
+        productionSources.set(relative, readFileSync(full, 'utf8'));
+      }
+    }
+  };
+  for (const root of PRODUCTION_ROOTS) collectSources(path.join(REPO_ROOT, root));
+
+  it('exports both halves of the seam from the package barrel', () => {
+    const barrel = readFileSync(
+      path.join(REPO_ROOT, 'packages', 'core', 'src', 'publication', 'index.js'),
+      'utf8'
+    );
+    for (const name of ['serialisePublicationSnapshot', 'readPublicationSnapshot']) {
+      expect(barrel, `${name} is not registered in the publication barrel`).toContain(name);
+    }
+    // And the names resolve through it, rather than only appearing in its text.
+    expect(typeof serialisePublicationSnapshot).toBe('function');
+    expect(typeof readPublicationSnapshot).toBe('function');
+  });
+
+  it('has no production caller anywhere, which is the half a store would falsify', () => {
+    expect(productionSources.size).toBeGreaterThan(MIN_FILES_SCANNED);
+
+    const mentions = [...productionSources]
+      .filter(
+        ([, source]) =>
+          source.includes('serialisePublicationSnapshot') ||
+          source.includes('readPublicationSnapshot')
+      )
+      .map(([file]) => file);
+    // Meta-assertion: the pattern matches the seam's own file, so a renamed
+    // function cannot make this check pass by matching nothing.
+    expect(mentions).toContain(`${SEAM_PACKAGE}serialise.js`);
+    for (const file of mentions) {
+      expect(file.startsWith(SEAM_PACKAGE), `${file} names the publication seam`).toBe(true);
+    }
+
+    // The sharper half: only the barrel imports the seam module at all, so no
+    // production path reaches it even under another name.
+    const importers = [...productionSources]
+      .filter(
+        ([file, source]) =>
+          file !== `${SEAM_PACKAGE}serialise.js` && /from\s+'[^']*serialise\.js'/.test(source)
+      )
+      .map(([file]) => file);
+    expect(importers.filter((file) => file.startsWith(SEAM_PACKAGE))).toEqual([
+      `${SEAM_PACKAGE}index.js`,
+    ]);
+    // `fieldAdmin/serialise.js` is a different module of the same name; its own
+    // importers are not this seam's, and listing them here proves the regex is
+    // matching real import lines rather than nothing.
+    expect(importers.some((file) => file.startsWith('packages/core/src/fieldAdmin/'))).toBe(true);
   });
 });
 

@@ -266,6 +266,13 @@ smoke_needs_seed() {
   esac
 }
 
+# **The default arm is `return 1`, not `return 0`.** These three case
+# registries are keyed on the same id and nothing joins them: an id added to
+# `smoke_needs_seed` whose plant arm is forgotten would, with a silent `return
+# 0` default, report a successful plant having planted nothing and run the
+# smoke against an unseeded database -- a plant that cannot fail, guarding a
+# smoke that then fails for the wrong reason. Both halves refuse an id they do
+# not know.
 smoke_plant() { # id -- leaves the estate 20260611000400 reads with SELECT ... LIMIT 1
   case "$1" in
     20260611000400)
@@ -276,7 +283,7 @@ smoke_plant() { # id -- leaves the estate 20260611000400 reads with SELECT ... L
                 INSERT INTO public.divisions (id, organization_id, season_settings_id, name)
                 VALUES ('5e5e5e5e-0000-0000-0000-00000000000c','5e5e5e5e-0000-0000-0000-00000000000a','5e5e5e5e-0000-0000-0000-00000000000b','Smoke Seed Division');"
       ;;
-    *) return 0 ;;
+    *) echo "smoke_plant: no estate is declared for ${1}" >&2; return 1 ;;
   esac
 }
 
@@ -285,7 +292,7 @@ smoke_unplant() { # id
     20260611000400)
       psql_cmd "DELETE FROM public.organizations WHERE id = '5e5e5e5e-0000-0000-0000-00000000000a';"
       ;;
-    *) return 0 ;;
+    *) echo "smoke_unplant: no estate is declared for ${1}" >&2; return 1 ;;
   esac
 }
 
@@ -316,12 +323,17 @@ done
 if [ "$v_era" -lt 30 ]; then
   echo "FAIL: only ${v_era} migration(s) at or after ${SMOKE_ERA_BASELINE}; the baseline or the migration glob is wrong"
   STATUS=1
-elif [ "${#v_missing[@]}" -ne 0 ]; then
+fi
+# A separate `if`, not an `elif`: "the glob is wrong" and "these migrations
+# have no smoke" are two facts, and chaining them suppressed the list exactly
+# when the run most needs it.
+if [ "${#v_missing[@]}" -ne 0 ]; then
   echo "FAIL: ${#v_missing[@]} migration(s) at or after ${SMOKE_ERA_BASELINE} have no docs/sql/<id>_smoke.sql:"
   printf '    %s\n' "${v_missing[@]}"
   echo "    Write one, or add the id to SMOKE_DEBT in this file with the reason."
   STATUS=1
-else
+fi
+if [ "$v_era" -ge 30 ] && [ "${#v_missing[@]}" -eq 0 ]; then
   echo "  | (coverage) all ${v_era} migration(s) at or after ${SMOKE_ERA_BASELINE} carry a smoke, bar ${#SMOKE_DEBT[@]} recorded as debt"
 fi
 
@@ -344,19 +356,27 @@ done
 # and be run by nothing, which is the defect this rewrite exists to remove,
 # one directory along. So the rule is asserted rather than described -- every
 # smoke under `docs/sql/tests/` must be for a pre-baseline migration.
-v_hidden=()
+v_hidden=() v_tests=0
 for smoke in "$SMOKE_DIR"/tests/*_smoke.sql; do
   [ -e "$smoke" ] || continue
+  v_tests=$((v_tests + 1))
   b="$(basename "$smoke")"; id="${b%%_*}"
   [ "$id" \< "$SMOKE_ERA_BASELINE" ] || v_hidden+=("$b")
 done
+# Its siblings' meta-assertion: renaming the directory, or the files, leaves
+# `v_hidden` empty for the wrong reason and this prints health having examined
+# nothing -- while an in-era smoke dropped in there is run by nothing.
+if [ "$v_tests" -lt 15 ]; then
+  echo "FAIL: found only ${v_tests} smoke(s) under docs/sql/tests/; the directory or its naming has moved"
+  STATUS=1
+fi
 if [ "${#v_hidden[@]}" -ne 0 ]; then
   echo "FAIL: ${#v_hidden[@]} smoke(s) in docs/sql/tests/ are for migrations at or after ${SMOKE_ERA_BASELINE}, where nothing runs them:"
   printf '    %s\n' "${v_hidden[@]}"
   echo "    Move them to docs/sql/ so the loop below picks them up."
   STATUS=1
-else
-  echo "  | (coverage) every smoke in docs/sql/tests/ is for a migration before ${SMOKE_ERA_BASELINE}"
+elif [ "$v_tests" -ge 15 ]; then
+  echo "  | (coverage) all ${v_tests} smoke(s) in docs/sql/tests/ are for migrations before ${SMOKE_ERA_BASELINE}"
 fi
 
 # --- execution: every smoke under docs/sql/ runs ----------------------------
@@ -376,8 +396,13 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
   needle="$(smoke_refusal_needle "$id")"
   ctx="$(smoke_refusal_context "$id")"
   if [ -n "$needle" ] && [ -z "$ctx" ]; then
+    # `continue`, not a bare STATUS=1: `grep -qF ""` matches any non-empty
+    # output, so falling through with an empty context needle would score the
+    # smoke PASS -- and print a claim that a guard fired -- for a failure that
+    # might have come from anywhere in the file.
     echo "FAIL smoke ${id}: it is recorded as ending in a refusal but no CONTEXT needle pins it to a function"
     STATUS=1
+    continue
   fi
   seeded=0
   if smoke_needs_seed "$id"; then
@@ -455,11 +480,12 @@ fi
 if [ "$v_smokes" -lt 30 ]; then
   echo "FAIL: only ${v_smokes} smoke(s) found under docs/sql/ -- the glob is wrong"
   STATUS=1
-elif [ "$v_ran" -ne "$v_smokes" ]; then
-  # Unconditional, and NOT suppressed when something above already failed: a
-  # per-smoke FAIL and a shortfall in the total are different facts, and the
-  # reassuring "32 of 33" the else branch would otherwise print over
-  # a red run is the shape this whole rewrite is about.
+fi
+# Its own `if`, and NOT suppressed when something above already failed: a
+# per-smoke FAIL and a shortfall in the total are different facts, and the
+# reassuring "32 of 33" the else branch would otherwise print over a red run
+# is the shape this whole rewrite is about.
+if [ "$v_ran" -ne "$v_smokes" ]; then
   echo "FAIL: ${v_smokes} smoke(s) found under docs/sql/ and only ${v_ran} executed cleanly"
   STATUS=1
 else

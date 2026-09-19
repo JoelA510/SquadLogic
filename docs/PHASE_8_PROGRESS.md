@@ -3639,3 +3639,153 @@ time.
 And the one the supervisor named: **read the file past the defect it was opened
 for.** Three reviews found nothing here because each was looking for the
 timezone defect it had been told about.
+
+---
+
+## GAP-29 stage 0 — the registry was wrong about its own blocker — **docs only**
+
+Documentation only. No production code, no migration, no test changed. Recorded
+here as a dated entry beside the others rather than folded into them: the
+entries above are records of what was known when they were written, and several
+of them are the reason this correction was needed at all.
+
+### What was false
+
+**Every document that scoped GAP-29 said persistence was blocked on GAP-30.**
+Seven statements across four documents, all tracing back to one sentence written
+at Prompt 6.2 and copied forward:
+
+| where                           | the claim                                                                                   |
+| ------------------------------- | ------------------------------------------------------------------------------------------- |
+| `MODEL_GAPS.md` GAP-30 `Today`  | `SlotSchema`/`AssignmentSchema` use `z.coerce.date()`                                       |
+| `MODEL_GAPS.md` GAP-30 `Status` | "still use `z.coerce.date()`"; "nothing on the persistence or `calendar-feed` path changed" |
+| `MODEL_GAPS.md` GAP-29 `Status` | "Persistence work must close GAP-30 first"                                                  |
+| `MODEL_GAPS.md` index row       | GAP-30 "Partial · new modules only"                                                         |
+| `PUBLICATION_PARITY.md` §2, §7  | "the reason is GAP-30 … **still** normalise through `z.coerce.date()`"                      |
+| `BUILD_PLAN_STATUS.md` §3       | "must be closed before publication snapshots can be persisted safely"                       |
+| `PHASE_8_PLAN.md` §gate         | "must close before any snapshot persists"                                                   |
+
+**GAP-30 had already closed**, across #396, #398 and #400 — recorded in this
+file at "GAP-30 — the season clock" (#396), "GAP-30 follow-ups" (#398) and the
+two #400 entries, LIVE-5/LIVE-7 and LIVE-11.
+
+### Verified by execution, not by reading
+
+The whole correction rests on one claim, so that claim was executed rather than
+reviewed. Both schemas, four inputs, two host zones:
+
+```
+TZ=UTC  /  TZ=America/Los_Angeles      (identical output under both)
+  REFUSED  SlotSchema        '2026-11-07T16:44:00'
+  REFUSED  AssignmentSchema  '2026-11-07T16:44:00'
+  REFUSED  SlotSchema        '2026-11-07'
+  REFUSED  AssignmentSchema  '2026-11-07'
+    -> timestamp must carry a timezone; compose a wall time with
+       timing/seasonClock.js first
+  ACCEPTED SlotSchema        '2026-11-07T16:44:00-08:00'
+             -> 2026-11-08T00:44:00.000Z  epoch=1794098640000
+  ACCEPTED AssignmentSchema  '2026-11-07T16:44:00-08:00'
+             -> 2026-11-08T00:44:00.000Z  epoch=1794098640000
+```
+
+The bare-date case matters on its own: `new Date('2026-11-07')` reads as UTC
+midnight, so a schema that only refused naive date-**times** would have let the
+worse form through. `isZonelessTimestamp` refuses both.
+
+The other two legs were checked against the repository: `season_settings.timezone`
+with `admin_set_season_timezone()` (`20260913000000`, actor context in
+`20260917000000`), and `calendar-feed` reading the zone via `readSeasonTimezone()`
+and composing through `_shared/timing/seasonClock.ts`, refusing rather than
+defaulting when a season has none.
+
+### Live claims corrected in place; dated records corrected beside
+
+Applied deliberately, because the two are not the same thing.
+
+- **Corrected in place** — `MODEL_GAPS.md` GAP-29 and GAP-30 `Status` bullets and
+  index rows, `PUBLICATION_PARITY.md` §2 and §7, `BUILD_PLAN_STATUS.md` §3,
+  `PHASE_8_PLAN.md`'s gate paragraph. Each asserts current state, and each was
+  false.
+- **Corrected beside** — `BUILD_PLAN_STATUS.md` §5 is a gate record of _"what was
+  verified at the time of asking"_, 2026-09-16, and its GAP-30 premise was true
+  on its own date. A new §7 is appended following §6's pattern; §5 is not
+  rewritten. This entry is the same treatment for this file.
+- **Also corrected beside, found by `/code-review` on this PR rather than by the
+  original sweep** — `ARCHITECTURE.md` §1.1 quotes both schema bodies verbatim
+  with `z.coerce.date()` under now-wrong line citations, and
+  `DURATION_MIGRATION.md`'s "What it holds today" table records the same. Both
+  get a dated correction note; the excerpts and rows stay, because in each case
+  the surrounding point (four divergent schema copies; an interval that cannot be
+  open-ended) is unaffected and still true. That the first sweep missed two live
+  assertions of the very claim it was auditing is the entry's own point, made
+  again.
+- **Split propagated** — `FREEZE_SCOPES.md`, `MINIMAL_DIFF.md` and
+  `SCENARIOS.md` each routed freeze-plan, resolve-run or scenario persistence to
+  GAP-29 and now name GAP-35. Without this a later task closing GAP-29 as now
+  scoped would read `FREEZE_SCOPES.md` and conclude freeze-plan persistence was
+  covered.
+- **Not touched** — `MODEL_GAPS.md`'s `Today` bullets, on that file's own
+  standing rule that `Today` is history and the `Status` bullet is the current
+  answer. Two clauses of GAP-30's `Today` also survive on the merits:
+  `Organization.settings` still has no timezone field and there is no per-venue
+  timezone, both deliberate, since the zone belongs to the season and
+  `seasonClock.js` takes it as a parameter for exactly that reason.
+
+### Two corrections of substance, not just staleness
+
+**1. GAP-29 meant six things and is now narrowed.** Its entry named six
+unpersisted artifacts: no `frozen` flag, and no SQL home for a freeze plan, a
+resolve run, a publication snapshot, a durable published-baseline version, or a
+scenario/promotion. A gap that means six things cannot be closed or sequenced.
+Per the operator's ruling: **GAP-29 keeps the published baseline** — snapshot
+plus durable version, which is what incidents 1 and 2 are about — and freeze
+plan, resolve run, scenario/promotion and the `frozen` flag split out as
+**GAP-35**, since those are about storing _how_ a schedule was reached rather
+than _what_ was published. Separately, `externalImport/mapping.js:346` cites
+GAP-29 for the mapping registry, which was never among the six; its home is
+GAP-34, which already lists GAP-29 as a dependency. The mapping registry is cited as GAP-29 in four places in
+that package — `mapping.js:38`, `:46` and `:346` and `externalImport/index.js:47`
+— of which `:346` is the user-visible finding message; and two more citations in
+`gameScheduling.js` (`:123`, and the `scheduleGames()` freeze-refusal message at
+`:127`) are about a persisted freeze scope and so belong to GAP-35. All six are
+**left as follow-ups**, not made in a docs-only PR.
+
+**2. A third in-memory seam nobody had catalogued.**
+`packages/core/src/fieldAdmin/serialise.js:428` emits `REGISTRY_NOT_PERSISTED`,
+and `serialiseFieldRegistry()` / `readFieldRegistry()` have no caller outside
+their own module, the `fieldAdmin/index.js` barrel, `tests/fieldAdminRoundTrip.test.js`
+and documentation. One other declared seam was known —
+`externalImport/mapping.js`'s `serialiseExternalMappingRegistry()` /
+`readExternalMappingRegistry()`, reported as `EXTERNAL_MAPPING_NOT_PERSISTED`.
+This is the second. (`publication/snapshot.js`'s `SNAPSHOT_IN_MEMORY_ONLY` is
+often counted alongside them and should not be: that module declares no seam at
+all, which is a stronger statement, not a weaker one.)
+
+**What makes it worth recording is what happened next to it.** `fieldAdmin` is
+the one package here where real persistence was actually built, and **it
+bypassed its own seam entirely**: `field_blackouts` (`20260906000100`) with RLS
+enabled, `admin_create_field_blackout()` and `admin_delete_field_blackout()`
+there plus `admin_update_field_blackout()` (`20260910000000`), each writing
+`record_audit_event()`, all three called from
+`frontend/src/hooks/useFieldClosures.js`. `serialiseFieldRegistry()` plays no
+part in any of it.
+
+### The rule this earns
+
+**A `serialise`/`read` document pair in this repository has a perfect record of
+_not_ being the route to a store.** Two have been declared — `fieldAdmin`'s and
+`externalImport`'s; `publication/` has none at all and says so in
+`snapshot.js`, which is a third position rather than a third seam. One of the two
+packages went on to get persistence, and it went table + RPC + RLS + audit, as
+CLAUDE.md's RPC-enforcement and audit-immutability rules require — a CSV-shaped document
+round trip cannot carry an RLS policy or an audit row. Treat a `serialise*()` /
+`read*()` pair as a declaration that a store is **missing**, not as a design for
+the one that will exist. `BUILD_PLAN_STATUS.md` §3 previously read as though
+closing GAP-30 and "wiring one store" through that seam were the remaining work;
+the seam is not the hard part and is probably not the shape.
+
+And the one this pass cost: **a blocker outlives the thing that blocked it.**
+Seven statements repeated one sentence for three days after it stopped being
+true, in the registry that is supposed to be the answer to "what is still open".
+A cited blocker is worth re-executing before it is quoted, exactly as §6 of
+`BUILD_PLAN_STATUS.md` says of a grep that returns zero.

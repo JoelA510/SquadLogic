@@ -76,6 +76,15 @@ plan; the equivalent concept is `PracticeSlot.durationMinutes` plus the implicit
 
 ### 2.1 Domain types and schemas (in-memory)
 
+> **Dated correction, 2026-09-19.** The two `schemas/index.js` rows below are
+> stale: `z.coerce.date()` was replaced by `InstantSchema` when GAP-30 closed
+> (#396, #398, #400), and it now **refuses** a zoneless timestamp instead of
+> coercing one in the host zone. What the rows say about the _interval_ — that it
+> cannot be open-ended, so a format with unknown timing still cannot validate —
+> is unaffected, which is why they are corrected here rather than rewritten. §5.3
+> below is likewise half-closed: the schema route is shut, and its warning to a
+> backfill script that does not go through these schemas still stands.
+
 | Site | What it holds today | What it silently means |
 | --- | --- | --- |
 | `packages/core/src/types.js` — `GameSlot {start, end, capacity, fieldId, priority}` | two ISO strings | `end` is "the field is free again", with no statement about whistles, halftime or turnover |

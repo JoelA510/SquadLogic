@@ -30,7 +30,10 @@ Code: `packages/core/src/freeze/` (the scope model) and
 `packages/core/src/resolve/` (the re-solver), barrels at `index.js`. Tests:
 `tests/freezeScopes.test.js`. In-memory only — there is no SQL home for a freeze
 plan or a resolve run and this phase deliberately does not create one, exactly
-as Phases 1-3 did not. GAP-29 therefore stays partly open.
+as Phases 1-3 did not. This was GAP-29's stored half; **as of 2026-09-19 it is
+[GAP-35](MODEL_GAPS.md#gap-35)**, which took the freeze plan, the resolve run,
+the `frozen` flag and scenario/promotion persistence when GAP-29 was narrowed to
+the published baseline. GAP-35 is open.
 
 ---
 

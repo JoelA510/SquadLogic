@@ -221,15 +221,25 @@ From the whole-build review (#356), stated rather than left to be rediscovered:
 - **Promote two widened publication codes to first-class** —
   `NOTICE_PARITY_VACUOUS` / `NOTICE_LABEL_AMBIGUOUS`, currently distinguished only
   by `details.reason`.
-- **Nothing is persisted.** Every module built here is in-memory. GAP-29's stored
-  half stays open, and `z.coerce.date()` in `SlotSchema`/`AssignmentSchema`
-  (GAP-30) must be closed before publication snapshots can be persisted safely —
-  otherwise the parity checker would cause the divergence it detects. 7.3's
+- **Nothing is persisted.** Every module built here is in-memory, and GAP-29's
+  stored half stays open. **The GAP-30 precondition is gone as of 2026-09-19**:
+  `z.coerce.date()` is no longer in `SlotSchema`/`AssignmentSchema` — it was
+  replaced across #396, #398 and #400 by `InstantSchema`, which refuses a
+  zoneless timestamp outright, and the refusal plus the zone-independence of the
+  parsed instant were verified by execution rather than by reading. So
+  publication snapshots can now be persisted safely; nothing has been. 7.3's
   `externalImport/mapping.js` is the first module to build the **seam** a store
   would use — `serialiseExternalMappingRegistry()` /
   `readExternalMappingRegistry()`, byte-identical round trip asserted — so
-  closing GAP-30 and wiring one store is now a bounded piece of work rather than
-  a design question. Nothing wires it, and every registry says so.
+  wiring one store is now a bounded piece of work rather than a design question.
+  Nothing wires it, and every registry says so. **Read `fieldAdmin` before
+  assuming that seam is the design**: it is the one package here that actually
+  got persistence, and it bypassed its own `serialiseFieldRegistry()` /
+  `readFieldRegistry()` pair entirely in favour of a table plus three admin RPCs
+  with RLS and audit rows ([`MODEL_GAPS.md`](MODEL_GAPS.md#gap-29)). The same
+  document splits GAP-29's six unpersisted artifacts, so this bullet's "GAP-29's
+  stored half" now means the published baseline; freeze plans, resolve runs and
+  scenarios are [GAP-35](MODEL_GAPS.md#gap-35).
 - **The impact analysis consults two layers, and names the five it does not.**
   `EXTERNAL_IMPACT_LAYERS_NOT_CONSULTED` — permits and blackouts, sunset and
   lighting, coach travel and personal timelines, the constraint registry and rule
@@ -271,6 +281,11 @@ Recorded because they were learned the hard way and are cheap to keep.
 schedulers that do not meet. It was put to the operator at that gate, with the
 plan's figures re-verified against the repository rather than quoted from the
 plan, because the plan predates 8.0-8.4.
+
+> **Two later corrections apply to this section and it is not rewritten to
+> absorb them**: §6 (2026-09-17) on the "zero frontend imports" figure, and §7
+> (2026-09-19) on the GAP-30 premise and the `snapshot.js` bullet. Read all three
+> before quoting any figure here.
 
 **What was verified at the time of asking:**
 
@@ -365,3 +380,82 @@ the 0.1-7.3 engine's own count at `06a1b97`), and the engine measures **172 file
 the same phase that collected it four times from agents:** a grep that returns
 zero proves nothing until the pattern is shown to match something. Before
 reporting a zero as evidence, run the pattern against a case it *must* hit.
+
+---
+
+## 7. CORRECTION to §5 — "GAP-30 is open" was true when written and is now false
+
+**Recorded 2026-09-19, against §5's gate record, by the GAP-29 stage-0 scoping
+pass.**
+
+§5 is a dated record of _what was verified at the time of asking_, 2026-09-16.
+It is not rewritten here, because it was accurate on its own date and the
+operator's decision rests on what was in front of them. This section is appended
+beside it, following the pattern §6 established for exactly this situation.
+
+§5 states, as a premise of the gate: _"**GAP-30 is open.** `SlotSchema` and
+`AssignmentSchema` in `packages/core/src/schemas/index.js` still normalise
+through `z.coerce.date()` — lines 33-34 and 52-53."_ **True on 2026-09-16.
+False from 2026-09-19.**
+
+**§5's second bullet is stale in the same way, and by the same event.** It
+records that `publication/snapshot.js:181` _"continues to emit
+`SNAPSHOT_IN_MEMORY_ONLY`, naming both GAP-29 (persistence) and GAP-30
+(timezone-lossy schemas) in its own message."_ The finding is still emitted, but
+it is now at `:184`, and its message names **GAP-29 only** — the module's own
+header says in as many words that GAP-30 is no longer one of the reasons. The
+substance of the bullet survives: the engine still persists nothing.
+
+**GAP-30 closed across #396, #398 and #400.** Three legs, each verified against
+the repository rather than quoted from a PR description:
+
+1. **The schemas.** `z.coerce.date()` appears nowhere in
+   `packages/core/src/schemas/index.js`. `SlotSchema.start/end` and
+   `AssignmentSchema.start/end` are `InstantSchema`, a union of `Date`, epoch
+   number and string, refined by `isZonelessTimestamp` so that a timestamp
+   carrying no zone is **refused** rather than given the host's offset.
+2. **The zone has a home and a writer.** `season_settings.timezone`, with
+   `admin_set_season_timezone()` added by
+   `20260913000000_season_timezone_writer.sql` (validated against
+   `pg_timezone_names`; a fourth `p_actor_context` argument added by
+   `20260917000000`), plus the onboarding RPC writing the zone it already
+   receives.
+3. **`calendar-feed` composes through the season clock.** It reads the zone with
+   `readSeasonTimezone()` (`_shared/timing/seasonSettings.ts`) and builds
+   instants through `_shared/timing/seasonClock.ts` by way of
+   `_shared/calendar/icsFeed.ts`. It **refuses rather than defaulting** when a
+   season has no zone; the hardcoded `'America/New_York'` fallback is gone.
+
+**Executed, not statically reviewed.** Both schemas were driven with four inputs
+under two host zones. Refused in both zones: the naive
+`'2026-11-07T16:44:00'` and the bare `'2026-11-07'`, each with _"timestamp must
+carry a timezone; compose a wall time with timing/seasonClock.js first"_.
+Accepted in both zones, to the identical instant `2026-11-08T00:44:00.000Z`
+(epoch `1794098640000`): `'2026-11-07T16:44:00-08:00'` and
+`'2026-11-08T00:44:00Z'`. The host-zone dependence the gate premise names is
+therefore removed rather than relocated. The full output is in the pull request
+that recorded this correction.
+
+**What this does and does not do to the gate.** §5's decision was _"neither
+branch yet — close GAP-29 and GAP-30 first, then decide"_. **One of the two
+conditions is now met.** The gate is **not** reopened by this correction and no
+later task may treat it as settled: GAP-29 is still open, the solver core still
+persists nothing, and `publication/snapshot.js` still emits
+`SNAPSHOT_IN_MEMORY_ONLY`. What changes is the reason: that snapshot is now
+unpersisted because nobody has built the store, **not** because a
+timezone-lossy schema made persisting it unsafe. The wiring question is still to
+be re-put to the operator once GAP-29 closes.
+
+**GAP-29 has also been narrowed, which changes what "close GAP-29" means.** Six
+unpersisted artifacts had accumulated behind one id. Per the operator's ruling of
+2026-09-19, GAP-29 keeps the published baseline — the publication snapshot and a
+durable version for it — and freeze-plan, resolve-run and scenario/promotion
+persistence, with the `frozen` flag, split out as
+[GAP-35](MODEL_GAPS.md#gap-35). The gate condition is GAP-29 as now scoped.
+
+**The rule this earns**, alongside §6's: **a dated verification decays, and the
+document should say when.** §5's GAP-30 premise was correct, carefully executed,
+and wrong three days later; nothing in the document would have told a reader
+that. A verification recorded as a premise for a decision is worth a re-check
+before it is quoted, and quoting §5's figures after this date without re-running
+them is the same error §6 names in a different disguise.

@@ -58,14 +58,28 @@ catches the accident, which is the failure that actually happens.
 can hand it a tampered one and watch `SNAPSHOT_DIGEST_MISMATCH` fire.
 
 **`durability: 'in-memory'` is on the record, not only in the docs.** Phase 6
-persists nothing, and the reason is GAP-30 rather than consistency with earlier
-phases: `SlotSchema` and `AssignmentSchema` still normalise through
-`z.coerce.date()`, which turns a published wall-clock `8:30 AM` into an absolute
-instant using the host timezone, and two corpus dates fall after DST ends.
-Persisting a snapshot through a timezone-lossy schema would make **the parity
-checker cause the divergence it exists to detect**. So there is no SQL
-migration here, and a consumer holding the object learns the limitation from the
-object.
+persists nothing. The reason it gave at the time was GAP-30 rather than
+consistency with earlier phases: `SlotSchema` and `AssignmentSchema` then
+normalised through `z.coerce.date()`, which turned a published wall-clock
+`8:30 AM` into an absolute instant using the host timezone, and two corpus dates
+fall after DST ends. Persisting a snapshot through a timezone-lossy schema would
+have made **the parity checker cause the divergence it exists to detect**.
+
+**That reason expired on 2026-09-19. GAP-30 is closed** (#396, #398, #400).
+`z.coerce.date()` is gone: `SlotSchema.start/end` and
+`AssignmentSchema.start/end` are `InstantSchema`, which **refuses** a zoneless
+timestamp — both a naive `'2026-11-07T16:44:00'` and a bare `'2026-11-07'` —
+rather than silently giving it the host's offset, and a wall time must be
+composed on the season clock (`timing/seasonClock.js`,
+`season_settings.timezone`) before it can reach a domain schema. Verified by
+execution rather than by reading: an offset-carrying string parses to the
+identical instant under `TZ=UTC` and `TZ=America/Los_Angeles`, and both zoneless
+forms are refused in both zones. **So the timezone objection to persisting a
+snapshot no longer holds.** What still holds is everything else: there is still
+no SQL migration here, `durability: 'in-memory'` is still on every record, and a
+consumer holding the object still learns the limitation from the object. The
+remaining work is GAP-29's own — a durable published-baseline version — and it
+is no longer waiting on anything.
 
 ---
 
@@ -264,7 +278,9 @@ registry can never read as monitoring. It is a notebook that does arithmetic.
 
 ## 7. What this deliberately is not
 
-- **Not persisted.** No SQL migration, for the GAP-30 reason in §2.
+- **Not persisted.** No SQL migration. The GAP-30 reason §2 originally gave for
+  that has expired — GAP-30 closed on 2026-09-19 — so this is now simply unbuilt
+  rather than blocked; see §2 and [GAP-29](MODEL_GAPS.md#gap-29).
 - **Not a second diff.** `compareParityRows()` is the only row comparator;
   `resolve/state.js` `diffAgainstBaseline()` remains the only game-by-game
   baseline diff, over a resolve run rather than over two artifacts. The scenario

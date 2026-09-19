@@ -368,8 +368,9 @@ two-game change, and now reads as its true change cost).
 ## 6. What this phase still does not do
 
 - **Persist anything.** No SQL home for a resolve run, a report or a committed
-  schedule; GAP-29's stored half stays open, along with published-baseline
-  versioning.
+  schedule. Since 2026-09-19 that is **[GAP-35](MODEL_GAPS.md#gap-35)** rather
+  than GAP-29: the resolve run and the freeze plan split out when GAP-29 was
+  narrowed. Published-baseline versioning is still GAP-29, and both are open.
 - **Backtrack.** The placer is greedy and one-pass. When a game's own slot is
   gone it takes the best remaining one, and if none is legal it becomes TIME
   TBD. The objective scores that honestly rather than hiding it.

@@ -35,10 +35,13 @@ KpiCard.propTypes = {
  * `generatedAt`, and `GameReadinessPanel` already takes it as a prop of that
  * name. That contract is adopted here rather than a third one invented.
  *
- * `timezone` is accepted and deliberately unused: `generatedAt` is
- * `scheduler_runs.completed_at`/`created_at`, a real instant carrying a zone,
- * and the viewer's own clock is the right one to read it on. See the
- * `toSeasonInstant` docblock in `utils/formatters.js`, which names this panel.
+ * **There is no `timezone` prop, and its absence is the contract.**
+ * `generatedAt` is `scheduler_runs.completed_at`/`created_at`, a real instant
+ * carrying a zone, and the viewer's own clock is the right one to read it on
+ * -- the `toSeasonInstant` docblock in `utils/formatters.js` names this panel
+ * as one of the callers that deliberately passes none. The prop used to be
+ * declared, typed and destructured as `_timezone`, which is the same
+ * reads-as-load-bearing-and-is-not shape as the `lastCalculated` above it.
  *
  * @param {{
  *   practiceReadinessSnapshot?: {
@@ -50,14 +53,12 @@ KpiCard.propTypes = {
  *   },
  *   dashboardLoading?: { practice?: boolean },
  *   generatedAt?: string|null,
- *   timezone?: string,
  * }} props
  */
 export default function PracticeReadinessPanel({
   practiceReadinessSnapshot = {},
   dashboardLoading = {},
   generatedAt = undefined,
-  timezone: _timezone = undefined,
 }) {
   if (dashboardLoading.practice) {
     return (
@@ -138,5 +139,4 @@ PracticeReadinessPanel.propTypes = {
   practiceReadinessSnapshot: PropTypes.object,
   dashboardLoading: PropTypes.object,
   generatedAt: PropTypes.string,
-  timezone: PropTypes.string,
 };

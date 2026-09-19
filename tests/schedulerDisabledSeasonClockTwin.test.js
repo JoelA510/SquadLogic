@@ -156,16 +156,33 @@ describe('both schedulerDisabled arms carry the clause', () => {
    * Read from the source because the expression is inline in a component and
    * there is no seam to call. The slice is the `schedulerDisabled` declaration
    * itself, not the file: `seasonClockLoading` appears elsewhere in both pages
-   * (the readiness sentence, the unplaceable summary), so a file-wide `toContain`
-   * would have passed on the divergence this test exists to catch.
+   * (the readiness sentence, the unplaceable summary), so a file-wide
+   * `toContain` would have passed on the divergence this test exists to catch.
    */
-  function schedulerDisabledExpression(relativePath) {
-    const source = readFileSync(path.join(process.cwd(), relativePath), 'utf8');
+  function schedulerDisabledExpression(source) {
     const start = source.indexOf('const schedulerDisabled =');
-    expect(start).toBeGreaterThan(-1);
+    if (start < 0) return null;
     const end = source.indexOf(';', start);
-    expect(end).toBeGreaterThan(start);
-    return source.slice(start, end);
+    if (end < 0) return null;
+    return source.slice(start + 'const schedulerDisabled ='.length, end);
+  }
+
+  /**
+   * The arms as a SET, so the assertion is about which clauses are there and
+   * not about the order they are written in. A reader that required
+   * `seasonClockLoading ||` would go red on a behaviour-preserving move of the
+   * clause to the end of the chain -- a test that fails on a reformat is a
+   * test whose next failure gets ignored.
+   */
+  function armsOf(source) {
+    const expression = schedulerDisabledExpression(source);
+    if (expression === null) return null;
+    return new Set(
+      expression
+        .split('||')
+        .map((arm) => arm.replace(/\/\/[^\n]*/g, '').trim())
+        .filter(Boolean)
+    );
   }
 
   const PAGES = [
@@ -173,21 +190,42 @@ describe('both schedulerDisabled arms carry the clause', () => {
     'frontend/src/pages/GameSchedulingPage.jsx',
   ];
 
+  /** @type {Record<string, string>} */
+  const SOURCES = {};
+  for (const page of PAGES) {
+    SOURCES[page] = readFileSync(path.join(process.cwd(), page), 'utf8');
+  }
+
   it.each(PAGES)('%s disables the scheduler while the season clock is loading', (page) => {
-    const expression = schedulerDisabledExpression(page);
-    expect(expression).toMatch(/^\s*seasonClockLoading \|\|$/m);
+    const arms = armsOf(SOURCES[page]);
+    expect(arms).not.toBeNull();
+    expect([...(arms ?? [])]).toContain('seasonClockLoading');
   });
 
-  it('meta-assertion: the slice is the expression and not the whole file', () => {
+  it('meta-assertion: the reader sees the declaration, and goes red when the clause goes', () => {
     for (const page of PAGES) {
-      const expression = schedulerDisabledExpression(page);
-      // Short enough to be one declaration...
-      expect(expression.length).toBeLessThan(400);
-      // ...and it really is the one, carrying the arm both pages already had.
-      expect(expression).toMatch(/canManageSchedule/);
-      // The control that makes the `toMatch` above meaningful: a clause the
-      // expression does NOT contain is not found by the same reader.
-      expect(expression).not.toMatch(/^\s*seasonClockMissing \|\|$/m);
+      const arms = /** @type {Set<string>} */ (armsOf(SOURCES[page]));
+      // It really parsed a boolean chain, and one both pages already had.
+      expect(arms.size).toBeGreaterThanOrEqual(5);
+      expect([...arms]).toContain('!canManageSchedule');
+
+      // **The control is built from the real source, not from an identifier
+      // that never existed.** The clause is stripped exactly as a future
+      // "simplification" would strip it, and the same reader is run again:
+      // this is the failure the test above is claiming to catch, made to
+      // happen rather than assumed.
+      const stripped = SOURCES[page].replace(/\n\s*seasonClockLoading \|\|/, '');
+      expect(stripped).not.toBe(SOURCES[page]);
+      const strippedArms = /** @type {Set<string>} */ (armsOf(stripped));
+      expect([...strippedArms]).not.toContain('seasonClockLoading');
+      // ...and it is still a parseable chain, so the control failed for the
+      // reason it names rather than by breaking the reader.
+      expect(strippedArms.size).toBe(arms.size - 1);
+      expect([...strippedArms]).toContain('!canManageSchedule');
     }
+  });
+
+  it('meta-assertion: the reader returns null rather than passing on a file it cannot parse', () => {
+    expect(armsOf('const somethingElse = true;')).toBeNull();
   });
 });

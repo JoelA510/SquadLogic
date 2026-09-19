@@ -468,13 +468,12 @@ export function serialiseFieldRegistry(registry) {
     // `../documentOrder.js` holds the one comparator every persistence seam in
     // this repository sorts by, so two seams cannot drift into two orders.
     // This file's rule is unchanged - it is where the rule came from.
-    records: sortRecordsById(registry.records)
-      .map((record) => {
-        /** @type {Record<string, unknown>} */
-        const row = {};
-        for (const column of columns) row[column] = record[column] ?? null;
-        return row;
-      }),
+    records: sortRecordsById(registry.records).map((record) => {
+      /** @type {Record<string, unknown>} */
+      const row = {};
+      for (const column of columns) row[column] = record[column] ?? null;
+      return row;
+    }),
   };
   return /** @type {Object} */ (FieldRegistryDocumentSchema.parse(document));
 }

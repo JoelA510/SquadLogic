@@ -1528,6 +1528,186 @@ describe('acceptance 10 — persistence is a seam, and it says so', () => {
   });
 });
 
+describe('acceptance 10b — the seam is order-canonical, and the corpus is not the whole of it', () => {
+  /**
+   * A participant record, the branch the corpus has none of.
+   *
+   * `SEASON_2026_EXTERNAL_MAPPING_RECORDS` is two records, both `kind: 'venue'`,
+   * both `subjectId: null`, both carrying a `statedOn`. So the `participant`
+   * arm, the null-`statedOn` arm and any non-ASCII content were exercised by
+   * nothing: they work, and nothing would have noticed if they stopped.
+   *
+   * @param {Record<string, unknown>} over
+   * @returns {Record<string, unknown>}
+   */
+  const participant = (over = {}) => ({
+    id: 'p-1',
+    kind: EXTERNAL_MAPPING_KIND.PARTICIPANT,
+    externalLabel: 'Seeding League U12 Reds',
+    venueId: null,
+    surfaceId: null,
+    subjectId: 'team:u12-reds',
+    provenance: 'the league entry form, countersigned',
+    statedBy: 'club operations',
+    statedOn: '2026-08-15',
+    note: null,
+    ...over,
+  });
+
+  const registryOf = (records, registryId = 'order-test') =>
+    buildExternalMappingRegistry({
+      registryId,
+      label: 'ordering subject',
+      party: 'test league',
+      records,
+    });
+
+  it('serialises two orderings of one registry to one document', () => {
+    // The behavioural consequence of adopting `fieldAdmin`'s contract, stated
+    // as the assertion that used to fail. Before this change the two documents
+    // differed, and a store comparing them would have reported a re-ordered
+    // read as an edit.
+    const records = [
+      participant({ id: 'p-a', externalLabel: 'Alpha', subjectId: 'team:a' }),
+      participant({ id: 'p-b', externalLabel: 'Bravo', subjectId: 'team:b' }),
+      participant({ id: 'p-c', externalLabel: 'Charlie', subjectId: 'team:c' }),
+    ];
+    const forward = registryOf(records);
+    const backward = registryOf([...records].reverse());
+
+    // The positive control for the test itself: the two registries really are
+    // in different orders, so this is not comparing a thing with itself.
+    expect(forward.records.map((record) => record.id)).not.toEqual(
+      backward.records.map((record) => record.id)
+    );
+    expect(JSON.stringify(serialiseExternalMappingRegistry(backward))).toBe(
+      JSON.stringify(serialiseExternalMappingRegistry(forward))
+    );
+  });
+
+  it('orders by code unit, where localeCompare would order differently', () => {
+    // `#`, `-`, `.` and `_` are exactly the characters a locale collation has
+    // an opinion about, and every id in this repository is full of them.
+    const ids = ['r_a', 'r-a', 'r#2', 'rZ', 'ra'];
+    const codeUnitOrder = [...ids].sort();
+    const localeOrder = [...ids].sort((a, b) => a.localeCompare(b));
+    // The control that keeps this test honest: on a runtime where the two
+    // agreed, it would be asserting nothing.
+    expect(localeOrder, 'localeCompare agrees here; pick sharper ids').not.toEqual(codeUnitOrder);
+
+    const document = serialiseExternalMappingRegistry(
+      registryOf(ids.map((id, index) => participant({ id, subjectId: `team:${index}` })))
+    );
+    expect(document.records.map((record) => record.id)).toEqual(codeUnitOrder);
+  });
+
+  it('nothing depended on the old ordering: both registries answer identically', () => {
+    const records = [
+      participant({ id: 'p-a', externalLabel: 'Alpha', subjectId: 'team:a' }),
+      participant({ id: 'p-b', externalLabel: 'Bravo', subjectId: 'team:b' }),
+    ];
+    const forward = registryOf(records);
+    const backward = registryOf([...records].reverse());
+    for (const label of ['Alpha', 'Bravo', 'Delta']) {
+      expect(resolveExternalName(backward, EXTERNAL_MAPPING_KIND.PARTICIPANT, label)).toEqual(
+        resolveExternalName(forward, EXTERNAL_MAPPING_KIND.PARTICIPANT, label)
+      );
+    }
+    // And the corpus's own reverse lookups, over the registry that now comes
+    // back from a document in id order rather than in adapter order.
+    const readBack = readExternalMappingRegistry(
+      serialiseExternalMappingRegistry(corpusRegistry()),
+      { graph: corpusGraph() }
+    );
+    for (const surfaceId of [
+      season2026SurfaceId('Alder Park', 'Pitch 2'),
+      season2026SurfaceId('Alder Park', 'Pitch 3'),
+    ]) {
+      expect(reverseResolveSurface(readBack, surfaceId)).toEqual(
+        reverseResolveSurface(corpusRegistry(), surfaceId)
+      );
+    }
+  });
+
+  it('round-trips a participant record, which the corpus has none of', () => {
+    const registry = registryOf([participant()], 'participant-registry');
+    // The branch is genuinely taken: the corpus registry has no such record.
+    expect(
+      corpusRegistry().records.some((record) => record.kind === EXTERNAL_MAPPING_KIND.PARTICIPANT),
+      'the corpus grew a participant record; this test no longer covers a gap'
+    ).toBe(false);
+
+    const document = serialiseExternalMappingRegistry(registry);
+    const readBack = readExternalMappingRegistry(document);
+    expect(JSON.stringify(serialiseExternalMappingRegistry(readBack))).toBe(
+      JSON.stringify(document)
+    );
+    expect(readBack.records).toEqual(registry.records);
+    expect(readBack.records[0].subjectId).toBe('team:u12-reds');
+    expect(readBack.records[0].venueId).toBeNull();
+    expect(readBack.status).toBe(EXTERNAL_IMPORT_STATUS.ALLOWED);
+    // And the record resolves after the round trip, not merely survives it.
+    expect(
+      resolveExternalName(readBack, EXTERNAL_MAPPING_KIND.PARTICIPANT, 'seeding league u12 reds')
+        .subjectId
+    ).toBe('team:u12-reds');
+  });
+
+  it('round-trips the null arms of statedOn and statedBy, which the corpus never takes', () => {
+    for (const record of corpusRegistry().records) {
+      expect(record.statedOn, 'the corpus grew a null statedOn').not.toBeNull();
+    }
+    const registry = registryOf(
+      [participant({ id: 'p-undated', statedBy: null, statedOn: null, note: null })],
+      'undated-registry'
+    );
+    const document = serialiseExternalMappingRegistry(registry);
+    expect(document.records[0].statedOn).toBeNull();
+    expect(document.records[0].statedBy).toBeNull();
+    const readBack = readExternalMappingRegistry(document);
+    expect(readBack.records[0].statedOn).toBeNull();
+    expect(readBack.records[0].statedBy).toBeNull();
+    expect(JSON.stringify(serialiseExternalMappingRegistry(readBack))).toBe(
+      JSON.stringify(document)
+    );
+    // `null` is carried, never dropped: an absent key would read back through
+    // the schema default as the same value and hide a lossy write.
+    expect('statedOn' in document.records[0]).toBe(true);
+    expect('statedBy' in document.records[0]).toBe(true);
+  });
+
+  it('round-trips non-ASCII labels, provenance and notes unchanged', () => {
+    const label = 'Sportpark Münster (Rückseite) — Platz 2';
+    const registry = registryOf(
+      [
+        participant({
+          id: 'p-üml',
+          externalLabel: label,
+          subjectId: 'team:münster',
+          provenance: 'Spielplan der Liga — 対戦表 v3',
+          statedBy: 'Bjørn Østergård',
+          note: 'the umlaut is part of the name — nothing here strips it',
+        }),
+      ],
+      'unicode-registry'
+    );
+    const document = serialiseExternalMappingRegistry(registry);
+    const readBack = readExternalMappingRegistry(document);
+    expect(readBack.records[0].externalLabel).toBe(label);
+    expect(readBack.records[0].provenance).toBe('Spielplan der Liga — 対戦表 v3');
+    expect(readBack.records[0].statedBy).toBe('Bjørn Østergård');
+    expect(JSON.stringify(serialiseExternalMappingRegistry(readBack))).toBe(
+      JSON.stringify(document)
+    );
+    // The one normalisation is typographic and case-folding only, and it
+    // survives the seam: the label still resolves under its own spelling.
+    expect(
+      resolveExternalName(readBack, EXTERNAL_MAPPING_KIND.PARTICIPANT, `  ${label.toUpperCase()} `)
+        .state
+    ).toBe(EXTERNAL_NAME_RESOLUTION.RESOLVED);
+  });
+});
+
 describe('acceptance 11 — every meta-assertion can fail, and here is the input', () => {
   it('zero rows read is a blocking finding, not a perfect score', () => {
     const resolution = classifyExternalImport({ ...corpusQuery(), rows: [] }, corpusRegistry());

@@ -65,7 +65,7 @@ export function compareIdsCodeUnit(left, right) {
  * stable), so a duplicate id is left for the caller's own duplicate check to
  * report rather than silently rearranged here.
  *
- * @template {{ id: unknown }} T
+ * @template {{ id?: unknown }} T
  * @param {ReadonlyArray<T>} records
  * @returns {T[]}
  */

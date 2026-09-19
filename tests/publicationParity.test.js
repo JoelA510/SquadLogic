@@ -332,9 +332,7 @@ describe('publication :: the seam exists, and nothing stores through it', () => 
       })),
     });
     const readBack = readPublicationSnapshot(serialisePublicationSnapshot(snapshot));
-    expect(readBack.snapshot.rows[0][SCHEDULE_EXPORT_HEADERS.TEAM_NAME]).toBe(
-      'Tigres Ñandú'
-    );
+    expect(readBack.snapshot.rows[0][SCHEDULE_EXPORT_HEADERS.TEAM_NAME]).toBe('Tigres Ñandú');
     expect(readBack.snapshot.rows[0][SCHEDULE_EXPORT_HEADERS.NOTES]).toBe(
       'kickoff moved — see 案内'
     );

@@ -32,7 +32,14 @@ const COMPLETED_AT = '2026-03-04T17:45:00Z';
 
 /** The real engine report a practice run persists into `scheduler_runs.results`. */
 function engineReport() {
-  return evaluatePracticeSchedule({ assignments: [], unassigned: [], teams: [], slots: [] });
+  return evaluatePracticeSchedule({
+    assignments: [],
+    unassigned: [],
+    teams: [],
+    slots: [],
+    schoolDayEnd: undefined,
+    timezone: undefined,
+  });
 }
 
 describe('the practice snapshot does not carry its own timestamp', () => {
@@ -81,7 +88,11 @@ describe('PracticeReadinessPanel renders the run timestamp it is given', () => {
 
   it('shows "Generated ..." from the mapper output the page really passes', () => {
     const mapped = mapSchedulerRunToPracticeSummary(
-      makeSchedulerRun({ run_type: 'practice', results: engineReport(), completed_at: COMPLETED_AT })
+      makeSchedulerRun({
+        run_type: 'practice',
+        results: engineReport(),
+        completed_at: COMPLETED_AT,
+      })
     );
 
     renderPanel({
@@ -94,7 +105,11 @@ describe('PracticeReadinessPanel renders the run timestamp it is given', () => {
 
   it('positive control: the same snapshot with no generatedAt renders no header line', () => {
     const mapped = mapSchedulerRunToPracticeSummary(
-      makeSchedulerRun({ run_type: 'practice', results: engineReport(), completed_at: COMPLETED_AT })
+      makeSchedulerRun({
+        run_type: 'practice',
+        results: engineReport(),
+        completed_at: COMPLETED_AT,
+      })
     );
 
     renderPanel({ practiceReadinessSnapshot: mapped.practiceReadinessSnapshot });

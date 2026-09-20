@@ -4232,6 +4232,10 @@ isomorphic; the two disagree on the first line of the summary.
 
 Three layers of why nothing catches it, and one is the supervisor's:
 
+> **FALSE — see "CORRECTION: four of five ran" at the end of this file.** Items
+> 1 and 2 below, and the "eleven seconds" line, are wrong. They are left in
+> place rather than deleted so the correction has its subject.
+
 1. **CI runs two of five Deno test files.** The job names them individually.
    Never run: `scoring-engine_test.ts`, `anchor-wall-times_test.ts`,
    `ics-feed_test.ts`.
@@ -4260,3 +4264,175 @@ rather than an error — and because it matched the workflow display name as "CI
 when it is "SquadLogic CI". Both failure modes read as *"CI never ran"* instead
 of erroring. The same shape as everything else on this page, in the tooling built
 to watch for it.
+
+## CORRECTION: four of five ran — the #407 entry's Deno claim was false
+
+The entry above states that CI ran two of five Deno test files, that
+`anchor-wall-times_test.ts` and `ics-feed_test.ts` had never executed, and that
+#400 shipped them dead. **All three statements are false.** Corrected here by
+the #409 agent, and verified by the supervisor before accepting the correction.
+
+`grep -n "_test\.ts" .github/workflows/ci.yml`, with no context window:
+
+```
+243:  supabase/functions/_shared/tests/practice-coaches_test.ts
+267:  supabase/functions/_shared/tests/season-clock_test.ts
+268:  supabase/functions/_shared/tests/ics-feed_test.ts
+269:  supabase/functions/_shared/tests/anchor-wall-times_test.ts
+279:  supabase/functions/_shared/tests/season-clock_test.ts
+280:  supabase/functions/_shared/tests/ics-feed_test.ts
+281:  supabase/functions/_shared/tests/anchor-wall-times_test.ts
+```
+
+Four of five ran, two of them under both host zones. `git blame` puts lines
+268-269 in `4826668` — **#400 added those test files and wired them into CI in
+the same commit.** The accusation that a PR whose subject was "the cross-check
+that keeps both arms honest" shipped dead tests was groundless, and is withdrawn.
+
+Only `scoring-engine_test.ts` never ran, and it was excluded **deliberately**,
+with the reason stated at `ci.yml:214-218`: one case expected `'Time overlap'`,
+a string the engine has never produced. The #409 agent measured it on `main`
+with Deno 2.9.7 — 2 passed, 1 failed. The comment was accurate and the exclusion
+was honest. What was true in the entry above is only this: `scoring-engine_test.ts`
+had never run, and the engine beneath it had drifted.
+
+### The mechanism, which is a third instance and the first to reach `main`
+
+```
+grep -n "deno test" -A 3 .github/workflows/ci.yml | grep "_test.ts"
+```
+
+`-A 3` captured three lines after each match. Line 267 fell inside the window;
+268 and 269 did not. A truncating context window was read as an exhaustive
+enumeration.
+
+This is **not** the defect the supervisor had just adopted a rule against. That
+rule — never suppress stderr, show the pattern matching something — would not
+have caught this: the grep matched, and stderr was clean. The mechanism here is
+different and has now happened three times in this phase: `head -20` cutting an
+alphabetical listing before `auto-scheduler/` and `fairness-scoring/` (caught
+before filing), the `TeamListView` path that did not exist (caught by the #407
+agent), and this one — **the first to be published, filed as a task, written
+into this file, and merged to `main` in a PR body.**
+
+Rule, superseding the narrower one: **an evidentiary command may not carry
+`-A`, `-B`, `-C`, `head`, `tail` or any other truncation.** Enumerate the whole
+set, then narrow. A count is a claim about a set, and a windowed grep cannot
+support one.
+
+Worse than the error is what surrounded it. The supervisor offered *"a Deno
+Mirror Tests job that finishes in eleven seconds is its own tell"* as
+corroboration. That job ran 79 test executions. The eleven seconds was a real
+observation recruited to support a conclusion reached another way — which is
+the same defect this page catalogues in code, in the reasoning about it.
+
+### What the corrected picture is
+
+The real finding stands and is larger than the false one. `scoring-engine.ts`
+had drifted from `practiceMetrics.js` in **four** places, not the one the brief
+named, and three of the four were found by the drift check on its first run —
+including a phantom coach conflict between a team and itself. The word
+"isomorphic" was wrong in five places, not two, and the strongest of them was
+one the supervisor's brief missed entirely:
+`docs/architecture/edge-functions-inventory.md:128`, *"the same bytes run in
+both places."*
+
+## #409 — the drift the false claim was sitting on top of
+
+Merged `65e06f4`. The entry above this one withdraws the brief's central claim;
+this records what the work found once the claim was out of the way, and two
+further supervisor errors in the same round.
+
+### Two wrong statements from the supervisor, in one task
+
+The first is recorded above: "CI runs two of five Deno test files", with #400
+blamed for shipping two dead. Four of five ran and #400 wired all three of its
+files in within the same commit.
+
+The second was in the review message: *"note `main` has moved to `5bb139c`"*.
+It had not. `5bb139c` was the withdrawal commit, sitting unmerged on
+`claude/phase-8-supervisor-z9p4f4`; `origin/main` was still `bbe05f6`. The
+supervisor had committed and pushed a correction and **never opened a PR for
+it**, then told an agent the correction had landed. The agent checked
+(`git rev-parse origin/main`) rather than taking it, and said so. Had it not,
+the 3353 test baseline it was asked to measure against would have been checked
+against a tree that did not exist.
+
+Both errors share a shape with the grep: **a claim about state, asserted from
+memory of an intention rather than read from the thing itself.** Pushing a
+branch is not merging it, and a truncated grep is not an enumeration.
+
+### What the agent found once the false half was removed
+
+The real defect was larger than the brief's version of it in every dimension.
+
+- **Four divergences, not one.** The root cause was single: the Edge arm decided
+  what an assignment row was worth in three inconsistent places. Beyond the
+  `assignments.length` count the brief named, that produced an inflated
+  `slotUtilization`, a **phantom coach conflict between a team and itself**
+  (a duplicate `team::slot` row read as two practices), and a false
+  `action-required` for an organisation with an empty roster. **Three of the
+  four were found by the new drift check on its first run**, which is the
+  strongest possible argument for the check.
+- **"Isomorphic" wrong in five places, not two**, including the one the
+  supervisor missed entirely: `docs/architecture/edge-functions-inventory.md:128`,
+  *"Same file is imported by the browser … the same bytes run in both places."*
+  They are two different files.
+- **The reach question answered in both directions.** The negative count cannot
+  reach `PracticeReadinessPanel`: the Edge evaluation does land in
+  `scheduler_runs.results`, but nested at `results.evaluation.summary`, while
+  `practiceSummaryMapper` reads `results.summary`. The reachable corruption is
+  `fairness-scoring`, which the brief did not consider — it can persist
+  `practice_coverage` above 100 against a min-90 threshold. And
+  `auto-scheduler` cannot reach it at all, because `assignmentMap` is a
+  `Map<teamId, slotId>`. The agent corrected its own earlier comment that had
+  blamed the optimizer.
+
+### Three times the agent was right against the supervisor
+
+1. **The vectors-table premise.** The brief said an Edge Function cannot import
+   `packages/core`, which is why the season clock used a shared table. True, but
+   it constrains only that direction: `tests/unit/scoring-engine.test.ts` has
+   imported the Edge engine under Vitest since it was written, so both arms run
+   in one process and are compared value against value. Strictly stronger — a
+   table can be wrong about both arms, and cannot compare fields it does not
+   enumerate.
+2. **A hollow fix the supervisor suggested.** Review finding 3 said the floor and
+   `EXCLUDED` were coupled and asked whether the floor should be
+   `DISCOVERED - len(EXCLUDED)`. That is the hollow version: the bar would drop
+   by exactly what each exclusion removes, so no exclusion could ever trip it and
+   the floor would only ever catch deletions. The agent kept the friction, argued
+   that the second edit *is* the mechanism — "a reviewer seeing `5` become `4` is
+   the entire mechanism" — and improved the failure message instead.
+3. **Matching an exclusion's recorded reason**, considered and rejected with a
+   reason: it would pin the script to Deno's assertion formatting, and a reason
+   like "expects a string the engine has never produced" has no stable textual
+   counterpart in the failure. The overreaching comment was narrowed to what the
+   check delivers, with the residual gap written down.
+
+### A hollow check the agent found in its own new work
+
+`tests/seasonClockVectors.test.js`'s CI-coverage guard used `toContain` against
+the raw workflow file — and went on passing after the step was changed to
+`run: echo skipped`, because it matched the sentence *naming* the script rather
+than the line *running* it. It now strips comments before matching. Found only
+by trying to make it fail, which is the practice this phase exists to enforce.
+
+### The "eleven seconds" line, finally dead
+
+The withdrawn entry offered a job finishing in eleven seconds as evidence it was
+doing nothing. That job ran 79 test executions. After this PR it runs **108**
+— five files under two zones — and still completes in eleven seconds. The
+duration never carried the information it was claimed to carry, in either
+direction.
+
+### Out of scope, reported not fixed
+
+The auto-scheduler apply path writes `scheduler_runs.results` as
+`{assignments, unassigned, evaluation, optimization}`, while
+`practiceSummaryMapper` and `supabase/seed.sql:866` expect the core
+`practiceMetrics` shape with a **top-level `summary`**. So
+`PracticeReadinessPanel`'s KPI card — the one #407 wired to
+`summary.unassignedTeams` — renders from seeded and mock data and is **absent
+for every run applied through the auto-scheduler**. Filed separately rather than
+widened into this PR.

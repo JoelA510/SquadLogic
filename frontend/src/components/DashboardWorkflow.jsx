@@ -263,9 +263,18 @@ const DashboardWorkflow = ({
           status={getStatus(4)}
           onClick={() => handleStepChange(4)}
         >
+          {/* The real flag, which was in scope and unused: this component
+              already receives `loading` -- `{ team, practice, game }` from
+              `useDashboardData` via `WorkflowPage` -- and reads `loading.team`
+              for the teaming step above. The hardcoded `{ practice: false }`
+              meant the panel's skeleton could never show here however long
+              the practice fetch took, while its sibling step used the live
+              value. `PracticeReadinessPanel` defaults `dashboardLoading` to
+              `{}`, so an absent `loading` prop still renders the loaded
+              panel. */}
           <PracticeReadinessPanel
             practiceReadinessSnapshot={practiceData.snapshot}
-            dashboardLoading={{ practice: false }}
+            dashboardLoading={loading}
             generatedAt={practiceData?.generatedAt}
           />
           <div className="flex justify-end pt-4 mt-6 border-t border-border-subtle">

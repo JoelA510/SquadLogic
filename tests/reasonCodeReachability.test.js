@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 20 vocabularies, 474 codes, of
- * which 463 are shown to be producible and 11 are named as holes.
+ * `tests/attribution.test.js` already carries. 20 vocabularies, 484 codes, of
+ * which 473 are shown to be producible and 11 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -147,6 +147,7 @@ import {
 } from '@squadlogic/core/facility/index.js';
 import {
   FEASIBILITY_REASON,
+  analyseMoveRequest,
   canGameMove,
   canTeamPlay,
   feasibleKickoffBounds,
@@ -4221,6 +4222,179 @@ harvest(
       { venueComplexes }
     );
   })()
+);
+
+/* -- the move-request analysis -------------------------------------------- */
+
+/**
+ * `feasibility/moveRequest.js`, driven through its one public query.
+ *
+ * Every input below is **data**: a window, and a list of practice holdings in
+ * the shape `MoveRequestHoldingSchema` parses. Nothing reaches inside a
+ * returned analysis, and no internal state is forged — which matters more here
+ * than usual, because the whole module is about who else stands on a piece of
+ * ground and a driver that could invent an occupant would prove nothing.
+ *
+ * `brookside-park/upper-1` on 2026-08-22 is clean from 08:00, holds four
+ * fixtures between 10:15 and 14:55, and its permit makes 17:00 the last and
+ * only tight kickoff. That one surface therefore reaches vacancies, swaps,
+ * costly swaps and the off-grid report; the blacked-out Summit record reaches
+ * the two that need a grid with nothing on it.
+ */
+const moveRequestPractice = (id, startMinutes, over = {}) => ({
+  id,
+  date: '2026-08-22',
+  surfaceId: 'brookside-park/upper-1',
+  startMinutes,
+  endMinutes: startMinutes + 55,
+  format: '7v7',
+  teamIds: [`audit-team-${id}`],
+  personIds: [],
+  label: id,
+  ...over,
+});
+
+harvest(
+  'analyseMoveRequest(a practice whose every feasible slot is held, all for one objective)',
+  analyseMoveRequest(
+    context,
+    {
+      entityKind: 'practice',
+      entityId: 'audit:subject',
+      dates: ['2026-08-22'],
+      surfaceIds: ['brookside-park/upper-1'],
+      cadenceMinutes: 60,
+      earliestKickoffMinutes: 8 * 60,
+      latestKickoffMinutes: 9 * 60,
+    },
+    {
+      venueComplexes,
+      practices: [
+        // The subject sits at the one tight kickoff, so every holder it could
+        // exchange with loses the permit's comfort margin — a cost no registry
+        // constraint claims, which is `MOVE_REQUEST_COST_UNCLAIMED`. The
+        // 09:30 holding stands on ground the 60-minute cadence does not
+        // generate, which is `MOVE_REQUEST_OFF_CAPACITY_GRID`.
+        moveRequestPractice('audit:subject', 17 * 60),
+        moveRequestPractice('audit:holder-0', 8 * 60),
+        moveRequestPractice('audit:holder-1', 9 * 60),
+        moveRequestPractice('audit:off-grid', 9 * 60 + 30),
+      ],
+    }
+  )
+);
+
+harvest(
+  'analyseMoveRequest(a window whose only candidate is held by an open-ended practice)',
+  analyseMoveRequest(
+    context,
+    {
+      entityKind: 'practice',
+      entityId: 'audit:subject',
+      dates: ['2026-08-22'],
+      surfaceIds: ['brookside-park/upper-1'],
+      cadenceMinutes: 60,
+      earliestKickoffMinutes: 9 * 60,
+      latestKickoffMinutes: 9 * 60,
+    },
+    {
+      venueComplexes,
+      practices: [
+        moveRequestPractice('audit:subject', 8 * 60),
+        // GAP-14: no known end, so whether the ground is free cannot be
+        // decided — `MOVE_REQUEST_OCCUPANCY_UNDECIDABLE` — and a window that
+        // then offers nothing says its class is a floor:
+        // `MOVE_REQUEST_CLASS_UNDER_UNKNOWN`.
+        moveRequestPractice('audit:open-ended', 9 * 60, { endMinutes: null }),
+      ],
+    }
+  )
+);
+
+harvest(
+  'analyseMoveRequest(a practice wearing a game id, and a subject nothing holds)',
+  analyseMoveRequest(
+    context,
+    {
+      entityKind: 'practice',
+      entityId: 'audit:subject',
+      dates: ['2026-08-22'],
+      surfaceIds: ['brookside-park/upper-1'],
+      cadenceMinutes: 60,
+      earliestKickoffMinutes: 8 * 60,
+      latestKickoffMinutes: 8 * 60,
+    },
+    {
+      venueComplexes,
+      practices: [
+        moveRequestPractice('audit:subject', 17 * 60),
+        // A holding under an id the index already holds: one of the two would
+        // be invisible to occupancy, vacancy and every swap.
+        moveRequestPractice(schedule.games[0].id, 8 * 60),
+      ],
+    }
+  )
+);
+
+harvest(
+  'analyseMoveRequest(a subject this run does not hold)',
+  analyseMoveRequest(
+    context,
+    {
+      entityKind: 'game',
+      entityId: 'audit:no-such-fixture',
+      dates: ['2026-08-22'],
+      surfaceIds: ['brookside-park/upper-1'],
+      cadenceMinutes: 60,
+      earliestKickoffMinutes: 9 * 60,
+      latestKickoffMinutes: 10 * 60,
+    },
+    { venueComplexes }
+  )
+);
+
+harvest(
+  'analyseMoveRequest(a practice standing on ground the graph does not hold)',
+  analyseMoveRequest(
+    context,
+    {
+      entityKind: 'practice',
+      entityId: 'audit:subject',
+      dates: ['2026-08-22'],
+      surfaceIds: ['brookside-park/upper-1'],
+      cadenceMinutes: 60,
+      earliestKickoffMinutes: 9 * 60,
+      latestKickoffMinutes: 9 * 60,
+    },
+    {
+      venueComplexes,
+      practices: [
+        moveRequestPractice('audit:subject', 8 * 60),
+        // `surfacesConflict()` reaches `requireSurface()`, which throws; the id
+        // came from the caller's data, so the query guards it and reports.
+        moveRequestPractice('audit:ghost', 9 * 60, {
+          surfaceId: 'brookside-park/upper-1-not-in-the-graph',
+        }),
+      ],
+    }
+  )
+);
+
+harvest(
+  'analyseMoveRequest(a window over the blacked-out permit record)',
+  analyseMoveRequest(
+    context,
+    {
+      entityKind: 'game',
+      entityId: schedule.games.find((game) => game.date === '2026-09-19').id,
+      dates: ['2026-09-19'],
+      surfaceIds: ['summit-hs/stadium'],
+      cadenceMinutes: 60,
+      earliestKickoffMinutes: 9 * 60,
+      latestKickoffMinutes: 17 * 60,
+    },
+    { venueComplexes }
+  )
 );
 
 /* -- fairness -------------------------------------------------------------- */

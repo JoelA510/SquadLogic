@@ -78,6 +78,8 @@ import {
   loadSeason2026,
   loadSunsets,
 } from '@squadlogic/core/fixtures/index.js';
+import { FEASIBILITY_REASON, analyseMoveRequest } from '@squadlogic/core/feasibility/index.js';
+import { buildAttributionContext } from '@squadlogic/core/attribution/index.js';
 import { toSeason2026PlacementInput } from '@squadlogic/core/placement/index.js';
 import { replaceGamesUnderRegistry } from '@squadlogic/core/placement/index.js';
 import {
@@ -240,6 +242,61 @@ const closureSet = buildClosureSet(graph, {
 });
 
 const REPORTS = {
+  'feasibility/moveRequest.js': [
+    {
+      label: 'analyseMoveRequest(a practice on ground the graph does not hold)',
+      expectCode: FEASIBILITY_REASON.MOVE_REQUEST_HOLDING_SURFACE_UNKNOWN,
+      run: () =>
+        analyseMoveRequest(
+          buildAttributionContext({
+            graph,
+            table,
+            calendar,
+            registry,
+            schedule,
+            verification: null,
+            venueComplexes,
+            roster: null,
+          }),
+          {
+            entityKind: 'practice',
+            entityId: 'census:subject',
+            dates: [DATE],
+            surfaceIds: [REAL],
+            cadenceMinutes: 60,
+            earliestKickoffMinutes: 10 * 60,
+            latestKickoffMinutes: 11 * 60,
+          },
+          {
+            venueComplexes,
+            practices: [
+              {
+                id: 'census:subject',
+                date: DATE,
+                surfaceId: REAL,
+                startMinutes: 9 * 60,
+                endMinutes: 9 * 60 + 55,
+                format: '7v7',
+                teamIds: ['census-subject'],
+                personIds: [],
+              },
+              // The id that came from data. `surfacesConflict()` would throw on
+              // it; the query has to answer instead.
+              {
+                id: 'census:ghost',
+                date: DATE,
+                surfaceId: GHOST,
+                startMinutes: 10 * 60,
+                endMinutes: 10 * 60 + 55,
+                format: '7v7',
+                teamIds: ['census-ghost'],
+                personIds: [],
+              },
+            ],
+          }
+        ),
+    },
+  ],
   'availability/closures.js': [
     {
       label: 'checkClosures()',

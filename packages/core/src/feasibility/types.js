@@ -236,6 +236,109 @@
  */
 
 /**
+ * One candidate position in a move-request window, judged, with who stands on
+ * it.
+ *
+ * **`occupantIds` and `undecidableOccupantIds` are two lists and never one.**
+ * An occupant whose footprint is unknown (GAP-14) is not an empty field and is
+ * not a holder either, and a position carrying one is never offered as a
+ * vacancy. Folding the second list into the first would refuse ground that may
+ * be free; folding it into neither would offer ground that may be taken.
+ *
+ * @typedef {Object} MoveRequestSlot
+ * @property {string} slotId - `reserve/capacity.js`'s own `capacitySlotId()`, so
+ *   a slot in this answer and a slot in a capacity report share one spelling
+ * @property {string} date
+ * @property {string} surfaceId
+ * @property {number} kickoffMinutes
+ * @property {number|null} endMinutes
+ * @property {string} verdict - a `FEASIBILITY_VERDICT` value; three, never two
+ * @property {string|null} tight - a `FEASIBILITY_TIGHTNESS` value, or null
+ * @property {FeasibilityBound[]} binding
+ * @property {number|null} marginMinutes
+ * @property {string|null} marginBasis
+ * @property {string[]} occupantIds - holdings standing on this ground, sorted
+ * @property {string[]} undecidableOccupantIds - holdings that may be, sorted
+ * @property {string[]} ownCommitmentClashIds - the subject's own diary, not the ground
+ * @property {string[]} travelCodes - what moving here would introduce for its people
+ * @property {FeasibilityUnknown[]} unknowns
+ */
+
+/**
+ * What a counterparty currently satisfies and would lose by exchanging.
+ *
+ * `objectives` are registry constraint ids, from `registryConstraintIdsFor()`.
+ * `codes` is the fuller truth: a code no constraint claims is a real loss with
+ * no id, it is listed in `unclaimedCodes`, and it still makes `free` false.
+ *
+ * @typedef {Object} MoveRequestCost
+ * @property {boolean} free - nothing above `info` is newly raised, and no travel
+ *   finding is introduced
+ * @property {string[]} codes - sorted
+ * @property {string[]} objectives - sorted registry constraint ids
+ * @property {string[]} unclaimedCodes - codes the registry cannot name
+ */
+
+/**
+ * One admissible two-sided exchange.
+ *
+ * Both legs are judged with **both** parties' bookings lifted, by one function,
+ * so a swap cannot be admitted under one standard and priced under another.
+ *
+ * @typedef {Object} MoveRequestSwap
+ * @property {string} slotId
+ * @property {string} date
+ * @property {string} surfaceId
+ * @property {number} kickoffMinutes
+ * @property {string} counterpartyId
+ * @property {string} counterpartyKind - a `MOVE_REQUEST_ENTITY` value
+ * @property {{ verdict: string, tight: string|null, binding: FeasibilityBound[], marginMinutes: number|null, marginBasis: string|null }} subjectLeg
+ * @property {{ verdict: string, tight: string|null, binding: FeasibilityBound[], marginMinutes: number|null, marginBasis: string|null }} counterpartyLeg
+ * @property {MoveRequestCost} cost
+ * @property {boolean} free - `cost.free`, carried so that `classifyMoveRequest()`
+ *   reads one field rather than reaching into a nested one
+ * @property {FeasibilityUnknown[]} unknowns
+ */
+
+/**
+ * *"What can the club offer this move request?"*
+ *
+ * `classification` and `verdict` are **two channels and never one**, in the same
+ * way `status` and `verdict` already are elsewhere in this module.
+ * `classification` says what the club can offer; `verdict` says whether the
+ * window could be judged at all. A window that is fully and legally occupied is
+ * `infeasible` as a *class* while its positions are perfectly legal, and a
+ * window nobody could judge is `unknown` as a *verdict* whatever its class
+ * reads.
+ *
+ * @typedef {Object} MoveRequestAnalysis
+ * @property {string} question - always `FEASIBILITY_QUESTION.ANALYSE_MOVE_REQUEST`
+ * @property {FeasibilitySubject} subject
+ * @property {string} entityKind - a `MOVE_REQUEST_ENTITY` value
+ * @property {string} entityId
+ * @property {string} classification - a `MOVE_REQUEST_CLASS` value, from
+ *   `classifyMoveRequest()` and from nowhere else
+ * @property {string} verdict - a `FEASIBILITY_VERDICT` value
+ * @property {string|null} tight - a `FEASIBILITY_TIGHTNESS` value, or null
+ * @property {MoveRequestSlot[]} feasibleSlots - **every** candidate the grid
+ *   offered, including the ones that could not be judged; incident 10's rule
+ *   applied to a window, which is why the list is not filtered to the feasible
+ *   ones and the counts say how many of each there are
+ * @property {MoveRequestSlot[]} vacancies - feasible, unoccupied, and nothing
+ *   undecidable standing on them
+ * @property {MoveRequestSwap[]} swaps - admissible, legal for both parties
+ * @property {{ objectives: Array<{ objective: string, holderCount: number, holderIds: string[], codes: string[] }>, holderCount: number }} zeroSum -
+ *   over the **costly** swaps only: which objective each counterparty would
+ *   lose, and how many holders rely on it
+ * @property {{ candidatesOnGrid: number, feasible: number, infeasible: number, undecidable: number, occupied: number, vacancies: number, swapsAdmissible: number, swapsFree: number, swapsCostly: number }} counts
+ * @property {string} marginUnit - always `FEASIBILITY_MARGIN_UNIT`
+ * @property {FeasibilityUnknown[]} unknowns
+ * @property {FeasibilityFinding[]} findings
+ * @property {FeasibilityMeta} meta
+ * @property {string} status
+ */
+
+/**
  * Counters proving an answer looked at something.
  *
  * @typedef {Object} FeasibilityMeta
@@ -252,6 +355,11 @@
  * @property {number} unknownsRaised - counted once, where each was raised
  * @property {number} travelTransitionsProjected
  * @property {number} teamFixturesCompared
+ * @property {number} holdingsIndexed
+ * @property {number} occupancyPairsCompared
+ * @property {number} capacitySlotsJoined
+ * @property {number} swapsConsidered
+ * @property {number} swapLegsJudged
  */
 
 export {};

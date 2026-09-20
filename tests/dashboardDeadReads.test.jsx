@@ -372,6 +372,173 @@ describe('PracticeReadinessPanel renders only cards a producer can fill', () => 
     expect(screen.queryByLabelText('Manual Actions')).toBeNull();
     expect(screen.getByRole('heading', { name: 'Practice Readiness' })).toBeTruthy();
   });
+
+  it('the KPI gate is satisfied by every report the engine produces', () => {
+    // The loading skeleton shows a KPI placeholder, and the card is gated on
+    // `summary.unassignedTeams` being a number. That promise is only honest
+    // if the engine always supplies one. Driven from the engine across the
+    // interesting shapes rather than asserted once.
+    for (const shape of [
+      { assignedCount: 0, unassignedCount: 0 },
+      { assignedCount: 3, unassignedCount: 0 },
+      { assignedCount: 0, unassignedCount: 4 },
+      { assignedCount: 2, unassignedCount: 5 },
+    ]) {
+      expect(typeof engineReport(shape).summary.unassignedTeams).toBe('number');
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Supervisor finding 1 -- a total and a breakdown that can disagree
+ * ------------------------------------------------------------------ */
+
+/**
+ * `summary.unassignedTeams` and `unassignedByReason[].count` are two different
+ * quantities that usually coincide, and the panel puts them next to each other
+ * as a total and its breakdown.
+ *
+ * `unassignedTeams` is `totalTeams - assignedTeams`, from the roster.
+ * `unassignedByReason` increments its bucket **before** the roster lookup
+ * (`practiceMetrics.js:331`), so it counts list entries. Every divergence
+ * below is produced by the real engine from inputs it accepts -- none is a
+ * hand-built snapshot -- and each is asserted to actually diverge before the
+ * rendering is checked, so a future engine change that made them agree turns
+ * these red rather than leaving them vacuous.
+ */
+function divergenceCase({ teams, assignments, unassigned }) {
+  const report = evaluatePracticeSchedule({
+    assignments,
+    unassigned,
+    teams,
+    slots: [
+      {
+        id: 's1',
+        capacity: 10,
+        start: '2026-03-02T22:00:00Z',
+        end: '2026-03-02T23:00:00Z',
+        day: 'Monday',
+      },
+    ],
+    schoolDayEnd: undefined,
+    timezone: undefined,
+  });
+  const reasonsTotal = report.unassignedByReason.reduce((sum, entry) => sum + entry.count, 0);
+  return { report, reasonsTotal, card: report.summary.unassignedTeams };
+}
+
+const TEAM_A = { id: 't1', division: 'U10' };
+const TEAM_B = { id: 't2', division: 'U10' };
+const TEAM_C = { id: 't3', division: 'U10' };
+
+describe('the practice panel never shows a total and a breakdown that silently disagree', () => {
+  it('divergence A: an unassigned entry naming a team not on the roster', () => {
+    const { report, reasonsTotal, card } = divergenceCase({
+      teams: [TEAM_A, TEAM_B],
+      assignments: [{ teamId: 't1', slotId: 's1' }],
+      unassigned: [
+        { teamId: 't2', reason: 'no available slot' },
+        { teamId: 'GHOST', reason: 'no available slot' },
+      ],
+    });
+    // The divergence is real before anything is rendered.
+    expect(card).toBe(1);
+    expect(reasonsTotal).toBe(2);
+    expect(report.dataQualityWarnings.join(' ')).toContain('GHOST');
+
+    render(<PracticeReadinessPanel practiceReadinessSnapshot={report} />);
+
+    expect(screen.getByText(/Reasons account for 2 teams, but 1 is unassigned/)).toBeTruthy();
+    // The engine's own explanation, which nothing in the app used to render.
+    expect(screen.getByText(/Unassigned list references unknown team/)).toBeTruthy();
+  });
+
+  it('divergence B: a team in neither list — and the engine raises no warning', () => {
+    const { report, reasonsTotal, card } = divergenceCase({
+      teams: [TEAM_A, TEAM_B, TEAM_C],
+      assignments: [{ teamId: 't1', slotId: 's1' }],
+      unassigned: [{ teamId: 't2', reason: 'no available slot' }],
+    });
+    expect(card).toBe(2);
+    expect(reasonsTotal).toBe(1);
+    // This is why rendering `dataQualityWarnings` alone would not have been a
+    // fix: on this divergence there is nothing to render.
+    expect(report.dataQualityWarnings).toEqual([]);
+
+    render(<PracticeReadinessPanel practiceReadinessSnapshot={report} />);
+
+    expect(screen.getByText(/Reasons account for 1 team, but 2 are unassigned/)).toBeTruthy();
+  });
+
+  it('divergence C: an assignment naming a team not on the roster', () => {
+    const { report, reasonsTotal, card } = divergenceCase({
+      teams: [TEAM_A],
+      assignments: [{ teamId: 'GHOST2', slotId: 's1' }],
+      unassigned: [],
+    });
+    expect(card).toBe(1);
+    expect(reasonsTotal).toBe(0);
+
+    render(<PracticeReadinessPanel practiceReadinessSnapshot={report} />);
+
+    // No reasons at all, so the empty state carries the reconciliation --
+    // and it must not claim everyone was assigned.
+    expect(
+      screen.getByText(/recorded no reasons for the 1 team needing manual assignment/)
+    ).toBeTruthy();
+    expect(screen.queryByText('All teams assigned automatically.')).toBeNull();
+    expect(screen.getByText(/assignment references unknown team/)).toBeTruthy();
+  });
+
+  it('a snapshot with no unassigned list at all does not claim everyone was assigned', () => {
+    // The shape any writer that omits `unassigned` persists, which is
+    // divergence B for every team at once.
+    const { report, reasonsTotal, card } = divergenceCase({
+      teams: [TEAM_A, TEAM_B, TEAM_C],
+      assignments: [],
+      unassigned: [],
+    });
+    expect(card).toBe(3);
+    expect(reasonsTotal).toBe(0);
+
+    render(<PracticeReadinessPanel practiceReadinessSnapshot={report} />);
+
+    expect(
+      screen.getByText(/recorded no reasons for the 3 teams needing manual assignment/)
+    ).toBeTruthy();
+    expect(screen.queryByText('All teams assigned automatically.')).toBeNull();
+  });
+
+  it('negative control: a run that reconciles shows no discrepancy line', () => {
+    const { report, reasonsTotal, card } = divergenceCase({
+      teams: [TEAM_A, TEAM_B],
+      assignments: [{ teamId: 't1', slotId: 's1' }],
+      unassigned: [{ teamId: 't2', reason: 'no available slot' }],
+    });
+    // Meta-assertion: this case really does reconcile, so the absence below
+    // is a statement about agreement and not about an empty panel.
+    expect(card).toBe(1);
+    expect(reasonsTotal).toBe(1);
+
+    render(<PracticeReadinessPanel practiceReadinessSnapshot={report} />);
+
+    expect(screen.queryByText(/Reasons account for/)).toBeNull();
+    expect(screen.getByText(/no available slot/)).toBeTruthy();
+  });
+
+  it('negative control: a fully assigned run still says everyone was assigned', () => {
+    const { report, card } = divergenceCase({
+      teams: [TEAM_A],
+      assignments: [{ teamId: 't1', slotId: 's1' }],
+      unassigned: [],
+    });
+    expect(card).toBe(0);
+
+    render(<PracticeReadinessPanel practiceReadinessSnapshot={report} />);
+
+    expect(screen.getByText('All teams assigned automatically.')).toBeTruthy();
+    expect(screen.queryByText(/Reasons account for/)).toBeNull();
+  });
 });
 
 /* ------------------------------------------------------------------ *
@@ -542,6 +709,36 @@ describe('WorkflowPage shows the dashboard error it is now given', () => {
       </MemoryRouter>
     );
     expect(screen.getByText(/network request failed/)).toBeTruthy();
+  });
+
+  it('reopens when the IDENTICAL error recurs after a recovery', () => {
+    // Dismissal is scoped to the occurrence, not the message. Recording only
+    // the string meant the commonest real sequence -- a flaky 2s poll failing
+    // with the same message twice around one success -- stayed silenced
+    // forever after the first dismissal.
+    const paint = (rerender) => {
+      const ui = (
+        <MemoryRouter>
+          <WorkflowPage />
+        </MemoryRouter>
+      );
+      return rerender ? rerender(ui) : render(ui);
+    };
+
+    runState.error = new Error('permission denied for table scheduler_runs');
+    const { rerender } = paint();
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+    expect(screen.queryByText(/permission denied/)).toBeNull();
+
+    // The poll recovers...
+    runState.error = null;
+    paint(rerender);
+    expect(screen.queryByText(/permission denied/)).toBeNull();
+
+    // ...and then fails again with the very same message.
+    runState.error = new Error('permission denied for table scheduler_runs');
+    paint(rerender);
+    expect(screen.getByText(/permission denied for table scheduler_runs/)).toBeTruthy();
   });
 });
 

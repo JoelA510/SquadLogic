@@ -43,8 +43,14 @@ export default function WorkflowPage() {
   //
   // `dataError` is therefore *live* state — it disappears when the fetch
   // recovers — while a navigation error is a one-shot message that stays
-  // until dismissed. Dismissing a data error records which message was
-  // dismissed, so a different failure afterwards still opens the banner.
+  // until dismissed.
+  //
+  // Dismissal is scoped to the **occurrence**, not to the message. Recording
+  // only the string meant an identical failure recurring after a recovery
+  // ("permission denied" → dismissed → poll succeeds → "permission denied"
+  // again) compared equal to the dismissed value and stayed shut. The effect
+  // below clears the record the moment the error goes away, so the next
+  // failure opens the banner whether or not it reads the same.
   const [navError, setNavError] = useState(null);
   const [dismissedDataError, setDismissedDataError] = useState(null);
   const [activeStep, setActiveStep] = useState(1);
@@ -57,6 +63,12 @@ export default function WorkflowPage() {
     if (navError) setNavError(null);
     else setDismissedDataError(dataError);
   };
+
+  useEffect(() => {
+    if (!dataError && dismissedDataError !== null) {
+      setDismissedDataError(null);
+    }
+  }, [dataError, dismissedDataError]);
 
   useEffect(() => {
     if (location.state?.error) {

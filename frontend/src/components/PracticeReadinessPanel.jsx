@@ -69,10 +69,35 @@ KpiCard.propTypes = {
  * evenness at all. A number derived to keep a card alive cannot be told apart
  * from a measured one, which is worse than an absent card.
  *
+ * **The KPI card and the reasons list count different things, and the panel
+ * says so when they disagree.**
+ * `summary.unassignedTeams` is `totalTeams - assignedTeams`, derived from the
+ * roster (`practiceMetrics.js:621`). `unassignedByReason[].count` is derived
+ * from the `unassigned` **list**: the bucket is incremented before the roster
+ * lookup (`:331`), so an entry naming a team that is not in `teams` is counted
+ * there and not in the card. Three divergences are reachable and all three are
+ * reproduced in `tests/dashboardDeadReads.test.jsx`:
+ *
+ * - an `unassigned` entry naming an unknown team — reasons sum **higher**;
+ *   the engine records why in `dataQualityWarnings`.
+ * - an `assignments` entry naming an unknown team — same warning, card higher.
+ * - **a team in neither list — card higher, and no warning at all.** This is
+ *   the one that matters: `dataQualityWarnings` is empty, so rendering the
+ *   warnings alone would not have reconciled it, and any writer that persists
+ *   a snapshot without an `unassigned` list lands here for every team.
+ *
+ * Presented as a total and its breakdown they would silently disagree, and the
+ * empty state asserted "All teams assigned automatically" over a card reading
+ * 7. So the card keeps the engine's own quantity (it is `manualFollowUpRate`'s
+ * numerator), the empty state no longer claims more than it knows, a
+ * reconciliation line appears whenever the two part company, and
+ * `dataQualityWarnings` — which nothing in the app rendered — is shown.
+ *
  * @param {{
  *   practiceReadinessSnapshot?: {
  *     summary?: { unassignedTeams?: number },
  *     unassignedByReason?: Array<{ reason: string, count: number }>,
+ *     dataQualityWarnings?: Array<string>,
  *   },
  *   dashboardLoading?: { practice?: boolean },
  *   generatedAt?: string|null,
@@ -87,14 +112,30 @@ export default function PracticeReadinessPanel({
     return (
       <div className="glass-panel p-8 animate-pulse">
         <div className="h-6 w-1/3 bg-bg-surface-hover rounded mb-4" />
-        {/* One placeholder because one card follows. Four promised three
-            cards that no producer can fill. */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* One KPI placeholder and one insight placeholder: the two sections
+            the loaded panel renders. The KPI card is gated on
+            `summary.unassignedTeams` being a number, and every report
+            `evaluatePracticeSchedule` produces carries one — asserted in
+            `tests/dashboardDeadReads.test.jsx` rather than assumed here — so
+            the promise holds for every real snapshot. */}
+        <div className="max-w-xs mb-8">
           <div className="h-24 bg-bg-glass rounded-lg" />
         </div>
+        <div className="h-24 bg-bg-glass rounded-lg" />
       </div>
     );
   }
+
+  const summary = practiceReadinessSnapshot.summary;
+  const unassignedTeams =
+    typeof summary?.unassignedTeams === 'number' ? summary.unassignedTeams : null;
+  const reasons = practiceReadinessSnapshot.unassignedByReason ?? [];
+  const reasonsTotal = reasons.reduce((total, entry) => total + (entry?.count ?? 0), 0);
+  const warnings = practiceReadinessSnapshot.dataQualityWarnings ?? [];
+  // The KPI card and this list are two different quantities that usually
+  // coincide, so the panel must never present them as a total and its
+  // breakdown without saying when they part company. See the docblock above.
+  const reconciles = unassignedTeams === null || reasonsTotal === unassignedTeams;
 
   return (
     <div className="space-y-6">
@@ -107,12 +148,12 @@ export default function PracticeReadinessPanel({
         )}
       </div>
 
-      {typeof practiceReadinessSnapshot.summary?.unassignedTeams === 'number' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      {unassignedTeams !== null && (
+        <div className="max-w-xs mb-8">
           <KpiCard
             label="Manual Actions"
-            value={practiceReadinessSnapshot.summary.unassignedTeams}
-            status={practiceReadinessSnapshot.summary.unassignedTeams === 0 ? 'good' : 'warning'}
+            value={unassignedTeams}
+            status={unassignedTeams === 0 ? 'good' : 'warning'}
             description="Teams requiring manual slot assignment"
           />
         </div>
@@ -123,13 +164,44 @@ export default function PracticeReadinessPanel({
           <h3 className="insight-card__title" id="manual-follow-ups">
             Manual follow-up reasons
           </h3>
-          {!practiceReadinessSnapshot.unassignedByReason?.length ? (
-            <p className="insight-card__empty">All teams assigned automatically.</p>
+          {reasons.length === 0 ? (
+            // "All teams assigned automatically" was asserted whenever the
+            // list was empty, including over a card reading 7. An empty list
+            // means no reasons were recorded, which is not the same claim.
+            unassignedTeams === null || unassignedTeams === 0 ? (
+              <p className="insight-card__empty">All teams assigned automatically.</p>
+            ) : (
+              <p className="insight-card__empty">
+                This run recorded no reasons for the {unassignedTeams} team
+                {unassignedTeams === 1 ? '' : 's'} needing manual assignment.
+              </p>
+            )
           ) : (
+            <>
+              <ul className="insight-card__list">
+                {reasons.map((reason, idx) => (
+                  <li key={idx} className="insight-card__list-item">
+                    <span className="font-medium">{reason.reason}:</span> {reason.count} teams
+                  </li>
+                ))}
+              </ul>
+              {!reconciles && (
+                <p className="insight-card__empty" role="status">
+                  Reasons account for {reasonsTotal} team{reasonsTotal === 1 ? '' : 's'}, but{' '}
+                  {unassignedTeams} {unassignedTeams === 1 ? 'is' : 'are'} unassigned. These count
+                  different things; see the data-quality notes.
+                </p>
+              )}
+            </>
+          )}
+          {warnings.length > 0 && (
+            // Nothing rendered `dataQualityWarnings` anywhere. It is the
+            // engine's own explanation for the commonest divergence above --
+            // an unassigned entry naming a team that is not on the roster.
             <ul className="insight-card__list">
-              {practiceReadinessSnapshot.unassignedByReason.map((reason, idx) => (
-                <li key={idx} className="insight-card__list-item">
-                  <span className="font-medium">{reason.reason}:</span> {reason.count} teams
+              {warnings.map((warning, idx) => (
+                <li key={`dq-${idx}`} className="insight-card__list-item">
+                  <span className="font-medium">Data quality:</span> {warning}
                 </li>
               ))}
             </ul>

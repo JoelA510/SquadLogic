@@ -1,4 +1,4 @@
-import { assertEquals } from 'https://deno.land/std@0.203.0/assert/mod.ts';
+import { assertEquals, assertStringIncludes } from 'https://deno.land/std@0.203.0/assert/mod.ts';
 import { evaluatePracticeSchedule } from '../engines/scoring-engine.ts';
 import { Team, Slot, PracticeAssignment } from '../schemas/scoring.ts';
 
@@ -46,7 +46,13 @@ Deno.test('evaluatePracticeSchedule - coach conflict detection', () => {
 
   assertEquals(result.coachConflicts.length, 1);
   assertEquals(result.coachConflicts[0].coachId, 'coach-a');
-  assertEquals(result.coachConflicts[0].reason.includes('Time overlap'), true);
+  // The engine has never produced the string 'Time overlap'; its reason reads
+  // "Coach <id> has overlapping practices on <day>". This expectation was the
+  // sole reason this file was kept out of the Deno mirror job, so it went
+  // unrun for months rather than being reconciled. The contract adopted here
+  // is the sibling's -- `tests/unit/scoring-engine.test.ts`, which runs the
+  // same function under Vitest, already asserts `'overlapping practices'`.
+  assertStringIncludes(result.coachConflicts[0].reason, 'overlapping practices');
 });
 
 Deno.test('evaluatePracticeSchedule - manual follow up categorization', () => {

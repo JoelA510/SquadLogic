@@ -124,7 +124,8 @@ serve(async (req) => {
       return jsonResponse(failure, 422);
     }
 
-    // 4. Heavy Computation (Isomorphic Scoring Engine)
+    // 4. Heavy Computation (_shared/engines/scoring-engine.ts — the Edge arm,
+    //    not a shared module; see its header and tests/scoringEngineDrift.test.js)
     const startTime = performance.now();
 
     // Task 1 Refinement: Pass as single objects

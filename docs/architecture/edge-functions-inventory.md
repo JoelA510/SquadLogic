@@ -56,7 +56,7 @@ Seven functions are deployed. Each has its own directory under `supabase/functio
 
 ### 2.5 `fairness-scoring`
 
-- **Purpose**: Evaluate a practice and/or game schedule against the isomorphic scoring engine in `supabase/functions/_shared/engines/scoring-engine.ts`. Returns `metrics_summary` and structured `findings`. With `persist: true`, also writes an `evaluation_runs` row through the three-arg `persist_evaluation_run` overload.
+- **Purpose**: Evaluate a practice and/or game schedule against the Edge scoring engine in `supabase/functions/_shared/engines/scoring-engine.ts` (a separate implementation from `packages/core`'s — see §3.5). Returns `metrics_summary` and structured `findings`. With `persist: true`, also writes an `evaluation_runs` row through the three-arg `persist_evaluation_run` overload.
 - **Invoked by**: `frontend/src/components/EvaluationPanel.jsx` via `supabase.functions.invoke('fairness-scoring', …)`.
 - **Authentication**: `getUserFromRequest()` + `verifyOrgMembership(supabase, user.id, body.organizationId)`.
 - **Rate limit**: `checkRateLimit(user.id)` with the default 60 req/min.
@@ -125,7 +125,11 @@ Zod schemas shared by `fairness-scoring` and `auto-scheduler`: `TeamSchema`, `Sl
 
 ### 3.5 `_shared/engines/scoring-engine.ts`
 
-The isomorphic scoring engine. Same file is imported by the browser (via `@squadlogic/core`) _and_ by the Edge Functions under the `_shared` path. Exports `evaluatePracticeSchedule()` and `evaluateGameSchedule()`. No React or Deno-specific imports — the same bytes run in both places.
+The Edge arm of the scoring engine. Exports `evaluatePracticeSchedule()` and `evaluateGameSchedule()`.
+
+**It is not shared with the browser, and the same bytes do not run in both places** — which is what this entry claimed until the two arms were measured. The browser uses `packages/core/src/practiceMetrics.js` and `gameMetrics.js`; this is a separate, narrower reimplementation, written because an Edge Function cannot import `packages/core`. Core's practice report publishes thirteen top-level keys, this one six, and only three names appear in both. While the "same bytes" claim stood, the two drifted on `summary.assignedTeams` (rows here, distinct teams in core) and published a negative `unassignedTeams`.
+
+The fields the two arms must agree on, and the ones that are deliberately arm-specific, are stated and enforced in `tests/scoringEngineDrift.test.js`, which imports both and runs them over one vector table.
 
 ### 3.6 `_shared/tests/scoring-engine_test.ts`
 

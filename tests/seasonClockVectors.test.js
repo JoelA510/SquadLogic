@@ -33,6 +33,16 @@ import { resolveZonedInstant as resolveTs } from '../supabase/functions/_shared/
 const VECTORS_PATH = 'supabase/functions/_shared/timing/seasonClock.vectors.json';
 const SIBLING_RUNNER_PATH = 'supabase/functions/_shared/tests/season-clock_test.ts';
 const CI_WORKFLOW_PATH = '.github/workflows/ci.yml';
+/**
+ * The Deno job's runner. It used to be the workflow itself, naming each test
+ * file: this check asserted the workflow contained `SIBLING_RUNNER_PATH`,
+ * because a file the list omitted never ran. That list was the defect -- it
+ * silently skipped `scoring-engine_test.ts` for months -- so the job now
+ * discovers its files and this check follows it there. The guarantee is the
+ * stronger one: not "this one path is named" but "the directory it lives in is
+ * discovered, and nothing can be dropped by omission".
+ */
+const DENO_RUNNER_PATH = 'scripts/deno-mirror-tests.sh';
 
 /**
  * Vitest is configured at the repository root, so `process.cwd()` is it. The
@@ -99,13 +109,50 @@ describe('season clock vectors — the table itself', () => {
     expect(sibling).toContain('seasonClock.vectors.json');
     expect(sibling).toContain('resolveZonedInstant');
 
-    // The Deno job runs an explicit file list, so a new test file that is not
-    // in it never runs at all -- which is how a mirror test can exist, pass
-    // locally, and never guard anything.
-    const ci = readFileSync(fromRoot(CI_WORKFLOW_PATH), 'utf8');
-    expect(ci).toContain(SIBLING_RUNNER_PATH);
-    // ...and it has to run under the edge default, where a host-zone read hides.
-    expect(ci).toMatch(/TZ:\s*UTC/);
+    // The Deno arm has to actually be run by CI, or a mirror test can exist,
+    // pass locally, and never guard anything. The job discovers its files
+    // rather than listing them, so what is asserted is that the discovery
+    // covers the directory this runner lives in -- and that the workflow
+    // still invokes the discovery script at all.
+    // **Comments are stripped before matching, and that is not fastidiousness.**
+    // Written as a plain `toContain` against the raw file, every assertion
+    // below passes on a *mention*: both files describe in prose exactly what
+    // they do, so a check for 'scripts/deno-mirror-tests.sh' went on passing
+    // after the workflow step was changed to `run: echo skipped`, matching the
+    // sentence that names the script instead of the line that runs it. That
+    // was found by trying to make this check fail, which is the only way it
+    // would ever have been found.
+    const executable = (/** @type {string} */ text) =>
+      text
+        .split('\n')
+        .filter((line) => !/^\s*#/.test(line))
+        .join('\n');
+
+    const runner = executable(readFileSync(fromRoot(DENO_RUNNER_PATH), 'utf8'));
+    expect(runner).toContain(path.posix.dirname(SIBLING_RUNNER_PATH));
+    expect(runner).toContain("-name '*_test.ts'");
+
+    // **Discovered is not the same as run.** The script can suppress a
+    // discovered file through its `EXCLUDED` list, so checking only that
+    // discovery reaches this directory would move the old omission channel
+    // out of the workflow's file list and into the script's exclusion list,
+    // where it would be just as invisible. This file's own Deno arm must not
+    // be in it.
+    const excluded = runner.match(/^EXCLUDED=\(([^)]*)\)/m);
+    expect(excluded, 'EXCLUDED array not found in the runner').not.toBeNull();
+    expect(excluded[1]).not.toContain(path.posix.basename(SIBLING_RUNNER_PATH));
+
+    // ...and it has to run under BOTH zones. Pinning only UTC would let the
+    // second zone be dropped with every assertion still green, and one zone
+    // is not a control -- the whole point is that a host-zone read fails
+    // exactly one of the two runs.
+    const zones = runner.match(/^ZONES=\(([^)]*)\)/m);
+    expect(zones, 'ZONES array not found in the runner').not.toBeNull();
+    expect(zones[1]).toContain('UTC');
+    expect(zones[1].trim().split(/\s+/).length).toBeGreaterThanOrEqual(2);
+
+    const ci = executable(readFileSync(fromRoot(CI_WORKFLOW_PATH), 'utf8'));
+    expect(ci).toContain(DENO_RUNNER_PATH);
   });
 });
 

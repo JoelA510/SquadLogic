@@ -3,8 +3,16 @@
  *
  * Phase 8 — Intelligent Auto-Scheduler.
  * Runs a Hill Climbing optimization loop on the server, scoring candidates
- * via the isomorphic scoring-engine and persisting the best result via
+ * via `_shared/engines/scoring-engine.ts` and persisting the best result via
  * the persist_evaluation_run RPC.
+ *
+ * That engine used to be described here as "the isomorphic scoring-engine",
+ * which was never true and hid a real divergence for months. It is a second,
+ * narrower implementation of `packages/core`'s `evaluatePracticeSchedule`
+ * (core publishes thirteen top-level keys, this one six), written separately
+ * because an Edge Function cannot import `packages/core`. What the two arms
+ * actually promise each other is stated and enforced in
+ * `tests/scoringEngineDrift.test.js`, which runs both over one vector table.
  *
  * Security: JWT auth, org membership verification, rate limiting, IDOR prevention.
  * Governance: Every run produces an evaluation_run record and audit trail.

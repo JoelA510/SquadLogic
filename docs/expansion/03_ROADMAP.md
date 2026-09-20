@@ -62,7 +62,7 @@ Additionally, a comprehensive **4-phase security audit** was completed in March 
 **Goal**: Server-side Hill Climbing optimizer for practice schedule generation.
 
 - **Edge Function**: `auto-scheduler` with seeded PRNG, greedy seed, swap/relocate/chain-swap mutations.
-- **Scoring Engine**: Isomorphic `evaluatePracticeSchedule` shared between client and Edge Function.
+- **Scoring Engine**: `evaluatePracticeSchedule` exists **twice** — `packages/core/src/practiceMetrics.js` for the client and `supabase/functions/_shared/engines/scoring-engine.ts` for the Edge Function, because an Edge Function cannot import `packages/core`. This line used to call them "isomorphic" and "shared"; they are neither, and the two drifted on `assignedTeams` while the claim stood. The Edge arm is a narrower evaluator for hill-climbing fitness. The fields the two must agree on are enforced by `tests/scoringEngineDrift.test.js`.
 - **Realtime Progress**: Live iteration/score tracking via `audit_log` Realtime subscription.
 - **Governance**: Full evaluation_run persistence with findings and metrics.
 - **Retention**: Reduced default retention from 365 → 180 days for free-tier storage protection.

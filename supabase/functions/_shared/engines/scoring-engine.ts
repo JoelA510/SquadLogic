@@ -25,8 +25,17 @@ export interface EvaluationResult {
 }
 
 /**
- * Fairness Scoring Engine (Isomorphic Deno/TS)
- * Migrated from packages/core/src/practiceMetrics.js and gameMetrics.js
+ * Fairness Scoring Engine (Deno/TS)
+ *
+ * A **separate, narrower** implementation of the evaluators in
+ * `packages/core/src/practiceMetrics.js` and `gameMetrics.js` -- not a shared
+ * module and not isomorphic with them, though this header claimed to be both
+ * until the two arms were measured against each other. An Edge Function cannot
+ * import `packages/core`, so the logic exists twice and can drift; it did.
+ *
+ * The agreed contract, and the fields that are deliberately arm-specific, are
+ * stated and enforced in `tests/scoringEngineDrift.test.js`, which imports
+ * both arms and runs them over one vector table.
  */
 
 const _FAIRNESS_DOMINANCE_THRESHOLD = 0.7;
@@ -67,22 +76,95 @@ export function evaluatePracticeSchedule(params: {
 }) {
   const { assignments, unassigned = [], teams, slots } = params;
 
-  const totalTeams = teams.length;
-  const assignedTeams = assignments.length;
-  const unassignedTeams = totalTeams - assignedTeams;
-
   const teamsById = new Map<string, Team>(teams.map((t) => [t.id, t]));
   const slotsById = new Map<string, Slot>(slots.map((s) => [s.id, s]));
 
+  // **One resolution pass, which is core's contract rather than a fourth one.**
+  // This function used to decide what an assignment row was worth in three
+  // different places: the summary counted every row (`assignments.length`),
+  // `slotUtilization` counted every row naming the slot with no resolution at
+  // all, and the coach loop alone dropped rows whose team or slot was unknown.
+  // `practiceMetrics.js:345-373` makes that decision once -- unknown team,
+  // unknown slot and duplicate `team::slot` are each dropped, then everything
+  // downstream reads what survived -- and that is adopted here.
+  //
+  // Each of the three disagreed with core in a way the cross-arm check
+  // (`tests/scoringEngineDrift.test.js`) now pins:
+  //   * `assignedTeams = assignments.length` counted a team holding two slots
+  //     twice. That is a supported case, not a malformed one -- core has a test
+  //     named "correctly counts teams assigned to multiple slots" -- so ten
+  //     teams with twelve assignments published `unassignedTeams: -2` and
+  //     `coveragePercent: 120`.
+  //
+  //     **Reachable through `fairness-scoring`, not through the hill-climber.**
+  //     `fairness-scoring/index.ts` passes the request's `practice.assignments`
+  //     straight through, so a payload with two rows for one team lands here
+  //     and `practice_coverage` is persisted over 100 against a min-90
+  //     threshold. `auto-scheduler` cannot reach it: `buildState` keeps
+  //     assignments in an `assignmentMap: Map<teamId, slotId>`, so a team can
+  //     never hold two slots there. Stated precisely because an earlier draft
+  //     of this comment blamed the optimizer and would have sent the next
+  //     reader hunting a bug that is not there.
+  //   * `slotUtilization` counted a duplicate row twice and an unknown team's
+  //     row at all, reporting a slot as fuller than core does.
+  //   * the coach loop read duplicates as two distinct practices, so a repeated
+  //     `team::slot` row raised a phantom conflict between a team and itself.
+  //
+  // **Dropping is reported, not just done.** Core pushes a line into
+  // `dataQualityWarnings` for each row it discards; this arm has no such field,
+  // so the equivalent goes into `issues[]`, which is its only output channel.
+  // Filtering without reporting would trade one silent wrong number for a
+  // silent missing one -- before this pass, a row naming an unknown slot at
+  // least inflated `slotUtilization` visibly.
+  const resolvedAssignments: Array<{ teamId: string; slotId: string; team: Team; slot: Slot }> = [];
+  const seenAssignments = new Set<string>();
+  const dataQualityMessages: string[] = [];
+  for (const a of assignments) {
+    const team = teamsById.get(a.teamId);
+    const slot = slotsById.get(a.slotId);
+    if (!team) {
+      dataQualityMessages.push(`assignment references unknown team ${a.teamId}`);
+      continue;
+    }
+    if (!slot) {
+      dataQualityMessages.push(`assignment references unknown slot ${a.slotId}`);
+      continue;
+    }
+    const key = `${a.teamId}::${a.slotId}`;
+    if (seenAssignments.has(key)) {
+      dataQualityMessages.push(`duplicate assignment for team ${a.teamId} to slot ${a.slotId}`);
+      continue;
+    }
+    seenAssignments.add(key);
+    resolvedAssignments.push({ teamId: a.teamId, slotId: a.slotId, team, slot });
+  }
+
+  const totalTeams = teams.length;
+  const assignedTeams = new Set(resolvedAssignments.map((a) => a.teamId)).size;
+  const unassignedTeams = totalTeams - assignedTeams;
+
   const issues: Issue[] = [];
 
+  for (const message of dataQualityMessages) {
+    issues.push({ category: 'data-quality', severity: 'warning', message });
+  }
+
   // 1. Summary Metrics
+  //
+  // **An empty roster is fully covered, not uncovered.** `totalTeams === 0`
+  // used to yield `assignmentRate: 0` and `coveragePercent: 0`, which tripped
+  // the "Low practice assignment coverage: 0.0%" error below and returned
+  // `status: 'action-required'` for an organisation that has nothing to
+  // schedule -- and `fairness-scoring` persisted `practice_coverage: 0`
+  // against a min-90 threshold. Core answers the vacuous case with
+  // `assignmentRate = 1` (`practiceMetrics.js:622`); that contract is adopted
+  // here rather than a second answer to the same question.
   const summary = {
     totalTeams,
     assignedTeams,
     unassignedTeams,
-    assignmentRate: totalTeams > 0 ? assignedTeams / totalTeams : 0,
-    coveragePercent: totalTeams > 0 ? (assignedTeams / totalTeams) * 100 : 0,
+    assignmentRate: totalTeams > 0 ? assignedTeams / totalTeams : 1,
+    coveragePercent: totalTeams > 0 ? (assignedTeams / totalTeams) * 100 : 100,
   };
 
   if (summary.coveragePercent < 90) {
@@ -94,8 +176,14 @@ export function evaluatePracticeSchedule(params: {
   }
 
   // 2. Slot Utilization
-  const slotUtilization = slots.map((slot) => {
-    const assignedInSlot = assignments.filter((a) => a.slotId === slot.id).length;
+  //
+  // Iterated over `slotsById.values()`, not `slots`: two entries sharing an id
+  // are one slot, which is what core's `slotsById` map already made them. From
+  // `slots` this arm published a row per entry and core published one, so the
+  // two disagreed on how many slots exist before they could disagree on any
+  // number in them.
+  const slotUtilization = [...slotsById.values()].map((slot) => {
+    const assignedInSlot = resolvedAssignments.filter((a) => a.slotId === slot.id).length;
     const utilization = slot.capacity > 0 ? assignedInSlot / slot.capacity : null;
 
     if (utilization && utilization > 1.0) {
@@ -137,11 +225,7 @@ export function evaluatePracticeSchedule(params: {
     Array<{ teamId: string; slotId: string; start: Date; end: Date; day: string }>
   >();
 
-  assignments.forEach((a) => {
-    const team = teamsById.get(a.teamId);
-    const slot = slotsById.get(a.slotId);
-    if (!team || !slot) return;
-
+  resolvedAssignments.forEach(({ team, slot, ...a }) => {
     const start = new Date(slot.start);
     const end = new Date(slot.end);
     // `slot.day ?? 'unknown'`, which is what `practiceMetrics.js:582` does.

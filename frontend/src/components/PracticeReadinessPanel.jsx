@@ -197,7 +197,19 @@ export default function PracticeReadinessPanel({
                 // an EMPTY `dataQualityWarnings`, so an unconditional "see
                 // the data-quality notes" sent the reader to nothing in
                 // exactly the branch that matters most.
-                <p className="insight-card__alert-text" role="status">
+                //
+                // The class is `insight-card__empty` on a message that is not
+                // an empty state, which is a naming mismatch and was raised as
+                // one. The only closer-sounding class, `insight-card__alert-text`
+                // (`App.css:149`), is `display: inline-flex` with a `gap` and
+                // no `flex-wrap`, built for an icon plus a short label: this
+                // sentence is many JSX fragments, so each would become its own
+                // non-wrapping flex item with a gap between. It also has no
+                // other user in the repository. Keeping the plain block style
+                // rather than reviving dead CSS into a shape it was not built
+                // for; a properly named class is a design-system change, not
+                // this PR.
+                <p className="insight-card__empty" role="status">
                   Reasons account for {reasonsTotal} team{reasonsTotal === 1 ? '' : 's'}, but{' '}
                   {unassignedTeams} {unassignedTeams === 1 ? 'is' : 'are'} unassigned. The reasons
                   list counts this run&apos;s unassigned entries; the total counts teams with no

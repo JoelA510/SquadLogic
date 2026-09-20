@@ -15,8 +15,12 @@
  * mirror's against the same rows. Parity is therefore transitive through this
  * file rather than claimed by a comment in either.
  *
- * Plain ESM with no imports, because Deno loads it by relative path and
- * `deno test` runs with no read permission.
+ * Plain ESM with no imports, because Deno loads it by relative path. It used
+ * to say "and `deno test` runs with no read permission"; that stopped being
+ * true when the mirror job moved to `scripts/deno-mirror-tests.sh`, which
+ * passes `--allow-read=.` to every file. The no-imports shape is still worth
+ * keeping -- it is what lets both runtimes load this table unchanged -- but
+ * the permission is no longer the reason.
  *
  * @typedef {Object} CoachIdentityParityCase
  * @property {string} label - names the branch, so a failure says which one drifted

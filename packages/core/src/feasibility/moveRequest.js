@@ -416,6 +416,29 @@ function judgeLeg(context, holding, at, world, meta) {
     probe.findings,
     `"${holding.id}" at ${at.date} ${at.surfaceId} ${at.kickoffMinutes}`
   );
+  // **Rule 4, on every leg — including a counterparty's.** A registry
+  // constraint that governs this position and that no rule in the run enforces
+  // turns a would-be `feasible` into `unknown` naming it. It lived in
+  // `judgeCandidate()` for one draft, which asked it of the subject and never
+  // of the party being asked to move: a swap could then be admitted as "legal
+  // for both parties" with one side's governing constraints unasked, which is
+  // the declared-is-not-enforced shape wearing a two-sided answer's clothes.
+  // Asking it here, where a position is judged, is what makes the module
+  // header's claim about this function true of every leg.
+  absorbUnknowns(
+    unknowns,
+    unenforcedGoverningConstraints(
+      context.verification,
+      context.engines.registry,
+      scopeContextOf(context.engines.graph, {
+        date: at.date,
+        surfaceId: at.surfaceId,
+        venueId: venueIdOf(context, at.surfaceId),
+        divisionLabel: holding.divisionLabel ?? null,
+      }),
+      meta
+    )
+  );
   const binding = boundsOf(
     context.engines,
     probe.result,
@@ -523,7 +546,7 @@ function ownCommitmentClash(subject, holdings, window, lift, meta) {
  * @param {ReadonlyArray<{ holding: Object, to: { date: string, surfaceId: string, venueId: string|null, startMinutes: number } }>} moves
  * @param {Object|null} venueComplexes
  * @param {import('./types.js').FeasibilityMeta} meta
- * @returns {{ ok: boolean, introduced: Array<{ code: string, severity: string, message: string }>, peopleCount: number }}
+ * @returns {{ ok: boolean, introduced: Array<{ code: string, severity: string, message: string, personId: string|null }>, peopleCount: number }}
  */
 function projectTravelForMoves(context, commitments, moves, venueComplexes, meta) {
   /** @type {Map<string, Object>} */
@@ -570,7 +593,7 @@ function projectTravelForMoves(context, commitments, moves, venueComplexes, meta
 
   /** @type {Record<string, number>} */
   const budget = { ...tallyByCode(before.findings) };
-  /** @type {Array<{ code: string, severity: string, message: string }>} */
+  /** @type {Array<{ code: string, severity: string, message: string, personId: string|null }>} */
   const introduced = [];
   for (const finding of after.findings) {
     if ((budget[finding.code] ?? 0) > 0) {
@@ -578,13 +601,45 @@ function projectTravelForMoves(context, commitments, moves, venueComplexes, meta
       continue;
     }
     if (finding.severity === CONSTRAINT_SEVERITY.INFO) continue;
+    // **Whose day this is, by identity rather than by code.**
+    // `evaluateCoachTravel()` returns each transition's findings by reference
+    // in the flat list, so the owning transition — and therefore the person —
+    // is found exactly; `queries.js` `projectTravel()` makes the same lookup
+    // for the same reason, and warns that a code match would attach a
+    // scan-level finding to whichever transition happened to share its code.
+    //
+    // A move-request exchange moves **two** parties at once, so "whose day got
+    // worse" is a real question here in a way it is not for a one-sided move:
+    // without it, a venue hop introduced for the *subject's* coach is charged
+    // to the counterparty, and the club tells one family that another is
+    // giving something up when it is not. A finding no transition owns keeps
+    // `personId: null` and is charged to neither.
+    const transition = after.transitions.find((entry) => entry.findings.includes(finding)) ?? null;
     introduced.push({
       code: String(finding.code),
       severity: String(finding.severity),
       message: String(finding.message),
+      personId: transition === null ? null : String(transition.personId),
     });
   }
   return { ok: true, introduced, peopleCount: personIds.size };
+}
+
+/**
+ * The people a holding commits, from the one commitment index.
+ *
+ * @param {{ rows: Object[], idsByHolding: Map<string, string[]> }} commitments
+ * @param {Object} holding
+ * @returns {Set<string>}
+ */
+function peopleOf(commitments, holding) {
+  const ids = new Set(commitments.idsByHolding.get(holding.id) ?? []);
+  /** @type {Set<string>} */
+  const people = new Set();
+  for (const row of commitments.rows) {
+    if (ids.has(row.id)) people.add(row.personId);
+  }
+  return people;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -597,10 +652,19 @@ function projectTravelForMoves(context, commitments, moves, venueComplexes, meta
  * Two judgements of the *same* counterparty in the *same* world — both parties
  * lifted, both times — one at the slot it holds and one at the subject's. What
  * it would lose is the codes above `info` that the second raises and the first
- * does not, plus the travel codes the exchange introduces for its coaches.
- * Comparing against the counterparty's own standing position rather than against
- * nothing is what stops a party that already has a tight afternoon being charged
- * for it.
+ * does not, plus the travel codes the exchange introduces **for its own
+ * people**. Comparing against the counterparty's own standing position rather
+ * than against nothing is what stops a party that already has a tight afternoon
+ * being charged for it.
+ *
+ * **`travelIntroduced` is already filtered to this party when it arrives**, and
+ * it must be. A move-request exchange moves two parties at once, so
+ * `projectTravelForMoves()` returns the regressions of *both* — and charging
+ * the whole list here made the subject's own coach's venue hop appear in the
+ * counterparty's cost, dropping the class from `free_swap_available` to
+ * `zero_sum_only` and naming the counterparty as the holder losing an
+ * objective it never had. `judgeSwap()` partitions the list by the owning
+ * transition's person before calling this.
  *
  * The **objective** is the constraint that claims the code, and it takes **two**
  * lookups because this corpus's registry answers in two ways. Facility and
@@ -895,9 +959,19 @@ export function analyseMoveRequest(context, rawQuery, options = {}) {
   // **Ground the club holds inside this window that the grid does not offer.**
   // `reserve/capacity.js` reports the same thing about its own reservations as
   // `RESERVED_SLOT_OFF_GRID`, and it matters here for a reason that is this
-  // module's own: a holder at a minute no candidate stands on was never
-  // considered as a swap counterparty, so an answer that said "no swap
-  // available" would be describing the cadence rather than the season.
+  // module's own: the subject cannot be *placed* at a minute no candidate
+  // stands on, so a holder sitting at one was never reachable as an exchange
+  // at its own time, and an answer that said "no swap available" would be
+  // describing the cadence rather than the season.
+  //
+  // **Holders the grid did reach by overlap are excluded, and the exclusion is
+  // the point.** A holding at 09:30 on a 60-minute cadence overlaps the 09:00
+  // candidate, becomes its occupant, and *is* considered for a swap there. The
+  // first draft of this finding named it anyway and said "no swap with them
+  // was considered", contradicting the swap for it one field away.
+  const reachedAsOccupant = new Set(
+    answer.feasibleSlots.flatMap((slot) => [...slot.occupantIds, ...slot.undecidableOccupantIds])
+  );
   const windowDates = new Set(capacity.dates.map((dateRow) => dateRow.date));
   const windowSurfaces = new Set(surfaceIds);
   const offGrid = holdings.all.filter(
@@ -905,16 +979,19 @@ export function analyseMoveRequest(context, rawQuery, options = {}) {
       holding.id !== subject.id &&
       windowDates.has(holding.date) &&
       windowSurfaces.has(holding.surfaceId) &&
+      !reachedAsOccupant.has(holding.id) &&
       !gridKeys.has(capacitySlotId(holding.date, holding.surfaceId, holding.startMinutes))
   );
   if (offGrid.length > 0) {
     findings.push(
       makeFeasibilityFinding(
         FEASIBILITY_REASON.MOVE_REQUEST_OFF_CAPACITY_GRID,
-        `${offGrid.length} holding(s) stand on this window's ground at a minute the capacity grid does not generate (${offGrid
+        `${offGrid.length} holding(s) stand on this window's ground at a minute the capacity grid does not generate and overlap no candidate it does (${offGrid
           .map((holding) => holding.id)
           .sort()
-          .join(', ')}), so no swap with them was considered`,
+          .join(
+            ', '
+          )}), so the ground they hold was never offered and no exchange with them was considered`,
         {
           entityId: subject.id,
           holdingIds: offGrid.map((holding) => holding.id).sort(),
@@ -947,8 +1024,37 @@ export function analyseMoveRequest(context, rawQuery, options = {}) {
   // list. The property it was meant to state is pinned as an invariant over
   // real answers instead — *no feasible slot has an undecidable occupant* —
   // where making the unknown non-verdict-bearing turns the test red.
+  //
+  // **And the subject's own position is not a vacancy.** `occupantsAt()` skips
+  // the subject, so the slot it already stands on comes back feasible and
+  // unoccupied — and a window that happens to contain it would otherwise
+  // classify `vacancy_available`, the club answering *"yes, there is free
+  // ground"* and offering the fixture the position it already holds. That is
+  // `canGameMove()`'s no-op in a different shape, and it is reported the way
+  // `canTeamPlay()` reports the same cell: as a fact, with
+  // `FEASIBILITY_POSITION_ALREADY_HELD`, rather than as an offer.
+  const heldSlotId = capacitySlotId(subject.date, subject.surfaceId, subject.startMinutes);
+  const standingPosition = answer.feasibleSlots.find((slot) => slot.slotId === heldSlotId) ?? null;
+  if (standingPosition !== null) {
+    findings.push(
+      makeFeasibilityFinding(
+        FEASIBILITY_REASON.FEASIBILITY_POSITION_ALREADY_HELD,
+        `the window includes the position "${subject.id}" already holds (${subject.date} ${subject.surfaceId} at minute ${subject.startMinutes}), which is reported as a candidate and is not offered as a vacancy`,
+        {
+          entityId: subject.id,
+          slotId: heldSlotId,
+          date: subject.date,
+          surfaceId: subject.surfaceId,
+          kickoffMinutes: subject.startMinutes,
+        }
+      )
+    );
+  }
   answer.vacancies = answer.feasibleSlots.filter(
-    (slot) => slot.verdict === FEASIBILITY_VERDICT.FEASIBLE && slot.occupantIds.length === 0
+    (slot) =>
+      slot.verdict === FEASIBILITY_VERDICT.FEASIBLE &&
+      slot.occupantIds.length === 0 &&
+      slot.slotId !== heldSlotId
   );
   answer.counts.vacancies = answer.vacancies.length;
 
@@ -987,6 +1093,26 @@ export function analyseMoveRequest(context, rawQuery, options = {}) {
         )
       );
     }
+    if (swap.unattributedTravelCodes.length > 0) {
+      // A travel finding no transition owns names no person, so the exchange
+      // cannot say whose day it worsens — and charging it to the counterparty
+      // would name the wrong family. It is stated in this module's own
+      // vocabulary instead, exactly as `canGameMove()` states the same class of
+      // record, because it is evidence about the exchange that would otherwise
+      // be visible nowhere.
+      findings.push(
+        makeFeasibilityFinding(
+          FEASIBILITY_REASON.FEASIBILITY_EVIDENCE_UNCLAIMED,
+          `exchanging "${subject.id}" with "${counterparty.id}" introduces ${swap.unattributedTravelCodes.join(', ')}; no coach transition owns it, so it names no person and is charged to neither party — it is stated here because it is a consequence of the exchange either way`,
+          {
+            entityId: subject.id,
+            counterpartyId: counterparty.id,
+            source: 'coach-travel',
+            codes: [...swap.unattributedTravelCodes],
+          }
+        )
+      );
+    }
   }
   answer.counts.swapsAdmissible = answer.swaps.length;
   answer.counts.swapsFree = answer.swaps.filter((swap) => swap.free).length;
@@ -1014,6 +1140,21 @@ export function analyseMoveRequest(context, rawQuery, options = {}) {
   }
 
   if (answer.counts.candidatesOnGrid === 0) {
+    // **An empty search must never come back `feasible`.** The finding alone
+    // was not enough: `seal()` derives the verdict from the blockers and the
+    // `blocked` flag, both of which are empty here, so an unreachable window
+    // sealed `feasible` / `clean` beside a `rejected` status — the falsely
+    // perfect result in miniature. `canTeamPlay()` meets the same case with an
+    // unknown and the comment *"the one thing it must never say is yes"*; this
+    // is that unknown, in the same place, for the same reason.
+    unknowns.push(
+      makeUnknown(
+        FEASIBILITY_REASON.FEASIBILITY_QUERY_VACUOUS,
+        `every position "${subject.id}" could take in this window`,
+        'the window produced no candidate position at all, so there is nothing this answer can be true of',
+        { details: { entityId: subject.id } }
+      )
+    );
     findings.push(
       makeFeasibilityFinding(
         FEASIBILITY_REASON.FEASIBILITY_QUERY_VACUOUS,
@@ -1055,26 +1196,9 @@ function judgeCandidate(context, work) {
   const leg = judgeLeg(context, subject, at, { lift, bookings: allBookings }, meta);
 
   /** @type {import('./types.js').FeasibilityUnknown[]} */
+  // Rule 4 arrives inside `leg.unknowns`; `judgeLeg()` asks it of every
+  // position it judges, so the counterparty's leg cannot escape it.
   const slotUnknowns = [...leg.unknowns, ...occupancy.unknowns];
-  // **Rule 4, at every candidate.** A registry constraint that governs this
-  // position and that no rule in the run enforces turns a would-be `feasible`
-  // into `unknown` naming the constraint — `canGameMove()`'s guarantee, asked
-  // here through the same function and the same scope builder rather than a
-  // second reading of the registry.
-  absorbUnknowns(
-    slotUnknowns,
-    unenforcedGoverningConstraints(
-      context.verification,
-      context.engines.registry,
-      scopeContextOf(context.engines.graph, {
-        date: at.date,
-        surfaceId: at.surfaceId,
-        venueId: venueIdOf(context, at.surfaceId),
-        divisionLabel: subject.divisionLabel ?? null,
-      }),
-      meta
-    )
-  );
   const clash = ownCommitmentClash(
     subject,
     holdings.all,
@@ -1366,12 +1490,39 @@ function judgeSwap(context, work) {
     ]);
   }
 
+  // **Whose day got worse, partitioned before anything is priced.** The
+  // projection above moved both parties, so its findings belong to both; only
+  // the counterparty's reach the counterparty's cost. The subject's are carried
+  // on the swap in their own field — they are a real consequence of the
+  // exchange and the requesting family should see them — and a finding no
+  // transition owns names no person, so it is charged to neither and published
+  // as `FEASIBILITY_EVIDENCE_UNCLAIMED` rather than silently dropped.
+  const counterpartyPeople = peopleOf(commitments, counterparty);
+  const subjectPeople = peopleOf(commitments, subject);
+  const counterpartyTravel = travel.introduced.filter(
+    (finding) => finding.personId !== null && counterpartyPeople.has(finding.personId)
+  );
+  const subjectTravelCodes = [
+    ...new Set(
+      travel.introduced
+        .filter((finding) => finding.personId !== null && subjectPeople.has(finding.personId))
+        .map((finding) => finding.code)
+    ),
+  ].sort();
+  const unattributedTravelCodes = [
+    ...new Set(
+      travel.introduced
+        .filter((finding) => finding.personId === null)
+        .map((finding) => finding.code)
+    ),
+  ].sort();
+
   const cost = costOfSwap(
     context.engines,
     work.travelObjectiveByCode,
     counterAtSubject,
     counterAtOwn,
-    travel.introduced
+    counterpartyTravel
   );
 
   return {
@@ -1397,6 +1548,8 @@ function judgeSwap(context, work) {
     },
     cost,
     free: cost.free,
+    subjectTravelCodes,
+    unattributedTravelCodes,
     unknowns: swapUnknowns,
   };
 }

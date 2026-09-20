@@ -980,6 +980,135 @@ describe('move request :: undecidable is neither free nor taken', () => {
       )
     ).toBe(true);
     expect(answer.status).toBe(FEASIBILITY_STATUS.REJECTED);
+    // **And the one thing an empty search must never say is yes.** The finding
+    // alone left the verdict `feasible` and the tightness `clean` beside a
+    // `rejected` status, because `seal()` derives a verdict from blockers and a
+    // blocked flag that an unreachable window leaves empty. The unknown is what
+    // makes the two channels agree.
+    expect(answer.verdict).toBe(FEASIBILITY_VERDICT.UNKNOWN);
+    expect(answer.tight).toBeNull();
+    expect(
+      answer.unknowns.some((entry) => entry.code === FEASIBILITY_REASON.FEASIBILITY_QUERY_VACUOUS)
+    ).toBe(true);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* What the answer must not offer, and what it must not charge for             */
+/* -------------------------------------------------------------------------- */
+
+describe('move request :: the position already held is not an offer', () => {
+  it('reports the subject\u2019s own slot as a candidate and never as a vacancy', () => {
+    // `occupantsAt()` skips the subject, so its own slot comes back feasible
+    // and unoccupied. A window containing it would otherwise classify
+    // `vacancy_available` \u2014 the club answering "yes, there is free ground"
+    // and offering the fixture the position it already holds.
+    const answer = askSubject([practiceAt('practice:subject', 9 * 60)], {
+      earliest: 9 * 60,
+      latest: 9 * 60,
+    });
+    const held = capacitySlotId(AUG_22, BROOKSIDE_1, 9 * 60);
+    expect(answer.feasibleSlots.map((slot) => slot.slotId)).toEqual([held]);
+    expect(answer.feasibleSlots[0].verdict).toBe(FEASIBILITY_VERDICT.FEASIBLE);
+    expect(answer.feasibleSlots[0].occupantIds).toEqual([]);
+    // …and it is not offered.
+    expect(answer.vacancies).toEqual([]);
+    expect(answer.classification).toBe(MOVE_REQUEST_CLASS.INFEASIBLE);
+    expect(
+      answer.findings.some(
+        (finding) => finding.code === FEASIBILITY_REASON.FEASIBILITY_POSITION_ALREADY_HELD
+      )
+    ).toBe(true);
+  });
+
+  it('**the break**: the neighbouring minute, which it does not hold, is offered', () => {
+    // The control. Without it, "no vacancy here" would also be true of a
+    // module that offered nothing at all.
+    const answer = askSubject([practiceAt('practice:subject', 9 * 60)], {
+      earliest: 8 * 60,
+      latest: 8 * 60,
+    });
+    expect(answer.counts.vacancies).toBe(1);
+    expect(answer.classification).toBe(MOVE_REQUEST_CLASS.VACANCY_AVAILABLE);
+    expect(
+      answer.findings.some(
+        (finding) => finding.code === FEASIBILITY_REASON.FEASIBILITY_POSITION_ALREADY_HELD
+      )
+    ).toBe(false);
+  });
+});
+
+describe('move request :: a counterparty is charged only for its own people', () => {
+  const subject = schedule.games.find(
+    (game) => game.format === '7v7' && game.date === '2026-10-03'
+  );
+  const answer = analyseMoveRequest(
+    context,
+    {
+      entityKind: MOVE_REQUEST_ENTITY.GAME,
+      entityId: subject.id,
+      dates: [subject.date],
+      surfaceIds: [],
+      cadenceMinutes: 60,
+      earliestKickoffMinutes: 8 * 60,
+      latestKickoffMinutes: 19 * 60,
+    },
+    { venueComplexes }
+  );
+
+  it('partitions the exchange\u2019s travel regressions by the person who owns them', () => {
+    // A move-request exchange moves two parties at once, so
+    // `projectTravelForMoves()` returns both parties' regressions. Charging the
+    // whole list to the counterparty made the subject's own coach's venue hop
+    // read as something the *other* family gives up, and named them in
+    // `zeroSum.holderIds` for it.
+    let costedSomething = 0;
+    for (const swap of answer.swaps) {
+      // Nothing is in two places: a code charged to the counterparty is not
+      // simultaneously reported as the subject's.
+      for (const code of swap.cost.codes) {
+        expect(swap.subjectTravelCodes).not.toContain(code);
+      }
+      for (const code of swap.subjectTravelCodes) {
+        expect(swap.cost.codes).not.toContain(code);
+      }
+      if (swap.cost.codes.length > 0) costedSomething += 1;
+    }
+    // Meta-assertion: a sweep in which nothing was ever charged would make the
+    // partition above true of an empty set.
+    expect(costedSomething).toBeGreaterThan(0);
+  });
+
+  it('names every holder in the zero-sum roll-up as a party that really loses something', () => {
+    const costly = answer.swaps.filter((swap) => !swap.free);
+    expect(new Set(answer.zeroSum.objectives.flatMap((entry) => entry.holderIds))).toEqual(
+      new Set(costly.map((swap) => swap.counterpartyId))
+    );
+    for (const swap of costly) {
+      expect(swap.cost.codes.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('move request :: rule 4 is asked of both parties', () => {
+  it('asks the unenforced-constraint sweep once per leg, not once per subject', () => {
+    // `unenforcedGoverningConstraints()` increments `registryConstraintsTested`
+    // for every record it judges, so the counter is how many legs were swept.
+    // It lived in the subject's path for one draft, which admitted swaps as
+    // "legal for both parties" with one side's governing constraints unasked.
+    const practices = [
+      practiceAt('practice:subject', 17 * 60),
+      practiceAt('practice:holder-0', 8 * 60),
+    ];
+    const answer = askSubject(practices, { earliest: 8 * 60, latest: 8 * 60 });
+    expect(answer.counts.swapsAdmissible).toBe(1);
+    // One candidate plus the swap's two counterparty legs is three sweeps, and
+    // the corpus's two unenforced constraints are judged on each.
+    const perSweep = 2;
+    expect(answer.meta.registryConstraintsTested).toBe(3 * perSweep);
+    // Meta-assertion: a corpus with no unenforced constraint would make the
+    // count zero and the comparison vacuous.
+    expect(perSweep).toBe(verification.coverage.unenforcedConstraintIds.length);
   });
 });
 
@@ -1068,19 +1197,34 @@ describe('move request :: the subject and the query', () => {
     ).toBe(false);
   });
 
-  it('reports ground inside the window that the cadence does not offer', () => {
-    // A holder at a minute the grid does not generate was never considered as a
-    // counterparty, and saying "no swap available" without saying so would be
-    // describing the cadence rather than the season.
+  it('reports ground inside the window that the cadence never offered', () => {
+    // A holder at a minute the grid does not generate, and overlapping no
+    // candidate it does, was never reachable as an exchange; saying "no swap
+    // available" without saying so would be describing the cadence rather than
+    // the season.
+    //
+    // **And a holder the grid did reach by overlap is not named.** 09:30 on a
+    // 60-minute cadence overlaps the 09:00 candidate and becomes its occupant,
+    // so an exchange with it *was* considered — the first draft of this finding
+    // named it anyway and contradicted the swap sitting one field away.
     const answer = askSubject(
-      [practiceAt('practice:subject', 8 * 60), practiceAt('practice:odd', 9 * 60 + 30)],
+      [
+        practiceAt('practice:subject', 8 * 60),
+        practiceAt('practice:overlapping', 9 * 60 + 30),
+        practiceAt('practice:unreachable', 11 * 60 + 30),
+      ],
       { earliest: 9 * 60, latest: 10 * 60 }
     );
     const offGrid = answer.findings.find(
       (finding) => finding.code === FEASIBILITY_REASON.MOVE_REQUEST_OFF_CAPACITY_GRID
     );
     expect(offGrid).toBeDefined();
-    expect(offGrid.details.holdingIds).toContain('practice:odd');
+    expect(offGrid.details.holdingIds).toContain('practice:unreachable');
+    expect(offGrid.details.holdingIds).not.toContain('practice:overlapping');
+    // The premise of the second half: the overlapping holder really was reached.
+    expect(answer.feasibleSlots.flatMap((slot) => slot.occupantIds)).toContain(
+      'practice:overlapping'
+    );
   });
 
   it('parses its window strictly, and refuses an empty one', () => {

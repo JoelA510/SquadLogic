@@ -294,9 +294,16 @@
  * @property {string} counterpartyKind - a `MOVE_REQUEST_ENTITY` value
  * @property {{ verdict: string, tight: string|null, binding: FeasibilityBound[], marginMinutes: number|null, marginBasis: string|null }} subjectLeg
  * @property {{ verdict: string, tight: string|null, binding: FeasibilityBound[], marginMinutes: number|null, marginBasis: string|null }} counterpartyLeg
- * @property {MoveRequestCost} cost
+ * @property {MoveRequestCost} cost - the **counterparty's**, and only its own
  * @property {boolean} free - `cost.free`, carried so that `classifyMoveRequest()`
  *   reads one field rather than reaching into a nested one
+ * @property {string[]} subjectTravelCodes - what the exchange introduces for
+ *   the **subject's** own people. A real consequence of the swap and not the
+ *   counterparty's cost: folding the two together charged one family for the
+ *   other's coach's drive and named it in `zeroSum.holderIds`
+ * @property {string[]} unattributedTravelCodes - introduced travel findings that
+ *   no transition owns, so they name no person and are charged to neither
+ *   party; reported as `FEASIBILITY_EVIDENCE_UNCLAIMED` rather than dropped
  * @property {FeasibilityUnknown[]} unknowns
  */
 

@@ -4436,3 +4436,95 @@ The auto-scheduler apply path writes `scheduler_runs.results` as
 `summary.unassignedTeams` — renders from seeded and mock data and is **absent
 for every run applied through the auto-scheduler**. Filed separately rather than
 widened into this PR.
+
+## #411 — the first review round of this phase with nothing in it
+
+Merged `a7d2515`. Three live dashboard defects, zero supervisor findings, and
+the sixth wrong brief — this time wrong only in its coordinates.
+
+### The brief's line numbers were all stale, and the mechanism is new
+
+Every line number given for `WorkflowPage.jsx` was correct at `edf4162` and
+wrong at `ab235c7`, the commit the brief targeted. #407 added 48 lines to that
+file, moving `:64` to `:98` and `:206` to `:240`. The supervisor had read those
+numbers earlier in the session and reused them in a brief written after the tree
+moved.
+
+This is distinct from the two mechanisms already recorded. It is not a scan
+returning zero, and not a truncating window. It is **coordinates that were true
+when read and were not re-read after the tree moved** — the same family as
+telling an agent `main` had moved when only a branch had.
+
+Rule: cite a line number only from a read performed at the commit the brief
+targets, and name that commit in the brief.
+
+Worth stating precisely, because the distinction matters for how much weight to
+put on it: **every defect in the brief was real and confirmed.** The brief was
+navigationally wrong and diagnostically right. That is a smaller failure than
+#407's, which prescribed a fix that would have shipped.
+
+### The agent corrected the diagnosis upward
+
+The brief framed defect C as "#407's KPI card cannot render". The panel also
+reads `unassignedByReason` and `dataQualityWarnings`, and the old payload
+carried neither: **the whole panel was empty for every applied run.** Pinned by
+a test that enumerates the panel's reads from the panel's own source and shows
+the old payload supplies none of them.
+
+It also settled the "which side is wrong" question harder than the brief could:
+the **game sibling already wrote `results.summary`**, so three of four sides plus
+the twin arm agreed and the practice writer was the lone outlier. Verified
+independently at `GameSchedulingPage.jsx:835-843`.
+
+### A second reason the obvious fix was wrong, which the brief did not have
+
+The brief rejected hoisting `evaluation.summary` on one ground: wrong arm. The
+agent found a second, independent one. **It is also the wrong schedule.**
+`evaluation` measures the auto-scheduler's raw proposal, not the
+`reviewAssignments` being persisted — `handleToggleLock` and
+`handleStageManualAssignment` both edit afterwards, and the latter needs no
+auto-scheduler run at all, so on that path `evaluation` is `null` and there is
+nothing to hoist. A measurement of one schedule stored as the results of another
+would have been a new hollow guarantee replacing the old one.
+
+### A guard nobody asked for
+
+`/code-review` found that an empty roster makes the core evaluator return a
+**falsely perfect** report — `unassignedTeams: 0` in the `good` tone over a run
+whose assignments were all silently dropped — and that the state is reachable,
+because `teams` is empty while the summary is in flight, after it errors, and on
+cold start. Detected from the engine's own `assignmentsRead` /
+`assignmentsCounted` rather than guessed from the inputs, routed to
+`metricsUnavailable`, and **surfaced to the operator** rather than written to a
+JSON column nobody reads.
+
+### Two things the supervisor verified that strengthened the agent's case
+
+- `LoadingScreen` is not orphaned by removing its only `WorkflowPage` use — and
+  `App.jsx:111` already wraps the lazy routes in `<Suspense fallback={<LoadingScreen />}>`,
+  so a page-level screen inside `WorkflowPage` would have been a second one
+  behind an existing one. A better argument than the one the agent made.
+- The new util follows the existing convention exactly: there is no
+  `packages/core/src/utils/index.js` and every sibling is imported by file, so
+  the Definition of Done's export-registration item does not apply.
+
+### An elapsed-time claim measured against the wrong start — twice, from both sides
+
+The agent reported the CI test step "stuck ~85 minutes" against 125 seconds
+locally and suggested a re-run. The job had been running **four minutes**; its
+own runtime was about fifty, which is what it appears to have measured. Build &
+Test then completed in 11m24s, the normal baseline. Acting on the report would
+have re-run a healthy job.
+
+The supervisor made the identical error earlier in this phase, nearly flagging
+#407's five-minute run as twenty-eight. Same shape, both directions:
+**an elapsed time computed against the wrong start.** Read the job's own
+`started_at`, and read the clock, before calling anything stuck.
+
+### The agent was left spinning, and that is a supervisor cost too
+
+After handing back, the agent re-notified five times with `tool_uses` frozen at
+205 and its token count climbing — a watcher loop with no progress. Its work was
+complete: PR open, report delivered, review done. It was stopped. A finished
+agent left running is the resource waste this project has already had one
+standing instruction about.

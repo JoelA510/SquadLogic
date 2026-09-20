@@ -310,7 +310,17 @@ export default function TeamAnalysisPage() {
   // deliberately renders its `generatedAt` on the viewer's clock and no longer
   // declares the prop. `useDashboardData` does not return a `timezone` either,
   // so the binding was `undefined` in every render this page has ever had.
-  const { team, loading, error: _error } = useDashboardData();
+  // `useDashboardData` also returns an `error` now (it used to swallow all
+  // three fetch failures). It is deliberately NOT destructured here: this page
+  // has no data-error surface to put it on. `validationErrors` below is a
+  // pre-generation gate — "select a program", "missing roster" — and a
+  // transient RLS refusal on the *last team run* is not a reason to block
+  // generating teams, so pushing it there would be the wrong answer rather
+  // than a partial one. Binding it to `_error` and discarding it is the
+  // reads-as-load-bearing-and-is-not shape this PR removes elsewhere, so it is
+  // not bound at all. Giving this page (and `PracticeSchedulingPage`,
+  // `GameSchedulingPage`, `ExportsPage`) a real error surface is its own unit.
+  const { team, loading } = useDashboardData();
   const {
     persistenceSnapshot,
     loading: persistenceLoading,

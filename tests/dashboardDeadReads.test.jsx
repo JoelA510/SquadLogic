@@ -49,7 +49,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import { renderHook } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { evaluatePracticeSchedule } from '@squadlogic/core/practiceMetrics.js';
@@ -71,7 +71,25 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
  * below could not tell a fixed panel from a broken one.
  */
 const COMPLETED_AT = '2026-03-04T02:30:00Z';
-const SEASON_TZ = 'America/Los_Angeles';
+
+/**
+ * A season zone that this host reads the instant above differently from.
+ *
+ * Every assertion below is "it rendered the viewer's date, not the season's",
+ * so a season zone that happens to equal the runner's own zone would make the
+ * two strings identical and every one of them would pass over a completely
+ * unfixed component. Hard-coding one zone bought that silence on any
+ * contributor whose machine sat in it -- `vitest.config.js` pins no `TZ`, so
+ * the runner's zone is whatever the machine has.
+ *
+ * The zone is therefore chosen against the host at load time, from candidates
+ * spread far enough around the clock that no single host zone can collide with
+ * all of them. `undefined` here is a loud failure in the precondition test
+ * below, never a skipped assertion.
+ */
+const SEASON_TZ = ['America/Los_Angeles', 'Asia/Tokyo', 'Pacific/Kiritimati', 'Etc/GMT+12'].find(
+  (zone) => formatDate(COMPLETED_AT, zone) !== formatDate(COMPLETED_AT)
+);
 
 /** The real engine report a practice run persists into `scheduler_runs.results`. */
 function engineReport({ assignedCount = 3, unassignedCount = 2 } = {}) {
@@ -117,6 +135,7 @@ describe('the two zones a run timestamp could be read on are distinguishable her
     // A and B were the same string in this environment the tests would pass
     // over a completely unfixed component. This is the precondition that makes
     // them capable of failing, so it fails loudly rather than being assumed.
+    expect(SEASON_TZ).toBeDefined();
     expect(formatDate(COMPLETED_AT)).not.toBe(formatDate(COMPLETED_AT, SEASON_TZ));
   });
 });
@@ -485,6 +504,44 @@ describe('WorkflowPage shows the dashboard error it is now given', () => {
     expect(screen.queryByText(/permission denied/)).toBeNull();
     // ...and the page really rendered, so the absence is not an empty DOM.
     expect(screen.getByRole('heading', { name: 'Season Setup Workflow' })).toBeTruthy();
+  });
+
+  it('clears the banner when the fetch recovers, rather than latching it open', () => {
+    // `useTeamSummary` re-polls every 2s while a run is `running`. One failed
+    // poll followed by a successful one must not leave a red banner over a
+    // loaded dashboard. The old single `useState` + set-only effect did
+    // exactly that, and it was unreachable only because `dataError` was
+    // permanently `undefined`.
+    runState.error = new Error('permission denied for table scheduler_runs');
+    const { rerender } = renderPage();
+    expect(screen.getByText(/permission denied/)).toBeTruthy();
+
+    runState.error = null;
+    rerender(
+      <MemoryRouter>
+        <WorkflowPage />
+      </MemoryRouter>
+    );
+
+    expect(screen.queryByText(/permission denied/)).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Season Setup Workflow' })).toBeTruthy();
+  });
+
+  it('dismisses on demand, and a different failure afterwards still opens', () => {
+    runState.error = new Error('permission denied for table scheduler_runs');
+    const { rerender } = renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+    expect(screen.queryByText(/permission denied/)).toBeNull();
+
+    // A dismissal must silence the message that was dismissed, not the
+    // banner for good.
+    runState.error = new Error('network request failed');
+    rerender(
+      <MemoryRouter>
+        <WorkflowPage />
+      </MemoryRouter>
+    );
+    expect(screen.getByText(/network request failed/)).toBeTruthy();
   });
 });
 

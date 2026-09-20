@@ -33,18 +33,34 @@ export default function WorkflowPage() {
   const { importedData, setImportedData } = useImport();
   const { theme: _theme } = useTheme();
   const { currentOrganization } = useOrganization();
-  const [error, setError] = useState(dataError);
+  // The banner has two sources with different lifetimes, and collapsing them
+  // into one `useState` made it a one-way latch: the old effect only ever
+  // called `setError`, never cleared it. That was harmless while `dataError`
+  // was permanently `undefined` and is not now. `useTeamSummary` re-polls
+  // every 2s while a run is `running`, so one failed poll followed by a
+  // successful one would leave a red "permission denied" banner over a fully
+  // loaded dashboard until the operator dismissed it by hand.
+  //
+  // `dataError` is therefore *live* state — it disappears when the fetch
+  // recovers — while a navigation error is a one-shot message that stays
+  // until dismissed. Dismissing a data error records which message was
+  // dismissed, so a different failure afterwards still opens the banner.
+  const [navError, setNavError] = useState(null);
+  const [dismissedDataError, setDismissedDataError] = useState(null);
   const [activeStep, setActiveStep] = useState(1);
 
   const location = useLocation();
 
-  useEffect(() => {
-    if (dataError) setError(dataError);
-  }, [dataError]);
+  const error = navError ?? (dataError === dismissedDataError ? null : dataError);
+
+  const dismissError = () => {
+    if (navError) setNavError(null);
+    else setDismissedDataError(dataError);
+  };
 
   useEffect(() => {
     if (location.state?.error) {
-      setError(location.state.error);
+      setNavError(location.state.error);
     }
   }, [location.state]);
 
@@ -81,7 +97,8 @@ export default function WorkflowPage() {
         <div className="bg-red-500/10 border border-red-500 text-red-500 p-4 rounded-md mb-4 flex justify-between items-center">
           <span>{error}</span>
           <button
-            onClick={() => setError(null)}
+            onClick={dismissError}
+            aria-label="Dismiss error"
             className="text-red-500 hover:text-red-700 font-bold"
           >
             ✕

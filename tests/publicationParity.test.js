@@ -280,6 +280,41 @@ describe('publication :: the seam exists, and nothing stores through it', () => 
     expect(readBack.meta.snapshotRowsFrozen).toBe(snapshot.rowCount);
   });
 
+  it('does not report a read as a publication event', () => {
+    const readBack = readPublicationSnapshot(serialisePublicationSnapshot(seamSnapshot()));
+    // `mergePublicationMeta()` folds every counter additively, so a Stage 2
+    // caller loading N stored snapshots into one run would report N
+    // publications that never happened - each with a finding naming who
+    // published what, when and where. An audit trail synthesised from a disk
+    // read is exactly what this package refuses elsewhere.
+    expect(readBack.meta.snapshotsCreated).toBe(0);
+    expect(codesOf(readBack.findings)).not.toContain(PUBLICATION_REASON.SNAPSHOT_CREATED);
+    // The provenance that is still true on a read is still emitted.
+    expect(codesOf(readBack.findings)).toContain(PUBLICATION_REASON.SNAPSHOT_IN_MEMORY_ONLY);
+    // And the constructor, which really did publish, still says so.
+    expect(codesOf(makePublicationSnapshot(seamInput).findings)).toContain(
+      PUBLICATION_REASON.SNAPSHOT_CREATED
+    );
+    expect(makePublicationSnapshot(seamInput).meta.snapshotsCreated).toBe(1);
+  });
+
+  it('refuses to write a document it would refuse to read', () => {
+    // `{ ...snapshot, rows }` is the idiom `verifySnapshotDigest()`'s own
+    // docstring invites, and the schema cannot see it: the document would be
+    // structurally perfect and carry a digest for rows that are not there, so
+    // every read of it forever would blame the store.
+    const snapshot = seamSnapshot();
+    const edited = {
+      ...snapshot,
+      rows: snapshot.rows.map((row, index) =>
+        index === 0 ? { ...row, [SCHEDULE_EXPORT_HEADERS.START]: '2026-09-12T11:30:00' } : row
+      ),
+    };
+    expect(() => serialisePublicationSnapshot(edited)).toThrow(/could never be read back/);
+    // The guard is content-only: an untouched snapshot still writes.
+    expect(() => serialisePublicationSnapshot(snapshot)).not.toThrow();
+  });
+
   it('writes cells in declared column order, so key insertion order cannot reach the document', () => {
     const forward = seamSnapshot();
     // The same rows with their keys inserted in the reverse order. Two

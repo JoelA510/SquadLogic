@@ -579,7 +579,12 @@ export function recordMappingUse(usage, resolution, options = {}) {
 export function mappingUsageFindings(registry, usage) {
   /** @type {import('./types.js').ExternalImportFinding[]} */
   const findings = [];
-  const unexercised = registry.records.filter((record) => !usage.usedRecordIds.has(record.id));
+  // Sorted, not filtered-in-place: a reported list whose order depends on how
+  // the registry was assembled is the divergence `serialiseExternalMappingRegistry()`
+  // was just brought into line about, one layer up.
+  const unexercised = sortRecordsById(
+    registry.records.filter((record) => !usage.usedRecordIds.has(record.id))
+  );
 
   if (registry.records.length > 0 && usage.usedRecordIds.size === 0) {
     // Both halves of this sentence are read off the ledger rather than assumed
@@ -661,11 +666,23 @@ export function mappingUsageFindings(registry, usage) {
  *
  * The consequence is stated rather than discovered: a registry read back from a
  * document carries its records in id order, which need not be the order the
- * registry that wrote it held them in. Nothing in this package reads
- * `registry.records` positionally — every lookup filters and every reported list
- * is `.sort()`ed — so the re-ordering is invisible to behaviour, and
- * `tests/externalFixtureImport.test.js` holds that claim to a registry built in
- * deliberately reversed order.
+ * registry that wrote it held them in. No **answer** changes — every lookup
+ * filters and reports its claimants `.sort()`ed, which
+ * `tests/externalFixtureImport.test.js` holds to a registry built in
+ * deliberately reversed order. Two derived **orderings** did follow input
+ * order, and both are named rather than glossed:
+ *
+ * - {@link mappingUsageFindings}'s `unexercised` list, which
+ *   `classifyExternalImport()` republishes as `unexercisedRecords` along with
+ *   one `EXTERNAL_MAPPING_RECORD_UNEXERCISED` finding each. That is a reported
+ *   list, so it is now sorted by the same comparator — otherwise one registry
+ *   would produce two differently-ordered reports depending on whether it had
+ *   been through a document, which is the same false difference one layer up.
+ * - The per-record structural findings {@link buildExternalMappingRegistry}
+ *   emits at construction, which follow record order and therefore do differ.
+ *   They are keyed by code and record id and nothing reads them positionally;
+ *   sorting the whole finding stream would reorder unrelated codes against each
+ *   other, which is a larger change than this one and not obviously right.
  *
  * @param {import('./types.js').ExternalMappingRegistry} registry
  * @returns {Object} an `MappingDocumentSchema` value

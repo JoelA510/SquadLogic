@@ -3960,6 +3960,10 @@ production source and reverted:
 | `makePublicationSnapshot()` stops normalising key order | the column-order canonicality test      |
 | a production `import` of `serialise.js` added         | the no-production-caller scan             |
 | the message stops naming the seam                     | the message test                          |
+| the write-side content guard removed                 | the refuse-to-write test                  |
+| a read keeps `snapshotsCreated: 1`                   | the read-is-not-a-publication test        |
+| the shared comparator goes `localeCompare`           | the code-unit ordering test               |
+| `externalImport` reverts to insertion order          | both ordering tests                       |
 
 ### The order-canonical divergence, and its one exemption
 
@@ -4017,6 +4021,39 @@ guards one of them moved with it rather than being weakened:
   `EXTERNAL_MAPPING_NOT_PERSISTED` message; the other three are module prose.
 
 `publication/snapshot.js`'s citation was already correct and stays GAP-29.
+
+### What `/code-review` found on this PR, fixed here
+
+Five findings, all fixed in this PR as CLAUDE.md requires. Two were real
+defects in the new code and both are the same species as the ones this phase
+keeps finding — a guarantee that reads as stronger than it is:
+
+1. **A read reported itself as a publication.** `readPublicationSnapshot()`
+   returned the constructor's `SNAPSHOT_CREATED` finding and
+   `snapshotsCreated: 1`. `mergePublicationMeta()` folds additively, so the
+   Stage 2 caller this seam exists for — load N stored snapshots into one run
+   — would have reported N publications that never happened, each with a
+   finding naming who published what and when. An audit trail synthesised from
+   a disk read. Now zeroed, the finding dropped, and `snapshotsRead` is the
+   only counter a read moves.
+2. **The writer could mint a document it would always refuse.**
+   `serialisePublicationSnapshot()` validated shape and copied the digest
+   verbatim, so `{ ...snapshot, rows: edited }` — the idiom
+   `verifySnapshotDigest()`'s own docstring invites — wrote a structurally
+   perfect document carrying a digest for rows that were not there, unreadable
+   forever, with the reader blaming the store. The content is now checked on
+   the way out and the writer throws.
+3. **A claim in the new prose was false.** The `externalImport` docstring said
+   "nothing in this package reads `registry.records` positionally". Two derived
+   orderings did. `mappingUsageFindings()`'s `unexercised` list is a *reported*
+   list and is now sorted by the same comparator; the per-record construction
+   findings still follow record order, and the docstring now says so instead of
+   claiming otherwise.
+4. and 5. **Two line citations this PR's own edits moved** —
+   `BUILD_PLAN_STATUS.md` §7 on `snapshot.js:184` (now `:195`) and
+   `MODEL_GAPS.md` on `fieldAdmin/serialise.js:428` (now `:433`). Corrected.
+   Noted because §7 is *itself* the entry about a citation going stale, and it
+   went stale again in the same PR that quotes it.
 
 ### What this does not close
 

@@ -405,10 +405,13 @@ records that `publication/snapshot.js:181` _"continues to emit
 it is now at `:184`, and its message names **GAP-29 only** — the module's own
 header says in as many words that GAP-30 is no longer one of the reasons. The
 substance of the bullet survives: the engine still persists nothing. (Corrected
-again on 2026-09-19 by GAP-29 Stage 1: the finding's *message* now also names
+again on 2026-09-19 by GAP-29 Stage 1, which also moved it: the finding is now
+at `publication/snapshot.js:195`, and its *message* now names
 `serialisePublicationSnapshot()` / `readPublicationSnapshot()` and says nothing
 stores through them, because that seam now exists. The bullet's substance
-survives that too, and for the same reason.)
+survives that too, and for the same reason. A line citation is worth
+re-executing before it is quoted, which is this entry's own lesson and was
+missed once already in writing it.)
 
 **GAP-30 closed across #396, #398 and #400.** Three legs, each verified against
 the repository rather than quoted from a PR description:

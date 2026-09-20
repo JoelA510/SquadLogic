@@ -56,7 +56,7 @@
  * @module publication/serialise
  */
 
-import { derivePublicationStatus } from './reasonCodes.js';
+import { PUBLICATION_REASON, derivePublicationStatus } from './reasonCodes.js';
 import {
   PUBLICATION_SNAPSHOT_DOCUMENT_VERSION,
   PublicationSnapshotDocumentSchema,
@@ -67,12 +67,27 @@ import { makePublicationSnapshot, verifySnapshotDigest } from './snapshot.js';
  * **Serialise a snapshot** into the only shape a store would hold.
  *
  * Validated on the way out as well as on the way in, for the reason
- * `serialiseExternalMappingRegistry()` states.
+ * `serialiseExternalMappingRegistry()` states — and **the content is checked
+ * on the way out too, not only the shape**. A caller holding
+ * `{ ...snapshot, rows: edited }` is the idiom `verifySnapshotDigest()`'s own
+ * docstring invites, and the schema cannot see it: the document would be
+ * structurally perfect, carry a digest describing rows that are no longer
+ * there, and be `SNAPSHOT_DIGEST_MISMATCH` on every read forever. A writer that
+ * can mint a permanently unreadable artifact and leave the reader blaming the
+ * store is the whole failure this validate-in-both-directions rule exists to
+ * prevent, so this throws instead.
  *
  * @param {import('./types.js').PublicationSnapshot} snapshot
  * @returns {Object} a `PublicationSnapshotDocumentSchema` value
+ * @throws {Error} if the snapshot's own rows do not digest to its own digest
  */
 export function serialisePublicationSnapshot(snapshot) {
+  const drifted = verifySnapshotDigest(snapshot);
+  if (drifted.length > 0) {
+    throw new Error(
+      `publication serialise: ${drifted[0].message}; a document written from it could never be read back`
+    );
+  }
   const document = {
     version: PUBLICATION_SNAPSHOT_DOCUMENT_VERSION,
     snapshotId: snapshot.snapshotId,
@@ -117,6 +132,15 @@ export function serialisePublicationSnapshot(snapshot) {
  *   returned snapshot carries the digest of the rows actually read rather than
  *   the claim that failed.
  *
+ * **A read is not a publication event**, and the result says so rather than
+ * borrowing the constructor's provenance. `SNAPSHOT_CREATED` is dropped and
+ * `snapshotsCreated` is zeroed; `snapshotsRead` is 1. The counters are folded
+ * additively by `mergePublicationMeta()`, so a Stage 2 caller loading N stored
+ * snapshots into one run would otherwise report N publications that never
+ * happened, each with a finding asserting who published what and when — an
+ * audit trail synthesised from a disk read, which is the shape of defect this
+ * package exists to refuse.
+ *
  * @param {unknown} rawDocument
  * @returns {ReturnType<typeof makePublicationSnapshot>}
  */
@@ -133,13 +157,15 @@ export function readPublicationSnapshot(rawDocument) {
     rows: document.rows,
   });
   rebuilt.meta.snapshotsRead = 1;
+  // Nothing was published here; something was loaded. See the note above.
+  rebuilt.meta.snapshotsCreated = 0;
 
   // The stored claim, checked against the rows that arrived. Handing
   // `verifySnapshotDigest()` the rebuilt snapshot wearing the document's digest
   // is what keeps the comparison in one place: it recomputes over
   // `columns`/`rows` exactly as it does for an in-memory snapshot.
   const findings = [
-    ...rebuilt.findings,
+    ...rebuilt.findings.filter((finding) => finding.code !== PUBLICATION_REASON.SNAPSHOT_CREATED),
     ...verifySnapshotDigest({ ...rebuilt.snapshot, digest: document.digest }),
   ];
 

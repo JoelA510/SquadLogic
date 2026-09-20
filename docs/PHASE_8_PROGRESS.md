@@ -4142,3 +4142,121 @@ Three things the agent surfaced that a store has to answer:
    confirmed both readings in the source. Whichever a store commits to is a
    decision, and today it is being made by whichever function a caller reaches
    for.
+
+## #407 — the supervisor's fourth wrong brief, and the mirror job that mirrors two files of five
+
+Merged `58d1092`. Three review rounds: the agent's own `/code-review` (4), supervisor
+round 1 (4), supervisor round 2 (1). Nine findings, none rejected.
+
+### The brief did not merely misjudge an edge case; it prescribed a defect
+
+It said `formatDate` "falls through to the host browser's timezone", called that
+GAP-30's defect class still live in the UI, and directed the agent to route the
+season zone in from `seasonClock.js`. Every part of that is wrong, and following
+it would have introduced a bug in six places.
+
+- `formatters.js:30-45` — the docblock **directly above the function the brief
+  quoted** states that a caller passing no timezone renders browser-local *by
+  design*, because these panels format audit timestamps that already carry a
+  `Z` and "the viewer's own clock is the right one for those". A naive wall
+  string with no zone returns `null`, not a browser-derived guess.
+- `generatedAt` is `scheduler_runs.completed_at || created_at` — a real instant,
+  not a season wall time. #402 had already ruled on it in as many words: *"There
+  is no `timezone` prop, and its absence is the contract."*
+- The one wrong answer actually on screen ran the **other way**:
+  `GameSchedulingPage:1201` passed a *real* season zone, so that page rendered a
+  run timestamp on the season's clock instead of the operator's.
+
+The supervisor read the function body and not the contract sitting above it.
+Fourth brief this phase corrected by an agent through measurement; the first
+three were at worst wasteful, and this one would have shipped.
+
+### The mechanism, which is worse than the conclusion
+
+The brief asserted `TeamListView` never reads `timezone`, on this evidence:
+
+```
+grep -n "timezone" frontend/src/components/TeamListView.jsx ... 2>/dev/null
+```
+
+`frontend/src/components/TeamListView.jsx` **does not exist**. The file is at
+`frontend/src/components/teaming/TeamListView.jsx`. `2>/dev/null` swallowed the
+"No such file" error and the empty output was read as proof of absence. It reads
+`formatDate(generatedAt, timezone)` at `:30`.
+
+So: **the phase's own zero-result defect, committed by the supervisor, inside the
+brief whose own text instructs the agent that "a grep or scan that returns zero
+proves nothing until you have shown the pattern matching something."**
+
+Standing rule adopted, mechanical rather than aspirational: an evidentiary grep
+never suppresses stderr, and no claim of absence is made until the pattern has
+been shown matching something.
+
+### Where the agent beat the review
+
+On the finding the supervisor was proudest of — that the KPI card and the reasons
+list are two quantities that can disagree — the agent enumerated **three**
+divergences where the supervisor had found two, and the third is the one that
+matters: a team in neither list produces an empty `dataQualityWarnings`, so
+rendering the warnings (the supervisor's first suggested remedy) would have left
+it silently disagreeing. It also found, sitting directly beneath those two
+numbers, a sentence the supervisor walked straight past: the empty state asserted
+**"All teams assigned automatically"** whenever the reasons list was empty —
+including over a card reading 7. Not two numbers disagreeing; a false statement
+rendered to an operator.
+
+Twice more it was right against instruction. Told the class-name mismatch was
+optional and to act only if an existing class fit better, it swapped to
+`insight-card__alert-text`, then **checked the class rather than its name**:
+`App.css:149` is `display: inline-flex` with a `gap` and no `flex-wrap`, built
+for an icon plus a short label, with zero other users. The sentence is many JSX
+fragments, so each would have become a non-wrapping flex item. It reverted and
+recorded why. And in its own `/code-review` it caught that three of its
+assertions passed **vacuously** on a Pacific-time machine — CI was green only
+because runners are UTC.
+
+Its own note on the round-2 finding is the sharpest line in the exchange: its
+divergence-B test already asserted both `dataQualityWarnings` is `[]` *and* that
+the reconciliation line renders, and it had not read the two adjacent assertions
+against each other.
+
+### What the parting lead turned out to be — #41 and #42
+
+The agent flagged, explicitly as a lead and not a claim, a second
+`evaluatePracticeSchedule` in `supabase/functions/_shared/engines/scoring-engine.ts:72`
+using `assignedTeams = assignments.length` where core uses `assignedTeamIds.size`.
+Verified: a team with two slots counts twice, so ten teams and twelve assignments
+give `unassignedTeams = -2`. Both `auto-scheduler/index.ts:6` and
+`docs/expansion/03_ROADMAP.md` call it **isomorphic**. It is not shared and not
+isomorphic; the two disagree on the first line of the summary.
+
+Three layers of why nothing catches it, and one is the supervisor's:
+
+1. **CI runs two of five Deno test files.** The job names them individually.
+   Never run: `scoring-engine_test.ts`, `anchor-wall-times_test.ts`,
+   `ics-feed_test.ts`.
+2. **Two of the dead files came from #400** — a PR this supervisor reviewed and
+   merged, whose subject was *"the cross-check that keeps both arms honest"*.
+   Two of the three test files it added to keep the arms honest have never
+   executed. Same defect as #29's `NEW_MIGRATIONS` list, which the supervisor
+   fixed for the SQL harness and did not think to check for Deno.
+3. **`scoring-engine_test.ts` would not catch it if it ran.** Its assignment test
+   uses two teams with one assignment each, so `assignments.length` equals the
+   distinct count and the assertion passes under both implementations. The single
+   case that exposes the defect is the case not constructed.
+
+A "Deno Mirror Tests" job that finishes in eleven seconds is its own tell.
+
+Not established, and not to be repeated as fact: whether the three unrun files
+pass today (Deno is not installed in the supervisor's container, so they were not
+run), and whether the divergent summary reaches `scheduler_runs.results` or only
+the response body and the `evaluation_run` tables.
+
+### One operational note worth keeping
+
+The agent's first CI watcher reported "workflow not registered yet" for twenty
+minutes because it queried a **short** SHA — the API returns `total_count: 0`
+rather than an error — and because it matched the workflow display name as "CI"
+when it is "SquadLogic CI". Both failure modes read as *"CI never ran"* instead
+of erroring. The same shape as everything else on this page, in the tooling built
+to watch for it.

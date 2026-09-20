@@ -450,7 +450,31 @@ export function bindingAt(engines, at, existingBookings, boundaryResult, thresho
     existingBookings,
     meta
   );
-  const speaking = speaksAt(threshold, probe.findings);
+  return boundsOf(engines, boundaryResult, speaksAt(threshold, probe.findings));
+}
+
+/**
+ * **Turn the findings that spoke into the binding set.**
+ *
+ * Extracted from {@link bindingAt} rather than copied out of it, because
+ * `feasibility/moveRequest.js` needs the same construction at a *placement* —
+ * where `types.js` says a constraint binds when it speaks **at** the position —
+ * while {@link bindingAt} needs it one minute past a **boundary**. The two
+ * differ only in which minute is probed, and the alternative was a second bound
+ * builder free to attribute a finding to a different kind, name a different
+ * constraint id, or sort differently from the first.
+ *
+ * `owningResult` is the availability answer about the position the bounds
+ * describe; it supplies each kind's own `limitMinutes` and `slackMinutes`, which
+ * is why the margin is copied from its owner rather than recomputed here.
+ *
+ * @param {Object} engines
+ * @param {Object} owningResult - the `checkKickoffAvailability()` result the bounds describe
+ * @param {ReadonlyArray<{ code: string, severity: string }>} speaking - the findings
+ *   that count at this threshold, already filtered by {@link speaksAt}
+ * @returns {import('./types.js').FeasibilityBound[]}
+ */
+export function boundsOf(engines, owningResult, speaking) {
   const grouped = groupFindingsByConstraintKind(
     /** @type {ReadonlyArray<import('../attribution/types.js').AttributionFinding>} */ (speaking)
   );
@@ -458,7 +482,7 @@ export function bindingAt(engines, at, existingBookings, boundaryResult, thresho
   /** @type {Map<string, import('./types.js').FeasibilityBound>} */
   const bounds = new Map();
   const ownerOf = (kind) =>
-    (boundaryResult.constraints ?? []).find((entry) => entry.kind === kind) ?? null;
+    (owningResult.constraints ?? []).find((entry) => entry.kind === kind) ?? null;
 
   for (const [kind, findings] of Object.entries(grouped.byKind)) {
     if (findings.length === 0) continue;

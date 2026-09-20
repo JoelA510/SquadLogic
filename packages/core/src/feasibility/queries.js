@@ -160,11 +160,16 @@ function codeRowsOf(claims) {
 /**
  * The scope context a registry record is judged against, for one position.
  *
+ * Exported **within the package only**, like {@link seal}: `moveRequest.js`
+ * judges the same registry records against the same kind of position, and a
+ * second scope builder would be free to disagree about which venue a surface
+ * stands at — which is the one field the whole applicability answer turns on.
+ *
  * @param {Object} graph
  * @param {{ date: string, surfaceId: string, venueId: string|null, divisionLabel?: string|null }} where
  * @returns {import('../constraints/types.js').ScopeContext}
  */
-function scopeContextOf(graph, where) {
+export function scopeContextOf(graph, where) {
   const surface = getSurface(
     /** @type {import('../facility/types.js').FacilityGraph} */ (graph),
     where.surfaceId
@@ -181,10 +186,13 @@ function scopeContextOf(graph, where) {
 /**
  * Count findings by code.
  *
+ * Exported within the package only; `moveRequest.js` runs the same before/after
+ * travel comparison over a two-sided move and needs the same tally.
+ *
  * @param {ReadonlyArray<{ code: string }>} findings
  * @returns {Record<string, number>}
  */
-function tallyByCode(findings) {
+export function tallyByCode(findings) {
   /** @type {Record<string, number>} */
   const byCode = {};
   for (const finding of findings) byCode[finding.code] = (byCode[finding.code] ?? 0) + 1;
@@ -346,6 +354,13 @@ function emptyAnswer(question, subject, meta) {
  * grid said no", "this date offers no boundary at all" — and is folded in
  * beside the published evidence rather than instead of it.
  *
+ * Exported **within the package only** — it is deliberately absent from
+ * `feasibility/index.js`. `canTeamPlay()` and `analyseMoveRequest()` both build
+ * a synthetic {@link import('./types.js').FeasibilityAnswer} and pass it through
+ * here rather than re-deriving a verdict, a tightness and a status beside it;
+ * three sealers for one answer shape is the drift this repository has paid for
+ * before. A caller outside the package has no `FeasibilityAnswer` to seal.
+ *
  * This function reads the meta it is handed and never writes to it: the counter
  * it used to add to is shared with every nested answer that fed into this one,
  * and adding there counted the grid's unknowns once per cell and again in the
@@ -355,7 +370,7 @@ function emptyAnswer(question, subject, meta) {
  * @param {{ blocked: boolean, compromised: boolean, cleanBoundaryExists?: boolean|null }} state
  * @returns {import('./types.js').FeasibilityAnswer}
  */
-function seal(answer, state) {
+export function seal(answer, state) {
   const published = deriveFeasibilityEvidence(answer.blockers);
   const verdict = deriveFeasibilityVerdict({
     blocked: published.blocked || state.blocked,

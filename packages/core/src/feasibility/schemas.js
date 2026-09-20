@@ -82,6 +82,67 @@ export const TeamFeasibilityQuerySchema = z
   .strict();
 
 /**
+ * One thing standing on ground, in the one shape a game and a practice share.
+ *
+ * **Why a shared shape rather than two indexes.** A move request is a question
+ * about who else holds the ground in a window, and the club's ground carries
+ * both kinds. Two indexes is how a swap gets computed against half the
+ * occupancy — a game offered a slot a practice already holds — which is the
+ * `bookingsOn()`-versus-a-second-mapping failure `feasibility/verdict.js`
+ * records, one layer up.
+ *
+ * Games are **derived** from the context and never handed in; only practices
+ * are supplied, because Phase 8 has no practice engine for the query to read
+ * one from. See `feasibility/moveRequest.js` for what that costs the answer and
+ * where it is said.
+ */
+export const MoveRequestHoldingSchema = z
+  .object({
+    id: IdSchema,
+    date: IsoDateSchema,
+    surfaceId: IdSchema,
+    startMinutes: MinutesSchema,
+    /** Null is GAP-14's unknown footprint, carried and never invented. */
+    endMinutes: MinutesSchema.nullable().default(null),
+    format: z.string().min(1).nullable().default(null),
+    /** Whose commitment this is; both sides of a fixture, or the practising team. */
+    teamIds: z.array(IdSchema).default([]),
+    /** The people who must be there, so travel and double-booking can be asked about. */
+    personIds: z.array(IdSchema).default([]),
+    divisionLabel: z.string().min(1).nullable().default(null),
+    label: z.string().min(1).nullable().default(null),
+  })
+  .strict();
+
+/**
+ * *"A parent asked to move this into that window — what can the club offer?"*
+ *
+ * `dates` and `surfaceIds` are lists for the reason
+ * {@link TeamFeasibilityQuerySchema}'s are: a season is specific dates each with
+ * its own permit set and its own sunset, and expanding a range here would invent
+ * dates the calendar does not hold. `surfaceIds` empty means *"the surfaces this
+ * entity's own commitments already use"*, derived and reported.
+ *
+ * The three grid fields are `ReserveCapacityInputSchema`'s own, verbatim and
+ * with its defaults, because the grid this query joins to is that report's — a
+ * second cadence vocabulary for one idea would be a third contract.
+ */
+export const MoveRequestQuerySchema = z
+  .object({
+    /** A `MOVE_REQUEST_ENTITY` value. */
+    entityKind: z.enum(['game', 'practice']),
+    entityId: IdSchema,
+    dates: z.array(IsoDateSchema).min(1, {
+      message: 'name at least one date to ask about; an empty window offers nothing by definition',
+    }),
+    surfaceIds: z.array(IdSchema).default([]),
+    cadenceMinutes: z.number().int().min(1),
+    earliestKickoffMinutes: MinutesSchema,
+    latestKickoffMinutes: MinutesSchema.default(24 * 60),
+  })
+  .strict();
+
+/**
  * *"How late — and how early — can anything kick off here on this date?"*
  *
  * Field names and defaults are `availability/schemas.js`'s

@@ -135,6 +135,86 @@ export const FEASIBILITY_QUESTION = Object.freeze({
   CAN_TEAM_PLAY: 'can-team-play',
   /** *"How late — and how early — can anything kick off here, and what stops it?"* */
   KICKOFF_BOUNDS: 'kickoff-bounds',
+  /**
+   * *"A parent asked to move this fixture into that window — what can the club
+   * actually offer?"*
+   *
+   * The two-sided question, and the only one in this module that looks at
+   * anybody but the subject. See `feasibility/moveRequest.js`.
+   */
+  ANALYSE_MOVE_REQUEST: 'analyse-move-request',
+});
+
+/**
+ * **What a club can say in answer to a move request.**
+ *
+ * Four classes, and the whole point of the vocabulary is that they are not four
+ * shades of the same thing: each one licenses a different sentence to a family,
+ * and picking the wrong one is how a club promises ground it does not have or
+ * refuses a request it could have granted.
+ *
+ * Derived **only** by `classifyMoveRequest()`. A caller that reconstructed the
+ * class from `vacancies.length` and `swaps.length` would be a second producer of
+ * a derived status, which is the shape `docs/BUILD_PLAN_STATUS.md` §4 records
+ * over and over — and, unlike a duplicated number, a duplicated *classification*
+ * diverges silently because both copies are plausible.
+ *
+ * @readonly
+ * @enum {string}
+ */
+export const MOVE_REQUEST_CLASS = Object.freeze({
+  /**
+   * There is feasible ground in the window that **nobody holds**. The club can
+   * simply say yes.
+   */
+  VACANCY_AVAILABLE: 'vacancy_available',
+  /**
+   * No vacancy, but at least one admissible swap costs its counterparty
+   * **nothing** — the other party is as well placed after the exchange as
+   * before. The club can say yes subject to the other family agreeing.
+   */
+  FREE_SWAP_AVAILABLE: 'free_swap_available',
+  /**
+   * No vacancy, and **every** admissible swap takes something from the
+   * counterparty. The club can only say *"yes, and somebody else loses this"*,
+   * and the answer names which objective and how many holders rely on it.
+   */
+  ZERO_SUM_ONLY: 'zero_sum_only',
+  /**
+   * Nothing to offer: no vacancy and no admissible swap. Note that this is a
+   * statement about the **window asked about**, and where a candidate could not
+   * be judged the answer's own `verdict` is `unknown` and
+   * `MOVE_REQUEST_CLASS_UNDER_UNKNOWN` says so — the class is then a floor
+   * rather than a finding.
+   */
+  INFEASIBLE: 'infeasible',
+});
+
+/**
+ * Declared order of the classes, best offer first, for deterministic rendering.
+ *
+ * @type {ReadonlyArray<string>}
+ */
+export const MOVE_REQUEST_CLASS_ORDER = Object.freeze([
+  MOVE_REQUEST_CLASS.VACANCY_AVAILABLE,
+  MOVE_REQUEST_CLASS.FREE_SWAP_AVAILABLE,
+  MOVE_REQUEST_CLASS.ZERO_SUM_ONLY,
+  MOVE_REQUEST_CLASS.INFEASIBLE,
+]);
+
+/**
+ * The two kinds of thing that stand on ground in this model.
+ *
+ * `game` and `practice` are held in one vocabulary, and one holder index, so
+ * that a practice can be the counterparty of a game's swap. Keeping two indexes
+ * is how a swap gets computed against half the occupancy.
+ *
+ * @readonly
+ * @enum {string}
+ */
+export const MOVE_REQUEST_ENTITY = Object.freeze({
+  GAME: 'game',
+  PRACTICE: 'practice',
 });
 
 /**
@@ -423,6 +503,105 @@ export const FEASIBILITY_REASON = Object.freeze({
   FEASIBILITY_BLOCKED_OUTSIDE_FACILITY: 'FEASIBILITY_BLOCKED_OUTSIDE_FACILITY',
   /** The verdict, as provenance, with the counts behind it. `info`. */
   FEASIBILITY_VERDICT_REACHED: 'FEASIBILITY_VERDICT_REACHED',
+
+  /* -- the move request ----------------------------------------------------- */
+  /**
+   * The class, as provenance, with the four counts behind it. `info`.
+   *
+   * Emitted by `classifyMoveRequest()` itself, so the sentence a reader sees and
+   * the class a consumer branches on are produced by one call and cannot drift.
+   */
+  MOVE_REQUEST_CLASS_REACHED: 'MOVE_REQUEST_CLASS_REACHED',
+  /**
+   * The class is `infeasible` **and at least one candidate position could not be
+   * judged**, so "nothing to offer" is a floor rather than a finding.
+   *
+   * `compromise`. Without it a window with three undecidable candidates and no
+   * vacancy reads exactly like a window that was searched to the bottom, which
+   * is the collapse of `unknown` into "no" this package exists to refuse. The
+   * answer's own `verdict` is `unknown` in that case; this is the same fact said
+   * where a reader of the *class* will see it.
+   */
+  MOVE_REQUEST_CLASS_UNDER_UNKNOWN: 'MOVE_REQUEST_CLASS_UNDER_UNKNOWN',
+  /**
+   * A counterparty's cost names reason codes that **no registry constraint
+   * claims**, so the objective it would lose has no id.
+   *
+   * `compromise`, and it is *declared is not enforced* in this module's own
+   * vocabulary: a cost reported as a bare code is a real loss that the registry
+   * cannot name, and reporting it as an empty objective list would make a
+   * zero-sum swap read as a free one.
+   */
+  MOVE_REQUEST_COST_UNCLAIMED: 'MOVE_REQUEST_COST_UNCLAIMED',
+  /**
+   * Whether something stands on a candidate position could not be decided,
+   * because a holder's footprint is unknown (GAP-14).
+   *
+   * `compromise`. Such a position is **never** counted as a vacancy: an
+   * undecidable overlap is not an empty field, and the club would be offering
+   * ground it has not checked.
+   */
+  MOVE_REQUEST_OCCUPANCY_UNDECIDABLE: 'MOVE_REQUEST_OCCUPANCY_UNDECIDABLE',
+  /**
+   * A candidate position the window names is **not on the capacity grid** — the
+   * ground does not offer a slot at that minute.
+   *
+   * `info`. It is provenance for the join: the grid is
+   * `buildReserveCapacityReport()`'s and this module does not invent a slot
+   * beside one it generated.
+   */
+  MOVE_REQUEST_OFF_CAPACITY_GRID: 'MOVE_REQUEST_OFF_CAPACITY_GRID',
+  /**
+   * The capacity report this analysis joined to reported something above `info`
+   * about its own integrity.
+   *
+   * `compromise`, and lifted rather than swallowed for the reason
+   * `scenario/relocation.js` lifts the same findings: `RESERVE_CAPACITY_VACUOUS`
+   * means the grid generated nothing, and "no vacancy" over an empty grid is a
+   * fact about the report rather than about the season.
+   */
+  MOVE_REQUEST_CAPACITY_IMPEACHED: 'MOVE_REQUEST_CAPACITY_IMPEACHED',
+  /**
+   * The subject named is neither a game this run holds nor a practice the caller
+   * supplied. `compromise`.
+   */
+  MOVE_REQUEST_SUBJECT_UNKNOWN: 'MOVE_REQUEST_SUBJECT_UNKNOWN',
+  /**
+   * Two supplied holdings share an id, or a supplied practice collides with a
+   * game id.
+   *
+   * `blocking`. The holder index is what occupancy, vacancy and every swap are
+   * read from; two holdings under one key means one of them is invisible to all
+   * three, and a swap computed against half the occupancy is worse than none.
+   */
+  MOVE_REQUEST_HOLDING_DUPLICATED: 'MOVE_REQUEST_HOLDING_DUPLICATED',
+  /**
+   * A layer that speaks for a **game** does not speak for a **practice**, and
+   * the answer says which.
+   *
+   * `info`, and not an unknown: the standing rule engine's rules are turnover
+   * floors, round-robin completeness and hosting balance, which are statements
+   * about a fixture list. They do not govern a practice, so leaving them unasked
+   * is an inapplicability rather than a measurement nobody took — and turning it
+   * into a verdict-bearing unknown would make every practice answer `unknown`
+   * and the whole query useless on the half of the estate it was asked for.
+   */
+  MOVE_REQUEST_LAYER_SILENT: 'MOVE_REQUEST_LAYER_SILENT',
+  /**
+   * A holding stands on ground the facility graph does not hold, so whether it
+   * overlaps anything in this window could not be decided.
+   *
+   * `compromise`, and it is the unknown-surface discipline
+   * (`tests/unknownSurfaceDiscipline.test.js`) applied to this module.
+   * `surfacesConflict()` reaches `requireSurface()`, which **throws**, and the
+   * surface ids here come from data — a caller's practice list. Three modules
+   * have now shipped that throw, each taking every other verdict in its run
+   * down with it. So the id is guarded before the lookup and the holding is
+   * carried as an **undecidable** occupant of every candidate on its date: not
+   * a holder, because nobody can say it conflicts, and never absent, because
+   * nobody can say it does not.
+   */
+  MOVE_REQUEST_HOLDING_SURFACE_UNKNOWN: 'MOVE_REQUEST_HOLDING_SURFACE_UNKNOWN',
 });
 
 /**
@@ -457,6 +636,17 @@ export const FEASIBILITY_REASON_SEVERITY = Object.freeze({
   [FEASIBILITY_REASON.FEASIBILITY_EVIDENCE_UNCLAIMED]: FEASIBILITY_SEVERITY.COMPROMISE,
   [FEASIBILITY_REASON.FEASIBILITY_BLOCKED_OUTSIDE_FACILITY]: FEASIBILITY_SEVERITY.INFO,
   [FEASIBILITY_REASON.FEASIBILITY_VERDICT_REACHED]: FEASIBILITY_SEVERITY.INFO,
+
+  [FEASIBILITY_REASON.MOVE_REQUEST_CLASS_REACHED]: FEASIBILITY_SEVERITY.INFO,
+  [FEASIBILITY_REASON.MOVE_REQUEST_CLASS_UNDER_UNKNOWN]: FEASIBILITY_SEVERITY.COMPROMISE,
+  [FEASIBILITY_REASON.MOVE_REQUEST_COST_UNCLAIMED]: FEASIBILITY_SEVERITY.COMPROMISE,
+  [FEASIBILITY_REASON.MOVE_REQUEST_OCCUPANCY_UNDECIDABLE]: FEASIBILITY_SEVERITY.COMPROMISE,
+  [FEASIBILITY_REASON.MOVE_REQUEST_OFF_CAPACITY_GRID]: FEASIBILITY_SEVERITY.INFO,
+  [FEASIBILITY_REASON.MOVE_REQUEST_CAPACITY_IMPEACHED]: FEASIBILITY_SEVERITY.COMPROMISE,
+  [FEASIBILITY_REASON.MOVE_REQUEST_SUBJECT_UNKNOWN]: FEASIBILITY_SEVERITY.COMPROMISE,
+  [FEASIBILITY_REASON.MOVE_REQUEST_HOLDING_DUPLICATED]: FEASIBILITY_SEVERITY.BLOCKING,
+  [FEASIBILITY_REASON.MOVE_REQUEST_LAYER_SILENT]: FEASIBILITY_SEVERITY.INFO,
+  [FEASIBILITY_REASON.MOVE_REQUEST_HOLDING_SURFACE_UNKNOWN]: FEASIBILITY_SEVERITY.COMPROMISE,
 });
 
 /**
@@ -753,6 +943,23 @@ export function createFeasibilityMeta() {
     travelTransitionsProjected: 0,
     /** Existing fixtures of the subject team compared for a time clash. */
     teamFixturesCompared: 0,
+    /**
+     * Holdings — games and practices — put into the holder index a move request
+     * reads occupancy from.
+     *
+     * Enumerated from the schedule and the caller's practices, never from the
+     * candidate grid: a holder that a broken join dropped must still be counted
+     * here, or the counter would testify to the very set the break corrupted.
+     */
+    holdingsIndexed: 0,
+    /** Holder-against-candidate overlap questions put to `bookingsOverlapInTime()`. */
+    occupancyPairsCompared: 0,
+    /** Capacity-report slots joined to, per (date, surface, kickoff). */
+    capacitySlotsJoined: 0,
+    /** Two-sided exchanges examined, admissible or not. */
+    swapsConsidered: 0,
+    /** Individual parties judged at a position inside a swap — two per exchange. */
+    swapLegsJudged: 0,
   };
 }
 

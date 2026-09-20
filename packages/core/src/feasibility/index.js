@@ -15,6 +15,13 @@
  * call each, answered with a verdict, the constraint(s) that decided it, and a
  * margin in minutes.
  *
+ * Prompt 8.7 adds a fourth question with a different shape: *a parent asked to
+ * move this into that window — what can the club offer?* It is the only query
+ * here that looks at anybody but the subject, and the only one that prices what
+ * an exchange would cost the other party. `feasibility/moveRequest.js` says why
+ * it judges a position through the availability layer rather than through
+ * `canGameMove()`, and what that costs its answers.
+ *
  * It decides nothing on its own. Every number it reports was computed by the
  * module that owns the question, and the whole package is a coherent shape over
  * those answers plus two things no earlier module could do: hold a verdict open
@@ -59,6 +66,9 @@
  */
 
 export {
+  MOVE_REQUEST_CLASS,
+  MOVE_REQUEST_CLASS_ORDER,
+  MOVE_REQUEST_ENTITY,
   FEASIBILITY_MARGIN_CONVENTION,
   FEASIBILITY_MARGIN_UNIT,
   FEASIBILITY_QUESTION,
@@ -86,6 +96,8 @@ export {
 export {
   KickoffBoundsQuerySchema,
   MoveFeasibilityQuerySchema,
+  MoveRequestHoldingSchema,
+  MoveRequestQuerySchema,
   TeamFeasibilityQuerySchema,
 } from './schemas.js';
 
@@ -95,6 +107,7 @@ export {
   bindingAt,
   blockingEvidenceOf,
   boundFindings,
+  boundsOf,
   candidateAccountingFindings,
   makeUnknown,
   marginFrom,
@@ -107,3 +120,5 @@ export {
 } from './verdict.js';
 
 export { canGameMove, canTeamPlay, feasibleKickoffBounds } from './queries.js';
+
+export { analyseMoveRequest, classifyMoveRequest } from './moveRequest.js';

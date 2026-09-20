@@ -466,3 +466,91 @@ and wrong three days later; nothing in the document would have told a reader
 that. A verification recorded as a premise for a decision is worth a re-check
 before it is quoted, and quoting §5's figures after this date without re-running
 them is the same error §6 names in a different disguise.
+
+## 8. GATE 2 answered — the vertical slice, 2026-09-20
+
+§5 recorded the operator's first answer as *"neither branch yet — close GAP-29
+and GAP-30 first, then decide"*, and said the question would be **re-put once
+those gaps close**. It was re-put. **The operator's answer: move the engine
+under the app, as a vertical slice.**
+
+### §5's precondition is deliberately superseded, not overlooked
+
+GAP-30 closed (#396, #398, #400). **GAP-29 did not.** Its status is still
+*Partial — published baseline only, unpersisted*: Stage 0 narrowed it (#401),
+Stage 1 added the declared seam (#405), and Stage 2 — the store — was
+explicitly not approved.
+
+So the literal precondition in §5 is unmet, and this section says so rather
+than letting a later reader find the gap. The supersession is coherent: **the
+vertical slice is how GAP-29 closes.** The store arrives *as* the wiring
+instead of being built abstractly first and connected afterwards. Building it
+the other way round would produce a store with no reader, which is this
+phase's signature defect with a table underneath it — #407 shipped four KPI
+cards reading fields no producer wrote, and #411 found a writer whose shape its
+own reader did not read.
+
+### The binding condition on the slice
+
+**Stage 2 must not land without Stage 4.** Naming the stages so the condition
+is checkable rather than a slogan:
+
+| stage | what | state |
+| --- | --- | --- |
+| 0 | narrow the gap, split GAP-35 | done, #401 |
+| 1 | the declared `serialise`/`read` seam | done, #405 |
+| 2 | the store — table + RLS + RPC + audit | **this slice** |
+| 3 | a writer on the real publish path | **this slice** |
+| 4 | a reader that answers a question with it | **this slice** |
+
+Stages 2, 3 and 4 land together. A PR that adds the table and stops is
+refused, whatever its tests say.
+
+**The store is a table, not the seam.** GAP-29's own record earns this: the one
+package here that got real persistence — `fieldAdmin`, `field_blackouts` —
+**bypassed its own `serialise`/`read` seam entirely** and went table + RPC +
+RLS + audit, as CLAUDE.md requires. A `serialise*()`/`read*()` pair in this
+repository is a declaration that a store is missing, not a design for the one
+that will exist. Stage 1's seam is therefore evidence, not an interface.
+
+### Why the publication snapshot is the right slice
+
+Verified at `a206473` rather than remembered:
+
+- `OutputGenerationPanel.jsx:2` imports `generateScheduleExports` from
+  `@squadlogic/core/outputGeneration.js` and renders `generated.master.rows`.
+- `makePublicationSnapshot()` (`publication/snapshot.js:141-145`) defaults its
+  `columns` to `SCHEDULE_EXPORT_COLUMNS`, defined at `outputGeneration.js:51`
+  as `MASTER_HEADERS`.
+
+**The publish path already holds rows in the snapshot's own shape**, so the
+slice needs no adapter — the thing most likely to introduce a second row
+vocabulary is already absent. And Stage 4's payoff is built: `checkParity()`
+partitions two row sets into matched / differing / added / removed. Persisting
+a baseline turns *"is the working schedule still what version v said?"* from a
+process-lifetime question into a durable one, which is what incidents 1 and 2
+were about.
+
+### Review posture for this slice, set by the operator
+
+Scrutiny up; review loops down. Operationally:
+
+- **The full production diff is read, not sampled.** 8.7 merged on a sampled
+  review and that entry says plainly it is weak evidence — the agent's own
+  `/code-review` found five defects in code this review found none in. A slice
+  touching SQL, RLS, an RPC, audit rows and a frontend reader is not eligible
+  for sampling.
+- **SQL gets its own pass**: RLS enabled, every policy scoped by
+  `organization_id`, no `anon` EXECUTE, `record_audit_event()` on every
+  state-altering path, and a matching revert plus smoke under `docs/sql/`.
+  An `anon`-callable `SECURITY DEFINER` function was already caught once this
+  phase by a smoke that had never run.
+- **The round trip is proved by execution**, not by reading: write a snapshot,
+  read it back, run parity against a changed schedule, see it report.
+- **Findings are classified BLOCKING or NOTED, and only BLOCKING starts a
+  round.** BLOCKING is correctness, security, or a guarantee that cannot fail.
+  NOTED is prose, naming and cosmetics; it rides the next push if one happens
+  and otherwise dies with the PR. **A round consisting only of NOTED items is
+  never sent** — that is the loop that manufactures work without resolving
+  anything. The loop stops on a round with zero BLOCKING findings regardless of
+  how many NOTED remain.

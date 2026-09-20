@@ -22,23 +22,57 @@ export default function WorkflowPage() {
     throw new Error('E2E forced error for resilience testing.');
   }
 
-  const { team, practice, game, loading, error: dataError, timezone } = useDashboardData();
+  // No `timezone` here: the two consumers were `TeamListView` and
+  // `GameReadinessPanel`, which both render a `scheduler_runs` timestamp on
+  // the viewer's clock and no longer declare the prop. `useDashboardData` has
+  // never returned a zone, so the binding was `undefined` in every render this
+  // page has ever had. `error` it DOES return, now that it stops swallowing
+  // the three fetch failures underneath it.
+  const { team, practice, game, loading, error: dataError } = useDashboardData();
   const { persistenceSnapshot, loading: _persistenceLoading } = useTeamPersistence();
   const { importedData, setImportedData } = useImport();
   const { theme: _theme } = useTheme();
   const { currentOrganization } = useOrganization();
-  const [error, setError] = useState(dataError);
+  // The banner has two sources with different lifetimes, and collapsing them
+  // into one `useState` made it a one-way latch: the old effect only ever
+  // called `setError`, never cleared it. That was harmless while `dataError`
+  // was permanently `undefined` and is not now. `useTeamSummary` re-polls
+  // every 2s while a run is `running`, so one failed poll followed by a
+  // successful one would leave a red "permission denied" banner over a fully
+  // loaded dashboard until the operator dismissed it by hand.
+  //
+  // `dataError` is therefore *live* state — it disappears when the fetch
+  // recovers — while a navigation error is a one-shot message that stays
+  // until dismissed.
+  //
+  // Dismissal is scoped to the **occurrence**, not to the message. Recording
+  // only the string meant an identical failure recurring after a recovery
+  // ("permission denied" → dismissed → poll succeeds → "permission denied"
+  // again) compared equal to the dismissed value and stayed shut. The effect
+  // below clears the record the moment the error goes away, so the next
+  // failure opens the banner whether or not it reads the same.
+  const [navError, setNavError] = useState(null);
+  const [dismissedDataError, setDismissedDataError] = useState(null);
   const [activeStep, setActiveStep] = useState(1);
 
   const location = useLocation();
 
+  const error = navError ?? (dataError === dismissedDataError ? null : dataError);
+
+  const dismissError = () => {
+    if (navError) setNavError(null);
+    else setDismissedDataError(dataError);
+  };
+
   useEffect(() => {
-    if (dataError) setError(dataError);
-  }, [dataError]);
+    if (!dataError && dismissedDataError !== null) {
+      setDismissedDataError(null);
+    }
+  }, [dataError, dismissedDataError]);
 
   useEffect(() => {
     if (location.state?.error) {
-      setError(location.state.error);
+      setNavError(location.state.error);
     }
   }, [location.state]);
 
@@ -75,7 +109,8 @@ export default function WorkflowPage() {
         <div className="bg-red-500/10 border border-red-500 text-red-500 p-4 rounded-md mb-4 flex justify-between items-center">
           <span>{error}</span>
           <button
-            onClick={() => setError(null)}
+            onClick={dismissError}
+            aria-label="Dismiss error"
             className="text-red-500 hover:text-red-700 font-bold"
           >
             ✕
@@ -132,7 +167,6 @@ export default function WorkflowPage() {
             importedData={importedData}
             controlledActiveStep={activeStep}
             onStepChange={setActiveStep}
-            timezone={timezone}
           />
         </div>
 

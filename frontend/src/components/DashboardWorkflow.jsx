@@ -27,7 +27,6 @@ const DashboardWorkflow = ({
   importedData,
   controlledActiveStep,
   onStepChange,
-  timezone,
   scheduleEvaluation: _scheduleEvaluation = undefined,
 }) => {
   const navigate = useNavigate();
@@ -196,7 +195,6 @@ const DashboardWorkflow = ({
                     totals={teamData.totals}
                     divisions={teamData.divisions}
                     generatedAt={teamData.generatedAt}
-                    timezone={timezone}
                   />
                 </FeatureGuard>
                 <TeamPersistencePanel teamPersistenceSnapshot={persistenceSnapshot} />
@@ -295,7 +293,6 @@ const DashboardWorkflow = ({
             gameReadinessSnapshot={gameData.snapshot}
             gameSummary={gameData.summary}
             generatedAt={gameData.generatedAt}
-            timezone={timezone}
           />
           <div className="flex flex-col sm:flex-row gap-3 justify-between pt-4 mt-6 border-t border-border-subtle">
             <StepRunButton

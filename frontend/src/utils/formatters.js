@@ -32,9 +32,13 @@ export const formatReasons = (reasons) =>
  * - **A value that already carries a zone is untouched.** Once a slot is a real
  *   instant, `new Date(value)` plus `timeZone` was already correct and stays so.
  * - **A caller that passes no timezone still renders browser-local.**
- *   `PersistenceHistoryList`, `TeamPersistencePanel`, `PracticeReadinessPanel`
- *   and `TeamOverviewPanel` format audit timestamps that already carry a `Z`,
- *   and the viewer's own clock is the right one for those.
+ *   `PersistenceHistoryList`, `TeamPersistencePanel`, `PracticeReadinessPanel`,
+ *   `TeamOverviewPanel`, `TeamListView` and `GameReadinessPanel` format audit
+ *   and `scheduler_runs` timestamps that already carry a `Z`, and the viewer's
+ *   own clock is the right one for those. The last two joined that list when
+ *   the dead `timezone` thread from `useDashboardData` was removed; each of
+ *   their docblocks cites this paragraph as the rule, so this list is the
+ *   thing that has to stay true.
  *
  * A naive wall string with no zone to place it on has no honest reading, so it
  * comes back `null` and the caller renders its `unspecified` sentinel rather

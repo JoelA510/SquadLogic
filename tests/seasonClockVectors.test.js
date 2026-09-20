@@ -130,7 +130,16 @@ describe('season clock vectors — the table itself', () => {
 
     const runner = executable(readFileSync(fromRoot(DENO_RUNNER_PATH), 'utf8'));
     expect(runner).toContain(path.posix.dirname(SIBLING_RUNNER_PATH));
-    expect(runner).toContain("-name '*_test.ts'");
+
+    // **Both suffixes, because the script deliberately matches both.** Pinning
+    // only `*_test.ts` left the `-o -name '*.test.ts'` clause deletable with
+    // this check still green -- and that clause is not decoration: the script
+    // widened discovery to the set `deno test` itself recognises, precisely so
+    // a file that passes when a developer runs `deno test` locally cannot be
+    // skipped by CI without a word. Half the glob is half that guarantee.
+    for (const pattern of ["-name '*_test.ts'", "-name '*.test.ts'"]) {
+      expect(runner, `discovery no longer matches ${pattern}`).toContain(pattern);
+    }
 
     // **Discovered is not the same as run.** The script can suppress a
     // discovered file through its `EXCLUDED` list, so checking only that

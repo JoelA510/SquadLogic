@@ -50,18 +50,42 @@ export DENO_NO_PACKAGE_JSON=1
 # while destroying the only thing that can catch a host-zone read.
 ZONES=(UTC America/Los_Angeles)
 
-# **A floor, stated rather than derived.** Its only job is to catch a discovery
-# that silently finds nothing or nearly nothing -- a moved directory, a broken
-# glob, a renamed suffix. Deriving it by counting the files would compare the
-# glob against itself and could never fail. Adding a test file needs no change
-# here (discovery already runs it); this number only ratchets when someone
-# wants the stronger guarantee.
+# **A floor, stated rather than derived.** Its only job is to catch a suite
+# that silently shrinks -- a moved directory, a broken glob, a renamed suffix,
+# a deleted file. Deriving it by counting what discovery found would compare
+# the glob against itself and could never fail.
+#
+# Adding a test file needs no change here: discovery runs it already.
+#
+# **Adding an EXCLUDED entry DOES require lowering this number, and that
+# friction is the point.** It is checked against RUNNABLE, so one exclusion
+# takes the suite to 4 and trips the floor. The obvious softening --
+# `${#DISCOVERED[@]} - ${#EXCLUDED[@]}` -- is the hollow version of this
+# check: the bar would move down by exactly the amount each new exclusion
+# removes, so no exclusion could ever trip it and the floor would only ever
+# catch deletions. Suppressing a file must therefore be written down twice,
+# once in EXCLUDED and once here, and the lowered number is the durable record
+# in the diff that coverage went down. A reviewer seeing `5` become `4` is the
+# entire mechanism.
 EXPECTED_MIN_TEST_FILES=5
 
 # Test files that must NOT run, each with the reason. Empty is the correct
-# state. Both halves are enforced below: an entry naming a file that does not
-# exist fails, and so does an entry whose file now PASSES. An exclusion cannot
-# outlive the reason for it.
+# state.
+#
+# **What the checks below actually establish**, stated exactly, because the
+# stronger sentence that used to sit here ("an exclusion cannot outlive the
+# reason for it") is not what they deliver: an entry naming a file that does
+# not exist fails, and an entry whose file now PASSES fails. So an exclusion
+# cannot outlive the *failure* it records.
+#
+# It CAN outlive the *reason* it records. A file whose documented cause was
+# fixed while a different failure appeared stays suppressed behind a
+# justification that is now false, and nothing here notices. Matching the
+# recorded reason against the failure output was considered and rejected:
+# it would pin this script to Deno's assertion formatting, and a reason like
+# "expects a string the engine has never produced" has no stable textual
+# counterpart in the failure at all. A wrong reason is a smaller problem than
+# a check that pretends to verify one, so it is written down instead.
 EXCLUDED=()
 
 STATUS=0
@@ -129,18 +153,27 @@ fi
 # let four-of-five look like coverage before this script existed.
 if [[ ${#RUNNABLE[@]} -lt $EXPECTED_MIN_TEST_FILES ]]; then
   fail "${#RUNNABLE[@]} test file(s) would run, fewer than the floor of ${EXPECTED_MIN_TEST_FILES}."
-  fail "(${#DISCOVERED[@]} discovered, ${#EXCLUDED[@]} excluded.) A file was deleted, discovery is"
-  fail "broken, or an exclusion is eating the suite. None of those may pass silently."
+  fail "(${#DISCOVERED[@]} discovered, ${#EXCLUDED[@]} excluded.)"
+  if [[ ${#EXCLUDED[@]} -gt 0 ]]; then
+    fail ""
+    fail "If you just added an EXCLUDED entry: this is expected, and the second edit is"
+    fail "deliberate. Lower EXPECTED_MIN_TEST_FILES to ${#RUNNABLE[@]} in the same commit."
+    fail "That number is the record that coverage went down; see its comment for why the"
+    fail "floor is not computed from EXCLUDED automatically."
+  else
+    fail "A file was deleted or discovery is broken. Neither may pass silently."
+  fi
   exit 1
 fi
 
-# **Both halves of the exclusion contract, because only the first was real.**
-# The comment on EXCLUDED promises an entry cannot outlive its reason, and the
-# existence check alone does not deliver that: an exclusion whose cause was
-# fixed goes on suppressing a file that would now pass. That is precisely this
-# PR's incident -- `scoring-engine_test.ts` sat excluded for months over a
-# single reconcilable expectation. So each excluded file is RUN, and a pass is
-# a failure of the exclusion.
+# **An excluded file is RUN, and a pass is a failure of the exclusion.**
+# The existence check alone would let an exclusion whose cause was fixed go on
+# suppressing a file that now passes -- precisely this PR's incident, where
+# `scoring-engine_test.ts` sat excluded for months over a single reconcilable
+# expectation.
+#
+# This establishes "still failing", not "still failing for the recorded
+# reason"; see the note on EXCLUDED for why the stronger check was rejected.
 for x in ${EXCLUDED[@]+"${EXCLUDED[@]}"}; do
   if [[ ! -f "$TEST_DIR/$x" ]]; then
     fail "EXCLUDED names '$x', which does not exist in $TEST_DIR -- a stale exclusion."

@@ -4528,3 +4528,105 @@ After handing back, the agent re-notified five times with `tool_uses` frozen at
 complete: PR open, report delivered, review done. It was stopped. A finished
 agent left running is the resource waste this project has already had one
 standing instruction about.
+
+## 8.7 — move-request analysis, and a clean review round that should not be read as clean code
+
+Merged `78a3ad3`. `analyseMoveRequest()` in `packages/core/src/feasibility/`,
+3637 lines added, ten new reason codes, none allowlisted.
+
+### The plan was wrong, and so was the supervisor's check of it
+
+`docs/PHASE_8_PLAN.md` §8.7 states *"nothing anywhere in `packages/core`
+computes a two-sided swap."* **False.** `autoScheduler.js` `mutate()` at its
+`'swap'` branch lifts two teams' practice assignments, re-adds each into the
+other's slot, and refuses the pair if either fails `checkHardConstraints()`.
+That is a genuine two-sided exchange.
+
+It was read and deliberately not adopted, with the reasons in the module
+header: a random mutation inside a hill-climb rather than an enumeration; on
+the shipped MVP practice path, which models time as `Date` and so cannot meet
+this engine's no-`Date` rule; and it scores the **whole schedule** through one
+objective, so it never computes what *this* counterparty loses. The precise
+finding is sharper than either "it exists" or "it doesn't": **two-sided
+legality existed twice; two-sided cost existed nowhere.**
+`tryResolveTeamWithSwap()` and `resolve/stages.js` `pairRepair` are **bumps** —
+the occupant goes to a *third* slot — and `scenario/relocation.js` is one-sided.
+
+**The supervisor's supporting grep was case-sensitive.** `grep -rl "swap"`
+returns 10 files; `-i` returns 12, and one of the two missed was
+`practiceScheduling.js`, holding `tryResolveTeamWithSwap()` — precisely the
+near-miss that had to be read before any absence could be claimed.
+
+Seventh wrong brief this phase, and it defeats all three guards already
+recorded: the pattern *was* shown matching, no window truncated it, and the
+commit was right. **New rule: in a camelCase codebase an evidentiary grep over
+identifiers must be case-insensitive.** A single lowercase word cannot see a
+compound identifier.
+
+What made it harmless is worth as much as the rule: the brief passed the claim
+through **flagged as unverified, with the instruction to establish it by
+reading**. That framing is what produced the correction. Incomplete evidence
+honestly labelled cost nothing; the same evidence asserted as fact would have
+had an agent build a second two-sided swap beside an existing one, which is the
+`evaluatePracticeSchedule` divergence #409 had just finished removing.
+
+### Two more brief errors, both small
+
+`gh` is **not installed** in the agent container — the agent armed two `Monitor`
+watches on `gh api` before discovering it, and both would have reported "no
+events" forever. And the season fixture suite is **145** cases, not the 141
+recorded at 8.3. Carry both into future briefs alongside the Deno note.
+
+### A real defect in the registry, found by the work
+
+`registryConstraintIdsFor()` **cannot name a travel objective**: none of the
+seven `TRAVEL_*` codes is in `registry.idsByReasonCode`, while
+`travelConstraintIdByCode()` names two. Asking only the first reported
+`coach-travel-between-venues` as an objective the registry cannot name. Both
+owners are now asked, each for the codes it owns, and `PERMIT_MARGIN_TIGHT` —
+claimed by neither — reports as `MOVE_REQUEST_COST_UNCLAIMED`. **A loss the
+registry cannot name is still a loss, not a free swap.** That distinction is
+the difference between an honest answer and a hollow one.
+
+### Why this is a different question from `canGameMove()`
+
+Both parties are lifted before either is judged, through one function, via
+`probeKickoff()`'s `ignoreBookingIds`. `checkPlacement()` reads the resolve
+state as it stands, so `canGameMove()` sees the counterparty still standing on
+the slot. The test drives both directions: every slot this module admits a swap
+into, `canGameMove()` refuses; and on **unoccupied** candidates, where the two
+are asked the same question, they agree across 22+ comparisons with a
+deliberate mismatch shown red so the agreement is not vacuous.
+
+### The single-producer requirement, made structural
+
+The plan required the class be derived mechanically by one producer. A source
+scan over all of `packages/core` asserts exactly one line assigns a
+classification onto an object, and its meta-assertion is the right shape: the
+wider pattern is shown matching lines this module does **not** own (`fairness/`
+has two locals of the same name), so the narrowing to one is real rather than a
+filter over a set of one.
+
+### The clean round is not evidence of clean code
+
+**The supervisor's review found zero findings. That is the second consecutive
+zero-finding round and it should be discounted, not celebrated.**
+
+`moveRequest.js` is **1661 lines** and its test **1301**. The supervisor
+reviewed the shared-code changes (`boundsOf` extraction, `queries.js`
+visibility), the reachability claim, the single-producer scan and the two
+positive controls — and did **not** read the module in full. The agent's own
+`/code-review` pass found **five real defects** in it, including a swap called
+"legal for both parties" with one side's governing constraints never asked, and
+a travel regression created for the *subject's* coach charged to the
+counterparty. Two more holes were found by the agent's own falsifiability
+breaks before any reviewer saw them.
+
+So the honest reading is: five defects were found in this module by a reviewer
+that read it, zero by one that sampled it. A 1661-line module merged on a
+sampled review probably still holds defects. The agent said as much itself,
+against 8.3's recorded experience that roughly six PRs' worth of surface is
+where review starts finding things, and argued the pieces were not separable —
+the classifier is meaningless without the swaps, the swaps without the lift.
+That argument is accepted; the risk it carries is recorded here rather than
+dissolved by a green round.

@@ -6,7 +6,6 @@ import { useTeamPersistence } from '../hooks/useTeamPersistence.js';
 import { useImport } from '../contexts/ImportContext.jsx';
 import { useTheme } from '../contexts/ThemeContext.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
-import LoadingScreen from '../components/LoadingScreen.jsx';
 import { Building2, Calendar, Users, Trophy, ArrowRight, Sparkles } from 'lucide-react';
 import { FeatureGuard } from '../components/ui/FeatureGuard.jsx';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
@@ -95,9 +94,54 @@ export default function WorkflowPage() {
     return score;
   }, [team, practice, game]);
 
-  if (loading && !team) {
-    return <LoadingScreen message="Aggregating league status..." />;
-  }
+  // **`loading` is `{ team, practice, game }`, and the three are read
+  // separately because they are three sources with three lifetimes.**
+  //
+  // This page used to open with `if (loading && !team) return <LoadingScreen
+  // .../>`. Both operands were permanently truthy -- `loading` is an object
+  // literal `useDashboardData` builds on every render, and `team` is
+  // `resolvedTeam`, another unconditional object literal -- so the branch was
+  // dead and that screen had never been seen. `DashboardWorkflow` two hundred
+  // lines below consumed the same value correctly, as an object, which is how
+  // the shape stayed right while these two reads went wrong.
+  //
+  // **No page-level screen replaces it, and that is a decision rather than an
+  // omission.** Neither gate it could have is correct:
+  //
+  //   * on `loading.team` it would swallow the very UI built for the state it
+  //     claims to cover. `useTeamSummary` holds `loading` true for the WHOLE
+  //     of a running teaming job (`useTeamSummary.js:92`, re-polling every 2s),
+  //     and `DashboardWorkflow` renders a live "Generating Teams..."
+  //     ProgressBar off `team.status`/`team.progress` for exactly that window.
+  //     A full-page screen over it would hide the progress it exists to show.
+  //   * on anything true at first paint it would blank the dashboard on every
+  //     navigation. The route is lazy and the hooks remount, so "no data yet"
+  //     is true every single visit.
+  //
+  // What the dead branch was actually groping at is real, though, and it is
+  // per-source: while a source is in flight this page cannot honestly say
+  // what that source found. Unguarded it asserted `readinessScore === 0`,
+  // three Pending/Unscheduled/In Progress rows, and "Your season hasn't
+  // started yet" -- over a fully scheduled season, on every navigation, for
+  // as long as the fetches took. So each of the three claims now waits for
+  // its own flag, and the aggregate ones wait for all three.
+  const teamPending = Boolean(loading?.team);
+  const practicePending = Boolean(loading?.practice);
+  const gamePending = Boolean(loading?.game);
+
+  // **In flight is not the same as unknown, and the score turns on the
+  // difference.** `readinessScore` is built from the three `generatedAt`
+  // values, so a source that has already produced one contributes a known
+  // 40/30/30 no matter what its fetch is doing now. Gating the aggregate on
+  // the raw flags would blank a fully scheduled season's "100%" to "—" for
+  // the whole of a re-run -- `loading.team` stays true for the duration of
+  // one -- while the three rows beside it still read Complete / Optimized /
+  // Finalized. A source is unknown only when it is in flight AND has yet to
+  // report anything, which is the same condition the rows below use.
+  const teamUnknown = teamPending && !team?.generatedAt;
+  const practiceUnknown = practicePending && !practice?.generatedAt;
+  const gameUnknown = gamePending && !game?.generatedAt;
+  const readinessKnown = !teamUnknown && !practiceUnknown && !gameUnknown;
 
   const handleImport = (data) => {
     setImportedData(data);
@@ -128,7 +172,7 @@ export default function WorkflowPage() {
         </p>
       </header>
 
-      {readinessScore === 0 && (
+      {readinessKnown && readinessScore === 0 && (
         <div className="glass-panel p-12 text-center mb-12 animate-fadeIn border-brand-400/20 relative overflow-hidden">
           <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
             <Sparkles size={120} className="text-brand-400" />
@@ -182,38 +226,70 @@ export default function WorkflowPage() {
               <div className="bg-bg-surface-hover/50 p-4 rounded-lg border border-border-subtle">
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-sm font-medium text-text-secondary">Overall Readiness</span>
+                  {/* A partial score is not a small error, it is a different
+                      number: every source still in flight contributes 0, so
+                      the figure reads as "nothing is ready" rather than "not
+                      counted yet". Withheld until all three have answered. */}
                   <span
-                    className={`text-sm font-bold ${readinessScore >= 70 ? 'text-green-400' : 'text-amber-400'}`}
+                    className={`text-sm font-bold ${
+                      !readinessKnown
+                        ? 'text-text-muted'
+                        : readinessScore >= 70
+                          ? 'text-green-400'
+                          : 'text-amber-400'
+                    }`}
                   >
-                    {readinessScore}%
+                    {readinessKnown ? `${readinessScore}%` : '—'}
                   </span>
                 </div>
                 <div className="w-full bg-bg-glass h-2 rounded-full overflow-hidden">
                   <div
                     className={`h-full transition-all duration-500 ${readinessScore >= 70 ? 'bg-green-500' : 'bg-amber-500'}`}
-                    style={{ width: `${readinessScore}%` }}
+                    style={{ width: `${readinessKnown ? readinessScore : 0}%` }}
                   />
                 </div>
               </div>
 
               {/* Status List */}
               <div className="space-y-4">
+                {/* Each row waits on its OWN flag. "Pending", "Unscheduled"
+                    and "In Progress" are findings about a source, and none of
+                    them can be reported before that source has answered.
+                    `team` additionally distinguishes a run in flight, because
+                    `useTeamSummary` keeps `loading.team` true for the whole of
+                    one and "Checking..." would be wrong for minutes. */}
                 <StatusItem
                   icon={<Users size={18} />}
                   label="Team Rosters"
-                  status={team?.generatedAt ? 'Complete' : 'Pending'}
+                  status={
+                    team?.generatedAt
+                      ? 'Complete'
+                      : teamPending
+                        ? team?.status === 'running'
+                          ? 'Generating'
+                          : 'Checking…'
+                        : 'Pending'
+                  }
                   isReady={!!team?.generatedAt}
                 />
                 <StatusItem
                   icon={<Calendar size={18} />}
                   label="Practice Slots"
-                  status={practice?.generatedAt ? 'Optimized' : 'Unscheduled'}
+                  status={
+                    practice?.generatedAt
+                      ? 'Optimized'
+                      : practicePending
+                        ? 'Checking…'
+                        : 'Unscheduled'
+                  }
                   isReady={!!practice?.generatedAt}
                 />
                 <StatusItem
                   icon={<Trophy size={18} />}
                   label="Game Schedule"
-                  status={game?.generatedAt ? 'Finalized' : 'In Progress'}
+                  status={
+                    game?.generatedAt ? 'Finalized' : gamePending ? 'Checking…' : 'In Progress'
+                  }
                   isReady={!!game?.generatedAt}
                 />
               </div>
@@ -237,7 +313,16 @@ export default function WorkflowPage() {
         </div>
       </div>
 
-      {loading && <IngestionOverlay />}
+      {/* Unguarded, because the guard that was here was not about this
+          component. `IngestionOverlay` shows CSV-ingestion progress and
+          decides its own visibility from `ImportContext` (`isImporting`,
+          `activeJob`, `importStatus`) behind its own `isVisible` state; it
+          has no relationship to the three scheduler-run fetches `loading`
+          describes. `{loading && ...}` reduced to `{true && ...}` against the
+          always-truthy object, so the overlay already mounted on every render
+          and only looked deliberate. Removing a condition that never
+          subtracted anything, rather than inventing one it never had. */}
+      <IngestionOverlay />
     </div>
   );
 }

@@ -12,6 +12,7 @@ import { findBlackoutConflicts } from '@squadlogic/core/fieldAdmin/index.js';
 import { useFieldClosures } from '../hooks/useFieldClosures.js';
 import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
 import { requireZonedInstant } from '@squadlogic/core/timing/index.js';
+import { buildPracticeRunResults } from '@squadlogic/core/utils/practiceRunResults.js';
 import {
   describeTimingFindings,
   describeUnplaceableSlots,
@@ -698,6 +699,28 @@ export default function PracticeSchedulingPage() {
     setApplyStatus('applying');
     setApplyError(null);
 
+    // The core `practiceMetrics` report over the assignments actually being
+    // applied -- which is the shape `practiceSummaryMapper`,
+    // `PracticeReadinessPanel` and `seed.sql` all already expect, and the one
+    // this call site alone used not to write. The Edge evaluator's report is
+    // kept under `edgeEvaluation`, named for its producer so the two arms
+    // cannot be confused. See `buildPracticeRunResults` for why hoisting it
+    // instead would have been the wrong arm AND the wrong schedule.
+    //
+    // Built before the call rather than inline so the outcome can be read
+    // back below: a run it could not measure has to reach the operator, not
+    // just the JSON column.
+    const results = buildPracticeRunResults({
+      assignments: persistenceAssignments,
+      unassigned: autoScheduler.result?.unassigned ?? [],
+      teams: schedulerTeams,
+      slots: schedulerSlots,
+      schoolDayEnd,
+      timezone,
+      edgeEvaluation: autoScheduler.result?.evaluation ?? null,
+      optimization: autoScheduler.result?.optimization ?? null,
+    });
+
     try {
       const result = await persistPracticeScheduleReview({
         assignments: persistenceAssignments,
@@ -715,12 +738,7 @@ export default function PracticeSchedulingPage() {
             timezone,
           },
           metrics: autoScheduler.result?.optimization ?? {},
-          results: {
-            assignments: persistenceAssignments,
-            unassigned: autoScheduler.result?.unassigned ?? [],
-            evaluation: autoScheduler.result?.evaluation ?? null,
-            optimization: autoScheduler.result?.optimization ?? null,
-          },
+          results,
           completedAt: now,
         },
       });
@@ -735,7 +753,15 @@ export default function PracticeSchedulingPage() {
       );
       setReviewAssignments(null);
       setApplyStatus('applied');
-      setStatusMessage(null);
+      // The schedule was persisted either way -- this is not an error -- but
+      // a run with no readiness metrics must say so here. The panel can only
+      // fall silent (it gates on `summary.unassignedTeams`), and a silent
+      // panel is indistinguishable from a season with nothing to report.
+      setStatusMessage(
+        results.metricsUnavailable
+          ? `Schedule applied. Readiness metrics were not computed for this run: ${results.metricsUnavailable.reason}`
+          : null
+      );
     } catch (err) {
       setApplyError(err.message || 'Practice schedule changes could not be applied.');
       setApplyStatus('error');
@@ -749,7 +775,10 @@ export default function PracticeSchedulingPage() {
     practice?.runId,
     reviewAssignments,
     schedulerSlots,
-    schedulerTeams.length,
+    // The array, not its length: the roster is now an input to the metrics
+    // report this callback persists, so a change of membership at an
+    // unchanged count has to re-create it.
+    schedulerTeams,
     schoolDayEnd,
     slotById,
     timezone,

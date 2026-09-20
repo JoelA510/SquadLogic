@@ -3950,7 +3950,7 @@ firing, swapping its wording is decoration.*
   Write a production caller and the message is false and the test red — which
   is exactly what closing GAP-29 has to do.
 
-Proved by execution, not by reading. Five deliberate breaks, each applied to
+Proved by execution, not by reading. Nine deliberate breaks, each applied to
 production source and reverted:
 
 | break                                                | what went red                             |
@@ -4062,3 +4062,83 @@ A seam is not a store. The one thing a later reader should take from here is the
 sentence the new message can now be held to — *nothing in this repository stores
 through it* — and the fact that a test, rather than a paragraph, is what holds
 it.
+
+## Supervisor note on #405 — the brief was wrong about the third seam
+
+Three of this phase's briefs have now been corrected by the agent holding them,
+each time by measurement rather than argument. This is the third and the most
+expensive one had it gone through.
+
+**The brief said: make all three persistence seams order-canonical.** Two of
+them should be, and now are — `externalImport` adopted `fieldAdmin`'s code-unit
+sort through one extracted comparator, and the registry that used to serialise
+two ways now serialises one. The third instruction was wrong. A publication
+snapshot's row order is *inside* `publicationDigest()`, so a serialiser that
+sorted rows would have written documents that fail their own digest check on
+every read — the seam corrupting the drift detector it exists to serve, shipped
+under a commit message saying the seams now agree. The agent declined the
+instruction, said why in the module header rather than silently skipping it, and
+proved the consequence with a test that reads re-ordered rows back as
+`SNAPSHOT_DIGEST_MISMATCH`. Taking my reading would have produced a defect with
+a paragraph of my own prose defending it.
+
+The pattern across all three: the brief asserted that two things were the same
+case. `seasonClockLoading` against `!schedulerSlots.length`; the two seed copies;
+now three seams against one ordering rule. Each time the agent enumerated the
+cases and found the one that differs. **A supervisor's "A already covers B" is a
+claim about a set, and a claim about a set is checked by enumerating it.**
+
+### What I verified myself, by execution, on the branch before the hand-back
+
+```
+clean round trip  -> SNAPSHOT_IN_MEMORY_ONLY
+edited cell       -> SNAPSHOT_IN_MEMORY_ONLY, SNAPSHOT_DIGEST_MISMATCH
+reordered rows    -> SNAPSHOT_IN_MEMORY_ONLY, SNAPSHOT_DIGEST_MISMATCH
+```
+
+and, reviewing the diff rather than the report: `snapshotsRead` is a member of
+`createPublicationMeta()`, so `mergePublicationMeta()` — which folds
+`Object.keys(target)` — carries it; a counter added to the type and not to the
+constructor would have been folded into nothing. The repository scan in
+`tests/publicationParity.test.js` clears the bar this phase set for a grep that
+returns zero: it has a file-count floor, a positive control asserting the
+pattern matches the seam's own file, and a second control asserting the import
+regex matches `fieldAdmin`'s same-named module. A scan proving absence has to
+first prove it can see.
+
+### The merge rule from #402, applied
+
+#402 was merged while its own agent was still running a second `/code-review`
+pass, and the findings landed as a separate PR. Here both preconditions were
+waited for: the hand-back, **and** the notification that the agent had stopped
+with no live children. A PR is not merge-eligible while its own agent is alive,
+however green CI looks.
+
+### One correction to the entry above
+
+Its lead-in says "Five deliberate breaks" over a table of **nine**. The table
+and the PR body are right; the numeral was left behind when the `/code-review`
+round added four more. Corrected in place by the supervisor rather than
+re-dispatched, and recorded here because a count that disagrees with the list
+under it is the same species as everything else on this page.
+
+### Carried into Stage 2 scoping, not resolved here
+
+Three things the agent surfaced that a store has to answer:
+
+1. **A `serialise`/`read` pair is probably not the shape of the store.**
+   `fieldAdmin` is the one package that got real persistence and it bypassed its
+   own seam entirely — table + RPC + RLS + audit. The pair is a declaration that
+   a store is missing and a statement of the value's shape; reading it as the
+   interface would be reading the repository's only data point backwards.
+2. **`fieldAdmin`'s byte-stability claim has no locale control of its own.**
+   Switching the shared comparator to `localeCompare` reddened only
+   `externalImport`'s test. The rule `fieldAdmin` wrote is now enforced
+   somewhere else.
+3. **Two answers to "are these the same publication?", and nothing exercises the
+   disagreement.** `publicationDigest()` canonicalises rows by position;
+   `checkParity()` groups them by key (`parity.js:122-124`). Same rows in a
+   different order: one comparison says identical, the other says drifted. I
+   confirmed both readings in the source. Whichever a store commits to is a
+   decision, and today it is being made by whichever function a caller reaches
+   for.

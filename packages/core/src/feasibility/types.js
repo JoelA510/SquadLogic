@@ -260,7 +260,10 @@
  * @property {string[]} occupantIds - holdings standing on this ground, sorted
  * @property {string[]} undecidableOccupantIds - holdings that may be, sorted
  * @property {string[]} ownCommitmentClashIds - the subject's own diary, not the ground
- * @property {string[]} travelCodes - what moving here would introduce for its people
+ * @property {string[]} travelCodes - what moving the **subject alone** here
+ *   would introduce for its own people, from the one-sided projection. A swap
+ *   into this slot moves two parties at once and prices them separately; see
+ *   {@link MoveRequestSwap}'s `cost` and `subjectTravelCodes`
  * @property {FeasibilityUnknown[]} unknowns
  */
 

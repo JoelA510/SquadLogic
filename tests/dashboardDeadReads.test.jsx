@@ -451,6 +451,8 @@ describe('the practice panel never shows a total and a breakdown that silently d
     expect(screen.getByText(/Reasons account for 2 teams, but 1 is unassigned/)).toBeTruthy();
     // The engine's own explanation, which nothing in the app used to render.
     expect(screen.getByText(/Unassigned list references unknown team/)).toBeTruthy();
+    // Here there ARE notes, so the line may point at them.
+    expect(screen.getByText(/See the data-quality notes below/)).toBeTruthy();
   });
 
   it('divergence B: a team in neither list — and the engine raises no warning', () => {
@@ -468,6 +470,13 @@ describe('the practice panel never shows a total and a breakdown that silently d
     render(<PracticeReadinessPanel practiceReadinessSnapshot={report} />);
 
     expect(screen.getByText(/Reasons account for 1 team, but 2 are unassigned/)).toBeTruthy();
+    // ...and because there are none, the line must not send the reader to a
+    // data-quality section that is not rendered. This is the branch the whole
+    // reconciliation exists for, so a pointer to nothing lands exactly here.
+    expect(screen.queryByText(/data-quality notes/)).toBeNull();
+    expect(screen.queryByText(/Data quality:/)).toBeNull();
+    // The explanation still stands on its own without the pointer.
+    expect(screen.getByText(/counts this run's unassigned entries/)).toBeTruthy();
   });
 
   it('divergence C: an assignment naming a team not on the roster', () => {

@@ -93,6 +93,11 @@ KpiCard.propTypes = {
  * reconciliation line appears whenever the two part company, and
  * `dataQualityWarnings` — which nothing in the app rendered — is shown.
  *
+ * The reconciliation line explains itself without referring anywhere, and
+ * points at the notes only when there are notes: the team-in-neither-list
+ * case is precisely the one with none, so an unconditional pointer would send
+ * the reader to an absent section in the branch that matters most.
+ *
  * @param {{
  *   practiceReadinessSnapshot?: {
  *     summary?: { unassignedTeams?: number },
@@ -186,10 +191,18 @@ export default function PracticeReadinessPanel({
                 ))}
               </ul>
               {!reconciles && (
-                <p className="insight-card__empty" role="status">
+                // The explanation stands on its own, and the pointer to the
+                // notes is conditional on there being notes. The divergence
+                // this panel exists for -- a team in neither list -- produces
+                // an EMPTY `dataQualityWarnings`, so an unconditional "see
+                // the data-quality notes" sent the reader to nothing in
+                // exactly the branch that matters most.
+                <p className="insight-card__alert-text" role="status">
                   Reasons account for {reasonsTotal} team{reasonsTotal === 1 ? '' : 's'}, but{' '}
-                  {unassignedTeams} {unassignedTeams === 1 ? 'is' : 'are'} unassigned. These count
-                  different things; see the data-quality notes.
+                  {unassignedTeams} {unassignedTeams === 1 ? 'is' : 'are'} unassigned. The reasons
+                  list counts this run&apos;s unassigned entries; the total counts teams with no
+                  slot.
+                  {warnings.length > 0 ? ' See the data-quality notes below.' : ''}
                 </p>
               )}
             </>

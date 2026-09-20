@@ -22,7 +22,13 @@ export default function WorkflowPage() {
     throw new Error('E2E forced error for resilience testing.');
   }
 
-  const { team, practice, game, loading, error: dataError, timezone } = useDashboardData();
+  // No `timezone` here: the two consumers were `TeamListView` and
+  // `GameReadinessPanel`, which both render a `scheduler_runs` timestamp on
+  // the viewer's clock and no longer declare the prop. `useDashboardData` has
+  // never returned a zone, so the binding was `undefined` in every render this
+  // page has ever had. `error` it DOES return, now that it stops swallowing
+  // the three fetch failures underneath it.
+  const { team, practice, game, loading, error: dataError } = useDashboardData();
   const { persistenceSnapshot, loading: _persistenceLoading } = useTeamPersistence();
   const { importedData, setImportedData } = useImport();
   const { theme: _theme } = useTheme();
@@ -132,7 +138,6 @@ export default function WorkflowPage() {
             importedData={importedData}
             controlledActiveStep={activeStep}
             onStepChange={setActiveStep}
-            timezone={timezone}
           />
         </div>
 

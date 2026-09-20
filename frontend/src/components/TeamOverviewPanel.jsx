@@ -16,9 +16,16 @@ const COLOR_CLASSES = {
  * viewer's own clock is the right one to read it on -- the `toSeasonInstant`
  * docblock in `utils/formatters.js` names this panel as one of the callers
  * that deliberately passes none. It used to be declared, typed and discarded
- * as `_timezone`, which reads as load-bearing and is not. Its sibling
- * `TeamListView` DOES honour a `timezone`, and that difference is real: the
- * two render different timestamps, not the same one two ways.
+ * as `_timezone`, which reads as load-bearing and is not.
+ *
+ * This docblock used to add that its sibling `TeamListView` "DOES honour a
+ * `timezone`, and that difference is real: the two render different
+ * timestamps, not the same one two ways." That was wrong, and it justified
+ * leaving the sibling unfixed. `DashboardWorkflow` renders the two as the
+ * fallback and the child of a single `FeatureGuard`, handed the identical
+ * `teamData.totals`, `teamData.divisions` and `teamData.generatedAt`: they are
+ * one panel and its accessible alternative, showing the same run timestamp.
+ * `TeamListView` now reads it on the viewer's clock too.
  */
 export default function TeamOverviewPanel({ totals, divisions, generatedAt }) {
   const summaryItems = [

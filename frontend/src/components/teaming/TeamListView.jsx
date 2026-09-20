@@ -7,13 +7,24 @@ import { formatPercent, formatDate } from '../../utils/formatters.js';
  * A high-contrast, semantic table-based alternative to the graphical TeamOverviewPanel.
  * Designed for maximum accessibility and screen-reader compatibility.
  *
+ * **There is no `timezone` prop, and its absence is the contract.**
+ * `generatedAt` is a `scheduler_runs` timestamp (see `teamSummaryMapper`), a
+ * real instant carrying a zone, and the viewer's own clock is the right one to
+ * read it on — the `toSeasonInstant` docblock in `utils/formatters.js` states
+ * that rule and `TeamOverviewPanel` already follows it.
+ *
+ * That matters here more than anywhere else: `DashboardWorkflow` renders this
+ * component and `TeamOverviewPanel` as the two arms of one `FeatureGuard`,
+ * handed the identical `teamData.generatedAt`. They are one panel with an
+ * accessible alternative, so a zone on one arm and not the other made the same
+ * run report two different dates depending on a feature flag.
+ *
  * @param {Object} props
  * @param {Object} props.totals - Global allocator totals.
  * @param {Array} props.divisions - List of division-specific results.
  * @param {string} props.generatedAt - ISO timestamp of when teams were generated.
- * @param {string} props.timezone - Organization target timezone.
  */
-const TeamListView = ({ totals, divisions, generatedAt, timezone }) => {
+const TeamListView = ({ totals, divisions, generatedAt }) => {
   return (
     <section
       className="bg-bg-surface border-4 border-text-primary p-6 rounded-none my-4"
@@ -26,9 +37,7 @@ const TeamListView = ({ totals, divisions, generatedAt, timezone }) => {
         >
           Drafting Summary (Table View)
         </h2>
-        <p className="text-text-primary font-medium mt-2">
-          Generated on {formatDate(generatedAt, timezone)}
-        </p>
+        <p className="text-text-primary font-medium mt-2">Generated on {formatDate(generatedAt)}</p>
       </header>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">

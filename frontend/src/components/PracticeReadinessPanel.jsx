@@ -43,12 +43,35 @@ KpiCard.propTypes = {
  * declared, typed and destructured as `_timezone`, which is the same
  * reads-as-load-bearing-and-is-not shape as the `lastCalculated` above it.
  *
+ * **The KPI row reads `summary`, and only `summary`.**
+ * Four cards used to read `balancedScore`, `manualActionRequiredCount`,
+ * `venueSaturation` and `conflictFreeTeams` off the snapshot. Nothing in the
+ * repository has ever written any of the four: the snapshot is
+ * `scheduler_runs.results` verbatim (`practiceSummaryMapper`), i.e.
+ * `evaluatePracticeSchedule`'s report, whose keys are `summary`,
+ * `slotUtilization`, `baseSlotDistribution`, `divisionDayDistribution`,
+ * `divisionBaseSlotDistribution`, `dayConcentrationAlerts`, `coachLoad`,
+ * `coachConflicts`, `dataQualityWarnings`, `fairnessConcerns`,
+ * `underutilizedBaseSlots`, `unassignedByReason` and
+ * `manualFollowUpBreakdown`. Each card carried a `?? 0` / `?? 'Unknown'`
+ * fallback, so all four rendered a confident constant — `0%`, `0`, `Unknown`,
+ * `0%` — over every season this app has ever scheduled.
+ *
+ * That is the `lastCalculated` defect above, on this same component, for four
+ * more fields: the fix landed on the header line and left the cards beside it.
+ *
+ * **Only one of the four had a metric measuring the same quantity.**
+ * `summary.unassignedTeams` (unit `ROSTERED_TEAM`) is exactly "teams requiring
+ * manual slot assignment", so "Manual Actions" is wired to it. The other three
+ * are deleted rather than derived: `slotUtilization` is per-slot occupancy and
+ * not venue saturation, `coachConflicts` counts coach pairs and not
+ * conflict-free teams, and no metric measures primary-vs-secondary field
+ * evenness at all. A number derived to keep a card alive cannot be told apart
+ * from a measured one, which is worse than an absent card.
+ *
  * @param {{
  *   practiceReadinessSnapshot?: {
- *     balancedScore?: number,
- *     manualActionRequiredCount?: number,
- *     venueSaturation?: string,
- *     conflictFreeTeams?: number,
+ *     summary?: { unassignedTeams?: number },
  *     unassignedByReason?: Array<{ reason: string, count: number }>,
  *   },
  *   dashboardLoading?: { practice?: boolean },
@@ -64,10 +87,10 @@ export default function PracticeReadinessPanel({
     return (
       <div className="glass-panel p-8 animate-pulse">
         <div className="h-6 w-1/3 bg-bg-surface-hover rounded mb-4" />
+        {/* One placeholder because one card follows. Four promised three
+            cards that no producer can fill. */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-24 bg-bg-glass rounded-lg" />
-          ))}
+          <div className="h-24 bg-bg-glass rounded-lg" />
         </div>
       </div>
     );
@@ -84,34 +107,16 @@ export default function PracticeReadinessPanel({
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <KpiCard
-          label="Field Distribution"
-          value={`${practiceReadinessSnapshot.balancedScore ?? 0}%`}
-          status={(practiceReadinessSnapshot.balancedScore ?? 0) > 85 ? 'good' : 'warning'}
-          description="Evenness of primary vs secondary fields"
-        />
-        <KpiCard
-          label="Manual Actions"
-          value={practiceReadinessSnapshot.manualActionRequiredCount ?? 0}
-          status={
-            (practiceReadinessSnapshot.manualActionRequiredCount ?? 0) === 0 ? 'good' : 'warning'
-          }
-          description="Teams requiring manual slot assignment"
-        />
-        <KpiCard
-          label="Venue Saturation"
-          value={practiceReadinessSnapshot.venueSaturation ?? 'Unknown'}
-          status={practiceReadinessSnapshot.venueSaturation === 'Low' ? 'good' : 'warning'}
-          description="Current capacity utilization"
-        />
-        <KpiCard
-          label="Conflict Free"
-          value={`${practiceReadinessSnapshot.conflictFreeTeams ?? 0}%`}
-          status={(practiceReadinessSnapshot.conflictFreeTeams ?? 0) > 95 ? 'good' : 'warning'}
-          description="Teams without schedule overlapping"
-        />
-      </div>
+      {typeof practiceReadinessSnapshot.summary?.unassignedTeams === 'number' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <KpiCard
+            label="Manual Actions"
+            value={practiceReadinessSnapshot.summary.unassignedTeams}
+            status={practiceReadinessSnapshot.summary.unassignedTeams === 0 ? 'good' : 'warning'}
+            description="Teams requiring manual slot assignment"
+          />
+        </div>
+      )}
 
       <div className="insights-grid">
         <article className="insight-card" aria-labelledby="manual-follow-ups">

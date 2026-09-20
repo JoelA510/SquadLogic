@@ -1198,7 +1198,6 @@ export default function GameSchedulingPage() {
             gameReadinessSnapshot={reviewSnapshot ?? {}}
             gameSummary={reviewSummary}
             generatedAt={schedulerResult?.generatedAt ?? game?.generatedAt}
-            timezone={timezone}
           />
         </div>
       </div>

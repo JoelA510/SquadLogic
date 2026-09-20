@@ -4232,6 +4232,10 @@ isomorphic; the two disagree on the first line of the summary.
 
 Three layers of why nothing catches it, and one is the supervisor's:
 
+> **FALSE — see "CORRECTION: four of five ran" at the end of this file.** Items
+> 1 and 2 below, and the "eleven seconds" line, are wrong. They are left in
+> place rather than deleted so the correction has its subject.
+
 1. **CI runs two of five Deno test files.** The job names them individually.
    Never run: `scoring-engine_test.ts`, `anchor-wall-times_test.ts`,
    `ics-feed_test.ts`.
@@ -4260,3 +4264,75 @@ rather than an error — and because it matched the workflow display name as "CI
 when it is "SquadLogic CI". Both failure modes read as *"CI never ran"* instead
 of erroring. The same shape as everything else on this page, in the tooling built
 to watch for it.
+
+## CORRECTION: four of five ran — the #407 entry's Deno claim was false
+
+The entry above states that CI ran two of five Deno test files, that
+`anchor-wall-times_test.ts` and `ics-feed_test.ts` had never executed, and that
+#400 shipped them dead. **All three statements are false.** Corrected here by
+the #409 agent, and verified by the supervisor before accepting the correction.
+
+`grep -n "_test\.ts" .github/workflows/ci.yml`, with no context window:
+
+```
+243:  supabase/functions/_shared/tests/practice-coaches_test.ts
+267:  supabase/functions/_shared/tests/season-clock_test.ts
+268:  supabase/functions/_shared/tests/ics-feed_test.ts
+269:  supabase/functions/_shared/tests/anchor-wall-times_test.ts
+279:  supabase/functions/_shared/tests/season-clock_test.ts
+280:  supabase/functions/_shared/tests/ics-feed_test.ts
+281:  supabase/functions/_shared/tests/anchor-wall-times_test.ts
+```
+
+Four of five ran, two of them under both host zones. `git blame` puts lines
+268-269 in `4826668` — **#400 added those test files and wired them into CI in
+the same commit.** The accusation that a PR whose subject was "the cross-check
+that keeps both arms honest" shipped dead tests was groundless, and is withdrawn.
+
+Only `scoring-engine_test.ts` never ran, and it was excluded **deliberately**,
+with the reason stated at `ci.yml:214-218`: one case expected `'Time overlap'`,
+a string the engine has never produced. The #409 agent measured it on `main`
+with Deno 2.9.7 — 2 passed, 1 failed. The comment was accurate and the exclusion
+was honest. What was true in the entry above is only this: `scoring-engine_test.ts`
+had never run, and the engine beneath it had drifted.
+
+### The mechanism, which is a third instance and the first to reach `main`
+
+```
+grep -n "deno test" -A 3 .github/workflows/ci.yml | grep "_test.ts"
+```
+
+`-A 3` captured three lines after each match. Line 267 fell inside the window;
+268 and 269 did not. A truncating context window was read as an exhaustive
+enumeration.
+
+This is **not** the defect the supervisor had just adopted a rule against. That
+rule — never suppress stderr, show the pattern matching something — would not
+have caught this: the grep matched, and stderr was clean. The mechanism here is
+different and has now happened three times in this phase: `head -20` cutting an
+alphabetical listing before `auto-scheduler/` and `fairness-scoring/` (caught
+before filing), the `TeamListView` path that did not exist (caught by the #407
+agent), and this one — **the first to be published, filed as a task, written
+into this file, and merged to `main` in a PR body.**
+
+Rule, superseding the narrower one: **an evidentiary command may not carry
+`-A`, `-B`, `-C`, `head`, `tail` or any other truncation.** Enumerate the whole
+set, then narrow. A count is a claim about a set, and a windowed grep cannot
+support one.
+
+Worse than the error is what surrounded it. The supervisor offered *"a Deno
+Mirror Tests job that finishes in eleven seconds is its own tell"* as
+corroboration. That job ran 79 test executions. The eleven seconds was a real
+observation recruited to support a conclusion reached another way — which is
+the same defect this page catalogues in code, in the reasoning about it.
+
+### What the corrected picture is
+
+The real finding stands and is larger than the false one. `scoring-engine.ts`
+had drifted from `practiceMetrics.js` in **four** places, not the one the brief
+named, and three of the four were found by the drift check on its first run —
+including a phantom coach conflict between a team and itself. The word
+"isomorphic" was wrong in five places, not two, and the strongest of them was
+one the supervisor's brief missed entirely:
+`docs/architecture/edge-functions-inventory.md:128`, *"the same bytes run in
+both places."*

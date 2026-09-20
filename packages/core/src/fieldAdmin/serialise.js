@@ -55,7 +55,10 @@
  *    `Object.keys()` of whatever the first record happened to hold.
  * 2. **Row order is a declared sort** on the record id, in code-unit order so
  *    the runtime's locale cannot reach it - two runs over the same set write
- *    the same file regardless of input order.
+ *    the same file regardless of input order. The comparator itself now lives
+ *    in `../documentOrder.js`, shared with `externalImport`'s seam, which
+ *    preserved insertion order until 2026-09-19 and so wrote a different
+ *    document for the same registry.
  * 3. **One quoting rule**, {@link quoteCell} - quote if and only if the cell
  *    holds a comma, a double quote, a newline, or leading/trailing space.
  * 4. **Structured columns are JSON**, so a value containing the separator
@@ -73,6 +76,8 @@
  */
 
 import { z } from 'zod';
+
+import { sortRecordsById } from '../documentOrder.js';
 
 import {
   AliasRecordSchema,
@@ -458,26 +463,17 @@ export function serialiseFieldRegistry(registry) {
     registryId: registry.registryId,
     label: registry.label,
     kind: registry.kind,
-    // Sorted by id, so input order cannot reach the output.
-    records: [...registry.records]
-      // **Code-unit order, not `localeCompare`.** The contract of this file is
-      // byte stability across runs, and `localeCompare` varies with the
-      // runtime's default locale and ICU build - notably in how it weights
-      // `#`, `_` and `.`, which every id here contains
-      // (`field_constraints.csv#10` against `#2`). A declared ordering has to
-      // be one the machine cannot have an opinion about.
-      .sort((a, b) => {
-        const left = String(a.id);
-        const right = String(b.id);
-        if (left < right) return -1;
-        return left > right ? 1 : 0;
-      })
-      .map((record) => {
-        /** @type {Record<string, unknown>} */
-        const row = {};
-        for (const column of columns) row[column] = record[column] ?? null;
-        return row;
-      }),
+    // Sorted by id, so input order cannot reach the output. **Code-unit
+    // order, not `localeCompare`**, and shared rather than spelled here:
+    // `../documentOrder.js` holds the one comparator every persistence seam in
+    // this repository sorts by, so two seams cannot drift into two orders.
+    // This file's rule is unchanged - it is where the rule came from.
+    records: sortRecordsById(registry.records).map((record) => {
+      /** @type {Record<string, unknown>} */
+      const row = {};
+      for (const column of columns) row[column] = record[column] ?? null;
+      return row;
+    }),
   };
   return /** @type {Object} */ (FieldRegistryDocumentSchema.parse(document));
 }

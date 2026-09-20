@@ -120,11 +120,11 @@ export function scheduleGames({ teams, slots, roundRobinByDivision, freeze }) {
   // The real path is `packages/core/src/resolve/`:
   // `resolve/applyChangeRequest()` for a scoped change, and
   // `resolve/reoptimiseWholeSeason()` for the deliberate, named global
-  // re-solve. GAP-32 (week index vs calendar date) and GAP-29 (no persisted
+  // re-solve. GAP-32 (week index vs calendar date) and GAP-35 (no persisted
   // freeze scope) are why the bridge does not exist yet.
   if (freeze !== undefined) {
     throw new TypeError(
-      'gameScheduling: scheduleGames() cannot honour a freeze and will not pretend to. It is week-indexed, it generates matchups rather than re-placing existing games, and its assignments carry no game id to freeze. Use resolve/applyChangeRequest() to apply a scoped change to an existing schedule, or resolve/reoptimiseWholeSeason() to re-solve one on purpose. See GAP-29 and GAP-32.'
+      'gameScheduling: scheduleGames() cannot honour a freeze and will not pretend to. It is week-indexed, it generates matchups rather than re-placing existing games, and its assignments carry no game id to freeze. Use resolve/applyChangeRequest() to apply a scoped change to an existing schedule, or resolve/reoptimiseWholeSeason() to re-solve one on purpose. See GAP-35 and GAP-32.'
     );
   }
 

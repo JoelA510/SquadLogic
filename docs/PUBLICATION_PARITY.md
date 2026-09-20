@@ -81,6 +81,28 @@ consumer holding the object still learns the limitation from the object. The
 remaining work is GAP-29's own — a durable published-baseline version — and it
 is no longer waiting on anything.
 
+**What changed on the same date, and what did not.** Stage 1 added the seam this
+package used to say it did not have: `serialisePublicationSnapshot()` /
+`readPublicationSnapshot()` (`publication/serialise.js`), a version-stamped
+`.strict()` document validated in both directions, on the same pattern
+`externalImport`'s `MappingDocumentSchema` and `fieldAdmin`'s
+`FieldRegistryDocumentSchema` follow. `SNAPSHOT_IN_MEMORY_ONLY` no longer says
+*"there is no persistence seam"*; it says the seam exists and nothing stores
+through it, which is what its two siblings have always said. **Nothing is
+stored.** A `serialise`/`read` pair in this repository is a declaration that a
+store is missing — `fieldAdmin` is the one package that got a real store and it
+bypassed its own seam entirely, going table + RPC + RLS + audit — so read this
+as the shape of the value a store would hold, not as the interface it will use.
+
+The seam's refusals are the ones the digest already implied, now reachable from
+a document: a wrong `version`, a missing or added field, or a row outside the
+document's own column vocabulary throws; an edited cell or a re-ordered row is
+`SNAPSHOT_DIGEST_MISMATCH` at `blocking`, through the same
+`verifySnapshotDigest()` the in-memory path uses. Row order is inside the
+digest, which is the one place this seam does **not** follow its siblings: they
+sort their records by id because a registry is a set, and a snapshot's rows are
+positional.
+
 ---
 
 ## 3. Parity: four buckets, enumerated from both sides
@@ -280,7 +302,10 @@ registry can never read as monitoring. It is a notebook that does arithmetic.
 
 - **Not persisted.** No SQL migration. The GAP-30 reason §2 originally gave for
   that has expired — GAP-30 closed on 2026-09-19 — so this is now simply unbuilt
-  rather than blocked; see §2 and [GAP-29](MODEL_GAPS.md#gap-29).
+  rather than blocked; see §2 and [GAP-29](MODEL_GAPS.md#gap-29). There **is** a
+  seam as of the same date (`publication/serialise.js`), and nothing calls it;
+  the finding on every snapshot says so and a test holds that sentence to the
+  repository.
 - **Not a second diff.** `compareParityRows()` is the only row comparator;
   `resolve/state.js` `diffAgainstBaseline()` remains the only game-by-game
   baseline diff, over a resolve run rather than over two artifacts. The scenario

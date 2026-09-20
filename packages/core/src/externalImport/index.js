@@ -44,7 +44,9 @@
  *   them came back with its dates reinterpreted, and a module whose whole job is
  *   to *detect* a difference between two artifacts must not be built on a store
  *   that **creates** one. That is closed — those schemas now refuse a naive wall
- *   reading — and what is left is GAP-29's open stored half.
+ *   reading — and what is left is GAP-34's open stored half. (GAP-29 keeps the
+ *   published baseline; the mapping registry was never among the artifacts it
+ *   names, and this line cited it until the 2026-09-19 scope ruling.)
  *   `publication/index.js` states the same position for the same reason.
  *
  * ## What it deliberately is not

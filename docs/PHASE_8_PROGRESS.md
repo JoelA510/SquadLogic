@@ -3901,3 +3901,164 @@ published each time. Nothing was lost. But that is the outputs being right, not
 the check being right; none of those four happened to delete a bullet. A phase
 spent filing findings against checks that cannot fail had one running against
 its own verification the whole time.
+## GAP-29 stage 1 — the seam, and the six citations — **core only; no SQL**
+
+No migration, no table, no RPC, nothing under `supabase/`. Stage 2 is the store
+and it is not approved; if a later reader finds a migration attached to this
+entry, it did not come from here.
+
+### Three subsystems were in one situation and described it three ways
+
+`externalImport` and `fieldAdmin` each declared a `serialise`/`read` document
+pair and reported, on every registry, that **nothing stores through it**.
+`publication/` reported `SNAPSHOT_IN_MEMORY_ONLY` and said in `snapshot.js`
+that *"there is no persistence seam to store through"* at all. Stage 0 recorded
+that difference as a third position rather than a third seam, and said the
+stronger statement was the more honest one. It is also the one a reader cannot
+place: further behind, or further ahead?
+
+Stage 1 makes it one situation. `packages/core/src/publication/serialise.js`
+adds `serialisePublicationSnapshot()` / `readPublicationSnapshot()` on the
+`MappingDocumentSchema` pattern — version-stamped,
+`PublicationSnapshotDocumentSchema` `.strict()`, validated in both directions,
+no `Date`, no `Map`, no function — and the finding's message becomes the
+siblings' sentence: the seam exists and nothing stores through it.
+
+**Stage 0's rule is not weakened by this and is restated in the module's own
+header**: a `serialise*()` / `read*()` pair in this repository is a declaration
+that a store is **missing**, not a design for the one that will exist.
+`fieldAdmin` is the only package that got a real store and it bypassed its own
+seam entirely — table + RPC + RLS + audit. Nothing calls the new pair either.
+
+### Why the new message is not just nicer words
+
+The brief's own test: *if nothing can make `SNAPSHOT_IN_MEMORY_ONLY` stop
+firing, swapping its wording is decoration.*
+
+- **The emission is unconditional, and that is stated rather than dressed up.**
+  `PUBLICATION_DURABILITY` has exactly one member, so there is no snapshot the
+  finding could truthfully be omitted from. A condition here today would be a
+  branch no input can take, which this repository counts as evidence of a
+  missing feature, not as coverage. What would make it stop is named in
+  `reasonCodes.js`: the Stage 2 store — table, RLS, RPC, audit row — and a
+  second `PUBLICATION_DURABILITY` member that a snapshot loaded from it carries.
+- **The message is falsifiable today, and that is the part a reader can check.**
+  It names both seam functions and says nothing stores through them, and
+  `tests/publicationParity.test.js` enumerates the repository to hold both
+  halves: the seam is exported from the barrel, no production file outside
+  `publication/` names either function, and only the barrel imports the module.
+  Write a production caller and the message is false and the test red — which
+  is exactly what closing GAP-29 has to do.
+
+Proved by execution, not by reading. Five deliberate breaks, each applied to
+production source and reverted:
+
+| break                                                | what went red                             |
+| ---------------------------------------------------- | ----------------------------------------- |
+| document's `digest` loosened to any string            | the version/field-shape refusal test      |
+| reader compares the rebuilt digest against **itself** | the edited-cell and re-ordered-row tests  |
+| `makePublicationSnapshot()` stops normalising key order | the column-order canonicality test      |
+| a production `import` of `serialise.js` added         | the no-production-caller scan             |
+| the message stops naming the seam                     | the message test                          |
+| the write-side content guard removed                 | the refuse-to-write test                  |
+| a read keeps `snapshotsCreated: 1`                   | the read-is-not-a-publication test        |
+| the shared comparator goes `localeCompare`           | the code-unit ordering test               |
+| `externalImport` reverts to insertion order          | both ordering tests                       |
+
+### The order-canonical divergence, and its one exemption
+
+`fieldAdmin/serialise.js` sorted document records by id in code-unit order and
+documented byte-stability as a rule. `externalImport`'s seam preserved
+insertion order. **Two logically identical registries therefore produced two
+different documents**, which is harmless while nothing stores either and stops
+being harmless the moment something does: a table is a set, so "has this
+changed since we stored it?" answered by comparing documents would report a
+re-ordered read as an edit.
+
+`externalImport` now adopts the sibling contract. The comparator is extracted
+once into `packages/core/src/documentOrder.js` and both seams call it — a
+refactor slightly beyond the brief, flagged here for that reason: leaving two
+copies of the comparator while committing a change that says "the two seams now
+agree about order" is the hollow shape this phase keeps finding. Code units, not
+`localeCompare`, and the test proves that choice is live by asserting on an id
+set the two orderings disagree about.
+
+**`publication` does not sort, and says so.** A snapshot's rows carry no id and
+their order is *inside* `publicationDigest()`. Sorting them would write a
+document that no longer digests to the digest it carries — the seam corrupting
+the drift detector it serves. What it does adopt is the half that applies: cells
+in declared column order, asserted end to end rather than re-implemented in the
+serialiser where no input could make it fail.
+
+**The asymmetry is recorded rather than resolved.** Two snapshots holding the
+same rows in a different order are one table and two digests. Resolving it means
+changing `publicationDigest()`, which `scenario/` fingerprints also depend on;
+that is a decision for whoever scopes the store, not a side effect of this PR.
+
+### Two round-trip branches nothing covered
+
+`SEASON_2026_EXTERNAL_MAPPING_RECORDS` is two records, both `kind: 'venue'`,
+both `subjectId: null`, both carrying a `statedOn`. The `participant` arm, the
+null-`statedOn`/`statedBy` arm and non-ASCII content were asserted **nowhere**.
+They worked — that was executed before writing anything — and nothing would have
+noticed if they stopped. Each now has a round trip, and each carries a
+meta-assertion that the corpus still does not cover it, so the test says so if
+the corpus grows the case rather than silently becoming a duplicate.
+`publication`'s seam gets the non-ASCII case too, in labels, notes and cells.
+
+### The six citations
+
+Stage 0 left them as follow-ups. All six are now moved, and the assertion that
+guards one of them moved with it rather than being weakened:
+
+- `gameScheduling.js:123` (comment) and `:127` (the `scheduleGames()`
+  freeze-refusal message) — a persisted freeze scope, so **GAP-35**.
+  `tests/freezeScopes.test.js` asserts the refusal names both gaps it means; it
+  now asserts `GAP-35` and `GAP-32`, and the refusal still throws a `TypeError`
+  and still names `resolve/applyChangeRequest()`.
+- `externalImport/mapping.js:38`, `:46`, `:346` and `externalImport/index.js:47`
+  — the mapping registry, so **GAP-34**. `:346` is the user-visible
+  `EXTERNAL_MAPPING_NOT_PERSISTED` message; the other three are module prose.
+
+`publication/snapshot.js`'s citation was already correct and stays GAP-29.
+
+### What `/code-review` found on this PR, fixed here
+
+Five findings, all fixed in this PR as CLAUDE.md requires. Two were real
+defects in the new code and both are the same species as the ones this phase
+keeps finding — a guarantee that reads as stronger than it is:
+
+1. **A read reported itself as a publication.** `readPublicationSnapshot()`
+   returned the constructor's `SNAPSHOT_CREATED` finding and
+   `snapshotsCreated: 1`. `mergePublicationMeta()` folds additively, so the
+   Stage 2 caller this seam exists for — load N stored snapshots into one run
+   — would have reported N publications that never happened, each with a
+   finding naming who published what and when. An audit trail synthesised from
+   a disk read. Now zeroed, the finding dropped, and `snapshotsRead` is the
+   only counter a read moves.
+2. **The writer could mint a document it would always refuse.**
+   `serialisePublicationSnapshot()` validated shape and copied the digest
+   verbatim, so `{ ...snapshot, rows: edited }` — the idiom
+   `verifySnapshotDigest()`'s own docstring invites — wrote a structurally
+   perfect document carrying a digest for rows that were not there, unreadable
+   forever, with the reader blaming the store. The content is now checked on
+   the way out and the writer throws.
+3. **A claim in the new prose was false.** The `externalImport` docstring said
+   "nothing in this package reads `registry.records` positionally". Two derived
+   orderings did. `mappingUsageFindings()`'s `unexercised` list is a *reported*
+   list and is now sorted by the same comparator; the per-record construction
+   findings still follow record order, and the docstring now says so instead of
+   claiming otherwise.
+4. and 5. **Two line citations this PR's own edits moved** —
+   `BUILD_PLAN_STATUS.md` §7 on `snapshot.js:184` (now `:195`) and
+   `MODEL_GAPS.md` on `fieldAdmin/serialise.js:428` (now `:433`). Corrected.
+   Noted because §7 is *itself* the entry about a citation going stale, and it
+   went stale again in the same PR that quotes it.
+
+### What this does not close
+
+GAP-29 is unchanged in status: **Partial, published baseline only, unpersisted.**
+A seam is not a store. The one thing a later reader should take from here is the
+sentence the new message can now be held to — *nothing in this repository stores
+through it* — and the fact that a test, rather than a paragraph, is what holds
+it.

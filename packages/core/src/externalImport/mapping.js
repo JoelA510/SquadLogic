@@ -35,7 +35,10 @@
  * ## Persistence: a seam, declared, and deliberately unwired
  *
  * The build plan's own record (`docs/BUILD_PLAN_STATUS.md` §3) says **nothing in
- * phases 1-7 is persisted** and GAP-29's stored half is open. GAP-30 used to be
+ * phases 1-7 is persisted**, and this registry's own stored half is
+ * [GAP-34](../../../../docs/MODEL_GAPS.md#gap-34) — not GAP-29, which keeps the
+ * published baseline and was never the mapping registry's home (the citation
+ * here said GAP-29 until the 2026-09-19 scope ruling corrected it). GAP-30 used to be
  * the other half of this sentence: `z.coerce.date()` in
  * `SlotSchema`/`AssignmentSchema` meant a registry stored through a
  * timezone-lossy layer came back describing different ground after DST ends —
@@ -43,7 +46,7 @@
  * so a store that *created* one would be the parity defect
  * `publication/index.js` refuses for the same reason. **GAP-30 is closed.**
  * Those schemas refuse a naive wall reading and `timing/seasonClock.js` is the
- * one place a wall time becomes an instant, so the remaining blocker is GAP-29
+ * one place a wall time becomes an instant, so the remaining blocker is GAP-34
  * alone.
  *
  * What is built here instead, and what is claimed for it:
@@ -70,6 +73,7 @@
  * @module externalImport/mapping
  */
 
+import { sortRecordsById } from '../documentOrder.js';
 import { getSurface } from '../facility/facilityGraph.js';
 
 import {
@@ -343,7 +347,7 @@ export function buildExternalMappingRegistry(rawInput, options = {}) {
   findings.push(
     makeExternalImportFinding(
       EXTERNAL_IMPORT_REASON.EXTERNAL_MAPPING_NOT_PERSISTED,
-      `mapping registry ${input.registryId} lives in memory only; serialiseExternalMappingRegistry() and readExternalMappingRegistry() are the declared persistence seam and nothing in this repository stores through it (GAP-29)`,
+      `mapping registry ${input.registryId} lives in memory only; serialiseExternalMappingRegistry() and readExternalMappingRegistry() are the declared persistence seam and nothing in this repository stores through it (GAP-34)`,
       {
         registryId: input.registryId,
         durability: EXTERNAL_MAPPING_DURABILITY.IN_MEMORY,
@@ -575,7 +579,12 @@ export function recordMappingUse(usage, resolution, options = {}) {
 export function mappingUsageFindings(registry, usage) {
   /** @type {import('./types.js').ExternalImportFinding[]} */
   const findings = [];
-  const unexercised = registry.records.filter((record) => !usage.usedRecordIds.has(record.id));
+  // Sorted, not filtered-in-place: a reported list whose order depends on how
+  // the registry was assembled is the divergence `serialiseExternalMappingRegistry()`
+  // was just brought into line about, one layer up.
+  const unexercised = sortRecordsById(
+    registry.records.filter((record) => !usage.usedRecordIds.has(record.id))
+  );
 
   if (registry.records.length > 0 && usage.usedRecordIds.size === 0) {
     // Both halves of this sentence are read off the ledger rather than assumed
@@ -636,6 +645,45 @@ export function mappingUsageFindings(registry, usage) {
  * `tests/externalFixtureImport.test.js` a real check rather than a deep-equal
  * that would pass on a lossy transform.
  *
+ * ## Record order is a declared sort, not the caller's insertion order
+ *
+ * **This used to preserve insertion order, and its sibling did not.**
+ * `fieldAdmin/serialise.js` — written after this file and explicitly modelled on
+ * it — sorts by record id in code-unit order and documents byte-stability as a
+ * rule, because a registry assembled in a different order is the same registry.
+ * Two logically identical registries therefore produced two different documents
+ * here and one document there. That difference is harmless while nothing stores
+ * either, and stops being harmless the moment something does: a table is a set,
+ * so "has this registry changed since we stored it?" answered by comparing
+ * documents would report a re-ordered read as an edit.
+ *
+ * So the contract is the sibling's, unchanged in substance from
+ * {@link import('../fieldAdmin/serialise.js').serialiseFieldRegistry}: sorted by
+ * `id`, in **code-unit order** rather than `localeCompare`, because
+ * `localeCompare` varies with the runtime's default locale and ICU build — and
+ * these ids are full of the punctuation locales disagree about
+ * (`season-2026/external/alder-back-pitch-2`).
+ *
+ * The consequence is stated rather than discovered: a registry read back from a
+ * document carries its records in id order, which need not be the order the
+ * registry that wrote it held them in. No **answer** changes — every lookup
+ * filters and reports its claimants `.sort()`ed, which
+ * `tests/externalFixtureImport.test.js` holds to a registry built in
+ * deliberately reversed order. Two derived **orderings** did follow input
+ * order, and both are named rather than glossed:
+ *
+ * - {@link mappingUsageFindings}'s `unexercised` list, which
+ *   `classifyExternalImport()` republishes as `unexercisedRecords` along with
+ *   one `EXTERNAL_MAPPING_RECORD_UNEXERCISED` finding each. That is a reported
+ *   list, so it is now sorted by the same comparator — otherwise one registry
+ *   would produce two differently-ordered reports depending on whether it had
+ *   been through a document, which is the same false difference one layer up.
+ * - The per-record structural findings {@link buildExternalMappingRegistry}
+ *   emits at construction, which follow record order and therefore do differ.
+ *   They are keyed by code and record id and nothing reads them positionally;
+ *   sorting the whole finding stream would reorder unrelated codes against each
+ *   other, which is a larger change than this one and not obviously right.
+ *
  * @param {import('./types.js').ExternalMappingRegistry} registry
  * @returns {Object} an `MappingDocumentSchema` value
  */
@@ -645,7 +693,7 @@ export function serialiseExternalMappingRegistry(registry) {
     registryId: registry.registryId,
     label: registry.label,
     party: registry.party,
-    records: registry.records.map((record) => ({
+    records: sortRecordsById(registry.records).map((record) => ({
       id: record.id,
       kind: record.kind,
       externalLabel: record.externalLabel,

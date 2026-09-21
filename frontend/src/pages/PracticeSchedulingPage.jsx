@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useDashboardData } from '../hooks/useDashboardData.js';
+import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import PracticeAssignmentList from '../components/PracticeAssignmentList.jsx';
 import PracticeOverridePanel from '../components/PracticeOverridePanel.jsx';
 import AutoSchedulerPanel from '../components/scheduling/AutoSchedulerPanel.jsx';
@@ -333,7 +334,10 @@ function toPersistenceAssignment(assignment) {
 }
 
 export default function PracticeSchedulingPage() {
-  const { practice, team, loading: dashboardLoading } = useDashboardData();
+  // `error` too. The page's own scheduler errors (`autoScheduler.error`,
+  // `applyError`) are about a run the operator just started; this one is about
+  // the schedule they are looking at, and neither surface could report it.
+  const { practice, team, loading: dashboardLoading, error: dataError } = useDashboardData();
   const {
     currentOrganization,
     currentSeasonSetting,
@@ -913,6 +917,12 @@ export default function PracticeSchedulingPage() {
           </div>
         )}
       </div>
+
+      {/* Above the conflict banner deliberately: blackout findings computed
+          over a schedule that failed to load say nothing about the schedule.
+          As on the game page, `dataError` is the hook's aggregate over all
+          three reads rather than this page's alone. */}
+      <DataErrorBanner message={dataError} />
 
       <GameConflictBanner warnings={blackoutWarnings} />
 

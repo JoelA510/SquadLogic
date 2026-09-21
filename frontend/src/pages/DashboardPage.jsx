@@ -28,6 +28,7 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { usePermission } from '../hooks/usePermission.js';
 import { useSetupProgress } from '../hooks/useSetupProgress.js';
+import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
@@ -259,6 +260,17 @@ function AdminHome() {
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
           <div className="card">
+            {/* Above the card head, not inside the body: `SetupChecklist`'s
+                rule is that the operator reads this before the number, and
+                the card head carries `doneCount/total` — a failed load
+                understates that count exactly as it understates the bar. One
+                surface is still above this one and is NOT fixed here: the
+                page header's primary button reads `Resume setup` off the same
+                regressed `nextStep`. Moving an error banner into the page
+                header is a chrome change rather than a dashboard one, so it
+                is named in the PR instead of done quietly. */}
+            <DataErrorBanner message={setup.error} className="m-3 mb-0" />
+
             <div className="card-head">
               <Sparkles size={18} style={{ color: 'var(--primary)' }} aria-hidden="true" />
               <h3>Season Setup</h3>
@@ -785,17 +797,14 @@ export default function DashboardPage() {
   const effectiveRole = isImpersonating ? user?.profile?.role || role : role;
 
   // ProtectedRoute redirects here with state.error (e.g. "Unauthorized
-  // access"); surface it like the previous dashboard did.
+  // access"). This was a second hand-rolled red alert -- `role="alert"` on a
+  // `.badge danger` sized back up with inline padding -- in the same file
+  // that now renders `DataErrorBanner` in the Season Setup card. Two
+  // differently-styled reds can appear together (an unauthorized redirect
+  // onto a dashboard whose reads are also failing), which is the duplication
+  // this PR exists to remove, so it goes through the shared banner too.
   const routeError = location.state?.error;
-  const banner = routeError ? (
-    <div
-      role="alert"
-      className="badge danger"
-      style={{ margin: '12px 24px 0', height: 'auto', padding: '8px 12px' }}
-    >
-      {routeError}
-    </div>
-  ) : null;
+  const banner = <DataErrorBanner message={routeError} className="mx-6 mt-3" />;
 
   const Home =
     effectiveRole === 'coach' || effectiveRole === 'staff'

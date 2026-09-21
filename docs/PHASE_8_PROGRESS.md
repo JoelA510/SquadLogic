@@ -5304,3 +5304,82 @@ returned five plausible findings in files the PR does not touch. Each agent
 caught it only because the brief told them to check scope first. **That is a
 workaround for a tool defect, not a fix**, and three occurrences is a pattern
 rather than an accident.
+
+## #427 — a task that survived two infrastructure failures, and what inheriting a commit is worth
+
+**2026-09-21.** Merged as `0c824f9`, CI green including E2E. The change is in
+the PR. Three things belong here: how the task survived, what a fresh reviewer
+found in a commit nobody had reviewed, and two figures future briefs should
+stop guessing at.
+
+### Two failures, no lost implementation
+
+The first agent's **container restarted**; the second died to a **529** at the
+exact step where it had checked out unfixed source to prove its tests bite.
+Neither cost the work. Agents now cut their own worktrees and commit as they
+go, so both times the implementation was on disk and committed — 10 files,
++489/−29, clean tree — and what was lost was the verify/review/push tail.
+
+That discipline was adopted after a supervisor error (moving HEAD in a tree an
+agent was using), not designed as reset insurance. It turns out to be both.
+**The operator's standing objection was that resets waste resources and
+"nothing gets done"; the answer is not fewer resets, which is not in our gift,
+but work that is committed early enough that a reset costs minutes of process
+rather than hours of thought.**
+
+The second failure is also the argument for one instruction: the dangerous step
+is not checking out old files to falsify, it is **restoring**. The third agent
+hit it too — its `trap ... EXIT` restore ran `git checkout HEAD -- $FILES` over
+five files that also carried uncommitted review fixes and silently discarded
+them. It caught that by **diffing against HEAD immediately after the restore
+rather than trusting the trap**, reapplied all five, and re-ran the whole gate
+sequence. A cleanup that runs on exit is not evidence it ran correctly.
+
+### A fresh reviewer on an unreviewed commit found five things
+
+The third agent was told to read the inherited diff adversarially rather than
+trust a commit it did not write. Nothing in it was broken — every checkable
+claim in the commit message held — but it carried **five defects of honesty**,
+three fixed in code, and none caught by the commit's own tests:
+
+- **A false factual claim load-bearing for a design decision.** The new
+  `DataErrorBanner` docstring said `WorkflowPage` receives `location.state
+  ?.error` "from a `ProtectedRoute` redirect", and rested the whole "only
+  WorkflowPage needs a dismiss button" rationale on it. `ProtectedRoute.jsx:34`
+  redirects to `/`, which is `DashboardPage`. The rationale was sound; its
+  stated reason was not.
+- **A sixth hand-rolled red left in a file the PR was already editing** —
+  `DashboardPage`'s own `role="alert"` on a `.badge danger` resized with inline
+  padding, which can render *beside* the new banner in two different styles, in
+  a change whose stated purpose is that there should be one.
+- **The coverage meta-assertion had the fault it was written to prevent, one
+  level up.** It enumerated consumers from `pages/` — and `useSetupProgress`,
+  a consumer, lives in `hooks/`. A pages-only universe could not have seen the
+  very kind of consumer the check exists to catch.
+
+The last is the one worth carrying. *Never derive a check's subject set from
+the data a break would corrupt* has an obvious reading and a subtler one: the
+universe can be too narrow as easily as it can be circular, and a scan scoped
+to where you expect the problem cannot find it where you do not.
+
+### Two figures this phase has been repeating without defining
+
+- **The fixture suite's "145" is specifically `tests/season2026*.test.js`,
+  three files.** Everything touching `fixtures/season-2026/` is **23 files and
+  1351 cases**; `season2026Fixture.test.js` alone is 34. 145 is neither. Briefs
+  have carried the bare number for several tasks without saying which set.
+- **`/code-review` did not diff the wrong tree this time**, after doing so on
+  #420, #423 and #425. The difference may be that the invocation passed the
+  worktree path *and* an explicit instruction not to diff the shared checkout.
+  Treat that as the working invocation, and keep verifying: a bare
+  `/code-review` may still misfire.
+
+### Recorded, not fixed
+
+Three follow-ups the PR names at their call sites rather than leaving for a
+reader to find: the hook's single `error` string covers three independent reads,
+so a page can raise an assertive alert about a source it does not display —
+over-reporting, the opposite direction to the defect being fixed;
+`ExportsPage` warns and still lets an operator ship a zero-row CSV; and the
+dashboard's header CTA still reads off the same regressed `nextStep`. Two dead
+branches found in passing are filed separately.

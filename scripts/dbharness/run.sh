@@ -205,6 +205,14 @@ echo "=== smokes, enumerated from docs/sql/ ==="
 #
 # Registering them properly in `prove.sh` is follow-up work for a change that
 # can afford to run it.
+#
+# **Staying out of the universe is now a DECLARATION rather than a spelling.**
+# `prove.sh`'s `static_claim_census` walks every `echo "  | ..."` in this file
+# and refuses any prefix its `NON_CLAIM` table does not name, with the reason
+# it is out -- so a new prefix has to be argued there before it can appear
+# here, and a `(checked)` claim cannot be quietly renamed out of the census by
+# inventing a word for it. The four declared today are `(coverage)`,
+# `(refused)`, `(known gap, pinned)` and `(unplantable)`.
 STATUS=0
 
 SMOKE_DIR="$REPO/docs/sql"
@@ -601,7 +609,30 @@ else
     echo "FAIL the seed inserted with squadlogic.seed_sample_data unset: ${v_seed_off} sample season(s). The guard is the only thing keeping this migration inert by default."
     STATUS=1
   else
-    echo "  | (checked) with the flag unset the seed migration inserts nothing"
+    # **`(unplantable)` rather than `(checked)`, and the demotion is measured.**
+    #
+    # `prove.sh`'s census requires one plant per `(checked)` line, and no
+    # mutation this harness can place makes THIS one go red. Every defect that
+    # would falsify it -- a guard that stops firing, a guard reading a setting
+    # nothing sets -- lets the seed insert on the FLAG-UNSET build, and those
+    # rows abort `20260310000002_unified_rls_schema` back in the "applying
+    # migration set" stage, three stages before this check runs. The harness
+    # exits there. Executed, not reasoned about: with the guard replaced by
+    # `if false then` the whole transcript is `FAIL applying
+    # 20260310000002_unified_rls_schema.sql / HARNESS FAILED`.
+    #
+    # Nor can the row arrive from anywhere else. The only writers this
+    # truncated build reaches are migrations at or before 20251208000001;
+    # every row one of them leaves is still there when 20260331000000 refuses
+    # to replay over a non-empty `season_settings` (it is on that migration's
+    # thirty-table emptiness list); and no migration in between deletes one.
+    #
+    # So the guard IS enforced -- by the migration build, loudly, in a stage
+    # nobody can miss -- and this line reports it rather than claiming a check
+    # of its own that nothing could ever falsify. Declared is not enforced;
+    # neither is enforced-elsewhere the same as checked here, and the word is
+    # what says which. Its twin below is plantable and keeps `(checked)`.
+    echo "  | (unplantable) with the flag unset the seed migration inserts nothing -- enforced by the migration build, which aborts if it ever stops being true"
   fi
 
   if ! seed_opt_in_build on; then

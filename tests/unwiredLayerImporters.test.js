@@ -379,6 +379,62 @@ const LAYERS = Object.freeze([
       'packages/core/src/fieldAdmin/projectors/constraints.js',
     ]),
   }),
+  /* -- Phase 8.5: the recurring-practice model -------------------------- */
+  //
+  // **Three entries, not one.** The layer is a directory, and this file's unit
+  // is the defining module: an entry's own definitions are excluded by
+  // `file === ownPath`, so folding three files into one entry would list each
+  // builder's own `export function` line as a consumer of itself. Three exact
+  // entries say more than one fuzzy one, and each public entry point gets its
+  // own both-directions pin.
+  //
+  // What `PRACTICE_MODEL_UNWIRED` claims is the *external* list being empty on
+  // all three. The internal one is not empty and should not be:
+  // `materialise.js` calls `firstWeekdayOnOrAfter()` from `slots.js`, which is
+  // the layer using itself.
+  Object.freeze({
+    layer: 'practice/slots.js',
+    modulePath: 'packages/core/src/practice/slots.js',
+    functions: Object.freeze(['buildPracticeSlotSet', 'getPracticeSlot', 'firstWeekdayOnOrAfter']),
+    importers: Object.freeze([
+      'packages/core/src/practice/index.js',
+      // Shares the one weekday walk rather than writing a second one.
+      'packages/core/src/practice/materialise.js',
+    ]),
+    consumers: Object.freeze([
+      'packages/core/src/practice/materialise.js',
+      'tests/practiceSlotModel.test.js',
+      'tests/reasonCodeReachability.test.js',
+    ]),
+    expectedProductionConsumers: Object.freeze(['packages/core/src/practice/materialise.js']),
+    expectedExternalProductionConsumers: Object.freeze([]),
+  }),
+  Object.freeze({
+    layer: 'practice/materialise.js',
+    modulePath: 'packages/core/src/practice/materialise.js',
+    functions: Object.freeze(['materialisePracticeOccurrences']),
+    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    consumers: Object.freeze([
+      'tests/practiceSlotModel.test.js',
+      'tests/reasonCodeReachability.test.js',
+    ]),
+    // Empty is the whole claim. The first production entry here is the day
+    // PRACTICE_MODEL_UNWIRED has to be rewritten.
+    expectedProductionConsumers: Object.freeze([]),
+    expectedExternalProductionConsumers: Object.freeze([]),
+  }),
+  Object.freeze({
+    layer: 'practice/history.js',
+    modulePath: 'packages/core/src/practice/history.js',
+    functions: Object.freeze(['buildPracticeHistory', 'describePracticeHistory']),
+    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    consumers: Object.freeze([
+      'tests/practiceSlotModel.test.js',
+      'tests/reasonCodeReachability.test.js',
+    ]),
+    expectedProductionConsumers: Object.freeze([]),
+    expectedExternalProductionConsumers: Object.freeze([]),
+  }),
 ]);
 
 /* -------------------------------------------------------------------------- */

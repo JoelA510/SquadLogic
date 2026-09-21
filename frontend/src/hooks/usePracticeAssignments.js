@@ -11,6 +11,12 @@ export function usePracticeAssignments(runId) {
   useEffect(() => {
     if (!runId) {
       setAssignments([]);
+      // The error belongs to the run that is going away. Left standing it
+      // outlived its run: switch organisation after a refused read and this
+      // hook early-returns here with the previous tenant's `Error` still in
+      // state, so a consumer reading it blocks a tenant where nothing failed.
+      // Harmless while nothing read it; `useDashboardData` reads it now.
+      setError(null);
       return;
     }
 

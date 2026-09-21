@@ -374,7 +374,14 @@ export default function GameSchedulingPage() {
   // so it is never null and the empty grid below is indistinguishable from a
   // season with no games in it -- which is exactly what a refused
   // `scheduler_runs` read rendered as.
-  const { game, team, loading, error: dataError } = useDashboardData();
+  const { game, team, loading, errors } = useDashboardData();
+  // The two sources this page renders, and not the aggregate. `error` covers
+  // all of them, so a refused `practice_assignments` read used to open an
+  // assertive alert here about rows this page never shows -- and folding the
+  // assignments reads into the aggregate would have widened that rather than
+  // fixed it. This is the narrowing `DataErrorBanner`'s docstring said needed
+  // per-source errors on the hook.
+  const dataError = errors.game ?? errors.team;
   const {
     currentOrganization,
     currentSeasonSetting,
@@ -1040,11 +1047,10 @@ export default function GameSchedulingPage() {
           from a schedule that failed to load is not a finding about the
           schedule, and the operator needs to know that first.
 
-          `dataError` is the hook's aggregate over all three reads, not this
-          page's alone, so a refused `practice` read -- a source this page
-          does not render -- opens this banner too. Over-reporting, in the
-          opposite direction to the defect being fixed; narrowing it needs
-          per-source errors on the hook and is named in the PR. */}
+          `dataError` is now this page's two sources (`errors.game`, then
+          `errors.team`) rather than the hook's aggregate, so a refused
+          `practice` read no longer opens an alert about rows the page does
+          not render. */}
       <DataErrorBanner message={dataError} />
 
       <GameConflictBanner

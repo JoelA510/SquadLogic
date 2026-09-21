@@ -344,12 +344,97 @@ function ParityReport({ report }) {
   );
 }
 
+/**
+ * No read failed. The default for `sourceErrors`, so the pipeline call site
+ * that passes nothing behaves exactly as it did.
+ */
+const NO_SOURCE_ERRORS = Object.freeze({ team: null, practice: null, game: null });
+
+/** Nothing is still in flight. The default for `sourceLoading`. */
+const NO_SOURCE_LOADING = Object.freeze({ team: false, practice: false, game: false });
+
+/** How each failed source is named to an operator. */
+const SOURCE_LABELS = Object.freeze({
+  team: 'the teams',
+  practice: 'the practice assignments',
+  game: 'the game assignments',
+});
+
+/** The sources in `keys` whose rows cannot be trusted yet, in the order given. */
+function unreadableSources(sourceErrors, sourceLoading, keys) {
+  return keys.filter((key) => Boolean(sourceErrors?.[key]) || Boolean(sourceLoading?.[key]));
+}
+
+/** Whether any named source is unreadable because it has not arrived yet. */
+function anyLoading(sourceLoading, keys) {
+  return keys.some((key) => Boolean(sourceLoading?.[key]));
+}
+
+/** "the teams", "the teams and the game assignments", … */
+function describeSources(keys) {
+  const labels = keys.map((key) => SOURCE_LABELS[key]);
+  if (labels.length < 2) return labels.join('');
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
+/**
+ * The output panel, and what it refuses to generate from data it could not
+ * read.
+ *
+ * **An empty array is two different facts and this component used to be told
+ * only one of them.** Both call sites pass `teams={team?.teams || []}`, and
+ * that `|| []` turns a refused `scheduler_runs` read into "the season has no
+ * teams". A zero-row CSV is the correct export for an empty season and a
+ * falsehood after a failed read, and nothing in `teams` distinguishes them --
+ * so the distinction arrives separately, as `sourceErrors`, rather than as a
+ * `disabled` boolean the parent computed. The panel knows which of its inputs
+ * feeds which artifact; the page does not.
+ *
+ * **A source still in flight is not a source that returned nothing, either.**
+ * `sourceLoading` is the same statement about the same three reads one moment
+ * earlier. The first paint of `/exports` has empty arrays and no error at
+ * all, and without this an operator who lands on the page and presses
+ * Generate before the fetches resolve gets the same zero-row CSV by a route
+ * that involves no failure.
+ *
+ * **Per artifact, not per panel.** The CSV export is built from all three
+ * sources, so any one of them failing is a reason not to generate it. The
+ * welcome-email drafts read teams and practice assignments only -- a coach's
+ * draft carries their practice times and never mentions a game -- so a
+ * refused `game_assignments` read does not stop them. Gating the whole panel
+ * on one aggregate error would have claimed a precision the sources do not
+ * have, in the other direction.
+ *
+ * **`aria-disabled`, not `disabled`.** A control with no reachable
+ * explanation is its own defect: a native `disabled` button is removed from
+ * the tab order, so a keyboard user meets a dead control and the reason it is
+ * dead is something they have to go looking for. `aria-disabled` keeps it
+ * focusable, `aria-describedby` points at the visible reason next to it, and
+ * the handlers below refuse the action -- so the guard is the code path, not
+ * the attribute. (`StepRunButton` puts its reason in a `Tooltip` over a
+ * natively disabled button. That is the weaker surface of the two and its
+ * `if (disabled) return;` cannot run; this does not copy it.)
+ *
+ * @param {Object} props
+ * @param {Array<Object>} [props.teams]
+ * @param {Object|null} [props.teamSummary]
+ * @param {Array<Object>} [props.practiceAssignments]
+ * @param {Array<Object>} [props.gameAssignments]
+ * @param {any} props.supabaseClient
+ * @param {{ team?: string|null, practice?: string|null, game?: string|null }} [props.sourceErrors]
+ *   Per-source read failures from `useDashboardData().errors`. Omit when every
+ *   read succeeded; an empty `teams` is then taken at face value.
+ * @param {{ team?: boolean, practice?: boolean, game?: boolean }} [props.sourceLoading]
+ *   Per-source reads still in flight, from `useDashboardData().loading`.
+ */
 export default function OutputGenerationPanel({
   teams = [],
   teamSummary = null,
   practiceAssignments = [],
   gameAssignments = [],
   supabaseClient,
+  sourceErrors = NO_SOURCE_ERRORS,
+  sourceLoading = NO_SOURCE_LOADING,
 }) {
   const [generated, setGenerated] = useState(null);
   const [emails, setEmails] = useState(null);
@@ -368,7 +453,26 @@ export default function OutputGenerationPanel({
   const [parityError, setParityError] = useState(null);
   const [parityBusy, setParityBusy] = useState(false);
 
+  // The CSV export flattens teams, practices and games into one file; the
+  // email drafts read teams and practices only.
+  const CSV_SOURCES = ['team', 'practice', 'game'];
+  const EMAIL_SOURCES = ['team', 'practice'];
+  const csvBlockedBy = unreadableSources(sourceErrors, sourceLoading, CSV_SOURCES);
+  const emailsBlockedBy = unreadableSources(sourceErrors, sourceLoading, EMAIL_SOURCES);
+  const csvBlocked = csvBlockedBy.length > 0;
+  const emailsBlocked = emailsBlockedBy.length > 0;
+  // "Not read yet" and "could not be read" are different sentences, and
+  // telling an operator a read failed while it is merely slow is the same
+  // class of false statement this gate exists to stop.
+  const csvReason = anyLoading(sourceLoading, CSV_SOURCES)
+    ? `CSVs cannot be generated yet: ${describeSources(csvBlockedBy)} have not finished loading.`
+    : `CSVs cannot be generated: ${describeSources(csvBlockedBy)} could not be read. An export made now would be missing rows, not reporting an empty season. Reload the page to read again.`;
+  const emailsReason = anyLoading(sourceLoading, EMAIL_SOURCES)
+    ? `Drafts cannot be written yet: ${describeSources(emailsBlockedBy)} have not finished loading.`
+    : `Drafts cannot be written: ${describeSources(emailsBlockedBy)} could not be read. A draft made now would tell a coach their practice times are TBD when the truth is that we could not look them up. Reload the page to read again.`;
+
   const generateEmails = () => {
+    if (emailsBlocked) return;
     const sourceTeams =
       Array.isArray(teams) && teams.length > 0
         ? teams
@@ -426,6 +530,7 @@ export default function OutputGenerationPanel({
   };
 
   const handleGenerate = () => {
+    if (csvBlocked) return;
     setStatus('generating');
     setMessage('Generating CSVs...');
 
@@ -488,7 +593,7 @@ export default function OutputGenerationPanel({
   };
 
   const handleUpload = async () => {
-    if (!generated) return;
+    if (!generated || csvBlocked) return;
     if (!supabaseClient && !IS_MOCK_MODE) {
       setStatus('error');
       setMessage('Supabase client not available for upload.');
@@ -609,12 +714,24 @@ export default function OutputGenerationPanel({
               data-testid="generate-csvs-btn"
               onClick={handleGenerate}
               disabled={status === 'generating' || status === 'uploading'}
-              className="relative z-20 bg-bg-surface hover:bg-bg-surface-hover text-text-primary px-4 py-2 rounded-lg transition-colors"
+              aria-disabled={csvBlocked || undefined}
+              aria-describedby={csvBlocked ? 'output-csv-blocked' : undefined}
+              className={`relative z-20 bg-bg-surface hover:bg-bg-surface-hover text-text-primary px-4 py-2 rounded-lg transition-colors${
+                csvBlocked ? ' opacity-50 cursor-not-allowed' : ''
+              }`}
             >
               {status === 'generating' ? 'Generating...' : 'Generate CSVs'}
             </button>
 
-            {generated && (
+            {/* The artifact goes with the gate, and this is the finding that
+                said so: gating Generate alone left Upload, Download and the
+                publish baseline one button to the right of the block, so the
+                zero-row CSV still reached the bucket and was recorded as
+                what went out. Whatever `generated` holds was rendered from
+                rows this panel can no longer vouch for, so it is not offered
+                until they can be read again. The same for the drafts list
+                below, whose mailto links are live. */}
+            {generated && !csvBlocked && (
               <button
                 type="button"
                 onClick={handleUpload}
@@ -626,7 +743,23 @@ export default function OutputGenerationPanel({
             )}
           </div>
 
-          {generated && (
+          {/* The reason, beside the control it explains and not only in the
+              page banner above -- an operator who scrolled past the banner
+              still needs to know why this button will not act. It is the
+              `aria-describedby` target, so it is the reason a screen reader
+              reads out on the button too, rather than a second red box
+              competing with `DataErrorBanner`. */}
+          {csvBlocked && (
+            <p
+              id="output-csv-blocked"
+              data-testid="csv-blocked-reason"
+              className="text-sm text-status-error m-0"
+            >
+              {csvReason}
+            </p>
+          )}
+
+          {generated && !csvBlocked && (
             <div className="bg-bg-surface rounded-lg p-4 border border-border-subtle mt-2">
               <div className="flex justify-between items-center mb-2">
                 <h3 className="text-sm font-medium text-text-primary">Generated Files</h3>
@@ -740,12 +873,25 @@ export default function OutputGenerationPanel({
               type="button"
               data-testid="generate-emails-btn"
               onClick={generateEmails}
-              className="relative z-20 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 px-4 py-2 rounded-lg transition-colors mb-4"
+              aria-disabled={emailsBlocked || undefined}
+              aria-describedby={emailsBlocked ? 'output-emails-blocked' : undefined}
+              className={`relative z-20 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 px-4 py-2 rounded-lg transition-colors mb-4${
+                emailsBlocked ? ' opacity-50 cursor-not-allowed' : ''
+              }`}
             >
               Generate Draft Welcome Emails
             </button>
+            {emailsBlocked && (
+              <p
+                id="output-emails-blocked"
+                data-testid="emails-blocked-reason"
+                className="text-sm text-status-error mt-0 mb-4"
+              >
+                {emailsReason}
+              </p>
+            )}
 
-            {emails && (
+            {emails && !emailsBlocked && (
               <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
                 {emails.length === 0 ? (
                   <p className="text-sm text-text-muted">No coaches with emails found.</p>

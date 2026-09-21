@@ -28,6 +28,11 @@ const DashboardWorkflow = ({
   controlledActiveStep,
   onStepChange,
   scheduleEvaluation: _scheduleEvaluation = undefined,
+  // Forwarded to `OutputGenerationPanel` untouched. The same
+  // `teamData?.teams || []` that hid a failed read on `ExportsPage` is on
+  // this page too, so the gate is on both call sites rather than on the one
+  // the defect was reported against.
+  sourceErrors = undefined,
 }) => {
   const navigate = useNavigate();
   const totalSteps = 6;
@@ -331,6 +336,8 @@ const DashboardWorkflow = ({
             practiceAssignments={practiceData?.assignments || []}
             gameAssignments={gameData?.assignments || []}
             supabaseClient={supabase}
+            sourceErrors={sourceErrors}
+            sourceLoading={loading}
           />
         </WorkflowStep>
       </div>

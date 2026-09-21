@@ -11,6 +11,7 @@ import { FeatureGuard } from '../components/ui/FeatureGuard.jsx';
 import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { IngestionOverlay } from '../components/ui/IngestionOverlay.jsx';
 import Button from '../components/ui/Button.jsx';
+import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 
 export default function WorkflowPage() {
   // E2E Testing Error Trigger
@@ -149,18 +150,12 @@ export default function WorkflowPage() {
 
   return (
     <div className="animate-fadeIn">
-      {error && (
-        <div className="bg-red-500/10 border border-red-500 text-red-500 p-4 rounded-md mb-4 flex justify-between items-center">
-          <span>{error}</span>
-          <button
-            onClick={dismissError}
-            aria-label="Dismiss error"
-            className="text-red-500 hover:text-red-700 font-bold"
-          >
-            ✕
-          </button>
-        </div>
-      )}
+      {/* Markup moved to `DataErrorBanner` so the four sibling pages that had
+          no error surface at all could adopt this one rather than grow four
+          more. The dismissal logic above is unchanged and stays here: it is
+          this page's alone, because only this page merges `location.state`
+          into the banner. */}
+      <DataErrorBanner message={error} onDismiss={dismissError} className="mb-4" />
 
       {/* Page Header */}
       <header className="mb-8">

@@ -5,6 +5,7 @@ import { ArrowRight, Check, CheckCircle2 } from 'lucide-react';
 import Badge from '../ui/Badge.jsx';
 import Button from '../ui/Button.jsx';
 import { useSetupProgress } from '../../hooks/useSetupProgress.js';
+import DataErrorBanner from '../ui/DataErrorBanner.jsx';
 
 /**
  * Resumable Season Setup checklist. Completion is derived from live data
@@ -13,7 +14,7 @@ import { useSetupProgress } from '../../hooks/useSetupProgress.js';
  */
 export default function SetupChecklist({ onNavigate = undefined }) {
   const navigate = useNavigate();
-  const { steps, doneCount, total, percent, nextStep } = useSetupProgress();
+  const { steps, doneCount, total, percent, nextStep, error } = useSetupProgress();
 
   const go = (route) => {
     navigate(route);
@@ -22,6 +23,12 @@ export default function SetupChecklist({ onNavigate = undefined }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Above the bar, not below it: when the dashboard sources fail, the
+          three run-derived steps fall back to "Not started" and the
+          percentage understates a season that may be finished. The operator
+          has to read this before the number, not after it. */}
+      <DataErrorBanner message={error} />
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
         <div
           className="bar"

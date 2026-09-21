@@ -4,6 +4,7 @@ import { generateRoundRobinWeeks, scheduleGames } from '@squadlogic/core/gameSch
 import { evaluateGameSchedule } from '@squadlogic/core/gameMetrics.js';
 import { findBlackoutConflicts } from '@squadlogic/core/fieldAdmin/index.js';
 import { useDashboardData } from '../hooks/useDashboardData.js';
+import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import { useAutoRunOnNavigate } from '../hooks/useAutoRunOnNavigate.js';
 import TeamScheduleView from '../components/TeamScheduleView.jsx';
 import AutoSchedulerPanel from '../components/scheduling/AutoSchedulerPanel.jsx';
@@ -369,7 +370,11 @@ function toPersistenceAssignment(assignment) {
 }
 
 export default function GameSchedulingPage() {
-  const { game, team, loading } = useDashboardData();
+  // `error` too. `game` is an object literal the hook rebuilds every render,
+  // so it is never null and the empty grid below is indistinguishable from a
+  // season with no games in it -- which is exactly what a refused
+  // `scheduler_runs` read rendered as.
+  const { game, team, loading, error: dataError } = useDashboardData();
   const {
     currentOrganization,
     currentSeasonSetting,
@@ -1030,6 +1035,17 @@ export default function GameSchedulingPage() {
           </div>
         )}
       </div>
+
+      {/* Above the conflict banner deliberately: a conflict count computed
+          from a schedule that failed to load is not a finding about the
+          schedule, and the operator needs to know that first.
+
+          `dataError` is the hook's aggregate over all three reads, not this
+          page's alone, so a refused `practice` read -- a source this page
+          does not render -- opens this banner too. Over-reporting, in the
+          opposite direction to the defect being fixed; narrowing it needs
+          per-source errors on the hook and is named in the PR. */}
+      <DataErrorBanner message={dataError} />
 
       <GameConflictBanner
         warnings={[...(reviewSnapshot?.warnings ?? game?.warnings ?? []), ...blackoutWarnings]}

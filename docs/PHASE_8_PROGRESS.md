@@ -5213,3 +5213,94 @@ PR 1 does not reconcile them and says so in its own body, because a reader who
 finds two venue-withdrawal repair paths and no sentence about why must conclude
 nobody noticed. It adds no new comparator and no new placement path, so it does
 not become a third thing. Reconciliation is filed.
+
+## The school-hours twin arm — and a brief whose central premise was invented
+
+**2026-09-21.** Merged as `cd47977` from PR #425, CI green. The fix is in the
+PR; what belongs here is that the constraint I put on the decision did not
+exist, and how the agent found a failure class neither of us knew about.
+
+### The premise was wrong, and it was the one the decision turned on
+
+My brief said `evaluatePracticeSchedule` had **six** consumers, "one of them an
+Edge Function", and warned that throwing could turn a 200 into a 500 on
+`fairness-scoring`. That reason to deviate from #420's answer **describes an
+impossible event**.
+
+There are **five** core call sites. The sixth,
+`supabase/functions/fairness-scoring/index.ts:133`, calls the **Deno twin** —
+its import is `from '../_shared/engines/scoring-engine.ts'`. My line number was
+right and my attribution was wrong. No Edge Function calls the core evaluator
+and **none can**: nothing under `supabase/functions/` imports `packages/core`,
+and `scoring-engine.ts:34` says so outright — *"an Edge Function cannot import
+`packages/core`, so the logic exists twice."*
+
+Two more:
+
+- I named **two** reason codes from #420. It uses **three**. The one I left
+  out, `WALL_TIME_UNREADABLE`, is the one covering the `NaN`-bounds case my own
+  brief described. Fixing to my list would have left the most reachable path
+  uncoded.
+- I said the falsely-clean report reaches `scheduler_runs.results` by both
+  silent paths. Only one. With no timezone, `partitionPracticeSlots` leaves
+  `schedulerSlots` empty, so `buildPracticeRunResults` already returns
+  `metricsUnavailable`. The live blast radius was the unreadable-`schoolDayEnd`
+  path alone — smaller than I claimed, still real.
+
+**The mechanism, and it is a new one.** The previous brief errors were stale
+coordinates, an inherited figure, a grep whose scope did not match its claim.
+This one was different: I read a true grep hit — `evaluatePracticeSchedule(` at
+`fairness-scoring/index.ts:133` — and **attributed it to the wrong function of
+that name**, then built a constraint on the attribution. The line existed. The
+call existed. It was a call to something else. **A name is not an identity when
+the repository deliberately carries the same name twice**, which this one does
+and documents doing.
+
+### A third failure class, found by a falsification that stayed green
+
+The brief described two silent-pass paths. There were two silent ones and a
+**third that already threw**: a *truthy* zone string `Intl` rejects — `'   '`
+as much as `'Americas/New_York'` — passed the `&& timezone` guard and threw a
+bare, uncoded `RangeError` out of `toLocaleString`, mid-loop.
+
+It surfaced because the new test file run against the unfixed source went **25
+of 36 red**, and the agent explained the 11 green instead of discounting them.
+Two of those green were the *"does not report as clean"* vectors for the blank
+and unknown zones — green because the old code already refused there, wordlessly.
+
+That reframes the whole fix: not *"make it throw"* but *"make all of it throw
+with a reason code"*. The function already refused part of this input space, so
+the change is a change of spelling, not of kind — which is what makes the throw
+arm clearly right rather than a new contract imposed on five callers.
+
+### The counter-argument, weighed rather than waved
+
+`resolveSchoolDayEndFilter`'s own comment justifies refusing on the grounds
+that *"`ScheduleResult` has no channel for a statement about the run"* — and the
+evaluator **does** have one, `dataQualityWarnings`, which the readiness panel
+renders. On that reading the sibling would have reported rather than thrown.
+
+The agent went the other way and said why: the refusal reaches the operator
+*louder* through `metricsUnavailable`, a banner at apply time, than a warning
+buried in a panel list — and choosing the finding arm would have required
+**converting the existing `RangeError` into a finding**, a larger change than
+the task scopes. Recorded because the losing argument was real, and a reader
+who only sees the answer cannot tell whether it was considered.
+
+### Two bounds pinned as tests rather than described
+
+GAP-36 is **not** fixed here: the solver exempts by the `slot.day` label and
+the evaluator derives the weekday from the instant, so a slot labelled
+`'Friday'` starting Thursday 14:00 locally is kept by one arm and reported by
+the other. And an **unrequested** check still looks identical to a clean one —
+`school_day_end` NULL opts out and publishes the same empty list. Closing the
+second needs a flag the panel reads, and *a flag nothing reads would be this
+PR's own defect class*, so it is stated instead.
+
+### `/code-review` diffed the wrong tree for the third time
+
+#420, #423 and now #425: the first run silently diffed the shared checkout and
+returned five plausible findings in files the PR does not touch. Each agent
+caught it only because the brief told them to check scope first. **That is a
+workaround for a tool defect, not a fix**, and three occurrences is a pattern
+rather than an accident.

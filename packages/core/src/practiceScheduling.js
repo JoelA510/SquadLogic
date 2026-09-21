@@ -93,12 +93,20 @@ function schoolDayEndRefusal(code, message, details) {
  * already throws for malformed input, and GAP-30's ruling one layer up: a
  * season with no clock refuses to place slots rather than guessing an instant.
  *
+ * **Exported because the evaluator asks the same question.**
+ * `practiceMetrics.evaluatePracticeSchedule` reports school-hours violations
+ * over the schedule this function produces, and it used to answer "is this
+ * `schoolDayEnd` readable, and does this zone exist" for itself — differently,
+ * and in one arm not at all. Two answers to one question is how the solver came
+ * to refuse an input the evaluator called clean. There is one answer now, and
+ * this is it; see `practiceMetrics.js` for what the evaluator does with it.
+ *
  * @param {string} schoolDayEnd - e.g. `'16:00'`.
  * @param {string|undefined} timezone - the season's IANA zone.
  * @returns {{ endHour: number, endMinute: number, formatter: Intl.DateTimeFormat }}
  * @throws {SeasonClockError} when the constraint cannot be evaluated.
  */
-function resolveSchoolDayEndFilter(schoolDayEnd, timezone) {
+export function resolveSchoolDayEndFilter(schoolDayEnd, timezone) {
   const wall = typeof schoolDayEnd === 'string' ? schoolDayEnd.trim() : '';
   const match = SCHOOL_DAY_END_PATTERN.exec(wall);
   const endHour = match ? Number.parseInt(match[1], 10) : Number.NaN;
@@ -133,8 +141,15 @@ function resolveSchoolDayEndFilter(schoolDayEnd, timezone) {
     return {
       endHour,
       endMinute,
+      // `weekday` is for the evaluator, which has to decide Mon-Thu from the
+      // instant because its `slot.day` is optional where this function refuses
+      // a slot without one. This function reads only `hour` and `minute`, and
+      // `formatToParts` returning a part nobody here asks for changes nothing
+      // for it -- one formatter, so the two arms cannot land in different
+      // zones, which is the whole reason this is shared.
       formatter: new Intl.DateTimeFormat('en-US', {
         timeZone: zone,
+        weekday: 'short',
         hour: 'numeric',
         minute: 'numeric',
         hour12: false,

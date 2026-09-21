@@ -67,6 +67,12 @@ export function filterRedundantCapacityWarnings(dataQualityWarnings = [], overbo
  *   games: ReturnType<typeof evaluateGameSchedule> | null,
  * }}
  * @throws {TypeError} When provided practice or game payloads omit required arrays expected by the evaluators.
+ * @throws {import('./timing/seasonClock.js').SeasonClockError} When a
+ *   `schoolDayEnd` is supplied that `evaluatePracticeSchedule` cannot place on
+ *   the season's clock. Propagated rather than absorbed: this function's whole
+ *   output is a readiness verdict, and returning `status: 'ok'` over a
+ *   constraint nobody could check is the falsely-clean answer the refusal
+ *   exists to prevent.
  */
 export function runScheduleEvaluations({ practice, games, schoolDayEnd, timezone } = {}) {
   if (practice !== undefined && (practice === null || typeof practice !== 'object')) {

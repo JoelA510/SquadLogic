@@ -25,26 +25,30 @@
  *   persisted. It is a **drift digest, not a seal**: FNV-1a is not
  *   cryptographic and a determined forger can collide it. It catches the
  *   accident, which is the failure mode that actually happens.
- * - **`durability: 'in-memory'` on the record.** Phase 6 does not persist, and
- *   the reason is on the record rather than only in the docs. It used to be two
- *   reasons; GAP-30 is no longer one of them. `SlotSchema` and
- *   `AssignmentSchema` normalised through `z.coerce.date()`, so a snapshot
- *   round-tripped through them came back with its wall-clock times
- *   reinterpreted in the host timezone — the parity checker causing the
- *   divergence it exists to detect. Those schemas now refuse a naive wall
- *   reading. What remains is GAP-29: {@link import('./serialise.js').serialisePublicationSnapshot}
- *   and {@link import('./serialise.js').readPublicationSnapshot} are the
- *   declared persistence seam, and **nothing in this repository stores through
- *   it** — the same sentence `externalImport` and `fieldAdmin` have each said
- *   about their own seam since Phase 5. Until 2026-09-19 this module said
- *   something different, that there was no seam at all; the three subsystems
- *   were in one situation and describing it three ways. What makes the new
- *   sentence checkable rather than decorative is that both of its halves are
- *   enumerated from the repository in `tests/publicationParity.test.js`: the
- *   seam is exported from the barrel, and no file outside this module, the
- *   barrel, the tests and the docs names either function. Write a production
- *   caller and the finding's message becomes false and the test red — which is
- *   exactly what closing GAP-29 has to do.
+ * - **`durability: 'in-memory'` on the record, and a store to put a copy in.**
+ *   A snapshot object lives in this process; that is what `durability` is
+ *   about, and it does not change when a copy of it is also written to a
+ *   table. Two reasons once stood between this package and a store and both
+ *   are gone. GAP-30 went first: `SlotSchema` and `AssignmentSchema` normalised
+ *   through `z.coerce.date()`, so a snapshot round-tripped through them came
+ *   back with its wall-clock times reinterpreted in the host timezone — the
+ *   parity checker causing the divergence it exists to detect. Those schemas
+ *   now refuse a naive wall reading. GAP-29 went second:
+ *   {@link import('./serialise.js').serialisePublicationSnapshot} and
+ *   {@link import('./serialise.js').readPublicationSnapshot} are the
+ *   persistence seam, and `public.publication_baselines`
+ *   (`20260920000000_publication_baselines.sql`) **stores through it** —
+ *   `frontend/src/hooks/usePublicationBaselines.js` serialises into
+ *   `admin_publish_schedule_baseline()` and reads back through the same pair.
+ *   The sentence is checkable rather than decorative, and it is checked the
+ *   same way its predecessor was: `tests/publicationParity.test.js` enumerates
+ *   the repository, and where it once required **no** production caller it now
+ *   requires exactly the ones named here. Remove the writer and the finding's
+ *   message becomes false and the test goes red, which is the direction the
+ *   guard has to point once the store exists.
+ *
+ *   `externalImport`'s seam and `fieldAdmin`'s are unchanged: both still store
+ *   through nothing, and both still say so.
  *
  * ## Not the teaming snapshot
  *
@@ -193,7 +197,7 @@ export function makePublicationSnapshot(input) {
     ),
     makePublicationFinding(
       PUBLICATION_REASON.SNAPSHOT_IN_MEMORY_ONLY,
-      `snapshot "${parsed.snapshotId}" lives in memory only and is lost when this process ends; serialisePublicationSnapshot() and readPublicationSnapshot() are the declared persistence seam and nothing in this repository stores through it (GAP-29)`,
+      `snapshot "${parsed.snapshotId}" is an in-memory record and is lost when this process ends unless a copy is stored; serialisePublicationSnapshot() writes it through admin_publish_schedule_baseline() into public.publication_baselines, and readPublicationSnapshot() reads it back (GAP-29)`,
       { snapshotId: parsed.snapshotId, durability: PUBLICATION_DURABILITY.IN_MEMORY }
     ),
   ];

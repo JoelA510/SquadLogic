@@ -21,22 +21,34 @@
  *
  * ## What it deliberately is not
  *
- * - **Not persisted.** `PublicationSnapshot.durability` says `in-memory` on the
- *   record, and the reason is now GAP-29 alone. It used to be GAP-30 as well:
- *   `SlotSchema` and `AssignmentSchema` normalised through `z.coerce.date()`,
- *   so a snapshot round-tripped through them came back with its wall-clock
- *   times reinterpreted in the host timezone, and a parity checker storing its
- *   ground truth that way would have **caused the divergence it exists to
- *   detect**. That is closed: those schemas now refuse a naive wall reading
- *   outright and `timing/seasonClock.js` composes one against the season's
- *   zone. Persistence still waits on GAP-29, and on nothing else here.
- * - **Seamed, but not stored.** `serialise.js` moves a snapshot through a
- *   version-stamped document and back, validated in both directions, so this
- *   package now says what `externalImport` and `fieldAdmin` say about their own
- *   registries rather than a third thing. Nothing calls it: a
- *   `serialise*()` / `read*()` pair in this repository is a declaration that a
- *   store is **missing**, and `fieldAdmin` — the one package that got a real
- *   store — bypassed its own seam and went table + RPC + RLS + audit.
+ * - **Still an in-memory record, now with somewhere to be put.**
+ *   `PublicationSnapshot.durability` says `in-memory` on every snapshot this
+ *   package constructs, and that stays true: a snapshot object lives in this
+ *   process whether or not a copy of it was also written to a table. What has
+ *   changed is that there is a table. `PUBLICATION_DURABILITY` deliberately
+ *   still has **one** member, because a second one would have to be produced
+ *   by some input and none can: `readPublicationSnapshot()` is handed a
+ *   document and cannot tell a row of `publication_baselines` from a fixture
+ *   file, so a `persisted` member would be a branch nothing could reach —
+ *   which this repository counts as evidence of a missing feature rather than
+ *   as coverage.
+ * - **Seamed, and — since GAP-29 Stage 2 — stored.** `serialise.js` moves a
+ *   snapshot through a version-stamped document and back, validated in both
+ *   directions. That pair used to be a declaration that a store was missing,
+ *   which is what a `serialise*()` / `read*()` pair had always meant here.
+ *   `public.publication_baselines` is now the store, and it reaches it
+ *   **through** the seam rather than around it —
+ *   `frontend/src/hooks/usePublicationBaselines.js` serialises into
+ *   `admin_publish_schedule_baseline()` and reads back out through
+ *   `readPublicationSnapshot()`. That is the one place this package departs
+ *   from the `fieldAdmin` precedent, and `baseline.js`'s header says why: a
+ *   registry seam serialises N records into one document and its store holds
+ *   one row per record, so the granularities did not meet; a snapshot *is* one
+ *   immutable document and the store holds exactly one row per document. The
+ *   other two seams — `externalImport`'s and `fieldAdmin`'s — are unchanged and
+ *   still store through nothing.
+ * - **Not the comparison, twice.** `baseline.js` joins a stored baseline to
+ *   {@link checkParity} and contains no comparator of its own.
  * - **Not a second diff.** `compareParityRows()` is the only row comparator
  *   here; `resolve/state.js` `diffAgainstBaseline()` remains the only
  *   game-by-game baseline diff, over a resolve run rather than over two
@@ -106,6 +118,19 @@ export {
 } from './snapshot.js';
 
 export { readPublicationSnapshot, serialisePublicationSnapshot } from './serialise.js';
+
+export {
+  BASELINE_COMPARED_FIELDS,
+  BASELINE_KEY_FIELDS,
+  BASELINE_READ_EXPORT_HEADERS,
+  BASELINE_UNREAD_EXPORT_COLUMNS,
+  BASELINE_UNSOUND_REASONS,
+  baselineDriftSummary,
+  baselineParityCoverageFindings,
+  baselineParityIsBlocking,
+  baselineParitySoundness,
+  checkBaselineParity,
+} from './baseline.js';
 
 export {
   applyMappingRules,

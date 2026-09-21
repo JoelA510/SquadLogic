@@ -4630,3 +4630,188 @@ where review starts finding things, and argued the pieces were not separable —
 the classifier is meaningless without the swaps, the swaps without the lift.
 That argument is accepted; the risk it carries is recorded here rather than
 dissolved by a green round.
+
+---
+
+## GAP-29 — the vertical slice: store, writer, reader, landed together
+
+**2026-09-20.** `public.publication_baselines`, the writer on
+`OutputGenerationPanel`'s upload path, and the parity reader in the same panel.
+The substance is in [`PUBLICATION_PARITY.md`](PUBLICATION_PARITY.md) §2a,
+[`MODEL_GAPS.md`](MODEL_GAPS.md) GAP-29 and
+[`BUILD_PLAN_STATUS.md`](BUILD_PLAN_STATUS.md) §9, against the binding
+condition §8 set. What belongs here is what the work cost and what it found.
+
+### The agent reported a missing section that was not missing
+
+The brief said the specification was `BUILD_PLAN_STATUS.md` §8. At `a206473` —
+the commit the brief said to branch from, and the tree this work was done
+against — the document ended at §7, and the first draft of this entry
+confidently reported the brief as citing a section that did not exist.
+
+**It did exist.** #415 landed §8 on `main` at 22:16 UTC on 2026-09-20, while
+the slice was being built, and the brief had said in as many words that *"a
+docs-only commit may land above it; rebase if so"*. The fault was the agent's:
+it read the document once at the start of the work and wrote a correction to
+it hours later without re-fetching. The section was found only when the PR was
+already open and `main` was checked for the rebase.
+
+Kept on the record because it is §6's rule displaced in time. §6 says a grep
+returning zero proves nothing until the pattern is shown matching something;
+this is the same error against a moving document. **A "this does not exist"
+claim needs a re-read at the moment it is written, not at the moment the work
+started** — and §7 had already recorded that a dated verification decays, about
+a premise three days old. This one was four hours old. `BUILD_PLAN_STATUS.md`
+§9.0 carries the correction beside §8 itself.
+
+### §8's central technical claim was half right, and the wrong half mattered
+
+It verified at `a206473` that the publish path *"already holds rows in the
+snapshot's own shape"*, so the slice *"needs no adapter — the thing most likely
+to introduce a second row vocabulary is already absent"*. **The columns do match**, exactly as
+stated: `generateScheduleExports()` builds `master.rows` from
+`SCHEDULE_EXPORT_COLUMNS` and `makePublicationSnapshot()` defaults `columns` to
+the same frozen constant, and no column adapter was written.
+
+**The `Start` cell does not.** There are three spellings of it in this
+repository:
+
+| producer | `Start` |
+| --- | --- |
+| `reserve/publication.js` `naiveDateTime()` | `2026-04-11T09:00:00` |
+| `generateScheduleExports()` | `2026-04-11T09:00:00.000Z` |
+| `generateScheduleExports({ timezone })` | `4/11/2026, 9:00:00 AM` |
+
+`parityRowFromExportRow()` reads only the first. So the first end-to-end run of
+the reader — a baseline taken from the app's own publish path, compared against
+a schedule with one kickoff deliberately moved half an hour — reported the game
+as differing in `field` **and nothing else**. The kickoff was invisible, and
+`date` (a key field) was empty on every row. `PARITY_FIELD_ABSENT` at blocking
+stopped it being silent, which is the package working as designed; it did not
+stop it being useless for the question it exists to answer.
+
+That is [GAP-36](MODEL_GAPS.md#gap-36), worked around locally in
+`publication/baseline.js` — an instant's text is re-spelled into a wall reading
+when **both** sides are instants, with no `Date` constructed and no zone
+applied; a mixture is refused rather than compared, because `09:00:00` and
+`09:00:00Z` are not the same moment. The fix belongs in `outputGeneration.js`
+and was not taken as a rider on a persistence change.
+
+**The rule**: matching column names is not matching a vocabulary, and only
+running the comparison says which you have.
+
+### The seam decision went against the precedent, deliberately
+
+GAP-29's own record says a `serialise*()`/`read*()` pair in this repository is
+a declaration that a store is missing, because `fieldAdmin` — the one package
+that got persistence — bypassed its own seam entirely. The brief carried that
+forward and asked for a reason if the conclusion differed.
+
+It does, and the reason is **granularity**. `serialiseFieldRegistry()` turns N
+records into one document while `field_blackouts` holds one row per record, so
+writing one blackout through that seam would have meant reading and rewriting
+the whole registry — seam and store did not meet. A publication snapshot is one
+immutable document and `publication_baselines` holds one row per document;
+`PublicationSnapshotDocumentSchema` already called itself *"the only shape a
+store would ever hold"*. Going round it would have meant a second serialiser
+and a second digest comparison, which is the drift this repository keeps
+paying for. The other two seams are untouched and still store through nothing,
+and `tests/publicationParity.test.js` now enumerates the repository to keep
+**that** true as well.
+
+The guard that used to say *"no production file outside the package names this
+seam"* — written when closing GAP-29 was defined as making it go red — did go
+red, and has been turned round rather than deleted: it now requires exactly one
+production caller and fails both if it disappears and if a second appears.
+
+### A defect the first draft of the migration shipped, caught by its own smoke
+
+`publication_baselines_immutable` originally refused **every** `UPDATE` and
+`DELETE`, table owner included, which reads like strength. `organization_id` is
+`ON DELETE CASCADE`, so an organisation that had ever published a baseline
+could not be deleted at all: an immutability rule breaking tenant offboarding.
+The trigger now refuses `DELETE` only while the owning organisation still
+exists — a foreign-key cascade fires after the parent row is gone, so
+`NOT EXISTS` separates the two cases exactly — and the smoke exercises **both**
+arms, the refusal and the cascade.
+
+### Falsification: sixteen breaks, one of which found a real hole
+
+Ten JavaScript breaks and six SQL ones were constructed, run, and reverted.
+Fifteen went red on the first attempt. **One did not**: making
+`baselineDriftSummary()` count an addition as drift left the suite green,
+because every run in the test file had a real difference alongside its
+additions and nothing isolated the rule. *An addition is not a divergence* is
+the distinction `checkParity()`'s own header is built on and the difference
+between a correct report and a 112-row false alarm on this corpus, and it was
+unenforced. A case with additions only was added, and the break then went red.
+
+That is the value of the exercise stated plainly: the table is not paperwork,
+it found a hollow guarantee in work written by an agent that had read the rule
+about hollow guarantees three times that hour.
+
+### The bundle budget, and a measurement instead of a bump
+
+`npm run check:bundle` failed: the main entry came to 136.95 KB gzipped against
+a 136.72 KB cap. The cause was **measured** rather than guessed — the mock
+Supabase client is a static import of `supabaseClient.js`, so its new
+`admin_publish_schedule_baseline` arm ships in main, and stripping the arm took
+the chunk to 135.77 KB. The arm now sits behind the same
+`import.meta.env.DEV || VITE_USE_MOCK_SUPABASE === 'true'` guard the facility
+RPC handlers already use, which folds to `false` in a production build; the
+rebuilt main entry is byte-identical to the arm-stripped one, hash and all. The
+budget was not touched, which `docs/operations/bundle-budget.md` says is the
+default response.
+
+### Three source scans read documentation as code, in one change
+
+Worth recording as a set, because the same mistake arrived three times wearing
+different clothes. A scan for *"nothing outside this package names the seam"*
+matched a JSDoc cross-reference in `externalImport/mapping.js`. Tightening it
+to `name(` then matched `serialiseExternalMappingRegistry()` **with its
+parentheses** in a sentence in `publication/serialise.js` explaining why it
+validates in both directions. A third, checking `baseline.js` holds no second
+comparator, matched the module's own prose saying it calls `compareParityRows`
+nowhere. The answers were: match an `import` statement, and strip comments
+before scanning. Both reasonings are left in the tests rather than only the
+answers, because the wrong versions were each individually plausible.
+
+### `/code-review` found seven, and one of them affected every run
+
+Run before the PR opened, as CLAUDE.md §3 requires, and fixed in the same
+change. Worth listing because none was a broken feature and six were
+surface-level readings that looked right:
+
+1. **Every baseline parity result mis-stated its `status`.** `checkParity()`
+   derives status mechanically from *its* findings;
+   `checkBaselineParity()` then appends the coverage finding — which fires on
+   every real run — and kept the old status. So a result carrying a
+   `compromise` reported `allowed`, contradicting itself, on every call.
+   `derivePublicationStatus()` is now re-run over the merged list.
+2. **A failed read rendered as "nothing has ever been published."** The hook
+   empties the list on a read error and the panel never destructured `error`
+   — a field parsed and unread, which is the shape CLAUDE.md names. The revert
+   file promises this surface will not make that exact false statement.
+3. **The headline verdict was computed from the buckets alone**, so a run that
+   could not read a single kickoff put every row in `matched` and printed, in
+   green, that the schedule still matched.
+4. `compromise` findings were rendered nowhere, putting the narrowing back
+   into the silence `baseline.js` exists to break.
+5. Duplicate React keys exactly in the `PARITY_KEY_AMBIGUOUS` case.
+6. A stale parity verdict survived a regenerate, describing a row set that no
+   longer existed.
+7. **`TRUNCATE` bypassed the append-only trigger.** A row-level trigger does
+   not fire on `TRUNCATE`, so the guarantee had a one-statement hole reachable
+   by the table owner and `service_role`.
+
+**The fix to (3) was itself wrong first, and that is the instructive part.**
+Gating the verdict on "any blocking finding" made the panel refuse to state a
+moved game — because `PARITY_ROW_DIFFERS` is blocking *precisely because it is
+the answer*. Soundness and severity are different questions, and the
+distinction now lives in the core as `BASELINE_UNSOUND_REASONS` /
+`baselineParitySoundness()` with both arms tested: a moved game is blocking
+**and** sound; an unreadable kickoff is not sound and says which code said so.
+
+Sixteen falsification breaks were run in total across the change, plus six
+more for these fixes; all went red except the one recorded above.
+

@@ -214,7 +214,7 @@ describe('publication :: snapshots are immutable, stamped and attributed', () =>
 /* The persistence seam                                                        */
 /* ========================================================================== */
 
-describe('publication :: the seam exists, and nothing stores through it', () => {
+describe('publication :: the seam, and the store that reaches it', () => {
   /**
    * A snapshot in the shipping export vocabulary, built through the production
    * projection rather than from hand-written cells, so the round trip is
@@ -430,17 +430,22 @@ describe('publication :: the seam exists, and nothing stores through it', () => 
     expect(readBack.status).toBe(PUBLICATION_STATUS.REJECTED);
   });
 
-  it('says on every snapshot that the seam exists and nothing stores through it', () => {
+  it('says on every snapshot where a durable copy of it goes', () => {
     const { findings } = makePublicationSnapshot(seamInput);
     const stated = findingsWith(findings, PUBLICATION_REASON.SNAPSHOT_IN_MEMORY_ONLY)[0];
     expect(stated).toBeDefined();
     expect(stated.severity).toBe(PUBLICATION_SEVERITY.INFO);
-    // The message names the seam by both of its function names, and the two
-    // assertions below hold that naming to the repository. A message naming a
-    // seam nobody can find would be the decoration this change exists to avoid.
+    // **This message used to end "and nothing in this repository stores
+    // through it", and the change of direction is the point.** GAP-29 Stage 2
+    // built the store, so the old sentence became false and this assertion
+    // became the thing holding a false sentence in place. It now names the
+    // route a copy takes, and the enumeration below holds that naming to the
+    // repository exactly as its predecessor held the absence.
     expect(stated.message).toContain('serialisePublicationSnapshot()');
     expect(stated.message).toContain('readPublicationSnapshot()');
-    expect(stated.message).toContain('nothing in this repository stores through it');
+    expect(stated.message).toContain('admin_publish_schedule_baseline()');
+    expect(stated.message).toContain('public.publication_baselines');
+    expect(stated.message).not.toContain('nothing in this repository stores through it');
   });
 
   /* ---- the message's two halves, enumerated from the repository ---------- */
@@ -486,7 +491,10 @@ describe('publication :: the seam exists, and nothing stores through it', () => 
     expect(typeof readPublicationSnapshot).toBe('function');
   });
 
-  it('has no production caller anywhere, which is the half a store would falsify', () => {
+  /** The one production file outside the package that may name the seam. */
+  const SEAM_STORE_CALLER = 'frontend/src/hooks/usePublicationBaselines.js';
+
+  it('has exactly one production caller, and it is the store', () => {
     expect(productionSources.size).toBeGreaterThan(MIN_FILES_SCANNED);
 
     const mentions = [...productionSources]
@@ -496,15 +504,29 @@ describe('publication :: the seam exists, and nothing stores through it', () => 
           source.includes('readPublicationSnapshot')
       )
       .map(([file]) => file);
-    // Meta-assertion: the pattern matches the seam's own file, so a renamed
-    // function cannot make this check pass by matching nothing.
+    // Meta-assertion, unchanged in shape: the pattern matches the seam's own
+    // file, so a renamed function cannot make this check pass by matching
+    // nothing.
     expect(mentions).toContain(`${SEAM_PACKAGE}serialise.js`);
+
+    // **The direction this assertion points is reversed by GAP-29 Stage 2, and
+    // both halves are now required rather than forbidden.** Until the store
+    // existed the rule was "no production file outside the package names the
+    // seam", and closing the gap was defined as making that go red. It went
+    // red. The rule that replaces it is not weaker: the caller must be there
+    // (a store that quietly stopped storing makes this fail) and it must be
+    // the only one (a second route into the seam makes it fail too).
+    expect(mentions).toContain(SEAM_STORE_CALLER);
     for (const file of mentions) {
-      expect(file.startsWith(SEAM_PACKAGE), `${file} names the publication seam`).toBe(true);
+      expect(
+        file.startsWith(SEAM_PACKAGE) || file === SEAM_STORE_CALLER,
+        `${file} names the publication seam and is neither the package nor the store`
+      ).toBe(true);
     }
 
-    // The sharper half: only the barrel imports the seam module at all, so no
-    // production path reaches it even under another name.
+    // The sharper half, in its new direction: the module itself is imported by
+    // the barrel and by nothing else in the package, and the store reaches it
+    // through that barrel rather than by deep import.
     const importers = [...productionSources]
       .filter(
         ([file, source]) =>
@@ -514,10 +536,58 @@ describe('publication :: the seam exists, and nothing stores through it', () => 
     expect(importers.filter((file) => file.startsWith(SEAM_PACKAGE))).toEqual([
       `${SEAM_PACKAGE}index.js`,
     ]);
+    expect(importers).not.toContain(SEAM_STORE_CALLER);
     // `fieldAdmin/serialise.js` is a different module of the same name; its own
     // importers are not this seam's, and listing them here proves the regex is
     // matching real import lines rather than nothing.
     expect(importers.some((file) => file.startsWith('packages/core/src/fieldAdmin/'))).toBe(true);
+  });
+
+  it('leaves the other two declared seams storing through nothing', () => {
+    // **The sibling claim, still made and still checkable.** `publication/`
+    // departed from the `fieldAdmin` precedent; `externalImport` and
+    // `fieldAdmin` did not, and every document in this repository saying so is
+    // now one store old. If either grows a production caller this is what says
+    // the sentence has gone stale, rather than a reader discovering it.
+    //
+    // **Imports, not mentions and not `name(`.** Both looser patterns were
+    // tried here and both were wrong in the same direction, which is why the
+    // reasoning is left in place rather than only the answer.
+    // `externalImport/mapping.js` names `serialiseFieldRegistry` in a JSDoc
+    // cross-reference about row ordering, so a mention test called prose a
+    // caller; `publication/serialise.js` writes
+    // `serialiseExternalMappingRegistry()` **with its parentheses** in a
+    // sentence about why it validates in both directions, so a `name(` test
+    // did too. A caller has to import the symbol, and an import statement is
+    // the one shape prose does not have.
+    const importsSymbol = (source, name) =>
+      new RegExp(`import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}`).test(source);
+
+    for (const [seam, ownPackage] of [
+      ['serialiseFieldRegistry', 'packages/core/src/fieldAdmin/'],
+      ['serialiseExternalMappingRegistry', 'packages/core/src/externalImport/'],
+    ]) {
+      const importers = [...productionSources]
+        .filter(([, source]) => importsSymbol(source, seam))
+        .map(([file]) => file);
+      expect(
+        importers.filter((file) => !file.startsWith(ownPackage)),
+        `${seam} is imported outside its own package, so the "stores through nothing" claim is stale`
+      ).toEqual([]);
+    }
+
+    // **The positive control, using the same predicate.** A regex that had
+    // stopped matching anything would report both siblings clean; pointed at
+    // this package's seam it must find the store, and find nothing else.
+    const publicationImporters = [...productionSources]
+      .filter(([, source]) => importsSymbol(source, 'serialisePublicationSnapshot'))
+      .map(([file]) => file);
+    expect(publicationImporters).toContain(SEAM_STORE_CALLER);
+    expect(
+      publicationImporters.filter(
+        (file) => file !== SEAM_STORE_CALLER && !file.startsWith(SEAM_PACKAGE)
+      )
+    ).toEqual([]);
   });
 });
 

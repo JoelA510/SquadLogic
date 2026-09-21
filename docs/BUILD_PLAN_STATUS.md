@@ -554,3 +554,93 @@ Scrutiny up; review loops down. Operationally:
   never sent** — that is the loop that manufactures work without resolving
   anything. The loop stops on a round with zero BLOCKING findings regardless of
   how many NOTED remain.
+
+---
+
+## 9. GAP-29 closes — the store, the writer and the reader, landed together
+
+**Recorded 2026-09-21, by the agent that built it.**
+
+### 9.0 A correction to this agent's own first draft, kept on the record
+
+An earlier draft of this section opened by reporting that **§8 did not exist**
+and that the brief had cited a section which was not in the document. That was
+true of `a206473`, the commit the brief said to branch from and the tree this
+work was done against; §8 landed on `main` as #415 at 22:16 UTC on 2026-09-20,
+while the slice was being built. The brief had said in as many words that *"a
+docs-only commit may land above it; rebase if so"*, and the fault was entirely
+this agent's: it read the document once, at the start, and wrote a confident
+correction hours later without re-fetching.
+
+It is recorded rather than quietly deleted because it is §6's rule turned
+around. §6 says a grep returning zero proves nothing until the pattern is shown
+matching something. This is the same error in time rather than in pattern
+space: **a read of a moving document decays, and a "this does not exist" claim
+needs a re-read at the moment it is written, not at the moment the work
+started.** §7 already recorded that a dated verification decays; §7 was talking
+about a premise three days old. This one was four hours old.
+
+### 9.1 What landed, against §8's binding condition
+
+§8 named the condition: **stages 2, 3 and 4 land together, and a PR that adds
+the table and stops is refused whatever its tests say.** All three are here.
+
+| stage | what | where |
+| --- | --- | --- |
+| 2 | the store | `supabase/migrations/20260920000000_publication_baselines.sql` |
+| 3 | a writer on the real publish path | `OutputGenerationPanel`'s upload, via `frontend/src/hooks/usePublicationBaselines.js` |
+| 4 | a reader that answers a question with it | the same panel's parity section, via `checkBaselineParity()` |
+
+The substance is in [`PUBLICATION_PARITY.md`](PUBLICATION_PARITY.md) §2a and
+[`MODEL_GAPS.md`](MODEL_GAPS.md) GAP-29 and is not repeated here.
+
+### 9.2 Where §8's verification held, and where it did not
+
+§8 verified at `a206473` that *"the publish path already holds rows in the
+snapshot's own shape, so the slice needs no adapter — the thing most likely to
+introduce a second row vocabulary is already absent."*
+
+**On the columns that is exactly right, and no column adapter was written.**
+`generateScheduleExports()` builds `master.rows` from `SCHEDULE_EXPORT_COLUMNS`
+and `makePublicationSnapshot()` defaults `columns` to the same frozen
+constant; the coordinates §8 cites were re-read and are correct.
+
+**On the `Start` cell it is not.** This repository has three spellings of that
+column — `reserve/publication.js` writes a naive wall reading,
+`generateScheduleExports()` writes `toISOString()`, and with a `timezone`
+argument it writes a `toLocaleString` — and `parityRowFromExportRow()` reads
+only the first. A baseline taken from the real publish path therefore came
+back with `date` and `startMinutes` **null on every row**: the kickoff
+invisible, and `date` is a key field. It is [GAP-36](MODEL_GAPS.md#gap-36),
+worked around narrowly in `publication/baseline.js` and left for
+`outputGeneration.js` to fix, since that function's output is the CSV
+operators download.
+
+**The rule this earns**: matching *column names* is not matching a
+*vocabulary*, and only running the comparison says which you have. §8's check
+was a reasonable one and it was carried out properly; it simply could not see
+this.
+
+### 9.3 §5's precondition, now met on its own terms
+
+§8 recorded that §5's literal precondition was unmet and superseded it
+deliberately, because the vertical slice is how GAP-29 closes. It has closed.
+GAP-29 as the operator scoped it on 2026-09-19 — the published baseline and a
+durable version for it — is answered: `publication_baselines.baseline_version`
+is a per-organisation monotonic id that *"moved since publication v3"* can
+point at. So §5's two conditions are now both discharged, by the route §8 set
+rather than the one §5 imagined.
+
+**What is deliberately not claimed.** The solver core is still unwired. No
+`frontend/` module imports `reserve/`, `scenario/`, `resolve/`, `freeze/`,
+`feasibility/` or their siblings, and this slice does not move one game. What
+it moves is the *published artifact*, which is what incidents 1 and 2 were
+about. §6's correction gains one more entry: the engine/app boundary is less
+hermetic again, and this change is what did it — by design, and under §8.
+
+### 9.4 [GAP-35](MODEL_GAPS.md#gap-35) is unblocked, not closed
+
+It named GAP-29 as its dependency because a resolve run and a promotion both
+reference a published baseline version that has to durably exist. One now
+does. Nothing in GAP-35 is thereby built: no `frozen` flag, and no SQL home for
+a freeze plan, a resolve run, a scenario or a promotion.

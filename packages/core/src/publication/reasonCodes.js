@@ -53,14 +53,15 @@ export const PUBLICATION_STATUS = CONSTRAINT_STATUS;
  *
  * One member, and it is on the record rather than only in the docs, because a
  * consumer holding the object has to be able to learn the limitation from the
- * object. Phase 6 is deliberately in-memory, and the reason is now GAP-29
- * alone. It used to include GAP-30: `SlotSchema` and `AssignmentSchema`
- * normalised through `z.coerce.date()`, which turned a published wall-clock
- * `8:30 AM` into an absolute instant using the host timezone, and persisting a
- * snapshot through a timezone-lossy schema would have made the parity checker
- * **cause the divergence it exists to detect**. Those schemas now refuse a
- * naive wall reading, so what is left is that nothing stores through the seam
- * `serialise.js` declares.
+ * object: a snapshot passed around in this process is gone when the process
+ * is.
+ *
+ * **Still one member after GAP-29 Stage 2 gave the package a store.** See
+ * {@link PUBLICATION_REASON.SNAPSHOT_IN_MEMORY_ONLY} for why: nothing in this
+ * package can produce a `persisted` value honestly, because
+ * `readPublicationSnapshot()` cannot tell a row of `publication_baselines`
+ * from a fixture file. Durability is a property of where a copy was put, and
+ * a snapshot object is not that copy.
  *
  * @readonly
  * @enum {string}
@@ -147,27 +148,34 @@ export const PUBLICATION_REASON = Object.freeze({
    */
   SNAPSHOT_DIGEST_MISMATCH: 'SNAPSHOT_DIGEST_MISMATCH',
   /**
-   * The snapshot lives in memory only. Provenance, emitted on every snapshot.
+   * This snapshot *record* lives in memory. Provenance, emitted on every
+   * snapshot.
    *
-   * `info`, because it is a stated property of this phase rather than a defect
+   * `info`, because it is a stated property of the object rather than a defect
    * — but it is stated, in the findings and on the record's `durability` field,
-   * so nobody reads a snapshot as a durable audit artifact.
+   * so nobody reads a snapshot handed around in this process as a durable
+   * audit artifact.
    *
-   * **What would make it stop firing**, stated because a finding nothing can
-   * silence is decoration rather than a report: a store. Concretely, the thing
-   * Stage 2 of GAP-29 has to produce — a table with RLS, an RPC that writes it,
-   * an audit row, and a second member of {@link PUBLICATION_DURABILITY} that a
-   * snapshot loaded from that store carries. The emission is unconditional
-   * today for the honest reason that `PUBLICATION_DURABILITY` has exactly one
-   * member, so there is no snapshot this could truthfully be omitted from; a
-   * conditional here now would be a branch no input can take, which this
-   * repository counts as evidence of a missing feature rather than as coverage.
+   * **The emission stays unconditional, and after GAP-29 Stage 2 that is a
+   * decision rather than an inheritance.** The store exists
+   * (`public.publication_baselines`, `20260920000000`), so it is fair to ask
+   * why a stored snapshot does not say `persisted` instead. Because nothing
+   * could produce that value honestly:
+   * {@link import('./serialise.js').readPublicationSnapshot} is handed a
+   * document and has no way to tell a row of that table from a fixture file, so
+   * a second member of {@link PUBLICATION_DURABILITY} would be a branch no
+   * input can take — which this repository counts as evidence of a missing
+   * feature rather than as coverage. Durability is a property of *where a copy
+   * was put*, and this record is not that copy. A caller that wants to know
+   * whether a baseline is stored asks the store; that is what
+   * `frontend/src/hooks/usePublicationBaselines.js` lists.
    *
-   * The *message* is falsifiable today, and that is the part a reader can
-   * check: it names `serialisePublicationSnapshot()` /
-   * `readPublicationSnapshot()` as the declared seam and says nothing stores
-   * through it, and `tests/publicationParity.test.js` enumerates the
-   * repository to hold both halves true.
+   * The *message* is falsifiable, and that is the part a reader can check: it
+   * names `serialisePublicationSnapshot()` / `readPublicationSnapshot()` and
+   * the RPC and table a copy goes to, and `tests/publicationParity.test.js`
+   * enumerates the repository to hold that naming true — where it once
+   * required no production caller, it now requires the writer and the reader
+   * it names.
    */
   SNAPSHOT_IN_MEMORY_ONLY: 'SNAPSHOT_IN_MEMORY_ONLY',
   /** A snapshot was created. Provenance, with the row count and the digest. */

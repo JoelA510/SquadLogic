@@ -974,9 +974,20 @@ describe('practice model :: the season-2026 practice grid', () => {
     // independently: 19 of these rows are Friday.
     const fridayRows = rows.filter((row) => row[columnOf('day')] === 'Friday');
     expect(fridayRows).toHaveLength(19);
-    expect(set.stats.slotsByWeekday.FRI).toBe(fridayRows.length);
     expect(set.stats.slotsByWeekday.SAT).toBe(0);
     expect(set.stats.slotsByWeekday.SUN).toBe(0);
+
+    // Counted **per assignment**, which is 1:1 with grid rows by construction,
+    // not per slot. Today the adapter merges nothing on this corpus, so the
+    // two are equal and a per-slot count would pass; the day two teams share a
+    // Friday window it would start failing for a reason that is not a defect.
+    // A check that only works while a merge never happens is not the check it
+    // looks like.
+    const weekdayOfSlot = new Map(set.slots.map((slot) => [slot.id, slot.weekday]));
+    const fridayAssignments = set.assignments.filter(
+      (assignment) => weekdayOfSlot.get(assignment.slotId) === 'FRI'
+    );
+    expect(fridayAssignments).toHaveLength(fridayRows.length);
   });
 
   it('resolves ground through the facility graph, not by spelling an id', () => {
@@ -1005,8 +1016,9 @@ describe('practice model :: the season-2026 practice grid', () => {
         (byResolution[finding.details.resolution] ?? 0) + 1;
     }
     expect(byResolution).toEqual({ 'venue-unknown': 28, 'surface-unknown': 4 });
-    // Kept, not dropped: the row count is still honest.
-    expect(set.stats.slotCount).toBe(rows.length);
+    // Kept, not dropped: every row still reaches an assignment. Asserted on
+    // assignments rather than slots for the merge reason noted below.
+    expect(set.stats.assignmentCount).toBe(rows.length);
   });
 
   it('refuses to date the seven revisions, and says so once per revision', () => {
@@ -1015,7 +1027,11 @@ describe('practice model :: the season-2026 practice grid', () => {
     const undated = set.findings.filter((f) => f.code === PRACTICE_REASON.REVISION_UNDATED);
     expect(undated).toHaveLength(7);
     expect(codesOf(set.findings)).toContain(PRACTICE_REASON.REVISION_ORDER_UNKNOWN);
-    expect(set.stats.undatedSlotCount).toBe(rows.length);
+    // Every slot is undated — stated as a proportion of the slots there are,
+    // rather than against the row count, which is only equal while the adapter
+    // merges nothing.
+    expect(set.stats.undatedSlotCount).toBe(set.stats.slotCount);
+    expect(set.slots.every((slot) => slot.validFrom === null)).toBe(true);
   });
 
   it('therefore materialises the whole corpus to nothing, loudly', () => {

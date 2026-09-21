@@ -251,8 +251,19 @@ function calculateFairnessConcerns(baseSlotDistribution, assignmentsByDivision) 
  *   whenever `schoolDayEnd` is supplied: a wall reading needs a clock before
  *   an assignment can be compared against it.
  * @returns {Object} The practice report. `dataQualityWarnings` carries the
- *   school-hours violations, and is empty only when the check ran and found
- *   none.
+ *   school-hours violations alongside the unknown-team, unknown-slot,
+ *   duplicate-assignment and zero-capacity notes.
+ *
+ *   **Its emptiness is not, by itself, a clean bill of health, and this is the
+ *   bound of what this function fixed.** An empty list now rules out a
+ *   school-hours check that was *asked for* and could not run — that used to
+ *   look identical to one that ran clean. It still does not distinguish "ran
+ *   and found nothing" from "never asked for": a season whose
+ *   `season_settings.school_day_end` is NULL reaches
+ *   `PracticeSchedulingPage.jsx` as `undefined`, opts out here, and publishes
+ *   the same empty list. Telling those two apart needs a flag on the report
+ *   that a reader consumes, which is a report-shape change and a panel change
+ *   rather than this one; a flag nothing reads would be its own defect.
  * @throws {TypeError} for malformed `assignments`, `unassigned`, `teams` or
  *   `slots`.
  * @throws {import('./timing/seasonClock.js').SeasonClockError} when
@@ -490,12 +501,18 @@ export function evaluatePracticeSchedule({
       const partValue = (type) => parts.find((part) => part.type === type)?.value;
       const weekday = partValue('weekday');
 
-      // Mon-Thu. `en-US` is fixed by the formatter, so these five labels are
-      // the whole domain; the weekday comes from the instant because
-      // `slot.day` is optional here, where `schedulePractices` refuses a slot
-      // without one. Deriving it rather than reading the label is the
-      // label-versus-instant question (GAP-36) and is unchanged by this fix --
-      // the old code derived it too.
+      // Mon-Thu. `en-US` is fixed by the formatter, so the domain is its seven
+      // `weekday: 'short'` labels and these four are the matched ones.
+      //
+      // **The weekday comes from the instant, and `schedulePractices` reads
+      // the `slot.day` label -- so the two arms can still disagree.** A slot
+      // labelled `'Friday'` that starts Thursday 14:00 in the season's zone is
+      // kept by the solver and reported by this function. That is GAP-36, it
+      // predates this change (the old code derived the weekday too), and it is
+      // deliberately not settled here: the solver refuses a slot with no
+      // `day`, this function's `day` is optional, and reconciling that is a
+      // solver change. What this fix unifies is which INPUTS the constraint
+      // can be evaluated over, not which weekday a slot is on.
       if (['Mon', 'Tue', 'Wed', 'Thu'].includes(weekday)) {
         const slotHour = Number.parseInt(partValue('hour'), 10);
         const slotMinute = Number.parseInt(partValue('minute'), 10);

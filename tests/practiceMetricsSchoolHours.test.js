@@ -32,6 +32,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import { evaluatePracticeSchedule } from '../packages/core/src/practiceMetrics.js';
+import { runScheduleEvaluations } from '../packages/core/src/evaluationPipeline.js';
 import { schedulePractices } from '../packages/core/src/practiceScheduling.js';
 import { TIMING_REASON } from '../packages/core/src/timing/reasonCodes.js';
 import { SeasonClockError } from '../packages/core/src/timing/seasonClock.js';
@@ -325,11 +326,20 @@ describe('omitting schoolDayEnd is the opt-out', () => {
 /* Solver and evaluator agree about which inputs are evaluable                 */
 /* -------------------------------------------------------------------------- */
 
-describe('the two arms answer the same question the same way', () => {
-  // The asymmetry is the defect: the solver refusing an input the evaluator
-  // reports clean is how a falsely-clean report reached `scheduler_runs`.
-  // Both arms are run over the one table above, so neither arm's set can be
-  // derived from the other's.
+describe('the two arms agree on which inputs are evaluable', () => {
+  // **The scope of the claim, stated so it is not read wider.** This is about
+  // input validity only: whether a given (`schoolDayEnd`, `timezone`) pair can
+  // be placed on the season's clock at all. The arms still differ on which
+  // weekday a slot is on -- the solver exempts by the `slot.day` label, this
+  // function derives it from the instant, so a slot labelled `'Friday'` that
+  // starts Thursday afternoon locally is kept by one and reported by the
+  // other. That is GAP-36, it predates this fix, and nothing below asserts
+  // otherwise.
+  //
+  // The asymmetry that IS the defect: the solver refusing an input the
+  // evaluator reported clean is how a falsely-clean report reached
+  // `scheduler_runs`. Both arms run over the one table above, so neither
+  // arm's set can be derived from the other's.
   it.each(UNEVALUABLE)(
     'schedulePractices and evaluatePracticeSchedule both refuse $label',
     ({ args, code }) => {
@@ -367,5 +377,119 @@ describe('the two arms answer the same question the same way', () => {
       1,
       'the evaluator reports the in-school-hours assignment the solver would not have made'
     );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The bounds of the fix, pinned rather than described                         */
+/* -------------------------------------------------------------------------- */
+
+describe('what this fix does not unify', () => {
+  it('still derives the weekday from the instant where the solver reads the label', () => {
+    // GAP-36, pinned so the bound is enforced rather than declared. This slot
+    // is labelled Friday and starts Thursday 14:00 in the season's zone:
+    // `schedulePractices` exempts it by the label and keeps it, and this
+    // function reports it from the instant. Both arms are asserted, so the
+    // day this is reconciled the test fails and says which one moved.
+    const mislabelled = {
+      id: 's-label-clash',
+      baseSlotId: 'b5',
+      start: new Date('2025-01-02T22:00:00Z'), // Thursday 14:00 America/Los_Angeles
+      end: new Date('2025-01-02T23:00:00Z'),
+      capacity: 1,
+      day: 'Friday',
+    };
+
+    const scheduled = schedulePractices({
+      teams,
+      slots: [mislabelled],
+      schoolDayEnd: '16:00',
+      timezone: ZONE,
+    });
+    assert.equal(
+      scheduled.assignments.find((a) => a.teamId === 't1')?.slotId,
+      's-label-clash',
+      'the solver keeps it: its `day` label is outside Mon-Thu'
+    );
+
+    const report = evaluatePracticeSchedule({
+      assignments: [{ teamId: 't1', slotId: 's-label-clash' }],
+      teams,
+      slots: [mislabelled],
+      schoolDayEnd: '16:00',
+      timezone: ZONE,
+    });
+    assert.equal(
+      schoolHoursWarnings(report).length,
+      1,
+      'the evaluator reports it: the instant is a Thursday afternoon'
+    );
+  });
+
+  it('leaves an unrequested check indistinguishable from a clean one', () => {
+    // The other bound. A season with no `school_day_end` opts out, and the
+    // report says so only by omission -- the same empty list a clean run
+    // publishes. Stated as a test so the next reader finds the gap here
+    // rather than in production; closing it needs a flag the panel reads.
+    const optedOut = evaluate({ schoolDayEnd: undefined });
+    const cleanRun = evaluate({ slotId: 's-late' });
+    assert.deepEqual(optedOut.dataQualityWarnings, cleanRun.dataQualityWarnings);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* The pipeline passes the opt-out through                                     */
+/* -------------------------------------------------------------------------- */
+
+describe('runScheduleEvaluations honours the per-practice opt-out', () => {
+  const practiceInputs = {
+    assignments: [{ teamId: 't1', slotId: 's-early' }],
+    teams,
+    slots: [insideSchoolHours, afterSchoolHours],
+  };
+
+  it('a per-practice null opts out of a season-wide schoolDayEnd', () => {
+    // `practice.schoolDayEnd ?? schoolDayEnd` read an explicit `null` as
+    // "absent, inherit" and applied the season bound over the top of a
+    // decision the caller had made. `null` became meaningful the moment the
+    // evaluator started refusing everything that is not an opt-out.
+    const result = runScheduleEvaluations({
+      practice: { ...practiceInputs, schoolDayEnd: null },
+      schoolDayEnd: '16:00',
+      timezone: ZONE,
+    });
+    assert.deepEqual(
+      result.issues.filter((issue) => issue.message.includes('violates school hours')),
+      []
+    );
+  });
+
+  it('an absent key still inherits the season-wide schoolDayEnd', () => {
+    // The falsifier for the case above: if inheritance had been broken
+    // instead of narrowed, this would also report nothing.
+    const result = runScheduleEvaluations({
+      practice: practiceInputs,
+      schoolDayEnd: '16:00',
+      timezone: ZONE,
+    });
+    assert.equal(
+      result.issues.filter((issue) => issue.message.includes('violates school hours')).length,
+      1
+    );
+  });
+
+  it('propagates the refusal rather than reporting status ok', () => {
+    // The pipeline's own falsely-clean answer: before the fix this returned
+    // `{ status: 'ok', issues: [] }` for a season whose bound nobody could
+    // read.
+    const error = refusalFrom(() =>
+      runScheduleEvaluations({
+        practice: practiceInputs,
+        schoolDayEnd: 'afternoon',
+        timezone: ZONE,
+      })
+    );
+    assert.ok(error instanceof SeasonClockError, 'expected the refusal to propagate');
+    assert.equal(error.code, TIMING_REASON.WALL_TIME_UNREADABLE);
   });
 });

@@ -49,8 +49,10 @@ export function filterRedundantCapacityWarnings(dataQualityWarnings = [], overbo
  * @param {Array<Object>} [params.practice.unassigned]
  * @param {Array<Object>} [params.practice.teams]
  * @param {Array<Object>} [params.practice.slots]
- * @param {string} [params.practice.schoolDayEnd]
- * @param {string} [params.practice.timezone]
+ * @param {string|null} [params.practice.schoolDayEnd] - Overrides the
+ *   season-wide `schoolDayEnd` below. `undefined` (or absent) inherits it;
+ *   `null` is an explicit opt-out and is kept.
+ * @param {string|null} [params.practice.timezone] - Same rule.
  * @param {Object} [params.games] - Game evaluation inputs.
  * @param {Array<Object>} [params.games.assignments]
  * @param {Array<Object>} [params.games.teams]
@@ -90,8 +92,15 @@ export function runScheduleEvaluations({ practice, games, schoolDayEnd, timezone
           unassigned: practice.unassigned ?? [],
           teams: practice.teams,
           slots: practice.slots,
-          schoolDayEnd: practice.schoolDayEnd ?? schoolDayEnd,
-          timezone: practice.timezone ?? timezone,
+          // **`??` would swallow the `null` opt-out.** `undefined` and `null`
+          // both opt out of `evaluatePracticeSchedule`'s school-hours check,
+          // so `practice.schoolDayEnd ?? schoolDayEnd` read an explicit
+          // per-practice `null` as "absent, inherit" and applied the
+          // season-wide bound over the top of it. `undefined` still inherits,
+          // which is the case every existing caller relies on; `null` is a
+          // decision and is kept.
+          schoolDayEnd: practice.schoolDayEnd === undefined ? schoolDayEnd : practice.schoolDayEnd,
+          timezone: practice.timezone === undefined ? timezone : practice.timezone,
         });
 
   const gameResult =

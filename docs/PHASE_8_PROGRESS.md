@@ -5616,3 +5616,22 @@ careful: `expect(roster.filter(RE)).toHaveLength(132)` before
 `expect(filtered).toEqual([...])` does not require anyone to notice the shared
 axis in advance. Adopted as default practice for every check that narrows a
 set.
+
+**And a guard against the wrong lesson, which the agent raised and the entry
+above invites.** Three of the supervisor's corrections this session were wrong.
+**Two were right, and they were the two that mattered most**: the blocking
+`logged` defect, which the agent had shipped and no test of its own caught, and
+the false tier census, which the agent had confirmed with a broken instrument
+and would have merged. A reader taking "three over-corrections" as grounds to
+treat this supervisor's corrections as presumptively suspect would have learned
+something worse than the original fault. The honest rule is narrower and
+symmetrical, in the agent's words:
+
+> A correction carries no more evidential weight than the work behind it, in
+> either direction. The remedy isn't scepticism about the source, it's the
+> command.
+
+The agent's own operational form of it, adopted: an incoming correction that
+cites no executed command is **unverified until one is run**, the same standing
+as any other claim — a step rather than a judgement call, since the absence of
+a citation is easy to miss under the authority of a correction.

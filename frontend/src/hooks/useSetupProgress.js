@@ -9,10 +9,31 @@ import { useDashboardData } from './useDashboardData.js';
  * loses nothing because nothing is stored about the checklist itself.
  *
  * Steps: features → import → teams → fields → practices → games → publish.
+ *
+ * **`error` is passed through, not surfaced and not swallowed.** A hook
+ * renders nothing, so "surface" is not an option it has; the only real choice
+ * is whether its two consumers can tell a failed load from an unstarted
+ * season. They could not. `teams`, `practices` and `games` derive `done` from
+ * `team/practice/game.generatedAt`, so a refused read turns three completed
+ * steps into "Not started", drops `percent`, and moves `nextStep` back to work
+ * the operator already did — a wrong instruction, not just a blank. Both
+ * consumers (`SetupChecklist`, and the Season Setup card in `DashboardPage`)
+ * render that progress inline and neither had anywhere to report why, so the
+ * error is returned for them to put next to it.
+ *
+ * **Scope of the field, stated so it is not over-read:** this is
+ * `useDashboardData`'s error and nothing else. The `players`/`teams`/`fields`
+ * counts fetched below still swallow their own failures — `countOf` returns 0
+ * on error, so a refused `players` read is reported as "Not started" by the
+ * `import` step with no error to go with it. That is the same defect in a
+ * second place and it is deliberately NOT fixed here: it needs `counts` to
+ * carry a loaded/failed state per table, which changes three steps' `done`
+ * values and is its own unit of work. `error` being null does not mean the
+ * checklist is complete, only that the dashboard sources loaded.
  */
 export function useSetupProgress() {
   const { currentOrganization, featureFlags = {} } = useOrganization();
-  const { team, practice, game } = useDashboardData();
+  const { team, practice, game, error } = useDashboardData();
   const orgId = currentOrganization?.id;
   const [counts, setCounts] = useState({ players: 0, teams: 0, fields: 0, loaded: false });
 
@@ -112,6 +133,7 @@ export function useSetupProgress() {
       percent: Math.round((doneCount / steps.length) * 100),
       nextStep,
       loaded: counts.loaded,
+      error,
     };
-  }, [featureFlags, currentOrganization?.is_onboarded, counts, team, practice, game]);
+  }, [featureFlags, currentOrganization?.is_onboarded, counts, team, practice, game, error]);
 }

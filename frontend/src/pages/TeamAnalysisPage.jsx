@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDashboardData } from '../hooks/useDashboardData.js';
+import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import { useTeamPersistence } from '../hooks/useTeamPersistence.js';
 import { useAutoRunOnNavigate } from '../hooks/useAutoRunOnNavigate.js';
 import { useImport } from '../contexts/ImportContext.jsx';
@@ -310,17 +311,24 @@ export default function TeamAnalysisPage() {
   // deliberately renders its `generatedAt` on the viewer's clock and no longer
   // declares the prop. `useDashboardData` does not return a `timezone` either,
   // so the binding was `undefined` in every render this page has ever had.
-  // `useDashboardData` also returns an `error` now (it used to swallow all
-  // three fetch failures). It is deliberately NOT destructured here: this page
-  // has no data-error surface to put it on. `validationErrors` below is a
-  // pre-generation gate — "select a program", "missing roster" — and a
-  // transient RLS refusal on the *last team run* is not a reason to block
-  // generating teams, so pushing it there would be the wrong answer rather
-  // than a partial one. Binding it to `_error` and discarding it is the
-  // reads-as-load-bearing-and-is-not shape this PR removes elsewhere, so it is
-  // not bound at all. Giving this page (and `PracticeSchedulingPage`,
-  // `GameSchedulingPage`, `ExportsPage`) a real error surface is its own unit.
-  const { team, loading } = useDashboardData();
+  // `useDashboardData` also returns an `error` (it used to swallow all three
+  // fetch failures). The comment that used to sit here deferred reading it —
+  // "this page has no data-error surface to put it on ... is its own unit" —
+  // and this is that unit. The surface is `DataErrorBanner`, the one
+  // `WorkflowPage` already had, now shared.
+  //
+  // The deferred note was right about where it does NOT belong, and that part
+  // still holds: `validationErrors` below is a pre-generation gate ("select a
+  // program", "missing roster"), and a transient RLS refusal on the *last team
+  // run* is not a reason to block generating new teams. So the banner is its
+  // own element above the header and `validationErrors` is left alone.
+  //
+  // This page reads `team` only, but `error` is the hook's aggregate over all
+  // three reads, so a refused `practice` or `game` read opens the banner over
+  // a teaming analysis that loaded correctly. Over-reporting rather than the
+  // silence this PR removes; the fix is per-source errors on the hook, which
+  // this change was scoped not to touch. Named in the PR.
+  const { team, loading, error: dataError } = useDashboardData();
   const {
     persistenceSnapshot,
     loading: persistenceLoading,
@@ -1196,6 +1204,8 @@ export default function TeamAnalysisPage() {
 
   return (
     <div className="animate-fadeIn space-y-8 max-w-[65ch] mx-auto w-full">
+      <DataErrorBanner message={dataError} />
+
       <div className="flex justify-between items-start mb-8">
         <div>
           <h1 className="text-3xl font-display font-bold text-text-primary mb-2">

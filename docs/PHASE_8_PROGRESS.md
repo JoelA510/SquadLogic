@@ -5635,3 +5635,92 @@ The agent's own operational form of it, adopted: an incoming correction that
 cites no executed command is **unverified until one is run**, the same standing
 as any other claim — a step rather than a judgement call, since the absence of
 a citation is easy to miss under the authority of a correction.
+
+---
+
+## Backlog sweep during the §5 hold — #430 and #431
+
+Recorded as one entry for two PRs, because the §5 gate blocks 8.5-8.10 and
+neither of these is roadmap work. Both are live defects already identified in
+earlier reviews, fixed under the operator's standing authorisation to close
+them in their own PRs.
+
+### #430 `09adb89` — a failed read stops the export it would have emptied
+
+`ExportsPage` showed the banner and still let an operator ship the zero-row CSV
+the failure left behind. `|| []` is the line that makes a refused read and an
+empty season identical, so the fix is not a `disabled` flag: the page passes
+per-source errors and loading, and the panel decides, because the panel knows
+which input feeds which artifact.
+
+Five further defects on the same path came out of the agent's own review:
+
+- **The two assignments reads were dropped entirely by `useDashboardData`** —
+  and they are the rows the CSV is built from. A refused `practice_assignments`
+  read produced the empty-looking-but-unread state with **no banner anywhere**,
+  because the banner only ever covered the three summary reads. A purer
+  instance of the reported defect than the reported one.
+- An **in-flight** read reached the same zero-row CSV with no failure at all.
+- Gating Generate alone left the harm one button right: Upload wrote the empty
+  CSV to storage **and recorded it as a published baseline**.
+- An assignments error outlived its run, surviving an organisation switch.
+- Widening the aggregate error would have worsened known over-reporting, so
+  three pages moved onto their own sources.
+
+**One positive control found three vacuous assertions in the new tests.** The
+panel generates inside a `setTimeout`, so asserting absence on the line after
+the click was equally true of a panel about to succeed. Three assertions passed
+against correct code and would have passed against broken code. Caught only
+because the control was run — the suite alone would have shipped it.
+
+**A supervisor error, the fourth of the session and the costliest kind.** The
+brief asserted that a failed practice read should not block "a roster CSV".
+There is no roster CSV: `outputGeneration.js` exports master and per-team
+**schedule** CSVs only. The premise came from the page's own subtitle, which is
+itself wrong and is left as a one-line follow-up. An error in a brief is worse
+than one in a review comment, because the agent builds on it before anyone
+can check it.
+
+### #431 `9658292` — the census that could not start
+
+The note said six unplanted `(checked)` claims. It is **eight**, one-way, and
+the two missed were not revert claims at all.
+
+**`prove.sh` already carried exactly this census**, bidirectional, with its own
+empty-universe meta-assertion. It is unreachable: its universe is the baseline
+transcript, so it runs only after a 5.4-hour sweep — and the sweep **could not
+start**. A pre-flight correctly refuses two plants aimed at a body a later
+migration recreates, and that refusal exits before the baseline. Eight claims
+accumulated because nothing has run the census since the containment migration
+landed.
+
+> A guard whose only runtime is a sweep nobody runs is a guard nobody runs.
+
+That is the entry's lesson, and it generalises past this harness: **reachability
+is part of a guard's correctness.** A check that is right and never evaluated
+is indistinguishable from one that is wrong.
+
+Worse, **three plants could never have scored `CAUGHT`**: their `expect` began
+`FAIL `, which the matcher prepends, so each searched for `FAIL FAIL revert
+<id>` — a string nothing prints — and scored `MISATTRIBUTED` on every sweep.
+One is a declared prover. A falsification instrument that cannot succeed is the
+purest form of the defect this phase is named for.
+
+One claim is genuinely unplantable and now prints `(unplantable)` with its
+reason rather than `(checked)`: every mutation aborts the migration build three
+stages before its check runs.
+
+**Supervisor review, under the new one-check budget.** Ran the static guard
+clean (78 ms, exit 0), then tried to evade it twice rather than re-running what
+CI had run: a printed claim with no plant gives `CENSUS FAIL` exit 1 naming the
+claim; demoting a real claim to `(unplantable)` without registering it fails in
+**both** directions and names the two legitimate remedies. Restores verified
+clean after each.
+
+### Left for the operator
+
+`run.sh:186-210` keeps six `(coverage)`/`(refused)` bookkeeping lines
+deliberately outside the census, justified when registering them required the
+sweep. The static census is now 78 ms, but registering them properly still
+needs plants, which still need the sweep. Cheaper to revisit than it was; not
+free.

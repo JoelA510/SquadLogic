@@ -4921,13 +4921,22 @@ The plan text for 8.5 carried several stale claims, so the brief existed to
 correct them. It introduced four errors of its own, all caught by the agent
 before a line was written, all confirmed by me afterwards:
 
-- **The lint baseline is 2 warnings, not 1.** Both are
-  `react-hooks/incompatible-library` at `RosterManager.jsx:93:26`. The figure
-  came from **#416's PR body rather than from a run**. That is a new mechanism
-  and the guards did not cover it: the previous eight errors were about greps,
-  coordinates, branch state and query staleness, and none of them is "a number
-  inherited from a prior report". **Guard: a baseline goes into a brief only if
-  it was executed in the session that writes the brief.**
+- **The lint baseline is 1 warning. This bullet used to say 2, and 2 was also
+  wrong.** The warning is `react-hooks/incompatible-library` at
+  `RosterManager.jsx:93:26`. The original "1" was taken from **#416's PR body
+  rather than from a run**, a mechanism the earlier guards did not cover, so
+  the guard below still stands. But the "2" that replaced it was not a better
+  number, it was a contaminated one. `eslint .` also linted the agent
+  worktrees under `.claude/worktrees/`, each a full second copy of the
+  repository, and counted the same single warning once per copy: 1 with no
+  nested worktree, 2 with one, 3 with two. #416's 1 happened to be right and
+  this bullet's 2 was wrong by measurement. Fixed in #422, which adds
+  `**/.claude/**` to the ESLint ignores so the count stops depending on what
+  else is checked out, and makes `npm run lint` enforce it with
+  `--max-warnings=1`.
+  **Guard: a baseline goes into a brief only if it was executed in the session
+  that writes the brief -- and executing it is not enough when the tool walks
+  the whole tree, so confirm what the run actually covered.**
 - **`practiceScheduling.js` does not interpret instants as America/Los_Angeles.**
   It contains no `America/` at all; the zone is caller-supplied and the LA
   framing lives in a test fixture's comments. I verified `utils/date.js` and

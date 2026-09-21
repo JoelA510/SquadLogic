@@ -392,6 +392,48 @@ export function applyMove(state, move, stageId) {
 }
 
 /**
+ * The per-run scratch fields every stage reads, zeroed.
+ *
+ * **Refactor-first, forced by 8.6.** Two callers build a stage context by hand
+ * — `resolve.js` for a real run and `probe.js` for the adversarial freeze
+ * probe — and every stage reads both as though they were one shape. Nothing
+ * detected the drift: adding `repairScope` to the first left the second
+ * handing every stage a context without it, and the freeze probe (the check
+ * incident 2 exists for) died on `context.repairScope.has(...)` rather than
+ * reporting anything. That is the same defect as the two `computeFitness()`
+ * implementations `objective.js` opens by describing, at a smaller scale.
+ *
+ * Only the fields **neither caller customises** live here. The ones they
+ * genuinely differ on — `engines`, `plan`, `weights`, `touchedDates`,
+ * `onUnsatisfiable`, `runVerification` — stay at the call sites, spread over
+ * this, because a default for those would be a decision hidden in a helper.
+ *
+ * @returns {Record<string, unknown>}
+ */
+export function resolveContextDefaults() {
+  return {
+    /** Per game, the blocking codes its baseline slot already carried. */
+    baselineBlockingCodes: {},
+    /** The same one severity wider, for the objective's relative scoring. */
+    baselineFindingCounts: {},
+    /** Games this run repairs rather than accepts; see the repair scope. */
+    repairScope: new Set(),
+    /** Per scoped game, how many baseline findings un-accepting it discarded. */
+    repairScopeExercised: {},
+    /** The cap the placer spends, or null for no cap. */
+    changeBudget: null,
+    /** Per requested game, the slot its drift is measured from. */
+    anchors: {},
+    /** Per requested game, the slot the request named, as a key. */
+    requestedSlots: {},
+    /** Frozen-game contradictions reported rather than thrown. */
+    unsatisfiableErrors: [],
+    /** One entry per stage, for the freeze audit. */
+    stageSnapshots: [],
+  };
+}
+
+/**
  * Freeze a set of games that were thawed, part-way through a run.
  *
  * The one state transition that is not a placement write, and it can only ever
@@ -474,8 +516,8 @@ export function slotChangedFields(before, after) {
 }
 
 /**
- * Which games ended up somewhere other than where they started — **by game,
- * never as a bare count**.
+ * **The baseline partition**: what moved, what held, and what has no time at
+ * all — by game, never as a bare count.
  *
  * Enumerated from the **baseline**, not from the ledger and not from the final
  * schedule: a game a stage dropped, or one a stage wrote around the gate, must
@@ -483,12 +525,63 @@ export function slotChangedFields(before, after) {
  * Incident 1 was a count that said 366 long after the damage, and recovery was
  * game by game.
  *
+ * ## Why the hold comes out of this function and not a new one
+ *
+ * `publication/index.js` states that this "remains the only game-by-game
+ * baseline diff, over a resolve run rather than over two published artifacts",
+ * so it is already the named authority for the question. The hold is the exact
+ * complement of the diff, and computing it anywhere else would be a second
+ * count free to disagree with this one about a shelved game — which is the
+ * drift `docs/ARCHITECTURE.md` §6.10 records for the two fitness functions this
+ * repository already carries, arriving a third time. `moved` and `held` are
+ * therefore read out of one walk of one roster.
+ *
+ * Three producers of "did it keep its published time" already existed when 8.6
+ * was written — `placement/replaceGames.js`'s `unchanged` list,
+ * `publication/parity.js`'s `rowsMatched`, and `scenario/diff.js`'s
+ * `gamesUnchanged` — and none of them is reachable from a resolve run. This is
+ * the fourth question and deliberately not the fourth producer: it answers it
+ * where the run already partitions its own roster.
+ *
+ * ## The partition, and what it must add up to
+ *
+ * Every baseline game lands in exactly one of three buckets:
+ *
+ * | bucket | meaning |
+ * |---|---|
+ * | `held` | standing on the date, ground and kickoff the baseline gave it |
+ * | `moved` | standing somewhere, but not there |
+ * | `unplaced` | standing nowhere: incident 10's TIME TBD |
+ *
+ * and `held.length + moved.length + unplaced.length === gameIds.length`.
+ * Counted from both sides rather than asserted from how the lists were built,
+ * which is the discipline `publication/parity.js` applies to its four buckets.
+ * {@link baselinePartitionFindings} is what turns a partition that does not add
+ * up into a blocking finding; it is separate and takes its counts as arguments
+ * so a caller cannot get the check without the numbers it checked.
+ *
+ * **`moved` keeps carrying the unplaced.** A game with no time has changed as
+ * far as the change budget, the dry-run report and a family are concerned, and
+ * every existing reader of this function counts it that way. `unplaced` is a
+ * view of the same games under `changedFields: ['placed']`, not a fourth
+ * bucket subtracted from `moved`; the identity that has to hold is stated over
+ * `held` and `moved` alone.
+ *
  * @param {import('./types.js').ResolveState} state
- * @returns {import('./types.js').ScheduleChange[]}
+ * @returns {import('./types.js').BaselinePartition}
  */
 export function diffAgainstBaseline(state) {
   /** @type {import('./types.js').ScheduleChange[]} */
   const changed = [];
+  /** @type {import('./types.js').BaselineHold[]} */
+  const held = [];
+  /** @type {import('./types.js').ScheduleChange[]} */
+  const unplaced = [];
+  // Counted separately from `held.length` on purpose: the kickoff is what a
+  // family was told and the ground is a second question, so a game that keeps
+  // its time on another pitch is a hold of the kickoff and not of the slot.
+  let kickoffHeld = 0;
+
   for (const gameId of state.gameIds) {
     const before = state.baseline[gameId];
     const after = state.games[gameId] ?? null;
@@ -503,17 +596,111 @@ export function diffAgainstBaseline(state) {
         : { date: after.date, surfaceId: after.surfaceId, startMinutes: after.startMinutes };
 
     const changedFields = slotChangedFields(beforeSlot, afterSlot);
-    if (changedFields.length === 0) continue;
+    if (
+      afterSlot !== null &&
+      afterSlot.date === beforeSlot.date &&
+      afterSlot.startMinutes === beforeSlot.startMinutes
+    ) {
+      kickoffHeld += 1;
+    }
 
-    changed.push({
+    if (changedFields.length === 0) {
+      held.push({
+        gameId,
+        label: `${before.homeLabel} v ${before.awayLabel}`,
+        disposition: state.dispositions[gameId],
+        slot: beforeSlot,
+      });
+      continue;
+    }
+
+    const entry = {
       gameId,
       label: `${before.homeLabel} v ${before.awayLabel}`,
       disposition: state.dispositions[gameId],
       changedFields,
       before: beforeSlot,
       after: afterSlot,
-    });
+    };
+    changed.push(entry);
+    if (afterSlot === null) unplaced.push(entry);
   }
+
   changed.sort((a, b) => a.gameId.localeCompare(b.gameId));
-  return changed;
+  held.sort((a, b) => a.gameId.localeCompare(b.gameId));
+  unplaced.sort((a, b) => a.gameId.localeCompare(b.gameId));
+
+  return {
+    moved: changed,
+    held,
+    unplaced,
+    counts: {
+      baselineGames: state.gameIds.length,
+      held: held.length,
+      moved: changed.length,
+      unplaced: unplaced.length,
+      publishedKickoffHeld: kickoffHeld,
+      publishedSlotHeld: held.length,
+    },
+  };
+}
+
+/**
+ * The partition's own meta-assertions, as findings.
+ *
+ * **Given its counts as arguments** rather than closing over the partition, for
+ * the same reason `publication/parity.js`'s `parityPartitionFindings()` is: a
+ * check that derives the universe it is checking against from the same walk
+ * that produced the buckets compares a set against itself. `baselineGames` is
+ * the roster length, which a break in the walk leaves intact.
+ *
+ * @param {import('./types.js').BaselinePartition} partition
+ * @param {{ baselineGames: number }} counts
+ * @returns {import('../freeze/types.js').FreezeFinding[]}
+ */
+export function baselinePartitionFindings(partition, counts) {
+  /** @type {import('../freeze/types.js').FreezeFinding[]} */
+  const findings = [];
+  const held = partition.held.length;
+  const moved = partition.moved.length;
+  const accounted = held + moved;
+
+  if (accounted !== counts.baselineGames) {
+    findings.push(
+      makeResolveFinding(
+        RESOLVE_REASON.RESOLVE_PUBLISHED_HOLD_PARTITION_INCOMPLETE,
+        `the baseline partition accounts for ${accounted} of ${counts.baselineGames} baseline game(s): ${held} held and ${moved} moved. A game in two buckets or in none makes the hold a number nobody should read`,
+        { baselineGames: counts.baselineGames, accounted, held, moved }
+      )
+    );
+  }
+
+  // A game named in both buckets adds up perfectly while being wrong twice, so
+  // the overlap is counted rather than inferred from the total above.
+  const heldIds = new Set(partition.held.map((entry) => entry.gameId));
+  const inBoth = partition.moved.filter((entry) => heldIds.has(entry.gameId));
+  if (inBoth.length > 0) {
+    findings.push(
+      makeResolveFinding(
+        RESOLVE_REASON.RESOLVE_PUBLISHED_HOLD_PARTITION_INCOMPLETE,
+        `${inBoth.length} game(s) are counted as both held and moved: ${inBoth
+          .slice(0, 5)
+          .map((entry) => entry.gameId)
+          .join(', ')}`,
+        { baselineGames: counts.baselineGames, inBoth: inBoth.length }
+      )
+    );
+  }
+
+  if (counts.baselineGames === 0) {
+    findings.push(
+      makeResolveFinding(
+        RESOLVE_REASON.RESOLVE_PUBLISHED_HOLD_PARTITION_INCOMPLETE,
+        'the hold was measured over zero baseline games; "every published kickoff was held" is a true statement about an empty schedule and means nothing (incident 4)',
+        { baselineGames: 0, accounted, held, moved }
+      )
+    );
+  }
+
+  return findings;
 }

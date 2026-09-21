@@ -41,10 +41,12 @@ import { buildChangeReport } from './report.js';
 import { ScheduleChangeRequestSchema } from './schemas.js';
 import { buildResolvePipeline } from './stages.js';
 import {
+  baselinePartitionFindings,
   createResolveLedger,
   createResolveState,
   diffAgainstBaseline,
   pinGames,
+  resolveContextDefaults,
   slotKey,
 } from './state.js';
 
@@ -193,6 +195,23 @@ function runResolve(input) {
       'resolve: the schedule holds no games, so every verdict this run could produce would be true of nothing (incident 4)'
     );
   }
+
+  // **The repair scope**: games this run is asked to repair rather than to
+  // accept as it found them. See `RESOLVE_REPAIR_SCOPE_DECLARED`. An id the
+  // schedule does not hold throws rather than being skipped, for the same
+  // reason `season2026ExternalFixtureChanges()` refuses a fixture matching no
+  // game: a scope that silently covered eleven of twelve closed-venue games
+  // would produce a clean report about the wrong eleven.
+  const scheduleGameIds = new Set(baseSchedule.games.map((game) => game.id));
+  const repairScopeIds = [...new Set(input.repairScope ?? [])];
+  for (const gameId of repairScopeIds) {
+    if (!scheduleGameIds.has(gameId)) {
+      throw new Error(
+        `resolve: the repair scope names game "${gameId}", which this schedule does not hold; a scope that quietly covered fewer games than it named would report a bounded repair of the wrong set`
+      );
+    }
+  }
+  const repairScope = new Set(repairScopeIds);
   const games = baseSchedule.games.map((game) => ({ ...game }));
   const judgements = judgeFreezeAll(
     plan,
@@ -269,16 +288,22 @@ function runResolve(input) {
   const touchedDates = input.dislodgeAll
     ? [...inventory.dates]
     : [
-        ...new Set(
-          changes.flatMap((change) => {
+        ...new Set([
+          ...changes.flatMap((change) => {
             const game = state.baseline[change.gameId];
             return game ? [game.date, change.date ?? game.date] : [];
-          })
-        ),
+          }),
+          // Without this the scope is inert: `local-search` and `pair-repair`
+          // both iterate `placedGamesOn(current, context.touchedDates)`, so a
+          // scoped game on a date the change request never mentions is never
+          // visited and the run reports a repair it never attempted.
+          ...repairScopeIds.map((gameId) => state.baseline[gameId].date),
+        ]),
       ].sort();
 
   /** @type {Object} */
   const context = {
+    ...resolveContextDefaults(),
     engines,
     changes,
     plan,
@@ -287,11 +312,13 @@ function runResolve(input) {
     dislodgeAll: input.dislodgeAll === true,
     onUnsatisfiable: input.onUnsatisfiable ?? 'throw',
     touchedDates,
-    baselineBlockingCodes: {},
-    baselineFindingCounts: {},
-    anchors: {},
-    requestedSlots: {},
-    unsatisfiableErrors: [],
+    repairScope,
+    /**
+     * The cap, on the context, so the placer is told the number **before** it
+     * spends it. `report.js` still checks the finished run against it; that
+     * check is now a backstop rather than the only enforcement.
+     */
+    changeBudget: input.changeBudget ?? null,
     /**
      * What the rule engine already said about the schedule **before** this run
      * touched it.
@@ -379,9 +406,52 @@ function runResolve(input) {
   // re-solve that could be read without it would be a re-solve somebody read
   // without it. It carries the three categories, checks its own partition, and
   // is what the change budget is measured against.
+  // **The repair scope's own verdict**, emitted from the roster of ids the
+  // caller named rather than from whatever the pipeline ended up touching:
+  // a scope whose games the run dropped must be reported as unexercised, not
+  // be absent from the set that would have named it.
+  if (repairScopeIds.length > 0) {
+    ledger.meta.repairScopeGames = repairScopeIds.length;
+    const exercised = repairScopeIds.filter(
+      (gameId) => (context.repairScopeExercised[gameId] ?? 0) > 0
+    );
+    const discarded = repairScopeIds.reduce(
+      (total, gameId) => total + (context.repairScopeExercised[gameId] ?? 0),
+      0
+    );
+    if (exercised.length === 0) {
+      ledger.findings.push(
+        makeResolveFinding(
+          RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_VACUOUS,
+          `the repair scope names ${repairScopeIds.length} game(s) and not one of them carries a baseline finding, so un-accepting them discarded nothing and this run repaired nothing it would not have repaired anyway. A bounded repair reported over an undisturbed schedule is incident 4 one layer up`,
+          { scopeGames: repairScopeIds.length, exercised: 0, findingsDiscarded: 0 }
+        )
+      );
+    } else {
+      ledger.findings.push(
+        makeResolveFinding(
+          RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_DECLARED,
+          `${repairScopeIds.length} game(s) are in the repair scope: their baseline positions are not accepted as given, and ${exercised.length} of them carried ${discarded} baseline finding(s) that this run therefore has to answer for rather than inherit`,
+          {
+            scopeGames: repairScopeIds.length,
+            exercised: exercised.length,
+            findingsDiscarded: discarded,
+          }
+        )
+      );
+    }
+  }
+
   const resolvedSchedule = resolvedScheduleOf(baseSchedule, state);
-  const moved = diffAgainstBaseline(state);
+  const partition = diffAgainstBaseline(state);
+  const moved = partition.moved;
+  for (const finding of baselinePartitionFindings(partition, {
+    baselineGames: state.gameIds.length,
+  })) {
+    ledger.findings.push(finding);
+  }
   const report = buildChangeReport({
+    partition,
     name: input.name,
     baselineSchedule: baseSchedule,
     schedule: resolvedSchedule,
@@ -419,6 +489,10 @@ function runResolve(input) {
   meta.movedRequested = Number(report.meta.movedRequested);
   meta.movedConsequential = Number(report.meta.movedConsequential);
   meta.movedConsequentialExplained = Number(report.meta.movedConsequentialExplained);
+  // Read off the same partition the report published, not recomputed: two
+  // counts of one hold would be free to disagree about a shelved game.
+  meta.publishedKickoffHeld = partition.counts.publishedKickoffHeld;
+  meta.publishedSlotHeld = partition.counts.publishedSlotHeld;
 
   /** @type {import('./types.js').StageResult[]} */
   const stages = pipeline.map((stage) => {
@@ -448,6 +522,12 @@ function runResolve(input) {
     judgements,
     state,
     moved,
+    /**
+     * The whole baseline partition, of which `moved` is one bucket. Carried so
+     * a caller asking "what held" does not have to subtract two lists and
+     * arrive at a third opinion.
+     */
+    partition,
     unplaced: [...state.unplaced],
     moves: [...ledger.moves],
     stages,

@@ -158,7 +158,8 @@ export function violationTally(verification) {
  * @param {import('../ruleEngine/types.js').Schedule} input.baselineSchedule
  * @param {import('../ruleEngine/types.js').Schedule} input.schedule - the proposal
  * @param {ReadonlyArray<Object>} input.changes - the parsed change request
- * @param {ReadonlyArray<import('./types.js').ScheduleChange>} input.moved - `diffAgainstBaseline()`
+ * @param {ReadonlyArray<import('./types.js').ScheduleChange>} input.moved - `diffAgainstBaseline().moved`
+ * @param {import('./types.js').BaselinePartition} [input.partition] - the whole of it
  * @param {ReadonlyArray<{ gameId: string, reason: string }>} input.unplaced
  * @param {ReadonlyArray<import('./types.js').MoveRecord>} input.moves
  * @param {import('./types.js').ResolveState} input.state
@@ -181,6 +182,7 @@ export function buildChangeReport(input) {
     weights,
     changeBudget,
   } = input;
+  const partition = input.partition ?? null;
 
   const movedById = new Map(moved.map((change) => [change.gameId, change]));
   const requestedIds = new Set(changes.map((change) => change.gameId));
@@ -428,6 +430,16 @@ export function buildChangeReport(input) {
     blockingConstraintIds,
   };
 
+  // Did the budget *stop* something, rather than merely not being reached?
+  // `RESOLVE_CHANGE_BUDGET_BOUND` is emitted by the placing stages at the
+  // moment they refuse a move, so its presence is the fact; counting refusals
+  // here from the run's own meta would be a second opinion about the same
+  // event. `RESOLVE_CHANGE_BUDGET_MET` at `info` would read as an all-clear
+  // over a repair that stopped early, so the two are mutually exclusive.
+  const budgetBoundTheRepair = state.ledger.findings.some(
+    (finding) => finding.code === RESOLVE_REASON.RESOLVE_CHANGE_BUDGET_BOUND
+  );
+
   if (changeBudget !== null) {
     if (!withinBudget) {
       findings.push(
@@ -445,7 +457,7 @@ export function buildChangeReport(input) {
           }
         )
       );
-    } else {
+    } else if (!budgetBoundTheRepair) {
       findings.push(
         makeResolveFinding(
           RESOLVE_REASON.RESOLVE_CHANGE_BUDGET_MET,
@@ -459,6 +471,39 @@ export function buildChangeReport(input) {
         )
       );
     }
+  }
+
+  /* -- published-time hold -------------------------------------------------- */
+
+  /** @type {import('./types.js').PublishedHold|null} */
+  let hold = null;
+  if (partition !== null) {
+    hold = {
+      baselineGames: partition.counts.baselineGames,
+      kickoffHeld: partition.counts.publishedKickoffHeld,
+      slotHeld: partition.counts.publishedSlotHeld,
+      kickoffChanged: partition.counts.baselineGames - partition.counts.publishedKickoffHeld,
+      moved: partition.counts.moved,
+      unplaced: partition.counts.unplaced,
+      // Whether the run was in a position to hold anything at all. A run over
+      // a schedule it moved nothing in holds every kickoff trivially, and an
+      // operator comparing two runs needs to know which kind they are reading.
+      measuredOver: partition.counts.baselineGames,
+    };
+    findings.push(
+      makeResolveFinding(
+        RESOLVE_REASON.RESOLVE_PUBLISHED_HOLD_MEASURED,
+        `${hold.kickoffHeld} of ${hold.baselineGames} published kickoff(s) held, ${hold.slotHeld} of them on their published ground; ${hold.moved} game(s) moved and ${hold.unplaced} have no time at all`,
+        {
+          baselineGames: hold.baselineGames,
+          kickoffHeld: hold.kickoffHeld,
+          slotHeld: hold.slotHeld,
+          kickoffChanged: hold.kickoffChanged,
+          moved: hold.moved,
+          unplaced: hold.unplaced,
+        }
+      )
+    );
   }
 
   const explained = consequential.filter((entry) => entry.causeKind !== null).length;
@@ -492,6 +537,7 @@ export function buildChangeReport(input) {
       deltaIncludesQuality: measured,
     },
     budget,
+    hold,
     unplaced: input.unplaced.map((entry) => ({ ...entry })),
     meta: {
       movedGames: moved.length,

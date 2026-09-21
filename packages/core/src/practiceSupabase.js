@@ -209,7 +209,11 @@ export function expandSupabasePracticeSlots({ rows, seasonPhases }) {
  * @param {Array<{ teamId: string, slotId: string, source?: string }>} params.assignments
  * @param {Array<Object>} params.slots - Slot definitions that include `effectiveFrom` and `effectiveUntil`.
  * @param {string} [params.runId] - Optional scheduler run identifier to persist alongside assignments.
- * @returns {Array<Object>} Supabase row payloads with snake_case keys.
+ * @returns {Array<Object>} Row payloads keyed `team_id`, `practice_slot_id`,
+ *   `effective_date_range`, `source` and `run_id` — the first four are what
+ *   `persist_practice_schedule` declares in its `jsonb_to_recordset`, and
+ *   `run_id` is the `practice_assignments` column the direct-insert path
+ *   below writes. Nothing else may be added without a receiver.
  */
 export function buildPracticeAssignmentRows(
   { assignments, slots, runId } = { assignments: [], slots: [] }
@@ -238,11 +242,10 @@ export function buildPracticeAssignmentRows(
       throw new Error(`duplicate slot id detected: "${slot.id}" at slots[${index}]`);
     }
 
-    slotById.set(slot.id, {
-      ...slot,
-      baseSlotId: slot.baseSlotId ?? slot.id,
-      seasonPhaseId: slot.seasonPhaseId ?? null,
-    });
+    // `baseSlotId`/`seasonPhaseId` were defaulted here for the two row keys
+    // removed below. With nothing reading them, defaulting them would be the
+    // same unread-field habit one step earlier, so they go with the keys.
+    slotById.set(slot.id, { ...slot });
   });
 
   const normalizeSource = (value, index) => {
@@ -273,13 +276,22 @@ export function buildPracticeAssignmentRows(
 
     const normalizedSource = normalizeSource(assignment.source, index);
 
+    // Every key here must be received by something. `base_slot_id`,
+    // `season_phase_id`, `effective_from` and `effective_until` were not:
+    // `persist_practice_schedule` declares only `team_id`,
+    // `practice_slot_id`, `slot_id`, `effective_date_range` and `source` in
+    // its `jsonb_to_recordset`, which drops every key it does not name, and
+    // the `practice_assignments` table that `persistPracticeAssignments`
+    // inserts into directly has no such columns at all.
+    // `effective_from`/`effective_until` were the misleading pair: they read
+    // as an alternative the RPC might accept instead of
+    // `effective_date_range`, which is composed from those same two values
+    // and is the only form anything reads.
+    // `tests/practiceSupabase.test.js` now checks this key set against the
+    // recordset parsed out of the migration, so the two cannot drift again.
     return {
       team_id: assignment.teamId,
       practice_slot_id: slot.id,
-      base_slot_id: slot.baseSlotId,
-      season_phase_id: slot.seasonPhaseId,
-      effective_from: slot.effectiveFrom,
-      effective_until: slot.effectiveUntil,
       effective_date_range: `[${slot.effectiveFrom},${slot.effectiveUntil}]`,
       source: normalizedSource,
       run_id: runId ?? null,

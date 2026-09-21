@@ -5108,3 +5108,108 @@ Here the diverging arm is in another module with another contract, the fix
 touches the readiness panel and `seed.sql`, and the contradiction is **not
 reachable** — precisely because the fixed arm has no production caller. A twin
 arm is blocking when both arms can fire. This one cannot, yet.
+
+## 8.6 PR 1 — the operator could not be pointed at the event it exists for
+
+**2026-09-21.** Merged as `89325f6` from PR #423, green run `35566763349`
+(Build & Test 699s). Games side only; the plan's acceptance criterion is
+written about practice slots and is assigned to PR 3. The substance is in the
+PR and in `resolve/`'s own headers. What belongs here is the finding that
+reframed the task, three design errors I approved, and one thing about the
+plan gate.
+
+### The finding: proven by execution, not argued
+
+`resolve/` could not express a lost field. Withdrawing one venue's permit for
+one date takes the rule engine from **62 to 74** violations, and the ordinary
+change request over those same engines reports `moved: 2, unplaced: 0` with
+**not one finding naming the closure**. Twelve games standing on ground with no
+permit, silently. `baseline-ingest` records each game's blocking codes from its
+own baseline slot using the same engines, so the closure is filed as
+already-carried, and `local-search` then skips every one at
+`newBlockingCodes(...).length === 0`.
+
+It is not a defect. It is the deliberate policy `objective.js` argues at
+length — a change request is not asked to repair the schedule it was handed,
+and may not charge a family a new kickoff for doing so. It is a **missing
+input**, and the second data point settles it: a request moving games off a
+"lost" field re-homed them **back onto the field that was lost**, because
+nothing told the operator the ground was gone.
+
+So 8.6's acceptance criterion was **unreachable**, not merely hard, and the
+prompt's three points were refinements to an operator that could not be aimed
+at the event it exists for. Everything else in the task followed from that.
+
+### Three things I approved that were wrong, all caught by building them
+
+The plan gate worked for scope and direction and **did not work for design
+detail**, which is worth stating because I have been treating approval as
+though it settled things.
+
+- **I approved "a dislodge is not charged against the budget."** It is: a
+  dislodged game has no slot, so `diffAgainstBaseline()` counts it as moved.
+  Found by sweeping budgets to zero and watching a consequential move survive a
+  cap of 0.
+- **I approved a TIME TBD discriminator** splitting "nowhere legal" from
+  "budget exhausted". It cannot exist: `placePending()` only ever sees pending
+  games, a pending game is already counted among `moved`, and the gate returns
+  true before any arithmetic. One of three values reachable. The whole
+  vocabulary was deleted rather than shipped as a promise the code does not
+  keep — and falsified: 679 games lifted with `changeBudget: 1` refuses **zero**
+  moves through that stage.
+- **I approved a design whose first implementation destroyed 21 published
+  kickoffs.** Emptying the record `dislodge` reads as well as the placer's made
+  `dislodge` lift every scoped game and `initial-assignment` shelve them all as
+  TIME TBD — at a shut venue with nowhere to put them. Two accessors now
+  separate *"is this clash new?"* from *"is this a position we answer for?"*.
+
+**What this says about the gate.** Approving a plan is weaker evidence than
+building one, and a supervisor who reads a design cannot test it. The gate is
+still right — it caught the scope question, and the three-PR split it produced
+is the reason the season fixture stays attributable — but it should be
+understood as settling *what to build and how much*, not *whether the design
+holds*. Three of the design points I signed off on did not survive contact, and
+all three failures were visible only from inside the code.
+
+### The measurement worth keeping
+
+`chooseSlot()` under default weights does not merely behave like first-fit:
+across **1361 invocations it never scored a second candidate at all**, mean
+scan depth **1.09 of 18.19** available. The cause is the
+`compromiseViolation:driftMinute = 100:1` ratio, so the search widens only when
+the anchor is excluded or rejected, and the window is then the first admitted
+candidate's quality cost — about 100 minutes of drift per compromise. Left
+untouched: it is policy, CLAUDE.md says global re-optimisation only when
+requested by name, and changing it moves the season fixture.
+
+### A check that could not fail, found before it was written down
+
+The obvious test of the short-circuits is to run with the breaks disabled and
+compare. Identical over 1361 calls — and **still identical with the zero-clamp
+deliberately removed**, so quality terms could go negative and the break
+*could* prune a better candidate. On this corpus the anchor is admitted first
+in essentially every call and nothing later is ever reachable, so that
+comparison cannot be made to fail. It is incident 4's shape, and writing it
+down would have been worse than writing nothing because it would have looked
+like coverage. The two preconditions are tested instead, each where it can
+fail, and the docblock says why the obvious test is absent.
+
+The same discipline caught a live one: the first `pair-repair` test stayed
+green against the unfixed code because it thawed both halves of the clash,
+`local-search` re-homed the scoped game, and the stage under test was never
+reached. Rebuilt with stage-counter meta-assertions proving the stage is
+entered.
+
+### Two operators for one event, said out loud
+
+`scenario/relocation.js:358 proposeRelocations()` already does venue-withdrawal
+repair — replacement surfaces, drift minutes, TIME TBD, capacity — under two
+named policies with **its own comparator** at `:226`. That is a fourth fitness
+function in exactly the sense `objective.js` opens by warning about, and
+`chooseSlot()` **cannot cross venues** by construction, which is probably why
+it exists separately.
+
+PR 1 does not reconcile them and says so in its own body, because a reader who
+finds two venue-withdrawal repair paths and no sentence about why must conclude
+nobody noticed. It adds no new comparator and no new placement path, so it does
+not become a third thing. Reconciliation is filed.

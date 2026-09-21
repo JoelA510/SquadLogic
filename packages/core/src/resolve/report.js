@@ -485,10 +485,6 @@ export function buildChangeReport(input) {
       kickoffChanged: partition.counts.baselineGames - partition.counts.publishedKickoffHeld,
       moved: partition.counts.moved,
       unplaced: partition.counts.unplaced,
-      // Whether the run was in a position to hold anything at all. A run over
-      // a schedule it moved nothing in holds every kickoff trivially, and an
-      // operator comparing two runs needs to know which kind they are reading.
-      measuredOver: partition.counts.baselineGames,
     };
     findings.push(
       makeResolveFinding(

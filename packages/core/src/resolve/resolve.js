@@ -412,6 +412,38 @@ function runResolve(input) {
   // be absent from the set that would have named it.
   if (repairScopeIds.length > 0) {
     ledger.meta.repairScopeGames = repairScopeIds.length;
+
+    // **A scoped game the plan freezes is a repair nobody can make, and it has
+    // to say so here.** The scope does not thaw anything — the freeze is the
+    // only authority on what may move — and `applyChangeRequest()` defaults to
+    // maximum freeze, which holds every game the change request does not name.
+    // A repair scope is *for* games the request does not name, so the default
+    // path freezes the whole scope. `local-search` then turns back at its
+    // `mayMove()` guard, before the branch that reports an unrepairable game,
+    // and the run comes back with `repairsUnavailable: 0` and a scope report
+    // reading "21 of them carried 25 baseline finding(s) that this run
+    // therefore has to answer for" — byte for byte the report of a run that
+    // answered every one of them. The generic `FREEZE_MOVE_REFUSED` findings
+    // are no help: every frozen consideration in the run produces those.
+    const frozenInScope = repairScopeIds.filter(
+      (gameId) => dispositions[gameId] === FREEZE_DISPOSITION.FROZEN
+    );
+    for (const gameId of frozenInScope) {
+      ledger.meta.repairsUnavailable += 1;
+      const judgement = judgements.byGameId[gameId];
+      ledger.findings.push(
+        makeResolveFinding(
+          RESOLVE_REASON.RESOLVE_REPAIR_UNAVAILABLE,
+          `game "${gameId}" is in the repair scope and the plan freezes it${judgement?.decidedByRuleId ? ` (rule "${judgement.decidedByRuleId}")` : ' by default'}; no repair was attempted, because the scope says what to repair and the freeze says what may move. Thaw it by name if it is meant to move`,
+          {
+            gameId,
+            reason: 'frozen',
+            ruleId: judgement?.decidedByRuleId ?? null,
+          }
+        )
+      );
+    }
+
     const exercised = repairScopeIds.filter(
       (gameId) => (context.repairScopeExercised[gameId] ?? 0) > 0
     );
@@ -423,19 +455,25 @@ function runResolve(input) {
       ledger.findings.push(
         makeResolveFinding(
           RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_VACUOUS,
-          `the repair scope names ${repairScopeIds.length} game(s) and not one of them carries a baseline finding, so un-accepting them discarded nothing and this run repaired nothing it would not have repaired anyway. A bounded repair reported over an undisturbed schedule is incident 4 one layer up`,
-          { scopeGames: repairScopeIds.length, exercised: 0, findingsDiscarded: 0 }
+          `the repair scope names ${repairScopeIds.length} game(s) and not one of them carries a baseline blocking finding, so un-accepting them discarded nothing every stage downstream does not re-accept and this run repaired nothing it would not have repaired anyway. A bounded repair reported over an undisturbed schedule is incident 4 one layer up`,
+          {
+            scopeGames: repairScopeIds.length,
+            exercised: 0,
+            findingsDiscarded: 0,
+            frozen: frozenInScope.length,
+          }
         )
       );
     } else {
       ledger.findings.push(
         makeResolveFinding(
           RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_DECLARED,
-          `${repairScopeIds.length} game(s) are in the repair scope: their baseline positions are not accepted as given, and ${exercised.length} of them carried ${discarded} baseline finding(s) that this run therefore has to answer for rather than inherit`,
+          `${repairScopeIds.length} game(s) are in the repair scope: their baseline positions are not accepted as given, and ${exercised.length} of them carried ${discarded} baseline blocking finding(s) that this run therefore has to answer for rather than inherit${frozenInScope.length === 0 ? '' : `. ${frozenInScope.length} of them are frozen and no repair was attempted for those`}`,
           {
             scopeGames: repairScopeIds.length,
             exercised: exercised.length,
             findingsDiscarded: discarded,
+            frozen: frozenInScope.length,
           }
         )
       );

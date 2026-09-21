@@ -257,6 +257,13 @@
  * a game the pipeline dropped lands in `unplaced` rather than quietly leaving
  * the denominator.
  *
+ * There is no separate "measured over" field. One was written and removed in
+ * the same PR: it was assigned `baselineGames` unconditionally, so the two
+ * could never differ and it distinguished nothing while its comment claimed it
+ * told a reader which kind of run they were looking at. `baselineGames` **is**
+ * the denominator, and the vacuous case — a hold measured over nothing — is a
+ * blocking finding rather than a field nobody checks.
+ *
  * @typedef {Object} PublishedHold
  * @property {number} baselineGames
  * @property {number} kickoffHeld
@@ -264,7 +271,6 @@
  * @property {number} kickoffChanged
  * @property {number} moved
  * @property {number} unplaced
- * @property {number} measuredOver - the denominator, stated rather than implied
  */
 
 /**

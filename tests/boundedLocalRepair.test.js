@@ -59,8 +59,10 @@ import {
   buildSlotInventory,
   candidateObjectiveCounts,
   candidateSlotsFor,
+  checkPlacement,
   createResolveLedger,
   createResolveState,
+  reoptimiseWholeSeason,
   resolveObjectiveWeights,
   scoreObjective,
 } from '@squadlogic/core/resolve/index.js';
@@ -380,6 +382,250 @@ function cleanGames() {
   return clean.slice(0, 5);
 }
 
+describe('the scope measures its own exercise with the ruler the stages use', () => {
+  /**
+   * A game carrying **compromise** findings at its baseline slot and no
+   * blocking one. Found rather than named; the corpus's 62 accepted exceptions
+   * are mostly of this kind.
+   */
+  const COMPROMISE_ONLY = (() => {
+    const state = createResolveState({
+      games: schedule.games.map((game) => ({ ...game })),
+      dispositions: Object.fromEntries(
+        schedule.games.map((game) => [game.id, FREEZE_DISPOSITION.THAWED])
+      ),
+      inventory: buildSlotInventory(schedule.games),
+      ledger: createResolveLedger(),
+    });
+    for (const game of schedule.games) {
+      const placement = checkPlacement(openEngines, state, game.id, {
+        date: game.date,
+        surfaceId: game.surfaceId,
+        startMinutes: game.startMinutes,
+      });
+      const blocking = Object.keys(placement.blockingCodeCounts).length;
+      const compromises = placement.findings.filter(
+        (finding) => finding.severity === CONSTRAINT_SEVERITY.COMPROMISE
+      ).length;
+      if (blocking === 0 && compromises > 0) return game;
+    }
+    return null;
+  })();
+
+  it('found a game that carries compromises and nothing blocking', () => {
+    // The meta-assertion: without such a game the test below is vacuous, and
+    // a corpus that stops carrying one should say so rather than pass.
+    expect(COMPROMISE_ONLY).not.toBeNull();
+  });
+
+  it('calls a scope over compromise-only games vacuous, because every stage will hold them', () => {
+    // **A review finding, kept as a test.** The exercise counter first summed
+    // `placementFindingCounts()`, which counts blocking **and** compromise,
+    // while every stage that can act on the scope gates on
+    // `newBlockingCodes()`, which reads blocking alone. A scope over games
+    // like this one therefore reported `exercised > 0`, suppressed the
+    // blocking vacuity finding, and claimed the run "has to answer for" a set
+    // of findings that `local-search`'s `.length === 0` guard holds every one
+    // of — the exact vacuity the code exists to catch, reported as its
+    // opposite.
+    const game = /** @type {any} */ (COMPROMISE_ONLY);
+    const run = applyChangeRequest({
+      schedule,
+      changes: NO_OP_CHANGE,
+      engines: openEngines,
+      repairScope: [game.id],
+      freeze: freezeAllExcept([game.id, NO_OP_CHANGE[0].gameId].map((gameId) => ({ gameId }))),
+      verify: false,
+      onUnsatisfiable: 'report',
+    });
+    const vacuous = run.findings.find(
+      (finding) => finding.code === RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_VACUOUS
+    );
+    expect(vacuous?.severity).toBe('blocking');
+    expect(vacuous?.details.findingsDiscarded).toBe(0);
+    // …and it really did nothing, which is what makes "vacuous" the honest word.
+    expect(run.report.meta.movedGames).toBe(0);
+  });
+});
+
+describe('a repair scope the freeze holds says so, rather than reading as answered', () => {
+  // **A review finding, and the path an operator hits first.** Every other
+  // scoped test in this file passes an explicit thawing plan.
+  // `applyChangeRequest()` defaults to maximum freeze — every game held but the
+  // ones the request names — and a repair scope is *for* games the request does
+  // not name, so the default freezes the entire scope. `local-search` turns
+  // back at its `mayMove()` guard, which sits before the branch that reports an
+  // unrepairable game, and the run used to come back with
+  // `repairsUnavailable: 0` and a scope report indistinguishable from one that
+  // answered everything.
+  const run = applyChangeRequest({
+    schedule,
+    changes: NO_OP_CHANGE,
+    engines: closedEngines,
+    repairScope: STRANDED,
+    verify: false,
+    onUnsatisfiable: 'report',
+  });
+
+  it('names every scoped game the plan holds, and counts it as an unmade repair', () => {
+    const held = run.findings.filter(
+      (finding) =>
+        finding.code === RESOLVE_REASON.RESOLVE_REPAIR_UNAVAILABLE &&
+        finding.details.reason === 'frozen'
+    );
+    expect(held).toHaveLength(STRANDED.length);
+    expect(new Set(held.map((finding) => String(finding.details.gameId)))).toEqual(
+      new Set(STRANDED)
+    );
+    expect(run.meta.repairsUnavailable).toBe(STRANDED.length);
+    expect(run.status).not.toBe('allowed');
+  });
+
+  it('says on the scope report itself how many of them were never attempted', () => {
+    const declared = run.findings.find(
+      (finding) => finding.code === RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_DECLARED
+    );
+    expect(declared?.details.frozen).toBe(STRANDED.length);
+    expect(String(declared?.message)).toContain('no repair was attempted');
+  });
+
+  it('is a different report from the same scope thawed, which is the whole point', () => {
+    // Without this the assertions above could pass against a run that reports
+    // "frozen" for everything regardless. The thawed run of the same scope
+    // over the same closed venue reports the same games as unrepairable for a
+    // different reason, and does not report them as frozen.
+    const thawedRun = applyChangeRequest({
+      schedule,
+      changes: NO_OP_CHANGE,
+      engines: closedEngines,
+      repairScope: STRANDED,
+      freeze: freezeAllExcept([...STRANDED, NO_OP_CHANGE[0].gameId].map((gameId) => ({ gameId }))),
+      verify: false,
+      onUnsatisfiable: 'report',
+    });
+    const reasons = new Set(
+      thawedRun.findings
+        .filter((finding) => finding.code === RESOLVE_REASON.RESOLVE_REPAIR_UNAVAILABLE)
+        .map((finding) => finding.details.reason ?? 'no-legal-slot')
+    );
+    expect(reasons.has('frozen')).toBe(false);
+    expect(thawedRun.meta.repairsUnavailable).toBeGreaterThan(0);
+  });
+});
+
+describe("a repair scope does not license spending an unscoped game's kickoff", () => {
+  /**
+   * A baseline double-booking between a scoped game and an unscoped one.
+   *
+   * Constructed, because the published corpus has no overlap for
+   * `pair-repair` to find. One game is moved onto another's slot **in the
+   * baseline**, so the clash is something the schedule arrived carrying rather
+   * than something the run created — which is the whole point: the scope asks
+   * about a pre-existing breach, and `pair-repair` moves somebody *else*.
+   */
+  const PAIR = (() => {
+    const wave = schedule.games
+      .filter((game) => game.date === WITHDRAWN.date && game.venueId === WITHDRAWN.venueId)
+      .sort((a, b) => a.startMinutes - b.startMinutes || a.id.localeCompare(b.id));
+    const kickoff = wave[0].startMinutes;
+    const atKickoff = wave.filter((game) => game.startMinutes === kickoff);
+    const host = atKickoff[0];
+    const guest = atKickoff.find(
+      (game) => game.format === host.format && game.surfaceId !== host.surfaceId
+    );
+    if (!guest) throw new Error('the corpus no longer offers two same-format games on one wave');
+    return {
+      host,
+      guest,
+      schedule: {
+        ...schedule,
+        games: schedule.games.map((game) =>
+          game.id === guest.id
+            ? {
+                ...game,
+                surfaceId: host.surfaceId,
+                startMinutes: host.startMinutes,
+                endMinutes: host.startMinutes + (game.endMinutes - game.startMinutes),
+              }
+            : game
+        ),
+      },
+    };
+  })();
+
+  const noOp = [
+    {
+      gameId: PAIR.host.id,
+      date: PAIR.host.date,
+      surfaceId: PAIR.host.surfaceId,
+      startMinutes: PAIR.host.startMinutes,
+      reason: 'a run has to happen',
+    },
+  ];
+  /**
+   * The guest is scoped and **frozen**; the host is thawed, so it is the one
+   * thing `pair-repair` could move.
+   *
+   * The first version of this test thawed both, and it passed with the fix
+   * reverted — `local-search` simply re-homed the guest, the clash went away,
+   * and `pair-repair` was never reached. A test of a stage that the scenario
+   * never runs is the shape incident 4 is about, so the scenario is now built
+   * so that the guest's own repair cannot succeed and the clash survives into
+   * the stage under test. The stage counters below prove it did.
+   */
+  const run = applyChangeRequest({
+    schedule: PAIR.schedule,
+    changes: noOp,
+    engines: openEngines,
+    repairScope: [PAIR.guest.id],
+    freeze: freezeAllExcept([{ gameId: PAIR.host.id }]),
+    verify: false,
+    onUnsatisfiable: 'report',
+  });
+
+  it('really does put the two games on one slot, scope one, and reach pair-repair', () => {
+    // Three meta-assertions, because the test below asserts that something did
+    // *not* happen and would pass just as well over a scenario with no clash,
+    // no scope, or no pair-repair pass.
+    const guest = /** @type {any} */ (
+      PAIR.schedule.games.find((game) => game.id === PAIR.guest.id)
+    );
+    expect(guest.surfaceId).toBe(PAIR.host.surfaceId);
+    expect(guest.startMinutes).toBe(PAIR.host.startMinutes);
+    const declared = run.findings.find(
+      (finding) => finding.code === RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_DECLARED
+    );
+    expect(declared?.details.scopeGames).toBe(1);
+    expect(Number(declared?.details.exercised)).toBe(1);
+    // The scoped game could not be repaired, so the clash is still standing
+    // when `pair-repair` runs — which is the only state in which this stage
+    // can spend the counterpart's kickoff.
+    expect(run.meta.repairsUnavailable).toBe(1);
+    const stages = new Map(run.stages.map((stage) => [stage.stageId, stage]));
+    expect(stages.get('pair-repair')).toBeDefined();
+    // And the host really is the movable half: nothing else could be moved
+    // for the guest's benefit, so a move here would have to be the host's.
+    expect(run.freeze.defaultDisposition).toBe('frozen');
+  });
+
+  it('leaves the unscoped half of the clash exactly where it was published', () => {
+    // **A review finding, kept as a test.** `pair-repair` read the
+    // scope-aware record for the game it was triggered by and then relocated
+    // that game's *counterpart*, which is not in the scope. So a breach the
+    // run neither created nor could fix cost an uninvolved game its published
+    // kickoff — the same "published kickoffs destroyed to repair nothing"
+    // hazard this PR guards against in `dislodge`, left open in the stage next
+    // door. It now reads the as-found record, as `dislodge` does.
+    const placed = new Map(run.schedule.games.map((game) => [game.id, game]));
+    const host = /** @type {any} */ (placed.get(PAIR.host.id));
+    expect(host.surfaceId).toBe(PAIR.host.surfaceId);
+    expect(host.startMinutes).toBe(PAIR.host.startMinutes);
+    // Stated the other way as well, off the partition rather than off the
+    // schedule, so a game the run dropped fails here instead of being absent.
+    expect(run.partition.moved.map((entry) => entry.gameId)).not.toContain(PAIR.host.id);
+  });
+});
+
 describe('the change budget bounds the neighbourhood rather than judging the result', () => {
   /**
    * A clash the corpus does not contain, constructed the way
@@ -558,17 +804,42 @@ describe('the change budget bounds the neighbourhood rather than judging the res
     expect(impossible.meta.movesRefusedByBudget).toBeGreaterThan(0);
   });
 
-  it('never leaves a shelved game without a reason that says which refusal it was', () => {
+  it('never leaves a shelved game without a reason', () => {
     for (const run of [bounded, repair(0)]) {
       for (const entry of run.unplaced) {
-        expect(entry.reason).toMatch(/change budget|no slot the schedule already used/);
-      }
-      for (const finding of run.findings.filter(
-        (candidate) => candidate.code === RESOLVE_REASON.RESOLVE_GAME_TIME_TBD
-      )) {
-        expect(['no-legal-slot', 'change-budget', 'frozen']).toContain(finding.details.refusal);
+        expect(entry.reason).toMatch(/no slot the schedule already used/);
       }
     }
+  });
+
+  it('does not offer a change-budget reason for a shelved game, because it cannot be one', () => {
+    // **A review finding, kept as a test.** A three-valued refusal
+    // discriminator was written here and removed: `initial-assignment` only
+    // ever places games that are already pending, a pending game is already
+    // counted among `moved` because it has no slot at all, and
+    // `withinChangeBudget()` therefore returns true for every one of them
+    // before it does any arithmetic. Refusing such a placement would turn a
+    // game with a new time into a game with **no** time at identical cost to
+    // the cap, which is worse for the family and no help to the budget.
+    //
+    // The falsification, so this is not a claim about the code as written:
+    // every thawed game in the season is lifted at once and the cap is set to
+    // one. If a budget gate existed in that stage it would fire hundreds of
+    // times.
+    const lifted = reoptimiseWholeSeason({
+      schedule,
+      changes: NO_OP_CHANGE,
+      engines: openEngines,
+      reason: 'proving the budget cannot bound initial-assignment',
+      acknowledged: true,
+      changeBudget: 1,
+      verify: false,
+      onUnsatisfiable: 'report',
+    });
+    // The meta-assertion: this run really did lift the whole season, so a zero
+    // below means "could not fire" rather than "was never asked".
+    expect(lifted.meta.gamesDislodged).toBeGreaterThan(100);
+    expect(lifted.meta.movesRefusedByBudget).toBe(0);
   });
 });
 
@@ -588,8 +859,9 @@ describe('published-time hold, counted from the baseline roster', () => {
     expect(hold.baselineGames).toBe(schedule.games.length);
     expect(hold.kickoffHeld + hold.kickoffChanged).toBe(hold.baselineGames);
     expect(run.partition.held.length + run.partition.moved.length).toBe(hold.baselineGames);
-    // A hold measured over nothing is not a perfect hold.
-    expect(hold.measuredOver).toBeGreaterThan(0);
+    // A hold measured over nothing is not a perfect hold; that is the blocking
+    // partition finding's job, not a field beside the number.
+    expect(hold.baselineGames).toBeGreaterThan(0);
   });
 
   it('reports the number, at info, with the same figures the meta carries', () => {

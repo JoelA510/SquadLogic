@@ -358,9 +358,10 @@ function anchorOf(state, context, gameId) {
  *
  * ## What this does not bound, and why the backstop stays
  *
- * This gate sits in front of the three **placing** stages. It is deliberately
- * not in front of `change-request-apply` or `dislodge`, and neither omission
- * is an oversight:
+ * This gate sits in front of the two stages that **relocate a game that
+ * already has a slot** — `local-search` and `pair-repair`. It is deliberately
+ * not in front of `change-request-apply`, `dislodge`, or `initial-assignment`,
+ * and none of the three omissions is an oversight:
  *
  * - A **requested** move is the operator's instruction, not the solver's
  *   choice. Refusing part of a change request under a cap would be answering a
@@ -368,6 +369,10 @@ function anchorOf(state, context, gameId) {
  * - A **dislodge** is forced: the game's slot has just been made illegal by a
  *   move that already happened, and the alternative to lifting it is leaving
  *   two games on one pitch.
+ * - `initial-assignment` only ever places games that are already pending, and
+ *   a pending game has no slot at all, so it is already counted among `moved`.
+ *   The gate cannot fire there and a version that tried was removed; see
+ *   {@link placePending} for the measurement.
  *
  * So a request whose own moves plus the dislodges they force already exceed
  * the cap cannot be bounded by anything here, and falls through to
@@ -404,8 +409,8 @@ function withinChangeBudget(state, context, gameId, to) {
  * Refuse a move the budget cannot pay for, and say so.
  *
  * Separate from {@link withinChangeBudget} because a refusal that is not
- * counted and not named is a silent drop, and the three placing stages each
- * need the same sentence. `RESOLVE_CHANGE_BUDGET_BOUND` is `compromise`
+ * counted and not named is a silent drop, and both relocating stages need the
+ * same sentence. `RESOLVE_CHANGE_BUDGET_BOUND` is `compromise`
  * deliberately: it is what stops the run's status coming back clean when the
  * repair stopped early, which `RESOLVE_CHANGE_BUDGET_MET` at `info` would not.
  *

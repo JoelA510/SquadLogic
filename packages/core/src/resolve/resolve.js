@@ -421,10 +421,10 @@ function runResolve(input) {
     // path freezes the whole scope. `local-search` then turns back at its
     // `mayMove()` guard, before the branch that reports an unrepairable game,
     // and the run comes back with `repairsUnavailable: 0` and a scope report
-    // reading "21 of them carried 25 baseline finding(s) that this run
-    // therefore has to answer for" — byte for byte the report of a run that
-    // answered every one of them. The generic `FREEZE_MOVE_REFUSED` findings
-    // are no help: every frozen consideration in the run produces those.
+    // saying that every one of them carried findings "this run therefore has
+    // to answer for" — byte for byte the report of a run that answered them.
+    // The generic `FREEZE_MOVE_REFUSED` findings are no help: every frozen
+    // consideration in the run produces those.
     const frozenInScope = repairScopeIds.filter(
       (gameId) => dispositions[gameId] === FREEZE_DISPOSITION.FROZEN
     );

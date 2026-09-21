@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 521 codes, of
- * which 509 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 522 codes, of
+ * which 510 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -6047,6 +6047,15 @@ harvest(
 
 // AS_OF_UNJUDGED — a state asked for with no date to apply.
 harvest('stateAsOf(no as-of date)', stateAsOf(changeLogWithConflict, { subjectId: 'CL-A v CL-B' }));
+
+// AS_OF_PRECEDES_LOG — the subject IS in the log and every entry postdates the
+// date asked about. Distinct from HISTORY_EMPTY, which is the subject the log
+// never names; the two were once the same answer, on the field the module
+// header nominates to keep them apart.
+harvest(
+  'stateAsOf(a date before the subject’s first entry)',
+  stateAsOf(changeLogWithConflict, { subjectId: 'CL-A v CL-B', asOf: '2026-01-01' })
+);
 
 // PARTITION_UNSOUND cannot be produced by handing `buildChangeLog()` input:
 // it counts its own buckets as it fills them, so making it disagree would mean

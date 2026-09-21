@@ -142,8 +142,14 @@
  * The answer to "what was this subject's state on `asOf`".
  *
  * `state` is null when the log says nothing about the subject on or before
- * that date — which is *not* the same as the subject having had no slot, and
- * `logged` is the field that keeps the two apart.
+ * that date — which is *not* the same as the subject having had no slot.
+ *
+ * `logged` answers *"does this log carry any entry for this subject at all"*,
+ * and it means that with or without an `asOf`. It is deliberately **not**
+ * "was a state selected", which `state !== null` already says: the two were
+ * once the same field and a subject queried before its first entry was
+ * indistinguishable from one the log had never mentioned. See
+ * `history.js`'s header for the three-row table this keeps apart.
  *
  * @typedef {Object} ChangeStateAsOf
  * @property {string} subjectId

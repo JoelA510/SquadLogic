@@ -315,10 +315,23 @@ are dropped. `permit_id` is a positional label (`PERMIT-01`…), not the real on
   `16BSuperRec02`**, and it is different in three ways worth stating: it is
   shaped exactly like a roster team code, it is the **home** side, and it plays
   four fixtures (09/19, 09/26, 10/17, 11/07) — all of them `Regional League
-  Select fixture` additions. No team in the 132-team roster answers to it and no
-  roster id contains `SuperRec`. Whether the roster is short a team or the label
-  is a variant spelling is not something the corpus settles, so it is kept as it
-  is and reported rather than reconciled — the same treatment
+  Select fixture` additions. No team in the 132-team roster answers to it.
+
+  **And `SuperRec` is a tier that appears nowhere else in the corpus.** The
+  roster's 132 team codes carry exactly three tier tokens — `Junior` (64
+  assignments), `Micro` (52) and `Select` (22, over 14 distinct teams) — and
+  `SuperRec` is none of them. The only `16B` codes anywhere under
+  `fixtures/season-2026/` are `16BSelect01`, `16BSelect02` and this one, so it
+  is **not** a gap in a numbered sequence: there is no `16BSuperRec01` or `03`
+  for it to be missing a sibling of, and it is not a variant spelling of an
+  existing code either.
+
+  That is what makes it worth recording rather than shrugging at, and it cuts
+  both ways. An opposing club adopting this corpus's own
+  `<age><gender><Tier><nn>` convention exactly would be odd; so would a
+  rostered team whose tier name exists nowhere else in the club's own sheets.
+  Both readings are live and the data does not choose between them, so it is
+  kept as it is and reported rather than reconciled — the same treatment
   `../coach_roster_v1.csv` gets for "Nate"/"Nathaniel" and
   `field_code_names.csv` for `Rookery`/`Rookerie`. `tests/changelog.test.js`
   asserts it by name, so a corpus edit that resolves it will fail there and make

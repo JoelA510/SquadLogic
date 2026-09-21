@@ -197,6 +197,19 @@ export const CHANGELOG_REASON = Object.freeze({
 
   /* -- standing ------------------------------------------------------------ */
   /**
+   * Every entry for this subject postdates the as-of date.
+   *
+   * `compromise`. The subject **is** in the log; the log simply has nothing
+   * to say about it yet on that date. Without this the answer is
+   * indistinguishable from a subject the log never mentions — both give no
+   * state — and the two mean opposite things to whoever reads them: one is
+   * "we have a record and it starts later", the other is "we have no record".
+   * `logged` carries the distinction as a field and this carries it as a
+   * finding, because a consumer that reads only `status` sees findings and
+   * not fields.
+   */
+  AS_OF_PRECEDES_LOG: 'AS_OF_PRECEDES_LOG',
+  /**
    * A history or as-of answer was derived from a log that is itself rejected.
    *
    * `compromise`. The answer may be perfectly correct about what the log
@@ -240,6 +253,7 @@ export const CHANGELOG_REASON_SEVERITY = Object.freeze({
   [CHANGELOG_REASON.HISTORY_CONFLICT]: CHANGELOG_SEVERITY.BLOCKING,
   [CHANGELOG_REASON.HISTORY_EMPTY]: CHANGELOG_SEVERITY.COMPROMISE,
   [CHANGELOG_REASON.AS_OF_UNJUDGED]: CHANGELOG_SEVERITY.COMPROMISE,
+  [CHANGELOG_REASON.AS_OF_PRECEDES_LOG]: CHANGELOG_SEVERITY.COMPROMISE,
   [CHANGELOG_REASON.DERIVED_FROM_REJECTED_LOG]: CHANGELOG_SEVERITY.COMPROMISE,
   [CHANGELOG_REASON.LOG_NOT_PERSISTED]: CHANGELOG_SEVERITY.COMPROMISE,
 });

@@ -349,10 +349,51 @@ describe('season-2026 change log — history and as-of', () => {
     expect(after.state?.scheduled).toBe(true);
     expect(typeof after.state?.startMinutes).toBe('number');
 
-    // Before the entry, the log says nothing — which is not "it had no slot".
+    // Before the entry, the log says nothing — which is not "it had no slot",
+    // and not "we have never heard of this subject" either.
     const before = stateAsOf(log, { subjectId, asOf: '2026-09-01' });
-    expect(before.logged).toBe(false);
     expect(before.state).toBeNull();
+    expect(before.logged).toBe(true);
+    expect(codeCounts(before.findings)[CHANGELOG_REASON.AS_OF_PRECEDES_LOG]).toBe(1);
+  });
+
+  it('tells "never logged" apart from "nothing logged yet", through the same call', () => {
+    // Review finding, and the reason it was invisible: the two cases were only
+    // ever exercised through different APIs — this one through `stateAsOf`,
+    // the never-logged one through `buildChangeHistory` — so nothing compared
+    // them. Both go through `stateAsOf` here, and the assertion is that they
+    // DIFFER rather than that either has a particular shape.
+    const known = stateAsOf(log, { subjectId, asOf: '2026-09-01' });
+    const never = stateAsOf(log, { subjectId: 'no such fixture', asOf: '2026-09-01' });
+
+    // Neither can answer with a state — that much they share, and it is why
+    // the old pair of assertions passed in both worlds.
+    expect(known.state).toBeNull();
+    expect(never.state).toBeNull();
+
+    // The documented field separates them.
+    expect(known.logged).toBe(true);
+    expect(never.logged).toBe(false);
+
+    // And so do the findings, for a consumer that reads status rather than
+    // fields.
+    expect(codeCounts(known.findings)[CHANGELOG_REASON.AS_OF_PRECEDES_LOG]).toBe(1);
+    expect(codeCounts(known.findings)[CHANGELOG_REASON.HISTORY_EMPTY]).toBeUndefined();
+    expect(codeCounts(never.findings)[CHANGELOG_REASON.HISTORY_EMPTY]).toBe(1);
+    expect(codeCounts(never.findings)[CHANGELOG_REASON.AS_OF_PRECEDES_LOG]).toBeUndefined();
+  });
+
+  it('reads `logged` the same way with and without an as-of date', () => {
+    // The root cause was two readings of one field in one function: the dated
+    // branch answered "was a state selected" and the undated branch answered
+    // "is this subject in the log". Pinned so they cannot drift apart again.
+    for (const id of [subjectId, 'no such fixture']) {
+      expect(stateAsOf(log, { subjectId: id }).logged).toBe(
+        stateAsOf(log, { subjectId: id, asOf: '2026-12-01' }).logged
+      );
+    }
+    expect(stateAsOf(log, { subjectId }).logged).toBe(true);
+    expect(stateAsOf(log, { subjectId: 'no such fixture' }).logged).toBe(false);
   });
 
   it('refuses to call the last entry current when no as-of date was given', () => {

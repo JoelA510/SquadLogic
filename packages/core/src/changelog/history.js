@@ -35,12 +35,32 @@
  * honest history over a log with one unroutable participant read as though
  * that participant were this subject's problem.
  *
- * ## An unlogged subject is not an unchanged subject
+ * ## An unlogged subject is not an unchanged subject, and `logged` is the
+ * field that says which
  *
  * `logged: false` is a distinct field from `state: null` for the reason
  * `ConsequencePreview.jsx` gives about an empty table: "nothing happened" and
  * "we have not looked" render identically as absence, and only one of them is
  * a claim this package is entitled to make.
+ *
+ * **`logged` answers one question and it is not "was a state selected".** It
+ * is *"does this log carry any entry for this subject at all"*, and it means
+ * that whether or not an `asOf` was given. The three answers a caller must be
+ * able to tell apart are therefore:
+ *
+ * | `logged` | `state` | means |
+ * | --- | --- | --- |
+ * | `false` | `null` | the log has never mentioned this subject |
+ * | `true` | `null` | the log knows it; every entry postdates `asOf` — {@link CHANGELOG_REASON.AS_OF_PRECEDES_LOG} |
+ * | `true` | a state | the most recent logged state at or before `asOf` |
+ *
+ * The first two were once the same answer. `logged` was `latest !== null` in
+ * the dated branch and `phases.length > 0` in the undated one — two readings
+ * of one field inside one function — so a subject queried before its first
+ * entry was indistinguishable from a subject nobody had ever logged, on the
+ * very field this header nominates to keep them apart. The finding is the
+ * second half of the fix, because a consumer that reads `status` sees
+ * findings and not fields.
  *
  * @module changelog/history
  */
@@ -173,6 +193,10 @@ export function stateAsOf(log, { subjectId, asOf = null } = /** @type {any} */ (
   /** @type {import('./types.js').ChangeLogFinding[]} */
   const findings = [...history.findings];
 
+  // One reading of `logged`, shared by both branches below: does the log
+  // carry any entry for this subject at all?
+  const logged = history.phases.length > 0;
+
   if (asOf === null) {
     findings.push(
       makeChangelogFinding(
@@ -186,7 +210,7 @@ export function stateAsOf(log, { subjectId, asOf = null } = /** @type {any} */ (
       asOf: null,
       logStatus: log.status,
       state: null,
-      logged: history.phases.length > 0,
+      logged,
       fromEntryKey: null,
       findings,
       status: deriveChangelogStatus(findings),
@@ -198,12 +222,27 @@ export function stateAsOf(log, { subjectId, asOf = null } = /** @type {any} */ (
   const applicable = history.phases.filter((phase) => phase.date <= asOf);
   const latest = applicable.length === 0 ? null : applicable[applicable.length - 1];
 
+  if (logged && latest === null) {
+    findings.push(
+      makeChangelogFinding(
+        CHANGELOG_REASON.AS_OF_PRECEDES_LOG,
+        `subject "${subjectId}" has ${history.phases.length} logged state(s) and the earliest is ${history.phases[0].date}, all after ${asOf}; the log knows this subject and says nothing about it yet on that date, which is not the same as never having mentioned it`,
+        {
+          subjectId,
+          asOf,
+          phaseCount: history.phases.length,
+          earliestLoggedDate: history.phases[0].date,
+        }
+      )
+    );
+  }
+
   return deepFreeze({
     subjectId,
     asOf,
     logStatus: log.status,
     state: latest === null ? null : latest.after,
-    logged: latest !== null,
+    logged,
     fromEntryKey: latest === null ? null : latest.entryKey,
     findings,
     status: deriveChangelogStatus(findings),

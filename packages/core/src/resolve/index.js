@@ -95,6 +95,7 @@ export {
   applyMove,
   createResolveLedger,
   createResolveState,
+  baselinePartitionFindings,
   diffAgainstBaseline,
   isFrozen,
   isSlotAdmissible,

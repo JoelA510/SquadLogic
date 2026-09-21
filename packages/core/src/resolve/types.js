@@ -162,9 +162,20 @@
  * @property {Record<string, number>} [objectiveWeights] - overrides for
  *   `RESOLVE_OBJECTIVE_WEIGHTS`; an unknown term is refused rather than ignored
  * @property {number|null} [changeBudget] - a hard cap on **moved games**,
- *   requested and consequential together. Exceeding it is
- *   `RESOLVE_CHANGE_BUDGET_EXCEEDED` at blocking and a refusal at
- *   `commitResolve()`, never a silent large diff
+ *   requested and consequential together. Since 8.6 it bounds the
+ *   neighbourhood as well as judging the result: every relocation is checked
+ *   against it before the writer sees it, so a run comes back within the cap
+ *   and partially repaired rather than over it and refused whole. The
+ *   irreducible core — the requested moves and the dislodges they force — is
+ *   not gated and still reaches `RESOLVE_CHANGE_BUDGET_EXCEEDED` at blocking
+ *   and a refusal at `commitResolve()`, which has no override
+ * @property {ReadonlyArray<string>} [repairScope] - games whose current
+ *   position this run repairs rather than accepts. Without it a run accepts
+ *   whatever the schedule arrived carrying, which is right for a change
+ *   request and blind to ground that has been withdrawn since publication.
+ *   Naming a game the schedule does not hold throws. It does **not** thaw
+ *   anything: the freeze is still the only authority on what may move, so a
+ *   scope over frozen games reports rather than acts
  * @property {string} [name]
  * @property {string} [reason] - `reoptimiseWholeSeason()` only, and required there
  * @property {true} [acknowledged] - `reoptimiseWholeSeason()` only, and required there
@@ -231,9 +242,35 @@
  * @property {Object} quality - (c) violations by code and by severity, before and after
  * @property {Object} objective - the weights, the two scores and the delta
  * @property {{ limit: number|null, moved: number, requested: number, consequential: number, withinBudget: boolean, blockingConstraintIds: string[] }} budget
+ * @property {PublishedHold|null} hold - null only when the caller built a report without a partition
  * @property {Array<{ gameId: string, reason: string }>} unplaced
  * @property {Record<string, number|boolean>} meta
  * @property {import('../freeze/types.js').FreezeFinding[]} findings
+ */
+
+/**
+ * Published-time hold, as a number a report can be read for.
+ *
+ * `kickoffHeld` is the family-facing one: the date and time they were told.
+ * `slotHeld` is the subset that also kept its ground — still a notice to send,
+ * but a different one. Both are counted by walking the **baseline** roster, so
+ * a game the pipeline dropped lands in `unplaced` rather than quietly leaving
+ * the denominator.
+ *
+ * There is no separate "measured over" field. One was written and removed in
+ * the same PR: it was assigned `baselineGames` unconditionally, so the two
+ * could never differ and it distinguished nothing while its comment claimed it
+ * told a reader which kind of run they were looking at. `baselineGames` **is**
+ * the denominator, and the vacuous case — a hold measured over nothing — is a
+ * blocking finding rather than a field nobody checks.
+ *
+ * @typedef {Object} PublishedHold
+ * @property {number} baselineGames
+ * @property {number} kickoffHeld
+ * @property {number} slotHeld
+ * @property {number} kickoffChanged
+ * @property {number} moved
+ * @property {number} unplaced
  */
 
 /**
@@ -268,6 +305,7 @@
  * @property {import('../freeze/types.js').FreezeJudgementSet} judgements
  * @property {ResolveState} state
  * @property {ScheduleChange[]} moved - by game, never a bare count
+ * @property {BaselinePartition} partition - moved, held and unplaced, from one walk of the roster
  * @property {Array<{ gameId: string, reason: string }>} unplaced
  * @property {MoveRecord[]} moves
  * @property {StageResult[]} stages
@@ -317,6 +355,49 @@
  * @property {number} movedRequested
  * @property {number} movedConsequential
  * @property {number} movedConsequentialExplained - of which named what forced them
+ * @property {number} repairScopeGames - games the run was asked to repair rather than accept
+ * @property {number} repairsUnavailable - of those, ones with nothing legal to offer
+ * @property {number} movesRefusedByBudget - moves the change budget refused before the writer
+ * @property {number} publishedKickoffHeld - baseline games standing at their published kickoff
+ * @property {number} publishedSlotHeld - of those, ones also on their published ground
+ */
+
+/**
+ * One game standing exactly where the baseline put it.
+ *
+ * No `changedFields` and no `before`/`after` pair, because there is no change
+ * to describe: a hold is one game and one slot. Shaped deliberately unlike
+ * {@link ScheduleChange} so the two cannot be handed to the same reader by
+ * mistake.
+ *
+ * @typedef {Object} BaselineHold
+ * @property {string} gameId
+ * @property {string} label
+ * @property {string} disposition
+ * @property {Slot} slot
+ */
+
+/**
+ * What `diffAgainstBaseline()` returns: the whole partition of the baseline
+ * roster, not only the half of it that changed.
+ *
+ * `unplaced` is a **view** of the entries in `moved` whose `after` is null, not
+ * a bucket subtracted from it; see that function's docblock for why the
+ * unplaced keep counting as moved.
+ *
+ * @typedef {Object} BaselinePartitionCounts
+ * @property {number} baselineGames
+ * @property {number} held
+ * @property {number} moved
+ * @property {number} unplaced
+ * @property {number} publishedKickoffHeld - same date and kickoff, any ground
+ * @property {number} publishedSlotHeld - same date, kickoff and ground
+ *
+ * @typedef {Object} BaselinePartition
+ * @property {ScheduleChange[]} moved
+ * @property {BaselineHold[]} held
+ * @property {ScheduleChange[]} unplaced
+ * @property {BaselinePartitionCounts} counts
  */
 
 export {};

@@ -57,7 +57,15 @@ import {
 } from './objective.js';
 import { RESOLVE_REASON, makeResolveFinding } from './reasonCodes.js';
 import { ResolveStageSchema, STAGE_PROBE } from './schemas.js';
-import { MOVE_KIND, applyMove, isFrozen, mayMove, slotKey, slotOf } from './state.js';
+import {
+  MOVE_KIND,
+  applyMove,
+  diffAgainstBaseline,
+  isFrozen,
+  mayMove,
+  slotKey,
+  slotOf,
+} from './state.js';
 
 /**
  * Why a game had to move, in the words of the machinery that decided it.
@@ -96,6 +104,55 @@ function constraintCause(context, placement, codes, counterpartGameIds) {
     bindingKinds: Object.freeze([...(availability.bindingKinds ?? [])]),
     slackMinutes: binding === null ? null : (binding.slackMinutes ?? null),
   });
+}
+
+/**
+ * What this run **accepts** at a game's baseline slot, as blocking code counts.
+ *
+ * Two questions wear the same numbers and they are not the same question:
+ *
+ * | question | asked by | reads |
+ * |---|---|---|
+ * | *is this clash new?* | `dislodge` | `context.baselineBlockingCodes` — what the schedule arrived carrying, always |
+ * | *is this game's position one we answer for?* | `local-search`, `pair-repair`, the placer | this, which is empty for a game in the repair scope |
+ *
+ * Keeping `dislodge` on the as-found record is what stops a repair scope
+ * costing a family their time for nothing. Emptying the accepted record makes
+ * `local-search` see the breach; emptying the *as-found* record as well would
+ * make `dislodge` see it too, and `dislodge` lifts a game off the board before
+ * anything has established there is somewhere else to put it. Measured on the
+ * corpus while 8.6 was built: with a venue's permit withdrawn and its games
+ * scoped, that reading takes all 21 of them off the board and shelves every
+ * one as TIME TBD — 21 published kickoffs destroyed to repair nothing, because
+ * the venue is shut and there was never anywhere for them to go. The breach
+ * they stand in was not created by this run, so it is not `dislodge`'s to
+ * answer.
+ *
+ * @param {Object} context
+ * @param {string} gameId
+ * @returns {Record<string, number>}
+ */
+function acceptedBlockingCodesFor(context, gameId) {
+  if (context.repairScope.has(gameId)) return {};
+  return context.baselineBlockingCodes[gameId] ?? {};
+}
+
+/**
+ * The same, one severity wider, for the objective's relative quality scoring.
+ *
+ * Moves with {@link acceptedBlockingCodesFor} and never separately: the gate
+ * that admits a candidate compares blocking counts and the objective discounts
+ * blocking **and** compromise, so a game whose gate stopped accepting its own
+ * slot while the objective still scored it as free would be refused everywhere
+ * and content where it was.
+ *
+ * @param {Object} context
+ * @param {string} gameId
+ * @returns {Record<string, number>}
+ */
+function acceptedFindingCountsFor(context, gameId) {
+  if (context.repairScope.has(gameId)) return {};
+  return context.baselineFindingCounts[gameId] ?? {};
 }
 
 /**
@@ -264,6 +321,120 @@ function anchorOf(state, context, gameId) {
 }
 
 /**
+ * **The change budget as a bound on the neighbourhood, not a verdict on the
+ * result.**
+ *
+ * Until 8.6 the budget was a number the solver was never told. `resolve.js`
+ * handed `changeBudget` straight to `buildChangeReport()`; `report.js:421`
+ * compared `moved.length` against it once the run was over and `commit.js`
+ * threw. A re-solve that would move forty games moved forty, built the whole
+ * report, and was refused. Nothing was bounded — the answer was merely
+ * rejected after it had been paid for.
+ *
+ * This is asked **before every relocation**, so the budget decides how far the
+ * repair may spread instead of whether the finished spread was acceptable.
+ *
+ * ## What is counted
+ *
+ * Distinct **games standing somewhere other than their baseline slot**, read
+ * out of {@link diffAgainstBaseline} — the one function that partitions the
+ * baseline roster, so the number the gate spends is the same number the report
+ * publishes and the same number `commit.js` measures. A count of *moves* would
+ * charge twice for a game moved and moved again, and a family whose game
+ * changed twice has one new kickoff.
+ *
+ * Three consequences follow from counting the state rather than the ledger,
+ * and all three are wanted:
+ *
+ * - **Sending a game home is free.** A relocation onto the baseline slot does
+ *   not grow the set, so a budget can never stop `local-search` walking a
+ *   displaced game back to where it was published.
+ * - **Moving an already-moved game again is free.** It is already counted, and
+ *   a family whose game changed twice has one new kickoff.
+ * - **A dislodged game is charged while it is off the board**, because a game
+ *   with no time is away from its baseline slot by any reading and
+ *   `diffAgainstBaseline()` counts it as moved. Placing it again therefore
+ *   costs nothing it has not already paid, and placing it *home* refunds it.
+ *
+ * ## What this does not bound, and why the backstop stays
+ *
+ * This gate sits in front of the two stages that **relocate a game that
+ * already has a slot** — `local-search` and `pair-repair`. It is deliberately
+ * not in front of `change-request-apply`, `dislodge`, or `initial-assignment`,
+ * and none of the three omissions is an oversight:
+ *
+ * - A **requested** move is the operator's instruction, not the solver's
+ *   choice. Refusing part of a change request under a cap would be answering a
+ *   different question from the one asked.
+ * - A **dislodge** is forced: the game's slot has just been made illegal by a
+ *   move that already happened, and the alternative to lifting it is leaving
+ *   two games on one pitch.
+ * - `initial-assignment` only ever places games that are already pending, and
+ *   a pending game has no slot at all, so it is already counted among `moved`.
+ *   The gate cannot fire there and a version that tried was removed; see
+ *   {@link placePending} for the measurement.
+ *
+ * So a request whose own moves plus the dislodges they force already exceed
+ * the cap cannot be bounded by anything here, and falls through to
+ * `report.js`'s `withinBudget` and `commit.js`'s `ChangeBudgetExceeded` exactly
+ * as before. Measured on a constructed corpus scenario whose unbounded run
+ * moves 4 games: a budget of 3 returns 3 and a budget of 2 returns 2, both
+ * within cap and partially repaired; a budget of 1 returns the irreducible 2
+ * and is refused. The bound shrinks the neighbourhood; it does not pretend to
+ * shrink the instruction.
+ *
+ * @param {import('./types.js').ResolveState} state
+ * @param {Object} context
+ * @param {string} gameId
+ * @param {import('./types.js').Slot} to
+ * @returns {boolean} false when this relocation would spend budget the run does not have
+ */
+function withinChangeBudget(state, context, gameId, to) {
+  const budget = context.changeBudget;
+  if (budget === null) return true;
+
+  const baseline = state.baseline[gameId];
+  const staysHome =
+    baseline.date === to.date &&
+    baseline.surfaceId === to.surfaceId &&
+    baseline.startMinutes === to.startMinutes;
+  if (staysHome) return true;
+
+  const moved = diffAgainstBaseline(state).moved;
+  if (moved.some((entry) => entry.gameId === gameId)) return true;
+  return moved.length + 1 <= budget;
+}
+
+/**
+ * Refuse a move the budget cannot pay for, and say so.
+ *
+ * Separate from {@link withinChangeBudget} because a refusal that is not
+ * counted and not named is a silent drop, and both relocating stages need the
+ * same sentence. `RESOLVE_CHANGE_BUDGET_BOUND` is `compromise`
+ * deliberately: it is what stops the run's status coming back clean when the
+ * repair stopped early, which `RESOLVE_CHANGE_BUDGET_MET` at `info` would not.
+ *
+ * @param {import('./types.js').ResolveState} state
+ * @param {Object} context
+ * @param {string} gameId
+ * @param {import('./types.js').Slot} to
+ * @param {string} stageId
+ * @returns {boolean} true when the move may proceed
+ */
+function mayMoveWithinBudget(state, context, gameId, to, stageId) {
+  if (withinChangeBudget(state, context, gameId, to)) return true;
+  state.ledger.meta.movesRefusedByBudget += 1;
+  state.ledger.findings.push(
+    makeResolveFinding(
+      RESOLVE_REASON.RESOLVE_CHANGE_BUDGET_BOUND,
+      `stage "${stageId}" would have moved game "${gameId}" to ${slotKey(to)}, and the change budget of ${context.changeBudget} is already spent. The repair stopped here rather than moving it and being refused afterwards; the game is reported unrepaired`,
+      { gameId, stageId, slot: slotKey(to), budget: context.changeBudget }
+    )
+  );
+  return false;
+}
+
+/**
  * **The one place a slot is chosen**, and the only consumer of the objective's
  * quality half.
  *
@@ -329,7 +500,7 @@ function chooseSlot(state, context, gameId, options) {
     const placement = checkPlacement(context.engines, state, gameId, candidate);
     const grown = newBlockingCodes(
       placement.blockingCodeCounts,
-      context.baselineBlockingCodes[gameId] ?? {}
+      acceptedBlockingCodesFor(context, gameId)
     );
     if (grown.length > 0) {
       state.ledger.meta.candidatesRejected += 1;
@@ -346,7 +517,7 @@ function chooseSlot(state, context, gameId, options) {
         // candidate absolutely would then charge this game for that finding at
         // its own published slot and move it off its published time to repair
         // something already accepted.
-        accepted: context.baselineFindingCounts[gameId] ?? {},
+        accepted: acceptedFindingCountsFor(context, gameId),
       }),
       context.weights
     ).total;
@@ -366,6 +537,29 @@ function chooseSlot(state, context, gameId, options) {
 
 /**
  * Place one pending game on the slot the objective likes best.
+ *
+ * ## There is deliberately no change-budget gate here
+ *
+ * The other two placing stages ask {@link mayMoveWithinBudget} before they
+ * move anything. This one does not, and the reason is that the question has no
+ * answer rather than that it was forgotten.
+ *
+ * Every game this function is handed is **pending**, and `applyMove()`
+ * guarantees pending implies absent from `state.games`. A game with no slot is
+ * away from its baseline position by any reading, so
+ * {@link diffAgainstBaseline} already counts it among `moved`. Placing it
+ * therefore costs the budget nothing it has not already paid, and placing it
+ * *home* refunds it. Refusing the placement would not save a unit of budget;
+ * it would turn a game with a new time into a game with no time, at identical
+ * cost, which is strictly worse for the family and no help to the cap.
+ *
+ * A gate was written here first and then removed: it could not fire, because
+ * {@link withinChangeBudget}'s already-counted early exit caught every pending
+ * game before the arithmetic. Measured: `reoptimiseWholeSeason()` over the
+ * corpus with `dislodgeAll` lifting all 679 games and `changeBudget: 1`
+ * refused **zero** moves through it. An unreachable branch reporting a refusal
+ * an operator could act on ("raise the budget and this game gets a time") is
+ * worse than no branch, so it is gone.
  *
  * @param {import('./types.js').ResolveState} state
  * @param {Object} context
@@ -466,12 +660,35 @@ const baselineIngest = {
       const game = state.baseline[gameId];
       const slot = { date: game.date, surfaceId: game.surfaceId, startMinutes: game.startMinutes };
       const placement = checkPlacement(context.engines, state, gameId, slot);
+      const findingCounts = placementFindingCounts(placement);
+      // **What the schedule arrived carrying, always and for every game** —
+      // including the ones in the repair scope. This map answers "is this
+      // clash new?", which is `dislodge`'s question, and the answer does not
+      // change because a caller asked for a game to be re-homed. What the
+      // repair scope changes is a different question, asked by `local-search`
+      // and the placer: see {@link acceptedBlockingCodesFor}.
       context.baselineBlockingCodes[gameId] = placement.blockingCodeCounts;
       // The same record one severity wider: the gate compares blocking counts,
       // the objective charges for blocking **and** compromise, and both have to
       // be measured against the same published slot or the run pays twice for
       // an exception the season already accepted.
-      context.baselineFindingCounts[gameId] = placementFindingCounts(placement);
+      context.baselineFindingCounts[gameId] = findingCounts;
+      if (context.repairScope.has(gameId)) {
+        // **Counted off `blockingCodeCounts`, not `findingCounts`.** The
+        // vacuity check exists to catch a scope that cannot change anything,
+        // so it has to measure what the stages that act on the scope actually
+        // gate on — and `local-search` and `pair-repair` both gate on
+        // `newBlockingCodes()`, which reads blocking counts alone. Counting
+        // the wider record would let a scope over games carrying only
+        // compromise findings report `exercised > 0`, suppress
+        // `RESOLVE_REPAIR_SCOPE_VACUOUS`, and claim the run "has to answer
+        // for" findings that every guard downstream holds. That is the exact
+        // vacuity the code was added to catch, reported as its opposite.
+        context.repairScopeExercised[gameId] = Object.values(placement.blockingCodeCounts).reduce(
+          (total, count) => total + count,
+          0
+        );
+      }
       ledger.meta.constraintsConsulted += /** @type {Array<Object>} */ (
         placement.availability.constraints
       ).length;
@@ -629,6 +846,14 @@ const dislodge = {
       if (!current.games[gameId]) continue;
       const slot = /** @type {import('./types.js').Slot} */ (slotOf(current, gameId));
       const placement = checkPlacement(context.engines, current, gameId, slot);
+      // **`context.baselineBlockingCodes` directly, never
+      // {@link acceptedBlockingCodesFor}.** This stage asks whether the clash
+      // is one *this run* created, and the repair scope does not change that
+      // answer: a game whose ground was withdrawn before the run started was
+      // not put there by the run. Reading the scope-aware record here lifts
+      // every scoped game off the board on the strength of a breach nothing
+      // here can repair, and `initial-assignment` then shelves them all. See
+      // that function's docblock for the 21 kickoffs it cost when measured.
       const grown = newBlockingCodes(
         placement.blockingCodeCounts,
         context.baselineBlockingCodes[gameId] ?? {}
@@ -776,6 +1001,12 @@ const initialAssignment = {
         continue;
       }
 
+      // **One sentence, because there is only one way to get here.** A
+      // discriminator was added in 8.6 and removed in the same PR: the budget
+      // arm could not fire (see `placePending`) and the frozen arm is caught
+      // by the branch above, so the other two values were decoration on a
+      // single reachable outcome. A vocabulary whose every other member is
+      // unreachable reads as a promise the code does not keep.
       const reason =
         'no slot the schedule already used is legal for it; kept visible as TIME TBD rather than dropped (incident 10)';
       current = applyMove(
@@ -794,7 +1025,7 @@ const initialAssignment = {
       current.ledger.findings.push(
         makeResolveFinding(
           RESOLVE_REASON.RESOLVE_GAME_TIME_TBD,
-          `game "${gameId}" has no legal slot left and is carried as TIME TBD: ${reason}`,
+          `game "${gameId}" is carried as TIME TBD: ${reason}`,
           { gameId, stageId: this.id }
         )
       );
@@ -824,7 +1055,7 @@ const localSearch = {
       const slot = /** @type {import('./types.js').Slot} */ (slotOf(current, gameId));
       const placement = checkPlacement(context.engines, current, gameId, slot);
       if (
-        newBlockingCodes(placement.blockingCodeCounts, context.baselineBlockingCodes[gameId] ?? {})
+        newBlockingCodes(placement.blockingCodeCounts, acceptedBlockingCodesFor(context, gameId))
           .length === 0
       ) {
         // The hold rule, in one branch: a legal game is never moved. The
@@ -847,7 +1078,37 @@ const localSearch = {
         anchor,
         excludeSlotKey: slotKey(slot),
       });
-      if (chosen === null) continue;
+      if (chosen === null) {
+        // **Never a silent `continue` for a game the run was asked to
+        // repair.** For a game merely caught up in the run this is ordinary —
+        // it stays where it is and the verify stage reports what it carries.
+        // For one in the repair scope it is the answer to a question somebody
+        // asked, and the answer is "I could not". `resolve/` may only offer
+        // slots the baseline used **at the same venue on the same date**
+        // (`inventory.js:candidateSlotsFor`), so a whole-venue withdrawal has
+        // no in-reach answer by construction; saying nothing would read as
+        // "repaired".
+        if (context.repairScope.has(gameId)) {
+          current.ledger.meta.repairsUnavailable += 1;
+          current.ledger.findings.push(
+            makeResolveFinding(
+              RESOLVE_REASON.RESOLVE_REPAIR_UNAVAILABLE,
+              `game "${gameId}" was in the repair scope and no slot the baseline used at its venue on ${slot.date} is legal for it; it is left standing at ${slotKey(slot)} rather than losing the time families already have. Re-homing it needs ground this package cannot offer — it re-places games within the inventory, it does not find new venues`,
+              {
+                gameId,
+                stageId: this.id,
+                slot: slotKey(slot),
+                codes: newBlockingCodes(
+                  placement.blockingCodeCounts,
+                  acceptedBlockingCodesFor(context, gameId)
+                ).join(', '),
+              }
+            )
+          );
+        }
+        continue;
+      }
+      if (!mayMoveWithinBudget(current, context, gameId, chosen.slot, this.id)) continue;
       current = applyMove(
         current,
         {
@@ -860,7 +1121,7 @@ const localSearch = {
             placement,
             newBlockingCodes(
               placement.blockingCodeCounts,
-              context.baselineBlockingCodes[gameId] ?? {}
+              acceptedBlockingCodesFor(context, gameId)
             ),
             placement.counterpartGameIds
           ),
@@ -892,6 +1153,16 @@ const pairRepair = {
       if (!current.games[gameId]) continue;
       const slot = /** @type {import('./types.js').Slot} */ (slotOf(current, gameId));
       const placement = checkPlacement(context.engines, current, gameId, slot);
+      // **`context.baselineBlockingCodes` directly, as `dislodge` does, and
+      // deliberately not {@link acceptedBlockingCodesFor}.** This stage does
+      // not move `gameId`; it moves somebody else off their published slot
+      // for `gameId`'s benefit. Reading the scope-aware record here lets a
+      // breach that existed before the run started — one the scope asked
+      // about and `local-search` has very likely just reported it cannot fix —
+      // cost an **unscoped** neighbour its kickoff, leaving the scoped game
+      // exactly as broken as it was. A repair scope is permission to try to
+      // move the games it names, not a licence to spend the times of games it
+      // does not.
       const grown = newBlockingCodes(
         placement.blockingCodeCounts,
         context.baselineBlockingCodes[gameId] ?? {}
@@ -915,6 +1186,7 @@ const pairRepair = {
           excludeSlotKey: slotKey(counterpartSlot),
         });
         if (chosen === null) continue;
+        if (!mayMoveWithinBudget(current, context, counterpart, chosen.slot, this.id)) continue;
         current = applyMove(
           current,
           {

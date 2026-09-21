@@ -123,7 +123,17 @@ stale_backups() {
   return 0
 }
 
-if ! STALE_AT_START="$(stale_backups)"; then
+# **Census-only mode plants nothing, so the two sweeps that exist to protect a
+# MUTATING run must not act on its behalf.** This one refuses to start on a
+# stale `.orig`; `restore_all` below would MOVE one. Both are right for a
+# sweep and wrong here: `npm run test` runs the census on every PR, a `.orig`
+# is gitignored and invisible in `git status`, and the two failure modes are a
+# census failing with a planting message about a `git mergetool` leftover, and
+# -- far worse -- a test run restoring a file out from under a sweep that is
+# mid-plant. Measured: `touch supabase/migrations/zz.sql.orig` made
+# census-only exit 2 with `REFUSING TO START: stale backup`.
+STALE_AT_START=""
+if [ -z "$CENSUS_ONLY" ] && ! STALE_AT_START="$(stale_backups)"; then
   echo "REFUSING TO START: the plant directories could not be swept" >&2
   echo "  A planted file may be on disk with its .orig beside it. Compare against" >&2
   echo "  git before re-running." >&2
@@ -163,6 +173,9 @@ done <<< "$STALE_AT_START"
 # reader trusts. Both callers turn a non-zero return into exit 6.
 restore_all() {
   local orig list failed=0
+  # Nothing was planted in census-only mode, so an `.orig` on disk belongs to
+  # somebody else's run. See the stale-backup refusal above.
+  [ -z "$CENSUS_ONLY" ] || return 0
   # A sweep that FAILED is not a sweep that found nothing: saying so is the
   # whole point, because this runs when the script is already going down and
   # there is nobody left to notice a mutation it quietly declined to restore.
@@ -2634,6 +2647,24 @@ declare -A CLAIM_PROVER=(
   ["(checked) publication_baselines is gone from the catalogue after the revert"]="R9 the revert re-creates the store after verifying it gone"
 )
 
+# **`(unplantable)` is the one prefix that retires a HEALTH CLAIM, so it is
+# registered by its full text rather than admitted on its prefix.** The other
+# three declared prefixes are about this harness's bookkeeping and carry
+# interpolated counts; nothing is lost by admitting them on the word alone.
+# This one is different in kind: it says "this WOULD be a claim and no plant
+# can reach it", which is exactly the sentence a hollow guarantee wants to be
+# able to write about itself. Left on prefix alone it is a two-edit escape
+# hatch out of the census -- reword a `(checked)` line to `(unplantable)`,
+# delete its `CLAIM_PROVER` row, and the census prints a smaller number and
+# exits 0. Demonstrated in review, on this very commit, before it was closed.
+#
+# So a demotion costs an entry here, the reason is printed on every run rather
+# than parsed and left unread, and an entry whose line stops being printed is
+# a failure exactly as a stale `CLAIM_PROVER` key is.
+declare -A UNPLANTABLE_CLAIM=(
+  ["(unplantable) with the flag unset the seed migration inserts nothing -- enforced by the migration build, which aborts if it ever stops being true"]="every mutation that lets the seed insert aborts 20260310000002 in the first stage, three before this check runs; measured, and argued where it prints"
+)
+
 # ---------------------------------------------------------------------------
 # The same census, against the SOURCE, with no database
 # ---------------------------------------------------------------------------
@@ -2651,7 +2682,7 @@ declare -A CLAIM_PROVER=(
 # So the same diff is taken statically, off `run.sh`'s SOURCE, in under a
 # second and with nothing installed. It runs in the anchor pre-flight -- so a
 # full sweep now refuses to plant in seconds rather than discovering the gap
-# five hours later -- and `tests/dbharness.claimCensus.test.js` runs it on
+# five hours later -- and `tests/dbharnessClaimCensus.test.js` runs it on
 # every PR, which is the half that makes drift impossible rather than
 # unlikely.
 #
@@ -2676,26 +2707,48 @@ declare -A CLAIM_PROVER=(
 # the number of claims the channel walk found, so the two readings have to
 # agree rather than being assumed to.
 static_claim_census() {
-  local ok=1 claim prover
-  printf '%s\n' "${!CLAIM_PROVER[@]}" >/tmp/harness_claim_registry || return 2
-  python3 - "$REPO/scripts/dbharness/run.sh" /tmp/harness_claim_registry <<'CENSUS' || ok=0
+  local ok=1 claim prover reg unp
+  # **An undeclared associative array expands to NOTHING**, and every diff
+  # below would then pass over an empty set -- the vacuous pass this census
+  # exists to stop, in the census. It happened once already in review: the
+  # registry was declared after the call that reads it and the demotion check
+  # compared against nothing. Both are checked for existence, not contents,
+  # because an empty registry is a legitimate state and an absent one is not.
+  if ! declare -p CLAIM_PROVER UNPLANTABLE_CLAIM >/dev/null 2>&1; then
+    echo "CENSUS FAIL: a claim registry is not declared where this census reads it" >&2
+    return 2
+  fi
+  if ! reg="$(mktemp)" || ! unp="$(mktemp)"; then
+    echo "CENSUS FAIL: could not create the temporary files this census reads from" >&2
+    rm -f "${reg:-}" "${unp:-}"
+    return 2
+  fi
+  printf '%s\n' "${!CLAIM_PROVER[@]}" >"$reg" || { rm -f "$reg" "$unp"; return 2; }
+  for claim in "${!UNPLANTABLE_CLAIM[@]}"; do
+    printf '%s\t%s\n' "$claim" "${UNPLANTABLE_CLAIM[$claim]}" >>"$unp" || {
+      rm -f "$reg" "$unp"; return 2; }
+  done
+  python3 - "$REPO/scripts/dbharness/run.sh" "$reg" "$unp" <<'CENSUS' || ok=0
 import io, re, sys
 
-run_sh, registry_path = sys.argv[1], sys.argv[2]
+run_sh, registry_path, unplantable_path = sys.argv[1], sys.argv[2], sys.argv[3]
 lines = io.open(run_sh, encoding='utf8').read().splitlines()
 
 # Every prefix on the `  | ` channel that is deliberately NOT a health claim,
 # with the reason it is out. `run.sh` argues each of these where it prints
 # them; an entry here is a claim that the argument was made, not a licence.
+# `(unplantable)` is admitted on its prefix but NOT on that alone -- see
+# UNPLANTABLE_CLAIM in prove.sh for why it is registered line by line.
 NON_CLAIM = {
     '(coverage)':          "this harness's own bookkeeping -- which files exist and which ran",
     '(refused)':           "a smoke that is REQUIRED to raise, reporting the refusal it raised",
     '(known gap, pinned)': "a pre-existing defect pinned so it cannot drift, not a passing check",
-    '(unplantable)':       "a condition enforced elsewhere, printed with the reason no plant can reach it",
+    '(unplantable)':       "a health claim no plant can reach, registered one by one with its reason",
 }
 ECHO = re.compile(r'^\s*echo "  \| (.*)"$')
+INTERPOLATED = '$`\\'
 
-printed, declared_out, bad = [], [], []
+printed, unplantable_seen, by_prefix, bad = [], [], {}, []
 for n, raw in enumerate(lines, 1):
     if '  | ' not in raw:
         continue
@@ -2710,16 +2763,22 @@ for n, raw in enumerate(lines, 1):
         continue
     body = m.group(1)
     if body.startswith('(checked) '):
-        if any(c in body for c in '$`\\'):
+        if any(c in body for c in INTERPOLATED):
             bad.append((n, 'is a (checked) claim whose text is interpolated, so what it prints is not what this reads', line))
             continue
         printed.append(body)
         continue
     prefix = next((k for k in NON_CLAIM if body.startswith(k + ' ')), None)
     if prefix is None:
-        bad.append((n, 'prints on the claim channel under a prefix nothing declares; make it a (checked) claim with a plant, or declare it in NON_CLAIM with its reason', line))
-    else:
-        declared_out.append((n, prefix))
+        bad.append((n, 'prints on the claim channel under a prefix nothing declares. Make it a (checked) claim with a plant, or declare the prefix in NON_CLAIM with its reason. Declared today: '
+                    + ', '.join(sorted(NON_CLAIM)), line))
+        continue
+    by_prefix[prefix] = by_prefix.get(prefix, 0) + 1
+    if prefix == '(unplantable)':
+        if any(c in body for c in INTERPOLATED):
+            bad.append((n, 'is an (unplantable) claim whose text is interpolated, so it cannot be registered by what it prints', line))
+            continue
+        unplantable_seen.append(body)
 
 # The second reading of the same source, which has to agree with the first.
 tokens = [n for n, raw in enumerate(lines, 1)
@@ -2734,7 +2793,7 @@ for n, why, line in bad:
 if bad:
     sys.exit(1)
 
-# The meta-assertion both diffs below pass vacuously without.
+# The meta-assertion every diff below passes vacuously without.
 if not printed:
     print('CENSUS FAIL: found no (checked) claim in run.sh at all; this census looked at nothing')
     sys.exit(1)
@@ -2742,6 +2801,8 @@ registry = set(l for l in io.open(registry_path, encoding='utf8').read().splitli
 if not registry:
     print('CENSUS FAIL: the plant registry is empty; this census compared against nothing')
     sys.exit(1)
+unplantable = dict(l.split('\t', 1)
+                   for l in io.open(unplantable_path, encoding='utf8').read().splitlines() if l)
 
 failed = False
 for claim in sorted(set(printed) - registry):
@@ -2752,13 +2813,30 @@ for claim in sorted(registry - set(printed)):
     print('CENSUS FAIL: a plant is declared for a claim run.sh does not print:')
     print('    %s' % claim)
     failed = True
+# And the same both ways for the demotions, because retiring a claim from the
+# census has to cost as much as registering one.
+for claim in sorted(set(unplantable_seen) - set(unplantable)):
+    print('CENSUS FAIL: run.sh retires a claim from the census that nothing registers:')
+    print('    %s' % claim)
+    print('  Add it to UNPLANTABLE_CLAIM in prove.sh with the reason no plant can reach it,')
+    print('  or give it a plant and print it as a (checked) claim.')
+    failed = True
+for claim in sorted(set(unplantable) - set(unplantable_seen)):
+    print('CENSUS FAIL: a claim is registered unplantable that run.sh does not print:')
+    print('    %s' % claim)
+    failed = True
 if failed:
     sys.exit(1)
 
 print('claim census (static): %d (checked) claim(s) in run.sh, each with a plant declared here; '
-      '%d line(s) on the same channel declared out of the universe'
-      % (len(set(printed)), len(declared_out)))
+      '%d line(s) on the same channel declared out of the universe (%s)'
+      % (len(set(printed)), sum(by_prefix.values()),
+         ', '.join('%s x%d' % (k, v) for k, v in sorted(by_prefix.items()))))
+for claim in sorted(unplantable_seen):
+    print('  not covered, by declaration: %s' % claim)
+    print('    because %s' % unplantable[claim])
 CENSUS
+  rm -f "$reg" "$unp"
   # **And the label a registry entry names has to BE a plant.** The runtime
   # census reports a prover it cannot find as "scored NOT AT ALL", which is
   # correct and arrives five hours in. `RESULT` is keyed by every label
@@ -2796,6 +2874,7 @@ if [ -n "$CENSUS_ONLY" ]; then
   [ "$STATIC_CENSUS_OK" -eq 1 ] || exit 1
   exit 0
 fi
+
 
 # **The anchor pre-flight's own verdict, with the meta-assertion the others
 # have.** A run that examined ZERO plants would clear every one of them by

@@ -16,11 +16,14 @@
  * same diff taken statically needs no cluster and runs in 80ms, so it runs
  * here.
  *
- * **The negative control is the point.** A census that passes proves nothing
- * on its own, so the second and third cases COPY the harness into a sandbox,
- * assert the copy is green, break it in each of the two ways that matter, and
+ * **The negative controls are the point.** A census that passes proves nothing
+ * on its own, so the cases after the first COPY the harness into a sandbox,
+ * assert the copy is green, break it in each of the ways that matter, and
  * require the census to say so. An assertion nobody has made fail is an
- * assertion nobody has checked.
+ * assertion nobody has checked. The census has two halves -- a python walk
+ * over `run.sh`'s source and a bash loop over the registry's prover labels --
+ * and there is a control for each, because a control that only ever reaches
+ * one half leaves the other exactly as unchecked as no control at all.
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -79,6 +82,10 @@ function runSh(dir) {
   return path.join(dir, 'scripts/dbharness/run.sh');
 }
 
+function proveSh(dir) {
+  return path.join(dir, 'scripts/dbharness/prove.sh');
+}
+
 afterEach(() => {
   let dir;
   while ((dir = sandboxes.pop())) fs.rmSync(dir, { recursive: true, force: true });
@@ -118,6 +125,46 @@ describe('dbharness claim census', () => {
 
     const { status, output } = census(dir);
     expect(output).toContain('prints on the claim channel under a prefix nothing declares');
+    expect(status).not.toBe(0);
+  });
+
+  it('fails when a claim is retired from the census without being registered', () => {
+    // The escape hatch the prefix-only reading left open: reword a `(checked)`
+    // line to `(unplantable)`, drop its plant row, and a census that admitted
+    // the prefix on its word alone would print a smaller number and exit 0.
+    const dir = sandbox();
+    const src = fs.readFileSync(runSh(dir), 'utf8');
+    const line = src.split('\n').find((l) => CLAIM_ECHO.test(l));
+    expect(line, 'the sandbox copy must carry at least one claim to retire').toBeTruthy();
+    const retired = line.replace('(checked) ', '(unplantable) ');
+    fs.writeFileSync(runSh(dir), src.replace(line, retired));
+
+    const claim = /^\s*echo " {2}\| (.*)"$/.exec(retired)[1];
+    const prove = fs.readFileSync(proveSh(dir), 'utf8');
+    const row = prove
+      .split('\n')
+      .find((l) => l.startsWith(`  ["${claim.replace('(unplantable) ', '(checked) ')}"]=`));
+    expect(row, 'the retired claim must have had a registry row to delete').toBeTruthy();
+    fs.writeFileSync(proveSh(dir), prove.replace(`${row}\n`, ''));
+
+    const { status, output } = census(dir);
+    expect(output).toContain('retires a claim from the census that nothing registers');
+    expect(status).not.toBe(0);
+  });
+
+  it('fails when the registry names a prover no plant declares', () => {
+    // The bash half of the census, which no other case here reaches: the
+    // python walk never looks at a plant label.
+    const dir = sandbox();
+    const prove = fs.readFileSync(proveSh(dir), 'utf8');
+    const prover = /^ {2}\["\(checked\) [^"]*"\]="([^"|]+)"$/m.exec(prove)?.[1];
+    expect(prover, 'the registry must declare at least one single-prover claim').toBeTruthy();
+    const call = `plant "${prover}"`;
+    expect(prove).toContain(call);
+    fs.writeFileSync(proveSh(dir), prove.replace(call, `plant "${prover} (renamed)"`));
+
+    const { status, output } = census(dir);
+    expect(output).toContain('names a prover no plant call declares');
     expect(status).not.toBe(0);
   });
 });

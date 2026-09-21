@@ -4930,9 +4930,10 @@ before a line was written, all confirmed by me afterwards:
   worktrees under `.claude/worktrees/`, each a full second copy of the
   repository, and counted the same single warning once per copy: 1 with no
   nested worktree, 2 with one, 3 with two. #416's 1 happened to be right and
-  this bullet's 2 was wrong by measurement. Fixed in
-  `fix/lint-scope-and-gitignore`, which adds `**/.claude/**` to the ESLint
-  ignores so the count stops depending on what else is checked out.
+  this bullet's 2 was wrong by measurement. Fixed in #422, which adds
+  `**/.claude/**` to the ESLint ignores so the count stops depending on what
+  else is checked out, and makes `npm run lint` enforce it with
+  `--max-warnings=1`.
   **Guard: a baseline goes into a brief only if it was executed in the session
   that writes the brief -- and executing it is not enough when the tool walks
   the whole tree, so confirm what the run actually covered.**

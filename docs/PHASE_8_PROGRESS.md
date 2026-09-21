@@ -5575,3 +5575,44 @@ refused, would be knowingly compounding it rather than inheriting it.
 
 PR 2 waits for the operator. Its design is settled and recorded in the ruling
 above, so the decision is the only thing missing.
+
+### Addendum to the above, from the agent, and a supervisor pattern worth naming
+
+Two corrections arrived after the entry was written.
+
+**The `run_number` ordinal was read, not inferred.** The supervisor told the
+agent that "run 950" looked measured but was probably inferred from ordering.
+It is a field: `GET /actions/runs/35620368458` returns `"run_number": 950`
+beside `"id"`, re-fetched and confirmed. The agent flagged it rather than
+letting it stand, for the right reason — a correction that recasts a measured
+figure as a guess is the same defect as the reverse, and the record would
+otherwise have carried "the agent guessed an ordinal" about a figure read off
+a response.
+
+That is the **third over-correction by this supervisor in one session**: the
+`soleCoachRiskRegister` location, the withdrawal of the "23 files / 1351 cases"
+fixture figure, and now this. The error mode has shifted and is worth naming
+as its own shape, because the guard for it is different. Earlier in the phase
+the supervisor's failures were *unverified assertions*. These three are
+**unverified corrections** — and a correction carries more weight than an
+assertion, because it arrives with the authority of having caught something
+and the recipient has already been told they were wrong. The rule is
+symmetrical and was not being applied symmetrically: **a correction is a
+claim, and needs the same execution before it is sent as the claim it
+corrects.** All three would have been caught by one command.
+
+**Why the two-instrument failure was invisible**, in the agent's words, which
+sharpens the entry above:
+
+> What made it invisible was that my check and yours were phrased differently
+> — different anchors, different character classes, different age patterns —
+> so they *looked* independent. They were independent in syntax and identical
+> in the one dimension that mattered. Agreement between two checks is evidence
+> only to the extent the checks can fail differently, and nothing in either
+> regex said what it could not see.
+
+Which is the argument for the mechanical remedy over a resolution to be more
+careful: `expect(roster.filter(RE)).toHaveLength(132)` before
+`expect(filtered).toEqual([...])` does not require anyone to notice the shared
+axis in advance. Adopted as default practice for every check that narrows a
+set.

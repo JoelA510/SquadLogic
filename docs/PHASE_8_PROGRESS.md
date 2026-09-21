@@ -4815,3 +4815,94 @@ distinction now lives in the core as `BASELINE_UNSOUND_REASONS` /
 Sixteen falsification breaks were run in total across the change, plus six
 more for these fixes; all went red except the one recorded above.
 
+
+## Supervisor's record of the GAP-29 slice — the fault above is misallocated
+
+**2026-09-21.** Merged as `f89b209` after a green run `35546999311` on
+`133ac37` (11m03s; E2E 00:18:53Z-00:24:19Z). Four things belong here that the
+entry above cannot carry, because three of them are about the brief rather
+than the work and the fourth is a ruling.
+
+### The §8 error was the supervisor's, not the agent's
+
+The entry above says *"The fault was the agent's: it read the document once at
+the start of the work and wrote a correction to it hours later without
+re-fetching."* That is generous and it is wrong.
+
+**The brief told the agent to read `BUILD_PLAN_STATUS.md` §8 while §8 existed
+only in unmerged PR #415**, and told it to branch from `a206473`, which does
+not contain §8. The agent did what it was told, found nothing, and reported
+nothing — correctly, for the tree it was given. Its only error was writing that
+report hours later without re-fetching, and that error could not have caused
+anything on its own: the section it was looking for was absent because the
+brief pointed at a commit that did not have it.
+
+This is a direct repeat of the fifth supervisor error of this phase — *"main
+has moved to `5bb139c`"*, when `5bb139c` had been pushed to a branch and never
+merged — and it was made **one turn after writing that rule down**. The rule
+was "pushing a branch is not merging it." The repeat was "citing a section is
+not merging the PR that contains it." Same mechanism, different noun.
+
+**The guard, stated so it is mechanical rather than a resolution**: a brief may
+cite a document section only by a commit that is an ancestor of the branch
+point it also names, and the brief must state that commit. If the section is
+in flight, the brief says so and gives the PR number instead of the section
+number. Four guards have now been defeated by the next error; this one is
+narrow enough to check by running `git merge-base --is-ancestor` before the
+brief is sent.
+
+### The falsification count says three different things
+
+The record now carries three totals for one exercise: **16** ("ten JavaScript
+breaks and six SQL ones"), **22** ("sixteen... plus six more for these fixes")
+and **23** (the PR body). The enumerated table is the authority and it lists
+`B1`-`B16` and `S1`-`S7`, so the answer is **23: sixteen JavaScript and seven
+SQL**. The split in the prose is what drifted — six of the SQL breaks and ten
+of the JavaScript ones predate `/code-review`, and the seven added for the
+review fixes were six JavaScript and one SQL (`S7`, the `TRUNCATE` hole), not
+six and none. One stayed green on its first run: `B3`, an addition counted as
+drift, which found a genuinely unenforced rule.
+
+Left as a correction rather than an edit to the entry above, because a count
+that moved is more informative than a count that was always right.
+
+### Review findings that did not block the merge
+
+Read in full rather than sampled, as the raised-scrutiny posture requires.
+Zero blocking. Three recorded as follow-ups rather than sent back as a round,
+because a round consisting only of noted items is the loop that manufactures
+work without resolving anything:
+
+- **A contract claim held up by prose.** *"The RPC returns the row without its
+  payload"* is behavioural for the mock (`returned.export_rows` is undefined)
+  and, for the SQL, is `expect(MIGRATION).toContain('-- The row **without**
+  its payload.')` — an assertion on a comment. Change the SQL's return and
+  both halves still pass. The smoke already holds `v_res` from a real admin
+  call, so `IF v_res ? 'export_rows' THEN RAISE` closes it in one line.
+- **The revert proves every claim in its own header except one.** Item 4 says
+  the audit rows and the registered `audit_actions` row survive; the `DO`
+  block at the end asserts everything else and not that.
+- **An append-only store of contact details has no erasure path.** A published
+  baseline freezes the `Coaches` and `Coach Emails` columns verbatim, and the
+  table refuses `DELETE` except on organisation cascade. Within CLAUDE.md §2's
+  permitted set, so not a scope violation, and the entry above correctly
+  refuses to drop the columns unilaterally — but the consequence it does not
+  name is that a coach's email, once published, is removable only by deleting
+  the tenant. That is an operator decision.
+
+### Ruling on the seam decision: accepted, and the guard is why
+
+The agent went against §8's *"the store is a table, not the seam"* and flagged
+it as the cheapest thing in the PR to reverse. It stands. The granularity
+argument is correct — `serialiseFieldRegistry()` turns N records into one
+document against a store holding one row per record, while a snapshot is one
+document against one row — and the precedent it departs from was never a rule
+about seams, it was an observation about the one case where seam and store did
+not meet.
+
+What makes it safe rather than merely reasoned is that the guard was turned
+round instead of deleted. A rule that said *"no production file outside this
+package names the seam"* became *"exactly one does, and it is the store"*,
+failing both if the caller disappears and if a second appears. A departure from
+a precedent that leaves behind a check which fails in both directions is a
+different thing from a departure that leaves behind a comment.

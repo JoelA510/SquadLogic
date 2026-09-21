@@ -160,7 +160,16 @@ export function buildPracticeRunResults({
     // evaluator validates its inputs (`TeamSchema`, `SlotSchema`), and a slot
     // that survives `partitionPracticeSlots` can still fail it -- a
     // non-numeric `capacity` becomes `NaN`, and an end at or before its start
-    // composes fine but is refused here. Persisting the operator's schedule
+    // composes fine but is refused here.
+    //
+    // It also refuses a `schoolDayEnd` it cannot place on the season's clock,
+    // with a `SeasonClockError` carrying `WALL_TIME_UNREADABLE`,
+    // `SEASON_TIMEZONE_MISSING` or `SEASON_TIMEZONE_UNKNOWN` -- the same three
+    // `schedulePractices` raises. That arrives here rather than as an empty
+    // `dataQualityWarnings`, which is the point: a season with a malformed
+    // `school_day_end` used to persist a report reading "no school-hours
+    // violations" over a schedule nothing had checked, and now persists no
+    // report and says why. Persisting the operator's schedule
     // matters more than measuring it, so the apply is not failed; but the row
     // says plainly that it carries no metrics and why, rather than shipping a
     // partial report that would read as a complete one. With no `summary` the

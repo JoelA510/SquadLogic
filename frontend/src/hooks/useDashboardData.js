@@ -7,7 +7,7 @@ import { useGameAssignments } from './useGameAssignments.js';
 import { ROADMAP_SECTIONS } from '../constants/roadmap.js';
 
 /**
- * The first of the three fetches that failed, as a string.
+ * The first of the supplied fetches that failed, as a string.
  *
  * All three child hooks already hold an `error`, and this hook used to return
  * none of them: `WorkflowPage` destructured `error` off it, seeded a
@@ -55,7 +55,11 @@ export function useDashboardData() {
     runId: practiceRunId,
   } = usePracticeSummary();
 
-  const { assignments: practiceAssignments } = usePracticeAssignments(practiceRunId);
+  const {
+    assignments: practiceAssignments,
+    loading: practiceAssignmentsLoading,
+    error: practiceAssignmentsError,
+  } = usePracticeAssignments(practiceRunId);
 
   const {
     gameSummary,
@@ -66,11 +70,49 @@ export function useDashboardData() {
     runId: gameRunId,
   } = useGameSummary();
 
-  const { assignments: gameAssignments } = useGameAssignments(gameRunId);
+  const {
+    assignments: gameAssignments,
+    loading: gameAssignmentsLoading,
+    error: gameAssignmentsError,
+  } = useGameAssignments(gameRunId);
+
+  /**
+   * One message per source, so a caller can tell which read failed.
+   *
+   * `error` below is one string for what are five independent fetches, and a
+   * page that renders only one source has no way to know whether the string
+   * is about that source or another. `DataErrorBanner`'s docstring recorded
+   * that as over-reporting and named per-source errors on this hook as the
+   * remedy; this is it. `error` is now derived from these three rather than
+   * computed a second time, so the aggregate and the parts cannot disagree.
+   *
+   * **The assignments reads are in here, and they were in nothing before.**
+   * `usePracticeAssignments` and `useGameAssignments` each hold an `error`
+   * and this hook destructured only their `assignments`. On a refused read
+   * those stay `[]` -- so a refused `practice_assignments` read produced the
+   * exact empty-looking-but-unread state the banner exists to prevent, with
+   * no banner anywhere, and those are the rows the CSV export is built from.
+   * Folding them in widens `error` for every existing consumer, in the one
+   * direction that is a fix: they showed nothing for these failures.
+   *
+   * Practice and game each fold their summary and their assignments into one
+   * message, because no consumer distinguishes "the run" from "the rows of
+   * the run" -- both mean the same thing to a reader of `practice`.
+   *
+   * @type {{ team: string|null, practice: string|null, game: string|null }}
+   */
+  const errors = useMemo(
+    () => ({
+      team: firstErrorMessage([teamError]),
+      practice: firstErrorMessage([practiceError, practiceAssignmentsError]),
+      game: firstErrorMessage([gameError, gameAssignmentsError]),
+    }),
+    [teamError, practiceError, practiceAssignmentsError, gameError, gameAssignmentsError]
+  );
 
   const error = useMemo(
-    () => firstErrorMessage([teamError, practiceError, gameError]),
-    [teamError, practiceError, gameError]
+    () => firstErrorMessage([errors.team, errors.practice, errors.game]),
+    [errors]
   );
 
   const roadmapStats = useMemo(() => {
@@ -110,10 +152,15 @@ export function useDashboardData() {
   return {
     loading: {
       team: teamLoading,
-      practice: practiceLoading,
-      game: gameLoading,
+      // The assignments reads are folded in here for the same reason their
+      // errors are: a source whose rows have not arrived is not a source that
+      // returned none, and `practice` means the run and its rows to every
+      // reader of it.
+      practice: practiceLoading || practiceAssignmentsLoading,
+      game: gameLoading || gameAssignmentsLoading,
     },
     error,
+    errors,
     roadmap: {
       sections: ROADMAP_SECTIONS,
       stats: roadmapStats,

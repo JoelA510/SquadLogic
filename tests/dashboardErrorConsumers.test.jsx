@@ -151,6 +151,11 @@ function dashboardData(error) {
   return {
     loading: { team: false, practice: false, game: false },
     error,
+    // The hook derives `error` from `errors`, so a fixture that set one
+    // without the other could not occur. `team` is the arm chosen because it
+    // is the first `firstErrorMessage` reads, which is what makes `error`
+    // equal to it here.
+    errors: { team: error, practice: null, game: null },
     roadmap: { sections: [], stats: { completed: 0, pending: 0 } },
     team: {
       summary: null,
@@ -213,9 +218,30 @@ const PAGES = [
  * a directory the check never looks at.
  *
  * The match is on the call `useDashboardData(`, not the bare identifier, so
- * the import lines and the several comments that now discuss the hook by
- * name are not counted as consumers.
+ * the import lines are not counted as consumers.
+ *
+ * **Comments are stripped before the match, and that was not a precaution.**
+ * This scan claimed the call parenthesis kept prose out of the universe. It
+ * did not: `OutputGenerationPanel`'s docstring gained the words
+ * "`useDashboardData().errors`", the file calls no hook at all, and the scan
+ * reported it as a seventh consumer. A universe that grows when someone
+ * writes a sentence is not a universe -- it is a set that fails open on the
+ * next rename and closed on the next comment. `withoutComments` below is the
+ * fix, and `the scan counts calls and not prose` is the case that makes it
+ * fail.
  */
+
+/**
+ * Source with `//` and block comments removed, so a hook named in prose is
+ * not read as a call.
+ *
+ * @param {string} source
+ * @returns {string}
+ */
+function withoutComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+}
+
 function consumersOfHook() {
   const srcDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../frontend/src');
   /** @type {string[]} */
@@ -230,7 +256,7 @@ function consumersOfHook() {
         continue;
       }
       if (!/\.jsx?$/.test(entry.name)) continue;
-      const source = readFileSync(full, 'utf8');
+      const source = withoutComments(readFileSync(full, 'utf8'));
       // The hook's own definition is not one of its consumers.
       if (source.includes('export function useDashboardData(')) continue;
       if (source.includes('useDashboardData(')) found.push(entry.name.replace(/\.jsx?$/, ''));
@@ -297,6 +323,89 @@ describe('every page consuming useDashboardData reports a failed load', () => {
 
     expect(consumers).not.toEqual(short);
     expect(consumers.length).toBe(short.length + 1);
+  });
+
+  /**
+   * Which of the three reads each page renders, and therefore which failures
+   * it may raise an alert about.
+   *
+   * Written out per page rather than derived from the page's destructure,
+   * which would compare the rule against the thing the rule governs.
+   */
+  const SOURCES_OF = {
+    WorkflowPage: ['team', 'practice', 'game'],
+    ExportsPage: ['team', 'practice', 'game'],
+    GameSchedulingPage: ['team', 'game'],
+    PracticeSchedulingPage: ['team', 'practice'],
+    TeamAnalysisPage: ['team'],
+  };
+
+  for (const { name, Page, heading } of PAGES) {
+    const shown = SOURCES_OF[name];
+    const hidden = ['team', 'practice', 'game'].filter((s) => !shown.includes(s));
+
+    // Meta-assertion on the table, not on the page: a row that named all
+    // three would make the loop below assert nothing, silently.
+    it(`${name} is listed against the sources it renders`, () => {
+      expect(shown.length).toBeGreaterThan(0);
+      expect(shown.every((s) => ['team', 'practice', 'game'].includes(s))).toBe(true);
+    });
+
+    for (const source of shown) {
+      it(`${name} raises an alert for a failed ${source} read, which it renders`, () => {
+        dash.value = {
+          ...dashboardData(MESSAGE),
+          errors: { team: null, practice: null, game: null, [source]: MESSAGE },
+        };
+        render(
+          <MemoryRouter>
+            <Page />
+          </MemoryRouter>
+        );
+        expect(screen.getByRole('heading', { name: heading })).toBeTruthy();
+        expect(screen.getByTestId(BANNER)).toHaveTextContent(MESSAGE);
+      });
+    }
+
+    for (const source of hidden) {
+      it(`${name} stays quiet about a failed ${source} read, which it does not`, () => {
+        // The over-reporting `DataErrorBanner`'s docstring recorded, and which
+        // folding the assignments reads into the aggregate would otherwise
+        // have made worse rather than better.
+        dash.value = {
+          ...dashboardData(MESSAGE),
+          errors: { team: null, practice: null, game: null, [source]: MESSAGE },
+        };
+        render(
+          <MemoryRouter>
+            <Page />
+          </MemoryRouter>
+        );
+        expect(screen.getByRole('heading', { name: heading })).toBeTruthy();
+        expect(screen.queryByTestId(BANNER)).toBeNull();
+      });
+    }
+  }
+
+  it('the scan counts calls and not prose', () => {
+    // The fault this scan actually had. Both strings name the hook with its
+    // call parenthesis; only one of them is a call. Asserting the real call
+    // survives is the half that keeps `withoutComments` from "fixing" the
+    // false positive by matching nothing at all.
+    const prose = ['/**', ' * See `useDashboardData().errors` for the shape.', ' */', ''].join(
+      '\n'
+    );
+    const line = '// forwarded from useDashboardData() upstream\n';
+    const call = 'const { errors } = useDashboardData();\n';
+
+    expect(withoutComments(prose).includes('useDashboardData(')).toBe(false);
+    expect(withoutComments(line).includes('useDashboardData(')).toBe(false);
+    expect(withoutComments(call).includes('useDashboardData(')).toBe(true);
+    // A `//` inside a URL is not a comment, and eating the rest of that line
+    // would be a false negative of exactly the kind this check exists to stop.
+    expect(withoutComments(`const u = 'https://x/y';\n${call}`).includes('useDashboardData(')).toBe(
+      true
+    );
   });
 });
 

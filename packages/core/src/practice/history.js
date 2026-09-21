@@ -33,6 +33,32 @@ function clockOf(minutes) {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
+/**
+ * The later of two bounds, where `null` means "unbounded at this end".
+ *
+ * @param {string|null} a
+ * @param {string|null} b
+ * @returns {string|null}
+ */
+function laterOf(a, b) {
+  if (a === null) return b;
+  if (b === null) return a;
+  return a > b ? a : b;
+}
+
+/**
+ * The earlier of two bounds, where `null` means "unbounded at this end".
+ *
+ * @param {string|null} a
+ * @param {string|null} b
+ * @returns {string|null}
+ */
+function earlierOf(a, b) {
+  if (a === null) return b;
+  if (b === null) return a;
+  return a < b ? a : b;
+}
+
 /** Weekday code -> the word a person reads. */
 const WEEKDAY_WORD = Object.freeze({
   SUN: 'Sunday',
@@ -72,8 +98,13 @@ export function buildPracticeHistory(slotSet, { teamId }) {
       throw new Error(`practice: assignment "${assignment.id}" has no slot`);
     }
     phases.push({
-      from: assignment.effectiveFrom ?? slot.validFrom,
-      until: assignment.effectiveUntil ?? slot.validUntil,
+      // **Intersected with the slot, not taken whole.** `teamsOn()` in
+      // `materialise.js` only ever asks about slot-valid dates, so an
+      // assignment running wider than its slot would make the history claim
+      // months the materialiser produces nothing for — and would hide a real
+      // gap by making two narrow slots read as one contiguous stretch.
+      from: laterOf(assignment.effectiveFrom, slot.validFrom),
+      until: earlierOf(assignment.effectiveUntil, slot.validUntil),
       slotId: slot.id,
       surfaceId: slot.surfaceId,
       weekday: slot.weekday,
@@ -136,6 +167,16 @@ export function buildPracticeHistory(slotSet, { teamId }) {
           gapUntil: isoDateOfDayNumber(thisStart - 1),
           days: thisStart - previousEnd - 1,
         }
+      )
+    );
+  }
+
+  if (phases.length === 0) {
+    findings.push(
+      makePracticeFinding(
+        PRACTICE_REASON.HISTORY_EMPTY,
+        `team ${teamId} holds no slot in this plan of ${slotSet.slots.length} slot(s); an empty history here means "this team never practises", not "that team id is a typo"`,
+        { teamId, slotCount: slotSet.slots.length }
       )
     );
   }

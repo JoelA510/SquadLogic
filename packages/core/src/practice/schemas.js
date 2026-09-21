@@ -65,6 +65,28 @@ export const PracticeSlotSchema = z
     /** Which revision of the plan this row came from; the corpus's `source_sheet`. */
     revisionId: z.string().min(1).nullable().default(null),
     label: z.string().nullable().default(null),
+    /**
+     * How an adapter's `(venue, field, subunit)` triple resolved against the
+     * facility graph — a `PRACTICE_SURFACE_RESOLUTION` value, or `null` when
+     * the caller supplied a surface id directly and there was nothing to
+     * resolve.
+     *
+     * Carried on the slot rather than raised by the adapter because an adapter
+     * produces plan data and the builder produces findings; `buildClosureSet()`
+     * splits the same work the same way. Anything other than `resolved` gets
+     * `PRACTICE_SLOT_SURFACE_UNRESOLVED`.
+     */
+    surfaceResolution: z
+      .enum([
+        'resolved',
+        'ambiguous',
+        'venue-unknown',
+        'surface-unknown',
+        'subunit-unknown',
+        'venue-only',
+      ])
+      .nullable()
+      .default(null),
   })
   .strict()
   .refine(

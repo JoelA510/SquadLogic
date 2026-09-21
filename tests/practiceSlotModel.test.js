@@ -38,11 +38,20 @@ import {
   describePracticeHistory,
   firstWeekdayOnOrAfter,
   materialisePracticeOccurrences,
+  practiceSeverityOf,
+  toFacilityBooking,
   toSeason2026PracticePlan,
 } from '@squadlogic/core/practice/index.js';
 import { weekdayCodeOf } from '@squadlogic/core/availability/index.js';
-import { isoDateOfDayNumber, isoDayNumber } from '@squadlogic/core/facility/index.js';
-import { loadSeason2026Practice } from '@squadlogic/core/fixtures/index.js';
+import {
+  FacilityBookingSchema,
+  buildSeason2026PracticeFacilityGraph,
+  buildSeason2026VenueComplexMap,
+  checkOccupancy,
+  isoDateOfDayNumber,
+  isoDayNumber,
+} from '@squadlogic/core/facility/index.js';
+import { loadFacilityGeometry, loadSeason2026Practice } from '@squadlogic/core/fixtures/index.js';
 import { expandPracticeSlotsForSeason } from '@squadlogic/core/practiceSlotExpansion.js';
 import { formatDate } from '@squadlogic/core/utils/date.js';
 
@@ -178,8 +187,51 @@ describe('practice model :: materialisation across a month', () => {
       format: null,
       slotId: 'tue-17',
       teamIds: ['T1'],
-      exceptionId: null,
+      exceptionIds: [],
     });
+  });
+
+  it('narrows to a FacilityBooking the facility layer really accepts', () => {
+    const [occurrence] = materialisePracticeOccurrences(oneSlotSet(), {
+      from: '2026-09-01',
+      to: '2026-09-07',
+    }).occurrences;
+    // An occurrence is a booking *superset*: FacilityBookingSchema is
+    // `.strict()`, so the provenance fields make it not a booking. The
+    // docstring used to claim otherwise; this pins both halves.
+    expect(() => FacilityBookingSchema.parse(occurrence)).toThrow(/nrecognized/);
+    expect(() => FacilityBookingSchema.parse(toFacilityBooking(occurrence))).not.toThrow();
+  });
+
+  it('hands occupancy a booking it can actually judge', () => {
+    // The end-to-end of the narrowing above, through a real facility call
+    // rather than through the schema alone. `checkOccupancy()` parses every
+    // *existing* booking, so that is where an un-narrowed occurrence breaks.
+    const graph = buildSeason2026PracticeFacilityGraph(loadFacilityGeometry());
+    const surfaceId = graph.surfaceIds[0];
+    const both = materialisePracticeOccurrences(
+      buildPracticeSlotSet({
+        slots: [
+          { ...TUESDAY_SLOT, id: 'o1', surfaceId },
+          // Same ground, same hour, a different revision so the pair is not
+          // also reported as a duplicate plan entry.
+          { ...TUESDAY_SLOT, id: 'o2', surfaceId, revisionId: 'r2' },
+        ],
+        assignments: [],
+      }),
+      { from: '2026-09-01', to: '2026-09-07' }
+    ).occurrences;
+    expect(both).toHaveLength(2);
+
+    // Raw: the facility layer refuses it.
+    expect(() => checkOccupancy(graph, toFacilityBooking(both[0]), [both[1]])).toThrow(
+      /nrecognized/
+    );
+
+    // Narrowed: it decides, and finds the clash that is really there.
+    const result = checkOccupancy(graph, toFacilityBooking(both[0]), [toFacilityBooking(both[1])]);
+    expect(result.findings.map((f) => f.code)).toContain('OCCUPIED_SAME_SURFACE');
+    expect(result.meta.bookingPairsCompared).toBe(1);
   });
 
   it('reports an empty window rather than returning a bare empty list', () => {
@@ -355,10 +407,44 @@ describe('practice model :: dated exceptions', () => {
       ],
     });
     expect(datesOf(materialised)).not.toContain('2026-09-15');
-    const unmatched = materialised.findings.filter(
-      (f) => f.code === PRACTICE_REASON.EXCEPTION_UNMATCHED
+    // Reported as *superseded*, not as unmatched: the slot does occur on
+    // 2026-09-15, it was cancelled. The unmatched wording would send a reader
+    // looking for a wrong-weekday bug that is not there.
+    expect(codesOf(materialised.findings)).not.toContain(PRACTICE_REASON.EXCEPTION_UNMATCHED);
+    const superseded = materialised.findings.filter(
+      (f) => f.code === PRACTICE_REASON.EXCEPTION_SUPERSEDED
     );
-    expect(unmatched.map((f) => f.details.exceptionId)).toEqual(['x8']);
+    expect(superseded.map((f) => f.details.exceptionId)).toEqual(['x8']);
+    expect(superseded[0].details.supersededBy).toBe('x7');
+  });
+
+  it('records every override that touched a date, not just the last', () => {
+    const materialised = materialisePracticeOccurrences(oneSlotSet(), {
+      ...window,
+      exceptions: [
+        {
+          id: 'm1',
+          slotId: 'tue-17',
+          date: '2026-09-08',
+          kind: 'moved',
+          reason: 'clash',
+          startMinutes: 18 * 60,
+        },
+        {
+          id: 's1',
+          slotId: 'tue-17',
+          date: '2026-09-08',
+          kind: 'shortened',
+          reason: 'sunset',
+          durationMinutes: 30,
+        },
+      ],
+    });
+    const moved = materialised.occurrences.find((o) => o.date === '2026-09-08');
+    // Both apply and compose; a single `exceptionId` would have dropped one.
+    expect(moved.exceptionIds).toEqual(['m1', 's1']);
+    expect(moved.startMinutes).toBe(1080);
+    expect(moved.endMinutes).toBe(1110);
   });
 
   it('requires a reason, including for a cancellation', () => {
@@ -505,10 +591,67 @@ describe('practice model :: a team history', () => {
     expect(lines.at(-1)).toContain('dates not stated in the source');
   });
 
+  it('clamps a phase to the slot, so the history cannot outrun the materialiser', () => {
+    // An assignment wider than its slot used to be reported whole, so the
+    // history claimed August-to-December while the materialiser produced only
+    // the five September Tuesdays.
+    const set = buildPracticeSlotSet({
+      slots: [{ ...TUESDAY_SLOT, id: 'p1', validFrom: '2026-09-01', validUntil: '2026-09-30' }],
+      assignments: [
+        {
+          id: 'a1',
+          slotId: 'p1',
+          teamId: 'T1',
+          effectiveFrom: '2026-08-01',
+          effectiveUntil: '2026-12-31',
+        },
+      ],
+      source: 'test',
+    });
+    const [phase] = buildPracticeHistory(set, { teamId: 'T1' }).phases;
+    expect(phase.from).toBe('2026-09-01');
+    expect(phase.until).toBe('2026-09-30');
+
+    // The property that matters: the history's range and the materialiser's
+    // dates describe the same season.
+    const dates = datesOf(
+      materialisePracticeOccurrences(set, { from: '2026-01-01', to: '2026-12-31' })
+    );
+    expect(dates.at(0) >= phase.from).toBe(true);
+    expect(dates.at(-1) <= phase.until).toBe(true);
+  });
+
+  it('still sees a gap that two over-wide assignments would have hidden', () => {
+    // Unclamped, these two assignments run 2026-08-01..2026-12-31 each and
+    // read as contiguous; clamped, the October gap between the slots shows.
+    const wide = (id, slotId) => ({
+      id,
+      slotId,
+      teamId: 'T1',
+      effectiveFrom: '2026-08-01',
+      effectiveUntil: '2026-12-31',
+    });
+    const history = buildPracticeHistory(
+      buildPracticeSlotSet({
+        slots: [
+          { ...TUESDAY_SLOT, id: 'p1', validFrom: '2026-09-01', validUntil: '2026-09-30' },
+          { ...TUESDAY_SLOT, id: 'p2', validFrom: '2026-11-01', validUntil: '2026-11-30' },
+        ],
+        assignments: [wide('a1', 'p1'), wide('a2', 'p2')],
+        source: 'test',
+      }),
+      { teamId: 'T1' }
+    );
+    const gap = history.findings.find((f) => f.code === PRACTICE_REASON.HISTORY_GAP);
+    expect(gap.details).toMatchObject({ gapFrom: '2026-10-01', gapUntil: '2026-10-31' });
+  });
+
   it('says plainly when a team holds no slot', () => {
-    expect(describePracticeHistory(buildPracticeHistory(oneSlotSet(), { teamId: 'T9' }))).toEqual([
-      'Team T9: no practice slot in this plan.',
-    ]);
+    const history = buildPracticeHistory(oneSlotSet(), { teamId: 'T9' });
+    expect(describePracticeHistory(history)).toEqual(['Team T9: no practice slot in this plan.']);
+    // ... and as a finding, not only as prose. Without this, a mistyped team
+    // id is indistinguishable from a team that never practises.
+    expect(codesOf(history.findings)).toContain(PRACTICE_REASON.HISTORY_EMPTY);
   });
 });
 
@@ -776,7 +919,9 @@ describe('practice model :: agreement with practiceSlotExpansion', () => {
 
 describe('practice model :: the season-2026 practice grid', () => {
   const practice = loadSeason2026Practice();
-  const plan = toSeason2026PracticePlan(practice.practiceSlots);
+  const graph = buildSeason2026PracticeFacilityGraph(loadFacilityGeometry());
+  const complexMap = buildSeason2026VenueComplexMap();
+  const plan = toSeason2026PracticePlan(practice.practiceSlots, graph, complexMap);
   const set = buildPracticeSlotSet(plan);
 
   /**
@@ -832,6 +977,36 @@ describe('practice model :: the season-2026 practice grid', () => {
     expect(set.stats.slotsByWeekday.FRI).toBe(fridayRows.length);
     expect(set.stats.slotsByWeekday.SAT).toBe(0);
     expect(set.stats.slotsByWeekday.SUN).toBe(0);
+  });
+
+  it('resolves ground through the facility graph, not by spelling an id', () => {
+    // The grid writes `Maplewood` where the graph venue is `Maplewood Back`
+    // (season2026PracticeGeometry.js:191-202). An earlier draft formatted ids
+    // from the grid spelling and produced 14 surface ids the graph does not
+    // hold, across 252 rows, silently. Enumerated from the graph — the thing a
+    // break would leave intact — not from the slots.
+    const known = new Set(graph.surfaceIds);
+    const resolved = set.slots.filter((slot) => known.has(slot.surfaceId));
+    expect(resolved).toHaveLength(425);
+    // Meta-assertion: a graph that held nothing would make that a vacuous 0.
+    expect(known.size).toBeGreaterThan(20);
+  });
+
+  it('keeps the ground it could not resolve, and says so for each', () => {
+    const unresolved = set.findings.filter(
+      (f) => f.code === PRACTICE_REASON.SLOT_SURFACE_UNRESOLVED
+    );
+    // 28 `(unresolved)` venue rows the sheet itself could not place, plus four
+    // `Maplewood Front A` rows naming a field the graph has no record of.
+    expect(unresolved).toHaveLength(32);
+    const byResolution = {};
+    for (const finding of unresolved) {
+      byResolution[finding.details.resolution] =
+        (byResolution[finding.details.resolution] ?? 0) + 1;
+    }
+    expect(byResolution).toEqual({ 'venue-unknown': 28, 'surface-unknown': 4 });
+    // Kept, not dropped: the row count is still honest.
+    expect(set.stats.slotCount).toBe(rows.length);
   });
 
   it('refuses to date the seven revisions, and says so once per revision', () => {
@@ -905,11 +1080,19 @@ describe('practice model :: nothing in production consults it', () => {
   });
 
   it('registers a severity for every code it declares', () => {
-    // The `severityOf` throw is the enforcement; this proves the table is
-    // complete rather than that the throw exists.
+    // **This assertion used to be unfailable.** It read
+    // `PRACTICE_SEVERITY[code]`, which is the three-member severity *enum*,
+    // not the severity table — a property access that returns `undefined` and
+    // never throws, so it passed for any code list at all. `practiceSeverityOf`
+    // is the lookup that throws on an unregistered code.
     expect(practiceCodes.length).toBeGreaterThan(3);
     for (const code of practiceCodes) {
-      expect(() => PRACTICE_SEVERITY[code]).not.toThrow();
+      expect(Object.values(PRACTICE_SEVERITY)).toContain(practiceSeverityOf(code));
     }
+  });
+
+  it('the severity check can fail — an unregistered code throws', () => {
+    // The control the previous version of this test had no way to pass.
+    expect(() => practiceSeverityOf('PRACTICE_NOT_A_REAL_CODE')).toThrow(/no registered severity/);
   });
 });

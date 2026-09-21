@@ -61,6 +61,21 @@ export const PRACTICE_REASON = Object.freeze({
    * returning an empty list.
    */
   SLOT_NEVER_OCCURS: 'PRACTICE_SLOT_NEVER_OCCURS',
+  /**
+   * **The slot's ground did not resolve to exactly one facility surface.**
+   *
+   * An adapter states how a `(venue, field, subunit)` triple resolved, using
+   * `facility/practiceSurfaces.js`'s vocabulary; this code is raised for any
+   * answer that is not `resolved`. The slot is kept — dropping it would make
+   * the count dishonest — but its `surfaceId` points at nothing the graph
+   * holds, so an occupancy or closure check over it would decide nothing.
+   *
+   * The same division of labour `buildClosureSet()` uses: the adapter *says*
+   * the sheet named ground nothing knows, and the builder turns that into a
+   * finding. It is here rather than in the adapter because the adapter
+   * produces plan data, not findings.
+   */
+  SLOT_SURFACE_UNRESOLVED: 'PRACTICE_SLOT_SURFACE_UNRESOLVED',
 
   /* -- revisions (the corpus's seven plans) ------------------------------ */
   /**
@@ -96,6 +111,15 @@ export const PRACTICE_REASON = Object.freeze({
    * range somebody forgot to extend.
    */
   HISTORY_GAP: 'PRACTICE_HISTORY_GAP',
+  /**
+   * The team holds no slot in this plan.
+   *
+   * The counterpart of `PRACTICE_WINDOW_EMPTY`, and here for the same reason:
+   * an empty phase list cannot otherwise be told apart from a mistyped team
+   * id. Without it a history of nothing reads `allowed` with no findings,
+   * which is the same falsely-clean result in a smaller disguise.
+   */
+  HISTORY_EMPTY: 'PRACTICE_HISTORY_EMPTY',
 
   /* -- materialisation --------------------------------------------------- */
   /**
@@ -121,6 +145,18 @@ export const PRACTICE_REASON = Object.freeze({
    * believes is cancelled is still in the plan.
    */
   EXCEPTION_UNMATCHED: 'PRACTICE_EXCEPTION_UNMATCHED',
+  /**
+   * An exception named a real occurrence that a cancellation on the same date
+   * had already removed.
+   *
+   * Distinct from {@link PRACTICE_REASON.EXCEPTION_UNMATCHED}, which says the
+   * slot does not occur on that date. Here it does — it was cancelled. An
+   * earlier draft reported both through `EXCEPTION_UNMATCHED`, whose wording
+   * would have sent an operator looking for a wrong-weekday bug that is not
+   * there. `info`, because nothing is wrong: a superseded move is what a
+   * cancellation is supposed to do to it.
+   */
+  EXCEPTION_SUPERSEDED: 'PRACTICE_EXCEPTION_SUPERSEDED',
   /** An exception names a slot id the set does not hold. */
   EXCEPTION_UNKNOWN_SLOT: 'PRACTICE_EXCEPTION_UNKNOWN_SLOT',
   /**
@@ -166,6 +202,8 @@ export const PRACTICE_REASON_SEVERITY = Object.freeze({
   // *reading* that is compromised, not the data.
   [PRACTICE_REASON.SLOT_DUPLICATE]: PRACTICE_SEVERITY.COMPROMISE,
   [PRACTICE_REASON.SLOT_NEVER_OCCURS]: PRACTICE_SEVERITY.COMPROMISE,
+  // The plan is readable; what cannot be decided is anything about the ground.
+  [PRACTICE_REASON.SLOT_SURFACE_UNRESOLVED]: PRACTICE_SEVERITY.COMPROMISE,
 
   [PRACTICE_REASON.REVISION_UNDATED]: PRACTICE_SEVERITY.COMPROMISE,
   [PRACTICE_REASON.REVISION_ORDER_UNKNOWN]: PRACTICE_SEVERITY.COMPROMISE,
@@ -173,12 +211,14 @@ export const PRACTICE_REASON_SEVERITY = Object.freeze({
   // The model's own invariant, broken.
   [PRACTICE_REASON.HISTORY_OVERLAP]: PRACTICE_SEVERITY.BLOCKING,
   [PRACTICE_REASON.HISTORY_GAP]: PRACTICE_SEVERITY.INFO,
+  [PRACTICE_REASON.HISTORY_EMPTY]: PRACTICE_SEVERITY.INFO,
 
   // A suppression is the model working, not the model complaining.
   [PRACTICE_REASON.OCCURRENCE_SUPPRESSED]: PRACTICE_SEVERITY.INFO,
   [PRACTICE_REASON.OCCURRENCE_SHORTENED]: PRACTICE_SEVERITY.INFO,
   [PRACTICE_REASON.OCCURRENCE_MOVED]: PRACTICE_SEVERITY.INFO,
   [PRACTICE_REASON.EXCEPTION_UNMATCHED]: PRACTICE_SEVERITY.COMPROMISE,
+  [PRACTICE_REASON.EXCEPTION_SUPERSEDED]: PRACTICE_SEVERITY.INFO,
   [PRACTICE_REASON.EXCEPTION_UNKNOWN_SLOT]: PRACTICE_SEVERITY.BLOCKING,
   [PRACTICE_REASON.WINDOW_EMPTY]: PRACTICE_SEVERITY.INFO,
 

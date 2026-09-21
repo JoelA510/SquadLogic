@@ -29,6 +29,7 @@
  * @property {number} capacity
  * @property {string|null} revisionId
  * @property {string|null} label
+ * @property {string|null} surfaceResolution - a `PRACTICE_SURFACE_RESOLUTION` value, or null
  */
 
 /**
@@ -81,9 +82,10 @@
 /**
  * One concrete practice on one date.
  *
- * Deliberately the `FacilityBooking` shape (`facility/schemas.js:131-146`)
- * plus the provenance a practice needs, so an occurrence can go straight into
- * `checkOccupancy()` or `findClosureBreaches()` with no adapter.
+ * The `FacilityBooking` shape (`facility/schemas.js:131-146`) plus the
+ * provenance a practice needs. That schema is `.strict()`, so the extra fields
+ * make this a booking *superset*: narrow it with `toFacilityBooking()` before
+ * handing it to `checkOccupancy()` or `findClosureBreaches()`.
  *
  * @typedef {Object} PracticeOccurrence
  * @property {string} id
@@ -96,7 +98,7 @@
  * @property {string} slotId
  * @property {string|null} revisionId
  * @property {ReadonlyArray<string>} teamIds
- * @property {string|null} exceptionId - the override that altered this occurrence
+ * @property {ReadonlyArray<string>} exceptionIds - every override that altered this occurrence
  */
 
 /**

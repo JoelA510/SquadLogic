@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 21 vocabularies, 497 codes, of
- * which 486 are shown to be producible and 11 are named as holes.
+ * `tests/attribution.test.js` already carries. 21 vocabularies, 500 codes, of
+ * which 489 are shown to be producible and 11 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -5647,7 +5647,7 @@ harvest('repairProposal(8.6 does not exist)', repairProposal({ affectedCount: 2 
 /* practice: the recurring-practice model (Phase 8.5)                          */
 /* -------------------------------------------------------------------------- */
 
-// Every one of the thirteen codes is driven from a public entry point on
+// Every one of the sixteen codes is driven from a public entry point on
 // constructed input — no hole to register. The model is young enough that
 // nothing has yet had time to become unreachable, which is the point of
 // auditing it on the way in rather than later.
@@ -5688,11 +5688,12 @@ const practicePlan = harvest(
       // Two revisions the source never dated, so neither can be ordered.
       practiceSlot({ id: 'pm-4', validFrom: null, validUntil: null, revisionId: 'r2' }),
       practiceSlot({ id: 'pm-5', validFrom: null, validUntil: null, revisionId: 'r3' }),
+      // Ground an adapter could not place against the facility graph.
+      practiceSlot({ id: 'pm-6', revisionId: 'r4', surfaceResolution: 'venue-unknown' }),
     ],
     assignments: [
       { id: 'pa-1', slotId: 'pm-1', teamId: 'PT1' },
-      // Overlaps pm-1 for the whole of September, and leaves an October gap
-      // before pm-7 below.
+      // Same September range as pm-1, so PT1's two phases overlap.
       { id: 'pa-2', slotId: 'pm-2', teamId: 'PT1' },
     ],
     source: 'reachability rig',
@@ -5726,8 +5727,22 @@ harvest(
       { id: 'px-4', slotId: 'pm-1', date: '2026-09-16', kind: 'cancelled', reason: 'typo' },
       // A slot this plan does not hold.
       { id: 'px-5', slotId: 'ghost', date: '2026-09-29', kind: 'cancelled', reason: 'wrong plan' },
+      // Aimed at a date 'px-1' already cancelled: superseded, not unmatched.
+      {
+        id: 'px-6',
+        slotId: 'pm-1',
+        date: '2026-09-08',
+        kind: 'moved',
+        reason: 'stale request',
+        startMinutes: 1140,
+      },
     ],
   })
+);
+
+harvest(
+  'buildPracticeHistory(a team id no assignment names)',
+  buildPracticeHistory(practicePlan, { teamId: 'PT-nobody' })
 );
 
 harvest(

@@ -175,6 +175,17 @@ export function buildPracticeSlotSet(input) {
   }
 
   for (const slot of slots) {
+    if (slot.surfaceResolution === null || slot.surfaceResolution === 'resolved') continue;
+    findings.push(
+      makePracticeFinding(
+        PRACTICE_REASON.SLOT_SURFACE_UNRESOLVED,
+        `slot "${slot.id}" names ground that resolved "${slot.surfaceResolution}", so "${slot.surfaceId}" is not a surface the facility graph holds; the slot is kept and nothing can be decided about its ground`,
+        { slotId: slot.id, surfaceId: slot.surfaceId, resolution: slot.surfaceResolution }
+      )
+    );
+  }
+
+  for (const slot of slots) {
     if (slot.validFrom === null) continue;
     if (slotEverOccurs(slot)) continue;
     findings.push(

@@ -12,12 +12,17 @@
  *
  * **Nothing here constructs a `Date`.** Dates are `YYYY-MM-DD`, times are
  * minutes past local midnight, and the walk is integer arithmetic on day
- * numbers. The output is deliberately the `FacilityBooking` shape
- * (`facility/schemas.js:131-146`), so an occurrence goes straight into
- * `checkOccupancy()` or `findClosureBreaches()` without an adapter — and so
- * that venue closures stay the facility layer's job rather than being
- * re-modelled here. A slot's own exceptions (rain-out, holiday) are the slot's;
- * a venue being shut is the venue's.
+ * numbers.
+ *
+ * An occurrence is the `FacilityBooking` shape (`facility/schemas.js:131-146`)
+ * **plus** four provenance fields, so venue closures stay the facility layer's
+ * job rather than being re-modelled here: a slot's own exceptions (rain-out,
+ * holiday) are the slot's, a venue being shut is the venue's. Because
+ * `FacilityBookingSchema` is `.strict()`, the extra fields make an occurrence
+ * a booking *superset*, not a booking — passing one to `checkOccupancy()`
+ * raises `unrecognized_keys`. {@link toFacilityBooking} is the one-line
+ * narrowing; an earlier draft of this file claimed "no adapter needed" and was
+ * simply wrong.
  *
  * @module practice/materialise
  */
@@ -28,6 +33,28 @@ import { isoDateOfDayNumber, isoDayNumber } from '../facility/eligibility.js';
 import { PRACTICE_REASON, derivePracticeStatus, makePracticeFinding } from './reasonCodes.js';
 import { PRACTICE_EXCEPTION_KIND, PracticeWindowSchema } from './schemas.js';
 import { firstWeekdayOnOrAfter } from './slots.js';
+
+/**
+ * Narrow an occurrence to the booking the facility layer accepts.
+ *
+ * `FacilityBookingSchema` is `.strict()`, so the provenance fields have to go
+ * before `checkOccupancy()`, `findFacilityConflicts()` or
+ * `findClosureBreaches()` will look at it.
+ *
+ * @param {import('./types.js').PracticeOccurrence} occurrence
+ * @returns {{ id: string, surfaceId: string, date: string, startMinutes: number, endMinutes: number, format: string|null, label: string|null }}
+ */
+export function toFacilityBooking(occurrence) {
+  return {
+    id: occurrence.id,
+    surfaceId: occurrence.surfaceId,
+    date: occurrence.date,
+    startMinutes: occurrence.startMinutes,
+    endMinutes: occurrence.endMinutes,
+    format: occurrence.format,
+    label: occurrence.label,
+  };
+}
 
 /** The later of two ISO dates. */
 const laterOf = (a, b) => (a > b ? a : b);
@@ -142,15 +169,33 @@ export function materialisePracticeOccurrences(slotSet, window) {
           )
         );
         // Anything else aimed at this date could not apply: there is no
-        // occurrence left to move or shorten. Left out of `applied`, so the
-        // unmatched sweep below reports it.
+        // occurrence left to move or shorten. Reported here, with its own
+        // code, rather than falling through to the unmatched sweep — whose
+        // wording ("the slot does not occur on that date") would be false.
+        for (const superseded of onThisDate) {
+          if (superseded.id === cancellation.id) continue;
+          applied.add(superseded.id);
+          findings.push(
+            makePracticeFinding(
+              PRACTICE_REASON.EXCEPTION_SUPERSEDED,
+              `${date}: exception "${superseded.id}" (${superseded.kind}) had nothing to change — "${cancellation.id}" cancelled this practice`,
+              {
+                slotId: slot.id,
+                date,
+                exceptionId: superseded.id,
+                kind: superseded.kind,
+                supersededBy: cancellation.id,
+              }
+            )
+          );
+        }
         continue;
       }
 
       let startMinutes = slot.startMinutes;
       let durationMinutes = slot.durationMinutes;
-      /** @type {string|null} */
-      let exceptionId = null;
+      /** @type {string[]} */
+      const exceptionIds = [];
 
       for (const exception of onThisDate) {
         if (exception.kind === PRACTICE_EXCEPTION_KIND.MOVED) {
@@ -175,7 +220,7 @@ export function materialisePracticeOccurrences(slotSet, window) {
           );
         }
         applied.add(exception.id);
-        exceptionId = exception.id;
+        exceptionIds.push(exception.id);
       }
 
       occurrences.push({
@@ -191,7 +236,9 @@ export function materialisePracticeOccurrences(slotSet, window) {
         slotId: slot.id,
         revisionId: slot.revisionId,
         teamIds: teamsOn(slotSet, slot, date),
-        exceptionId,
+        // Every override that touched this date. A `moved` and a `shortened`
+        // on one date both apply, so a single id would drop one of them.
+        exceptionIds,
       });
     }
   }

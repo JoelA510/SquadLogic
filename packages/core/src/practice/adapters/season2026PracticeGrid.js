@@ -28,23 +28,49 @@
  * @module practice/adapters/season2026PracticeGrid
  */
 
-import { season2026PracticeSurfaceId } from '../../facility/adapters/season2026PracticeGeometry.js';
+import {
+  PRACTICE_SURFACE_RESOLUTION,
+  resolvePracticeSurface,
+} from '../../facility/practiceSurfaces.js';
 
 /**
  * Turn parsed `practice_grid.csv` records into slots and assignments.
  *
- * Unresolved-venue rows (the corpus's 28, whose section heading is not machine
- * readable) are **kept**, under a surface id built from the `(unresolved)`
- * token, for the reason the corpus README gives for keeping them at all: so
- * the count stays honest. The loader already reports each one as
- * `PRACTICE_VENUE_UNRESOLVED`; re-reporting here would double-count a fact.
+ * ## Ground is resolved, never spelled
+ *
+ * The grid's venue spelling is **not** a facility-graph id and must not be
+ * turned into one by string formatting. `season2026PracticeGeometry.js:191-202`
+ * says so outright — the grid writes `Maplewood` where the graph venue is the
+ * game corpus's `Maplewood Back` — and `facility/practiceSurfaces.js` exists
+ * for exactly this lookup, naming that case in its own module doc. An earlier
+ * draft of this adapter built ids with `season2026PracticeSurfaceId()` and
+ * produced 14 distinct surface ids the graph does not hold, covering 252 of
+ * the 457 rows, with no finding raised: an id that resolves to nothing, which
+ * every downstream occupancy and closure check would have silently declined to
+ * decide on.
+ *
+ * So the triple goes through {@link resolvePracticeSurface}, and the answer's
+ * status is carried on the slot. Rows that do not resolve are **kept** — the
+ * corpus README's own principle, so the count stays honest — and
+ * `buildPracticeSlotSet()` raises `PRACTICE_SLOT_SURFACE_UNRESOLVED` for each.
+ * The loader separately reports the 28 `(unresolved)` venue rows as
+ * `PRACTICE_VENUE_UNRESOLVED`; that is the *sheet* being unreadable, this is
+ * the *graph* not holding the ground, and they are different facts.
  *
  * @param {ReadonlyArray<Object>} records - `loadSeason2026Practice().practiceSlots`
+ * @param {import('../../facility/types.js').FacilityGraph} graph - the practice-layer graph
+ * @param {import('../../facility/types.js').VenueComplexMap} complexMap
  * @returns {{ slots: Array<Object>, assignments: Array<Object>, source: string }}
  */
-export function toSeason2026PracticePlan(records) {
+export function toSeason2026PracticePlan(records, graph, complexMap) {
   if (!Array.isArray(records)) {
     throw new TypeError('toSeason2026PracticePlan requires the parsed practice_grid records');
+  }
+  if (!graph || !complexMap) {
+    throw new TypeError(
+      'toSeason2026PracticePlan requires the practice facility graph and venue-complex map; ' +
+        'grid venue spellings are not surface ids and must be resolved, not formatted'
+    );
   }
 
   /** group key -> slot */
@@ -53,7 +79,19 @@ export function toSeason2026PracticePlan(records) {
   const assignments = [];
 
   for (const record of records) {
-    const surfaceId = season2026PracticeSurfaceId(record.venue, record.field, record.subunit);
+    const resolution = resolvePracticeSurface(graph, complexMap, {
+      venue: record.venue,
+      field: record.field,
+      subunit: record.subunit,
+    });
+    // On `resolved` there is exactly one id. On anything else the first id (or
+    // a legible marker when there are none) keeps the slot addressable while
+    // the status says not to trust it.
+    const surfaceId =
+      resolution.status === PRACTICE_SURFACE_RESOLUTION.RESOLVED
+        ? resolution.surfaceIds[0]
+        : (resolution.surfaceIds[0] ??
+          `unresolved::${record.venue}/${record.field}${record.subunit ? `/${record.subunit}` : ''}`);
     // Revision is part of the identity: two revisions describing the same
     // window are two versions of the plan, and merging them would delete the
     // structure §4 of the README is about.
@@ -79,6 +117,7 @@ export function toSeason2026PracticePlan(records) {
         capacity: 0,
         revisionId: record.sourceSheet,
         label: `${record.venue} ${record.field}${record.subunit ? ` ${record.subunit}` : ''}`,
+        surfaceResolution: resolution.status,
       };
       slotsByKey.set(key, slot);
     }

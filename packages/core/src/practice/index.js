@@ -61,7 +61,7 @@ export {
 
 export { buildPracticeSlotSet, firstWeekdayOnOrAfter, getPracticeSlot } from './slots.js';
 
-export { materialisePracticeOccurrences } from './materialise.js';
+export { materialisePracticeOccurrences, toFacilityBooking } from './materialise.js';
 
 export { buildPracticeHistory, describePracticeHistory } from './history.js';
 

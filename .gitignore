@@ -1,4 +1,8 @@
-node_modules/
+# No trailing slash. `node_modules/` matches a directory only, so an agent
+# worktree that SYMLINKS the root `node_modules` in to run the suite leaves it
+# untracked AND unignored -- one `git add -A` from being committed. The bare
+# pattern matches the directory and the symlink both.
+node_modules
 dist/
 .DS_Store
 npm-debug.log*

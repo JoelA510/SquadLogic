@@ -1,6 +1,6 @@
 import { assertCountsLabelled, buildCountUnitRegistry } from './counts.js';
 import { SlotSchema, TeamSchema } from './schemas/index.js';
-import { listTeamCoachIds } from './practiceScheduling.js';
+import { listTeamCoachIds, resolveSchoolDayEndFilter } from './practiceScheduling.js';
 
 /**
  * What every number this module publishes is a number **of**.
@@ -232,6 +232,47 @@ function calculateFairnessConcerns(baseSlotDistribution, assignmentsByDivision) 
   return fairnessConcerns;
 }
 
+/**
+ * Measure an applied or proposed practice schedule.
+ *
+ * @param {Object} params
+ * @param {Array<{ teamId: string, slotId: string }>} params.assignments
+ * @param {Array<{ teamId: string, reason?: unknown }>} [params.unassigned] -
+ *   `reason` is deliberately untyped: `normalizeManualFollowUpReasonInput`
+ *   takes whatever a persisted run put there, and a test pins a number and an
+ *   object against it.
+ * @param {Array<Object>} params.teams - The roster, and the subject set for
+ *   every team-shaped count: derived from `teams`, never from `assignments`.
+ * @param {Array<Object>} params.slots
+ * @param {string} [params.schoolDayEnd] - e.g. `'16:00'`. Omit it (or pass
+ *   `null`) to opt out of the school-hours check; supplying it is a promise to
+ *   apply it, so an empty or blank string refuses rather than opting out.
+ * @param {string} [params.timezone] - the season's IANA zone. Required
+ *   whenever `schoolDayEnd` is supplied: a wall reading needs a clock before
+ *   an assignment can be compared against it.
+ * @returns {Object} The practice report. `dataQualityWarnings` carries the
+ *   school-hours violations alongside the unknown-team, unknown-slot,
+ *   duplicate-assignment and zero-capacity notes.
+ *
+ *   **Its emptiness is not, by itself, a clean bill of health, and this is the
+ *   bound of what this function fixed.** An empty list now rules out a
+ *   school-hours check that was *asked for* and could not run — that used to
+ *   look identical to one that ran clean. It still does not distinguish "ran
+ *   and found nothing" from "never asked for": a season whose
+ *   `season_settings.school_day_end` is NULL reaches
+ *   `PracticeSchedulingPage.jsx` as `undefined`, opts out here, and publishes
+ *   the same empty list. Telling those two apart needs a flag on the report
+ *   that a reader consumes, which is a report-shape change and a panel change
+ *   rather than this one; a flag nothing reads would be its own defect.
+ * @throws {TypeError} for malformed `assignments`, `unassigned`, `teams` or
+ *   `slots`.
+ * @throws {import('./timing/seasonClock.js').SeasonClockError} when
+ *   `schoolDayEnd` is supplied and cannot be evaluated:
+ *   `WALL_TIME_UNREADABLE` for a malformed time, `SEASON_TIMEZONE_MISSING` for
+ *   no zone, `SEASON_TIMEZONE_UNKNOWN` for a zone this runtime does not know.
+ *   Identical to `schedulePractices`, deliberately — a constraint that cannot
+ *   be checked is refused, never reported as satisfied.
+ */
 export function evaluatePracticeSchedule({
   assignments,
   unassigned = [],
@@ -299,6 +340,50 @@ export function evaluatePracticeSchedule({
     }
     baseSlotMetadata.set(baseSlotId, existingMeta);
   }
+
+  // **The school-hours constraint is resolved once, here, or the run refuses.**
+  //
+  // This used to be three words inside the assignment loop --
+  // `if (schoolDayEnd && timezone && slot.start)` -- and two ways past it
+  // produced a report saying the schedule had no school-hours violations,
+  // over a schedule nobody had checked:
+  //
+  //   * **no `timezone`, or a falsy one**: the guard was false, the block
+  //     never ran, and `dataQualityWarnings` stayed empty;
+  //   * **an unreadable `schoolDayEnd`** (`'afternoon'`, `'16'`, `'16:99'`):
+  //     `split(':').map(Number)` gave `NaN` bounds, and every comparison
+  //     against `NaN` is false, so no assignment could ever violate it.
+  //
+  // A third class was not silent but was uncoded: a TRUTHY zone string `Intl`
+  // rejects -- `'   '` as much as `'Americas/New_York'` -- passed the guard
+  // and threw a bare `RangeError` out of `toLocaleString`, mid-loop, in the
+  // runtime's wording and with no reason code. So this function already
+  // refused part of this input space; the rest of it refuses with it now,
+  // rather than one arm being singled out for honesty.
+  //
+  // `schedulePractices` refuses all three (#420), and refuses them by name.
+  // Its `resolveSchoolDayEndFilter` is reused rather than re-derived: a second
+  // opinion on what a readable `schoolDayEnd` is, or on which zones exist, is
+  // precisely how the solver came to refuse an input the evaluator called
+  // clean. That also settles the opt-out the same way in both arms -- only
+  // `undefined`/`null` opt out, and a cleared field arriving as `''` refuses
+  // instead of quietly disabling the constraint.
+  //
+  // **Refusing, not reporting, and the callers were checked first.** There are
+  // five call sites and none is an Edge Function -- `fairness-scoring` and
+  // `auto-scheduler` call the Deno twin in
+  // `supabase/functions/_shared/engines/scoring-engine.ts`, which takes neither
+  // parameter, so no HTTP 200 becomes a 500 here. The three in
+  // `autoScheduler.js` run after a `schedulePractices` call on the same two
+  // values, which already refuses first. `evaluationPipeline` documents that it
+  // propagates evaluator throws. `utils/practiceRunResults.js` catches and
+  // records `metricsUnavailable: { reason }`, which
+  // `PracticeSchedulingPage.handleApplySchedule` shows the operator while still
+  // persisting their schedule -- the channel this refusal is meant to reach.
+  const schoolDayEndRequested = schoolDayEnd !== undefined && schoolDayEnd !== null;
+  const schoolHours = schoolDayEndRequested
+    ? resolveSchoolDayEndFilter(schoolDayEnd, timezone)
+    : null;
 
   const dataQualityWarnings = [];
   const seenAssignments = new Set();
@@ -398,20 +483,44 @@ export function evaluatePracticeSchedule({
     );
     baseSlotDivisionCounts.set(baseSlotId, baseEntry);
 
-    // R3 Validation: Check School Hours
-    if (schoolDayEnd && timezone && slot.start) {
-      // Convert to local time
-      const localDateString = slot.start.toLocaleString('en-US', { timeZone: timezone });
-      const localDate = new Date(localDateString);
-      const day = localDate.getDay(); // 0 is Sunday, 1 is Monday...
+    // R3 Validation: Check School Hours. Unconditional once `schoolHours` is
+    // non-null: the only way past the resolution above is a constraint that
+    // can be evaluated, and `slot.start` is `SlotSchema`'s parsed instant, so
+    // there is nothing left here to skip on. The old `slot.start` clause could
+    // not fire -- `InstantSchema` refuses a start that is absent, naive or
+    // unparseable long before this line -- and reading as though it could is
+    // what let the two live arms beside it pass for defensiveness.
+    if (schoolHours) {
+      // `formatToParts` in the season's zone, which is the sibling filter's
+      // method. The old code formatted with `toLocaleString` and re-parsed the
+      // result with `new Date()`: correct only because the host-zone parse
+      // cancelled the host-zone read, and silently `NaN` on any host whose
+      // formatted output its own `Date` cannot parse -- a fourth way to the
+      // same empty warning list.
+      const parts = schoolHours.formatter.formatToParts(slot.start);
+      const partValue = (type) => parts.find((part) => part.type === type)?.value;
+      const weekday = partValue('weekday');
 
-      // Mon(1) - Thu(4)
-      if (day >= 1 && day <= 4) {
-        const [endHour, endMinute] = schoolDayEnd.split(':').map(Number);
-        const slotHour = localDate.getHours();
-        const slotMinute = localDate.getMinutes();
+      // Mon-Thu. `en-US` is fixed by the formatter, so the domain is its seven
+      // `weekday: 'short'` labels and these four are the matched ones.
+      //
+      // **The weekday comes from the instant, and `schedulePractices` reads
+      // the `slot.day` label -- so the two arms can still disagree.** A slot
+      // labelled `'Friday'` that starts Thursday 14:00 in the season's zone is
+      // kept by the solver and reported by this function. That is GAP-36, it
+      // predates this change (the old code derived the weekday too), and it is
+      // deliberately not settled here: the solver refuses a slot with no
+      // `day`, this function's `day` is optional, and reconciling that is a
+      // solver change. What this fix unifies is which INPUTS the constraint
+      // can be evaluated over, not which weekday a slot is on.
+      if (['Mon', 'Tue', 'Wed', 'Thu'].includes(weekday)) {
+        const slotHour = Number.parseInt(partValue('hour'), 10);
+        const slotMinute = Number.parseInt(partValue('minute'), 10);
 
-        if (slotHour < endHour || (slotHour === endHour && slotMinute < endMinute)) {
+        if (
+          slotHour < schoolHours.endHour ||
+          (slotHour === schoolHours.endHour && slotMinute < schoolHours.endMinute)
+        ) {
           dataQualityWarnings.push(
             `Assignment for team ${team.id} violates school hours (starts at ${slotHour}:${String(slotMinute).padStart(2, '0')} ${timezone}, limit is ${schoolDayEnd})`
           );

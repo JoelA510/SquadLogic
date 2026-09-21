@@ -5472,3 +5472,106 @@ bounded to `packages/core` plus migrations, and nothing in 8.8 may touch
 `frontend/`. The wiring question itself is the operator's, and is now the fourth
 decision waiting on them alongside #51, the 100:1 weight ratio, and #53's
 sequencing.
+
+---
+
+## 8.8 PR 1 — the corpus changelog (`8ebe16f`, PR #429)
+
+`packages/core/src/changelog/`: 167 corpus rows load and classify, per-subject
+history, and an as-of query over it. Core only — no SQL, no frontend, no store.
+Two review rounds, both blocking, **both found by falsification rather than by
+reading**. The agent's own `/code-review` had already found and fixed seven.
+
+### Round 1 — a break that stayed green
+
+The agent proved four falsifications red before handing over. The supervisor's
+job was to look for the fifth, and there was one. `stateAsOf()` could not tell a
+subject the log has never mentioned from one queried before its first entry:
+
+```
+all-after : {"logged":false,"state":null,"codes":["DERIVED_FROM_REJECTED_LOG"]}
+never-logd: {"logged":false,"state":null,"codes":["DERIVED_FROM_REJECTED_LOG","HISTORY_EMPTY"]}
+```
+
+`history.js`'s header nominates `logged` as the field that keeps those apart,
+citing `ConsequencePreview.jsx` on why "nothing happened" and "we have not
+looked" must not render alike. The root cause was one level below the symptom:
+**two readings of one field inside one function** — `latest !== null` in the
+dated branch, `phases.length > 0` in the undated one. The test codified the
+defect rather than catching it, asserting the `logged: false, state: null` pair
+that a never-logged subject also produces, with the never-logged case driven
+only through `buildChangeHistory()` so the two were never compared through one
+API. One reading now in both branches, plus `AS_OF_PRECEDES_LOG`.
+
+### Round 2 — a false census, and the supervisor put it there
+
+The ride-along the supervisor requested landed a claim in
+`fixtures/season-2026/practice/README.md` that the roster's 132 codes "carry
+exactly three tier tokens". It carries five:
+
+| token  | teams | assignments |
+| ------ | ----: | ----------: |
+| Junior |    40 |          64 |
+| Micro  |    34 |          52 |
+| 7v7    |    28 |          50 |
+| 9v9    |    16 |          27 |
+| Select |    14 |          22 |
+| total  |   132 |         215 |
+
+The supervisor supplied the premise, from `grep -oE "1[0-9][BG][A-Za-z]+[0-9]{2}"`
+— a filter requiring ages 10-19 and an alphabetic token, which matches 14 of
+132 teams and misses 118. The 14 it matched were all `Select` **because the
+filter admitted nothing else**. A conclusion derived from a universe that
+excluded everything capable of contradicting it, then passed downstream as a
+premise: the exact rule this phase has spent itself enforcing, broken in the
+act of enforcing it.
+
+**The agent's half is the more valuable finding.** It did not take the premise
+on trust — it ran its own check, `grep -oE "^[0-9]{2}[A-Z]([A-Za-z]+?)[0-9]{2}$"`,
+which excludes `7v7` and `9v9` for the same reason, got the same three tokens,
+and reported "all confirmed". In its words:
+
+> **Two instruments blind along one axis are one instrument.**
+
+Independent verification is only independent along the axes the two instruments
+do not share. An agreement between two filters that exclude the same thing is
+not corroboration, and it reads exactly like corroboration. This is the first
+defect of the phase where verification *by a second party* was the thing that
+failed, rather than a single unchecked claim.
+
+The same blind spot was in the test, which filtered "looks like one of our
+codes" with a pattern matching 88 of 132 roster codes. `16BSuperRec02` was
+still the only match — but under that filter it was luck, not evidence. The
+test now proves its pattern matches all 132 before it is allowed to answer,
+which is the correct general remedy: **a filter must establish its universe
+before its result means anything.**
+
+### Verified at `8ebe16f` by the supervisor, not inherited
+
+- `npx vitest run` on merged `main` — **3765 passed**, 34 skipped, 6 todo
+  (3805); 215 files passed, 1 skipped. Matches the agent's figure exactly.
+  Reconciles against the 3725 baseline: +39 changelog, +1 generated
+  reachability test.
+- The `logged` fix, re-executed: `AS_OF_PRECEDES_LOG` fires and `logged` reads
+  `true` for the queried-before case against `false` for never-logged, both
+  through `stateAsOf`. Both of the agent's falsifications re-run by hand —
+  restoring `logged: latest !== null` fails 2 tests, neutering the new guard
+  fails the same 2.
+- The corrected census, from `loadSeason2026().teams` rather than a text grep,
+  plus the coaches-per-team histogram `{1: 50, 2: 81, 3: 1}`, which reconciles
+  50 + 162 + 3 = 215.
+- `16BSuperRec02`: four rows, all `Regional League Select fixture`, zero
+  occurrences in `combined_schedule.csv` or either roster file.
+
+### 8.8 PR 2 is HELD, at the agent's insistence and correctly
+
+The agent declined to write SQL until the §5 gate is answered, and it is right.
+The supervisor's ruling had authorised PR 1 and PR 2 together as "`packages/core`
+plus migrations, nothing touching `frontend/`" — but PR 2 is a migration, RPCs
+**and app readers**, which breaches that bound on its own terms and is
+materially less revertible than PR 1 was. Continuing to cross a gate this
+supervisor has already crossed three times, now that an agent has formally
+refused, would be knowingly compounding it rather than inheriting it.
+
+PR 2 waits for the operator. Its design is settled and recorded in the ruling
+above, so the decision is the only thing missing.

@@ -5003,3 +5003,99 @@ directly: when the stop hook fires during an agent's round, the correct response
 is to do nothing. Satisfying a hook is never worth an operation on a working
 tree another process owns, and "I found a non-destructive way" is how this one
 happened.
+
+## The two "declared, not enforced" defects — and why the lint baseline was never 2
+
+**2026-09-21.** Merged as `0087f4f` from PR #420. Two defects filed off the
+back of 8.5's review, fixed in one PR because they are one shape: a thing the
+code declares and does not do. What belongs here is not the fixes — the PR has
+those — but three things the work established about how this phase has been
+measuring itself.
+
+### The lint baseline is whatever happens to be checked out
+
+The brief told the agent "warnings at or below **2**, and this one I did run."
+The agent measured **1** and called the claim false. I re-measured and got
+**3**, four runs running, same rule and same location every time
+(`react-hooks/incompatible-library` at `RosterManager.jsx:93:26`).
+
+All three numbers are honest. `eslint.config.js` ignores `**/.gemini/**` and
+`**/.github/**` and does not ignore `.claude/`. Agent worktrees live at
+`.claude/worktrees/<name>/` and each is a full copy of the repository, so
+`eslint .` in the shared checkout lints every copy and reports the same warning
+once per copy. One copy gives 1, two give 2, three give 3.
+
+So the repository's baseline is **1**, and every "at baseline" claim this phase
+was a reading of a tree with a different number of agent worktrees in it. The
+guard adopted one task earlier — *a baseline goes into a brief only if it was
+executed in the session that writes the brief* — would not have caught this,
+because it **was** executed. The correction is narrower and less comfortable: a
+number measured in the shared checkout is not the repository's number, because
+the shared checkout is not the repository. It contains every worktree any agent
+has left behind.
+
+Two consequences past the confusion. A lint **error** introduced on some other
+agent's branch fails `npm run lint` in the shared checkout although it is not in
+the working tree's branch. And the Definition of Done's "warnings at or below
+baseline" cannot be enforced at all while the number floats with worktree count.
+Filed with the one-line fix. `vitest.config.js` is **not** exposed — its
+`include: ['tests/**/…']` is anchored at the root — but `tsconfig.json`'s
+`exclude` does not name `.claude` either and has not been checked.
+
+### The defect as filed was the smaller half of the live one
+
+`schoolDayEnd` had **six** silent-pass paths, not the two the brief named: the
+missing zone, a zone `Intl` rejects, an unreadable value giving `NaN` bounds, an
+empty string read as the opt-out, a slot with no `day` exempted outright, and a
+**zoneless slot `start`** parsed in the runner's zone, so the constraint's answer
+depended on `TZ`. The last two were found by `/code-review`, not by reading.
+
+More importantly: `schedulePractices` **has no production caller**.
+`optimizePracticeSchedule` is its only caller and is itself uncalled outside
+tests. The production auto-generate route is
+`supabase/functions/auto-scheduler/index.ts`, which has its own inlined solver
+and contains no occurrence of `schoolDayEnd` at all — while
+`PracticeSchedulingPage` reads the setting, `useAutoScheduler` transmits it, and
+`_shared/schemas/auto-scheduler.ts` validates it. An operator sets a cutoff, the
+app sends it, the server accepts it, and nothing applies it.
+
+So the PR made the constraint real in the library and not on the path the UI
+invokes, and said so in its own body rather than letting the title imply
+otherwise. **The live defect is now filed separately and is a product question
+as much as an engineering one**: either the Edge solver honours the cutoff or
+the UI stops offering a setting that does nothing. Silently deleting the field
+is not available — an operator who set it believes it is in force.
+
+The lesson for filing: "this is on the live write path" was asserted in the
+brief from a chain of imports that was real, and the *other* consumer of the
+same builder turned out to have no caller. **Tracing a path forward from a
+module proves the path exists; it does not prove anything walks it.**
+
+### A `/code-review` that reviewed the wrong thing and looked fine doing it
+
+The agent's first `/code-review` run diffed the **shared checkout's supervisor
+branch** — 31 commits, 143 files — rather than the PR's range, and returned
+three plausible findings in code the PR never touched, one of them in a package
+the brief put out of scope. It noticed and re-ran against the real range.
+
+Worth recording because the failure mode is invisible from the output: a
+scope-blind review returns findings, the findings read as real, and the PR looks
+reviewed. The tell was not the findings' quality but their *subject*. **Check
+what a review says it examined before reading what it found.**
+
+### The twin arm this one deliberately left
+
+`practiceMetrics.js:402` guards the same school-hours check with
+`if (schoolDayEnd && timezone && slot.start)` and has the same two silent
+passes. After this PR the scheduler refuses those inputs and the metrics arm
+still accepts them, so the siblings answer one question two ways — and the
+falsely-clean answer is the one that reaches `scheduler_runs.results` and
+`PracticeReadinessPanel`.
+
+Deferred rather than blocked, and the distinction from 8.5's blocking finding is
+worth stating because the shapes look identical. In 8.5 both arms were
+reachable, the divergence was inside one function, and the fix was three lines.
+Here the diverging arm is in another module with another contract, the fix
+touches the readiness panel and `seed.sql`, and the contradiction is **not
+reachable** — precisely because the fixed arm has no production caller. A twin
+arm is blocking when both arms can fire. This one cannot, yet.

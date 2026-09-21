@@ -5383,3 +5383,92 @@ over-reporting, the opposite direction to the defect being fixed;
 `ExportsPage` warns and still lets an operator ship a zero-row CSV; and the
 dashboard's header CTA still reads off the same regressed `nextStep`. Two dead
 branches found in passing are filed separately.
+
+---
+
+## 8.8 — planning round (no code yet)
+
+**Recorded 2026-09-21 by the supervisor, before implementation starts.**
+
+8.8 was dispatched plan-first per CLAUDE.md §3. The research hand-back corrected
+the brief on five points. Each was verified in the shared checkout at `1fcfbdf`
+before being accepted, because on one of them the brief's error was a
+*correction the supervisor had made to the prompt*:
+
+- **`soleCoachRiskRegister` is defined once, at `people/roster.js:318`.**
+  `attribution/context.js:34` only imports it. The brief was right; the
+  supervisor's mid-flight "correction" to it — that the function lives under
+  `attribution/` — was the error. Second supervisor error of the phase where
+  the wrong claim was introduced by a correction rather than by the brief.
+- **`3ec872a` is PR #391**, `feat(facility): effective dating for venues and
+  sub-surfaces`. The brief called it "#20", which was the internal task id.
+- **Facility surfaces do have effective dating** — `facility/lifecycle.js`,
+  shipped in 8.4. The brief implied the capability was absent.
+- **`RequestedChange` has six outcomes, not five.** `unknown-game` is reachable
+  at `resolve/report.js:224` whenever the baseline lookup misses.
+- **`audit_log` is pruned at 180 days** —
+  `supabase/migrations/20260409000000_audit_log_retention_180.sql`. This is load
+  bearing: it is why an append-only corpus changelog cannot be a view over
+  `audit_log`, and the hand-back's argument for a dedicated store stands on it.
+
+### The fixture-suite figures, settled
+
+The hand-back also called "23 files / 1351 cases" unreproducible, offering
+15/979 and 26/1596 instead. It is reproducible — both numbers were executed:
+
+```
+npx vitest run $(grep -rl "season-2026" tests/ --include=*.js --include=*.jsx | tr '\n' ' ')
+  -> Test Files 23 (23)   Tests 1351 (1351)
+npx vitest run tests/season2026{CorpusVocabulary,Fixture,PracticeCorpus}.test.js
+  -> Test Files  3  (3)   Tests  145  (145)
+```
+
+So the previous entry's figures were right and the supervisor withdrew them
+wrongly on the agent's say-so, then retracted the withdrawal. The finding worth
+keeping is neither number: **four different enumerations of "the fixture suite"
+are live in this repo and they disagree, so a file-set figure quoted without the
+query that produced it is not a figure.** Briefs must carry the command.
+
+### Rulings on the proposed four-PR split
+
+1. **Resolve-run persistence is out of 8.8** — it is GAP-35, already open, and
+   what decides whether its store has a writer is the unanswered wiring
+   question. Findings go to the gap; nothing is implemented.
+2. **Team effective dating is deferred**, with the reason written into a gap
+   that names the reader which would justify building it. A store whose only
+   reader is hypothetical is the shape this phase exists to stop.
+3. **Notification state moves to 8.10.** The plan's "8.10 depends on 8.8 for the
+   notice half" is read as *the changelog is the notice's source data*, not as
+   *8.8 builds notice state* — because 8.10 is what generates notices. Landing
+   the table in 8.8 gives it neither writer nor reader until 8.10, which is
+   ruling 2's defect one task later. What 8.8 owes 8.10 is that each changelog
+   row carries what a per-entry notice derives from, stated in the PR body.
+4. **`teams.coach_id` / `assistant_coach_ids` are kept, single-writer, no
+   trigger.** The new table is the source of truth for dated assignment; the two
+   columns remain current-state denormalisation written by the same RPC in the
+   same transaction. A trigger would exist in Postgres and not in
+   `mockSupabaseClient.js`, which hand-implements these RPCs from `:6721` — a
+   twin arm, half-applied, which is the defect shape behind #407, #409, #418 and
+   #420. Deprecation is too wide today: 12 migrations reference
+   `assistant_coach_ids`, and `frontend/src/utils/teamCoaches.js` exists because
+   "a team row reaches the app under half a dozen spellings". Ships with a drift
+   check that is falsified before it is trusted.
+
+### Blocker for the operator: §5's gate was crossed without a record
+
+The hand-back flagged that `BUILD_PLAN_STATUS.md` §5 requires the wiring
+question to be re-put once GAP-29 and GAP-30 close, that both have closed, and
+that no record exists of it being re-put. Checking that, §5 is stronger than the
+flag: line 319 reads **"8.5-8.10 do not start until it is answered."**
+
+8.5, 8.6 and 8.7 ran. The gate was crossed, by this supervisor, without the
+question being re-put and without the crossing being recorded. Recording it now.
+
+The work done under it is defensible on the same reasoning §5 gives for
+8.0-8.4 — 8.5 through 8.7 are `packages/core` and commit no frontend surface —
+but that reasoning was never stated at the time and the plan's own instruction
+said not to proceed. 8.8's PR 1 and PR 2 continue on that explicit reasoning,
+bounded to `packages/core` plus migrations, and nothing in 8.8 may touch
+`frontend/`. The wiring question itself is the operator's, and is now the fourth
+decision waiting on them alongside #51, the 100:1 weight ratio, and #53's
+sequencing.

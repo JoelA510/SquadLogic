@@ -25,6 +25,11 @@ R7="$REPO/docs/sql/20260911000000_revert.sql"
 M8="$REPO/supabase/migrations/20260912000000_retire_refuses_on_contained_estate.sql"
 R8="$REPO/docs/sql/20260912000000_revert.sql"
 S5="$REPO/docs/sql/20260909000000_smoke.sql"
+# 8.8 census: the two reverts and the one migration whose printed claims had
+# no plant at all. They were plantable all along -- nothing had ever counted
+# the claims against the registry, so nobody looked.
+R9="$REPO/docs/sql/20260920000000_revert.sql"
+SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
 # occur exactly once -- but it does so at PLANT time, one full harness run into
@@ -34,6 +39,16 @@ ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # below for why that division stopped being reasonable.
 ANCHORS_ONLY="${PLANT_ANCHORS_ONLY:-}"
 ANCHOR_OK=0
+# **Census-only mode.** The census at the bottom of this file is the right
+# census and it costs 5.4 hours to reach, because its universe is the BASELINE
+# TRANSCRIPT -- it cannot name a claim until a green harness has printed one.
+# That is the correct authority and the wrong schedule: a guard whose only
+# runtime is a sweep nobody runs is a guard nobody runs. Set this and the
+# static half of the same census runs against `run.sh`'s SOURCE with no
+# cluster, no plant and no database, in under a second, so CI can hold it on
+# every PR. See `static_claim_census` at the bottom for what the two halves do
+# and do not each cover.
+CENSUS_ONLY="${PROVE_CLAIM_CENSUS_ONLY:-}"
 # What each plant scored, by label, for the census at the bottom of this file.
 # The census asserts that every health claim run.sh prints has a plant that
 # reached one of its RED branches, and it reads THIS run's results rather than a
@@ -257,8 +272,8 @@ trap on_signal INT TERM
 #
 # `plant()` has always refused an anchor that does not -- at PLANT time, one
 # full harness run into a sweep. That division was reasonable while the sweep
-# was something somebody ran. It is not reasonable at 121 plants and ~2.7
-# minutes each: **a loud failure nobody triggers is a quiet one.**
+# was something somebody ran. It is not reasonable at well over a hundred
+# plants at ~2.7 minutes each: **a loud failure nobody triggers is a quiet one.**
 #
 # It is not hypothetical, and the evidence is this very PR. 8.4 gap B changed
 # `public.field_bookings`' signature and renamed its second parameter, and that
@@ -278,21 +293,24 @@ trap on_signal INT TERM
 # coupling this stage closes: a plant whose anchor has moved is silently SKIPPED
 # by that check, so an unverified anchor takes a second guard down with it.
 # This runs first for that reason.
-if [ -z "$ANCHORS_ONLY" ]; then
+if [ -z "$ANCHORS_ONLY" ] && [ -z "$CENSUS_ONLY" ]; then
   echo "=== pre-flight: every plant anchor resolves, exactly once ==="
   PLANT_ANCHORS_ONLY=1 bash "${BASH_SOURCE[0]}"
   anchor_status=$?
   if [ "$anchor_status" -ne 0 ]; then
-    echo "REFUSING TO PLANT -- re-anchor the plants above before sweeping." >&2
-    echo "  Every one of them would score ANCHOR-MISS (meaningless) hours from now." >&2
+    echo "REFUSING TO PLANT -- fix the anchors or the census above before sweeping." >&2
+    echo "  A mis-anchored plant would score ANCHOR-MISS (meaningless) hours from now;" >&2
+    echo "  an unregistered claim would fail the census at the end of the same sweep." >&2
     exit 8
   fi
   echo
 fi
 
 # Skipped in anchors-only mode: this is the parent's stage, and running it in
-# the child too would print it twice for one sweep.
-if [ -n "$ANCHORS_ONLY" ]; then
+# the child too would print it twice for one sweep. Skipped in census-only
+# mode for the reason that mode exists: it reads no migration and starts no
+# database.
+if [ -n "$ANCHORS_ONLY" ] || [ -n "$CENSUS_ONLY" ]; then
   :
 else
 echo "=== pre-flight: no plant may target a superseded statement ==="
@@ -423,10 +441,10 @@ fi
 #
 # So: the unmutated harness must pass first. If it does not, nothing below is
 # evidence of anything and the run stops rather than printing eleven CAUGHTs.
-if [ -n "$ANCHORS_ONLY" ]; then
+if [ -n "$ANCHORS_ONLY" ] || [ -n "$CENSUS_ONLY" ]; then
   # No baseline in anchors-only mode: nothing is planted, so there is nothing
   # for a red baseline to make look caught. Skipping it is what makes this
-  # check cost minutes.
+  # check cost minutes, and census-only seconds.
   :
 else
 echo "=== baseline: the unmutated harness must pass before any plant ==="
@@ -494,6 +512,12 @@ plant() { # label file old new [expected-failing-check] [check-that-must-stay-gr
     echo "  directory to PLANT_DIRS." >&2
     exit 5
   fi
+  # **Census-only mode stops here, having still paid for the two checks
+  # above.** It resolves no anchor and opens no file: its subject is the
+  # REGISTRY at the bottom, and the only thing it needs from the plants is
+  # that they were declared. The duplicate-label and PLANT_DIRS refusals are
+  # free and are real guards on that registry, so they stay.
+  if [ -n "$CENSUS_ONLY" ]; then RESULT["$label"]=CENSUS-ONLY; return; fi
   # **What the file looked like before this run touched it.** See the restore
   # check below for why a checksum rather than trust.
   local before_sum
@@ -2112,11 +2136,30 @@ DROP FUNCTION IF EXISTS public.admin_delete_field_blackout(uuid, uuid);" \
 # 8.4 gap B: the scope, the containment, and the restore
 # ---------------------------------------------------------------------------
 #
+# **THESE TWO MOVED FROM $M7 TO $M8, AND THE SWEEP HAD BEEN UNSTARTABLE UNTIL
+# THEY DID.**
+#
+# 20260912000000 recreates `public.admin_retire_location`, so the installed
+# body is ITS copy and a mutation planted into 20260911000000's is overwritten
+# moments later -- the superseded-statement class the pre-flight above was
+# written for. The pre-flight did its job and refused, and that refusal is
+# `exit 7` BEFORE the baseline: from the commit that added the containment
+# migration onwards, `prove.sh` could not reach a single plant, a baseline or
+# the census at the bottom of this file. Eight unregistered `(checked)` claims
+# accumulated behind that refusal, which is what a guard that cannot start
+# costs. Reproduced on the merge commit before this change: two refusals,
+# `REFUSING TO PLANT`, nothing else run.
+#
+# Both anchors appear exactly once in 20260912000000 as well, because it
+# carries the body forward with the containment gate added, and both were
+# re-measured there: each scores CAUGHT at `smoke 20260911000000`, the check
+# they always named.
+#
 # **The one defect this whole migration exists to prevent**, planted so the
 # prevention is proved rather than asserted: the venue arm asking a
 # FIELD-scoped question. It is one word, it is what LIVE-1, LIVE-2 and LIVE-3
 # each were, and every structural assertion in the file stays green.
-plant "M7 the venue guard asks a field-scoped question" "$M7" \
+plant "M8 the venue guard asks a field-scoped question" "$M8" \
   "FROM public.field_bookings(p_organization_id, p_location_id, p_effective_to, 'location') b;" \
   "FROM public.field_bookings(p_organization_id, p_location_id, p_effective_to, 'field') b;" \
   "smoke 20260911000000"
@@ -2125,7 +2168,7 @@ plant "M7 the venue guard asks a field-scoped question" "$M7" \
 # onto the children satisfies every count the refusal reports and every audit
 # phase; only the "no child carries a date" assertions can see it, and they
 # exist in both the smoke and the shared table.
-plant "M7 the venue retirement copies its date onto its children" "$M7" \
+plant "M8 the venue retirement copies its date onto its children" "$M8" \
   "    WHERE id = p_location_id AND organization_id = p_organization_id
     RETURNING * INTO v_after;
 
@@ -2196,6 +2239,17 @@ plant "R7 revert counts no sub-surface retirements" "$R7" \
 # three-argument one back leaves admin_retire_field, admin_delete_field and
 # rollback_field_import_job raising 42883 on every call. The revert asserts its
 # own restore; this makes that assertion earn its place.
+#
+# **`FAIL ` is added by the matcher, so an `expect` that carries it can never
+# match.** `plant` greps the verdict lines for `FAIL $expect`, and these three
+# passed `FAIL revert <id>` -- so the search was for `FAIL FAIL revert <id>`,
+# which nothing prints. All three scored MISATTRIBUTED on every sweep: a plant
+# that IS caught, recorded as one that is not -- the mirror of the mis-aimed
+# plants this file has found before, and just as misleading. One of the three
+# is a declared prover in the census below, so the census failed with it.
+# Measured, each of the three: with the plant applied the transcript's only
+# verdict line is the bare `FAIL revert <id>`, `FAIL FAIL revert <id>` appears
+# zero times, and the `^` whole-line form scores CAUGHT.
 plant "R7 revert never restores the three-argument producer" "$R7" \
   "CREATE OR REPLACE FUNCTION public.field_bookings(
     p_organization_id uuid,
@@ -2203,7 +2257,7 @@ plant "R7 revert never restores the three-argument producer" "$R7" \
   "CREATE OR REPLACE FUNCTION public.field_bookings_not_restored(
     p_organization_id uuid,
     p_field_id uuid," \
-  "FAIL revert 20260911000000"
+  "^revert 20260911000000"
 
 # A DROP whose argument list drifted from the CREATE's is a silent no-op, which
 # is how docs/sql/reverts/20260504060000 came to report success over a function
@@ -2219,7 +2273,7 @@ plant "R7 revert never restores the three-argument producer" "$R7" \
 plant "R7 revert drops a producer signature that does not exist" "$R7" \
   "DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date, text);" \
   "DROP FUNCTION IF EXISTS public.field_bookings(uuid, uuid, date, boolean);" \
-  "FAIL revert 20260911000000"
+  "^revert 20260911000000"
 
 # A revert that leaves an RPC standing over a producer that can no longer
 # answer its question is worse than one that leaves nothing.
@@ -2359,7 +2413,161 @@ plant "R8 revert counts dated nodes instead of undated ones" "$R8" \
 plant "R8 the zero-venue guard is wired to a dead counter" "$R8" \
   "  IF v_venues = 0 AND COALESCE(current_setting('revert.allow_empty', true), 'off') <> 'on' THEN" \
   "  IF v_venues > 0 AND COALESCE(current_setting('revert.allow_empty', true), 'off') <> 'on' THEN" \
-  "FAIL revert 20260912000000"
+  "^revert 20260912000000"
+
+# ---------------------------------------------------------------------------
+# The seven claims nothing had ever tried to make fail
+# ---------------------------------------------------------------------------
+#
+# **The census below was already both-directional and it still missed eight
+# claims, because nothing had ever run it.** Its universe is the baseline
+# transcript, so it cannot name a gap until a green harness has printed one --
+# and reaching a green baseline costs a 5.4-hour sweep. Eight `(checked)`
+# lines had drifted into `run.sh` since the last one: the two sample-seed
+# lines, the four 20260912000000 revert lines and the two 20260920000000
+# lines. Seven are planted here. The eighth is the flag-unset seed line, and
+# it is the one that is not plantable at all: `run.sh` now says so in its own
+# words and no longer prints it as `(checked)`, with the measurement in the
+# comment there.
+#
+# The static half added at the bottom of this file is what stops the next
+# eight accumulating: it reads `run.sh`'s SOURCE, needs no database, and runs
+# in the anchor pre-flight and in `npm run test`.
+
+# **The opt-in's ON half, planted where it does not also unpin the known gap.**
+# Any mutation that makes the flag-on build insert NOTHING also makes the
+# seeded full build stop aborting, and that build is pinned -- so it would
+# come back with two red lines and no isolation to claim. Drifting the LABEL
+# instead leaves the 31 INSERTs happening (the pin holds, verified in the
+# transcript: `(known gap, pinned) the seeded full build still aborts at
+# 20260310000002`) while the season the check counts is not there. That is the
+# residual the check exists for: the seed applying is not the seed inserting
+# the row anything reads.
+plant "SEED the sample season's label drifts from the one anything looks for" "$SEED" \
+  "        'Fall Recreation',
+        2024," \
+  "        'Fall Recreational',
+        2024," \
+  "with squadlogic.seed_sample_data=on the seed left" \
+  "smoke 20260906000000"
+
+# **The 20260912000000 revert's three transcript figures, one plant each.**
+# The per-venue magnitude, the two totals, and the sentence that says which
+# way the magnitude is loose: three separate claims, printed by three separate
+# greps, and a plant aimed at one must leave the other two green or it is
+# proving the stage rather than the check. Each names one of its siblings as
+# `green` for that reason.
+
+# The per-venue figure, stopped being derived. `r.live_nodes` is the count the
+# loop computed from the estate; a constant prints the same sentence with a
+# number that owes nothing to the database, which is precisely what the check
+# reading `at least 3 node(s)` exists to reject.
+plant "R8 the per-venue exposure figure stops being derived" "$R8" \
+  "        r.name, r.id, r.live_nodes;" \
+  "        r.name, r.id, 1;" \
+  "revert 20260912000000: planted a live venue with three undated nodes" \
+  "(checked) the revert examined both live venues and counted only the one that loses a gate"
+
+# The examined set, widened to venues the revert does not touch. The harness
+# plants three venues and one is already retired, so the loop's
+# `effective_to IS NULL` is the difference between "examined 2" and
+# "examined 3" -- and a revert reporting on rows it will not change is the
+# wrong-subject-set shape, in the file that reports what a revert strands.
+plant "R8 the exposure loop examines already-retired venues too" "$R8" \
+  "     WHERE l.effective_to IS NULL
+     ORDER BY l.name" \
+  "     ORDER BY l.name" \
+  "revert 20260912000000: the revert's examined/exposed totals do not match the planted estate" \
+  "(checked) the revert named the venue that loses its containment gate and counted the nodes exposed whatever date is chosen"
+
+# The bound, dropped. The per-venue figure is a floor and the line after the
+# loop is the only thing that says so; without it the same numbers read as
+# totals, which is the overclaim the reword removed. The mutation is that
+# overclaim coming back.
+plant "R8 the floor disclaimer goes back to claiming a total" "$R8" \
+  "  RAISE NOTICE '  (the per-venue counts are a FLOOR: a retirement dated before a child''s own end date exposes that child too)';" \
+  "  RAISE NOTICE '  (the per-venue counts are exact)';" \
+  "revert 20260912000000: the revert printed a per-venue exposure count without naming it a floor" \
+  "(checked) the revert examined both live venues and counted only the one that loses a gate"
+
+# **The gate verdict, and why it took a two-statement mutation to reach.**
+#
+# Every simpler route is gated behind the revert's OWN assertion block, which
+# raises on a restored body that kept the gate, on a missing function and on
+# an overload -- so the revert fails to apply, the stage prints nothing but
+# its bare line, and the verdict is never evaluated. That is the same guard
+# the EMERG plant had to defeat in one edit, and the shape that does it here
+# is a revert whose last statement undoes what it has just proved: the
+# assertion block passes over the correctly restored body, and a second copy
+# of the definition -- taken from the wrong source -- lands after it.
+#
+# That is exactly the argument `run.sh`'s catalogue read exists to make. The
+# revert's in-file assertion is not the last word on the revert, so a check
+# that reads the catalogue AFTERWARDS is not redundant with it. Nothing had
+# ever shown that; this does.
+plant "R8 the revert re-installs the gated body after asserting its restore" "$R8" \
+  "END \$\$;
+
+COMMIT;" \
+  "END \$\$;
+
+-- plant: a second copy of the definition, taken from the WRONG source, after
+-- the block that has already asserted the restore.
+CREATE OR REPLACE FUNCTION public.admin_retire_location(
+    p_organization_id uuid,
+    p_location_id uuid,
+    p_effective_to date,
+    p_confirm boolean DEFAULT false
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS \$plant\$
+BEGIN
+    -- contained_estate_after_effective_to
+    RETURN NULL::jsonb;
+END;
+\$plant\$;
+
+COMMIT;" \
+  "revert 20260912000000: admin_retire_location did not come back without the containment gate" \
+  "(checked) the revert examined both live venues and counted only the one that loses a gate"
+
+# **The one revert whose cost is unrecoverable, and its two claims.** The
+# figure it prints before the DROP is the whole warning, so both halves of it
+# -- the rows and the organisations they span -- have to be falsifiable.
+# `DISTINCT` is the half nothing had tried: the harness seeds 3 baselines
+# across 2 organisations deliberately unequal, so dropping it prints
+# `across 3` and nothing else changes.
+plant "R9 the baseline warning stops counting organisations distinctly" "$R9" \
+  "    SELECT count(*), count(DISTINCT organization_id)" \
+  "    SELECT count(*), count(organization_id)" \
+  "revert 20260920000000: planted 3 baselines across 2 organisations and the revert did not warn with those figures" \
+  "(checked) publication_baselines is gone from the catalogue after the revert"
+
+# The store's own verdict, by the same two-statement shape as the gate above
+# and for the same reason: this revert also verifies itself, and its
+# `to_regclass` check raises on a table left standing, so a plain missing DROP
+# never reaches `run.sh`'s catalogue read. Re-creating the table AFTER the
+# verification block is what a revert whose statements have drifted out of
+# order actually looks like, and the independent read is the only thing that
+# can see it.
+plant "R9 the revert re-creates the store after verifying it gone" "$R9" \
+  "    RAISE NOTICE 'revert verified: table, writer, validator and both trigger functions all gone; audit history and the registered action left intact.';
+END;
+\$\$;" \
+  "    RAISE NOTICE 'revert verified: table, writer, validator and both trigger functions all gone; audit history and the registered action left intact.';
+END;
+\$\$;
+
+-- plant: the store is re-created after the block that has already verified it
+-- gone, so only an independent catalogue read can see it.
+CREATE TABLE public.publication_baselines (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid()
+);" \
+  "revert 20260920000000: publication_baselines survived its own revert" \
+  "(checked) the revert counted the published baselines it was about to destroy, and the organisations they span"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
@@ -2417,11 +2625,181 @@ declare -A CLAIM_PROVER=(
   ["(checked) both blackout siblings survive the revert untouched"]="R6 revert takes a blackout sibling with it"
   ["(checked) the rollback removed every overload of all four admin facility RPCs"]="EMERG the rollback and its own guard drift together"
   ["(checked) it left public.field_bookings standing, which admin_retire_field still calls"]="EMERG rollback takes the producer another RPC still calls"
+  ["(checked) with the flag on the seed migration applies and inserts its sample season"]="SEED the sample season's label drifts from the one anything looks for"
+  ["(checked) the revert named the venue that loses its containment gate and counted the nodes exposed whatever date is chosen"]="R8 the per-venue exposure figure stops being derived"
+  ["(checked) the revert examined both live venues and counted only the one that loses a gate"]="R8 the exposure loop examines already-retired venues too"
+  ["(checked) the revert says its per-venue exposure figure is a floor and which way it moves"]="R8 the floor disclaimer goes back to claiming a total"
+  ["(checked) the containment gate is gone from admin_retire_location after the revert"]="R8 the revert re-installs the gated body after asserting its restore"
+  ["(checked) the revert counted the published baselines it was about to destroy, and the organisations they span"]="R9 the baseline warning stops counting organisations distinctly"
+  ["(checked) publication_baselines is gone from the catalogue after the revert"]="R9 the revert re-creates the store after verifying it gone"
 )
 
+# ---------------------------------------------------------------------------
+# The same census, against the SOURCE, with no database
+# ---------------------------------------------------------------------------
+#
+# **The census above is the right census and it costs 5.4 hours to reach.**
+# Its universe is the baseline transcript, which is the correct authority --
+# a claim is a claim because a green harness PRINTED it, and a set derived
+# from the thing being checked compares a set against itself. But a green
+# baseline needs a cluster, the whole migration set and every smoke, and the
+# sweep it gates takes an afternoon. Eight claims drifted in unregistered
+# between two runs of it. **A guard whose only runtime is a sweep nobody runs
+# is a guard nobody runs**, which is the defect it exists to catch, one level
+# up.
+#
+# So the same diff is taken statically, off `run.sh`'s SOURCE, in under a
+# second and with nothing installed. It runs in the anchor pre-flight -- so a
+# full sweep now refuses to plant in seconds rather than discovering the gap
+# five hours later -- and `tests/dbharness.claimCensus.test.js` runs it on
+# every PR, which is the half that makes drift impossible rather than
+# unlikely.
+#
+# **What each half covers, stated, because neither is the other.** The static
+# half reads source, so it sees a claim `run.sh` would print on a branch the
+# baseline never takes, and it cannot see whether the plant still CATCHES
+# anything -- that is the runtime half's whole subject and it keeps it. The
+# runtime half reads the transcript, so it sees anything printed by a route
+# this parse cannot follow, and it is still the authority. Neither replaces
+# the other and both now run.
+#
+# **The universe is established before the diff means anything.** The channel
+# the runtime census reads is `  | ` at column 0, so this walks every source
+# line that writes it: a `(checked) ` line is a claim, a line under one of the
+# declared non-claim prefixes is counted out with its reason, the three psql
+# NOTICE passthroughs are psql's words rather than a claim, and ANYTHING ELSE
+# on that channel stops the run. A new prefix, a `printf`, an interpolated
+# claim text -- each is a refusal naming the line, because each is a way for
+# a claim to be printed that this filter would otherwise silently not see.
+# That is the difference between a filter and a universe, and it is checked a
+# second way too: the count of `(checked)` tokens outside comments must equal
+# the number of claims the channel walk found, so the two readings have to
+# agree rather than being assumed to.
+static_claim_census() {
+  local ok=1 claim prover
+  printf '%s\n' "${!CLAIM_PROVER[@]}" >/tmp/harness_claim_registry || return 2
+  python3 - "$REPO/scripts/dbharness/run.sh" /tmp/harness_claim_registry <<'CENSUS' || ok=0
+import io, re, sys
+
+run_sh, registry_path = sys.argv[1], sys.argv[2]
+lines = io.open(run_sh, encoding='utf8').read().splitlines()
+
+# Every prefix on the `  | ` channel that is deliberately NOT a health claim,
+# with the reason it is out. `run.sh` argues each of these where it prints
+# them; an entry here is a claim that the argument was made, not a licence.
+NON_CLAIM = {
+    '(coverage)':          "this harness's own bookkeeping -- which files exist and which ran",
+    '(refused)':           "a smoke that is REQUIRED to raise, reporting the refusal it raised",
+    '(known gap, pinned)': "a pre-existing defect pinned so it cannot drift, not a passing check",
+    '(unplantable)':       "a condition enforced elsewhere, printed with the reason no plant can reach it",
+}
+ECHO = re.compile(r'^\s*echo "  \| (.*)"$')
+
+printed, declared_out, bad = [], [], []
+for n, raw in enumerate(lines, 1):
+    if '  | ' not in raw:
+        continue
+    line = raw.strip()
+    if line.startswith('#'):
+        continue
+    if 's/^/  | /' in raw:
+        continue  # the psql NOTICE passthrough: psql's words, not this script's
+    m = ECHO.match(raw)
+    if not m:
+        bad.append((n, 'writes the `  | ` claim channel in a shape this census cannot read', line))
+        continue
+    body = m.group(1)
+    if body.startswith('(checked) '):
+        if any(c in body for c in '$`\\'):
+            bad.append((n, 'is a (checked) claim whose text is interpolated, so what it prints is not what this reads', line))
+            continue
+        printed.append(body)
+        continue
+    prefix = next((k for k in NON_CLAIM if body.startswith(k + ' ')), None)
+    if prefix is None:
+        bad.append((n, 'prints on the claim channel under a prefix nothing declares; make it a (checked) claim with a plant, or declare it in NON_CLAIM with its reason', line))
+    else:
+        declared_out.append((n, prefix))
+
+# The second reading of the same source, which has to agree with the first.
+tokens = [n for n, raw in enumerate(lines, 1)
+          if '(checked)' in raw and not raw.strip().startswith('#')]
+if len(tokens) != len(printed):
+    bad.append((0, 'the two readings disagree: %d non-comment line(s) carry a (checked) token but the channel walk found %d claim(s)'
+                % (len(tokens), len(printed)), 'lines %s' % tokens))
+
+for n, why, line in bad:
+    print('CENSUS FAIL: %s:%s %s' % (run_sh.split('/')[-1], n or '?', why))
+    print('    %s' % line)
+if bad:
+    sys.exit(1)
+
+# The meta-assertion both diffs below pass vacuously without.
+if not printed:
+    print('CENSUS FAIL: found no (checked) claim in run.sh at all; this census looked at nothing')
+    sys.exit(1)
+registry = set(l for l in io.open(registry_path, encoding='utf8').read().splitlines() if l)
+if not registry:
+    print('CENSUS FAIL: the plant registry is empty; this census compared against nothing')
+    sys.exit(1)
+
+failed = False
+for claim in sorted(set(printed) - registry):
+    print('CENSUS FAIL: run.sh prints a health claim no plant is declared for:')
+    print('    %s' % claim)
+    failed = True
+for claim in sorted(registry - set(printed)):
+    print('CENSUS FAIL: a plant is declared for a claim run.sh does not print:')
+    print('    %s' % claim)
+    failed = True
+if failed:
+    sys.exit(1)
+
+print('claim census (static): %d (checked) claim(s) in run.sh, each with a plant declared here; '
+      '%d line(s) on the same channel declared out of the universe'
+      % (len(set(printed)), len(declared_out)))
+CENSUS
+  # **And the label a registry entry names has to BE a plant.** The runtime
+  # census reports a prover it cannot find as "scored NOT AT ALL", which is
+  # correct and arrives five hours in. `RESULT` is keyed by every label
+  # `plant` was called with -- in this mode too, which is the whole reason the
+  # census-only walk still runs the plant table -- so a renamed or deleted
+  # plant is a dead prover here, in a second.
+  for claim in "${!CLAIM_PROVER[@]}"; do
+    IFS='|' read -r -a provers <<<"${CLAIM_PROVER[$claim]}"
+    for prover in "${provers[@]}"; do
+      if [ -z "${RESULT[$prover]+x}" ]; then
+        echo "CENSUS FAIL: the claim"
+        echo "    $claim"
+        echo "  names a prover no plant call declares: \"$prover\""
+        ok=0
+      fi
+    done
+  done
+  [ "$ok" -eq 1 ]
+}
+
+# The meta-assertion the plant walk needs before either check above means
+# anything: a run that called `plant` zero times has an empty `RESULT`, and
+# every dead-prover lookup would then report nothing rather than everything.
+STATIC_CENSUS_OK=1
+if [ -n "$ANCHORS_ONLY" ] || [ -n "$CENSUS_ONLY" ]; then
+  if [ "$ATTEMPTED" -eq 0 ]; then
+    echo "CENSUS FAIL: the plant table was never walked; the prover lookup examined nothing" >&2
+    STATIC_CENSUS_OK=0
+  elif ! static_claim_census; then
+    STATIC_CENSUS_OK=0
+  fi
+fi
+
+if [ -n "$CENSUS_ONLY" ]; then
+  [ "$STATIC_CENSUS_OK" -eq 1 ] || exit 1
+  exit 0
+fi
+
 # **The anchor pre-flight's own verdict, with the meta-assertion the others
-# have.** A run that examined ZERO plants would clear all 121 by looking at
-# none of them -- the vacuous pass this whole file exists to stop, in the check
+# have.** A run that examined ZERO plants would clear every one of them by
+# looking at none of them -- the vacuous pass this whole file exists to stop, in the check
 # added to stop a vacuous pass one level down.
 if [ -n "$ANCHORS_ONLY" ]; then
   echo
@@ -2431,6 +2809,10 @@ if [ -n "$ANCHORS_ONLY" ]; then
   fi
   if [ "$MISS" -ne 0 ]; then
     echo "ANCHOR PRE-FLIGHT FAILED: $MISS of $ATTEMPTED plant anchors do not resolve exactly once" >&2
+    exit 9
+  fi
+  if [ "$STATIC_CENSUS_OK" -ne 1 ]; then
+    echo "ANCHOR PRE-FLIGHT FAILED: the static claim census above did not pass" >&2
     exit 9
   fi
   echo "anchor pre-flight: $ANCHOR_OK of $ATTEMPTED plant anchors resolve exactly once in their target file"

@@ -307,3 +307,19 @@ are dropped. `permit_id` is a positional label (`PERMIT-01`…), not the real on
   rows outright and 24 more from prose. 29 are narrative with no resolvable name,
   9 are unresolved, 3 decline, 65 name nobody. The unresolved ones are the reason
   the prose is not shipped.
+- `game_change_log.csv` names **103 distinct side labels across its 167 rows, and
+  44 of them match no side of `../combined_schedule.csv` and no team in
+  `../coach_roster.csv`.** Forty-three are the external league's own club and
+  team names, which are opponents rather than parties to this club's season and
+  which nobody here could notify in any case. **The forty-fourth is
+  `16BSuperRec02`**, and it is different in three ways worth stating: it is
+  shaped exactly like a roster team code, it is the **home** side, and it plays
+  four fixtures (09/19, 09/26, 10/17, 11/07) — all of them `Regional League
+  Select fixture` additions. No team in the 132-team roster answers to it and no
+  roster id contains `SuperRec`. Whether the roster is short a team or the label
+  is a variant spelling is not something the corpus settles, so it is kept as it
+  is and reported rather than reconciled — the same treatment
+  `../coach_roster_v1.csv` gets for "Nate"/"Nathaniel" and
+  `field_code_names.csv` for `Rookery`/`Rookerie`. `tests/changelog.test.js`
+  asserts it by name, so a corpus edit that resolves it will fail there and make
+  the decision visible.

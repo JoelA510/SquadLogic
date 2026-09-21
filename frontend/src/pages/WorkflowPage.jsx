@@ -28,7 +28,7 @@ export default function WorkflowPage() {
   // never returned a zone, so the binding was `undefined` in every render this
   // page has ever had. `error` it DOES return, now that it stops swallowing
   // the three fetch failures underneath it.
-  const { team, practice, game, loading, error: dataError } = useDashboardData();
+  const { team, practice, game, loading, error: dataError, errors } = useDashboardData();
   const { persistenceSnapshot, loading: _persistenceLoading } = useTeamPersistence();
   const { importedData, setImportedData } = useImport();
   const { theme: _theme } = useTheme();
@@ -206,6 +206,7 @@ export default function WorkflowPage() {
             importedData={importedData}
             controlledActiveStep={activeStep}
             onStepChange={setActiveStep}
+            sourceErrors={errors}
           />
         </div>
 

@@ -337,7 +337,10 @@ export default function PracticeSchedulingPage() {
   // `error` too. The page's own scheduler errors (`autoScheduler.error`,
   // `applyError`) are about a run the operator just started; this one is about
   // the schedule they are looking at, and neither surface could report it.
-  const { practice, team, loading: dashboardLoading, error: dataError } = useDashboardData();
+  const { practice, team, loading: dashboardLoading, errors } = useDashboardData();
+  // This page's two sources, not the aggregate -- see the note on the game
+  // page. A refused `game_assignments` read says nothing about practices.
+  const dataError = errors.practice ?? errors.team;
   const {
     currentOrganization,
     currentSeasonSetting,
@@ -920,8 +923,8 @@ export default function PracticeSchedulingPage() {
 
       {/* Above the conflict banner deliberately: blackout findings computed
           over a schedule that failed to load say nothing about the schedule.
-          As on the game page, `dataError` is the hook's aggregate over all
-          three reads rather than this page's alone. */}
+          As on the game page, `dataError` is this page's own two sources
+          rather than the hook's aggregate. */}
       <DataErrorBanner message={dataError} />
 
       <GameConflictBanner warnings={blackoutWarnings} />

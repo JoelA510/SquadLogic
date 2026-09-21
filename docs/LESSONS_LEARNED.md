@@ -114,23 +114,43 @@ evolves. If you are about to make a decision one of these covers, read it first.
     fabricated issues (e.g., "unused imports" that were vitest globals).
     Verify every reported finding against the file before acting — and budget
     gates (`check:bundle`, `check:advisors`) beat report-reading.
+25. **A guard that only runs inside an expensive sweep does not run.** The
+    database harness's mutation prover carries a census pairing every health
+    claim `run.sh` prints with the plant that proves the check can fail. It
+    was correct, both-directional, and unreachable: its universe is a green
+    baseline transcript, so reaching it costs a multi-hour sweep — and a
+    pre-flight refusal had made that sweep unstartable outright. Eight hollow
+    `(checked)` claims accumulated behind it. Split such a check: answer the
+    half that can be read off the source (what a script prints, diffed
+    against what a registry declares) in CI on every PR, keep the runtime
+    half for what only it can see, and state in both which is which. A guard
+    someone has to remember to run is the defect it was written to catch, one
+    level up.
+26. **"Enforced elsewhere" is not "checked here", and the wording has to say
+    which.** One harness claim turned out to be unfalsifiable by
+    construction: every defect that would break it aborts the migration build
+    three stages earlier, so the check it advertises can never be the thing
+    that fails. A claim nothing can falsify either loses the word that says
+    it was verified or keeps it dishonestly — there is no third option, and
+    the demotion belongs in the line itself, with its reason, rather than in
+    a comment beside it.
 
 ## Process & rationale
 
-25. **CI first, features second, live backend last.** The pipeline protects
+27. **CI first, features second, live backend last.** The pipeline protects
     everything downstream; features iterate fastest against the mock; the
     risky backend cutover happens once, with the full suite green.
-26. **Staged review → apply beats direct writes.** Generated schedules and
+28. **Staged review → apply beats direct writes.** Generated schedules and
     rosters go through a review state ("ghost" runs with no DB writes) and an
     explicit audited apply RPC. Users get dry-runs; the audit log gets intent.
-27. **Honest UX over aspirational UX.** A button must describe what the code
+29. **Honest UX over aspirational UX.** A button must describe what the code
     does today ("move players, clear rosters"), not what a future iteration
     might do ("regenerate"). Surface mutation results; never report success
     that wasn't checked.
-28. **Prototype before building big.** A throwaway prototype validated the
+30. **Prototype before building big.** A throwaway prototype validated the
     grid/locking UX before production work, and the hi-fi design prototype
     drove the redesign. Cheap iteration first, then commit.
-29. **Keep historical records out of living docs.** Point-in-time audits,
+31. **Keep historical records out of living docs.** Point-in-time audits,
     progress logs, and completed plans rot into misinformation. Living docs
     describe the present; durable knowledge goes here; everything else is
     recoverable from git history.

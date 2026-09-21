@@ -328,7 +328,11 @@ export default function TeamAnalysisPage() {
   // a teaming analysis that loaded correctly. Over-reporting rather than the
   // silence this PR removes; the fix is per-source errors on the hook, which
   // this change was scoped not to touch. Named in the PR.
-  const { team, loading, error: dataError } = useDashboardData();
+  const { team, loading, errors } = useDashboardData();
+  // The one source this page renders. The hook's aggregate `error` would
+  // raise an assertive alert here for a refused practice or game read, about
+  // rows this page does not show.
+  const dataError = errors.team;
   const {
     persistenceSnapshot,
     loading: persistenceLoading,

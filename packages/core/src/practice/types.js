@@ -98,7 +98,7 @@
  * @property {string} slotId
  * @property {string|null} revisionId
  * @property {ReadonlyArray<string>} teamIds
- * @property {ReadonlyArray<string>} exceptionIds - every override that altered this occurrence
+ * @property {ReadonlyArray<string>} exceptionIds - the overrides that took effect, in id order
  */
 
 /**
@@ -116,9 +116,9 @@
  * @property {number} windowDays
  * @property {number} slotsConsidered
  * @property {number} occurrenceCount
- * @property {number} suppressedCount
- * @property {number} movedCount
- * @property {number} shortenedCount
+ * @property {number} occurrencesSuppressed - practices removed, not exceptions seen
+ * @property {number} occurrencesMoved - practices whose start changed
+ * @property {number} occurrencesShortened - practices whose length changed
  * @property {number} exceptionsApplied
  * @property {number} exceptionsUnmatched
  */

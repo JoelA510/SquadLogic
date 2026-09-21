@@ -56,6 +56,39 @@ export function toFacilityBooking(occurrence) {
   };
 }
 
+/**
+ * The one finding for "this override did not take effect", whichever rule
+ * decided it.
+ *
+ * Two rules produce it — a cancellation removing the practice, and a
+ * same-kind collision on one date — and they are distinguished by the
+ * `collision` detail rather than by two codes, so a consumer asking "did
+ * anything I sent get dropped" has one code to read.
+ *
+ * @param {Object} input
+ * @param {import('./types.js').PracticeSlot} input.slot
+ * @param {string} input.date
+ * @param {import('./types.js').PracticeException} input.loser
+ * @param {string} input.winnerId
+ * @param {'cancelled'|'same-kind'} input.collision
+ * @param {string} input.because - the clause that completes the message
+ * @returns {import('./types.js').PracticeFinding}
+ */
+function supersededFinding({ slot, date, loser, winnerId, collision, because }) {
+  return makePracticeFinding(
+    PRACTICE_REASON.EXCEPTION_SUPERSEDED,
+    `${date}: exception "${loser.id}" (${loser.kind}) had no effect — ${because}`,
+    {
+      slotId: slot.id,
+      date,
+      exceptionId: loser.id,
+      kind: loser.kind,
+      supersededBy: winnerId,
+      collision,
+    }
+  );
+}
+
 /** The later of two ISO dates. */
 const laterOf = (a, b) => (a > b ? a : b);
 /** The earlier of two ISO dates. */
@@ -126,9 +159,14 @@ export function materialisePracticeOccurrences(slotSet, window) {
 
   /** @type {import('./types.js').PracticeOccurrence[]} */
   const occurrences = [];
-  let suppressedCount = 0;
-  let movedCount = 0;
-  let shortenedCount = 0;
+  // **Counted per occurrence changed, not per exception seen.** With
+  // same-kind collisions resolved above, at most one override of each kind
+  // takes effect on a date, so these are counts of practices, which is what
+  // a reader assumes. A superseded override is counted by neither; it is
+  // visible as an EXCEPTION_SUPERSEDED finding.
+  let occurrencesSuppressed = 0;
+  let occurrencesMoved = 0;
+  let occurrencesShortened = 0;
 
   for (const slot of slotSet.slots) {
     // An undated slot materialises to nothing. `buildPracticeSlotSet()` has
@@ -154,7 +192,7 @@ export function materialisePracticeOccurrences(slotSet, window) {
       );
       if (cancellation) {
         applied.add(cancellation.id);
-        suppressedCount += 1;
+        occurrencesSuppressed += 1;
         findings.push(
           makePracticeFinding(
             PRACTICE_REASON.OCCURRENCE_SUPPRESSED,
@@ -176,17 +214,14 @@ export function materialisePracticeOccurrences(slotSet, window) {
           if (superseded.id === cancellation.id) continue;
           applied.add(superseded.id);
           findings.push(
-            makePracticeFinding(
-              PRACTICE_REASON.EXCEPTION_SUPERSEDED,
-              `${date}: exception "${superseded.id}" (${superseded.kind}) had nothing to change — "${cancellation.id}" cancelled this practice`,
-              {
-                slotId: slot.id,
-                date,
-                exceptionId: superseded.id,
-                kind: superseded.kind,
-                supersededBy: cancellation.id,
-              }
-            )
+            supersededFinding({
+              slot,
+              date,
+              loser: superseded,
+              winnerId: cancellation.id,
+              collision: 'cancelled',
+              because: `"${cancellation.id}" cancelled this practice`,
+            })
           );
         }
         continue;
@@ -197,10 +232,47 @@ export function materialisePracticeOccurrences(slotSet, window) {
       /** @type {string[]} */
       const exceptionIds = [];
 
-      for (const exception of onThisDate) {
+      // **Two overrides of one kind on one date are a collision, and the
+      // deciding rule is stated rather than inherited from array order.**
+      // Lowest exception id wins. That is not a judgement that the lower id
+      // is the better record — this model has no way to rank two
+      // contradictory moves — it is a rule that gives the same answer however
+      // the caller happened to order its input. The loser is reported, in the
+      // same code and with the same `supersededBy` a cancellation uses, so
+      // "this override did not take effect" has one vocabulary.
+      //
+      // Applying both silently would leave two OCCURRENCE_MOVED findings on
+      // one practice, each true alone, contradicting each other about the
+      // start time, with nothing saying which the occurrence reflects.
+      const ordered = [...onThisDate].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      /** kind -> the exception that takes effect */
+      const winnerOfKind = new Map();
+      for (const exception of ordered) {
+        if (!winnerOfKind.has(exception.kind)) winnerOfKind.set(exception.kind, exception);
+      }
+
+      for (const exception of ordered) {
+        applied.add(exception.id);
+        const winner = winnerOfKind.get(exception.kind);
+        if (winner.id !== exception.id) {
+          findings.push(
+            supersededFinding({
+              slot,
+              date,
+              loser: exception,
+              winnerId: winner.id,
+              collision: 'same-kind',
+              because: `"${winner.id}" is the ${exception.kind} exception this model applies here (lowest id of ${
+                ordered.filter((other) => other.kind === exception.kind).length
+              } on this date)`,
+            })
+          );
+          continue;
+        }
+
         if (exception.kind === PRACTICE_EXCEPTION_KIND.MOVED) {
           startMinutes = /** @type {number} */ (exception.startMinutes);
-          movedCount += 1;
+          occurrencesMoved += 1;
           findings.push(
             makePracticeFinding(
               PRACTICE_REASON.OCCURRENCE_MOVED,
@@ -210,7 +282,7 @@ export function materialisePracticeOccurrences(slotSet, window) {
           );
         } else if (exception.kind === PRACTICE_EXCEPTION_KIND.SHORTENED) {
           durationMinutes = /** @type {number} */ (exception.durationMinutes);
-          shortenedCount += 1;
+          occurrencesShortened += 1;
           findings.push(
             makePracticeFinding(
               PRACTICE_REASON.OCCURRENCE_SHORTENED,
@@ -219,7 +291,6 @@ export function materialisePracticeOccurrences(slotSet, window) {
             )
           );
         }
-        applied.add(exception.id);
         exceptionIds.push(exception.id);
       }
 
@@ -236,8 +307,10 @@ export function materialisePracticeOccurrences(slotSet, window) {
         slotId: slot.id,
         revisionId: slot.revisionId,
         teamIds: teamsOn(slotSet, slot, date),
-        // Every override that touched this date. A `moved` and a `shortened`
-        // on one date both apply, so a single id would drop one of them.
+        // Every override that **took effect** on this date, in id order. A
+        // `moved` and a `shortened` compose, so a single id would drop one;
+        // an override superseded by another of its kind is absent, because it
+        // altered nothing.
         exceptionIds,
       });
     }
@@ -311,9 +384,9 @@ export function materialisePracticeOccurrences(slotSet, window) {
       windowDays: isoDayNumber(to) - isoDayNumber(from) + 1,
       slotsConsidered: slotSet.slots.length,
       occurrenceCount: occurrences.length,
-      suppressedCount,
-      movedCount,
-      shortenedCount,
+      occurrencesSuppressed,
+      occurrencesMoved,
+      occurrencesShortened,
       exceptionsApplied: applied.size,
       exceptionsUnmatched,
     },

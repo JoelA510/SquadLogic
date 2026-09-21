@@ -299,7 +299,7 @@ describe('practice model :: dated exceptions', () => {
     );
     expect(suppression).toBeDefined();
     expect(suppression.details).toMatchObject({ date: '2026-09-15', reason: 'rain-out' });
-    expect(materialised.stats.suppressedCount).toBe(1);
+    expect(materialised.stats.occurrencesSuppressed).toBe(1);
   });
 
   it('leaves the slot itself unedited — an exception is an override', () => {
@@ -334,7 +334,7 @@ describe('practice model :: dated exceptions', () => {
     expect(byDate.get('2026-09-08').endMinutes).toBe(1140);
     expect(byDate.get('2026-09-01').startMinutes).toBe(1020);
     expect(byDate.get('2026-09-22').startMinutes).toBe(1020);
-    expect(materialised.stats.movedCount).toBe(1);
+    expect(materialised.stats.occurrencesMoved).toBe(1);
   });
 
   it('shortens one occurrence without shortening the rest', () => {
@@ -415,7 +415,124 @@ describe('practice model :: dated exceptions', () => {
       (f) => f.code === PRACTICE_REASON.EXCEPTION_SUPERSEDED
     );
     expect(superseded.map((f) => f.details.exceptionId)).toEqual(['x8']);
-    expect(superseded[0].details.supersededBy).toBe('x7');
+    expect(superseded[0].details).toMatchObject({ supersededBy: 'x7', collision: 'cancelled' });
+  });
+
+  it('resolves two overrides of the same kind by a stated rule, not array order', () => {
+    // Two `moved` exceptions on one date used to both apply: the start was
+    // assigned twice and ended as whichever the caller listed last, while the
+    // result carried two OCCURRENCE_MOVED findings contradicting each other
+    // about the same practice. Lowest id wins, and the loser says so.
+    const collide = (order) =>
+      materialisePracticeOccurrences(oneSlotSet(), {
+        ...window,
+        exceptions: order.map(([id, startHour]) => ({
+          id,
+          slotId: 'tue-17',
+          date: '2026-09-15',
+          kind: 'moved',
+          reason: `request ${id}`,
+          startMinutes: startHour * 60,
+        })),
+      });
+
+    const forwards = collide([
+      ['mv-a', 18],
+      ['mv-b', 19],
+    ]);
+    const backwards = collide([
+      ['mv-b', 19],
+      ['mv-a', 18],
+    ]);
+
+    const startOn = (m) => m.occurrences.find((o) => o.date === '2026-09-15').startMinutes;
+    // Independent of input order — the point of the rule.
+    expect(startOn(forwards)).toBe(1080);
+    expect(startOn(backwards)).toBe(1080);
+
+    // Exactly one OCCURRENCE_MOVED, not two contradicting each other.
+    expect(
+      forwards.findings.filter((f) => f.code === PRACTICE_REASON.OCCURRENCE_MOVED)
+    ).toHaveLength(1);
+    expect(forwards.stats.occurrencesMoved).toBe(1);
+
+    // And the loser is reported rather than dropped.
+    const superseded = forwards.findings.filter(
+      (f) => f.code === PRACTICE_REASON.EXCEPTION_SUPERSEDED
+    );
+    expect(superseded).toHaveLength(1);
+    expect(superseded[0].details).toMatchObject({
+      exceptionId: 'mv-b',
+      supersededBy: 'mv-a',
+      collision: 'same-kind',
+    });
+    // The occurrence records only what took effect.
+    expect(forwards.occurrences.find((o) => o.date === '2026-09-15').exceptionIds).toEqual([
+      'mv-a',
+    ]);
+  });
+
+  it('resolves two shortenings the same way', () => {
+    const materialised = materialisePracticeOccurrences(oneSlotSet(), {
+      ...window,
+      exceptions: [
+        {
+          id: 'sh-z',
+          slotId: 'tue-17',
+          date: '2026-09-22',
+          kind: 'shortened',
+          reason: 'later request',
+          durationMinutes: 20,
+        },
+        {
+          id: 'sh-a',
+          slotId: 'tue-17',
+          date: '2026-09-22',
+          kind: 'shortened',
+          reason: 'earlier request',
+          durationMinutes: 45,
+        },
+      ],
+    });
+    const occurrence = materialised.occurrences.find((o) => o.date === '2026-09-22');
+    expect(occurrence.endMinutes - occurrence.startMinutes).toBe(45);
+    expect(materialised.stats.occurrencesShortened).toBe(1);
+    expect(
+      materialised.findings
+        .filter((f) => f.code === PRACTICE_REASON.EXCEPTION_SUPERSEDED)
+        .map((f) => f.details.exceptionId)
+    ).toEqual(['sh-z']);
+  });
+
+  it('still lets a moved and a shortened on one date both take effect', () => {
+    // The control for the collision rule: it must fire on same-kind pairs
+    // only. Different kinds compose, and both ids stay on the occurrence.
+    const materialised = materialisePracticeOccurrences(oneSlotSet(), {
+      ...window,
+      exceptions: [
+        {
+          id: 'k1',
+          slotId: 'tue-17',
+          date: '2026-09-01',
+          kind: 'moved',
+          reason: 'clash',
+          startMinutes: 19 * 60,
+        },
+        {
+          id: 'k2',
+          slotId: 'tue-17',
+          date: '2026-09-01',
+          kind: 'shortened',
+          reason: 'sunset',
+          durationMinutes: 30,
+        },
+      ],
+    });
+    const occurrence = materialised.occurrences.find((o) => o.date === '2026-09-01');
+    expect(occurrence.startMinutes).toBe(1140);
+    expect(occurrence.endMinutes).toBe(1170);
+    expect(occurrence.exceptionIds).toEqual(['k1', 'k2']);
+    expect(codesOf(materialised.findings)).not.toContain(PRACTICE_REASON.EXCEPTION_SUPERSEDED);
   });
 
   it('records every override that touched a date, not just the last', () => {
@@ -443,6 +560,8 @@ describe('practice model :: dated exceptions', () => {
     const moved = materialised.occurrences.find((o) => o.date === '2026-09-08');
     // Both apply and compose; a single `exceptionId` would have dropped one.
     expect(moved.exceptionIds).toEqual(['m1', 's1']);
+    expect(materialised.stats.occurrencesMoved).toBe(1);
+    expect(materialised.stats.occurrencesShortened).toBe(1);
     expect(moved.startMinutes).toBe(1080);
     expect(moved.endMinutes).toBe(1110);
   });

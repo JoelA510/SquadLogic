@@ -36,6 +36,18 @@
  * `PracticeSchedulingPage.partitionPracticeSlots()`; replacing it is a change
  * to the live persistence path, not a rider on a domain-model PR.
  *
+ * ## Findings live on two objects, and a surface must combine them
+ *
+ * `buildPracticeSlotSet()` reports what is wrong with the *plan* — undated
+ * revisions, duplicate windows, unresolved ground — and
+ * `materialisePracticeOccurrences()` reports what happened in a *window*.
+ * A consumer reading only the materialisation sees `PRACTICE_WINDOW_EMPTY`
+ * without the `PRACTICE_REVISION_UNDATED` that explains why the window is
+ * empty. Nothing is wrong today, because nothing consumes either; whoever
+ * wires this up has to present both sets together, the way the publication
+ * package ended up passing the read's findings into soundness as a second
+ * argument. Noted here so it is a known requirement rather than a discovery.
+ *
  * @module practice
  */
 

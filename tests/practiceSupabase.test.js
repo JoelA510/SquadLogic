@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it } from 'vitest';
 import {
   buildPracticeSlotsFromSupabaseRows,
@@ -6,6 +9,74 @@ import {
   buildPracticeAssignmentRows,
   persistPracticeAssignments,
 } from '../packages/core/src/practiceSupabase.js';
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const RPC_SIGNATURE = 'CREATE OR REPLACE FUNCTION public.persist_practice_schedule';
+
+/**
+ * The migration that defines `persist_practice_schedule` LAST, and its text.
+ *
+ * Derived from the directory rather than named, for the reason
+ * `tests/fieldDeleteGuard.test.js` gives: a hard-coded filename goes on
+ * grading the builder against a recordset the database no longer runs.
+ *
+ * @returns {{ file: string, sql: string }}
+ */
+function rpcMigration() {
+  const dir = path.join(REPO_ROOT, 'supabase/migrations');
+  const defining = readdirSync(dir)
+    .filter((name) => name.endsWith('.sql'))
+    .sort()
+    .filter((name) => readFileSync(path.join(dir, name), 'utf8').includes(RPC_SIGNATURE));
+  // Migrations run in filename order, so the LAST definition is the live one.
+  // An empty list means the RPC was renamed or removed, which has to fail
+  // loudly rather than leave the comparison below comparing nothing.
+  assert.ok(defining.length > 0, 'no migration defines persist_practice_schedule');
+  const file = defining[defining.length - 1];
+  return { file, sql: readFileSync(path.join(dir, file), 'utf8') };
+}
+
+/**
+ * The column names `persist_practice_schedule` declares for its `assignments`
+ * payload — the only keys `jsonb_to_recordset` carries into the function.
+ * Anything else in a row reaches Postgres and is dropped without a word.
+ *
+ * @param {string} sql
+ * @returns {Set<string>}
+ */
+function rpcRecordsetColumns(sql) {
+  const blocks = [
+    ...sql.matchAll(/jsonb_to_recordset\(assignments\)\s+AS\s+raw_assignments\(([^)]*)\)/gi),
+  ];
+  // The meta-assertion. A regex that stopped matching — a renamed alias, a
+  // reformatted declaration — would yield an empty set, and an empty set
+  // accepts every key the builder could possibly emit.
+  assert.ok(blocks.length > 0, 'no jsonb_to_recordset(assignments) declaration found');
+
+  const perBlock = blocks.map(
+    (block) =>
+      new Set(
+        block[1]
+          .split(',')
+          .map((entry) => entry.trim().split(/\s+/)[0])
+          .filter(Boolean)
+      )
+  );
+  // The RPC declares the recordset more than once (the validation CTE and the
+  // write CTE). They must agree, or "declared" has two answers.
+  for (const columns of perBlock) {
+    assert.deepEqual(
+      [...columns].sort(),
+      [...perBlock[0]].sort(),
+      'the RPC declares two different assignment recordsets'
+    );
+  }
+
+  const declared = perBlock[0];
+  assert.ok(declared.size > 1, 'the recordset parse produced fewer columns than it has');
+  assert.ok(declared.has('team_id'), 'the recordset parse did not find team_id; it is stale');
+  return declared;
+}
 
 describe('buildPracticeSlotsFromSupabaseRows', () => {
   it('normalizes camelCase and snake_case Supabase slot rows', () => {
@@ -337,10 +408,6 @@ describe('buildPracticeAssignmentRows', () => {
       {
         team_id: 'team-1',
         practice_slot_id: 'slot-1::early',
-        base_slot_id: 'slot-1',
-        season_phase_id: 'early',
-        effective_from: '2024-08-01',
-        effective_until: '2024-09-15',
         effective_date_range: '[2024-08-01,2024-09-15]',
         source: 'manual',
         run_id: 'run-123',
@@ -348,10 +415,6 @@ describe('buildPracticeAssignmentRows', () => {
       {
         team_id: 'team-2',
         practice_slot_id: 'slot-1::late',
-        base_slot_id: 'slot-1',
-        season_phase_id: 'late',
-        effective_from: '2024-09-16',
-        effective_until: '2024-10-31',
         effective_date_range: '[2024-09-16,2024-10-31]',
         source: 'auto',
         run_id: 'run-123',
@@ -418,14 +481,52 @@ describe('buildPracticeAssignmentRows', () => {
     assert.deepEqual(rows[0], {
       team_id: 'team-1',
       practice_slot_id: 'slot-1::early',
-      base_slot_id: 'slot-1',
-      season_phase_id: 'early',
-      effective_from: '2024-08-01',
-      effective_until: '2024-09-15',
       effective_date_range: '[2024-08-01,2024-09-15]',
       source: 'auto',
       run_id: null,
     });
+  });
+
+  it('emits no key the persistence path cannot receive', () => {
+    const { file, sql } = rpcMigration();
+    const declared = rpcRecordsetColumns(sql);
+
+    const rows = buildPracticeAssignmentRows({
+      assignments: [{ teamId: 'team-1', slotId: 'slot-1::early', source: 'locked' }],
+      slots: sampleSlots,
+      runId: 'run-123',
+    });
+    // Meta-assertion on the subject set. Enumerating the keys from a row the
+    // builder did not produce would compare nothing with nothing and pass.
+    assert.equal(rows.length, 1, 'the builder produced no row to check');
+    const emitted = Object.keys(rows[0]);
+    assert.ok(emitted.length > 0, 'the row carries no keys to check');
+
+    // `run_id` is the one key outside the recordset, and the exemption is
+    // proven rather than asserted: the same migration adds it as a real column
+    // on `practice_assignments`, which is where `persistPracticeAssignments`
+    // writes it directly. Everything else must be a column the RPC declares.
+    //
+    // Stated plainly, because the exemption is narrower than it looks: the
+    // RPC drops `run_id` like any other undeclared key and fills the column
+    // from `run_data` instead, so the only reader of this key is the direct
+    // insert — and that function has no caller outside this file today. It
+    // stays because it addresses a real column through a real exported API,
+    // not because the live path uses it.
+    assert.match(
+      sql,
+      /ALTER TABLE public\.practice_assignments\s+ADD COLUMN IF NOT EXISTS run_id/,
+      `${file} no longer adds practice_assignments.run_id; the exemption below is stale`
+    );
+    const receivable = new Set([...declared, 'run_id']);
+
+    const orphans = emitted.filter((key) => !receivable.has(key));
+    assert.deepEqual(
+      orphans,
+      [],
+      `buildPracticeAssignmentRows emits ${orphans.join(', ')}, which ${file} declares nowhere; ` +
+        `jsonb_to_recordset drops undeclared keys silently. Declared: ${[...declared].join(', ')}`
+    );
   });
 });
 
@@ -468,10 +569,6 @@ describe('persistPracticeAssignments', () => {
           {
             team_id: 'team-1',
             practice_slot_id: 'slot-1::early',
-            base_slot_id: 'slot-1',
-            season_phase_id: 'early',
-            effective_from: '2024-08-01',
-            effective_until: '2024-09-15',
             effective_date_range: '[2024-08-01,2024-09-15]',
             source: 'auto',
             run_id: 'run-123',
@@ -484,10 +581,6 @@ describe('persistPracticeAssignments', () => {
       {
         team_id: 'team-1',
         practice_slot_id: 'slot-1::early',
-        base_slot_id: 'slot-1',
-        season_phase_id: 'early',
-        effective_from: '2024-08-01',
-        effective_until: '2024-09-15',
         effective_date_range: '[2024-08-01,2024-09-15]',
         source: 'auto',
         run_id: 'run-123',
@@ -523,10 +616,6 @@ describe('persistPracticeAssignments', () => {
           {
             team_id: 'team-1',
             practice_slot_id: 'slot-1::early',
-            base_slot_id: 'slot-1',
-            season_phase_id: 'early',
-            effective_from: '2024-08-01',
-            effective_until: '2024-09-15',
             effective_date_range: '[2024-08-01,2024-09-15]',
             source: 'auto',
             run_id: null,

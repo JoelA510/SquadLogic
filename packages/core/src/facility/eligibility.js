@@ -86,6 +86,51 @@ export function isoDayNumber(iso) {
 }
 
 /**
+ * The inverse of {@link isoDayNumber}: `YYYY-MM-DD` for a day number.
+ *
+ * Hand-rolled (Hinnant's `civil_from_days`) for the reason its twin above
+ * gives — this package builds no `Date`.
+ *
+ * Added here, next to `isoDayNumber()`, rather than inside the module that
+ * needed it: Phase 8.5's practice model has to walk a date range, and the
+ * forward direction was already exported from here precisely so a second copy
+ * would not appear. Putting the inverse anywhere else would have split one
+ * round trip across two homes.
+ *
+ * **A third copy of this arithmetic already exists and is not touched here.**
+ * `fieldAdmin/consequences.js` carries its own family — `toDayNumber()` (:109),
+ * `isoDayOfWeek()` (:131) and `fromDayNumber()` (:388) — duplicating this
+ * function and `isoDayNumber()`. Consolidating the two families means changing
+ * `fieldAdmin`'s public barrel and its tests, which is a refactor in its own
+ * right rather than a rider on a domain-model PR, so it is named rather than
+ * done. What 8.5 does guarantee is that it added no *new* duplicate: the
+ * practice model imports this pair and defines neither.
+ *
+ * @param {number} dayNumber - days since 1970-01-01
+ * @returns {string}
+ */
+export function isoDateOfDayNumber(dayNumber) {
+  const shifted = dayNumber + 719468;
+  const era = Math.floor(shifted / 146097);
+  const dayOfEra = shifted - era * 146097;
+  const yearOfEra = Math.floor(
+    (dayOfEra -
+      Math.floor(dayOfEra / 1460) +
+      Math.floor(dayOfEra / 36524) -
+      Math.floor(dayOfEra / 146096)) /
+      365
+  );
+  const year = yearOfEra + era * 400;
+  const dayOfYear =
+    dayOfEra - (365 * yearOfEra + Math.floor(yearOfEra / 4) - Math.floor(yearOfEra / 100));
+  const monthPrime = Math.floor((5 * dayOfYear + 2) / 153);
+  const day = dayOfYear - Math.floor((153 * monthPrime + 2) / 5) + 1;
+  const month = monthPrime + (monthPrime < 10 ? 3 : -9);
+  const civilYear = year + (month <= 2 ? 1 : 0);
+  return `${String(civilYear).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/**
  * Rank table in force for a graph, with a caller override.
  *
  * @param {import('./types.js').FacilityGraph} graph

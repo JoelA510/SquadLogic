@@ -9,8 +9,10 @@
  * reported `SNAPSHOT_IN_MEMORY_ONLY` and said in `snapshot.js` that *"there is
  * no persistence seam to store through"* at all. Three subsystems in the same
  * situation, saying three different things about it. This file makes the
- * situation one situation; the situation itself is unchanged, and
- * {@link import('./snapshot.js').makePublicationSnapshot} still says so on
+ * situation one situation. From GAP-29 Stage 2 the situation itself has
+ * changed for this one of the three: a copy of a snapshot can now be made
+ * durable, through this pair. The other two seams still store through nothing.
+ * {@link import('./snapshot.js').makePublicationSnapshot} names the route on
  * every snapshot it takes.
  *
  * ## What is claimed for it, and what is not
@@ -22,12 +24,26 @@
  * finding that out at write time is the difference between a failing test and a
  * corrupt store.
  *
- * Not claimed: that this is how a store will be reached. `docs/MODEL_GAPS.md`
- * GAP-29's own record earns the opposite rule — the one package here that
- * actually got persistence (`fieldAdmin`, `field_blackouts`) **bypassed its own
- * seam entirely** and went table + RPC + RLS + audit, as CLAUDE.md requires.
- * Read this pair as a declaration that a store is missing, and as the shape of
- * the value such a store would hold, not as the interface it will use.
+ * **This IS how the store is reached, and that departs from the precedent on
+ * purpose.** `docs/MODEL_GAPS.md` GAP-29's record says a `serialise*()` /
+ * `read*()` pair in this repository is a declaration that a store is missing,
+ * because the one package that got persistence (`fieldAdmin`,
+ * `field_blackouts`) bypassed its own seam entirely. GAP-29 Stage 2 went the
+ * other way, and the difference is granularity rather than taste:
+ * `serialiseFieldRegistry()` turns **N records into one document** while
+ * `field_blackouts` holds **one row per record**, so writing one blackout
+ * through that seam would have meant reading and rewriting the whole registry.
+ * A publication snapshot is not a registry. It is one immutable document, and
+ * `public.publication_baselines` holds exactly one row per document — the
+ * granularities meet, and `PublicationSnapshotDocumentSchema`'s own header
+ * already called itself *"the only shape a store would ever hold"*.
+ *
+ * What the store does **not** do is trust this pass. Everything validated here
+ * is validated again in SQL by `publication_baseline_document_problem()`, and
+ * anyone with a session can call the RPC without going near this file.
+ *
+ * `externalImport`'s seam and `fieldAdmin`'s are untouched by any of this:
+ * both still store through nothing, and both still say so.
  *
  * ## Row order: the one place this seam does not follow its siblings
  *

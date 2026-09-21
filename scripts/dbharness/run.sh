@@ -686,7 +686,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1030,6 +1030,48 @@ for id in "${REVERT_CHECKS[@]}"; do
     fi
   fi
 
+  # **The same reasoning for 20260920000000's revert.** It DESTROYS the
+  # published baselines, and on a freshly migrated database there are none --
+  # so it prints "0 baselines; this revert destroys no operator data" and
+  # proves only that the file parses. That is the empty-universe pass this
+  # harness exists to refuse, on the one revert in the set whose cost is
+  # unrecoverable data loss.
+  #
+  # **The two printed figures are deliberately unequal, 3 and 2**, following
+  # 20260909000000's own lesson: with every cardinality at 1 a check reading
+  # the wrong set prints the right number. THREE baselines across TWO
+  # organisations, split 2 + 1, and a third organisation with none so a count
+  # over `organizations` rather than over baselines cannot pass either.
+  #
+  # Inserted directly rather than through the RPC: `admin_publish_schedule_baseline`
+  # gates on `is_org_admin` and `psql_cmd` carries no JWT. The trigger only
+  # refuses UPDATE and DELETE, so a plain INSERT as the table owner is the
+  # cheapest way to give the revert something real to destroy. The RPC path
+  # itself is exercised in docs/sql/20260920000000_smoke.sql.
+  if [ "$id" = "20260920000000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('e1111111-1111-1111-1111-11111111111e','Baseline Org A','baseline-org-a'),
+                ('e2222222-2222-2222-2222-22222222222e','Baseline Org B','baseline-org-b'),
+                ('e3333333-3333-3333-3333-33333333333e','Baseline Org None','baseline-org-none');
+              INSERT INTO public.publication_baselines
+                (organization_id, baseline_version, document_version, snapshot_id, label,
+                 channel, published_at, published_by, export_columns, export_rows, row_count, digest)
+              VALUES
+                ('e1111111-1111-1111-1111-11111111111e',1,1,'rev-a-1','A week 1','harness','2026-09-20T09:00:00','harness',
+                 jsonb_build_array('Start'),
+                 jsonb_build_array(jsonb_build_object('Start','2026-09-26T09:00:00')), 1, '00000000000000a1'),
+                ('e1111111-1111-1111-1111-11111111111e',2,1,'rev-a-2','A week 2','harness','2026-09-21T09:00:00','harness',
+                 jsonb_build_array('Start'),
+                 jsonb_build_array(jsonb_build_object('Start','2026-10-03T09:00:00')), 1, '00000000000000a2'),
+                ('e2222222-2222-2222-2222-22222222222e',1,1,'rev-b-1','B week 1','harness','2026-09-20T09:00:00','harness',
+                 jsonb_build_array('Start'),
+                 jsonb_build_array(jsonb_build_object('Start','2026-09-26T09:00:00')), 1, '00000000000000b1');" \
+         >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the published baselines the revert's destruction warning requires were never inserted"
+      dump 10 /tmp/harness_seed; STATUS=1; continue
+    fi
+  fi
+
   if [ "$id" = "20260906000000" ]; then
     if ! psql_cmd "INSERT INTO public.organizations (id, name, slug)
               VALUES ('11111111-1111-1111-1111-111111111111','Revert Org','revert-org');
@@ -1134,6 +1176,37 @@ NEEDLES
     echo "PASS revert ${id}"
     grep -E '^(psql:[^ ]+ )?(NOTICE|WARNING):' /tmp/harness_rev |
       sed -E 's/^psql:[^ ]+ //; s/^/  | /' || true
+    if [ "$id" = "20260920000000" ]; then
+      # **The one revert in this set whose cost is unrecoverable**, so the
+      # figure it prints before destroying anything is the check. The seed
+      # planted 3 baselines across 2 organisations -- unequal on purpose, and
+      # a third organisation holds none, so a count over the wrong table
+      # cannot print this line.
+      if grep -q 'this revert DESTROYS 3 published baseline(s) across 2 organisation(s)' /tmp/harness_rev; then
+        echo "  | (checked) the revert counted the published baselines it was about to destroy, and the organisations they span"
+      else
+        echo "FAIL revert ${id}: planted 3 baselines across 2 organisations and the revert did not warn with those figures"
+        STATUS=1
+      fi
+      # And the store really is gone, read from the catalogue rather than from
+      # the revert's own NOTICE. **Three printed tokens, and all three are
+      # reachable**: `gone` is the pass, `present` is the failure, and
+      # `unreadable` fires when the catalogue lookup itself cannot see a table
+      # that is certainly there -- a wrong database, or a lookup that has
+      # stopped resolving anything. Without that arm a broken query would
+      # print `gone` and be read as a clean revert, which is the reading
+      # 20260912000000's gate check records having been caught out by.
+      if psql_cmd "SELECT 'STORE-VERDICT:' || CASE
+               WHEN to_regclass('public.audit_log') IS NULL THEN 'unreadable'
+               WHEN to_regclass('public.publication_baselines') IS NOT NULL THEN 'present'
+               ELSE 'gone' END AS verdict;" \
+         >/tmp/harness_store 2>&1 && grep -q 'STORE-VERDICT:gone' /tmp/harness_store; then
+        echo "  | (checked) publication_baselines is gone from the catalogue after the revert"
+      else
+        echo "FAIL revert ${id}: publication_baselines survived its own revert"
+        dump 10 /tmp/harness_store; STATUS=1
+      fi
+    fi
     if [ "$id" = "20260912000000" ]; then
       # **The exposure the revert creates, read back from its own transcript.**
       # Two figures, both made unique by the seed: the venue that loses a gate

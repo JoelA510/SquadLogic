@@ -528,6 +528,7 @@ const initialMockData = {
   field_availability_profile_formats: [],
   field_blackout_windows: [],
   field_blackouts: [],
+  publication_baselines: [],
   field_equipment_requirements: [],
   field_availability_scenarios: [],
   field_availability_scenario_members: [],
@@ -2783,6 +2784,233 @@ export const mockSupabase = {
       saveDB(db);
       triggerRealtimeEvent('team_messages', 'INSERT', { new: message, old: null });
       return { data: { message }, error: null };
+    }
+
+    if (
+      (import.meta.env.DEV || import.meta.env.VITE_USE_MOCK_SUPABASE === 'true') &&
+      name === 'admin_publish_schedule_baseline'
+    ) {
+      // Mirrors `admin_publish_schedule_baseline` in
+      // `20260920000000_publication_baselines.sql` -- **including the
+      // refusals**, not just the happy path (LESSONS_LEARNED #13). A mock
+      // looser than the database lets a defect the database would refuse pass
+      // every test, and this RPC's whole job is refusing documents.
+      //
+      // **Behind the same DEV/mock guard the facility RPCs use, and that is a
+      // measured decision rather than a copied idiom.** This client is a
+      // static import of `supabaseClient.js`, so everything in it ships in the
+      // main entry chunk -- which `config/bundle-budget.json`'s own rationale
+      // names as the reason that chunk is as large as it is. Measured: the arm
+      // adds 1.18 KB gzipped to `assets/index-*.js`, taking it from 135.77 KB
+      // to 136.95 KB against a 136.72 KB cap, so ungated it fails
+      // `npm run check:bundle`. The guard folds to `false` in a production
+      // build and the branch is eliminated; under Vitest and `vite dev` it is
+      // live, which is everywhere the mock is actually used. The budget doc is
+      // explicit that the default response is to fix the cause rather than
+      // loosen the cap.
+      const { p_organization_id: orgId, p_document: document } = params || {};
+      if (!orgId) {
+        return { data: null, error: { code: '22023', message: 'p_organization_id is required' } };
+      }
+      if (!isOrgAdmin(orgId)) {
+        return {
+          data: null,
+          error: {
+            code: '42501',
+            message: `Access denied: caller is not an admin of organization ${orgId}`,
+          },
+        };
+      }
+      if (!(db.organizations || []).some((org) => String(org.id) === String(orgId))) {
+        return { data: null, error: { code: 'P0002', message: `Organization ${orgId} not found` } };
+      }
+
+      // `publication_baseline_document_problem()`, in the mock's own words.
+      // The literals are this arm's statement of the contract and are compared
+      // with the SQL's by `tests/publicationBaselineStore.test.js`, never with
+      // each other.
+      const problem = (() => {
+        if (!document || typeof document !== 'object' || Array.isArray(document)) {
+          return 'document must be a JSON object';
+        }
+        const declared = [
+          'version',
+          'snapshotId',
+          'label',
+          'channel',
+          'publishedAt',
+          'publishedBy',
+          'notes',
+          'columns',
+          'rows',
+          'digest',
+        ];
+        const keys = Object.keys(document).sort();
+        if (keys.join(',') !== [...declared].sort().join(',')) {
+          return `document keys are ${keys.join(',')}; PublicationSnapshotDocumentSchema is strict and declares ${[...declared].sort().join(',')}`;
+        }
+        if (document.version !== 1) {
+          return `document version is ${document.version}; this store reads version 1`;
+        }
+        for (const field of ['snapshotId', 'label', 'channel', 'publishedBy', 'digest']) {
+          if (typeof document[field] !== 'string' || document[field].trim().length === 0) {
+            return `${field} must be a non-empty string`;
+          }
+        }
+        if (!/^[0-9a-f]{16}$/.test(document.digest)) {
+          return `digest "${document.digest}" is not 16 lowercase hex characters from publicationDigest()`;
+        }
+        if (
+          typeof document.publishedAt !== 'string' ||
+          !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(document.publishedAt)
+        ) {
+          return `publishedAt "${document.publishedAt}" is not a naive YYYY-MM-DDTHH:MM:SS stamp`;
+        }
+        if (
+          document.notes !== null &&
+          (typeof document.notes !== 'string' || document.notes.trim().length === 0)
+        ) {
+          return 'notes must be null or a non-empty string';
+        }
+        if (!Array.isArray(document.columns) || document.columns.length === 0) {
+          return 'columns must be a non-empty array';
+        }
+        if (document.columns.some((c) => typeof c !== 'string' || c.trim().length === 0)) {
+          return 'every column must be a non-empty string';
+        }
+        if (new Set(document.columns).size !== document.columns.length) {
+          return 'columns carries a duplicate; a row cannot hold one column twice';
+        }
+        if (!Array.isArray(document.rows) || document.rows.length === 0) {
+          return 'rows must be a non-empty array; a snapshot of zero rows is not a publication';
+        }
+        const wanted = [...document.columns].sort().join(',');
+        for (let index = 0; index < document.rows.length; index += 1) {
+          const row = document.rows[index];
+          if (!row || typeof row !== 'object' || Array.isArray(row)) {
+            return `row ${index} is not an object`;
+          }
+          if (Object.keys(row).sort().join(',') !== wanted) {
+            return `row ${index} carries keys ${Object.keys(row).sort().join(',')}; the document declares columns ${wanted}`;
+          }
+          if (Object.values(row).some((cell) => typeof cell !== 'string')) {
+            return `row ${index} carries a non-string cell; export cells are text`;
+          }
+        }
+        return null;
+      })();
+      if (problem !== null) {
+        return {
+          data: null,
+          error: {
+            code: '22023',
+            message: `publication baseline document is not valid: ${problem}`,
+          },
+        };
+      }
+
+      db.publication_baselines = db.publication_baselines || [];
+      const mine = db.publication_baselines.filter(
+        (row) => String(row.organization_id) === String(orgId)
+      );
+      // `publication_baselines_snapshot_unique`.
+      if (mine.some((row) => String(row.snapshot_id) === String(document.snapshotId))) {
+        return {
+          data: null,
+          error: {
+            code: '23505',
+            message:
+              'duplicate key value violates unique constraint "publication_baselines_snapshot_unique"',
+          },
+        };
+      }
+      const baselineVersion = mine.reduce((max, row) => Math.max(max, row.baseline_version), 0) + 1;
+      const baseline = {
+        id: mockId(),
+        organization_id: orgId,
+        baseline_version: baselineVersion,
+        document_version: document.version,
+        snapshot_id: document.snapshotId,
+        label: document.label,
+        channel: document.channel,
+        published_at: document.publishedAt,
+        published_by: document.publishedBy,
+        notes: document.notes,
+        export_columns: document.columns,
+        export_rows: document.rows,
+        row_count: document.rows.length,
+        digest: document.digest,
+        recorded_at: new Date().toISOString(),
+        recorded_by: currentUserId,
+      };
+
+      // Before/after phases, matching the RPC, and the before row carries no
+      // payload for the same reason the SQL's does not: a megabyte of
+      // duplicated schedule per publication.
+      const auditBaseline = (phase, resourceId, metadata) => {
+        db.audit_log = db.audit_log || [];
+        db.audit_log.push({
+          id: mockId(),
+          organization_id: orgId,
+          user_id: currentUserId,
+          action: 'publication.baseline_recorded',
+          resource_type: 'publication_baseline',
+          resource_id: resourceId,
+          metadata: { operation: 'admin_publish_schedule_baseline', phase, ...metadata },
+          created_at: new Date().toISOString(),
+        });
+      };
+      auditBaseline('before', null, {
+        requested: {
+          snapshot_id: baseline.snapshot_id,
+          label: baseline.label,
+          channel: baseline.channel,
+          published_at: baseline.published_at,
+          published_by: baseline.published_by,
+          row_count: baseline.row_count,
+          digest: baseline.digest,
+          baseline_version: baselineVersion,
+        },
+      });
+      db.publication_baselines.push(baseline);
+      auditBaseline('after', baseline.id, {
+        after: {
+          id: baseline.id,
+          baseline_version: baseline.baseline_version,
+          document_version: baseline.document_version,
+          snapshot_id: baseline.snapshot_id,
+          label: baseline.label,
+          channel: baseline.channel,
+          published_at: baseline.published_at,
+          published_by: baseline.published_by,
+          row_count: baseline.row_count,
+          digest: baseline.digest,
+          recorded_at: baseline.recorded_at,
+        },
+      });
+      saveDB(db);
+
+      // The row WITHOUT its payload, exactly as the RPC returns it. A mock
+      // that handed the rows back would let a caller read them from the write
+      // result and never exercise the read path.
+      return {
+        data: {
+          id: baseline.id,
+          organization_id: baseline.organization_id,
+          baseline_version: baseline.baseline_version,
+          document_version: baseline.document_version,
+          snapshot_id: baseline.snapshot_id,
+          label: baseline.label,
+          channel: baseline.channel,
+          published_at: baseline.published_at,
+          published_by: baseline.published_by,
+          notes: baseline.notes,
+          row_count: baseline.row_count,
+          digest: baseline.digest,
+          recorded_at: baseline.recorded_at,
+        },
+        error: null,
+      };
     }
 
     if (

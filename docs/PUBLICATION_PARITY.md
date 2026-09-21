@@ -94,6 +94,14 @@ store is missing — `fieldAdmin` is the one package that got a real store and i
 bypassed its own seam entirely, going table + RPC + RLS + audit — so read this
 as the shape of the value a store would hold, not as the interface it will use.
 
+> **CORRECTION, 2026-09-20 — GAP-29 Stage 2/3/4.** The paragraph above is a
+> dated record and the last two sentences of it are now false. There *is* a
+> store: `public.publication_baselines`
+> (`supabase/migrations/20260920000000_publication_baselines.sql`), and it
+> reaches the snapshot **through** the seam rather than around it. §2a below
+> records what was built and, more to the point, **why this package departed
+> from the `fieldAdmin` precedent** when both of its siblings have not.
+
 The seam's refusals are the ones the digest already implied, now reachable from
 a document: a wrong `version`, a missing or added field, or a row outside the
 document's own column vocabulary throws; an edited cell or a re-ordered row is
@@ -102,6 +110,104 @@ document's own column vocabulary throws; an edited cell or a re-ordered row is
 digest, which is the one place this seam does **not** follow its siblings: they
 sort their records by id because a registry is a set, and a snapshot's rows are
 positional.
+
+---
+
+## 2a. The store — GAP-29 Stage 2/3/4, 2026-09-20
+
+`public.publication_baselines`, one row per publication, written only by
+`admin_publish_schedule_baseline()`. RLS on, a SELECT policy scoped by
+`is_org_member(organization_id)`, **no write policy of any kind**, both
+functions `REVOKE`d from `PUBLIC` and from `anon` explicitly, and a before/after
+`record_audit_event()` pair on every write. `docs/sql/20260920000000_smoke.sql`
+proves each of those against a live catalogue rather than against the file.
+
+**`baseline_version` is the point.** A per-organisation monotonic integer,
+assigned by the RPC under a transaction-scoped advisory lock and never supplied
+by a caller — there is no parameter for it. GAP-29's "what remains" named its
+absence in as many words: *"no published-baseline version, so 'moved since
+publication v3' is still not a question the model can answer"*. It is now.
+
+**Why this seam, when `fieldAdmin` bypassed its own.** The rule GAP-29's record
+earns is real and it still holds for the other two seams; what makes this case
+different is **granularity**. `serialiseFieldRegistry()` turns N records into
+one document while `field_blackouts` holds one row per record, so writing a
+single blackout through that seam would have meant reading and rewriting the
+whole registry — the seam and the store did not meet. A publication snapshot is
+not a registry. It is one immutable document, `publication_baselines` holds
+exactly one row per document, and `PublicationSnapshotDocumentSchema`'s own
+header already called itself *"the only shape a store would ever hold"*. Going
+around it would have meant a second serialiser and a second digest check, which
+is the drift this repository has paid for repeatedly. `externalImport`'s seam
+and `fieldAdmin`'s are untouched and still store through nothing;
+`tests/publicationParity.test.js` enumerates the repository to keep that true,
+and the same test now **requires** the one production caller this package has
+rather than forbidding it.
+
+**The store does not trust the client.** Everything Zod validates on the way in
+is validated again in SQL by `publication_baseline_document_problem()`, which is
+a separate function precisely so a smoke with no JWT can drive fourteen corrupt
+documents and one sound one through every branch. A validator that refused
+everything would fail the sound case first.
+
+**Immutability is structural.** `publication_baselines_immutable` refuses
+`UPDATE` for every role including the table owner, and refuses `DELETE` too
+except on the cascade from a deleted organisation — without that one exception
+an organisation that had ever published could not be deleted at all, which the
+first draft of the migration shipped and the smoke caught. Withdrawing a
+baseline means recording a later one.
+
+**Soundness is not severity.** `PARITY_ROW_DIFFERS` and `PARITY_ROW_REMOVED`
+are `blocking` because they *are* the answer, so a surface that gated its
+verdict on severity would refuse to report a moved game.
+`BASELINE_UNSOUND_REASONS` / `baselineParitySoundness()` name the codes that
+mean the comparison itself cannot be read — a digest mismatch, an unreadable
+compared field, a vacuous run, a partition that does not add up, an ambiguous
+key — and the panel gates on those. The read's own findings are folded in,
+because a digest mismatch is discovered when the row set is loaded rather than
+when it is compared.
+
+**The reader, and the question.** `checkBaselineParity()`
+(`publication/baseline.js`) joins a stored baseline to `checkParity()` and
+contains no comparator of its own. It keys on
+`DEFAULT_PARITY_KEY_FIELDS + participant`, because an export artifact is per
+team and both halves of a fixture otherwise share one identity — under the
+default key every game in the artifact is `PARITY_KEY_AMBIGUOUS` and nothing is
+compared at all. The operator surface is the Exports panel: publish, pick a
+version, and see matched / differing / removed / added with the differing rows
+**named**.
+
+### The defect this stage found: `Start` has two spellings
+
+Running the comparison rather than reading it turned up a pre-existing
+divergence. This repository has two producers of export-vocabulary rows and
+they do not agree about the `Start` cell:
+
+| producer | `Start` |
+| --- | --- |
+| `reserve/publication.js` `naiveDateTime()` | `2026-04-11T09:00:00` — a wall reading |
+| `outputGeneration.js` `generateScheduleExports()` | `2026-04-11T09:00:00.000Z` — an instant, or a `toLocaleString` when a `timezone` argument is passed |
+
+`parityRowFromExportRow()` reads only the first — its `NAIVE_DATETIME_RE`
+refuses a trailing `Z`. So a baseline taken from the **real publish path** came
+back with `date` and `startMinutes` null on every row: the kickoff invisible,
+and `date` is a key field. `PARITY_FIELD_ABSENT` at blocking kept that from
+being silent, but a reader whose headline question is *"has my game moved?"* and
+which cannot see a kickoff is not a reader.
+
+`checkBaselineParity()` handles it narrowly and says so: it re-spells an
+instant's own text into `YYYY-MM-DDTHH:MM:SS` when **both** sides are instants,
+constructing no `Date` and applying no zone, so the comparison is a UTC reading
+against a UTC reading. A **mixture** of the two vocabularies is refused rather
+than compared, because `09:00:00` and `09:00:00Z` are not the same moment and
+agreeing that they are is GAP-30 arriving through a CSV cell instead of through
+a schema. The `toLocaleString` spelling stays unreadable and reports as such;
+inventing a parser for it is how a comparison starts guessing.
+
+The underlying divergence is a defect in `outputGeneration.js`, not here, and it
+is recorded as [GAP-36](MODEL_GAPS.md#gap-36) rather than fixed under a
+persistence change: `generateScheduleExports()`'s output is the CSV operators
+download.
 
 ---
 

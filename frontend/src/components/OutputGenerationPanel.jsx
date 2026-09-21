@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { generateScheduleExports } from '@squadlogic/core/outputGeneration.js';
 import { uploadScheduleExport } from '@squadlogic/core/storageSupabase.js';
+import {
+  baselineDriftSummary,
+  baselineParitySoundness,
+} from '@squadlogic/core/publication/index.js';
 import { IS_MOCK_MODE } from '../config.js';
 import { logger } from '../lib/logger.js';
 import {
@@ -8,6 +12,35 @@ import {
   teamsWithUncorroboratedCoachIdentity,
 } from '@squadlogic/core/people/coachList.js';
 import { teamCoachFields, teamCoaches } from '../utils/teamCoaches.js';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import {
+  naivePublicationStamp,
+  usePublicationBaselines,
+} from '../hooks/usePublicationBaselines.js';
+
+/**
+ * The publish path, and the question it makes answerable (GAP-29).
+ *
+ * Uploading the master CSV to Storage is the moment this app sends a schedule
+ * out, and until now nothing recorded what went. `handleUpload` therefore
+ * records a **publication baseline** alongside the upload: the same
+ * `master.rows` the CSV was rendered from, frozen through
+ * `makePublicationSnapshot()` and stored by `admin_publish_schedule_baseline()`.
+ * No adapter stands between the two -- `generateScheduleExports()` builds its
+ * rows from `SCHEDULE_EXPORT_COLUMNS` and `makePublicationSnapshot()` defaults
+ * its `columns` to the same frozen constant.
+ *
+ * The reader is the section below it: pick a stored baseline, and
+ * `checkBaselineParity()` says whether the working schedule is still what that
+ * version said. A store nothing reads would be the defect this whole phase
+ * keeps finding, with a table underneath it.
+ *
+ * **A failed baseline never reports as a successful publish, and never fails
+ * the upload it follows.** The files really did go out; saying otherwise would
+ * send an operator to re-upload. So the message carries both outcomes and the
+ * status goes to `error` when the baseline did not land, because a publication
+ * nobody recorded is exactly the state incident 1 could not recover from.
+ */
 
 const MOCK_UPLOAD = IS_MOCK_MODE;
 const DAY_INDEX = {
@@ -175,6 +208,142 @@ function buildExportPayload({ teams, teamSummary, practiceAssignments, gameAssig
   return { teams: exportTeams, practiceAssignments: exportPractices, gameAssignments: exportGames };
 }
 
+/**
+ * A baseline parity result, rendered for an operator.
+ *
+ * **All four buckets, and the read's own findings.** Showing only "differing"
+ * would hide a fixture that has vanished, which is the half of incident 1 that
+ * actually hurt; showing only the parity findings would hide a
+ * `SNAPSHOT_DIGEST_MISMATCH`, which means the stored ground truth itself is
+ * not what was published and no number below it can be trusted.
+ *
+ * **Additions are reported as news, not as drift** -- `baselineDriftSummary()`
+ * is the one reading of that, and this component does not invent a second one.
+ *
+ * @param {{ report: { baseline: any, snapshot: any, readFindings: any[], parity: any } }} props
+ */
+function ParityReport({ report }) {
+  const { baseline, parity, readFindings } = report;
+  const drift = baselineDriftSummary(parity);
+  const all = [...readFindings, ...parity.findings];
+  const blocking = all.filter((finding) => finding.severity === 'blocking');
+  // **`compromise` is rendered too, and that is a review finding rather than
+  // taste.** `PARITY_FIELD_UNCOMPARED` is the statement of what the numbers
+  // are silent about and `PARITY_KEY_AMBIGUOUS` says rows were paired by
+  // input order because the key did not identify them. Both are `compromise`,
+  // both change how the counts above should be read, and dropping them put
+  // the narrowing back in the silence `baseline.js` exists to break.
+  const qualified = all.filter((finding) => finding.severity === 'compromise');
+  // **The verdict is gated on the findings, not only on the buckets.** A run
+  // whose `Start` cells nobody could read puts every row in `matched` with
+  // `startMinutes` absent, so `drifted` is false and the panel printed, in
+  // green, that the schedule still matches — having compared no kickoff at
+  // all.
+  //
+  // `baselineParitySoundness()` rather than "any blocking finding", and the
+  // difference matters: `PARITY_ROW_DIFFERS` and `PARITY_ROW_REMOVED` are
+  // blocking **because they are the answer**, so gating on severity made the
+  // panel refuse to state the result it exists to state. The soundness list
+  // is the codes that mean the comparison itself cannot be read, and it lives
+  // in the core beside those codes rather than in this component.
+  const soundness = baselineParitySoundness(parity, readFindings);
+  const unsound = !soundness.sound;
+
+  return (
+    <div
+      className="bg-bg-surface rounded-lg p-4 border border-border-subtle"
+      data-testid="parity-report"
+    >
+      <h4 className="text-sm font-medium text-text-primary mb-2">
+        {`Baseline v${baseline.baselineVersion} — ${baseline.label}`}
+      </h4>
+      <p
+        className={
+          unsound
+            ? 'text-sm text-red-400 mb-2'
+            : drift.drifted
+              ? 'text-sm text-amber-400 mb-2'
+              : 'text-sm text-emerald-400 mb-2'
+        }
+        data-testid="parity-verdict"
+      >
+        {unsound
+          ? `This comparison cannot be read as a verdict (${soundness.reasons.join(', ')}); the counts below are arithmetic over something that did not compare cleanly.`
+          : drift.drifted
+            ? `The working schedule has moved since this was published: ${drift.differing} row(s) changed, ${drift.removed} row(s) gone.`
+            : 'The working schedule still matches what was published.'}
+      </p>
+      <dl className="text-xs text-text-muted font-mono grid grid-cols-2 gap-x-6 gap-y-1 max-w-sm">
+        <dt>Matched</dt>
+        <dd data-testid="parity-matched">{drift.matched}</dd>
+        <dt>Differing</dt>
+        <dd data-testid="parity-differing">{drift.differing}</dd>
+        <dt>Removed since publication</dt>
+        <dd data-testid="parity-removed">{drift.removed}</dd>
+        <dt>Added since publication</dt>
+        <dd data-testid="parity-added">{drift.added}</dd>
+      </dl>
+
+      {parity.buckets.differing.length > 0 && (
+        <div className="mt-3">
+          <h5 className="text-xs font-medium text-text-secondary mb-1">What changed</h5>
+          <ul className="text-xs text-text-muted space-y-1">
+            {/* The key carries the row id, not just the parity key: a
+                parity key that does not identify a row is exactly the
+                `PARITY_KEY_AMBIGUOUS` case, and there `pair.key` repeats. */}
+            {parity.buckets.differing.map((pair) => (
+              <li key={pair.currentRow.rowId} data-testid="parity-differing-row">
+                {`${pair.label} — ${pair.changedFields.join(', ')}`}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {parity.buckets.removed.length > 0 && (
+        <div className="mt-3">
+          <h5 className="text-xs font-medium text-text-secondary mb-1">
+            Published and no longer in the schedule
+          </h5>
+          <ul className="text-xs text-text-muted space-y-1">
+            {parity.buckets.removed.map((orphan) => (
+              <li key={orphan.row.rowId} data-testid="parity-removed-row">
+                {orphan.label}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {blocking.length > 0 && (
+        <div className="mt-3">
+          <h5 className="text-xs font-medium text-red-400 mb-1">Blocking findings</h5>
+          <ul className="text-xs text-red-400 space-y-1">
+            {blocking.map((finding, index) => (
+              <li key={`${finding.code}-${index}`} data-testid="parity-blocking">
+                {`${finding.code}: ${finding.message}`}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {qualified.length > 0 && (
+        <div className="mt-3">
+          <h5 className="text-xs font-medium text-amber-400 mb-1">What these numbers do not say</h5>
+          <ul className="text-xs text-amber-400 space-y-1">
+            {qualified.map((finding, index) => (
+              <li key={`${finding.code}-${index}`} data-testid="parity-qualified">
+                {`${finding.code}: ${finding.message}`}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function OutputGenerationPanel({
   teams = [],
   teamSummary = null,
@@ -186,6 +355,18 @@ export default function OutputGenerationPanel({
   const [emails, setEmails] = useState(null);
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
+  const { user } = useAuth() || {};
+  const {
+    baselines,
+    loading: baselinesLoading,
+    error: baselinesError,
+    publishBaseline,
+    compareWithBaseline,
+  } = usePublicationBaselines();
+  const [selectedBaselineId, setSelectedBaselineId] = useState('');
+  const [parityReport, setParityReport] = useState(null);
+  const [parityError, setParityError] = useState(null);
+  const [parityBusy, setParityBusy] = useState(false);
 
   const generateEmails = () => {
     const sourceTeams =
@@ -262,6 +443,11 @@ export default function OutputGenerationPanel({
           gameAssignments: exportPayload.gameAssignments,
         });
         setGenerated(exports);
+        // **A parity report describes one row set.** Leaving the previous
+        // verdict on screen after a regenerate means a green "still matches"
+        // describing a schedule that no longer exists.
+        setParityReport(null);
+        setParityError(null);
         setStatus('idle');
         // The reconciliation's findings are surfaced, not discarded. A
         // `COACH_ORDER_SOURCE_DISAGREES` is two sources contradicting each
@@ -328,12 +514,56 @@ export default function OutputGenerationPanel({
 
       await Promise.all(uploads);
 
-      setStatus('success');
-      setMessage(`Uploaded ${uploads.length} files to 'exports' bucket.`);
+      // **Stage 3: the writer, on the path that actually publishes.** The
+      // rows go in exactly as the CSV was rendered from them.
+      let baselineNote;
+      let baselineFailed = false;
+      try {
+        const recorded = await publishBaseline({
+          snapshotId: `master-schedule-${timestamp}`,
+          label: `Master schedule, ${generated.master.rows.length} rows`,
+          channel: 'exports bucket',
+          // The caller's clock, in local wall-clock parts. This package never
+          // self-stamps: a snapshot that invents its own timestamp and actor
+          // has two fields that read as an audit trail and are not one.
+          publishedAt: naivePublicationStamp(new Date()),
+          publishedBy: user?.id ? String(user.id) : 'unknown-actor',
+          rows: generated.master.rows,
+        });
+        baselineNote = `Recorded as published baseline v${recorded.baseline_version}.`;
+      } catch (baselineErr) {
+        logger.error('Baseline error:', baselineErr);
+        baselineFailed = true;
+        baselineNote =
+          `The files went out but NO published baseline was recorded: ` +
+          `${baselineErr.message}. Nothing can later be checked against this publication.`;
+      }
+
+      setStatus(baselineFailed ? 'error' : 'success');
+      setMessage(`Uploaded ${uploads.length} files to 'exports' bucket. ${baselineNote}`);
     } catch (err) {
       logger.error('Upload error:', err);
       setStatus('error');
       setMessage(`Upload failed: ${err.message}`);
+    }
+  };
+
+  /**
+   * **Stage 4: the reader.** "Is the working schedule still what version v
+   * said?", answered from the store rather than from this process's memory.
+   */
+  const handleCheckParity = async () => {
+    setParityBusy(true);
+    setParityError(null);
+    setParityReport(null);
+    try {
+      const report = await compareWithBaseline(selectedBaselineId, generated?.master?.rows ?? []);
+      setParityReport(report);
+    } catch (err) {
+      logger.error('Parity error:', err);
+      setParityError(err.message || 'The baseline comparison could not be run.');
+    } finally {
+      setParityBusy(false);
     }
   };
 
@@ -414,6 +644,95 @@ export default function OutputGenerationPanel({
               </div>
             </div>
           )}
+
+          <section
+            aria-labelledby="published-baselines-heading"
+            className="pt-4 border-t border-border-subtle mt-4"
+          >
+            <h3
+              id="published-baselines-heading"
+              className="text-lg font-bold text-text-primary mb-2"
+            >
+              Published Baselines
+            </h3>
+            <p className="text-xs text-text-muted mb-4">
+              Uploading to Storage records what went out. Compare a published baseline against the
+              schedule you have now to see what has moved since.
+            </p>
+
+            {baselinesLoading ? (
+              <p className="text-sm text-text-muted">Loading published baselines…</p>
+            ) : baselinesError ? (
+              /* **A read that failed is not an empty store.** The hook empties
+                 the list on a read error, so without this the operator is told
+                 "nothing has been published yet" when the truth is that we
+                 could not find out — which is the false statement
+                 `docs/sql/20260920000000_revert.sql` explicitly promises this
+                 surface will not make. */
+              <p className="text-sm text-red-400" data-testid="baselines-error">
+                {`Published baselines could not be read, so this says nothing about whether any exist: ${baselinesError}`}
+              </p>
+            ) : baselines.length === 0 ? (
+              <p className="text-sm text-text-muted" data-testid="no-baselines">
+                Nothing has been published yet. Generate the CSVs and upload them to record the
+                first baseline.
+              </p>
+            ) : (
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="flex flex-col gap-1">
+                  <label
+                    htmlFor="baseline-select"
+                    className="text-xs font-medium text-text-secondary"
+                  >
+                    Published baseline
+                  </label>
+                  <select
+                    id="baseline-select"
+                    data-testid="baseline-select"
+                    value={selectedBaselineId}
+                    onChange={(event) => {
+                      setSelectedBaselineId(event.target.value);
+                      // The report on screen is about the version that was
+                      // selected when it ran, not this one.
+                      setParityReport(null);
+                      setParityError(null);
+                    }}
+                    className="relative z-20 bg-bg-surface text-text-primary border border-border-subtle rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="">Choose a version…</option>
+                    {baselines.map((baseline) => (
+                      <option key={baseline.id} value={baseline.id}>
+                        {`v${baseline.baselineVersion} — ${baseline.label} — published ${baseline.publishedAt} (${baseline.rowCount} rows)`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  data-testid="check-parity-btn"
+                  onClick={handleCheckParity}
+                  disabled={parityBusy || !selectedBaselineId || !generated}
+                  className="relative z-20 bg-bg-surface hover:bg-bg-surface-hover text-text-primary px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {parityBusy ? 'Checking…' : 'Check against current schedule'}
+                </button>
+                {!generated && (
+                  <p className="text-xs text-text-muted">
+                    Generate the CSVs first — there is no current schedule to compare against.
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div aria-live="polite" className="mt-4">
+              {parityError && (
+                <p className="text-sm text-red-400" data-testid="parity-error">
+                  {parityError}
+                </p>
+              )}
+              {parityReport && <ParityReport report={parityReport} />}
+            </div>
+          </section>
 
           <div className="pt-4 border-t border-border-subtle mt-4">
             <h3 className="text-lg font-bold text-text-primary mb-4">Coach Communications</h3>

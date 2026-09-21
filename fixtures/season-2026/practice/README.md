@@ -317,21 +317,46 @@ are dropped. `permit_id` is a positional label (`PERMIT-01`…), not the real on
   four fixtures (09/19, 09/26, 10/17, 11/07) — all of them `Regional League
   Select fixture` additions. No team in the 132-team roster answers to it.
 
-  **And `SuperRec` is a tier that appears nowhere else in the corpus.** The
-  roster's 132 team codes carry exactly three tier tokens — `Junior` (64
-  assignments), `Micro` (52) and `Select` (22, over 14 distinct teams) — and
-  `SuperRec` is none of them. The only `16B` codes anywhere under
-  `fixtures/season-2026/` are `16BSelect01`, `16BSelect02` and this one, so it
-  is **not** a gap in a numbered sequence: there is no `16BSuperRec01` or `03`
-  for it to be missing a sibling of, and it is not a variant spelling of an
-  existing code either.
+  **And `SuperRec` matches no token the roster uses.** A roster code is
+  `<2-digit age><B|G><token><2-digit number>`, and across the 132 teams in
+  `../coach_roster.csv` the token takes exactly five values. Counted two ways,
+  because the two are different numbers and mixing them has caused trouble on
+  this corpus before — **distinct teams** (132 in total) and **assignment
+  occurrences** (215 in total, since 82 teams carry a second coach and one a
+  third):
 
-  That is what makes it worth recording rather than shrugging at, and it cuts
-  both ways. An opposing club adopting this corpus's own
-  `<age><gender><Tier><nn>` convention exactly would be odd; so would a
-  rostered team whose tier name exists nowhere else in the club's own sheets.
-  Both readings are live and the data does not choose between them, so it is
-  kept as it is and reported rather than reconciled — the same treatment
+  | token | teams | assignments |
+  | ------ | ----: | ----------: |
+  | Junior |    40 |          64 |
+  | Micro  |    34 |          52 |
+  | 7v7    |    28 |          50 |
+  | 9v9    |    16 |          27 |
+  | Select |    14 |          22 |
+  | total  |   132 |         215 |
+
+  `SuperRec` is none of the five, and the only `16B` codes anywhere under
+  `fixtures/season-2026/` are `16BSelect01`, `16BSelect02` and this one — so it
+  is **not** a gap in a numbered sequence (there is no `16BSuperRec01` or `03`
+  for it to be missing a sibling of) and not a variant spelling of an existing
+  code.
+
+  **How much that is worth, stated honestly, because a stronger version of this
+  sentence was written first and was false.** That version said the roster
+  carries "exactly three tier tokens" — it omitted `7v7` and `9v9`, which are
+  44 of the 132 teams — because it was derived from a regex requiring a purely
+  alphabetic token, a filter that excluded every code capable of contradicting
+  it. Two of the five tokens are **match formats rather than tier names at
+  all**, so the roster's vocabulary in that position is not a tidy closed set
+  of tiers, and an unfamiliar token is correspondingly weaker evidence of an
+  anomaly than the three-word version implied.
+
+  What survives is narrower and still worth recording: the token is one this
+  club's own sheets never use anywhere, on a label shaped exactly like this
+  club's own codes, on the **home** side. It cuts both ways. An opposing club
+  adopting this convention exactly would be odd; so would a rostered team whose
+  token appears in none of the club's sheets. Both readings are live and the
+  data does not choose between them, so it is kept as it is and reported rather
+  than reconciled — the same treatment
   `../coach_roster_v1.csv` gets for "Nate"/"Nathaniel" and
   `field_code_names.csv` for `Rookery`/`Rookerie`. `tests/changelog.test.js`
   asserts it by name, so a corpus edit that resolves it will fail there and make

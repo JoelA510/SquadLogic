@@ -274,9 +274,15 @@ describe('season-2026 change log — who can be told', () => {
     ];
     expect(unresolvedLabels.length).toBe(44);
 
-    const codeShaped = unresolvedLabels.filter((label) =>
-      /^\d{2}[A-Z][A-Za-z0-9]*\d{2}$/.test(label)
-    );
+    // **The shape is the roster's own, and it has to prove that before it is
+    // allowed to answer.** A filter that excludes part of the universe cannot
+    // be trusted to have found the only match in it, whatever it returns —
+    // the same fault that produced a false tier census for this very finding.
+    // So the pattern must match every one of the 132 roster codes first.
+    const ROSTER_CODE = /^\d{2}[BG].+\d{2}$/;
+    expect(season.teams.filter((team) => ROSTER_CODE.test(team.id))).toHaveLength(132);
+
+    const codeShaped = unresolvedLabels.filter((label) => ROSTER_CODE.test(label));
     expect(codeShaped).toEqual(['16BSuperRec02']);
     expect(season.teams.some((team) => team.id === '16BSuperRec02')).toBe(false);
 

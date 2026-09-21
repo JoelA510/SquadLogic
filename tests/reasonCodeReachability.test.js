@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 20 vocabularies, 484 codes, of
- * which 473 are shown to be producible and 11 are named as holes.
+ * `tests/attribution.test.js` already carries. 21 vocabularies, 500 codes, of
+ * which 489 are shown to be producible and 11 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -230,6 +230,12 @@ import {
   soleCoachRiskRegister,
 } from '@squadlogic/core/people/index.js';
 import {
+  PRACTICE_REASON,
+  buildPracticeHistory,
+  buildPracticeSlotSet,
+  materialisePracticeOccurrences,
+} from '@squadlogic/core/practice/index.js';
+import {
   PARITY_FIELD,
   PUBLICATION_REASON,
   SYNC_DESTINATION_KIND,
@@ -354,6 +360,7 @@ const TABLES = Object.freeze({
   FEASIBILITY_REASON,
   FREEZE_REASON,
   PEOPLE_REASON,
+  PRACTICE_REASON,
   PUBLICATION_REASON,
   RESERVE_REASON,
   RESOLVE_REASON,
@@ -5635,6 +5642,135 @@ harvest(
   }).findings
 );
 harvest('repairProposal(8.6 does not exist)', repairProposal({ affectedCount: 2 }).finding);
+
+/* -------------------------------------------------------------------------- */
+/* practice: the recurring-practice model (Phase 8.5)                          */
+/* -------------------------------------------------------------------------- */
+
+// Every one of the sixteen codes is driven from a public entry point on
+// constructed input — no hole to register. The model is young enough that
+// nothing has yet had time to become unreachable, which is the point of
+// auditing it on the way in rather than later.
+//
+// `PRACTICE_MODEL_UNWIRED` is on every result by construction, so the first
+// call below carries it.
+
+/** A Tuesday slot over September 2026; 2026-09-01 is a Tuesday. */
+const practiceSlot = (overrides = {}) => ({
+  id: 'pm-1',
+  surfaceId: 'rig/half',
+  weekday: 'TUE',
+  startMinutes: 1020,
+  durationMinutes: 60,
+  validFrom: '2026-09-01',
+  validUntil: '2026-09-30',
+  capacity: 1,
+  revisionId: 'r1',
+  label: null,
+  ...overrides,
+});
+
+/** Duplicate window inside one revision, a dead Friday slot, two undated plans. */
+const practicePlan = harvest(
+  'buildPracticeSlotSet(duplicate window, dead slot, two undated revisions)',
+  buildPracticeSlotSet({
+    slots: [
+      practiceSlot(),
+      // Same revision, same window: a plan contradicting itself.
+      practiceSlot({ id: 'pm-2' }),
+      // A Friday slot over a Tue–Wed range occurs never.
+      practiceSlot({
+        id: 'pm-3',
+        weekday: 'FRI',
+        validFrom: '2026-09-01',
+        validUntil: '2026-09-02',
+      }),
+      // Two revisions the source never dated, so neither can be ordered.
+      practiceSlot({ id: 'pm-4', validFrom: null, validUntil: null, revisionId: 'r2' }),
+      practiceSlot({ id: 'pm-5', validFrom: null, validUntil: null, revisionId: 'r3' }),
+      // Ground an adapter could not place against the facility graph.
+      practiceSlot({ id: 'pm-6', revisionId: 'r4', surfaceResolution: 'venue-unknown' }),
+    ],
+    assignments: [
+      { id: 'pa-1', slotId: 'pm-1', teamId: 'PT1' },
+      // Same September range as pm-1, so PT1's two phases overlap.
+      { id: 'pa-2', slotId: 'pm-2', teamId: 'PT1' },
+    ],
+    source: 'reachability rig',
+  })
+);
+
+harvest(
+  'materialisePracticeOccurrences(cancelled, moved, shortened, misdated, unknown slot)',
+  materialisePracticeOccurrences(practicePlan, {
+    from: '2026-09-01',
+    to: '2026-09-30',
+    exceptions: [
+      { id: 'px-1', slotId: 'pm-1', date: '2026-09-08', kind: 'cancelled', reason: 'rain-out' },
+      {
+        id: 'px-2',
+        slotId: 'pm-1',
+        date: '2026-09-15',
+        kind: 'moved',
+        reason: 'clash',
+        startMinutes: 1080,
+      },
+      {
+        id: 'px-3',
+        slotId: 'pm-1',
+        date: '2026-09-22',
+        kind: 'shortened',
+        reason: 'early sunset',
+        durationMinutes: 30,
+      },
+      // A Wednesday, on a Tuesday slot: aimed at nothing.
+      { id: 'px-4', slotId: 'pm-1', date: '2026-09-16', kind: 'cancelled', reason: 'typo' },
+      // A slot this plan does not hold.
+      { id: 'px-5', slotId: 'ghost', date: '2026-09-29', kind: 'cancelled', reason: 'wrong plan' },
+      // Aimed at a date 'px-1' already cancelled: superseded, not unmatched.
+      {
+        id: 'px-6',
+        slotId: 'pm-1',
+        date: '2026-09-08',
+        kind: 'moved',
+        reason: 'stale request',
+        startMinutes: 1140,
+      },
+    ],
+  })
+);
+
+harvest(
+  'buildPracticeHistory(a team id no assignment names)',
+  buildPracticeHistory(practicePlan, { teamId: 'PT-nobody' })
+);
+
+harvest(
+  'materialisePracticeOccurrences(a month in which nothing is scheduled)',
+  materialisePracticeOccurrences(practicePlan, { from: '2026-11-01', to: '2026-11-30' })
+);
+
+harvest(
+  'buildPracticeHistory(a team holding two overlapping ranges)',
+  buildPracticeHistory(practicePlan, { teamId: 'PT1' })
+);
+
+harvest(
+  'buildPracticeHistory(a team whose ranges leave a gap)',
+  buildPracticeHistory(
+    buildPracticeSlotSet({
+      slots: [
+        practiceSlot({ id: 'pg-1', validFrom: '2026-08-01', validUntil: '2026-08-31' }),
+        practiceSlot({ id: 'pg-2', validFrom: '2026-09-15', validUntil: '2026-09-30' }),
+      ],
+      assignments: [
+        { id: 'pga-1', slotId: 'pg-1', teamId: 'PT2' },
+        { id: 'pga-2', slotId: 'pg-2', teamId: 'PT2' },
+      ],
+    }),
+    { teamId: 'PT2' }
+  )
+);
 
 /* -------------------------------------------------------------------------- */
 /* The audit                                                                   */

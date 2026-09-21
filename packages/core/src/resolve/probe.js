@@ -50,6 +50,7 @@ import {
   createResolveLedger,
   createResolveState,
   pinGames,
+  resolveContextDefaults,
   slotKey,
 } from './state.js';
 
@@ -158,6 +159,7 @@ export function buildAdversarialState(input) {
 
   /** @type {Object} */
   const context = {
+    ...resolveContextDefaults(),
     engines,
     changes: change
       ? [
@@ -179,13 +181,7 @@ export function buildAdversarialState(input) {
     // than thrown.
     onUnsatisfiable: 'report',
     touchedDates: [...new Set(games.map((game) => game.date))].sort(),
-    baselineBlockingCodes: {},
-    baselineFindingCounts: {},
-    anchors: {},
-    requestedSlots: {},
-    unsatisfiableErrors: [],
     baselineVerification: null,
-    stageSnapshots: [],
     baselineSnapshot: fingerprint(state),
     runVerification: () => null,
     baseSchedule,

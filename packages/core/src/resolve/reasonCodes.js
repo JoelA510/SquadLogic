@@ -196,6 +196,92 @@ export const RESOLVE_REASON = Object.freeze({
    * outside until the day it matters.
    */
   RESOLVE_CHANGE_BUDGET_MET: 'RESOLVE_CHANGE_BUDGET_MET',
+
+  /* -- the repair scope and the bounded neighbourhood ------------------------ */
+  /**
+   * The run was handed a **repair scope**: games whose current position it is
+   * being asked to repair rather than to accept.
+   *
+   * `info`. Every other run in this package accepts what it was handed and
+   * repairs only what it breaks, which is the whole of "a change request is not
+   * asked to repair the schedule it was handed". That policy has one blind
+   * spot, and it is the event this operator exists for: when the ground under a
+   * game is withdrawn, the game is illegal **at its baseline slot**, so
+   * `baseline-ingest` files the breach as already-carried and `local-search`
+   * skips it. Measured on the season-2026 corpus: withdrawing one venue's
+   * permit for one date takes the rule engine from 62 baseline violations to
+   * 74, and the re-solve over the same engines emits **not one finding naming
+   * the closure**. The repair scope is how a caller says which games that
+   * silence is wrong about.
+   */
+  RESOLVE_REPAIR_SCOPE_DECLARED: 'RESOLVE_REPAIR_SCOPE_DECLARED',
+  /**
+   * A repair scope was declared and **not one game in it carried a baseline
+   * finding**.
+   *
+   * `blocking`, and the meta-assertion the scope rests on. Un-accepting the
+   * baseline findings of games that had none changes nothing whatsoever, so the
+   * run would report a successful bounded repair having repaired nothing and
+   * examined nothing — incident 4's shape, one layer up. A caller who names the
+   * wrong games, or names them after the closure has already been lifted, is
+   * told so rather than handed a clean report.
+   */
+  RESOLVE_REPAIR_SCOPE_VACUOUS: 'RESOLVE_REPAIR_SCOPE_VACUOUS',
+  /**
+   * A game in the repair scope had **nowhere legal to go**, and is left
+   * standing where it is.
+   *
+   * `compromise`. Deliberately not TIME TBD: a game on withdrawn ground still
+   * has a time families were given, and taking it away buys nothing when the
+   * placer has nothing to offer instead. `resolve/` can only offer slots the
+   * baseline used at the same venue on the same date (see
+   * `inventory.js:candidateSlotsFor`), so a whole-venue withdrawal has no
+   * in-reach answer by construction and the honest report is that the repair
+   * was attempted and failed, naming how many candidates were refused.
+   */
+  RESOLVE_REPAIR_UNAVAILABLE: 'RESOLVE_REPAIR_UNAVAILABLE',
+  /**
+   * The change budget **stopped the repair**, and games are unrepaired or TIME
+   * TBD as a consequence.
+   *
+   * `compromise`, and the severity is the point. Before this the budget was
+   * checked once, after the fact, on a finished run:
+   * `report.js` compared `moved.length` against the cap and `commit.js` threw.
+   * A run that would move forty games moved forty and was then refused whole.
+   * The budget now bounds the neighbourhood the repair may spend itself on, so
+   * such a run comes back **within** its cap and partially repaired — which is
+   * more useful and is a different thing, and a caller gating on status must be
+   * unable to mistake "we stopped early" for "we finished".
+   * {@link RESOLVE_REASON.RESOLVE_CHANGE_BUDGET_MET} is `info` and would read
+   * as an all-clear; this is what stops the status coming back clean.
+   */
+  RESOLVE_CHANGE_BUDGET_BOUND: 'RESOLVE_CHANGE_BUDGET_BOUND',
+
+  /* -- published-time hold, as a tracked metric ------------------------------ */
+  /**
+   * How many games kept the kickoff the published schedule gave them.
+   *
+   * `info`. Every counter this package had before counted **change** —
+   * `movedGames`, `gamesDislodged`, `gamesReplaced`, `gamesTimeTbd`,
+   * `candidatesRejected`. The hold existed as behaviour (the anchor, and
+   * `local-search`'s never-move-a-legal-game branch) and as nothing a report
+   * could be read for. It is counted here by enumerating the **baseline**
+   * roster, never the result, so a game the pipeline dropped is reported as
+   * unplaced rather than being silently absent from the set it would have been
+   * counted in.
+   */
+  RESOLVE_PUBLISHED_HOLD_MEASURED: 'RESOLVE_PUBLISHED_HOLD_MEASURED',
+  /**
+   * The hold partition does not add up.
+   *
+   * `blocking`. `held + moved + unplaced === baselineGames`, counted from both
+   * sides rather than asserted from how the lists were built — the same
+   * discipline `publication/parity.js` applies to its four buckets and reports
+   * as `PARITY_PARTITION_INCOMPLETE`. A partition that does not add up means a
+   * game is in two buckets or in none, and either way the hold number is a
+   * number nobody should read.
+   */
+  RESOLVE_PUBLISHED_HOLD_PARTITION_INCOMPLETE: 'RESOLVE_PUBLISHED_HOLD_PARTITION_INCOMPLETE',
   /**
    * A game moved and **nothing in the run can say what forced it**.
    *
@@ -298,6 +384,12 @@ export const RESOLVE_REASON_SEVERITY = Object.freeze({
   [RESOLVE_REASON.RESOLVE_OBJECTIVE_CHANGE_TERM_DISABLED]: RESOLVE_SEVERITY.COMPROMISE,
   [RESOLVE_REASON.RESOLVE_CHANGE_BUDGET_EXCEEDED]: RESOLVE_SEVERITY.BLOCKING,
   [RESOLVE_REASON.RESOLVE_CHANGE_BUDGET_MET]: RESOLVE_SEVERITY.INFO,
+  [RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_DECLARED]: RESOLVE_SEVERITY.INFO,
+  [RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_VACUOUS]: RESOLVE_SEVERITY.BLOCKING,
+  [RESOLVE_REASON.RESOLVE_REPAIR_UNAVAILABLE]: RESOLVE_SEVERITY.COMPROMISE,
+  [RESOLVE_REASON.RESOLVE_CHANGE_BUDGET_BOUND]: RESOLVE_SEVERITY.COMPROMISE,
+  [RESOLVE_REASON.RESOLVE_PUBLISHED_HOLD_MEASURED]: RESOLVE_SEVERITY.INFO,
+  [RESOLVE_REASON.RESOLVE_PUBLISHED_HOLD_PARTITION_INCOMPLETE]: RESOLVE_SEVERITY.BLOCKING,
   [RESOLVE_REASON.RESOLVE_CONSEQUENTIAL_MOVE_UNEXPLAINED]: RESOLVE_SEVERITY.BLOCKING,
   [RESOLVE_REASON.RESOLVE_REPORT_PARTITION_INCOMPLETE]: RESOLVE_SEVERITY.BLOCKING,
   [RESOLVE_REASON.RESOLVE_REPORT_QUALITY_UNMEASURED]: RESOLVE_SEVERITY.INFO,
@@ -383,6 +475,22 @@ export function createResolveMeta() {
     movedRequested: 0,
     movedConsequential: 0,
     movedConsequentialExplained: 0,
+    // 8.6's counters. Every counter above this line counts **change**; these
+    // are the first that count a hold and the first that count a repair the
+    // run was asked for and could not make. `publishedKickoffHeld` and
+    // `publishedSlotHeld` are assigned after the pipeline from the baseline
+    // partition, as `movedGames` is; the other three are summed as the stages
+    // run.
+    /** Games the run was asked to repair rather than to accept. */
+    repairScopeGames: 0,
+    /** Of those, ones the placer had nothing legal to offer. */
+    repairsUnavailable: 0,
+    /** Moves the change budget refused before the writer saw them. */
+    movesRefusedByBudget: 0,
+    /** Baseline games standing at their published date **and** kickoff. */
+    publishedKickoffHeld: 0,
+    /** Of those, ones also standing on their published ground. */
+    publishedSlotHeld: 0,
   };
 }
 

@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 21 vocabularies, 500 codes, of
- * which 489 are shown to be producible and 11 are named as holes.
+ * `tests/attribution.test.js` already carries. 21 vocabularies, 506 codes, of
+ * which 494 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -54,7 +54,7 @@
  *   coverage down with it, and the audit would then read as a defect in the
  *   module rather than in this file. The labels passed to {@link harvest} exist
  *   so the failure names the call that used to work.
- * - Eight declared codes cannot be produced through any entry point at all, and
+ * - Nine declared codes cannot be produced through any entry point at all, and
  *   three more only by calling an exported helper the pipeline itself never
  *   calls that way. Each is named in {@link UNREACHABLE} with what stands in
  *   the way, and that list — not this file's machinery — is the finding worth
@@ -205,6 +205,7 @@ import {
   freezeAllExcept,
   judgeFreeze,
   judgeFreezeAll,
+  FREEZE_DISPOSITION,
 } from '@squadlogic/core/freeze/index.js';
 import {
   ASSIGNMENT_STATUS,
@@ -283,6 +284,10 @@ import {
   applyMove,
   commitResolve,
   season2026ExternalFixtureChanges,
+  createResolveState,
+  createResolveLedger,
+  buildSlotInventory,
+  checkPlacement,
 } from '@squadlogic/core/resolve/index.js';
 import {
   RULE_REASON,
@@ -507,6 +512,11 @@ const UNREACHABLE = Object.freeze([
     'RESOLVE_RUN_VACUOUS',
     WHY.NO_PRODUCTION_PATH,
     'The stage raises it when the run holds no games, but runResolve() throws on an empty schedule before any stage runs ("every verdict this run could produce would be true of nothing"), and applyChangeRequest() throws again on an empty change list. It is a third guard standing behind two hard refusals.'
+  ),
+  allow(
+    'RESOLVE_PUBLISHED_HOLD_PARTITION_INCOMPLETE',
+    WHY.NO_PRODUCTION_PATH,
+    'Same shape as RESOLVE_REPORT_PARTITION_INCOMPLETE. diffAgainstBaseline() builds held and moved from one walk of state.gameIds, pushing each game into exactly one of them, so no production run can produce a partition that fails to add up or names a game in both. It is the meta-assertion on that walk, and it is driven from a hand-built partition in tests/boundedLocalRepair.test.js, which is where a check that cannot fire in production can still be shown to fire.'
   ),
   allow(
     'RESOLVE_AUDIT_VACUOUS',
@@ -2318,6 +2328,154 @@ harvest(
     changeBudget: 1,
   })
 );
+/* -- 8.6: the repair scope and the bounded neighbourhood ------------------ */
+
+/**
+ * Games the published corpus already carries a **blocking** finding for at
+ * their own slot — the `Scrimmage` rows with no timing entry, which the
+ * registry severities as `SIZE_UNKNOWN_FORMAT`. Found rather than named, so a
+ * corpus that stops carrying them fails the meta-assertion below instead of
+ * silently driving nothing.
+ */
+const SCOPE_STATE = createResolveState({
+  games: schedule.games.map((game) => ({ ...game })),
+  dispositions: Object.fromEntries(
+    schedule.games.map((game) => [game.id, FREEZE_DISPOSITION.THAWED])
+  ),
+  inventory: buildSlotInventory(schedule.games),
+  ledger: createResolveLedger(),
+});
+const alreadyIllegal = schedule.games.filter(
+  (game) =>
+    Object.keys(
+      checkPlacement(engines, SCOPE_STATE, game.id, {
+        date: game.date,
+        surfaceId: game.surfaceId,
+        startMinutes: game.startMinutes,
+      }).blockingCodeCounts
+    ).length > 0
+);
+if (alreadyIllegal.length === 0) {
+  throw new Error(
+    'reachability: no corpus game carries a baseline blocking finding, so the repair-scope codes cannot be driven from real data'
+  );
+}
+const SCOPE_DATE = alreadyIllegal[0].date;
+const SCOPED = alreadyIllegal.filter((game) => game.date === SCOPE_DATE).map((game) => game.id);
+const SCOPE_NO_OP = /** @type {any} */ (schedule.games.find((game) => game.date === SCOPE_DATE));
+/** A change that asks for the slot it already has: the run has to happen. */
+const scopeNoOpChange = [
+  {
+    gameId: SCOPE_NO_OP.id,
+    date: SCOPE_NO_OP.date,
+    surfaceId: SCOPE_NO_OP.surfaceId,
+    startMinutes: SCOPE_NO_OP.startMinutes,
+    reason: 'a run has to happen for the repair scope to act on anything',
+  },
+];
+
+harvest(
+  'applyChangeRequest(a repair scope over games the schedule already broke)',
+  applyChangeRequest({
+    schedule,
+    changes: scopeNoOpChange,
+    engines,
+    repairScope: SCOPED,
+    freeze: freezeAllExcept([...SCOPED, SCOPE_NO_OP.id].map((gameId) => ({ gameId }))),
+    verify: false,
+    onUnsatisfiable: 'report',
+  })
+);
+
+harvest(
+  'applyChangeRequest(a repair scope over a game that carries nothing)',
+  applyChangeRequest({
+    schedule,
+    changes: scopeNoOpChange,
+    engines,
+    repairScope: [
+      /** @type {any} */ (
+        schedule.games.find(
+          (game) =>
+            game.date === SCOPE_DATE && !SCOPED.includes(game.id) && game.id !== SCOPE_NO_OP.id
+        )
+      ).id,
+    ],
+    freeze: freezeAllExcept([{ date: SCOPE_DATE }]),
+    verify: false,
+    onUnsatisfiable: 'report',
+  })
+);
+
+/**
+ * A budget that bites **during** the repair rather than after it.
+ *
+ * Two same-format games are stacked onto a third's slot in the baseline and a
+ * fourth is requested onto it and pinned, so the pile has to come apart around
+ * a game that cannot move. Unbounded the run spreads; under a cap one of the
+ * relocations is refused before the writer sees it, which is
+ * `RESOLVE_CHANGE_BUDGET_BOUND`. `tests/boundedLocalRepair.test.js` is where
+ * the numbers are asserted; this only has to make the code fire.
+ */
+const BOUND_SCENARIO = (() => {
+  const wave = schedule.games
+    .filter((game) => game.date === RESOLVE_DATE && game.venueId === anchor.venueId)
+    .filter((game) => game.startMinutes === KICKOFFS[0]);
+  const head = wave[0];
+  const stackers = wave
+    .filter((game) => game.format === head.format && game.surfaceId !== head.surfaceId)
+    .slice(0, 2);
+  const extra = wave.find(
+    (game) =>
+      game.format === head.format &&
+      game.id !== head.id &&
+      !stackers.some((stacker) => stacker.id === game.id)
+  );
+  if (stackers.length < 2 || !extra) return null;
+  return {
+    schedule: {
+      ...schedule,
+      games: schedule.games.map((game) =>
+        stackers.some((stacker) => stacker.id === game.id)
+          ? {
+              ...game,
+              surfaceId: head.surfaceId,
+              startMinutes: head.startMinutes,
+              endMinutes: head.startMinutes + (game.endMinutes - game.startMinutes),
+            }
+          : game
+      ),
+    },
+    changes: [
+      {
+        gameId: extra.id,
+        date: RESOLVE_DATE,
+        surfaceId: head.surfaceId,
+        startMinutes: KICKOFFS[0],
+        reason: 'one more game onto a slot three others already share',
+      },
+    ],
+  };
+})();
+if (BOUND_SCENARIO === null) {
+  throw new Error(
+    'reachability: the corpus no longer offers a wave to stack, so RESOLVE_CHANGE_BUDGET_BOUND cannot be driven'
+  );
+}
+harvest(
+  'applyChangeRequest(a pile that has to come apart, under a budget that stops it early)',
+  applyChangeRequest({
+    schedule: BOUND_SCENARIO.schedule,
+    changes: BOUND_SCENARIO.changes,
+    engines,
+    freeze: freezeAllExcept([{ date: RESOLVE_DATE }]),
+    holdChanges: true,
+    changeBudget: 2,
+    verify: false,
+    onUnsatisfiable: 'report',
+  })
+);
+
 harvest(
   'applyChangeRequest(unknown game, no-op, frozen game, slot off the inventory)',
   applyChangeRequest({

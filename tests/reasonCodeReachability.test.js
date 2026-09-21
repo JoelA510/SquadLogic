@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 21 vocabularies, 506 codes, of
- * which 494 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 522 codes, of
+ * which 510 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -237,6 +237,14 @@ import {
   materialisePracticeOccurrences,
 } from '@squadlogic/core/practice/index.js';
 import {
+  CHANGELOG_REASON,
+  UNDECLARED_SOURCE,
+  buildChangeHistory,
+  buildChangeLog,
+  changeLogPartitionFindings,
+  stateAsOf,
+} from '@squadlogic/core/changelog/index.js';
+import {
   PARITY_FIELD,
   PUBLICATION_REASON,
   SYNC_DESTINATION_KIND,
@@ -357,6 +365,7 @@ const CORE = path.join(ROOT, 'packages', 'core', 'src');
 const TABLES = Object.freeze({
   ATTRIBUTION_REASON,
   AVAILABILITY_REASON,
+  CHANGELOG_REASON,
   CONSTRAINT_REASON,
   EXTERNAL_IMPORT_REASON,
   FACILITY_REASON,
@@ -5928,6 +5937,134 @@ harvest(
     }),
     { teamId: 'PT2' }
   )
+);
+
+/* -------------------------------------------------------------------------- */
+/* changelog/                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** A raw change-log entry, varied one field at a time. */
+const changeEntry = (overrides = {}) => ({
+  date: '2026-10-03',
+  home: 'CL-A',
+  away: 'CL-B',
+  reason: 'because',
+  before: { raw: '10:00', startMinutes: 600, location: 'Pitch 1', scheduled: true },
+  after: { raw: '10:30', startMinutes: 630, location: 'Pitch 1', scheduled: true },
+  ...overrides,
+});
+const changeTeams = [
+  { teamId: 'CL-A', teamName: null },
+  { teamId: 'CL-B', teamName: null },
+];
+const claimsEverything = [{ id: 'cl-any', title: 'anything', matches: () => true }];
+
+// SOURCE_UNDECLARED, COVERAGE_UNSTATED, TRANSACTION_TIME_ABSENT, LOG_NOT_PERSISTED.
+harvest(
+  'buildChangeLog(a reason no source declares)',
+  buildChangeLog({
+    subject: 'changelog rig',
+    entries: [changeEntry()],
+    sources: [{ id: 'cl-never', title: 'never', matches: () => false }],
+    teams: changeTeams,
+  })
+);
+
+// SOURCE_AMBIGUOUS and SOURCE_MATCHED_NOTHING in one pass: two matchers claim
+// the single entry, so the third declaration claims nothing.
+harvest(
+  'buildChangeLog(two sources claiming one entry, and a third claiming none)',
+  buildChangeLog({
+    subject: 'changelog rig',
+    entries: [changeEntry()],
+    sources: [
+      { id: 'cl-one', title: 'one', matches: () => true },
+      { id: 'cl-two', title: 'two', matches: () => true },
+      { id: 'cl-three', title: 'three', matches: () => false },
+    ],
+    teams: changeTeams,
+    coverage: 'stated, so COVERAGE_UNSTATED is not what this call proves',
+  })
+);
+
+// PARTICIPANT_UNRESOLVED — a side that is neither a team nor a declared label.
+harvest(
+  'buildChangeLog(a participant nobody answers to)',
+  buildChangeLog({
+    subject: 'changelog rig',
+    entries: [changeEntry({ away: 'CL-nobody' })],
+    sources: claimsEverything,
+    teams: changeTeams,
+  })
+);
+
+// PARTICIPANT_AMBIGUOUS — one team's name is another team's id.
+harvest(
+  'buildChangeLog(a label two teams answer to)',
+  buildChangeLog({
+    subject: 'changelog rig',
+    entries: [changeEntry()],
+    sources: claimsEverything,
+    teams: [...changeTeams, { teamId: 'CL-C', teamName: 'CL-A' }],
+  })
+);
+
+// PARTICIPANT_SELF_PAIRED — both sides resolve to one team.
+harvest(
+  'buildChangeLog(a fixture whose sides are one team)',
+  buildChangeLog({
+    subject: 'changelog rig',
+    entries: [changeEntry({ away: 'The As' })],
+    sources: claimsEverything,
+    teams: [{ teamId: 'CL-A', teamName: 'The As' }],
+  })
+);
+
+// ENTRY_CHANGED_NOTHING and HISTORY_CONFLICT — two entries on one date, the
+// second of which changes nothing.
+const changeLogWithConflict = buildChangeLog({
+  subject: 'changelog rig',
+  entries: [
+    changeEntry(),
+    changeEntry({
+      after: { raw: '10:00', startMinutes: 600, location: 'Pitch 1', scheduled: true },
+    }),
+  ],
+  sources: claimsEverything,
+  teams: changeTeams,
+});
+harvest('buildChangeLog(two states on one date, one of them a no-op)', changeLogWithConflict);
+harvest(
+  'buildChangeHistory(a subject holding two states on one date)',
+  buildChangeHistory(changeLogWithConflict, { subjectId: 'CL-A v CL-B' })
+);
+
+// HISTORY_EMPTY — a subject the log never names.
+harvest(
+  'buildChangeHistory(a subject the log never names)',
+  buildChangeHistory(changeLogWithConflict, { subjectId: 'CL-nothing v CL-nothing' })
+);
+
+// AS_OF_UNJUDGED — a state asked for with no date to apply.
+harvest('stateAsOf(no as-of date)', stateAsOf(changeLogWithConflict, { subjectId: 'CL-A v CL-B' }));
+
+// AS_OF_PRECEDES_LOG — the subject IS in the log and every entry postdates the
+// date asked about. Distinct from HISTORY_EMPTY, which is the subject the log
+// never names; the two were once the same answer, on the field the module
+// header nominates to keep them apart.
+harvest(
+  'stateAsOf(a date before the subject’s first entry)',
+  stateAsOf(changeLogWithConflict, { subjectId: 'CL-A v CL-B', asOf: '2026-01-01' })
+);
+
+// PARTITION_UNSOUND cannot be produced by handing `buildChangeLog()` input:
+// it counts its own buckets as it fills them, so making it disagree would mean
+// introducing the drop it exists to catch. It is driven through the exported
+// reconciliation instead — the same seam `tests/changelog.test.js` falsifies
+// in both directions, and the reason that function is public at all.
+harvest(
+  'changeLogPartitionFindings(a partition short of an entry)',
+  changeLogPartitionFindings({ changed: 1 }, { [UNDECLARED_SOURCE]: 3 }, 2)
 );
 
 /* -------------------------------------------------------------------------- */

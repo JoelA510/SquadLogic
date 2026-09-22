@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CI now runs on Node 24 (parity with the Vercel production runtime, which has reported Node `24.x` since the 2026-05-02 release-prep check) and all GitHub Actions are on their Node 24-native majors (`checkout@v5`, `setup-node@v5`, `upload-artifact@v6`, `supabase/setup-cli@v2`), ahead of the June 16 2026 runner default switch.
+- Refreshed all in-range npm dependencies (`npm update`): notably `@supabase/supabase-js` 2.108, `@playwright/test` 1.60, Tailwind 4.3, zod 4.4, React 19.2.7, Sentry 10.57. Major bumps (`vite` 8, `eslint` 10, `typescript` 6, `jsdom` 29, `@vitejs/plugin-react` 6, `lucide-react` 1.x) deliberately deferred to a dedicated upgrade PR, and `eslint-plugin-react-hooks` is pinned at 7.0.1 — its 7.1 minor enables new rules (`set-state-in-effect`, `preserve-manual-memoization`) that flag 63 pre-existing patterns and deserve their own refactor pass.
 - Normalized the remaining deep-relative `../../../packages/core/src/...` frontend imports to the canonical `@squadlogic/core/...` alias.
 - Release hygiene: CI now uses `npm ci`, explicit docs-only diff checks, concurrency, full E2E artifacts, and a hosted full E2E path restored in PR #209.
 - Release hygiene: local and CI pgTAP now use a pinned Supabase CLI, committed `supabase/config.toml`, repaired fresh migration replay, and reproducible full/single-file DB test commands from PR #211.

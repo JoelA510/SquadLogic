@@ -81,7 +81,7 @@ The application is structured around the following workflows (see `frontend/src/
 
 ### Prerequisites
 
-- Node.js (v20 or higher)
+- Node.js (v20 or higher; CI and the Vercel production build run on Node 24)
 - npm (v10 or higher)
 - A Supabase Project (for database and auth) — or run in mock mode (below) with no backend at all
 

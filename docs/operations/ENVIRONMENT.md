@@ -14,10 +14,10 @@
 
 These variables are set in **Vercel → Project Settings → Environment Variables**. Variables prefixed with `VITE_` are bundled into the client-side JavaScript at build time.
 
-As of the 2026-05-02 release-prep check, Vercel reports the `squadlogic`
-project runtime as Node `24.x`. CI intentionally remains on Node 20 as the
-minimum supported runtime until a separate parity PR changes that setting with
-full verification.
+Vercel reports the `squadlogic` project runtime as Node `24.x`, and as of
+2026-06-12 CI verifies on Node 24 as well (the runtime-parity follow-up the
+2026-05-02 release-prep check deferred). `package.json` still declares
+`engines: >=20` as the minimum supported runtime.
 
 | Variable | Required | Secret | Purpose | Source |
 |---|---|---|---|---|

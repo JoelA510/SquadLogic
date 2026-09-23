@@ -45,7 +45,7 @@ import { SEASON_2026_EARLIEST_KICKOFF_MINUTES } from '../../reserve/adapters/sea
 
 import { makeSeasonInputs } from '../inputs.js';
 import { replacementSurfacesFor } from '../relocation.js';
-import { RELOCATION_POLICY, SCENARIO_OVERRIDE_KIND } from '../reasonCodes.js';
+import { SCENARIO_OVERRIDE_KIND } from '../reasonCodes.js';
 import { makeScenario } from '../scenario.js';
 
 /**
@@ -198,14 +198,12 @@ export function season2026EarliestKickoffFor(games, format) {
  * @param {ReadonlyArray<string>} input.excludeVenueIds
  * @param {ReadonlyArray<Object>} input.games - the baseline schedule's rows, for the anchor
  * @param {number} [input.earliestKickoffMinutes] - a stated anchor, overriding the derived one
- * @param {string} [input.policy] - a `RELOCATION_POLICY` value
  * @returns {Object} input for `RelocationPolicySchema`
  */
 export function season2026RelocationPolicy(input) {
   const timing = input.table.formats?.[input.format] ?? null;
   const cadence = timing?.blockMinutes ?? SEASON_2026_RELOCATION_CADENCE_MINUTES;
   return {
-    policy: input.policy ?? RELOCATION_POLICY.NEAREST_KICKOFF,
     surfaceIds: replacementSurfacesFor(input.graph, {
       format: input.format,
       excludeVenueIds: input.excludeVenueIds,

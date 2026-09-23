@@ -21,7 +21,7 @@ import { z } from 'zod';
 
 import { CONSTRAINT_TYPE } from '../constraints/reasonCodes.js';
 
-import { RELOCATION_POLICY, SCENARIO_OVERRIDE_KIND, SCENARIO_RECORD_SET } from './reasonCodes.js';
+import { SCENARIO_OVERRIDE_KIND, SCENARIO_RECORD_SET } from './reasonCodes.js';
 
 /** Inclusive ISO calendar date, `YYYY-MM-DD`. No `Date` construction anywhere. */
 const IsoDateSchema = z
@@ -206,7 +206,10 @@ export const ScheduleScenarioSchema = z
  */
 export const RelocationPolicySchema = z
   .object({
-    policy: z.enum(Object.values(RELOCATION_POLICY)).default(RELOCATION_POLICY.NEAREST_KICKOFF),
+    // No `policy` field (#53): the proposer has one ordering,
+    // `RELOCATION_RANKING`, and a field choosing between orderings would be
+    // parsed and unread. `.strict()` refuses a caller still sending one rather
+    // than letting it believe it chose.
     surfaceIds: z.array(IdSchema).min(1, {
       message:
         'a relocation policy that names no candidate ground can only ever report "nowhere to go", which is a fact about the policy rather than about the season',

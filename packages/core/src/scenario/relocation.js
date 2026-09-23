@@ -24,6 +24,24 @@
  * redefines `reoptimiseWholeSeason()`, whose 8-games-moved figure is a headline
  * result of Prompt 4.2.
  *
+ * ## Relocation proposes, `resolve/` decides (#53)
+ *
+ * This module filters; it does not judge. Every candidate that survives its
+ * own questions — ground of the right size and grade, free, no team in two
+ * places — is handed to a **probe** the caller builds from `resolve/`
+ * (`createPlacementProbe()`, or the options pass's own), which asks the
+ * facility model, the rule gate and the objective exactly as the placer does.
+ * A candidate the gate refuses is never proposed, and the order among the rest
+ * is `rankReplacementOptions()`: clean first, then `scoreObjective()`. There
+ * used to be two orderings of this module's own (`RELOCATION_POLICY`), a
+ * second definition of "better" that disagreed with the objective in 19 of 22
+ * measured cases; they are gone.
+ *
+ * The same filter serves two callers: `proposeRelocations()` for a scenario
+ * branch, which applies its proposals (gated, `origin: 'proposer'`), and
+ * `relocationOptionsFor()` for `resolve/`'s options pass, which applies
+ * nothing and offers up to three for an operator to approve.
+ *
  * ## The sentence that must survive every rewrite of the report
  *
  * These replacements were **proposed by `proposeRelocations()` under a stated
@@ -48,12 +66,12 @@ import { CONSTRAINT_SEVERITY } from '../constraints/reasonCodes.js';
 import { checkKickoffAvailability } from '../availability/kickoff.js';
 import { DEFAULT_SIZE_RANK, checkSizeEligibility } from '../facility/eligibility.js';
 import { bookingsOverlapInTime } from '../facility/occupancy.js';
-import { FACILITY_REASON, FACILITY_STATUS } from '../facility/reasonCodes.js';
+import { FACILITY_STATUS } from '../facility/reasonCodes.js';
 import { buildReserveCapacityReport } from '../reserve/capacity.js';
 import { RESERVE_REASON } from '../reserve/reasonCodes.js';
 
 import {
-  RELOCATION_POLICY,
+  RELOCATION_RANKING,
   REPLACEMENT_GRADE,
   SCENARIO_REASON,
   createScenarioMeta,
@@ -61,23 +79,6 @@ import {
   makeScenarioFinding,
 } from './reasonCodes.js';
 import { RelocationPolicySchema } from './schemas.js';
-
-/**
- * Which findings make a replacement a compromise rather than a clean swap.
- *
- * **One entry, and the docstring is where the second one is refused.** The
- * build plan's acceptance test asks for compromises such as *"games on
- * undersized or wrongly-lined pitches"*. The wrongly-lined half is here and
- * composes with no new code. **The undersized half is unreachable by design**:
- * `SIZE_TOO_SMALL` is `blocking` and the size policy is downward-closed, so a
- * game is refused rather than placed on ground too small for it — and retyping
- * the size constraint to manufacture the case would weaken a hard physical
- * constraint in order to satisfy a test. `docs/SCENARIOS.md` §6 says so in the
- * report's own words.
- *
- * @type {ReadonlyArray<string>}
- */
-const COMPROMISE_CODES = Object.freeze([/** @type {string} */ (FACILITY_REASON.LINING_MISMATCH)]);
 
 /** How many example ids an aggregate finding carries. */
 const EXAMPLE_LIMIT = 5;
@@ -218,25 +219,37 @@ export function replacementSurfacesFor(graph, query) {
 }
 
 /**
- * Order the slots offered to one displaced game, cheapest first under a policy.
+ * **The one ordering of replacement slots** (#53), for proposals and offered
+ * options alike.
  *
- * @param {string} policy
- * @returns {(a: Object, b: Object) => number}
+ * 1. **Clean first.** A replacement is clean when `resolve/`'s facility model
+ *    gives its slot no compromise-severity finding; the operator's ruling is
+ *    that a clean option is preferred to any carrying a code, which a weight
+ *    could trade away and an order cannot. In this corpus the code is
+ *    `LINING_MISMATCH` — a pitch painted for another format. The *undersized*
+ *    half of the build plan's "undersized or wrongly-lined" is unreachable by
+ *    design: `SIZE_TOO_SMALL` is blocking and the size policy is
+ *    downward-closed, so such a slot never reaches this function, and
+ *    `docs/SCENARIOS.md` §6 says so.
+ * 2. **Then `scoreObjective()`**, the only scoring function in `resolve/`.
+ * 3. **Then `candidateSlotsFor()`'s tie-break**: kickoff, then surface id — the
+ *    sibling's contract rather than a third one. The objective has no venue or
+ *    travel term (8.9 will make travel computable), so ties are common: 8 of
+ *    22 measured top pairs.
+ *
+ * @template {{ compromiseCodes: ReadonlyArray<string>, score: number, startMinutes: number, surfaceId: string }} T
+ * @param {ReadonlyArray<T>} options
+ * @returns {T[]}
  */
-function comparatorFor(policy) {
-  const gradeRank = (option) => (option.grade === REPLACEMENT_GRADE.CLEAN ? 0 : 1);
-  if (policy === RELOCATION_POLICY.PREFER_CLEAN) {
-    return (a, b) =>
-      gradeRank(a) - gradeRank(b) ||
-      a.driftMinutes - b.driftMinutes ||
+export function rankReplacementOptions(options) {
+  const dirty = (option) => (option.compromiseCodes.length === 0 ? 0 : 1);
+  return [...options].sort(
+    (a, b) =>
+      dirty(a) - dirty(b) ||
+      a.score - b.score ||
       a.startMinutes - b.startMinutes ||
-      a.surfaceId.localeCompare(b.surfaceId);
-  }
-  return (a, b) =>
-    a.driftMinutes - b.driftMinutes ||
-    gradeRank(a) - gradeRank(b) ||
-    a.startMinutes - b.startMinutes ||
-    a.surfaceId.localeCompare(b.surfaceId);
+      a.surfaceId.localeCompare(b.surfaceId)
+  );
 }
 
 /**
@@ -343,6 +356,210 @@ const ANSWERS_THE_PROPOSERS_OWN_REQUIREMENT = Object.freeze(
 );
 
 /**
+ * `resolve/`'s judgement of one slot, injected so this module never keeps a
+ * second one (#53).
+ *
+ * @typedef {Object} ReplacementProbe
+ * @property {(gameId: string, slot: import('../resolve/types.js').Slot) => { cleared: boolean, compromiseCodes: string[], score: number, counts: Record<string, number> }} evaluate
+ * @property {(gameId: string, slot: import('../resolve/types.js').Slot) => void} hold - the game now stands on `slot` for every later question
+ */
+
+/**
+ * @param {unknown} probe
+ * @param {string} caller
+ */
+function requireProbe(probe, caller) {
+  const candidate = /** @type {any} */ (probe);
+  if (typeof candidate?.evaluate !== 'function' || typeof candidate?.hold !== 'function') {
+    throw new Error(
+      `scenario: ${caller} needs a probe from resolve/ (createPlacementProbe()); without one it would judge slots by a rule of its own, and #53 removed the second definition of "better"`
+    );
+  }
+}
+
+/**
+ * Every legal replacement for one game on one date, ranked.
+ *
+ * Three filters of this module's own, then `resolve/`'s: the ground is free
+ * (`checkKickoffAvailability()` against what stands), no team of the game's is
+ * in two places at once (`bookingsOverlapInTime()`, which returns `null` for an
+ * unknown footprint — an undecidable pair is not a clash, and the rule engine
+ * reports the unknown footprint in its own right), and then the probe: facility
+ * findings, coach overlap and turnover through the rule gate, and the score.
+ * A candidate the probe does not clear is counted and dropped, never ranked.
+ *
+ * @param {{ graph: Object, table: Object, calendar: Object }} engines
+ * @param {{ gameId: string, row: Object, format: string, date: string, surfaceIds: ReadonlyArray<string>, kickoffsFor: (surfaceId: string) => ReadonlyArray<number>, bookings: ReadonlyArray<Object>, commitments: ReadonlyArray<{ teams: string[], booking: Object }>, probe: ReplacementProbe }} query
+ * @returns {{ options: Array<{ surfaceId: string, startMinutes: number, grade: string, driftMinutes: number, compromiseCodes: string[], score: number, counts: Record<string, number> }>, considered: number, refusedForTeamClash: number, refusedByGate: number }}
+ */
+function searchReplacements(engines, query) {
+  const { row } = query;
+  const teams = teamsOf(row);
+  const occupancy = row.endMinutes === null ? null : row.endMinutes - row.startMinutes;
+  /**
+   * Would this kickoff put one of this game's teams in two places at once?
+   *
+   * @param {number} kickoff
+   */
+  const teamClash = (kickoff) => {
+    if (teams.length === 0) return null;
+    const candidate = {
+      id: query.gameId,
+      surfaceId: row.surfaceId,
+      date: query.date,
+      startMinutes: kickoff,
+      endMinutes: occupancy === null ? null : kickoff + occupancy,
+    };
+    for (const entry of query.commitments) {
+      if (entry.booking.id === query.gameId) continue;
+      if (!entry.teams.some((team) => teams.includes(team))) continue;
+      if (bookingsOverlapInTime(candidate, entry.booking) !== true) continue;
+      return entry.booking;
+    }
+    return null;
+  };
+
+  let considered = 0;
+  let refusedForTeamClash = 0;
+  let refusedByGate = 0;
+  const options = [];
+  for (const surfaceId of query.surfaceIds) {
+    for (const kickoff of query.kickoffsFor(surfaceId)) {
+      considered += 1;
+      const answer = checkKickoffAvailability(
+        engines.graph,
+        engines.table,
+        engines.calendar,
+        {
+          surfaceId,
+          date: query.date,
+          kickoffMinutes: kickoff,
+          format: query.format,
+          ignoreBookingIds: [query.gameId],
+        },
+        { existingBookings: query.bookings }
+      );
+      if (answer.findings.some((f) => f.severity === AVAILABILITY_SEVERITY.BLOCKING)) continue;
+      // **Legality before grade.** The ground is free; the teams may not be.
+      if (teamClash(kickoff) !== null) {
+        refusedForTeamClash += 1;
+        continue;
+      }
+      const slot = { date: query.date, surfaceId, startMinutes: kickoff };
+      const judged = query.probe.evaluate(query.gameId, slot);
+      if (!judged.cleared) {
+        refusedByGate += 1;
+        continue;
+      }
+      options.push({
+        surfaceId,
+        startMinutes: kickoff,
+        grade:
+          judged.compromiseCodes.length === 0
+            ? REPLACEMENT_GRADE.CLEAN
+            : REPLACEMENT_GRADE.COMPROMISED,
+        driftMinutes: Math.abs(kickoff - row.startMinutes),
+        compromiseCodes: [...judged.compromiseCodes],
+        score: judged.score,
+        counts: { ...judged.counts },
+      });
+    }
+  }
+  return {
+    options: rankReplacementOptions(options),
+    considered,
+    refusedForTeamClash,
+    refusedByGate,
+  };
+}
+
+/**
+ * Up to `limit` cross-venue options for one game, for `resolve/`'s options
+ * pass (#53). **Offered, never applied** by anything in this package's live
+ * path: an operator approves one, and the approval re-enters `resolve/` as an
+ * `approved-option` change that is judged again.
+ *
+ * The candidate ground is the stated policy's, minus every surface at the
+ * game's own venue — an option is by definition somewhere else; the same
+ * venue is the placer's business. The kickoff grid is the reserve capacity
+ * report's for this one format and date, as in {@link proposeRelocations}.
+ *
+ * @param {{ graph: Object, table: Object, calendar: Object, registry?: Object }} engines
+ * @param {Object} input
+ * @param {Object} input.game - the game's baseline row
+ * @param {ReadonlyArray<Object>} input.standing - every other game standing on the result
+ * @param {Object} input.policy - see `RelocationPolicySchema`
+ * @param {ReplacementProbe} input.probe
+ * @param {number} input.limit
+ * @returns {{ options: ReturnType<typeof searchReplacements>['options'], candidatesConsidered: number, refusedForTeamClash: number, refusedByGate: number, surfaceIds: string[], capacityFindings: Object[] }}
+ */
+export function relocationOptionsFor(engines, input) {
+  requireProbe(input.probe, 'relocationOptionsFor()');
+  const policy = RelocationPolicySchema.parse(input.policy);
+  const game = input.game;
+  const surfaceIds = policy.surfaceIds.filter(
+    (surfaceId) => engines.graph.surfaces[surfaceId]?.venueId !== game.venueId
+  );
+  const empty = {
+    options: [],
+    candidatesConsidered: 0,
+    refusedForTeamClash: 0,
+    refusedByGate: 0,
+    surfaceIds,
+    capacityFindings: [],
+  };
+  if (typeof game.format !== 'string' || surfaceIds.length === 0) return empty;
+
+  const report = buildReserveCapacityReport(engines, {
+    name: `cross-venue options for ${game.id} (${policy.source})`,
+    format: game.format,
+    dates: [game.date],
+    surfaceIds,
+    cadenceMinutes: policy.cadenceMinutes,
+    earliestKickoffMinutes: policy.earliestKickoffMinutes,
+    latestKickoffMinutes: policy.latestKickoffMinutes,
+    requirement: { slots: 1, label: 'one game needing a time', source: policy.source },
+    reservedSlots: [],
+    bookings: [],
+  });
+  /** @type {Map<string, number[]>} */
+  const grid = new Map();
+  for (const dateRow of report.dates) {
+    for (const surfaceRow of dateRow.bySurface) {
+      grid.set(surfaceRow.surfaceId, [...surfaceRow.kickoffMinutes]);
+    }
+  }
+  const sameDay = input.standing.filter(
+    (other) => other.date === game.date && String(other.id) !== String(game.id)
+  );
+  const searched = searchReplacements(engines, {
+    gameId: String(game.id),
+    row: game,
+    format: game.format,
+    date: game.date,
+    surfaceIds,
+    kickoffsFor: (surfaceId) => grid.get(surfaceId) ?? [],
+    bookings: sameDay.map((other) => bookingFor(other)),
+    commitments: sameDay
+      .map((other) => ({ teams: teamsOf(other), booking: bookingFor(other) }))
+      .filter((entry) => entry.teams.length > 0),
+    probe: input.probe,
+  });
+  return {
+    options: searched.options.slice(0, input.limit),
+    candidatesConsidered: searched.considered,
+    refusedForTeamClash: searched.refusedForTeamClash,
+    refusedByGate: searched.refusedByGate,
+    surfaceIds,
+    capacityFindings: report.findings.filter(
+      (finding) =>
+        finding.severity !== CONSTRAINT_SEVERITY.INFO &&
+        !ANSWERS_THE_PROPOSERS_OWN_REQUIREMENT.has(finding.code)
+    ),
+  };
+}
+
+/**
  * Propose a replacement slot for each displaced game.
  *
  * @param {{ graph: Object, table: Object, calendar: Object, registry?: Object }} engines - the **branch's** engines
@@ -353,9 +570,11 @@ const ANSWERS_THE_PROPOSERS_OWN_REQUIREMENT = Object.freeze(
  * @param {Object} input.policy - see `RelocationPolicySchema`
  * @param {{ slots: number, label: string, source: string }} input.requirement - what the ground is being asked to hold
  * @param {ReadonlyArray<Object>} [input.reservedSlots] - the branch's own `ReservedSlotSchema` rows; ground already held
+ * @param {ReplacementProbe} input.probe - `resolve/`'s judgement of a slot; see `createPlacementProbe()`
  * @returns {import('./types.js').RelocationPlan}
  */
 export function proposeRelocations(engines, input) {
+  requireProbe(input.probe, 'proposeRelocations()');
   const policy = RelocationPolicySchema.parse(input.policy);
   const meta = createScenarioMeta();
   /** @type {import('./types.js').ScenarioFinding[]} */
@@ -377,7 +596,7 @@ export function proposeRelocations(engines, input) {
     // displaced count, and a proposer that was handed nothing has nothing to
     // say about the season.
     return {
-      policy: policy.policy,
+      ranking: RELOCATION_RANKING,
       surfaceIds: Object.freeze([...policy.surfaceIds]),
       proposals: [],
       unrelocatable: [],
@@ -523,8 +742,6 @@ export function proposeRelocations(engines, input) {
   const proposals = [];
   /** @type {import('./types.js').UnrelocatableGame[]} */
   const unrelocatable = [];
-  const compare = comparatorFor(policy.policy);
-
   for (const game of displaced) {
     const row = input.gamesById[game.gameId];
     if (!row) {
@@ -535,35 +752,20 @@ export function proposeRelocations(engines, input) {
     const format = /** @type {string} */ (game.format);
     const bookings = bookingsByDate.get(game.date) ?? [];
     const commitments = commitmentsByDate.get(game.date) ?? [];
-    const teams = teamsOf(row);
-    const occupancy = row.endMinutes === null ? null : row.endMinutes - row.startMinutes;
-    /**
-     * Would this kickoff put one of this game's teams in two places at once?
-     *
-     * Decided by `bookingsOverlapInTime()` — the facility model's own answer,
-     * rather than a second one written here — which returns `null` for an
-     * unknown footprint. An undecidable pair is not treated as a clash: the
-     * unknown-footprint case is reported by the rule engine in its own right,
-     * and refusing every candidate over it would silently shrink the search.
-     */
-    const teamClash = (kickoff) => {
-      if (teams.length === 0) return null;
-      const candidate = {
-        id: game.gameId,
-        surfaceId: game.surfaceId,
-        date: game.date,
-        startMinutes: kickoff,
-        endMinutes: occupancy === null ? null : kickoff + occupancy,
-      };
-      for (const entry of commitments) {
-        if (entry.booking.id === game.gameId) continue;
-        if (!entry.teams.some((team) => teams.includes(team))) continue;
-        if (bookingsOverlapInTime(candidate, entry.booking) !== true) continue;
-        return entry.booking;
-      }
-      return null;
-    };
-    let refusedForTeamClash = 0;
+    const searched = searchReplacements(engines, {
+      gameId: game.gameId,
+      row,
+      format,
+      date: game.date,
+      surfaceIds: policy.surfaceIds,
+      kickoffsFor: (surfaceId) => grid.get(`${format}|${game.date}|${surfaceId}`) ?? [],
+      bookings,
+      commitments,
+      probe: input.probe,
+    });
+    meta.candidatesConsidered += searched.considered;
+    meta.candidatesRefusedTeamClash += searched.refusedForTeamClash;
+    meta.candidatesRefusedByGate += searched.refusedByGate;
     /**
      * Every candidate slot this game was offered, before any filter.
      *
@@ -575,57 +777,20 @@ export function proposeRelocations(engines, input) {
      * per-game counts now sum to `meta.candidatesConsidered`, so neither can
      * drift from the other without the reconciliation in the test failing.
      */
-    let consideredForThisGame = 0;
-    /** @type {Array<{ surfaceId: string, startMinutes: number, grade: string, driftMinutes: number, codes: string[] }>} */
-    const options = [];
-
-    for (const surfaceId of policy.surfaceIds) {
-      for (const kickoff of grid.get(`${format}|${game.date}|${surfaceId}`) ?? []) {
-        meta.candidatesConsidered += 1;
-        consideredForThisGame += 1;
-        const answer = checkKickoffAvailability(
-          engines.graph,
-          engines.table,
-          engines.calendar,
-          {
-            surfaceId,
-            date: game.date,
-            kickoffMinutes: kickoff,
-            format,
-            ignoreBookingIds: [game.gameId],
-          },
-          { existingBookings: bookings }
-        );
-        if (answer.findings.some((f) => f.severity === AVAILABILITY_SEVERITY.BLOCKING)) continue;
-        // **Legality before grade.** The ground is free; the teams may not be.
-        if (teamClash(kickoff) !== null) {
-          refusedForTeamClash += 1;
-          meta.candidatesRefusedTeamClash += 1;
-          continue;
-        }
-        const codes = [
-          ...new Set(
-            answer.findings
-              .map((finding) => finding.code)
-              .filter((code) => COMPROMISE_CODES.includes(code))
-          ),
-        ].sort();
-        options.push({
-          surfaceId,
-          startMinutes: kickoff,
-          grade: codes.length === 0 ? REPLACEMENT_GRADE.CLEAN : REPLACEMENT_GRADE.COMPROMISED,
-          driftMinutes: Math.abs(kickoff - game.startMinutes),
-          codes,
-        });
-      }
-    }
-
-    const candidatesConsidered = consideredForThisGame;
-    if (options.length === 0) {
+    const candidatesConsidered = searched.considered;
+    if (searched.options.length === 0) {
+      const refusals = [
+        searched.refusedForTeamClash === 0
+          ? ''
+          : `${searched.refusedForTeamClash} otherwise-free slot(s) would have put one of its teams in two places at once`,
+        searched.refusedByGate === 0
+          ? ''
+          : `${searched.refusedByGate} would have double-booked a coach, turned a surface over too fast or broken a facility rule, by resolve/'s own gate`,
+      ].filter(Boolean);
       unrelocatable.push({
         gameId: game.gameId,
         label: game.label,
-        reason: `the scenario withdraws the ground it stood on (${game.codes.join(', ')}) and none of the ${candidatesConsidered} candidate slot(s) on ${game.date} across ${policy.surfaceIds.length} replacement surface(s) is legal for it${refusedForTeamClash === 0 ? '' : ` (${refusedForTeamClash} otherwise-free slot(s) would have put one of its teams in two places at once)`}; kept visible as TIME TBD rather than dropped (incident 10)`,
+        reason: `the scenario withdraws the ground it stood on (${game.codes.join(', ')}) and none of the ${candidatesConsidered} candidate slot(s) on ${game.date} across ${policy.surfaceIds.length} replacement surface(s) is legal for it${refusals.length === 0 ? '' : ` (${refusals.join('; ')})`}; kept visible as TIME TBD rather than dropped (incident 10)`,
         codes: Object.freeze([...game.codes]),
         constraintIds: Object.freeze([...game.constraintIds]),
         candidatesConsidered,
@@ -634,7 +799,7 @@ export function proposeRelocations(engines, input) {
       continue;
     }
 
-    const [chosen] = [...options].sort(compare);
+    const [chosen] = searched.options;
     const toSlot = {
       date: game.date,
       surfaceId: chosen.surfaceId,
@@ -645,26 +810,30 @@ export function proposeRelocations(engines, input) {
       gameId: game.gameId,
       label: game.label,
       format,
-      policy: policy.policy,
+      ranking: RELOCATION_RANKING,
       grade: chosen.grade,
       from: { date: game.date, surfaceId: game.surfaceId, startMinutes: game.startMinutes },
       to: toSlot,
       fromVenueId: game.venueId,
       toVenueId: surface?.venueId ?? '',
       driftMinutes: chosen.driftMinutes,
-      compromiseCodes: Object.freeze([...chosen.codes]),
+      score: chosen.score,
+      compromiseCodes: Object.freeze([...chosen.compromiseCodes]),
       candidatesConsidered,
     });
     meta.relocationsProposed += 1;
     if (chosen.grade === REPLACEMENT_GRADE.COMPROMISED) meta.relocationsCompromised += 1;
     // The slot is held from this point on, keyed the way the capacity report
-    // spells a candidate so the two can be reconciled.
+    // spells a candidate so the two can be reconciled — and in the probe, so
+    // the next game's coach and turnover questions see this one where it is
+    // going rather than where it was.
     const held = bookingFor(row, toSlot);
     bookings.push(held);
     bookingsByDate.set(game.date, bookings);
+    input.probe.hold(game.gameId, toSlot);
     // The teams are held from this point on as well, so the next displaced game
     // sharing one of them cannot be offered the same minute on other ground.
-    commit(game.date, teams, held);
+    commit(game.date, teamsOf(row), held);
   }
 
   if (proposals.length > 0) {
@@ -673,9 +842,9 @@ export function proposeRelocations(engines, input) {
     findings.push(
       makeScenarioFinding(
         SCENARIO_REASON.SCENARIO_RELOCATION_PROPOSED,
-        `proposeRelocations() searched ${meta.candidatesConsidered} candidate slot(s) under the "${policy.policy}" policy and proposed ${proposals.length} replacement(s) on ${venues.join(', ')}. These were **proposed**, not solved: the re-solver cannot move a game to another venue, and it is being handed these slots by name`,
+        `proposeRelocations() searched ${meta.candidatesConsidered} candidate slot(s), ranked "${RELOCATION_RANKING}", and proposed ${proposals.length} replacement(s) on ${venues.join(', ')}. These were **proposed**, not solved: the re-solver cannot move a game to another venue, and it is being handed these slots by name`,
         {
-          policy: policy.policy,
+          ranking: RELOCATION_RANKING,
           policySource: policy.source,
           proposed: proposals.length,
           candidatesConsidered: meta.candidatesConsidered,
@@ -693,9 +862,9 @@ export function proposeRelocations(engines, input) {
     findings.push(
       makeScenarioFinding(
         SCENARIO_REASON.SCENARIO_RELOCATION_COMPROMISED,
-        `${compromised.length} of the ${proposals.length} replacement(s) are legal but add ${codes.join(', ')}: ${[...new Set(compromised.map((p) => p.to.surfaceId))].sort().join(', ')} are size-eligible for the format under the downward-closed policy and painted for another one`,
+        `${compromised.length} of the ${proposals.length} replacement(s) are legal but add ${codes.join(', ')}: ${[...new Set(compromised.map((p) => p.to.surfaceId))].sort().join(', ')} carry them — resolve/'s facility model and coach-travel evaluator say so, each proposal names its own codes`,
         {
-          policy: policy.policy,
+          ranking: RELOCATION_RANKING,
           compromised: compromised.length,
           proposed: proposals.length,
           codes,
@@ -712,7 +881,7 @@ export function proposeRelocations(engines, input) {
         SCENARIO_REASON.SCENARIO_RELOCATION_UNAVAILABLE,
         `${unrelocatable.length} displaced game(s) have no legal replacement slot on their own date across the ${policy.surfaceIds.length} stated replacement surface(s), and are carried as TIME TBD with a reason rather than dropped (incident 10)`,
         {
-          policy: policy.policy,
+          ranking: RELOCATION_RANKING,
           unrelocatable: unrelocatable.length,
           surfaceCount: policy.surfaceIds.length,
           exampleGameIds: unrelocatable.slice(0, EXAMPLE_LIMIT).map((entry) => entry.gameId),
@@ -725,7 +894,7 @@ export function proposeRelocations(engines, input) {
   }
 
   return {
-    policy: policy.policy,
+    ranking: RELOCATION_RANKING,
     surfaceIds: Object.freeze([...policy.surfaceIds]),
     proposals,
     unrelocatable,

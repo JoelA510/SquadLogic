@@ -907,7 +907,7 @@ describe('the narrow coach-travel evaluator', () => {
     expect(buildSeason2026VenueComplexMap().stats.complexCount).toBeGreaterThan(0);
   });
 
-  it('keeps an overlap blocking whatever the record says', () => {
+  it('keeps an overlap at its fixed severity whatever the record says', () => {
     const softened = retypeConstraint(registry, TRAVEL, {
       type: CONSTRAINT_TYPE.PREFERENCE,
       weight: 1,
@@ -924,7 +924,9 @@ describe('the narrow coach-travel evaluator', () => {
     const overlap = result.findings.find(
       (finding) => finding.code === TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP
     );
-    expect(overlap.severity).toBe(WAIVER_SEVERITY.BLOCKING);
+    // Compromise since #61 (allowed with a warning) — and fixed: the PREFERENCE
+    // record would read `info` if it were allowed to decide.
+    expect(overlap.severity).toBe(WAIVER_SEVERITY.COMPROMISE);
     expect(travelSeverityOf(TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP, null)).toBe(
       TRAVEL_REASON_SEVERITY[TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP]
     );

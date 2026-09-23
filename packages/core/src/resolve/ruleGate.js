@@ -153,12 +153,14 @@ export function indexCommitments(commitments) {
  * @param {import('./types.js').ResolveState} state
  * @param {string} gameId
  * @param {import('./types.js').Slot} slot
- * @returns {{ instances: Record<string, number>, meta: { coachCommitmentsExamined: number, surfacePairsExamined: number } }}
+ * @returns {{ instances: Record<string, number>, overlaps: Array<{ key: string, personId: string, commitmentId: string, otherId: string, teamId: string|null, otherTeamId: string|null }>, meta: { coachCommitmentsExamined: number, surfacePairsExamined: number } }}
  */
 export function ruleGateInstances(context, state, gameId, slot) {
   /** @type {Record<string, number>} */
   const instances = {};
   const meta = { coachCommitmentsExamined: 0, surfacePairsExamined: 0 };
+  /** @type {Array<{ key: string, personId: string, commitmentId: string, otherId: string, teamId: string|null, otherTeamId: string|null }>} */
+  const overlaps = [];
   const add = (code, other) => {
     const key = `${code}|${other}`;
     instances[key] = (instances[key] ?? 0) + 1;
@@ -199,8 +201,19 @@ export function ruleGateInstances(context, state, gameId, slot) {
           for (const subject of travel.subjects) {
             for (const finding of subject.findings) {
               if (!GATED_RULE_CODES.includes(finding.code)) continue;
-              if (finding.severity !== CONSTRAINT_SEVERITY.BLOCKING) continue;
-              add(finding.code, other.gameId ?? `commitment:${other.id}`);
+              // Any severity: the overlap is gated by *code*. Since #61 it is
+              // compromise, and the placer still avoids it (pass 1) before it
+              // accepts one (pass 2); turnover below stays blocking-gated.
+              const otherId = other.gameId ?? `commitment:${other.id}`;
+              add(finding.code, otherId);
+              overlaps.push({
+                key: `${finding.code}|${otherId}`,
+                personId,
+                commitmentId: own.id,
+                otherId,
+                teamId: own.teamId ?? null,
+                otherTeamId: other.teamId ?? null,
+              });
             }
           }
         }
@@ -233,5 +246,5 @@ export function ruleGateInstances(context, state, gameId, slot) {
       add(finding.code, earlierGameId === gameId ? laterGameId : earlierGameId);
     }
   }
-  return { instances, meta };
+  return { instances, overlaps, meta };
 }

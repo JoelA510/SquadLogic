@@ -55,6 +55,7 @@ import {
   violationInstanceKey,
 } from '@squadlogic/core/resolve/index.js';
 import { FREEZE_DISPOSITION, freezeAllExcept } from '@squadlogic/core/freeze/index.js';
+import { buildConstraintRegistry } from '@squadlogic/core/constraints/index.js';
 
 /* -------------------------------------------------------------------------- */
 /* Corpus and engines                                                          */
@@ -200,7 +201,7 @@ describe('(e) the games the season publishes in an overlap, displaced', () => {
 /* The two measured cases, and (a)                                              */
 /* -------------------------------------------------------------------------- */
 
-describe('the solver no longer places a displaced game into a coach overlap', () => {
+describe('a displaced game with no overlap-free slot: refused in pass 1, placed in pass 2 (#61)', () => {
   // Measured before #59: #7 displaced was placed 75 minutes into coach Gray
   // Judd's #18, at another venue.
   const { run, requested, standing, introduced } = displace('combined_schedule.csv#7');
@@ -210,9 +211,24 @@ describe('the solver no longer places a displaced game into a coach overlap', ()
     expect(run.meta.candidatesRefusedByRules).toBeGreaterThan(0);
   });
 
-  it('introduces no overlap or turnover breach the requested game is not party to', () => {
-    expect(introduced.filter(({ pair }) => !pair.includes(requested.id))).toEqual([]);
-    expect(standing.filter(({ pair }) => pair.includes('combined_schedule.csv#7'))).toEqual([]);
+  it('is placed rather than shelved, carrying exactly the one overlap it could not avoid', () => {
+    // #436 refused every candidate and shelved #7 as TIME TBD. Since #61 an
+    // overlap is the last resort before TIME TBD: pass 1 still refuses it (the
+    // test above), pass 2 is entered because nothing overlap-free existed, and
+    // the placement carries a warning.
+    expect(run.meta.overlapFallbackEntered).toBe(1);
+    expect(whereIs(run, 'combined_schedule.csv#7')).not.toBeNull();
+    expect(run.unplaced).toEqual([]);
+    const own = standing.filter(({ pair }) => pair.includes('combined_schedule.csv#7'));
+    expect(own.map(({ code }) => code)).toEqual(['TRAVEL_COMMITMENTS_OVERLAP']);
+    expect(own[0].pair).toContain('combined_schedule.csv#18');
+    // Nothing else the requested game is not party to, and never a turnover.
+    expect(
+      introduced.filter(
+        ({ pair }) => !pair.includes(requested.id) && !pair.includes('combined_schedule.csv#7')
+      )
+    ).toEqual([]);
+    expect(introduced.filter(({ code }) => code === 'TURNOVER_BELOW_MINIMUM')).toEqual([]);
   });
 
   it('(a) never lifts the coach’s other game, which stands at another venue', () => {
@@ -226,7 +242,7 @@ describe('the solver no longer places a displaced game into a coach overlap', ()
 });
 
 describe('(a) the gate is read by the placer and nowhere else', () => {
-  it('is called by chooseSlot and baseline-ingest only, never by a stage that lifts games', () => {
+  it('is called by chooseSlot, baseline-ingest and the overlap warning, never by a stage that lifts games', () => {
     const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
     const code = readFileSync(
       path.join(ROOT, 'packages', 'core', 'src', 'resolve', 'stages.js'),
@@ -234,7 +250,10 @@ describe('(a) the gate is read by the placer and nowhere else', () => {
     ).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
     const between = (from, to) => code.slice(code.indexOf(from), code.indexOf(to));
     expect(code.length).toBeGreaterThan(20000);
-    expect([...code.matchAll(/\bruleGateInstances\(/g)]).toHaveLength(2);
+    expect([...code.matchAll(/\bruleGateInstances\(/g)]).toHaveLength(3);
+    expect(between('function reportCoachOverlapsCarried(', 'const freezeAudit = {')).toContain(
+      'ruleGateInstances('
+    );
     expect(between('function chooseSlot(', 'function placePending(')).toContain(
       'ruleGateInstances('
     );
@@ -419,5 +438,154 @@ describe('(d) a commitment naming no game is part of the coach’s day', () => {
       slotOf(x)
     ).instances;
     expect(instances['TRAVEL_COMMITMENTS_OVERLAP|commitment:external-long']).toBe(1);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* #61: an overlap is the last resort, and always warned                        */
+/* -------------------------------------------------------------------------- */
+
+/** The overlap warnings a run carries. */
+const warningsOf = (run) =>
+  run.findings.filter((finding) => finding.code === 'RESOLVE_COACH_OVERLAP_CARRIED');
+
+/** Displace with verify switched off — the warning must not depend on it. */
+function displaceQuietly(displacedId, sched = schedule) {
+  const displaced = /** @type {any} */ (byId.get(displacedId));
+  const requested = /** @type {any} */ (
+    sched.games.find(
+      (game) =>
+        game.id !== displaced.id &&
+        game.date === displaced.date &&
+        game.venueId === displaced.venueId &&
+        game.format === displaced.format &&
+        game.startMinutes !== displaced.startMinutes
+    )
+  );
+  return applyChangeRequest({
+    schedule: sched,
+    changes: [{ gameId: requested.id, ...slotOf(displaced), reason: 'displace' }],
+    engines,
+    freeze: freezeAllExcept([{ date: displaced.date }]),
+    holdChanges: true,
+    verify: false,
+    onUnsatisfiable: 'report',
+  });
+}
+
+describe('#61: a clean slot at the same venue is preferred to an overlap', () => {
+  // #117 displaced (found by search): pass 1 refuses an overlap candidate the
+  // objective would otherwise choose — with overlaps admitted, #117 lands in
+  // one — and still finds a clean slot, so pass 2 is never entered.
+  const run = displaceQuietly('combined_schedule.csv#117');
+
+  it('refused an overlap candidate, so the preference was actually exercised', () => {
+    expect(run.meta.candidatesRefusedByRules).toBeGreaterThan(0);
+    expect(run.meta.ruleGateCommitmentsExamined).toBeGreaterThan(0);
+  });
+
+  it('never enters pass 2 and carries no overlap', () => {
+    expect(run.meta.overlapFallbackEntered).toBe(0);
+    expect(warningsOf(run).filter((w) => w.details.gameId === 'combined_schedule.csv#117')).toEqual(
+      []
+    );
+    expect(whereIs(run, 'combined_schedule.csv#117')).not.toBeNull();
+  });
+});
+
+describe('#61: every placement carrying a new coach overlap warns, verify or not', () => {
+  it('warns for the pass-2 placement, naming the coach, the other game and the cover', () => {
+    const run = displaceQuietly('combined_schedule.csv#7');
+    expect(run.meta.overlapFallbackEntered).toBe(1);
+    const warned = warningsOf(run);
+    expect(warned).toHaveLength(1);
+    expect(warned[0].severity).toBe('compromise');
+    expect(warned[0].details).toMatchObject({
+      gameId: 'combined_schedule.csv#7',
+      personId: 'gray judd',
+      otherId: 'combined_schedule.csv#18',
+      covered: true,
+    });
+    // The co-coach is read from the team's registered coaches.
+    const team = /** @type {any} */ (
+      schedule.teams.find((entry) => entry.id === warned[0].details.teamId)
+    );
+    const others = team.personIds.filter((id) => id !== 'gray judd');
+    expect(others.length).toBeGreaterThan(0);
+    expect(warned[0].details.coCoaches).toBe([...others].sort().join(', '));
+    expect(run.meta.coachOverlapsCarried).toBe(1);
+  });
+
+  it('warns for a requested move, with verify off', () => {
+    // #7 requested onto #6's slot, where its coach is at #18.
+    const run = displaceQuietly('combined_schedule.csv#6');
+    expect(run.meta.overlapFallbackEntered).toBe(0);
+    const warned = warningsOf(run);
+    expect(warned.map((w) => [w.details.gameId, w.details.otherId])).toEqual([
+      ['combined_schedule.csv#7', 'combined_schedule.csv#18'],
+    ]);
+    expect(run.verification).toBeNull();
+  });
+
+  it('says plainly when neither team has another registered coach', () => {
+    // The same case with gray judd the only coach either team has registered.
+    const alone = {
+      ...schedule,
+      teams: schedule.teams.map((team) =>
+        team.personIds.includes('gray judd') ? { ...team, personIds: ['gray judd'] } : team
+      ),
+    };
+    const warned = warningsOf(displaceQuietly('combined_schedule.csv#7', alone));
+    expect(warned).toHaveLength(1);
+    expect(warned[0].details.covered).toBe(false);
+    expect(warned[0].message).toMatch(/NEITHER team has another registered coach/);
+  });
+});
+
+describe('#61: turnover stays a hard refusal in pass 2', () => {
+  // No pass-2 placement on the corpus had a turnover-refused candidate at all
+  // (searched: all 30), so ungating turnover there changes nothing and a test
+  // over the corpus alone could not fail. Constructed instead: the same #7
+  // displacement under a turnover floor raised to 600 minutes, so nearly every
+  // candidate that shares a surface is refused for turnover and pass 2 is left
+  // choosing between overlap-only candidates and turnover ones.
+  const strictRegistry = buildConstraintRegistry({
+    name: 'season-2026, turnover floor raised for the pass-2 control',
+    constraints: engines.registry.constraints.map((record) =>
+      record.policy === 'turnover-minimum' && record.type === 'hard'
+        ? { ...record, parameters: { ...record.parameters, minimumGapMinutes: 600 } }
+        : record
+    ),
+  });
+  const strictEngines = { ...engines, registry: strictRegistry };
+  const displaced = /** @type {any} */ (byId.get('combined_schedule.csv#7'));
+  const requested = /** @type {any} */ (byId.get('combined_schedule.csv#6'));
+  const run = applyChangeRequest({
+    schedule,
+    changes: [{ gameId: requested.id, ...slotOf(displaced), reason: 'displace' }],
+    engines: strictEngines,
+    freeze: freezeAllExcept([{ date: displaced.date }]),
+    holdChanges: true,
+    verify: true,
+    onUnsatisfiable: 'report',
+  });
+
+  it('refused candidates for turnover, so the control has something to refuse', () => {
+    expect(run.meta.candidatesRefusedByRules).toBeGreaterThan(0);
+  });
+
+  it('never places the displaced game below the turnover floor, in either pass', () => {
+    const placed = whereIs(run, displaced.id);
+    if (placed === null) {
+      expect(run.unplaced.find((entry) => entry.gameId === displaced.id)?.reason).toMatch(
+        /TIME TBD/
+      );
+      return;
+    }
+    const below = /** @type {any} */ (run.verification).violations.filter(
+      (violation) =>
+        violation.code === 'TURNOVER_BELOW_MINIMUM' && pairOf(violation).includes(displaced.id)
+    );
+    expect(below).toEqual([]);
   });
 });

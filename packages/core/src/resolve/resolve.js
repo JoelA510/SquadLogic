@@ -314,6 +314,15 @@ function runResolve(input) {
      */
     commitmentIndex: indexCommitments(baseSchedule.commitments ?? []),
     /**
+     * Each team's registered coaches — the schedule's own team records, which
+     * the adapter builds from the roster's coach assignments. Read by the
+     * overlap warning (#61) to say whether a team has cover; taken from the
+     * schedule rather than `people/`, so `resolve/` gains no new dependency.
+     */
+    coachesByTeam: new Map(
+      (baseSchedule.teams ?? []).map((team) => [team.id, [...(team.personIds ?? [])].sort()])
+    ),
+    /**
      * What the rule engine already said about the schedule **before** this run
      * touched it.
      *

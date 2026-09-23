@@ -5899,3 +5899,99 @@ different mechanism. #61 operator decision on requested moves that double-book
 a coach (86 runs; `compromised` with only a verify finding, and no finding at all
 with `verify: false`). #62 the gate ignores waivers; `verify`'s coach check
 compares only consecutive commitments.
+
+---
+
+## Operator decisions, 2026-09-23
+
+- **#61 — a requested move that double-books a coach: allowed, with a warning.**
+  Reason given: the team may have a co-coach whose registration is not yet
+  complete but will be before the game. **Avoiding the conflict is still
+  preferred.** Today the result is `compromised` with only a `verify` finding,
+  and with `verify: false` nothing names the overlap at all — so "with a
+  warning" is not yet true and needs a finding that surfaces regardless of
+  `verify`.
+  *Open follow-on, put back to the operator:* the same reasoning applies to a
+  placement the solver chooses. #436 refuses those outright, which is why 30
+  games went TIME TBD.
+- **#51 — `schoolDayEnd`: optional and low priority.** Some venues are
+  community parks and some players are homeschooled. Schools do not permit
+  their fields during school hours and the club does not request them then, so
+  the permit windows already encode school hours. The operator's instruction is
+  to integrate it safely or drop it; the supervisor's ruling is **drop it from
+  the auto-scheduler path**, where it is sent and ignored. Implementing it in
+  the Deno twin would duplicate #420/#425's timezone handling there, which is
+  the twin-arm hazard again. Core support stays.
+- **8.9 — sunset data is public and computable; unblocked.** The NOAA solar
+  calculator the operator cites is a published algorithm. Computing sunset in
+  core from venue coordinates satisfies the plan's "same source" test, provided
+  the computed values reproduce the 13 Saturdays in `sunsets.csv` within a
+  stated tolerance, well inside the 15-minute margin. If they do not, 8.9 stays
+  blocked with the measured discrepancy. Computed per venue, the operator's
+  50-mile clustering rule is unnecessary: the computation costs nothing, and
+  per-venue values are more accurate. Away venues are excluded, as the operator
+  specified.
+  **Privacy constraint:** real coordinates must not enter the repo, because the
+  corpus is anonymised (task #13). The fixture uses coarse coordinates fitted to
+  `sunsets.csv` itself, which reveals no more than that file already does. Real
+  coordinates live only in the organisation's database.
+
+**Approved by the operator, 2026-09-23, same exchange:**
+
+- **#61 extended to solver-placed games.** Placement preference, strictly
+  ordered:
+  1. a clean slot at the same venue;
+  2. a clean slot at another venue, proposed via #53 for operator approval;
+  3. the same venue with a coach overlap, carried with a warning that states
+     whether the team has another registered coach;
+  4. TIME TBD, last.
+
+  Turnover stays a hard refusal. This reverses part of #436. The operator's
+  answer makes `TRAVEL_COMMITMENTS_OVERLAP` avoid-but-allow, not blocking,
+  which overrides the "nothing may soften it" at `waivers/coachTravel.js:235`.
+- **#53 as recommended.** Keep the split (relocation proposes, `resolve/`
+  decides). Rank proposals with `resolve/`'s objective, not the second
+  comparator. Put relocation proposals through the rule gate rather than the
+  requested-move exemption. Wire it so that a TIME TBD outcome offers the
+  operator one to three cross-venue options to approve, never auto-applied.
+- **Order:**
+  1. #61 and #51;
+  2. #53;
+  3. 8.9, starting with the `sunsets.csv` validation;
+  4. 8.6 PR 3.
+
+---
+
+## #51 and #61 — operator decisions implemented (`c78a921` PR #438, `c878ae4` PR #439)
+
+**#51, `schoolDayEnd` dropped from the auto-scheduler path.** The request stops
+sending it; the schema strips it (not passthrough, so older clients are not
+rejected). Two facts the agent established: **no live code ever enforced the
+cutoff** — the core solvers that honour it have no production caller, and the
+only live reader adds warnings on Apply — and **there is no UI input**; the
+value comes from a `season_settings` column defaulting to `16:00`. The earlier
+entry here saying silent deletion "is not available" is superseded by the
+operator's ruling; the deletion is stated in code comments, not silent.
+
+**#61, a coach overlap is the last resort before TIME TBD.**
+`TRAVEL_COMMITMENTS_OVERLAP` is now compromise severity (still unwaivable);
+turnover stays hard. `chooseSlot()` has a strict second pass, placer-only, taken
+only when pass 1 admits nothing: fewest new overlaps, then the usual objective.
+`RESOLVE_COACH_OVERLAP_CARRIED` is emitted independent of `verify`, for pass-2
+and requested moves alike, naming the coach, both games and each team's free
+registered co-coaches — or saying there are none.
+
+679 displacement runs: **TIME TBD 30 -> 0**; 38 consequential overlaps, all
+warned; **16 of 130 warnings name no free co-coach**, the cases where the
+operator's rationale does not hold; #436's knock-on round-robin violations gone.
+No-op run byte-identical.
+
+**Supervisor review, one check, one BLOCKING finding.** The placer-only opt-in —
+the agent's own key safety point, protecting published kickoffs of unrequested
+games — had no witness: opening pass 2 to every caller left all 559 resolve
+tests green. Fixed with a constructed `local-search` case (the corpus cannot
+reach the path: the sweep is byte-identical with the guard broken), verified by
+the supervisor: 1 red under the break, 25/25 restored.
+
+**Filed:** #63 — changing the severity left the feasibility "tightest bound, not
+first claimed" check with no witness on this corpus.

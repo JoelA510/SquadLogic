@@ -1,6 +1,6 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import { AlertTriangle, HelpCircle, Layers } from 'lucide-react';
+import { AlertTriangle, HelpCircle, Layers, Users } from 'lucide-react';
 
 /**
  * What a mutation would cost, shown BEFORE it is committed.
@@ -40,11 +40,19 @@ import { AlertTriangle, HelpCircle, Layers } from 'lucide-react';
  *    key at all, because a sub-surface is the leaf of the estate, and "nothing
  *    below" must not render as "nobody looked" or vice versa.
  *
+ * 5. **A coaching change has no booking half here, and says so.** 8.8's
+ *    `operation: 'reassign'` renders the sole-coach register run before and
+ *    after the change (`coachChangeConsequence()` in core) in place of the
+ *    bookings table, and states in words that which games and practices the
+ *    change touches is NOT computed. Rendering the bookings sentence with a
+ *    zero would say "nothing is booked", which nobody checked.
+ *
  * @param {object} props
  * @param {string} props.subject - what is about to change, e.g. a field name
- * @param {string} props.operation - `'delete'` or `'retire'`
- * @param {number} props.affectedCount - the RPC's own count, NOT `rows.length`
- * @param {Array<Record<string, any>>} props.rows - the RPC's `affected` array
+ * @param {string} props.operation - `'delete'`, `'retire'` or `'reassign'`
+ * @param {number} [props.affectedCount] - the RPC's own count, NOT `rows.length`
+ *   (required for `'delete'`/`'retire'`; a `'reassign'` has no bookings half)
+ * @param {Array<Record<string, any>>} [props.rows] - the RPC's `affected` array
  * @param {{ available: false, finding: { code: string, message: string } }} props.repair
  * @param {string} [props.titleId] - id of the heading paragraph, for `aria-labelledby`
  * @param {Array<Record<string, any>>} [props.contained] - the RPC's `contained`
@@ -52,16 +60,19 @@ import { AlertTriangle, HelpCircle, Layers } from 'lucide-react';
  *   a depth that contains nothing, and never substitute `[]`.
  * @param {number} [props.containedCount] - the RPC's own `contained_count`,
  *   which counts only the nodes NOT already retired. Not derived from `contained`.
+ * @param {{ effectiveOn: string, teamsExamined: number, changes: Array<{ teamId: string, teamName: string, effect: string, stateBefore: string, soleCoachName: string|null }> }} [props.coverage]
+ *   - `'reassign'` only: the team coverage that moves, with names resolved by the caller.
  */
 export default function ConsequencePreview({
   subject,
   operation,
-  affectedCount,
-  rows,
+  affectedCount = 0,
+  rows = undefined,
   repair,
   titleId = undefined,
   contained = undefined,
   containedCount = undefined,
+  coverage = undefined,
 }) {
   const list = rows || [];
   // **The count comes from the RPC, the list is what it sent.** They should
@@ -91,6 +102,15 @@ export default function ConsequencePreview({
     containedRows !== null &&
     typeof containedCount === 'number' &&
     containedCount !== containedStillLive.length;
+
+  if (operation === 'reassign') {
+    return (
+      <section aria-labelledby={titleId} data-testid="consequence-preview">
+        <CoverageConsequence subject={subject} coverage={coverage} titleId={titleId} />
+        <RepairUnavailable repair={repair} />
+      </section>
+    );
+  }
 
   return (
     <section aria-labelledby={titleId} data-testid="consequence-preview">
@@ -241,28 +261,124 @@ export default function ConsequencePreview({
         </div>
       )}
 
-      {/*
-        The repair half of the clause. Rendered whether or not anything is
-        affected, because "there is no repair engine" is true either way and an
-        operator who sees it only on the bad path learns the wrong lesson.
-      */}
-      <p
-        className="text-sm"
-        style={{ marginTop: 10 }}
-        data-testid="repair-proposal-unavailable"
-        data-reason-code={repair.finding.code}
-      >
-        <HelpCircle size={15} aria-hidden="true" style={{ verticalAlign: '-2px' }} />{' '}
-        <strong>{repair.finding.code}</strong> — {repair.finding.message}
-      </p>
+      <RepairUnavailable repair={repair} />
     </section>
   );
 }
 
+/**
+ * The repair half of the clause. Rendered whether or not anything is
+ * affected, because "there is no repair engine" is true either way and an
+ * operator who sees it only on the bad path learns the wrong lesson.
+ *
+ * @param {{ repair: { finding: { code: string, message: string } } }} props
+ */
+function RepairUnavailable({ repair }) {
+  return (
+    <p
+      className="text-sm"
+      style={{ marginTop: 10 }}
+      data-testid="repair-proposal-unavailable"
+      data-reason-code={repair.finding.code}
+    >
+      <HelpCircle size={15} aria-hidden="true" style={{ verticalAlign: '-2px' }} />{' '}
+      <strong>{repair.finding.code}</strong> — {repair.finding.message}
+    </p>
+  );
+}
+
+const EFFECT_WORDING = {
+  uncoached: 'has no coach',
+  sole: 'has one coach',
+  covered: 'has more than one coach',
+};
+
+/**
+ * The coaching half: which teams' coverage the change moves, from the
+ * sole-coach register run before and after it.
+ *
+ * @param {{ subject: string, coverage: any, titleId?: string }} props
+ */
+function CoverageConsequence({ subject, coverage, titleId }) {
+  if (!coverage) {
+    // Never blank: a missing report is "not computed", not "no effect".
+    return (
+      <p id={titleId} className="text-sm" data-testid="coverage-not-computed">
+        <AlertTriangle size={15} aria-hidden="true" style={{ verticalAlign: '-2px' }} /> The effect
+        of this coaching change on <strong>{subject}</strong> could not be computed. That is not a
+        statement that it has none.
+      </p>
+    );
+  }
+  const changes = coverage.changes || [];
+  return (
+    <>
+      <p id={titleId} className="text-sm" style={{ marginBottom: 8 }}>
+        <Users size={15} aria-hidden="true" style={{ verticalAlign: '-2px' }} />{' '}
+        <strong>{changes.length}</strong> of{' '}
+        <strong data-testid="coverage-examined">{coverage.teamsExamined}</strong> team
+        {coverage.teamsExamined === 1 ? '' : 's'} change coaching cover from{' '}
+        <strong>{coverage.effectiveOn}</strong>.
+      </p>
+      {changes.length === 0 ? (
+        <p className="text-sm" data-testid="coverage-none">
+          No team gains or loses a coach it would be left depending on. This is the sole-coach
+          register run before and after the change, not an empty panel.
+        </p>
+      ) : (
+        <table className="grid" data-testid="coverage-rows">
+          <caption className="sr-only">Teams whose coaching cover changes</caption>
+          <thead>
+            <tr>
+              <th scope="col">Team</th>
+              <th scope="col">Before</th>
+              <th scope="col">After</th>
+            </tr>
+          </thead>
+          <tbody>
+            {changes.map((row) => (
+              <tr key={row.teamId} data-testid={`coverage-row-${row.effect}`}>
+                <td>{row.teamName}</td>
+                <td>{EFFECT_WORDING[row.stateBefore] || 'not stated'}</td>
+                <td>
+                  <span className={`badge ${row.effect === 'covered' ? 'success' : 'warning'}`}>
+                    {row.effect === 'sole' && row.soleCoachName
+                      ? `only ${row.soleCoachName}`
+                      : EFFECT_WORDING[row.effect] || 'not stated'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="text-sm" style={{ marginTop: 8 }} data-testid="coverage-bookings-not-computed">
+        Which games and practices this change touches, and which conflict checks it moves, is not
+        computed here: that needs the schedule, and this reads the coaching record only.
+      </p>
+    </>
+  );
+}
+
+CoverageConsequence.propTypes = {
+  subject: PropTypes.string.isRequired,
+  coverage: PropTypes.object,
+  titleId: PropTypes.string,
+};
+
+RepairUnavailable.propTypes = {
+  repair: PropTypes.shape({
+    finding: PropTypes.shape({
+      code: PropTypes.string.isRequired,
+      message: PropTypes.string.isRequired,
+    }).isRequired,
+  }).isRequired,
+};
+
 ConsequencePreview.propTypes = {
   subject: PropTypes.string.isRequired,
-  operation: PropTypes.oneOf(['delete', 'retire']).isRequired,
-  affectedCount: PropTypes.number.isRequired,
+  operation: PropTypes.oneOf(['delete', 'retire', 'reassign']).isRequired,
+  affectedCount: PropTypes.number,
   rows: PropTypes.array,
   repair: PropTypes.shape({
     available: PropTypes.bool,
@@ -274,4 +390,5 @@ ConsequencePreview.propTypes = {
   titleId: PropTypes.string,
   contained: PropTypes.array,
   containedCount: PropTypes.number,
+  coverage: PropTypes.object,
 };

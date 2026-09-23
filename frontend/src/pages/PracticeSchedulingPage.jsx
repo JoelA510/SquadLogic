@@ -626,12 +626,16 @@ export default function PracticeSchedulingPage() {
     // makes the value authoritative as well as read; sending it too would be a
     // second answer to the same question. What goes over the wire is
     // `schedulerSlots`, whose `start`/`end` are already instants on that clock.
+    //
+    // `schoolDayEnd` is not sent either (#51): the function has no code for
+    // it, so it was a field sent and ignored. The solver does not enforce it.
+    // It is still read below, where `buildPracticeRunResults` hands it to core
+    // `evaluatePracticeSchedule`, which reports school-hour warnings on Apply.
     await autoScheduler.trigger({
       teams: schedulerTeams,
       slots: schedulerSlots,
       lockedAssignments,
       scoringWeights: {},
-      schoolDayEnd,
       seasonSettingsId: currentSeasonSetting?.id,
       config: {
         timeBudgetMs: 8000,
@@ -647,7 +651,6 @@ export default function PracticeSchedulingPage() {
     schedulerDisabled,
     schedulerSlots,
     schedulerTeams,
-    schoolDayEnd,
   ]);
 
   // Auto-run when arriving from the dashboard "Run Practice Scheduling" button.

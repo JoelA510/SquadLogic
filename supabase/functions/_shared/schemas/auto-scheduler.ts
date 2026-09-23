@@ -66,14 +66,15 @@ export const AutoSchedulerInputSchema = z.object({
     .default([]),
   scoringWeights: z.record(z.string(), z.number()).optional().default({}),
   /**
-   * **Declared, not enforced.** `index.ts` has never filtered slots by the
-   * school day; `packages/core/src/practiceScheduling.js` does. Named here so
-   * a reader is not misled into thinking the edge honours it, and left in the
-   * schema so a client sending it is not rejected. Not fixed in this PR --
-   * doing so is a solver change, not a timing one.
-   */
-  schoolDayEnd: z.string().optional(),
-  /**
+   * `schoolDayEnd` used to be declared here. `index.ts` has no code for
+   * it, so it was a field sent and ignored (#51). Removed rather than
+   * implemented, by operator ruling: the club requests school fields only
+   * outside school hours, so the permit windows behind the practice slots
+   * already encode them. This solver does not check that. The field's only
+   * reader on the live path is core `evaluatePracticeSchedule`, reached via
+   * `buildPracticeRunResults` on Apply, which reports school-hour warnings
+   * after the fact; it enforces nothing.
+   *
    * `timezone` used to live here, and `index.ts` contained **zero occurrences
    * of the string** while composing every practice instant with `new Date()`
    * on a naive value -- a field sent and ignored, on the persistence path for
@@ -86,8 +87,8 @@ export const AutoSchedulerInputSchema = z.object({
    * `20260913000000` migration refuses when it declines a read-time
    * `contact_info->>'timezone'` fallback.
    *
-   * The field is not listed at all, and this object is not `.passthrough()`,
-   * so an older client that still sends it is not rejected -- Zod strips it.
+   * Neither field is listed at all, and this object is not `.passthrough()`,
+   * so an older client that still sends either is not rejected -- Zod strips it.
    */
   config: z
     .object({

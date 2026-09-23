@@ -242,6 +242,31 @@ Deno.test(
   }
 );
 
+Deno.test(
+  'AutoSchedulerInputSchema - schoolDayEnd is no longer declared, and is stripped (#51)',
+  () => {
+    // `index.ts` has no code for it, so declaring it read as a promise nothing
+    // kept. An older client that still sends it must be accepted, not rejected.
+    const base = {
+      organizationId: '11111111-1111-4111-8111-111111111111',
+      teams: [{ id: 'T1', division: 'U10', coachId: 'h1' }],
+      slots: [
+        { id: 'early', start: '2026-04-06T17:00:00Z', end: '2026-04-06T18:00:00Z', capacity: 1 },
+      ],
+    };
+    const parsed = AutoSchedulerInputSchema.safeParse({ ...base, schoolDayEnd: '16:00' });
+    assertEquals(parsed.success, true, JSON.stringify(parsed.success ? null : parsed.error.issues));
+    if (!parsed.success) return;
+    assertEquals('schoolDayEnd' in parsed.data, false);
+    // Control: a declared optional key does survive, so the `in` check can fail.
+    const withSeason = AutoSchedulerInputSchema.safeParse({
+      ...base,
+      seasonSettingsId: '22222222-2222-4222-8222-222222222222',
+    });
+    assertEquals(withSeason.success && 'seasonSettingsId' in withSeason.data, true);
+  }
+);
+
 // `day` is carried on the slot, as every production caller carries it:
 // `PracticeSchedulingPage` normalises `practice_slots.day_of_week` and sends it.
 // The engine reads `slot.day ?? 'unknown'` and derives nothing -- see the

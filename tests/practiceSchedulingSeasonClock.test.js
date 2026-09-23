@@ -169,8 +169,9 @@ describe('what the page sends to the auto-scheduler', () => {
     const body = hook.slice(bodyStart, hook.indexOf('}),', bodyStart));
     expect(body).toContain('slots,');
     expect(body).not.toMatch(/^\s*timezone,\s*$/m);
-    // Control: the key it DOES still send, so the regex is known to match.
-    expect(body).toMatch(/^\s*schoolDayEnd,\s*$/m);
+    // Control: a key it DOES still send, so the regex is known to match.
+    // (`schoolDayEnd` was this control until #51 stopped sending it too.)
+    expect(body).toMatch(/^\s*seasonSettingsId,\s*$/m);
     // The page still needs the zone locally, to compose with. It must not be
     // in the trigger payload.
     const triggerCall = page.slice(
@@ -179,6 +180,9 @@ describe('what the page sends to the auto-scheduler', () => {
     );
     expect(triggerCall).toContain('slots: schedulerSlots');
     expect(triggerCall).not.toMatch(/^\s*timezone,\s*$/m);
+    // #51: nor `schoolDayEnd` -- the function has no code for it either.
+    expect(body).not.toMatch(/^\s*schoolDayEnd\b/m);
+    expect(triggerCall).not.toMatch(/schoolDayEnd/);
   });
 
   it('the function reads the season clock itself, so the field is not merely gone', () => {

@@ -5995,3 +5995,68 @@ the supervisor: 1 red under the break, 25/25 restored.
 
 **Filed:** #63 — changing the severity left the feasibility "tightest bound, not
 first claimed" check with no witness on this corpus.
+
+---
+
+## #53 — relocation proposes, `resolve/` decides (`9327562`, PR #441)
+
+Relocation stays a proposer. Change entries carry `origin`; proposer and
+approved-option slots are judged by the placer's facility model and rule gate
+**in `change-request-apply`** — where the research found the gap:
+`applyMove()` ran with no gate at all, and in 7 of 30 cases the proposer's pick
+double-booked a coach and was pinned unrefused. The brief had placed the check
+somewhere it would never have fired.
+
+- **`origin` defaults to operator.** The ruling made it required, with a
+  fallback if call sites exceeded ~15; there are ~90 in tests. A source test
+  enforces that every production caller sets it. Supervisor check: stripping
+  `origin: 'proposer'` from `scenario/run.js` turns that test red. Holds.
+- **A second machine path, found by the agent's control 5:**
+  `candidateSlotsFor()` re-offered a refused change's slot to the placer, which
+  then moved the game there anyway. Closed.
+- **One ranking.** Relocation is a pre-filter; `resolve/`'s objective scores,
+  clean options first. The second comparator and `RELOCATION_POLICY` are
+  deleted.
+- **Options.** Opt-in, read-only: up to 3 cross-venue options per TIME TBD or
+  coach-overlap game, each carrying `applyAs` for approval. **21 of the 30**
+  overlap games get a clean option (research said 22; one game's clean slots
+  carry `TRAVEL_BETWEEN_VENUES_TOO_SHORT`). Season fixture byte-identical
+  without the opt-in.
+- **Brookside withdrawal:** the one coach-overlap proposal is gone; clean
+  proposals 11 -> 14; drift 12,900 -> 14,400 minutes.
+
+**Supervisor decisions, overridable by the operator:** lining-mismatch options
+fill slots only after every clean one, labelled by code; scenario branches
+auto-apply **gated** proposals, promotion of the branch being the approval —
+"never auto-applied" governs the live schedule.
+
+**Unwitnessed, stated:** scenario-side shelving of a proposal the backstop
+refuses; the corpus cannot reach it because the proposer uses the same gate.
+
+---
+
+## 8.9 validation — NO-GO, and the reason is in the corpus, not the method
+
+The gate the operator's decision set: compute sunset with NOAA's published
+algorithm and require it to reproduce `sunsets.csv` within ~2 minutes before
+anything is built. **It does not, at any coordinate resolution** — 3.47 min at
+0.5 deg, still 3.21 at 0.05 deg. The 11 rows before DST ends fit one location
+within 1.19 min; the 2 rows after (11/07, 11/14) sit 6.1 and 7.5 min *earlier*
+than that fit.
+
+The inconsistency is visible in the CSV alone, supervisor-verified by
+arithmetic: DST-adjusted, weekly sunset drops through the DST week run 12, 11,
+10, **15**, 9 minutes. A lone 15-minute week is not physical. Either the two
+November rows or the other eleven came from a different source or location,
+and it sits on exactly the DST cliff 8.9 is about. The corpus values are the
+*earlier* ones, so if they are the wrong ones they err in the safe direction.
+
+Also: the corpus names no timezone (only a US DST rule is implied), and 08/23 is
+a Sunday — the plan's "13 Saturdays" is 12 plus one.
+
+**8.9 remains blocked on one operator check:** the 11/07 and 11/14 sunset at the
+club's real location in the NOAA calculator (the location stays out of the
+repo). If NOAA gives ~4:50 and ~4:42 PM, the two corpus rows are wrong and
+correcting them is a recorded ruling; the 11-row fit then validates the method.
+Nothing was committed; finer coordinates were never recorded. No legality
+changes in today's corpus either way (statically reviewed).

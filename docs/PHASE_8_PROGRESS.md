@@ -5765,3 +5765,46 @@ review posture (full diff read, SQL pass, round trip proved by execution,
 BLOCKING/NOTED classification). §8's binding condition carries into every
 persistence PR: no store lands without its writer and a reader that answers a
 question with it.
+
+---
+
+## 8.8 PR 2 — effective-dated coach assignments (`2daadc4`, PR #432)
+
+`team_coach_assignments` is the source of truth for who coaches which team and
+when; ids only, no FK on the coach, so deletion erases personal data and keeps
+history. `teams.coach_id` / `assistant_coach_ids` stay as denormalisation,
+written only through `set_team_coaches()` (security invoker, executable by no
+client role including `service_role`, no trigger). Drift check falsified both
+ways on every smoke run. `soleCoachRiskRegister()` before/after is the
+consequence report, through `ConsequencePreview`. Tests 3809 -> 3826; pgTAP and
+the harness green.
+
+**The brief's writer list was wrong, again.** It named six functions writing
+the coach columns. Two do (`admin_assign_team_coach`, `admin_delete_coaches`);
+three only *read* them as guards; and the third real writer,
+`persist_team_schedule`, was one the brief did not name. The agent built the
+census universe-first — a parse of every `UPDATE`/`INSERT` attributed to its
+enclosing live definition, cross-checked against an independent grep — and the
+smoke re-executes it against `pg_proc`. A census the agent had merely inherited
+from the brief would have routed two functions that write nothing and missed
+one that does.
+
+**Supervisor review, one check:** cross-tenant reach. The new table's policy is
+`is_org_member(organization_id)`; the writer is revoked from every client role;
+the drift function is invoker-rights. Holds. The agent's `/code-review` had
+already found and fixed the one BLOCKING defect — `admin_delete_coaches` sent
+other organisations' teams through the writer.
+
+**Recorded limitations (NOTED, not fixed):**
+
+- Effective dates come from UTC `current_date`, not the season timezone: a US
+  admin's evening change is dated the next day. The future-date guard uses the
+  same clock, so no US user can be wrongly refused; an admin ahead of UTC
+  could be. GAP-30 closed this class for game instants; it is open here.
+- A team created after this migration has no backdating floor for its first
+  assignment.
+- The preview arm uses inline spacing styles, against CLAUDE.md §6.
+
+**Process gap found:** this file lived only on the supervisor branch, so agents
+branching from `main` could not read the rulings or the correction entry. It
+now lands on `main` after each task.

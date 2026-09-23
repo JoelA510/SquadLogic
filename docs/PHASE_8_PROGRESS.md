@@ -5857,3 +5857,45 @@ static; constraint overrides were not measured.
 alone) was wrong — it was keyed per game, per code, by count, which catches a
 second instance but not a swapped one. The plan's own item 1 meant something
 else again (unit of repair), now enforced by an executed test.
+
+---
+
+## #59 — repair refuses a coach overlap or turnover shortfall it would introduce (`68aa0e7`, PR #436)
+
+`chooseSlot()` consulted only the facility model, so repair could re-place a
+displaced game double-booking a coach or under the turnover floor — both
+blocking — and report the run with nothing louder than a `verify` finding.
+`resolve/ruleGate.js` now checks both through the rule engine's own evaluators,
+keyed per unordered game pair through PR #434's `acceptedAtSlot()`. Tests
+3846 -> 3863.
+
+**The trade-off, reported rather than tuned away.** Season fixture no-op run
+byte-identical. Over 679 displacement runs: consequential overlaps 56 -> 0,
+turnover shortfalls 42 -> 0, **TIME TBD 0 -> 30**, each carrying its refusal
+reason. Those 30 had no legal slot at their venue that day; before, they were
+placed on top of a coach's other game. Knock-on `verify` findings follow (a team
+with an untimed game plays 8 of 9). Part of the cause is structural:
+`chooseSlot()` cannot cross venues — see #53.
+
+**A design point that failed on contact, again.** Gating every placement as
+planned broke incident 3: two requested external fixtures lost their historical
+12:00 resolution and went TIME TBD. The gate now exempts games a change request
+actually moved, which also keeps requested-move policy with the operator (#61).
+
+**Correction to the 8.6 PR 2 entry above.** It called `TURNOVER_BELOW_MINIMUM`
+and `CONFLICT_SPREAD_EXCEEDED` compromise severity, from the fallback table.
+Under the corpus's HARD constraint records both are **blocking**
+(`constraints/adapters/season2026Constraints.js:165-168`, `:392-395`) —
+measured from the rule engine's output this time, not read from code.
+
+**Supervisor review, one check:** the gate ignores waivers, the defect class
+behind the lost board waiver. Waivers match by `constraintId`; the corpus's only
+waiver targets a constraint the gate does not check, and
+`TRAVEL_COMMITMENTS_OVERLAP` cannot be waived. The residual case — a future
+turnover waiver — fails safe (over-refusal). NOTED, filed.
+
+**Filed:** #60 `CONFLICT_SPREAD_EXCEEDED` is blocking but aggregate, needs a
+different mechanism. #61 operator decision on requested moves that double-book
+a coach (86 runs; `compromised` with only a verify finding, and no finding at all
+with `verify: false`). #62 the gate ignores waivers; `verify`'s coach check
+compares only consecutive commitments.

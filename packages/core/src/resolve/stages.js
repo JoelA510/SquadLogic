@@ -64,6 +64,7 @@ import {
 } from './objective.js';
 import { RESOLVE_REASON, makeResolveFinding } from './reasonCodes.js';
 import { ruleGateInstances } from './ruleGate.js';
+import { TRAVEL_REASON } from '../waivers/coachTravel.js';
 import { ResolveStageSchema, STAGE_PROBE } from './schemas.js';
 import {
   MOVE_KIND,
@@ -532,13 +533,21 @@ function mayMoveWithinBudget(state, context, gameId, to, stageId) {
  * @param {import('./types.js').ResolveState} state
  * @param {Object} context
  * @param {string} gameId
- * @param {{ anchor: import('./types.js').Slot, excludeSlotKey?: string }} options
- * @returns {{ slot: import('./types.js').Slot, placement: ReturnType<typeof checkPlacement>, score: number, findingsCarried: number }|null}
+ * @param {{ anchor: import('./types.js').Slot, excludeSlotKey?: string, allowOverlapFallback?: boolean }} options -
+ *   `allowOverlapFallback` enables pass 2 (#61); only the placer passes it
+ * @returns {{ slot: import('./types.js').Slot, placement: ReturnType<typeof checkPlacement>, score: number, findingsCarried: number, viaOverlapFallback?: boolean }|null}
  */
 function chooseSlot(state, context, gameId, options) {
   const { anchor } = options;
   /** @type {{ slot: import('./types.js').Slot, placement: ReturnType<typeof checkPlacement>, score: number, findingsCarried: number }|null} */
   let best = null;
+  /**
+   * Candidates pass 1 refused for a coach overlap **alone** — facility-legal,
+   * turnover-clean — kept for pass 2 with how many overlap instances each adds.
+   *
+   * @type {Array<{ slot: import('./types.js').Slot, placement: ReturnType<typeof checkPlacement>, overlapsAdded: number, score: number, findingsCarried: number }>}
+   */
+  const overlapOnly = [];
 
   for (const candidate of candidateSlotsFor(state, gameId, anchor, context.weights)) {
     if (options.excludeSlotKey !== undefined && slotKey(candidate) === options.excludeSlotKey) {
@@ -584,23 +593,26 @@ function chooseSlot(state, context, gameId, options) {
       state.ledger.meta.ruleGateSurfacePairsExamined += ruled.meta.surfacePairsExamined;
     }
     const ruleGrown = newBlockingCodes(ruled.instances, acceptedRules);
-    if (ruleGrown.length > 0) {
+    const overlapOnlyRefusal =
+      ruleGrown.length > 0 &&
+      options.allowOverlapFallback === true &&
+      ruleGrown.every((code) => code === TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP);
+    if (ruleGrown.length > 0 && !overlapOnlyRefusal) {
       state.ledger.meta.candidatesRejected += 1;
       state.ledger.meta.candidatesRefusedByRules += 1;
       const refusals = (context.ruleGateRefusals[gameId] ??= {});
       for (const code of ruleGrown) refusals[code] = (refusals[code] ?? 0) + 1;
       continue;
     }
-
     const score = scoreObjective(
       candidateObjectiveCounts({
         reference: anchor,
         slot: candidate,
-        // **No rule term here, and why.** The gate above admits only a
-        // candidate whose rule instances do not exceed what this slot accepts,
-        // so every candidate that reaches this line carries zero rule excess:
-        // a blocking rule term would always read nought. The objective moves
-        // with the gate by construction, not by a second copy of the count.
+        // **No rule term here, and why.** Pass 1 admits only a candidate whose
+        // rule instances do not exceed what this slot accepts, so a rule term
+        // would read nought for every candidate it can choose. Pass 2 orders by
+        // new overlap instances *before* this score, so the overlap is decided
+        // by that order, never traded against drift by a weight (#61).
         placement,
         // **Scored the way the gate above admits.** `newBlockingCodes()` accepts
         // a finding the published schedule already carried; scoring the same
@@ -612,6 +624,28 @@ function chooseSlot(state, context, gameId, options) {
       context.weights
     ).total;
     const findingsCarried = placementFindingTotal(placement);
+    if (ruleGrown.length > 0) {
+      state.ledger.meta.candidatesRejected += 1;
+      state.ledger.meta.candidatesRefusedByRules += 1;
+      const refusals = (context.ruleGateRefusals[gameId] ??= {});
+      for (const code of ruleGrown) refusals[code] = (refusals[code] ?? 0) + 1;
+      // **Pass 2's pool: refused for a coach overlap and nothing else.** A
+      // turnover below the floor is HARD and refused in both passes (#61);
+      // the branch above already turned away anything else.
+      {
+        overlapOnly.push({
+          slot: candidate,
+          placement,
+          overlapsAdded: grownInstances(ruled.instances, acceptedRules).reduce(
+            (total, key) => total + ruled.instances[key] - (acceptedRules[key] ?? 0),
+            0
+          ),
+          score,
+          findingsCarried,
+        });
+      }
+      continue;
+    }
     state.ledger.meta.candidatesScored += 1;
     if (
       best === null ||
@@ -622,7 +656,30 @@ function chooseSlot(state, context, gameId, options) {
     }
     if (best.score === 0 && best.findingsCarried === 0) break;
   }
-  return best;
+  if (best !== null || overlapOnly.length === 0) return best;
+
+  // **Pass 2 (#61): a coach overlap, as the last resort before TIME TBD.** The
+  // operator allows a double-booked coach with a warning, and prefers any
+  // overlap-free slot to one. Reached only when pass 1 admitted nothing — and
+  // pass 1 then scanned every candidate, because its break needs a `best` — so
+  // "preferred" is an order, not a weight: the fewest new overlap instances
+  // first, then the objective, then the tie-break pass 1 uses. The warning is
+  // emitted from the finished schedule (`verify`), not here, so a requested
+  // move carrying one is reported by the same code.
+  state.ledger.meta.overlapFallbackEntered += 1;
+  const chosen = [...overlapOnly].sort(
+    (a, b) =>
+      a.overlapsAdded - b.overlapsAdded ||
+      a.score - b.score ||
+      a.findingsCarried - b.findingsCarried
+  )[0];
+  return {
+    slot: chosen.slot,
+    placement: chosen.placement,
+    score: chosen.score,
+    findingsCarried: chosen.findingsCarried,
+    viaOverlapFallback: true,
+  };
 }
 
 /**
@@ -659,7 +716,12 @@ function chooseSlot(state, context, gameId, options) {
  */
 function placePending(state, context, gameId, stageId) {
   const anchor = anchorOf(state, context, gameId);
-  const chosen = chooseSlot(state, context, gameId, { anchor });
+  // **Only the placer takes pass 2 (#61).** For `local-search` and
+  // `pair-repair` the alternative to "no overlap-free slot" is leaving a game
+  // standing where it was published, not TIME TBD, and moving an unrequested
+  // game into a coach double-booking to repair somebody else's clash is the
+  // opposite of minimal diff.
+  const chosen = chooseSlot(state, context, gameId, { anchor, allowOverlapFallback: true });
 
   if (chosen !== null) {
     const candidate = chosen.slot;
@@ -677,7 +739,9 @@ function placePending(state, context, gameId, stageId) {
         // Restating it here would be a second copy free to disagree with the
         // first, and `report.js` reads the first cause in the game's own slice
         // of the ledger precisely so there is only ever one.
-        reason: `the slot the objective scored lowest (${chosen.score}) among those the schedule already used`,
+        reason: chosen.viaOverlapFallback
+          ? `no overlap-free slot existed; the slot that double-books the fewest coaches, then scored lowest (${chosen.score}), among those the schedule already used — a coach overlap carried as a last resort before TIME TBD (#61)`
+          : `the slot the objective scored lowest (${chosen.score}) among those the schedule already used`,
       },
       stageId
     );
@@ -1360,6 +1424,10 @@ const verify = {
    * @param {Object} context
    */
   run(state, context) {
+    // Before the rule engine, and whether or not it runs: "allowed with a
+    // warning" has to be true when a caller switches `verify` off (#61).
+    reportCoachOverlapsCarried(state, context, this.id);
+
     const verification = verificationFor(context, state);
     if (verification === null) return state;
 
@@ -1435,6 +1503,84 @@ const verify = {
     return state;
   },
 };
+
+/**
+ * Warn about every coach overlap the result carries that the published
+ * schedule did not (#61), from the finished schedule.
+ *
+ * Read from where every game **ended up**, so a requested move and the
+ * placer's pass-2 last resort are reported by one piece of code and cannot
+ * disagree. Only games standing off their published slot can have created an
+ * overlap; each is asked through the same `ruleGateInstances()` the placer
+ * used, against the same `acceptedAtSlot()` record, and a pair both of whose
+ * games moved is reported once per coach.
+ *
+ * @param {import('./types.js').ResolveState} state
+ * @param {Object} context
+ * @param {string} stageId
+ * @returns {void}
+ */
+function reportCoachOverlapsCarried(state, context, stageId) {
+  /** @type {Set<string>} */
+  const reported = new Set();
+  /** @param {string|null} teamId @param {string} personId */
+  const coCoaches = (teamId, personId) =>
+    teamId === null
+      ? []
+      : (context.coachesByTeam.get(teamId) ?? []).filter((id) => id !== personId);
+  for (const gameId of [...state.gameIds].sort()) {
+    const game = state.games[gameId];
+    const published = state.baseline[gameId];
+    if (!game) continue;
+    const slot = { date: game.date, surfaceId: game.surfaceId, startMinutes: game.startMinutes };
+    if (slotKey(slot) === slotKey(published)) continue;
+    const ruled = ruleGateInstances(context, state, gameId, slot, { turnover: false });
+    // **Pair-level, not slot-level.** The warning says the published schedule
+    // did not carry this overlap, so it asks whether the published schedule had
+    // these two games overlapping at all: a pair moved together and still
+    // overlapping was carried. (The placer's gate is stricter, per slot; that
+    // decides where a game may go, this decides what to warn about.)
+    const grown = new Set(
+      grownInstances(ruled.instances, context.baselineRules[gameId]?.instances ?? {})
+    );
+    for (const overlap of ruled.overlaps) {
+      if (!grown.has(overlap.key)) continue;
+      const pairKey = `${overlap.personId}|${[gameId, overlap.otherId].sort().join('|')}`;
+      if (reported.has(pairKey)) continue;
+      reported.add(pairKey);
+      // A co-coach who is double-booked on the same two games is no cover.
+      const alsoBooked = new Set(
+        ruled.overlaps.filter((entry) => entry.key === overlap.key).map((entry) => entry.personId)
+      );
+      const here = coCoaches(overlap.teamId, overlap.personId).filter((id) => !alsoBooked.has(id));
+      const there = coCoaches(overlap.otherTeamId, overlap.personId).filter(
+        (id) => !alsoBooked.has(id)
+      );
+      const cover =
+        here.length === 0 && there.length === 0
+          ? 'NEITHER team has another registered coach, so the co-coach reason for allowing this does not hold'
+          : `${overlap.teamId ?? 'this game'} has ${here.length === 0 ? 'no other registered coach' : `other registered coach(es) ${here.join(', ')}`}; ${overlap.otherTeamId ?? 'the other commitment'} has ${there.length === 0 ? 'no other registered coach' : `other registered coach(es) ${there.join(', ')}`}`;
+      state.ledger.meta.coachOverlapsCarried += 1;
+      state.ledger.findings.push(
+        makeResolveFinding(
+          RESOLVE_REASON.RESOLVE_COACH_OVERLAP_CARRIED,
+          `coach "${overlap.personId}" is committed to game "${gameId}" at ${slotKey(slot)} and to "${overlap.otherId}" at an overlapping time; allowed with a warning (#61). ${cover}`,
+          {
+            stageId,
+            gameId,
+            personId: overlap.personId,
+            otherId: overlap.otherId,
+            teamId: overlap.teamId,
+            otherTeamId: overlap.otherTeamId,
+            coCoaches: here.join(', '),
+            otherCoCoaches: there.join(', '),
+            covered: here.length > 0 || there.length > 0,
+          }
+        )
+      );
+    }
+  }
+}
 
 /** @type {Object} */
 const freezeAudit = {

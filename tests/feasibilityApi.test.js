@@ -74,7 +74,11 @@ import {
   loadSunsets,
 } from '@squadlogic/core/fixtures/index.js';
 import { buildSeason2026CoachRoster } from '@squadlogic/core/people/index.js';
-import { runRuleEngine, toSeason2026Schedule } from '@squadlogic/core/ruleEngine/index.js';
+import {
+  RULE_VIOLATION_REASON,
+  runRuleEngine,
+  toSeason2026Schedule,
+} from '@squadlogic/core/ruleEngine/index.js';
 import {
   TIMING_REASON,
   buildFormatTimingTableFromSeason2026,
@@ -176,6 +180,78 @@ const context = deepFreeze(
     roster,
   })
 );
+/**
+ * **A rule-layer blocking position, constructed (#61).** Until #61 the corpus
+ * carried one on its own: the three coach overlaps, blocking by a hard-coded
+ * severity. The operator made an overlap compromise (allowed with a warning),
+ * and the published season has no other rule-engine blocking finding at a
+ * standing position — so every guard below that needs "blocked by a layer other
+ * than the facility" would have compared nothing. The witness is a turnover
+ * below the season's HARD floor: the tightest consecutive pair on one surface
+ * (found, not named), its later game moved earlier so the gap is five minutes.
+ * Facility-legal — no occupancy overlap — and blocking in the rule engine.
+ */
+const TURNOVER_WITNESS = (() => {
+  const bySurfaceDate = new Map();
+  for (const game of schedule.games) {
+    if (game.endMinutes === null) continue;
+    const key = `${game.surfaceId}|${game.date}`;
+    bySurfaceDate.set(key, [...(bySurfaceDate.get(key) ?? []), game]);
+  }
+  const pairs = [...bySurfaceDate.values()].flatMap((games) => {
+    const ordered = [...games].sort((a, b) => a.startMinutes - b.startMinutes);
+    return ordered.slice(1).map((later, index) => [ordered[index], later]);
+  });
+  const [earlier, later] = pairs.sort(
+    ([a1, b1], [a2, b2]) => b1.startMinutes - a1.endMinutes - (b2.startMinutes - a2.endMinutes)
+  )[0];
+  const shift = later.startMinutes - (earlier.endMinutes + 5);
+  const moved = (row) => ({
+    ...row,
+    startMinutes: row.startMinutes - shift,
+    endMinutes: row.endMinutes === null ? null : row.endMinutes - shift,
+  });
+  const witnessSchedule = {
+    ...schedule,
+    games: schedule.games.map((game) => (game.id === later.id ? moved(game) : game)),
+    commitments: schedule.commitments.map((c) => (c.gameId === later.id ? moved(c) : c)),
+  };
+  const witnessVerification = runRuleEngine(witnessSchedule, {
+    registry,
+    resources: { graph, timingTable: table, calendar, venueComplexes },
+  });
+  const witnessContext = buildAttributionContext({
+    graph,
+    table,
+    calendar,
+    registry,
+    schedule: witnessSchedule,
+    verification: witnessVerification,
+    venueComplexes,
+    roster,
+  });
+  return {
+    context: witnessContext,
+    game: /** @type {any} */ (witnessSchedule.games.find((game) => game.id === later.id)),
+    verification: witnessVerification,
+  };
+})();
+
+/** A standing position asked of the turnover witness's own context. */
+function witnessStanding(options = {}) {
+  const game = TURNOVER_WITNESS.game;
+  return canGameMove(
+    TURNOVER_WITNESS.context,
+    {
+      gameId: game.id,
+      insteadOfDate: game.date,
+      insteadOfSurfaceId: game.surfaceId,
+      insteadOfMinutes: game.startMinutes,
+    },
+    { venueComplexes, standingPositionIsAnAnswer: true, ...options }
+  );
+}
+
 deepFreeze(graph);
 deepFreeze(table);
 deepFreeze(calendar);
@@ -1735,24 +1811,40 @@ describe('feasibility :: finding 1 — "no clean position exists" is not "not ti
 
 describe('feasibility :: finding 2 — a margin’s basis names the bound it came from', () => {
   it('names the bound whose slack the margin is, not whichever was claimed first', () => {
-    // The corpus's own instance: three constraints bind, the first claimed is
-    // 5 minutes short and the tightest is 55 minutes short, and the answer used
-    // to report the 55 under the first one's name.
-    const answer = canTeamPlay(
-      context,
-      {
-        teamId: '06GMicro01',
-        dates: [...new Set(schedule.games.map((game) => game.date))].sort(),
-        kickoffMinutes: 12 * 60 + 30,
-      },
-      { venueComplexes }
-    );
-    expect(answer.binding.length).toBeGreaterThan(1);
-    const named = answer.binding.filter((bound) => bound.kind === answer.marginBasis);
-    expect(named).toHaveLength(1);
-    expect(named[0].slackMinutes).toBe(answer.marginMinutes);
-    expect(answer.marginBasis).not.toBe(answer.binding[0].kind);
-  });
+    // The corpus's instance was 06GMicro01 at 12:30: three bounds, the first
+    // claimed 5 minutes short and the tightest 55. #61 made the coach overlap
+    // compromise, that answer's binding changed, and **no answer this corpus
+    // produces now has a tightest bound that is not also its first** — searched
+    // over every team at four kickoffs (528 answers). So the order-independence
+    // the original instance proved is no longer witnessed here; it is stated
+    // rather than left passing over nothing, and filed. What every answer can
+    // still show is the invariant itself: the basis is the argmin of the slack
+    // and the margin is that slack.
+    const dates = [...new Set(schedule.games.map((game) => game.date))].sort();
+    const teamIds = [...new Set(schedule.teams.map((team) => team.id))].sort();
+    let multiBound = 0;
+    let firstIsNotTightest = 0;
+    for (const kickoffMinutes of [12 * 60 + 30, 10 * 60, 15 * 60, 17 * 60 + 30]) {
+      for (const teamId of teamIds) {
+        const answer = canTeamPlay(context, { teamId, dates, kickoffMinutes }, { venueComplexes });
+        if (answer.binding.length < 2 || answer.marginBasis === null) continue;
+        multiBound += 1;
+        const tightest = Math.min(...answer.binding.map((bound) => bound.slackMinutes));
+        const named = answer.binding.filter((bound) => bound.kind === answer.marginBasis);
+        expect(named.length, teamId).toBeGreaterThan(0);
+        expect(named[0].slackMinutes, teamId).toBe(tightest);
+        expect(answer.marginMinutes, teamId).toBe(tightest);
+        if (answer.binding[0].slackMinutes !== tightest) firstIsNotTightest += 1;
+      }
+    }
+    // The meta-assertion: answers with more than one bound were examined.
+    expect(multiBound).toBeGreaterThan(0);
+    // `firstIsNotTightest` is counted, not asserted: on this corpus it is 0, so
+    // the order-independence above is **not witnessed here** — a regression to
+    // "name the first-claimed bound" would pass. Stated in the PR and filed; a
+    // constructed witness belongs with the feasibility work, not in #61.
+    void firstIsNotTightest;
+  }, 120_000);
 
   it('never reports a basis without a margin, on any answer shape', () => {
     // **The rule.** A basis is the name of the bound the number came from, so
@@ -2329,27 +2421,37 @@ describe('feasibility :: round 2, finding 1 — a blocking blocker is never a fe
       { venueComplexes, minimalSet: false, standingPositionIsAnAnswer: true }
     );
 
-  it('refuses the four standing positions that sealed as feasible while blocked', () => {
-    // The reviewer's own four. `explainGame()` merges the rule engine's
-    // violation claims into `claims` and takes `legal` from facility legality
-    // alone, so a position carrying a blocking `TRAVEL_COMMITMENTS_OVERLAP`
-    // sealed as `feasible` / `clean`: the blockers said no and the verdict
-    // said yes, from one answer.
-    const relayed = [534, 548, 564, 575].map((n) => `combined_schedule.csv#${n}`);
-    for (const gameId of relayed) {
+  it('refuses a standing position blocked by the rule engine alone', () => {
+    // Round two's defect: `legal` came from facility legality while the
+    // blockers carried a blocking rule-engine claim, so the answer sealed
+    // `feasible` / `clean`. The corpus's own instance was the three coach
+    // overlaps; since #61 those are compromise (allowed with a warning), so the
+    // witness is the constructed turnover above.
+    const answer = witnessStanding({ minimalSet: false });
+    expect(
+      blockingClaimsIn(answer.blockers).flatMap((claim) => claim.codes),
+      TURNOVER_WITNESS.game.id
+    ).toContain(RULE_VIOLATION_REASON.TURNOVER_BELOW_MINIMUM);
+    expect(answer.verdict).toBe(FEASIBILITY_VERDICT.INFEASIBLE);
+    expect(answer.tight).toBeNull();
+  });
+
+  it('no longer refuses the four overlap positions, and still carries the overlap (#61)', () => {
+    for (const n of [534, 548, 564, 575]) {
+      const gameId = `combined_schedule.csv#${n}`;
       const game = schedule.games.find((entry) => entry.id === gameId);
-      // Meta-assertions: a game this corpus no longer holds, or one that
-      // stopped carrying the claim, would make the verdict assertion below a
-      // statement about nothing.
       expect(game, gameId).toBeDefined();
       const answer = standing(/** @type {any} */ (game));
-      const blocking = blockingClaimsIn(answer.blockers);
       expect(
-        blocking.flatMap((claim) => claim.codes),
+        blockingClaimsIn(answer.blockers).flatMap((c) => c.codes),
+        gameId
+      ).not.toContain(TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP);
+      expect(
+        claimsAtSeverity(answer.blockers, CONSTRAINT_SEVERITY.COMPROMISE).flatMap((c) => c.codes),
         gameId
       ).toContain(TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP);
-      expect(answer.verdict, gameId).toBe(FEASIBILITY_VERDICT.INFEASIBLE);
-      expect(answer.tight, gameId).toBeNull();
+      expect(answer.verdict, gameId).not.toBe(FEASIBILITY_VERDICT.INFEASIBLE);
+      expect(answer.tight, gameId).not.toBe(FEASIBILITY_TIGHTNESS.CLEAN);
     }
   });
 
@@ -2689,29 +2791,22 @@ describe('feasibility :: round 3, finding 1 — the derivation reads every sever
 
 describe('feasibility :: round 3, finding 2 — an answer never denies its own verdict', () => {
   it('says which layer blocked the standing positions the facility layer did not', () => {
-    // With `minimalSet` at its default these four came back `infeasible`
-    // alongside `minimalSet.blocked === false` and
-    // ATTRIBUTION_PLACEMENT_NOT_BLOCKED — "no set of constraints blocks it"
-    // printed beside "infeasible". The information is kept, because a blocked
-    // answer with no *facility* explanation is worth saying; what changes is
-    // that the answer now says which layer did decide.
-    for (const n of [534, 548, 564, 575]) {
-      const gameId = `combined_schedule.csv#${n}`;
-      const game = schedule.games.find((entry) => entry.id === gameId);
-      expect(game, gameId).toBeDefined();
-      const answer = standingAnswer(/** @type {any} */ (game));
-      expect(answer.verdict, gameId).toBe(FEASIBILITY_VERDICT.INFEASIBLE);
-      // Meta-assertion: the minimal set is still asked for and still denies,
-      // or the case below is about a shape that no longer occurs.
-      expect(answer.minimalSet, gameId).not.toBeNull();
-      expect(answer.minimalSet.blocked, gameId).toBe(false);
-      const said = answer.findings.filter(
-        (finding) => finding.code === FEASIBILITY_REASON.FEASIBILITY_BLOCKED_OUTSIDE_FACILITY
-      );
-      expect(said, gameId).toHaveLength(1);
-      expect(said[0].details.sources, gameId).toContain(ATTRIBUTION_SOURCE.RULE_ENGINE);
-      expect(said[0].details.codes, gameId).toContain(TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP);
-    }
+    // With `minimalSet` at its default this position came back `infeasible`
+    // alongside `minimalSet.blocked === false` — "no set of constraints blocks
+    // it" printed beside "infeasible". The answer now says which layer did
+    // decide. (The corpus's own four were the coach overlaps, compromise since
+    // #61; the witness is the constructed turnover.)
+    const answer = witnessStanding();
+    const gameId = TURNOVER_WITNESS.game.id;
+    expect(answer.verdict, gameId).toBe(FEASIBILITY_VERDICT.INFEASIBLE);
+    expect(answer.minimalSet, gameId).not.toBeNull();
+    expect(answer.minimalSet.blocked, gameId).toBe(false);
+    const said = answer.findings.filter(
+      (finding) => finding.code === FEASIBILITY_REASON.FEASIBILITY_BLOCKED_OUTSIDE_FACILITY
+    );
+    expect(said, gameId).toHaveLength(1);
+    expect(said[0].details.sources, gameId).toContain(ATTRIBUTION_SOURCE.RULE_ENGINE);
+    expect(said[0].details.codes, gameId).toContain(RULE_VIOLATION_REASON.TURNOVER_BELOW_MINIMUM);
   });
 
   it('holds as a rule: no answer carries a verdict and a minimal-set claim that disagree', () => {
@@ -2772,6 +2867,8 @@ describe('feasibility :: round 3, finding 2 — an answer never denies its own v
       }
     };
 
+    // The constructed rule-layer block (#61): the corpus no longer has one.
+    rule(`standing ${TURNOVER_WITNESS.game.id} (turnover witness)`, witnessStanding());
     for (const game of schedule.games) {
       rule(`standing ${game.id}`, standingAnswer(game));
       rule(
@@ -3210,6 +3307,8 @@ describe('feasibility :: round 4, finding 2 — a denial names the layer that de
         }
       }
     };
+    // The constructed rule-layer block (#61): the corpus no longer has one.
+    rule(`standing ${TURNOVER_WITNESS.game.id} (turnover witness)`, witnessStanding());
     for (const game of schedule.games) {
       rule(`standing ${game.id}`, standingAnswer(game));
       rule(
@@ -3295,9 +3394,13 @@ describe('feasibility :: round 4, finding 2 — a denial names the layer that de
     const blocking = overlapping.findings.filter(
       (finding) => finding.severity === CONSTRAINT_SEVERITY.BLOCKING
     );
-    expect(blocking.map((finding) => finding.code)).toEqual([
-      TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP,
-    ]);
+    // Since #61 no travel finding is blocking by fallback: the overlap is
+    // compromise (allowed with a warning). Stated positively, with the overlap
+    // present, so this is not passing over an evaluator that found nothing.
+    expect(blocking.map((finding) => finding.code)).toEqual([]);
+    expect(overlapping.findings.map((finding) => finding.code)).toContain(
+      TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP
+    );
     for (const finding of blocking) {
       expect(overlapping.transitions.some((entry) => entry.findings.includes(finding))).toBe(true);
     }

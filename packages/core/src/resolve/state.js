@@ -434,6 +434,8 @@ export function resolveContextDefaults() {
      * Not `requestedSlots`, which also holds no-op and frozen-refused changes.
      */
     requestedApplied: new Set(),
+    /** Each team's registered coaches, by team id, for the overlap warning (#61). */
+    coachesByTeam: new Map(),
     /** Games this run repairs rather than accepts; see the repair scope. */
     repairScope: new Set(),
     /** Per scoped game, how many baseline findings un-accepting it discarded. */

@@ -92,7 +92,6 @@ export function useAutoScheduler({ organizationId }) {
       divisionPreferences,
       lockedAssignments,
       scoringWeights,
-      schoolDayEnd,
       seasonSettingsId,
       config,
     }) => {
@@ -117,7 +116,6 @@ export function useAutoScheduler({ organizationId }) {
         divisionPreferences: divisionPreferences ?? {},
         lockedAssignments: lockedAssignments ?? [],
         scoringWeights: scoringWeights ?? {},
-        schoolDayEnd,
         config: config ?? {},
       });
       const cached = edgeFunctionCache.get(cacheKey);
@@ -199,7 +197,6 @@ export function useAutoScheduler({ organizationId }) {
             divisionPreferences: divisionPreferences ?? {},
             lockedAssignments: lockedAssignments ?? [],
             scoringWeights: scoringWeights ?? {},
-            schoolDayEnd,
             config: config ?? {},
           }),
           signal: controller.signal,

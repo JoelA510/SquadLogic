@@ -228,6 +228,19 @@ export const RESOLVE_REASON = Object.freeze({
    */
   RESOLVE_REPAIR_SCOPE_VACUOUS: 'RESOLVE_REPAIR_SCOPE_VACUOUS',
   /**
+   * A game now stands where one of its coaches is committed elsewhere at the
+   * same time, and the published schedule did not carry that overlap (#61).
+   *
+   * `compromise`: the operator allows it with a warning, because the team may
+   * have a co-coach whose registration is not complete yet. Emitted for every
+   * such placement — the solver's last resort and a requested move alike — and
+   * **independent of `verify`**, which a caller may switch off. The details
+   * name the coach, both games, and whether each team has another registered
+   * coach; where neither does, the message says so, because that is the case
+   * the operator's reason does not cover.
+   */
+  RESOLVE_COACH_OVERLAP_CARRIED: 'RESOLVE_COACH_OVERLAP_CARRIED',
+  /**
    * A game in the repair scope had **nowhere legal to go**, and is left
    * standing where it is.
    *
@@ -386,6 +399,7 @@ export const RESOLVE_REASON_SEVERITY = Object.freeze({
   [RESOLVE_REASON.RESOLVE_CHANGE_BUDGET_MET]: RESOLVE_SEVERITY.INFO,
   [RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_DECLARED]: RESOLVE_SEVERITY.INFO,
   [RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_VACUOUS]: RESOLVE_SEVERITY.BLOCKING,
+  [RESOLVE_REASON.RESOLVE_COACH_OVERLAP_CARRIED]: RESOLVE_SEVERITY.COMPROMISE,
   [RESOLVE_REASON.RESOLVE_REPAIR_UNAVAILABLE]: RESOLVE_SEVERITY.COMPROMISE,
   [RESOLVE_REASON.RESOLVE_CHANGE_BUDGET_BOUND]: RESOLVE_SEVERITY.COMPROMISE,
   [RESOLVE_REASON.RESOLVE_PUBLISHED_HOLD_MEASURED]: RESOLVE_SEVERITY.INFO,
@@ -459,6 +473,8 @@ export function createResolveMeta() {
     candidatesEvaluated: 0,
     candidatesRejected: 0,
     candidatesRefusedByRules: 0,
+    overlapFallbackEntered: 0,
+    coachOverlapsCarried: 0,
     ruleGateCommitmentsExamined: 0,
     ruleGateSurfacePairsExamined: 0,
     candidatesScored: 0,

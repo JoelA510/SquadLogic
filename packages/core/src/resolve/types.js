@@ -341,6 +341,8 @@
  * @property {number} movesApplied
  * @property {number} candidatesEvaluated
  * @property {number} candidatesRejected
+ * @property {number} overlapFallbackEntered - `chooseSlot()` calls that found no overlap-free candidate and took pass 2 (#61)
+ * @property {number} coachOverlapsCarried - coach overlaps the result carries that the published schedule did not (#61)
  * @property {number} candidatesRefusedByRules - of those, refused by the coach or turnover gate alone (#59)
  * @property {number} ruleGateCommitmentsExamined - coach commitments the placer's gate read (#59)
  * @property {number} ruleGateSurfacePairsExamined - same-surface pairs the placer's gate read (#59)

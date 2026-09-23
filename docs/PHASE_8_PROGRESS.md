@@ -5899,3 +5899,39 @@ different mechanism. #61 operator decision on requested moves that double-book
 a coach (86 runs; `compromised` with only a verify finding, and no finding at all
 with `verify: false`). #62 the gate ignores waivers; `verify`'s coach check
 compares only consecutive commitments.
+
+---
+
+## Operator decisions, 2026-09-23
+
+- **#61 — a requested move that double-books a coach: allowed, with a warning.**
+  Reason given: the team may have a co-coach whose registration is not yet
+  complete but will be before the game. **Avoiding the conflict is still
+  preferred.** Today the result is `compromised` with only a `verify` finding,
+  and with `verify: false` nothing names the overlap at all — so "with a
+  warning" is not yet true and needs a finding that surfaces regardless of
+  `verify`.
+  *Open follow-on, put back to the operator:* the same reasoning applies to a
+  placement the solver chooses. #436 refuses those outright, which is why 30
+  games went TIME TBD.
+- **#51 — `schoolDayEnd`: optional and low priority.** Some venues are
+  community parks and some players are homeschooled. Schools do not permit
+  their fields during school hours and the club does not request them then, so
+  the permit windows already encode school hours. The operator's instruction is
+  to integrate it safely or drop it; the supervisor's ruling is **drop it from
+  the auto-scheduler path**, where it is sent and ignored. Implementing it in
+  the Deno twin would duplicate #420/#425's timezone handling there, which is
+  the twin-arm hazard again. Core support stays.
+- **8.9 — sunset data is public and computable; unblocked.** The NOAA solar
+  calculator the operator cites is a published algorithm. Computing sunset in
+  core from venue coordinates satisfies the plan's "same source" test, provided
+  the computed values reproduce the 13 Saturdays in `sunsets.csv` within a
+  stated tolerance, well inside the 15-minute margin. If they do not, 8.9 stays
+  blocked with the measured discrepancy. Computed per venue, the operator's
+  50-mile clustering rule is unnecessary: the computation costs nothing, and
+  per-venue values are more accurate. Away venues are excluded, as the operator
+  specified.
+  **Privacy constraint:** real coordinates must not enter the repo, because the
+  corpus is anonymised (task #13). The fixture uses coarse coordinates fitted to
+  `sunsets.csv` itself, which reveals no more than that file already does. Real
+  coordinates live only in the organisation's database.

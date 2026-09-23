@@ -1839,9 +1839,11 @@ describe('feasibility :: finding 2 — a margin’s basis names the bound it cam
     }
     // The meta-assertion: answers with more than one bound were examined.
     expect(multiBound).toBeGreaterThan(0);
-    // And the gap, stated: were this ever non-zero again, the order-independent
-    // case would be live and worth a named instance.
-    expect(firstIsNotTightest).toBe(0);
+    // `firstIsNotTightest` is counted, not asserted: on this corpus it is 0, so
+    // the order-independence above is **not witnessed here** — a regression to
+    // "name the first-claimed bound" would pass. Stated in the PR and filed; a
+    // constructed witness belongs with the feasibility work, not in #61.
+    void firstIsNotTightest;
   }, 120_000);
 
   it('never reports a basis without a margin, on any answer shape', () => {

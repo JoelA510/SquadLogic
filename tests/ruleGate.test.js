@@ -546,42 +546,37 @@ describe('#61: turnover stays a hard refusal in pass 2', () => {
   // No pass-2 placement on the corpus had a turnover-refused candidate at all
   // (searched: all 30), so ungating turnover there changes nothing and a test
   // over the corpus alone could not fail. Constructed instead: the same #7
-  // displacement under a turnover floor raised to 600 minutes, so nearly every
-  // candidate that shares a surface is refused for turnover and pass 2 is left
-  // choosing between overlap-only candidates and turnover ones.
+  // displacement under a turnover floor raised to 45 minutes (found by sweep:
+  // 15-30 leaves an overlap-only slot, 45 does not). Every candidate that
+  // would take #7 as a last resort then also turns a surface over too fast.
   const strictRegistry = buildConstraintRegistry({
     name: 'season-2026, turnover floor raised for the pass-2 control',
     constraints: engines.registry.constraints.map((record) =>
       record.policy === 'turnover-minimum' && record.type === 'hard'
-        ? { ...record, parameters: { ...record.parameters, minimumGapMinutes: 600 } }
+        ? { ...record, parameters: { ...record.parameters, minimumGapMinutes: 45 } }
         : record
     ),
   });
-  const strictEngines = { ...engines, registry: strictRegistry };
   const displaced = /** @type {any} */ (byId.get('combined_schedule.csv#7'));
   const requested = /** @type {any} */ (byId.get('combined_schedule.csv#6'));
   const run = applyChangeRequest({
     schedule,
     changes: [{ gameId: requested.id, ...slotOf(displaced), reason: 'displace' }],
-    engines: strictEngines,
+    engines: { ...engines, registry: strictRegistry },
     freeze: freezeAllExcept([{ date: displaced.date }]),
     holdChanges: true,
     verify: true,
     onUnsatisfiable: 'report',
   });
 
-  it('refused candidates for turnover, so the control has something to refuse', () => {
-    expect(run.meta.candidatesRefusedByRules).toBeGreaterThan(0);
-  });
-
-  it('never places the displaced game below the turnover floor, in either pass', () => {
-    const placed = whereIs(run, displaced.id);
-    if (placed === null) {
-      expect(run.unplaced.find((entry) => entry.gameId === displaced.id)?.reason).toMatch(
-        /TIME TBD/
-      );
-      return;
-    }
+  it('shelves the game as TIME TBD, naming both refusals, rather than place it below the floor', () => {
+    expect(whereIs(run, displaced.id)).toBeNull();
+    const reason = run.unplaced.find((entry) => entry.gameId === displaced.id)?.reason ?? '';
+    // Both codes named: overlap candidates existed, and every one of them also
+    // failed the turnover floor — which is what kept pass 2's pool empty.
+    expect(reason).toMatch(/TURNOVER_BELOW_MINIMUM/);
+    expect(reason).toMatch(/TRAVEL_COMMITMENTS_OVERLAP/);
+    expect(run.meta.overlapFallbackEntered).toBe(0);
     const below = /** @type {any} */ (run.verification).violations.filter(
       (violation) =>
         violation.code === 'TURNOVER_BELOW_MINIMUM' && pairOf(violation).includes(displaced.id)

@@ -533,8 +533,9 @@ function mayMoveWithinBudget(state, context, gameId, to, stageId) {
  * @param {import('./types.js').ResolveState} state
  * @param {Object} context
  * @param {string} gameId
- * @param {{ anchor: import('./types.js').Slot, excludeSlotKey?: string }} options
- * @returns {{ slot: import('./types.js').Slot, placement: ReturnType<typeof checkPlacement>, score: number, findingsCarried: number }|null}
+ * @param {{ anchor: import('./types.js').Slot, excludeSlotKey?: string, allowOverlapFallback?: boolean }} options -
+ *   `allowOverlapFallback` enables pass 2 (#61); only the placer passes it
+ * @returns {{ slot: import('./types.js').Slot, placement: ReturnType<typeof checkPlacement>, score: number, findingsCarried: number, viaOverlapFallback?: boolean }|null}
  */
 function chooseSlot(state, context, gameId, options) {
   const { anchor } = options;
@@ -592,15 +593,26 @@ function chooseSlot(state, context, gameId, options) {
       state.ledger.meta.ruleGateSurfacePairsExamined += ruled.meta.surfacePairsExamined;
     }
     const ruleGrown = newBlockingCodes(ruled.instances, acceptedRules);
+    const overlapOnlyRefusal =
+      ruleGrown.length > 0 &&
+      options.allowOverlapFallback === true &&
+      ruleGrown.every((code) => code === TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP);
+    if (ruleGrown.length > 0 && !overlapOnlyRefusal) {
+      state.ledger.meta.candidatesRejected += 1;
+      state.ledger.meta.candidatesRefusedByRules += 1;
+      const refusals = (context.ruleGateRefusals[gameId] ??= {});
+      for (const code of ruleGrown) refusals[code] = (refusals[code] ?? 0) + 1;
+      continue;
+    }
     const score = scoreObjective(
       candidateObjectiveCounts({
         reference: anchor,
         slot: candidate,
-        // **No rule term here, and why.** The gate above admits only a
-        // candidate whose rule instances do not exceed what this slot accepts,
-        // so every candidate that reaches this line carries zero rule excess:
-        // a blocking rule term would always read nought. The objective moves
-        // with the gate by construction, not by a second copy of the count.
+        // **No rule term here, and why.** Pass 1 admits only a candidate whose
+        // rule instances do not exceed what this slot accepts, so a rule term
+        // would read nought for every candidate it can choose. Pass 2 orders by
+        // new overlap instances *before* this score, so the overlap is decided
+        // by that order, never traded against drift by a weight (#61).
         placement,
         // **Scored the way the gate above admits.** `newBlockingCodes()` accepts
         // a finding the published schedule already carried; scoring the same
@@ -618,8 +630,9 @@ function chooseSlot(state, context, gameId, options) {
       const refusals = (context.ruleGateRefusals[gameId] ??= {});
       for (const code of ruleGrown) refusals[code] = (refusals[code] ?? 0) + 1;
       // **Pass 2's pool: refused for a coach overlap and nothing else.** A
-      // turnover below the floor is HARD and refused in both passes (#61).
-      if (ruleGrown.every((code) => code === TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP)) {
+      // turnover below the floor is HARD and refused in both passes (#61);
+      // the branch above already turned away anything else.
+      {
         overlapOnly.push({
           slot: candidate,
           placement,
@@ -660,12 +673,12 @@ function chooseSlot(state, context, gameId, options) {
       a.score - b.score ||
       a.findingsCarried - b.findingsCarried
   )[0];
-  state.ledger.meta.candidatesScored += 1;
   return {
     slot: chosen.slot,
     placement: chosen.placement,
     score: chosen.score,
     findingsCarried: chosen.findingsCarried,
+    viaOverlapFallback: true,
   };
 }
 
@@ -703,7 +716,12 @@ function chooseSlot(state, context, gameId, options) {
  */
 function placePending(state, context, gameId, stageId) {
   const anchor = anchorOf(state, context, gameId);
-  const chosen = chooseSlot(state, context, gameId, { anchor });
+  // **Only the placer takes pass 2 (#61).** For `local-search` and
+  // `pair-repair` the alternative to "no overlap-free slot" is leaving a game
+  // standing where it was published, not TIME TBD, and moving an unrequested
+  // game into a coach double-booking to repair somebody else's clash is the
+  // opposite of minimal diff.
+  const chosen = chooseSlot(state, context, gameId, { anchor, allowOverlapFallback: true });
 
   if (chosen !== null) {
     const candidate = chosen.slot;
@@ -721,7 +739,9 @@ function placePending(state, context, gameId, stageId) {
         // Restating it here would be a second copy free to disagree with the
         // first, and `report.js` reads the first cause in the game's own slice
         // of the ledger precisely so there is only ever one.
-        reason: `the slot the objective scored lowest (${chosen.score}) among those the schedule already used`,
+        reason: chosen.viaOverlapFallback
+          ? `no overlap-free slot existed; the slot that double-books the fewest coaches, then scored lowest (${chosen.score}), among those the schedule already used — a coach overlap carried as a last resort before TIME TBD (#61)`
+          : `the slot the objective scored lowest (${chosen.score}) among those the schedule already used`,
       },
       stageId
     );
@@ -1514,17 +1534,28 @@ function reportCoachOverlapsCarried(state, context, stageId) {
     if (!game) continue;
     const slot = { date: game.date, surfaceId: game.surfaceId, startMinutes: game.startMinutes };
     if (slotKey(slot) === slotKey(published)) continue;
-    const ruled = ruleGateInstances(context, state, gameId, slot);
+    const ruled = ruleGateInstances(context, state, gameId, slot, { turnover: false });
+    // **Pair-level, not slot-level.** The warning says the published schedule
+    // did not carry this overlap, so it asks whether the published schedule had
+    // these two games overlapping at all: a pair moved together and still
+    // overlapping was carried. (The placer's gate is stricter, per slot; that
+    // decides where a game may go, this decides what to warn about.)
     const grown = new Set(
-      grownInstances(ruled.instances, acceptedAtSlot(context.baselineRules[gameId], slotKey(slot)))
+      grownInstances(ruled.instances, context.baselineRules[gameId]?.instances ?? {})
     );
     for (const overlap of ruled.overlaps) {
       if (!grown.has(overlap.key)) continue;
       const pairKey = `${overlap.personId}|${[gameId, overlap.otherId].sort().join('|')}`;
       if (reported.has(pairKey)) continue;
       reported.add(pairKey);
-      const here = coCoaches(overlap.teamId, overlap.personId);
-      const there = coCoaches(overlap.otherTeamId, overlap.personId);
+      // A co-coach who is double-booked on the same two games is no cover.
+      const alsoBooked = new Set(
+        ruled.overlaps.filter((entry) => entry.key === overlap.key).map((entry) => entry.personId)
+      );
+      const here = coCoaches(overlap.teamId, overlap.personId).filter((id) => !alsoBooked.has(id));
+      const there = coCoaches(overlap.otherTeamId, overlap.personId).filter(
+        (id) => !alsoBooked.has(id)
+      );
       const cover =
         here.length === 0 && there.length === 0
           ? 'NEITHER team has another registered coach, so the co-coach reason for allowing this does not hold'

@@ -628,8 +628,9 @@ export default function PracticeSchedulingPage() {
     // `schedulerSlots`, whose `start`/`end` are already instants on that clock.
     //
     // `schoolDayEnd` is not sent either (#51): the function has no code for
-    // it, so it was a field sent and ignored. It is still honoured below, where
-    // `buildPracticeRunResults` hands it to core `evaluatePracticeSchedule`.
+    // it, so it was a field sent and ignored. The solver does not enforce it.
+    // It is still read below, where `buildPracticeRunResults` hands it to core
+    // `evaluatePracticeSchedule`, which reports school-hour warnings on Apply.
     await autoScheduler.trigger({
       teams: schedulerTeams,
       slots: schedulerSlots,

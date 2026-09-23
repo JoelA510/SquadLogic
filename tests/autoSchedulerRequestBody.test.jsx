@@ -3,13 +3,11 @@
  *
  * The function has no code for it (`supabase/functions/auto-scheduler/index.ts`
  * never reads it), so sending it made the UI present as meaningful a field
- * nothing honoured. Core still honours it, and the page still hands it to core
- * via `buildPracticeRunResults` -- the second half of this file pins that the
- * removal did not reach the honouring path.
+ * nothing honoured. The page-side and source-level checks live with the
+ * `timezone` removal in `practiceSchedulingSeasonClock.test.js`; this file
+ * drives the hook itself, so it fails on the wire and not only in the source.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { renderHook, act } from '@testing-library/react';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => {
@@ -60,24 +58,5 @@ describe('the auto-scheduler request body (#51)', () => {
     expect(body).toHaveProperty('seasonSettingsId', '22222222-2222-4222-8222-222222222222');
     expect(body).not.toHaveProperty('schoolDayEnd');
     expect(JSON.stringify(body)).not.toContain('16:00');
-  });
-
-  it('the page no longer passes it to the trigger, but still hands it to core', () => {
-    const page = readFileSync(
-      path.join(process.cwd(), 'frontend/src/pages/PracticeSchedulingPage.jsx'),
-      'utf8'
-    );
-    const callOf = (marker) => {
-      const start = page.indexOf(marker);
-      expect(start, `${marker} not found`).toBeGreaterThan(-1);
-      return page.slice(start, page.indexOf('});', start));
-    };
-    const trigger = callOf('autoScheduler.trigger({');
-    expect(trigger).toContain('slots: schedulerSlots');
-    expect(trigger).not.toMatch(/schoolDayEnd/);
-    // The honouring path: core `evaluatePracticeSchedule` via
-    // `buildPracticeRunResults` still receives the season's value.
-    const results = callOf('buildPracticeRunResults({');
-    expect(results).toMatch(/^\s*schoolDayEnd,\s*$/m);
   });
 });

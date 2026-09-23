@@ -180,6 +180,9 @@ describe('what the page sends to the auto-scheduler', () => {
     );
     expect(triggerCall).toContain('slots: schedulerSlots');
     expect(triggerCall).not.toMatch(/^\s*timezone,\s*$/m);
+    // #51: nor `schoolDayEnd` -- the function has no code for it either.
+    expect(body).not.toMatch(/^\s*schoolDayEnd\b/m);
+    expect(triggerCall).not.toMatch(/schoolDayEnd/);
   });
 
   it('the function reads the season clock itself, so the field is not merely gone', () => {

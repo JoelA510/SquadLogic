@@ -5935,3 +5935,27 @@ compares only consecutive commitments.
   corpus is anonymised (task #13). The fixture uses coarse coordinates fitted to
   `sunsets.csv` itself, which reveals no more than that file already does. Real
   coordinates live only in the organisation's database.
+
+**Approved by the operator, 2026-09-23, same exchange:**
+
+- **#61 extended to solver-placed games.** Placement preference, strictly
+  ordered:
+  1. a clean slot at the same venue;
+  2. a clean slot at another venue, proposed via #53 for operator approval;
+  3. the same venue with a coach overlap, carried with a warning that states
+     whether the team has another registered coach;
+  4. TIME TBD, last.
+
+  Turnover stays a hard refusal. This reverses part of #436. The operator's
+  answer makes `TRAVEL_COMMITMENTS_OVERLAP` avoid-but-allow, not blocking,
+  which overrides the "nothing may soften it" at `waivers/coachTravel.js:235`.
+- **#53 as recommended.** Keep the split (relocation proposes, `resolve/`
+  decides). Rank proposals with `resolve/`'s objective, not the second
+  comparator. Put relocation proposals through the rule gate rather than the
+  requested-move exemption. Wire it so that a TIME TBD outcome offers the
+  operator one to three cross-venue options to approve, never auto-applied.
+- **Order:**
+  1. #61 and #51;
+  2. #53;
+  3. 8.9, starting with the `sunsets.csv` validation;
+  4. 8.6 PR 3.

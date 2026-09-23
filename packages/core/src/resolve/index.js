@@ -119,6 +119,13 @@ export { buildSlotInventory, candidateSlotsFor } from './inventory.js';
 export { bookingsOn, checkPlacement } from './legality.js';
 
 export {
+  GATED_RULE_CODES,
+  indexCommitments,
+  projectCommitment,
+  ruleGateInstances,
+} from './ruleGate.js';
+
+export {
   FINDING_LOCUS,
   FINDING_LOCUS_BY_CODE,
   PLACEMENT_REASON_REGISTRIES,

@@ -341,6 +341,9 @@
  * @property {number} movesApplied
  * @property {number} candidatesEvaluated
  * @property {number} candidatesRejected
+ * @property {number} candidatesRefusedByRules - of those, refused by the coach or turnover gate alone (#59)
+ * @property {number} ruleGateCommitmentsExamined - coach commitments the placer's gate read (#59)
+ * @property {number} ruleGateSurfacePairsExamined - same-surface pairs the placer's gate read (#59)
  * @property {number} candidatesScored - survived legality and went to the objective
  * @property {number} conflictsExamined
  * @property {number} gamesDislodged

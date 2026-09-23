@@ -29,6 +29,7 @@ import { runRuleEngine } from '../ruleEngine/engine.js';
 import { ScheduleSchema } from '../ruleEngine/schemas.js';
 
 import { buildSlotInventory } from './inventory.js';
+import { indexCommitments, projectCommitment } from './ruleGate.js';
 import { objectiveWeightsAreDefault, resolveObjectiveWeights } from './objective.js';
 import {
   RESOLVE_REASON,
@@ -123,23 +124,10 @@ export function resolvedScheduleOf(baseSchedule, state) {
   // or a game this run does not hold — a scrimmage, a field reservation, an
   // external club's window — pass through untouched, because a change request
   // cannot edit one.
+  // The projection itself lives in `ruleGate.js`, shared with the placer's
+  // coach check, so `verify` and the gate cannot put a coach in two places.
   const commitments = (baseSchedule.commitments ?? [])
-    .map((commitment) => {
-      const gameId = commitment.gameId;
-      if (typeof gameId !== 'string' || state.baseline[gameId] === undefined) return commitment;
-      const game = state.games[gameId];
-      if (game === undefined) return null;
-      const occupancy =
-        commitment.endMinutes === null ? null : commitment.endMinutes - commitment.startMinutes;
-      return {
-        ...commitment,
-        date: game.date,
-        startMinutes: game.startMinutes,
-        endMinutes: occupancy === null ? null : game.startMinutes + occupancy,
-        venueId: game.venueId,
-        surfaceId: game.surfaceId,
-      };
-    })
+    .map((commitment) => projectCommitment(commitment, state))
     .filter((commitment) => commitment !== null);
 
   return /** @type {import('../ruleEngine/types.js').Schedule} */ ({
@@ -319,6 +307,12 @@ function runResolve(input) {
      * check is now a backstop rather than the only enforcement.
      */
     changeBudget: input.changeBudget ?? null,
+    /**
+     * Every commitment the schedule carries, indexed for the placer's coach
+     * check (`ruleGate.js`) — including those naming no game, which a coach's
+     * day still contains.
+     */
+    commitmentIndex: indexCommitments(baseSchedule.commitments ?? []),
     /**
      * What the rule engine already said about the schedule **before** this run
      * touched it.

@@ -5808,3 +5808,52 @@ other organisations' teams through the writer.
 **Process gap found:** this file lived only on the supervisor branch, so agents
 branching from `main` could not read the rulings or the correction entry. It
 now lands on `main` after each task.
+
+---
+
+## 8.6 PR 2 — acceptance per instance, on the published slot (`9458a6c`, PR #434)
+
+The solver accepted a game's baseline violations by count, per code, anywhere.
+Two gaps, both demonstrated by execution: **swapped instances** (two clashing
+pairs trade partners, every count unchanged, allowed with zero findings) and
+**acceptance following a game off its published slot** (the placer re-homed two
+games together into a new clash). Acceptance is now per instance and belongs to
+the published slot; the gate and the objective's discount read one
+`acceptedAtSlot()`; `verify` uses the same instances. Tests 3826 -> 3846; the
+season fixture's 679 displacement runs are byte-identical to base.
+
+**A live defect on `main`, found by the fix.** Under a change budget, `main`
+published three games on one slot as a "partial repair". PR 1's budget test and
+its `RESOLVE_CHANGE_BUDGET_BOUND` witness passed **only because of Gap B** — the
+witness depended on the defect. Rebuilt on a repair scope with every assertion
+kept.
+
+**The 100:1 ratio is inert on this corpus**, and the 8.6 PR 1 entry above was
+wrong to blame it for first-fit behaviour. Five ratios (100:1 to 1:1) over all
+679 games gave identical results: not one of ~4,000 scored candidates carried
+any compromise, so there is nothing for the ratio to scale. The cause is zero
+quality cost. Positive control: setting drift to 0 does change outcomes. The
+operator decision this was waiting on is withdrawn; re-ask in PR 3, where the
+practice optimizer may have compromised candidates.
+
+**Supervisor ruling: `pair-repair` kept as a documented backstop.** The fix
+removed its only reachable witness. It still refuses moves under its freeze
+probe, and deleting a solver stage is a larger change than this PR. Its lack of
+a witness is stated on the stage, per "declared is not enforced".
+
+**Supervisor review, one check:** the agent's control broke acceptance in one
+direction (accept everywhere). Broken the other way — nothing accepted at the
+published slot — 17 resolve tests go red, including the stranded-games
+protections PR 1 built. Covered.
+
+**Filed from the research (task #59):** repair's gate consults only
+`resolve/legality`. A biased 162-game sweep saw it introduce 138
+`TRAVEL_COMMITMENTS_OVERLAP`, which is **blocking** at base severity
+(`waivers/coachTravel.js:167`), while reporting allowed — a defect. Four
+compromise-severity codes it also introduced are a policy gap. Severity is
+static; constraint overrides were not measured.
+
+**Brief accuracy:** the brief's reading of "per-violation keying" (keyed by code
+alone) was wrong — it was keyed per game, per code, by count, which catches a
+second instance but not a swapped one. The plan's own item 1 meant something
+else again (unit of repair), now enforced by an executed test.

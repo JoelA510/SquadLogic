@@ -121,29 +121,22 @@ export const REPLACEMENT_GRADE = Object.freeze({
 
 /**
  * How {@link import('./relocation.js').proposeRelocations} orders the slots it
- * offers a displaced game.
+ * offers a displaced game — **one ordering, not a choice of two** (#53).
  *
- * The policy is **stated on every proposal and on every report line**, because
- * the same displaced set under two policies produces two different seasons and
- * a report that did not say which one it ran is a report nobody can check.
+ * This was `RELOCATION_POLICY`, two comparators of the proposer's own
+ * (`nearest-kickoff`: drift first; `prefer-clean`: grade first) beside the
+ * objective `resolve/` places every other game by — two definitions of
+ * "better" in one package. On the 30 games the 679-run displacement sweep
+ * places on a coach overlap, the proposer's pick differed from the objective's
+ * best clean option in 19 of 22. Now: clean first (the operator's ruling —
+ * a replacement with no compromise code beats any with one), then
+ * `resolve/objective.js` `scoreObjective()`, then `candidateSlotsFor()`'s
+ * tie-break (kickoff, then surface id). The value is still stated on every
+ * proposal and report line, so a reader can check which ordering produced it.
  *
- * @readonly
- * @enum {string}
+ * @type {string}
  */
-export const RELOCATION_POLICY = Object.freeze({
-  /**
-   * Keep the kickoff time if you can. Families already have the time, so drift
-   * from the published kickoff is the first key and the replacement grade only
-   * breaks ties.
-   */
-  NEAREST_KICKOFF: 'nearest-kickoff',
-  /**
-   * Keep the playing surface honest if you can. The replacement grade is the
-   * first key, so a clean pitch two hours away beats a wrongly-lined one at the
-   * published time.
-   */
-  PREFER_CLEAN: 'prefer-clean',
-});
+export const RELOCATION_RANKING = 'clean-first, then resolve objective';
 
 /**
  * Every reason a scenario check can give.
@@ -451,6 +444,8 @@ export function createScenarioMeta() {
      * the proposer's own check, and this is the number that proves it ran.
      */
     candidatesRefusedTeamClash: 0,
+    /** Free, team-clean slots `resolve/`'s facility model or rule gate refused (#53). */
+    candidatesRefusedByGate: 0,
     /** Reserved slots the proposer treated as ground already held. */
     reservedSlotsHonoured: 0,
     /** Displaced games given a replacement slot. */

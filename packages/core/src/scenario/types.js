@@ -97,7 +97,8 @@
  * @property {string} gameId
  * @property {string} label
  * @property {string} format
- * @property {string} policy - a `RELOCATION_POLICY` value
+ * @property {string} ranking - `RELOCATION_RANKING`: resolve's objective, clean first
+ * @property {number} score - `scoreObjective()` of the replacement, as `resolve/` scores it
  * @property {string} grade - a `REPLACEMENT_GRADE` value
  * @property {import('../resolve/types.js').Slot} from
  * @property {import('../resolve/types.js').Slot} to
@@ -124,7 +125,7 @@
  * What {@link import('./relocation.js').proposeRelocations} returns.
  *
  * @typedef {Object} RelocationPlan
- * @property {string} policy
+ * @property {string} ranking - `RELOCATION_RANKING`
  * @property {ReadonlyArray<string>} surfaceIds - the stated candidate ground
  * @property {RelocationProposal[]} proposals
  * @property {UnrelocatableGame[]} unrelocatable
@@ -238,6 +239,7 @@
  * @property {number} gamesDisplaced
  * @property {number} candidatesConsidered - the sum of the per-game counts
  * @property {number} candidatesRefusedTeamClash
+ * @property {number} candidatesRefusedByGate
  * @property {number} reservedSlotsHonoured - slots installed as bookings, not slots handed in
  * @property {number} relocationsProposed
  * @property {number} relocationsCompromised

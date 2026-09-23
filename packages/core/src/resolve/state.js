@@ -434,6 +434,20 @@ export function resolveContextDefaults() {
      * Not `requestedSlots`, which also holds no-op and frozen-refused changes.
      */
     requestedApplied: new Set(),
+    /**
+     * Games the placer put on a coach overlap (pass 2, #61), by the slot it
+     * chose. The cross-venue options pass (#53) reads it; a game moved off
+     * that slot since is no longer a trigger.
+     */
+    overlapFallbackPlaced: new Map(),
+    /**
+     * Per game, the slot a proposer's or an approved-option change named (#53).
+     * `change-request-apply` alone may write it, after judging it; the placer
+     * never offers it, or a refused cross-venue slot would come back in as a
+     * candidate — `candidateSlotsFor()` offers a change's admitted slot to the
+     * game it names — and a machine would have moved the game after all.
+     */
+    judgedChangeSlots: new Map(),
     /** Each team's registered coaches, by team id, for the overlap warning (#61). */
     coachesByTeam: new Map(),
     /** Games this run repairs rather than accepts; see the repair scope. */

@@ -363,7 +363,6 @@ solver did not find them. Every finding this module emits names the policy.
 | `cadenceMinutes`         | the format's own `blockMinutes` from `game_formats.csv`                               |
 | `earliestKickoffMinutes` | the earliest kickoff the published season gives **that format**                       |
 | `allowDateChange`        | `false`, and not settable: families have the date                                     |
-| `policy`                 | `nearest-kickoff` (drift first) or `prefer-clean` (grade first)                       |
 
 `replacementSurfacesFor()` filters to leaf surfaces (booking a parent pitch takes
 both halves with it), not at a withdrawn venue, **big enough for the format**,
@@ -388,9 +387,33 @@ kickoff is 08:00; the earliest 7v7 kickoff in the corpus is 09:00. A grid laid a
 the format's 75-minute block from 08:00 falls *between* every published kickoff,
 so no relocated game could keep the time families already have.
 
-Running the same branch under `prefer-clean` keeps more games on cleanly-lined
-ground and pays for it in drift — asserted in the test, because "under a stated
-policy" only means something if the policy changes the answer.
+### One ranking, and `resolve/` decides (#53)
+
+There used to be a `policy` field choosing between two orderings of the
+proposer's own — `nearest-kickoff` (drift first) and `prefer-clean` (grade
+first) — beside the objective `resolve/` places every other game by. They are
+gone. Every candidate the search above admits is judged by a probe built from
+`resolve/` (`createPlacementProbe()`): the facility model, the placer's rule gate
+(a coach in two places, a surface turned over too fast) and `scoreObjective()`.
+A candidate the gate refuses is never proposed. The rest are ranked **clean
+first** (no compromise code — the operator's ruling), then by the objective, then
+by `candidateSlotsFor()`'s tie-break. The ordering is stated on every proposal
+and finding as `RELOCATION_RANKING`.
+
+The branch then applies its proposals as `origin: 'proposer'` changes, which
+`change-request-apply` judges by the same gate again and refuses
+(`RESOLVE_CHANGE_REFUSED_BY_RULES`) rather than carries — an operator's move is
+exempt from that gate (#436), a machine's never is. A branch is a what-if; its
+promotion is the operator's approval of every change in it. On the live,
+published schedule a cross-venue move is never applied by the machine:
+`applyChangeRequest({ relocationSearch })` offers up to three options for each
+game left TIME TBD or placed on a coach overlap, and an operator approves one
+(`resolve/relocationOptions.js`).
+
+Measured on the acceptance withdrawal (brookside-park, 72 games): still 60
+proposed and 12 TIME TBD; 14 clean rather than 11; the one proposal that
+double-booked a coach before #53 is gone; total drift 14,400 minutes rather than
+12,900.
 
 ---
 

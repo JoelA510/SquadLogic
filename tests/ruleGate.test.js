@@ -241,8 +241,8 @@ describe('a displaced game with no overlap-free slot: refused in pass 1, placed 
   });
 });
 
-describe('(a) the gate is read by the placer and nowhere else', () => {
-  it('is called by chooseSlot, baseline-ingest and the overlap warning, never by a stage that lifts games', () => {
+describe('(a) the gate is read by the placer, and by a slot a machine chose, and nowhere else', () => {
+  it('is called by chooseSlot, baseline-ingest, the overlap warning and evaluateCandidate, never by a stage that lifts games', () => {
     const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
     const code = readFileSync(
       path.join(ROOT, 'packages', 'core', 'src', 'resolve', 'stages.js'),
@@ -250,15 +250,28 @@ describe('(a) the gate is read by the placer and nowhere else', () => {
     ).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
     const between = (from, to) => code.slice(code.indexOf(from), code.indexOf(to));
     expect(code.length).toBeGreaterThan(20000);
-    expect([...code.matchAll(/\bruleGateInstances\(/g)]).toHaveLength(3);
+    // Four since #53: `evaluateCandidate()` asks it of a slot a proposer chose
+    // or an operator approved, read by `change-request-apply` and by the
+    // cross-venue options pass — the same question, never a stage lifting games.
+    expect([...code.matchAll(/\bruleGateInstances\(/g)]).toHaveLength(4);
+    expect(between('export function evaluateCandidate(', 'function placePending(')).toContain(
+      'ruleGateInstances('
+    );
+    expect(between('const changeRequestApply = {', 'const dislodge = {')).toContain(
+      'evaluateCandidate('
+    );
     expect(between('function reportCoachOverlapsCarried(', 'const freezeAudit = {')).toContain(
       'ruleGateInstances('
     );
     expect(between('function chooseSlot(', 'function placePending(')).toContain(
       'ruleGateInstances('
     );
+    // Factored into `recordBaselineAcceptance()` in #53, which baseline-ingest calls.
+    expect(
+      between('export function recordBaselineAcceptance(', 'const baselineIngest = {')
+    ).toContain('ruleGateInstances(');
     expect(between('const baselineIngest = {', 'const changeRequestApply = {')).toContain(
-      'ruleGateInstances('
+      'recordBaselineAcceptance('
     );
     for (const [from, to] of [
       ['const dislodge = {', 'const initialAssignment = {'],

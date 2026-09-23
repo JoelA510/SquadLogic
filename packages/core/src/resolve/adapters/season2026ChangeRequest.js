@@ -24,6 +24,7 @@
  */
 
 import { season2026SurfaceId } from '../../facility/adapters/season2026Geometry.js';
+import { CHANGE_ORIGIN } from '../schemas.js';
 
 /**
  * Turn the published external fixtures into change requests against a schedule.
@@ -38,7 +39,7 @@ import { season2026SurfaceId } from '../../facility/adapters/season2026Geometry.
  *
  * @param {ReadonlyArray<Object>} fixtures - parsed `external_fixtures_published.csv` rows
  * @param {import('../../ruleEngine/types.js').Schedule} schedule
- * @returns {Array<{ gameId: string, date: string, surfaceId: string, startMinutes: number, reason: string }>}
+ * @returns {Array<{ gameId: string, date: string, surfaceId: string, startMinutes: number, reason: string, origin: string }>}
  */
 export function season2026ExternalFixtureChanges(fixtures, schedule) {
   if (!Array.isArray(fixtures) || fixtures.length === 0) {
@@ -71,6 +72,9 @@ export function season2026ExternalFixtureChanges(fixtures, schedule) {
         surfaceId: season2026SurfaceId(fixture.venue, fixture.field),
         startMinutes: fixture.kickoffMinutes,
         reason: 'the external league published this kickoff',
+        // Incident 3: an externally-published fixture is an instruction, not a
+        // machine's choice, and keeps #436's exemption from the placer's gate.
+        origin: CHANGE_ORIGIN.OPERATOR,
       };
     })
     .sort(

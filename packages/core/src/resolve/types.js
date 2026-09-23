@@ -75,6 +75,7 @@
  *
  * @typedef {Object} ResolveLedger
  * @property {ResolveMeta} meta
+ * @property {Array<Object>} [relocationOptions] - present only when `relocationSearch` was given (#53); see `resolve/relocationOptions.js`
  * @property {MoveRecord[]} moves
  * @property {import('../freeze/types.js').FreezeFinding[]} findings
  * @property {Record<string, { considered: number, rejected: number, applied: number }>} byStage
@@ -155,6 +156,7 @@
  * @property {Object} engines - `{ graph, table, calendar, registry, resources?, ruleEngine?, waiverLedger? }`
  * @property {import('../freeze/types.js').FreezePlan} [freeze] - omit for maximum freeze
  * @property {boolean} [holdChanges] - pin the changed games at the slots they were given
+ * @property {{ policies: Record<string, Object>, limit?: number }} [relocationSearch] - opt-in cross-venue options (#53): one `RelocationPolicySchema` search per format; see `resolve/relocationOptions.js`
  * @property {'throw'|'report'} [onUnsatisfiable]
  * @property {ReadonlyArray<Object>} [extraStages] - inserted before `freeze-audit`
  * @property {Object|null} [baselineVerification] - a `runRuleEngine()` result over the baseline

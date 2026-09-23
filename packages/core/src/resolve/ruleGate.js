@@ -154,8 +154,8 @@ export function indexCommitments(commitments) {
  * @param {import('./types.js').ResolveState} state
  * @param {string} gameId
  * @param {import('./types.js').Slot} slot
- * @param {{ turnover?: boolean }} [options] - `turnover: false` asks about coaches only
- * @returns {{ instances: Record<string, number>, overlaps: Array<{ key: string, personId: string, otherId: string, teamId: string|null, otherTeamId: string|null }>, meta: { coachCommitmentsExamined: number, surfacePairsExamined: number } }}
+ * @param {{ turnover?: boolean, travelCodes?: boolean }} [options] - `turnover: false` asks about coaches only; `travelCodes: true` also returns the non-gated travel compromise codes the moving game would carry
+ * @returns {{ travelCodes: string[], instances: Record<string, number>, overlaps: Array<{ key: string, personId: string, otherId: string, teamId: string|null, otherTeamId: string|null }>, meta: { coachCommitmentsExamined: number, surfacePairsExamined: number } }}
  */
 export function ruleGateInstances(context, state, gameId, slot, options = {}) {
   /** @type {Record<string, number>} */
@@ -163,6 +163,13 @@ export function ruleGateInstances(context, state, gameId, slot, options = {}) {
   const meta = { coachCommitmentsExamined: 0, surfacePairsExamined: 0 };
   /** @type {Array<{ key: string, personId: string, otherId: string, teamId: string|null, otherTeamId: string|null }>} */
   const overlaps = [];
+  // **Travel compromises, collected on request (#53).** A cross-venue option
+  // makes a too-short journey between venues far more likely than a same-venue
+  // re-placement does, and an operator approving a venue change should be
+  // shown it. Collected from the same evaluator calls, never gated.
+  const collectTravel = options.travelCodes === true;
+  /** @type {Set<string>} */
+  const travelCodes = new Set();
   const add = (code, other) => {
     const key = `${code}|${other}`;
     instances[key] = (instances[key] ?? 0) + 1;
@@ -202,7 +209,12 @@ export function ruleGateInstances(context, state, gameId, slot, options = {}) {
           const travel = evaluateCoachTravel([own, other], options);
           for (const subject of travel.subjects) {
             for (const finding of subject.findings) {
-              if (!GATED_RULE_CODES.includes(finding.code)) continue;
+              if (!GATED_RULE_CODES.includes(finding.code)) {
+                if (collectTravel && finding.severity !== CONSTRAINT_SEVERITY.INFO) {
+                  travelCodes.add(finding.code);
+                }
+                continue;
+              }
               // Any severity: the overlap is gated by *code*. Since #61 it is
               // compromise, and the placer still avoids it (pass 1) before it
               // accepts one (pass 2); turnover below stays blocking-gated.
@@ -224,7 +236,9 @@ export function ruleGateInstances(context, state, gameId, slot, options = {}) {
 
   // -- a surface turned over too fast ---------------------------------------
   // Skipped when the caller asks only about coaches (the overlap warning).
-  if (options.turnover === false) return { instances, overlaps, meta };
+  if (options.turnover === false) {
+    return { instances, overlaps, meta, travelCodes: [...travelCodes].sort() };
+  }
   const candidate = gameOnSlot(state, gameId, slot);
   const games = [
     candidate,
@@ -249,5 +263,5 @@ export function ruleGateInstances(context, state, gameId, slot, options = {}) {
       add(finding.code, earlierGameId === gameId ? laterGameId : earlierGameId);
     }
   }
-  return { instances, overlaps, meta };
+  return { instances, overlaps, meta, travelCodes: [...travelCodes].sort() };
 }

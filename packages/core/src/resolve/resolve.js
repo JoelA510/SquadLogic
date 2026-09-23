@@ -39,7 +39,8 @@ import {
   mergeResolveMeta,
 } from './reasonCodes.js';
 import { buildChangeReport } from './report.js';
-import { ScheduleChangeRequestSchema } from './schemas.js';
+import { offerRelocationOptions } from './relocationOptions.js';
+import { CHANGE_ORIGIN, RelocationSearchSchema, ScheduleChangeRequestSchema } from './schemas.js';
 import { buildResolvePipeline } from './stages.js';
 import {
   baselinePartitionFindings,
@@ -168,6 +169,13 @@ function runResolve(input) {
   );
   const changes = (input.changes ?? []).map((change) => ScheduleChangeRequestSchema.parse(change));
   const plan = input.plan;
+  // Parsed up front so a malformed search fails before any stage runs. Absent
+  // means no options pass at all, and a result byte-identical to one from
+  // before #53.
+  const relocationSearch =
+    input.relocationSearch === undefined
+      ? null
+      : RelocationSearchSchema.parse(input.relocationSearch);
 
   const changedIds = changes.map((change) => change.gameId);
   if (new Set(changedIds).size !== changedIds.length) {
@@ -360,6 +368,15 @@ function runResolve(input) {
       return result;
     },
   };
+  for (const change of changes) {
+    if ((change.origin ?? CHANGE_ORIGIN.OPERATOR) === CHANGE_ORIGIN.OPERATOR) continue;
+    const game = state.baseline[change.gameId];
+    if (!game) continue;
+    context.judgedChangeSlots.set(
+      change.gameId,
+      `${change.date ?? game.date}|${change.surfaceId ?? game.surfaceId}|${change.startMinutes}`
+    );
+  }
 
   // At this point no move has been applied, so the cache key (`0`) is the
   // baseline's own and a run that moves nothing correctly reuses it.
@@ -392,6 +409,28 @@ function runResolve(input) {
         .filter((move) => move.stageId === CHANGE_STAGE_ID)
         .map((move) => move.gameId);
       state = pinGames(state, moved, 'held at the slot the change request named (holdChanges)');
+    }
+    if (stage.id === CHANGE_STAGE_ID && input.holdChanges !== true) {
+      // **A machine-chosen or approved slot is held where it was judged (#53).**
+      // It cleared the gate in `change-request-apply`; if a later move could
+      // lift it, the placer would re-place it from its *new* venue's inventory
+      // — a third slot nobody proposed or approved. `holdChanges` already pins
+      // every requested game; without it, these are pinned alone.
+      const judgedOrigins = new Set(
+        changes
+          .filter((change) => (change.origin ?? CHANGE_ORIGIN.OPERATOR) !== CHANGE_ORIGIN.OPERATOR)
+          .map((change) => change.gameId)
+      );
+      const moved = ledger.moves
+        .filter((move) => move.stageId === CHANGE_STAGE_ID && judgedOrigins.has(move.gameId))
+        .map((move) => move.gameId);
+      if (moved.length > 0) {
+        state = pinGames(
+          state,
+          moved,
+          'held at the slot it was judged on (proposer or approved option)'
+        );
+      }
     }
   }
 
@@ -520,6 +559,14 @@ function runResolve(input) {
     )
   );
 
+  // **Cross-venue options (#53), opt-in and read-only.** After every stage,
+  // so the triggers are the run's final TIME TBD games and final pass-2
+  // placements; nothing here moves a game or changes the schedule.
+  const relocationOptions =
+    relocationSearch === null
+      ? null
+      : offerRelocationOptions({ search: relocationSearch, state, context });
+
   const findings = [...judgements.findings, ...ledger.findings];
   const meta = mergeResolveMeta(createResolveMeta(), ledger.meta);
   meta.freezeJudgements = Math.max(meta.freezeJudgements, judgements.meta.gamesJudged);
@@ -580,6 +627,9 @@ function runResolve(input) {
     findings,
     status: deriveResolveStatus(findings),
     meta,
+    // Present only when asked for, so a run without the opt-in is
+    // byte-identical to one from before #53.
+    ...(relocationOptions === null ? {} : { relocationOptions }),
   };
 }
 

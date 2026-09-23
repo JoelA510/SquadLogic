@@ -63,6 +63,7 @@ import {
   scoreObjective,
 } from './objective.js';
 import { RESOLVE_REASON, makeResolveFinding } from './reasonCodes.js';
+import { ruleGateInstances } from './ruleGate.js';
 import { ResolveStageSchema, STAGE_PROBE } from './schemas.js';
 import {
   MOVE_KIND,
@@ -186,6 +187,27 @@ function carriedBlockingAt(context, gameId, slot) {
 function acceptedFindingsFor(context, gameId, slot) {
   if (context.repairScope.has(gameId)) return {};
   return acceptedAtSlot(context.baselineFindings[gameId], slotKey(slot));
+}
+
+/**
+ * What the published schedule's **rule-engine** record accepts for a game on
+ * `slot` — the placer's coach and turnover gate (`ruleGate.js`). The same
+ * rule as {@link acceptedBlockingFor}, from the same `acceptedAtSlot()`: an
+ * overlap the season published is accepted at its published slot, per pair of
+ * games, and nowhere else.
+ *
+ * @param {Object} context
+ * @param {string} gameId
+ * @param {import('./types.js').Slot} slot
+ * @returns {Record<string, number>}
+ */
+function acceptedRulesFor(context, gameId, slot) {
+  // **Not narrowed by the repair scope.** The scope un-accepts a game's
+  // *facility* breach so `local-search` will answer for it; this record is read
+  // by the placer alone, which never decides whether a game must move, so there
+  // is nothing for the scope to open up — only a published overlap to refuse at
+  // the game's own home slot.
+  return acceptedAtSlot(context.baselineRules[gameId], slotKey(slot));
 }
 
 /**
@@ -538,11 +560,47 @@ function chooseSlot(state, context, gameId, options) {
       state.ledger.meta.candidatesRejected += 1;
       continue;
     }
+    // **The second question (#59): a coach in two places, or a surface turned
+    // over too fast.** Asked only of a candidate the facility already admits,
+    // and only here: this decides where a moving game may go, never whether a
+    // standing one must move — see `ruleGate.js` for why that line is drawn.
+    //
+    // **Not for a game the change request names.** Where a requested game ends
+    // up — including where it is re-placed after its requested slot proved
+    // illegal — is the operator's instruction playing out, and whether a
+    // request that double-books a coach or shortens a turnover should be
+    // displaced, refused or allowed with a finding is a policy question put to
+    // the operator, not something this gate settles by the back door. Measured
+    // on incident 3: gating the two external 12:30 fixtures refused their
+    // historical 12:00 resolution for a turnover against the other requested
+    // fixture and shelved both as TIME TBD.
+    const gated = !context.requestedApplied.has(gameId);
+    const ruled = gated
+      ? ruleGateInstances(context, state, gameId, candidate)
+      : { instances: {}, meta: null };
+    const acceptedRules = gated ? acceptedRulesFor(context, gameId, candidate) : {};
+    if (gated) {
+      state.ledger.meta.ruleGateCommitmentsExamined += ruled.meta.coachCommitmentsExamined;
+      state.ledger.meta.ruleGateSurfacePairsExamined += ruled.meta.surfacePairsExamined;
+    }
+    const ruleGrown = newBlockingCodes(ruled.instances, acceptedRules);
+    if (ruleGrown.length > 0) {
+      state.ledger.meta.candidatesRejected += 1;
+      state.ledger.meta.candidatesRefusedByRules += 1;
+      const refusals = (context.ruleGateRefusals[gameId] ??= {});
+      for (const code of ruleGrown) refusals[code] = (refusals[code] ?? 0) + 1;
+      continue;
+    }
 
     const score = scoreObjective(
       candidateObjectiveCounts({
         reference: anchor,
         slot: candidate,
+        // **No rule term here, and why.** The gate above admits only a
+        // candidate whose rule instances do not exceed what this slot accepts,
+        // so every candidate that reaches this line carries zero rule excess:
+        // a blocking rule term would always read nought. The objective moves
+        // with the gate by construction, not by a second copy of the count.
         placement,
         // **Scored the way the gate above admits.** `newBlockingCodes()` accepts
         // a finding the published schedule already carried; scoring the same
@@ -709,6 +767,12 @@ const baselineIngest = {
       // be measured against the same published slot or the run pays twice for
       // an exception the season already accepted.
       context.baselineFindings[gameId] = { slotKey: publishedSlotKey, instances: findingCounts };
+      // And the rule-engine half the placer's gate reads (#59), recorded the
+      // same way: what this game carried on the slot it was published on.
+      context.baselineRules[gameId] = {
+        slotKey: publishedSlotKey,
+        instances: ruleGateInstances(context, state, gameId, slot).instances,
+      };
       if (context.repairScope.has(gameId)) {
         // **Counted off `blockingCodeCounts`, not `findingCounts`.** The
         // vacuity check exists to catch a scope that cannot change anything,
@@ -801,6 +865,7 @@ const changeRequestApply = {
         continue;
       }
 
+      context.requestedApplied.add(change.gameId);
       current = applyMove(
         current,
         {
@@ -1041,8 +1106,17 @@ const initialAssignment = {
       // by the branch above, so the other two values were decoration on a
       // single reachable outcome. A vocabulary whose every other member is
       // unreachable reads as a promise the code does not keep.
-      const reason =
-        'no slot the schedule already used is legal for it; kept visible as TIME TBD rather than dropped (incident 10)';
+      // Which candidates the rule gate alone refused, named, so a game the
+      // coach or turnover check shelved is not reported as though no ground
+      // existed (#59).
+      const refused = Object.entries(context.ruleGateRefusals[gameId] ?? {})
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([code, count]) => `${count} for ${code}`);
+      const reason = `no slot the schedule already used is legal for it${
+        refused.length > 0
+          ? ` (candidates the facility admitted were refused: ${refused.join(', ')})`
+          : ''
+      }; kept visible as TIME TBD rather than dropped (incident 10)`;
       current = applyMove(
         current,
         {

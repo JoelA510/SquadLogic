@@ -5959,3 +5959,39 @@ compares only consecutive commitments.
   2. #53;
   3. 8.9, starting with the `sunsets.csv` validation;
   4. 8.6 PR 3.
+
+---
+
+## #51 and #61 — operator decisions implemented (`c78a921` PR #438, `c878ae4` PR #439)
+
+**#51, `schoolDayEnd` dropped from the auto-scheduler path.** The request stops
+sending it; the schema strips it (not passthrough, so older clients are not
+rejected). Two facts the agent established: **no live code ever enforced the
+cutoff** — the core solvers that honour it have no production caller, and the
+only live reader adds warnings on Apply — and **there is no UI input**; the
+value comes from a `season_settings` column defaulting to `16:00`. The earlier
+entry here saying silent deletion "is not available" is superseded by the
+operator's ruling; the deletion is stated in code comments, not silent.
+
+**#61, a coach overlap is the last resort before TIME TBD.**
+`TRAVEL_COMMITMENTS_OVERLAP` is now compromise severity (still unwaivable);
+turnover stays hard. `chooseSlot()` has a strict second pass, placer-only, taken
+only when pass 1 admits nothing: fewest new overlaps, then the usual objective.
+`RESOLVE_COACH_OVERLAP_CARRIED` is emitted independent of `verify`, for pass-2
+and requested moves alike, naming the coach, both games and each team's free
+registered co-coaches — or saying there are none.
+
+679 displacement runs: **TIME TBD 30 -> 0**; 38 consequential overlaps, all
+warned; **16 of 130 warnings name no free co-coach**, the cases where the
+operator's rationale does not hold; #436's knock-on round-robin violations gone.
+No-op run byte-identical.
+
+**Supervisor review, one check, one BLOCKING finding.** The placer-only opt-in —
+the agent's own key safety point, protecting published kickoffs of unrequested
+games — had no witness: opening pass 2 to every caller left all 559 resolve
+tests green. Fixed with a constructed `local-search` case (the corpus cannot
+reach the path: the sweep is byte-identical with the guard broken), verified by
+the supervisor: 1 red under the break, 25/25 restored.
+
+**Filed:** #63 — changing the severity left the feasibility "tightest bound, not
+first claimed" check with no witness on this corpus.

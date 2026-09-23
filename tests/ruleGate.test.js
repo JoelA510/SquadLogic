@@ -584,3 +584,70 @@ describe('#61: turnover stays a hard refusal in pass 2', () => {
     expect(below).toEqual([]);
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* #61: pass 2 is the placer's alone — a constructed witness                    */
+/* -------------------------------------------------------------------------- */
+
+describe('#61: local-search never takes pass 2 for a game no change request names', () => {
+  // The corpus cannot reach this path: the 679-run displacement sweep is
+  // byte-identical with the opt-in broken open. Constructed instead. #6 is
+  // stacked onto #7's published slot in the baseline, and #7 is put in the
+  // repair scope, so `local-search` must answer for #7's clash. Every
+  // overlap-free slot at its venue that day is refused — the same neighbourhood
+  // that sends a displaced #7 through the placer's pass 2 — so the only slots
+  // left would double-book coach Gray Judd with #18. For the placer that is
+  // the last resort before TIME TBD; for `local-search` the alternative is
+  // leaving #7 exactly where it was published, and that is what must happen.
+  const seven = /** @type {any} */ (byId.get('combined_schedule.csv#7'));
+  const six = /** @type {any} */ (byId.get('combined_schedule.csv#6'));
+  const stacked = {
+    ...schedule,
+    games: schedule.games.map((game) =>
+      game.id === six.id
+        ? {
+            ...game,
+            surfaceId: seven.surfaceId,
+            startMinutes: seven.startMinutes,
+            endMinutes: seven.startMinutes + (game.endMinutes - game.startMinutes),
+          }
+        : game
+    ),
+  };
+  const noOp = /** @type {any} */ (
+    stacked.games.find(
+      (game) => game.date === seven.date && game.id !== seven.id && game.id !== six.id
+    )
+  );
+  const run = applyChangeRequest({
+    schedule: stacked,
+    changes: [{ gameId: noOp.id, ...slotOf(noOp), reason: 'the run has to happen' }],
+    engines,
+    freeze: freezeAllExcept([{ date: seven.date }]),
+    repairScope: [seven.id],
+    verify: false,
+    onUnsatisfiable: 'report',
+  });
+  const stage = (id) => /** @type {any} */ (run.stages.find((entry) => entry.stageId === id));
+
+  it('reaches local-search for #7, which no change request names', () => {
+    expect(stage('local-search').movesConsidered).toBeGreaterThan(0);
+    expect(
+      run.moves.some((move) => move.stageId === 'change-request-apply' && move.gameId === seven.id)
+    ).toBe(false);
+    // The meta-assertion: the only slots left would double-book a coach.
+    expect(run.meta.candidatesRefusedByRules).toBeGreaterThan(0);
+  });
+
+  it('leaves #7 on its published slot, says it could not repair it, and never enters pass 2', () => {
+    expect(slotOf(/** @type {any} */ (whereIs(run, seven.id)))).toEqual(slotOf(seven));
+    expect(run.meta.overlapFallbackEntered).toBe(0);
+    expect(warningsOf(run)).toEqual([]);
+    expect(
+      run.findings.some(
+        (finding) =>
+          finding.code === 'RESOLVE_REPAIR_UNAVAILABLE' && finding.details.gameId === seven.id
+      )
+    ).toBe(true);
+  });
+});

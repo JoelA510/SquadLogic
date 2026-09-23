@@ -5724,3 +5724,44 @@ deliberately outside the census, justified when registering them required the
 sweep. The static census is now 78 ms, but registering them properly still
 needs plants, which still need the sweep. Cheaper to revisit than it was; not
 free.
+
+---
+
+## CORRECTION — the §5 wiring gate was answered on 2026-09-20, and two entries above say otherwise
+
+**Recorded 2026-09-23 by the supervisor who wrote the false entries.**
+
+Two entries above are wrong and are corrected here rather than edited:
+
+- *"Blocker for the operator: §5's gate was crossed without a record"* says the
+  wiring question was never re-put and that 8.5-8.7 ran in breach of
+  `BUILD_PLAN_STATUS.md:319`. **False.** `BUILD_PLAN_STATUS.md` §8, dated
+  2026-09-20, opens: *"It was re-put. The operator's answer: move the engine
+  under the app, as a vertical slice."* It also records, deliberately, that
+  §5's literal precondition (GAP-29 closed first) was superseded — the slice is
+  how GAP-29 closes.
+- *"8.8 PR 2 is HELD, at the agent's insistence and correctly"* — held on a
+  premise that was false when it was written. The agent's refusal was a sound
+  response to what it believed; the belief was wrong, and the supervisor
+  endorsed it.
+
+**How.** The 8.8 research hand-back said it found no record of the re-put. The
+supervisor checked §5 — the section the claim pointed at — found the gate
+language, and read that as confirmation. §8 was never opened, although the
+supervisor's own task list carried *"GATE 2 answered: vertical slice — recorded
+BUILD_PLAN_STATUS §8"* throughout. Both checks searched one section; the answer
+was in the next. That is the two-instruments failure recorded in the 8.8 PR 1
+entry above — two checks blind along the same axis, agreement read as
+corroboration — repeated by the supervisor **one day after writing it down**,
+and on a claim that then shaped a day of the operator's budget: backlog work
+was chosen over roadmap work *because* the roadmap was believed gated.
+
+The remedy is the same one, applied to documents: **a search for "is there a
+record of X" must establish its universe first** — here, every section of the
+file, not the section that predicted X would be recorded.
+
+**Standing position from here:** 8.5-8.10 proceed under §8's answer and its
+review posture (full diff read, SQL pass, round trip proved by execution,
+BLOCKING/NOTED classification). §8's binding condition carries into every
+persistence PR: no store lands without its writer and a reader that answers a
+question with it.

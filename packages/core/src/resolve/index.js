@@ -86,7 +86,10 @@ export {
   FreezeContractSchema,
   ResolveStageSchema,
   STAGE_PROBE,
+  CHANGE_ORIGIN,
+  RelocationSearchSchema,
   ScheduleChangeRequestSchema,
+  relocationOptionId,
 } from './schemas.js';
 
 export {
@@ -167,10 +170,13 @@ export {
   RESOLVE_STAGES,
   VERIFY_STAGE_ID,
   buildResolvePipeline,
+  evaluateCandidate,
+  recordBaselineAcceptance,
 } from './stages.js';
 
 export { probeStage, probeEveryStage } from './probe.js';
 
 export { applyChangeRequest, reoptimiseWholeSeason, resolvedScheduleOf } from './resolve.js';
+export { createPlacementProbe, offerRelocationOptions } from './relocationOptions.js';
 
 export { season2026ExternalFixtureChanges } from './adapters/season2026ChangeRequest.js';

@@ -50,7 +50,7 @@
  */
 
 export {
-  RELOCATION_POLICY,
+  RELOCATION_RANKING,
   REPLACEMENT_GRADE,
   SCENARIO_OVERRIDE_KIND,
   SCENARIO_REASON,
@@ -92,7 +92,12 @@ export {
   scenarioFingerprint,
 } from './scenario.js';
 
-export { proposeRelocations, replacementSurfacesFor } from './relocation.js';
+export {
+  proposeRelocations,
+  rankReplacementOptions,
+  relocationOptionsFor,
+  replacementSurfacesFor,
+} from './relocation.js';
 
 export {
   diffCapacity,

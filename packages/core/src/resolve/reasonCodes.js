@@ -241,6 +241,46 @@ export const RESOLVE_REASON = Object.freeze({
    */
   RESOLVE_COACH_OVERLAP_CARRIED: 'RESOLVE_COACH_OVERLAP_CARRIED',
   /**
+   * A change whose slot a **machine** chose (`origin: 'proposer'`) would add a
+   * blocking facility finding, a coach overlap or a turnover shortfall, and was
+   * not applied (#53). The game stays where it stood, and the stages that
+   * follow treat it like any other game on illegal ground.
+   *
+   * `compromise`. The proposer runs the same gate before it proposes, so on a
+   * consistent run this never fires: it is the backstop for a proposer and a
+   * gate that disagree, and firing means the branch shelved a game rather than
+   * carried a breach nobody chose.
+   */
+  RESOLVE_CHANGE_REFUSED_BY_RULES: 'RESOLVE_CHANGE_REFUSED_BY_RULES',
+  /**
+   * An operator approved a relocation option that no longer stands as it was
+   * offered: the slot is now occupied, now double-books a coach or turns a
+   * surface over too fast, or carries different compromise codes (#53). Not
+   * applied. Two options offered on one slot are the ordinary way here — they
+   * are offered independently, and approving one spends the slot.
+   *
+   * `compromise`: the operator is asked again, not overruled.
+   */
+  RESOLVE_OPTION_STALE: 'RESOLVE_OPTION_STALE',
+  /**
+   * One to three cross-venue options offered for a game left TIME TBD or
+   * placed on a coach overlap, for the operator to approve (#53). Never
+   * applied by this run: a venue change moves every family's travel.
+   */
+  RESOLVE_RELOCATION_OPTIONS_OFFERED: 'RESOLVE_RELOCATION_OPTIONS_OFFERED',
+  /**
+   * The cross-venue search examined candidates for a game and none cleared the
+   * facility model, the team check and the rule gate.
+   */
+  RESOLVE_RELOCATION_OPTIONS_NONE: 'RESOLVE_RELOCATION_OPTIONS_NONE',
+  /**
+   * The cross-venue search was asked for and examined **no candidate at all**
+   * for a game that needed one — no stated search for its format, or a search
+   * whose ground generated no kickoff. `blocking`: "no options" from a search
+   * that looked at nothing is incident 4's shape.
+   */
+  RESOLVE_RELOCATION_SEARCH_VACUOUS: 'RESOLVE_RELOCATION_SEARCH_VACUOUS',
+  /**
    * A game in the repair scope had **nowhere legal to go**, and is left
    * standing where it is.
    *
@@ -400,6 +440,11 @@ export const RESOLVE_REASON_SEVERITY = Object.freeze({
   [RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_DECLARED]: RESOLVE_SEVERITY.INFO,
   [RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_VACUOUS]: RESOLVE_SEVERITY.BLOCKING,
   [RESOLVE_REASON.RESOLVE_COACH_OVERLAP_CARRIED]: RESOLVE_SEVERITY.COMPROMISE,
+  [RESOLVE_REASON.RESOLVE_CHANGE_REFUSED_BY_RULES]: RESOLVE_SEVERITY.COMPROMISE,
+  [RESOLVE_REASON.RESOLVE_OPTION_STALE]: RESOLVE_SEVERITY.COMPROMISE,
+  [RESOLVE_REASON.RESOLVE_RELOCATION_OPTIONS_OFFERED]: RESOLVE_SEVERITY.INFO,
+  [RESOLVE_REASON.RESOLVE_RELOCATION_OPTIONS_NONE]: RESOLVE_SEVERITY.INFO,
+  [RESOLVE_REASON.RESOLVE_RELOCATION_SEARCH_VACUOUS]: RESOLVE_SEVERITY.BLOCKING,
   [RESOLVE_REASON.RESOLVE_REPAIR_UNAVAILABLE]: RESOLVE_SEVERITY.COMPROMISE,
   [RESOLVE_REASON.RESOLVE_CHANGE_BUDGET_BOUND]: RESOLVE_SEVERITY.COMPROMISE,
   [RESOLVE_REASON.RESOLVE_PUBLISHED_HOLD_MEASURED]: RESOLVE_SEVERITY.INFO,

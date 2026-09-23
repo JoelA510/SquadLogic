@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 523 codes, of
- * which 511 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 528 codes, of
+ * which 516 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -2868,6 +2868,106 @@ harvest(
     onUnsatisfiable: 'report',
     verify: false,
   })
+);
+
+/* -- resolve: cross-venue options and machine-chosen slots (#53) ---------- */
+
+const corpusResolveEngines = {
+  graph,
+  table: timingTable,
+  calendar,
+  registry,
+  resources: { graph, timingTable, calendar, venueComplexes },
+};
+const relocationPolicies = Object.fromEntries(
+  ['Minis', '4v4', '5v5', '7v7', '9v9', '11v11'].map((format) => [
+    format,
+    season2026RelocationPolicy({
+      graph,
+      table: timingTable,
+      format,
+      excludeVenueIds: [],
+      games: schedule.games,
+    }),
+  ])
+);
+/**
+ * The #59/#61 displacement workload over the corpus: pin a same-format game
+ * from another kickoff on `displacedId`'s slot.
+ *
+ * @param {string} displacedId
+ * @param {Object[]} extra
+ * @param {Object} [relocationSearch]
+ */
+const displaceForOptions = (displacedId, extra, relocationSearch) => {
+  const displaced = /** @type {any} */ (schedule.games.find((game) => game.id === displacedId));
+  const requested = /** @type {any} */ (
+    schedule.games.find(
+      (game) =>
+        game.id !== displaced.id &&
+        game.date === displaced.date &&
+        game.venueId === displaced.venueId &&
+        game.format === displaced.format &&
+        game.startMinutes !== displaced.startMinutes
+    )
+  );
+  return applyChangeRequest({
+    schedule,
+    changes: [
+      {
+        gameId: requested.id,
+        date: displaced.date,
+        surfaceId: displaced.surfaceId,
+        startMinutes: displaced.startMinutes,
+        reason: 'displace',
+      },
+      ...extra,
+    ],
+    engines: corpusResolveEngines,
+    freeze: freezeAllExcept([{ date: displaced.date }]),
+    holdChanges: true,
+    onUnsatisfiable: 'report',
+    verify: false,
+    ...(relocationSearch ? { relocationSearch } : {}),
+  });
+};
+const offeredRun = harvest(
+  'applyChangeRequest(a pass-2 game, with the cross-venue search)',
+  displaceForOptions('combined_schedule.csv#7', [], { policies: relocationPolicies })
+);
+harvest(
+  'applyChangeRequest(the cross-venue search states no policy for the format)',
+  displaceForOptions('combined_schedule.csv#7', [], { policies: {} })
+);
+harvest(
+  'applyChangeRequest(the cross-venue search stated only ground that is all taken)',
+  displaceForOptions('combined_schedule.csv#7', [], {
+    policies: {
+      '11v11': { ...relocationPolicies['11v11'], surfaceIds: ['summit-hs/stadium'] },
+    },
+  })
+);
+harvest(
+  'applyChangeRequest(an approval of a slot whose codes have changed)',
+  displaceForOptions('combined_schedule.csv#7', [
+    {
+      .../** @type {any} */ (offeredRun).relocationOptions[0].options[0].applyAs,
+      compromiseCodes: ['LINING_MISMATCH'],
+    },
+  ])
+);
+harvest(
+  'applyChangeRequest(a proposer slot that double-books a coach)',
+  displaceForOptions('combined_schedule.csv#65', [
+    {
+      gameId: 'combined_schedule.csv#65',
+      date: '2026-08-22',
+      surfaceId: 'brookside-park/upper-1',
+      startMinutes: 540,
+      reason: 'a machine chose this slot',
+      origin: 'proposer',
+    },
+  ])
 );
 
 /* -- reserve -------------------------------------------------------------- */

@@ -64,8 +64,10 @@ import {
 } from './objective.js';
 import { RESOLVE_REASON, makeResolveFinding } from './reasonCodes.js';
 import { ruleGateInstances } from './ruleGate.js';
+import { CONSTRAINT_SEVERITY } from '../constraints/reasonCodes.js';
+import { RULE_VIOLATION_REASON } from '../ruleEngine/reasonCodes.js';
 import { TRAVEL_REASON } from '../waivers/coachTravel.js';
-import { ResolveStageSchema, STAGE_PROBE } from './schemas.js';
+import { CHANGE_ORIGIN, ResolveStageSchema, STAGE_PROBE } from './schemas.js';
 import {
   MOVE_KIND,
   applyMove,
@@ -553,6 +555,8 @@ function chooseSlot(state, context, gameId, options) {
     if (options.excludeSlotKey !== undefined && slotKey(candidate) === options.excludeSlotKey) {
       continue;
     }
+    // A slot only `change-request-apply` may write, after judging it (#53).
+    if (context.judgedChangeSlots.get(gameId) === slotKey(candidate)) continue;
     const changeCost = scoreObjective(
       changeCountsFor(anchor, candidate),
       context.weights
@@ -683,6 +687,74 @@ function chooseSlot(state, context, gameId, options) {
 }
 
 /**
+ * **Everything the placer's `chooseSlot` asks of one candidate, asked of a slot somebody
+ * else chose** (#53).
+ *
+ * The same three questions in the same order and against the same accepted
+ * records: the facility model (`checkPlacement()` against `acceptedBlockingFor`),
+ * the rule gate (`ruleGateInstances()` against `acceptedRulesFor`), and the
+ * objective (`candidateObjectiveCounts()` against `acceptedFindingsFor`). Read
+ * by `change-request-apply` for a slot the proposer chose or an operator
+ * approved, and by the cross-venue options pass — so "clears the gate" means
+ * one thing in all three places, and "better" is `scoreObjective()` alone.
+ *
+ * `compromiseCodes` are the slot's compromise findings **absolute** — the
+ * facility model's, plus any travel compromise the rule engine's coach
+ * evaluator gives the moving game there — not net of
+ * what the published slot carried: they are what an operator is shown about
+ * the ground, and an option is never the published slot.
+ *
+ * @param {Object} context
+ * @param {import('./types.js').ResolveState} state
+ * @param {string} gameId
+ * @param {import('./types.js').Slot} slot
+ * @param {import('./types.js').Slot} reference - where drift is measured from
+ * @returns {{ placement: ReturnType<typeof checkPlacement>, blockingGrown: string[], ruleGrown: string[], overlapsAdded: number, turnoverAdded: number, cleared: boolean, compromiseCodes: string[], counts: Record<string, number>, score: number }}
+ */
+export function evaluateCandidate(context, state, gameId, slot, reference) {
+  const placement = checkPlacement(context.engines, state, gameId, slot);
+  const blockingGrown = newBlockingCodes(
+    placement.blockingInstanceCounts,
+    acceptedBlockingFor(context, gameId, slot)
+  );
+  const ruled = ruleGateInstances(context, state, gameId, slot, { travelCodes: true });
+  const acceptedRules = acceptedRulesFor(context, gameId, slot);
+  const ruleGrown = newBlockingCodes(ruled.instances, acceptedRules);
+  const grownKeys = grownInstances(ruled.instances, acceptedRules);
+  const added = (code) =>
+    grownKeys
+      .filter((key) => key.startsWith(`${code}|`))
+      .reduce((total, key) => total + ruled.instances[key] - (acceptedRules[key] ?? 0), 0);
+  const counts = candidateObjectiveCounts({
+    reference,
+    slot,
+    placement,
+    accepted: acceptedFindingsFor(context, gameId, slot),
+  });
+  const compromiseCodes = [
+    ...new Set([
+      ...placement.findings
+        .filter((finding) => finding.severity === CONSTRAINT_SEVERITY.COMPROMISE)
+        .map((finding) => finding.code),
+      // A journey too short between this slot and the coach's next or last
+      // commitment: not gated, but shown (#53).
+      ...ruled.travelCodes,
+    ]),
+  ].sort();
+  return {
+    placement,
+    blockingGrown,
+    ruleGrown,
+    overlapsAdded: added(TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP),
+    turnoverAdded: added(RULE_VIOLATION_REASON.TURNOVER_BELOW_MINIMUM),
+    cleared: blockingGrown.length === 0 && ruleGrown.length === 0,
+    compromiseCodes,
+    counts,
+    score: scoreObjective(counts, context.weights).total,
+  };
+}
+
+/**
  * Place one pending game on the slot the objective likes best.
  *
  * ## There is deliberately no change-budget gate here
@@ -766,6 +838,11 @@ function placePending(state, context, gameId, stageId) {
         )
       );
     }
+    // **The options pass's trigger (#53)**, recorded where the placer takes
+    // pass 2 rather than re-derived from the reason string: a game placed on a
+    // coach overlap is offered cross-venue alternatives if it is still there
+    // when the run ends.
+    if (chosen.viaOverlapFallback) context.overlapFallbackPlaced.set(gameId, slotKey(candidate));
     return { state: next, placed: true };
   }
   return { state, placed: false };
@@ -774,6 +851,50 @@ function placePending(state, context, gameId, stageId) {
 /* -------------------------------------------------------------------------- */
 /* The eight stages                                                            */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * Record what one game carries at its published slot: the three accepted
+ * records `acceptedBlockingFor`, `acceptedFindingsFor` and `acceptedRulesFor`
+ * read. Factored out of `baseline-ingest` (#53) so `createPlacementProbe()`
+ * builds them the same way rather than a second way.
+ *
+ * @param {Object} context
+ * @param {import('./types.js').ResolveState} state
+ * @param {string} gameId
+ * @returns {ReturnType<typeof checkPlacement>} the placement at the published slot
+ */
+export function recordBaselineAcceptance(context, state, gameId) {
+  // The **baseline** slot, deliberately, not the current one: this stage
+  // records what the schedule arrived carrying, and it must give the same
+  // answer whenever it is run.
+  const game = state.baseline[gameId];
+  const slot = { date: game.date, surfaceId: game.surfaceId, startMinutes: game.startMinutes };
+  const placement = checkPlacement(context.engines, state, gameId, slot);
+  const findingCounts = placementFindingCounts(placement);
+  const publishedSlotKey = slotKey(slot);
+  // **What the schedule arrived carrying, always and for every game** —
+  // including the ones in the repair scope. This map answers "is this
+  // clash new?", which is `dislodge`'s question, and the answer does not
+  // change because a caller asked for a game to be re-homed. What the
+  // repair scope changes is a different question, asked by `local-search`
+  // and the placer: see {@link acceptedBlockingFor}.
+  context.baselineBlocking[gameId] = {
+    slotKey: publishedSlotKey,
+    instances: placement.blockingInstanceCounts,
+  };
+  // The same record one severity wider: the gate compares blocking counts,
+  // the objective charges for blocking **and** compromise, and both have to
+  // be measured against the same published slot or the run pays twice for
+  // an exception the season already accepted.
+  context.baselineFindings[gameId] = { slotKey: publishedSlotKey, instances: findingCounts };
+  // And the rule-engine half the placer's gate reads (#59), recorded the
+  // same way: what this game carried on the slot it was published on.
+  context.baselineRules[gameId] = {
+    slotKey: publishedSlotKey,
+    instances: ruleGateInstances(context, state, gameId, slot).instances,
+  };
+  return placement;
+}
 
 /** @type {Object} */
 const baselineIngest = {
@@ -808,35 +929,7 @@ const baselineIngest = {
     // What the schedule was *already* carrying, so the run is never blamed for
     // it and never tries to repair it.
     for (const gameId of state.gameIds) {
-      // The **baseline** slot, deliberately, not the current one: this stage
-      // records what the schedule arrived carrying, and it must give the same
-      // answer whenever it is run.
-      const game = state.baseline[gameId];
-      const slot = { date: game.date, surfaceId: game.surfaceId, startMinutes: game.startMinutes };
-      const placement = checkPlacement(context.engines, state, gameId, slot);
-      const findingCounts = placementFindingCounts(placement);
-      const publishedSlotKey = slotKey(slot);
-      // **What the schedule arrived carrying, always and for every game** —
-      // including the ones in the repair scope. This map answers "is this
-      // clash new?", which is `dislodge`'s question, and the answer does not
-      // change because a caller asked for a game to be re-homed. What the
-      // repair scope changes is a different question, asked by `local-search`
-      // and the placer: see {@link acceptedBlockingFor}.
-      context.baselineBlocking[gameId] = {
-        slotKey: publishedSlotKey,
-        instances: placement.blockingInstanceCounts,
-      };
-      // The same record one severity wider: the gate compares blocking counts,
-      // the objective charges for blocking **and** compromise, and both have to
-      // be measured against the same published slot or the run pays twice for
-      // an exception the season already accepted.
-      context.baselineFindings[gameId] = { slotKey: publishedSlotKey, instances: findingCounts };
-      // And the rule-engine half the placer's gate reads (#59), recorded the
-      // same way: what this game carried on the slot it was published on.
-      context.baselineRules[gameId] = {
-        slotKey: publishedSlotKey,
-        instances: ruleGateInstances(context, state, gameId, slot).instances,
-      };
+      const placement = recordBaselineAcceptance(context, state, gameId);
       if (context.repairScope.has(gameId)) {
         // **Counted off `blockingCodeCounts`, not `findingCounts`.** The
         // vacuity check exists to catch a scope that cannot change anything,
@@ -897,6 +990,65 @@ const changeRequestApply = {
         startMinutes: change.startMinutes,
       };
       const from = /** @type {import('./types.js').Slot} */ (slotOf(current, change.gameId));
+      const origin = change.origin ?? CHANGE_ORIGIN.OPERATOR;
+
+      // **A slot a machine chose is judged before it is applied (#53).** An
+      // operator's move is an instruction and is applied as asked (#436,
+      // incident 3). A proposer's slot is not, and neither is an approval of an
+      // option offered against a schedule that may since have changed — two
+      // options offered on one slot are the ordinary case. Judged here, at the
+      // only place a requested slot is written, because the placer's gate
+      // (`chooseSlot`) never sees a requested slot at all: it sees only a
+      // game re-placed after its requested slot failed. And judged *before*
+      // `requestedSlots` and `anchors` are set, so a refused game is re-placed
+      // (if at all) from its own ground, never from the venue it was refused at.
+      if (origin !== CHANGE_ORIGIN.OPERATOR && slotKey(target) !== slotKey(from)) {
+        const baselineGame = current.baseline[change.gameId];
+        const judged = evaluateCandidate(context, current, change.gameId, target, {
+          date: baselineGame.date,
+          surfaceId: baselineGame.surfaceId,
+          startMinutes: baselineGame.startMinutes,
+        });
+        const offered = [...(change.compromiseCodes ?? [])].sort();
+        const compromiseChanged =
+          origin === CHANGE_ORIGIN.APPROVED_OPTION &&
+          offered.join(',') !== judged.compromiseCodes.join(',');
+        if (!judged.cleared || compromiseChanged) {
+          const approved = origin === CHANGE_ORIGIN.APPROVED_OPTION;
+          const why = [
+            ...judged.blockingGrown,
+            ...judged.ruleGrown,
+            ...(compromiseChanged
+              ? [
+                  `compromise codes now ${judged.compromiseCodes.join(', ') || 'none'}, offered as ${offered.join(', ') || 'none'}`,
+                ]
+              : []),
+          ].join('; ');
+          ledger.findings.push(
+            makeResolveFinding(
+              approved
+                ? RESOLVE_REASON.RESOLVE_OPTION_STALE
+                : RESOLVE_REASON.RESOLVE_CHANGE_REFUSED_BY_RULES,
+              approved
+                ? `the approved option moves game "${change.gameId}" to ${slotKey(target)}, and that slot no longer stands as it was offered (${why}); the game has NOT been moved, and the operator is asked again rather than overruled`
+                : `the change moves game "${change.gameId}" to ${slotKey(target)}, a slot a machine chose (origin "${origin}"), and it would add ${why}; not applied, because only an operator may carry that`,
+              {
+                gameId: change.gameId,
+                stageId: this.id,
+                origin,
+                requestedSlot: slotKey(target),
+                currentSlot: slotKey(from),
+                blockingCodes: judged.blockingGrown,
+                ruleCodes: judged.ruleGrown,
+                compromiseCodes: judged.compromiseCodes,
+                ...(approved ? { offeredCompromiseCodes: offered, optionId: change.optionId } : {}),
+              }
+            )
+          );
+          continue;
+        }
+      }
+
       context.requestedSlots[change.gameId] = slotKey(target);
       context.anchors[change.gameId] = target;
 

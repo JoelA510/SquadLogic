@@ -69,7 +69,11 @@ import {
   loadSunsets,
 } from '@squadlogic/core/fixtures/index.js';
 import { PUBLICATION_TBD, RESERVE_REASON } from '@squadlogic/core/reserve/index.js';
-import { candidateSlotsFor, RESOLVE_OBJECTIVE_WEIGHTS } from '@squadlogic/core/resolve/index.js';
+import {
+  candidateSlotsFor,
+  createPlacementProbe,
+  RESOLVE_OBJECTIVE_WEIGHTS,
+} from '@squadlogic/core/resolve/index.js';
 import { runRuleEngine } from '@squadlogic/core/ruleEngine/index.js';
 import { toSeason2026Schedule } from '@squadlogic/core/ruleEngine/adapters/season2026Schedule.js';
 import {
@@ -79,7 +83,7 @@ import {
 import { verifySnapshotDigest } from '@squadlogic/core/publication/index.js';
 import { WAIVER_REASON, buildWaiverLedger } from '@squadlogic/core/waivers/index.js';
 import {
-  RELOCATION_POLICY,
+  RELOCATION_RANKING,
   REPLACEMENT_GRADE,
   SCENARIO_DIGEST_EXCLUSIONS,
   SCENARIO_OVERRIDE_KIND,
@@ -258,6 +262,8 @@ const runOptions = {
 
 /** The branch, searched. */
 const result = runScenario(inputs, scenario, runOptions);
+/** `resolve/`'s judgement under the branch's engines, which the proposer takes (#53). */
+const branchProbe = () => createPlacementProbe({ schedule, engines: result.materialised.engines });
 
 /** The same branch, with the search switched off. */
 const control = runScenario(inputs, scenario, { ...runOptions, relocations: false });
@@ -468,10 +474,19 @@ describe('the acceptance test :: build "no venue X", diff it, read the report', 
     );
     expect(compromised.length).toBeGreaterThan(0);
     const codes = [...new Set(compromised.flatMap((p) => p.compromiseCodes))].sort();
-    expect(codes).toEqual(['LINING_MISMATCH']);
+    // Since #53 a grade is `resolve/`'s facility model's verdict plus the coach
+    // evaluator's travel compromise, not a one-code list of the proposer's own:
+    // measured on this withdrawal, 46 lining mismatches, 6 neighbours with an
+    // unknown footprint, 3 journeys too short between venues.
+    expect(codes).toEqual([
+      'LINING_MISMATCH',
+      'OCCUPANCY_FOOTPRINT_UNKNOWN',
+      'TRAVEL_BETWEEN_VENUES_TOO_SHORT',
+    ]);
+    const lined = compromised.filter((p) => p.compromiseCodes.includes('LINING_MISMATCH'));
     // The rule engine agrees, independently: the branch's schedule carries
     // exactly that many more of the code than the baseline did.
-    expect(diff.constraints.byCode.LINING_MISMATCH.delta).toBe(compromised.length);
+    expect(diff.constraints.byCode.LINING_MISMATCH.delta).toBe(lined.length);
     expect(diff.constraints.newlyViolated).toContain('LINING_MISMATCH');
     expect(codesOf(result.findings)).toContain(SCENARIO_REASON.SCENARIO_RELOCATION_COMPROMISED);
   });
@@ -532,31 +547,24 @@ describe('the acceptance test :: build "no venue X", diff it, read the report', 
     expect(new Set([...proposed, ...shelved]).size).toBe(result.displaced.length);
   });
 
-  it('produces a different season under a different stated policy', () => {
-    // "Under a stated policy" is only meaningful if the policy changes the
-    // answer. The same displaced set, the same ground, the same engines — and a
-    // different allocation, which is why every proposal and every finding
-    // carries the policy it was made under.
-    const clean = proposeRelocations(result.materialised.engines, {
-      displaced: result.displaced,
-      survivors: schedule.games.filter(
-        (game) => !result.displaced.some((d) => d.gameId === String(game.id))
-      ),
-      gamesById: Object.fromEntries(schedule.games.map((game) => [String(game.id), game])),
-      policy: { ...policy, policy: RELOCATION_POLICY.PREFER_CLEAN },
-      requirement,
-    });
-    expect(clean.policy).toBe(RELOCATION_POLICY.PREFER_CLEAN);
-    expect(result.relocations.policy).toBe(RELOCATION_POLICY.NEAREST_KICKOFF);
-    // It keeps more games on cleanly-lined ground…
-    const cleanCount = (plan) =>
-      plan.proposals.filter((p) => p.grade === REPLACEMENT_GRADE.CLEAN).length;
-    expect(cleanCount(clean)).toBeGreaterThan(cleanCount(result.relocations));
-    // …and pays for it in drift from the published kickoff.
-    const totalDrift = (plan) => plan.proposals.reduce((sum, p) => sum + p.driftMinutes, 0);
-    expect(totalDrift(clean)).toBeGreaterThan(totalDrift(result.relocations));
-    for (const proposal of clean.proposals) {
-      expect(proposal.policy).toBe(RELOCATION_POLICY.PREFER_CLEAN);
+  it('ranks by resolve/’s objective, clean first, and never proposes a slot the gate refuses', () => {
+    // #53: one definition of "better". There were two stated orderings
+    // (nearest-kickoff, prefer-clean), a second comparator beside the
+    // objective; there is now one, stated on every proposal.
+    expect(result.relocations.ranking).toBe(RELOCATION_RANKING);
+    for (const proposal of result.relocations.proposals) {
+      expect(proposal.ranking).toBe(RELOCATION_RANKING);
+      expect(typeof proposal.score).toBe('number');
+    }
+    // Before #53, one proposal here double-booked a coach and was applied
+    // with a warning. Every proposal is now judged by the placer's own gate
+    // before it is proposed, and again (the backstop) before it is applied.
+    expect(codesOf(result.findings)).not.toContain('RESOLVE_COACH_OVERLAP_CARRIED');
+    expect(codesOf(result.findings)).not.toContain('RESOLVE_CHANGE_REFUSED_BY_RULES');
+    const probe = createPlacementProbe({ schedule, engines: result.materialised.engines });
+    for (const proposal of result.relocations.proposals) {
+      expect(probe.evaluate(proposal.gameId, proposal.to).cleared, proposal.gameId).toBe(true);
+      probe.hold(proposal.gameId, proposal.to);
     }
   });
 
@@ -564,7 +572,7 @@ describe('the acceptance test :: build "no venue X", diff it, read the report', 
     const finding = result.findings.find(
       (f) => f.code === SCENARIO_REASON.SCENARIO_RELOCATION_PROPOSED
     );
-    expect(finding?.details.policy).toBe(policy.policy);
+    expect(finding?.details.ranking).toBe(RELOCATION_RANKING);
     expect(finding?.details.policySource).toBe(policy.source);
     expect(finding?.message).toMatch(/proposed/i);
     expect(finding?.details.candidatesConsidered).toBeGreaterThan(
@@ -1347,6 +1355,7 @@ describe('the diff refuses to fabricate', () => {
         gamesById: {},
         policy: { ...policy, surfaceIds: [] },
         requirement,
+        probe: branchProbe(),
       })
     ).toThrow();
     expect(() =>
@@ -1356,6 +1365,7 @@ describe('the diff refuses to fabricate', () => {
         gamesById: {},
         policy: { ...policy, earliestKickoffMinutes: undefined },
         requirement,
+        probe: branchProbe(),
       })
     ).toThrow();
   });
@@ -1527,16 +1537,16 @@ describe('the memo answers the question it was asked, not merely the branch', ()
     expect(memo.misses).toBe(2);
   });
 
-  it('separates two runs that differ only by the stated relocation policy', () => {
+  it('separates two runs that differ only by the stated relocation search', () => {
     const memo = new ScenarioMemo();
-    const nearest = memo.resolve(inputs, scenario, runOptions);
-    const preferClean = memo.resolve(inputs, scenario, {
+    const stated = memo.resolve(inputs, scenario, runOptions);
+    const narrower = memo.resolve(inputs, scenario, {
       ...runOptions,
-      relocationPolicy: { ...policy, policy: RELOCATION_POLICY.PREFER_CLEAN },
+      relocationPolicy: { ...policy, surfaceIds: policy.surfaceIds.slice(1) },
     });
-    expect(preferClean).not.toBe(nearest);
-    expect(nearest.relocations.policy).toBe(RELOCATION_POLICY.NEAREST_KICKOFF);
-    expect(preferClean.relocations.policy).toBe(RELOCATION_POLICY.PREFER_CLEAN);
+    expect(narrower).not.toBe(stated);
+    expect(narrower.relocations.surfaceIds).toEqual(policy.surfaceIds.slice(1));
+    expect(stated.relocations.surfaceIds).toEqual(policy.surfaceIds);
   });
 
   it('re-establishes the acceptance and the control figures through the memo path', () => {
@@ -1892,6 +1902,7 @@ describe('a replacement slot is checked for legality before it is graded', () =>
       gamesById: doctored,
       policy,
       requirement,
+      probe: branchProbe(),
     });
 
     // Meta-assertion: a plan that proposed nothing would satisfy the clash
@@ -2340,6 +2351,7 @@ describe('the relocation counters are counts something could have made non-zero'
       gamesById,
       policy,
       requirement,
+      probe: branchProbe(),
       reservedSlots: [held],
     });
     expect(plan.meta.reservedSlotsHonoured).toBe(1);
@@ -4620,6 +4632,7 @@ describe('proposeRelocations :: the capacity reports it asks for, carried whole'
       gamesById: displacedGamesById,
       policy,
       requirement,
+      probe: branchProbe(),
       ...overrides,
     });
 

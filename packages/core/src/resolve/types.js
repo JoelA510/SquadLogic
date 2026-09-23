@@ -341,6 +341,8 @@
  * @property {number} movesApplied
  * @property {number} candidatesEvaluated
  * @property {number} candidatesRejected
+ * @property {number} candidatesRefusedByRules - of those, refused by the coach or turnover gate alone (#59)
+ * @property {number} ruleGateJudgements - candidates the coach and turnover gate judged (#59)
  * @property {number} candidatesScored - survived legality and went to the objective
  * @property {number} conflictsExamined
  * @property {number} gamesDislodged

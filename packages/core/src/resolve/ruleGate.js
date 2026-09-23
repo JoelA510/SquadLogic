@@ -1,0 +1,203 @@
+/**
+ * **The placer's second question: does this slot break a blocking rule the
+ * facility model cannot see?** (#59)
+ *
+ * `checkPlacement()` answers facility legality and nothing else, by design.
+ * Two blocking-severity rules of the standing rule engine can nonetheless be
+ * judged per candidate slot, and until #59 nothing asked them before a game
+ * was placed:
+ *
+ * - `TRAVEL_COMMITMENTS_OVERLAP` — a coach committed to two things at once.
+ *   Blocking unconditionally: `waivers/coachTravel.js` `travelSeverityOf()`
+ *   lets no constraint record soften it.
+ * - `TURNOVER_BELOW_MINIMUM` — two consecutive games on one surface closer than
+ *   the turnover floor. Blocking under the season's `TURNOVER_FLOOR_GLOBAL`
+ *   (HARD).
+ *
+ * Measured over 679 displacement runs on the corpus before this module
+ * existed, `verify` reported 148 overlaps and 60 turnover shortfalls the runs
+ * introduced; 56 of the overlaps were the solver's own placement of a displaced
+ * game, reported `allowed` apart from the verify finding.
+ *
+ * ## What this is, and deliberately is not
+ *
+ * **It gates the placer only** — where `chooseSlot()` may put a game it is
+ * already moving. It is not read by `dislodge`, `local-search` or
+ * `pair-repair`, so it never decides that a standing game must move, and never
+ * lifts the coach's *other* game: that game may be at another venue, which the
+ * placer cannot re-home it to, and lifting it is how PR 1 measured 21 published
+ * kickoffs destroyed for nothing. It also leaves a requested move exactly as it
+ * was: whether a request that double-books a coach should be displaced,
+ * refused, or allowed with a finding is the operator's question, not this
+ * module's.
+ *
+ * **It asks the rule engine's own evaluators**, `evaluateCoachTravel()` and
+ * `turnoverMinimumRule.evaluate()`, over the smallest input that can change —
+ * the moving game's coaches on that date, and the games on that surface that
+ * date — so the gate and `verify` cannot disagree about what a breach is.
+ * Waivers are not consulted: an overlap cannot be waived, and a waived turnover
+ * would be refused here while `verify` accepts it. Stated rather than hidden.
+ *
+ * **Instances are keyed by the unordered pair of games**, not by the rule
+ * engine's consecutive-pair subject. Reordering a coach's day re-pairs an
+ * unchanged overlap, and a subject-keyed instance would read that as new.
+ *
+ * @module resolve/ruleGate
+ */
+
+import { CONSTRAINT_SEVERITY } from '../constraints/reasonCodes.js';
+import { RULE_VIOLATION_REASON } from '../ruleEngine/reasonCodes.js';
+import { turnoverMinimumRule } from '../ruleEngine/rules.js';
+import { TRAVEL_REASON, evaluateCoachTravel } from '../waivers/coachTravel.js';
+
+/** The rule-engine codes the placer refuses to introduce. */
+export const GATED_RULE_CODES = Object.freeze([
+  TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP,
+  RULE_VIOLATION_REASON.TURNOVER_BELOW_MINIMUM,
+]);
+
+/**
+ * Where a commitment stands in `state`. **The one projection**: `verify`
+ * (`resolvedScheduleOf()`) and the gate both come through here, so the two
+ * cannot place a coach in different places.
+ *
+ * A commitment to a game this run holds follows the game, keeping its own
+ * length; one whose game has no time is `null`; one naming no game this run
+ * holds — a scrimmage, a reservation, an external window — passes through.
+ *
+ * @param {Object} commitment
+ * @param {import('./types.js').ResolveState} state
+ * @param {{ gameId: string, slot: import('./types.js').Slot }|null} [override] -
+ *   stand this one game on a candidate slot instead of where `state` has it
+ * @returns {Object|null}
+ */
+export function projectCommitment(commitment, state, override = null) {
+  const gameId = commitment.gameId;
+  if (typeof gameId !== 'string' || state.baseline[gameId] === undefined) return commitment;
+  const game =
+    override !== null && override.gameId === gameId
+      ? { ...state.baseline[gameId], ...override.slot }
+      : state.games[gameId];
+  if (game === undefined) return null;
+  const occupancy =
+    commitment.endMinutes === null ? null : commitment.endMinutes - commitment.startMinutes;
+  return {
+    ...commitment,
+    date: game.date,
+    startMinutes: game.startMinutes,
+    endMinutes: occupancy === null ? null : game.startMinutes + occupancy,
+    venueId: game.venueId,
+    surfaceId: game.surfaceId,
+  };
+}
+
+/**
+ * The commitments indexed the two ways the gate reads them.
+ *
+ * @param {ReadonlyArray<Object>} commitments
+ * @returns {{ byPerson: Map<string, Object[]>, personsByGame: Map<string, string[]>, count: number }}
+ */
+export function indexCommitments(commitments) {
+  /** @type {Map<string, Object[]>} */
+  const byPerson = new Map();
+  /** @type {Map<string, Set<string>>} */
+  const persons = new Map();
+  for (const commitment of commitments) {
+    byPerson.set(commitment.personId, [...(byPerson.get(commitment.personId) ?? []), commitment]);
+    if (typeof commitment.gameId === 'string') {
+      if (!persons.has(commitment.gameId)) persons.set(commitment.gameId, new Set());
+      /** @type {Set<string>} */ (persons.get(commitment.gameId)).add(commitment.personId);
+    }
+  }
+  /** @type {Map<string, string[]>} */
+  const personsByGame = new Map();
+  for (const [gameId, ids] of persons) personsByGame.set(gameId, [...ids].sort());
+  return { byPerson, personsByGame, count: commitments.length };
+}
+
+/**
+ * The blocking rule-engine instances `gameId` would carry on `slot`, keyed
+ * `CODE|otherGameId` — the unordered pair, read from this game's side.
+ *
+ * @param {{ engines: Object, commitmentIndex: ReturnType<typeof indexCommitments> }} context
+ * @param {import('./types.js').ResolveState} state
+ * @param {string} gameId
+ * @param {import('./types.js').Slot} slot
+ * @returns {{ instances: Record<string, number>, meta: { coachCommitmentsExamined: number, surfacePairsExamined: number } }}
+ */
+export function ruleGateInstances(context, state, gameId, slot) {
+  /** @type {Record<string, number>} */
+  const instances = {};
+  const meta = { coachCommitmentsExamined: 0, surfacePairsExamined: 0 };
+  const add = (code, other) => {
+    const key = `${code}|${other}`;
+    instances[key] = (instances[key] ?? 0) + 1;
+  };
+
+  // -- a coach in two places ------------------------------------------------
+  const index = context.commitmentIndex;
+  const persons = index.personsByGame.get(gameId) ?? [];
+  if (persons.length > 0) {
+    const override = { gameId, slot };
+    /** @type {Object[]} */
+    const day = [];
+    for (const personId of persons) {
+      for (const commitment of index.byPerson.get(personId) ?? []) {
+        const projected = projectCommitment(commitment, state, override);
+        if (projected !== null && projected.date === slot.date) day.push(projected);
+      }
+    }
+    meta.coachCommitmentsExamined = day.length;
+    const byId = new Map(day.map((commitment) => [commitment.id, commitment]));
+    const travel = evaluateCoachTravel(day, {
+      registry: context.engines.registry,
+      ...(context.engines.resources?.venueComplexes
+        ? { venueComplexes: context.engines.resources.venueComplexes }
+        : {}),
+    });
+    for (const subject of travel.subjects) {
+      for (const finding of subject.findings) {
+        if (finding.code !== TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP) continue;
+        if (finding.severity !== CONSTRAINT_SEVERITY.BLOCKING) continue;
+        const from = byId.get(finding.details.fromId);
+        const to = byId.get(finding.details.toId);
+        const mine = from?.gameId === gameId ? from : to?.gameId === gameId ? to : null;
+        if (mine === null) continue; // two *other* commitments: not this game's doing
+        const other = mine === from ? to : from;
+        add(finding.code, other?.gameId ?? `commitment:${other?.id}`);
+      }
+    }
+  }
+
+  // -- a surface turned over too fast ---------------------------------------
+  const published = state.baseline[gameId];
+  const candidate = {
+    ...published,
+    ...slot,
+    endMinutes: slot.startMinutes + (published.endMinutes - published.startMinutes),
+  };
+  const games = [
+    candidate,
+    ...state.gameIds
+      .filter((id) => id !== gameId)
+      .map((id) => state.games[id])
+      .filter(
+        (game) => game !== undefined && game.date === slot.date && game.surfaceId === slot.surfaceId
+      ),
+  ];
+  const turnover = turnoverMinimumRule.evaluate(
+    /** @type {any} */ ({ games, commitments: [] }),
+    /** @type {any} */ ({ registry: context.engines.registry, resources: {} })
+  );
+  meta.surfacePairsExamined = Math.max(0, games.length - 1);
+  for (const subject of turnover.subjects) {
+    for (const finding of subject.findings) {
+      if (finding.code !== RULE_VIOLATION_REASON.TURNOVER_BELOW_MINIMUM) continue;
+      if (finding.severity !== CONSTRAINT_SEVERITY.BLOCKING) continue;
+      const { earlierGameId, laterGameId } = finding.details;
+      if (earlierGameId !== gameId && laterGameId !== gameId) continue;
+      add(finding.code, earlierGameId === gameId ? laterGameId : earlierGameId);
+    }
+  }
+  return { instances, meta };
+}

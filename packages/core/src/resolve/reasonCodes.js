@@ -458,6 +458,8 @@ export function createResolveMeta() {
     movesApplied: 0,
     candidatesEvaluated: 0,
     candidatesRejected: 0,
+    candidatesRefusedByRules: 0,
+    ruleGateJudgements: 0,
     candidatesScored: 0,
     conflictsExamined: 0,
     gamesDislodged: 0,

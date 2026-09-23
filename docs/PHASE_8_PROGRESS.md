@@ -5383,3 +5383,428 @@ over-reporting, the opposite direction to the defect being fixed;
 `ExportsPage` warns and still lets an operator ship a zero-row CSV; and the
 dashboard's header CTA still reads off the same regressed `nextStep`. Two dead
 branches found in passing are filed separately.
+
+---
+
+## 8.8 — planning round (no code yet)
+
+**Recorded 2026-09-21 by the supervisor, before implementation starts.**
+
+8.8 was dispatched plan-first per CLAUDE.md §3. The research hand-back corrected
+the brief on five points. Each was verified in the shared checkout at `1fcfbdf`
+before being accepted, because on one of them the brief's error was a
+*correction the supervisor had made to the prompt*:
+
+- **`soleCoachRiskRegister` is defined once, at `people/roster.js:318`.**
+  `attribution/context.js:34` only imports it. The brief was right; the
+  supervisor's mid-flight "correction" to it — that the function lives under
+  `attribution/` — was the error. Second supervisor error of the phase where
+  the wrong claim was introduced by a correction rather than by the brief.
+- **`3ec872a` is PR #391**, `feat(facility): effective dating for venues and
+  sub-surfaces`. The brief called it "#20", which was the internal task id.
+- **Facility surfaces do have effective dating** — `facility/lifecycle.js`,
+  shipped in 8.4. The brief implied the capability was absent.
+- **`RequestedChange` has six outcomes, not five.** `unknown-game` is reachable
+  at `resolve/report.js:224` whenever the baseline lookup misses.
+- **`audit_log` is pruned at 180 days** —
+  `supabase/migrations/20260409000000_audit_log_retention_180.sql`. This is load
+  bearing: it is why an append-only corpus changelog cannot be a view over
+  `audit_log`, and the hand-back's argument for a dedicated store stands on it.
+
+### The fixture-suite figures, settled
+
+The hand-back also called "23 files / 1351 cases" unreproducible, offering
+15/979 and 26/1596 instead. It is reproducible — both numbers were executed:
+
+```
+npx vitest run $(grep -rl "season-2026" tests/ --include=*.js --include=*.jsx | tr '\n' ' ')
+  -> Test Files 23 (23)   Tests 1351 (1351)
+npx vitest run tests/season2026{CorpusVocabulary,Fixture,PracticeCorpus}.test.js
+  -> Test Files  3  (3)   Tests  145  (145)
+```
+
+So the previous entry's figures were right and the supervisor withdrew them
+wrongly on the agent's say-so, then retracted the withdrawal. The finding worth
+keeping is neither number: **four different enumerations of "the fixture suite"
+are live in this repo and they disagree, so a file-set figure quoted without the
+query that produced it is not a figure.** Briefs must carry the command.
+
+### Rulings on the proposed four-PR split
+
+1. **Resolve-run persistence is out of 8.8** — it is GAP-35, already open, and
+   what decides whether its store has a writer is the unanswered wiring
+   question. Findings go to the gap; nothing is implemented.
+2. **Team effective dating is deferred**, with the reason written into a gap
+   that names the reader which would justify building it. A store whose only
+   reader is hypothetical is the shape this phase exists to stop.
+3. **Notification state moves to 8.10.** The plan's "8.10 depends on 8.8 for the
+   notice half" is read as *the changelog is the notice's source data*, not as
+   *8.8 builds notice state* — because 8.10 is what generates notices. Landing
+   the table in 8.8 gives it neither writer nor reader until 8.10, which is
+   ruling 2's defect one task later. What 8.8 owes 8.10 is that each changelog
+   row carries what a per-entry notice derives from, stated in the PR body.
+4. **`teams.coach_id` / `assistant_coach_ids` are kept, single-writer, no
+   trigger.** The new table is the source of truth for dated assignment; the two
+   columns remain current-state denormalisation written by the same RPC in the
+   same transaction. A trigger would exist in Postgres and not in
+   `mockSupabaseClient.js`, which hand-implements these RPCs from `:6721` — a
+   twin arm, half-applied, which is the defect shape behind #407, #409, #418 and
+   #420. Deprecation is too wide today: 12 migrations reference
+   `assistant_coach_ids`, and `frontend/src/utils/teamCoaches.js` exists because
+   "a team row reaches the app under half a dozen spellings". Ships with a drift
+   check that is falsified before it is trusted.
+
+### Blocker for the operator: §5's gate was crossed without a record
+
+The hand-back flagged that `BUILD_PLAN_STATUS.md` §5 requires the wiring
+question to be re-put once GAP-29 and GAP-30 close, that both have closed, and
+that no record exists of it being re-put. Checking that, §5 is stronger than the
+flag: line 319 reads **"8.5-8.10 do not start until it is answered."**
+
+8.5, 8.6 and 8.7 ran. The gate was crossed, by this supervisor, without the
+question being re-put and without the crossing being recorded. Recording it now.
+
+The work done under it is defensible on the same reasoning §5 gives for
+8.0-8.4 — 8.5 through 8.7 are `packages/core` and commit no frontend surface —
+but that reasoning was never stated at the time and the plan's own instruction
+said not to proceed. 8.8's PR 1 and PR 2 continue on that explicit reasoning,
+bounded to `packages/core` plus migrations, and nothing in 8.8 may touch
+`frontend/`. The wiring question itself is the operator's, and is now the fourth
+decision waiting on them alongside #51, the 100:1 weight ratio, and #53's
+sequencing.
+
+---
+
+## 8.8 PR 1 — the corpus changelog (`8ebe16f`, PR #429)
+
+`packages/core/src/changelog/`: 167 corpus rows load and classify, per-subject
+history, and an as-of query over it. Core only — no SQL, no frontend, no store.
+Two review rounds, both blocking, **both found by falsification rather than by
+reading**. The agent's own `/code-review` had already found and fixed seven.
+
+### Round 1 — a break that stayed green
+
+The agent proved four falsifications red before handing over. The supervisor's
+job was to look for the fifth, and there was one. `stateAsOf()` could not tell a
+subject the log has never mentioned from one queried before its first entry:
+
+```
+all-after : {"logged":false,"state":null,"codes":["DERIVED_FROM_REJECTED_LOG"]}
+never-logd: {"logged":false,"state":null,"codes":["DERIVED_FROM_REJECTED_LOG","HISTORY_EMPTY"]}
+```
+
+`history.js`'s header nominates `logged` as the field that keeps those apart,
+citing `ConsequencePreview.jsx` on why "nothing happened" and "we have not
+looked" must not render alike. The root cause was one level below the symptom:
+**two readings of one field inside one function** — `latest !== null` in the
+dated branch, `phases.length > 0` in the undated one. The test codified the
+defect rather than catching it, asserting the `logged: false, state: null` pair
+that a never-logged subject also produces, with the never-logged case driven
+only through `buildChangeHistory()` so the two were never compared through one
+API. One reading now in both branches, plus `AS_OF_PRECEDES_LOG`.
+
+### Round 2 — a false census, and the supervisor put it there
+
+The ride-along the supervisor requested landed a claim in
+`fixtures/season-2026/practice/README.md` that the roster's 132 codes "carry
+exactly three tier tokens". It carries five:
+
+| token  | teams | assignments |
+| ------ | ----: | ----------: |
+| Junior |    40 |          64 |
+| Micro  |    34 |          52 |
+| 7v7    |    28 |          50 |
+| 9v9    |    16 |          27 |
+| Select |    14 |          22 |
+| total  |   132 |         215 |
+
+The supervisor supplied the premise, from `grep -oE "1[0-9][BG][A-Za-z]+[0-9]{2}"`
+— a filter requiring ages 10-19 and an alphabetic token, which matches 14 of
+132 teams and misses 118. The 14 it matched were all `Select` **because the
+filter admitted nothing else**. A conclusion derived from a universe that
+excluded everything capable of contradicting it, then passed downstream as a
+premise: the exact rule this phase has spent itself enforcing, broken in the
+act of enforcing it.
+
+**The agent's half is the more valuable finding.** It did not take the premise
+on trust — it ran its own check, `grep -oE "^[0-9]{2}[A-Z]([A-Za-z]+?)[0-9]{2}$"`,
+which excludes `7v7` and `9v9` for the same reason, got the same three tokens,
+and reported "all confirmed". In its words:
+
+> **Two instruments blind along one axis are one instrument.**
+
+Independent verification is only independent along the axes the two instruments
+do not share. An agreement between two filters that exclude the same thing is
+not corroboration, and it reads exactly like corroboration. This is the first
+defect of the phase where verification *by a second party* was the thing that
+failed, rather than a single unchecked claim.
+
+The same blind spot was in the test, which filtered "looks like one of our
+codes" with a pattern matching 88 of 132 roster codes. `16BSuperRec02` was
+still the only match — but under that filter it was luck, not evidence. The
+test now proves its pattern matches all 132 before it is allowed to answer,
+which is the correct general remedy: **a filter must establish its universe
+before its result means anything.**
+
+### Verified at `8ebe16f` by the supervisor, not inherited
+
+- `npx vitest run` on merged `main` — **3765 passed**, 34 skipped, 6 todo
+  (3805); 215 files passed, 1 skipped. Matches the agent's figure exactly.
+  Reconciles against the 3725 baseline: +39 changelog, +1 generated
+  reachability test.
+- The `logged` fix, re-executed: `AS_OF_PRECEDES_LOG` fires and `logged` reads
+  `true` for the queried-before case against `false` for never-logged, both
+  through `stateAsOf`. Both of the agent's falsifications re-run by hand —
+  restoring `logged: latest !== null` fails 2 tests, neutering the new guard
+  fails the same 2.
+- The corrected census, from `loadSeason2026().teams` rather than a text grep,
+  plus the coaches-per-team histogram `{1: 50, 2: 81, 3: 1}`, which reconciles
+  50 + 162 + 3 = 215.
+- `16BSuperRec02`: four rows, all `Regional League Select fixture`, zero
+  occurrences in `combined_schedule.csv` or either roster file.
+
+### 8.8 PR 2 is HELD, at the agent's insistence and correctly
+
+The agent declined to write SQL until the §5 gate is answered, and it is right.
+The supervisor's ruling had authorised PR 1 and PR 2 together as "`packages/core`
+plus migrations, nothing touching `frontend/`" — but PR 2 is a migration, RPCs
+**and app readers**, which breaches that bound on its own terms and is
+materially less revertible than PR 1 was. Continuing to cross a gate this
+supervisor has already crossed three times, now that an agent has formally
+refused, would be knowingly compounding it rather than inheriting it.
+
+PR 2 waits for the operator. Its design is settled and recorded in the ruling
+above, so the decision is the only thing missing.
+
+### Addendum to the above, from the agent, and a supervisor pattern worth naming
+
+Two corrections arrived after the entry was written.
+
+**The `run_number` ordinal was read, not inferred.** The supervisor told the
+agent that "run 950" looked measured but was probably inferred from ordering.
+It is a field: `GET /actions/runs/35620368458` returns `"run_number": 950`
+beside `"id"`, re-fetched and confirmed. The agent flagged it rather than
+letting it stand, for the right reason — a correction that recasts a measured
+figure as a guess is the same defect as the reverse, and the record would
+otherwise have carried "the agent guessed an ordinal" about a figure read off
+a response.
+
+That is the **third over-correction by this supervisor in one session**: the
+`soleCoachRiskRegister` location, the withdrawal of the "23 files / 1351 cases"
+fixture figure, and now this. The error mode has shifted and is worth naming
+as its own shape, because the guard for it is different. Earlier in the phase
+the supervisor's failures were *unverified assertions*. These three are
+**unverified corrections** — and a correction carries more weight than an
+assertion, because it arrives with the authority of having caught something
+and the recipient has already been told they were wrong. The rule is
+symmetrical and was not being applied symmetrically: **a correction is a
+claim, and needs the same execution before it is sent as the claim it
+corrects.** All three would have been caught by one command.
+
+**Why the two-instrument failure was invisible**, in the agent's words, which
+sharpens the entry above:
+
+> What made it invisible was that my check and yours were phrased differently
+> — different anchors, different character classes, different age patterns —
+> so they *looked* independent. They were independent in syntax and identical
+> in the one dimension that mattered. Agreement between two checks is evidence
+> only to the extent the checks can fail differently, and nothing in either
+> regex said what it could not see.
+
+Which is the argument for the mechanical remedy over a resolution to be more
+careful: `expect(roster.filter(RE)).toHaveLength(132)` before
+`expect(filtered).toEqual([...])` does not require anyone to notice the shared
+axis in advance. Adopted as default practice for every check that narrows a
+set.
+
+**And a guard against the wrong lesson, which the agent raised and the entry
+above invites.** Three of the supervisor's corrections this session were wrong.
+**Two were right, and they were the two that mattered most**: the blocking
+`logged` defect, which the agent had shipped and no test of its own caught, and
+the false tier census, which the agent had confirmed with a broken instrument
+and would have merged. A reader taking "three over-corrections" as grounds to
+treat this supervisor's corrections as presumptively suspect would have learned
+something worse than the original fault. The honest rule is narrower and
+symmetrical, in the agent's words:
+
+> A correction carries no more evidential weight than the work behind it, in
+> either direction. The remedy isn't scepticism about the source, it's the
+> command.
+
+The agent's own operational form of it, adopted: an incoming correction that
+cites no executed command is **unverified until one is run**, the same standing
+as any other claim — a step rather than a judgement call, since the absence of
+a citation is easy to miss under the authority of a correction.
+
+---
+
+## Backlog sweep during the §5 hold — #430 and #431
+
+Recorded as one entry for two PRs, because the §5 gate blocks 8.5-8.10 and
+neither of these is roadmap work. Both are live defects already identified in
+earlier reviews, fixed under the operator's standing authorisation to close
+them in their own PRs.
+
+### #430 `09adb89` — a failed read stops the export it would have emptied
+
+`ExportsPage` showed the banner and still let an operator ship the zero-row CSV
+the failure left behind. `|| []` is the line that makes a refused read and an
+empty season identical, so the fix is not a `disabled` flag: the page passes
+per-source errors and loading, and the panel decides, because the panel knows
+which input feeds which artifact.
+
+Five further defects on the same path came out of the agent's own review:
+
+- **The two assignments reads were dropped entirely by `useDashboardData`** —
+  and they are the rows the CSV is built from. A refused `practice_assignments`
+  read produced the empty-looking-but-unread state with **no banner anywhere**,
+  because the banner only ever covered the three summary reads. A purer
+  instance of the reported defect than the reported one.
+- An **in-flight** read reached the same zero-row CSV with no failure at all.
+- Gating Generate alone left the harm one button right: Upload wrote the empty
+  CSV to storage **and recorded it as a published baseline**.
+- An assignments error outlived its run, surviving an organisation switch.
+- Widening the aggregate error would have worsened known over-reporting, so
+  three pages moved onto their own sources.
+
+**One positive control found three vacuous assertions in the new tests.** The
+panel generates inside a `setTimeout`, so asserting absence on the line after
+the click was equally true of a panel about to succeed. Three assertions passed
+against correct code and would have passed against broken code. Caught only
+because the control was run — the suite alone would have shipped it.
+
+**A supervisor error, the fourth of the session and the costliest kind.** The
+brief asserted that a failed practice read should not block "a roster CSV".
+There is no roster CSV: `outputGeneration.js` exports master and per-team
+**schedule** CSVs only. The premise came from the page's own subtitle, which is
+itself wrong and is left as a one-line follow-up. An error in a brief is worse
+than one in a review comment, because the agent builds on it before anyone
+can check it.
+
+### #431 `9658292` — the census that could not start
+
+The note said six unplanted `(checked)` claims. It is **eight**, one-way, and
+the two missed were not revert claims at all.
+
+**`prove.sh` already carried exactly this census**, bidirectional, with its own
+empty-universe meta-assertion. It is unreachable: its universe is the baseline
+transcript, so it runs only after a 5.4-hour sweep — and the sweep **could not
+start**. A pre-flight correctly refuses two plants aimed at a body a later
+migration recreates, and that refusal exits before the baseline. Eight claims
+accumulated because nothing has run the census since the containment migration
+landed.
+
+> A guard whose only runtime is a sweep nobody runs is a guard nobody runs.
+
+That is the entry's lesson, and it generalises past this harness: **reachability
+is part of a guard's correctness.** A check that is right and never evaluated
+is indistinguishable from one that is wrong.
+
+Worse, **three plants could never have scored `CAUGHT`**: their `expect` began
+`FAIL `, which the matcher prepends, so each searched for `FAIL FAIL revert
+<id>` — a string nothing prints — and scored `MISATTRIBUTED` on every sweep.
+One is a declared prover. A falsification instrument that cannot succeed is the
+purest form of the defect this phase is named for.
+
+One claim is genuinely unplantable and now prints `(unplantable)` with its
+reason rather than `(checked)`: every mutation aborts the migration build three
+stages before its check runs.
+
+**Supervisor review, under the new one-check budget.** Ran the static guard
+clean (78 ms, exit 0), then tried to evade it twice rather than re-running what
+CI had run: a printed claim with no plant gives `CENSUS FAIL` exit 1 naming the
+claim; demoting a real claim to `(unplantable)` without registering it fails in
+**both** directions and names the two legitimate remedies. Restores verified
+clean after each.
+
+### Left for the operator
+
+`run.sh:186-210` keeps six `(coverage)`/`(refused)` bookkeeping lines
+deliberately outside the census, justified when registering them required the
+sweep. The static census is now 78 ms, but registering them properly still
+needs plants, which still need the sweep. Cheaper to revisit than it was; not
+free.
+
+---
+
+## CORRECTION — the §5 wiring gate was answered on 2026-09-20, and two entries above say otherwise
+
+**Recorded 2026-09-23 by the supervisor who wrote the false entries.**
+
+Two entries above are wrong and are corrected here rather than edited:
+
+- *"Blocker for the operator: §5's gate was crossed without a record"* says the
+  wiring question was never re-put and that 8.5-8.7 ran in breach of
+  `BUILD_PLAN_STATUS.md:319`. **False.** `BUILD_PLAN_STATUS.md` §8, dated
+  2026-09-20, opens: *"It was re-put. The operator's answer: move the engine
+  under the app, as a vertical slice."* It also records, deliberately, that
+  §5's literal precondition (GAP-29 closed first) was superseded — the slice is
+  how GAP-29 closes.
+- *"8.8 PR 2 is HELD, at the agent's insistence and correctly"* — held on a
+  premise that was false when it was written. The agent's refusal was a sound
+  response to what it believed; the belief was wrong, and the supervisor
+  endorsed it.
+
+**How.** The 8.8 research hand-back said it found no record of the re-put. The
+supervisor checked §5 — the section the claim pointed at — found the gate
+language, and read that as confirmation. §8 was never opened, although the
+supervisor's own task list carried *"GATE 2 answered: vertical slice — recorded
+BUILD_PLAN_STATUS §8"* throughout. Both checks searched one section; the answer
+was in the next. That is the two-instruments failure recorded in the 8.8 PR 1
+entry above — two checks blind along the same axis, agreement read as
+corroboration — repeated by the supervisor **one day after writing it down**,
+and on a claim that then shaped a day of the operator's budget: backlog work
+was chosen over roadmap work *because* the roadmap was believed gated.
+
+The remedy is the same one, applied to documents: **a search for "is there a
+record of X" must establish its universe first** — here, every section of the
+file, not the section that predicted X would be recorded.
+
+**Standing position from here:** 8.5-8.10 proceed under §8's answer and its
+review posture (full diff read, SQL pass, round trip proved by execution,
+BLOCKING/NOTED classification). §8's binding condition carries into every
+persistence PR: no store lands without its writer and a reader that answers a
+question with it.
+
+---
+
+## 8.8 PR 2 — effective-dated coach assignments (`2daadc4`, PR #432)
+
+`team_coach_assignments` is the source of truth for who coaches which team and
+when; ids only, no FK on the coach, so deletion erases personal data and keeps
+history. `teams.coach_id` / `assistant_coach_ids` stay as denormalisation,
+written only through `set_team_coaches()` (security invoker, executable by no
+client role including `service_role`, no trigger). Drift check falsified both
+ways on every smoke run. `soleCoachRiskRegister()` before/after is the
+consequence report, through `ConsequencePreview`. Tests 3809 -> 3826; pgTAP and
+the harness green.
+
+**The brief's writer list was wrong, again.** It named six functions writing
+the coach columns. Two do (`admin_assign_team_coach`, `admin_delete_coaches`);
+three only *read* them as guards; and the third real writer,
+`persist_team_schedule`, was one the brief did not name. The agent built the
+census universe-first — a parse of every `UPDATE`/`INSERT` attributed to its
+enclosing live definition, cross-checked against an independent grep — and the
+smoke re-executes it against `pg_proc`. A census the agent had merely inherited
+from the brief would have routed two functions that write nothing and missed
+one that does.
+
+**Supervisor review, one check:** cross-tenant reach. The new table's policy is
+`is_org_member(organization_id)`; the writer is revoked from every client role;
+the drift function is invoker-rights. Holds. The agent's `/code-review` had
+already found and fixed the one BLOCKING defect — `admin_delete_coaches` sent
+other organisations' teams through the writer.
+
+**Recorded limitations (NOTED, not fixed):**
+
+- Effective dates come from UTC `current_date`, not the season timezone: a US
+  admin's evening change is dated the next day. The future-date guard uses the
+  same clock, so no US user can be wrongly refused; an admin ahead of UTC
+  could be. GAP-30 closed this class for game instants; it is open here.
+- A team created after this migration has no backdating floor for its first
+  assignment.
+- The preview arm uses inline spacing styles, against CLAUDE.md §6.
+
+**Process gap found:** this file lived only on the supervisor branch, so agents
+branching from `main` could not read the rulings or the correction entry. It
+now lands on `main` after each task.

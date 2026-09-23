@@ -175,6 +175,37 @@ describe('every placement finding code has a locus, and the universe is the one 
   })();
 
   it('classifies every code in the registries the gate draws from', () => {
+    // **The decision gate, stated as numbers.** The table defaults every code
+    // to PLACED, so "every code has a locus" cannot fail by itself. What can:
+    // these counts. A code added to any of the three registries fails here
+    // until somebody decides whether it travels with the game -- add it to
+    // `CARRIED_CODES` in `resolve/instances.js` or accept PLACED -- and updates
+    // the count in the same change.
+    expect(
+      Object.fromEntries(
+        Object.entries(PLACEMENT_REASON_REGISTRIES).map(([name, registry]) => [
+          name,
+          Object.keys(registry).length,
+        ])
+      )
+    ).toEqual({ FACILITY_REASON: 30, AVAILABILITY_REASON: 33, TIMING_REASON: 28 });
+    expect(
+      Object.entries(FINDING_LOCUS_BY_CODE)
+        .filter(([, locus]) => locus === FINDING_LOCUS.CARRIED)
+        .map(([code]) => code)
+        .sort()
+    ).toEqual([
+      'BLOCK_SHORTER_THAN_OCCUPANCY',
+      'FORMAT_TIMING_DUPLICATE',
+      'FORMAT_TIMING_UNDEFINED',
+      'HALFTIME_IS_RANGE',
+      'HALFTIME_UNDECLARED',
+      'OCCUPANCY_DERIVATION_DISAGREES',
+      'SEASON_TIMEZONE_MISSING',
+      'SEASON_TIMEZONE_UNKNOWN',
+      'SIZE_UNKNOWN_FORMAT',
+      'WARMUP_DURATION_UNSPECIFIED',
+    ]);
     expect(universe.length).toBeGreaterThan(50);
     for (const code of universe) {
       expect(FINDING_LOCUS_BY_CODE[code], code).toMatch(/^(carried|placed)$/);
@@ -357,10 +388,16 @@ describe('Gap A: trading one accepted clash for another is a new clash', () => {
       const introduced = pinned.findings.filter(
         (finding) => finding.code === RESOLVE_REASON.RESOLVE_VERIFY_NEW_VIOLATION
       );
-      expect(introduced.length).toBeGreaterThan(0);
-      for (const finding of introduced) {
-        expect(finding.details.introduced).toBeGreaterThan(0);
-      }
+      // The swapped clash itself, not merely something: the same-ground code is
+      // reported with both swapped instances introduced and both published
+      // ones gone, while its total is unchanged.
+      const sameGround = introduced.find(
+        (finding) => finding.details.code === 'OCCUPIED_SAME_SURFACE'
+      );
+      expect(sameGround, JSON.stringify(introduced.map((f) => f.details.code))).toBeTruthy();
+      expect(sameGround?.details.introduced).toBe(2);
+      expect(sameGround?.details.removed).toBe(2);
+      expect(sameGround?.details.resolvedCount).toBe(sameGround?.details.baselineCount);
     });
   });
 });
@@ -396,24 +433,31 @@ describe('Gap B: a displaced game does not take its accepted clash with it', () 
     }
   });
 
-  it('re-places every game on the date clear of any blocking instance it did not arrive with', () => {
+  it('re-places every game on the date clear of any clash it did not arrive with', () => {
+    // An oracle that does not use the code under test: a game on its published
+    // slot may carry exactly the same-ground clashes the constructed baseline
+    // gave it; a game anywhere else may carry none.
     const onDate = stacked.games.filter((game) => game.date === WAVES.date);
-    const accepted = stateOver(stacked);
+    const published = stateOver(stacked);
+    const clashes = (counts) =>
+      Object.keys(counts)
+        .filter((key) => key.startsWith('OCCUPIED_'))
+        .sort();
     let examined = 0;
     for (const game of onDate) {
       const after = blockingAfter(run, game.id);
       expect(after, `${game.id} was dropped`).not.toBeNull();
       examined += 1;
       const placed = /** @type {any} */ (run.schedule.games.find((row) => row.id === game.id));
-      const baseline = checkPlacement(engines, accepted, game.id, slotOfGame(game));
-      const record = {
-        slotKey: slotKey(slotOfGame(game)),
-        instances: baseline.blockingInstanceCounts,
-      };
-      expect(
-        grownCodes(/** @type {any} */ (after), acceptedAtSlot(record, slotKey(slotOfGame(placed)))),
-        game.id
-      ).toEqual([]);
+      const home = placed.surfaceId === game.surfaceId && placed.startMinutes === game.startMinutes;
+      const allowed = home
+        ? clashes(
+            checkPlacement(engines, published, game.id, slotOfGame(game)).blockingInstanceCounts
+          )
+        : [];
+      for (const key of clashes(/** @type {any} */ (after))) {
+        expect(allowed, `${game.id} stands in ${key}`).toContain(key);
+      }
     }
     expect(examined).toBe(onDate.length);
     expect(Object.keys(blockingAfter(run, A.id) ?? {})).toEqual([]);
@@ -512,6 +556,42 @@ describe('a scrimmage asked onto another slot keeps it, because its unsized form
     const placed = /** @type {any} */ (run.schedule.games.find((game) => game.id === first.id));
     expect(slotKey(slotOfGame(placed))).toBe(slotKey(slotOfGame(second)));
     expect(blockingAfter(run, first.id)).toEqual({ SIZE_UNKNOWN_FORMAT: 1 });
+  });
+
+  it('is not reported by verify as introducing what it carries everywhere, even across venues', () => {
+    // A review finding, kept: keyed on the rule engine's entities -- which carry
+    // surface, venue and date -- every violation a moved game already carried
+    // read as new. `verify` keys on who, not where.
+    const elsewhere = /** @type {any} */ (
+      schedule.games.find((game) => game.date === first.date && game.venueId !== first.venueId)
+    );
+    const run = applyChangeRequest({
+      schedule,
+      changes: [
+        {
+          gameId: first.id,
+          date: first.date,
+          surfaceId: elsewhere.surfaceId,
+          startMinutes: first.startMinutes,
+          reason: 'to another venue',
+        },
+      ],
+      engines,
+      verify: true,
+      onUnsatisfiable: 'report',
+    });
+    expect(run.verification).not.toBeNull();
+    const carried = run.verification.violations.filter(
+      (violation) =>
+        violation.subjectId.endsWith(first.id) && violation.code === 'SIZE_UNKNOWN_FORMAT'
+    );
+    // The meta-assertion: the moved game really does still carry it.
+    expect(carried.length).toBeGreaterThan(0);
+    const reported = run.findings
+      .filter((finding) => finding.code === RESOLVE_REASON.RESOLVE_VERIFY_NEW_VIOLATION)
+      .map((finding) => finding.details.code);
+    expect(reported).not.toContain('SIZE_UNKNOWN_FORMAT');
+    expect(reported).not.toContain('FORMAT_TIMING_UNDEFINED');
   });
 });
 

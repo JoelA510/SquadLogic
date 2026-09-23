@@ -23,7 +23,7 @@ import { applyRegistrySeverity, effectiveSeverityTable } from '../constraints/se
 import { CONSTRAINT_SEVERITY, CONSTRAINT_STATUS } from '../constraints/reasonCodes.js';
 import { checkKickoffAvailability } from '../availability/kickoff.js';
 import { getSurface } from '../facility/facilityGraph.js';
-import { findingInstanceKey } from './instances.js';
+import { findingCounterparts, findingInstanceKey } from './instances.js';
 
 /** The id `checkKickoffAvailability()` gives the candidate it invents. */
 const PROBE_BOOKING_ID = '__availability_probe__';
@@ -110,16 +110,13 @@ export function checkPlacement(engines, state, gameId, slot) {
   const blocking = applied.findings.filter(
     (finding) => finding.severity === CONSTRAINT_SEVERITY.BLOCKING
   );
+  // One extractor for "who is this finding with", shared with the instance key
+  // below, so `counterpartGameIds` and the key cannot disagree about it.
+  const self = new Set([gameId, PROBE_BOOKING_ID]);
   /** @type {Set<string>} */
   const counterparts = new Set();
   for (const finding of blocking) {
-    const details = /** @type {Record<string, unknown>} */ (finding.details ?? {});
-    for (const key of ['bookingAId', 'bookingBId', 'otherBookingId']) {
-      const value = details[key];
-      if (typeof value !== 'string') continue;
-      if (value === PROBE_BOOKING_ID || value === gameId) continue;
-      counterparts.add(value);
-    }
+    for (const id of findingCounterparts(finding, self)) counterparts.add(id);
   }
 
   // **How many, not just whether.** `blockingCodes` is the de-duplicated set and
@@ -140,7 +137,6 @@ export function checkPlacement(engines, state, gameId, slot) {
   // that kept its clash from one that traded it for a clash with somebody
   // else — the count is 1 in both places. Every "is this new?" question in
   // `stages.js` compares these instead; see `resolve/instances.js`.
-  const self = new Set([gameId, PROBE_BOOKING_ID]);
   /** @type {Record<string, number>} */
   const blockingInstanceCounts = {};
   /** @type {Record<string, { severity: string, count: number }>} */

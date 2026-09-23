@@ -127,7 +127,13 @@ export function findingLocusOf(code) {
   return FINDING_LOCUS_BY_CODE[code] ?? FINDING_LOCUS.PLACED;
 }
 
-/** The keys the facility model names another booking under. */
+/**
+ * The keys the facility model names another booking under. The one list:
+ * `legality.js` derives `counterpartGameIds` through {@link findingCounterparts}
+ * too. `attribution/claims.js` reads two more (`bookingId`, `boundByBookingIds`)
+ * for its own purpose; adopting them here would change which games `dislodge`
+ * treats as parties, which is not this module's call to make silently.
+ */
 const COUNTERPART_KEYS = Object.freeze(['bookingAId', 'bookingBId', 'otherBookingId']);
 
 /**
@@ -199,27 +205,56 @@ export function acceptedAtSlot(record, candidateSlotKey) {
  * @returns {string[]}
  */
 export function grownCodes(now, accepted) {
-  /** @type {Set<string>} */
-  const grown = new Set();
-  for (const [key, count] of Object.entries(now)) {
-    if (count > (accepted[key] ?? 0)) grown.add(codeOfInstance(key));
-  }
-  return [...grown].sort();
+  return [...new Set(grownInstances(now, accepted).map(codeOfInstance))].sort();
 }
 
 /**
- * One rule-engine violation's identity: rule, code, subject, and the entities
- * it names — never the measured values, which move whenever a neighbour does.
+ * The instance keys that occur more often than accepted, sorted.
  *
- * @param {{ ruleId?: string, code: string, subjectId?: string, entities?: ReadonlyArray<{ kind: string, id: string }> }} violation
+ * @param {Readonly<Record<string, number>>} now
+ * @param {Readonly<Record<string, number>>} accepted
+ * @returns {string[]}
+ */
+export function grownInstances(now, accepted) {
+  return Object.entries(now)
+    .filter(([key, count]) => count > (accepted[key] ?? 0))
+    .map(([key]) => key)
+    .sort();
+}
+
+/**
+ * The counterpart games an instance key names, if any.
+ *
+ * @param {string} key
+ * @returns {string[]}
+ */
+export function counterpartsOfInstance(key) {
+  const bar = key.indexOf('|');
+  return bar === -1 ? [] : key.slice(bar + 1).split(',');
+}
+
+/**
+ * One rule-engine violation's identity: **who**, never where.
+ *
+ * The rule, the code, the subject (every rule engine subject is built from
+ * game, person, team or division identities) and the other bookings the
+ * violation names in its details — the counterpart of a same-ground clash sits
+ * in `bookingBId`, not in the entities, because the rule engine attaches the
+ * finding to one half of the pair only. Not the entities: they carry the
+ * game's surface, venue and date, so any game that moved would turn every
+ * violation it already carried into a "new" one. Where a game stands is the
+ * gate's question, answered per slot in {@link acceptedAtSlot}; `verify` asks
+ * whether the schedule now breaks something about somebody it did not before.
+ *
+ * @param {{ ruleId?: string, code: string, subjectId?: string, details?: Record<string, unknown> }} violation
  * @returns {string}
  */
 export function violationInstanceKey(violation) {
-  const entities = (violation.entities ?? []).map((entity) => `${entity.kind}:${entity.id}`).sort();
+  const counterparts = findingCounterparts(violation, new Set());
   return [
     violation.ruleId ?? '',
     violation.code,
     violation.subjectId ?? '',
-    entities.join(','),
+    counterparts.join(','),
   ].join('|');
 }

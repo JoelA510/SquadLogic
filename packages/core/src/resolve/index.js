@@ -124,10 +124,12 @@ export {
   PLACEMENT_REASON_REGISTRIES,
   acceptedAtSlot,
   codeOfInstance,
+  counterpartsOfInstance,
   findingCounterparts,
   findingInstanceKey,
   findingLocusOf,
   grownCodes,
+  grownInstances,
   violationInstanceKey,
 } from './instances.js';
 

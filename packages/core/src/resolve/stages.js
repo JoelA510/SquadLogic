@@ -47,7 +47,13 @@ import { FREEZE_DISPOSITION } from '../freeze/reasonCodes.js';
 
 import { frozenGameUnsatisfiable, registryConstraintIdsFor } from './errors.js';
 import { candidateSlotsFor } from './inventory.js';
-import { acceptedAtSlot, grownCodes, violationInstanceKey } from './instances.js';
+import {
+  acceptedAtSlot,
+  counterpartsOfInstance,
+  grownCodes,
+  grownInstances,
+  violationInstanceKey,
+} from './instances.js';
 import { checkPlacement } from './legality.js';
 import {
   candidateObjectiveCounts,
@@ -1163,7 +1169,20 @@ const localSearch = {
   },
 };
 
-/** @type {Object} */
+/**
+ * **No construction is known that makes this stage apply a move** once
+ * acceptance is keyed per instance and per slot (8.6 PR 2), and that is stated
+ * rather than left for a reader to rediscover. Every applied move it had in the
+ * test suite came from `initial-assignment` re-homing a displaced game into a
+ * clash its published slot had carried; that path is closed. What remains is
+ * symmetric: a placer that admits a game only where none of *its* instances
+ * grow cannot create an instance that grows for the game it lands beside, and
+ * `dislodge` lifts every movable party to a clash a change created. The stage
+ * still considers and refuses (its freeze probe drives it), and is kept as the
+ * backstop for an asymmetric finding nobody has yet constructed.
+ *
+ * @type {Object}
+ */
 const pairRepair = {
   id: 'pair-repair',
   title: 'Move the other party to a clash, when the other party may be moved',
@@ -1198,8 +1217,19 @@ const pairRepair = {
         carriedBlockingAt(context, gameId, slot)
       );
       if (grown.length === 0) continue;
+      // **Only the counterparts of the instances that grew.** A game standing
+      // in a clash it published *and* a new one must not cost the published
+      // neighbour its kickoff: that clash was accepted, and moving its other
+      // half repairs nothing this run broke.
+      const culprits = new Set(
+        grownInstances(
+          placement.blockingInstanceCounts,
+          carriedBlockingAt(context, gameId, slot)
+        ).flatMap(counterpartsOfInstance)
+      );
 
       for (const counterpart of placement.counterpartGameIds) {
+        if (!culprits.has(counterpart)) continue;
         if (!current.games[counterpart]) continue;
         if (!mayMove(current, counterpart, this.id, `repair the clash with "${gameId}"`)) continue;
 
@@ -1298,6 +1328,14 @@ const verify = {
       introducedByCode[codeOfKey[key]] = (introducedByCode[codeOfKey[key]] ?? 0) + excess;
     }
 
+    /** @type {Record<string, number>} */
+    const removedByCode = {};
+    for (const violation of context.baselineVerification?.violations ?? []) {
+      const key = violationInstanceKey(violation);
+      if ((afterInstances[key] ?? 0) >= (beforeInstances[key] ?? 0)) continue;
+      removedByCode[violation.code] = (removedByCode[violation.code] ?? 0) + 1;
+    }
+
     for (const [code, introduced] of Object.entries(introducedByCode).sort(([a], [b]) =>
       a.localeCompare(b)
     )) {
@@ -1306,13 +1344,14 @@ const verify = {
       ledger.findings.push(
         makeResolveFinding(
           RESOLVE_REASON.RESOLVE_VERIFY_NEW_VIOLATION,
-          `the standing rule engine reports ${count} ${code} on the resolved schedule against ${baselineCount} on the baseline, and ${introduced} of them are instances the baseline did not carry — this change introduced them. The resolver repairs facility legality only — it does not trade a soft constraint against another`,
+          `the standing rule engine reports ${count} ${code} on the resolved schedule against ${baselineCount} on the baseline: ${introduced} instance(s) the baseline did not carry are new, and ${removedByCode[code] ?? 0} it did carry are gone, so this change introduced ${introduced} whatever the totals say. The resolver repairs facility legality only — it does not trade a soft constraint against another`,
           {
             stageId: this.id,
             code,
             baselineCount,
             resolvedCount: count,
             introduced,
+            removed: removedByCode[code] ?? 0,
             rulesRun: verification.meta.rulesRun,
             rulesExercised: verification.meta.rulesExercised,
           }

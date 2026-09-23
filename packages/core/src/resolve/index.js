@@ -170,6 +170,8 @@ export {
   RESOLVE_STAGES,
   VERIFY_STAGE_ID,
   buildResolvePipeline,
+  evaluateCandidate,
+  recordBaselineAcceptance,
 } from './stages.js';
 
 export { probeStage, probeEveryStage } from './probe.js';

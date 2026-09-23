@@ -43,6 +43,7 @@ import { registryConstraintIdsFor } from '../resolve/errors.js';
 import { resolveObjectiveWeights } from '../resolve/objective.js';
 import { applyChangeRequest, resolvedScheduleOf } from '../resolve/resolve.js';
 import { createPlacementProbe } from '../resolve/relocationOptions.js';
+import { RESOLVE_REASON } from '../resolve/reasonCodes.js';
 import { CHANGE_ORIGIN } from '../resolve/schemas.js';
 import { buildSlotInventory } from '../resolve/inventory.js';
 import {
@@ -365,6 +366,20 @@ function sameViolations(left, right) {
   return left.every((entry, index) => entry === right[index]);
 }
 
+/** A probe for a branch that displaces nothing: never consulted, loud if it were. */
+const INERT_PROBE = Object.freeze({
+  evaluate() {
+    throw new Error(
+      'scenario: the inert probe was consulted; a branch with no displaced game has nothing to judge'
+    );
+  },
+  hold() {
+    throw new Error(
+      'scenario: the inert probe was consulted; a branch with no displaced game has nothing to judge'
+    );
+  },
+});
+
 /**
  * Derive a scenario's answer.
  *
@@ -536,11 +551,17 @@ export function runScenario(inputs, scenario, options) {
       // model, the rule gate and the objective, under the branch's engines and
       // this run's weights — the same ones the re-solve below applies them
       // under, so the proposer and `change-request-apply`'s gate agree.
-      probe: createPlacementProbe({
-        schedule: baselineSchedule,
-        engines: materialised.engines,
-        objectiveWeights: options.objectiveWeights,
-      }),
+      // Built only when there is something to judge: the probe records every
+      // game's published slot, a full-season pass a branch that displaces
+      // nothing would pay for and never read.
+      probe:
+        displaced.length === 0
+          ? INERT_PROBE
+          : createPlacementProbe({
+              schedule: baselineSchedule,
+              engines: materialised.engines,
+              objectiveWeights: options.objectiveWeights,
+            }),
     });
   }
   mergeScenarioMeta(meta, relocations.meta);
@@ -611,10 +632,41 @@ export function runScenario(inputs, scenario, options) {
   const resolveUnplaced =
     run === null ? [] : unplacedFromResolveRun(run, { source: `scenario "${scenario.id}"` });
 
-  const shelving = shelveUnrelocatable(relocated, relocations.unrelocatable, {
-    name: `scenario "${scenario.name}"`,
-    registry: materialised.engines.registry,
-  });
+  /**
+   * **Proposals `change-request-apply` refused (#53), shelved like any other
+   * game with nowhere to go.** The proposer judges with the same gate, so this
+   * is empty on a consistent run; when it is not, the refused game is still
+   * standing on the ground the branch withdrew, and — its blocking finding
+   * accepted there as published — nothing downstream would lift it. Carried
+   * as TIME TBD with the refusal as its reason, never left on withdrawn ground
+   * (incident 10).
+   */
+  const refusedIds = new Set(
+    (run?.findings ?? [])
+      .filter((finding) => finding.code === RESOLVE_REASON.RESOLVE_CHANGE_REFUSED_BY_RULES)
+      .map((finding) => String(finding.details.gameId))
+  );
+  const refusedByGate = displaced
+    .filter((game) => refusedIds.has(game.gameId))
+    .map((game) => ({
+      gameId: game.gameId,
+      label: game.label,
+      reason: `the scenario withdraws the ground it stood on (${game.codes.join(', ')}) and resolve/'s rule gate refused the replacement proposeRelocations() chose; kept visible as TIME TBD rather than dropped (incident 10)`,
+      codes: Object.freeze([...game.codes]),
+      constraintIds: Object.freeze([...game.constraintIds]),
+      candidatesConsidered: 0,
+    }));
+  // Not relocated after all: the counters say what the branch did.
+  meta.relocationsProposed -= refusedByGate.length;
+  meta.relocationsUnavailable += refusedByGate.length;
+  const shelving = shelveUnrelocatable(
+    relocated,
+    [...relocations.unrelocatable, ...refusedByGate],
+    {
+      name: `scenario "${scenario.name}"`,
+      registry: materialised.engines.registry,
+    }
+  );
   const schedule = shelving.schedule;
 
   const shelved = unplacedFromResolveRun(shelving.run, { source: `scenario "${scenario.id}"` });

@@ -39,6 +39,7 @@ import {
   mergeResolveMeta,
 } from './reasonCodes.js';
 import { buildChangeReport } from './report.js';
+import { RelocationPolicySchema } from '../scenario/schemas.js';
 import { offerRelocationOptions } from './relocationOptions.js';
 import { CHANGE_ORIGIN, RelocationSearchSchema, ScheduleChangeRequestSchema } from './schemas.js';
 import { buildResolvePipeline } from './stages.js';
@@ -176,6 +177,13 @@ function runResolve(input) {
     input.relocationSearch === undefined
       ? null
       : RelocationSearchSchema.parse(input.relocationSearch);
+  // Every stated policy, parsed here too: a malformed one must not surface
+  // only after every stage has run, or never, when no game of its format
+  // happens to need an option.
+  if (relocationSearch !== null) {
+    for (const policy of Object.values(relocationSearch.policies))
+      RelocationPolicySchema.parse(policy);
+  }
 
   const changedIds = changes.map((change) => change.gameId);
   if (new Set(changedIds).size !== changedIds.length) {
@@ -228,6 +236,17 @@ function runResolve(input) {
     if (change.surfaceId === null) continue;
     const surface = getSurface(engines.graph, change.surfaceId);
     if (surface) surfaceVenues[change.surfaceId] = surface.venueId;
+  }
+  if (relocationSearch !== null) {
+    // **The venue of every surface an option could name (#53)**, for the
+    // lookup only — never the placer's candidates. Without it `gameOnSlot()`
+    // falls back to the game's own venue for ground the baseline never used,
+    // and the coach's journey to an option would be judged as if the game
+    // never changed venue: shown clean, then stale on approval.
+    for (const surface of Object.values(engines.graph.surfaces)) {
+      const { id, venueId } = /** @type {{ id: string, venueId: string }} */ (surface);
+      if (surfaceVenues[id] === undefined) surfaceVenues[id] = venueId;
+    }
   }
 
   const inventory = buildSlotInventory(games, { surfaceVenues });
@@ -374,7 +393,11 @@ function runResolve(input) {
     if (!game) continue;
     context.judgedChangeSlots.set(
       change.gameId,
-      `${change.date ?? game.date}|${change.surfaceId ?? game.surfaceId}|${change.startMinutes}`
+      slotKey({
+        date: change.date ?? game.date,
+        surfaceId: change.surfaceId ?? game.surfaceId,
+        startMinutes: change.startMinutes,
+      })
     );
   }
 

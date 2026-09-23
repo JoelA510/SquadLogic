@@ -1081,9 +1081,7 @@ const changeRequestApply = {
         continue;
       }
 
-      // A proposer's game is not an operator's instruction, so if anything
-      // later lifts it the placer's gate applies to it like any other.
-      if (origin !== CHANGE_ORIGIN.PROPOSER) context.requestedApplied.add(change.gameId);
+      context.requestedApplied.add(change.gameId);
       current = applyMove(
         current,
         {

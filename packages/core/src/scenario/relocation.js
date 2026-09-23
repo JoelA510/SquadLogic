@@ -862,7 +862,7 @@ export function proposeRelocations(engines, input) {
     findings.push(
       makeScenarioFinding(
         SCENARIO_REASON.SCENARIO_RELOCATION_COMPROMISED,
-        `${compromised.length} of the ${proposals.length} replacement(s) are legal but add ${codes.join(', ')}: ${[...new Set(compromised.map((p) => p.to.surfaceId))].sort().join(', ')} are size-eligible for the format under the downward-closed policy and painted for another one`,
+        `${compromised.length} of the ${proposals.length} replacement(s) are legal but add ${codes.join(', ')}: ${[...new Set(compromised.map((p) => p.to.surfaceId))].sort().join(', ')} carry them — resolve/'s facility model and coach-travel evaluator say so, each proposal names its own codes`,
         {
           ranking: RELOCATION_RANKING,
           compromised: compromised.length,

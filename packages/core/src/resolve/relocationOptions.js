@@ -50,6 +50,16 @@
  * is judged again in `change-request-apply` — the second approval of a shared
  * slot is `RESOLVE_OPTION_STALE`, never a double-booking and never a dislodge.
  *
+ * ## Judged twice, against two different moments — stated, not hidden
+ *
+ * An option is judged against this run's **finished** schedule; its approval
+ * is judged in `change-request-apply` of the next run, **before** `dislodge`,
+ * the placer and `local-search` have moved anything. Where this run freed a
+ * slot by moving a game, the approval can find that game still standing on it
+ * and be refused as stale, and a coach's other game not yet moved can change
+ * a travel code. The refusal is the safe direction — nothing is applied that
+ * was not judged — and the operator is offered the next run's options.
+ *
  * @module resolve/relocationOptions
  */
 
@@ -188,6 +198,12 @@ export function offerRelocationOptions(input) {
         },
       };
     });
+    // **The search's own ground report, carried rather than kept on the side.**
+    // A blocking capacity finding impeaches the search (it examined nothing,
+    // or does not cover ground somebody reserved); left on the entry alone it
+    // could never reach this run's status — the defect `proposeRelocations()`
+    // had and fixed.
+    for (const finding of searched?.capacityFindings ?? []) state.ledger.findings.push(finding);
     const entry = {
       gameId,
       trigger,

@@ -29,6 +29,7 @@ S5="$REPO/docs/sql/20260909000000_smoke.sql"
 # no plant at all. They were plantable all along -- nothing had ever counted
 # the claims against the registry, so nobody looked.
 R9="$REPO/docs/sql/20260920000000_revert.sql"
+R10="$REPO/docs/sql/20260923000000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -2582,6 +2583,15 @@ CREATE TABLE public.publication_baselines (
   "revert 20260920000000: publication_baselines survived its own revert" \
   "(checked) the revert counted the published baselines it was about to destroy, and the organisations they span"
 
+# **8.8 PR 2's revert destroys the coaching history**, so its warning is the
+# claim. The harness seeds 3 rows across 2 teams, 1 ended; dropping DISTINCT
+# prints `across 3 team(s)` and leaves the other two figures right, which is
+# the one-figure drift a check reading only "3" would miss.
+plant "R10 the assignment warning stops counting teams distinctly" "$R10" \
+  "    SELECT count(*), count(*) FILTER (WHERE effective_to IS NOT NULL), count(DISTINCT team_id)" \
+  "    SELECT count(*), count(*) FILTER (WHERE effective_to IS NOT NULL), count(team_id)" \
+  "revert 20260923000000: planted 3 assignment rows across 2 teams, 1 ended, and the revert did not warn with those figures"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -2645,6 +2655,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) the containment gate is gone from admin_retire_location after the revert"]="R8 the revert re-installs the gated body after asserting its restore"
   ["(checked) the revert counted the published baselines it was about to destroy, and the organisations they span"]="R9 the baseline warning stops counting organisations distinctly"
   ["(checked) publication_baselines is gone from the catalogue after the revert"]="R9 the revert re-creates the store after verifying it gone"
+  ["(checked) the revert counted the coach assignment rows it was about to destroy, the teams they span, and the ended ones"]="R10 the assignment warning stops counting teams distinctly"
 )
 
 # **`(unplantable)` is the one prefix that retires a HEALTH CLAIM, so it is

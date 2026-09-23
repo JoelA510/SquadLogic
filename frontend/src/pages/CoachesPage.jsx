@@ -14,6 +14,7 @@ import DataGrid from '../components/grid/DataGrid.jsx';
 import Button from '../components/ui/Button.jsx';
 import Badge from '../components/ui/Badge.jsx';
 import Modal from '../components/ui/Modal.jsx';
+import ConsequencePreview from '../components/scheduling/ConsequencePreview.jsx';
 import { useToast } from '../components/ui/ToastHost.jsx';
 import LoadingScreen from '../components/LoadingScreen.jsx';
 import { supabase } from '../lib/supabaseClient.js';
@@ -23,6 +24,8 @@ import { usePermission } from '../hooks/usePermission.js';
 import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
+import { coachChangeConsequence } from '@squadlogic/core/people/assignmentHistory.js';
+import { repairProposal } from '@squadlogic/core/fieldAdmin/index.js';
 
 const STATUS_FILTERS = [
   { id: 'all', label: 'All statuses' },
@@ -257,6 +260,11 @@ export default function CoachesPage() {
   const [selected, setSelected] = useState(() => new Set());
   const [manageCoachId, setManageCoachId] = useState(null);
   const [assignTeamId, setAssignTeamId] = useState('');
+  // 8.8: the effective-dated coaching record, and the change awaiting
+  // confirmation. A change is previewed (sole-coach register before and after)
+  // and only then committed.
+  const [assignmentRows, setAssignmentRows] = useState(null);
+  const [pendingChange, setPendingChange] = useState(null);
   const canManageCoaches = can(PERMISSIONS.MANAGE_ORGANIZATION);
 
   const loadCoaches = useCallback(async () => {
@@ -269,6 +277,7 @@ export default function CoachesPage() {
       setDivisions([]);
       setPlayers([]);
       setTeams([]);
+      setAssignmentRows(null);
       setLoading(false);
       return;
     }
@@ -276,30 +285,37 @@ export default function CoachesPage() {
     setError(null);
 
     try {
-      const [coachResult, interestResult, divisionResult, teamResult] = await Promise.all([
-        supabase
-          .from('coaches')
-          .select(
-            'id, organization_id, full_name, email, phone, status, import_source, last_imported_at, can_coach_multiple_teams, created_at'
-          )
-          .eq('organization_id', currentOrganization.id)
-          .order('full_name', { ascending: true }),
-        supabase
-          .from('coach_interested_programs')
-          .select('id, coach_id, division_id, inferred_from_player_id, organization_id, created_at')
-          .eq('organization_id', currentOrganization.id)
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('divisions')
-          .select('id, name, organization_id')
-          .eq('organization_id', currentOrganization.id)
-          .order('name', { ascending: true }),
-        supabase
-          .from('teams')
-          .select('id, name, division_id, coach_id, organization_id')
-          .eq('organization_id', currentOrganization.id)
-          .order('name', { ascending: true }),
-      ]);
+      const [coachResult, interestResult, divisionResult, teamResult, assignmentResult] =
+        await Promise.all([
+          supabase
+            .from('coaches')
+            .select(
+              'id, organization_id, full_name, email, phone, status, import_source, last_imported_at, can_coach_multiple_teams, created_at'
+            )
+            .eq('organization_id', currentOrganization.id)
+            .order('full_name', { ascending: true }),
+          supabase
+            .from('coach_interested_programs')
+            .select(
+              'id, coach_id, division_id, inferred_from_player_id, organization_id, created_at'
+            )
+            .eq('organization_id', currentOrganization.id)
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('divisions')
+            .select('id, name, organization_id')
+            .eq('organization_id', currentOrganization.id)
+            .order('name', { ascending: true }),
+          supabase
+            .from('teams')
+            .select('id, name, division_id, coach_id, organization_id')
+            .eq('organization_id', currentOrganization.id)
+            .order('name', { ascending: true }),
+          supabase
+            .from('team_coach_assignments')
+            .select('id, team_id, coach_id, role, effective_from, effective_to')
+            .eq('organization_id', currentOrganization.id),
+        ]);
 
       const resultError =
         coachResult.error || interestResult.error || divisionResult.error || teamResult.error;
@@ -328,6 +344,12 @@ export default function CoachesPage() {
       setDivisions(divisionResult.data || []);
       setPlayers(playerResult.data || []);
       setTeams(teamResult.data || []);
+      // An unreadable coaching record is NOT an empty one: null makes the
+      // preview say "could not be computed" instead of "no effect".
+      setAssignmentRows(assignmentResult.error ? null : assignmentResult.data || []);
+      if (assignmentResult.error) {
+        logger.error('Failed to load coach assignment history:', assignmentResult.error);
+      }
       setSelected((previous) => {
         const validIds = new Set((coachResult.data || []).map((coach) => String(coach.id)));
         return new Set([...previous].filter((id) => validIds.has(String(id))));
@@ -496,34 +518,76 @@ export default function CoachesPage() {
     [runMutation]
   );
 
-  const handleAssignTeam = useCallback(async () => {
+  // Staging, not committing: Assign and Unassign each stage the head-coach
+  // change so its consequence is shown BEFORE it is written (8.8).
+  const handleAssignTeam = useCallback(() => {
     if (!manageCoach || !assignTeamId) return;
+    const team = teams.find((entry) => String(entry.id) === String(assignTeamId));
+    setPendingChange({
+      teamId: assignTeamId,
+      teamName: team?.name || 'the selected team',
+      leadCoachId: manageCoach.id,
+      successMessage: `${manageCoach.fullName} assigned to the selected team`,
+    });
+  }, [assignTeamId, manageCoach, teams]);
+
+  const handleUnassignTeam = useCallback((team) => {
+    setPendingChange({
+      teamId: team.id,
+      teamName: team.name,
+      leadCoachId: null,
+      successMessage: `${team.name} no longer has an assigned coach`,
+    });
+  }, []);
+
+  const handleConfirmChange = useCallback(async () => {
+    if (!pendingChange) return;
+    const change = pendingChange;
     const ok = await runMutation(
       () =>
         supabase.rpc('admin_assign_team_coach', {
           p_organization_id: currentOrganization.id,
-          p_team_id: assignTeamId,
-          p_coach_id: manageCoach.id,
+          p_team_id: change.teamId,
+          p_coach_id: change.leadCoachId,
         }),
-      `${manageCoach.fullName} assigned to the selected team`
+      change.successMessage
     );
-    if (ok) setAssignTeamId('');
-  }, [assignTeamId, currentOrganization?.id, manageCoach, runMutation]);
+    setPendingChange(null);
+    if (ok && change.leadCoachId) setAssignTeamId('');
+  }, [currentOrganization?.id, pendingChange, runMutation]);
 
-  const handleUnassignTeam = useCallback(
-    (team) => {
-      runMutation(
-        () =>
-          supabase.rpc('admin_assign_team_coach', {
-            p_organization_id: currentOrganization.id,
-            p_team_id: team.id,
-            p_coach_id: null,
-          }),
-        `${team.name} no longer has an assigned coach`
-      );
-    },
-    [currentOrganization?.id, runMutation]
-  );
+  const pendingCoverage = useMemo(() => {
+    if (!pendingChange || assignmentRows === null) return undefined;
+    const today = new Date().toISOString().slice(0, 10);
+    try {
+      const report = coachChangeConsequence({
+        rows: assignmentRows,
+        teamIds: teams.map((team) => String(team.id)),
+        change: {
+          teamId: String(pendingChange.teamId),
+          leadCoachId: pendingChange.leadCoachId ? String(pendingChange.leadCoachId) : null,
+          assistantCoachIds: null,
+        },
+        effectiveOn: today,
+      });
+      const teamName = new Map(teams.map((team) => [String(team.id), team.name]));
+      const coachName = new Map(coaches.map((coach) => [String(coach.id), coach.full_name]));
+      return {
+        effectiveOn: report.effectiveOn,
+        teamsExamined: report.teamsExamined,
+        changes: report.changes.map((row) => ({
+          ...row,
+          teamName: teamName.get(row.teamId) || row.teamId,
+          soleCoachName: row.soleCoachId
+            ? coachName.get(row.soleCoachId) || 'a coach no longer on file'
+            : null,
+        })),
+      };
+    } catch (err) {
+      logger.error('Coach change consequence failed:', err);
+      return undefined;
+    }
+  }, [assignmentRows, coaches, pendingChange, teams]);
 
   const columns = useMemo(() => {
     /** @type {any[]} */
@@ -749,10 +813,20 @@ export default function CoachesPage() {
 
       <Modal
         open={Boolean(manageCoach)}
-        onClose={() => setManageCoachId(null)}
+        onClose={() => {
+          setPendingChange(null);
+          setManageCoachId(null);
+        }}
         title={manageCoach ? `Teams — ${manageCoach.fullName}` : 'Teams'}
         footer={
-          <Button variant="secondary" size="sm" onClick={() => setManageCoachId(null)}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setPendingChange(null);
+              setManageCoachId(null);
+            }}
+          >
             Done
           </Button>
         }
@@ -822,6 +896,31 @@ export default function CoachesPage() {
                 </span>
               )}
             </div>
+
+            {pendingChange && (
+              <div data-testid="coach-change-preview">
+                <ConsequencePreview
+                  subject={pendingChange.teamName}
+                  operation="reassign"
+                  titleId="coach-change-preview-title"
+                  coverage={pendingCoverage}
+                  repair={repairProposal()}
+                />
+                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                  <Button variant="primary" size="sm" disabled={busy} onClick={handleConfirmChange}>
+                    Confirm change
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => setPendingChange(null)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </Modal>

@@ -72,6 +72,10 @@ When(
 
     await teamSelect.selectOption(teamValue || '');
     await dialog.getByRole('button', { name: 'Assign' }).click();
+    // 8.8: the change is previewed (sole-coach register before/after) and
+    // committed only on confirmation.
+    await expect(dialog.getByTestId('coach-change-preview')).toBeVisible({ timeout: 15000 });
+    await dialog.getByRole('button', { name: 'Confirm change' }).click();
     await expect(
       page.getByRole('status').filter({ hasText: 'assigned to the selected team' })
     ).toBeVisible({ timeout: 15000 });

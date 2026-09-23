@@ -261,8 +261,10 @@ export function changeCountsFor(reference, slot) {
 }
 
 /**
- * How many blocking and compromise findings one placement carries, per reason
- * code.
+ * How many blocking and compromise findings one placement carries, per
+ * **instance** — the code and the counterpart games it is with (see
+ * `resolve/instances.js`), which for a finding naming no other game is the code
+ * alone.
  *
  * This is what "the schedule already carried this" is recorded as, so that
  * {@link candidateObjectiveCounts} can charge for what a candidate slot adds
@@ -276,15 +278,7 @@ export function placementFindingCounts(placement) {
   /** @type {Record<string, number>} */
   const counts = {};
   if (placement === null || placement === undefined) return counts;
-  for (const finding of placement.findings) {
-    if (
-      finding.severity !== CONSTRAINT_SEVERITY.BLOCKING &&
-      finding.severity !== CONSTRAINT_SEVERITY.COMPROMISE
-    ) {
-      continue;
-    }
-    counts[finding.code] = (counts[finding.code] ?? 0) + 1;
-  }
+  for (const [key, entry] of Object.entries(placement.findingInstances)) counts[key] = entry.count;
   return counts;
 }
 
@@ -328,8 +322,8 @@ export function placementFindingTotal(placement) {
  *
  * ## Quality is charged **against what the schedule already carried**
  *
- * `accepted` is the same game's findings at the slot the published schedule gave
- * it, per code, and only the *excess* over that is counted. Without it the
+ * `accepted` is what the published schedule's record accepts **at this candidate
+ * slot**, per instance (`resolve/instances.js` `acceptedAtSlot()`), and only the *excess* over that is counted. Without it the
  * objective scores quality absolutely while the gate that admits a candidate
  * (`newBlockingCodes()` in `stages.js`) compares against the baseline, and the
  * two disagree in the one direction that matters: a game standing on a
@@ -359,24 +353,14 @@ export function candidateObjectiveCounts(input) {
   if (placement === null) return counts;
   const accepted = input.accepted ?? {};
 
-  /** @type {Map<string, { severity: string, count: number }>} */
-  const here = new Map();
-  for (const finding of placement.findings) {
-    if (
-      finding.severity !== CONSTRAINT_SEVERITY.BLOCKING &&
-      finding.severity !== CONSTRAINT_SEVERITY.COMPROMISE
-    ) {
-      continue;
-    }
-    const entry = here.get(finding.code);
-    if (entry === undefined) here.set(finding.code, { severity: finding.severity, count: 1 });
-    else entry.count += 1;
-  }
-
   let blocking = 0;
   let compromise = 0;
-  for (const [code, entry] of here) {
-    const excess = entry.count - (accepted[code] ?? 0);
+  // Per **instance**, the key the gate admits by (`resolve/instances.js`): a
+  // clash with a different opponent is a different breach, and discounting it
+  // because the baseline carried *a* clash of that code would let the objective
+  // prefer the very slot the gate is about to refuse.
+  for (const [key, entry] of Object.entries(placement.findingInstances)) {
+    const excess = entry.count - (accepted[key] ?? 0);
     if (excess <= 0) continue;
     if (entry.severity === CONSTRAINT_SEVERITY.BLOCKING) blocking += excess;
     else compromise += excess;

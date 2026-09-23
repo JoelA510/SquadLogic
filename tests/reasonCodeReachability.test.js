@@ -2419,11 +2419,14 @@ harvest(
 /**
  * A budget that bites **during** the repair rather than after it.
  *
- * Two same-format games are stacked onto a third's slot in the baseline and a
- * fourth is requested onto it and pinned, so the pile has to come apart around
- * a game that cannot move. Unbounded the run spreads; under a cap one of the
- * relocations is refused before the writer sees it, which is
- * `RESOLVE_CHANGE_BUDGET_BOUND`. `tests/boundedLocalRepair.test.js` is where
+ * One same-format game is stacked onto another's slot in the baseline and both
+ * are put in the repair scope, so `local-search` has to answer for an accepted
+ * clash; a third is requested onto a fourth's slot and pinned, which is the
+ * ungated core. Under a cap the scoped relocations are refused before the
+ * writer sees them, which is `RESOLVE_CHANGE_BUDGET_BOUND`. (Rebuilt in 8.6
+ * PR 2: the pile-up construction it replaced only bit because the placer
+ * could re-home a displaced game into a clash its published slot had carried —
+ * see `tests/boundedLocalRepair.test.js`.) `tests/boundedLocalRepair.test.js` is where
  * the numbers are asserted; this only has to make the code fire.
  */
 const BOUND_SCENARIO = (() => {
@@ -2431,21 +2434,23 @@ const BOUND_SCENARIO = (() => {
     .filter((game) => game.date === RESOLVE_DATE && game.venueId === anchor.venueId)
     .filter((game) => game.startMinutes === KICKOFFS[0]);
   const head = wave[0];
-  const stackers = wave
-    .filter((game) => game.format === head.format && game.surfaceId !== head.surfaceId)
-    .slice(0, 2);
-  const extra = wave.find(
+  const [stacker, requested] = wave.filter(
+    (game) => game.format === head.format && game.surfaceId !== head.surfaceId
+  );
+  const occupant = wave.find(
     (game) =>
       game.format === head.format &&
       game.id !== head.id &&
-      !stackers.some((stacker) => stacker.id === game.id)
+      game.id !== stacker?.id &&
+      game.id !== requested?.id
   );
-  if (stackers.length < 2 || !extra) return null;
+  if (!stacker || !requested || !occupant) return null;
   return {
+    scope: [head.id, stacker.id],
     schedule: {
       ...schedule,
       games: schedule.games.map((game) =>
-        stackers.some((stacker) => stacker.id === game.id)
+        game.id === stacker.id
           ? {
               ...game,
               surfaceId: head.surfaceId,
@@ -2457,11 +2462,11 @@ const BOUND_SCENARIO = (() => {
     },
     changes: [
       {
-        gameId: extra.id,
+        gameId: requested.id,
         date: RESOLVE_DATE,
-        surfaceId: head.surfaceId,
-        startMinutes: KICKOFFS[0],
-        reason: 'one more game onto a slot three others already share',
+        surfaceId: occupant.surfaceId,
+        startMinutes: occupant.startMinutes,
+        reason: 'one game onto a slot another already holds',
       },
     ],
   };
@@ -2472,13 +2477,14 @@ if (BOUND_SCENARIO === null) {
   );
 }
 harvest(
-  'applyChangeRequest(a pile that has to come apart, under a budget that stops it early)',
+  'applyChangeRequest(a scoped accepted clash, under a budget that stops its repair)',
   applyChangeRequest({
     schedule: BOUND_SCENARIO.schedule,
     changes: BOUND_SCENARIO.changes,
     engines,
     freeze: freezeAllExcept([{ date: RESOLVE_DATE }]),
     holdChanges: true,
+    repairScope: BOUND_SCENARIO.scope,
     changeBudget: 2,
     verify: false,
     onUnsatisfiable: 'report',

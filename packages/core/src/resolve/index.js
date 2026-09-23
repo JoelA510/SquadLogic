@@ -119,6 +119,19 @@ export { buildSlotInventory, candidateSlotsFor } from './inventory.js';
 export { bookingsOn, checkPlacement } from './legality.js';
 
 export {
+  FINDING_LOCUS,
+  FINDING_LOCUS_BY_CODE,
+  PLACEMENT_REASON_REGISTRIES,
+  acceptedAtSlot,
+  codeOfInstance,
+  findingCounterparts,
+  findingInstanceKey,
+  findingLocusOf,
+  grownCodes,
+  violationInstanceKey,
+} from './instances.js';
+
+export {
   RESOLVE_CHANGE_TERMS,
   RESOLVE_OBJECTIVE_TERM,
   RESOLVE_OBJECTIVE_WEIGHTS,

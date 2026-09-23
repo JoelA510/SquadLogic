@@ -630,15 +630,26 @@ describe('the change budget bounds the neighbourhood rather than judging the res
   /**
    * A clash the corpus does not contain, constructed the way
    * `tests/minimalDiff.test.js` constructs its own and for the same reason:
-   * on the published season `local-search` and `pair-repair` never apply a
-   * move at all, so a budget test over the corpus alone would bound a
-   * neighbourhood that was never going to spread.
+   * on the published season `local-search` never applies a move at all, so a
+   * budget test over the corpus alone would bound a neighbourhood that was
+   * never going to spread.
    *
-   * Two same-format games are stacked onto a third's slot in the **baseline**
-   * — so the overlap is accepted, not something this run created — and the
-   * change request then puts one more game on the same slot and pins it with
-   * `holdChanges`. The pile now has to come apart around a game that cannot
-   * move, which is what makes the other games' moves consequential.
+   * **Rebuilt in 8.6 PR 2, because the first construction bit on a defect.**
+   * It stacked two games onto a third's slot and pinned a fourth onto the pile.
+   * The gated moves the budget refused there existed only because the placer
+   * re-homed two dislodged games **back onto the pinned game's slot** — a
+   * three-way clash their published-slot acceptance was allowed to follow them
+   * into — and `pair-repair` then had to clean up after it. Under a cap the run
+   * stopped halfway and published that pile-up as a "partial repair". With
+   * acceptance keyed per instance and per slot the placer puts them on clean
+   * ground at once, no gated move remains, and the bound had nothing to bite.
+   *
+   * So the gated half now comes from where 8.6 says it should: a **repair
+   * scope**. One same-format game is stacked onto another's slot in the
+   * baseline — an accepted clash — and both are scoped, so `local-search`
+   * answers for them under the budget. The ungated core the cap cannot touch is
+   * a request that puts a third game onto a fourth's slot and pins it: the
+   * requested move and the dislodge it forces.
    */
   const STACK = (() => {
     const byVenueDate = new Map();
@@ -655,16 +666,18 @@ describe('the change budget bounds the neighbourhood rather than judging the res
     )[0];
     const wave = venueGames.filter((game) => game.startMinutes === kickoff);
     const anchor = wave[0];
-    const movers = wave
-      .filter((game) => game.format === anchor.format && game.surfaceId !== anchor.surfaceId)
-      .slice(0, 2);
-    const extra = wave.find(
+    const sameFormat = wave.filter(
+      (game) => game.format === anchor.format && game.surfaceId !== anchor.surfaceId
+    );
+    const [stacker, requested] = sameFormat;
+    const occupant = wave.find(
       (game) =>
         game.format === anchor.format &&
         game.id !== anchor.id &&
-        !movers.some((mover) => mover.id === game.id)
+        game.id !== stacker?.id &&
+        game.id !== requested?.id
     );
-    if (movers.length < 2 || !extra) {
+    if (!stacker || !requested || !occupant) {
       throw new Error(
         'the corpus no longer offers a wave to stack; this scenario needs rebuilding'
       );
@@ -672,7 +685,7 @@ describe('the change budget bounds the neighbourhood rather than judging the res
     const stacked = {
       ...schedule,
       games: schedule.games.map((game) =>
-        movers.some((mover) => mover.id === game.id)
+        game.id === stacker.id
           ? {
               ...game,
               surfaceId: anchor.surfaceId,
@@ -686,13 +699,14 @@ describe('the change budget bounds the neighbourhood rather than judging the res
       date,
       kickoff,
       schedule: stacked,
+      scope: [anchor.id, stacker.id],
       changes: [
         {
-          gameId: extra.id,
+          gameId: requested.id,
           date,
-          surfaceId: anchor.surfaceId,
-          startMinutes: kickoff,
-          reason: 'one more game onto a slot three others already share',
+          surfaceId: occupant.surfaceId,
+          startMinutes: occupant.startMinutes,
+          reason: 'one game onto a slot another already holds',
         },
       ],
     };
@@ -706,6 +720,7 @@ describe('the change budget bounds the neighbourhood rather than judging the res
       engines: openEngines,
       freeze: freezeAllExcept([{ date: STACK.date }]),
       holdChanges: true,
+      repairScope: STACK.scope,
       changeBudget,
       verify: false,
       onUnsatisfiable: 'report',
@@ -1002,9 +1017,17 @@ describe('the short-circuits rest on two preconditions, and both are checked whe
 
     let negativeExcessCasesSeen = 0;
     for (const testCase of cases) {
-      const placement = {
-        findings: testCase.here.map(([code, severity]) => ({ code, severity })),
-      };
+      // `candidateObjectiveCounts()` reads `findingInstances`, the per-instance
+      // record `checkPlacement()` builds; a finding naming no other game is
+      // keyed by its code alone, which is every case here.
+      /** @type {Record<string, { severity: string, count: number }>} */
+      const findingInstances = {};
+      for (const [code, severity] of testCase.here) {
+        const entry = findingInstances[code];
+        if (entry === undefined) findingInstances[code] = { severity, count: 1 };
+        else entry.count += 1;
+      }
+      const placement = { findingInstances };
       const carriedHere = testCase.here.length;
       const acceptedTotal = Object.values(testCase.accepted).reduce((a, b) => a + b, 0);
       if (acceptedTotal > carriedHere) negativeExcessCasesSeen += 1;

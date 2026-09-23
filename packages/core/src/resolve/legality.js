@@ -23,6 +23,7 @@ import { applyRegistrySeverity, effectiveSeverityTable } from '../constraints/se
 import { CONSTRAINT_SEVERITY, CONSTRAINT_STATUS } from '../constraints/reasonCodes.js';
 import { checkKickoffAvailability } from '../availability/kickoff.js';
 import { getSurface } from '../facility/facilityGraph.js';
+import { findingInstanceKey } from './instances.js';
 
 /** The id `checkKickoffAvailability()` gives the candidate it invents. */
 const PROBE_BOOKING_ID = '__availability_probe__';
@@ -62,7 +63,7 @@ export function bookingsOn(state, date, exceptGameId) {
  * @param {import('./types.js').ResolveState} state
  * @param {string} gameId
  * @param {import('./types.js').Slot} slot
- * @returns {{ legal: boolean, status: string, findings: Array<Object>, blockingCodes: string[], blockingCodeCounts: Record<string, number>, counterpartGameIds: string[], availability: Object, registryFindings: Array<Object> }}
+ * @returns {{ legal: boolean, status: string, findings: Array<Object>, blockingCodes: string[], blockingCodeCounts: Record<string, number>, blockingInstanceCounts: Record<string, number>, findingInstances: Record<string, { severity: string, count: number }>, counterpartGameIds: string[], availability: Object, registryFindings: Array<Object> }}
  */
 export function checkPlacement(engines, state, gameId, slot) {
   const game = state.baseline[gameId];
@@ -135,12 +136,39 @@ export function checkPlacement(engines, state, gameId, slot) {
     blockingCodeCounts[finding.code] = (blockingCodeCounts[finding.code] ?? 0) + 1;
   }
 
+  // **Which breach, not only how many.** Counts per code cannot tell a game
+  // that kept its clash from one that traded it for a clash with somebody
+  // else — the count is 1 in both places. Every "is this new?" question in
+  // `stages.js` compares these instead; see `resolve/instances.js`.
+  const self = new Set([gameId, PROBE_BOOKING_ID]);
+  /** @type {Record<string, number>} */
+  const blockingInstanceCounts = {};
+  /** @type {Record<string, { severity: string, count: number }>} */
+  const findingInstances = {};
+  for (const finding of applied.findings) {
+    if (
+      finding.severity !== CONSTRAINT_SEVERITY.BLOCKING &&
+      finding.severity !== CONSTRAINT_SEVERITY.COMPROMISE
+    ) {
+      continue;
+    }
+    const key = findingInstanceKey(finding, self);
+    if (finding.severity === CONSTRAINT_SEVERITY.BLOCKING) {
+      blockingInstanceCounts[key] = (blockingInstanceCounts[key] ?? 0) + 1;
+    }
+    const entry = findingInstances[key];
+    if (entry === undefined) findingInstances[key] = { severity: finding.severity, count: 1 };
+    else entry.count += 1;
+  }
+
   return {
     legal: applied.status !== CONSTRAINT_STATUS.REJECTED,
     status: applied.status,
     findings: applied.findings,
     blockingCodes: [...new Set(blocking.map((finding) => finding.code))].sort(),
     blockingCodeCounts,
+    blockingInstanceCounts,
+    findingInstances,
     counterpartGameIds: [...counterparts].sort(),
     availability,
     // **What the seam itself said, carried rather than dropped.**

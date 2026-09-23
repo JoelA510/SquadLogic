@@ -47,6 +47,7 @@ import { FREEZE_DISPOSITION } from '../freeze/reasonCodes.js';
 
 import { frozenGameUnsatisfiable, registryConstraintIdsFor } from './errors.js';
 import { candidateSlotsFor } from './inventory.js';
+import { acceptedAtSlot, grownCodes, violationInstanceKey } from './instances.js';
 import { checkPlacement } from './legality.js';
 import {
   candidateObjectiveCounts,
@@ -107,13 +108,15 @@ function constraintCause(context, placement, codes, counterpartGameIds) {
 }
 
 /**
- * What this run **accepts** at a game's baseline slot, as blocking code counts.
+ * What this run **accepts** for a game standing on `slot`, as blocking instance
+ * counts: everything its published slot carried when `slot` *is* that slot,
+ * and only what travels with the game anywhere else (`resolve/instances.js`).
  *
  * Two questions wear the same numbers and they are not the same question:
  *
  * | question | asked by | reads |
  * |---|---|---|
- * | *is this clash new?* | `dislodge` | `context.baselineBlockingCodes` — what the schedule arrived carrying, always |
+ * | *is this clash new?* | `dislodge`, `pair-repair` | {@link carriedBlockingAt} — what the schedule arrived carrying, always |
  * | *is this game's position one we answer for?* | `local-search`, `pair-repair`, the placer | this, which is empty for a game in the repair scope |
  *
  * Keeping `dislodge` on the as-found record is what stops a repair scope
@@ -130,34 +133,59 @@ function constraintCause(context, placement, codes, counterpartGameIds) {
  *
  * @param {Object} context
  * @param {string} gameId
+ * @param {import('./types.js').Slot} slot - where the game stands, or is offered
  * @returns {Record<string, number>}
  */
-function acceptedBlockingCodesFor(context, gameId) {
+function acceptedBlockingFor(context, gameId, slot) {
   if (context.repairScope.has(gameId)) return {};
-  return context.baselineBlockingCodes[gameId] ?? {};
+  return acceptedAtSlot(context.baselineBlocking[gameId], slotKey(slot));
+}
+
+/**
+ * What the schedule **arrived carrying** that still counts as carried at this
+ * slot — `dislodge`'s and `pair-repair`'s record, which the repair scope does
+ * not change (see {@link acceptedBlockingFor} for why the two differ).
+ *
+ * Slot-aware for the same reason the scope-aware record is: a clash the
+ * published schedule carried was accepted for that game **on that slot**, and a
+ * game the run has moved elsewhere carries only what travels with it
+ * (`resolve/instances.js`).
+ *
+ * @param {Object} context
+ * @param {string} gameId
+ * @param {import('./types.js').Slot} slot
+ * @returns {Record<string, number>}
+ */
+function carriedBlockingAt(context, gameId, slot) {
+  return acceptedAtSlot(context.baselineBlocking[gameId], slotKey(slot));
 }
 
 /**
  * The same, one severity wider, for the objective's relative quality scoring.
  *
- * Moves with {@link acceptedBlockingCodesFor} and never separately: the gate
+ * Moves with {@link acceptedBlockingFor} and never separately: the gate
  * that admits a candidate compares blocking counts and the objective discounts
  * blocking **and** compromise, so a game whose gate stopped accepting its own
  * slot while the objective still scored it as free would be refused everywhere
- * and content where it was.
+ * and content where it was. **Both are slot-aware and keyed per instance, from
+ * the same `acceptedAtSlot()`**, which is why one cannot drift from the other:
+ * a compromise the published slot carried is discounted at that slot and
+ * charged anywhere else, exactly as the gate treats a blocking one.
  *
  * @param {Object} context
  * @param {string} gameId
+ * @param {import('./types.js').Slot} slot
  * @returns {Record<string, number>}
  */
-function acceptedFindingCountsFor(context, gameId) {
+function acceptedFindingsFor(context, gameId, slot) {
   if (context.repairScope.has(gameId)) return {};
-  return context.baselineFindingCounts[gameId] ?? {};
+  return acceptedAtSlot(context.baselineFindings[gameId], slotKey(slot));
 }
 
 /**
- * Grew, in the sense that matters: this game breaks a blocking code **more
- * often** than the baseline did.
+ * Grew, in the sense that matters: some blocking **instance** occurs more often
+ * here than the record accepts at this slot. Returns the codes of the instances
+ * that grew, so every caller still reports in codes.
  *
  * A change request is not asked to repair the schedule it was handed. The
  * corpus's four `Scrimmage` rows are blocking-illegal in the published season
@@ -168,22 +196,20 @@ function acceptedFindingCountsFor(context, gameId) {
  * **Counts, not presence.** Comparing the two de-duplicated code *sets* answers
  * "does it break something new" and misses "does it break the same thing
  * twice": a game already overlapping one neighbour can be relocated into a slot
- * where it overlaps two, and the set is identical in both places. `verify`
- * already compares the rule engine's violations per code by count, and this is
- * that contract, adopted rather than reinvented — the shape `CLAUDE.md` §3 asks
- * for when a sibling already handles the case.
+ * where it overlaps two, and the set is identical in both places.
  *
- * @param {Readonly<Record<string, number>>} now - `checkPlacement().blockingCodeCounts`
- * @param {Readonly<Record<string, number>>} baseline - the same, for the baseline slot
+ * **Instances, not codes (8.6 PR 2).** Counts per code miss a game that
+ * *traded* its accepted clash for a clash with somebody else — the count is 1
+ * in both places — and a game carrying a clash its published slot was allowed
+ * to carry into a slot that never had it. `verify` now compares the rule
+ * engine's violations per instance too; one contract, both layers.
+ *
+ * @param {Readonly<Record<string, number>>} now - `checkPlacement().blockingInstanceCounts`
+ * @param {Readonly<Record<string, number>>} baseline - `acceptedAtSlot()` for the same slot
  * @returns {string[]}
  */
 function newBlockingCodes(now, baseline) {
-  /** @type {string[]} */
-  const grown = [];
-  for (const [code, count] of Object.entries(now)) {
-    if (count > (baseline[code] ?? 0)) grown.push(code);
-  }
-  return grown.sort();
+  return grownCodes(now, baseline);
 }
 
 /**
@@ -499,8 +525,8 @@ function chooseSlot(state, context, gameId, options) {
     state.ledger.meta.candidatesEvaluated += 1;
     const placement = checkPlacement(context.engines, state, gameId, candidate);
     const grown = newBlockingCodes(
-      placement.blockingCodeCounts,
-      acceptedBlockingCodesFor(context, gameId)
+      placement.blockingInstanceCounts,
+      acceptedBlockingFor(context, gameId, candidate)
     );
     if (grown.length > 0) {
       state.ledger.meta.candidatesRejected += 1;
@@ -517,7 +543,7 @@ function chooseSlot(state, context, gameId, options) {
         // candidate absolutely would then charge this game for that finding at
         // its own published slot and move it off its published time to repair
         // something already accepted.
-        accepted: acceptedFindingCountsFor(context, gameId),
+        accepted: acceptedFindingsFor(context, gameId, candidate),
       }),
       context.weights
     ).total;
@@ -661,18 +687,22 @@ const baselineIngest = {
       const slot = { date: game.date, surfaceId: game.surfaceId, startMinutes: game.startMinutes };
       const placement = checkPlacement(context.engines, state, gameId, slot);
       const findingCounts = placementFindingCounts(placement);
+      const publishedSlotKey = slotKey(slot);
       // **What the schedule arrived carrying, always and for every game** —
       // including the ones in the repair scope. This map answers "is this
       // clash new?", which is `dislodge`'s question, and the answer does not
       // change because a caller asked for a game to be re-homed. What the
       // repair scope changes is a different question, asked by `local-search`
-      // and the placer: see {@link acceptedBlockingCodesFor}.
-      context.baselineBlockingCodes[gameId] = placement.blockingCodeCounts;
+      // and the placer: see {@link acceptedBlockingFor}.
+      context.baselineBlocking[gameId] = {
+        slotKey: publishedSlotKey,
+        instances: placement.blockingInstanceCounts,
+      };
       // The same record one severity wider: the gate compares blocking counts,
       // the objective charges for blocking **and** compromise, and both have to
       // be measured against the same published slot or the run pays twice for
       // an exception the season already accepted.
-      context.baselineFindingCounts[gameId] = findingCounts;
+      context.baselineFindings[gameId] = { slotKey: publishedSlotKey, instances: findingCounts };
       if (context.repairScope.has(gameId)) {
         // **Counted off `blockingCodeCounts`, not `findingCounts`.** The
         // vacuity check exists to catch a scope that cannot change anything,
@@ -846,8 +876,8 @@ const dislodge = {
       if (!current.games[gameId]) continue;
       const slot = /** @type {import('./types.js').Slot} */ (slotOf(current, gameId));
       const placement = checkPlacement(context.engines, current, gameId, slot);
-      // **`context.baselineBlockingCodes` directly, never
-      // {@link acceptedBlockingCodesFor}.** This stage asks whether the clash
+      // **The as-found record ({@link carriedBlockingAt}), never
+      // {@link acceptedBlockingFor}.** This stage asks whether the clash
       // is one *this run* created, and the repair scope does not change that
       // answer: a game whose ground was withdrawn before the run started was
       // not put there by the run. Reading the scope-aware record here lifts
@@ -855,8 +885,8 @@ const dislodge = {
       // here can repair, and `initial-assignment` then shelves them all. See
       // that function's docblock for the 21 kickoffs it cost when measured.
       const grown = newBlockingCodes(
-        placement.blockingCodeCounts,
-        context.baselineBlockingCodes[gameId] ?? {}
+        placement.blockingInstanceCounts,
+        carriedBlockingAt(context, gameId, slot)
       );
       if (grown.length === 0) continue;
 
@@ -920,15 +950,13 @@ const dislodge = {
         // Lifting the game being examined ends the clash by definition;
         // otherwise re-ask, so no further neighbour is disturbed once it is.
         if (party === gameId) break;
-        const after = checkPlacement(
-          context.engines,
-          current,
-          gameId,
-          /** @type {import('./types.js').Slot} */ (slotOf(current, gameId))
-        );
+        const afterSlot = /** @type {import('./types.js').Slot} */ (slotOf(current, gameId));
+        const after = checkPlacement(context.engines, current, gameId, afterSlot);
         if (
-          newBlockingCodes(after.blockingCodeCounts, context.baselineBlockingCodes[gameId] ?? {})
-            .length === 0
+          newBlockingCodes(
+            after.blockingInstanceCounts,
+            carriedBlockingAt(context, gameId, afterSlot)
+          ).length === 0
         ) {
           break;
         }
@@ -1055,8 +1083,10 @@ const localSearch = {
       const slot = /** @type {import('./types.js').Slot} */ (slotOf(current, gameId));
       const placement = checkPlacement(context.engines, current, gameId, slot);
       if (
-        newBlockingCodes(placement.blockingCodeCounts, acceptedBlockingCodesFor(context, gameId))
-          .length === 0
+        newBlockingCodes(
+          placement.blockingInstanceCounts,
+          acceptedBlockingFor(context, gameId, slot)
+        ).length === 0
       ) {
         // The hold rule, in one branch: a legal game is never moved. The
         // objective decides *where* a game goes once something has forced it to
@@ -1099,8 +1129,8 @@ const localSearch = {
                 stageId: this.id,
                 slot: slotKey(slot),
                 codes: newBlockingCodes(
-                  placement.blockingCodeCounts,
-                  acceptedBlockingCodesFor(context, gameId)
+                  placement.blockingInstanceCounts,
+                  acceptedBlockingFor(context, gameId, slot)
                 ).join(', '),
               }
             )
@@ -1120,8 +1150,8 @@ const localSearch = {
             context,
             placement,
             newBlockingCodes(
-              placement.blockingCodeCounts,
-              acceptedBlockingCodesFor(context, gameId)
+              placement.blockingInstanceCounts,
+              acceptedBlockingFor(context, gameId, slot)
             ),
             placement.counterpartGameIds
           ),
@@ -1153,8 +1183,8 @@ const pairRepair = {
       if (!current.games[gameId]) continue;
       const slot = /** @type {import('./types.js').Slot} */ (slotOf(current, gameId));
       const placement = checkPlacement(context.engines, current, gameId, slot);
-      // **`context.baselineBlockingCodes` directly, as `dislodge` does, and
-      // deliberately not {@link acceptedBlockingCodesFor}.** This stage does
+      // **The as-found record ({@link carriedBlockingAt}), as `dislodge` reads
+      // it, and deliberately not {@link acceptedBlockingFor}.** This stage does
       // not move `gameId`; it moves somebody else off their published slot
       // for `gameId`'s benefit. Reading the scope-aware record here lets a
       // breach that existed before the run started — one the scope asked
@@ -1164,8 +1194,8 @@ const pairRepair = {
       // move the games it names, not a licence to spend the times of games it
       // does not.
       const grown = newBlockingCodes(
-        placement.blockingCodeCounts,
-        context.baselineBlockingCodes[gameId] ?? {}
+        placement.blockingInstanceCounts,
+        carriedBlockingAt(context, gameId, slot)
       );
       if (grown.length === 0) continue;
 
@@ -1233,30 +1263,56 @@ const verify = {
     ledger.meta.rulesRun += verification.meta.rulesRun;
     ledger.meta.rulesExercised += verification.meta.rulesExercised;
 
+    // **Per instance, then summed per code.** Comparing totals per code let a
+    // swapped instance net to zero: two accepted clashes traded for two new
+    // ones read as "2 against 2" and the stage said nothing. An instance is the
+    // rule, the code, the subject and the entities it names
+    // (`resolve/instances.js` `violationInstanceKey()`), never the measured
+    // values, which move whenever a neighbour does.
+    /** @type {Record<string, number>} */
+    const beforeInstances = {};
     /** @type {Record<string, number>} */
     const before = {};
     for (const violation of context.baselineVerification?.violations ?? []) {
+      const key = violationInstanceKey(violation);
+      beforeInstances[key] = (beforeInstances[key] ?? 0) + 1;
       before[violation.code] = (before[violation.code] ?? 0) + 1;
     }
     /** @type {Record<string, number>} */
+    const afterInstances = {};
+    /** @type {Record<string, number>} */
     const after = {};
+    /** @type {Record<string, string>} */
+    const codeOfKey = {};
     for (const violation of verification.violations) {
+      const key = violationInstanceKey(violation);
+      afterInstances[key] = (afterInstances[key] ?? 0) + 1;
       after[violation.code] = (after[violation.code] ?? 0) + 1;
+      codeOfKey[key] = violation.code;
+    }
+    /** @type {Record<string, number>} */
+    const introducedByCode = {};
+    for (const [key, count] of Object.entries(afterInstances)) {
+      const excess = count - (beforeInstances[key] ?? 0);
+      if (excess <= 0) continue;
+      introducedByCode[codeOfKey[key]] = (introducedByCode[codeOfKey[key]] ?? 0) + excess;
     }
 
-    for (const [code, count] of Object.entries(after).sort(([a], [b]) => a.localeCompare(b))) {
+    for (const [code, introduced] of Object.entries(introducedByCode).sort(([a], [b]) =>
+      a.localeCompare(b)
+    )) {
+      const count = after[code] ?? 0;
       const baselineCount = before[code] ?? 0;
-      if (count <= baselineCount) continue;
       ledger.findings.push(
         makeResolveFinding(
           RESOLVE_REASON.RESOLVE_VERIFY_NEW_VIOLATION,
-          `the standing rule engine reports ${count} ${code} on the resolved schedule against ${baselineCount} on the baseline; this change introduced ${count - baselineCount}. The resolver repairs facility legality only — it does not trade a soft constraint against another`,
+          `the standing rule engine reports ${count} ${code} on the resolved schedule against ${baselineCount} on the baseline, and ${introduced} of them are instances the baseline did not carry — this change introduced them. The resolver repairs facility legality only — it does not trade a soft constraint against another`,
           {
             stageId: this.id,
             code,
             baselineCount,
             resolvedCount: count,
-            introduced: count - baselineCount,
+            introduced,
             rulesRun: verification.meta.rulesRun,
             rulesExercised: verification.meta.rulesExercised,
           }

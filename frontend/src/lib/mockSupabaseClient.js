@@ -152,6 +152,32 @@ const initialMockData = {
       calendar_token_expires_at: new Date(Date.now() + 90 * 86400000).toISOString(),
     },
   ],
+  // 8.8: the backfill 20260923000000 performs, for the seeded teams. The mock
+  // twins of admin_assign_team_coach / admin_delete_coaches keep these rows and
+  // the teams' coach columns in step through mockSetTeamCoaches(), exactly as
+  // set_team_coaches() does in Postgres.
+  team_coach_assignments: [
+    {
+      id: 'tca-t1-lead',
+      organization_id: 'org-1',
+      team_id: 't1',
+      coach_id: 'mock-coach-id',
+      role: 'lead',
+      effective_from: '2026-01-01',
+      effective_to: null,
+      started_via: 'backfill',
+    },
+    {
+      id: 'tca-t2-lead',
+      organization_id: 'org-1',
+      team_id: 't2',
+      coach_id: 'c2',
+      role: 'lead',
+      effective_from: '2026-01-01',
+      effective_to: null,
+      started_via: 'backfill',
+    },
+  ],
   team_players: [
     { team_id: '00000000-0000-0000-0000-000000000001', player_id: 'player-1' },
     { team_id: '00000000-0000-0000-0000-000000000001', player_id: 'player-2' },
@@ -1419,6 +1445,75 @@ const deriveFieldClosures = (db) => {
   });
 
   return [...admin, ...imported];
+};
+
+const mockToday = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * Mock twin of `public.set_team_coaches()` (20260923000000): the only place the
+ * mock writes a team's coach columns, and it writes the assignment rows in the
+ * same step. Row arithmetic and date refusals are core's `applyCoachChange()`
+ * and `coachChangeRefusal()` -- what the consequence preview runs -- so mock,
+ * preview and SQL share one contract. Rows are updated in place, never removed.
+ */
+//
+// Loaded on first use: this file ships in the main bundle, and the budget has
+// no room for code only a mock session runs.
+const mockSetTeamCoaches = async (
+  db,
+  team,
+  leadCoachId,
+  assistantCoachIds,
+  effectiveOn,
+  via,
+  userId
+) => {
+  const { applyCoachChange, coachChangeRefusal } =
+    await import('@squadlogic/core/people/assignmentChange.js');
+  const table = (db.team_coach_assignments = db.team_coach_assignments || []);
+  const rows = table.filter((row) => String(row.team_id) === String(team.id));
+  const { ended, started } = applyCoachChange(
+    rows,
+    { teamId: String(team.id), leadCoachId, assistantCoachIds },
+    effectiveOn
+  );
+  const moved = ended.length + started.length > 0;
+  const refusal = moved && coachChangeRefusal(rows, effectiveOn, mockToday());
+  if (refusal) return { error: { message: refusal } };
+  for (const closed of ended) {
+    Object.assign(table.find((row) => row.id === closed.id) || {}, {
+      effective_to: closed.effective_to,
+      ended_via: via,
+    });
+  }
+  for (const opened of started) {
+    table.push({
+      ...opened,
+      id: mockId('tca-'),
+      organization_id: team.organization_id,
+      started_via: via,
+    });
+  }
+  const before = JSON.stringify([team.coach_id ?? null, team.assistant_coach_ids ?? null]);
+  team.coach_id = leadCoachId ?? null;
+  if (assistantCoachIds != null) {
+    team.assistant_coach_ids = [...new Set(assistantCoachIds.filter((id) => id != null))];
+  }
+  const written = before !== JSON.stringify([team.coach_id, team.assistant_coach_ids ?? null]);
+  if (moved || written) {
+    team.updated_at = new Date().toISOString();
+    (db.audit_log = db.audit_log || []).push({
+      id: mockId(),
+      organization_id: team.organization_id,
+      user_id: userId,
+      action: 'team.coach_assignments_changed',
+      resource_type: 'team',
+      resource_id: team.id,
+      metadata: { team_id: team.id, effective_on: effectiveOn, via, ended, started },
+      created_at: new Date().toISOString(),
+    });
+  }
+  return { error: null };
 };
 
 export const getMockData = (table, col, val) => {
@@ -6585,13 +6680,32 @@ export const mockSupabase = {
         return { data: null, error: { message: 'Access denied: admin role required' } };
       }
 
-      for (const team of db.teams || []) {
-        if (idSet.has(String(team.coach_id))) team.coach_id = null;
-        if (Array.isArray(team.assistant_coach_ids)) {
-          team.assistant_coach_ids = team.assistant_coach_ids.filter(
-            (coachId) => !idSet.has(String(coachId))
-          );
-        }
+      // 8.8: unassignment is END-DATING, through the single writer's twin.
+      // Every team naming a deleted coach in either column or in an open row.
+      const affectedTeams = (db.teams || [])
+        .filter(
+          (team) =>
+            idSet.has(String(team.coach_id)) ||
+            (team.assistant_coach_ids || []).some((coachId) => idSet.has(String(coachId))) ||
+            (db.team_coach_assignments || []).some(
+              (row) =>
+                String(row.team_id) === String(team.id) &&
+                row.effective_to == null &&
+                idSet.has(String(row.coach_id))
+            )
+        )
+        .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+      for (const team of affectedTeams) {
+        const result = await mockSetTeamCoaches(
+          db,
+          team,
+          idSet.has(String(team.coach_id)) ? null : (team.coach_id ?? null),
+          (team.assistant_coach_ids || []).filter((coachId) => !idSet.has(String(coachId))),
+          mockToday(),
+          'admin_delete_coaches',
+          session?.user?.id
+        );
+        if (result.error) return { data: null, error: result.error };
       }
       const droppedInterests = (db.coach_interested_programs || []).filter((row) =>
         idSet.has(String(row.coach_id))
@@ -6718,7 +6832,8 @@ export const mockSupabase = {
     }
 
     if (name === 'admin_assign_team_coach') {
-      const { p_organization_id, p_team_id, p_coach_id } = params || {};
+      const { p_organization_id, p_team_id, p_coach_id, p_effective_on } = params || {};
+      const effectiveOn = p_effective_on || mockToday();
       const session =
         typeof window !== 'undefined'
           ? JSON.parse(sessionStorage.getItem('__MOCK_SESSION__') || 'null')
@@ -6782,8 +6897,17 @@ export const mockSupabase = {
         };
       }
 
-      team.coach_id = p_coach_id || null;
-      team.updated_at = new Date().toISOString();
+      // 8.8: through the single writer's twin; assistants left as they are.
+      const written = await mockSetTeamCoaches(
+        db,
+        team,
+        p_coach_id || null,
+        null,
+        effectiveOn,
+        'admin_assign_team_coach',
+        session?.user?.id
+      );
+      if (written.error) return { data: null, error: written.error };
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
         id: mockId(),
@@ -6800,6 +6924,7 @@ export const mockSupabase = {
           team_id: p_team_id,
           previous_coach_id: previousCoachId,
           coach_id: p_coach_id || null,
+          effective_on: effectiveOn,
         },
         created_at: new Date().toISOString(),
       });
@@ -6810,6 +6935,7 @@ export const mockSupabase = {
           organization_id: p_organization_id,
           previous_coach_id: previousCoachId,
           coach_id: p_coach_id || null,
+          effective_on: effectiveOn,
           changed: true,
         },
         error: null,

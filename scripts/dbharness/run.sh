@@ -717,7 +717,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1079,6 +1079,38 @@ for id in "${REVERT_CHECKS[@]}"; do
   # refuses UPDATE and DELETE, so a plain INSERT as the table owner is the
   # cheapest way to give the revert something real to destroy. The RPC path
   # itself is exercised in docs/sql/20260920000000_smoke.sql.
+  # **The same reasoning for 20260923000000's revert.** It drops
+  # team_coach_assignments, and the ENDED rows in it are the only record of
+  # who coached a team before its current coach -- the columns the restored
+  # writers go on writing hold today's state only. On a fresh database there
+  # are no rows and the warning prints zeroes. So the harness plants THREE
+  # rows across TWO teams, ONE of them ended: unequal figures, split 2 + 1 by
+  # team, so a count of rows where teams were meant (or of open rows where
+  # ended were meant) prints a different number. Inserted as the table owner
+  # because the writer runs only inside the definer RPCs, which gate on a JWT
+  # psql_cmd does not carry; the RPC path is exercised in the smoke.
+  if [ "$id" = "20260923000000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('e4444444-4444-4444-4444-44444444444e','Assignment Org','assignment-org');
+              INSERT INTO public.season_settings (id, organization_id, name) VALUES
+                ('e5555555-5555-5555-5555-55555555555e','e4444444-4444-4444-4444-44444444444e','Assignment Season');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+                ('e6666666-6666-6666-6666-66666666666e','e4444444-4444-4444-4444-44444444444e','e5555555-5555-5555-5555-55555555555e','Assignment Division');
+              INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+                ('e7777777-7777-7777-7777-77777777777e','e4444444-4444-4444-4444-44444444444e','e6666666-6666-6666-6666-66666666666e','Assignment Team X'),
+                ('e8888888-8888-8888-8888-88888888888e','e4444444-4444-4444-4444-44444444444e','e6666666-6666-6666-6666-66666666666e','Assignment Team Y');
+              INSERT INTO public.team_coach_assignments
+                (organization_id, team_id, coach_id, role, effective_from, effective_to, started_via, ended_via)
+              VALUES
+                ('e4444444-4444-4444-4444-44444444444e','e7777777-7777-7777-7777-77777777777e',gen_random_uuid(),'lead','2026-08-01','2026-08-31','harness','harness'),
+                ('e4444444-4444-4444-4444-44444444444e','e7777777-7777-7777-7777-77777777777e',gen_random_uuid(),'lead','2026-09-01',NULL,'harness',NULL),
+                ('e4444444-4444-4444-4444-44444444444e','e8888888-8888-8888-8888-88888888888e',gen_random_uuid(),'assistant','2026-09-01',NULL,'harness',NULL);" \
+         >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the three assignment rows the revert check requires were never inserted"
+      dump 10 /tmp/harness_seed; STATUS=1; continue
+    fi
+  fi
+
   if [ "$id" = "20260920000000" ]; then
     if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
                 ('e1111111-1111-1111-1111-11111111111e','Baseline Org A','baseline-org-a'),
@@ -1236,6 +1268,16 @@ NEEDLES
       else
         echo "FAIL revert ${id}: publication_baselines survived its own revert"
         dump 10 /tmp/harness_store; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20260923000000" ]; then
+      # The seed planted 3 rows across 2 teams, 1 of them ended -- all three
+      # figures distinct, so a count over the wrong column cannot print this.
+      if grep -q 'this revert DESTROYS 3 coach assignment row(s) across 2 team(s); 1 of them are ENDED' /tmp/harness_rev; then
+        echo "  | (checked) the revert counted the coach assignment rows it was about to destroy, the teams they span, and the ended ones"
+      else
+        echo "FAIL revert ${id}: planted 3 assignment rows across 2 teams, 1 ended, and the revert did not warn with those figures"
+        STATUS=1
       fi
     fi
     if [ "$id" = "20260912000000" ]; then

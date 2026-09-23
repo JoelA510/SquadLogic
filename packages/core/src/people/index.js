@@ -97,6 +97,17 @@ export {
 } from './coachList.js';
 
 export {
+  TEAM_COACH_ROLE,
+  applyCoachChange,
+  assignmentRowCovers,
+  coachChangeConsequence,
+  coachChangeRefusal,
+  coachColumnDrift,
+  coachesOfTeamOn,
+  rosterInputFromAssignmentRows,
+} from './assignmentHistory.js';
+
+export {
   buildCoachRoster,
   coCoachesOf,
   coachSlotOf,

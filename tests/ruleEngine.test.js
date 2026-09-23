@@ -676,9 +676,10 @@ describe('rule engine :: the published season-2026 schedule', () => {
     // `Maplewood Back`/`Maplewood Front` were declared one venue complex; 17 of
     // those were a walk across one park, judged against a drive.
     [TRAVEL_REASON.TRAVEL_BETWEEN_VENUES_TOO_SHORT]: 1,
-    // "3 rec games are single-coach (a co-coach covered)". The overlap is real
-    // and blocking; the corpus records how it was handled, not that it did not
-    // happen.
+    // "3 rec games are single-coach (a co-coach covered)". The overlap is real;
+    // the corpus records how it was handled, not that it did not happen. Since
+    // #61 it is compromise: the operator allows it with a warning for exactly
+    // this reason — a co-coach covered.
     [TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP]: 3,
     // Five divisions carry no two-sided counted game: the Minis division, whose
     // rows name no team at all, and the four Select divisions, whose teams are
@@ -697,7 +698,8 @@ describe('rule engine :: the published season-2026 schedule', () => {
     const expectedTotal = Object.values(ACCEPTED_EXCEPTIONS).reduce((sum, n) => sum + n, 0);
     expect(report.violationCount).toBe(expectedTotal);
     expect(report.violationCount).toBe(62);
-    expect(report.countBySeverity).toEqual({ blocking: 7, compromise: 55, info: 0 });
+    // #61 moved the three coach overlaps from blocking to compromise.
+    expect(report.countBySeverity).toEqual({ blocking: 4, compromise: 58, info: 0 });
     // Asserted positively rather than by omission: the walking floor is now
     // reachable for a move between two venues in one complex, and every such
     // gap in the published season clears it.
@@ -720,12 +722,13 @@ describe('rule engine :: the published season-2026 schedule', () => {
     expect(gameIds).toEqual(unknownFootprint.map((game) => game.id).sort());
   });
 
-  it('traces the three blocking coach overlaps to the corpus’s three single-coach games', () => {
+  it('traces the three coach overlaps to the corpus’s three single-coach games', () => {
     const overlaps = run.violations.filter(
       (violation) => violation.code === TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP
     );
     expect(overlaps).toHaveLength(3);
-    for (const violation of overlaps) expect(violation.severity).toBe(RULE_SEVERITY.BLOCKING);
+    // Compromise since #61: allowed with a warning, because a co-coach covers.
+    for (const violation of overlaps) expect(violation.severity).toBe(RULE_SEVERITY.COMPROMISE);
     // The corpus's own reading of the same three clashes, derived from its own
     // loader rather than restated here.
     const singleCoach = findSingleCoachGames(season.recGames, season.coachTimelines, season.teams);
@@ -1015,7 +1018,9 @@ describe('incident 4, reproduced :: (a) a join that matches nothing', () => {
     // leaves all fifteen divisions unjudged — which is the point rather than an
     // inconvenience: no comparison of counts decides this, the engine's own
     // exercise verdict does.
-    expect(brokenReport.countBySeverity.blocking).toBeLessThan(report.countBySeverity.blocking);
+    // Since #61 the overlaps it sheds are compromise, so the blocking count no
+    // longer moves; the shed is stated by code instead.
+    expect(report.countByCode[TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP]).toBe(3);
     expect(brokenRun.byRuleId[RULE_ID.COACH_CONFLICT].violationCount).toBe(0);
     expect(run.byRuleId[RULE_ID.COACH_CONFLICT].violationCount).toBeGreaterThan(0);
     expect(brokenReport.countByCode[TRAVEL_REASON.TRAVEL_BETWEEN_VENUES_TOO_SHORT]).toBeUndefined();
@@ -1427,7 +1432,9 @@ describe('rule engine :: waivers', () => {
     expect(overlaps).toHaveLength(3);
     for (const violation of overlaps) {
       expect(violation.waived).toBe(false);
-      expect(violation.severity).toBe(RULE_SEVERITY.BLOCKING);
+      // Compromise since #61, and still not waivable: allowed with a warning is
+      // an operator policy, not an exception a board signature grants.
+      expect(violation.severity).toBe(RULE_SEVERITY.COMPROMISE);
     }
   });
 

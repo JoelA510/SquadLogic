@@ -164,7 +164,11 @@ export const TRAVEL_REASON_SEVERITY = Object.freeze({
   [TRAVEL_REASON.TRAVEL_BETWEEN_VENUES_TOO_SHORT]: CONSTRAINT_SEVERITY.COMPROMISE,
   [TRAVEL_REASON.TRAVEL_WITHIN_VENUE_TOO_SHORT]: CONSTRAINT_SEVERITY.COMPROMISE,
   [TRAVEL_REASON.TRAVEL_WITHIN_COMPLEX_CROSS_VENUE]: CONSTRAINT_SEVERITY.INFO,
-  [TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP]: CONSTRAINT_SEVERITY.BLOCKING,
+  // Compromise, by the operator's decision on #61: a coach in two places is
+  // allowed with a warning, because the team may have a co-coach whose
+  // registration is not complete yet. Avoiding it is still preferred, and the
+  // placer does (`resolve/stages.js` `chooseSlot()`, pass 2).
+  [TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP]: CONSTRAINT_SEVERITY.COMPROMISE,
   [TRAVEL_REASON.TRAVEL_FOOTPRINT_UNKNOWN]: CONSTRAINT_SEVERITY.COMPROMISE,
   [TRAVEL_REASON.TRAVEL_POLICY_UNGOVERNED]: CONSTRAINT_SEVERITY.COMPROMISE,
   [TRAVEL_REASON.TRAVEL_SCAN_VACUOUS]: CONSTRAINT_SEVERITY.COMPROMISE,
@@ -231,7 +235,8 @@ export function travelSeverityOf(code, record) {
   if (!fallback) {
     throw new Error(`waivers/coachTravel: reason code "${code}" has no registered severity`);
   }
-  // Overlap is a fact about physics, not a policy: no record may soften it.
+  // Overlap's severity is the operator's policy (#61: compromise, avoid but
+  // allow), fixed in the table above: no constraint record moves it either way.
   if (record === null || code === TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP) return fallback;
   if (!(code in POLICY_BY_CODE)) return fallback;
   return severityForType(record.type);

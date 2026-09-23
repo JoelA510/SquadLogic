@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 522 codes, of
- * which 510 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 523 codes, of
+ * which 511 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -2477,6 +2477,57 @@ if (BOUND_SCENARIO === null) {
   );
 }
 harvest(
+  'applyChangeRequest(a requested move that double-books a coach, verify off)',
+  (() => {
+    // #61: every placement that carries a new coach overlap warns, verify or
+    // not. Found rather than named: the first game whose coach has another
+    // game that day, requested onto that other game's kickoff at its own venue.
+    const byId = new Map(schedule.games.map((game) => [game.id, game]));
+    for (const commitment of schedule.commitments) {
+      const game = byId.get(commitment.gameId);
+      if (!game || game.endMinutes === null) continue;
+      const other = schedule.commitments.find(
+        (c) =>
+          c.personId === commitment.personId &&
+          c.date === commitment.date &&
+          c.gameId !== commitment.gameId
+      );
+      const target =
+        other &&
+        schedule.games.find(
+          (candidate) =>
+            candidate.date === game.date &&
+            candidate.venueId === game.venueId &&
+            candidate.format === game.format &&
+            candidate.startMinutes === byId.get(other.gameId)?.startMinutes &&
+            candidate.id !== game.id
+        );
+      if (!target) continue;
+      return applyChangeRequest({
+        schedule,
+        changes: [
+          {
+            gameId: game.id,
+            ...{
+              date: target.date,
+              surfaceId: target.surfaceId,
+              startMinutes: target.startMinutes,
+            },
+            reason: 'onto a kickoff its coach already has',
+          },
+        ],
+        engines,
+        holdChanges: true,
+        freeze: freezeAllExcept([{ date: game.date }]),
+        verify: false,
+        onUnsatisfiable: 'report',
+      });
+    }
+    throw new Error('reachability: no coach with two games on one date and a matching kickoff');
+  })()
+);
+
+harvest(
   'applyChangeRequest(a scoped accepted clash, under a budget that stops its repair)',
   applyChangeRequest({
     schedule: BOUND_SCENARIO.schedule,
@@ -4155,16 +4206,53 @@ harvest(
   (() => {
     // The rule engine blocks this fixture where it stands, and the facility
     // layer does not — so `minimalBlockingSet()` comes back `blocked: false`
-    // and the answer has to say which layer did decide. Asked with the minimal
-    // set left at its default, which is the answer an operator actually gets.
-    const blockedElsewhere = schedule.games.find((game) => game.id === 'combined_schedule.csv#534');
+    // and the answer has to say which layer did decide. The corpus's own case
+    // was a coach overlap, compromise since #61; the block is now a turnover
+    // below the HARD floor, constructed from the tightest consecutive pair on
+    // one surface (found, not named) with the later game moved to a 5-minute gap.
+    const bySurfaceDate = new Map();
+    for (const game of schedule.games) {
+      if (game.endMinutes === null) continue;
+      const key = `${game.surfaceId}|${game.date}`;
+      bySurfaceDate.set(key, [...(bySurfaceDate.get(key) ?? []), game]);
+    }
+    const [earlier, later] = [...bySurfaceDate.values()]
+      .flatMap((games) => {
+        const ordered = [...games].sort((a, b) => a.startMinutes - b.startMinutes);
+        return ordered.slice(1).map((next, index) => [ordered[index], next]);
+      })
+      .sort(
+        ([a1, b1], [a2, b2]) => b1.startMinutes - a1.endMinutes - (b2.startMinutes - a2.endMinutes)
+      )[0];
+    const shift = later.startMinutes - (earlier.endMinutes + 5);
+    const moved = (row) => ({
+      ...row,
+      startMinutes: row.startMinutes - shift,
+      endMinutes: row.endMinutes === null ? null : row.endMinutes - shift,
+    });
+    const witnessSchedule = {
+      ...schedule,
+      games: schedule.games.map((game) => (game.id === later.id ? moved(game) : game)),
+      commitments: schedule.commitments.map((c) => (c.gameId === later.id ? moved(c) : c)),
+    };
+    const witnessContext = buildAttributionContext({
+      graph,
+      table: timingTable,
+      calendar,
+      registry,
+      schedule: witnessSchedule,
+      verification: runRuleEngine(witnessSchedule, { registry, resources }),
+      venueComplexes,
+      roster,
+    });
+    const standing = moved(later);
     return canGameMove(
-      context,
+      witnessContext,
       {
-        gameId: blockedElsewhere.id,
-        insteadOfDate: blockedElsewhere.date,
-        insteadOfSurfaceId: blockedElsewhere.surfaceId,
-        insteadOfMinutes: blockedElsewhere.startMinutes,
+        gameId: standing.id,
+        insteadOfDate: standing.date,
+        insteadOfSurfaceId: standing.surfaceId,
+        insteadOfMinutes: standing.startMinutes,
       },
       { venueComplexes, standingPositionIsAnAnswer: true }
     );

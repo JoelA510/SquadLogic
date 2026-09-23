@@ -412,10 +412,13 @@ export function applyMove(state, move, stageId) {
  */
 export function resolveContextDefaults() {
   return {
-    /** Per game, the blocking codes its baseline slot already carried. */
-    baselineBlockingCodes: {},
+    /**
+     * Per game, its published slot and the blocking **instances** it carried
+     * there (`resolve/instances.js`); read only through `acceptedAtSlot()`.
+     */
+    baselineBlocking: {},
     /** The same one severity wider, for the objective's relative scoring. */
-    baselineFindingCounts: {},
+    baselineFindings: {},
     /** Games this run repairs rather than accepts; see the repair scope. */
     repairScope: new Set(),
     /** Per scoped game, how many baseline findings un-accepting it discarded. */

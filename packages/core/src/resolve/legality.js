@@ -23,6 +23,7 @@ import { applyRegistrySeverity, effectiveSeverityTable } from '../constraints/se
 import { CONSTRAINT_SEVERITY, CONSTRAINT_STATUS } from '../constraints/reasonCodes.js';
 import { checkKickoffAvailability } from '../availability/kickoff.js';
 import { getSurface } from '../facility/facilityGraph.js';
+import { findingCounterparts, findingInstanceKey } from './instances.js';
 
 /** The id `checkKickoffAvailability()` gives the candidate it invents. */
 const PROBE_BOOKING_ID = '__availability_probe__';
@@ -62,7 +63,7 @@ export function bookingsOn(state, date, exceptGameId) {
  * @param {import('./types.js').ResolveState} state
  * @param {string} gameId
  * @param {import('./types.js').Slot} slot
- * @returns {{ legal: boolean, status: string, findings: Array<Object>, blockingCodes: string[], blockingCodeCounts: Record<string, number>, counterpartGameIds: string[], availability: Object, registryFindings: Array<Object> }}
+ * @returns {{ legal: boolean, status: string, findings: Array<Object>, blockingCodes: string[], blockingCodeCounts: Record<string, number>, blockingInstanceCounts: Record<string, number>, findingInstances: Record<string, { severity: string, count: number }>, counterpartGameIds: string[], availability: Object, registryFindings: Array<Object> }}
  */
 export function checkPlacement(engines, state, gameId, slot) {
   const game = state.baseline[gameId];
@@ -109,16 +110,13 @@ export function checkPlacement(engines, state, gameId, slot) {
   const blocking = applied.findings.filter(
     (finding) => finding.severity === CONSTRAINT_SEVERITY.BLOCKING
   );
+  // One extractor for "who is this finding with", shared with the instance key
+  // below, so `counterpartGameIds` and the key cannot disagree about it.
+  const self = new Set([gameId, PROBE_BOOKING_ID]);
   /** @type {Set<string>} */
   const counterparts = new Set();
   for (const finding of blocking) {
-    const details = /** @type {Record<string, unknown>} */ (finding.details ?? {});
-    for (const key of ['bookingAId', 'bookingBId', 'otherBookingId']) {
-      const value = details[key];
-      if (typeof value !== 'string') continue;
-      if (value === PROBE_BOOKING_ID || value === gameId) continue;
-      counterparts.add(value);
-    }
+    for (const id of findingCounterparts(finding, self)) counterparts.add(id);
   }
 
   // **How many, not just whether.** `blockingCodes` is the de-duplicated set and
@@ -135,12 +133,38 @@ export function checkPlacement(engines, state, gameId, slot) {
     blockingCodeCounts[finding.code] = (blockingCodeCounts[finding.code] ?? 0) + 1;
   }
 
+  // **Which breach, not only how many.** Counts per code cannot tell a game
+  // that kept its clash from one that traded it for a clash with somebody
+  // else — the count is 1 in both places. Every "is this new?" question in
+  // `stages.js` compares these instead; see `resolve/instances.js`.
+  /** @type {Record<string, number>} */
+  const blockingInstanceCounts = {};
+  /** @type {Record<string, { severity: string, count: number }>} */
+  const findingInstances = {};
+  for (const finding of applied.findings) {
+    if (
+      finding.severity !== CONSTRAINT_SEVERITY.BLOCKING &&
+      finding.severity !== CONSTRAINT_SEVERITY.COMPROMISE
+    ) {
+      continue;
+    }
+    const key = findingInstanceKey(finding, self);
+    if (finding.severity === CONSTRAINT_SEVERITY.BLOCKING) {
+      blockingInstanceCounts[key] = (blockingInstanceCounts[key] ?? 0) + 1;
+    }
+    const entry = findingInstances[key];
+    if (entry === undefined) findingInstances[key] = { severity: finding.severity, count: 1 };
+    else entry.count += 1;
+  }
+
   return {
     legal: applied.status !== CONSTRAINT_STATUS.REJECTED,
     status: applied.status,
     findings: applied.findings,
     blockingCodes: [...new Set(blocking.map((finding) => finding.code))].sort(),
     blockingCodeCounts,
+    blockingInstanceCounts,
+    findingInstances,
     counterpartGameIds: [...counterparts].sort(),
     availability,
     // **What the seam itself said, carried rather than dropped.**

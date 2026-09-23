@@ -1193,7 +1193,10 @@ describe('review finding 2 :: quality was scored absolutely while the gate is re
     // The constructed baseline really does carry a blocking finding at that
     // slot, read from `checkPlacement()` rather than assumed.
     expect(stackedPlacement.blockingCodeCounts.OCCUPIED_SAME_SURFACE).toBe(1);
-    expect(stackedAccepted.OCCUPIED_SAME_SURFACE).toBe(1);
+    // Per instance since 8.6 PR 2: the clash is recorded with the game it is
+    // *with*, so trading it for a clash with somebody else is not "the same".
+    expect(stackedAccepted[`OCCUPIED_SAME_SURFACE|${stackHeld.id}`]).toBe(1);
+    expect(stackedAccepted.OCCUPIED_SAME_SURFACE).toBeUndefined();
     // …and the published corpus carries no such thing, which is why it is
     // constructed: its four accepted blocking findings are all
     // `SIZE_UNKNOWN_FORMAT` on the `Scrimmage` rows, a property of the format
@@ -1234,12 +1237,13 @@ describe('review finding 2 :: quality was scored absolutely while the gate is re
     // quality term would let a solver buy a move with somebody else's accepted
     // exception, and the short-circuits in `chooseSlot()` rest on every quality
     // term being non-negative.
+    // The per-instance record `checkPlacement()` builds; `X` and `Y` name no
+    // other game, so each is keyed by its code alone.
     const placement = /** @type {any} */ ({
-      findings: [
-        { code: 'X', severity: 'blocking' },
-        { code: 'X', severity: 'blocking' },
-        { code: 'Y', severity: 'compromise' },
-      ],
+      findingInstances: {
+        X: { severity: 'blocking', count: 2 },
+        Y: { severity: 'compromise', count: 1 },
+      },
     });
     const absolute = candidateObjectiveCounts({
       reference: STACK_SLOT,
@@ -1272,8 +1276,9 @@ describe('review finding 2 :: quality was scored absolutely while the gate is re
 });
 
 /**
- * The constructed scenario that gets `local-search` and `pair-repair` off the
- * ground at all — see the finding-1 block below for why that takes doing.
+ * A third game pinned onto a slot two others already share. Until 8.6 PR 2
+ * this was what got `local-search` and `pair-repair` off the ground; it no
+ * longer does, and the finding-1 block below says why that is the fix.
  */
 const stackThird = busiestWave.find(
   (game) =>
@@ -1334,29 +1339,77 @@ describe('review finding 1 :: drift was measured from the wrong anchor', () => {
     expect([...code.matchAll(/(?<!function )\banchorOf\(/g)]).toHaveLength(3);
   });
 
-  it('gets local-search and pair-repair off the ground, which the corpus alone does not', () => {
-    // **Reported rather than papered over.** On the published corpus these two
-    // stages never apply a move at all, and it is structural rather than
-    // incidental: `initial-assignment` only ever places a game where its blocking
-    // codes do not grow against the baseline, so it cannot make a *standing* game
-    // illegal unless the game it is placing already carried an accepted overlap —
-    // and the corpus has none. With one constructed, the two stages run.
+  it('no longer reaches local-search or pair-repair through a pile-up, because the pile-up was a defect', () => {
+    // **Inverted in 8.6 PR 2, and why.** This construction used to be how the
+    // two stages got off the ground: `initial-assignment` re-homed a dislodged
+    // game **back onto the pinned third game's slot**, because the clash its
+    // published slot carried was accepted as a count at every slot, and
+    // `pair-repair` then moved somebody off it. That was acceptance travelling
+    // with a game into a clash it never had — the gap `resolve/instances.js`
+    // closes. With acceptance keyed per instance and per slot the placer puts
+    // the dislodged games on clean ground at once, so both stages apply
+    // nothing here, which is the fix and not a lost witness.
     const byStage = new Map(stackedRepairRun.stages.map((stage) => [stage.stageId, stage]));
-    const search = /** @type {any} */ (byStage.get('local-search'));
-    const repair = /** @type {any} */ (byStage.get('pair-repair'));
-    expect(search.movesConsidered).toBeGreaterThan(0);
-    // The frozen half of the clash is refused and counted, which is incident 2's
-    // guarantee stated by a stage that actually looked.
-    expect(search.movesRejectedByFreeze).toBeGreaterThan(0);
-    expect(search.movesApplied).toBe(0);
-    expect(repair.movesApplied).toBeGreaterThan(0);
+    // The meta-assertion: the pile really did have to come apart.
+    expect(/** @type {any} */ (byStage.get('dislodge')).movesApplied).toBeGreaterThan(0);
+    expect(/** @type {any} */ (byStage.get('local-search')).movesApplied).toBe(0);
+    expect(/** @type {any} */ (byStage.get('pair-repair')).movesApplied).toBe(0);
 
-    // And what it repairs, it repairs without spreading: the game it moves ends
-    // on a slot that carries no finding the schedule did not already have.
-    const repaired = stackedRepairRun.moves.filter((move) => move.stageId === 'pair-repair');
+    // Every game on the date, from the constructed roster, stands clear of a
+    // same-surface clash — including the two that were published in one.
+    const onDate = stackedSchedule.games.filter((game) => game.date === SEEDING_DATE);
+    const resolvedById = new Map(stackedRepairRun.schedule.games.map((game) => [game.id, game]));
+    let examined = 0;
+    for (const game of onDate) {
+      const placed = resolvedById.get(game.id);
+      if (!placed) continue;
+      examined += 1;
+      const placement = checkPlacement(engines, stackedRepairRun.state, game.id, placed);
+      expect(placement.blockingCodeCounts.OCCUPIED_SAME_SURFACE ?? 0, game.id).toBe(0);
+    }
+    expect(examined).toBe(onDate.length);
+  });
+
+  it('gets local-search off the ground through a repair scope, and repairs without spreading', () => {
+    // Where 8.6 says the repair belongs: the accepted clash is *scoped*, so
+    // `local-search` answers for it. The request is a no-op on the date; it
+    // only has to make the run happen.
+    const noOp = /** @type {any} */ (
+      stackedSchedule.games.find(
+        (game) =>
+          game.date === SEEDING_DATE && game.id !== stackHeld.id && game.id !== stackMoved.id
+      )
+    );
+    const run = applyChangeRequest({
+      schedule: stackedSchedule,
+      changes: [
+        {
+          gameId: noOp.id,
+          date: noOp.date,
+          surfaceId: noOp.surfaceId,
+          startMinutes: noOp.startMinutes,
+          reason: 'the run has to happen for the scope to act',
+        },
+      ],
+      engines,
+      freeze: freezeAllExcept([{ date: SEEDING_DATE }]),
+      repairScope: [stackHeld.id, stackMoved.id],
+      onUnsatisfiable: 'report',
+      verify: false,
+    });
+    const search = /** @type {any} */ (
+      run.stages.find((stage) => stage.stageId === 'local-search')
+    );
+    expect(search.movesApplied).toBeGreaterThan(0);
+    const repaired = run.moves.filter((move) => move.stageId === 'local-search');
+    expect(repaired.length).toBe(search.movesApplied);
     for (const move of repaired) {
-      const slot = /** @type {any} */ (move.to);
-      const placement = checkPlacement(engines, stackedRepairRun.state, move.gameId, slot);
+      const placement = checkPlacement(
+        engines,
+        run.state,
+        move.gameId,
+        /** @type {any} */ (move.to)
+      );
       expect(placement.blockingCodeCounts.OCCUPIED_SAME_SURFACE ?? 0, move.gameId).toBe(0);
     }
   });

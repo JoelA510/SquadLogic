@@ -43,7 +43,6 @@
  * @module resolve/stages
  */
 
-import { CONSTRAINT_SEVERITY } from '../constraints/reasonCodes.js';
 import { FREEZE_DISPOSITION } from '../freeze/reasonCodes.js';
 
 import { frozenGameUnsatisfiable, registryConstraintIdsFor } from './errors.js';
@@ -203,7 +202,11 @@ function acceptedFindingsFor(context, gameId, slot) {
  * @returns {Record<string, number>}
  */
 function acceptedRulesFor(context, gameId, slot) {
-  if (context.repairScope.has(gameId)) return {};
+  // **Not narrowed by the repair scope.** The scope un-accepts a game's
+  // *facility* breach so `local-search` will answer for it; this record is read
+  // by the placer alone, which never decides whether a game must move, so there
+  // is nothing for the scope to open up — only a published overlap to refuse at
+  // the game's own home slot.
   return acceptedAtSlot(context.baselineRules[gameId], slotKey(slot));
 }
 
@@ -571,12 +574,15 @@ function chooseSlot(state, context, gameId, options) {
     // on incident 3: gating the two external 12:30 fixtures refused their
     // historical 12:00 resolution for a turnover against the other requested
     // fixture and shelved both as TIME TBD.
-    const gated = context.requestedSlots[gameId] === undefined;
+    const gated = !context.requestedApplied.has(gameId);
     const ruled = gated
       ? ruleGateInstances(context, state, gameId, candidate)
       : { instances: {}, meta: null };
     const acceptedRules = gated ? acceptedRulesFor(context, gameId, candidate) : {};
-    if (gated) state.ledger.meta.ruleGateJudgements += 1;
+    if (gated) {
+      state.ledger.meta.ruleGateCommitmentsExamined += ruled.meta.coachCommitmentsExamined;
+      state.ledger.meta.ruleGateSurfacePairsExamined += ruled.meta.surfacePairsExamined;
+    }
     const ruleGrown = newBlockingCodes(ruled.instances, acceptedRules);
     if (ruleGrown.length > 0) {
       state.ledger.meta.candidatesRejected += 1;
@@ -590,28 +596,18 @@ function chooseSlot(state, context, gameId, options) {
       candidateObjectiveCounts({
         reference: anchor,
         slot: candidate,
-        // The rule instances ride along as blocking findings, discounted by the
-        // same record the gate read, so the objective and the gate cannot
-        // disagree about an overlap the published slot carried (ruling 2 of
-        // 8.6 PR 2: they move together).
-        placement: {
-          ...placement,
-          findingInstances: {
-            ...placement.findingInstances,
-            ...Object.fromEntries(
-              Object.entries(ruled.instances).map(([key, count]) => [
-                key,
-                { severity: CONSTRAINT_SEVERITY.BLOCKING, count },
-              ])
-            ),
-          },
-        },
+        // **No rule term here, and why.** The gate above admits only a
+        // candidate whose rule instances do not exceed what this slot accepts,
+        // so every candidate that reaches this line carries zero rule excess:
+        // a blocking rule term would always read nought. The objective moves
+        // with the gate by construction, not by a second copy of the count.
+        placement,
         // **Scored the way the gate above admits.** `newBlockingCodes()` accepts
         // a finding the published schedule already carried; scoring the same
         // candidate absolutely would then charge this game for that finding at
         // its own published slot and move it off its published time to repair
         // something already accepted.
-        accepted: { ...acceptedFindingsFor(context, gameId, candidate), ...acceptedRules },
+        accepted: acceptedFindingsFor(context, gameId, candidate),
       }),
       context.weights
     ).total;
@@ -869,6 +865,7 @@ const changeRequestApply = {
         continue;
       }
 
+      context.requestedApplied.add(change.gameId);
       current = applyMove(
         current,
         {

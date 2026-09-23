@@ -428,6 +428,12 @@ export function resolveContextDefaults() {
     commitmentIndex: { byPerson: new Map(), personsByGame: new Map(), count: 0 },
     /** Per game, candidates the rule gate alone refused, per code. */
     ruleGateRefusals: {},
+    /**
+     * Games a change request actually moved. The placer's rule gate leaves
+     * them alone: where a requested game lands is the operator's instruction.
+     * Not `requestedSlots`, which also holds no-op and frozen-refused changes.
+     */
+    requestedApplied: new Set(),
     /** Games this run repairs rather than accepts; see the repair scope. */
     repairScope: new Set(),
     /** Per scoped game, how many baseline findings un-accepting it discarded. */

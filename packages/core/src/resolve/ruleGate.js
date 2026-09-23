@@ -50,7 +50,12 @@ import { RULE_VIOLATION_REASON } from '../ruleEngine/reasonCodes.js';
 import { turnoverMinimumRule } from '../ruleEngine/rules.js';
 import { TRAVEL_REASON, evaluateCoachTravel } from '../waivers/coachTravel.js';
 
-/** The rule-engine codes the placer refuses to introduce. */
+/**
+ * The rule-engine codes the placer refuses to introduce. Read by
+ * {@link ruleGateInstances} as its filter, so the list and the gate cannot drift.
+ *
+ * @type {ReadonlyArray<string>}
+ */
 export const GATED_RULE_CODES = Object.freeze([
   TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP,
   RULE_VIOLATION_REASON.TURNOVER_BELOW_MINIMUM,
@@ -76,7 +81,7 @@ export function projectCommitment(commitment, state, override = null) {
   if (typeof gameId !== 'string' || state.baseline[gameId] === undefined) return commitment;
   const game =
     override !== null && override.gameId === gameId
-      ? { ...state.baseline[gameId], ...override.slot }
+      ? gameOnSlot(state, gameId, override.slot)
       : state.games[gameId];
   if (game === undefined) return null;
   const occupancy =
@@ -92,6 +97,30 @@ export function projectCommitment(commitment, state, override = null) {
 }
 
 /**
+ * The game as it would stand on `slot` — built exactly as `applyMove()` in
+ * `state.js` builds it: the venue from the inventory, the footprint carried
+ * over, and an unknown footprint left unknown rather than invented.
+ *
+ * @param {import('./types.js').ResolveState} state
+ * @param {string} gameId
+ * @param {import('./types.js').Slot} slot
+ * @returns {Object}
+ */
+export function gameOnSlot(state, gameId, slot) {
+  const baseline = state.baseline[gameId];
+  const occupancy =
+    baseline.endMinutes === null ? null : baseline.endMinutes - baseline.startMinutes;
+  return {
+    ...baseline,
+    date: slot.date,
+    surfaceId: slot.surfaceId,
+    venueId: state.inventory.venueBySurfaceId[slot.surfaceId] ?? baseline.venueId,
+    startMinutes: slot.startMinutes,
+    endMinutes: occupancy === null ? null : slot.startMinutes + occupancy,
+  };
+}
+
+/**
  * The commitments indexed the two ways the gate reads them.
  *
  * @param {ReadonlyArray<Object>} commitments
@@ -103,7 +132,8 @@ export function indexCommitments(commitments) {
   /** @type {Map<string, Set<string>>} */
   const persons = new Map();
   for (const commitment of commitments) {
-    byPerson.set(commitment.personId, [...(byPerson.get(commitment.personId) ?? []), commitment]);
+    if (!byPerson.has(commitment.personId)) byPerson.set(commitment.personId, []);
+    /** @type {Object[]} */ (byPerson.get(commitment.personId)).push(commitment);
     if (typeof commitment.gameId === 'string') {
       if (!persons.has(commitment.gameId)) persons.set(commitment.gameId, new Set());
       /** @type {Set<string>} */ (persons.get(commitment.gameId)).add(commitment.personId);
@@ -135,47 +165,51 @@ export function ruleGateInstances(context, state, gameId, slot) {
   };
 
   // -- a coach in two places ------------------------------------------------
+  //
+  // **Pairwise, not consecutive.** `evaluateCoachTravel()` compares each
+  // commitment only with the next one in the coach's day, so a long commitment
+  // with a short one inside it hides an overlap with anything after the short
+  // one. The gate asks the same evaluator about the moving game against each
+  // other commitment in turn, so its *definition* of an overlap is the rule
+  // engine's and its *coverage* is every pair. `verify` keeps the consecutive
+  // blind spot; that is the rule engine's to fix, and filed.
   const index = context.commitmentIndex;
   const persons = index.personsByGame.get(gameId) ?? [];
   if (persons.length > 0) {
     const override = { gameId, slot };
-    /** @type {Object[]} */
-    const day = [];
-    for (const personId of persons) {
-      for (const commitment of index.byPerson.get(personId) ?? []) {
-        const projected = projectCommitment(commitment, state, override);
-        if (projected !== null && projected.date === slot.date) day.push(projected);
-      }
-    }
-    meta.coachCommitmentsExamined = day.length;
-    const byId = new Map(day.map((commitment) => [commitment.id, commitment]));
-    const travel = evaluateCoachTravel(day, {
+    const options = {
       registry: context.engines.registry,
       ...(context.engines.resources?.venueComplexes
         ? { venueComplexes: context.engines.resources.venueComplexes }
         : {}),
-    });
-    for (const subject of travel.subjects) {
-      for (const finding of subject.findings) {
-        if (finding.code !== TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP) continue;
-        if (finding.severity !== CONSTRAINT_SEVERITY.BLOCKING) continue;
-        const from = byId.get(finding.details.fromId);
-        const to = byId.get(finding.details.toId);
-        const mine = from?.gameId === gameId ? from : to?.gameId === gameId ? to : null;
-        if (mine === null) continue; // two *other* commitments: not this game's doing
-        const other = mine === from ? to : from;
-        add(finding.code, other?.gameId ?? `commitment:${other?.id}`);
+    };
+    for (const personId of persons) {
+      /** @type {Object[]} */
+      const day = [];
+      for (const commitment of index.byPerson.get(personId) ?? []) {
+        const projected = projectCommitment(commitment, state, override);
+        if (projected !== null && projected.date === slot.date) day.push(projected);
+      }
+      meta.coachCommitmentsExamined += day.length;
+      const mine = day.filter((commitment) => commitment.gameId === gameId);
+      for (const own of mine) {
+        for (const other of day) {
+          if (other.gameId === gameId) continue;
+          const travel = evaluateCoachTravel([own, other], options);
+          for (const subject of travel.subjects) {
+            for (const finding of subject.findings) {
+              if (!GATED_RULE_CODES.includes(finding.code)) continue;
+              if (finding.severity !== CONSTRAINT_SEVERITY.BLOCKING) continue;
+              add(finding.code, other.gameId ?? `commitment:${other.id}`);
+            }
+          }
+        }
       }
     }
   }
 
   // -- a surface turned over too fast ---------------------------------------
-  const published = state.baseline[gameId];
-  const candidate = {
-    ...published,
-    ...slot,
-    endMinutes: slot.startMinutes + (published.endMinutes - published.startMinutes),
-  };
+  const candidate = gameOnSlot(state, gameId, slot);
   const games = [
     candidate,
     ...state.gameIds
@@ -192,7 +226,7 @@ export function ruleGateInstances(context, state, gameId, slot) {
   meta.surfacePairsExamined = Math.max(0, games.length - 1);
   for (const subject of turnover.subjects) {
     for (const finding of subject.findings) {
-      if (finding.code !== RULE_VIOLATION_REASON.TURNOVER_BELOW_MINIMUM) continue;
+      if (!GATED_RULE_CODES.includes(finding.code)) continue;
       if (finding.severity !== CONSTRAINT_SEVERITY.BLOCKING) continue;
       const { earlierGameId, laterGameId } = finding.details;
       if (earlierGameId !== gameId && laterGameId !== gameId) continue;

@@ -135,12 +135,17 @@ function displace(displacedId) {
     baselineVerification,
     onUnsatisfiable: 'report',
   });
-  /** Gated violations the run introduced, from the rule engine, by pair. */
-  const introduced = /** @type {any} */ (run.verification).violations
+  /** Every gated violation on the result, from the rule engine, by pair. */
+  const standing = /** @type {any} */ (run.verification).violations
     .filter((violation) => GATED.includes(violation.code))
-    .filter((violation) => !baselineKeys.has(violationInstanceKey(violation)))
-    .map((violation) => ({ code: violation.code, pair: pairOf(violation) }));
-  return { run, requested, introduced };
+    .map((violation) => ({
+      code: violation.code,
+      pair: pairOf(violation),
+      published: baselineKeys.has(violationInstanceKey(violation)),
+    }));
+  /** Those the baseline did not carry. */
+  const introduced = standing.filter((entry) => !entry.published);
+  return { run, requested, standing, introduced };
 }
 
 /** Where a run left a game, or null if TIME TBD. */
@@ -163,7 +168,7 @@ describe('(e) the games the season publishes in an overlap, displaced', () => {
 
   for (const gameId of games) {
     it(`${gameId}: keeps a time or says why, and is never placed into an overlap`, () => {
-      const { run, introduced } = displace(gameId);
+      const { run, standing } = displace(gameId);
       const placed = whereIs(run, gameId);
       if (placed === null) {
         const shelved = run.unplaced.find((entry) => entry.gameId === gameId);
@@ -171,9 +176,11 @@ describe('(e) the games the season publishes in an overlap, displaced', () => {
       } else {
         expect(slotOf(placed)).not.toEqual(slotOf(/** @type {any} */ (byId.get(gameId))));
       }
-      // The run introduced no gated breach involving a game it placed itself.
-      const own = introduced.filter(({ pair }) => pair.includes(gameId));
-      expect(own).toEqual([]);
+      // Off its published slot it may carry no gated breach at all — not even
+      // the one it was published with, which was accepted there and nowhere
+      // else. Read from every standing violation, not only the introduced
+      // ones: the published pair recurring elsewhere keys as "not new".
+      expect(standing.filter(({ pair }) => pair.includes(gameId))).toEqual([]);
       // (a) Its published overlap partner stands exactly where it was published.
       const partners = published
         .map(pairOf)
@@ -196,16 +203,16 @@ describe('(e) the games the season publishes in an overlap, displaced', () => {
 describe('the solver no longer places a displaced game into a coach overlap', () => {
   // Measured before #59: #7 displaced was placed 75 minutes into coach Gray
   // Judd's #18, at another venue.
-  const { run, requested, introduced } = displace('combined_schedule.csv#7');
+  const { run, requested, standing, introduced } = displace('combined_schedule.csv#7');
 
-  it('refused at least one candidate for it — the gate was exercised, not bypassed', () => {
-    expect(run.meta.ruleGateJudgements).toBeGreaterThan(0);
+  it('refused at least one candidate for it — the gate read real commitments', () => {
+    expect(run.meta.ruleGateCommitmentsExamined).toBeGreaterThan(0);
     expect(run.meta.candidatesRefusedByRules).toBeGreaterThan(0);
   });
 
   it('introduces no overlap or turnover breach the requested game is not party to', () => {
     expect(introduced.filter(({ pair }) => !pair.includes(requested.id))).toEqual([]);
-    expect(introduced.filter(({ pair }) => pair.includes('combined_schedule.csv#7'))).toEqual([]);
+    expect(standing.filter(({ pair }) => pair.includes('combined_schedule.csv#7'))).toEqual([]);
   });
 
   it('(a) never lifts the coach’s other game, which stands at another venue', () => {
@@ -249,15 +256,16 @@ describe('(a) the gate is read by the placer and nowhere else', () => {
 describe('the solver no longer places a displaced game below the turnover floor', () => {
   // Measured before #59: #25 displaced was placed where it turned over from #22
   // below the floor, on the same Orchard Park surface.
-  const { run, introduced } = displace('combined_schedule.csv#25');
+  const { run, standing } = displace('combined_schedule.csv#25');
 
-  it('refused at least one candidate for it', () => {
+  it('refused at least one candidate for it, having read real surface pairs', () => {
+    expect(run.meta.ruleGateSurfacePairsExamined).toBeGreaterThan(0);
     expect(run.meta.candidatesRefusedByRules).toBeGreaterThan(0);
   });
 
-  it('introduces no turnover breach involving the displaced game', () => {
+  it('leaves the displaced game in no turnover breach', () => {
     expect(
-      introduced.filter(
+      standing.filter(
         ({ code, pair }) =>
           code === 'TURNOVER_BELOW_MINIMUM' && pair.includes('combined_schedule.csv#25')
       )
@@ -370,9 +378,46 @@ describe('(d) a commitment naming no game is part of the coach’s day', () => {
     expect(instances['TRAVEL_COMMITMENTS_OVERLAP|commitment:external-window-1']).toBe(1);
   });
 
-  it('is invisible without it, which is what the index must not do', () => {
-    const context = { engines, commitmentIndex: indexCommitments(schedule.commitments) };
-    const instances = ruleGateInstances(context, state, x.id, slotOf(x)).instances;
-    expect(instances['TRAVEL_COMMITMENTS_OVERLAP|commitment:external-window-1']).toBeUndefined();
+  it('is indexed under the coach, beside the games', () => {
+    const index = indexCommitments(withExternal);
+    expect(index.byPerson.get(personId)?.some((c) => c.id === 'external-window-1')).toBe(true);
+    expect(index.personsByGame.get(x.id)).toContain(personId);
+  });
+
+  it('catches an overlap the consecutive-pair scan hides behind a short commitment', () => {
+    // A long window with a short one inside it, both before X starts: sorted,
+    // the rule engine pairs long-short and short-X, never long-X.
+    const long = {
+      ...external,
+      id: 'external-long',
+      startMinutes: x.startMinutes - 60,
+      endMinutes: x.startMinutes + 30,
+    };
+    const short = {
+      ...external,
+      id: 'external-short',
+      startMinutes: x.startMinutes - 50,
+      endMinutes: x.startMinutes - 40,
+    };
+    const day = [...schedule.commitments, long, short];
+    // The meta-assertion: the consecutive scan really does miss it.
+    const consecutive = evaluateCoachTravel(
+      day
+        .filter((c) => c.personId === personId && c.date === x.date)
+        .map((c) => projectCommitment(c, state)),
+      { registry: engines.registry, venueComplexes }
+    ).subjects.flatMap((subject) =>
+      subject.findings.filter((f) => f.code === 'TRAVEL_COMMITMENTS_OVERLAP')
+    );
+    const pairs = consecutive.map((f) => [f.details.fromId, f.details.toId].sort().join('+'));
+    expect(pairs).toContain(['external-long', 'external-short'].sort().join('+'));
+    expect(pairs).not.toContain(['external-long', template.id].sort().join('+'));
+    const instances = ruleGateInstances(
+      { engines, commitmentIndex: indexCommitments(day) },
+      state,
+      x.id,
+      slotOf(x)
+    ).instances;
+    expect(instances['TRAVEL_COMMITMENTS_OVERLAP|commitment:external-long']).toBe(1);
   });
 });

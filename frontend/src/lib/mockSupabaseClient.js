@@ -1496,7 +1496,9 @@ const mockSetTeamCoaches = async (
   }
   const before = JSON.stringify([team.coach_id ?? null, team.assistant_coach_ids ?? null]);
   team.coach_id = leadCoachId ?? null;
-  if (assistantCoachIds != null) team.assistant_coach_ids = [...new Set(assistantCoachIds)];
+  if (assistantCoachIds != null) {
+    team.assistant_coach_ids = [...new Set(assistantCoachIds.filter((id) => id != null))];
+  }
   const written = before !== JSON.stringify([team.coach_id, team.assistant_coach_ids ?? null]);
   if (moved || written) {
     team.updated_at = new Date().toISOString();

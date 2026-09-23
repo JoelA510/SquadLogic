@@ -19,6 +19,7 @@ import { useToast } from '../components/ui/ToastHost.jsx';
 import LoadingScreen from '../components/LoadingScreen.jsx';
 import { supabase } from '../lib/supabaseClient.js';
 import { mapInChunks } from '../utils/asyncChunks.js';
+import { fetchAllPages } from '../lib/pagedFetch.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { usePermission } from '../hooks/usePermission.js';
 import { useFeatures } from '../hooks/useFeatures.js';
@@ -311,10 +312,18 @@ export default function CoachesPage() {
             .select('id, name, division_id, coach_id, organization_id')
             .eq('organization_id', currentOrganization.id)
             .order('name', { ascending: true }),
-          supabase
-            .from('team_coach_assignments')
-            .select('id, team_id, coach_id, role, effective_from, effective_to')
-            .eq('organization_id', currentOrganization.id),
+          // Paged: the history only grows (nothing is deleted), and an unranged
+          // select is cut at the server's row cap -- a partial history would
+          // make covered teams read as uncoached in the preview.
+          fetchAllPages(() =>
+            supabase
+              .from('team_coach_assignments')
+              .select('id, team_id, coach_id, role, effective_from, effective_to')
+              .eq('organization_id', currentOrganization.id)
+          ).then(
+            (data) => ({ data, error: null }),
+            (error) => ({ data: null, error })
+          ),
         ]);
 
       const resultError =

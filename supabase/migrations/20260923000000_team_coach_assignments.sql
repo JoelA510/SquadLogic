@@ -268,7 +268,14 @@ BEGIN
            updated_at = timezone('utc', now())
      WHERE t.id = p_team_id
        AND (t.coach_id IS DISTINCT FROM p_lead_coach_id
-            OR (v_assistants IS NOT NULL AND t.assistant_coach_ids IS DISTINCT FROM v_assistants));
+            -- Compared as SETS, as the drift check compares them: the writers
+            -- order the array differently, and an order-only difference is
+            -- not a change worth a write and an audit row.
+            OR (v_assistants IS NOT NULL
+                AND ARRAY(SELECT DISTINCT x FROM unnest(COALESCE(t.assistant_coach_ids, '{}'::uuid[])) AS x
+                           WHERE x IS NOT NULL ORDER BY x)
+                    IS DISTINCT FROM
+                    ARRAY(SELECT x FROM unnest(v_assistants) AS x ORDER BY x)));
     GET DIAGNOSTICS v_columns_written = ROW_COUNT;
 
     -- Audited whenever either half moved. A column write with no row change is
@@ -550,17 +557,36 @@ BEGIN
     -- team's history survives the coach; the FK's SET NULL never fires because
     -- the lead has already been cleared here. The assignment rows keep the
     -- coach's id and nothing else -- see the table's comment on erasure.
+    -- NULL elements dropped first: `x = ANY('{X,NULL}')` is NULL for every
+    -- other x, and the NOT below would then strip every assistant.
+    p_coach_ids := array_remove(p_coach_ids, NULL);
+
+    -- A team in ANOTHER organisation naming these coaches cannot be routed
+    -- (its audit belongs to an organisation the caller is not in) and must
+    -- not be left for the FK's SET NULL to rewrite behind its history. The
+    -- writers no longer produce such a reference; one left by older data is
+    -- refused by name rather than written across the tenant boundary.
+    IF EXISTS (
+        SELECT 1 FROM public.teams t
+         WHERE t.organization_id <> v_org_id
+           AND (t.coach_id = ANY(p_coach_ids) OR t.assistant_coach_ids && p_coach_ids)
+    ) THEN
+        RAISE EXCEPTION 'a team in another organization names one of these coaches; it must be unassigned there first'
+            USING ERRCODE = '42501';
+    END IF;
+
     FOR v_team IN
         SELECT t.id, t.coach_id, t.assistant_coach_ids
           FROM public.teams t
-         WHERE t.coach_id = ANY(p_coach_ids)
+         WHERE t.organization_id = v_org_id
+           AND (t.coach_id = ANY(p_coach_ids)
             OR t.assistant_coach_ids && p_coach_ids
             OR EXISTS (
                 SELECT 1 FROM public.team_coach_assignments a
                  WHERE a.team_id = t.id
                    AND a.effective_to IS NULL
                    AND a.coach_id = ANY(p_coach_ids)
-            )
+            ))
          ORDER BY t.id
     LOOP
         PERFORM public.set_team_coaches(

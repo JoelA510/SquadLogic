@@ -56,6 +56,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 
+import { PRACTICE_REASON, repairPracticeLoss } from '@squadlogic/core/practice/index.js';
 import {
   buildAvailabilityCalendarFromSeason2026,
   buildClosureSet,
@@ -242,6 +243,37 @@ const closureSet = buildClosureSet(graph, {
 });
 
 const REPORTS = {
+  'practice/repair.js': [
+    {
+      label: 'repairPracticeLoss(a loss naming ground the graph does not hold)',
+      expectCode: PRACTICE_REASON.REPAIR_LOSS_UNKNOWN_SURFACE,
+      run: () =>
+        repairPracticeLoss({
+          plan: {
+            slots: [
+              {
+                id: 'census:slot',
+                // A series standing on unknown ground too: it is compared by
+                // id and never handed to a throwing lookup.
+                surfaceId: GHOST,
+                weekday: 'TUE',
+                startMinutes: 17 * 60,
+                durationMinutes: 60,
+                validFrom: '2026-09-01',
+                validUntil: '2026-11-30',
+              },
+            ],
+            assignments: [{ id: 'census:assignment', slotId: 'census:slot', teamId: 'census' }],
+          },
+          graph,
+          loss: { surfaceIds: [GHOST], from: '2026-10-05', reason: 'census' },
+          inventory: [
+            { surfaceId: GHOST, weekday: 'WED', startMinutes: 17 * 60, durationMinutes: 60 },
+            { surfaceId: REAL, weekday: 'WED', startMinutes: 17 * 60, durationMinutes: 60 },
+          ],
+        }),
+    },
+  ],
   'feasibility/moveRequest.js': [
     {
       label: 'analyseMoveRequest(a practice on ground the graph does not hold)',

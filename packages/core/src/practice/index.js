@@ -65,6 +65,7 @@ export {
   PRACTICE_EXCEPTION_KIND,
   PracticeAssignmentSchema,
   PracticeExceptionSchema,
+  PracticeRepairInputSchema,
   PracticeSlotSchema,
   PracticeSlotSetInputSchema,
   PracticeWeekdaySchema,
@@ -76,5 +77,9 @@ export { buildPracticeSlotSet, firstWeekdayOnOrAfter, getPracticeSlot } from './
 export { materialisePracticeOccurrences, toFacilityBooking } from './materialise.js';
 
 export { buildPracticeHistory, describePracticeHistory } from './history.js';
+
+export { toPracticeMetricsInput } from './metricsInput.js';
+
+export { PRACTICE_TBD_REASON, repairPracticeLoss } from './repair.js';
 
 export { toSeason2026PracticePlan } from './adapters/season2026PracticeGrid.js';

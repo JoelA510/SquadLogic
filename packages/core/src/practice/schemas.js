@@ -213,3 +213,39 @@ export const PracticeWindowSchema = z
     message: 'window `to` must not precede `from`',
     path: ['to'],
   });
+
+/**
+ * Input to `repairPracticeLoss()` (Phase 8.6 PR 3a).
+ *
+ * `graph` is the facility graph, checked for shape only: the facility layer
+ * owns its own validation. `inventory` is every practice shape the published
+ * plan used; the repair offers nothing else.
+ */
+const PracticeShapeSchema = z
+  .object({
+    surfaceId: IdSchema,
+    weekday: PracticeWeekdaySchema,
+    startMinutes: MinutesSchema,
+    durationMinutes: z.number().int().positive(),
+  })
+  .strict();
+
+export const PracticeRepairInputSchema = z
+  .object({
+    plan: PracticeSlotSetInputSchema,
+    graph: z.object({ surfaces: z.record(z.string(), z.any()) }).passthrough(),
+    loss: z
+      .object({
+        surfaceIds: z.array(IdSchema).min(1, { message: 'a loss names at least one surface' }),
+        from: IsoDateSchema,
+        reason: z.string().min(1, { message: 'a loss must say why' }),
+      })
+      .strict(),
+    inventory: z.array(PracticeShapeSchema),
+    coachesByTeam: z.record(z.string(), z.array(z.string())).optional(),
+    weights: z.record(z.string(), z.number()).optional(),
+    changeBudget: z.number().int().min(0).nullable().optional(),
+    searchNodeLimit: z.number().int().positive().optional(),
+    strategy: z.enum(['exact', 'greedy']).optional(),
+  })
+  .strict();

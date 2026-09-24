@@ -29,7 +29,7 @@
  *
  * | family | terms | counted from |
  * |---|---|---|
- * | **change** | `changedGame`, `driftMinute`, `changedSurface` | the reference schedule, game by game |
+ * | **change** | `changedGame`, `driftMinute`, `changedSurface`, `changedWeekday` (practice series only) | the reference schedule, game by game or series by series |
  * | **quality** | `unplacedGame`, `blockingViolation`, `compromiseViolation` | the standing rule engine / the facility check |
  *
  * The weights are **policy, not data** — nothing in the corpus can supply them —
@@ -66,6 +66,14 @@ export const RESOLVE_OBJECTIVE_TERM = Object.freeze({
   DRIFT_MINUTE: 'driftMinute',
   /** One game standing on different ground than the reference gave it. */
   CHANGED_SURFACE: 'changedSurface',
+  /**
+   * One recurring practice series moved to another day of the week.
+   *
+   * **Counted for practice series only** (see {@link changeCountsFor}). A game
+   * has a date, not a weekday, and a game that changed date is already a
+   * changed game; counting this for it as well would charge one move twice.
+   */
+  CHANGED_WEEKDAY: 'changedWeekday',
   /** One game left with no time at all (incident 10's TIME TBD). */
   UNPLACED_GAME: 'unplacedGame',
   /** One blocking violation or blocking placement finding. */
@@ -74,11 +82,32 @@ export const RESOLVE_OBJECTIVE_TERM = Object.freeze({
   COMPROMISE_VIOLATION: 'compromiseViolation',
 });
 
-/** Which terms measure distance from the reference schedule. */
+/**
+ * Which terms measure distance from the reference *game* schedule.
+ *
+ * `changedWeekday` is deliberately absent. It can only ever be counted for a
+ * practice series, so no game run can be steered by it, and listing it here
+ * would change what `disabledChangeTerms()` / `changeTermsDisabled()` report
+ * for game runs: a caller who zeroed the three game terms would stop being
+ * told the change terms are off, because a term that never fires for a game
+ * was still on. It is still a *change* cost — {@link CHANGE_COST_TERMS} — so
+ * {@link scoreObjective} books it on the change side of the ledger.
+ */
 export const RESOLVE_CHANGE_TERMS = Object.freeze([
   RESOLVE_OBJECTIVE_TERM.CHANGED_GAME,
   RESOLVE_OBJECTIVE_TERM.DRIFT_MINUTE,
   RESOLVE_OBJECTIVE_TERM.CHANGED_SURFACE,
+]);
+
+/** Change terms only a practice series can count (see {@link changeCountsFor}). */
+export const RESOLVE_PRACTICE_CHANGE_TERMS = Object.freeze([
+  RESOLVE_OBJECTIVE_TERM.CHANGED_WEEKDAY,
+]);
+
+/** Every term booked as change cost: the game terms, plus the practice-only ones. */
+const CHANGE_COST_TERMS = Object.freeze([
+  ...RESOLVE_CHANGE_TERMS,
+  ...RESOLVE_PRACTICE_CHANGE_TERMS,
 ]);
 
 /** Which terms measure how good the schedule is, irrespective of the diff. */
@@ -95,7 +124,7 @@ export const RESOLVE_QUALITY_TERMS = Object.freeze([
  * a tuned number invites the next reader to re-tune it:
  *
  * ```text
- * unplacedGame > blockingViolation > changedGame > compromiseViolation > driftMinute = changedSurface
+ * unplacedGame > blockingViolation > changedGame > changedWeekday > compromiseViolation > driftMinute = changedSurface
  * ```
  *
  * Read as sentences: a game with no time is worse than an illegal one; an
@@ -104,12 +133,20 @@ export const RESOLVE_QUALITY_TERMS = Object.freeze([
  * moved, and whether it changed pitch, only separate slots that are otherwise
  * equal.
  *
+ * `changedWeekday` (Phase 8.6 PR 3a, practice series only) sits between a
+ * changed series and a compromise: moving a family's practice to another day
+ * costs as much as four hours of same-day drift. That is what makes Tue 17:00
+ * -> Tue 18:00 (1000 + 60) beat Tue 17:00 -> Thu 17:00 (1000 + 240). Before
+ * this term existed the weekday move was the *cheaper* one, because a changed
+ * day counted no drift at all.
+ *
  * @type {Readonly<Record<string, number>>}
  */
 export const RESOLVE_OBJECTIVE_WEIGHTS = Object.freeze({
   [RESOLVE_OBJECTIVE_TERM.UNPLACED_GAME]: 100000,
   [RESOLVE_OBJECTIVE_TERM.BLOCKING_VIOLATION]: 10000,
   [RESOLVE_OBJECTIVE_TERM.CHANGED_GAME]: 1000,
+  [RESOLVE_OBJECTIVE_TERM.CHANGED_WEEKDAY]: 240,
   [RESOLVE_OBJECTIVE_TERM.COMPROMISE_VIOLATION]: 100,
   [RESOLVE_OBJECTIVE_TERM.DRIFT_MINUTE]: 1,
   [RESOLVE_OBJECTIVE_TERM.CHANGED_SURFACE]: 1,
@@ -217,7 +254,7 @@ export function scoreObjective(counts, weights) {
     const weight = weights[term] ?? 0;
     const cost = count * weight;
     terms[term] = { count, weight, cost };
-    if (/** @type {ReadonlyArray<string>} */ (RESOLVE_CHANGE_TERMS).includes(term)) {
+    if (/** @type {ReadonlyArray<string>} */ (CHANGE_COST_TERMS).includes(term)) {
       changeCost += cost;
     } else qualityCost += cost;
   }
@@ -241,12 +278,37 @@ export function scoreObjective(counts, weights) {
  * and, where it applies, a changed surface — never as a drift of some number of
  * minutes it did not actually drift.
  *
- * @param {import('./types.js').Slot|null} reference
- * @param {import('./types.js').Slot|null} slot
+ * ## A practice series is counted differently, and only a practice series
+ *
+ * A recurring practice (`practice/repair.js`) has a `weekday` and **no**
+ * `date`. For it:
+ *
+ * - `changedGame` means *the published time changed*: another weekday or
+ *   another start. A move to other ground at the same venue at the same time is
+ *   **not** a published-time change (operator ruling, 2026-09-23); it counts
+ *   `changedSurface` alone.
+ * - `driftMinute` is the clock distance between the two starts, whatever the
+ *   day. A weekly series has no date for GAP-32's objection to apply to, and
+ *   17:00 on Thursday really is nearer 17:00 on Tuesday than 19:00 is.
+ * - `changedWeekday` is counted when the day changes.
+ *
+ * Without that last term the day move was free: under the game rule a changed
+ * "date" counts no drift, so Tue 17:00 -> Thu 17:00 cost 1000 while
+ * Tue 17:00 -> Tue 18:00 cost 1060, and the objective preferred moving a
+ * family's practice day to shifting it by an hour.
+ *
+ * The branch is taken only when **both** slots carry a `weekday` and neither
+ * carries a `date`, so no game slot can reach it.
+ *
+ * @param {import('./types.js').Slot|PracticeSeriesSlot|null} reference
+ * @param {import('./types.js').Slot|PracticeSeriesSlot|null} slot
  * @returns {Record<string, number>}
  */
 export function changeCountsFor(reference, slot) {
   if (reference === null || slot === null) return {};
+  if (isPracticeSeriesSlot(reference) && isPracticeSeriesSlot(slot)) {
+    return practiceSeriesChangeCounts(reference, slot);
+  }
   const differs =
     reference.date !== slot.date ||
     reference.surfaceId !== slot.surfaceId ||
@@ -257,6 +319,50 @@ export function changeCountsFor(reference, slot) {
     [RESOLVE_OBJECTIVE_TERM.DRIFT_MINUTE]:
       reference.date === slot.date ? Math.abs(slot.startMinutes - reference.startMinutes) : 0,
     [RESOLVE_OBJECTIVE_TERM.CHANGED_SURFACE]: reference.surfaceId === slot.surfaceId ? 0 : 1,
+  };
+}
+
+/**
+ * A recurring practice series' slot, as the objective sees it.
+ *
+ * @typedef {Object} PracticeSeriesSlot
+ * @property {string} weekday - `'SUN'`…`'SAT'`
+ * @property {number} startMinutes
+ * @property {string} surfaceId
+ * @property {null} [date] - never set: a series has a weekday, not a date
+ */
+
+/**
+ * Whether a slot is a practice series (a weekday and no date) rather than a game slot.
+ *
+ * @param {Object} slot
+ * @returns {slot is PracticeSeriesSlot}
+ */
+export function isPracticeSeriesSlot(slot) {
+  return (
+    typeof slot?.weekday === 'string' &&
+    (slot.date === undefined || slot.date === null) &&
+    Number.isInteger(slot.startMinutes)
+  );
+}
+
+/**
+ * {@link changeCountsFor}'s practice arm. Counts only; weighs nothing.
+ *
+ * @param {PracticeSeriesSlot} reference
+ * @param {PracticeSeriesSlot} slot
+ * @returns {Record<string, number>}
+ */
+function practiceSeriesChangeCounts(reference, slot) {
+  const weekdayChanged = reference.weekday !== slot.weekday;
+  const timeChanged = weekdayChanged || reference.startMinutes !== slot.startMinutes;
+  const surfaceChanged = reference.surfaceId !== slot.surfaceId;
+  if (!timeChanged && !surfaceChanged) return {};
+  return {
+    [RESOLVE_OBJECTIVE_TERM.CHANGED_GAME]: timeChanged ? 1 : 0,
+    [RESOLVE_OBJECTIVE_TERM.DRIFT_MINUTE]: Math.abs(slot.startMinutes - reference.startMinutes),
+    [RESOLVE_OBJECTIVE_TERM.CHANGED_SURFACE]: surfaceChanged ? 1 : 0,
+    [RESOLVE_OBJECTIVE_TERM.CHANGED_WEEKDAY]: weekdayChanged ? 1 : 0,
   };
 }
 

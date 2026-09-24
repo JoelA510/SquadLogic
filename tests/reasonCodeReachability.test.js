@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 528 codes, of
- * which 516 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 539 codes, of
+ * which 527 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -133,6 +133,7 @@ import {
   buildFacilityGraphFromSeason2026,
   checkFacilityLifecycle,
   buildFieldAliasMap,
+  buildSeason2026PracticeFacilityGraph,
   buildSeason2026VenueComplexMap,
   buildVenueComplexMap,
   toSeason2026FacilityGraphInput,
@@ -235,6 +236,7 @@ import {
   buildPracticeHistory,
   buildPracticeSlotSet,
   materialisePracticeOccurrences,
+  repairPracticeLoss,
 } from '@squadlogic/core/practice/index.js';
 import {
   CHANGELOG_REASON,
@@ -396,6 +398,8 @@ const TABLES = Object.freeze({
  * @type {Readonly<Record<string, string>>}
  */
 const NOT_A_FINDING_TABLE = Object.freeze({
+  PRACTICE_TBD_REASON:
+    'why repairPracticeLoss() left a displaced series TIME TBD (no legal slot at its venue, contended, change budget). It is a classification carried on a TIME TBD entry and in the details of PRACTICE_REPAIR_TIME_TBD, which is the finding and is audited above.',
   DORMANCY_REASON:
     'the three verdicts detectDormantWaivers() gives a waiver (never-matched, not-status-bearing, load-bearing). It is a classification carried on a dormancy row, not a finding code: the findings that report it are WAIVER_DORMANT and WAIVER_NOT_STATUS_BEARING, and both are audited above.',
   IDENTITY_SIGNAL:
@@ -6131,6 +6135,103 @@ harvest(
     }),
     { teamId: 'PT2' }
   )
+);
+
+// Phase 8.6 PR 3a: bounded local repair. Constructed on the practice-layer
+// graph's own ground so the facility checks are the real ones.
+const repairGraph = buildSeason2026PracticeFacilityGraph(geometry);
+/** One series per entry, dated over the autumn, on orchard-park ground. */
+const repairInput = ({
+  series,
+  inventory,
+  coaches = {},
+  loss = 'orchard-park/field-2',
+  extra = {},
+}) =>
+  repairPracticeLoss({
+    plan: {
+      slots: series.map((entry, index) => ({
+        id: `rp-${index}`,
+        surfaceId: `orchard-park/${entry.surface}`,
+        weekday: entry.weekday,
+        startMinutes: entry.startMinutes,
+        durationMinutes: 60,
+        validFrom: entry.undated ? null : '2026-09-01',
+        validUntil: entry.undated ? null : '2026-11-30',
+        capacity: 1,
+        revisionId: 'r1',
+        label: null,
+        surfaceResolution: 'resolved',
+      })),
+      assignments: series.map((entry, index) => ({
+        id: `rpa-${index}`,
+        slotId: `rp-${index}`,
+        teamId: entry.teamId,
+      })),
+    },
+    graph: repairGraph,
+    loss: { surfaceIds: [loss], from: '2026-10-05', reason: 'audit' },
+    inventory: inventory.map((shape) => ({
+      surfaceId: `orchard-park/${shape.surface}`,
+      weekday: shape.weekday,
+      startMinutes: shape.startMinutes,
+      durationMinutes: 60,
+    })),
+    coachesByTeam: coaches,
+    ...extra,
+  });
+
+harvest(
+  'repairPracticeLoss(one series re-homed, one left TIME TBD, greedy)',
+  repairInput({
+    series: [
+      { teamId: 'RA', surface: 'field-2-a', weekday: 'TUE', startMinutes: 1020 },
+      { teamId: 'RB', surface: 'field-2-b', weekday: 'TUE', startMinutes: 1020 },
+    ],
+    inventory: [{ surface: 'field-3-a', weekday: 'TUE', startMinutes: 1020 }],
+    extra: { strategy: 'greedy' },
+  })
+);
+
+harvest(
+  'repairPracticeLoss(a coach given a new day and an overlap, both warned)',
+  repairInput({
+    series: [
+      { teamId: 'RC1', surface: 'field-1-a', weekday: 'TUE', startMinutes: 1020 },
+      { teamId: 'RC2', surface: 'field-2-a', weekday: 'WED', startMinutes: 900 },
+      { teamId: 'RC3', surface: 'field-2-b', weekday: 'TUE', startMinutes: 900 },
+      { teamId: 'RC4', surface: 'field-1-b', weekday: 'WED', startMinutes: 1080 },
+    ],
+    inventory: [
+      { surface: 'field-3-a', weekday: 'THU', startMinutes: 900 },
+      { surface: 'field-3-b', weekday: 'TUE', startMinutes: 1020 },
+    ],
+    coaches: { RC1: ['rc'], RC2: ['rc'], RC3: ['rc'], RC4: ['rc'] },
+  })
+);
+
+harvest(
+  'repairPracticeLoss(undated series on the lost ground, and so nothing displaced)',
+  repairInput({
+    series: [
+      { teamId: 'RU', surface: 'field-2-a', weekday: 'TUE', startMinutes: 1020, undated: true },
+    ],
+    inventory: [],
+  })
+);
+
+harvest(
+  'repairPracticeLoss(scored with the weekday term zeroed)',
+  repairInput({
+    series: [{ teamId: 'RW', surface: 'field-2-a', weekday: 'TUE', startMinutes: 1020 }],
+    inventory: [{ surface: 'field-3-a', weekday: 'THU', startMinutes: 1020 }],
+    extra: { weights: { changedWeekday: 0 } },
+  })
+);
+
+harvest(
+  'repairPracticeLoss(a loss naming ground the graph does not hold)',
+  repairInput({ series: [], inventory: [], loss: 'nowhere/field-9' })
 );
 
 /* -------------------------------------------------------------------------- */

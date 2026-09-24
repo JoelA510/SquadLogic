@@ -400,13 +400,23 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/index.js',
       // Shares the one weekday walk rather than writing a second one.
       'packages/core/src/practice/materialise.js',
+      // 8.6 PR 3a: the metrics seam anchors each series on the same walk, and
+      // the repair builds its result through the one validating builder.
+      'packages/core/src/practice/metricsInput.js',
+      'packages/core/src/practice/repair.js',
     ]),
     consumers: Object.freeze([
       'packages/core/src/practice/materialise.js',
+      'packages/core/src/practice/metricsInput.js',
+      'packages/core/src/practice/repair.js',
       'tests/practiceSlotModel.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
-    expectedProductionConsumers: Object.freeze(['packages/core/src/practice/materialise.js']),
+    expectedProductionConsumers: Object.freeze([
+      'packages/core/src/practice/materialise.js',
+      'packages/core/src/practice/metricsInput.js',
+      'packages/core/src/practice/repair.js',
+    ]),
     expectedExternalProductionConsumers: Object.freeze([]),
   }),
   Object.freeze({
@@ -415,6 +425,7 @@ const LAYERS = Object.freeze([
     functions: Object.freeze(['materialisePracticeOccurrences']),
     importers: Object.freeze(['packages/core/src/practice/index.js']),
     consumers: Object.freeze([
+      'tests/practiceRepair.test.js',
       'tests/practiceSlotModel.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
@@ -432,6 +443,32 @@ const LAYERS = Object.freeze([
       'tests/practiceSlotModel.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
+    expectedProductionConsumers: Object.freeze([]),
+    expectedExternalProductionConsumers: Object.freeze([]),
+  }),
+  /* -- Phase 8.6 PR 3a: bounded local repair, practice side ------------- */
+  //
+  // `PRACTICE_REPAIR_UNWIRED` claims the external list is empty: nothing in
+  // the app reaches the repair until 8.6 PR 3b wires it.
+  Object.freeze({
+    layer: 'practice/repair.js',
+    modulePath: 'packages/core/src/practice/repair.js',
+    functions: Object.freeze(['repairPracticeLoss']),
+    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    consumers: Object.freeze([
+      'tests/practiceRepair.test.js',
+      'tests/reasonCodeReachability.test.js',
+      'tests/unknownSurfaceDiscipline.test.js',
+    ]),
+    expectedProductionConsumers: Object.freeze([]),
+    expectedExternalProductionConsumers: Object.freeze([]),
+  }),
+  Object.freeze({
+    layer: 'practice/metricsInput.js',
+    modulePath: 'packages/core/src/practice/metricsInput.js',
+    functions: Object.freeze(['toPracticeMetricsInput']),
+    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    consumers: Object.freeze(['tests/practiceRepair.test.js']),
     expectedProductionConsumers: Object.freeze([]),
     expectedExternalProductionConsumers: Object.freeze([]),
   }),

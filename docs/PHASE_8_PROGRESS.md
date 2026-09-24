@@ -6084,3 +6084,40 @@ Findings for the operator:
 
 Supervisor check (executed): dropping one TIME TBD series from the output turned
 8 tests red, including both "none dropped" assertions; restored 46/46.
+
+## #64 writer fix — #444 merged (a72e9f2): the practice writer supersedes what it replaces
+
+`persist_practice_schedule` only ever upserted, so a re-run left every earlier
+row in place (executed: Team 1 held 26 practices in a 13-week season). It now
+prunes superseded rows in the same transaction, scoped to the run's season:
+payload teams lose any row whose `(team, slot, range)` key is absent; teams
+missing from the payload lose their `auto` rows, `manual` rows are kept and
+reported. Empty payload refused unless explicit; advisory lock on (org, season);
+full before-images on `scheduler_runs.results`; one `practice.superseded` audit
+row per removed row.
+
+**This stops new stale rows. It cleans up none.** Readers (calendar feed,
+portal, player record; PGRST201 embed) are deliberately untouched: fixing them
+first would surface the phantom rows. The reader + cleanup PR waits on the
+operator's production counts.
+
+Review rounds (all BLOCKING, same shape — a guarantee with no witness on the
+path the operator actually uses):
+
+1. The Edge Function called the RPC as service-role, which the RPC exempts from
+   its admin check, so the only guard on the new DELETE was an unexecuted
+   `verifyOrgAdmin`. Fixed by calling the RPC as the caller (`createUserClient`),
+   which also put live saves in the audit log (decision 1 resolved).
+2. Operator rulings 2026-09-24: **org admins only apply** (Apply disabled with a
+   visible reason for others; coach/staff change requests deferred, task #65);
+   **unplaced teams lose their old auto row, on condition of one warning per
+   team** — `teams_without_practice` enumerated from the season roster, never the
+   payload (plant M12).
+3. Supervisor plant: emptying the list at the page call site left 62/62 green.
+   Fixed with a real-page Apply test stubbed only at `fetch`; the same plant now
+   goes red, restored 4/4 (supervisor-executed).
+
+Harness: HARNESS OK, 43/43 claims planted, 140/140 anchors. CI green including
+pgTAP. Unexecuted: the Edge runtime against real Supabase (the user-client
+behaviour is statically reviewed); the Edge passthrough is pinned at source.
+Second writer `persistPracticeAssignments` has no caller — retirement filed.

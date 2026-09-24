@@ -1106,7 +1106,13 @@ plant "M3 every practice assignment claimed to be destroyed" "$M5" \
 # twice -- which is why this plant names the scenario table and requires the
 # smoke to stay green. Agreement is not correctness; only a fixture that states
 # the boundary as data can adjudicate it.
-plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M5" \
+#
+# **Planted in $M7, not $M5.** 20260911000000 drops the 3-argument
+# `field_bookings` (its `DROP FUNCTION IF EXISTS ... (uuid, uuid, date)`) and
+# recreates it with `p_scope`, so 20260909000000's copy of this line is dead
+# code by the time the scenario table runs. Planted there, the harness printed
+# HARNESS OK -- this prover could not fail. The live copy is $M7's.
+plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M7" \
   "                 ELSE upper(pa.effective_date_range) - 1" \
   "                 ELSE upper(pa.effective_date_range)" \
   "scenario table" \

@@ -7,7 +7,10 @@
 // by a completed auto-scheduler result -- the state in which Apply exists.
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { MemoryRouter } from 'react-router-dom';
 import { createChainMock } from './helpers/index.js';
 import { PERMISSIONS, ROLE_PERMISSIONS, ROLES } from '../frontend/src/constants/permissions.js';
@@ -18,7 +21,20 @@ const state = vi.hoisted(() => ({
   schedulerResult: {
     runId: 'run-review-1',
     assignments: [{ teamId: 'team-1', slotId: 'slot-1', source: 'auto' }],
-    unassigned: [],
+    // The solver's own reason for Hawks; Owls has none (it is simply not in
+    // this schedule).
+    unassigned: [{ teamId: 'team-hawks', reason: 'no slot fits the coach availability' }],
+  },
+  slotRow: {
+    id: 'slot-1',
+    day_of_week: 'mon',
+    start_time: '18:00',
+    end_time: '19:30',
+    capacity: 1,
+    valid_from: '2026-09-01',
+    valid_until: '2026-11-30',
+    field_id: 'field-1',
+    fields: { id: 'field-1', name: 'Pitch 1', location_id: 'loc-1' },
   },
 }));
 
@@ -82,9 +98,15 @@ vi.mock('../frontend/src/lib/pagedFetch.js', () => ({
 }));
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
-    from: () => createChainMock({ data: [], error: null }),
+    // One real practice slot, so an applied review references a slot that
+    // exists; every other table reads empty.
+    from: (table) =>
+      createChainMock({ data: table === 'practice_slots' ? [state.slotRow] : [], error: null }),
     rpc: async () => ({ data: null, error: null }),
-    auth: { getSession: async () => ({ data: { session: null }, error: null }) },
+    // A session, so `persistPracticeScheduleReview` reaches its `fetch`.
+    auth: {
+      getSession: async () => ({ data: { session: { access_token: 'test-token' } }, error: null }),
+    },
   },
 }));
 
@@ -177,5 +199,74 @@ describe('practice Apply is for org admins only (#64)', () => {
     expect(apply).not.toBeDisabled();
     expect(apply).not.toHaveAttribute('aria-describedby');
     expect(screen.queryByText(REASON)).toBeNull();
+  });
+});
+
+// #64, the operator's condition: "warnings for each team that is missing a
+// practice". The RPC list and the builder are proven elsewhere; this drives the
+// HAND-OFF -- Apply, the real `persistPracticeScheduleReview` (stubbed only at
+// its `fetch`, the lowest seam the page calls), the response it returns, and
+// the page's alert -- so a break anywhere between the Edge response and the
+// screen goes red here.
+describe('after Apply, every team without a practice is named with its reason (#64)', () => {
+  const TEAMS_WITHOUT_PRACTICE = [
+    { team_id: 'team-hawks', team_name: 'Hawks', had_prior_rows: false },
+    { team_id: 'team-owls', team_name: 'Owls', had_prior_rows: true },
+  ];
+
+  it('lists Hawks with the solver reason and Owls as not scheduled, having lost a practice', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: 'success',
+          runId: 'run-review-1',
+          supersededCount: 1,
+          retainedManualCount: 0,
+          retainedManual: [],
+          teamsWithoutPractice: TEAMS_WITHOUT_PRACTICE,
+          audited: true,
+          auditGap: null,
+          message: 'Persistence successful.',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+    try {
+      renderAs(ROLES.ADMIN);
+      const apply = await screen.findByRole('button', { name: /apply schedule/i });
+      // The slot read resolves after mount; Apply refuses a review whose slot
+      // it has not loaded, which is not what this test is about.
+      await waitFor(() => expect(apply).not.toBeDisabled());
+      fireEvent.click(apply);
+
+      const list = await screen.findByRole('list', { name: 'Teams without a practice' });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(String(fetchSpy.mock.calls[0][0])).toMatch(/practice-persistence$/);
+
+      const alert = /** @type {HTMLElement} */ (list.closest('[role="alert"]'));
+      expect(alert).not.toBeNull();
+      expect(within(alert).getByText('2 team(s) have no practice after this save:')).toBeVisible();
+      const items = within(list)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent);
+      expect(items).toEqual([
+        'Hawks: no slot fits the coach availability',
+        'Owls: not in this schedule; an earlier practice was removed',
+      ]);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('the Edge Function passes the RPC list through, not a derived one', () => {
+    // The one link this render cannot execute: vitest cannot load the Deno
+    // function. Pinned at the source, as `practicePersistenceUserClient.test.js`
+    // pins its client.
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    const edge = readFileSync(
+      path.join(root, 'supabase/functions/practice-persistence/index.ts'),
+      'utf8'
+    );
+    expect(edge).toMatch(/teamsWithoutPractice:\s*report\.teams_without_practice\s*\?\?\s*\[\]/);
   });
 });

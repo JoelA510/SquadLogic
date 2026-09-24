@@ -84,6 +84,13 @@ When('I navigate to the Practice Scheduling page', async ({ page }) => {
       body: JSON.stringify({
         status: 'success',
         runId: '00000000-0000-4000-8000-000000000221',
+        // The #64 contract: what the save superseded and what it kept.
+        supersededCount: 0,
+        retainedManualCount: 0,
+        retainedManual: [],
+        teamsWithoutPractice: [],
+        audited: false,
+        auditGap: 'no auth.uid(): record_audit_event cannot attribute this save',
         message: 'Persistence successful.',
         syncedAt: new Date().toISOString(),
       }),

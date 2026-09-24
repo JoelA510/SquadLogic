@@ -10,7 +10,8 @@ import {
   getUserFromRequest,
   getUserOrgIds,
   resolveOrgIdsFromTeamIds,
-  recordAudit,
+  verifyOrgAdmin,
+  createUserClient,
   corsHeaders,
   jsonResponse,
 } from '../_shared/auth.ts';
@@ -138,6 +139,8 @@ async function persistPracticeSnapshot(
       }
     : {
         run_type: 'practice',
+        // #64: the RPC scopes its prune to this season and refuses without it.
+        season_settings_id: runMetadata.seasonSettingsId,
         status: 'completed',
         updated_at: now.toISOString(),
       };
@@ -149,9 +152,31 @@ async function persistPracticeSnapshot(
 
   if (error) throw error;
 
+  // #64: the RPC returns jsonb -- the run id, the rows this save superseded,
+  // the manual rows it deliberately kept, and whether it could audit.
+  // A bare uuid is what the RPC returned before 20260924000000; read either,
+  // so this function and the migration need not deploy in the same instant.
+  const report = (typeof data === 'string' ? { run_id: data } : (data ?? {})) as {
+    run_id?: string;
+    superseded_count?: number;
+    retained_manual?: unknown[];
+    retained_manual_count?: number;
+    teams_without_practice?: Array<{ team_id: string; team_name: string; had_prior_rows: boolean }>;
+    audited?: boolean;
+    audit_gap?: string | null;
+  };
+
   return {
     status: 'success',
-    runId: effectiveRunId ?? data ?? null,
+    runId: effectiveRunId ?? report.run_id ?? null,
+    supersededCount: report.superseded_count ?? 0,
+    retainedManualCount: report.retained_manual_count ?? 0,
+    retainedManual: report.retained_manual ?? [],
+    // Every season team the save left with no practice, from the roster. The
+    // pre-20260924000000 uuid result carries none, so it reads as empty.
+    teamsWithoutPractice: report.teams_without_practice ?? [],
+    audited: report.audited ?? false,
+    auditGap: report.audit_gap ?? null,
     message: 'Persistence successful.',
     syncedAt: now.toISOString(),
   };
@@ -163,13 +188,14 @@ type HttpHandler = (request: Request) => Response | Promise<Response>;
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL');
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
 const allowedRoles = parseAllowedRolesEnv(Deno.env.get('PRACTICE_PERSISTENCE_ALLOWED_ROLES'));
 
 let handler: HttpHandler;
 
-if (!supabaseUrl || !serviceRoleKey) {
+if (!supabaseUrl || !serviceRoleKey || !anonKey) {
   console.error(
-    'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for practice persistence function.'
+    'Missing SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY for practice persistence function.'
   );
   handler = () =>
     jsonResponse({ status: 'error', message: 'Supabase service configuration is missing.' }, 500);
@@ -245,29 +271,57 @@ if (!supabaseUrl || !serviceRoleKey) {
         ? body.runMetadata.seasonSettingsId
         : undefined;
 
-    if (seasonSettingsId) {
-      const seasonOrgId = await resolveOrgIdFromSeasonSettingsId(serviceClient, seasonSettingsId);
-      if (!seasonOrgId || !userOrgIds.includes(seasonOrgId)) {
-        return jsonResponse(
-          { status: 'error', message: 'Access denied: season belongs to a different organization' },
-          403
-        );
-      }
+    // #64: a save now REPLACES the season's practice schedule, so it needs a
+    // season to scope that to, and an empty one would remove every auto row
+    // in it. The RPC refuses both; refusing here makes them a 400, not a 500.
+    if (!seasonSettingsId) {
+      return jsonResponse(
+        { status: 'error', message: 'runMetadata.seasonSettingsId is required' },
+        400
+      );
+    }
+    if (assignmentRows.length === 0) {
+      return jsonResponse(
+        {
+          status: 'error',
+          message:
+            'Refusing to save an empty practice schedule: it would remove every auto assignment in the season.',
+        },
+        400
+      );
     }
 
-    if (assignmentRows.length > 0) {
-      const teamIds = [
-        ...new Set(assignmentRows.map((r) => r.team_id).filter(Boolean)),
-      ] as string[];
-      if (teamIds.length > 0) {
-        const targetOrgIds = await resolveOrgIdsFromTeamIds(serviceClient, teamIds);
-        const unauthorized = targetOrgIds.filter((oid) => !userOrgIds.includes(oid));
-        if (unauthorized.length > 0) {
-          return jsonResponse(
-            { status: 'error', message: 'Access denied: data belongs to a different organization' },
-            403
-          );
-        }
+    const seasonOrgId = await resolveOrgIdFromSeasonSettingsId(serviceClient, seasonSettingsId);
+    if (!seasonOrgId || !userOrgIds.includes(seasonOrgId)) {
+      return jsonResponse(
+        { status: 'error', message: 'Access denied: season belongs to a different organization' },
+        403
+      );
+    }
+
+    // #64: a save now DELETES the season's superseded rows. The RPC requires an
+    // org admin of any caller with a uid, but this function calls it with the
+    // service-role client, which the RPC exempts -- so the same rule is
+    // enforced here, or any member could erase a season's practices.
+    if (!(await verifyOrgAdmin(serviceClient, user.id, seasonOrgId))) {
+      return jsonResponse(
+        {
+          status: 'error',
+          message: 'Access denied: only an organization admin can replace a practice schedule',
+        },
+        403
+      );
+    }
+
+    const teamIds = [...new Set(assignmentRows.map((r) => r.team_id).filter(Boolean))] as string[];
+    if (teamIds.length > 0) {
+      const targetOrgIds = await resolveOrgIdsFromTeamIds(serviceClient, teamIds);
+      const unauthorized = targetOrgIds.filter((oid) => !userOrgIds.includes(oid));
+      if (unauthorized.length > 0) {
+        return jsonResponse(
+          { status: 'error', message: 'Access denied: data belongs to a different organization' },
+          403
+        );
       }
     }
 
@@ -284,24 +338,22 @@ if (!supabaseUrl || !serviceRoleKey) {
       );
     }
 
-    // 5. Persist
+    // 5. Persist -- AS THE CALLER (#64). The save deletes the season's
+    // superseded practices, and the service-role client would carry that
+    // DELETE past the RPC's admin check (which exempts service_role), past the
+    // `practice_assignments_write_admin` policy, and past `record_audit_event`
+    // (no uid to attribute). The user client puts all three on this path;
+    // `verifyOrgAdmin` above stays as the early 403. The RPC also writes the
+    // `practice.saved` and per-row `practice.superseded` audit rows itself,
+    // so this function no longer records its own.
+    const userClient = createUserClient(req, supabaseUrl, anonKey);
     try {
       const result = await persistPracticeSnapshot(
-        serviceClient,
+        userClient,
         body.snapshot as Parameters<typeof persistPracticeSnapshot>[1],
         (body.runMetadata ?? {}) as RunMetadata,
         new Date()
       );
-
-      // Audit log (fire-and-forget)
-      if (userOrgIds.length > 0) {
-        recordAudit(serviceClient, {
-          organizationId: userOrgIds[0],
-          action: 'practice.saved',
-          resourceType: 'practice_assignment',
-          metadata: { assignment_count: assignmentRows.length },
-        });
-      }
 
       return jsonResponse(result, 200);
     } catch (error) {

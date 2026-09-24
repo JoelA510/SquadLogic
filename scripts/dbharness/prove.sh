@@ -30,6 +30,9 @@ S5="$REPO/docs/sql/20260909000000_smoke.sql"
 # the claims against the registry, so nobody looked.
 R9="$REPO/docs/sql/20260920000000_revert.sql"
 R10="$REPO/docs/sql/20260923000000_revert.sql"
+# #64: the practice writer that prunes superseded rows.
+M11="$REPO/supabase/migrations/20260924000000_practice_writer_prunes_superseded.sql"
+R11="$REPO/docs/sql/20260924000000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -2592,6 +2595,53 @@ plant "R10 the assignment warning stops counting teams distinctly" "$R10" \
   "    SELECT count(*), count(*) FILTER (WHERE effective_to IS NOT NULL), count(team_id)" \
   "revert 20260923000000: planted 3 assignment rows across 2 teams, 1 ended, and the revert did not warn with those figures"
 
+# **#64's writer**: the smoke replays the five-team re-run. Without the prune
+# the moved team keeps both practices, which is the defect families saw.
+plant "M11 the writer stops pruning superseded rows" "$M11" \
+  "         WHERE pa.team_id = s.team_id" \
+  "         WHERE false AND pa.team_id = s.team_id" \
+  "FAIL smoke 20260924000000"
+
+# The per-team list must come from the season ROSTER. Filtered to the payload
+# instead -- with the roster count left intact, so the count meta-assertion
+# cannot be what catches it -- the dropped team and the never-scheduled one
+# both vanish: the exact silence the operator's condition on #64 forbids.
+plant "M12 teams without practice are listed from the payload, not the roster" "$M11" \
+  "                   WHERE NOT EXISTS (
+                       SELECT 1 FROM public.practice_assignments pa WHERE pa.team_id = t.id
+                   )
+               )," \
+  "                   WHERE NOT EXISTS (
+                       SELECT 1 FROM public.practice_assignments pa WHERE pa.team_id = t.id
+                   )
+                   AND t.id = ANY (v_payload_teams)
+               )," \
+  "FAIL smoke 20260924000000"
+
+# Its revert leaves deleted rows deleted, so the warning is the claim. The seed
+# plants 3 rows on 2 runs plus an EMPTY run; counting every run prints 3 runs.
+plant "R11 the superseded-row warning counts runs holding none" "$R11" \
+  "           count(*) FILTER (WHERE jsonb_array_length(results->'superseded_rows') > 0)" \
+  "           count(*)" \
+  "revert 20260924000000: planted 3 superseded rows on 2 runs (and 1 empty run) and the revert did not warn with those figures"
+
+# The revert's own verification raises on a surviving overload, so a plain
+# missing DROP never reaches run.sh's catalogue read. An overload re-created
+# AFTER the verification is what drifted statements look like.
+plant "R11 the revert re-creates the pruning overload after verifying it gone" "$R11" \
+  "    RAISE NOTICE 'revert verified: one persist_practice_schedule(jsonb, jsonb) returning uuid, with no prune; audit actions left registered.';
+END;
+\$\$;" \
+  "    RAISE NOTICE 'revert verified: one persist_practice_schedule(jsonb, jsonb) returning uuid, with no prune; audit actions left registered.';
+END;
+\$\$;
+
+-- plant: a second overload re-created after the verification block.
+CREATE FUNCTION public.persist_practice_schedule(run_data jsonb, assignments jsonb, allow_empty boolean)
+RETURNS jsonb LANGUAGE sql AS 'SELECT NULL::jsonb';" \
+  "revert 20260924000000: the pruning writer, or a second overload, survived its own revert" \
+  "(checked) the revert counted the superseded practice rows it leaves deleted, and the runs recording them"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -2656,6 +2706,9 @@ declare -A CLAIM_PROVER=(
   ["(checked) the revert counted the published baselines it was about to destroy, and the organisations they span"]="R9 the baseline warning stops counting organisations distinctly"
   ["(checked) publication_baselines is gone from the catalogue after the revert"]="R9 the revert re-creates the store after verifying it gone"
   ["(checked) the revert counted the coach assignment rows it was about to destroy, the teams they span, and the ended ones"]="R10 the assignment warning stops counting teams distinctly"
+  ["(checked) the revert counted the superseded practice rows it leaves deleted, and the runs recording them"]="R11 the superseded-row warning counts runs holding none"
+  ["(checked) the practice writer names every season team left without a practice, from the roster, including one never scheduled"]="M12 teams without practice are listed from the payload, not the roster"
+  ["(checked) exactly one public.persist_practice_schedule survives the revert, returning uuid, and it no longer prunes"]="R11 the revert re-creates the pruning overload after verifying it gone"
 )
 
 # **`(unplantable)` is the one prefix that retires a HEALTH CLAIM, so it is

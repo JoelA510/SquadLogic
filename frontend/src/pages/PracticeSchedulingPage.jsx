@@ -25,6 +25,10 @@ import { PERMISSIONS } from '../constants/permissions.js';
 import { useAutoScheduler } from '../hooks/useAutoScheduler.js';
 import { useAutoRunOnNavigate } from '../hooks/useAutoRunOnNavigate.js';
 import { persistPracticeScheduleReview } from '../utils/practicePersistenceClient.js';
+import {
+  buildPracticeApplyStatus,
+  buildTeamsWithoutPracticeWarnings,
+} from '../utils/practiceApplyStatus.js';
 
 const DAY_LABELS = {
   sun: 'Sunday',
@@ -375,6 +379,8 @@ export default function PracticeSchedulingPage() {
   const [statusMessage, setStatusMessage] = useState(null);
   const [applyStatus, setApplyStatus] = useState('idle');
   const [applyError, setApplyError] = useState(null);
+  // #64: one warning per season team the last save left with no practice.
+  const [teamWarnings, setTeamWarnings] = useState([]);
   const [reviewedSchedulerRunId, setReviewedSchedulerRunId] = useState(null);
 
   const canManageSchedule =
@@ -384,6 +390,10 @@ export default function PracticeSchedulingPage() {
   // Cancelling is destructive and the RPC requires org admin, so the button
   // is gated tighter than general schedule editing.
   const canCancelAssignments = permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION) && isEditMode;
+  // #64: applying REPLACES the season's practice schedule, and the server lets
+  // only an org admin do that. Offering anyone else an Apply that always ends
+  // in a 403 is worse than saying so up front.
+  const canApplySchedule = permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);
 
   const autoScheduler = useAutoScheduler({ organizationId: currentOrganization?.id });
 
@@ -511,6 +521,7 @@ export default function PracticeSchedulingPage() {
     setApplyStatus('review');
     setApplyError(null);
     setStatusMessage(null);
+    setTeamWarnings([]);
     setReviewedSchedulerRunId(resultRunId);
   }, [autoScheduler.result, autoScheduler.status, reviewedSchedulerRunId, slotById, teamById]);
 
@@ -688,7 +699,7 @@ export default function PracticeSchedulingPage() {
   }, [autoScheduler]);
 
   const handleApplySchedule = useCallback(async () => {
-    if (!canManageSchedule || !reviewAssignments?.length) return;
+    if (!canManageSchedule || !canApplySchedule || !reviewAssignments?.length) return;
 
     const persistenceAssignments = reviewAssignments.map(toPersistenceAssignment);
     const missingSlot = persistenceAssignments.find(
@@ -708,6 +719,7 @@ export default function PracticeSchedulingPage() {
 
     setApplyStatus('applying');
     setApplyError(null);
+    setTeamWarnings([]);
 
     // The core `practiceMetrics` report over the assignments actually being
     // applied -- which is the shape `practiceSummaryMapper`,
@@ -767,10 +779,20 @@ export default function PracticeSchedulingPage() {
       // a run with no readiness metrics must say so here. The panel can only
       // fall silent (it gates on `summary.unassignedTeams`), and a silent
       // panel is indistinguishable from a season with nothing to report.
+      setTeamWarnings(
+        buildTeamsWithoutPracticeWarnings({
+          teamsWithoutPractice: result.teamsWithoutPractice,
+          unassigned: autoScheduler.result?.unassigned ?? [],
+        })
+      );
       setStatusMessage(
-        results.metricsUnavailable
-          ? `Schedule applied. Readiness metrics were not computed for this run: ${results.metricsUnavailable.reason}`
-          : null
+        buildPracticeApplyStatus({
+          metricsUnavailableReason: results.metricsUnavailable
+            ? results.metricsUnavailable.reason
+            : null,
+          supersededCount: result.supersededCount,
+          retainedManualCount: result.retainedManualCount,
+        })
       );
     } catch (err) {
       setApplyError(err.message || 'Practice schedule changes could not be applied.');
@@ -778,6 +800,7 @@ export default function PracticeSchedulingPage() {
     }
   }, [
     autoScheduler.result,
+    canApplySchedule,
     canManageSchedule,
     currentOrganization?.id,
     currentSeasonSetting?.id,
@@ -999,7 +1022,8 @@ export default function PracticeSchedulingPage() {
                       size="sm"
                       onClick={handleApplySchedule}
                       loading={applyStatus === 'applying'}
-                      disabled={applyStatus === 'applying'}
+                      disabled={applyStatus === 'applying' || !canApplySchedule}
+                      aria-describedby={canApplySchedule ? undefined : 'practice-apply-admin-only'}
                       className="flex items-center gap-1"
                     >
                       <CheckCircle size={14} aria-hidden="true" />
@@ -1018,9 +1042,31 @@ export default function PracticeSchedulingPage() {
                   </div>
                 )}
               </div>
+              {reviewAssignments?.length > 0 && !canApplySchedule && (
+                <p id="practice-apply-admin-only" className="mt-3 text-sm text-text-muted">
+                  Only an organization admin can apply a practice schedule.
+                </p>
+              )}
               {applyError && (
                 <div role="alert" className="mt-3 text-sm text-red-300">
                   {applyError}
+                </div>
+              )}
+              {applyStatus === 'applied' && teamWarnings.length > 0 && (
+                <div
+                  role="alert"
+                  className="mt-4 rounded-lg border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+                >
+                  <p className="font-semibold">
+                    {teamWarnings.length} team(s) have no practice after this save:
+                  </p>
+                  <ul className="mt-2 list-disc pl-5" aria-label="Teams without a practice">
+                    {teamWarnings.map((warning) => (
+                      <li key={warning.teamId}>
+                        {warning.teamName}: {warning.message}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </section>

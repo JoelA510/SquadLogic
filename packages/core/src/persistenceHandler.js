@@ -195,7 +195,12 @@ export async function persistSnapshotTransactional({
 
   return {
     status: 'success',
-    runId: runMetadata?.runId ?? snapshot.runId ?? (data ? data : null),
+    // `persist_practice_schedule` returns jsonb carrying `run_id` (#64); the
+    // team RPC still returns the bare id.
+    runId:
+      runMetadata?.runId ??
+      snapshot.runId ??
+      (data && typeof data === 'object' ? (data.run_id ?? null) : data || null),
     message: 'Persistence successful.',
     syncedAt: now.toISOString(),
   };

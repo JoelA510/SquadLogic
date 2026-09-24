@@ -199,46 +199,59 @@ function anchorSandbox() {
       filter: (src) => !src.includes('__pycache__'),
     });
   }
-  // The control: an unbroken copy must pass, or the refusal below could be
-  // any failure at all.
-  expect(anchors(dir)).toMatchObject({ status: 0 });
+  // No unmutated-copy run here, unlike `sandbox()`: the real-tree case already
+  // proves exit 0, and the control below asserts the pre-flight's own refusal
+  // text, which a copy broken any other way cannot print -- so it cannot pass
+  // for the wrong reason, and a second prove.sh run only doubles the time.
   return dir;
 }
+
+// Each case shells out to prove.sh over the whole migration set (about 2 s
+// alone, far more under a loaded CI runner), which vitest's 5 s default overran.
+const PREFLIGHT_TIMEOUT_MS = 60_000;
 
 const BOUNDARY_PLANT =
   'plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M7" \\';
 
 describe('dbharness anchor pre-flight', () => {
-  it('every plant anchor resolves once and none sits in a superseded body', () => {
-    const { status, output } = anchors(repoRoot);
-    expect(output).toMatch(
-      /pre-flight: \d+ migration-targeted plant anchors examined \((\d+) inside/
-    );
-    // Meta-assertion: the function arm judged real bodies, not none.
-    const judged = Number(/examined \((\d+) inside a function body/.exec(output)?.[1]);
-    expect(judged).toBeGreaterThan(20);
-    expect(output).toMatch(/anchor pre-flight: (\d+) of \1 plant anchors resolve exactly once/);
-    expect(status).toBe(0);
-  });
+  it(
+    'every plant anchor resolves once and none sits in a superseded body',
+    () => {
+      const { status, output } = anchors(repoRoot);
+      expect(output).toMatch(
+        /pre-flight: \d+ migration-targeted plant anchors examined \((\d+) inside/
+      );
+      // Meta-assertion: the function arm judged real bodies, not none.
+      const judged = Number(/examined \((\d+) inside a function body/.exec(output)?.[1]);
+      expect(judged).toBeGreaterThan(20);
+      expect(output).toMatch(/anchor pre-flight: (\d+) of \1 plant anchors resolve exactly once/);
+      expect(status).toBe(0);
+    },
+    PREFLIGHT_TIMEOUT_MS
+  );
 
-  it('refuses a plant re-aimed at the field_bookings body 20260911 drops', () => {
-    const dir = anchorSandbox();
-    const prove = fs.readFileSync(proveSh(dir), 'utf8');
-    // The plant call itself, not a comment quoting it: mutating a comment would
-    // leave the pre-flight green and this control proving nothing.
-    const lines = prove.split('\n');
-    expect(lines.filter((l) => l === BOUNDARY_PLANT)).toHaveLength(1);
-    fs.writeFileSync(
-      proveSh(dir),
-      lines.map((l) => (l === BOUNDARY_PLANT ? l.replace('"$M7"', '"$M5"') : l)).join('\n')
-    );
+  it(
+    'refuses a plant re-aimed at the field_bookings body 20260911 drops',
+    () => {
+      const dir = anchorSandbox();
+      const prove = fs.readFileSync(proveSh(dir), 'utf8');
+      // The plant call itself, not a comment quoting it: mutating a comment would
+      // leave the pre-flight green and this control proving nothing.
+      const lines = prove.split('\n');
+      expect(lines.filter((l) => l === BOUNDARY_PLANT)).toHaveLength(1);
+      fs.writeFileSync(
+        proveSh(dir),
+        lines.map((l) => (l === BOUNDARY_PLANT ? l.replace('"$M7"', '"$M5"') : l)).join('\n')
+      );
 
-    const { status, output } = anchors(dir);
-    expect(output).toContain(
-      'PRE-FLIGHT REFUSAL: plant "ONLY-SCEN the practice range boundary is read exclusively again"'
-    );
-    expect(output).toContain('public.field_bookings(uuid, uuid, date)');
-    expect(output).toContain('20260911000000_venue_subunit_effective_dating.sql (DROP FUNCTION)');
-    expect(status).not.toBe(0);
-  });
+      const { status, output } = anchors(dir);
+      expect(output).toContain(
+        'PRE-FLIGHT REFUSAL: plant "ONLY-SCEN the practice range boundary is read exclusively again"'
+      );
+      expect(output).toContain('public.field_bookings(uuid, uuid, date)');
+      expect(output).toContain('20260911000000_venue_subunit_effective_dating.sql (DROP FUNCTION)');
+      expect(status).not.toBe(0);
+    },
+    PREFLIGHT_TIMEOUT_MS
+  );
 });

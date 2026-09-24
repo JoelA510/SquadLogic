@@ -190,6 +190,26 @@ export const PRACTICE_REASON = Object.freeze({
    * itself unwired **exactly** while nothing claims one of its codes.
    */
   MODEL_UNWIRED: 'PRACTICE_MODEL_UNWIRED',
+
+  /* -- bounded local repair (Phase 8.6 PR 3a, `repair.js`) ---------------- */
+  /** A displaced series was re-homed at its own venue. One per series. */
+  REPAIR_REHOMED: 'PRACTICE_REPAIR_REHOMED',
+  /** A displaced series could not be re-homed at its venue: TIME TBD, with a reason. */
+  REPAIR_TIME_TBD: 'PRACTICE_REPAIR_TIME_TBD',
+  /** A re-home gave a coach more practice days than the published plan did. A warned compromise. */
+  REPAIR_COACH_DAYS_WORSENED: 'PRACTICE_REPAIR_COACH_DAYS_WORSENED',
+  /** A re-home put two of one coach's practices at the same time. A warned compromise. */
+  REPAIR_COACH_OVERLAP_CARRIED: 'PRACTICE_REPAIR_COACH_OVERLAP_CARRIED',
+  /** The search stopped before proving its answer optimal, or never tried to. */
+  REPAIR_MINIMALITY_UNPROVEN: 'PRACTICE_REPAIR_MINIMALITY_UNPROVEN',
+  /** A series on the lost ground has no validity range, so whether it is displaced is unknown. */
+  REPAIR_SERIES_UNDATED: 'PRACTICE_REPAIR_SERIES_UNDATED',
+  /** The loss names ground the facility graph does not hold. */
+  REPAIR_LOSS_UNKNOWN_SURFACE: 'PRACTICE_REPAIR_LOSS_UNKNOWN_SURFACE',
+  /** The loss displaced nothing. Said, so that zero is never read as "repaired". */
+  REPAIR_NOTHING_DISPLACED: 'PRACTICE_REPAIR_NOTHING_DISPLACED',
+  /** The repair has no production caller (8.6 PR 3b wires it). On every result. */
+  REPAIR_UNWIRED: 'PRACTICE_REPAIR_UNWIRED',
 });
 
 /**
@@ -223,6 +243,17 @@ export const PRACTICE_REASON_SEVERITY = Object.freeze({
   [PRACTICE_REASON.WINDOW_EMPTY]: PRACTICE_SEVERITY.INFO,
 
   [PRACTICE_REASON.MODEL_UNWIRED]: PRACTICE_SEVERITY.INFO,
+  [PRACTICE_REASON.REPAIR_REHOMED]: PRACTICE_SEVERITY.INFO,
+  // An unplaced practice is the result the operator has to act on.
+  [PRACTICE_REASON.REPAIR_TIME_TBD]: PRACTICE_SEVERITY.COMPROMISE,
+  // Operator ruling 2026-09-23 (the #61 analogue): avoid, allow, and warn.
+  [PRACTICE_REASON.REPAIR_COACH_DAYS_WORSENED]: PRACTICE_SEVERITY.COMPROMISE,
+  [PRACTICE_REASON.REPAIR_COACH_OVERLAP_CARRIED]: PRACTICE_SEVERITY.COMPROMISE,
+  [PRACTICE_REASON.REPAIR_MINIMALITY_UNPROVEN]: PRACTICE_SEVERITY.COMPROMISE,
+  [PRACTICE_REASON.REPAIR_SERIES_UNDATED]: PRACTICE_SEVERITY.COMPROMISE,
+  [PRACTICE_REASON.REPAIR_LOSS_UNKNOWN_SURFACE]: PRACTICE_SEVERITY.BLOCKING,
+  [PRACTICE_REASON.REPAIR_NOTHING_DISPLACED]: PRACTICE_SEVERITY.INFO,
+  [PRACTICE_REASON.REPAIR_UNWIRED]: PRACTICE_SEVERITY.INFO,
 });
 
 /**

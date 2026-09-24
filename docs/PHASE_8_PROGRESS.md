@@ -6060,3 +6060,27 @@ repo). If NOAA gives ~4:50 and ~4:42 PM, the two corpus rows are wrong and
 correcting them is a recorded ruling; the 11-row fit then validates the method.
 Nothing was committed; finer coordinates were never recorded. No legality
 changes in today's corpus either way (statically reviewed).
+
+## 8.6 PR 3a — #443 merged (7c62161): bounded local practice repair, unwired
+
+`repairPracticeLoss()` re-homes the practice series displaced by a surface loss
+from date D, same venue only, splitting each at D so pre-D occurrences are
+byte-identical; the rest go TIME TBD with a reason and up to three cross-venue
+options carrying `applyAs` (never auto-applied). Unwired, and pinned so: 3b
+wires it.
+
+Findings for the operator:
+
+- **Re-home rate is low: 36 of 187 displaced series across all 29 single-surface
+  losses; 151 TIME TBD.** The reasons come from the data (`no-legal-slot-at-venue`,
+  `contended`), not from a cap — the inventory rule leaves little same-venue slack.
+- **A clean slot beats a coach-day compromise only within 340 minutes of extra
+  drift**, because the compromise is one term in the single weight table.
+  Pinned by test; a strict clean-first pass is an operator decision.
+- The 100:1 compromise ratio is inert on the corpus (identical at 100/30/10/3/1).
+- `changedWeekday: 240` applies to practice series only; the games
+  679-displacement sweep is byte-identical to main (with a drift-0 control
+  showing the sweep can detect change).
+
+Supervisor check (executed): dropping one TIME TBD series from the output turned
+8 tests red, including both "none dropped" assertions; restored 46/46.

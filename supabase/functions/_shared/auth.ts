@@ -38,6 +38,32 @@ export async function getUserFromRequest(
 }
 
 /**
+ * A client that acts AS the caller: the anon (publishable) key plus the
+ * request's own `Authorization` header, so PostgREST runs as `authenticated`,
+ * `auth.uid()` is the caller, RLS applies, and `record_audit_event` can
+ * attribute what it records.
+ *
+ * Use it for any write whose authorisation must be the database's, not only
+ * this function's. The service-role client bypasses every RLS policy and every
+ * `service_role` exemption in an RPC, so a write made through it is authorised
+ * by nothing but the Edge Function's own checks -- which no test executes.
+ * (#64: `persist_practice_schedule` deletes a season's superseded practices.)
+ *
+ * `SUPABASE_ANON_KEY` is injected into every Edge Function by the platform
+ * (docs/operations/ENVIRONMENT.md).
+ */
+export function createUserClient(
+  request: Request,
+  supabaseUrl: string,
+  anonKey: string
+): SupabaseClient {
+  return _createClient(supabaseUrl, anonKey, {
+    global: { fetch, headers: { Authorization: request.headers.get('Authorization') ?? '' } },
+    auth: { persistSession: false },
+  });
+}
+
+/**
  * Verify that a user is a member of a specific organization.
  * Uses the service-role client to bypass RLS on organization_members
  * (since we're checking membership itself, not accessing org data).

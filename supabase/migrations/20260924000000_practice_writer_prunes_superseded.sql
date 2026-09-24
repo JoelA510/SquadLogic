@@ -40,16 +40,23 @@
 --     retained manual rows, and whether the save was audited. The return type
 --     changes, so the two-argument function is DROPped and recreated.
 --
--- ## Audit, and the gap it cannot close
+-- ## Audit, and the one caller it cannot cover
 --
 -- Every superseded row gets one `practice.superseded` audit row carrying the
 -- full row, and every save one `practice.saved` row -- when the caller has an
--- `auth.uid()`. `record_audit_event` writes `auth.uid()` into the NOT NULL
--- `audit_log.user_id`, and the live caller, the `practice-persistence` Edge
--- Function, calls with the service-role client, whose uid is NULL. Calling it
--- there would fail every save with 23502 -- the defect 20260726000200 records
--- as KNOWN PRE-EXISTING. So that path returns `audited: false` with the reason,
--- and the superseded before-images are ALSO written to the run's
+-- `auth.uid()`. The live caller does: the `practice-persistence` Edge Function
+-- calls this RPC with a USER client (the anon key plus the caller's JWT), so
+-- the admin check below, the `practice_assignments_write_admin` policy and the
+-- audit all apply on the live path.
+--
+-- A service-role caller has no uid. `record_audit_event` writes `auth.uid()`
+-- into the NOT NULL `audit_log.user_id`, so auditing there would fail the save
+-- with 23502 -- the defect 20260726000200 records as KNOWN PRE-EXISTING. That
+-- branch returns `audited: false` with the reason. No live code path takes it
+-- after #64: its remaining callers are an operator running the RPC with the
+-- service key, and `packages/core`'s `persistPracticeSnapshotTransactional`,
+-- which nothing in the app wires to a service-role client. The superseded
+-- before-images are ALSO written to the run's
 -- `scheduler_runs.results.superseded_rows` on every path, which is what makes
 -- a prune readable and reversible whichever way it was called.
 --
@@ -248,7 +255,7 @@ BEGIN
 
     -- #64: the upsert below replaces `results`, so a re-save under the same
     -- run id would erase the before-images an earlier save of it recorded --
-    -- on the service-role path, the only record of those rows. Read them first.
+    -- for a service-role caller, the only record of those rows. Read them first.
     SELECT sr.results->'superseded_rows'
       INTO v_prior_superseded
       FROM public.scheduler_runs sr
@@ -627,11 +634,12 @@ BEGIN
 
     -- Audit: one row per superseded assignment, with the full row, and one per
     -- run. `record_audit_event` writes `auth.uid()` into the NOT NULL
-    -- `audit_log.user_id`, so a caller with no uid -- the service-role client
-    -- `practice-persistence` uses -- cannot be audited here: calling it would
-    -- fail the save with 23502 (the defect 20260726000200 records as KNOWN
-    -- PRE-EXISTING). That caller is told so in the result rather than the
-    -- audit being skipped in silence, and its before-images are on the run.
+    -- `audit_log.user_id`, so a caller with no uid -- a service-role caller;
+    -- `practice-persistence` calls as the user -- cannot be audited here:
+    -- calling it would fail the save with 23502 (the defect 20260726000200
+    -- records as KNOWN PRE-EXISTING). That caller is told so in the result
+    -- rather than the audit being skipped in silence, and its before-images
+    -- are on the run.
     IF auth.uid() IS NOT NULL THEN
         FOR v_row IN SELECT value FROM jsonb_array_elements(v_removed) LOOP
             PERFORM public.record_audit_event(

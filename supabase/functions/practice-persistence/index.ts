@@ -11,7 +11,7 @@ import {
   getUserOrgIds,
   resolveOrgIdsFromTeamIds,
   verifyOrgAdmin,
-  recordAudit,
+  createUserClient,
   corsHeaders,
   jsonResponse,
 } from '../_shared/auth.ts';
@@ -184,13 +184,14 @@ type HttpHandler = (request: Request) => Response | Promise<Response>;
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL');
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
 const allowedRoles = parseAllowedRolesEnv(Deno.env.get('PRACTICE_PERSISTENCE_ALLOWED_ROLES'));
 
 let handler: HttpHandler;
 
-if (!supabaseUrl || !serviceRoleKey) {
+if (!supabaseUrl || !serviceRoleKey || !anonKey) {
   console.error(
-    'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for practice persistence function.'
+    'Missing SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY for practice persistence function.'
   );
   handler = () =>
     jsonResponse({ status: 'error', message: 'Supabase service configuration is missing.' }, 500);
@@ -333,35 +334,22 @@ if (!supabaseUrl || !serviceRoleKey) {
       );
     }
 
-    // 5. Persist
+    // 5. Persist -- AS THE CALLER (#64). The save deletes the season's
+    // superseded practices, and the service-role client would carry that
+    // DELETE past the RPC's admin check (which exempts service_role), past the
+    // `practice_assignments_write_admin` policy, and past `record_audit_event`
+    // (no uid to attribute). The user client puts all three on this path;
+    // `verifyOrgAdmin` above stays as the early 403. The RPC also writes the
+    // `practice.saved` and per-row `practice.superseded` audit rows itself,
+    // so this function no longer records its own.
+    const userClient = createUserClient(req, supabaseUrl, anonKey);
     try {
       const result = await persistPracticeSnapshot(
-        serviceClient,
+        userClient,
         body.snapshot as Parameters<typeof persistPracticeSnapshot>[1],
-        // `createdBy` is the verified caller, never the client's claim: the
-        // service-role RPC records it as the run's creator.
-        { ...((body.runMetadata ?? {}) as RunMetadata), createdBy: user.id },
+        (body.runMetadata ?? {}) as RunMetadata,
         new Date()
       );
-
-      // Audit log (fire-and-forget)
-      if (userOrgIds.length > 0) {
-        // The season's organisation, not the caller's first one, and what the
-        // save superseded. Still a no-op while audit_log.user_id is NOT NULL
-        // and this client has no uid (20260726000200's KNOWN PRE-EXISTING
-        // defect) -- which is why the RPC reports `audited: false`.
-        recordAudit(serviceClient, {
-          organizationId: seasonOrgId,
-          action: 'practice.saved',
-          resourceType: 'practice_assignment',
-          metadata: {
-            assignment_count: assignmentRows.length,
-            superseded_count: result.supersededCount,
-            retained_manual_count: result.retainedManualCount,
-            run_id: result.runId,
-          },
-        });
-      }
 
       return jsonResponse(result, 200);
     } catch (error) {

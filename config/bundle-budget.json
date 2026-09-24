@@ -4,8 +4,8 @@
     {
       "match": "^assets/index-.*\\.js$",
       "label": "main entry",
-      "maxGzipBytes": 140000,
-      "rationale": "Redesign: 131.1 KB after the Lightning-class chrome (TopBar/SideNav/navigation) plus expanded mock-client seeds & RPC handlers, which ship in main because supabaseClient imports the mock statically. 140 KB cap leaves ~9 KB for remaining phases; follow-ups: dynamic-import the mock client and route-split chart-vendor, then tighten."
+      "maxGzipBytes": 140100,
+      "rationale": "Redesign: 131.1 KB after the Lightning-class chrome (TopBar/SideNav/navigation) plus expanded mock-client seeds & RPC handlers, which ship in main because supabaseClient imports the mock statically. 140 KB cap leaves ~9 KB for remaining phases; follow-ups: dynamic-import the mock client and route-split chart-vendor, then tighten. +100 B (fix #64): the strict PGRST201 practice_slots embed check in the mock, which ships in main for the reason above; measured 136.55 -> 136.76 KB after two compaction passes."
     },
     {
       "match": "^assets/index-.*\\.css$",

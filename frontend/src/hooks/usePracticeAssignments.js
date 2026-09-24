@@ -29,7 +29,7 @@ export function usePracticeAssignments(runId) {
           .select(
             `
             *,
-            practice_slots (
+            practice_slots!practice_slot_id (
               id,
               day_of_week,
               start_time,

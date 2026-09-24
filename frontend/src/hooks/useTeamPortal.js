@@ -1,11 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
+import {
+  PRACTICE_OCCURRENCE_REFUSAL,
+  PRACTICE_TBD_CAUSES,
+  practiceOccurrenceDates,
+} from '@squadlogic/core/utils/practiceOccurrences.js';
 
 /**
  * useTeamPortal
  * Fetches and manages data for the Team Portal.
- * Handles practice expansion based on timezone and real-time updates.
+ * Handles practice expansion (season wall dates, see `expandPractices`) and real-time updates.
  */
 export function useTeamPortal(teamId) {
   const [loading, setLoading] = useState(true);
@@ -23,7 +28,7 @@ export function useTeamPortal(teamId) {
     try {
       setLoading(true);
 
-      // 1. Fetch Team Details + League Timezone
+      // 1. Fetch Team Details
       const { data: teamData, error: teamError } = await supabase
         .from('teams')
         .select(
@@ -34,7 +39,6 @@ export function useTeamPortal(teamId) {
             name,
             season:season_settings (
               id,
-              timezone,
               season_start,
               season_end
             )
@@ -46,8 +50,6 @@ export function useTeamPortal(teamId) {
 
       if (teamError) throw teamError;
       setTeam(teamData);
-
-      const timezone = teamData.division?.season?.timezone || 'UTC';
 
       // 2. Fetch Roster
       const { data: rosterData, error: rosterError } = await supabase
@@ -157,7 +159,7 @@ export function useTeamPortal(teamId) {
         .select(
           `
           *,
-          slot:practice_slots (
+          slot:practice_slots!practice_slot_id (
             day_of_week,
             start_time,
             end_time,
@@ -172,10 +174,13 @@ export function useTeamPortal(teamId) {
 
       if (practiceError) throw practiceError;
 
-      const expandedPractices = expandPractices(practiceAssignments, timezone);
+      const expandedPractices = expandPractices(practiceAssignments);
 
       // 5. Combine and Sort Events
       const allEvents = [...mappedGames, ...expandedPractices].sort((a, b) => {
+        // TIME TBD entries have no date to order by; they go last, in row order.
+        if (a.date == null || b.date == null)
+          return Number(a.date == null) - Number(b.date == null);
         const dateA = new Date(`${a.date}T${a.startTime}`);
         const dateB = new Date(`${b.date}T${b.startTime}`);
         return dateA.getTime() - dateB.getTime();
@@ -368,45 +373,76 @@ export function useTeamPortal(teamId) {
 }
 
 /**
- * expandPractices
- * Expands a practice assignment range into individual dates based on day_of_week.
+ * Expand each practice assignment into one event per occurrence.
+ *
+ * Every row is expanded only within its own `effective_date_range`: a team can
+ * hold several rows with disjoint ranges once a repair splits a series.
+ *
+ * Dates are wall dates on the season's clock and are computed without a
+ * `Date` (`practiceOccurrenceDates`, GAP-30). The loop this replaced parsed the
+ * range start as UTC midnight and read it back with local `getDay()`, so in
+ * any US zone a Monday practice rendered on the Tuesday and the last week of
+ * the range was dropped (fix #64). The season timezone is not needed here:
+ * the weekday of a calendar date is the same in every zone, and `startTime`
+ * stays the slot's wall reading.
+ *
+ * A row that cannot be expanded is logged AND returned as one TIME TBD entry
+ * (`timeTbd: true`, `date: null`) carrying the feed's reason code and wording
+ * -- the feed reports the same row as TIME TBD, so the portal must not show
+ * nothing where the calendar says TBD.
+ *
+ * @param {Array<Record<string, any>>} assignments
+ * @returns {Array<Record<string, any>>}
  */
-function expandPractices(assignments, _timezone) {
+export function expandPractices(assignments) {
   const expanded = [];
-  const daysMap = {
-    mon: 1,
-    tue: 2,
-    wed: 3,
-    thu: 4,
-    fri: 5,
-    sat: 6,
-    sun: 0,
-  };
 
-  assignments.forEach((assignment) => {
+  (assignments ?? []).forEach((assignment) => {
     const slot = assignment.slot;
-    if (!slot) return;
+    // Same fallback as the feed's `locationOf`, never 'undefined - undefined'.
+    const location = `${slot?.field?.location?.name || 'Venue'} - ${slot?.field?.name || 'Field'}`;
+    const timeTbd = (reasonCode) => {
+      logger.error('[useTeamPortal] practice assignment cannot be expanded', {
+        assignmentId: assignment.id,
+        refusal: reasonCode,
+      });
+      expanded.push({
+        id: assignment.id,
+        type: 'practice',
+        date: null,
+        startTime: null,
+        endTime: null,
+        location,
+        description: 'TIME TBD - Practice',
+        timeTbd: true,
+        reasonCode,
+        reason: PRACTICE_TBD_CAUSES[reasonCode],
+      });
+    };
+    if (!slot) {
+      timeTbd(PRACTICE_OCCURRENCE_REFUSAL.SLOT_MISSING);
+      return;
+    }
 
-    // Parse daterange string: [2025-01-01,2025-03-01)
-    const range = assignment.effective_date_range.replace(/[()[\]]/g, '').split(',');
-    const startDate = new Date(range[0]);
-    const endDate = new Date(range[1]);
-    const targetDay = daysMap[slot.day_of_week];
+    const { dates, refusal } = practiceOccurrenceDates({
+      range: assignment.effective_date_range,
+      dayOfWeek: slot.day_of_week,
+    });
+    if (refusal) {
+      timeTbd(refusal);
+      return;
+    }
 
-    let current = new Date(startDate);
-    while (current < endDate) {
-      if (current.getDay() === targetDay) {
-        expanded.push({
-          id: assignment.id,
-          type: 'practice',
-          date: current.toISOString().split('T')[0],
-          startTime: slot.start_time,
-          endTime: slot.end_time,
-          location: `${slot.field?.location?.name} - ${slot.field?.name}`,
-          description: 'Practice',
-        });
-      }
-      current.setDate(current.getDate() + 1);
+    for (const date of dates) {
+      expanded.push({
+        id: assignment.id,
+        type: 'practice',
+        date,
+        startTime: slot.start_time,
+        endTime: slot.end_time,
+        location,
+        description: 'Practice',
+      });
     }
   });
 

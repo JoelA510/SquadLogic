@@ -212,15 +212,19 @@ export default function TeamRecordPage() {
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-y-1 gap-x-4 text-sm text-text-secondary">
                             <div className="flex items-center gap-1.5">
                               <Calendar size={14} />
-                              {new Date(event.date + 'T00:00:00').toLocaleDateString(undefined, {
-                                weekday: 'long',
-                                month: 'long',
-                                day: 'numeric',
-                              })}
+                              {event.timeTbd
+                                ? `Date and time TBD: ${event.reason}`
+                                : new Date(event.date + 'T00:00:00').toLocaleDateString(undefined, {
+                                    weekday: 'long',
+                                    month: 'long',
+                                    day: 'numeric',
+                                  })}
                             </div>
                             <div className="flex items-center gap-1.5">
                               <Clock size={14} />
-                              {event.startTime?.substring(0, 5)} - {event.endTime?.substring(0, 5)}
+                              {event.timeTbd
+                                ? 'TIME TBD'
+                                : `${event.startTime?.substring(0, 5)} - ${event.endTime?.substring(0, 5)}`}
                             </div>
                             <div className="flex items-center gap-1.5 md:col-span-2">
                               <MapPin size={14} />
@@ -230,7 +234,7 @@ export default function TeamRecordPage() {
                         </div>
 
                         <div className="flex flex-col gap-3 min-w-[200px]">
-                          {myPlayers.length > 0 ? (
+                          {myPlayers.length > 0 && !event.timeTbd ? (
                             <div className="space-y-3">
                               <p className="text-xs font-bold text-text-muted uppercase tracking-widest">
                                 Your RSVPs
@@ -299,7 +303,9 @@ export default function TeamRecordPage() {
                           ) : (
                             <div className="h-full flex items-center justify-end">
                               <span className="text-xs text-text-muted">
-                                Viewing as Guest/Coach
+                                {event.timeTbd
+                                  ? 'RSVP opens once a date is set'
+                                  : 'Viewing as Guest/Coach'}
                               </span>
                             </div>
                           )}

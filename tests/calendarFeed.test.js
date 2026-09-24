@@ -23,6 +23,8 @@
  * nothing -- which is precisely how the suite stayed green.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   buildFeedEvents,
@@ -586,5 +588,80 @@ describe('the /code-review findings, kept red-able', () => {
     expect(notes.count).toBe(200);
     expect(notes.sentence.split(';')).toHaveLength(1);
     expect(notes.sentence.length).toBeLessThan(200);
+  });
+});
+
+/**
+ * A failed read is said in the feed, not rendered as an empty calendar (fix #64).
+ *
+ * Every practices read was failing in production with PGRST201 (an unhinted
+ * `practice_slots` embed), and the handler logged it and rendered the games
+ * alone -- which a family reads as "no practices". The error contract is the
+ * one the feed already uses for events it cannot place: the CALDESC plus the
+ * server log, never a 500 that would take the games down with it.
+ *
+ * The Edge handler (`calendar-feed/index.ts`) imports Deno-only modules and
+ * has no Vitest harness, so its half is a source pin; the rendering half is
+ * exercised through the real `renderIcsCalendar`.
+ */
+describe('calendar feed: a failed read is visible in the feed', () => {
+  const HANDLER = fs.readFileSync(
+    path.resolve(__dirname, '../supabase/functions/calendar-feed/index.ts'),
+    'utf8'
+  );
+
+  it('renderIcsCalendar says which read failed in the CALDESC', () => {
+    const events = buildFeedEvents({
+      teamName: 'Test FC',
+      timezone: 'America/Los_Angeles',
+      games: [gameRow()],
+      practices: [],
+    });
+    const ics = renderIcsCalendar({
+      orgName: 'Test Org',
+      teamName: 'Test FC',
+      timezone: 'America/Los_Angeles',
+      events,
+      readFailures: ['practices'],
+      now: NOW,
+    });
+    const unfolded = ics.replace(/\r\n /g, '');
+    expect(unfolded).toMatch(/X-WR-CALDESC:INCOMPLETE: the practices schedule could not be read/);
+    // The games that did load are still in the feed.
+    expect(unfolded.match(/BEGIN:VEVENT/g)).toHaveLength(1);
+  });
+
+  it('says nothing when every read succeeded', () => {
+    const ics = renderIcsCalendar({
+      orgName: 'Test Org',
+      teamName: 'Test FC',
+      timezone: 'America/Los_Angeles',
+      events: buildFeedEvents({
+        teamName: 'Test FC',
+        timezone: 'America/Los_Angeles',
+        games: [gameRow()],
+      }),
+      now: NOW,
+    });
+    expect(ics).not.toContain('INCOMPLETE');
+  });
+
+  it('the handler records a failed practices read and hands it to the renderer', () => {
+    const practicesBranch = /if \(practicesError\) \{([\s\S]*?)\n {4}\}/.exec(HANDLER);
+    // Meta: the branch was found, so the assertions below read real source.
+    expect(practicesBranch, 'practicesError branch').not.toBeNull();
+    expect(practicesBranch[1]).toContain("readFailures.push('practices')");
+
+    const gamesBranch = /if \(gamesError\) \{([\s\S]*?)\n {4}\}/.exec(HANDLER);
+    expect(gamesBranch, 'gamesError branch').not.toBeNull();
+    expect(gamesBranch[1]).toContain("readFailures.push('games')");
+
+    const render = /renderIcsCalendar\(\{([\s\S]*?)\}\)/.exec(HANDLER);
+    expect(render, 'renderIcsCalendar call').not.toBeNull();
+    expect(render[1]).toMatch(/\breadFailures\b/);
+  });
+
+  it('the handler embeds practice_slots through practice_slot_id', () => {
+    expect(HANDLER).toMatch(/practice_slots!practice_slot_id\s*\(/);
   });
 });

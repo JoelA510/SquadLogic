@@ -147,8 +147,12 @@ serve(async (req) => {
       )
       .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
 
+    // A failed read is recorded, not swallowed: it is rendered into the
+    // CALDESC below, because an empty feed reads as "nothing scheduled".
+    const readFailures: string[] = [];
     if (gamesError) {
       console.error('calendar-feed: games read failed', { teamId, message: gamesError.message });
+      readFailures.push('games');
     }
 
     // 4. Fetch Practice Assignments
@@ -158,7 +162,7 @@ serve(async (req) => {
         `
           id,
           effective_date_range,
-          practice_slots ( day_of_week, start_time, end_time, fields(name, locations(name)) )
+          practice_slots!practice_slot_id ( day_of_week, start_time, end_time, fields(name, locations(name)) )
        `
       )
       .eq('team_id', teamId);
@@ -168,6 +172,7 @@ serve(async (req) => {
         teamId,
         message: practicesError.message,
       });
+      readFailures.push('practices');
     }
 
     // 5. Place every occurrence on the season clock.
@@ -198,6 +203,7 @@ serve(async (req) => {
       teamName: team.name,
       timezone,
       events,
+      readFailures,
     });
 
     return new Response(icsString, {

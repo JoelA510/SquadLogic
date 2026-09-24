@@ -6152,3 +6152,34 @@ count (140/140) and claim census (43/43) passed throughout.
   load. The agent reproduced it at 1 s; now 60 s.
 
 Not run: the full 5.4 h `prove.sh` sweep.
+
+## #64 readers — #449 merged (e52a2c0): practice readers work on the real schema
+
+**Production state (supervisor-executed, read-only, 2026-09-24):** 0
+`practice_assignments` rows, so there is nothing to clean up and the cleanup
+tooling was dropped. Both FKs to `practice_slots` exist in prod, so every
+unhinted embed errored with PGRST201 whatever the data.
+
+- All four readers now embed `practice_slots!practice_slot_id`: calendar feed,
+  team portal, player record and `usePracticeAssignments`. The supervisor brief
+  called the last one safe; it was not, because the error comes from the schema,
+  not the rows. Hinting by column works whether or not the second FK exists.
+- The mock is strict. An unhinted embed returns PGRST201 even with no matching
+  rows, and a constraint-name hint is refused with PGRST200. This is why E2E
+  never saw the defect.
+- The portal expands practices on season dates (GAP-30 day arithmetic, no
+  `Date`/`getDay`), each row only within its own range. A row it cannot expand
+  is shown as TIME TBD with the feed's reason wording; it was silently omitted
+  until a BLOCKING review round. RSVP is hidden until a date exists.
+- A failed practices or games read now shows as "INCOMPLETE" in the feed and as
+  an alert on the player record, not as an empty schedule.
+- Plants P1-P5 were red on the final code. P2/P2b (strict mock) were
+  supervisor-executed on the pre-review mock and re-run by the agent after the
+  review fixes.
+- Bundle cap +100 B accepted (NOTED): the mock ships in main, which is a named
+  follow-up.
+
+Not executed: E2E, the Edge handler under Deno, and live PostgREST resolution of
+the column hint. Follow-ups (task #69): drop the redundant `slot_id` FK/column,
+the feed's constraint-name hint on games, a third weekday enum, and stale budget
+text.

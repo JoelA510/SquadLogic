@@ -503,9 +503,12 @@ describe('buildPracticeAssignmentRows', () => {
     assert.ok(emitted.length > 0, 'the row carries no keys to check');
 
     // `run_id` is the one key outside the recordset, and the exemption is
-    // proven rather than asserted: the same migration adds it as a real column
-    // on `practice_assignments`, which is where `persistPracticeAssignments`
+    // proven rather than asserted: a migration adds it as a real column on
+    // `practice_assignments`, which is where `persistPracticeAssignments`
     // writes it directly. Everything else must be a column the RPC declares.
+    // (It was the RPC's own migration until 20260924000000 redefined the RPC
+    // without re-adding a column that already exists, so the column is looked
+    // for across the migration set rather than in the RPC's latest file.)
     //
     // Stated plainly, because the exemption is narrower than it looks: the
     // RPC drops `run_id` like any other undeclared key and fills the column
@@ -513,10 +516,17 @@ describe('buildPracticeAssignmentRows', () => {
     // insert — and that function has no caller outside this file today. It
     // stays because it addresses a real column through a real exported API,
     // not because the live path uses it.
-    assert.match(
-      sql,
-      /ALTER TABLE public\.practice_assignments\s+ADD COLUMN IF NOT EXISTS run_id/,
-      `${file} no longer adds practice_assignments.run_id; the exemption below is stale`
+    const migrationDir = path.join(REPO_ROOT, 'supabase/migrations');
+    const addsRunId = readdirSync(migrationDir)
+      .filter((name) => name.endsWith('.sql'))
+      .filter((name) =>
+        /ALTER TABLE public\.practice_assignments\s+ADD COLUMN IF NOT EXISTS run_id/.test(
+          readFileSync(path.join(migrationDir, name), 'utf8')
+        )
+      );
+    assert.ok(
+      addsRunId.length > 0,
+      'no migration adds practice_assignments.run_id; the exemption below is stale'
     );
     const receivable = new Set([...declared, 'run_id']);
 

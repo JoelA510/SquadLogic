@@ -88,9 +88,9 @@ SELECT is(
             'effective_date_range', '[2026-03-01,2026-06-01)',
             'source', 'locked'
         ))
-    )::text,
+    )->>'run_id',
     'a1111111-1111-1111-1111-00000000dead',
-    'persist_practice_schedule returns the scheduler run id'
+    'persist_practice_schedule returns the scheduler run id in its jsonb result'
 );
 
 SELECT is(
@@ -197,7 +197,7 @@ SELECT is(
             'effective_date_range', '[2026-03-01,2026-06-01)',
             'source', 'auto'
         ))
-    )::text,
+    )->>'run_id',
     'a1111111-1111-1111-1111-00000000beef',
     'later persisted snapshots return the new scheduler run id'
 );

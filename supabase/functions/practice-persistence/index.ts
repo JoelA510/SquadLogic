@@ -10,6 +10,7 @@ import {
   getUserFromRequest,
   getUserOrgIds,
   resolveOrgIdsFromTeamIds,
+  verifyOrgAdmin,
   recordAudit,
   corsHeaders,
   jsonResponse,
@@ -138,6 +139,8 @@ async function persistPracticeSnapshot(
       }
     : {
         run_type: 'practice',
+        // #64: the RPC scopes its prune to this season and refuses without it.
+        season_settings_id: runMetadata.seasonSettingsId,
         status: 'completed',
         updated_at: now.toISOString(),
       };
@@ -149,9 +152,27 @@ async function persistPracticeSnapshot(
 
   if (error) throw error;
 
+  // #64: the RPC returns jsonb -- the run id, the rows this save superseded,
+  // the manual rows it deliberately kept, and whether it could audit.
+  // A bare uuid is what the RPC returned before 20260924000000; read either,
+  // so this function and the migration need not deploy in the same instant.
+  const report = (typeof data === 'string' ? { run_id: data } : (data ?? {})) as {
+    run_id?: string;
+    superseded_count?: number;
+    retained_manual?: unknown[];
+    retained_manual_count?: number;
+    audited?: boolean;
+    audit_gap?: string | null;
+  };
+
   return {
     status: 'success',
-    runId: effectiveRunId ?? data ?? null,
+    runId: effectiveRunId ?? report.run_id ?? null,
+    supersededCount: report.superseded_count ?? 0,
+    retainedManualCount: report.retained_manual_count ?? 0,
+    retainedManual: report.retained_manual ?? [],
+    audited: report.audited ?? false,
+    auditGap: report.audit_gap ?? null,
     message: 'Persistence successful.',
     syncedAt: now.toISOString(),
   };
@@ -245,29 +266,57 @@ if (!supabaseUrl || !serviceRoleKey) {
         ? body.runMetadata.seasonSettingsId
         : undefined;
 
-    if (seasonSettingsId) {
-      const seasonOrgId = await resolveOrgIdFromSeasonSettingsId(serviceClient, seasonSettingsId);
-      if (!seasonOrgId || !userOrgIds.includes(seasonOrgId)) {
-        return jsonResponse(
-          { status: 'error', message: 'Access denied: season belongs to a different organization' },
-          403
-        );
-      }
+    // #64: a save now REPLACES the season's practice schedule, so it needs a
+    // season to scope that to, and an empty one would remove every auto row
+    // in it. The RPC refuses both; refusing here makes them a 400, not a 500.
+    if (!seasonSettingsId) {
+      return jsonResponse(
+        { status: 'error', message: 'runMetadata.seasonSettingsId is required' },
+        400
+      );
+    }
+    if (assignmentRows.length === 0) {
+      return jsonResponse(
+        {
+          status: 'error',
+          message:
+            'Refusing to save an empty practice schedule: it would remove every auto assignment in the season.',
+        },
+        400
+      );
     }
 
-    if (assignmentRows.length > 0) {
-      const teamIds = [
-        ...new Set(assignmentRows.map((r) => r.team_id).filter(Boolean)),
-      ] as string[];
-      if (teamIds.length > 0) {
-        const targetOrgIds = await resolveOrgIdsFromTeamIds(serviceClient, teamIds);
-        const unauthorized = targetOrgIds.filter((oid) => !userOrgIds.includes(oid));
-        if (unauthorized.length > 0) {
-          return jsonResponse(
-            { status: 'error', message: 'Access denied: data belongs to a different organization' },
-            403
-          );
-        }
+    const seasonOrgId = await resolveOrgIdFromSeasonSettingsId(serviceClient, seasonSettingsId);
+    if (!seasonOrgId || !userOrgIds.includes(seasonOrgId)) {
+      return jsonResponse(
+        { status: 'error', message: 'Access denied: season belongs to a different organization' },
+        403
+      );
+    }
+
+    // #64: a save now DELETES the season's superseded rows. The RPC requires an
+    // org admin of any caller with a uid, but this function calls it with the
+    // service-role client, which the RPC exempts -- so the same rule is
+    // enforced here, or any member could erase a season's practices.
+    if (!(await verifyOrgAdmin(serviceClient, user.id, seasonOrgId))) {
+      return jsonResponse(
+        {
+          status: 'error',
+          message: 'Access denied: only an organization admin can replace a practice schedule',
+        },
+        403
+      );
+    }
+
+    const teamIds = [...new Set(assignmentRows.map((r) => r.team_id).filter(Boolean))] as string[];
+    if (teamIds.length > 0) {
+      const targetOrgIds = await resolveOrgIdsFromTeamIds(serviceClient, teamIds);
+      const unauthorized = targetOrgIds.filter((oid) => !userOrgIds.includes(oid));
+      if (unauthorized.length > 0) {
+        return jsonResponse(
+          { status: 'error', message: 'Access denied: data belongs to a different organization' },
+          403
+        );
       }
     }
 
@@ -289,17 +338,28 @@ if (!supabaseUrl || !serviceRoleKey) {
       const result = await persistPracticeSnapshot(
         serviceClient,
         body.snapshot as Parameters<typeof persistPracticeSnapshot>[1],
-        (body.runMetadata ?? {}) as RunMetadata,
+        // `createdBy` is the verified caller, never the client's claim: the
+        // service-role RPC records it as the run's creator.
+        { ...((body.runMetadata ?? {}) as RunMetadata), createdBy: user.id },
         new Date()
       );
 
       // Audit log (fire-and-forget)
       if (userOrgIds.length > 0) {
+        // The season's organisation, not the caller's first one, and what the
+        // save superseded. Still a no-op while audit_log.user_id is NOT NULL
+        // and this client has no uid (20260726000200's KNOWN PRE-EXISTING
+        // defect) -- which is why the RPC reports `audited: false`.
         recordAudit(serviceClient, {
-          organizationId: userOrgIds[0],
+          organizationId: seasonOrgId,
           action: 'practice.saved',
           resourceType: 'practice_assignment',
-          metadata: { assignment_count: assignmentRows.length },
+          metadata: {
+            assignment_count: assignmentRows.length,
+            superseded_count: result.supersededCount,
+            retained_manual_count: result.retainedManualCount,
+            run_id: result.runId,
+          },
         });
       }
 

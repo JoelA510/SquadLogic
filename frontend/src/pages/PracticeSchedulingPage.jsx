@@ -25,6 +25,7 @@ import { PERMISSIONS } from '../constants/permissions.js';
 import { useAutoScheduler } from '../hooks/useAutoScheduler.js';
 import { useAutoRunOnNavigate } from '../hooks/useAutoRunOnNavigate.js';
 import { persistPracticeScheduleReview } from '../utils/practicePersistenceClient.js';
+import { buildPracticeApplyStatus } from '../utils/practiceApplyStatus.js';
 
 const DAY_LABELS = {
   sun: 'Sunday',
@@ -768,9 +769,13 @@ export default function PracticeSchedulingPage() {
       // fall silent (it gates on `summary.unassignedTeams`), and a silent
       // panel is indistinguishable from a season with nothing to report.
       setStatusMessage(
-        results.metricsUnavailable
-          ? `Schedule applied. Readiness metrics were not computed for this run: ${results.metricsUnavailable.reason}`
-          : null
+        buildPracticeApplyStatus({
+          metricsUnavailableReason: results.metricsUnavailable
+            ? results.metricsUnavailable.reason
+            : null,
+          supersededCount: result.supersededCount,
+          retainedManualCount: result.retainedManualCount,
+        })
       );
     } catch (err) {
       setApplyError(err.message || 'Practice schedule changes could not be applied.');

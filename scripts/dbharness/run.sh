@@ -717,7 +717,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1110,6 +1110,22 @@ for id in "${REVERT_CHECKS[@]}"; do
       dump 10 /tmp/harness_seed; STATUS=1; continue
     fi
   fi
+  # **20260924000000's revert cannot restore what the pruning writer removed**,
+  # so its warning counts the before-images it leaves on scheduler_runs. The
+  # seed plants THREE runs holding 2, 1 and 0 superseded rows: 3 rows on 2
+  # runs, and a count of runs that includes the empty one prints 3, not 2.
+  if [ "$id" = "20260924000000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('f4444444-4444-4444-4444-44444444444f','Superseded Org','superseded-org');
+              INSERT INTO public.scheduler_runs (organization_id, run_type, status, results) VALUES
+                ('f4444444-4444-4444-4444-44444444444f','practice','completed',jsonb_build_object('superseded_rows', jsonb_build_array(1, 2))),
+                ('f4444444-4444-4444-4444-44444444444f','practice','completed',jsonb_build_object('superseded_rows', jsonb_build_array(3))),
+                ('f4444444-4444-4444-4444-44444444444f','practice','completed',jsonb_build_object('superseded_rows', jsonb_build_array()));" \
+       >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the three scheduler runs the revert check requires were never inserted"
+      dump 10 /tmp/harness_seed; STATUS=1; continue
+    fi
+  fi
 
   if [ "$id" = "20260920000000" ]; then
     if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
@@ -1278,6 +1294,31 @@ NEEDLES
       else
         echo "FAIL revert ${id}: planted 3 assignment rows across 2 teams, 1 ended, and the revert did not warn with those figures"
         STATUS=1
+      fi
+    fi
+    if [ "$id" = "20260924000000" ]; then
+      # The seed planted 3 superseded rows on 2 runs, plus a run holding none.
+      if grep -q '3 superseded row(s) recorded on 2 run(s) stay deleted' /tmp/harness_rev; then
+        echo "  | (checked) the revert counted the superseded practice rows it leaves deleted, and the runs recording them"
+      else
+        echo "FAIL revert ${id}: planted 3 superseded rows on 2 runs (and 1 empty run) and the revert did not warn with those figures"
+        STATUS=1
+      fi
+      # Read from the catalogue, not from the revert's own NOTICE: a statement
+      # drifting after its verification block is only visible from outside.
+      if psql_cmd "SELECT 'WRITER-VERDICT:' || CASE
+               WHEN count(*) = 0 THEN 'unreadable'
+               WHEN count(*) = 1 AND max(pg_get_function_result(p.oid)) = 'uuid'
+                    AND max(p.prosrc) NOT LIKE '%DELETE FROM public.practice_assignments%' THEN 'restored'
+               ELSE 'wrong' END
+             FROM pg_proc p
+            WHERE p.pronamespace = 'public'::regnamespace
+              AND p.proname = 'persist_practice_schedule';" \
+         >/tmp/harness_writer 2>&1 && grep -q 'WRITER-VERDICT:restored' /tmp/harness_writer; then
+        echo "  | (checked) exactly one public.persist_practice_schedule survives the revert, returning uuid, and it no longer prunes"
+      else
+        echo "FAIL revert ${id}: the pruning writer, or a second overload, survived its own revert"
+        dump 10 /tmp/harness_writer; STATUS=1
       fi
     fi
     if [ "$id" = "20260912000000" ]; then

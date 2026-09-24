@@ -1531,16 +1531,46 @@ export const getMockData = (table, col, val) => {
   return results;
 };
 
+// ── Ambiguous embed (PGRST201) ──────────────────────────────────────────────
+// `practice_assignments` has two foreign keys to `practice_slots` (`slot_id`,
+// `practice_slot_id`; `20260331000000_definitive_schema.sql`). PostgREST
+// refuses an unhinted `practice_slots(...)` embed off it with PGRST201 rather
+// than pick one. The mock used to resolve it through `slot_id` and never err,
+// which is how every unhinted reader passed E2E while failing in production
+// (fix #64). Now: no hint is PGRST201, a hint naming no FK column is PGRST200,
+// and a column hint (`practice_slots!practice_slot_id(...)`) joins on that
+// column and returns under its alias. The error keeps the mock's existing
+// `{ code, message }` shape. Only this pair is strict: `games -> teams`
+// (home/away) is hinted by constraint name, which this mock does not model.
+const PRACTICE_SLOT_FKS = ['slot_id', 'practice_slot_id'];
+const PRACTICE_SLOT_EMBED = /(?:(\w+)\s*:\s*)?\bpractice_slots\s*(?:!\s*(\w+))?\s*\(/g;
+
 // ── Chainable Mock Query Builder ────────────────────────────────────────────
 const createMockQuery = (table, data = null) => {
   let results = data || getMockData(table);
   let isSingle = false;
   let isMaybeSingle = false;
   let queryContent = '';
+  // Set by `select()` when the embed is one PostgREST would refuse.
+  let embedError = null;
 
   const proxy = {
     select: (query) => {
       queryContent = query;
+      // Schema-level, so it errs whether or not any row matches.
+      let slotEmbed = null;
+      embedError = null;
+      if (table === 'practice_assignments') {
+        for (const [, key, hint] of String(query || '').matchAll(PRACTICE_SLOT_EMBED)) {
+          if (!PRACTICE_SLOT_FKS.includes(hint)) {
+            embedError = {
+              code: hint ? 'PGRST200' : 'PGRST201',
+              message: 'Embed practice_slots via practice_slots!practice_slot_id',
+            };
+          }
+          slotEmbed = { column: hint, key: key || 'practice_slots' };
+        }
+      }
       if (results && results.length > 0 && queryContent) {
         if (table === 'organization_members' && queryContent.includes('organizations')) {
           const orgs = getMockData('organizations');
@@ -1626,17 +1656,14 @@ const createMockQuery = (table, data = null) => {
             },
           }));
         }
-        if (
-          table === 'practice_assignments' &&
-          (queryContent.includes('practice_slots') || queryContent.includes('teams'))
-        ) {
+        if (table === 'practice_assignments' && (slotEmbed || queryContent.includes('teams'))) {
           const slots = getMockData('practice_slots');
           const fields = getMockData('fields');
           const teams = getMockData('teams');
           const divisions = getMockData('divisions');
 
           results = results.map((item) => {
-            const slot = slots.find((s) => String(s.id) === String(item.slot_id));
+            const slot = slots.find((s) => String(s.id) === String(item[slotEmbed?.column]));
             const team = teams.find((t) => String(t.id) === String(item.team_id));
 
             let enrichedSlot = slot ? { ...slot } : null;
@@ -1655,7 +1682,11 @@ const createMockQuery = (table, data = null) => {
                 ) || null;
             }
 
-            return { ...item, practice_slots: enrichedSlot, teams: enrichedTeam };
+            return {
+              ...item,
+              [slotEmbed?.key || 'practice_slots']: enrichedSlot,
+              teams: enrichedTeam,
+            };
           });
         }
       }
@@ -1792,10 +1823,12 @@ const createMockQuery = (table, data = null) => {
       return proxy;
     },
     then: (onFulfilled, onRejected) => {
-      let finalData = JSON.parse(JSON.stringify(results));
-      let error = null;
+      let finalData = embedError ? null : JSON.parse(JSON.stringify(results));
+      let error = embedError;
 
-      if (isSingle) {
+      if (error) {
+        // An embed PostgREST refuses returns no data, single or not.
+      } else if (isSingle) {
         if (results.length > 0) {
           finalData = results[0];
         } else {

@@ -43,6 +43,7 @@ export default function PlayerRecordPage() {
   const [divisions, setDivisions] = useState([]);
   const [teams, setTeams] = useState([]);
   const [practices, setPractices] = useState([]);
+  const [practicesFailed, setPracticesFailed] = useState(false);
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('overview');
@@ -71,7 +72,9 @@ export default function PlayerRecordPage() {
             // (practice_slots has no team_id column).
             supabase
               .from('practice_assignments')
-              .select('id, slot:practice_slots (day_of_week, start_time, end_time)')
+              .select(
+                'id, slot:practice_slots!practice_slot_id (day_of_week, start_time, end_time)'
+              )
               .eq('team_id', found.team_id)
               .limit(10),
             supabase
@@ -85,6 +88,10 @@ export default function PlayerRecordPage() {
               .limit(10),
           ]);
           if (!cancelled) {
+            if (practicesRes.error) {
+              logger.error('[PlayerRecord] practices read failed:', practicesRes.error);
+            }
+            setPracticesFailed(Boolean(practicesRes.error));
             setPractices(practicesRes.data || []);
             setGames(gamesRes.data || []);
           }
@@ -418,7 +425,11 @@ export default function PlayerRecordPage() {
                 <h3>Practices</h3>
               </div>
               <div className="card-body flush">
-                {practices.length ? (
+                {practicesFailed ? (
+                  <div style={{ padding: 16 }} className="muted" role="alert">
+                    Practices could not be loaded.
+                  </div>
+                ) : practices.length ? (
                   practices.map((assignment, index) => (
                     <div
                       key={assignment.id}

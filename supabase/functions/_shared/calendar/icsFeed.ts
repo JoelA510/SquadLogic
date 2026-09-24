@@ -631,9 +631,17 @@ export function renderIcsCalendar(input: {
   teamName: string;
   timezone: string | null;
   events: FeedEvent[];
+  /**
+   * Sources whose read failed (`'games'`, `'practices'`). Said in the CALDESC,
+   * because a failed read renders exactly like "nothing scheduled" otherwise:
+   * a family would see a calendar with no practices and believe it (fix #64).
+   * Not a 500 -- the ruling on the season read applies: a feed that 500s
+   * takes every family's calendar down, including the half that did load.
+   */
+  readFailures?: string[];
   now?: Date;
 }): string {
-  const { orgName, teamName, timezone, events, now = new Date() } = input;
+  const { orgName, teamName, timezone, events, readFailures = [], now = new Date() } = input;
   const CRLF = '\r\n';
 
   /** Every content line goes through here, so none can be written unfolded. */
@@ -655,6 +663,11 @@ export function renderIcsCalendar(input: {
   const summary = summariseUnplaceable(events);
   const notes = summariseNotes(events);
   const calDesc: string[] = [];
+  if (readFailures.length > 0) {
+    calDesc.push(
+      `INCOMPLETE: the ${readFailures.join(' and ')} schedule could not be read, so this calendar may be missing ${readFailures.join(' and ')}. It is not a sign that none are scheduled.`
+    );
+  }
   if (summary.count > 0) {
     calDesc.push(
       `${summary.count} of ${events.length} events have no confirmed time: ${summary.sentence}. They appear as all-day "TIME TBD" entries.`

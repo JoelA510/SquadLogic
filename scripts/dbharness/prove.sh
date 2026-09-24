@@ -323,11 +323,14 @@ if [ -z "$ANCHORS_ONLY" ] && [ -z "$CENSUS_ONLY" ]; then
   echo
 fi
 
-# Skipped in anchors-only mode: this is the parent's stage, and running it in
-# the child too would print it twice for one sweep. Skipped in census-only
-# mode for the reason that mode exists: it reads no migration and starts no
-# database.
-if [ -n "$ANCHORS_ONLY" ] || [ -n "$CENSUS_ONLY" ]; then
+# **Runs in the anchors-only child, not in the parent.** It used to be the
+# other way round, which meant it ran only at the head of a 5.4-hour sweep that
+# nobody runs -- and the anchors-only pass that DOES run cleared 140 of 140
+# anchors while five plants sat in `field_bookings(uuid, uuid, date)`, the body
+# 20260911000000 drops. The parent always runs the child first, so moving it
+# here costs the sweep nothing and puts it on the cheap path. Skipped in
+# census-only mode for the reason that mode exists: it reads no migration.
+if [ -z "$ANCHORS_ONLY" ]; then
   :
 else
 echo "=== pre-flight: no plant may target a superseded statement ==="
@@ -353,14 +356,20 @@ for name, path in re.findall(r'^(\w+)="(\$REPO/[^"]+)"', sh, re.M):
 # indistinguishable from a missing assertion. A guard that covers one of the
 # three ways a migration supersedes an earlier one is not a guard against the
 # class; it just moves where the class hides.
+#
+# **The function arm is anchor_liveness.judge, keyed on name AND signature.**
+# Its first version matched only `CREATE OR REPLACE FUNCTION`, by name, and knew
+# nothing of DROP. 20260911000000 retires the 3-argument `field_bookings` with
+# `DROP FUNCTION ... (uuid, uuid, date)` and a plain `CREATE FUNCTION` of a new
+# signature, so this arm saw no later writer and passed five plants aimed at
+# the dropped body. judge() reads plain and OR REPLACE creates, reads DROPs, and
+# tells overloads apart by input types, which is how Postgres keys them.
+sys.dont_write_bytecode = True  # no __pycache__ left in the tree
+sys.path.insert(0, os.path.join(repo, 'scripts', 'dbharness'))
+from anchor_liveness import judge  # noqa: E402
+
 def spans(src):
-    """(kind, target, start, end) for every statement a later migration can supersede."""
-    for m in re.finditer(r'CREATE OR REPLACE FUNCTION public\.([a-z_]+)\(', src):
-        begin = m.start()
-        stop = src.find('\n$$;\n', begin)
-        if stop < 0:
-            continue
-        yield ('function', m.group(1), begin, stop + 5)
+    """(kind, target, start, end) for every COMMENT and GRANT/REVOKE a later migration can supersede."""
     for m in re.finditer(
             r"COMMENT ON ([A-Z]+(?: [A-Z]+)?) ([\w.(), ]+?) IS\s*(?:'(?:[^']|'')*'|NULL)\s*;",
             src, re.S):
@@ -387,7 +396,7 @@ for name in sorted(os.listdir(mig_dir)):
 # **Each arm must have found something to reason about.** An arm that matches
 # nothing across 109 migrations is not covering its shape -- it is the same
 # vacuous pass, one level up, in the check built to stop vacuous passes.
-for kind in ('function', 'comment', 'acl'):
+for kind in ('comment', 'acl'):
     if not seen_kinds.get(kind):
         print('PRE-FLIGHT FAILED: the %s arm matched no statement in %s; it is not covering anything'
               % (kind, mig_dir))
@@ -401,23 +410,38 @@ if not plants:
     sys.exit(2)
 
 WHY = {
-    'function': 'recreates it with CREATE OR REPLACE, and the installed body is the later one',
+    'function': 'recreates or drops that exact signature, so the installed body is not this one',
     'comment':  'rewrites that COMMENT, and the stored comment is the later one',
     'acl':      'issues its own GRANT/REVOKE on the same object, which decides the final privileges',
 }
 
 bad = []
 examined = 0
+fn_judged = 0
 for label, var, old_anchor in plants:
     path = files.get(var)
     if path is None or not path.startswith(mig_dir):
         continue  # reverts and the emergency rollback are not migrations
     base = os.path.basename(path)
     src = io.open(path, encoding='utf8').read()
+    # The four escapes bash honours inside double quotes, so an anchor carrying
+    # `$$` or a quote is judged rather than skipped as "not found".
+    old_anchor = re.sub(r'\\([$`"\\])', r'\1', old_anchor)
     pos = src.find(old_anchor)
     if pos < 0:
-        continue  # a moved anchor is ANCHOR-MISS's business, not this check's
+        continue  # a moved anchor is ANCHOR-MISS's business; it runs in this same pass
     examined += 1
+    verdict = judge(path, old_anchor)
+    if verdict.startswith('SUPERSEDED '):
+        fn, _, winner = verdict[len('SUPERSEDED '):].partition(' by ')
+        bad.append((label, base, 'function', fn, winner))
+        fn_judged += 1
+        continue
+    if verdict.startswith('LIVE '):
+        fn_judged += 1
+    elif not verdict.startswith('NA '):
+        print('PRE-FLIGHT FAILED: no liveness verdict for plant "%s": %s' % (label, verdict))
+        sys.exit(2)
     for kind, target, begin, stop in spans(src):
         if begin <= pos < stop and last_writer.get((kind, target)) != base:
             bad.append((label, base, kind, target, last_writer[(kind, target)]))
@@ -425,6 +449,9 @@ for label, var, old_anchor in plants:
 
 if examined == 0:
     print('PRE-FLIGHT FAILED: no plant anchor resolved inside a migration; the walk found nothing to judge')
+    sys.exit(2)
+if fn_judged == 0:
+    print('PRE-FLIGHT FAILED: the function arm judged no anchor inside a function body; it is not covering anything')
     sys.exit(2)
 
 for label, base, kind, target, winner in bad:
@@ -435,8 +462,8 @@ for label, base, kind, target, winner in bad:
           % (winner, base))
 if bad:
     sys.exit(1)
-print('pre-flight: %d migration-targeted plant anchors examined against %d function, %d comment and %d acl statements; none inside a superseded one'
-      % (examined, seen_kinds['function'], seen_kinds['comment'], seen_kinds['acl']))
+print('pre-flight: %d migration-targeted plant anchors examined (%d inside a function body, judged by name and signature) against %d comment and %d acl statements; none inside a superseded one'
+      % (examined, fn_judged, seen_kinds['comment'], seen_kinds['acl']))
 PREFLIGHT
 preflight_status=$?
 if [ "$preflight_status" -ne 0 ]; then
@@ -906,7 +933,13 @@ plant "ONLY-SCEN half a blackout window accepted" "$M2" \
 #
 # Each anchor below was confirmed to appear exactly once in 20260909000000 as
 # well, because that migration carries both bodies forward verbatim.
-plant "M3 the shared producer loses its games arm" "$M5" \
+#
+# **Then 20260911000000 superseded 20260909000000's producer, and the lesson
+# above repeated.** It DROPs `field_bookings(uuid, uuid, date)` and creates the
+# scoped signature with a plain CREATE, which the pre-flight's first function
+# arm could not see, so this plant and four more sat in a dropped body. They are
+# aimed at $M7 now; the pre-flight judges by name and signature and reads DROPs.
+plant "M3 the shared producer loses its games arm" "$M7" \
     "    SELECT 'game'::text, g.id," \
     "    SELECT 'not_a_game'::text, g.id," \
   "smoke 20260907000000" \
@@ -1080,21 +1113,25 @@ ALTER TABLE public.practice_assignments
 # lives in the producer's `cascades` column, so each plant pins that column to a
 # constant. Both halves get one, since a flat answer in either direction passes
 # the case for the shape it happens to match.
-plant "M3 every game assignment claimed to survive" "$M5" \
+plant "M3 every game assignment claimed to survive" "$M7" \
   "           EXISTS (SELECT 1 FROM public.game_slots s
-                    WHERE s.field_id = p_field_id
-                      AND s.id IN (ga.game_slot_id, ga.slot_id))
+                    WHERE s.id IN (ga.game_slot_id, ga.slot_id)
+                      AND public.estate_scope_covers(p_organization_id, p_scope, p_scope_id, s.field_id, NULL)),
+           ga.field_id
     FROM public.game_assignments ga" \
-  "           false
+  "           false,
+           ga.field_id
     FROM public.game_assignments ga" \
   "smoke 20260907000000" \
   "smoke 20260906000000"
-plant "M3 every practice assignment claimed to be destroyed" "$M5" \
+plant "M3 every practice assignment claimed to be destroyed" "$M7" \
   "           EXISTS (SELECT 1 FROM public.practice_slots s
-                    WHERE s.field_id = p_field_id
-                      AND s.id IN (pa.practice_slot_id, pa.slot_id))
+                    WHERE s.id IN (pa.practice_slot_id, pa.slot_id)
+                      AND public.estate_scope_covers(p_organization_id, p_scope, p_scope_id, s.field_id, s.field_subunit_id)),
+           pa.field_id
     FROM public.practice_assignments pa" \
-  "           true
+  "           true,
+           pa.field_id
     FROM public.practice_assignments pa" \
   "smoke 20260907000000" \
   "smoke 20260906000000"
@@ -1105,12 +1142,32 @@ plant "M3 every practice assignment claimed to be destroyed" "$M5" \
 # identical off-by-one, so the two runners AGREED and the table saw one answer
 # twice -- which is why this plant names the scenario table and requires the
 # smoke to stay green. Agreement is not correctness; only a fixture that states
-# the boundary as data can adjudicate it.
-plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M5" \
+# the boundary as data can adjudicate it. (The label predates 20260911000000's
+# smoke section 7, which now reads this boundary too; the scenario table is
+# still the check this plant names, and the label is kept as the census key.)
+#
+# **Planted in $M7, not $M5.** 20260911000000 drops the 3-argument
+# `field_bookings` (its `DROP FUNCTION IF EXISTS ... (uuid, uuid, date)`) and
+# recreates it with `p_scope`, so 20260909000000's copy of this line is dead
+# code by the time the scenario table runs. Planted there, the harness printed
+# HARNESS OK -- this prover could not fail. The live copy is $M7's.
+plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M7" \
   "                 ELSE upper(pa.effective_date_range) - 1" \
   "                 ELSE upper(pa.effective_date_range)" \
   "scenario table" \
   "smoke 20260907000000"
+# **The projection alone, read exclusively.** The plant above moves the filter
+# and the date together, so the scenario table sees a refusal flip. This one
+# leaves every refusal on the right rows and names each practice's end a day
+# late -- which only 20260911000000's section 7 reads, since the table asserts
+# the verdict and never the date. It must stay green for the same reason.
+plant "M7 a practice assignment's on_date reads the exclusive upper bound" "$M7" \
+  "    SELECT 'practice_assignment'::text, pa.id,
+           b.last_day," \
+  "    SELECT 'practice_assignment'::text, pa.id,
+           upper(pa.effective_date_range)," \
+  "smoke 20260911000000" \
+  "scenario table"
 # The revert's loss report is code like any other, and the harness plants a
 # future-dated retirement so it cannot pass by iterating zero rows. This proves
 # THAT check can fail: silence the report and the harness must go red.
@@ -1687,9 +1744,9 @@ plant "M5 the rollback goes back to its two-table guard" "$M5" \
 # **The sixth arm, removed.** `admin_delete_field` then reports nothing for a
 # field carrying only a profile and deletes it, which is the half of LIVE-3
 # LIVE-2 measured. Section 6 of the new smoke is what must see this.
-plant "M5 the producer loses its availability_profile arm" "$M5" \
-  "    WHERE fap.organization_id = p_organization_id AND fap.field_id = p_field_id" \
-  "    WHERE fap.organization_id = p_organization_id AND fap.field_id IS NULL" \
+plant "M5 the producer loses its availability_profile arm" "$M7" \
+  "      AND public.estate_scope_covers(p_organization_id, p_scope, p_scope_id, fap.field_id, NULL)" \
+  "      AND fap.field_id IS NULL" \
   "smoke 20260909000000"
 
 # **The FK left SET NULL.** Nothing about the reporting changes -- the arm

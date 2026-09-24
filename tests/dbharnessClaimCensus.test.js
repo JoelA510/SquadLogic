@@ -168,3 +168,90 @@ describe('dbharness claim census', () => {
     expect(status).not.toBe(0);
   });
 });
+
+/**
+ * The anchor pre-flight, held on every PR. `PLANT_ANCHORS_ONLY=1` resolves
+ * every plant anchor and runs the superseded-statement pre-flight -- the check
+ * that refuses a plant aimed at a function body a later migration re-creates
+ * or drops. It needs no database, but until it ran here nothing in CI ran it at
+ * all: five plants sat in a dropped `field_bookings` body with every PR green.
+ */
+function anchors(root) {
+  try {
+    const stdout = execFileSync('bash', [path.join(root, 'scripts/dbharness/prove.sh')], {
+      env: { ...process.env, PLANT_ANCHORS_ONLY: '1' },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { status: 0, output: stdout };
+  } catch (err) {
+    return { status: err.status ?? 1, output: `${err.stdout ?? ''}${err.stderr ?? ''}` };
+  }
+}
+
+/** A copy of everything the anchors-only pass reads: the harness and every plant target. */
+function anchorSandbox() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dbharness-anchors-'));
+  sandboxes.push(dir);
+  for (const sub of ['scripts/dbharness', 'supabase/migrations', 'docs/sql']) {
+    fs.cpSync(path.join(repoRoot, sub), path.join(dir, sub), {
+      recursive: true,
+      filter: (src) => !src.includes('__pycache__'),
+    });
+  }
+  // No unmutated-copy run here, unlike `sandbox()`: the real-tree case already
+  // proves exit 0, and the control below asserts the pre-flight's own refusal
+  // text, which a copy broken any other way cannot print -- so it cannot pass
+  // for the wrong reason, and a second prove.sh run only doubles the time.
+  return dir;
+}
+
+// Each case shells out to prove.sh over the whole migration set (about 2 s
+// alone, far more under a loaded CI runner), which vitest's 5 s default overran.
+const PREFLIGHT_TIMEOUT_MS = 60_000;
+
+const BOUNDARY_PLANT =
+  'plant "ONLY-SCEN the practice range boundary is read exclusively again" "$M7" \\';
+
+describe('dbharness anchor pre-flight', () => {
+  it(
+    'every plant anchor resolves once and none sits in a superseded body',
+    () => {
+      const { status, output } = anchors(repoRoot);
+      expect(output).toMatch(
+        /pre-flight: \d+ migration-targeted plant anchors examined \((\d+) inside/
+      );
+      // Meta-assertion: the function arm judged real bodies, not none.
+      const judged = Number(/examined \((\d+) inside a function body/.exec(output)?.[1]);
+      expect(judged).toBeGreaterThan(20);
+      expect(output).toMatch(/anchor pre-flight: (\d+) of \1 plant anchors resolve exactly once/);
+      expect(status).toBe(0);
+    },
+    PREFLIGHT_TIMEOUT_MS
+  );
+
+  it(
+    'refuses a plant re-aimed at the field_bookings body 20260911 drops',
+    () => {
+      const dir = anchorSandbox();
+      const prove = fs.readFileSync(proveSh(dir), 'utf8');
+      // The plant call itself, not a comment quoting it: mutating a comment would
+      // leave the pre-flight green and this control proving nothing.
+      const lines = prove.split('\n');
+      expect(lines.filter((l) => l === BOUNDARY_PLANT)).toHaveLength(1);
+      fs.writeFileSync(
+        proveSh(dir),
+        lines.map((l) => (l === BOUNDARY_PLANT ? l.replace('"$M7"', '"$M5"') : l)).join('\n')
+      );
+
+      const { status, output } = anchors(dir);
+      expect(output).toContain(
+        'PRE-FLIGHT REFUSAL: plant "ONLY-SCEN the practice range boundary is read exclusively again"'
+      );
+      expect(output).toContain('public.field_bookings(uuid, uuid, date)');
+      expect(output).toContain('20260911000000_venue_subunit_effective_dating.sql (DROP FUNCTION)');
+      expect(status).not.toBe(0);
+    },
+    PREFLIGHT_TIMEOUT_MS
+  );
+});

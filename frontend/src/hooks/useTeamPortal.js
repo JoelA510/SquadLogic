@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
-import { practiceOccurrenceDates } from '@squadlogic/core/utils/practiceOccurrences.js';
+import {
+  PRACTICE_OCCURRENCE_REFUSAL,
+  PRACTICE_TBD_CAUSES,
+  practiceOccurrenceDates,
+} from '@squadlogic/core/utils/practiceOccurrences.js';
 
 /**
  * useTeamPortal
@@ -174,6 +178,9 @@ export function useTeamPortal(teamId) {
 
       // 5. Combine and Sort Events
       const allEvents = [...mappedGames, ...expandedPractices].sort((a, b) => {
+        // TIME TBD entries have no date to order by; they go last, in row order.
+        if (a.date == null || b.date == null)
+          return Number(a.date == null) - Number(b.date == null);
         const dateA = new Date(`${a.date}T${a.startTime}`);
         const dateB = new Date(`${b.date}T${b.startTime}`);
         return dateA.getTime() - dateB.getTime();
@@ -379,7 +386,10 @@ export function useTeamPortal(teamId) {
  * the weekday of a calendar date is the same in every zone, and `startTime`
  * stays the slot's wall reading.
  *
- * A row that cannot be expanded is logged, not silently skipped.
+ * A row that cannot be expanded is logged AND returned as one TIME TBD entry
+ * (`timeTbd: true`, `date: null`) carrying the feed's reason code and wording
+ * -- the feed reports the same row as TIME TBD, so the portal must not show
+ * nothing where the calendar says TBD.
  *
  * @param {Array<Record<string, any>>} assignments
  * @returns {Array<Record<string, any>>}
@@ -389,10 +399,28 @@ export function expandPractices(assignments) {
 
   (assignments ?? []).forEach((assignment) => {
     const slot = assignment.slot;
-    if (!slot) {
-      logger.error('[useTeamPortal] practice assignment has no practice slot', {
+    // Same fallback as the feed's `locationOf`, never 'undefined - undefined'.
+    const location = `${slot?.field?.location?.name || 'Venue'} - ${slot?.field?.name || 'Field'}`;
+    const timeTbd = (reasonCode) => {
+      logger.error('[useTeamPortal] practice assignment cannot be expanded', {
         assignmentId: assignment.id,
+        refusal: reasonCode,
       });
+      expanded.push({
+        id: assignment.id,
+        type: 'practice',
+        date: null,
+        startTime: null,
+        endTime: null,
+        location,
+        description: 'TIME TBD - Practice',
+        timeTbd: true,
+        reasonCode,
+        reason: PRACTICE_TBD_CAUSES[reasonCode],
+      });
+    };
+    if (!slot) {
+      timeTbd(PRACTICE_OCCURRENCE_REFUSAL.SLOT_MISSING);
       return;
     }
 
@@ -401,10 +429,7 @@ export function expandPractices(assignments) {
       dayOfWeek: slot.day_of_week,
     });
     if (refusal) {
-      logger.error('[useTeamPortal] practice assignment cannot be expanded', {
-        assignmentId: assignment.id,
-        refusal,
-      });
+      timeTbd(refusal);
       return;
     }
 
@@ -415,8 +440,7 @@ export function expandPractices(assignments) {
         date,
         startTime: slot.start_time,
         endTime: slot.end_time,
-        // Same fallback as the feed's `locationOf`, never 'undefined - undefined'.
-        location: `${slot.field?.location?.name || 'Venue'} - ${slot.field?.name || 'Field'}`,
+        location,
         description: 'Practice',
       });
     }

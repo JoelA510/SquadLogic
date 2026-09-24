@@ -42,10 +42,27 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** The `day_of_week` enum (`20260331000000_definitive_schema.sql`). */
 const DAY_OF_WEEK_ENUM = Object.freeze(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
 
-/** Why a row produced no dates. */
+/**
+ * Why a row produced no dates. The same codes the calendar feed reports for
+ * the same rows (`icsFeed.ts`), so the portal and the feed say one thing.
+ */
 export const PRACTICE_OCCURRENCE_REFUSAL = Object.freeze({
+  SLOT_MISSING: 'PRACTICE_SLOT_MISSING',
   RANGE_UNREADABLE: 'PRACTICE_RANGE_UNREADABLE',
   DAY_UNREADABLE: 'PRACTICE_DAY_UNREADABLE',
+});
+
+/**
+ * The TIME TBD reason for each refusal, worded exactly as the feed's
+ * `UNPLACEABLE_CAUSES` words it. A mirror, not an import: the Edge module and
+ * this package do not import one another (the same arrangement as
+ * `UNPLACEABLE_SLOT_CAUSES` in `GameSchedulingPage.jsx`), and
+ * `tests/practiceOccurrences.test.js` pins the two tables equal.
+ */
+export const PRACTICE_TBD_CAUSES = Object.freeze({
+  PRACTICE_SLOT_MISSING: 'the practice assignment has no slot attached to expand',
+  PRACTICE_RANGE_UNREADABLE: 'the practice assignment has no readable start and end date',
+  PRACTICE_DAY_UNREADABLE: 'the practice slot names a day of the week this feed cannot read',
 });
 
 /**

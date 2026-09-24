@@ -440,6 +440,18 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # instead of being indistinguishable from a run that exercised hundreds.
     grep -E '^(psql:[^ ]+ )?(NOTICE|WARNING):' /tmp/harness_smoke |
       sed -E 's/^psql:[^ ]+ //; s/^/  | /' || true
+    # **#64's per-team warning list is the operator's condition for accepting
+    # that an unplaced team loses its old practice**, so it is a claim of its
+    # own rather than one NOTICE among many. The smoke RAISEs on the wrong
+    # set; this line fails if that assertion's evidence ever stops printing.
+    if [ "$id" = "20260924000000" ]; then
+      if grep -q 'teams without practice after run 2: exactly P64 Team 4 (had a practice) and P64 Team 8 (never had one), enumerated from 7 season roster teams' /tmp/harness_smoke; then
+        echo "  | (checked) the practice writer names every season team left without a practice, from the roster, including one never scheduled"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the per-team list of teams left without a practice"
+        STATUS=1
+      fi
+    fi
   elif [ -n "$needle" ] && grep -qF "$needle" /tmp/harness_smoke &&
        grep -qF "$ctx" /tmp/harness_smoke; then
     echo "PASS smoke ${id} (refused, as recorded)"

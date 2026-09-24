@@ -161,6 +161,7 @@ async function persistPracticeSnapshot(
     superseded_count?: number;
     retained_manual?: unknown[];
     retained_manual_count?: number;
+    teams_without_practice?: Array<{ team_id: string; team_name: string; had_prior_rows: boolean }>;
     audited?: boolean;
     audit_gap?: string | null;
   };
@@ -171,6 +172,9 @@ async function persistPracticeSnapshot(
     supersededCount: report.superseded_count ?? 0,
     retainedManualCount: report.retained_manual_count ?? 0,
     retainedManual: report.retained_manual ?? [],
+    // Every season team the save left with no practice, from the roster. The
+    // pre-20260924000000 uuid result carries none, so it reads as empty.
+    teamsWithoutPractice: report.teams_without_practice ?? [],
     audited: report.audited ?? false,
     auditGap: report.audit_gap ?? null,
     message: 'Persistence successful.',

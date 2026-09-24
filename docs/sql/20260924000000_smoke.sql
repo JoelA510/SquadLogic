@@ -64,7 +64,8 @@ DECLARE
     v_s1 uuid; v_s2 uuid; v_sb uuid; v_d1 uuid; v_d2 uuid; v_db uuid;
     v_sa uuid; v_sbl uuid; v_sx uuid;
     v_t uuid[] := ARRAY[]::uuid[];
-    v_t7 uuid; v_tb uuid; v_id uuid;
+    v_t7 uuid; v_t8 uuid; v_tb uuid; v_id uuid;
+    v_expected jsonb;
     v_r1 uuid := '64640000-0000-4000-8000-00000000f001';
     v_r2 uuid := '64640000-0000-4000-8000-00000000f002';
     v_r3 uuid := '64640000-0000-4000-8000-00000000f003';
@@ -113,6 +114,9 @@ BEGIN
         v_t := v_t || v_id;
     END LOOP;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d2, 'P64 Team 7 (other season)') RETURNING id INTO v_t7;
+    -- Season 1's seventh team, which no run ever schedules: the case a list
+    -- derived from the payload or the superseded rows cannot see at all.
+    INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d1, 'P64 Team 8 (never scheduled)') RETURNING id INTO v_t8;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_orgb, v_db, 'P64 Team B (other org)') RETURNING id INTO v_tb;
     INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
       VALUES (v_org, v_field, 'mon', '18:00', '19:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_sa;
@@ -142,6 +146,14 @@ BEGIN
             jsonb_build_object('team_id', v_t[6], 'practice_slot_id', v_sa, 'effective_date_range', c_r, 'source', 'manual')));
     IF (v_res->>'run_id')::uuid IS DISTINCT FROM v_r1 OR (v_res->>'superseded_count')::int <> 0 THEN
         RAISE EXCEPTION 'run 1 on an empty season superseded something or lost its run id: %', v_res;
+    END IF;
+    -- Meta-assertion: the roster the list is enumerated from matched teams.
+    IF (v_res->>'season_team_count')::int IS DISTINCT FROM 7 THEN
+        RAISE EXCEPTION 'teams_without_practice was enumerated from % season-1 team(s), expected 7', v_res->>'season_team_count';
+    END IF;
+    IF v_res->'teams_without_practice' IS DISTINCT FROM
+       jsonb_build_array(jsonb_build_object('team_id', v_t8, 'team_name', 'P64 Team 8 (never scheduled)', 'had_prior_rows', false)) THEN
+        RAISE EXCEPTION 'after run 1 only Team 8 should be without a practice: %', v_res->'teams_without_practice';
     END IF;
 
     -- ---- run 2: T1 moved to B; T2 same slot, new range; T3 unlocked and moved
@@ -189,6 +201,17 @@ BEGIN
        OR (v_run2->'retained_manual'->0->>'team_id')::uuid <> v_t[6] THEN
         RAISE EXCEPTION 'run 2 should report Team 6''s manual row as retained: %', v_run2->'retained_manual';
     END IF;
+    -- Exactly the dropped team (it had a practice) and the never-scheduled one.
+    -- Team 6 keeps its manual row and Team 7 is another season: neither is here.
+    v_expected := jsonb_build_array(
+        jsonb_build_object('team_id', v_t[4], 'team_name', 'P64 Team 4', 'had_prior_rows', true),
+        jsonb_build_object('team_id', v_t8, 'team_name', 'P64 Team 8 (never scheduled)', 'had_prior_rows', false));
+    IF (v_run2->>'season_team_count')::int IS DISTINCT FROM 7
+       OR v_run2->'teams_without_practice' IS DISTINCT FROM v_expected THEN
+        RAISE EXCEPTION 'after run 2 teams_without_practice should be exactly Team 4 (had a practice) and Team 8 (never), of 7 roster teams: % (count %)',
+            v_run2->'teams_without_practice', v_run2->>'season_team_count';
+    END IF;
+    RAISE NOTICE 'teams without practice after run 2: exactly P64 Team 4 (had a practice) and P64 Team 8 (never had one), enumerated from 7 season roster teams';
     IF NOT (v_run2->>'audited')::boolean THEN
         RAISE EXCEPTION 'an admin save with a uid was not audited: %', v_run2;
     END IF;

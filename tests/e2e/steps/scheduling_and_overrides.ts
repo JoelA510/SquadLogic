@@ -62,6 +62,7 @@ async function mockPracticeSchedulerRoutes(page: Page) {
         supersededCount: 0,
         retainedManualCount: 0,
         retainedManual: [],
+        teamsWithoutPractice: [],
         audited: false,
         auditGap: 'no auth.uid(): record_audit_event cannot attribute this save',
         message: 'Persistence successful.',

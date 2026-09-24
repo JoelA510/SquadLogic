@@ -88,6 +88,7 @@ When('I navigate to the Practice Scheduling page', async ({ page }) => {
         supersededCount: 0,
         retainedManualCount: 0,
         retainedManual: [],
+        teamsWithoutPractice: [],
         audited: false,
         auditGap: 'no auth.uid(): record_audit_event cannot attribute this save',
         message: 'Persistence successful.',

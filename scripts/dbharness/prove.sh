@@ -2602,6 +2602,22 @@ plant "M11 the writer stops pruning superseded rows" "$M11" \
   "         WHERE false AND pa.team_id = s.team_id" \
   "FAIL smoke 20260924000000"
 
+# The per-team list must come from the season ROSTER. Filtered to the payload
+# instead -- with the roster count left intact, so the count meta-assertion
+# cannot be what catches it -- the dropped team and the never-scheduled one
+# both vanish: the exact silence the operator's condition on #64 forbids.
+plant "M12 teams without practice are listed from the payload, not the roster" "$M11" \
+  "                   WHERE NOT EXISTS (
+                       SELECT 1 FROM public.practice_assignments pa WHERE pa.team_id = t.id
+                   )
+               )," \
+  "                   WHERE NOT EXISTS (
+                       SELECT 1 FROM public.practice_assignments pa WHERE pa.team_id = t.id
+                   )
+                   AND t.id = ANY (v_payload_teams)
+               )," \
+  "FAIL smoke 20260924000000"
+
 # Its revert leaves deleted rows deleted, so the warning is the claim. The seed
 # plants 3 rows on 2 runs plus an EMPTY run; counting every run prints 3 runs.
 plant "R11 the superseded-row warning counts runs holding none" "$R11" \
@@ -2691,6 +2707,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) publication_baselines is gone from the catalogue after the revert"]="R9 the revert re-creates the store after verifying it gone"
   ["(checked) the revert counted the coach assignment rows it was about to destroy, the teams they span, and the ended ones"]="R10 the assignment warning stops counting teams distinctly"
   ["(checked) the revert counted the superseded practice rows it leaves deleted, and the runs recording them"]="R11 the superseded-row warning counts runs holding none"
+  ["(checked) the practice writer names every season team left without a practice, from the roster, including one never scheduled"]="M12 teams without practice are listed from the payload, not the roster"
   ["(checked) exactly one public.persist_practice_schedule survives the revert, returning uuid, and it no longer prunes"]="R11 the revert re-creates the pruning overload after verifying it gone"
 )
 

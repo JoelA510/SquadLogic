@@ -37,7 +37,10 @@
 --     `practice_assignments_write_admin` policy already required of every
 --     write; the check turns a silent zero-row DELETE into a refusal;
 --   * the result is now jsonb: `run_id`, the superseded rows in full, the
---     retained manual rows, and whether the save was audited. The return type
+--     retained manual rows, `teams_without_practice` (every team of the
+--     season holding no practice after the save, enumerated from the roster,
+--     each with whether it had one before), and whether the save was
+--     audited. The return type
 --     changes, so the two-argument function is DROPped and recreated.
 --
 -- ## Audit, and the one caller it cannot cover
@@ -116,6 +119,9 @@ DECLARE
     v_updated integer;
     v_prior_superseded jsonb;
     v_payload_teams uuid[];
+    v_teams_with_prior uuid[];
+    v_season_team_count integer;
+    v_without_practice jsonb;
 BEGIN
     IF run_data IS NULL OR jsonb_typeof(run_data) IS DISTINCT FROM 'object' THEN
         RAISE EXCEPTION 'run_data must be a JSON object'
@@ -447,6 +453,17 @@ BEGIN
             USING ERRCODE = '42501';
     END IF;
 
+    -- #64: which of the season's teams held a practice BEFORE this save, for
+    -- `teams_without_practice.had_prior_rows` below.
+    SELECT COALESCE(array_agg(DISTINCT pa.team_id), '{}'::uuid[])
+      INTO v_teams_with_prior
+      FROM public.practice_assignments pa
+      JOIN public.teams t ON t.id = pa.team_id
+      JOIN public.divisions d ON d.id = t.division_id
+     WHERE pa.organization_id = v_org_id
+       AND d.organization_id = v_org_id
+       AND d.season_settings_id = v_season_id;
+
     -- #64: supersede what this schedule replaces. The upsert below only ever
     -- ADDED rows, so a team moved from slot A to slot B kept both, and every
     -- reader that selects by team showed the family both practices.
@@ -615,6 +632,34 @@ BEGIN
         source = EXCLUDED.source,
         updated_at = timezone('utc', now());
 
+    -- #64: every team of the season left with NO practice by this save --
+    -- unplaced by the solver, absent from the payload, stripped of its auto
+    -- row, or never scheduled at all. Enumerated from the season's ROSTER, not
+    -- from the payload or the superseded list: a team either of those lost
+    -- track of must still be named here, which is the point of the list.
+    SELECT count(*),
+           COALESCE(
+               jsonb_agg(
+                   jsonb_build_object(
+                       'team_id', t.id,
+                       'team_name', t.name,
+                       'had_prior_rows', t.id = ANY (v_teams_with_prior)
+                   )
+                   ORDER BY t.name, t.id
+               ) FILTER (
+                   WHERE NOT EXISTS (
+                       SELECT 1 FROM public.practice_assignments pa WHERE pa.team_id = t.id
+                   )
+               ),
+               '[]'::jsonb
+           )
+      INTO v_season_team_count, v_without_practice
+      FROM public.teams t
+      JOIN public.divisions d ON d.id = t.division_id
+     WHERE t.organization_id = v_org_id
+       AND d.organization_id = v_org_id
+       AND d.season_settings_id = v_season_id;
+
     -- The run carries its own before-images, so what it superseded can be
     -- read back and restored whether or not the audit rows below exist.
     UPDATE public.scheduler_runs
@@ -677,6 +722,8 @@ BEGIN
         'superseded_count', jsonb_array_length(v_removed),
         'retained_manual', v_retained,
         'retained_manual_count', jsonb_array_length(v_retained),
+        'teams_without_practice', v_without_practice,
+        'season_team_count', v_season_team_count,
         'audited', v_audited,
         'audit_gap', CASE WHEN v_audited THEN NULL ELSE
             'no auth.uid(): record_audit_event cannot attribute this save; the superseded rows are recorded on scheduler_runs.results instead'

@@ -67,14 +67,18 @@ import {
   isoDayNumber,
 } from '../facility/index.js';
 import {
+  RESOLVE_CHANGE_TERMS,
   RESOLVE_OBJECTIVE_TERM,
+  RESOLVE_OBJECTIVE_WEIGHTS,
+  RESOLVE_PRACTICE_CHANGE_TERMS,
   changeCountsFor,
+  objectiveWeightsAreDefault,
   resolveObjectiveWeights,
   scoreObjective,
 } from '../resolve/objective.js';
 import { PRACTICE_REASON, derivePracticeStatus, makePracticeFinding } from './reasonCodes.js';
 import { PracticeRepairInputSchema } from './schemas.js';
-import { buildPracticeSlotSet } from './slots.js';
+import { buildPracticeSlotSet, firstWeekdayOnOrAfter } from './slots.js';
 
 /** Why a displaced series is TIME TBD. */
 export const PRACTICE_TBD_REASON = Object.freeze({
@@ -84,6 +88,11 @@ export const PRACTICE_TBD_REASON = Object.freeze({
   CONTENDED: 'contended',
   /** A legal slot was left free, and taking it would have exceeded the change budget. */
   CHANGE_BUDGET: 'change-budget',
+  /**
+   * A legal slot was left free with no budget in force: the caller's weights
+   * priced placing it at or above leaving it TIME TBD.
+   */
+  OBJECTIVE_PREFERRED_TBD: 'objective-preferred-tbd',
 });
 
 const DEFAULT_SEARCH_NODE_LIMIT = 200000;
@@ -140,6 +149,7 @@ export function repairPracticeLoss(input) {
   const lossDate = parsed.loss.from;
   const dayBefore = shiftDate(lossDate, -1);
   const coachesByTeam = parsed.coachesByTeam ?? {};
+  const lossReason = parsed.loss.reason;
   const findings = [
     makePracticeFinding(
       PRACTICE_REASON.REPAIR_UNWIRED,
@@ -147,6 +157,34 @@ export function repairPracticeLoss(input) {
       { wiredBy: '8.6 PR 3b' }
     ),
   ];
+
+  // The sibling contract (`resolve.js`): a run scored under other weights says
+  // so, naming the terms; a zeroed change term — which undoes the freeze —
+  // says so at compromise, so it can never pass for an ordinary repair.
+  if (!objectiveWeightsAreDefault(weights)) {
+    const overridden = Object.keys(RESOLVE_OBJECTIVE_WEIGHTS)
+      .filter((term) => weights[term] !== RESOLVE_OBJECTIVE_WEIGHTS[term])
+      .sort();
+    findings.push(
+      makePracticeFinding(
+        PRACTICE_REASON.REPAIR_WEIGHTS_OVERRIDDEN,
+        `This repair was scored under caller-supplied weights (${overridden.join(', ')}), not the defaults; it is not comparable with a default run.`,
+        { overridden, weights: { ...weights } }
+      )
+    );
+    const disabled = [...RESOLVE_CHANGE_TERMS, ...RESOLVE_PRACTICE_CHANGE_TERMS].filter(
+      (term) => weights[term] === 0
+    );
+    if (disabled.length > 0) {
+      findings.push(
+        makePracticeFinding(
+          PRACTICE_REASON.REPAIR_CHANGE_TERM_DISABLED,
+          `Change terms weighted zero (${disabled.join(', ')}): this repair does not prefer keeping published practices where they were.`,
+          { disabled }
+        )
+      );
+    }
+  }
 
   /* -- the lost ground ---------------------------------------------------- */
   const lostSurfaceIds = new Set();
@@ -183,15 +221,37 @@ export function repairPracticeLoss(input) {
   /** @type {Series[]} */
   const active = [];
   const undatedOnLostGround = [];
+  /**
+   * Undated series off the lost ground. Whether they are in force is unknown,
+   * so — `slots.js` `slotsCollide()`'s contract — they occupy their ground on
+   * every date: a repair may not land on top of one.
+   */
+  const undatedOccupants = [];
   for (const assignment of slotSet.assignments) {
     const slot = /** @type {import('./types.js').PracticeSlot} */ (slotById.get(assignment.slotId));
     const from = assignment.effectiveFrom ?? slot.validFrom;
     const until = assignment.effectiveUntil ?? slot.validUntil;
     if (from === null || until === null) {
       if (lostSurfaceIds.has(slot.surfaceId)) undatedOnLostGround.push(assignment.id);
+      else {
+        undatedOccupants.push({
+          assignmentId: assignment.id,
+          teamId: assignment.teamId,
+          slotId: slot.id,
+          surfaceId: slot.surfaceId,
+          weekday: slot.weekday,
+          startMinutes: slot.startMinutes,
+          durationMinutes: slot.durationMinutes,
+          from: '0000-01-01',
+          until: '9999-12-31',
+        });
+      }
       continue;
     }
     if (until < lossDate) continue;
+    // A series with no occurrence left from the loss date is not displaced by
+    // it: re-homing it would spend budget on a practice that never happens.
+    if (firstWeekdayOnOrAfter(from < lossDate ? lossDate : from, slot.weekday) > until) continue;
     active.push({
       assignmentId: assignment.id,
       teamId: assignment.teamId,
@@ -273,7 +333,7 @@ export function repairPracticeLoss(input) {
   const againstFrozen = (series, shape) => {
     const placed = { ...shape, from: series.from, until: series.until };
     const overlaps = [];
-    for (const other of frozen) {
+    for (const other of [...frozen, ...undatedOccupants]) {
       if (!rangesOverlap(placed, other) || !timesOverlap(placed, other)) continue;
       if (conflictsWith(shape.surfaceId).has(other.surfaceId)) return null;
       if (other.teamId === series.teamId) return null;
@@ -527,7 +587,7 @@ export function repairPracticeLoss(input) {
         validUntil: series.until,
         capacity: 1,
         revisionId: slotById.get(series.slotId)?.revisionId ?? null,
-        label: `repair of ${series.slotId} from ${lossDate}`,
+        label: `repair of ${series.slotId} from ${lossDate}: ${lossReason}`,
         surfaceResolution: 'resolved',
       });
       newAssignments.push({
@@ -574,8 +634,12 @@ export function repairPracticeLoss(input) {
       );
       let reason;
       if (entry.same.length === 0) reason = PRACTICE_TBD_REASON.NO_LEGAL_SLOT_AT_VENUE;
-      else if (freeNow.length > 0) reason = PRACTICE_TBD_REASON.CHANGE_BUDGET;
-      else reason = PRACTICE_TBD_REASON.CONTENDED;
+      else if (freeNow.length > 0) {
+        reason =
+          budget !== null
+            ? PRACTICE_TBD_REASON.CHANGE_BUDGET
+            : PRACTICE_TBD_REASON.OBJECTIVE_PREFERRED_TBD;
+      } else reason = PRACTICE_TBD_REASON.CONTENDED;
       const crossVenueOptions = entry.cross
         .filter((candidate) => marginal(series, candidate, occupied, coachDays) !== null)
         .slice(0, MAX_CROSS_VENUE_OPTIONS)
@@ -585,7 +649,15 @@ export function repairPracticeLoss(input) {
             optionId,
             to: { ...candidate.shape },
             toVenueId: venueOf(candidate.shape.surfaceId),
-            objective: { total: candidate.cost, counts: { ...candidate.counts } },
+            // Filled below, once every TIME TBD series has its options.
+            sharedWith: /** @type {string[]} */ ([]),
+            // Standalone: against the frozen plan, before any coach-day
+            // effect of the other re-homes. A proposal, not a placement.
+            objective: {
+              basis: 'standalone',
+              total: candidate.cost,
+              counts: { ...candidate.counts },
+            },
             applyAs: {
               assignmentId: series.assignmentId,
               teamId: series.teamId,
@@ -605,6 +677,7 @@ export function repairPracticeLoss(input) {
           startMinutes: series.startMinutes,
         },
         reason,
+        lossReason,
         sameVenueCandidates: entry.same.length,
         crossVenueOptions,
       });
@@ -616,10 +689,31 @@ export function repairPracticeLoss(input) {
             assignmentId: series.assignmentId,
             teamId: series.teamId,
             reason,
+            lossReason,
             crossVenueOptions: crossVenueOptions.length,
           }
         )
       );
+    }
+  }
+
+  // Two TIME TBD series can be offered the same cross-venue ground. Each
+  // option names the others it competes with, so approving both is a choice
+  // made knowingly — #441's `sharedWith`.
+  for (const entry of timeTbd) {
+    for (const option of entry.crossVenueOptions) {
+      option.sharedWith = timeTbd
+        .filter(
+          (other) =>
+            other !== entry &&
+            other.crossVenueOptions.some(
+              (theirs) =>
+                timesOverlap(theirs.to, option.to) &&
+                conflictsWith(theirs.to.surfaceId).has(option.to.surfaceId)
+            )
+        )
+        .map((other) => other.assignmentId)
+        .sort();
     }
   }
 
@@ -710,8 +804,20 @@ export function repairPracticeLoss(input) {
     }
     return false;
   };
+  // One shape holds one series only while their ranges meet. When two placed
+  // series' ranges are disjoint they could share a shape, the matching would
+  // under-count keepers, and the "bound" could exceed the truth; there the
+  // bound falls back to the series with no same-time candidate at all.
+  const placedSeries = candidatesBySeries
+    .filter((entry) => placedIds.has(entry.series.assignmentId))
+    .map((entry) => entry.series);
+  const rangesAllMeet = placedSeries.every((a) => placedSeries.every((b) => rangesOverlap(a, b)));
   let keepers = 0;
-  for (let i = 0; i < sameTime.length; i += 1) if (augment(i, new Set())) keepers += 1;
+  if (rangesAllMeet) {
+    for (let i = 0; i < sameTime.length; i += 1) if (augment(i, new Set())) keepers += 1;
+  } else {
+    keepers = sameTime.filter((keys) => keys.length > 0).length;
+  }
   const publishedTimeChanges = rehomed.filter((entry) => entry.publishedTimeChanged).length;
   const timeChangeLowerBound = rehomed.length - keepers;
 

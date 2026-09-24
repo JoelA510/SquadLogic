@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 537 codes, of
- * which 525 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 539 codes, of
+ * which 527 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -6217,6 +6217,15 @@ harvest(
       { teamId: 'RU', surface: 'field-2-a', weekday: 'TUE', startMinutes: 1020, undated: true },
     ],
     inventory: [],
+  })
+);
+
+harvest(
+  'repairPracticeLoss(scored with the weekday term zeroed)',
+  repairInput({
+    series: [{ teamId: 'RW', surface: 'field-2-a', weekday: 'TUE', startMinutes: 1020 }],
+    inventory: [{ surface: 'field-3-a', weekday: 'THU', startMinutes: 1020 }],
+    extra: { weights: { changedWeekday: 0 } },
   })
 );
 

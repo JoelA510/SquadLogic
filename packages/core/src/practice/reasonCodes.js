@@ -208,6 +208,10 @@ export const PRACTICE_REASON = Object.freeze({
   REPAIR_LOSS_UNKNOWN_SURFACE: 'PRACTICE_REPAIR_LOSS_UNKNOWN_SURFACE',
   /** The loss displaced nothing. Said, so that zero is never read as "repaired". */
   REPAIR_NOTHING_DISPLACED: 'PRACTICE_REPAIR_NOTHING_DISPLACED',
+  /** The caller scored the repair under non-default weights; named, so runs are not compared unawares. */
+  REPAIR_WEIGHTS_OVERRIDDEN: 'PRACTICE_REPAIR_WEIGHTS_OVERRIDDEN',
+  /** A change term was weighted zero, so the repair no longer prefers holding published practices. */
+  REPAIR_CHANGE_TERM_DISABLED: 'PRACTICE_REPAIR_CHANGE_TERM_DISABLED',
   /** The repair has no production caller (8.6 PR 3b wires it). On every result. */
   REPAIR_UNWIRED: 'PRACTICE_REPAIR_UNWIRED',
 });
@@ -253,6 +257,10 @@ export const PRACTICE_REASON_SEVERITY = Object.freeze({
   [PRACTICE_REASON.REPAIR_SERIES_UNDATED]: PRACTICE_SEVERITY.COMPROMISE,
   [PRACTICE_REASON.REPAIR_LOSS_UNKNOWN_SURFACE]: PRACTICE_SEVERITY.BLOCKING,
   [PRACTICE_REASON.REPAIR_NOTHING_DISPLACED]: PRACTICE_SEVERITY.INFO,
+  // The sibling contract: RESOLVE_OBJECTIVE_WEIGHTS_OVERRIDDEN is info, and a
+  // zeroed change term (which undoes the freeze) is the loud one.
+  [PRACTICE_REASON.REPAIR_WEIGHTS_OVERRIDDEN]: PRACTICE_SEVERITY.INFO,
+  [PRACTICE_REASON.REPAIR_CHANGE_TERM_DISABLED]: PRACTICE_SEVERITY.COMPROMISE,
   [PRACTICE_REASON.REPAIR_UNWIRED]: PRACTICE_SEVERITY.INFO,
 });
 

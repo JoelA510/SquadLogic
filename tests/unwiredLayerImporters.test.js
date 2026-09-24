@@ -458,6 +458,7 @@ const LAYERS = Object.freeze([
     consumers: Object.freeze([
       'tests/practiceRepair.test.js',
       'tests/reasonCodeReachability.test.js',
+      'tests/unknownSurfaceDiscipline.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([]),
     expectedExternalProductionConsumers: Object.freeze([]),

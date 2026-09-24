@@ -30,6 +30,17 @@
 import { requireZonedInstant } from '../timing/seasonClock.js';
 import { firstWeekdayOnOrAfter } from './slots.js';
 
+/** Display labels only; the weekday codes stay `practice/`'s one vocabulary. */
+const DAY_LABEL = Object.freeze({
+  SUN: 'Sunday',
+  MON: 'Monday',
+  TUE: 'Tuesday',
+  WED: 'Wednesday',
+  THU: 'Thursday',
+  FRI: 'Friday',
+  SAT: 'Saturday',
+});
+
 /**
  * Whether a series' effective range covers a date.
  *
@@ -55,6 +66,7 @@ function covers(range, date) {
  *   slots: Array<{ id: string, start: string, end: string, capacity: number, day: string, baseSlotId: string }>,
  *   assignments: Array<{ teamId: string, slotId: string }>,
  *   undated: string[],
+ *   dangling: string[],
  * }}
  */
 export function toPracticeMetricsInput(slotSet, { asOf, timeZone }) {
@@ -67,9 +79,13 @@ export function toPracticeMetricsInput(slotSet, { asOf, timeZone }) {
   const usedSlotIds = new Set();
   const assignments = [];
   const undated = [];
+  const dangling = [];
   for (const assignment of slotSet.assignments) {
     const slot = slotById.get(assignment.slotId);
-    if (!slot) continue;
+    if (!slot) {
+      dangling.push(assignment.id);
+      continue;
+    }
     const range = {
       from: assignment.effectiveFrom ?? slot.validFrom,
       until: assignment.effectiveUntil ?? slot.validUntil,
@@ -96,9 +112,11 @@ export function toPracticeMetricsInput(slotSet, { asOf, timeZone }) {
         label,
       }),
       capacity: slot.capacity,
-      day: slot.weekday,
+      // The live Apply path labels days in full ('Tuesday'); matching it keeps
+      // day-keyed breakdowns comparable with the reports production shows.
+      day: DAY_LABEL[slot.weekday],
       baseSlotId: slot.id,
     };
   });
-  return { slots, assignments, undated };
+  return { slots, assignments, undated, dangling };
 }

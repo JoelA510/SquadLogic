@@ -894,3 +894,202 @@ describe('practice repair :: the 100:1 ratio on the corpus (measured, not change
     expect(compared).toBe(SURVEY.length * 4);
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* Regressions from /code-review on this PR                                    */
+/* -------------------------------------------------------------------------- */
+
+/** A constructed plan whose series carry their own ranges. */
+function rangedRun({ series, inventory, extra = {} }) {
+  return repairPracticeLoss({
+    plan: {
+      slots: series.map((entry, index) => ({
+        id: `r-slot-${index}`,
+        surfaceId: entry.surfaceId,
+        weekday: entry.weekday,
+        startMinutes: entry.startMinutes,
+        durationMinutes: 60,
+        validFrom: entry.from ?? null,
+        validUntil: entry.until ?? null,
+        capacity: 1,
+        revisionId: 'constructed',
+        label: null,
+        surfaceResolution: 'resolved',
+      })),
+      assignments: series.map((entry, index) => ({
+        id: `r-asg-${index}`,
+        slotId: `r-slot-${index}`,
+        teamId: entry.teamId,
+      })),
+      source: 'constructed',
+    },
+    graph,
+    loss: { surfaceIds: [OP('field-2')], from: '2026-10-05', reason: 'pitch resurfacing' },
+    inventory: inventory.map((shape) => ({ durationMinutes: 60, ...shape })),
+    ...extra,
+  });
+}
+
+describe('practice repair :: review regressions', () => {
+  it('proves minimality when two series with disjoint ranges keep their time on one shape', () => {
+    const run = rangedRun({
+      series: [
+        {
+          teamId: 'A',
+          surfaceId: OP('field-2-a'),
+          weekday: 'TUE',
+          startMinutes: 1020,
+          from: '2026-09-01',
+          until: '2026-10-20',
+        },
+        {
+          teamId: 'B',
+          surfaceId: OP('field-2-b'),
+          weekday: 'TUE',
+          startMinutes: 1020,
+          from: '2026-10-25',
+          until: '2026-11-30',
+        },
+      ],
+      inventory: [{ surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1020 }],
+    });
+    expect(run.stats.rehomed).toBe(2);
+    expect(run.stats.publishedTimeChanges).toBe(0);
+    expect(run.stats.timeChangeLowerBound).toBe(0);
+    expect(run.stats.timeChangesProvenMinimal).toBe(true);
+  });
+
+  it('does not blame a change budget nobody set', () => {
+    const run = rangedRun({
+      series: [
+        {
+          teamId: 'A',
+          surfaceId: OP('field-2-a'),
+          weekday: 'TUE',
+          startMinutes: 1020,
+          from: '2026-09-01',
+          until: '2026-11-30',
+        },
+      ],
+      inventory: [{ surfaceId: OP('field-3-a'), weekday: 'THU', startMinutes: 1020 }],
+      extra: { weights: { unplacedGame: 500 } },
+    });
+    expect(run.timeTbd[0].reason).toBe(PRACTICE_TBD_REASON.OBJECTIVE_PREFERRED_TBD);
+    expect(run.findings.map((f) => f.code)).toContain(PRACTICE_REASON.REPAIR_WEIGHTS_OVERRIDDEN);
+  });
+
+  it('will not land on an undated series, which occupies its ground on every date', () => {
+    const run = rangedRun({
+      series: [
+        { teamId: 'U', surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1020 },
+        {
+          teamId: 'A',
+          surfaceId: OP('field-2-a'),
+          weekday: 'TUE',
+          startMinutes: 1020,
+          from: '2026-09-01',
+          until: '2026-11-30',
+        },
+      ],
+      inventory: [{ surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1020 }],
+    });
+    expect(run.stats.rehomed).toBe(0);
+    expect(run.timeTbd[0].reason).toBe(PRACTICE_TBD_REASON.NO_LEGAL_SLOT_AT_VENUE);
+  });
+
+  it('says loudly when a change term is zeroed', () => {
+    const run = rangedRun({
+      series: [
+        {
+          teamId: 'A',
+          surfaceId: OP('field-2-a'),
+          weekday: 'TUE',
+          startMinutes: 1020,
+          from: '2026-09-01',
+          until: '2026-11-30',
+        },
+      ],
+      inventory: [{ surfaceId: OP('field-3-a'), weekday: 'THU', startMinutes: 1020 }],
+      extra: { weights: { changedGame: 0 } },
+    });
+    const disabled = run.findings.find(
+      (f) => f.code === PRACTICE_REASON.REPAIR_CHANGE_TERM_DISABLED
+    );
+    expect(disabled?.details.disabled).toEqual(['changedGame']);
+    expect(disabled?.severity).toBe('compromise');
+  });
+
+  it('carries the reason for the loss onto every TIME TBD and every new slot', () => {
+    const run = rangedRun({
+      series: [
+        {
+          teamId: 'A',
+          surfaceId: OP('field-2-a'),
+          weekday: 'TUE',
+          startMinutes: 1020,
+          from: '2026-09-01',
+          until: '2026-11-30',
+        },
+        {
+          teamId: 'B',
+          surfaceId: OP('field-2-b'),
+          weekday: 'WED',
+          startMinutes: 1020,
+          from: '2026-09-01',
+          until: '2026-11-30',
+        },
+      ],
+      inventory: [{ surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1020 }],
+    });
+    expect(run.timeTbd.every((entry) => entry.lossReason === 'pitch resurfacing')).toBe(true);
+    const repaired = run.plan.slots.filter((slot) => slot.id.includes('~repair@'));
+    expect(repaired.length).toBeGreaterThan(0);
+    for (const slot of repaired) expect(slot.label).toMatch(/pitch resurfacing$/);
+  });
+
+  it('does not displace a series with no occurrence left after the loss', () => {
+    // 2026-10-05 is a Monday; this Tuesday series ends on the Monday.
+    const run = rangedRun({
+      series: [
+        {
+          teamId: 'A',
+          surfaceId: OP('field-2-a'),
+          weekday: 'TUE',
+          startMinutes: 1020,
+          from: '2026-09-01',
+          until: '2026-10-05',
+        },
+      ],
+      inventory: [{ surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1020 }],
+    });
+    expect(run.stats.displaced).toBe(0);
+  });
+
+  it('tells two TIME TBD series when they are offered the same cross-venue ground', () => {
+    const run = rangedRun({
+      series: [
+        {
+          teamId: 'A',
+          surfaceId: OP('field-2-a'),
+          weekday: 'TUE',
+          startMinutes: 1020,
+          from: '2026-09-01',
+          until: '2026-11-30',
+        },
+        {
+          teamId: 'B',
+          surfaceId: OP('field-2-b'),
+          weekday: 'TUE',
+          startMinutes: 1020,
+          from: '2026-09-01',
+          until: '2026-11-30',
+        },
+      ],
+      inventory: [{ surfaceId: 'alder-park/pitch-2a', weekday: 'TUE', startMinutes: 1020 }],
+    });
+    expect(run.timeTbd).toHaveLength(2);
+    const [a, b] = run.timeTbd;
+    expect(a.crossVenueOptions[0].sharedWith).toEqual([b.assignmentId]);
+    expect(b.crossVenueOptions[0].sharedWith).toEqual([a.assignmentId]);
+  });
+});

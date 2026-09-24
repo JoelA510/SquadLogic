@@ -94,6 +94,9 @@ describe('useTeamPortal expandPractices: season wall dates', () => {
   it('keeps the wall reading of the slot', () => {
     const [first] = expandPractices(ROWS);
     expect(first).toMatchObject({ startTime: '17:00:00', endTime: '18:30:00', type: 'practice' });
+    expect(first.location).toBe('Test Park - Field A');
+    const [bare] = expandPractices([{ ...ROWS[0], slot: { ...slot('mon'), field: null } }]);
+    expect(bare.location).toBe('Venue - Field');
   });
 });
 
@@ -122,6 +125,10 @@ describe('practiceOccurrenceDates / practiceRangeBounds', () => {
     );
     expect(
       practiceOccurrenceDates({ range: '[2026-11-02,2026-11-17)', dayOfWeek: 'monday' }).refusal
+    ).toBe(PRACTICE_OCCURRENCE_REFUSAL.DAY_UNREADABLE);
+    // Read as the feed reads it: padded input is refused by both.
+    expect(
+      practiceOccurrenceDates({ range: '[2026-11-02,2026-11-17)', dayOfWeek: ' mon' }).refusal
     ).toBe(PRACTICE_OCCURRENCE_REFUSAL.DAY_UNREADABLE);
   });
 });

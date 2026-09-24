@@ -1540,10 +1540,13 @@ export const getMockData = (table, col, val) => {
 // (fix #64). Now: no hint is PGRST201, a hint naming no FK column is PGRST200,
 // and a column hint (`practice_slots!practice_slot_id(...)`) joins on that
 // column and returns under its alias. The error keeps the mock's existing
-// `{ code, message }` shape. Only this pair is strict: `games -> teams`
-// (home/away) is hinted by constraint name, which this mock does not model.
+// `{ code, message }` shape. `!inner`/`!left` are join modifiers, not hints.
+// A constraint-name hint is refused (PGRST200) on purpose: names differ
+// between environments, so readers must hint by column. Only this pair is
+// strict: `games -> teams` (home/away) is hinted by constraint name, which
+// this mock does not model.
 const PRACTICE_SLOT_FKS = ['slot_id', 'practice_slot_id'];
-const PRACTICE_SLOT_EMBED = /(?:(\w+)\s*:\s*)?\bpractice_slots\s*(?:!\s*(\w+))?\s*\(/g;
+const PRACTICE_SLOT_EMBED = /(?:(\w+)\s*:\s*)?\bpractice_slots((?:\s*!\s*\w+)*)\s*\(/g;
 
 // ── Chainable Mock Query Builder ────────────────────────────────────────────
 const createMockQuery = (table, data = null) => {
@@ -1561,7 +1564,11 @@ const createMockQuery = (table, data = null) => {
       let slotEmbed = null;
       embedError = null;
       if (table === 'practice_assignments') {
-        for (const [, key, hint] of String(query || '').matchAll(PRACTICE_SLOT_EMBED)) {
+        for (const [, key, bangs] of String(query || '').matchAll(PRACTICE_SLOT_EMBED)) {
+          const hint = bangs
+            .split('!')
+            .map((w) => w.trim())
+            .find((w) => w && w !== 'inner' && w !== 'left');
           if (!PRACTICE_SLOT_FKS.includes(hint)) {
             embedError = {
               code: hint ? 'PGRST200' : 'PGRST201',

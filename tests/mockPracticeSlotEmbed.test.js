@@ -83,6 +83,19 @@ describe('mock: practice_assignments -> practice_slots embed', () => {
     expect(legacy.data[0].practice_slots?.id).toBe('ps-legacy');
   });
 
+  it('a join modifier is not a hint: !inner alone errs, a column hint plus !inner resolves', async () => {
+    const bare = await mockSupabase
+      .from('practice_assignments')
+      .select('id, practice_slots!inner (day_of_week)');
+    expect(bare.error?.code).toBe('PGRST201');
+    const hinted = await mockSupabase
+      .from('practice_assignments')
+      .select('id, slot:practice_slots!practice_slot_id!inner (day_of_week)')
+      .eq('team_id', 'team-embed');
+    expect(hinted.error).toBeNull();
+    expect(hinted.data[0].slot?.id).toBe('ps-live');
+  });
+
   it('a hint naming no FK column errs (PGRST200) rather than guessing', async () => {
     const { data, error } = await mockSupabase
       .from('practice_assignments')

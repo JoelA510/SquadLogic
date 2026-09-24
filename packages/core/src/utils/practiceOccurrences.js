@@ -87,9 +87,8 @@ export function practiceOccurrenceDates({ range, dayOfWeek }) {
   if (bounds === null) {
     return { dates: [], refusal: PRACTICE_OCCURRENCE_REFUSAL.RANGE_UNREADABLE };
   }
-  const day = String(dayOfWeek ?? '')
-    .trim()
-    .toLowerCase();
+  // Lowercased and not trimmed, exactly as the feed's `DAY_MAP` lookup reads it.
+  const day = String(dayOfWeek ?? '').toLowerCase();
   if (!DAY_OF_WEEK_ENUM.includes(day)) {
     return { dates: [], refusal: PRACTICE_OCCURRENCE_REFUSAL.DAY_UNREADABLE };
   }

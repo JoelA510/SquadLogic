@@ -24,7 +24,7 @@ export function useTeamPortal(teamId) {
     try {
       setLoading(true);
 
-      // 1. Fetch Team Details + League Timezone
+      // 1. Fetch Team Details
       const { data: teamData, error: teamError } = await supabase
         .from('teams')
         .select(
@@ -35,7 +35,6 @@ export function useTeamPortal(teamId) {
             name,
             season:season_settings (
               id,
-              timezone,
               season_start,
               season_end
             )
@@ -416,7 +415,8 @@ export function expandPractices(assignments) {
         date,
         startTime: slot.start_time,
         endTime: slot.end_time,
-        location: `${slot.field?.location?.name} - ${slot.field?.name}`,
+        // Same fallback as the feed's `locationOf`, never 'undefined - undefined'.
+        location: `${slot.field?.location?.name || 'Venue'} - ${slot.field?.name || 'Field'}`,
         description: 'Practice',
       });
     }

@@ -44,6 +44,7 @@ export default function PlayerRecordPage() {
   const [teams, setTeams] = useState([]);
   const [practices, setPractices] = useState([]);
   const [practicesFailed, setPracticesFailed] = useState(false);
+  const [gamesFailed, setGamesFailed] = useState(false);
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('overview');
@@ -55,6 +56,12 @@ export default function PlayerRecordPage() {
     (async () => {
       if (!orgId || !playerId) return;
       setLoading(true);
+      // Per load: a failure flag or rows from the previous player must not
+      // carry over to one with no team.
+      setPracticesFailed(false);
+      setGamesFailed(false);
+      setPractices([]);
+      setGames([]);
       try {
         const [playerRes, divisionsRes, teamsRes] = await Promise.all([
           supabase.from('players').select('*').eq('id', playerId),
@@ -91,7 +98,11 @@ export default function PlayerRecordPage() {
             if (practicesRes.error) {
               logger.error('[PlayerRecord] practices read failed:', practicesRes.error);
             }
+            if (gamesRes.error) {
+              logger.error('[PlayerRecord] games read failed:', gamesRes.error);
+            }
             setPracticesFailed(Boolean(practicesRes.error));
+            setGamesFailed(Boolean(gamesRes.error));
             setPractices(practicesRes.data || []);
             setGames(gamesRes.data || []);
           }
@@ -462,7 +473,11 @@ export default function PlayerRecordPage() {
                 <h3>Games</h3>
               </div>
               <div className="card-body flush">
-                {games.length ? (
+                {gamesFailed ? (
+                  <div style={{ padding: 16 }} className="muted" role="alert">
+                    Games could not be loaded.
+                  </div>
+                ) : games.length ? (
                   games.map((game, index) => (
                     <div
                       key={game.id}

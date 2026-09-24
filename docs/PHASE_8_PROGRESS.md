@@ -6121,3 +6121,34 @@ Harness: HARNESS OK, 43/43 claims planted, 140/140 anchors. CI green including
 pgTAP. Unexecuted: the Edge runtime against real Supabase (the user-client
 behaviour is statically reviewed); the Edge passthrough is pinned at source.
 Second writer `persistPracticeAssignments` has no caller — retirement filed.
+
+## Harness — #447 merged (44c75d1): plants anchored in replaced function bodies were hollow
+
+**Supervisor correction.** I reported `admin_retire_field` as live-defective
+(exclusive upper bound compared to an inclusive date), relaying the 8.6 PR 3b
+plan agent. It is not: `20260907:667` redefines the function, and the live body
+goes through `field_bookings`, which already uses `upper - 1`. I read a narrow
+grep of the later file as "grants only" without reading the definition. The fix
+agent checked the definition history and shipped no migration.
+
+**What was real.** Five `prove.sh` plants mutated
+`field_bookings(uuid, uuid, date)` in 20260909, a signature 20260911 DROPs and
+replaces with a plain CREATE. They could never fail. The existing
+superseded-body pre-flight missed them: it matched only `CREATE OR REPLACE` by
+name, had no DROP arm, and ran only at the head of the 5.4 h sweep. The anchor
+count (140/140) and claim census (43/43) passed throughout.
+
+- The pre-flight (`anchor_liveness.py`) now reads plain CREATE and DROP and
+  tells overloads apart. On the pre-fix tree it refuses exactly those 5.
+- All 5 re-anchored to 20260911; each hand-planted in the live body turns its
+  check red.
+- It now runs in CI (`tests/dbharnessClaimCensus.test.js`), with a negative
+  control that re-aims a real plant line at the dead body. Neutering the
+  pre-flight turns both tests red. Supervisor-executed: re-aiming one plant at
+  `$M5` gives exit 7 with the exact refusal; restored, exit 0.
+- Boundary smoke section 7 (20260911): `on_date` is the last day, and
+  unbounded and NULL ranges are reported. Plant M7 turns it red.
+- One CI round: the negative control hit vitest's 5 s default under runner
+  load. The agent reproduced it at 1 s; now 60 s.
+
+Not run: the full 5.4 h `prove.sh` sweep.

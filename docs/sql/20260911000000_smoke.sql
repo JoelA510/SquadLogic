@@ -579,3 +579,94 @@ BEGIN
     'estate guard exercised: venue refusal spanned % pitch(es) over % kind(s), 3 contained nodes reported, sub-surface refusal narrowed to 1 of 2 bookings on its pitch, % audit rows',
     v_fields, array_length(v_kinds, 1), v_audit;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- 7. The practice-assignment boundary, as the producer REPORTS it
+-- ---------------------------------------------------------------------------
+--
+-- The scenario table pins which side of the boundary a practice falls on --
+-- refused or not -- but not what the producer SAYS about the rows it reports.
+-- A daterange canonicalises to `[)`, so `upper()` is the day AFTER the last one
+-- covered; `on_date` must be `upper() - 1`, the date an operator reads in the
+-- refusal. With the projection alone reverted to `upper()` every refusal still
+-- fires on the right rows and names each practice's end one day late, which
+-- nothing else here would notice. Unbounded and NULL ranges run forever, so
+-- both are reported and both say `unbounded`.
+DO $$
+DECLARE
+  v_org uuid; v_user uuid := gen_random_uuid();
+  v_venue uuid; v_field uuid; v_season uuid; v_div uuid; v_team uuid;
+  v_e date := current_date + 30;
+  v_on uuid; v_after uuid; v_open uuid; v_null uuid;
+  v_n int; v_res jsonb; r record;
+BEGIN
+  INSERT INTO auth.users (id, email, raw_user_meta_data)
+  VALUES (v_user, 'range-boundary@example.test', jsonb_build_object('password_length', 16))
+  ON CONFLICT DO NOTHING;
+  INSERT INTO public.organizations (name, slug) VALUES ('Range Boundary Org','range-boundary-org')
+  RETURNING id INTO v_org;
+  INSERT INTO public.profiles (id, email) VALUES (v_user, 'range-boundary@example.test')
+  ON CONFLICT DO NOTHING;
+  INSERT INTO public.organization_members (organization_id, profile_id, role)
+  VALUES (v_org, v_user, 'admin');
+  PERFORM set_config('request.jwt.claim.sub', v_user::text, true);
+
+  INSERT INTO public.locations (organization_id, name) VALUES (v_org, 'Range Park')
+  RETURNING id INTO v_venue;
+  INSERT INTO public.fields (organization_id, location_id, name, active)
+  VALUES (v_org, v_venue, 'Range Pitch', true) RETURNING id INTO v_field;
+  INSERT INTO public.season_settings (organization_id, name)
+  VALUES (v_org, 'Range Season') RETURNING id INTO v_season;
+  INSERT INTO public.divisions (organization_id, season_settings_id, name)
+  VALUES (v_org, v_season, 'Range Division') RETURNING id INTO v_div;
+  INSERT INTO public.teams (organization_id, division_id, name)
+  VALUES (v_org, v_div, 'Range Team') RETURNING id INTO v_team;
+
+  -- Last day ON the retirement date, the day AFTER it, open-ended, and NULL.
+  INSERT INTO public.practice_assignments (organization_id, team_id, field_id, effective_date_range)
+  VALUES (v_org, v_team, v_field, daterange(current_date, v_e, '[]')) RETURNING id INTO v_on;
+  INSERT INTO public.practice_assignments (organization_id, team_id, field_id, effective_date_range)
+  VALUES (v_org, v_team, v_field, daterange(current_date, v_e + 1, '[]')) RETURNING id INTO v_after;
+  INSERT INTO public.practice_assignments (organization_id, team_id, field_id, effective_date_range)
+  VALUES (v_org, v_team, v_field, daterange(current_date, NULL)) RETURNING id INTO v_open;
+  INSERT INTO public.practice_assignments (organization_id, team_id, field_id, effective_date_range)
+  VALUES (v_org, v_team, v_field, NULL) RETURNING id INTO v_null;
+
+  -- The subject set comes from the TABLE, not from the producer: four rows
+  -- exist, so a producer that stopped seeing the kind cannot pass by silence.
+  SELECT count(*) INTO v_n FROM public.practice_assignments
+   WHERE organization_id = v_org AND field_id = v_field;
+  IF v_n <> 4 THEN RAISE EXCEPTION 'expected 4 seeded practice assignments, found %', v_n; END IF;
+
+  SELECT count(*) INTO v_n FROM public.field_bookings(v_org, v_field, v_e) b
+   WHERE b.kind = 'practice_assignment';
+  IF v_n <> 3 THEN
+    RAISE EXCEPTION 'expected the day-after, open-ended and NULL ranges reported (3), got %', v_n; END IF;
+
+  IF EXISTS (SELECT 1 FROM public.field_bookings(v_org, v_field, v_e) b WHERE b.booking_id = v_on) THEN
+    RAISE EXCEPTION 'a practice whose last day IS the retirement date was reported as stranded'; END IF;
+
+  SELECT * INTO r FROM public.field_bookings(v_org, v_field, v_e) b WHERE b.booking_id = v_after;
+  IF NOT FOUND THEN RAISE EXCEPTION 'a practice ending the day after retirement was not reported'; END IF;
+  IF r.on_date IS DISTINCT FROM v_e + 1 THEN
+    RAISE EXCEPTION 'on_date must be the last covered day % (upper - 1), got %', v_e + 1, r.on_date; END IF;
+  IF r.unbounded THEN RAISE EXCEPTION 'a bounded range was reported unbounded'; END IF;
+
+  SELECT * INTO r FROM public.field_bookings(v_org, v_field, v_e) b WHERE b.booking_id = v_open;
+  IF NOT FOUND OR NOT r.unbounded THEN
+    RAISE EXCEPTION 'an open-ended range must be reported, and as unbounded: %', to_jsonb(r); END IF;
+
+  SELECT * INTO r FROM public.field_bookings(v_org, v_field, v_e) b WHERE b.booking_id = v_null;
+  IF NOT FOUND OR NOT r.unbounded THEN
+    RAISE EXCEPTION 'a NULL range must be reported, and as unbounded: %', to_jsonb(r); END IF;
+
+  -- And the operator-facing surface carries the same date through.
+  v_res := public.admin_retire_field(v_org, v_field, v_e, false);
+  IF (v_res->>'retired')::boolean OR (v_res->>'affected_count')::int <> 3 THEN
+    RAISE EXCEPTION 'admin_retire_field should refuse on exactly 3 practices: %', v_res; END IF;
+  IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_res->'affected') a
+                  WHERE a->>'id' = v_after::text AND (a->>'on_date')::date = v_e + 1) THEN
+    RAISE EXCEPTION 'the refusal must name the day-after practice with on_date %: %', v_e + 1, v_res; END IF;
+
+  RAISE NOTICE 'practice range boundary: 4 seeded, 3 reported (day-after on its last day, open-ended, NULL), the on-boundary one not';
+END $$;

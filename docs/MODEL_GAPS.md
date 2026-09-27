@@ -166,6 +166,9 @@ passing.
 ### GAP-06 — Sunset per date
 
 - **Source**: `sunsets.csv` → `11/07/2026,4:44 PM,DST ends 11/01`.
+  *Annotation (8.9 PR 1): quoted as it stood when this gap was written. Operator
+  ruling 2026-09-24 corrected that row to `4:49 PM` and 11/14 to `4:41 PM`; see
+  `fixtures/season-2026/README.md`, "Sunset corrections".*
 - **Example**: on 10/31 sunset is 5:59 PM, so an unlit 9v9 (65-minute occupancy) cannot kick off after 4:39 PM. The corpus honours a 15-minute margin on all 669 unlit rows with a known footprint.
 - **Today**: there is no sunset, daylight or per-date environment concept in any type. The 15-minute margin also has nowhere to live — see GAP-12.
 - **Needed by**: Phase 2 (daylight constraint), Phase 4 (what-if "latest legal kickoff").

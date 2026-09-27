@@ -180,7 +180,9 @@ describe('every placement finding code has a locus, and the universe is the one 
     // these counts. A code added to any of the three registries fails here
     // until somebody decides whether it travels with the game -- add it to
     // `CARRIED_CODES` in `resolve/instances.js` or accept PLACED -- and updates
-    // the count in the same change.
+    // the count in the same change. TIMING_REASON is 30 since 8.9 PR 1: its two
+    // sunset codes stay PLACED, as each turns on the venue and date a game is
+    // placed at.
     expect(
       Object.fromEntries(
         Object.entries(PLACEMENT_REASON_REGISTRIES).map(([name, registry]) => [
@@ -188,7 +190,7 @@ describe('every placement finding code has a locus, and the universe is the one 
           Object.keys(registry).length,
         ])
       )
-    ).toEqual({ FACILITY_REASON: 30, AVAILABILITY_REASON: 33, TIMING_REASON: 28 });
+    ).toEqual({ FACILITY_REASON: 30, AVAILABILITY_REASON: 33, TIMING_REASON: 30 });
     expect(
       Object.entries(FINDING_LOCUS_BY_CODE)
         .filter(([, locus]) => locus === FINDING_LOCUS.CARRIED)

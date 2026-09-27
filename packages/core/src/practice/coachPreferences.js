@@ -24,7 +24,10 @@
  * and every candidate violates it. Two differing `prefer_keep` references are
  * the soft analogue: every candidate breaches that dimension once, so the term
  * cannot rank candidates on it. That is one rule for both levels, stated here
- * rather than left for the Deno twin (PR 8) to rediscover.
+ * rather than left for the Deno twin (PR 8) to rediscover, and at both levels a
+ * `PRACTICE_COACH_PREFERENCE_CONFLICT` finding names the dimension, the level,
+ * the coaches and the references, so preferences that cancel each other out are
+ * visible to an admin rather than silently inert.
  *
  * **The verdict** on a candidate: `mustKeepViolated` when any `must_keep`
  * dimension is not kept (the hard filter), and `preferKeepBreaches`, one per
@@ -204,6 +207,20 @@ export function resolveCoachPreferences(input) {
     const level = strictestCoachPreferenceLevel(holders.map((holder) => holder.level));
     const strictest = holders.filter((holder) => holder.level === level);
     const references = [...new Set(strictest.map((holder) => holder.reference))];
+    if (references.length > 1) {
+      findings.push(
+        makePracticeFinding(
+          PRACTICE_REASON.COACH_PREFERENCE_CONFLICT,
+          `the team's coaches hold ${level} on ${dimension} with ${references.length} different values, so no practice can keep them all`,
+          {
+            dimension,
+            level,
+            coachIds: strictest.map((holder) => holder.coachId),
+            references,
+          }
+        )
+      );
+    }
     return Object.freeze({
       dimension,
       level,

@@ -74,6 +74,17 @@ function oracle(entries, candidateValue) {
     mustKeepViolated: top === 'must_keep' && !kept,
     preferKeepBreaches: top === 'prefer_keep' && !kept ? 1 : 0,
     unsatisfiable: top === 'must_keep' && new Set(held.map((entry) => entry.reference)).size > 1,
+    // Derived from the inputs: the strictest level held with more than one value.
+    conflict:
+      new Set(held.map((entry) => entry.reference)).size > 1
+        ? {
+            dimension: undefined,
+            level: top,
+            coachIds: held.map((entry) => entry.coachId).sort(),
+            references: [...new Set(held.map((entry) => entry.reference))].map(String).sort(),
+          }
+        : null,
+    unsatisfiableAgreesWithFinding: true,
     noReference: entries.filter((entry) => entry.level !== 'dont_care' && entry.reference === null)
       .length,
     othersInert: true,
@@ -94,6 +105,27 @@ function observe(resolution, verdict, dimension) {
     othersInert: resolution.dimensions
       .filter((other) => other.dimension !== dimension)
       .every((other) => other.level === 'dont_care' && other.references.length === 0),
+    conflict: conflictOf(resolution, dimension),
+    // For must_keep the flag and the finding are one fact, stated twice.
+    unsatisfiableAgreesWithFinding:
+      entry.level !== 'must_keep' ||
+      entry.unsatisfiable === (conflictOf(resolution, dimension) !== null),
+  };
+}
+
+/** The one conflict finding, normalised; every conflict finding must name this dimension. */
+function conflictOf(resolution, dimension) {
+  const found = resolution.findings.filter(
+    (finding) => finding.code === PRACTICE_REASON.COACH_PREFERENCE_CONFLICT
+  );
+  if (found.length === 0) return null;
+  if (found.length > 1) return { tooMany: found.length };
+  const { details } = found[0];
+  return {
+    dimension: details.dimension === dimension ? undefined : details.dimension,
+    level: details.level,
+    coachIds: [...details.coachIds].sort(),
+    references: details.references.map(String).sort(),
   };
 }
 
@@ -104,12 +136,21 @@ function tally(seen, verdict, expected) {
   if (!verdict.mustKeepViolated && verdict.preferKeepBreaches === 0) seen.clean += 1;
   if (expected.unsatisfiable) seen.unsatisfiable += 1;
   if (expected.noReference > 0) seen.noReference += 1;
+  if (expected.conflict) seen.conflict += 1;
 }
 
 describe('coach preferences :: strictest wins, enumerated', () => {
   it('value mode: every dimension x 0-3 coaches x every level and value combination', () => {
     const choicesPerCoach = ['match', 'otherA', 'otherB', null];
-    const seen = { cases: 0, violated: 0, breached: 0, clean: 0, unsatisfiable: 0, noReference: 0 };
+    const seen = {
+      cases: 0,
+      violated: 0,
+      breached: 0,
+      clean: 0,
+      unsatisfiable: 0,
+      noReference: 0,
+      conflict: 0,
+    };
     for (const dimension of DIMENSIONS) {
       for (let n = 0; n <= 3; n += 1) {
         for (const levels of tuples(LEVELS, n)) {
@@ -126,7 +167,7 @@ describe('coach preferences :: strictest wins, enumerated', () => {
             });
             const verdict = judgeCoachPreferenceCandidate(resolution, CANDIDATE);
             const expected = oracle(
-              preferences.map((p) => ({ level: p.level, reference: p.value })),
+              preferences.map((p) => ({ coachId: p.coachId, level: p.level, reference: p.value })),
               CANDIDATE[KEY[dimension]]
             );
             // The case rides in the comparison, so a red names what broke.
@@ -149,7 +190,15 @@ describe('coach preferences :: strictest wins, enumerated', () => {
 
   it('series mode: the series is the reference, whatever value each preference carries', () => {
     const choicesPerCoach = ['match', 'otherB', null];
-    const seen = { cases: 0, violated: 0, breached: 0, clean: 0, unsatisfiable: 0, noReference: 0 };
+    const seen = {
+      cases: 0,
+      violated: 0,
+      breached: 0,
+      clean: 0,
+      unsatisfiable: 0,
+      noReference: 0,
+      conflict: 0,
+    };
     for (const dimension of DIMENSIONS) {
       for (const seriesKept of [true, false]) {
         const seriesValue = seriesKept ? VALUES[dimension].match : VALUES[dimension].otherA;
@@ -170,7 +219,11 @@ describe('coach preferences :: strictest wins, enumerated', () => {
               });
               const verdict = judgeCoachPreferenceCandidate(resolution, CANDIDATE);
               const expected = oracle(
-                preferences.map((p) => ({ level: p.level, reference: seriesValue })),
+                preferences.map((p) => ({
+                  coachId: p.coachId,
+                  level: p.level,
+                  reference: seriesValue,
+                })),
                 CANDIDATE[KEY[dimension]]
               );
               expect({
@@ -190,6 +243,7 @@ describe('coach preferences :: strictest wins, enumerated', () => {
     // One series gives one reference: never unsatisfiable, never unreferenced.
     expect(seen.unsatisfiable).toBe(0);
     expect(seen.noReference).toBe(0);
+    expect(seen.conflict).toBe(0);
     for (const key of ['violated', 'breached', 'clean']) expect(seen[key]).toBeGreaterThan(0);
   });
 

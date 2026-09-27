@@ -216,6 +216,7 @@ export const PRACTICE_REASON = Object.freeze({
   REPAIR_UNWIRED: 'PRACTICE_REPAIR_UNWIRED',
   /* -- coach practice preferences (Phase 8.6 PR 3b, `coachPreferences.js`) */
   COACH_PREFERENCE_NO_REFERENCE: 'PRACTICE_COACH_PREFERENCE_NO_REFERENCE',
+  COACH_PREFERENCE_CONFLICT: 'PRACTICE_COACH_PREFERENCE_CONFLICT',
 });
 
 /**
@@ -267,6 +268,9 @@ export const PRACTICE_REASON_SEVERITY = Object.freeze({
   // A preference with nothing to keep does nothing; the schedule is not
   // compromised by it, but the coach who holds it should be told.
   [PRACTICE_REASON.COACH_PREFERENCE_NO_REFERENCE]: PRACTICE_SEVERITY.INFO,
+  // Approved preferences that cancel each other out: a must_keep conflict
+  // filters every candidate, a prefer_keep one ranks none. An admin must see it.
+  [PRACTICE_REASON.COACH_PREFERENCE_CONFLICT]: PRACTICE_SEVERITY.COMPROMISE,
 });
 
 /**

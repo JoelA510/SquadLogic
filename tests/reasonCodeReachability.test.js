@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 540 codes, of
- * which 528 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 541 codes, of
+ * which 529 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -6116,6 +6116,17 @@ harvest(
   resolveCoachPreferences({
     coachIds: ['coach-1'],
     preferences: [{ coachId: 'coach-1', dimension: 'weekday', level: 'prefer_keep', value: null }],
+  })
+);
+
+harvest(
+  'resolveCoachPreferences(two coaches holding prefer_keep on different weekdays)',
+  resolveCoachPreferences({
+    coachIds: ['coach-1', 'coach-2'],
+    preferences: [
+      { coachId: 'coach-1', dimension: 'weekday', level: 'prefer_keep', value: 'TUE' },
+      { coachId: 'coach-2', dimension: 'weekday', level: 'prefer_keep', value: 'THU' },
+    ],
   })
 );
 

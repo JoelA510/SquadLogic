@@ -214,6 +214,8 @@ export const PRACTICE_REASON = Object.freeze({
   REPAIR_CHANGE_TERM_DISABLED: 'PRACTICE_REPAIR_CHANGE_TERM_DISABLED',
   /** The repair has no production caller (8.6 PR 3b wires it). On every result. */
   REPAIR_UNWIRED: 'PRACTICE_REPAIR_UNWIRED',
+  /* -- coach practice preferences (Phase 8.6 PR 3b, `coachPreferences.js`) */
+  COACH_PREFERENCE_NO_REFERENCE: 'PRACTICE_COACH_PREFERENCE_NO_REFERENCE',
 });
 
 /**
@@ -262,6 +264,9 @@ export const PRACTICE_REASON_SEVERITY = Object.freeze({
   [PRACTICE_REASON.REPAIR_WEIGHTS_OVERRIDDEN]: PRACTICE_SEVERITY.INFO,
   [PRACTICE_REASON.REPAIR_CHANGE_TERM_DISABLED]: PRACTICE_SEVERITY.COMPROMISE,
   [PRACTICE_REASON.REPAIR_UNWIRED]: PRACTICE_SEVERITY.INFO,
+  // A preference with nothing to keep does nothing; the schedule is not
+  // compromised by it, but the coach who holds it should be told.
+  [PRACTICE_REASON.COACH_PREFERENCE_NO_REFERENCE]: PRACTICE_SEVERITY.INFO,
 });
 
 /**

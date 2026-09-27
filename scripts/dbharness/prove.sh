@@ -33,6 +33,9 @@ R10="$REPO/docs/sql/20260923000000_revert.sql"
 # #64: the practice writer that prunes superseded rows.
 M11="$REPO/supabase/migrations/20260924000000_practice_writer_prunes_superseded.sql"
 R11="$REPO/docs/sql/20260924000000_revert.sql"
+# 8.6 PR 3b PR 1: coach practice preferences.
+M13="$REPO/supabase/migrations/20260927000000_coach_practice_preferences.sql"
+R13="$REPO/docs/sql/20260927000000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -2699,6 +2702,48 @@ RETURNS jsonb LANGUAGE sql AS 'SELECT NULL::jsonb';" \
   "revert 20260924000000: the pruning writer, or a second overload, survived its own revert" \
   "(checked) the revert counted the superseded practice rows it leaves deleted, and the runs recording them"
 
+# **8.6 PR 3b PR 1: coach practice preferences.** One plant per claim the
+# smoke's evidence prints. The three function-body anchors sit in the only
+# definition of their function (anchor_liveness: LIVE); the policy and the
+# index are not function bodies (NA).
+plant "M13 the decide RPC stops checking the caller is an org admin" "$M13" \
+  "    IF NOT FOUND OR NOT public.is_org_admin(v_row.organization_id) THEN" \
+  "    IF NOT FOUND THEN" \
+  "FAIL smoke 20260927000000"
+
+plant "M13 the read policy lets every org member read every coach's preferences" "$M13" \
+  "            public.is_org_admin(organization_id)
+            OR EXISTS (" \
+  "            true
+            OR EXISTS (" \
+  "FAIL smoke 20260927000000"
+
+plant "M13 the request RPC stops auditing" "$M13" \
+  "    PERFORM public.record_audit_event(
+        v_org,
+        'coach_preference.requested'," \
+  "    PERFORM jsonb_build_array(
+        v_org,
+        'coach_preference.requested'," \
+  "FAIL smoke 20260927000000"
+
+plant "M13 the one-approved index stops being unique" "$M13" \
+  "CREATE UNIQUE INDEX IF NOT EXISTS coach_practice_preferences_one_approved" \
+  "CREATE INDEX IF NOT EXISTS coach_practice_preferences_one_approved" \
+  "FAIL smoke 20260927000000"
+
+plant "M13 a coach may request for another coach" "$M13" \
+  "           AND c.user_id = v_uid" \
+  "           AND v_uid IS NOT NULL" \
+  "FAIL smoke 20260927000000"
+
+# Its revert destroys every preference, so the warning is the claim. The seed
+# plants 3 rows across 2 coaches; counting non-distinct coaches prints 3.
+plant "R13 the preference warning stops counting coaches distinctly" "$R13" \
+  "    SELECT count(*), count(DISTINCT coach_id), count(*) FILTER (WHERE status = 'approved')" \
+  "    SELECT count(*), count(coach_id), count(*) FILTER (WHERE status = 'approved')" \
+  "revert 20260927000000: planted 3 preference rows across 2 coaches, 1 approved, and the revert did not warn with those figures"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -2766,6 +2811,12 @@ declare -A CLAIM_PROVER=(
   ["(checked) the revert counted the superseded practice rows it leaves deleted, and the runs recording them"]="R11 the superseded-row warning counts runs holding none"
   ["(checked) the practice writer names every season team left without a practice, from the roster, including one never scheduled"]="M12 teams without practice are listed from the payload, not the roster"
   ["(checked) exactly one public.persist_practice_schedule survives the revert, returning uuid, and it no longer prunes"]="R11 the revert re-creates the pruning overload after verifying it gone"
+  ["(checked) a coach requests a practice preference for themself only, never for another coach"]="M13 a coach may request for another coach"
+  ["(checked) only an org admin decides a coach practice preference; a coach approving their own request is refused"]="M13 the decide RPC stops checking the caller is an org admin"
+  ["(checked) a coach reads only their own practice preferences and the admin reads all of the organisation's"]="M13 the read policy lets every org member read every coach's preferences"
+  ["(checked) every coach practice preference write leaves its audit row, 9 of 9, each naming the row it wrote"]="M13 the request RPC stops auditing"
+  ["(checked) the database refuses a second approved practice preference for one coach and dimension"]="M13 the one-approved index stops being unique"
+  ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"
 )
 
 # **`(unplantable)` is the one prefix that retires a HEALTH CLAIM, so it is

@@ -6183,3 +6183,30 @@ Not executed: E2E, the Edge handler under Deno, and live PostgREST resolution of
 the column hint. Follow-ups (task #69): drop the redundant `slot_id` FK/column,
 the feed's constraint-name hint on games, a third weekday enum, and stale budget
 text.
+
+## Operator decisions 2026-09-24 → 2026-09-27
+
+- **8.6 PR 3b plan APPROVED in full** (no trims), with the rulings of
+  2026-09-24: blackouts in scope with jointly computed one-click
+  recommendations and a decline/re-offer chain; everything already assigned is
+  locked unless an admin accepts an override prompt, for the auto-scheduler and
+  the repair alike; coach preferences (weekday / start time / venue ×
+  must_keep / prefer_keep / dont_care), requested by coaches, approved or
+  changed only by admins, honoured by both schedulers. The 340-minute question
+  is superseded. Plan of record: `docs/PHASE_8_6_PR3B_PLAN.md`.
+- **8.9 plan APPROVED.** Sunset is computed with the NOAA algorithm from
+  per-venue coordinates stored in the database (never in the repo, never
+  geocoded). The corpus rows 11/07 and 11/14 are corrected to 4:49 and 4:41 PM.
+  **Unlit practices end at or before sunset; the twilight between sunset and
+  dusk is teardown time — the practice margin is 0.** Plan of record:
+  `docs/PHASE_8_9_PLAN.md`.
+- **Production catch-up authorised.** Supervisor read-only check (2026-09-24):
+  the SquadLogic production database's latest applied migration is from
+  2026-06-12; the 17 repo migrations from `20260726000000` to `20260924000000`
+  are not applied (no `field_blackouts`, `team_coach_assignments`,
+  `publication_baselines`, retire RPCs or field effective dating; the old
+  2-argument `persist_practice_schedule`). CI deploys Edge Functions but applies
+  no migrations. Production holds 1 organisation, 130 coaches, 0 teams, 0
+  fields, 0 practice slots and 0 practice rows. The broad write policies that
+  `20260726000000` drops are already absent. Catch-up proceeds as a drift check
+  first, then one migration at a time with verification after each.

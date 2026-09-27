@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 541 codes, of
- * which 529 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 543 codes, of
+ * which 531 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -237,6 +237,7 @@ import {
   buildPracticeSlotSet,
   materialisePracticeOccurrences,
   repairPracticeLoss,
+  resolveCoachPreferences,
 } from '@squadlogic/core/practice/index.js';
 import {
   CHANGELOG_REASON,
@@ -6123,6 +6124,25 @@ harvest(
 harvest(
   'buildPracticeHistory(a team id no assignment names)',
   buildPracticeHistory(practicePlan, { teamId: 'PT-nobody' })
+);
+
+harvest(
+  'resolveCoachPreferences(a prefer_keep with neither a value nor a current series)',
+  resolveCoachPreferences({
+    coachIds: ['coach-1'],
+    preferences: [{ coachId: 'coach-1', dimension: 'weekday', level: 'prefer_keep', value: null }],
+  })
+);
+
+harvest(
+  'resolveCoachPreferences(two coaches holding prefer_keep on different weekdays)',
+  resolveCoachPreferences({
+    coachIds: ['coach-1', 'coach-2'],
+    preferences: [
+      { coachId: 'coach-1', dimension: 'weekday', level: 'prefer_keep', value: 'TUE' },
+      { coachId: 'coach-2', dimension: 'weekday', level: 'prefer_keep', value: 'THU' },
+    ],
+  })
 );
 
 harvest(

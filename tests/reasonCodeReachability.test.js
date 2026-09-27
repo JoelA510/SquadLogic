@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 541 codes, of
- * which 529 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 543 codes, of
+ * which 531 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -318,6 +318,7 @@ import {
   computeGameWindows,
   earliestKickoffWithWarmup,
   resolveZonedInstant,
+  sunsetOnDate,
   warmupWindowAvailability,
 } from '@squadlogic/core/timing/index.js';
 import {
@@ -853,6 +854,20 @@ harvest(
 harvest(
   'resolveZonedInstant(daylight saving repeats the hour)',
   resolveZonedInstant({ date: '2026-11-01', time: '01:30', timeZone: 'America/New_York' })
+);
+
+/**
+ * `sunsetOnDate()` (8.9 PR 1) refuses from plain input too: a date and latitude
+ * where the sun does not set, and coordinates that are not a place. Its other
+ * refusals are the season clock's own codes, harvested above.
+ */
+harvest(
+  'sunsetOnDate(midnight sun)',
+  sunsetOnDate({ date: '2026-06-21', latitude: 80, longitude: 0, timeZone: 'UTC' })
+);
+harvest(
+  'sunsetOnDate(latitude out of range)',
+  sunsetOnDate({ date: '2026-11-07', latitude: 91, longitude: 0, timeZone: 'America/New_York' })
 );
 
 /* -- the alias layer ------------------------------------------------------ */

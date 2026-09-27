@@ -66,6 +66,7 @@ import {
   season2026SurfaceId,
 } from '@squadlogic/core/facility/index.js';
 import {
+  formatClockMinutes,
   loadCoachRoster,
   loadFacilityGeometry,
   loadFacilityPermits,
@@ -511,18 +512,21 @@ describe('feasibility :: acceptance 1 — the latest 11v11 kickoff, derived from
     const answer = boundsOn('2026-11-14', ALDER_2);
     const close = permitCloseOn('alder-park', '2026-11-14');
     const daylight = daylightLimitMinutes(calendar, '2026-11-14');
-    expect(sunsetOn(calendar, '2026-11-14').sunsetMinutes).toBe(16 * 60 + 35);
+    // 16:41 since operator ruling 2026-09-24 (was 16:35); every number below
+    // moved by those 6 minutes, and the restore controls further down put them
+    // back to main's exactly.
+    expect(sunsetOn(calendar, '2026-11-14').sunsetMinutes).toBe(16 * 60 + 41);
 
     expect(answer.latestHard.kickoffMinutes).toBe(daylight - ELEVEN_OCCUPANCY);
-    expect(answer.latestHard.kickoffMinutes).toBe(14 * 60 + 50);
-    expect(answer.latestClean.kickoffMinutes).toBe(14 * 60 + 50);
+    expect(answer.latestHard.kickoffMinutes).toBe(14 * 60 + 56);
+    expect(answer.latestClean.kickoffMinutes).toBe(14 * 60 + 56);
     expect(answer.latestHard.binding.map((bound) => bound.kind)).toEqual([
       AVAILABILITY_CONSTRAINT.SUNSET,
     ]);
-    // "205 minutes before the close" is the *raw* sunset against the close; the
+    // "199 minutes before the close" is the *raw* sunset against the close; the
     // model's own gap is measured against the daylight limit it actually applies.
-    expect(close - sunsetOn(calendar, '2026-11-14').sunsetMinutes).toBe(205);
-    expect(close - daylight).toBe(220);
+    expect(close - sunsetOn(calendar, '2026-11-14').sunsetMinutes).toBe(199);
+    expect(close - daylight).toBe(214);
   });
 
   it('11/14 at Summit HS: lit, so the permit binds — and the two thresholds differ', () => {
@@ -551,8 +555,8 @@ describe('feasibility :: acceptance 1 — the latest 11v11 kickoff, derived from
   it('the two 15-minute margins do not have the same status, and the model says which', () => {
     // **The assumption this corpus refuses.** `permitMarginMinutes` and
     // `sunsetMarginMinutes` are both 15, so it is natural to read the hard
-    // latest at Alder on 11/14 as 15:05 — sunset itself, less the occupancy.
-    // The model puts it at 14:50, because `sunsets.csv` states "unlit games must
+    // latest at Alder on 11/14 as 15:11 — sunset itself, less the occupancy.
+    // The model puts it at 14:56, because `sunsets.csv` states "unlit games must
     // end 15 min before sunset" as a *rule*: `daylightLimitMinutes()` bakes the
     // margin into the limit and `SUNSET_MARGIN_VIOLATED` is `blocking`, while
     // the permit's 15 minutes is a comfort and `PERMIT_MARGIN_TIGHT` is
@@ -568,8 +572,140 @@ describe('feasibility :: acceptance 1 — the latest 11v11 kickoff, derived from
 
     const answer = boundsOn('2026-11-14', ALDER_2);
     const rawSunset = sunsetOn(calendar, '2026-11-14').sunsetMinutes;
-    expect(rawSunset - ELEVEN_OCCUPANCY).toBe(15 * 60 + 5);
+    expect(rawSunset - ELEVEN_OCCUPANCY).toBe(15 * 60 + 11);
     expect(answer.latestHard.kickoffMinutes).toBe(rawSunset - ELEVEN_OCCUPANCY - 15);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Restore controls — operator ruling 2026-09-24                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * **The two `sunsets.csv` rows as main had them before operator ruling
+ * 2026-09-24**: 16:44 on 11/07 and 16:35 on 11/14, so daylight limits of 989
+ * and 980 once the 15-minute margin is taken. Test-only; nothing outside this
+ * block reads it.
+ */
+const PRE_RULING_SUNSET_MINUTES = Object.freeze({
+  '2026-11-07': 16 * 60 + 44,
+  '2026-11-14': 16 * 60 + 35,
+});
+
+/**
+ * The corpus calendar with the given dates' sunsets overridden and every other
+ * row as loaded.
+ *
+ * @param {Readonly<Record<string, number>>} override - date -> sunset minutes
+ */
+function calendarWithSunsets(override) {
+  return buildAvailabilityCalendarFromSeason2026(
+    permits,
+    sunsets.map((row) =>
+      Object.hasOwn(override, row.date)
+        ? {
+            ...row,
+            sunsetMinutes: override[row.date],
+            sunset: formatClockMinutes(override[row.date]),
+          }
+        : row
+    )
+  );
+}
+
+/**
+ * The module's verification and attribution context, rebuilt over another
+ * calendar: the same inputs in the same order, with one changed.
+ *
+ * @param {ReturnType<typeof buildAvailabilityCalendarFromSeason2026>} calendarUnderTest
+ */
+function contextOver(calendarUnderTest) {
+  return buildAttributionContext({
+    graph,
+    table,
+    calendar: calendarUnderTest,
+    registry,
+    schedule,
+    verification: runRuleEngine(schedule, {
+      registry,
+      resources: { graph, timingTable: table, calendar: calendarUnderTest, venueComplexes },
+    }),
+    venueComplexes,
+    roster,
+  });
+}
+
+/** Acceptance 1's 11v11 question at Alder Pitch 2, asked of a given context. */
+function alderBoundsIn(contextUnderTest, date) {
+  return feasibleKickoffBounds(contextUnderTest, {
+    surfaceId: ALDER_2,
+    date,
+    format: '11v11',
+    ignoreGameIds: schedule.games
+      .filter((game) => game.date === date && game.surfaceId.startsWith(ALDER_2.split('/')[0]))
+      .map((game) => game.id),
+  });
+}
+
+describe('feasibility :: restore controls — the sunset correction moved exactly what it touched', () => {
+  // Every assertion the 2026-09-24 correction moved is re-asked here of a
+  // calendar that puts main's two rows back, and must return main's value
+  // exactly. A moved number this does not restore is a defect, not a baseline.
+  const restoredCalendar = calendarWithSunsets(PRE_RULING_SUNSET_MINUTES);
+  const restored = contextOver(restoredCalendar);
+  const close = permitCloseOn('alder-park', '2026-11-14');
+
+  it('puts back 989 and 980 on the two ruled dates, and touches no other date', () => {
+    expect(daylightLimitMinutes(restoredCalendar, '2026-11-07')).toBe(989);
+    expect(daylightLimitMinutes(restoredCalendar, '2026-11-14')).toBe(980);
+    expect(daylightLimitMinutes(calendar, '2026-11-07')).toBe(994);
+    expect(daylightLimitMinutes(calendar, '2026-11-14')).toBe(986);
+    const untouched = sunsets.filter((row) => !Object.hasOwn(PRE_RULING_SUNSET_MINUTES, row.date));
+    expect(untouched).toHaveLength(sunsets.length - 2);
+    expect(untouched.length).toBeGreaterThan(10);
+    for (const { date } of untouched) {
+      expect(daylightLimitMinutes(restoredCalendar, date), date).toBe(
+        daylightLimitMinutes(calendar, date)
+      );
+    }
+  });
+
+  it("rebuilds today's answer exactly when fed today's calendar", () => {
+    // The rebuild is the control's one moving part, so it is held to the
+    // module-level context before it is trusted with main's calendar.
+    const rebuilt = alderBoundsIn(contextOver(calendar), '2026-11-14');
+    const today = alderBoundsIn(context, '2026-11-14');
+    expect(rebuilt.latestHard.kickoffMinutes).toBe(today.latestHard.kickoffMinutes);
+    expect(rebuilt.latestClean.kickoffMinutes).toBe(today.latestClean.kickoffMinutes);
+    expect(rebuilt.latestHard.kickoffMinutes).toBe(14 * 60 + 56);
+  });
+
+  it("11/14 at Alder Park: main's 16:35, 14:50, 205 and 220, each exactly 6 minutes from today's", () => {
+    const answer = alderBoundsIn(restored, '2026-11-14');
+    const sunset = sunsetOn(restoredCalendar, '2026-11-14').sunsetMinutes;
+    const daylight = daylightLimitMinutes(restoredCalendar, '2026-11-14');
+    expect(sunset).toBe(16 * 60 + 35);
+    expect(answer.latestHard.kickoffMinutes).toBe(daylight - ELEVEN_OCCUPANCY);
+    expect(answer.latestHard.kickoffMinutes).toBe(14 * 60 + 50);
+    expect(answer.latestClean.kickoffMinutes).toBe(14 * 60 + 50);
+    expect(answer.latestHard.binding.map((bound) => bound.kind)).toEqual([
+      AVAILABILITY_CONSTRAINT.SUNSET,
+    ]);
+    expect(close - sunset).toBe(205);
+    expect(close - daylight).toBe(220);
+
+    const today = alderBoundsIn(context, '2026-11-14');
+    expect(sunsetOn(calendar, '2026-11-14').sunsetMinutes - sunset).toBe(6);
+    expect(today.latestHard.kickoffMinutes - answer.latestHard.kickoffMinutes).toBe(6);
+    expect(today.latestClean.kickoffMinutes - answer.latestClean.kickoffMinutes).toBe(6);
+  });
+
+  it("the two 15-minute margins: main's 15:05 and the hard latest 15 minutes inside it", () => {
+    const rawSunset = sunsetOn(restoredCalendar, '2026-11-14').sunsetMinutes;
+    expect(rawSunset - ELEVEN_OCCUPANCY).toBe(15 * 60 + 5);
+    expect(alderBoundsIn(restored, '2026-11-14').latestHard.kickoffMinutes).toBe(
+      rawSunset - ELEVEN_OCCUPANCY - 15
+    );
   });
 });
 
@@ -655,7 +791,7 @@ describe('feasibility :: acceptance 2 — two constraints binding at one minute 
   });
 
   it('does not cry joint where only one constraint speaks — the negative control', () => {
-    // 11/14 at the same venue: sunset binds 220 minutes inside the permit, and
+    // 11/14 at the same venue: sunset binds 214 minutes inside the permit, and
     // nothing else is anywhere near. A finding that fired there too would be a
     // label rather than an observation.
     const single = feasibleKickoffBounds(context, {

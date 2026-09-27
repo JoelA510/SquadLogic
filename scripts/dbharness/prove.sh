@@ -33,6 +33,8 @@ R10="$REPO/docs/sql/20260923000000_revert.sql"
 # #64: the practice writer that prunes superseded rows.
 M11="$REPO/supabase/migrations/20260924000000_practice_writer_prunes_superseded.sql"
 R11="$REPO/docs/sql/20260924000000_revert.sql"
+# The production RLS drift reconcile, whose smoke replays production's drift.
+M13="$REPO/supabase/migrations/20260927000000_reconcile_prod_rls_drift.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -2699,6 +2701,22 @@ RETURNS jsonb LANGUAGE sql AS 'SELECT NULL::jsonb';" \
   "revert 20260924000000: the pruning writer, or a second overload, survived its own revert" \
   "(checked) the revert counted the superseded practice rows it leaves deleted, and the runs recording them"
 
+# **The production RLS drift reconcile.** On the repo chain both halves of it
+# have nothing to do -- the broad policy never existed there and every read
+# policy already does -- so neither plant can be seen by the migration build.
+# Only the smoke's replay of production's drift reaches them, and that is the
+# point: a reconcile that skipped either step would pass everywhere but
+# production.
+plant "M13 the reconcile skips dropping the broad policy" "$M13" \
+  "        EXECUTE format('DROP POLICY %I ON %I.%I', v_pol.policyname, v_pol.schemaname, v_pol.tablename);" \
+  "        NULL; -- plant: the broad policy is left standing" \
+  "FAIL smoke 20260927000000"
+
+plant "M13 the reconcile skips creating the missing read policies" "$M13" \
+  "            EXECUTE format('CREATE POLICY %I ', v_spec.pol) || v_ddl;" \
+  "            NULL; -- plant: the missing read policy is never created" \
+  "FAIL smoke 20260927000000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -2766,6 +2784,8 @@ declare -A CLAIM_PROVER=(
   ["(checked) the revert counted the superseded practice rows it leaves deleted, and the runs recording them"]="R11 the superseded-row warning counts runs holding none"
   ["(checked) the practice writer names every season team left without a practice, from the roster, including one never scheduled"]="M12 teams without practice are listed from the payload, not the roster"
   ["(checked) exactly one public.persist_practice_schedule survives the revert, returning uuid, and it no longer prunes"]="R11 the revert re-creates the pruning overload after verifying it gone"
+  ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M13 the reconcile skips dropping the broad policy"
+  ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M13 the reconcile skips creating the missing read policies"
 )
 
 # **`(unplantable)` is the one prefix that retires a HEALTH CLAIM, so it is

@@ -46,9 +46,44 @@
 -- both tables their read path, and "org_member_access" is dropped from them.
 -- No user-client write to either table exists (census in the PR).
 --
+-- **The same hole on scheduler_runs, found by censusing the catalogue rather
+-- than a list.** Every non-SELECT policy in `public` on the fully migrated
+-- repo chain was enumerated; three a plain member can satisfy on a row that is
+-- not their own survived the eleven-table fix:
+--   * practice_slots / field_subunits "org_member_access" -- holes (above).
+--   * scheduler_runs "org_member_access" (20260416000000_security_hardening.sql:54,70)
+--     -- a hole, and the table's ONLY policy, so it is also its only read
+--     path. Its writers: persist_game_schedule and persist_team_schedule are
+--     SECURITY DEFINER (bypass RLS); persist_practice_schedule
+--     (20260924000000_practice_writer_prunes_superseded.sql:84,91) is SECURITY
+--     INVOKER, refuses non-admins itself (:214) and INSERTs/UPDATEs
+--     scheduler_runs as the calling admin; no Edge Function and no client
+--     code writes it (census in the PR). So it gets the member-read /
+--     admin-write split its siblings got in
+--     20260602010000_consolidated_rls_security_hardening.sql:48-57, under the
+--     same names, and "org_member_access" is dropped.
+--   * telemetry_log "Insert telemetry for own organization"
+--     (20260404100000_phase_2_setup_wizard.sql:69-79) -- an INTENDED member
+--     write: the migration states "Only organization members can insert
+--     telemetry", and log_telemetry_event (20260404110000_telemetry_rpc.sql:15)
+--     grants every member the same write. Allowlisted, with that reason.
+-- "Profiles: users update own" (20260331000000_definitive_schema.sql:962) is a
+-- self-row write a member cannot use on another row; it is allowlisted only
+-- because the text-level check below cannot tell a self-row gate from none.
+--
+-- **The end state is asserted catalogue-wide before commit.** No non-SELECT
+-- policy anywhere in `public` may carry a clause without an admin gate unless
+-- `public.rls_member_write_allowlist()` names it with its reason. That check
+-- is TEXT-level (an admin token in every clause) because a migration cannot
+-- impersonate a member in production; the smoke checks the same set
+-- SEMANTICALLY, evaluating every policy as a plain member, which is what
+-- catches `is_org_member(x) OR is_org_admin(x)` -- a shape the text check
+-- would pass.
+--
 -- **On the repo chain** every policy below already exists with an identical
 -- definition, and "Enforce Org Membership: ALL" never existed, so this
--- creates nothing and drops only "org_member_access" on the two tables above.
+-- creates only the two scheduler_runs policies and drops only
+-- "org_member_access" on practice_slots, field_subunits and scheduler_runs.
 -- The smoke asserts both, and replays the production drift to prove the rest.
 --
 -- **Why a function.** The body is kept as
@@ -57,10 +92,28 @@
 -- SECURITY INVOKER (CREATE/DROP POLICY needs table ownership, which no API
 -- role has) and EXECUTE is revoked from PUBLIC, anon and authenticated.
 --
--- Revert: docs/sql/20260927000000_revert.sql (it does NOT restore the broad
--- policy; see its header). Smoke: docs/sql/20260927000000_smoke.sql.
+-- Revert: docs/sql/20260928000000_revert.sql (it does NOT restore the broad
+-- policy or any "org_member_access"; see its header). Smoke: docs/sql/20260928000000_smoke.sql.
 
 BEGIN;
+
+-- Every non-SELECT policy in `public` a plain member may satisfy, each with the
+-- reason it is intended. Anything else member-satisfiable is a hole.
+CREATE OR REPLACE FUNCTION public.rls_member_write_allowlist()
+RETURNS TABLE (tablename text, policyname text, reason text)
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public
+AS $fn$
+    VALUES
+        ('telemetry_log', 'Insert telemetry for own organization',
+         'intended member write: 20260404100000_phase_2_setup_wizard.sql:69 "Only organization members can insert telemetry"; log_telemetry_event (20260404110000_telemetry_rpc.sql:15) grants every member the same write'),
+        ('profiles', 'Profiles: users update own',
+         'self-row write (auth.uid() = id, 20260331000000_definitive_schema.sql:962): no member can reach another row; listed only because the text-level check cannot see a self-row gate')
+$fn$;
+
+REVOKE ALL ON FUNCTION public.rls_member_write_allowlist() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.rls_member_write_allowlist() FROM anon, authenticated;
 
 CREATE OR REPLACE FUNCTION public.reconcile_prod_rls_drift()
 RETURNS jsonb
@@ -81,7 +134,7 @@ DECLARE
     c_broad_tables text[] := ARRAY['coaches','teams','locations','fields','divisions','game_assignments',
                                    'import_jobs','imports','team_messages','organization_schemas',
                                    'schedule_evaluations'];
-    c_tables text[] := c_broad_tables || ARRAY['practice_slots','field_subunits'];
+    c_member_write_tables text[] := ARRAY['practice_slots','field_subunits','scheduler_runs'];
 BEGIN
     -- 1. Every repo policy on the affected tables, created if missing.
     --    Columns: table, policy, command, roles, USING, WITH CHECK -- each
@@ -141,7 +194,15 @@ BEGIN
              'public.is_org_member(organization_id)', NULL),
             -- 20260504060000_admin_facility_mutation_rpcs.sql:34
             ('practice_slots', 'Practice Slots: members select', 'SELECT', 'authenticated',
-             'public.is_org_member(organization_id)', NULL)
+             'public.is_org_member(organization_id)', NULL),
+            -- NEW (the repo has no member SELECT on scheduler_runs): the
+            -- sibling split of 20260602010000_consolidated_rls_security_hardening.sql:48-57,
+            -- same names and clauses. The admin write keeps the SECURITY
+            -- INVOKER persist_practice_schedule working for admins.
+            ('scheduler_runs', 'scheduler_runs_select_member', 'SELECT', 'authenticated',
+             'public.is_org_member(organization_id)', NULL),
+            ('scheduler_runs', 'scheduler_runs_write_admin', 'ALL', 'authenticated',
+             'public.is_org_admin(organization_id)', 'public.is_org_admin(organization_id)')
         ) AS s(tbl, pol, cmd, roles, using_expr, check_expr)
     LOOP
         v_ddl := format('ON public.%I FOR %s TO %s', v_spec.tbl, v_spec.cmd, v_spec.roles)
@@ -199,12 +260,12 @@ BEGIN
         v_dropped := v_dropped || (v_pol.tablename || ': ' || v_pol.policyname);
     END LOOP;
 
-    -- 3. The repo's own member-write hole on the two facility tables (header).
+    -- 3. The repo's own member-write hole, under its older name (header).
     FOR v_pol IN
         SELECT tablename, policyname
           FROM pg_policies
          WHERE schemaname = 'public'
-           AND tablename IN ('practice_slots', 'field_subunits')
+           AND tablename = ANY (c_member_write_tables)
            AND policyname = 'org_member_access'
          ORDER BY tablename
     LOOP
@@ -212,16 +273,20 @@ BEGIN
         v_dropped := v_dropped || (v_pol.tablename || ': ' || v_pol.policyname);
     END LOOP;
 
-    -- 4. Enforced, not declared: the end state is checked before commit. No
-    --    policy on the 13 tables may let a non-admin write, whatever its name
-    --    -- a member-write policy the drift report missed aborts here instead
-    --    of surviving under a "reconciled" notice.
+    -- 4. Enforced, not declared: the end state is checked before commit,
+    --    across EVERY table in `public` rather than a list. A write policy
+    --    with any clause lacking an admin gate aborts here unless the
+    --    allowlist names it -- so a member-write policy nobody reported fails
+    --    loudly instead of surviving under a "reconciled" notice. Text-level;
+    --    see the header for what the smoke adds.
     FOR v_pol IN
-        SELECT tablename, policyname
-          FROM pg_policies
-         WHERE schemaname = 'public' AND tablename = ANY (c_tables) AND cmd <> 'SELECT'
-           AND ((qual IS NOT NULL AND qual !~ 'is_org_admin\(')
-             OR (with_check IS NOT NULL AND with_check !~ 'is_org_admin\('))
+        SELECT p.tablename, p.policyname
+          FROM pg_policies p
+         WHERE p.schemaname = 'public' AND p.cmd <> 'SELECT'
+           AND ((p.qual IS NOT NULL AND p.qual !~ '(is_org_admin\(|''admin''::text)')
+             OR (p.with_check IS NOT NULL AND p.with_check !~ '(is_org_admin\(|''admin''::text)'))
+           AND NOT EXISTS (SELECT 1 FROM public.rls_member_write_allowlist() a
+                            WHERE a.tablename = p.tablename AND a.policyname = p.policyname)
     LOOP
         RAISE EXCEPTION
             'reconcile_prod_rls_drift: public.% still has write policy "%" that is not admin-gated; refusing to call it reconciled',
@@ -243,7 +308,7 @@ REVOKE ALL ON FUNCTION public.reconcile_prod_rls_drift() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.reconcile_prod_rls_drift() FROM anon, authenticated;
 
 COMMENT ON FUNCTION public.reconcile_prod_rls_drift() IS
-    'Idempotent: creates the repo''s member/admin policies on the 13 tables of migration 20260927000000 where missing (aborting on a same-named mismatch), drops "Enforce Org Membership: ALL" everywhere and "org_member_access" on practice_slots/field_subunits. Owner-only.';
+    'Idempotent: creates the repo''s member/admin policies on the tables of migration 20260928000000 where missing (aborting on a same-named mismatch), drops "Enforce Org Membership: ALL" and "org_member_access" on practice_slots/field_subunits/scheduler_runs, then refuses any non-allowlisted non-admin write policy in public. Owner-only.';
 
 DO $$
 DECLARE

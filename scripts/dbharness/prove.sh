@@ -34,7 +34,7 @@ R10="$REPO/docs/sql/20260923000000_revert.sql"
 M11="$REPO/supabase/migrations/20260924000000_practice_writer_prunes_superseded.sql"
 R11="$REPO/docs/sql/20260924000000_revert.sql"
 # The production RLS drift reconcile, whose smoke replays production's drift.
-M13="$REPO/supabase/migrations/20260927000000_reconcile_prod_rls_drift.sql"
+M13="$REPO/supabase/migrations/20260928000000_reconcile_prod_rls_drift.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -2710,12 +2710,40 @@ RETURNS jsonb LANGUAGE sql AS 'SELECT NULL::jsonb';" \
 plant "M13 the reconcile skips dropping the broad policy" "$M13" \
   "        EXECUTE format('DROP POLICY %I ON %I.%I', v_pol.policyname, v_pol.schemaname, v_pol.tablename);" \
   "        NULL; -- plant: the broad policy is left standing" \
-  "FAIL smoke 20260927000000"
+  "FAIL smoke 20260928000000"
 
 plant "M13 the reconcile skips creating the missing read policies" "$M13" \
   "            EXECUTE format('CREATE POLICY %I ', v_spec.pol) || v_ddl;" \
   "            NULL; -- plant: the missing read policy is never created" \
-  "FAIL smoke 20260927000000"
+  "FAIL smoke 20260928000000"
+
+# The end-state check was a hand-picked table list once; this puts it back.
+# The smoke's probe table -- member-writable, on no list -- must then pass
+# the reconcile, and the smoke says so.
+plant "M13 the end-state check goes back to a hand-picked table list" "$M13" \
+  "         WHERE p.schemaname = 'public' AND p.cmd <> 'SELECT'" \
+  "         WHERE p.schemaname = 'public' AND p.cmd <> 'SELECT' AND p.tablename = ANY (ARRAY['coaches', 'teams'])" \
+  "FAIL smoke 20260928000000"
+
+# `member OR admin` carries an admin token in every clause, so the
+# migration's TEXT-level check passes it; only the smoke's semantic census,
+# evaluating the clause as a plain member, can see the hole.
+plant "M13 the scheduler_runs admin write also admits members" "$M13" \
+  "scheduler_runs_write_admin', 'ALL', 'authenticated',
+             'public.is_org_admin(organization_id)'" \
+  "scheduler_runs_write_admin', 'ALL', 'authenticated',
+             'public.is_org_member(organization_id) OR public.is_org_admin(organization_id)'" \
+  "FAIL smoke 20260928000000"
+
+# Closing scheduler_runs to members without the admin write leaves the
+# SECURITY INVOKER persist_practice_schedule unable to write it for admins.
+# (20260924000000's smoke, which runs that writer as an admin, goes red too.)
+plant "M13 scheduler_runs gets no admin write policy" "$M13" \
+  "('scheduler_runs', 'scheduler_runs_write_admin', 'ALL', 'authenticated',
+             'public.is_org_admin(organization_id)', 'public.is_org_admin(organization_id)')" \
+  "('scheduler_runs', 'scheduler_runs_select_member', 'SELECT', 'authenticated',
+             'public.is_org_member(organization_id)', NULL)" \
+  "FAIL smoke 20260928000000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
@@ -2786,6 +2814,9 @@ declare -A CLAIM_PROVER=(
   ["(checked) exactly one public.persist_practice_schedule survives the revert, returning uuid, and it no longer prunes"]="R11 the revert re-creates the pruning overload after verifying it gone"
   ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M13 the reconcile skips dropping the broad policy"
   ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M13 the reconcile skips creating the missing read policies"
+  ["(checked) the reconcile's own end-state check refuses a member-writable policy on a table nobody listed"]="M13 the end-state check goes back to a hand-picked table list"
+  ["(checked) every write policy in public, evaluated as a plain member, is admin-gated or allowlisted with a reason"]="M13 the scheduler_runs admin write also admits members"
+  ["(checked) scheduler_runs is closed to member writes and scoped member reads, and an admin session still writes it"]="M13 scheduler_runs gets no admin write policy"
 )
 
 # **`(unplantable)` is the one prefix that retires a HEALTH CLAIM, so it is

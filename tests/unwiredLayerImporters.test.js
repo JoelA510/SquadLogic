@@ -472,6 +472,19 @@ const LAYERS = Object.freeze([
     expectedProductionConsumers: Object.freeze([]),
     expectedExternalProductionConsumers: Object.freeze([]),
   }),
+  // 8.9 PR 1: the computed sunset. Nothing in production calls it until the
+  // daylight provider (8.9 PR 4); that provider is the first entry the
+  // production lists below will gain, and the PR adding it rewrites this entry
+  // and the "nothing in production calls this yet" note in `solar.js`.
+  Object.freeze({
+    layer: 'timing/solar.js',
+    modulePath: 'packages/core/src/timing/solar.js',
+    functions: Object.freeze(['sunsetOnDate', 'sunsetEnforcementMinutes']),
+    importers: Object.freeze(['packages/core/src/timing/index.js']),
+    consumers: Object.freeze(['tests/reasonCodeReachability.test.js', 'tests/solar.test.js']),
+    expectedProductionConsumers: Object.freeze([]),
+    expectedExternalProductionConsumers: Object.freeze([]),
+  }),
 ]);
 
 /* -------------------------------------------------------------------------- */

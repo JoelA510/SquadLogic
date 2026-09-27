@@ -182,6 +182,29 @@ export const TIMING_REASON = Object.freeze({
    */
   WALL_TIME_AMBIGUOUS: 'WALL_TIME_AMBIGUOUS',
 
+  /* -- sunset, computed (`solar.js`) --------------------------------------- */
+  /**
+   * The sun does not cross the sunset zenith on that date at that latitude --
+   * polar night or midnight sun -- so there is no sunset to report.
+   * `details.cause` says which, because the two mean opposite things to a
+   * daylight rule.
+   *
+   * `blocking`: the answer is `null`, never a clamped hour angle. Clamping would
+   * invent a sunset at solar noon or at midnight, a confident number for a
+   * question that has none, and a limit that does not exist must not read as
+   * "no limit".
+   */
+  SUNSET_UNDEFINED_AT_LATITUDE: 'SUNSET_UNDEFINED_AT_LATITUDE',
+  /**
+   * The coordinates handed over are not a place: a latitude outside [-90, 90],
+   * a longitude outside [-180, 180], or not a finite number at all.
+   *
+   * A finding rather than a throw for the reason {@link WALL_TIME_UNREADABLE}
+   * is one: the season clock's contract, which `solar.js` adopts whole, is that
+   * a refusal is a result.
+   */
+  SUNSET_COORDINATES_UNREADABLE: 'SUNSET_COORDINATES_UNREADABLE',
+
   /* -- inverse ("what kickoff would work?") queries ------------------------ */
   /** No kickoff in the searched horizon yields the requested warm-up. */
   KICKOFF_SEARCH_EXHAUSTED: 'KICKOFF_SEARCH_EXHAUSTED',
@@ -231,6 +254,9 @@ export const TIMING_REASON_SEVERITY = Object.freeze({
   [TIMING_REASON.WALL_TIME_UNREADABLE]: TIMING_SEVERITY.BLOCKING,
   [TIMING_REASON.WALL_TIME_NONEXISTENT]: TIMING_SEVERITY.BLOCKING,
   [TIMING_REASON.WALL_TIME_AMBIGUOUS]: TIMING_SEVERITY.INFO,
+
+  [TIMING_REASON.SUNSET_UNDEFINED_AT_LATITUDE]: TIMING_SEVERITY.BLOCKING,
+  [TIMING_REASON.SUNSET_COORDINATES_UNREADABLE]: TIMING_SEVERITY.BLOCKING,
 
   [TIMING_REASON.KICKOFF_SEARCH_EXHAUSTED]: TIMING_SEVERITY.BLOCKING,
   [TIMING_REASON.KICKOFF_BOUND_BY_OTHER_SURFACE]: TIMING_SEVERITY.INFO,

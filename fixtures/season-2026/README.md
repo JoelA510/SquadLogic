@@ -64,6 +64,49 @@ right.
 - Every 11v11 kickoff pair on one field is ≥ 120 min apart.
 - The combined schedule's rec rows match `published_rec_schedule.csv` slot-for-slot and team-for-team (567/567).
 
+## Sunset corrections — operator ruling 2026-09-24
+
+Two rows of `sunsets.csv` were corrected: **11/07/2026 4:44 PM → 4:49 PM** and
+**11/14/2026 4:35 PM → 4:41 PM**. The `Note` column and the file's schema are
+unchanged, and every other row is as the source season published it.
+
+**Method.** Sunset is computed with NOAA's solar-position equations (the NOAA
+spreadsheet and its web twin solcalc, zenith 90.833°), implemented in
+`packages/core/src/timing/solar.js`. One location is fitted to the 11 rows
+before the 2026-11-01 fall-back, and the two rows after it are predicted out of
+sample.
+
+**Evidence.**
+
+- The 11-row fit has a maximum error of about **1.05 minutes**. Rounding to the
+  minute accounts for up to 0.5 of that; the rest is the difference between
+  NOAA's model and whatever produced the source table.
+  `tests/solar.test.js` allows 1.1.
+- Against that fit the two post-DST rows sat **5.2** (11/07) and **6.4** (11/14)
+  minutes early. The best single location for all 13 rows is off by 3.1–3.2
+  minutes somewhere, so the error was in those two rows, not in the model.
+- Read on one clock (the DST hour added back), the weekly drop in sunset through
+  the DST week was **15 minutes**, against **9–12** in the weeks either side.
+- Each corrected value is that fit's prediction (a 1-degree, then 0.1-degree
+  grid), to the minute. The fit is degenerate along a ridge, so the prediction
+  moves with the grid: a 0.02-degree grid fits the 11 rows to 0.99 minutes and
+  puts both dates about 0.7 minutes later again, where 11/14 would sit 1.15
+  minutes from its ruled value. The ruled values are on the early side of both
+  fits, the conservative side for a daylight limit.
+- Both values are *later* than before, so nothing legal becomes illegal: every
+  legality predicate is monotone in the limit. The other direction is real and
+  is the point of the ruling: the two dates' daylight limits move from 989 and
+  980 minutes to 994 and 986, so up to 5 and 6 more minutes of unlit play are
+  admitted there, on the evidence above rather than on the source table.
+
+**No coordinates are committed.** The fit lands on a real, specific place, so
+`tests/solar.test.js` re-derives it at test time from the 11 rows and never
+writes it down (decision D3 of the 8.9 plan).
+
+**The corpus names no timezone.** "DST ends 11/01" implies the US rule; tests
+read the corpus in `America/New_York`, as
+`tests/gameSchedulingSeasonClock.test.js` does.
+
 ## Incident log — why this corpus exists
 
 Each incident below is a real failure from the source season. The prompts in

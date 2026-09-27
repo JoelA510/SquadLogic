@@ -445,6 +445,11 @@ sunsets.csv. The corpus is authoritative because the season was built against
 it. A table that disagrees by more than the 15-minute safety margin can flip
 legality, and at least one circulating table disagrees by up to 16 minutes.
 
+> *Annotation (8.9 PR 1):* since operator ruling 2026-09-24, two
+> `sunsets.csv` rows (11/07 and 11/14) carry corrected values from the NOAA
+> model, not the 4:44 PM and 4:35 PM the season was built against; see
+> `fixtures/season-2026/README.md`, "Sunset corrections".
+
 Then:
 
 1. A DurationPhase schedule: an ordered list of (effective_from, duration) with
@@ -467,6 +472,11 @@ Then:
    between 10/31 (5:59 PM) and 11/07 (4:44 PM). For every unlit slot, report
    whether it survives that date at any phase duration, and if not, what would
    fix it: a lit field, an earlier start, or a different night.
+
+   > *Annotation (8.9 PR 1):* operator ruling 2026-09-24 corrected `sunsets.csv`
+   > 11/07 to 4:49 PM (and 11/14 to 4:41 PM), so this drop is now **70**
+   > minutes. The paragraph above is left as written; see
+   > `fixtures/season-2026/README.md`, "Sunset corrections".
 
 Lighting is already modelled: availability/ resolves per-surface lit and
 lightsOffMinutes with provenance codes, falling back to venue level for every

@@ -70,6 +70,8 @@ export {
   resolveZonedInstant,
 } from './seasonClock.js';
 
+export { SUNSET_ZENITH_DEGREES, sunsetEnforcementMinutes, sunsetOnDate } from './solar.js';
+
 export { computeGameWindows } from './windows.js';
 
 export {

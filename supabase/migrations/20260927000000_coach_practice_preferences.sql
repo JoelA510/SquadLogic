@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS public.coach_practice_preferences (
     value           jsonb,
     status          text NOT NULL DEFAULT 'requested',
     requested_by    uuid,
-    requested_at    timestamptz NOT NULL DEFAULT timezone('utc', now()),
+    requested_at    timestamptz NOT NULL DEFAULT clock_timestamp(),
     decided_by      uuid,
     decided_at      timestamptz,
     effective_from  date,
@@ -85,7 +85,7 @@ COMMENT ON TABLE public.coach_practice_preferences IS
 COMMENT ON COLUMN public.coach_practice_preferences.coach_id IS
   'A coaches.id, deliberately without a foreign key (the team_coach_assignments stance): deleting a coach erases their personal data and leaves this history holding an opaque id.';
 COMMENT ON COLUMN public.coach_practice_preferences.value IS
-  'weekday: a JSON string SUN..SAT; start_time: a JSON integer 0-1439 (minutes past local midnight); venue: a JSON string holding a locations.id. NULL = the team''s current series is the reference.';
+  'weekday: a JSON string SUN..SAT; start_time: a JSON integer 0-1439 (minutes past local midnight); venue: a JSON string holding a locations.id. The reference is the team''s current series when that series is being moved, otherwise this value (plan §4); with neither, the preference does nothing.';
 
 -- At most one approved row per (coach, dimension). The strictest-wins rule
 -- reads ONE level per coach per dimension; a second approved row would make
@@ -265,7 +265,7 @@ BEGIN
         END IF;
         v_status := 'rejected';
         UPDATE public.coach_practice_preferences
-           SET status = v_status, decided_by = v_uid, decided_at = timezone('utc', now())
+           SET status = v_status, decided_by = v_uid, decided_at = clock_timestamp()
          WHERE id = p_preference_id;
     ELSE
         v_status := 'approved';
@@ -281,6 +281,23 @@ BEGIN
                 USING ERRCODE = '23503';
         END IF;
 
+        -- One writer per (coach, dimension) at a time, so a concurrent approval
+        -- waits here rather than losing to the one-approved index with a raw 23505.
+        PERFORM pg_advisory_xact_lock(hashtext('coach_practice_preferences'), hashtext(v_row.coach_id::text || '/' || v_row.dimension));
+        IF NOT EXISTS (SELECT 1 FROM public.coaches c
+                        WHERE c.id = v_row.coach_id AND c.organization_id = v_row.organization_id) THEN
+            RAISE EXCEPTION 'coach % no longer exists in the organization; the request cannot be approved', v_row.coach_id
+                USING ERRCODE = '23503';
+        END IF;
+        -- A request older than the decision in force is stale: approving it
+        -- would silently undo a newer decision. Reject it, or request again.
+        IF EXISTS (SELECT 1 FROM public.coach_practice_preferences p
+                    WHERE p.coach_id = v_row.coach_id AND p.dimension = v_row.dimension
+                      AND p.status = 'approved' AND p.decided_at > v_row.requested_at) THEN
+            RAISE EXCEPTION 'coach practice preference % is stale: a later decision on % is in force', p_preference_id, v_row.dimension
+                USING ERRCODE = '22023';
+        END IF;
+
         UPDATE public.coach_practice_preferences
            SET status = 'superseded', effective_to = current_date - 1
          WHERE coach_id = v_row.coach_id
@@ -290,7 +307,7 @@ BEGIN
 
         UPDATE public.coach_practice_preferences
            SET status = v_status, level = v_level, value = v_value,
-               decided_by = v_uid, decided_at = timezone('utc', now()),
+               decided_by = v_uid, decided_at = clock_timestamp(),
                effective_from = current_date
          WHERE id = p_preference_id;
     END IF;
@@ -358,6 +375,8 @@ BEGIN
             USING ERRCODE = '23503';
     END IF;
 
+    PERFORM pg_advisory_xact_lock(hashtext('coach_practice_preferences'), hashtext(p_coach_id::text || '/' || p_dimension));
+
     UPDATE public.coach_practice_preferences
        SET status = 'superseded', effective_to = current_date - 1
      WHERE coach_id = p_coach_id
@@ -369,7 +388,7 @@ BEGIN
         (organization_id, coach_id, dimension, level, value, status,
          requested_by, decided_by, decided_at, effective_from)
     VALUES (v_org, p_coach_id, p_dimension, p_level, v_value, 'approved',
-            v_uid, v_uid, timezone('utc', now()), current_date)
+            v_uid, v_uid, clock_timestamp(), current_date)
     RETURNING id INTO v_id;
 
     PERFORM public.record_audit_event(

@@ -98,7 +98,7 @@ DECLARE
     v_b uuid;
     v_loc uuid;
     v_foreign_loc uuid;
-    v_r1 uuid; v_r2 uuid; v_r3 uuid; v_rb uuid; v_s1 uuid; v_s2 uuid;
+    v_r1 uuid; v_r2 uuid; v_r3 uuid; v_rb uuid; v_s1 uuid; v_s2 uuid; v_stale uuid;
     v_res jsonb;
     v_refused boolean;
     v_n int;
@@ -198,7 +198,28 @@ BEGIN
        OR (SELECT status FROM public.coach_practice_preferences WHERE id = v_r3) <> 'rejected' THEN
         RAISE EXCEPTION '(d) the admin set did not supersede its predecessor, or the rejection was not recorded';
     END IF;
-    RAISE NOTICE 'coach preferences: the admin approved; a later approval (level changed) superseded the earlier approved row, closed yesterday; 1 rejection and 2 admin sets recorded';
+    -- A request older than the decision in force is refused on approval. The
+    -- probe runs in a sub-block that is rolled back, so no count below moves.
+    v_refused := false;
+    BEGIN
+        PERFORM set_config('request.jwt.claim.sub', v_ua::text, true);
+        v_stale := (public.request_coach_practice_preference(v_a, 'weekday', 'prefer_keep', '"FRI"')->>'id')::uuid;
+        PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+        PERFORM public.admin_set_coach_practice_preference(v_a, 'weekday', 'must_keep', '"SAT"');
+        BEGIN
+            PERFORM public.admin_decide_coach_practice_preference(v_stale, 'approve');
+        EXCEPTION WHEN invalid_parameter_value THEN
+            v_refused := true;
+        END;
+        RAISE EXCEPTION 'smoke: roll back the stale-request probe';
+    EXCEPTION WHEN raise_exception THEN
+        NULL;
+    END;
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    IF NOT v_refused THEN
+        RAISE EXCEPTION '(d) a request older than the decision in force was approved over it';
+    END IF;
+    RAISE NOTICE 'coach preferences: the admin approved; a later approval (level changed) superseded the earlier approved row, closed yesterday; 1 rejection and 2 admin sets recorded; approving a request older than the decision in force was refused';
 
     -- ---- (e) a second approved row for (coach, dimension) is refused -------
     -- The positive control first: exactly one approved row exists to collide with.

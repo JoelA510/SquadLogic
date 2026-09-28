@@ -2883,6 +2883,16 @@ plant "M15 the double-booking rule ignores minutes" "$M15" \
   "" \
   "FAIL smoke 20260929000000"
 
+# Case (d): back-to-back slots touch at a boundary and share no minute.
+plant "M15 the double-booking minute test counts a touching boundary as a clash" "$M15" \
+  "       AND ps.start_time < ks.end_time
+       AND ks.start_time < ps.end_time
+" \
+  "       AND ps.start_time <= ks.end_time
+       AND ks.start_time <= ps.end_time
+" \
+  "FAIL smoke 20260929000000"
+
 plant "M15 the base_fingerprint check is skipped" "$M15" \
   "    IF base_fingerprint IS NOT NULL AND base_fingerprint IS DISTINCT FROM v_fingerprint THEN" \
   "    IF false AND base_fingerprint IS NOT NULL THEN" \
@@ -2926,6 +2936,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) a practice exception is stored in practice_exceptions, not as an assignment row, and survives a later ordinary save"]="M15 exceptions are stored as assignment rows"
   ["(checked) deleting a practice series that holds a live exception is refused (23503); cancelling it withdraws the exception in the same transaction, audited"]="M15 practice_exceptions' assignment FK cascades"
   ["(checked) a practice save carrying a stale base_fingerprint is refused (40001) and writes nothing"]="M15 the base_fingerprint check is skipped"
+  ["(checked) a practice save adding a same-weekday slot that only touches an existing one at its boundary is accepted: the minute test is strict"]="M15 the double-booking minute test counts a touching boundary as a clash"
   ["(checked) a practice save adding a second weekday over the same range to a team is accepted: a double-booking is a time clash, not a range overlap"]="M15 the double-booking rule reverts to range-only"
   ["(checked) a practice save adding a same-weekday slot at overlapping minutes to a team is refused as locked, naming the row it clashes with"]="M15 the double-booking time predicate is dropped entirely"
   ["(checked) a practice save adding a same-weekday slot at non-overlapping minutes to a team is accepted"]="M15 the double-booking rule ignores minutes"

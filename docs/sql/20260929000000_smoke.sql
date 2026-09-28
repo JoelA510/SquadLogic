@@ -74,7 +74,7 @@ DO $$
 DECLARE
     v_admin uuid := '66670000-0000-4000-8000-0000000000a1';
     v_org uuid; v_loc uuid; v_field uuid; v_s uuid; v_d uuid; v_t uuid;
-    v_m1 uuid; v_w uuid; v_m2 uuid; v_m3 uuid; v_row_m1 uuid;
+    v_m1 uuid; v_w uuid; v_m2 uuid; v_m3 uuid; v_m4 uuid; v_row_m1 uuid; v_t2 uuid;
     c_r text := '[2026-09-01,2026-11-30]';
     v_state text; v_msg text; v_n int;
     -- Each case is judged on its own and every failure is reported together,
@@ -92,6 +92,7 @@ BEGIN
     INSERT INTO public.season_settings (organization_id, name) VALUES (v_org, 'P67 Fall') RETURNING id INTO v_s;
     INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_s, 'P67 U10') RETURNING id INTO v_d;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d, 'P67 Team') RETURNING id INTO v_t;
+    INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d, 'P67 Team Two') RETURNING id INTO v_t2;
     INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
       VALUES (v_org, v_field, 'mon', '17:00', '18:00', '2026-09-01', '2026-11-30') RETURNING id INTO v_m1;
     INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
@@ -100,6 +101,9 @@ BEGIN
       VALUES (v_org, v_field, 'mon', '17:30', '18:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_m2;
     INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
       VALUES (v_org, v_field, 'mon', '18:30', '19:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_m3;
+    -- Monday 18:00-19:00: TOUCHES Monday 17:00-18:00 at 18:00 and shares no minute with it.
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
+      VALUES (v_org, v_field, 'mon', '18:00', '19:00', '2026-09-01', '2026-11-30') RETURNING id INTO v_m4;
 
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
@@ -162,6 +166,34 @@ BEGIN
         v_fail := v_fail || format(E'\n  ' || replace('(c) a Monday slot at 18:30-19:30 beside Monday 17:00-18:00 should be accepted (3 rows): % % (% rows)', '%', '%s'), v_state, v_msg, v_n);
     ELSE
         RAISE NOTICE 'time clash (c): a Monday slot at 18:30-19:30 beside Monday 17:00-18:00 was accepted -- 3 rows';
+    END IF;
+
+    -- (d) back to back: a second team holds Monday 17:00-18:00 and adds
+    -- Monday 18:00-19:00 over the same range. The slots touch at 18:00 and
+    -- share no minute, so it is accepted (the minute test is strict).
+    PERFORM public.persist_practice_schedule(jsonb_build_object('season_settings_id', v_s),
+        jsonb_build_array(
+            jsonb_build_object('team_id', v_t,  'practice_slot_id', v_m1, 'effective_date_range', c_r),
+            jsonb_build_object('team_id', v_t,  'practice_slot_id', v_w,  'effective_date_range', c_r),
+            jsonb_build_object('team_id', v_t,  'practice_slot_id', v_m3, 'effective_date_range', c_r),
+            jsonb_build_object('team_id', v_t2, 'practice_slot_id', v_m1, 'effective_date_range', c_r)));
+    v_state := NULL;
+    BEGIN
+        PERFORM public.persist_practice_schedule(jsonb_build_object('season_settings_id', v_s),
+            jsonb_build_array(
+                jsonb_build_object('team_id', v_t,  'practice_slot_id', v_m1, 'effective_date_range', c_r),
+                jsonb_build_object('team_id', v_t,  'practice_slot_id', v_w,  'effective_date_range', c_r),
+                jsonb_build_object('team_id', v_t,  'practice_slot_id', v_m3, 'effective_date_range', c_r),
+                jsonb_build_object('team_id', v_t2, 'practice_slot_id', v_m1, 'effective_date_range', c_r),
+                jsonb_build_object('team_id', v_t2, 'practice_slot_id', v_m4, 'effective_date_range', c_r)));
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+    END;
+    SELECT count(*) INTO v_n FROM public.practice_assignments WHERE team_id = v_t2;
+    IF v_state IS NOT NULL OR v_n <> 2 THEN
+        v_fail := v_fail || format(E'\n  (d) Monday 18:00-19:00 right after Monday 17:00-18:00 should be accepted (2 rows): %s %s (%s rows)', v_state, v_msg, v_n);
+    ELSE
+        RAISE NOTICE 'time clash (d): back-to-back Monday 18:00-19:00 after Monday 17:00-18:00 was accepted -- 2 rows';
     END IF;
 
     IF v_fail <> '' THEN

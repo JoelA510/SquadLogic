@@ -535,6 +535,11 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
       else
         echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save adding a same-weekday slot at non-overlapping minutes to a team is accepted"; STATUS=1
       fi
+      if grep -qF "time clash (d): back-to-back Monday 18:00-19:00 after Monday 17:00-18:00 was accepted -- 2 rows" /tmp/harness_smoke; then
+        echo "  | (checked) a practice save adding a same-weekday slot that only touches an existing one at its boundary is accepted: the minute test is strict"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save adding a same-weekday slot that only touches an existing one at its boundary is accepted: the minute test is strict"; STATUS=1
+      fi
       if grep -qF "fingerprint: a save carrying a stale base_fingerprint was refused 40001 and wrote nothing" /tmp/harness_smoke; then
         echo "  | (checked) a practice save carrying a stale base_fingerprint is refused (40001) and writes nothing"
       else

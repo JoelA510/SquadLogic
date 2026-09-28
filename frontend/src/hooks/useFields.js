@@ -417,6 +417,45 @@ export function useFields() {
   /** @param {string} subunitId */
   const unretireFieldSubunit = (subunitId) => unretireEstateNode('field_subunit', subunitId);
 
+  /**
+   * Set or clear a venue's coordinates through `admin_set_location_coordinates`
+   * (migration 20260930000000). `null, null` clears. The RPC rounds to 2
+   * decimals and returns the stored pair, which is merged into `locations`
+   * without a refetch, so the open form keeps its state and shows the answer.
+   * Every refusal is thrown as the DB returned it (code and message intact).
+   *
+   * @param {string} locationId
+   * @param {number|null} latitude
+   * @param {number|null} longitude
+   * @returns {Promise<{ id: string, latitude: number|null, longitude: number|null }>}
+   */
+  const setLocationCoordinates = async (locationId, latitude, longitude) => {
+    const { data, error: rpcError } = await supabase.rpc('admin_set_location_coordinates', {
+      p_location_id: locationId,
+      p_latitude: latitude,
+      p_longitude: longitude,
+    });
+
+    if (rpcError) throw rpcError;
+    if (!data || data.id === undefined || data.id === null) {
+      throw new Error('admin_set_location_coordinates returned no readable result');
+    }
+    setLocations((current) =>
+      current.map((loc) =>
+        String(loc.id) === String(data.id)
+          ? {
+              ...loc,
+              latitude: data.latitude,
+              longitude: data.longitude,
+              coordinates_set_at: data.coordinates_set_at,
+              coordinates_set_by: data.coordinates_set_by,
+            }
+          : loc
+      )
+    );
+    return data;
+  };
+
   return {
     locations,
     fields,
@@ -433,6 +472,7 @@ export function useFields() {
     unretireLocation,
     retireFieldSubunit,
     unretireFieldSubunit,
+    setLocationCoordinates,
     refresh: fetchLocationsAndFields,
   };
 }

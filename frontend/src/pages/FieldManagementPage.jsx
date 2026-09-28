@@ -3,6 +3,11 @@ import Button from '../components/ui/Button.jsx';
 import { MapPin, Plus, Edit2, Trash2, X, Check, CalendarX, RotateCcw } from 'lucide-react';
 import { useFields } from '../hooks/useFields.js';
 import RetireEstateNodeDialog from '../components/setup/RetireEstateNodeDialog.jsx';
+import LocationCoordinatesForm, {
+  hasCoordinates,
+} from '../components/setup/LocationCoordinatesForm.jsx';
+import { usePermission } from '../hooks/usePermission.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import { todayIso } from '../utils/today.js';
 import { logger } from '../lib/logger.js';
 
@@ -17,6 +22,18 @@ function hasMonthToken(profile, monthKey) {
   const value = `${profile?.blackout_months || ''} ${profile?.month_indicators || ''}`;
   const short = monthKey.slice(0, 3);
   return new RegExp(`\\b(${monthKey}|${short})\\b`, 'i').test(value);
+}
+
+/**
+ * A venue whose practices get `SUNSET_UNKNOWN` (plan 8.9 §2, D4): no
+ * coordinates, on ground that is not declared lit. Undeclared lighting is
+ * treated as unlit (D5, conservative), so only `lighting_available === true`
+ * is exempt. Lit venues need no coordinates and are never flagged.
+ *
+ * @param {{ lighting_available?: boolean|null, latitude?: unknown, longitude?: unknown }} loc
+ */
+function needsCoordinates(loc) {
+  return loc.lighting_available !== true && !hasCoordinates(loc);
 }
 
 function badgeClass() {
@@ -39,7 +56,13 @@ export default function FieldManagementPage() {
     unretireLocation,
     retireFieldSubunit,
     unretireFieldSubunit,
+    setLocationCoordinates,
   } = useFields();
+  const { can } = usePermission();
+  // The route is already admin-only; this is the same gate, held again at the
+  // field so the coordinates form never renders for a caller the RPC refuses.
+  const canEditCoordinates = can(PERMISSIONS.MANAGE_ORGANIZATION);
+  const [openCoordinatesId, setOpenCoordinatesId] = useState(/** @type {string|null} */ (null));
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingField, setEditingField] = useState(null);
@@ -389,39 +412,82 @@ export default function FieldManagementPage() {
             {locations.map((loc) => (
               <li
                 key={loc.id}
-                className="flex items-center justify-between gap-3 border border-border-subtle rounded-lg px-3 py-2"
+                className="border border-border-subtle rounded-lg px-3 py-2"
                 data-testid={`venue-${loc.id}`}
               >
-                <div>
-                  <div className="text-sm font-semibold text-text-primary">{loc.name}</div>
-                  {loc.effective_to && (
-                    <div
-                      className="text-xs text-text-secondary"
-                      data-testid={`venue-retired-${loc.id}`}
-                    >
-                      Retires after {loc.effective_to}
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-semibold text-text-primary">
+                      {loc.name}
+                      {needsCoordinates(loc) && (
+                        <span
+                          className="badge warning"
+                          data-testid={`venue-no-coordinates-${loc.id}`}
+                          title="Not lit and no coordinates: practices here get an unknown sunset"
+                        >
+                          No coordinates
+                        </span>
+                      )}
                     </div>
-                  )}
+                    {loc.effective_to && (
+                      <div
+                        className="text-xs text-text-secondary"
+                        data-testid={`venue-retired-${loc.id}`}
+                      >
+                        Retires after {loc.effective_to}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {loc.effective_to ? (
+                      <button
+                        onClick={() => handleUnretireNode('location', loc)}
+                        aria-label={`Clear the end date on ${loc.name}`}
+                        className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-primary transition-colors"
+                      >
+                        <RotateCcw size={16} />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setLifecycleError(null);
+                          setRetiring({ kind: 'location', node: loc });
+                        }}
+                        aria-label={`Retire ${loc.name}`}
+                        className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-primary transition-colors"
+                      >
+                        <CalendarX size={16} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOpenCoordinatesId((current) => (current === loc.id ? null : loc.id))
+                      }
+                      aria-expanded={openCoordinatesId === loc.id}
+                      aria-controls={
+                        openCoordinatesId === loc.id
+                          ? `venue-coordinates-panel-${loc.id}`
+                          : undefined
+                      }
+                      aria-label={`Coordinates for ${loc.name}`}
+                      className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-primary transition-colors"
+                    >
+                      <MapPin size={16} aria-hidden="true" />
+                    </button>
+                  </div>
                 </div>
-                {loc.effective_to ? (
-                  <button
-                    onClick={() => handleUnretireNode('location', loc)}
-                    aria-label={`Clear the end date on ${loc.name}`}
-                    className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-primary transition-colors"
+                {openCoordinatesId === loc.id && (
+                  <div
+                    id={`venue-coordinates-panel-${loc.id}`}
+                    className="mt-2 pt-2 border-t border-border-subtle"
                   >
-                    <RotateCcw size={16} />
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => {
-                      setLifecycleError(null);
-                      setRetiring({ kind: 'location', node: loc });
-                    }}
-                    aria-label={`Retire ${loc.name}`}
-                    className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-primary transition-colors"
-                  >
-                    <CalendarX size={16} />
-                  </button>
+                    <LocationCoordinatesForm
+                      location={loc}
+                      canEdit={canEditCoordinates}
+                      onSave={setLocationCoordinates}
+                    />
+                  </div>
                 )}
               </li>
             ))}

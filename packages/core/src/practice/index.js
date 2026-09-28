@@ -83,6 +83,13 @@ export { toPracticeMetricsInput } from './metricsInput.js';
 export { PRACTICE_TBD_REASON, repairPracticeLoss } from './repair.js';
 
 export {
+  PRACTICE_CHAIN_STOP,
+  createRecommendationState,
+  declineRecommendation,
+  undoDecline,
+} from './recommendations.js';
+
+export {
   COACH_PREFERENCE_DIMENSION,
   COACH_PREFERENCE_LEVEL,
   CoachPreferenceDimensionSchema,

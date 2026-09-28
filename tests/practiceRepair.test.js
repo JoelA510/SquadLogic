@@ -52,6 +52,7 @@ import {
 } from '@squadlogic/core/fixtures/index.js';
 import { changeCountsFor } from '@squadlogic/core/resolve/index.js';
 import { evaluatePracticeSchedule } from '@squadlogic/core/practiceMetrics.js';
+import { tier1Projection } from './helpers/practiceRepairTier1.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -395,17 +396,26 @@ describe('practice repair :: the acceptance criterion', () => {
     expect(RUN.stats.rehomed + RUN.stats.timeTbd).toBe(DISPLACED.length);
   });
 
-  it('gives every TIME TBD a reason, a finding, and whatever cross-venue options exist as proposals', () => {
+  it('gives every TIME TBD a reason, a finding, and at most one cross-venue recommendation', () => {
     const reasons = new Set(Object.values(PRACTICE_TBD_REASON));
     const tbdFindings = RUN.findings.filter((f) => f.code === PRACTICE_REASON.REPAIR_TIME_TBD);
     expect(tbdFindings.map((f) => f.details.assignmentId).sort()).toEqual([...TBD_IDS].sort());
+    const recommendationOf = new Map(RUN.recommendations.map((r) => [r.assignmentId, r]));
     for (const entry of RUN.timeTbd) {
       expect(reasons.has(entry.reason)).toBe(true);
-      expect(entry.crossVenueOptions.length).toBeLessThanOrEqual(3);
-      for (const option of entry.crossVenueOptions) {
-        expect(option.toVenueId).not.toBe(graph.surfaces[entry.from.surfaceId].venueId);
-        expect(option.applyAs.assignmentId).toBe(entry.assignmentId);
+      // 8.6 PR 5 retired the standalone options (up to three, each with
+      // `sharedWith`); tier 2 gives each TIME TBD one joint recommendation or none.
+      expect(entry.crossVenueOptions).toBeUndefined();
+      const recommendation = recommendationOf.get(entry.assignmentId);
+      if (recommendation.to === null) {
+        expect(recommendation.reason).toBe(entry.reason);
+        continue;
       }
+      expect(recommendation.tier).toBe('cross-venue');
+      expect(graph.surfaces[recommendation.to.surfaceId].venueId).not.toBe(
+        graph.surfaces[entry.from.surfaceId].venueId
+      );
+      expect(recommendation.origin).toBe('approved-option');
     }
   });
 
@@ -894,7 +904,7 @@ describe('practice repair :: the 100:1 ratio on the corpus (measured, not change
       }
     }
     expect(compared).toBe(SURVEY.length * 4);
-  });
+  }, 20_000); // 116 corpus repairs, each now with its tier-2 search (8.6 PR 5): 7.3 s measured alone, over the 5 s default.
 });
 
 /* -------------------------------------------------------------------------- */
@@ -1067,7 +1077,11 @@ describe('practice repair :: review regressions', () => {
     expect(run.stats.displaced).toBe(0);
   });
 
-  it('tells two TIME TBD series when they are offered the same cross-venue ground', () => {
+  // Retired by 8.6 PR 5 (plan §2): this was #441's `sharedWith`, which told two
+  // TIME TBD series they were offered the same cross-venue ground and left the
+  // clash to the operator. Tier 2 resolves it instead: one gets the ground, the
+  // other stays TIME TBD with its reason.
+  it('gives contended cross-venue ground to one TIME TBD series, never to two', () => {
     const run = rangedRun({
       series: [
         {
@@ -1090,9 +1104,16 @@ describe('practice repair :: review regressions', () => {
       inventory: [{ surfaceId: 'alder-park/pitch-2a', weekday: 'TUE', startMinutes: 1020 }],
     });
     expect(run.timeTbd).toHaveLength(2);
-    const [a, b] = run.timeTbd;
-    expect(a.crossVenueOptions[0].sharedWith).toEqual([b.assignmentId]);
-    expect(b.crossVenueOptions[0].sharedWith).toEqual([a.assignmentId]);
+    const recommended = run.recommendations.filter((r) => r.to !== null);
+    expect(recommended).toHaveLength(1);
+    expect(recommended[0]).toMatchObject({
+      tier: 'cross-venue',
+      to: { surfaceId: 'alder-park/pitch-2a' },
+    });
+    const other = run.recommendations.find((r) => r.to === null);
+    expect(other.reason).toBe(
+      run.timeTbd.find((entry) => entry.assignmentId === other.assignmentId).reason
+    );
   });
 });
 
@@ -1353,44 +1374,47 @@ describe('practice repair :: bounded losses are a temporary override (plan §1)'
 });
 
 /**
- * Unbounded losses are byte-identical to main (`fbab99a`). Each pin is the
- * digest of main's result for that surface, exact then greedy. This PR adds one
- * field, `representation`, which is left out of the digest and asserted on its
- * own — so any other change to an unbounded result turns a digest red.
+ * Unbounded losses are byte-identical to main in everything tier 1 decides.
+ * Each pin is the digest of `origin/main`'s result for that surface, exact then
+ * greedy, at 6db3c1b (after #458 and #464), through `tier1Projection()`: 8.6
+ * PR 5 replaced the standalone cross-venue options with the joint tier-2
+ * search, and the projection leaves out exactly those surfaces and the new
+ * `recommendations`. `representation` (#458) is left out and asserted on its
+ * own, as before. Any other change to an unbounded result turns a digest red.
  */
 const UNBOUNDED_DIGESTS_ON_MAIN = {
-  'alder-park/pitch-1a-side-1': ['5e2ebd4161449611', '468600c4e3946dac'],
-  'alder-park/pitch-1b-side-1': ['04cf94d1da9552f1', '4efd508e56d930ce'],
-  'alder-park/pitch-2a': ['3215c6aeffee68a2', 'fbf26aea91b564a4'],
-  'alder-park/pitch-2b': ['9304f8d696462ac1', '5ccc76f98df2d8d6'],
-  'alder-park/pitch-3a': ['76a5b7e56ba8c7a3', 'b1b3f1581444c40a'],
-  'alder-park/pitch-3b': ['aaf81a7d727dc655', '231d3af94e21678b'],
-  'alder-park/pitch-4a-side-1': ['ea992308a901053f', '16fe505fc711581f'],
-  'alder-park/pitch-4b-side-1': ['208b868b4746b4d1', 'bcf0770c757f6865'],
-  'brookside-park/lower-a': ['1d11eb84683ebb3c', '177eabfa9d88b0b5'],
-  'brookside-park/lower-b': ['e865307981f0f5a2', '24c32f1b34d14032'],
-  'larkfield-green/field-1-a': ['739ec92c7266eb6d', 'bf8584ae0cac7b76'],
-  'maplewood-back/field-1-a': ['c03a65d5df73b9fb', '6e1bb1f7a6fee4ed'],
-  'maplewood-back/field-1-b': ['d42c8365143228ba', '9ecf35bfc51af45e'],
-  'maplewood-back/field-2-a': ['62d58baa09e0df3a', '7168734d65ae5f87'],
-  'maplewood-back/field-2-b': ['e7c09fae93d586f9', '69b10bbf928b88de'],
-  'maplewood-back/field-3-a': ['f74b0131296eed44', '2382391de109a4e4'],
-  'maplewood-back/field-3-b': ['98ac336158c47566', 'd7587a5f103090e8'],
-  'maplewood-back/field-4-a': ['f963de0ed6698c4f', 'cf0a57038dabce68'],
-  'maplewood-back/field-4-b': ['ab82a36dbf603ea7', 'b399aaa927b8f615'],
-  'orchard-park/field-1-a': ['9afa1a01336e1d5a', 'e37c831a9ebf2ef9'],
-  'orchard-park/field-1-b': ['be539902bfe068a5', 'e1980ebf5ab49387'],
-  'orchard-park/field-2-a': ['a37c56aa0a93c20b', 'a77b92c5855fac65'],
-  'orchard-park/field-2-b': ['4a9e3a8cf1daa11b', 'eafd9c383c32f1a4'],
-  'orchard-park/field-3-a': ['d7339a6b37a0fa24', 'd4429dfe52cd0b8f'],
-  'orchard-park/field-3-b': ['c5007d6f450dcd83', 'f9253f9b8fee6cbc'],
-  'orchard-park/field-4-a': ['c51af85456a117dc', 'e60cbf1da9982be6'],
-  'orchard-park/field-4-b': ['77a7e93083d95e80', '03315fbf1c1bd3d3'],
-  'orchard-park/field-5': ['d8e5b0f6d6ab6781', 'bc6a67849905c1fa'],
-  'orchard-park/field-6': ['30b404a45903b2ed', 'ff308d35502281e2'],
+  'alder-park/pitch-1a-side-1': ['7b945ddec8f969b3', '4a1f502a0f7a8c70'],
+  'alder-park/pitch-1b-side-1': ['c6d1cdfaf55c2087', '721c21713e954c06'],
+  'alder-park/pitch-2a': ['9eb6d0d9c236db5d', '3233c1823a0022b2'],
+  'alder-park/pitch-2b': ['a33e8d86c259550c', 'd51ffae24d28a696'],
+  'alder-park/pitch-3a': ['6b578ee996334daf', '97e7be43d1972185'],
+  'alder-park/pitch-3b': ['6cbb6f6291cad723', '61608e133ca604fa'],
+  'alder-park/pitch-4a-side-1': ['b65775f119fc5a4b', 'f2f5c5a84f5b7572'],
+  'alder-park/pitch-4b-side-1': ['aa1a5fcc304846e0', 'f249247ec80b8f93'],
+  'brookside-park/lower-a': ['df2883b0eb69215d', '0ec7a4a66d6b581b'],
+  'brookside-park/lower-b': ['4ef65dff95f8e088', 'd574015a5bed7bb8'],
+  'larkfield-green/field-1-a': ['dbaa691599eb524c', '1ac2beff5049bdcf'],
+  'maplewood-back/field-1-a': ['89f62584a8eb4421', 'f77073b8836d58fb'],
+  'maplewood-back/field-1-b': ['2ef6bf28c5ce1f0a', 'e2b2f00250372179'],
+  'maplewood-back/field-2-a': ['1151dea4ab8de4a4', '381cab7bf6021a03'],
+  'maplewood-back/field-2-b': ['86229a7c01f3df3d', '8bfc0bb0430843c1'],
+  'maplewood-back/field-3-a': ['b8d3768d2d66becf', '672b4ba31ddc2ad8'],
+  'maplewood-back/field-3-b': ['52ae697bc706c2da', '849f5c24f58a259d'],
+  'maplewood-back/field-4-a': ['0228416349831755', '008c64730a17e696'],
+  'maplewood-back/field-4-b': ['71622298f58d478c', '270d959d9815fdd9'],
+  'orchard-park/field-1-a': ['cfb57de732d2b8df', 'd03791a9ed303bd5'],
+  'orchard-park/field-1-b': ['04c97342c8f7fc63', 'f935b35ef74a7aff'],
+  'orchard-park/field-2-a': ['4bd0e65c13b2238a', '2c1aeaa581be83cb'],
+  'orchard-park/field-2-b': ['2f7a629d08f21fc8', 'f96f7d571fcf45a4'],
+  'orchard-park/field-3-a': ['2537247d84078105', '20730687400189c8'],
+  'orchard-park/field-3-b': ['a0f7efef7cad8497', 'c4779f70176ccffd'],
+  'orchard-park/field-4-a': ['7df3e8749aac9c14', 'dab7744c96fe6a76'],
+  'orchard-park/field-4-b': ['d75e01e7a8c00612', '61d8f070e5e2b832'],
+  'orchard-park/field-5': ['853f5fb7793dc986', '0ee06b36b760db85'],
+  'orchard-park/field-6': ['26c0548ed2baf5bb', '129d4c878692be0a'],
 };
 function resultDigest(result) {
-  const { representation: _representation, ...rest } = result;
+  const { representation: _representation, ...rest } = tier1Projection(result);
   const json = JSON.stringify(rest, (key, value) => {
     if (value instanceof Map) return ['Map', [...value]];
     if (value instanceof Set) return ['Set', [...value]];

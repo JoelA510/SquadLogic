@@ -110,6 +110,7 @@ returns to S in that session except by an explicit **undo-decline** (removes
 locally repaired, not proven optimal: stamp `PRACTICE_REPAIR_RECOMMENDATION_LOCAL`.
 New pure module `practice/recommendations.js`: `declineRecommendation(state, S)`,
 `undoDecline`. Deterministic, no DB.
+*Ruling 2026-09-28 (PR 5):* "T ≠ S" applies only to the declined slot X (Δ alone bars S from it); on every later slot the chain releases S is an ordinary candidate, TBD at `tbdCost`, which is what makes "if S was not re-placed" meaningful.
 
 **Enact.** One click per recommendation, following the `approved-option`
 precedent: re-judged against a fresh DB snapshot and fingerprint

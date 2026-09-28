@@ -6210,3 +6210,45 @@ text.
   fields, 0 practice slots and 0 practice rows. The broad write policies that
   `20260726000000` drops are already absent. Catch-up proceeds as a drift check
   first, then one migration at a time with verification after each.
+
+## 8.9 PR 1 — #452 merged (49e1a78): NOAA sunset in core, corpus corrected
+
+`timing/solar.js`: `sunsetOnDate()` implements the NOAA equations (zenith
+90.833°), evaluated at the sunset instant and iterated; the UTC offset comes from
+`resolveZonedInstant()` at local noon, with no DST rule and no host-zone read;
+`null` with `SUNSET_UNDEFINED_AT_LATITUDE` when there is no sunset; floor-rounded
+enforcement. Corpus rows 11/07 → 4:49 PM and 11/14 → 4:41 PM (operator ruling
+2026-09-24), with the ruling recorded in the fixture README.
+
+- **Supervisor check (executed):** an independently written NOAA implementation,
+  iterated at the sunset instant, agrees with `solar.js` within **0.005 min**
+  over 30 cases in 5 zones (both hemispheres, both DST edges). A non-iterated
+  first attempt differed by up to 1.2 min at the equinoxes; the difference was
+  the reference's own approximation.
+- The golden test fits coordinates at test time from the 11 pre-DST rows; no
+  coordinates are committed. Five plants red, including zenith 90 (caught by
+  the refraction check — the fit absorbs a uniform shift).
+- Only `tests/feasibilityApi.test.js` moved, each value exactly ±6 on 11/14; a
+  restore control proves main's values come back with 989/980 restored.
+- NOTED: a finer 0.02° fit moves the out-of-sample predictions ~0.7 min later,
+  so 11/14 sits at the edge of the fit's resolution (4:41 vs ~4:42). Disclosed in
+  the README and the test.
+
+## 8.6 PR 3b, PR 1 — #453 merged (2336109): coach practice preferences
+
+`coach_practice_preferences` (no free text; one approved row per coach and
+dimension; members-read RLS scoped to admins and the coach themself; no write
+policy) with three definer RPCs — the coach for themself or an admin requests;
+only an admin decides or sets — each audited, with advisory locks and a refusal
+for stale approvals. Core `practice/coachPreferences.js`: the reference rule,
+strictest wins, the candidate verdict. Unwired.
+
+- One BLOCKING review round: conflicting references at the strictest level were
+  silently inert. They now raise `PRACTICE_COACH_PREFERENCE_CONFLICT` at both
+  levels (breach-all semantics kept; the Deno twin in PR 8 must mirror it),
+  verified over the 5,655-case enumeration with a plant.
+- Six harness plants red, three unit plants red; pgTAP ran green in CI.
+- Rebased onto #452 by merge; the reachability header's combined count is
+  543/531, derived from the four added codes rather than tuned.
+- The migration `20260927000000` is **not yet in production** (it follows the
+  catch-up).

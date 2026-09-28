@@ -82,4 +82,17 @@ export { toPracticeMetricsInput } from './metricsInput.js';
 
 export { PRACTICE_TBD_REASON, repairPracticeLoss } from './repair.js';
 
+export {
+  COACH_PREFERENCE_DIMENSION,
+  COACH_PREFERENCE_LEVEL,
+  CoachPreferenceDimensionSchema,
+  CoachPreferenceInputSchema,
+  CoachPreferenceLevelSchema,
+  CoachPreferencePlacementSchema,
+  CoachPreferenceSchema,
+  judgeCoachPreferenceCandidate,
+  resolveCoachPreferences,
+  strictestCoachPreferenceLevel,
+} from './coachPreferences.js';
+
 export { toSeason2026PracticePlan } from './adapters/season2026PracticeGrid.js';

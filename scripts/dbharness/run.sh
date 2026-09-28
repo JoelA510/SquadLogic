@@ -452,6 +452,38 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         STATUS=1
       fi
     fi
+    # **8.6 PR 3b PR 1: coach practice preferences.** Five guarantees, each a
+    # claim of its own because each has a plant in prove.sh that must turn it
+    # red: request is self-or-admin, decide is admin-only, the read policy is
+    # admin-or-self, every write is audited, one approved row per (coach,
+    # dimension). The smoke RAISEs on each; these fail if its evidence stops.
+    if [ "$id" = "20260927000000" ]; then
+      if grep -qF 'coach A requested for themself; coach A requesting for coach B was refused (42501)' /tmp/harness_smoke; then
+        echo "  | (checked) a coach requests a practice preference for themself only, never for another coach"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a coach cannot request for another coach"; STATUS=1
+      fi
+      if grep -qF 'a coach approving their own request was refused (42501) and the row is still requested' /tmp/harness_smoke; then
+        echo "  | (checked) only an org admin decides a coach practice preference; a coach approving their own request is refused"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a coach cannot approve"; STATUS=1
+      fi
+      if grep -qF "coach B read its 3 rows and none of coach A's; coach A read its 3 and none of coach B's; the admin read 6 of 6" /tmp/harness_smoke; then
+        echo "  | (checked) a coach reads only their own practice preferences and the admin reads all of the organisation's"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the preference read policy is admin-or-self"; STATUS=1
+      fi
+      if grep -qF 'every write audited -- 9 of 9 (4 requested, 2 approved, 1 rejected, 2 changed), each naming its row' /tmp/harness_smoke; then
+        echo "  | (checked) every coach practice preference write leaves its audit row, 9 of 9, each naming the row it wrote"
+      else
+        echo "FAIL smoke ${id}: it passed without proving every preference write is audited"; STATUS=1
+      fi
+      if grep -qF 'a second approved row for one (coach, dimension) was refused by the one-approved index (23505)' /tmp/harness_smoke; then
+        echo "  | (checked) the database refuses a second approved practice preference for one coach and dimension"
+      else
+        echo "FAIL smoke ${id}: it passed without proving one approved preference per coach and dimension"; STATUS=1
+      fi
+    fi
     # **The production RLS drift replay** is the only evidence that the
     # reconcile fixes production rather than a repo chain where it has nothing
     # to do, so each half of it is a claim. The smoke RAISEs on any failed
@@ -767,7 +799,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260928000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1176,6 +1208,26 @@ for id in "${REVERT_CHECKS[@]}"; do
       dump 10 /tmp/harness_seed; STATUS=1; continue
     fi
   fi
+  # **20260927000000's revert DESTROYS every coach practice preference**, so
+  # its warning is the check. THREE rows across TWO coaches, ONE approved: all
+  # figures distinct, so a count of rows where coaches were meant (or of every
+  # row where approved ones were meant) prints a different number. Inserted as
+  # the table owner: the RPCs gate on a JWT psql_cmd does not carry, and the
+  # RPC path is exercised in the smoke.
+  if [ "$id" = "20260927000000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('e9999999-9999-4999-8999-99999999999e','Preference Org','preference-org');
+              INSERT INTO public.coach_practice_preferences
+                (organization_id, coach_id, dimension, level, value, status, decided_at, effective_from)
+              VALUES
+                ('e9999999-9999-4999-8999-99999999999e','e9a00000-0000-4000-8000-000000000001','weekday','must_keep',to_jsonb('TUE'::text),'approved',now(),'2026-09-01'),
+                ('e9999999-9999-4999-8999-99999999999e','e9a00000-0000-4000-8000-000000000001','start_time','prefer_keep',to_jsonb(1020),'requested',NULL,NULL),
+                ('e9999999-9999-4999-8999-99999999999e','e9a00000-0000-4000-8000-000000000002','venue','dont_care',NULL,'requested',NULL,NULL);" \
+       >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the three preference rows the revert check requires were never inserted"
+      dump 10 /tmp/harness_seed; STATUS=1; continue
+    fi
+  fi
 
   if [ "$id" = "20260920000000" ]; then
     if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
@@ -1369,6 +1421,15 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the pruning writer, or a second overload, survived its own revert"
         dump 10 /tmp/harness_writer; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20260927000000" ]; then
+      # The seed planted 3 rows across 2 coaches, 1 approved -- all distinct.
+      if grep -q 'this revert DESTROYS 3 coach practice preference row(s) across 2 coach(es); 1 of them are APPROVED' /tmp/harness_rev; then
+        echo "  | (checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"
+      else
+        echo "FAIL revert ${id}: planted 3 preference rows across 2 coaches, 1 approved, and the revert did not warn with those figures"
+        STATUS=1
       fi
     fi
     if [ "$id" = "20260912000000" ]; then

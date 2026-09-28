@@ -33,8 +33,11 @@ R10="$REPO/docs/sql/20260923000000_revert.sql"
 # #64: the practice writer that prunes superseded rows.
 M11="$REPO/supabase/migrations/20260924000000_practice_writer_prunes_superseded.sql"
 R11="$REPO/docs/sql/20260924000000_revert.sql"
+# 8.6 PR 3b PR 1: coach practice preferences.
+M13="$REPO/supabase/migrations/20260927000000_coach_practice_preferences.sql"
+R13="$REPO/docs/sql/20260927000000_revert.sql"
 # The production RLS drift reconcile, whose smoke replays production's drift.
-M13="$REPO/supabase/migrations/20260928000000_reconcile_prod_rls_drift.sql"
+M14="$REPO/supabase/migrations/20260928000000_reconcile_prod_rls_drift.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -2701,18 +2704,59 @@ RETURNS jsonb LANGUAGE sql AS 'SELECT NULL::jsonb';" \
   "revert 20260924000000: the pruning writer, or a second overload, survived its own revert" \
   "(checked) the revert counted the superseded practice rows it leaves deleted, and the runs recording them"
 
+# **8.6 PR 3b PR 1: coach practice preferences.** One plant per claim the
+# smoke's evidence prints. The three function-body anchors sit in the only
+# definition of their function (anchor_liveness: LIVE); the policy and the
+# index are not function bodies (NA).
+plant "M13 the decide RPC stops checking the caller is an org admin" "$M13" \
+  "    IF NOT FOUND OR NOT public.is_org_admin(v_row.organization_id) THEN" \
+  "    IF NOT FOUND THEN" \
+  "FAIL smoke 20260927000000"
+
+plant "M13 the read policy lets every org member read every coach's preferences" "$M13" \
+  "            public.is_org_admin(organization_id)
+            OR EXISTS (" \
+  "            true
+            OR EXISTS (" \
+  "FAIL smoke 20260927000000"
+
+plant "M13 the request RPC stops auditing" "$M13" \
+  "    PERFORM public.record_audit_event(
+        v_org,
+        'coach_preference.requested'," \
+  "    PERFORM jsonb_build_array(
+        v_org,
+        'coach_preference.requested'," \
+  "FAIL smoke 20260927000000"
+
+plant "M13 the one-approved index stops being unique" "$M13" \
+  "CREATE UNIQUE INDEX IF NOT EXISTS coach_practice_preferences_one_approved" \
+  "CREATE INDEX IF NOT EXISTS coach_practice_preferences_one_approved" \
+  "FAIL smoke 20260927000000"
+
+plant "M13 a coach may request for another coach" "$M13" \
+  "           AND c.user_id = v_uid" \
+  "           AND v_uid IS NOT NULL" \
+  "FAIL smoke 20260927000000"
+
+# Its revert destroys every preference, so the warning is the claim. The seed
+# plants 3 rows across 2 coaches; counting non-distinct coaches prints 3.
+plant "R13 the preference warning stops counting coaches distinctly" "$R13" \
+  "    SELECT count(*), count(DISTINCT coach_id), count(*) FILTER (WHERE status = 'approved')" \
+  "    SELECT count(*), count(coach_id), count(*) FILTER (WHERE status = 'approved')" \
+  "revert 20260927000000: planted 3 preference rows across 2 coaches, 1 approved, and the revert did not warn with those figures"
 # **The production RLS drift reconcile.** On the repo chain both halves of it
 # have nothing to do -- the broad policy never existed there and every read
 # policy already does -- so neither plant can be seen by the migration build.
 # Only the smoke's replay of production's drift reaches them, and that is the
 # point: a reconcile that skipped either step would pass everywhere but
 # production.
-plant "M13 the reconcile skips dropping the broad policy" "$M13" \
+plant "M14 the reconcile skips dropping the broad policy" "$M14" \
   "        EXECUTE format('DROP POLICY %I ON %I.%I', v_pol.policyname, v_pol.schemaname, v_pol.tablename);" \
   "        NULL; -- plant: the broad policy is left standing" \
   "FAIL smoke 20260928000000"
 
-plant "M13 the reconcile skips creating the missing read policies" "$M13" \
+plant "M14 the reconcile skips creating the missing read policies" "$M14" \
   "            EXECUTE format('CREATE POLICY %I ', v_spec.pol) || v_ddl;" \
   "            NULL; -- plant: the missing read policy is never created" \
   "FAIL smoke 20260928000000"
@@ -2720,7 +2764,7 @@ plant "M13 the reconcile skips creating the missing read policies" "$M13" \
 # The end-state check was a hand-picked table list once; this puts it back.
 # The smoke's probe table -- member-writable, on no list -- must then pass
 # the reconcile, and the smoke says so.
-plant "M13 the end-state check goes back to a hand-picked table list" "$M13" \
+plant "M14 the end-state check goes back to a hand-picked table list" "$M14" \
   "         WHERE p.schemaname = 'public' AND p.cmd <> 'SELECT'" \
   "         WHERE p.schemaname = 'public' AND p.cmd <> 'SELECT' AND p.tablename = ANY (ARRAY['coaches', 'teams'])" \
   "FAIL smoke 20260928000000"
@@ -2728,7 +2772,7 @@ plant "M13 the end-state check goes back to a hand-picked table list" "$M13" \
 # `member OR admin` carries an admin token in every clause, so the
 # migration's TEXT-level check passes it; only the smoke's semantic census,
 # evaluating the clause as a plain member, can see the hole.
-plant "M13 the scheduler_runs admin write also admits members" "$M13" \
+plant "M14 the scheduler_runs admin write also admits members" "$M14" \
   "scheduler_runs_write_admin', 'ALL', 'authenticated',
              'public.is_org_admin(organization_id)'" \
   "scheduler_runs_write_admin', 'ALL', 'authenticated',
@@ -2738,7 +2782,7 @@ plant "M13 the scheduler_runs admin write also admits members" "$M13" \
 # Closing scheduler_runs to members without the admin write leaves the
 # SECURITY INVOKER persist_practice_schedule unable to write it for admins.
 # (20260924000000's smoke, which runs that writer as an admin, goes red too.)
-plant "M13 scheduler_runs gets no admin write policy" "$M13" \
+plant "M14 scheduler_runs gets no admin write policy" "$M14" \
   "('scheduler_runs', 'scheduler_runs_write_admin', 'ALL', 'authenticated',
              'public.is_org_admin(organization_id)', 'public.is_org_admin(organization_id)')" \
   "('scheduler_runs', 'scheduler_runs_select_member', 'SELECT', 'authenticated',
@@ -2812,11 +2856,17 @@ declare -A CLAIM_PROVER=(
   ["(checked) the revert counted the superseded practice rows it leaves deleted, and the runs recording them"]="R11 the superseded-row warning counts runs holding none"
   ["(checked) the practice writer names every season team left without a practice, from the roster, including one never scheduled"]="M12 teams without practice are listed from the payload, not the roster"
   ["(checked) exactly one public.persist_practice_schedule survives the revert, returning uuid, and it no longer prunes"]="R11 the revert re-creates the pruning overload after verifying it gone"
-  ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M13 the reconcile skips dropping the broad policy"
-  ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M13 the reconcile skips creating the missing read policies"
-  ["(checked) the reconcile's own end-state check refuses a member-writable policy on a table nobody listed"]="M13 the end-state check goes back to a hand-picked table list"
-  ["(checked) every write policy in public, evaluated as a plain member, is admin-gated or allowlisted with a reason"]="M13 the scheduler_runs admin write also admits members"
-  ["(checked) scheduler_runs is closed to member writes and scoped member reads, and an admin session still writes it"]="M13 scheduler_runs gets no admin write policy"
+  ["(checked) a coach requests a practice preference for themself only, never for another coach"]="M13 a coach may request for another coach"
+  ["(checked) only an org admin decides a coach practice preference; a coach approving their own request is refused"]="M13 the decide RPC stops checking the caller is an org admin"
+  ["(checked) a coach reads only their own practice preferences and the admin reads all of the organisation's"]="M13 the read policy lets every org member read every coach's preferences"
+  ["(checked) every coach practice preference write leaves its audit row, 9 of 9, each naming the row it wrote"]="M13 the request RPC stops auditing"
+  ["(checked) the database refuses a second approved practice preference for one coach and dimension"]="M13 the one-approved index stops being unique"
+  ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"
+  ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M14 the reconcile skips dropping the broad policy"
+  ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M14 the reconcile skips creating the missing read policies"
+  ["(checked) the reconcile's own end-state check refuses a member-writable policy on a table nobody listed"]="M14 the end-state check goes back to a hand-picked table list"
+  ["(checked) every write policy in public, evaluated as a plain member, is admin-gated or allowlisted with a reason"]="M14 the scheduler_runs admin write also admits members"
+  ["(checked) scheduler_runs is closed to member writes and scoped member reads, and an admin session still writes it"]="M14 scheduler_runs gets no admin write policy"
 )
 
 # **`(unplantable)` is the one prefix that retires a HEALTH CLAIM, so it is

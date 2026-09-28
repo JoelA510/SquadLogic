@@ -6252,3 +6252,31 @@ strictest wins, the candidate verdict. Unwired.
   543/531, derived from the four added codes rather than tuned.
 - The migration `20260927000000` is **not yet in production** (it follows the
   catch-up).
+
+## Production catch-up (2026-09-27/28) and #454 merged (fbab99a): RLS reconciled
+
+**Catch-up (operator-authorised; executed through the Supabase connector).**
+- **Phase 1:** a read-only drift check gave a go/no-go per migration; all 17 were GO or GO-WITH-NOTE.
+- **Phase 2A:** the 17 repo migrations `20260726000000`…`20260924000000` were applied one at a time. Each file's stored statement md5 equals the file's md5, each verification query passed before the next file, and the ledger went 124 → 141.
+- **Data unchanged:** 1 organisation, 130 coaches and 1 member, confirmed before and after, the last by the supervisor independently. One `season_settings` timezone was backfilled.
+- **Interruptions:** two operator usage-limit cut-offs mid-batch. Each resume re-verified the applied prefix and confirmed there was no half-applied file.
+- **Phase 2B census:** 692 of 730 production objects match a fresh repo build exactly. The remaining drift is enumerated:
+  - the 11 dashboard-only "Enforce Org Membership: ALL" policies;
+  - 6 tables whose member-read policy existed only as that ALL policy;
+  - 5 views missing, 4 of them referenced by the app;
+  - a legacy SECURITY DEFINER `persist_evaluation_run` overload;
+  - production-only improvements to adopt into the repo: `teams.calendar_token_expires_at`, two GIN indexes, 17 `set_org_id` / `created_by` triggers, and a `validate_custom_attributes` early return.
+
+  **A targeted reconcile was chosen over a repave** (task #71): a repave would replay repo defects and lose those production improvements. An attempt to apply migrations was first refused by the permission system as a production deploy. The operator then authorised it explicitly: "you can nuke and repave the database in any way that you need".
+
+**#454: RLS reconciled catalogue-wide.**
+- `20260928000000_reconcile_prod_rls_drift` creates the repo's member-SELECT policies first, then drops the broad ALL policies. It also closes two member-write holes **in the repo itself**:
+  - `org_member_access` FOR ALL on `practice_slots` and `field_subunits`;
+  - `org_member_access` FOR ALL on `scheduler_runs`. This is now split into member read and admin write, which keeps the SECURITY INVOKER practice writer working for admins.
+- It ends in a **catalogue-wide** assertion: no write policy in `public` is member-satisfiable unless an allowlist entry names it with a reason. The allowlist today is telemetry insert and own-profile update.
+- A semantic census in the smoke tries every write policy as a plain member.
+- One BLOCKING round: the first version reconciled a hand-picked table list and left `scheduler_runs` open.
+- A migration-version collision with #453 is now guarded by `tests/migrationVersionUnique.test.js`.
+- Evidence: five plants red on the real `run.sh`; pgTAP green in CI.
+
+**Not yet in production:** `20260927000000` (#453) and `20260928000000` (#454). The operator approved CI-applied migrations (2026-09-28); the first run of the new deploy job will apply both. Until then the broad policies remain, with no exposure: the only member is an admin.

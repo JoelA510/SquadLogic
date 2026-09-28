@@ -65,6 +65,30 @@ Raw import retention is handled by
 It requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, validates
 `dry_run`, and fails fast when either secret is missing.
 
+## Edge Functions (`deno-mirror-tests`)
+
+The `deno-mirror-tests` job runs on pushes and pull requests. It has two steps,
+and `deploy-edge-functions` needs both to pass:
+
+- `scripts/deno-mirror-tests.sh` runs `deno test` on every `_shared/tests/`
+  file, under two host zones. This type-checks only the tests and what they
+  import. No test imports an `index.ts`.
+- `scripts/deno-check-edge.sh` runs `deno check` on each Edge entrypoint. It
+  finds every directory directly under `supabase/functions/`, except
+  `_`-prefixed ones like `_shared`. A new function is checked without editing
+  the script. The script fails if it finds no function directories, or if a
+  function directory has no `index.ts`.
+
+Both scripts set `DENO_NO_PACKAGE_JSON=1` and use
+`supabase/functions/import_map.json`. Run them locally with
+`bash scripts/deno-check-edge.sh` and `bash scripts/deno-mirror-tests.sh`.
+
+We have not confirmed whether `supabase functions deploy` type-checks. The
+Supabase docs say it bundles each function into an ESZip. Their deploy
+troubleshooting guide suggests running `deno check` as a separate step. Do
+not count on the deploy to catch type errors. `calendar-feed` had two type
+errors on `main`, and every gate still passed (#483).
+
 ## Database migrations (`deploy-migrations`)
 
 Approved by the operator on 2026-09-28. Until then CI deployed Edge Functions

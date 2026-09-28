@@ -263,6 +263,15 @@ jobs:
       - name: Mirror tests (discovered, both host zones)
         run: bash scripts/deno-mirror-tests.sh
 
+      # `deno test` above type-checks the tests and what they import, and no
+      # test imports an `index.ts`; `supabase functions deploy` is not relied on
+      # to type-check. calendar-feed sat on main with two type errors (#483).
+      # Every function directory is discovered (not listed), and the script
+      # fails if it finds none or one has no index.ts. This job gates
+      # deploy-edge-functions, so a type error does not deploy.
+      - name: Type-check Edge entrypoints (discovered)
+        run: bash scripts/deno-check-edge.sh
+
   # ── Deploy database migrations (main only) ───────────────────
   # Until 2026-09 CI deployed Edge Functions but applied no migrations, and
   # production fell 17 migrations behind. This job closes that gap with

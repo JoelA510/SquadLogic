@@ -6616,3 +6616,88 @@ numeric(7,4)`, `coordinates_set_at` and `coordinates_set_by`, with two CHECKs
     3 red. The same change on table sunsets is a no-op, because the schema only
     allows integer minutes.
   - Fixture suite 2,050 → 2,076, all passing.
+
+## 8.9 PR 5 — #474 merged (bffe156): duration phases, compression report, DST survival report
+
+New `practice/durationPhases.js`. Nothing is applied: everything here is derived
+or reported.
+- **G3, `derivePracticeDurationPhases`.** Derives per-venue
+  `(effectiveFrom, durationMinutes)` phases, each recording the sunset, limit,
+  source and binding slot.
+  - The output is exactly the `seasonPhases`/`seasonOverrides` that
+    `expandPracticeSlotsForSeason` consumes.
+  - Overrides are Zod-validated. One that would run past sunset is superseded and
+    recorded, never honoured.
+  - Unsaveable slot-dates are held out and reported, so one slot can't drag down
+    its whole venue.
+- **G4, `buildPracticeCompressionReport`.**
+  - Hold-start flags for every slot-date still past sunset.
+  - Cascade proposals only as 8.8 `buildChangeLog` entries (source
+    `practice-sunset-cascade`); the input stays byte-identical.
+- **G5, `buildDstSurvivalReport`.** Enumerates the input plan's slots × dates.
+  Each slot that doesn't survive gets its D8 `tbdFrom` and three fix kinds (lit
+  field, earlier start, another night). D8 is reported here; PR 6 applies it.
+- **Corpus** (synthetic coordinates, minimum practice 30 min):
+  - 15 season phases (35 transitions, 60 → 31 min);
+  - 412 hold-starts, equal to an independent derivation;
+  - 222 cascade entries;
+  - 25 slots survive and 116 don't, equal to the independent set, each with at
+    least one fix.
+- **Evidence.**
+  - W12 (`>` for `>=`: 8 red), W13 (auto-apply: 10 red) and G5 coverage (a dropped
+    slot: 5 red; the meta-check is also red on an extra row, a lost date or an
+    empty universe).
+  - Supervisor plant: keeping a past-sunset override unchecked turns 1 red.
+  - `/code-review` (high): 9 of 10 findings fixed.
+- **Open operator question.** Phases use the longest legal duration with no
+  rounding, which gives near-weekly changes (up to 13 per venue). Should
+  durations step in fixed increments (e.g. 15 minutes) so there are fewer
+  changes? That is one parameter, `durationStepMinutes`.
+
+## 8.6 PR 3b, PR 7 — #471 merged (961f19e): the auto-scheduler honours the practice lock
+
+Operator ruling 2 now holds in the auto-scheduler as well as in the RPC.
+- **Edge Function.**
+  - Loads the season's `practice_assignments` itself, as the calling user through
+    RLS, paging until it gets an empty page. It locks every row. A failed read
+    refuses the run (503).
+  - The client's `lockedAssignments` is only a cross-check. A mismatch in either
+    direction (id, team, slot, range, `assigned_via`) refuses with 409 and is
+    audited as `scheduler.auto_refused`.
+  - Locked occupancy is a list per team, which fixes the one-slot-per-team Map
+    collapse, so a two-weekday team keeps both.
+  - An ordinary run places only roster teams with no row, excludes TIME TBD
+    series (decision 4), and returns only the new placements.
+  - Stated limitation: locked rows occupy their slot for the whole season
+    (there is no date model).
+- **Page.**
+  - `toPersistenceAssignment` carries id, range and `assignedVia`.
+  - New placements start at max(`validFrom`, today on the season clock), via the
+    new core `seasonCalendarDate`.
+  - The RPC key set is unchanged, so it stays v2-compatible.
+- **Also.** The solver moved unchanged into `_shared/engines`. A void `.catch`
+  that threw a TypeError every 100th iteration was fixed.
+- **Round 1 (BLOCKING, supervisor).** The page read locked rows by the latest
+  `run_id`, while writer v3 keeps every earlier run's rows. Every run from the
+  second on would have refused with 409. The page now reads the season with the
+  same query as the Edge (`loadSeasonPracticeAssignments`), stays disabled until
+  the read completes, and refetches after Apply.
+- **Round 2 (CI E2E red).** The failures were bad seeds, not the product: a slot
+  dated 2025, and a row with no `organization_id` or season. Two Then steps that
+  asserted pre-ruling behaviour were rewritten to the ruling.
+- **Round 3 (CI unit red).**
+  - The mock-DB ratchet (a new direct `__MOCK_DB__` write) was fixed via
+    `__saveMockDB__`.
+  - A latent main defect was fixed: the `practiceRepair` corpus blackout sweep
+    (1.8-2.6 s alone) timed out at 5 s under CI load. That one test gets 20 s.
+    Other heavy tests at the same edge are task #73.
+- **Evidence.**
+  - Plants red: the Map collapse, the cross-check skipped or forced ok, locked
+    teams returned, TIME TBD included, `validFrom`-only, the paging stop, a
+    latest-run read, the refetch skipped, the season filter dropped, and the
+    mock Edge re-placing Team A.
+  - Supervisor plant: the scheduler enabled before the season read completed
+    turns 1 red.
+  - E2E 10/10.
+- **Follow-up.** Editing a slot's window after rows are saved on it makes Apply
+  refuse loudly until the row or the slot is fixed.

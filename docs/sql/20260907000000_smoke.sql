@@ -141,7 +141,7 @@ DECLARE
     'field_availability_scenario_members','field_blackout_windows',
     'field_blackouts','field_equipment_requirements','field_subunits',
     'game_assignments','game_slots','games',
-    'practice_assignments','practice_slots'
+    'practice_assignments','practice_exceptions','practice_slots'
   ];
   -- Read by admin_delete_field. The other six are excluded for reasons the
   -- two migration headers state; section 4b holds it to both halves.
@@ -160,7 +160,14 @@ DECLARE
   v_excluded text[] := ARRAY[
     'field_availability_profile_formats','field_availability_scenario_members',
     'field_blackout_windows','field_blackouts','field_equipment_requirements',
-    'field_subunits'
+    'field_subunits',
+    -- 20260929000000 (writer v3): practice_exceptions joins the closure by
+    -- its FKs to practice_assignments (ON DELETE RESTRICT) and practice_slots
+    -- (NO ACTION). Neither edge cascades, so a field delete cannot destroy an
+    -- exception -- it would fail with 23503 -- and every exception row points
+    -- at a practice_assignments or practice_slots row, both of which are read
+    -- as bookings above. It is never the only thing a delete costs.
+    'practice_exceptions'
   ];
   v_def text;
   t text;
@@ -243,7 +250,7 @@ BEGIN
                        'game_assignments','game_slots','practice_assignments','practice_slots'] THEN
     RAISE EXCEPTION 'the field_id family changed: %', v_actual;
   END IF;
-  RAISE NOTICE 'field_id family: 7 tables, a subset of the 12-table cascade closure';
+  RAISE NOTICE 'field_id family: 7 tables, a subset of the 13-table cascade closure';
 END $$;
 
 -- ---------------------------------------------------------------------------

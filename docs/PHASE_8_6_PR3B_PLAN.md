@@ -125,8 +125,12 @@ prompt for that assignment.
 - **Default mode is add-only.** Any existing row the call would delete, re-range
   or move — a payload team's missing key, an absent team's auto rows, `closes`,
   withdrawing an exception — refuses with 22023 "assignment X is locked", unless
-  its id is in `unlock: [{assignment_id, reason}]`. A new row for a team that
-  already holds a row with an overlapping range refuses the same way.
+  its id is in `unlock: [{assignment_id, reason}]`. A new row that double-books
+  its team -- a row the team still holds with an overlapping range AND a slot
+  on the same weekday at overlapping minutes -- refuses the same way; another
+  weekday or a non-overlapping time is an addition and is allowed. (Amended on
+  #461 from "an overlapping range": 176 of the 281 (sheet, team) pairs in the
+  season-2026 corpus practise on two weekdays over one range.)
 - `unlock` requires an org admin (the existing check, `20260924000000:213-217`)
   and writes one `practice.unlock_accepted` audit row per assignment with the
   before-image.

@@ -19,7 +19,7 @@
 # listens on a unix socket only.
 set -uo pipefail
 
-PGUSER_LOCAL=pgrunner
+PGUSER_LOCAL="${HARNESS_PGUSER:-pgrunner}"
 PGBIN=/usr/lib/postgresql/16/bin
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DB=squadlogic_harness
@@ -31,7 +31,7 @@ start_cluster() {
   # directory -- deleting pgdata under a live postmaster leaves a process with
   # no files and the next connect fails with a socket that never appears.
   as_pg 'pg_ctl -D ~/pgdata -m immediate -w stop' >/dev/null 2>&1 || true
-  as_pg 'pkill -u pgrunner postgres' >/dev/null 2>&1 || true
+  as_pg "pkill -u $PGUSER_LOCAL postgres" >/dev/null 2>&1 || true
   sleep 1
   as_pg 'rm -rf ~/pgdata ~/sock ~/pg.log; mkdir -p ~/sock' >/dev/null 2>&1
   as_pg 'initdb -D ~/pgdata -U postgres --auth=trust' >/dev/null 2>&1 || return 1
@@ -484,6 +484,68 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "FAIL smoke ${id}: it passed without proving one approved preference per coach and dimension"; STATUS=1
       fi
     fi
+    # **8.6 PR 3b PR 6: writer v3, lock-by-default.** One claim per plan §6
+    # witness that has a plant in prove.sh. The smoke RAISEs on each; these
+    # fail if its evidence ever stops printing. (The split-keeps-id, scope,
+    # non-admin and teams_time_tbd witnesses RAISE in the same smoke and print
+    # as NOTICEs above; they carry no plant, so they are not claims.)
+    if [ "$id" = "20260929000000" ]; then
+      if grep -qF "lock: omitting, moving, re-ranging and overlapping an existing row were each refused 22023 naming that row, 4 of 4; all 4 run-1 rows unchanged" /tmp/harness_smoke; then
+        echo "  | (checked) an ordinary practice save that omits, moves, re-ranges or overlaps an existing row is refused as locked, 4 of 4, and changes nothing"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that an ordinary practice save that omits, moves, re-ranges or overlaps an existing row is refused as locked, 4 of 4, and changes nothing"; STATUS=1
+      fi
+      if grep -qF "unlock is per row: unlocking one of Team 1's two rows left the other locked (refused 22023 naming it) and both rows in place" /tmp/harness_smoke; then
+        echo "  | (checked) a practice unlock is per row: unlocking one of a team's two rows leaves the other locked"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that a practice unlock is per row: unlocking one of a team's two rows leaves the other locked"; STATUS=1
+      fi
+      if grep -qF "unlock gate: a coach and a service-role caller (no uid) were each refused 42501 by the unlock gate itself" /tmp/harness_smoke; then
+        echo "  | (checked) only an org admin with a uid may unlock a practice row: a coach and a service-role caller are refused by the unlock gate itself"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that only an org admin with a uid may unlock a practice row: a coach and a service-role caller are refused by the unlock gate itself"; STATUS=1
+      fi
+      if grep -qF "unlock audit: 2 of 2 accepted unlocks each left one practice.unlock_accepted row carrying its before-image and reason" /tmp/harness_smoke; then
+        echo "  | (checked) every accepted practice unlock leaves one practice.unlock_accepted audit row carrying the row's before-image"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that every accepted practice unlock leaves one practice.unlock_accepted audit row carrying the row's before-image"; STATUS=1
+      fi
+      if grep -qF "exceptions: stored in practice_exceptions (not as assignment rows) and still live after a later ordinary save -- 5 of 5 roster teams" /tmp/harness_smoke; then
+        echo "  | (checked) a practice exception is stored in practice_exceptions, not as an assignment row, and survives a later ordinary save"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that a practice exception is stored in practice_exceptions, not as an assignment row, and survives a later ordinary save"; STATUS=1
+      fi
+      if grep -qF "overridden series: the unlocked prune and a raw DELETE were each refused 23503; admin_cancel_practice_assignment withdrew the exception in the same transaction" /tmp/harness_smoke; then
+        echo "  | (checked) deleting a practice series that holds a live exception is refused (23503); cancelling it withdraws the exception in the same transaction, audited"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that deleting a practice series that holds a live exception is refused (23503); cancelling it withdraws the exception in the same transaction, audited"; STATUS=1
+      fi
+      if grep -qF "time clash (a): a team holding Monday 17:00-18:00 gained Wednesday 17:00-18:00 over the same range in a later save -- accepted, 2 rows" /tmp/harness_smoke; then
+        echo "  | (checked) a practice save adding a second weekday over the same range to a team is accepted: a double-booking is a time clash, not a range overlap"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save adding a second weekday over the same range to a team is accepted: a double-booking is a time clash, not a range overlap"; STATUS=1
+      fi
+      if grep -qF "time clash (b): a second Monday slot at 17:30-18:30 against Monday 17:00-18:00 was refused 22023 naming the Monday row; 2 rows unchanged" /tmp/harness_smoke; then
+        echo "  | (checked) a practice save adding a same-weekday slot at overlapping minutes to a team is refused as locked, naming the row it clashes with"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save adding a same-weekday slot at overlapping minutes to a team is refused as locked, naming the row it clashes with"; STATUS=1
+      fi
+      if grep -qF "time clash (c): a Monday slot at 18:30-19:30 beside Monday 17:00-18:00 was accepted -- 3 rows" /tmp/harness_smoke; then
+        echo "  | (checked) a practice save adding a same-weekday slot at non-overlapping minutes to a team is accepted"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save adding a same-weekday slot at non-overlapping minutes to a team is accepted"; STATUS=1
+      fi
+      if grep -qF "time clash (d): back-to-back Monday 18:00-19:00 after Monday 17:00-18:00 was accepted -- 2 rows" /tmp/harness_smoke; then
+        echo "  | (checked) a practice save adding a same-weekday slot that only touches an existing one at its boundary is accepted: the minute test is strict"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save adding a same-weekday slot that only touches an existing one at its boundary is accepted: the minute test is strict"; STATUS=1
+      fi
+      if grep -qF "fingerprint: a save carrying a stale base_fingerprint was refused 40001 and wrote nothing" /tmp/harness_smoke; then
+        echo "  | (checked) a practice save carrying a stale base_fingerprint is refused (40001) and writes nothing"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save carrying a stale base_fingerprint is refused (40001) and writes nothing"; STATUS=1
+      fi
+    fi
     # **The production RLS drift replay** is the only evidence that the
     # reconcile fixes production rather than a repo chain where it has nothing
     # to do, so each half of it is a claim. The smoke RAISEs on any failed
@@ -799,7 +861,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1192,6 +1254,46 @@ for id in "${REVERT_CHECKS[@]}"; do
       dump 10 /tmp/harness_seed; STATUS=1; continue
     fi
   fi
+  # **20260929000000's revert refuses to destroy unresolved practice
+  # exceptions** unless told to archive them. The seed plants 3 exceptions on
+  # ONE run -- 2 unresolved, 1 withdrawn -- and the revert is first applied
+  # WITHOUT archive mode, where it must refuse; archive mode is then set for
+  # the database, and the ordinary revert step below must archive all 3.
+  if [ "$id" = "20260929000000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('f9999999-9999-4999-8999-99999999999f','Exception Org','exception-org');
+              INSERT INTO public.season_settings (id, organization_id, name) VALUES
+                ('f9999999-9999-4999-8999-9999999999a1','f9999999-9999-4999-8999-99999999999f','Exception Season');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+                ('f9999999-9999-4999-8999-9999999999a2','f9999999-9999-4999-8999-99999999999f','f9999999-9999-4999-8999-9999999999a1','Exception Division');
+              INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+                ('f9999999-9999-4999-8999-9999999999a3','f9999999-9999-4999-8999-99999999999f','f9999999-9999-4999-8999-9999999999a2','Exception Team A'),
+                ('f9999999-9999-4999-8999-9999999999a4','f9999999-9999-4999-8999-99999999999f','f9999999-9999-4999-8999-9999999999a2','Exception Team B');
+              INSERT INTO public.scheduler_runs (id, organization_id, run_type, status, results) VALUES
+                ('f9999999-9999-4999-8999-9999999999a5','f9999999-9999-4999-8999-99999999999f','practice','completed','{}'::jsonb);
+              INSERT INTO public.practice_assignments (id, organization_id, team_id, effective_date_range, source) VALUES
+                ('f9999999-9999-4999-8999-9999999999b1','f9999999-9999-4999-8999-99999999999f','f9999999-9999-4999-8999-9999999999a3','[2026-09-01,2026-11-30]','auto'),
+                ('f9999999-9999-4999-8999-9999999999b2','f9999999-9999-4999-8999-99999999999f','f9999999-9999-4999-8999-9999999999a4','[2026-09-01,2026-11-30]','auto');
+              -- column order, because the column named window cannot be quoted inside psql_cmd
+              INSERT INTO public.practice_exceptions VALUES
+                (DEFAULT,'f9999999-9999-4999-8999-99999999999f','f9999999-9999-4999-8999-9999999999a1','f9999999-9999-4999-8999-9999999999a3','f9999999-9999-4999-8999-9999999999b1','[2026-10-01,2026-10-07]','time_tbd',NULL,'contended',NULL,NULL,'f9999999-9999-4999-8999-9999999999a5',NULL,DEFAULT,NULL,NULL),
+                (DEFAULT,'f9999999-9999-4999-8999-99999999999f','f9999999-9999-4999-8999-9999999999a1','f9999999-9999-4999-8999-9999999999a4','f9999999-9999-4999-8999-9999999999b2','[2026-10-01,2026-10-07]','time_tbd',NULL,'contended',NULL,NULL,'f9999999-9999-4999-8999-9999999999a5',NULL,DEFAULT,NULL,NULL),
+                (DEFAULT,'f9999999-9999-4999-8999-99999999999f','f9999999-9999-4999-8999-9999999999a1','f9999999-9999-4999-8999-9999999999a3','f9999999-9999-4999-8999-9999999999b1','[2026-10-01,2026-10-07]','time_tbd',NULL,'contended',NULL,NULL,'f9999999-9999-4999-8999-9999999999a5',NULL,DEFAULT,now(),NULL);" \
+       >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the three practice exceptions the revert check requires were never inserted"
+      dump 10 /tmp/harness_seed; STATUS=1; continue
+    fi
+    if psql_file "$REPO/docs/sql/${id}_revert.sql" >/tmp/harness_rev_refuse 2>&1; then
+      echo "FAIL revert ${id}: it dropped practice_exceptions while 2 unresolved exceptions existed and archive mode was off"
+      STATUS=1; continue
+    elif ! grep -q 'refusing to revert: 2 unresolved practice exception(s) would be destroyed' /tmp/harness_rev_refuse; then
+      echo "FAIL revert ${id}: it failed without the unresolved-exception refusal"
+      dump 10 /tmp/harness_rev_refuse; STATUS=1; continue
+    fi
+    if ! psql_cmd "ALTER DATABASE $DB SET squadlogic.revert_practice_exceptions = 'archive'" >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: could not set archive mode"; dump 10 /tmp/harness_seed; STATUS=1; continue
+    fi
+  fi
   # **20260924000000's revert cannot restore what the pruning writer removed**,
   # so its warning counts the before-images it leaves on scheduler_runs. The
   # seed plants THREE runs holding 2, 1 and 0 superseded rows: 3 rows on 2
@@ -1421,6 +1523,19 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the pruning writer, or a second overload, survived its own revert"
         dump 10 /tmp/harness_writer; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20260929000000" ]; then
+      # Refused above with archive mode off; here it archived all 3 onto the
+      # one seeded run. Read back from the run, not only from the NOTICE.
+      if grep -q 'archived 3 practice exception(s), 2 unresolved, onto 1 run(s)' /tmp/harness_rev &&
+         psql_cmd "SELECT 'ARCHIVE-VERDICT:' || jsonb_array_length(results->'archived_exceptions')
+                     FROM public.scheduler_runs WHERE id = 'f9999999-9999-4999-8999-9999999999a5'" \
+           >/tmp/harness_archive 2>&1 && grep -q 'ARCHIVE-VERDICT:3' /tmp/harness_archive; then
+        echo "  | (checked) the writer-v3 revert refused while 2 unresolved practice exceptions existed, then archived all 3 onto their run before dropping the table"
+      else
+        echo "FAIL revert ${id}: planted 3 exceptions (2 unresolved) on 1 run and the revert did not archive them onto it"
+        STATUS=1
       fi
     fi
     if [ "$id" = "20260927000000" ]; then

@@ -8,6 +8,51 @@ export async function persistPracticeScheduleReview({
   runId,
   runMetadata = {},
 }) {
+  return sendPracticeSnapshot({ assignments, slots, runId, runMetadata });
+}
+
+/**
+ * Save a practice repair through writer v3 (8.6 PR 3b plan §3): the same
+ * snapshot as an ordinary save plus the override arguments. Every existing
+ * row the save deletes, re-ranges or moves must be named in `unlock` (admin
+ * only, audited per row); `closes` ends a row in place; `exceptions` and
+ * `withdrawExceptions` write practice_exceptions; `baseFingerprint` refuses
+ * a save built on a stale read. The Edge Function validates each with Zod
+ * and the RPC re-checks them.
+ */
+export async function persistPracticeRepair({
+  assignments = [],
+  slots = [],
+  runId,
+  runMetadata = {},
+  unlock = [],
+  closes = [],
+  exceptions = [],
+  withdrawExceptions = [],
+  baseFingerprint,
+}) {
+  return sendPracticeSnapshot({
+    assignments,
+    slots,
+    runId,
+    runMetadata,
+    repair: {
+      unlock,
+      closes,
+      exceptions,
+      withdrawExceptions,
+      ...(baseFingerprint ? { baseFingerprint } : {}),
+    },
+  });
+}
+
+async function sendPracticeSnapshot({
+  assignments,
+  slots,
+  runId,
+  runMetadata,
+  repair = undefined,
+}) {
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData?.session?.access_token;
 
@@ -33,6 +78,7 @@ export async function persistPracticeScheduleReview({
       snapshot,
       overrides: [],
       runMetadata,
+      ...(repair ? { repair } : {}),
     }),
   });
 

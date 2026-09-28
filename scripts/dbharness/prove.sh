@@ -38,6 +38,9 @@ M13="$REPO/supabase/migrations/20260927000000_coach_practice_preferences.sql"
 R13="$REPO/docs/sql/20260927000000_revert.sql"
 # The production RLS drift reconcile, whose smoke replays production's drift.
 M14="$REPO/supabase/migrations/20260928000000_reconcile_prod_rls_drift.sql"
+# 8.6 PR 3b PR 6: writer v3 (lock-by-default) and its revert.
+M15="$REPO/supabase/migrations/20260929000000_practice_writer_v3_lock_by_default.sql"
+R15="$REPO/docs/sql/20260929000000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -2659,16 +2662,19 @@ plant "R10 the assignment warning stops counting teams distinctly" "$R10" \
 
 # **#64's writer**: the smoke replays the five-team re-run. Without the prune
 # the moved team keeps both practices, which is the defect families saw.
-plant "M11 the writer stops pruning superseded rows" "$M11" \
-  "         WHERE pa.team_id = s.team_id" \
-  "         WHERE false AND pa.team_id = s.team_id" \
+# (Re-aimed at 20260929000000 by 8.6 PR 3b PR 6: v3 drops and re-creates the
+# writer, so 20260924000000's body is superseded and a plant there is dead.
+# The prune survives in v3 for unlocked rows, and this smoke unlocks them.)
+plant "M11 the writer stops pruning superseded rows" "$M15" \
+  "         WHERE pa.id = ANY (v_prune_ids)" \
+  "         WHERE false AND pa.id = ANY (v_prune_ids)" \
   "FAIL smoke 20260924000000"
 
 # The per-team list must come from the season ROSTER. Filtered to the payload
 # instead -- with the roster count left intact, so the count meta-assertion
 # cannot be what catches it -- the dropped team and the never-scheduled one
 # both vanish: the exact silence the operator's condition on #64 forbids.
-plant "M12 teams without practice are listed from the payload, not the roster" "$M11" \
+plant "M12 teams without practice are listed from the payload, not the roster" "$M15" \
   "                   WHERE NOT EXISTS (
                        SELECT 1 FROM public.practice_assignments pa WHERE pa.team_id = t.id
                    )
@@ -2789,6 +2795,116 @@ plant "M14 scheduler_runs gets no admin write policy" "$M14" \
              'public.is_org_member(organization_id)', NULL)" \
   "FAIL smoke 20260928000000"
 
+# **8.6 PR 3b PR 6: writer v3, lock-by-default.** One plant per plan §6
+# witness for PR 6, each aimed at the only definition of its function
+# (anchor_liveness: LIVE) or at the table DDL (NA), each turning the claim
+# its smoke evidence prints red.
+plant "M15 the writer's lock check is removed" "$M15" \
+  "    IF v_locked_id IS NOT NULL THEN" \
+  "    IF false THEN" \
+  "FAIL smoke 20260929000000"
+
+plant "M15 unlock is by team, not by row" "$M15" \
+  "     WHERE NOT (t.id = ANY (v_unlock_ids))" \
+  "     WHERE NOT (t.id IN (SELECT u.id FROM public.practice_assignments u WHERE u.team_id IN (SELECT w.team_id FROM public.practice_assignments w WHERE w.id = ANY (v_unlock_ids))))" \
+  "FAIL smoke 20260929000000"
+
+plant "M15 the unlock gate stops checking is_org_admin" "$M15" \
+  "       AND (auth.uid() IS NULL OR NOT public.is_org_admin(v_org_id)) THEN" \
+  "       AND (auth.uid() IS NULL) THEN" \
+  "FAIL smoke 20260929000000"
+
+plant "M15 the unlock audit call is dropped" "$M15" \
+  "        PERFORM public.record_audit_event(
+            v_org_id,
+            'practice.unlock_accepted'," \
+  "        PERFORM jsonb_build_array(
+            v_org_id,
+            'practice.unlock_accepted'," \
+  "FAIL smoke 20260929000000"
+
+# The representation plan §1 rejects: the temporary move written as a second
+# assignment row (on the relocated slot, or the series' own for TIME TBD).
+plant "M15 exceptions are stored as assignment rows" "$M15" \
+  "        INSERT INTO public.practice_exceptions (
+            organization_id, season_settings_id, team_id, assignment_id, \"window\",
+            kind, practice_slot_id, tbd_reason, cause_kind, cause_id, run_id, created_by
+        )
+        SELECT v_org_id, v_season_id, pa.team_id, pa.id,
+               NULLIF(e.value->>'window', '')::daterange,
+               e.value->>'kind',
+               NULLIF(e.value->>'practice_slot_id', '')::uuid,
+               NULLIF(e.value->>'tbd_reason', ''),
+               NULLIF(e.value->>'cause_kind', ''),
+               NULLIF(e.value->>'cause_id', '')::uuid,
+               v_run_id,
+               v_created_by
+          FROM" \
+  "        INSERT INTO public.practice_assignments (
+            organization_id, run_id, team_id, slot_id, practice_slot_id,
+            effective_date_range, source, assigned_via
+        )
+        SELECT v_org_id, v_run_id, pa.team_id,
+               COALESCE(NULLIF(e.value->>'practice_slot_id', '')::uuid, pa.practice_slot_id),
+               COALESCE(NULLIF(e.value->>'practice_slot_id', '')::uuid, pa.practice_slot_id),
+               NULLIF(e.value->>'window', '')::daterange,
+               'manual', 'override'
+          FROM" \
+  "FAIL smoke 20260929000000"
+
+plant "M15 practice_exceptions' assignment FK cascades" "$M15" \
+  "        REFERENCES public.practice_assignments(id) ON DELETE RESTRICT," \
+  "        REFERENCES public.practice_assignments(id) ON DELETE CASCADE," \
+  "FAIL smoke 20260929000000"
+
+# The double-booking rule is a TIME clash (coordinator ruling on #461). Three
+# plants, one per case: range-only turns (a) red, never-clash turns (b) red,
+# weekday-only turns (c) red.
+plant "M15 the double-booking rule reverts to range-only" "$M15" \
+  "     WHERE ps.day_of_week = ks.day_of_week
+       AND ps.start_time < ks.end_time
+       AND ks.start_time < ps.end_time
+" \
+  "     WHERE true
+" \
+  "FAIL smoke 20260929000000"
+
+plant "M15 the double-booking time predicate is dropped entirely" "$M15" \
+  "     WHERE ps.day_of_week = ks.day_of_week
+" \
+  "     WHERE false AND ps.day_of_week = ks.day_of_week
+" \
+  "FAIL smoke 20260929000000"
+
+plant "M15 the double-booking rule ignores minutes" "$M15" \
+  "       AND ps.start_time < ks.end_time
+       AND ks.start_time < ps.end_time
+" \
+  "" \
+  "FAIL smoke 20260929000000"
+
+# Case (d): back-to-back slots touch at a boundary and share no minute.
+plant "M15 the double-booking minute test counts a touching boundary as a clash" "$M15" \
+  "       AND ps.start_time < ks.end_time
+       AND ks.start_time < ps.end_time
+" \
+  "       AND ps.start_time <= ks.end_time
+       AND ks.start_time <= ps.end_time
+" \
+  "FAIL smoke 20260929000000"
+
+plant "M15 the base_fingerprint check is skipped" "$M15" \
+  "    IF base_fingerprint IS NOT NULL AND base_fingerprint IS DISTINCT FROM v_fingerprint THEN" \
+  "    IF false AND base_fingerprint IS NOT NULL THEN" \
+  "FAIL smoke 20260929000000"
+
+# Its revert would destroy the exceptions a reader needs, so the refusal is
+# the claim: without it the first (archive-off) application succeeds.
+plant "R15 the revert drops unresolved exceptions without archiving" "$R15" \
+  "    IF v_unresolved > 0 AND v_mode IS DISTINCT FROM 'archive' THEN" \
+  "    IF false THEN" \
+  "revert 20260929000000: it dropped practice_exceptions while 2 unresolved exceptions existed and archive mode was off"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -2813,6 +2929,18 @@ plant "M14 scheduler_runs gets no admin write policy" "$M14" \
 # here, all three, because the rule that finding taught is to enumerate the ways
 # a claim can go RED rather than the lines it prints when it does not.
 declare -A CLAIM_PROVER=(
+  ["(checked) an ordinary practice save that omits, moves, re-ranges or overlaps an existing row is refused as locked, 4 of 4, and changes nothing"]="M15 the writer's lock check is removed"
+  ["(checked) a practice unlock is per row: unlocking one of a team's two rows leaves the other locked"]="M15 unlock is by team, not by row"
+  ["(checked) only an org admin with a uid may unlock a practice row: a coach and a service-role caller are refused by the unlock gate itself"]="M15 the unlock gate stops checking is_org_admin"
+  ["(checked) every accepted practice unlock leaves one practice.unlock_accepted audit row carrying the row's before-image"]="M15 the unlock audit call is dropped"
+  ["(checked) a practice exception is stored in practice_exceptions, not as an assignment row, and survives a later ordinary save"]="M15 exceptions are stored as assignment rows"
+  ["(checked) deleting a practice series that holds a live exception is refused (23503); cancelling it withdraws the exception in the same transaction, audited"]="M15 practice_exceptions' assignment FK cascades"
+  ["(checked) a practice save carrying a stale base_fingerprint is refused (40001) and writes nothing"]="M15 the base_fingerprint check is skipped"
+  ["(checked) a practice save adding a same-weekday slot that only touches an existing one at its boundary is accepted: the minute test is strict"]="M15 the double-booking minute test counts a touching boundary as a clash"
+  ["(checked) a practice save adding a second weekday over the same range to a team is accepted: a double-booking is a time clash, not a range overlap"]="M15 the double-booking rule reverts to range-only"
+  ["(checked) a practice save adding a same-weekday slot at overlapping minutes to a team is refused as locked, naming the row it clashes with"]="M15 the double-booking time predicate is dropped entirely"
+  ["(checked) a practice save adding a same-weekday slot at non-overlapping minutes to a team is accepted"]="M15 the double-booking rule ignores minutes"
+  ["(checked) the writer-v3 revert refused while 2 unresolved practice exceptions existed, then archived all 3 onto their run before dropping the table"]="R15 the revert drops unresolved exceptions without archiving"
   ["(checked) the revert named the retirement it was about to erase"]="R1 revert erases a future retirement silently"
   ["(checked) the revert counted the practice assignment it was about to expose"]="R3 revert exposes dangling rows silently"
   ["(checked) the revert named the retirement guard it was putting back"]="R3 revert reinstates the weaker guard silently"

@@ -35,6 +35,15 @@
  * `coach-preference`); `prefer_keep` is a lexicographic tiebreak, fewer
  * breaches first. Locked rows are never judged. A failed or partial read
  * refuses the run. See `_shared/engines/coach-preference-load.ts`.
+ *
+ * Daylight (8.9 PR 6, plan §3): each venue's `lighting_available` and
+ * coordinates are loaded by `fieldId` (fields -> locations) -- AS THE CALLER
+ * through RLS, never from the request body; a failed read refuses the run.
+ * The solver's post-pass truncates each NEW placement at its first date past
+ * `floor(sunset)` on unlit ground, the remainder TIME TBD (D8); an unlit
+ * venue with no coordinates is flagged and counted, not refused (D4); a
+ * locked row past sunset is reported with a proposed fix, never changed.
+ * See `_shared/engines/practice-daylight.ts`.
  */
 
 import { serve } from 'https://deno.land/std@0.223.0/http/server.ts';
@@ -43,8 +52,10 @@ import { AutoSchedulerInputSchema } from '../_shared/schemas/auto-scheduler.ts';
 import { prepareTeam } from '../_shared/engines/practice-coaches.ts';
 import {
   loadCoachPreferenceContext,
+  seasonCalendarDate,
   seasonRunDate,
 } from '../_shared/engines/coach-preference-load.ts';
+import { loadVenueDaylight, toDaylightSlot } from '../_shared/engines/practice-daylight.ts';
 import { runPracticeOptimizer } from '../_shared/engines/auto-scheduler-solver.ts';
 import {
   classifyTeamsForRun,
@@ -326,6 +337,40 @@ serve(async (req) => {
       );
     }
 
+    // 5e. DAYLIGHT (8.9 PR 6). Venue lighting and coordinates, by the slots'
+    //     stored field (practice_slots -> fields -> locations), loaded as the
+    //     caller through RLS -- never from the body. `toDaylightSlot` reads
+    //     only the slot's instants and, where the store has no end date, its
+    //     `effectiveUntil`, so a venue, coordinate or lighting key on a body
+    //     slot is never seen (W9).
+    const venueDaylight = await loadVenueDaylight(createUserClient(req, supabaseUrl, anonKey), {
+      organizationId: input.organizationId,
+      slotIds: anchored.rows.map((s) => s.id),
+    });
+    if (!venueDaylight.ok) {
+      edgeLogger.error('Auto-scheduler could not read venue lighting', {
+        orgId: input.organizationId,
+        seasonSettingsId,
+        message: venueDaylight.message,
+      });
+      await recordAuditNow(supabase, {
+        organizationId: input.organizationId,
+        action: 'scheduler.auto_refused',
+        resourceType: 'practice_schedule',
+        metadata: { reason: venueDaylight.code, message: venueDaylight.message },
+      });
+      await edgeLogger.flush();
+      return jsonResponse(
+        {
+          error:
+            "The practice venues' lighting and coordinates could not be read, so the run was " +
+            `refused rather than scheduled without a daylight check (${venueDaylight.message}).`,
+          code: venueDaylight.code,
+        },
+        503
+      );
+    }
+
     // 6. Audit + structured logging: scheduler started
     edgeLogger.info('Auto-scheduler invoked', {
       userId: user.id,
@@ -368,9 +413,21 @@ serve(async (req) => {
         assignmentId: row.id,
         teamId: row.teamId,
         slotId: row.slotId,
+        effectiveDateRange: row.effectiveDateRange,
       })),
       placeableTeamIds: classification.placeable,
       preferenceGate: preferences.gate,
+      daylight: {
+        slots: new Map(
+          anchored.rows.map((s) => [
+            s.id,
+            toDaylightSlot(s, season.timezone, venueDaylight.slots.get(s.id)),
+          ])
+        ),
+        venues: venueDaylight.venues,
+        timeZone: season.timezone,
+        today: seasonCalendarDate(Date.now(), season.timezone),
+      },
       config: input.config,
       onProgress: (progress) => {
         // Emit progress audit (fire-and-forget). `recordAudit` returns `void`
@@ -390,6 +447,13 @@ serve(async (req) => {
     const iteration = run.iterations;
     const totalElapsedMs = run.elapsedMs;
     const terminationReason = run.terminationReason;
+    // Always present: the solver was given a daylight context above.
+    const daylight = run.daylight!;
+    const warningCount =
+      bestUnassigned.length +
+      daylight.timeTbd.filter((t) => !t.withdrawn).length +
+      daylight.unknown.length +
+      daylight.lockedPastSunset.length;
     const timeTbdExcluded = classification.timeTbd.map((teamId) => ({
       teamId,
       reason: TIME_TBD_EXCLUDED_REASON,
@@ -402,8 +466,10 @@ serve(async (req) => {
       execution_time_ms: totalElapsedMs,
       scheduler_run_type: 'practice' as const,
       season_settings_id: seasonSettingsId,
-      status: bestUnassigned.length === 0 ? 'completed' : 'completed_with_warnings',
-      findings_severity: bestUnassigned.length > 0 ? 'warnings' : 'none',
+      // A daylight finding (TIME TBD remainder, unknown sunset, locked row
+      // past sunset) is a warning like an unplaced team.
+      status: warningCount === 0 ? 'completed' : 'completed_with_warnings',
+      findings_severity: warningCount > 0 ? 'warnings' : 'none',
       metrics_summary: {
         seedScore: run.seedScore,
         bestScore,
@@ -419,6 +485,7 @@ serve(async (req) => {
         unassignedCount: bestUnassigned.length,
         approvedPreferencesLoaded: preferences.preferencesLoaded,
         preferKeepBreaches: run.preferKeepBreaches,
+        daylight: daylight.meta,
       },
       input_snapshot: {
         teamCount: teams.length,
@@ -439,6 +506,36 @@ serve(async (req) => {
         (u.dimensions?.length ? ` (must_keep ${u.dimensions.join(', ')})` : ''),
       affected_entities: [{ teamId: u.teamId, reason: u.reason, dimensions: u.dimensions ?? [] }],
     }));
+    // Daylight: every TIME TBD remainder, unjudged sunset and locked row past
+    // sunset is a finding, so the run's record carries what the page shows.
+    const daylightFindings = [
+      ...daylight.timeTbd.map((tbd) => ({
+        severity: 'warning',
+        finding_code: 'DAYLIGHT_TIME_TBD',
+        description:
+          `Team ${tbd.teamId} practices past sunset in slot ${tbd.slotId} from ${tbd.from}: ` +
+          `TIME TBD ${tbd.from}..${tbd.until}` +
+          (tbd.withdrawn ? ' (no date before it remained)' : ''),
+        affected_entities: [tbd],
+      })),
+      ...daylight.unknown.map((unknown) => ({
+        severity: 'warning',
+        finding_code: 'DAYLIGHT_UNKNOWN',
+        description: `Sunset could not be judged for team ${unknown.teamId} in slot ${unknown.slotId}: ${unknown.cause}`,
+        affected_entities: [unknown],
+      })),
+      ...daylight.lockedPastSunset.map((locked) => ({
+        severity: 'warning',
+        finding_code: 'LOCKED_PRACTICE_PAST_SUNSET',
+        description:
+          `Locked practice ${locked.assignmentId} (team ${locked.teamId}) runs past sunset from ` +
+          `${locked.date}; proposed, not applied: ` +
+          (locked.proposedFix.effectiveUntil
+            ? `end it ${locked.proposedFix.effectiveUntil}`
+            : 'make the whole row TIME TBD'),
+        affected_entities: [locked],
+      })),
+    ];
 
     const metrics = [
       {
@@ -460,7 +557,7 @@ serve(async (req) => {
 
     const { data: runId, error: persistError } = await supabase.rpc('persist_evaluation_run', {
       p_run_data: runData,
-      p_findings: findings,
+      p_findings: [...findings, ...daylightFindings],
       p_metrics: metrics,
     });
 
@@ -492,6 +589,21 @@ serve(async (req) => {
         teamsConstrainedByPreferences: preferences.teamsConstrained,
         coachPreferenceTbd: bestUnassigned.filter((u) => u.reason === 'coach-preference').length,
         preferKeepBreaches: run.preferKeepBreaches,
+        // The daylight post-pass, audited: its counts, every TIME TBD
+        // remainder with its date, and every locked row it reported.
+        daylight: daylight.meta,
+        daylightTimeTbd: daylight.timeTbd.map((t) => ({
+          teamId: t.teamId,
+          slotId: t.slotId,
+          from: t.from,
+          until: t.until,
+          reason: t.reason,
+          withdrawn: t.withdrawn,
+        })),
+        daylightLockedPastSunset: daylight.lockedPastSunset.map((l) => ({
+          assignmentId: l.assignmentId,
+          date: l.date,
+        })),
       },
     });
 
@@ -534,6 +646,12 @@ serve(async (req) => {
           preferKeepBreaches: run.preferKeepBreaches,
           findings: preferences.findings,
         },
+        // The daylight post-pass (8.9 PR 6): counts, each TIME TBD remainder
+        // (a truncated placement carries its new `effectiveUntil`), each
+        // placement or locked row whose sunset is unknown (D4: flagged, never
+        // allowed), and each locked row past sunset with its proposed,
+        // unapplied fix. Always present.
+        daylight,
         evaluation: run.evaluation,
         // Non-blocking timing findings -- today only WALL_TIME_AMBIGUOUS, a
         // wall time that occurs twice on a fall-back night and was resolved to

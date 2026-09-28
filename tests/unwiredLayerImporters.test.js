@@ -534,14 +534,20 @@ const LAYERS = Object.freeze([
       'packages/core/src/timing/index.js',
       'packages/core/src/timing/seasonEvents.js',
       'scripts/generate-solar-vectors.mjs',
+      // 8.9 PR 6: the Edge daylight witness derives its expectations from
+      // core's sunset, independently of the Edge arm it judges.
+      'tests/autoSchedulerDaylight.test.js',
       'tests/solarDrift.test.js',
       'tests/solarVectors.test.js',
     ]),
     consumers: Object.freeze([
       'packages/core/src/availability/calendar.js',
       'scripts/generate-solar-vectors.mjs',
+      // 8.9 PR 6: by name only -- it calls the Edge twin, not this file.
+      'supabase/functions/_shared/engines/practice-daylight.ts',
       'supabase/functions/_shared/tests/solar_test.ts',
       'supabase/functions/_shared/timing/solar.ts',
+      'tests/autoSchedulerDaylight.test.js',
       'tests/practiceDaylight.test.js',
       'tests/practiceDurationPhases.test.js',
       'tests/practiceRepairDaylight.test.js',
@@ -553,28 +559,32 @@ const LAYERS = Object.freeze([
     expectedProductionConsumers: Object.freeze([
       'packages/core/src/availability/calendar.js',
       'scripts/generate-solar-vectors.mjs',
+      'supabase/functions/_shared/engines/practice-daylight.ts',
       'supabase/functions/_shared/tests/solar_test.ts',
       'supabase/functions/_shared/timing/solar.ts',
     ]),
     expectedExternalProductionConsumers: Object.freeze([
       'packages/core/src/availability/calendar.js',
       'scripts/generate-solar-vectors.mjs',
+      'supabase/functions/_shared/engines/practice-daylight.ts',
       'supabase/functions/_shared/tests/solar_test.ts',
       'supabase/functions/_shared/timing/solar.ts',
     ]),
   }),
-  // 8.9 PR 2: the Deno twin of the computed sunset. **Unused until 8.9 PR 6**
-  // wires it into the auto-scheduler. The load-bearing pin is `importers`:
-  // an Edge Function cannot reach this file without importing it, so the day
-  // `auto-scheduler/index.ts` does, this list fails and PR 6 rewrites this
-  // entry and the "Nothing calls this yet" note in `solar.ts`. The name-matched
-  // lists carry the same caveat as the core entry above: core's definitions
-  // and the generator appear by name, not as callers of this file.
+  // 8.9 PR 2: the Deno twin of the computed sunset. 8.9 PR 6 gave it its one
+  // production caller, the auto-scheduler's daylight post-pass
+  // (`_shared/engines/practice-daylight.ts`, which `auto-scheduler/index.ts`
+  // reaches through the solver). The load-bearing pin is `importers`: the next
+  // Edge caller must import this file, fails this list, and rewrites the
+  // "One production caller" note in `solar.ts`. The name-matched lists carry
+  // the same caveat as the core entry above: core's definitions and the
+  // generator appear by name, not as callers of this file.
   Object.freeze({
     layer: '_shared/timing/solar.ts',
     modulePath: 'supabase/functions/_shared/timing/solar.ts',
     functions: Object.freeze(['sunsetOnDate', 'sunsetEnforcementMinutes']),
     importers: Object.freeze([
+      'supabase/functions/_shared/engines/practice-daylight.ts',
       'supabase/functions/_shared/tests/solar_test.ts',
       'tests/solarDrift.test.js',
       'tests/solarVectors.test.js',
@@ -587,7 +597,11 @@ const LAYERS = Object.freeze([
       'packages/core/src/availability/calendar.js',
       'packages/core/src/timing/solar.js',
       'scripts/generate-solar-vectors.mjs',
+      'supabase/functions/_shared/engines/practice-daylight.ts',
       'supabase/functions/_shared/tests/solar_test.ts',
+      // 8.9 PR 6: by name only -- it calls core's `sunsetOnDate()` for the
+      // independent derivation, and the Edge arm through the solver.
+      'tests/autoSchedulerDaylight.test.js',
       'tests/practiceDaylight.test.js',
       'tests/practiceDurationPhases.test.js',
       'tests/practiceRepairDaylight.test.js',
@@ -600,12 +614,14 @@ const LAYERS = Object.freeze([
       'packages/core/src/availability/calendar.js',
       'packages/core/src/timing/solar.js',
       'scripts/generate-solar-vectors.mjs',
+      'supabase/functions/_shared/engines/practice-daylight.ts',
       'supabase/functions/_shared/tests/solar_test.ts',
     ]),
     expectedExternalProductionConsumers: Object.freeze([
       'packages/core/src/availability/calendar.js',
       'packages/core/src/timing/solar.js',
       'scripts/generate-solar-vectors.mjs',
+      'supabase/functions/_shared/engines/practice-daylight.ts',
       'supabase/functions/_shared/tests/solar_test.ts',
     ]),
   }),
@@ -613,7 +629,8 @@ const LAYERS = Object.freeze([
   // only (its registry claim says so); nothing in the app or the Edge calls it.
   // The season constraint adapter imports its two constants, not the
   // evaluator, so it is an importer and not a consumer. The Edge post-pass
-  // (8.9 PR 6) is a Deno twin, not a caller of this file.
+  // (8.9 PR 6, `_shared/engines/practice-daylight.ts`) is a Deno twin, not a
+  // caller of this file; its drift witness reads the margin via the barrel.
   // 8.9 PR 7: `repair.js` gates re-home candidates through it -- a production
   // consumer inside the layer, itself unwired until 8.6 3b PRs 9-11.
   Object.freeze({

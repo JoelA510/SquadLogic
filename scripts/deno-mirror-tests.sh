@@ -58,7 +58,7 @@ ZONES=(UTC America/Los_Angeles)
 # Adding a test file needs no change here: discovery runs it already. Raising
 # the floor with it is optional and makes that file's deletion trip it too
 # (8.9 PR 2 raised it to 6 for `solar_test.ts`; 8.6 PR 3b PR 8 to 7 for
-# `coach-preferences_test.ts`).
+# `coach-preferences_test.ts`; 8.9 PR 6 to 8 for `practice-daylight_test.ts`).
 #
 # **Adding an EXCLUDED entry DOES require lowering this number, and that
 # friction is the point.** It is checked against RUNNABLE, so one exclusion
@@ -70,7 +70,7 @@ ZONES=(UTC America/Los_Angeles)
 # once in EXCLUDED and once here, and the lowered number is the durable record
 # in the diff that coverage went down. A reviewer seeing `6` become `5` is the
 # entire mechanism.
-EXPECTED_MIN_TEST_FILES=7
+EXPECTED_MIN_TEST_FILES=8
 
 # Test files that must NOT run, each with the reason. Empty is the correct
 # state.

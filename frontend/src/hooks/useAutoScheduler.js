@@ -18,7 +18,8 @@ const DEFAULT_LOCAL_FUNCTIONS_URL = 'http://localhost:54321/functions/v1';
 
 /**
  * @typedef {Object} AutoSchedulerResult
- * @property {Array<{ teamId: string, slotId: string, source: string }>} assignments
+ * @property {Array<{ teamId: string, slotId: string, source: string, effectiveUntil?: string }>} assignments
+ *   `effectiveUntil` is set only on a placement the daylight post-pass truncated.
  * @property {Array<Object>} unassigned
  * @property {Object} evaluation
  * @property {Object} optimization
@@ -27,6 +28,9 @@ const DEFAULT_LOCAL_FUNCTIONS_URL = 'http://localhost:54321/functions/v1';
  *   Non-blocking timing advisories from the Edge Function -- today only
  *   `WALL_TIME_AMBIGUOUS`, a wall time that occurs twice on a fall-back night
  *   and was resolved to its first occurrence. Always an array, never absent.
+ * @property {Object|null} [approvedPreferences]
+ * @property {Object|null} [daylight] The daylight post-pass's report (8.9 PR 6):
+ *   `timeTbd`, `unknown`, `lockedPastSunset` and counts.
  */
 
 /**
@@ -222,6 +226,10 @@ export function useAutoScheduler({ organizationId }) {
           // counts, prefer_keep breaches, and every conflict or
           // no-reference finding. Carried through for the same reason.
           approvedPreferences: data.approvedPreferences ?? null,
+          // The daylight post-pass (8.9 PR 6): TIME TBD remainders, unjudged
+          // sunsets and locked rows past sunset. Carried through for the same
+          // reason.
+          daylight: data.daylight ?? null,
         };
         // Wave 6b Task 1: cache the successful run. Errors are intentionally
         // NOT cached so retries after a failed run go back to the Edge Function.

@@ -18,11 +18,21 @@
  *
  * Limitation (plan §3): no date model. A locked row occupies its slot for the
  * whole season, so the run never double-books but may under-use a slot.
+ *
+ * Daylight (8.9 PR 6): given a `daylight` context, the search's placements go
+ * through `practice-daylight.ts`'s post-pass -- truncated at the first date
+ * past sunset on unlit ground, the remainder TIME TBD. The search itself is
+ * unchanged and does not optimise toward surviving slots (D11).
  */
 import { evaluatePracticeSchedule } from './scoring-engine.ts';
 import { checkHardConstraints, type PreparedTeam, type TimeWindow } from './practice-coaches.ts';
 import { COACH_PREFERENCE_TBD_REASON } from './coach-preferences.ts';
 import { EMPTY_PREFERENCE_GATE, type PreferenceGate } from './coach-preference-load.ts';
+import {
+  applyDaylightPostPass,
+  type DaylightContext,
+  type DaylightReport,
+} from './practice-daylight.ts';
 
 export type SchedulerTeam = PreparedTeam & { division: string };
 
@@ -40,12 +50,16 @@ export interface LockedOccupant {
   assignmentId: string;
   teamId: string;
   slotId: string | null;
+  /** The row's stored range; read by the daylight pass's report only. */
+  effectiveDateRange?: string | null;
 }
 
 export interface Placement {
   teamId: string;
   slotId: string;
   source: 'auto';
+  /** Set only when the daylight pass truncated the placement (D8). */
+  effectiveUntil?: string;
 }
 
 export interface Unplaced {
@@ -53,6 +67,8 @@ export interface Unplaced {
   reason: string;
   /** For `coach-preference`: the `must_keep` dimensions no legal slot kept. */
   dimensions?: string[];
+  /** For `daylight-past-sunset`: the first date past sunset. */
+  date?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -505,6 +521,8 @@ export interface OptimizerResult {
   preferKeepBreaches: number;
   /** Locked rows whose slot is not in this run (still locked). */
   lockedOutsideRun: LockedOccupant[];
+  /** The daylight post-pass's report; `null` when the run was given no daylight context. */
+  daylight: DaylightReport | null;
   evaluation: ReturnType<typeof evaluatePracticeSchedule>;
   seedScore: number;
   bestScore: number;
@@ -532,6 +550,12 @@ export async function runPracticeOptimizer(params: {
    * server-side (`coach-preference-load.ts`); never from the request body.
    */
   preferenceGate?: PreferenceGate;
+  /**
+   * Venue lighting and coordinates loaded server-side
+   * (`practice-daylight.ts`), and the slots as the pass reads them. When
+   * given, the daylight post-pass runs over the search's result.
+   */
+  daylight?: DaylightContext;
   config: OptimizerConfig;
   /** Called at each CPU yield, e.g. for a progress audit. */
   onProgress?: (progress: {
@@ -671,12 +695,49 @@ export async function runPracticeOptimizer(params: {
           ? 'max-iterations'
           : 'converged';
 
+  let placements: Placement[] = bestPlacements;
+  let unassigned = explainUnplaced(
+    gate,
+    base,
+    bestPlacements,
+    bestUnassigned,
+    teamsById,
+    slotsById
+  );
+  let preferKeepBreaches = bestBreaches;
+  let evaluation = bestEvaluation;
+  let daylight: DaylightReport | null = null;
+  // The daylight post-pass (8.9 PR 6): after the search, over its placements
+  // only. Declared, not optimised (D11): nothing above steers toward slots
+  // that survive the season. A withdrawn placement leaves the schedule, so
+  // the score, evaluation and breaches are re-measured over what remains
+  // (the returned schedule's, not the search's); otherwise they are the
+  // search's own values, untouched.
+  if (params.daylight) {
+    const pass = applyDaylightPostPass({
+      placements,
+      unassigned,
+      locked,
+      ...params.daylight,
+    });
+    daylight = pass.report;
+    if (pass.report.meta.placementsWithdrawn > 0) {
+      const rescored = scoreSchedule(base, pass.placements, pass.unassigned, teams, slots);
+      evaluation = rescored.evaluation;
+      bestScore = rescored.score;
+      preferKeepBreaches = totalBreaches(gate, pass.placements);
+    }
+    placements = pass.placements;
+    unassigned = pass.unassigned;
+  }
+
   return {
-    placements: bestPlacements,
-    unassigned: explainUnplaced(gate, base, bestPlacements, bestUnassigned, teamsById, slotsById),
-    preferKeepBreaches: bestBreaches,
+    placements,
+    unassigned,
+    preferKeepBreaches,
     lockedOutsideRun: base.outsideRun,
-    evaluation: bestEvaluation,
+    daylight,
+    evaluation,
     seedScore: seedScoring.score,
     bestScore,
     iterations: iteration,

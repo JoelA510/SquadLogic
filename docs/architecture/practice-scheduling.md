@@ -53,6 +53,51 @@ This document elaborates the roadmap's practice scheduling phase into concrete i
    - The `practice_assignments` table is the authoritative source for assignments. `teams.practice_slot_id` should be considered for deprecation or used as a non-authoritative pointer to avoid inconsistency with mid-season slot changes.
    - Store a `scheduler_runs` entry with `run_type = 'practice'` capturing parameters used, conflicts encountered, and manual follow-ups required.
 
+## Daylight (8.9 PR 6)
+
+The live practice scheduler is the `auto-scheduler` Edge Function. After its
+search it runs a daylight post-pass (`supabase/functions/_shared/engines/practice-daylight.ts`),
+the Edge counterpart of core `practice/daylight.js`:
+
+- **Rule.** An unlit practice occurrence ends at or before `floor(sunset)` less
+  `PRACTICE_SUNSET_MARGIN_MINUTES` (0; a Deno twin pinned equal to core's by
+  `tests/autoSchedulerDaylight.test.js`). Sunset is the Edge solar twin
+  (`_shared/timing/solar.ts`), judged per date on the season's wall clock.
+  Lit venues are exempt; undeclared lighting is unlit.
+- **Venue and slot data come from the database.** Each run slot's `field_id`,
+  `end_time`, `valid_from`/`day_of_week` and `valid_until` are read from
+  `practice_slots`, and `lighting_available` and the location's coordinates by
+  that field (fields -> locations), as the caller through RLS, paged. A venue,
+  end time, coordinates or lighting on the request body are never read; the
+  body's first date and `effectiveUntil` are used only where `valid_from` or
+  `valid_until` is null (the page's season-start and season-end fallbacks). A failed read, or a run slot or field
+  the read does not return, refuses the run with `VENUE_DAYLIGHT_UNREADABLE`
+  (the coach-preference loader's contract).
+- **New placements only.** Each is expanded weekly from the season's today (where
+  the page starts a new placement) to the slot's `effectiveUntil`. At the first
+  date past the limit the placement is truncated (`effectiveUntil` = the day
+  before, which the page honours in `newPlacementRange`), and the remainder is
+  TIME TBD with reason `daylight-past-sunset` and the date. If the first
+  occurrence is already past the limit, the placement is withdrawn and the team
+  is unplaced with that reason. Every remainder is returned in `daylight.timeTbd`,
+  written as a `DAYLIGHT_TIME_TBD` run finding, and audited on
+  `scheduler.auto_completed`.
+- **No coordinates on unlit ground** is flagged `SUNSET_UNKNOWN`
+  (`venue-coordinates-missing`), counted in `daylightUnknownOccurrences`, shown on
+  the page, and never treated as within daylight. It does not refuse the run.
+- **Locked rows are never changed.** A locked row past sunset is reported in
+  `daylight.lockedPastSunset` with a proposed fix (`applied: false`).
+- **Declared, not optimised (D11).** The search does not steer toward slots that
+  survive the season, and a withdrawn placement's capacity is not offered to
+  another team.
+- **Not persisted here.** The TIME TBD remainder is reported, audited and shown.
+  This pass does not write a `practice_exceptions` row for it, and
+  `practice-persistence` has no `daylight-past-sunset` TBD reason yet; that is
+  follow-up persistence work.
+- **Autumn-shaped (D8).** Truncating at the first date past sunset suits a season
+  whose sunsets get earlier. In a spring season an early dark date withdraws the
+  whole placement even though later dates would be light; D8 chose this.
+
 ## Manual Adjustment Workflow
 
 - Display assigned slots in the admin UI grouped by day/field so conflicts are visible.

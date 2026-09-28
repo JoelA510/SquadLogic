@@ -41,9 +41,10 @@
  * compares the strings). Both are blocking there; both mean `minutes: null`
  * here.
  *
- * **Nothing calls this yet.** The auto-scheduler is wired to it in 8.9 PR 6;
- * until then `tests/unwiredLayerImporters.test.js` pins it as unused, so the
- * first production caller fails that pin.
+ * **One production caller:** the auto-scheduler's daylight post-pass,
+ * `_shared/engines/practice-daylight.ts` (8.9 PR 6).
+ * `tests/unwiredLayerImporters.test.js` pins its importers, so the next caller
+ * fails that pin.
  *
  * @module _shared/timing/solar
  */

@@ -93,8 +93,12 @@ export function seasonRunDate(instantMs: number, timeZone: string | null): strin
   return seasonDate > utcDate ? seasonDate : utcDate;
 }
 
-/** The season's calendar date at `instantMs`, or `null` when the zone cannot be read. */
-function seasonCalendarDate(instantMs: number, timeZone: string | null): string | null {
+/**
+ * The season's calendar date at `instantMs`, or `null` when the zone cannot be
+ * read. Exported for the daylight pass (8.9 PR 6), whose "today" is this date
+ * -- the page's `seasonCalendarDate`, where a new placement starts.
+ */
+export function seasonCalendarDate(instantMs: number, timeZone: string | null): string | null {
   if (!timeZone) return null;
   try {
     const parts = new Intl.DateTimeFormat('en-CA', {

@@ -42,7 +42,9 @@
  * In **core evaluation only** -- the `practice-daylight` claim in the season's
  * constraint registry says so. The core `practiceScheduling.js` and
  * `autoScheduler.js` do not call it; the live practice scheduler is the Deno
- * auto-scheduler, which gains a daylight post-pass in 8.9 PR 6.
+ * auto-scheduler, whose daylight post-pass (8.9 PR 6,
+ * `supabase/functions/_shared/engines/practice-daylight.ts`) applies this rule
+ * to the placements a run produces, with the Deno twin of the margin below.
  *
  * Every violation carries an attribution of kind `sunset` with the numbers
  * (end, sunset, margin, limit, overrun, source) for 8.10's explanations.

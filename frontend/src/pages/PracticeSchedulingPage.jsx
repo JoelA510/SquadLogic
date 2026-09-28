@@ -20,6 +20,7 @@ import {
   describeUnplaceableSlots,
   isSeasonClockLoading,
 } from '../utils/seasonClockSlots.js';
+import { describeDaylightReport } from '../utils/daylightReport.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
@@ -370,9 +371,13 @@ export function toPersistenceAssignment(assignment) {
  * @param {string} seasonToday - `YYYY-MM-DD`
  * @returns {string} the placement's `effectiveDateRange`, inclusive
  */
-export function newPlacementRange(slot, seasonToday) {
+export function newPlacementRange(slot, seasonToday, truncatedUntil = null) {
   const from = seasonToday > slot.effectiveFrom ? seasonToday : slot.effectiveFrom;
-  return `[${from},${slot.effectiveUntil}]`;
+  // The auto-scheduler's daylight post-pass (8.9 PR 6) truncates a placement
+  // at its first date past sunset; the remainder is TIME TBD, not this range.
+  const until =
+    truncatedUntil && truncatedUntil < slot.effectiveUntil ? truncatedUntil : slot.effectiveUntil;
+  return `[${from},${until}]`;
 }
 
 /**
@@ -575,11 +580,16 @@ export default function PracticeSchedulingPage() {
     const clash = placements.find((placement) => lockedTeamIds.has(placement.teamId));
     const seasonToday = seasonCalendarDate(Date.now(), timezone);
     // The function has no date model, so it can place a team in a slot whose
-    // window has already ended. That placement has no dates left to hold.
+    // window has already ended. That placement has no dates left to hold --
+    // nor has one the daylight pass truncated to end before today.
     const ended = seasonToday
       ? placements.filter((placement) => {
           const slot = slotById.get(placement.slotId);
-          return Boolean(slot) && slot.effectiveUntil < seasonToday;
+          return (
+            Boolean(slot) &&
+            (slot.effectiveUntil < seasonToday ||
+              (Boolean(placement.effectiveUntil) && placement.effectiveUntil < seasonToday))
+          );
         })
       : [];
     const refusal = clash
@@ -611,7 +621,14 @@ export default function PracticeSchedulingPage() {
           // A slot this page has not loaded keeps the display's own fallback;
           // Apply then refuses it by name (`missingSlot`).
           assignment: slot
-            ? { ...assignment, effectiveDateRange: newPlacementRange(slot, seasonToday) }
+            ? {
+                ...assignment,
+                effectiveDateRange: newPlacementRange(
+                  slot,
+                  seasonToday,
+                  assignment.effectiveUntil ?? null
+                ),
+              }
             : assignment,
           index,
           runId: autoScheduler.result.runId,
@@ -720,6 +737,11 @@ export default function PracticeSchedulingPage() {
    */
   const timingFindingMessage = useMemo(
     () => describeTimingFindings(autoScheduler.result?.timingFindings),
+    [autoScheduler.result]
+  );
+  /** The daylight post-pass's report (8.9 PR 6), one line per kind. */
+  const daylightMessage = useMemo(
+    () => describeDaylightReport(autoScheduler.result?.daylight),
     [autoScheduler.result]
   );
 
@@ -1109,6 +1131,15 @@ export default function PracticeSchedulingPage() {
               className="mt-4 rounded-lg border border-border-subtle bg-bg-glass px-4 py-3 text-sm text-text-secondary"
             >
               {timingFindingMessage}
+            </div>
+          )}
+
+          {daylightMessage && (
+            <div
+              role="status"
+              className="mt-4 rounded-lg border border-border-subtle bg-bg-glass px-4 py-3 text-sm text-text-secondary"
+            >
+              {daylightMessage}
             </div>
           )}
 

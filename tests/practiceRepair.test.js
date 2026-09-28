@@ -1450,3 +1450,129 @@ describe('practice repair :: loss schema (plan §1)', () => {
     expect(parse({ ...base, ...extra }).success).toBe(false);
   });
 });
+
+describe('practice repair :: the override window is the series range within the loss window', () => {
+  // Synthetic series with their own ranges, against a blackout of
+  // LOSS_DATE (Mon 2026-09-28) .. BLACKOUT_UNTIL (Sun 2026-10-18).
+  const SERIES = [
+    // (a) displaced, its range ends inside the window.
+    { id: 'A', surfaceId: OP('field-2-a'), weekday: 'TUE', from: SEASON_FROM, until: '2026-10-07' },
+    // (b) displaced, its range starts inside the window.
+    {
+      id: 'B',
+      surfaceId: OP('field-2-a'),
+      weekday: 'WED',
+      from: '2026-10-05',
+      until: SEASON_UNTIL,
+    },
+    // (c) on the lost ground, but its range ends before the window.
+    { id: 'C', surfaceId: OP('field-2-a'), weekday: 'THU', from: SEASON_FROM, until: '2026-09-20' },
+    // (d) frozen, off the lost ground, its range ends before the window; it
+    // held the only TUE shape A can take.
+    {
+      id: 'F1',
+      surfaceId: OP('field-3-a'),
+      weekday: 'TUE',
+      from: SEASON_FROM,
+      until: '2026-09-20',
+    },
+    // (d') frozen, its range ends inside the window, before G's starts; it
+    // holds the only FRI shape G can take.
+    {
+      id: 'F2',
+      surfaceId: OP('field-3-a'),
+      weekday: 'FRI',
+      from: SEASON_FROM,
+      until: '2026-10-04',
+    },
+    {
+      id: 'G',
+      surfaceId: OP('field-2-a'),
+      weekday: 'FRI',
+      from: '2026-10-05',
+      until: SEASON_UNTIL,
+    },
+  ];
+  const plan = {
+    slots: SERIES.map((s) => ({
+      id: `w-slot-${s.id}`,
+      surfaceId: s.surfaceId,
+      weekday: s.weekday,
+      startMinutes: 1020,
+      durationMinutes: 60,
+      validFrom: s.from,
+      validUntil: s.until,
+      capacity: 1,
+      revisionId: 'constructed',
+      label: null,
+      surfaceResolution: 'resolved',
+    })),
+    assignments: SERIES.map((s) => ({
+      id: `w-asg-${s.id}`,
+      slotId: `w-slot-${s.id}`,
+      teamId: `team-${s.id}`,
+      effectiveFrom: null,
+      effectiveUntil: null,
+    })),
+    source: 'constructed',
+  };
+  const loss = {
+    surfaceIds: [OP('field-2')],
+    from: LOSS_DATE,
+    until: BLACKOUT_UNTIL,
+    reason: 'maintenance',
+  };
+  const run = repairPracticeLoss({
+    plan,
+    graph,
+    loss,
+    inventory: ['TUE', 'WED', 'FRI'].map((weekday) => ({
+      surfaceId: OP('field-3-a'),
+      weekday,
+      startMinutes: 1020,
+      durationMinutes: 60,
+    })),
+  });
+  /** max(series.from, loss.from) .. min(series.until, loss.until), from the inputs. */
+  const windowOf = (id) => {
+    const s = SERIES.find((entry) => entry.id === id);
+    return {
+      from: s.from > loss.from ? s.from : loss.from,
+      until: s.until < loss.until ? s.until : loss.until,
+    };
+  };
+
+  it('derives the same displaced series-windows from the inputs as the repair answers', () => {
+    const expected = expectedSeriesWindows(plan, loss);
+    expect(expected.map((e) => e.assignmentId)).toEqual(['w-asg-A', 'w-asg-B', 'w-asg-G']);
+    expect(answeredWindows(run)).toEqual(expected);
+  });
+
+  it('(a) ends the override at the series end, (b) starts it at the series start', () => {
+    const byId = new Map(run.rehomed.map((entry) => [entry.assignmentId, entry]));
+    expect(windowOf('A')).toEqual({ from: LOSS_DATE, until: '2026-10-07' });
+    expect(byId.get('w-asg-A')?.window).toEqual(windowOf('A'));
+    expect(windowOf('B')).toEqual({ from: '2026-10-05', until: BLACKOUT_UNTIL });
+    expect(byId.get('w-asg-B')?.window).toEqual(windowOf('B'));
+    // No phantom practice: the override slot holds only the series-window.
+    const overrideSlot = run.plan.slots.find((slot) => slot.id.includes('#w-asg-A'));
+    expect([overrideSlot?.validFrom, overrideSlot?.validUntil]).toEqual([
+      '2026-09-28',
+      '2026-10-07',
+    ]);
+  });
+
+  it('(c) leaves a series that ended before the window alone', () => {
+    expect(answeredWindows(run).map((e) => e.assignmentId)).not.toContain('w-asg-C');
+    const kept = run.plan.assignments.find((assignment) => assignment.id === 'w-asg-C');
+    expect(kept).toEqual(plan.assignments.find((assignment) => assignment.id === 'w-asg-C'));
+  });
+
+  it('(d) frees ground a frozen series holds only outside its own range within the window', () => {
+    const byId = new Map(run.rehomed.map((entry) => [entry.assignmentId, entry]));
+    expect(run.timeTbd).toEqual([]);
+    expect(byId.get('w-asg-A')?.to).toMatchObject({ surfaceId: OP('field-3-a'), weekday: 'TUE' });
+    expect(byId.get('w-asg-G')?.to).toMatchObject({ surfaceId: OP('field-3-a'), weekday: 'FRI' });
+    expect(byId.get('w-asg-G')?.window).toEqual(windowOf('G'));
+  });
+});

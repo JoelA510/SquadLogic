@@ -64,6 +64,118 @@ END;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- 2b. The double-booking rule is a TIME clash, not a range overlap
+-- ---------------------------------------------------------------------------
+-- 176 of the 281 (sheet, team) pairs in fixtures/season-2026 practise on two
+-- weekdays over one range, so a team holding its Monday slot must be able to
+-- gain its Wednesday slot in a later save. It runs FIRST so no earlier
+-- section can stop the run before all three cases are judged.
+DO $$
+DECLARE
+    v_admin uuid := '66670000-0000-4000-8000-0000000000a1';
+    v_org uuid; v_loc uuid; v_field uuid; v_s uuid; v_d uuid; v_t uuid;
+    v_m1 uuid; v_w uuid; v_m2 uuid; v_m3 uuid; v_row_m1 uuid;
+    c_r text := '[2026-09-01,2026-11-30]';
+    v_state text; v_msg text; v_n int;
+    -- Each case is judged on its own and every failure is reported together,
+    -- so one run against a wrong rule shows all three cases' verdicts.
+    v_fail text := '';
+BEGIN
+    INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
+      (v_admin, 'p67-admin@example.test', jsonb_build_object('password_length', 16));
+    INSERT INTO public.profiles (id, email) VALUES (v_admin, 'p67-admin@example.test') ON CONFLICT DO NOTHING;
+    INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org 67', 'smoke-org-67') RETURNING id INTO v_org;
+    INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES (v_org, v_admin, 'admin');
+    INSERT INTO public.locations (organization_id, name) VALUES (v_org, 'P67 Park') RETURNING id INTO v_loc;
+    INSERT INTO public.fields (organization_id, location_id, name, active)
+      VALUES (v_org, v_loc, 'P67 Pitch', true) RETURNING id INTO v_field;
+    INSERT INTO public.season_settings (organization_id, name) VALUES (v_org, 'P67 Fall') RETURNING id INTO v_s;
+    INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_s, 'P67 U10') RETURNING id INTO v_d;
+    INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d, 'P67 Team') RETURNING id INTO v_t;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
+      VALUES (v_org, v_field, 'mon', '17:00', '18:00', '2026-09-01', '2026-11-30') RETURNING id INTO v_m1;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
+      VALUES (v_org, v_field, 'wed', '17:00', '18:00', '2026-09-01', '2026-11-30') RETURNING id INTO v_w;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
+      VALUES (v_org, v_field, 'mon', '17:30', '18:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_m2;
+    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
+      VALUES (v_org, v_field, 'mon', '18:30', '19:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_m3;
+
+    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
+    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
+    SET LOCAL ROLE authenticated;
+
+    PERFORM public.persist_practice_schedule(jsonb_build_object('season_settings_id', v_s),
+        jsonb_build_array(jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m1, 'effective_date_range', c_r)));
+    SELECT id INTO v_row_m1 FROM public.practice_assignments WHERE team_id = v_t;
+
+    -- (a) a later save adds the Wednesday slot over the same range: accepted.
+    v_state := NULL;
+    BEGIN
+        PERFORM public.persist_practice_schedule(jsonb_build_object('season_settings_id', v_s),
+            jsonb_build_array(
+                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m1, 'effective_date_range', c_r),
+                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_w,  'effective_date_range', c_r)));
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+    END;
+    SELECT count(*) INTO v_n FROM public.practice_assignments WHERE team_id = v_t;
+    IF v_state IS NOT NULL OR v_n <> 2 THEN
+        v_fail := v_fail || format(E'\n  ' || replace('(a) adding a Wednesday slot to a Monday team over the same range should be accepted (2 rows): % % (% rows)', '%', '%s'), v_state, v_msg, v_n);
+    ELSE
+        RAISE NOTICE 'time clash (a): a team holding Monday 17:00-18:00 gained Wednesday 17:00-18:00 over the same range in a later save -- accepted, 2 rows';
+    END IF;
+
+    -- (b) a second Monday slot at overlapping minutes: refused, naming the Monday row.
+    v_state := NULL;
+    BEGIN
+        PERFORM public.persist_practice_schedule(jsonb_build_object('season_settings_id', v_s),
+            jsonb_build_array(
+                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m1, 'effective_date_range', c_r),
+                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_w,  'effective_date_range', c_r),
+                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m2, 'effective_date_range', c_r)));
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+    END;
+    SELECT count(*) INTO v_n FROM public.practice_assignments WHERE team_id = v_t;
+    IF v_state IS DISTINCT FROM '22023'
+       OR v_msg NOT LIKE 'assignment ' || v_row_m1 || ' is locked: a new row for its team overlaps it in time%'
+       OR v_n <> 2 THEN
+        v_fail := v_fail || format(E'\n  ' || replace('(b) a second Monday slot at overlapping minutes should be refused 22023 naming the Monday row: % % (% rows)', '%', '%s'), v_state, v_msg, v_n);
+    ELSE
+        RAISE NOTICE 'time clash (b): a second Monday slot at 17:30-18:30 against Monday 17:00-18:00 was refused 22023 naming the Monday row; 2 rows unchanged';
+    END IF;
+
+    -- (c) a Monday slot at non-overlapping minutes: accepted.
+    v_state := NULL;
+    BEGIN
+        PERFORM public.persist_practice_schedule(jsonb_build_object('season_settings_id', v_s),
+            jsonb_build_array(
+                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m1, 'effective_date_range', c_r),
+                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_w,  'effective_date_range', c_r),
+                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m3, 'effective_date_range', c_r)));
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+    END;
+    SELECT count(*) INTO v_n FROM public.practice_assignments WHERE team_id = v_t;
+    IF v_state IS NOT NULL OR v_n <> 3 THEN
+        v_fail := v_fail || format(E'\n  ' || replace('(c) a Monday slot at 18:30-19:30 beside Monday 17:00-18:00 should be accepted (3 rows): % % (% rows)', '%', '%s'), v_state, v_msg, v_n);
+    ELSE
+        RAISE NOTICE 'time clash (c): a Monday slot at 18:30-19:30 beside Monday 17:00-18:00 was accepted -- 3 rows';
+    END IF;
+
+    IF v_fail <> '' THEN
+        RAISE EXCEPTION 'double-booking rule:%', v_fail;
+    END IF;
+
+    RESET ROLE;
+    DELETE FROM public.organizations WHERE id = v_org;
+    DELETE FROM public.profiles WHERE id = v_admin;
+    DELETE FROM auth.users WHERE id = v_admin;
+END;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- 2-9. One season, driven through the real RPC
 -- ---------------------------------------------------------------------------
 DO $$
@@ -445,116 +557,5 @@ BEGIN
     DELETE FROM public.organizations WHERE id = v_org;
     DELETE FROM public.profiles WHERE id IN (v_admin, v_coach);
     DELETE FROM auth.users WHERE id IN (v_admin, v_coach);
-END;
-$$;
-
--- ---------------------------------------------------------------------------
--- 2b. The double-booking rule is a TIME clash, not a range overlap
--- ---------------------------------------------------------------------------
--- 176 of the 281 (sheet, team) pairs in fixtures/season-2026 practise on two
--- weekdays over one range, so a team holding its Monday slot must be able to
--- gain its Wednesday slot in a later save.
-DO $$
-DECLARE
-    v_admin uuid := '66670000-0000-4000-8000-0000000000a1';
-    v_org uuid; v_loc uuid; v_field uuid; v_s uuid; v_d uuid; v_t uuid;
-    v_m1 uuid; v_w uuid; v_m2 uuid; v_m3 uuid; v_row_m1 uuid;
-    c_r text := '[2026-09-01,2026-11-30]';
-    v_state text; v_msg text; v_n int;
-    -- Each case is judged on its own and every failure is reported together,
-    -- so one run against a wrong rule shows all three cases' verdicts.
-    v_fail text := '';
-BEGIN
-    INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
-      (v_admin, 'p67-admin@example.test', jsonb_build_object('password_length', 16));
-    INSERT INTO public.profiles (id, email) VALUES (v_admin, 'p67-admin@example.test') ON CONFLICT DO NOTHING;
-    INSERT INTO public.organizations (name, slug) VALUES ('Smoke Org 67', 'smoke-org-67') RETURNING id INTO v_org;
-    INSERT INTO public.organization_members (organization_id, profile_id, role) VALUES (v_org, v_admin, 'admin');
-    INSERT INTO public.locations (organization_id, name) VALUES (v_org, 'P67 Park') RETURNING id INTO v_loc;
-    INSERT INTO public.fields (organization_id, location_id, name, active)
-      VALUES (v_org, v_loc, 'P67 Pitch', true) RETURNING id INTO v_field;
-    INSERT INTO public.season_settings (organization_id, name) VALUES (v_org, 'P67 Fall') RETURNING id INTO v_s;
-    INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_s, 'P67 U10') RETURNING id INTO v_d;
-    INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d, 'P67 Team') RETURNING id INTO v_t;
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'mon', '17:00', '18:00', '2026-09-01', '2026-11-30') RETURNING id INTO v_m1;
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'wed', '17:00', '18:00', '2026-09-01', '2026-11-30') RETURNING id INTO v_w;
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'mon', '17:30', '18:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_m2;
-    INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
-      VALUES (v_org, v_field, 'mon', '18:30', '19:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_m3;
-
-    PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
-    PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
-    SET LOCAL ROLE authenticated;
-
-    PERFORM public.persist_practice_schedule(jsonb_build_object('season_settings_id', v_s),
-        jsonb_build_array(jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m1, 'effective_date_range', c_r)));
-    SELECT id INTO v_row_m1 FROM public.practice_assignments WHERE team_id = v_t;
-
-    -- (a) a later save adds the Wednesday slot over the same range: accepted.
-    v_state := NULL;
-    BEGIN
-        PERFORM public.persist_practice_schedule(jsonb_build_object('season_settings_id', v_s),
-            jsonb_build_array(
-                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m1, 'effective_date_range', c_r),
-                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_w,  'effective_date_range', c_r)));
-    EXCEPTION WHEN OTHERS THEN
-        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
-    END;
-    SELECT count(*) INTO v_n FROM public.practice_assignments WHERE team_id = v_t;
-    IF v_state IS NOT NULL OR v_n <> 2 THEN
-        v_fail := v_fail || format(E'\n  ' || replace('(a) adding a Wednesday slot to a Monday team over the same range should be accepted (2 rows): % % (% rows)', '%', '%s'), v_state, v_msg, v_n);
-    ELSE
-        RAISE NOTICE 'time clash (a): a team holding Monday 17:00-18:00 gained Wednesday 17:00-18:00 over the same range in a later save -- accepted, 2 rows';
-    END IF;
-
-    -- (b) a second Monday slot at overlapping minutes: refused, naming the Monday row.
-    v_state := NULL;
-    BEGIN
-        PERFORM public.persist_practice_schedule(jsonb_build_object('season_settings_id', v_s),
-            jsonb_build_array(
-                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m1, 'effective_date_range', c_r),
-                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_w,  'effective_date_range', c_r),
-                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m2, 'effective_date_range', c_r)));
-    EXCEPTION WHEN OTHERS THEN
-        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
-    END;
-    SELECT count(*) INTO v_n FROM public.practice_assignments WHERE team_id = v_t;
-    IF v_state IS DISTINCT FROM '22023'
-       OR v_msg NOT LIKE 'assignment ' || v_row_m1 || ' is locked: a new row for its team overlaps it in time%'
-       OR v_n <> 2 THEN
-        v_fail := v_fail || format(E'\n  ' || replace('(b) a second Monday slot at overlapping minutes should be refused 22023 naming the Monday row: % % (% rows)', '%', '%s'), v_state, v_msg, v_n);
-    ELSE
-        RAISE NOTICE 'time clash (b): a second Monday slot at 17:30-18:30 against Monday 17:00-18:00 was refused 22023 naming the Monday row; 2 rows unchanged';
-    END IF;
-
-    -- (c) a Monday slot at non-overlapping minutes: accepted.
-    v_state := NULL;
-    BEGIN
-        PERFORM public.persist_practice_schedule(jsonb_build_object('season_settings_id', v_s),
-            jsonb_build_array(
-                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m1, 'effective_date_range', c_r),
-                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_w,  'effective_date_range', c_r),
-                jsonb_build_object('team_id', v_t, 'practice_slot_id', v_m3, 'effective_date_range', c_r)));
-    EXCEPTION WHEN OTHERS THEN
-        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
-    END;
-    SELECT count(*) INTO v_n FROM public.practice_assignments WHERE team_id = v_t;
-    IF v_state IS NOT NULL OR v_n <> 3 THEN
-        v_fail := v_fail || format(E'\n  ' || replace('(c) a Monday slot at 18:30-19:30 beside Monday 17:00-18:00 should be accepted (3 rows): % % (% rows)', '%', '%s'), v_state, v_msg, v_n);
-    ELSE
-        RAISE NOTICE 'time clash (c): a Monday slot at 18:30-19:30 beside Monday 17:00-18:00 was accepted -- 3 rows';
-    END IF;
-
-    IF v_fail <> '' THEN
-        RAISE EXCEPTION 'double-booking rule:%', v_fail;
-    END IF;
-
-    RESET ROLE;
-    DELETE FROM public.organizations WHERE id = v_org;
-    DELETE FROM public.profiles WHERE id = v_admin;
-    DELETE FROM auth.users WHERE id = v_admin;
 END;
 $$;

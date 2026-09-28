@@ -188,7 +188,7 @@ describe('coach preferences :: strictest wins, enumerated', () => {
     for (const count of Object.values(seen)) expect(count).toBeGreaterThan(0);
   });
 
-  it('series mode: the series is the reference, whatever value each preference carries', () => {
+  it('series mode: a value is its own reference, and only a null value keeps the series (operator ruling 2026-09-28)', () => {
     const choicesPerCoach = ['match', 'otherB', null];
     const seen = {
       cases: 0,
@@ -222,7 +222,7 @@ describe('coach preferences :: strictest wins, enumerated', () => {
                 preferences.map((p) => ({
                   coachId: p.coachId,
                   level: p.level,
-                  reference: seriesValue,
+                  reference: p.value === null ? seriesValue : p.value,
                 })),
                 CANDIDATE[KEY[dimension]]
               );
@@ -240,11 +240,12 @@ describe('coach preferences :: strictest wins, enumerated', () => {
       }
     }
     expect(seen.cases).toBe(3 * 2 * (1 + 9 + 81 + 729));
-    // One series gives one reference: never unsatisfiable, never unreferenced.
-    expect(seen.unsatisfiable).toBe(0);
+    // A series means a null value always has a reference; values that differ
+    // from each other, or from the series, conflict as in value mode.
     expect(seen.noReference).toBe(0);
-    expect(seen.conflict).toBe(0);
-    for (const key of ['violated', 'breached', 'clean']) expect(seen[key]).toBeGreaterThan(0);
+    for (const key of ['violated', 'breached', 'clean', 'unsatisfiable', 'conflict']) {
+      expect(seen[key]).toBeGreaterThan(0);
+    }
   });
 
   it('strictestCoachPreferenceLevel: every tuple of up to three levels', () => {

@@ -70,7 +70,8 @@
  * each displaced series, its team's CURRENT coaches are the rows that cover the
  * date the repair takes effect for that series (`coachesOfTeamOn()` on the
  * series-window's first day), strictest wins among them, and the reference is
- * the series itself, because every series the repair judges is being moved.
+ * the preference's `value` when it has one, else the series being moved
+ * ("keep what I have").
  * Venue is the location: the facility graph's `venueId`, which must then be the
  * location id.
  *
@@ -78,11 +79,11 @@
  *   A series that had legal same-venue candidates and has none after the
  *   filter is TIME TBD with `PRACTICE_TBD_REASON.COACH_PREFERENCE`, never
  *   dropped; `mustKeepDimensions` names what emptied its venue.
- * - **A preference's `value` is not read here.** The reference is the series
- *   being moved, so every coach on a dimension keeps the same thing, and two
- *   `must_keep` values that differ cannot conflict in a repair: that is the
- *   no-series case (placing an unassigned team), where `value` is the
- *   reference and `PRACTICE_COACH_PREFERENCE_CONFLICT` can fire.
+ * - **An approved `value` is honoured** (operator ruling, 2026-09-28):
+ *   `must_keep weekday=TUE` on a team now on Wednesday lands only on a
+ *   Tuesday, or is TIME TBD `coach-preference`. Two `must_keep` references
+ *   that differ make every candidate violate the dimension, and
+ *   `PRACTICE_COACH_PREFERENCE_CONFLICT` says why.
  * - `prefer_keep` is priced: each breached dimension is one
  *   `coachPreferenceBreached` in the candidate's counts, weighed by the one
  *   objective like every other term.

@@ -490,17 +490,24 @@ const rowsFor = (coaches, teamId = 'T') =>
  * One series for team T, Tue 17:00 on Orchard Park field 2-a, displaced by the
  * loss of field 2, and whatever inventory the case offers.
  *
- * @param {{ inventory: Array<Object>, preferences?: Array<Object>, rows?: Array<Object>, loss?: Object, extra?: Object }} options
+ * @param {{ inventory: Array<Object>, preferences?: Array<Object>, rows?: Array<Object>, loss?: Object, extra?: Object, on?: { weekday: string, startMinutes: number } }} options
  */
-function constructed({ inventory, preferences, rows, loss = {}, extra = {} }) {
+function constructed({
+  inventory,
+  preferences,
+  rows,
+  loss = {},
+  extra = {},
+  on = { weekday: 'TUE', startMinutes: 1020 },
+}) {
   return repairPracticeLoss({
     plan: {
       slots: [
         {
           id: 'c-slot-0',
           surfaceId: OP('field-2-a'),
-          weekday: 'TUE',
-          startMinutes: 1020,
+          weekday: on.weekday,
+          startMinutes: on.startMinutes,
           durationMinutes: 60,
           validFrom: SEASON_FROM,
           validUntil: SEASON_UNTIL,
@@ -622,22 +629,142 @@ describe('coach preferences :: must_keep is a hard candidate filter (plan §4)',
     });
     expect(byDay.timeTbd[0].crossVenueOptions.map((option) => option.to.weekday)).toEqual(['TUE']);
   });
+});
 
-  it('with the series as reference, two must_keep values do not conflict: the value is not read (plan §4)', () => {
-    // Every series the repair judges is being moved, so each coach keeps what
-    // the series has; `value` is the reference only when there is no series.
+/**
+ * The reference rule (operator ruling 2026-09-28, amending plan §4): a
+ * preference with a `value` keeps the value; one with a null value keeps the
+ * series being moved. Every case below reads its coaches from roster rows.
+ */
+describe('coach preferences :: an approved value is the reference (ruling 2026-09-28)', () => {
+  const ON_WEDNESDAY = { weekday: 'WED', startMinutes: 1020 };
+  const same = (weekday, startMinutes = 1020) => ({
+    surfaceId: OP('field-3-a'),
+    weekday,
+    startMinutes,
+  });
+  const conflicted = (run) =>
+    run.findings.filter((f) => f.code === PRACTICE_REASON.COACH_PREFERENCE_CONFLICT);
+
+  it('must_keep TUE on a team now on WED lands only on a Tuesday', () => {
+    const inventory = [same('WED', 1080), same('TUE', 1080)];
+    // Control: keeping what it has, the team stays on Wednesday.
+    expect(constructed({ inventory, on: ON_WEDNESDAY }).rehomed[0].to.weekday).toBe('WED');
     const run = constructed({
-      inventory: [{ surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1080 }],
+      inventory,
+      on: ON_WEDNESDAY,
+      preferences: [pref('coach-1', 'weekday', 'must_keep', 'TUE')],
+      rows: rowsFor(['coach-1']),
+    });
+    expect(run.rehomed.map((e) => [e.to.weekday, e.to.startMinutes])).toEqual([['TUE', 1080]]);
+  });
+
+  it('with no Tuesday candidate, that team is TIME TBD coach-preference', () => {
+    const run = constructed({
+      inventory: [same('WED', 1080), same('THU')],
+      on: ON_WEDNESDAY,
+      preferences: [pref('coach-1', 'weekday', 'must_keep', 'TUE')],
+      rows: rowsFor(['coach-1']),
+    });
+    expect(run.rehomed).toEqual([]);
+    expect(run.timeTbd[0]).toMatchObject({
+      reason: PRACTICE_TBD_REASON.COACH_PREFERENCE,
+      mustKeepDimensions: ['weekday'],
+    });
+  });
+
+  it('two must_keep coaches with different values conflict, breach every candidate, and go TIME TBD', () => {
+    const run = constructed({
+      inventory: [same('TUE', 1080), same('THU')],
       preferences: [
-        pref('coach-1', 'weekday', 'must_keep', 'MON'),
-        pref('coach-2', 'weekday', 'must_keep', 'FRI'),
+        pref('coach-1', 'weekday', 'must_keep', 'TUE'),
+        pref('coach-2', 'weekday', 'must_keep', 'THU'),
       ],
       rows: rowsFor(['coach-1', 'coach-2']),
     });
-    expect(run.rehomed.map((entry) => entry.to.weekday)).toEqual(['TUE']);
-    expect(run.findings.some((f) => f.code === PRACTICE_REASON.COACH_PREFERENCE_CONFLICT)).toBe(
-      false
-    );
+    expect(run.rehomed).toEqual([]);
+    expect(run.timeTbd[0].reason).toBe(PRACTICE_TBD_REASON.COACH_PREFERENCE);
+    expect(conflicted(run).map((f) => f.details)).toEqual([
+      expect.objectContaining({
+        dimension: 'weekday',
+        level: 'must_keep',
+        references: ['TUE', 'THU'],
+        assignmentId: 'c-asg-0',
+        teamId: 'T',
+      }),
+    ]);
+  });
+
+  it('control: two must_keep coaches with the same value do not conflict', () => {
+    const run = constructed({
+      inventory: [same('TUE', 1080), same('THU')],
+      preferences: [
+        pref('coach-1', 'weekday', 'must_keep', 'THU'),
+        pref('coach-2', 'weekday', 'must_keep', 'THU'),
+      ],
+      rows: rowsFor(['coach-1', 'coach-2']),
+    });
+    expect(conflicted(run)).toEqual([]);
+    expect(run.rehomed.map((e) => e.to.weekday)).toEqual(['THU']);
+  });
+
+  it('prefer_keep with a value breaches when the candidate differs from the value', () => {
+    const inventory = [same('TUE', 1080), same('THU')];
+    const free = constructed({ inventory });
+    // Unpreferred, the hour shift on Tuesday wins (1061 < 1241).
+    expect(free.rehomed[0].to.weekday).toBe('TUE');
+    const run = constructed({
+      inventory,
+      preferences: [pref('coach-1', 'weekday', 'prefer_keep', 'THU')],
+      rows: rowsFor(['coach-1']),
+    });
+    // Tuesday now breaches THU (1061 + 100) and still beats Thursday (1241).
+    expect(run.rehomed[0].to.weekday).toBe('TUE');
+    expect(run.rehomed[0].counts.coachPreferenceBreached).toBe(1);
+    expect(run.stats.objectiveTotal).toBe(free.stats.objectiveTotal + PLAN_COACH_PREFERENCE_WEIGHT);
+    // The same preference held on the day it is being kept on breaches nothing.
+    const kept = constructed({
+      inventory: [same('THU')],
+      preferences: [pref('coach-1', 'weekday', 'prefer_keep', 'THU')],
+      rows: rowsFor(['coach-1']),
+    });
+    expect(kept.rehomed[0].counts.coachPreferenceBreached).toBeUndefined();
+  });
+
+  it('a null value keeps the series being moved, not any other day', () => {
+    const run = constructed({
+      inventory: [same('TUE', 1080), same('WED', 1080), same('THU')],
+      on: ON_WEDNESDAY,
+      preferences: [pref('coach-1', 'weekday', 'must_keep')],
+      rows: rowsFor(['coach-1']),
+    });
+    expect(run.rehomed.map((e) => e.to.weekday)).toEqual(['WED']);
+    expect(conflicted(run)).toEqual([]);
+  });
+
+  it('mixed coaches, one with a value and one null, resolve as #453 does: differing references conflict', () => {
+    const run = constructed({
+      inventory: [same('TUE', 1080), same('THU')],
+      preferences: [
+        pref('coach-1', 'weekday', 'must_keep', 'THU'),
+        pref('coach-2', 'weekday', 'must_keep'),
+      ],
+      rows: rowsFor(['coach-1', 'coach-2']),
+    });
+    // coach-1 keeps THU, coach-2 keeps the series' TUE: no candidate keeps both.
+    expect(run.timeTbd[0].reason).toBe(PRACTICE_TBD_REASON.COACH_PREFERENCE);
+    expect(conflicted(run).map((f) => f.details.references)).toEqual([['THU', 'TUE']]);
+    // Strictest wins first: a prefer_keep value under a null must_keep is outranked.
+    const outranked = constructed({
+      inventory: [same('TUE', 1080), same('THU')],
+      preferences: [
+        pref('coach-1', 'weekday', 'prefer_keep', 'THU'),
+        pref('coach-2', 'weekday', 'must_keep'),
+      ],
+      rows: rowsFor(['coach-1', 'coach-2']),
+    });
+    expect(outranked.rehomed.map((e) => e.to.weekday)).toEqual(['TUE']);
+    expect(conflicted(outranked)).toEqual([]);
   });
 });
 

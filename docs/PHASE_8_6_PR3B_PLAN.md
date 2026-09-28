@@ -186,9 +186,14 @@ the coach id.**
   lifecycle; task #65 can adopt it.
 
 **Semantics — `practice/coachPreferences.js` (core).**
-- Reference: the team's current series when it is being moved; otherwise the
-  preference `value`; with neither, the dimension does nothing and a finding
-  says so.
+- Reference: the preference `value` when it is set, for a series being moved
+  and an unplaced team alike; with a null `value`, the team's current series
+  ("keep what I have"); with neither, the dimension does nothing and a finding
+  says so. *Amended 2026-09-28 (#464) under the operator ruling "the
+  auto-scheduler and repair should honor the change": an approved value is an
+  admin decision, and #463's approval dialog already judges current series
+  against it.* Two `must_keep` references that differ (values, or a value and a
+  series) are therefore reachable in the repair and conflict as below.
 - Strictest wins across the team's current coaches (`team_coach_assignments`):
   `must_keep` > `prefer_keep` > `dont_care`. Two `must_keep` with different
   values → unsatisfiable.
@@ -276,6 +281,16 @@ in 3b changes the default weights.
 
 Order: **1 → (3 ∥ 6) → 4 → 5 → 7 → 8 → 9 → 10 → 11 → 12**; 2 any time after 1;
 12 any time after 6.
+
+Notes carried forward from PR 4 (#464):
+- **PR 9 must** build the repair's facility graph with location ids (lowercase
+  uuids) as `venueId`. With any non-`dont_care` preference supplied, the repair
+  refuses a graph whose venues are not location ids, and both season-2026 graph
+  builders emit slugs.
+- **PR 9 must** derive the repair's `coachesByTeam` (coach overlaps and coach
+  days) from the same `team_coach_assignments` rows it passes as
+  `teamCoachAssignments` (preferences), on the same date, so the repair has a
+  single coach source. Today the two inputs are not cross-checked.
 
 **Cross-plan sequencing with 8.9** (`docs/PHASE_8_9_PLAN.md`): both touch the
 auto-scheduler Edge Function (3b PR 7, 8.9 PR 6) and `repair.js` (3b PRs 3-5,

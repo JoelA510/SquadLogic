@@ -546,6 +546,48 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save carrying a stale base_fingerprint is refused (40001) and writes nothing"; STATUS=1
       fi
     fi
+    # **8.9 PR 3: venue coordinates (plan §4 W14).** One claim per plant in
+    # prove.sh. The smoke RAISEs on each; these fail if its evidence stops.
+    # (The clear, the boundary controls and the no-direct-write check RAISE in
+    # the same smoke and print as NOTICEs above; they carry no plant, so they
+    # are not claims.)
+    if [ "$id" = "20260930000000" ]; then
+      if grep -qF "a coach and another organisation's admin were each refused 42501, 2 of 2, and the pair is unchanged; that admin set their own venue" /tmp/harness_smoke; then
+        echo "  | (checked) only an admin of the venue's own organisation sets its coordinates: a coach and another organisation's admin are refused"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a coach and another organisation's admin cannot set a venue's coordinates"; STATUS=1
+      fi
+      if grep -qF "the RPC refused both half pairs 22023, 2 of 2" /tmp/harness_smoke; then
+        echo "  | (checked) the coordinates RPC refuses a half pair (22023)"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the coordinates RPC refuses a half pair"; STATUS=1
+      fi
+      if grep -qF "the both-or-neither CHECK refused both half-pair owner writes 23514, 2 of 2" /tmp/harness_smoke; then
+        echo "  | (checked) the both-or-neither CHECK refuses a half-pair coordinates write that bypasses the RPC"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the both-or-neither CHECK refuses a half-pair write"; STATUS=1
+      fi
+      if grep -qF "the RPC refused 6 of 6 out-of-range pairs 22023 (lat 90.01, -90.01, 90.004 and NaN; long 180.01, -180.01)" /tmp/harness_smoke; then
+        echo "  | (checked) the coordinates RPC refuses an out-of-range pair (22023), judged before rounding"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the coordinates RPC refuses an out-of-range pair"; STATUS=1
+      fi
+      if grep -qF "the range CHECK refused both out-of-range owner writes 23514, 2 of 2" /tmp/harness_smoke; then
+        echo "  | (checked) the range CHECK refuses an out-of-range coordinates write that bypasses the RPC"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the range CHECK refuses an out-of-range write"; STATUS=1
+      fi
+      if grep -qF "40.1250/-75.1250 stored as 40.1300/-75.1300 -- rounded to 2 decimals, set_by the admin" /tmp/harness_smoke; then
+        echo "  | (checked) the coordinates RPC stores the pair rounded to 2 decimals"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the coordinates RPC rounds to 2 decimals"; STATUS=1
+      fi
+      if grep -qF "every accepted write audited -- 4 of 4 on the venue, the first with before NULL/NULL and after 40.13/-75.13, the clear with before -90/-180 and after NULL/NULL" /tmp/harness_smoke; then
+        echo "  | (checked) every accepted coordinates write, a clear included, leaves a location.coordinates_set audit row with its before and after"
+      else
+        echo "FAIL smoke ${id}: it passed without proving every coordinates write is audited with before and after"; STATUS=1
+      fi
+    fi
     # **The production RLS drift replay** is the only evidence that the
     # reconcile fixes production rather than a repo chain where it has nothing
     # to do, so each half of it is a claim. The smoke RAISEs on any failed
@@ -861,7 +903,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1331,6 +1373,27 @@ for id in "${REVERT_CHECKS[@]}"; do
     fi
   fi
 
+  # **20260930000000's revert DESTROYS every venue's coordinates**, so its
+  # warning is the check. THREE venues with coordinates across TWO
+  # organisations, plus ONE without: all figures distinct, so counting every
+  # venue, or organisations non-distinctly, prints a different number. The
+  # coordinates are synthetic. Inserted as the table owner: the RPC gates on a
+  # JWT psql_cmd does not carry, and the RPC path is exercised in the smoke.
+  if [ "$id" = "20260930000000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('ec000000-0000-4000-8000-00000000000a','Coordinate Org A','coordinate-org-a'),
+                ('ec000000-0000-4000-8000-00000000000b','Coordinate Org B','coordinate-org-b');
+              INSERT INTO public.locations (organization_id, name, latitude, longitude) VALUES
+                ('ec000000-0000-4000-8000-00000000000a','Coordinate Park 1',40.00,-75.00),
+                ('ec000000-0000-4000-8000-00000000000a','Coordinate Park 2',41.50,-73.50),
+                ('ec000000-0000-4000-8000-00000000000b','Coordinate Park 3',40.00,-75.00),
+                ('ec000000-0000-4000-8000-00000000000b','Coordinate Park 4',NULL,NULL);" \
+       >/tmp/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the four venues the revert check requires were never inserted"
+      dump 10 /tmp/harness_seed; STATUS=1; continue
+    fi
+  fi
+
   if [ "$id" = "20260920000000" ]; then
     if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
                 ('e1111111-1111-1111-1111-11111111111e','Baseline Org A','baseline-org-a'),
@@ -1535,6 +1598,16 @@ NEEDLES
         echo "  | (checked) the writer-v3 revert refused while 2 unresolved practice exceptions existed, then archived all 3 onto their run before dropping the table"
       else
         echo "FAIL revert ${id}: planted 3 exceptions (2 unresolved) on 1 run and the revert did not archive them onto it"
+        STATUS=1
+      fi
+    fi
+    if [ "$id" = "20260930000000" ]; then
+      # The seed planted 3 venues with coordinates across 2 organisations,
+      # and 1 without -- all figures distinct.
+      if grep -q 'this revert DESTROYS the coordinates of 3 venue(s) across 2 organisation(s)' /tmp/harness_rev; then
+        echo "  | (checked) the revert counted the venue coordinates it was about to destroy, and the organisations they span"
+      else
+        echo "FAIL revert ${id}: planted 3 venues with coordinates across 2 organisations (and 1 without) and the revert did not warn with those figures"
         STATUS=1
       fi
     fi

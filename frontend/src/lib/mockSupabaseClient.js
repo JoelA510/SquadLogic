@@ -3160,6 +3160,109 @@ export const mockSupabase = {
       };
     }
 
+    // **admin_set_location_coordinates (20260930000000), mirrored.** Its own
+    // arm because it takes no p_organization_id: the organisation is the
+    // location's, read from the row, exactly as the real RPC reads it. The
+    // refusals keep the real codes and order: 23502, P0002, 42501, then the
+    // half pair and the range (22023, judged before rounding), then the
+    // 2-decimal round and the location.coordinates_set audit row.
+    if (
+      (import.meta.env.DEV || import.meta.env.VITE_USE_MOCK_SUPABASE === 'true') &&
+      name === 'admin_set_location_coordinates'
+    ) {
+      const p = params || {};
+      if (!p.p_location_id) {
+        return { data: null, error: { code: '23502', message: 'p_location_id is required' } };
+      }
+      const location = (db.locations || []).find(
+        (item) => String(item.id) === String(p.p_location_id)
+      );
+      if (!location) {
+        return {
+          data: null,
+          error: { code: 'P0002', message: `location ${p.p_location_id} not found` },
+        };
+      }
+      const session =
+        typeof window !== 'undefined'
+          ? JSON.parse(sessionStorage.getItem('__MOCK_SESSION__') || 'null')
+          : null;
+      const member = (db.organization_members || []).find(
+        (item) =>
+          String(item.organization_id) === String(location.organization_id) &&
+          String(item.profile_id) === String(session?.user?.id)
+      );
+      if (!['admin', 'tenant_admin'].includes(String(member?.role || ''))) {
+        return { data: null, error: { code: '42501', message: 'Admin role is required' } };
+      }
+      const lat = p.p_latitude ?? null;
+      const lng = p.p_longitude ?? null;
+      if ((lat === null) !== (lng === null)) {
+        return {
+          data: null,
+          error: {
+            code: '22023',
+            message: 'latitude and longitude are both given or both NULL (NULL, NULL clears them)',
+          },
+        };
+      }
+      const inRange = (value, bound) =>
+        typeof value === 'number' && Number.isFinite(value) && value >= -bound && value <= bound;
+      if (lat !== null && !(inRange(lat, 90) && inRange(lng, 180))) {
+        return {
+          data: null,
+          error: {
+            code: '22023',
+            message: 'coordinates out of range: latitude must be -90..90 and longitude -180..180',
+          },
+        };
+      }
+      // Postgres round() on numeric: half away from zero, to 2 decimals. The
+      // exponent shift through a string keeps 1.005 from becoming 100.4999...
+      // Anything under 0.005 rounds to 0, and returning early keeps the shift
+      // away from values JavaScript prints in exponent form (1e-7 -> "1e-7e2").
+      const round2 = (value) => {
+        if (value === null) return null;
+        const abs = Math.abs(value);
+        if (abs < 0.005) return 0;
+        return Math.sign(value) * Number(`${Math.round(Number(`${abs}e2`))}e-2`);
+      };
+      const before = { latitude: location.latitude ?? null, longitude: location.longitude ?? null };
+      const now = new Date().toISOString();
+      location.latitude = round2(lat);
+      location.longitude = round2(lng);
+      location.coordinates_set_at = now;
+      location.coordinates_set_by = session?.user?.id ?? null;
+      location.updated_at = now;
+      db.audit_log = db.audit_log || [];
+      db.audit_log.push({
+        id: mockId(),
+        organization_id: location.organization_id,
+        user_id: session?.user?.id,
+        action: 'location.coordinates_set',
+        resource_type: 'location',
+        resource_id: location.id,
+        metadata: {
+          operation: lat === null ? 'cleared' : 'set',
+          before,
+          after: { latitude: location.latitude, longitude: location.longitude },
+        },
+        created_at: now,
+      });
+      saveDB(db);
+      return {
+        data: {
+          id: location.id,
+          organization_id: location.organization_id,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          coordinates_set_at: location.coordinates_set_at,
+          coordinates_set_by: location.coordinates_set_by,
+        },
+        error: null,
+      };
+    }
+
     if (
       (import.meta.env.DEV || import.meta.env.VITE_USE_MOCK_SUPABASE === 'true') &&
       [

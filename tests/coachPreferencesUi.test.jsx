@@ -408,3 +408,197 @@ describe('failure states', () => {
     expect(supabase.rpc).not.toHaveBeenCalled();
   });
 });
+
+/*
+ * Every user-triggered RPC path, enumerated from the `callRpc(` call sites in
+ * `useCoachPracticePreferences.js` (request, reject, approve, approve with
+ * change, set), driven through the real UI with the RPC refusing. Each must
+ * put the database's own message on screen AND claim no success. A catch
+ * that swallows (`void err`) turns its row red.
+ */
+describe('every RPC path surfaces a database refusal', () => {
+  const refuse = (code, message) =>
+    vi
+      .mocked(supabase.rpc)
+      .mockResolvedValue(/** @type {any} */ ({ data: null, error: { code, message } }));
+
+  const PATHS = [
+    {
+      path: 'request (coach)',
+      role: 'coach',
+      code: '42501',
+      message: 'Access denied: planted refusal on request_coach_practice_preference',
+      success: /request sent for admin review/,
+      rpc: 'request_coach_practice_preference',
+      drive: async () => {
+        await screen.findByTestId('coach-preferences-view');
+        await screen.findByText('Pending');
+        fireEvent.click(screen.getByRole('button', { name: 'Request weekday preference' }));
+      },
+      stillThere: () => expect(screen.getAllByText('Pending')).toHaveLength(1),
+    },
+    {
+      path: 'reject',
+      role: 'admin',
+      code: '42501',
+      message: 'Access denied: planted refusal on reject',
+      success: /^Request rejected$/,
+      rpc: 'admin_decide_coach_practice_preference',
+      drive: async () => {
+        await screen.findByTestId('admin-preferences-view');
+        fireEvent.click(screen.getByRole('button', { name: /^Reject/ }));
+      },
+      stillThere: () => expect(screen.getByRole('button', { name: /^Reject/ })).toBeInTheDocument(),
+    },
+    {
+      path: 'approve',
+      role: 'admin',
+      code: '22023',
+      message: 'coach practice preference r1 is stale: planted refusal on approve',
+      success: /^Request approved$/,
+      rpc: 'admin_decide_coach_practice_preference',
+      drive: async () => {
+        await screen.findByTestId('admin-preferences-view');
+        fireEvent.click(
+          screen.getByRole('button', { name: /^Approve Casey Coach's weekday request$/ })
+        );
+        const dialog = await screen.findByRole('dialog', { name: 'Approve request' });
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Approve request' }));
+      },
+      stillThere: () =>
+        expect(screen.getByRole('dialog', { name: 'Approve request' })).toBeInTheDocument(),
+    },
+    {
+      path: 'approve with change',
+      role: 'admin',
+      code: '23514',
+      message: 'new row violates check constraint (planted refusal on approve with change)',
+      success: /^Request approved with change$/,
+      rpc: 'admin_decide_coach_practice_preference',
+      drive: async () => {
+        await screen.findByTestId('admin-preferences-view');
+        fireEvent.click(screen.getByRole('button', { name: /with a change$/ }));
+        const dialog = await screen.findByRole('dialog', { name: 'Approve with change' });
+        fireEvent.change(within(dialog).getByLabelText('Value'), { target: { value: 'THU' } });
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Approve with change' }));
+      },
+      stillThere: () =>
+        expect(screen.getByRole('dialog', { name: 'Approve with change' })).toBeInTheDocument(),
+    },
+    {
+      path: 'set',
+      role: 'admin',
+      code: '42501',
+      message: 'Access denied: planted refusal on admin_set_coach_practice_preference',
+      success: /^Preference set$/,
+      rpc: 'admin_set_coach_practice_preference',
+      drive: async () => {
+        await screen.findByTestId('admin-preferences-view');
+        fireEvent.click(
+          screen.getByRole('button', { name: 'Set a preference for Robin Unassigned' })
+        );
+        const dialog = await screen.findByRole('dialog', { name: 'Set preference directly' });
+        fireEvent.change(within(dialog).getByLabelText('Value'), { target: { value: 'FRI' } });
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Set preference' }));
+      },
+      stillThere: () =>
+        expect(screen.getByRole('dialog', { name: 'Set preference directly' })).toBeInTheDocument(),
+    },
+  ];
+
+  it('the table names every RPC the hook calls and all five user paths', async () => {
+    // Enumerated from the hook's source, not from this table: a new callRpc
+    // site with no row here fails this test.
+    const fs = await import('node:fs');
+    const source = fs.readFileSync(
+      `${process.cwd()}/frontend/src/hooks/useCoachPracticePreferences.js`,
+      'utf8'
+    );
+    const called = new Set([...source.matchAll(/callRpc\('([a-z_]+)'/g)].map((m) => m[1]));
+    expect(called.size).toBe(3);
+    expect(new Set(PATHS.map((entry) => entry.rpc))).toEqual(called);
+    // Five sites: request, reject, approve, approve-with-change, set.
+    expect([...source.matchAll(/callRpc\('/g)]).toHaveLength(PATHS.length);
+  });
+
+  it.each(PATHS.map((entry) => [entry.path, entry]))(
+    '%s: the refusal message is shown and no success is claimed',
+    async (_name, entry) => {
+      refuse(entry.code, entry.message);
+      asRole(entry.role);
+      renderPage();
+      await entry.drive();
+      expect(await screen.findByText(entry.message)).toBeInTheDocument();
+      expect(supabase.rpc).toHaveBeenCalledWith(entry.rpc, expect.any(Object));
+      expect(screen.queryByText(entry.success)).not.toBeInTheDocument();
+      entry.stillThere();
+    }
+  );
+});
+
+describe('every load and compute failure is visible', () => {
+  const approveDialog = async () => {
+    await screen.findByTestId('admin-preferences-view');
+    fireEvent.click(
+      screen.getByRole('button', { name: /^Approve Casey Coach's weekday request$/ })
+    );
+    return screen.findByRole('dialog', { name: 'Approve request' });
+  };
+
+  it('admin: a failed roster read says the re-judge could not run', async () => {
+    tableErrors.team_coach_assignments = {
+      code: '42501',
+      message: 'permission denied for table team_coach_assignments',
+    };
+    asRole('admin');
+    renderPage();
+    const dialog = await approveDialog();
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      'Could not re-judge this decision: permission denied for table team_coach_assignments'
+    );
+    expect(within(dialog).queryByTestId('preview-none')).not.toBeInTheDocument();
+  });
+
+  it('admin: a failed coaches read is a banner, not an empty coach table', async () => {
+    tableErrors.coaches = { code: '42501', message: 'permission denied for table coaches' };
+    asRole('admin');
+    renderPage();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not load coaches or locations: permission denied for table coaches'
+    );
+  });
+
+  it('coach: a failed coach-record read is a banner, not "not linked"', async () => {
+    tableErrors.coaches = { code: '42501', message: 'permission denied for table coaches' };
+    asRole('coach');
+    renderPage();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not load your coach record: permission denied for table coaches'
+    );
+    expect(screen.queryByText(/not linked to a coach record/)).not.toBeInTheDocument();
+  });
+
+  it('admin: a preview core cannot compute says so instead of "None"', async () => {
+    // An approved row core refuses to parse: the re-judge throws.
+    tables.coach_practice_preferences.push({
+      id: 'bad-1',
+      organization_id: ORG,
+      coach_id: C1,
+      dimension: 'start_time',
+      level: 'must_keep',
+      value: 'Funday',
+      status: 'approved',
+      requested_at: '2026-09-01T10:00:00Z',
+      decided_at: '2026-09-02T10:00:00Z',
+      effective_from: '2026-09-02',
+      effective_to: null,
+    });
+    asRole('admin');
+    renderPage();
+    const dialog = await approveDialog();
+    const alert = within(dialog).getByRole('alert');
+    expect(alert).toHaveTextContent('Could not re-judge this decision');
+    expect(alert).toHaveTextContent('Funday');
+    expect(within(dialog).queryByTestId('preview-none')).not.toBeInTheDocument();
+  });
+});

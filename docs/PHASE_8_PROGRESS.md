@@ -6368,3 +6368,94 @@ Operator ruling (2026-09-28): "CI should apply database migrations from now on."
   3. drop the backup table after the first green deploy.
 - **Hazard noted:** an Edge deploy is not held back when the migration deploy
   skips. #461 must keep ordinary saves on the v2 RPC argument set.
+
+## 8.6 PR 3b, PR 2 — #463 merged (aec827c): coach practice-preferences UI
+
+Operator ruling: coaches request; only admins change (approve, reject, approve with a
+changed level or value, or set directly).
+- **Page.** New lazy page `/coaches/practice-preferences` behind the new permissions
+  `REQUEST_PRACTICE_PREFERENCE` and `DECIDE_PRACTICE_PREFERENCE`.
+  - Coach view: approved, pending and history, plus one request form per dimension.
+    It has no decision controls.
+  - Admin view: the pending queue, and the preferences in force per coach.
+- **Re-judge at approval.** For a must_keep, the dialog lists the coach's teams'
+  current series that the decision would make unsatisfiable. It uses core
+  `resolveCoachPreferences` and `judgeCoachPreferenceCandidate`. Teams come from
+  `team_coach_assignments` (the roster), never from the preferences. "None" is
+  explicit.
+- **Writes.** Writes go only through the three #453 RPCs, after checking the payload
+  with the core schema. A missing migration (42P01 / PGRST205 / PGRST202 / 42883)
+  shows a named error state, never an empty list. Production still lacks
+  `20260927000000` until the CI deploy secret is set.
+- **Mock.** The mock mirrors the RPC refusals and supersession. It adds 0 B to the
+  main bundle. The main-entry budget was raised by 350 B, with its rationale
+  recorded.
+- **One BLOCKING round.** Supervisor plant: the approve / approve-with-change / set
+  catch was changed to swallow the error, and all 13 tests stayed green. The fix:
+  - one refusal test per RPC path (request, reject, approve, approve-with-change,
+    set). The path list is checked against the `callRpc` sites parsed from the
+    hook, and a planted sixth site turns it red;
+  - four load and compute failure tests.
+  All nine swallow plants turn red; the supervisor re-ran its own plant and got 3
+  red. 23 UI tests and 7 mock tests.
+- **Deferred:**
+  - no E2E, because no comparable approval flow has one;
+  - the mock's table read does not emulate coach-self RLS;
+  - approve-with-change cannot clear a requested value; the admin must reject and
+    then set.
+
+## 8.6 PR 3b, PR 6 — #461 merged (654deb0): practice writer v3, lock-by-default
+
+This implements operator ruling 2: every assigned practice is locked unless an admin
+accepts an override. The rule is enforced in the RPC as well as the UI.
+`20260929000000_practice_writer_v3_lock_by_default` is a whole-function copy of
+the 20260924 writer (LESSONS #11), and has a verbatim revert.
+- **Locking.** Any save that would delete, re-range or move an existing row refuses
+  with 22023 "assignment X is locked" unless the row is in `unlock`. Unlocks are
+  per row.
+  - `unlock` has its own gate: an org admin with a uid. A service-role caller can
+    therefore never unlock, close or withdraw.
+  - Each unlock writes one `practice.unlock_accepted` audit row with the
+    before-image.
+- **`closes`** ends a row in place and keeps its id.
+- **`practice_exceptions`** holds overrides and TIME TBD windows, never as extra
+  assignment rows.
+  - Rows cannot overlap each other (a btree_gist exclusion constraint).
+  - Deleting their assignment is refused (ON DELETE RESTRICT).
+  - Members read; admins write.
+- **Other additions.**
+  - `base_fingerprint` makes the save refuse a stale plan with 40001.
+  - The new column `assigned_via` records how each row was assigned.
+  - The result reports `teams_time_tbd`, taken from the roster.
+  - `admin_cancel_practice_assignment` withdraws a series' exceptions in the same
+    transaction.
+- **BLOCKING round 1: the new-row rule was wrong, and it came from the supervisor's
+  own plan (§3).** "A new row overlapping any row the team holds, by date range"
+  would have blocked a second weekly practice. 176 of 281 (sheet, team) pairs in
+  the corpus practise on two weekdays. The rule is now a same-weekday time clash.
+  A new row is refused only when:
+  - its date range overlaps a row the team keeps, and
+  - it is on the same `day_of_week`, and
+  - its minutes overlap under a strict comparison.
+  An addition removes nothing, so locked rows stay protected either way. The plan
+  is amended.
+- **Deploy order.** Main's first CI run showed Edge deploys proceed while the
+  migration deploy is skipped. With no `repair` body, the Edge function therefore
+  sends exactly the v2 argument set, so ordinary saves work against a v2 database.
+  A source pin turns red on an unconditional `unlock: []`.
+- **Supervisor plant, round 2.** Flipping the minute comparison to `<=` (back-to-back
+  17:00-18:00 / 18:00-19:00) was uncaught. Case (d) now pins it, and the plant
+  turns only (d) red.
+- **Evidence.**
+  - 13/13 plants plus the boundary plant are red on the real `run.sh`, run on a
+    private harness cluster (`HARNESS_PGUSER`, a new override that avoids killing
+    other clusters).
+  - Anchor pre-flight 164/164.
+  - pgTAP, Build & Test and Deno Mirror are green.
+- **Follow-ups (not reachable until 3b PRs 9/11 write exceptions):**
+  - exception windows are not bounded by the assignment's range, and `closes` does
+    not trim them;
+  - withdrawn exceptions still block team, org, field and slot deletes;
+  - admins can write `practice_exceptions` directly, unaudited.
+- **Consequence.** Deleting a team or org whose rows carry exceptions now fails
+  with 23503.

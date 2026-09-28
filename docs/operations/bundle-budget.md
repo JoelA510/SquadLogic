@@ -74,6 +74,29 @@ Sizes in the `check:bundle` output and in the rationale fields are KiB
 (1024 B); the caps in the config are bytes, so a `250000` cap prints as
 `244.14 KB`.
 
+## Main entry and the mock client
+
+`frontend/src/lib/supabaseClient.js` loads `mockSupabaseClient.js` with a
+dynamic `import()`, so the mock is never in the main entry. It is a lazy
+`mockSupabaseClient-*.js` chunk, and a build made with both
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (and without
+`VITE_USE_MOCK_SUPABASE=true`) does not emit it at all.
+`tests/mockNotInMainBundle.test.js` fails on a static import of the mock or a
+top-level `await` in the switcher. A top-level `await` deadlocks the built app
+in mock mode, because the mock chunk imports shared modules back from the main
+entry chunk.
+
+Measured on a build with no credentials (as CI builds), 2026-09-28:
+
+| File | Before | After |
+| --- | --- | --- |
+| main entry | 137.16 KB (140,447 B) | 114.26 KB (116,999 B) |
+| total first paint (5 files) | 231.21 KB (236,757 B) | 208.31 KB (213,309 B) |
+| `mockSupabaseClient-*.js` (lazy) | in main entry | 22.69 KB (23,239 B), fetched only in mock mode |
+
+The caps are unchanged. The main-entry cap now has ~23 KB of headroom and can
+be tightened per the policy below.
+
 ## Updating the budget — the policy
 
 1. **Loosening is the LAST option.** Default ordering of responses to a violation:

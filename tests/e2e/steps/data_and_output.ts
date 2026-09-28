@@ -1,5 +1,6 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
+import { waitForMockClient } from './mockReady';
 
 const { Given, When, Then } = createBdd();
 
@@ -123,6 +124,7 @@ When('I apply the player CSV import', async ({ page }) => {
 });
 
 Then('the player import should materialize reciprocal buddy pairs', async ({ page }) => {
+  await waitForMockClient(page);
   const buddySummary = await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const latestPlayerJob = [...(db.import_jobs || [])]
@@ -160,6 +162,7 @@ Then('the coach CSV import should update the coach database', async ({ page }) =
   await expect(page.getByRole('button', { name: 'Roll Back Coach Import' })).toBeVisible({
     timeout: 10000,
   });
+  await waitForMockClient(page);
   const coachExists = await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     return (db.coaches || []).some(
@@ -177,6 +180,7 @@ When('I roll back the coach CSV import', async ({ page }) => {
 });
 
 Then('the imported coach should be removed from the coach database', async ({ page }) => {
+  await waitForMockClient(page);
   const coachExists = await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     return (db.coaches || []).some(
@@ -221,6 +225,7 @@ Then(
     await expect(page.getByRole('button', { name: 'Apply Field Import' })).toBeVisible({
       timeout: 10000,
     });
+    await waitForMockClient(page);
     const fieldExists = await page.evaluate(() => {
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
       return (db.fields || []).some((field: { name?: string }) => field.name === 'Imported Field');
@@ -240,6 +245,7 @@ Then('the field slot CSV import should update the facilities database', async ({
   await expect(page.getByRole('button', { name: 'Roll Back Field Import' })).toBeVisible({
     timeout: 10000,
   });
+  await waitForMockClient(page);
   const fieldExists = await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const field = (db.fields || []).find(
@@ -262,6 +268,7 @@ When('I roll back the field slot CSV import', async ({ page }) => {
 });
 
 Then('the imported field slot should be removed from the facilities database', async ({ page }) => {
+  await waitForMockClient(page);
   const fieldExists = await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     return (db.fields || []).some((field: { name?: string }) => field.name === 'Imported Field');
@@ -307,6 +314,7 @@ Then('provide a secure download link or trigger an instant download', async ({ p
 
 Given('the team rosters have been generated and finalized', async ({ page }) => {
   await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';

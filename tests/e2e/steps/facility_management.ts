@@ -1,10 +1,12 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
+import { waitForMockClient } from './mockReady';
 
 const { Given, When, Then } = createBdd();
 
 Given('I have an organization labeled {string}', async ({ page }, orgName: string) => {
   if (page.url() === 'about:blank') await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate((name) => {
     const db = JSON.parse(
       sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
@@ -129,6 +131,7 @@ Then('{string} should not display a subunit indicator', async ({ page }, fieldNa
 Given(
   'a field {string} at {string} exists without subunits',
   async ({ page }, f: string, l: string) => {
+    await waitForMockClient(page);
     await page.evaluate(
       ({ fName, lName }) => {
         const db = JSON.parse(
@@ -262,6 +265,7 @@ Then(
 Given(
   'a field {string} at {string} exists with subunits',
   async ({ page }, f: string, l: string) => {
+    await waitForMockClient(page);
     await page.evaluate(
       ({ fName, lName }) => {
         const db = JSON.parse(
@@ -325,6 +329,7 @@ Then(
 Given(
   'a field {string} at {string} exists and is active',
   async ({ page }, f: string, l: string) => {
+    await waitForMockClient(page);
     await page.evaluate(
       ({ fName, lName }) => {
         const db = JSON.parse(
@@ -370,6 +375,7 @@ Then(
 );
 
 Given('another organization {string} exists', async ({ page }, orgName: string) => {
+  await waitForMockClient(page);
   await page.evaluate((name) => {
     const db = JSON.parse(
       sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
@@ -384,6 +390,7 @@ Given('another organization {string} exists', async ({ page }, orgName: string) 
 Given(
   '{string} has a location {string} with field {string}',
   async ({ page }, orgName: string, locName: string, fieldName: string) => {
+    await waitForMockClient(page);
     await page.evaluate(
       ({ oName, lName, fName }) => {
         const db = JSON.parse(

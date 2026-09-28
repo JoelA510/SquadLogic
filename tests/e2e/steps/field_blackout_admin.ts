@@ -1,5 +1,6 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
+import { waitForMockClient } from './mockReady';
 
 const { Given, When, Then } = createBdd();
 
@@ -24,6 +25,7 @@ type Seed = { fieldName: string; locationName: string; withGame: boolean };
 
 async function seedGround(page, { fieldName, locationName, withGame }: Seed) {
   if (page.url() === 'about:blank') await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(
     ({ fName, lName, game, date }) => {
       const db = JSON.parse(

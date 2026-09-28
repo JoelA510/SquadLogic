@@ -1,5 +1,6 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, Page } from '@playwright/test';
+import { waitForMockClient } from './mockReady';
 
 const { Given, When, Then } = createBdd();
 
@@ -100,6 +101,7 @@ When('I navigate to the Practice Scheduling page', async ({ page }) => {
   // re-dated, and the page reloaded to read it.
   await page.goto('/schedule/practice');
   await page.waitForLoadState('networkidle');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     // Seeded through the sanctioned producer (`window.__saveMockDB__`, which is
     // `saveDB`), never by writing `__MOCK_DB__` directly: see
@@ -259,6 +261,7 @@ Given('the auto-scheduler service is unavailable', async ({ page }) => {
 
   // Ensure a completed team run exists so the Auto-Generate button is enabled
   // (the button is disabled when !team?.teams?.length)
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -308,6 +311,7 @@ Given(
   'team {string} has a locked assignment to slot {string}',
   async ({ page }, teamId: string, slotId: string) => {
     // Inject locked assignment into mock data via sessionStorage
+    await waitForMockClient(page);
     await page.evaluate(
       ([tId, sId]) => {
         const dbKey = '__MOCK_DB__';

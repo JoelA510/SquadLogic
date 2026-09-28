@@ -1,5 +1,6 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
+import { waitForMockClient } from './mockReady';
 
 const { Given: _Given, When, Then } = createBdd();
 
@@ -94,6 +95,7 @@ Then(
 // --- Score Entry RBAC ---
 When('I view the {string} section', async ({ page }, sectionName: string) => {
   // CRITICAL FIX: Seed games so the score entry fields appear
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';

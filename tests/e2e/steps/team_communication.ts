@@ -1,5 +1,6 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
+import { waitForMockClient } from './mockReady';
 
 const { Given, When, Then } = createBdd();
 
@@ -38,6 +39,7 @@ Then('I should be able to see a history of all sent messages', async ({ page }) 
 Given(
   'my child {string} is on the {string} team',
   async ({ page }, childName: string, teamName: string) => {
+    await waitForMockClient(page);
     await page.evaluate(
       ({ child, team }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -96,6 +98,7 @@ Given(
 Given(
   'my child {string} is also on the {string} team',
   async ({ page }, childName: string, teamName: string) => {
+    await waitForMockClient(page);
     await page.evaluate(
       ({ child, team }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -147,6 +150,7 @@ Given(
 );
 
 Given('there is an upcoming practice on {string}', async ({ page }, day: string) => {
+  await waitForMockClient(page);
   await page.evaluate((d) => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     db.practice_assignments = db.practice_assignments || [];
@@ -246,6 +250,7 @@ Then(
 Then(
   'the database should have two distinct RSVP records for this practice occurrence',
   async ({ page }) => {
+    await waitForMockClient(page);
     const rsvps = await page.evaluate(() => {
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
       return db.event_rsvps || [];
@@ -255,6 +260,7 @@ Then(
 );
 
 Then("the RSVP timestamps should align with the league's official timezone", async ({ page }) => {
+  await waitForMockClient(page);
   const rsvps = await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     return db.event_rsvps || [];
@@ -305,6 +311,7 @@ Then(
 Then(
   'the message should be broadcasted via Supabase Realtime to other connected clients',
   async ({ page }) => {
+    await waitForMockClient(page);
     const messages = await page.evaluate(() => {
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
       return db.team_messages || [];

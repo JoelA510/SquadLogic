@@ -12,8 +12,9 @@ import GameConflictBanner from '../components/scheduling/GameConflictBanner.jsx'
 import { findBlackoutConflicts } from '@squadlogic/core/fieldAdmin/index.js';
 import { useFieldClosures } from '../hooks/useFieldClosures.js';
 import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
-import { requireZonedInstant } from '@squadlogic/core/timing/index.js';
+import { requireZonedInstant, seasonCalendarDate } from '@squadlogic/core/timing/index.js';
 import { buildPracticeRunResults } from '@squadlogic/core/utils/practiceRunResults.js';
+import { practiceRangeBounds } from '@squadlogic/core/utils/practiceOccurrences.js';
 import {
   describeTimingFindings,
   describeUnplaceableSlots,
@@ -329,12 +330,58 @@ function buildDisplayAssignment({ assignment, index, runId, teamById, slotById }
   };
 }
 
-function toPersistenceAssignment(assignment) {
+/**
+ * One staged assignment as the writer and the auto-scheduler cross-check see
+ * it (8.6 PR 3b plan §3). A persisted row keeps its own `id`, its exact
+ * `effectiveDateRange` (so an ordinary save re-sends the row's key unchanged
+ * and the v3 lock has nothing to refuse) and its `assignedVia` provenance. A
+ * synthetic review id is not an assignment id and is never sent as one.
+ *
+ * `effectiveDateRange` and `assignedVia` are the stored values, verbatim --
+ * the cross-check compares them with the rows the function loads. The
+ * inclusive `effectiveFrom`/`effectiveUntil` the payload builder reads come
+ * from core `practiceRangeBounds` (Postgres returns `[from,until+1)`); a range
+ * it cannot bound (open-ended, empty) leaves them unset, and the v3 writer
+ * then refuses the save rather than let the row be silently re-ranged.
+ */
+export function toPersistenceAssignment(assignment) {
+  const effectiveDateRange =
+    assignment.effectiveDateRange ?? assignment.effective_date_range ?? null;
+  const bounds = practiceRangeBounds(effectiveDateRange);
   return {
+    id: assignment.persisted === false ? null : (assignment.id ?? null),
     teamId: getAssignmentTeamId(assignment),
     slotId: getAssignmentSlotId(assignment),
     source: normalizeAssignmentSource(assignment.source),
+    effectiveDateRange,
+    assignedVia: assignment.assignedVia ?? assignment.assigned_via ?? null,
+    effectiveFrom: bounds?.first,
+    effectiveUntil: bounds?.last,
   };
+}
+
+/**
+ * Where a NEW placement starts: max(slot.validFrom, today on the season's
+ * clock). A practice placed mid-season does not claim the weeks already past.
+ * `seasonToday` is the season's date, never the host's (`seasonCalendarDate`).
+ *
+ * @param {{ effectiveFrom: string, effectiveUntil: string }} slot
+ * @param {string} seasonToday - `YYYY-MM-DD`
+ * @returns {string} the placement's `effectiveDateRange`, inclusive
+ */
+export function newPlacementRange(slot, seasonToday) {
+  const from = seasonToday > slot.effectiveFrom ? seasonToday : slot.effectiveFrom;
+  return `[${from},${slot.effectiveUntil}]`;
+}
+
+/**
+ * What the auto-scheduler's cross-check compares, and nothing else: every
+ * field sent is one the function reads.
+ */
+function toLockedAssignment(assignment) {
+  const { id, teamId, slotId, effectiveDateRange, assignedVia } =
+    toPersistenceAssignment(assignment);
+  return { id, teamId, slotId, effectiveDateRange, assignedVia };
 }
 
 export default function PracticeSchedulingPage() {
@@ -507,15 +554,60 @@ export default function PracticeSchedulingPage() {
     const resultRunId = autoScheduler.result.runId ?? 'latest-auto-scheduler-result';
     if (reviewedSchedulerRunId === resultRunId) return;
 
-    const nextAssignments = (autoScheduler.result.assignments ?? []).map((assignment, index) =>
-      buildDisplayAssignment({
-        assignment,
-        index,
-        runId: autoScheduler.result.runId,
-        teamById,
-        slotById,
-      })
-    );
+    // The lock (8.6 PR 3b plan §3): the function returns NEW placements only,
+    // for teams with no current row. The review is the persisted schedule,
+    // unchanged, plus those placements -- which is also the payload an
+    // ordinary save must carry for the v3 writer to have nothing to refuse.
+    const placements = autoScheduler.result.assignments ?? [];
+    const lockedTeamIds = new Set(assignments.map(getAssignmentTeamId));
+    const clash = placements.find((placement) => lockedTeamIds.has(placement.teamId));
+    const seasonToday = seasonCalendarDate(Date.now(), timezone);
+    // The function has no date model, so it can place a team in a slot whose
+    // window has already ended. That placement has no dates left to hold.
+    const ended = seasonToday
+      ? placements.filter((placement) => {
+          const slot = slotById.get(placement.slotId);
+          return Boolean(slot) && slot.effectiveUntil < seasonToday;
+        })
+      : [];
+    const refusal = clash
+      ? `The scheduler proposed a practice for team ${clash.teamId}, which already has one. ` +
+        'Assigned practices are locked, so nothing was staged.'
+      : !seasonToday
+        ? "Today's date on the season's clock is unknown, so new practices cannot be dated."
+        : ended.length > 0
+          ? `The scheduler placed ${ended.map((p) => p.teamId).join(', ')} in a practice slot ` +
+            `whose dates end before today (${seasonToday}), so nothing was staged.`
+          : null;
+    if (refusal) {
+      setReviewAssignments(null);
+      setApplyStatus('error');
+      setApplyError(refusal);
+      // A clock still loading is not a verdict on this run: leave it
+      // unreviewed so it is staged once the season's settings arrive.
+      if (seasonToday) setReviewedSchedulerRunId(resultRunId);
+      return;
+    }
+
+    const nextAssignments = [
+      ...assignments.map((assignment, index) =>
+        buildDisplayAssignment({ assignment, index, runId: null, teamById, slotById })
+      ),
+      ...placements.map((assignment, index) => {
+        const slot = slotById.get(assignment.slotId);
+        return buildDisplayAssignment({
+          // A slot this page has not loaded keeps the display's own fallback;
+          // Apply then refuses it by name (`missingSlot`).
+          assignment: slot
+            ? { ...assignment, effectiveDateRange: newPlacementRange(slot, seasonToday) }
+            : assignment,
+          index,
+          runId: autoScheduler.result.runId,
+          teamById,
+          slotById,
+        });
+      }),
+    ];
 
     setReviewAssignments(nextAssignments);
     setApplyStatus('review');
@@ -523,24 +615,31 @@ export default function PracticeSchedulingPage() {
     setStatusMessage(null);
     setTeamWarnings([]);
     setReviewedSchedulerRunId(resultRunId);
-  }, [autoScheduler.result, autoScheduler.status, reviewedSchedulerRunId, slotById, teamById]);
+  }, [
+    assignments,
+    autoScheduler.result,
+    autoScheduler.status,
+    reviewedSchedulerRunId,
+    slotById,
+    teamById,
+    timezone,
+  ]);
 
   const localAssignments = reviewAssignments ?? assignments;
   const isColdStart = !schedulerTeams.length;
   const schoolDayEnd =
     currentSeasonSetting?.school_day_end ?? currentSeasonSetting?.schoolDayEnd ?? undefined;
 
+  // Every PERSISTED row, whatever its source: all of them are locked (ruling
+  // 2). The function loads the rows itself and uses this list only as a
+  // cross-check, refusing the run on any mismatch -- so it is the persisted
+  // schedule, not the staged review.
   const lockedAssignments = useMemo(
     () =>
-      localAssignments
-        .map(toPersistenceAssignment)
-        .filter(
-          (assignment) =>
-            assignment.teamId &&
-            assignment.slotId &&
-            normalizeAssignmentSource(assignment.source) === 'manual'
-        ),
-    [localAssignments]
+      assignments
+        .filter((assignment) => assignment.persisted !== false && assignment.id)
+        .map(toLockedAssignment),
+    [assignments]
   );
 
   const overrideBaseSlots = useMemo(() => {

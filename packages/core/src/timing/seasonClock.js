@@ -488,3 +488,23 @@ export function anchorToSeasonClock(value, timeZone) {
   const { date, time } = splitNaiveDateTime(/** @type {string} */ (value));
   return resolveZonedInstant({ date, time, timeZone });
 }
+
+/**
+ * The calendar date an instant falls on, read on the season's clock.
+ *
+ * "Today" for a club is the season's date, not the host's: a UTC runtime reads
+ * a Los Angeles evening as tomorrow for the last 7-8 hours of each local day
+ * (`frontend/src/utils/today.js` names that seam). The caller supplies the
+ * instant -- this module still constructs no "now" -- and gets `null`, never a
+ * guessed date, when the zone is missing or the runtime rejects it.
+ *
+ * @param {number} epochMs - the instant, e.g. `Date.now()` at the call site
+ * @param {string|null|undefined} timeZone - `season_settings.timezone`
+ * @returns {string|null} `YYYY-MM-DD`, or `null` when no clock is available
+ */
+export function seasonCalendarDate(epochMs, timeZone) {
+  if (!timeZone || typeof epochMs !== 'number' || !Number.isFinite(epochMs)) return null;
+  const formatter = formatterFor(timeZone);
+  if (!formatter) return null;
+  return new Date(wallMsIn(formatter, epochMs)).toISOString().slice(0, 10);
+}

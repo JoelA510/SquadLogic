@@ -54,20 +54,14 @@ When('I navigate to the Practice Scheduling page', async ({ page }) => {
       const lockedAssignments = Array.isArray(requestBody.lockedAssignments)
         ? requestBody.lockedAssignments
         : [];
-      const lockedByTeam = new Map(
-        lockedAssignments.map((assignment: { teamId: string; slotId: string }) => [
-          assignment.teamId,
-          assignment.slotId,
-        ])
+      // The 8.6 PR 3b PR 7 contract: every persisted row is locked, and the
+      // function returns placements ONLY for teams with no row. The page keeps
+      // its own rows and refuses a placement for a team that already has one.
+      const lockedTeams = new Set(
+        lockedAssignments.map((assignment: { teamId: string }) => assignment.teamId)
       );
-      const assignments = MOCK_AUTO_SCHEDULER_RESPONSE.assignments.map((assignment) =>
-        lockedByTeam.has(assignment.teamId)
-          ? {
-              ...assignment,
-              slotId: lockedByTeam.get(assignment.teamId),
-              source: 'locked',
-            }
-          : assignment
+      const assignments = MOCK_AUTO_SCHEDULER_RESPONSE.assignments.filter(
+        (assignment) => !lockedTeams.has(assignment.teamId)
       );
       await route.fulfill({
         status: 200,

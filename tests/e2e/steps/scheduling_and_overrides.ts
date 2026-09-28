@@ -20,11 +20,10 @@ async function mockPracticeSchedulerRoutes(page: Page) {
     const lockedAssignments = Array.isArray(requestBody.lockedAssignments)
       ? requestBody.lockedAssignments
       : [];
-    const lockedByTeam = new Map(
-      lockedAssignments.map((assignment: { teamId: string; slotId: string }) => [
-        assignment.teamId,
-        assignment.slotId,
-      ])
+    // The 8.6 PR 3b PR 7 contract: a team with a persisted row is locked and
+    // gets no placement; the page keeps its own row unchanged.
+    const lockedTeams = new Set(
+      lockedAssignments.map((assignment: { teamId: string }) => assignment.teamId)
     );
 
     await route.fulfill({
@@ -32,13 +31,9 @@ async function mockPracticeSchedulerRoutes(page: Page) {
       contentType: 'application/json',
       body: JSON.stringify({
         runId: '00000000-0000-4000-8000-000000000322',
-        assignments: [
-          {
-            teamId: 'team-a',
-            slotId: lockedByTeam.get('team-a') || 'slot-1',
-            source: lockedByTeam.has('team-a') ? 'locked' : 'auto',
-          },
-        ],
+        assignments: lockedTeams.has('team-a')
+          ? []
+          : [{ teamId: 'team-a', slotId: 'slot-1', source: 'auto' }],
         unassigned: [],
         evaluation: { overallScore: 95 },
         optimization: {

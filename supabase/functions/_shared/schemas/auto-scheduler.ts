@@ -55,11 +55,23 @@ export const AutoSchedulerInputSchema = z.object({
     )
     .optional()
     .default({}),
+  /**
+   * The page's view of the season's current practice assignments -- a
+   * CROSS-CHECK only (8.6 PR 3b plan §3). The function loads the rows itself,
+   * as the caller through RLS, locks every one, and refuses the run when this
+   * list disagrees with them in either direction. Every field here is
+   * compared (`crossCheckLockedAssignments`); a row without an `id` is itself
+   * a mismatch, since nothing can be matched without it.
+   */
   lockedAssignments: z
     .array(
       z.object({
+        id: z.string().nullable().optional(),
         teamId: z.string(),
-        slotId: z.string(),
+        // A stored row may have no slot; it is still locked and still compared.
+        slotId: z.string().nullable(),
+        effectiveDateRange: z.string().nullable().optional(),
+        assignedVia: z.string().nullable().optional(),
       })
     )
     .optional()

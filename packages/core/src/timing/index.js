@@ -68,6 +68,7 @@ export {
   isZonelessTimestamp,
   requireZonedInstant,
   resolveZonedInstant,
+  seasonCalendarDate,
 } from './seasonClock.js';
 
 export { SUNSET_ZENITH_DEGREES, sunsetEnforcementMinutes, sunsetOnDate } from './solar.js';

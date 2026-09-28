@@ -118,6 +118,39 @@
  * `recommendationSearch` says which. Declines and the re-offer chain are
  * `practice/recommendations.js`.
  *
+ * ## Daylight: a candidate gate (8.9 PR 7)
+ *
+ * Given a daylight provider (`calendar`, an `availability/calendar.js`
+ * calendar), every re-home candidate -- tier 1 and tier 2 alike -- is judged
+ * before it is priced. Its occurrences over the series-window (its weekday,
+ * every week, `[from, until]`) go to `practice/daylight.js`
+ * `evaluatePracticeDaylight()`, the one evaluator, so the contract is its own:
+ * lit ground is exempt, undeclared lighting is unlit (D5), a practice ending
+ * exactly at `floor(sunset)` is legal (margin 0; D2, D6), and an unknown
+ * sunset is never allowed (D4). A candidate with any occurrence past sunset
+ * is refused `past-sunset`; else one with any unknown date is refused
+ * `sunset-unknown`. The refusal is counted and listed in `daylight`, and named
+ * per series by `PRACTICE_REPAIR_CANDIDATES_PAST_SUNSET` /
+ * `PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN`.
+ *
+ * - **Refused, not truncated.** D8's truncation (legal early, TIME TBD from
+ *   the first illegal date) is the Edge post-pass's (8.9 PR 6). Here one
+ *   series-window gets exactly one recommendation (3b plan §5, decision 5),
+ *   and a candidate legal for part of the window is not a placement for it.
+ * - **The gate runs before `must_keep`.** A candidate past sunset is not
+ *   legal, so a series whose venue had frozen-free candidates and every one
+ *   was refused by daylight is TIME TBD `past-sunset` (or `sunset-unknown`
+ *   when any refusal was unknown: coordinates could make one legal), never
+ *   `coach-preference` and never dropped.
+ * - **No calendar, no gate.** Without one nothing is judged against sunset,
+ *   and `PRACTICE_REPAIR_DAYLIGHT_UNCHECKED` says so on the result. With a
+ *   calendar on which every candidate is lit, the result is identical to one
+ *   without, less that finding and the `daylight` block
+ *   (`tests/practiceRepairDaylight.test.js`).
+ *
+ * Enforced in this module; **not live** until 8.6 3b PRs 9-11 wire the
+ * repair, like everything else here.
+ *
  * ## Minimality, and when it is claimed
  *
  * The default strategy is an exact branch-and-bound over the displaced series,
@@ -164,6 +197,8 @@ import { PRACTICE_REASON, derivePracticeStatus, makePracticeFinding } from './re
 import { CHANGE_ORIGIN } from '../resolve/schemas.js';
 import { PracticeRepairInputSchema } from './schemas.js';
 import { buildPracticeSlotSet, firstWeekdayOnOrAfter } from './slots.js';
+import { PRACTICE_SUNSET_MARGIN_MINUTES, evaluatePracticeDaylight } from './daylight.js';
+import { AVAILABILITY_REASON } from '../availability/reasonCodes.js';
 
 /** Why a displaced series is TIME TBD. */
 export const PRACTICE_TBD_REASON = Object.freeze({
@@ -188,6 +223,18 @@ export const PRACTICE_TBD_REASON = Object.freeze({
    * and admissible for it afterwards (plan §2, `practice/recommendations.js`).
    */
   DECLINED: 'declined',
+  /**
+   * It had frozen-free candidates at its venue, and the daylight gate refused
+   * every one: each runs past `floor(sunset)` on unlit or undeclared ground on
+   * some date of its window (8.9 PR 7).
+   */
+  PAST_SUNSET: 'past-sunset',
+  /**
+   * As `PAST_SUNSET`, but at least one refusal was an unknown sunset (no table
+   * record, no coordinates): never read as allowed (D4), and coordinates
+   * could make a candidate legal.
+   */
+  SUNSET_UNKNOWN: 'sunset-unknown',
 });
 
 const DEFAULT_SEARCH_NODE_LIMIT = 200000;
@@ -300,6 +347,113 @@ export function buildPracticeRepairContext(input) {
       );
     }
   }
+
+  /* -- the daylight gate (8.9 PR 7) ---------------------------------------- */
+  // Shape-checked like `graph`; the raw calendar is what the evaluator reads.
+  const calendar = parsed.calendar === undefined ? null : input.calendar;
+  if (calendar === null) {
+    findings.push(
+      makePracticeFinding(
+        PRACTICE_REASON.REPAIR_DAYLIGHT_UNCHECKED,
+        'No daylight calendar was supplied, so no re-home candidate was judged against sunset. This is not a daylight pass.',
+        { wiredBy: '8.6 PR 3b' }
+      )
+    );
+  }
+  /** What the gate judged, refused and why: the caller's meta-assertion. */
+  const daylight = {
+    checked: calendar !== null,
+    marginMinutes: PRACTICE_SUNSET_MARGIN_MINUTES,
+    candidatesJudged: 0,
+    occurrencesExamined: 0,
+    candidatesLitExempt: 0,
+    candidatesWithNoOccurrence: 0,
+    candidatesWithinDaylight: 0,
+    candidatesRefusedPastSunset: 0,
+    candidatesRefusedSunsetUnknown: 0,
+    // The evaluator's gaps, kept visible rather than read as a pass: judgements
+    // resting on undeclared lighting (D5), and occurrence-dates on which the
+    // table and a venue's coordinates disagree (the table was applied, D10).
+    candidatesOnUndeclaredLighting: 0,
+    sunsetSourcesDisagree: 0,
+    refused: [],
+  };
+  /** Verdicts by shape and window: they do not depend on the team. */
+  const daylightVerdicts = new Map();
+  /**
+   * Judge `shape` over `series`' window with the one evaluator. Returns the
+   * refusal, or `null` when every occurrence is lit or ends by the limit.
+   */
+  const judgeDaylight = (series, shape) => {
+    const key = `${shapeKey(shape)}|${series.from}|${series.until}`;
+    let verdict = daylightVerdicts.get(key);
+    if (verdict === undefined) {
+      /** @type {import('./types.js').PracticeOccurrence[]} */
+      const occurrences = [];
+      const lastDay = isoDayNumber(series.until);
+      for (
+        let day = isoDayNumber(firstWeekdayOnOrAfter(series.from, shape.weekday));
+        day <= lastDay;
+        day += 7
+      ) {
+        const date = isoDateOfDayNumber(day);
+        occurrences.push({
+          id: `${key}@${date}`,
+          slotId: shapeKey(shape),
+          surfaceId: shape.surfaceId,
+          date,
+          startMinutes: shape.startMinutes,
+          endMinutes: shape.startMinutes + shape.durationMinutes,
+          format: null,
+          label: null,
+          revisionId: null,
+          teamIds: [],
+          exceptionIds: [],
+        });
+      }
+      const judged = evaluatePracticeDaylight({ occurrences, graph, calendar });
+      // Occurrences are in date order, so the first of each list is the earliest.
+      const past = judged.flagged[0] ?? null;
+      const unknown = judged.unknown[0] ?? null;
+      const first = past ?? unknown;
+      verdict = {
+        occurrences: occurrences.length,
+        lit: judged.meta.litPracticeOccurrencesExempt > 0,
+        undeclared: judged.meta.undeclaredLightingOccurrences > 0,
+        disagreements: judged.findings.filter(
+          (finding) => finding.code === AVAILABILITY_REASON.SUNSET_SOURCES_DISAGREE
+        ).length,
+        refusal:
+          first === null
+            ? null
+            : {
+                reason:
+                  past !== null
+                    ? PRACTICE_TBD_REASON.PAST_SUNSET
+                    : PRACTICE_TBD_REASON.SUNSET_UNKNOWN,
+                date: first.date,
+                endMinutes: first.endMinutes,
+                sunsetMinutes: first.sunsetMinutes,
+                limitMinutes: first.limitMinutes,
+                sunsetSource: first.sunsetSource,
+                datesPastSunset: judged.flagged.length,
+                datesSunsetUnknown: judged.unknown.length,
+              },
+      };
+      daylightVerdicts.set(key, verdict);
+    }
+    daylight.candidatesJudged += 1;
+    daylight.occurrencesExamined += verdict.occurrences;
+    if (verdict.undeclared) daylight.candidatesOnUndeclaredLighting += 1;
+    daylight.sunsetSourcesDisagree += verdict.disagreements;
+    if (verdict.occurrences === 0) daylight.candidatesWithNoOccurrence += 1;
+    else if (verdict.lit) daylight.candidatesLitExempt += 1;
+    else if (verdict.refusal === null) daylight.candidatesWithinDaylight += 1;
+    else if (verdict.refusal.reason === PRACTICE_TBD_REASON.PAST_SUNSET) {
+      daylight.candidatesRefusedPastSunset += 1;
+    } else daylight.candidatesRefusedSunsetUnknown += 1;
+    return verdict.refusal;
+  };
 
   /* -- the lost ground ---------------------------------------------------- */
   const lostSurfaceIds = new Set();
@@ -540,11 +694,34 @@ export function buildPracticeRepairContext(input) {
     // dimensions it filtered on: what tells COACH_PREFERENCE from no slot at all.
     let sameBeforeMustKeep = 0;
     const mustKeepViolated = new Set();
+    // Frozen-free same-venue candidates before the daylight gate, and what it
+    // refused: what tells PAST_SUNSET / SUNSET_UNKNOWN from no slot at all.
+    let sameBeforeDaylight = 0;
+    const sameDaylightRefused = { pastSunset: 0, sunsetUnknown: 0 };
+    const refusedHere = { pastSunset: 0, sunsetUnknown: 0 };
     for (const shape of inventoryShapes) {
       if (shape.durationMinutes !== series.durationMinutes) continue;
       const overlaps = againstFrozen(series, shape);
       if (overlaps === null) continue;
       const sameVenue = venueOf(shape.surfaceId) === venueOf(series.surfaceId);
+      if (calendar !== null) {
+        if (sameVenue) sameBeforeDaylight += 1;
+        const refusal = judgeDaylight(series, shape);
+        if (refusal !== null) {
+          const kind =
+            refusal.reason === PRACTICE_TBD_REASON.PAST_SUNSET ? 'pastSunset' : 'sunsetUnknown';
+          refusedHere[kind] += 1;
+          if (sameVenue) sameDaylightRefused[kind] += 1;
+          daylight.refused.push({
+            assignmentId: series.assignmentId,
+            teamId: series.teamId,
+            tier: sameVenue ? 'same-venue' : 'cross-venue',
+            to: { ...shape },
+            ...refusal,
+          });
+          continue;
+        }
+      }
       let breaches = 0;
       if (preferences !== null) {
         if (sameVenue) sameBeforeMustKeep += 1;
@@ -586,6 +763,36 @@ export function buildPracticeRepairContext(input) {
       (sameVenue ? same : cross).push(entry);
     }
     const order = (a, b) => a.cost - b.cost || shapeKey(a.shape).localeCompare(shapeKey(b.shape));
+    if (refusedHere.pastSunset > 0) {
+      findings.push(
+        makePracticeFinding(
+          PRACTICE_REASON.REPAIR_CANDIDATES_PAST_SUNSET,
+          `${series.teamId}: ${refusedHere.pastSunset} re-home candidate(s) refused: each ends past sunset on unlit or undeclared ground on some date from ${series.from} until ${series.until}.`,
+          {
+            assignmentId: series.assignmentId,
+            teamId: series.teamId,
+            refused: refusedHere.pastSunset,
+            sameVenue: sameDaylightRefused.pastSunset,
+          }
+        )
+      );
+    }
+    if (refusedHere.sunsetUnknown > 0) {
+      findings.push(
+        makePracticeFinding(
+          PRACTICE_REASON.REPAIR_CANDIDATES_SUNSET_UNKNOWN,
+          `${series.teamId}: ${refusedHere.sunsetUnknown} re-home candidate(s) refused: the sunset on unlit or undeclared ground is unknown on some date from ${series.from} until ${series.until} (no table record, no venue coordinates), so they cannot be shown to end by it.`,
+          {
+            assignmentId: series.assignmentId,
+            teamId: series.teamId,
+            refused: refusedHere.sunsetUnknown,
+            sameVenue: sameDaylightRefused.sunsetUnknown,
+          }
+        )
+      );
+    }
+    const daylightRefusedAtVenue =
+      sameDaylightRefused.pastSunset + sameDaylightRefused.sunsetUnknown;
     return {
       series,
       same: same.sort(order),
@@ -593,6 +800,9 @@ export function buildPracticeRepairContext(input) {
       // Legal at its venue before the filter, and nothing left after it.
       mustKeepEmptied: sameBeforeMustKeep > 0 && same.length === 0,
       mustKeepViolated: [...mustKeepViolated].sort(),
+      // Frozen-free at its venue, and every one refused by daylight.
+      daylightEmptied: sameBeforeDaylight > 0 && daylightRefusedAtVenue === sameBeforeDaylight,
+      daylightRefused: sameDaylightRefused,
     };
   });
 
@@ -843,6 +1053,7 @@ export function buildPracticeRepairContext(input) {
     baseCoachDays,
     timeChangeOf,
     jointSearch,
+    daylight,
   };
 }
 
@@ -946,6 +1157,7 @@ export function repairPracticeLoss(input) {
     baseCoachDays,
     timeChangeOf,
     jointSearch,
+    daylight,
   } = context;
 
   // Tier 1: the exact same-venue search (plan §2), unchanged.
@@ -1098,9 +1310,13 @@ export function repairPracticeLoss(input) {
       );
       let reason;
       if (entry.same.length === 0) {
-        reason = entry.mustKeepEmptied
-          ? PRACTICE_TBD_REASON.COACH_PREFERENCE
-          : PRACTICE_TBD_REASON.NO_LEGAL_SLOT_AT_VENUE;
+        if (entry.mustKeepEmptied) reason = PRACTICE_TBD_REASON.COACH_PREFERENCE;
+        else if (entry.daylightEmptied) {
+          reason =
+            entry.daylightRefused.sunsetUnknown > 0
+              ? PRACTICE_TBD_REASON.SUNSET_UNKNOWN
+              : PRACTICE_TBD_REASON.PAST_SUNSET;
+        } else reason = PRACTICE_TBD_REASON.NO_LEGAL_SLOT_AT_VENUE;
       } else if (freeNow.length > 0) {
         reason =
           budget !== null
@@ -1123,6 +1339,10 @@ export function repairPracticeLoss(input) {
         lossReason,
         ...(reason === PRACTICE_TBD_REASON.COACH_PREFERENCE
           ? { mustKeepDimensions: entry.mustKeepViolated }
+          : {}),
+        ...(reason === PRACTICE_TBD_REASON.PAST_SUNSET ||
+        reason === PRACTICE_TBD_REASON.SUNSET_UNKNOWN
+          ? { daylightRefused: { ...entry.daylightRefused } }
           : {}),
         sameVenueCandidates: entry.same.length,
       });
@@ -1327,6 +1547,7 @@ export function repairPracticeLoss(input) {
       nodeLimit,
       provenOptimal: strategy === 'exact' && tier2.exhausted,
     },
+    daylight: { ...daylight, refused: [...daylight.refused] },
   };
 }
 

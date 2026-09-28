@@ -297,6 +297,18 @@ Notes carried forward from PR 4 (#464):
   `teamCoachAssignments` (preferences), on the same date, so the repair has a
   single coach source. Today the two inputs are not cross-checked.
 
+Notes carried forward from 8.9 PR 7 (the repair's daylight gate):
+- **PR 9 must** pass the repair a daylight `calendar` (the season's sunset
+  table, `lighting_available` and location coordinates, on the season zone).
+  Without one the gate judges nothing and says so only with
+  `PRACTICE_REPAIR_DAYLIGHT_UNCHECKED`, which is `info` while the repair is
+  unwired; **PR 10**, which flips the unwired pin, raises it to `compromise`.
+- **Before PR 9 persists a repair**, the `practice_exceptions.tbd_reason`
+  CHECK and the `practice-persistence` Edge enum must admit the gate's two
+  reasons, `past-sunset` and `sunset-unknown` (a migration; 8.9 PR 7 adds
+  none). `tests/practiceWriterV3.test.js` names the pair as pending and goes
+  red when that lands.
+
 **Cross-plan sequencing with 8.9** (`docs/PHASE_8_9_PLAN.md`): both touch the
 auto-scheduler Edge Function (3b PR 7, 8.9 PR 6) and `repair.js` (3b PRs 3-5,
 8.9 PR 7). Land 3b PR 7 before 8.9 PR 6, and 3b PR 5 before 8.9 PR 7. Every new

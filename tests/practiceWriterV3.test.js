@@ -51,9 +51,17 @@ describe('practice_exceptions.tbd_reason CHECK', () => {
     const core = /** @type {string[]} */ (Object.values(PRACTICE_TBD_REASON));
     // Meta-assertion: the enum and the parse both matched something.
     assert.ok(core.length >= 4 && allowed.size >= 4, 'the enum or the CHECK parsed empty');
-    for (const reason of core) {
-      assert.ok(allowed.has(reason), `the CHECK refuses the core reason "${reason}"`);
-    }
+    // 8.9 PR 7 added the daylight gate's two reasons to core. The repair is
+    // unwired, so nothing persists them yet; the CHECK (and the
+    // practice-persistence Edge enum) must admit them before 8.6 3b PRs 9-11
+    // wire it. Named exactly: this goes red when that migration lands, and
+    // when any other core reason is added without one.
+    const PENDING_CHECK_AMENDMENT = ['past-sunset', 'sunset-unknown'];
+    assert.deepEqual(
+      core.filter((reason) => !allowed.has(reason)).sort(),
+      PENDING_CHECK_AMENDMENT,
+      'the core reasons the CHECK refuses are not exactly the declared pending pair'
+    );
     const extra = [...allowed].filter((r) => !core.includes(r)).sort();
     // plan §2 adds `declined`, §4 adds `coach-preference`; nothing else.
     for (const r of extra) {

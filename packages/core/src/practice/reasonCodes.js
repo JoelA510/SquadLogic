@@ -220,6 +220,28 @@ export const PRACTICE_REASON = Object.freeze({
    * proven optimal. One per decline or undo.
    */
   REPAIR_RECOMMENDATION_LOCAL: 'PRACTICE_REPAIR_RECOMMENDATION_LOCAL',
+  /*
+   * -- the daylight gate (8.9 PR 7, `repair.js`) --------------------------
+   * Enforced in the module; not live until 8.6 3b PRs 9-11 wire the repair.
+   */
+  /**
+   * Re-home candidates for one displaced series were refused because a
+   * practice there would end past `floor(sunset)` on unlit or undeclared
+   * ground on some date of the series-window. One per series with any.
+   */
+  REPAIR_CANDIDATES_PAST_SUNSET: 'PRACTICE_REPAIR_CANDIDATES_PAST_SUNSET',
+  /**
+   * Re-home candidates for one displaced series were refused because the
+   * sunset on some date of the series-window is unknown (no table record, no
+   * coordinates) on unlit or undeclared ground: never read as allowed (D4).
+   * One per series with any.
+   */
+  REPAIR_CANDIDATES_SUNSET_UNKNOWN: 'PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN',
+  /**
+   * The repair was given no daylight calendar, so no candidate was judged
+   * against sunset. Said on the result so that nobody reads it as a pass.
+   */
+  REPAIR_DAYLIGHT_UNCHECKED: 'PRACTICE_REPAIR_DAYLIGHT_UNCHECKED',
   /* -- coach practice preferences (Phase 8.6 PR 3b, `coachPreferences.js`) */
   COACH_PREFERENCE_NO_REFERENCE: 'PRACTICE_COACH_PREFERENCE_NO_REFERENCE',
   COACH_PREFERENCE_CONFLICT: 'PRACTICE_COACH_PREFERENCE_CONFLICT',
@@ -273,6 +295,14 @@ export const PRACTICE_REASON_SEVERITY = Object.freeze({
   [PRACTICE_REASON.REPAIR_UNWIRED]: PRACTICE_SEVERITY.INFO,
   // The sibling of REPAIR_MINIMALITY_UNPROVEN: nothing proves the result optimal.
   [PRACTICE_REASON.REPAIR_RECOMMENDATION_LOCAL]: PRACTICE_SEVERITY.COMPROMISE,
+  // The gate doing its job: a refused candidate was never legal.
+  [PRACTICE_REASON.REPAIR_CANDIDATES_PAST_SUNSET]: PRACTICE_SEVERITY.INFO,
+  // A candidate that may have been legal could not be judged: the result may
+  // be worse than one with coordinates, so an admin must see it (D4).
+  [PRACTICE_REASON.REPAIR_CANDIDATES_SUNSET_UNKNOWN]: PRACTICE_SEVERITY.COMPROMISE,
+  // The REPAIR_UNWIRED idiom: a statement of scope on the result, not a defect
+  // in it. Info, so a repair run without a calendar keeps its status.
+  [PRACTICE_REASON.REPAIR_DAYLIGHT_UNCHECKED]: PRACTICE_SEVERITY.INFO,
   // A preference with nothing to keep does nothing; the schedule is not
   // compromised by it, but the coach who holds it should be told.
   [PRACTICE_REASON.COACH_PREFERENCE_NO_REFERENCE]: PRACTICE_SEVERITY.INFO,

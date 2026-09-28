@@ -294,6 +294,20 @@ export const PracticeRepairInputSchema = z
      * team on a date. Preferences are judged over those coaches only.
      */
     teamCoachAssignments: z.array(TeamCoachAssignmentRowSchema).optional(),
+    /**
+     * The daylight provider (8.9 PR 7): an `availability/calendar.js`
+     * `buildAvailabilityCalendar()` result, checked for shape only, as `graph`
+     * is. With it, every re-home candidate is judged by
+     * `practice/daylight.js` over its series-window; without it, nothing is,
+     * and the result says so (`PRACTICE_REPAIR_DAYLIGHT_UNCHECKED`).
+     */
+    calendar: z
+      .object({
+        sunsetsByDate: z.record(z.string(), z.any()),
+        lightingBySurface: z.record(z.string(), z.any()),
+      })
+      .passthrough()
+      .optional(),
   })
   .strict()
   // Preferences with no rows would bind no coach to any team, so every one of

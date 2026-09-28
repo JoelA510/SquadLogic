@@ -66,6 +66,7 @@ This document elaborates the roadmap's practice scheduling phase into concrete i
 - **Metrics**: Emit counts of teams assigned on first pass vs. manual follow-up, distribution of start times per division, and slot utilization percentages. The `evaluatePracticeSchedule` helper in `src/practiceMetrics.js` now implements these summaries and flags data quality issues so the admin UI can surface early warnings.
 - **Alerts**: If more than 5% of teams require manual assignment, raise an admin warning suggesting more slot capacity.
 - **Audit Trail**: Persist a JSON diff of assignments compared to the prior run for transparency.
+- **Daylight (8.9)**: an unlit or undeclared practice ends at or before `floor(sunset)` (margin 0). Core evaluation enforces it through `practice/daylight.js`. The mid-season repair (`practice/repair.js`, 8.9 PR 7) refuses every re-home candidate, tier 1 and tier 2, that runs past sunset on any date of its series-window (`past-sunset`), or whose sunset is unknown (`sunset-unknown`, never allowed). When no legal candidate is left, the series is TIME TBD with that reason. A partly legal candidate is refused, not truncated: D8's truncation belongs to the Edge post-pass. The gate is enforced in the module but is **not live** until 8.6 3b PRs 9-11 wire the repair.
 
 ## Future Enhancements
 

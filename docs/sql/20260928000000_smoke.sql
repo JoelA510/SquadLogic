@@ -267,6 +267,12 @@ BEGIN
     -- set above) against a row of the policy's own table whose every uuid
     -- column is org A's id: in the member's org, and not their own row. The
     -- universe is pg_policies itself, not a list.
+    -- LIMIT, stated rather than implied: non-uuid columns are NULL and no
+    -- parent rows exist, so a gate reached THROUGH another table (e.g.
+    -- EXISTS (SELECT 1 FROM teams t WHERE t.id = team_id AND
+    -- is_org_member(t.organization_id)) OR is_org_admin(...)) evaluates false
+    -- here and is not caught. No such policy exists in public today; the
+    -- harness claim is worded to this reach.
     FOR v_pol IN
         SELECT tablename, policyname, cmd, qual, with_check
           FROM pg_policies WHERE schemaname = 'public' AND cmd <> 'SELECT'

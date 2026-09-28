@@ -510,7 +510,7 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         STATUS=1
       fi
       if grep -qF 'member-satisfiable exactly {"telemetry_log: Insert telemetry for own organization"}, allowlisted; a planted member-writable table is flagged' /tmp/harness_smoke; then
-        echo "  | (checked) every write policy in public, evaluated as a plain member, is admin-gated or allowlisted with a reason"
+        echo "  | (checked) every write policy in public, evaluated as a plain member on an own-org row, is admin-gated or allowlisted -- direct-column gates only, a gate through a parent row is not reached"
       else
         echo "FAIL smoke ${id}: it passed without proving the semantic census of every write policy in public"
         STATUS=1

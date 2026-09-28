@@ -2758,7 +2758,7 @@ plant "M14 the reconcile skips dropping the broad policy" "$M14" \
 
 plant "M14 the reconcile skips creating the missing read policies" "$M14" \
   "            EXECUTE format('CREATE POLICY %I ', v_spec.pol) || v_ddl;" \
-  "            NULL; -- plant: the missing read policy is never created" \
+  "            IF v_spec.tbl = 'scheduler_runs' THEN EXECUTE format('CREATE POLICY %I ', v_spec.pol) || v_ddl; END IF; -- plant: only the repo chain's own creates survive, so the no-op check passes and the drift replay's restore check is what must fail" \
   "FAIL smoke 20260928000000"
 
 # The end-state check was a hand-picked table list once; this puts it back.
@@ -2865,7 +2865,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M14 the reconcile skips dropping the broad policy"
   ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M14 the reconcile skips creating the missing read policies"
   ["(checked) the reconcile's own end-state check refuses a member-writable policy on a table nobody listed"]="M14 the end-state check goes back to a hand-picked table list"
-  ["(checked) every write policy in public, evaluated as a plain member, is admin-gated or allowlisted with a reason"]="M14 the scheduler_runs admin write also admits members"
+  ["(checked) every write policy in public, evaluated as a plain member on an own-org row, is admin-gated or allowlisted -- direct-column gates only, a gate through a parent row is not reached"]="M14 the scheduler_runs admin write also admits members"
   ["(checked) scheduler_runs is closed to member writes and scoped member reads, and an admin session still writes it"]="M14 scheduler_runs gets no admin write policy"
 )
 

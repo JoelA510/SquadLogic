@@ -161,7 +161,7 @@ clustering idea is unnecessary. For scale, 50 miles of longitude at 40°N is
 | New core `practice/daylight.js` evaluator over materialised occurrences | Enforced in core evaluation; registry claim, exercise counters, attribution kind `sunset` with the numbers (for 8.10) |
 | Core `practiceScheduling.js` / `autoScheduler.js` | Unchanged; stated unenforced (the live scheduler is the Deno twin) |
 | Deno auto-scheduler | Enforced by a post-pass; optimising toward surviving slots is declared, not optimised (D11) |
-| `practice/repair.js` | Candidate gate; enforced in the module, not live until 3b wires it |
+| `practice/repair.js` | Candidate gate; enforced in the module, not live until 3b wires it. *As built (PR 7):* every tier-1 and tier-2 candidate is judged by `evaluatePracticeDaylight()` over its series-window; past sunset → refused `past-sunset`, unknown sunset → refused `sunset-unknown` (D4 in core: never allowed); a venue emptied by the gate → TIME TBD with that reason, ahead of the `must_keep` filter. Partly legal candidates are **refused, not truncated**: one recommendation per series-window (3b decision 5), and D8's truncation stays the Edge post-pass's. No calendar → nothing judged, and `PRACTICE_REPAIR_DAYLIGHT_UNCHECKED` says so |
 
 **Auto-scheduler post-pass (PR 6).** Slots carry `fieldId` and
 `effectiveFrom`/`effectiveUntil` (`PracticeSchedulingPage.jsx:156-184`); the

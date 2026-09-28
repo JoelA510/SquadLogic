@@ -478,6 +478,7 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/recommendations.js',
       'tests/practiceRecommendations.test.js',
       'tests/practiceRepair.test.js',
+      'tests/practiceRepairDaylight.test.js',
       'tests/practiceRepairPreferences.test.js',
       'tests/reasonCodeReachability.test.js',
       'tests/unknownSurfaceDiscipline.test.js',
@@ -494,6 +495,7 @@ const LAYERS = Object.freeze([
     importers: Object.freeze(['packages/core/src/practice/index.js']),
     consumers: Object.freeze([
       'tests/practiceRecommendations.test.js',
+      'tests/practiceRepairDaylight.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([]),
@@ -542,6 +544,7 @@ const LAYERS = Object.freeze([
       'supabase/functions/_shared/timing/solar.ts',
       'tests/practiceDaylight.test.js',
       'tests/practiceDurationPhases.test.js',
+      'tests/practiceRepairDaylight.test.js',
       'tests/reasonCodeReachability.test.js',
       'tests/solar.test.js',
       // Not `solarDrift`/`solarVectors`: they call both arms through renamed
@@ -587,6 +590,7 @@ const LAYERS = Object.freeze([
       'supabase/functions/_shared/tests/solar_test.ts',
       'tests/practiceDaylight.test.js',
       'tests/practiceDurationPhases.test.js',
+      'tests/practiceRepairDaylight.test.js',
       'tests/reasonCodeReachability.test.js',
       'tests/solar.test.js',
       // Not `solarDrift`/`solarVectors`: they call both arms through renamed
@@ -610,6 +614,8 @@ const LAYERS = Object.freeze([
   // The season constraint adapter imports its two constants, not the
   // evaluator, so it is an importer and not a consumer. The Edge post-pass
   // (8.9 PR 6) is a Deno twin, not a caller of this file.
+  // 8.9 PR 7: `repair.js` gates re-home candidates through it -- a production
+  // consumer inside the layer, itself unwired until 8.6 3b PRs 9-11.
   Object.freeze({
     layer: 'practice/daylight.js',
     modulePath: 'packages/core/src/practice/daylight.js',
@@ -620,12 +626,14 @@ const LAYERS = Object.freeze([
       'packages/core/src/constraints/adapters/season2026Constraints.js',
       'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/index.js',
+      'packages/core/src/practice/repair.js',
     ]),
     consumers: Object.freeze([
+      'packages/core/src/practice/repair.js',
       'tests/practiceDaylight.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
-    expectedProductionConsumers: Object.freeze([]),
+    expectedProductionConsumers: Object.freeze(['packages/core/src/practice/repair.js']),
     expectedExternalProductionConsumers: Object.freeze([]),
   }),
   // 8.9 PR 5: duration phases, compression and the DST survival report.

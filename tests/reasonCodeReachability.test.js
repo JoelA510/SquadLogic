@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 547 codes, of
- * which 535 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 550 codes, of
+ * which 538 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -405,7 +405,7 @@ const TABLES = Object.freeze({
  */
 const NOT_A_FINDING_TABLE = Object.freeze({
   PRACTICE_TBD_REASON:
-    'why repairPracticeLoss() left a displaced series TIME TBD (no legal slot at its venue, contended, change budget). It is a classification carried on a TIME TBD entry and in the details of PRACTICE_REPAIR_TIME_TBD, which is the finding and is audited above. DECLINED (8.6 PR 5) is carried on a recommendation entry after a decline and named in PRACTICE_REPAIR_RECOMMENDATION_LOCAL, which is audited above; tests/practiceRecommendations.test.js produces it.',
+    'why repairPracticeLoss() left a displaced series TIME TBD (no legal slot at its venue, contended, change budget). It is a classification carried on a TIME TBD entry and in the details of PRACTICE_REPAIR_TIME_TBD, which is the finding and is audited above. DECLINED (8.6 PR 5) is carried on a recommendation entry after a decline and named in PRACTICE_REPAIR_RECOMMENDATION_LOCAL, which is audited above; tests/practiceRecommendations.test.js produces it. PAST_SUNSET and SUNSET_UNKNOWN (8.9 PR 7) are the daylight gate emptying a venue; the findings that name the refusals, PRACTICE_REPAIR_CANDIDATES_PAST_SUNSET and PRACTICE_REPAIR_CANDIDATES_SUNSET_UNKNOWN, are audited above and tests/practiceRepairDaylight.test.js produces both reasons.',
   DORMANCY_REASON:
     'the three verdicts detectDormantWaivers() gives a waiver (never-matched, not-status-bearing, load-bearing). It is a classification carried on a dormancy row, not a finding code: the findings that report it are WAIVER_DORMANT and WAIVER_NOT_STATUS_BEARING, and both are audited above.',
   IDENTITY_SIGNAL:
@@ -6365,6 +6365,41 @@ harvest(
     }),
     'rda-0'
   )
+);
+
+// 8.9 PR 7: the daylight gate. Orchard Park is practice-only ground, so its
+// lighting is undeclared (unlit, D5). With SYNTHETIC coordinates (not a place)
+// an 18:00 end runs past every November sunset; with none and no table, the
+// sunset is unknown and the candidate is refused, never allowed.
+const repairDaylightSeries = [
+  { teamId: 'RS', surface: 'field-2-a', weekday: 'TUE', startMinutes: 1020 },
+];
+const repairDaylightInventory = [{ surface: 'field-3-a', weekday: 'TUE', startMinutes: 1020 }];
+harvest(
+  'repairPracticeLoss(every candidate ends past sunset on undeclared ground)',
+  repairInput({
+    series: repairDaylightSeries,
+    inventory: repairDaylightInventory,
+    extra: {
+      calendar: buildAvailabilityCalendar({
+        permitWindows: [],
+        timeZone: 'America/New_York',
+        venueDaylight: Object.keys(repairGraph.venues).map((venueId) => ({
+          venueId,
+          latitude: 40.0,
+          longitude: -75.0,
+        })),
+      }),
+    },
+  })
+);
+harvest(
+  'repairPracticeLoss(every candidate on ground with no sunset at all)',
+  repairInput({
+    series: repairDaylightSeries,
+    inventory: repairDaylightInventory,
+    extra: { calendar: buildAvailabilityCalendar({ permitWindows: [] }) },
+  })
 );
 
 harvest(

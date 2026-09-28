@@ -6562,3 +6562,57 @@ numeric(7,4)`, `coordinates_set_at` and `coordinates_set_by`, with two CHECKs
   - All 6 witness plants are red.
   - Supervisor plant: removing "cross-venue only if T is TBD" turns 2 red.
   - Full suite: 4248 passed, 0 failed (twice).
+
+## 8.9 PR 3b — #470 merged (5813dba): the venue coordinates admin form
+
+- **The form.** Each venue row in Field Management gets a coordinates panel.
+  - It is validated with #467's core `LocationCoordinatesSchema` before the RPC is
+    called. Half pairs, out-of-range values and non-numbers are shown field by
+    field and tied to their inputs.
+  - A blank Save is refused; clearing goes only through Clear (null/null).
+  - After a save it displays the RPC's rounded answer.
+  - Non-admins get a read-only view.
+  - Every RPC refusal reaches the alert banner. The error codes are enumerated
+    from the migration's `RAISE … USING ERRCODE` lines.
+- **The badge.** A "No coordinates" badge appears only for unlit or undeclared
+  venues without a pair. Undeclared lighting counts as unlit, per plan D5 and §2.
+- **Privacy.** Only synthetic values. The supervisor grep found no geolocation,
+  fetch or geocoding.
+- **Evidence.**
+  - 21 tests, including real page, hook and form renders.
+  - 7 plants red, one of them a `/code-review` finding: a refetch left the inputs
+    stale, so Save could overwrite a newer pair.
+  - Supervisor plant: making a blank Save clear the pair turns 1 red.
+
+## 8.9 PR 4 — #472 merged (8c0713c): daylight provider, DST event, practice daylight evaluator
+
+- **Provider.** `sunsetForVenue` takes the date-keyed table first (authoritative),
+  then computes the sunset from the venue's coordinates in the season timezone,
+  then returns unknown.
+  - A difference of more than 2 minutes between the sources gives
+    `SUNSET_SOURCES_DISAGREE`.
+  - Missing data gives `SUNSET_UNKNOWN` with cause `venue-coordinates-missing`.
+  - Enforcement uses `floor`.
+- **DST event.** `timing/seasonEvents.js` derives the DST end from the zone's
+  offset change. The sunsets.csv `Note` column is finally read, as a cross-check
+  (`CLOCK_CHANGE_NOTE_DISAGREES`). The corpus derives 2026-11-01.
+- **Evaluator.** `practice/daylight.js` implements the operator rule: an unlit or
+  undeclared practice occurrence ends at or before floor(sunset), with
+  `PRACTICE_SUNSET_MARGIN_MINUTES = 0`.
+  - Lit venues are exempt.
+  - An unknown sunset is counted and never allowed.
+  - Attribution kind is `sunset`; the violation code is `PRACTICE_PAST_SUNSET`.
+- **Registry.** The claim lives in a separate
+  `buildSeason2026PracticeConstraintRegistry`. Putting it in the game registry
+  flipped game feasibility to `unknown` (no game rule claims it), so game results
+  are unchanged. The live game path is stated as declared, not enforced (D7).
+- **Corpus.** With synthetic coordinates, 656 of 1,833 unlit occurrences are
+  flagged: 380 before DST and 276/282 after. The flagged set equals an
+  independent derivation. The plan's F1 ("every slot fails after DST") was
+  corrected: the early-evening 16:00-16:45 slots survive.
+- **Evidence.**
+  - W4/W5/W6/W8/W11/W15: 8 plants, all red.
+  - Supervisor plant: switching the computed sunset from `floor` to `ceil` turns
+    3 red. The same change on table sunsets is a no-op, because the schema only
+    allows integer minutes.
+  - Fixture suite 2,050 → 2,076, all passing.

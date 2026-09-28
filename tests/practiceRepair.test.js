@@ -22,6 +22,7 @@
  * meta-assertion below fails if the dating is removed.
  */
 
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +31,7 @@ import { describe, it, expect } from 'vitest';
 import {
   PRACTICE_REASON,
   PRACTICE_TBD_REASON,
+  PracticeRepairInputSchema,
   materialisePracticeOccurrences,
   repairPracticeLoss,
   toPracticeMetricsInput,
@@ -1091,5 +1093,360 @@ describe('practice repair :: review regressions', () => {
     const [a, b] = run.timeTbd;
     expect(a.crossVenueOptions[0].sharedWith).toEqual([b.assignmentId]);
     expect(b.crossVenueOptions[0].sharedWith).toEqual([a.assignmentId]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* 8.6 PR 3b, PR 3: bounded losses (blackouts) — plan §1                        */
+/* -------------------------------------------------------------------------- */
+
+/** A Sunday three weeks after {@link LOSS_DATE}: the blackout's last day. */
+const BLACKOUT_UNTIL = '2026-10-18';
+const WEEKDAY_CODES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+/** The weekday of a date, from the calendar — not from the repair's helpers. */
+const weekdayOfDate = (iso) => WEEKDAY_CODES[new Date(`${iso}T00:00:00Z`).getUTCDay()];
+
+const boundedLoss = (surfaceId, overrides = {}) => ({
+  surfaceIds: [surfaceId],
+  from: LOSS_DATE,
+  until: BLACKOUT_UNTIL,
+  reason: 'maintenance',
+  ...overrides,
+});
+const bounded = (loss, options = {}) =>
+  repairPracticeLoss({
+    plan: options.plan ?? PLAN,
+    graph,
+    loss,
+    inventory: INVENTORY,
+    coachesByTeam: COACHES_BY_TEAM,
+    ...options.extra,
+  });
+
+/**
+ * The series-windows a loss displaces, derived from the input plan and the loss
+ * alone: every assignment on the lost (or clashing) ground whose own range,
+ * intersected with the loss window, holds a date on its weekday — walked day by
+ * day on the calendar — and, when the loss carries minutes, whose time meets
+ * them. Never read from a repair result.
+ */
+function expectedSeriesWindows(plan, loss) {
+  const lost = new Set(loss.surfaceIds.flatMap((id) => conflictingSurfacesOf(graph, id)));
+  const slotById = new Map(plan.slots.map((slot) => [slot.id, slot]));
+  const lossUntil = loss.until ?? '9999-12-31';
+  const out = [];
+  for (const assignment of plan.assignments) {
+    const slot = slotById.get(assignment.slotId);
+    if (!lost.has(slot.surfaceId)) continue;
+    const from = assignment.effectiveFrom ?? slot.validFrom;
+    const until = assignment.effectiveUntil ?? slot.validUntil;
+    if (from === null || until === null) continue;
+    const windowFrom = from > loss.from ? from : loss.from;
+    const windowUntil = until < lossUntil ? until : lossUntil;
+    let occurs = false;
+    for (let day = isoDayNumber(windowFrom); day <= isoDayNumber(windowUntil); day += 1) {
+      if (weekdayOfDate(isoDateOfDayNumber(day)) === slot.weekday) {
+        occurs = true;
+        break;
+      }
+    }
+    if (!occurs) continue;
+    if (
+      loss.startMinutes !== undefined &&
+      !(
+        slot.startMinutes < loss.endMinutes &&
+        loss.startMinutes < slot.startMinutes + slot.durationMinutes
+      )
+    ) {
+      continue;
+    }
+    out.push({ assignmentId: assignment.id, window: { from: windowFrom, until: windowUntil } });
+  }
+  return out.sort((a, b) => a.assignmentId.localeCompare(b.assignmentId));
+}
+
+const answeredWindows = (run) =>
+  [...run.rehomed, ...run.timeTbd]
+    .map((entry) => ({ assignmentId: entry.assignmentId, window: entry.window }))
+    .sort((a, b) => a.assignmentId.localeCompare(b.assignmentId));
+
+const BOUNDED_LOSS = boundedLoss(CHOSEN.surfaceId);
+const BOUNDED = bounded(BOUNDED_LOSS);
+
+describe('practice repair :: bounded losses are a temporary override (plan §1)', () => {
+  it('says override, and puts the series-window on every re-homed and TIME TBD entry', () => {
+    expect(BOUNDED.representation).toBe('override');
+    expect(BOUNDED.rehomed.length).toBeGreaterThan(0);
+    expect(BOUNDED.timeTbd.length).toBeGreaterThan(0);
+    for (const entry of [...BOUNDED.rehomed, ...BOUNDED.timeTbd]) {
+      expect(entry.window.from >= LOSS_DATE).toBe(true);
+      expect(entry.window.until <= BLACKOUT_UNTIL).toBe(true);
+    }
+  });
+
+  it('leaves every occurrence outside the window byte-identical, enumerated from the input plan', () => {
+    const lost = new Set(conflictingSurfacesOf(graph, CHOSEN.surfaceId));
+    const seasonWindow = { from: SEASON_FROM, to: SEASON_UNTIL };
+    const outside = (occurrence) => occurrence.date < LOSS_DATE || occurrence.date > BLACKOUT_UNTIL;
+    const before = requireOccurrences(PLAN, seasonWindow).filter(outside);
+    const after = new Map(
+      requireOccurrences(BOUNDED.plan, seasonWindow)
+        .filter(outside)
+        .map((occurrence) => [occurrence.id, occurrence])
+    );
+    // Meta: the displaced teams practise on the lost ground on both sides of
+    // the window, so a split (or any edit of the series) has something to break.
+    const displacedTeams = new Set(
+      [...BOUNDED.rehomed, ...BOUNDED.timeTbd].map((entry) => entry.teamId)
+    );
+    const onLostByDisplaced = (side) =>
+      before.filter(
+        (o) => side(o.date) && lost.has(o.surfaceId) && o.teamIds.some((t) => displacedTeams.has(t))
+      ).length;
+    expect(onLostByDisplaced((date) => date < LOSS_DATE)).toBeGreaterThan(0);
+    expect(onLostByDisplaced((date) => date > BLACKOUT_UNTIL)).toBeGreaterThan(0);
+    for (const occurrence of before) expect(after.get(occurrence.id)).toEqual(occurrence);
+    expect(after.size).toBe(before.length);
+  });
+
+  it('answers for every displaced series-window exactly once, derived from plan × window', () => {
+    const expected = expectedSeriesWindows(PLAN, BOUNDED_LOSS);
+    expect(expected.length).toBeGreaterThan(0);
+    expect(answeredWindows(BOUNDED)).toEqual(expected);
+  });
+
+  it('answers for every series-window on every corpus surface under a blackout', () => {
+    let losses = 0;
+    for (const { surfaceId } of SURVEY) {
+      const loss = boundedLoss(surfaceId);
+      const run = bounded(loss);
+      const expected = expectedSeriesWindows(PLAN, loss);
+      expect(answeredWindows(run)).toEqual(expected);
+      losses += expected.length > 0 ? 1 : 0;
+    }
+    expect(losses).toBe(SURVEY.length);
+  });
+
+  it('puts no displaced team on the lost ground inside the window', () => {
+    const lost = new Set(conflictingSurfacesOf(graph, CHOSEN.surfaceId));
+    const displacedTeams = new Set(
+      [...BOUNDED.rehomed, ...BOUNDED.timeTbd].map((entry) => entry.teamId)
+    );
+    const inside = requireOccurrences(BOUNDED.plan, { from: LOSS_DATE, to: BLACKOUT_UNTIL });
+    for (const occurrence of inside) {
+      if (!lost.has(occurrence.surfaceId)) continue;
+      expect(occurrence.teamIds.filter((t) => displacedTeams.has(t))).toEqual([]);
+    }
+    // Every re-homed team does practise inside the window, on its new ground.
+    for (const entry of BOUNDED.rehomed) {
+      const moved = inside.filter(
+        (o) => o.teamIds.includes(entry.teamId) && o.surfaceId === entry.to.surfaceId
+      );
+      expect(moved.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('does not displace a series whose time misses the loss minutes', () => {
+    const slotById = new Map(PLAN.slots.map((slot) => [slot.id, slot]));
+    const meets = (slot, minute) =>
+      slot.startMinutes <= minute && minute < slot.startMinutes + slot.durationMinutes;
+    // The loss, chosen from the data: the first corpus surface, and the first
+    // practice start on its lost ground, whose one minute some of the practices
+    // there meet and some miss.
+    let pick = null;
+    for (const { surfaceId } of SURVEY) {
+      const lost = new Set(conflictingSurfacesOf(graph, surfaceId));
+      const onLost = PLAN.assignments
+        .map((assignment) => slotById.get(assignment.slotId))
+        .filter((slot) => lost.has(slot.surfaceId));
+      const minute = [...new Set(onLost.map((slot) => slot.startMinutes))]
+        .sort((a, b) => a - b)
+        .find((m) => {
+          const hit = onLost.filter((slot) => meets(slot, m)).length;
+          return hit > 0 && hit < onLost.length;
+        });
+      if (minute !== undefined) {
+        pick = { surfaceId, minute };
+        break;
+      }
+    }
+    if (pick === null) throw new Error('no corpus loss has a minute that separates its series');
+    const loss = boundedLoss(pick.surfaceId, {
+      startMinutes: pick.minute,
+      endMinutes: pick.minute + 1,
+    });
+    const expected = expectedSeriesWindows(PLAN, loss);
+    const withoutMinutes = expectedSeriesWindows(PLAN, boundedLoss(pick.surfaceId));
+    // Meta: the minutes leave some series in and put some out.
+    expect(expected.length).toBeGreaterThan(0);
+    expect(expected.length).toBeLessThan(withoutMinutes.length);
+    const run = bounded(loss);
+    expect(answeredWindows(run)).toEqual(expected);
+    const spared = new Set(withoutMinutes.map((e) => e.assignmentId));
+    for (const e of expected) spared.delete(e.assignmentId);
+    const repaired = new Map(run.plan.assignments.map((assignment) => [assignment.id, assignment]));
+    let checked = 0;
+    for (const assignment of PLAN.assignments) {
+      if (!spared.has(assignment.id)) continue;
+      expect(repaired.get(assignment.id)).toEqual(assignment);
+      checked += 1;
+    }
+    expect(checked).toBe(spared.size);
+  });
+
+  describe('placement against frozen series looks at the window only', () => {
+    const occupancyRun = (occupants) =>
+      rangedRun({
+        series: [
+          {
+            teamId: 'D',
+            surfaceId: OP('field-2-a'),
+            weekday: 'TUE',
+            startMinutes: 1020,
+            from: SEASON_FROM,
+            until: SEASON_UNTIL,
+          },
+          ...occupants,
+        ],
+        inventory: [{ surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1020 }],
+        extra: {
+          loss: {
+            surfaceIds: [OP('field-2')],
+            from: LOSS_DATE,
+            until: BLACKOUT_UNTIL,
+            reason: 'maintenance',
+          },
+        },
+      });
+    const occupant = (teamId, from, until) => ({
+      teamId,
+      surfaceId: OP('field-3-a'),
+      weekday: 'TUE',
+      startMinutes: 1020,
+      from,
+      until,
+    });
+
+    it('takes ground a frozen series holds only before and after the window', () => {
+      const run = occupancyRun([
+        occupant('EARLY', SEASON_FROM, '2026-09-27'),
+        occupant('LATE', '2026-10-19', SEASON_UNTIL),
+      ]);
+      expect(run.representation).toBe('override');
+      expect(run.rehomed.map((e) => [e.teamId, e.to.surfaceId, e.window])).toEqual([
+        ['D', OP('field-3-a'), { from: LOSS_DATE, until: BLACKOUT_UNTIL }],
+      ]);
+    });
+
+    it('control: the same ground held inside the window refuses it', () => {
+      const run = occupancyRun([occupant('INSIDE', '2026-10-13', SEASON_UNTIL)]);
+      expect(run.rehomed).toEqual([]);
+      expect(run.timeTbd.map((e) => [e.teamId, e.reason, e.window])).toEqual([
+        [
+          'D',
+          PRACTICE_TBD_REASON.NO_LEGAL_SLOT_AT_VENUE,
+          { from: LOSS_DATE, until: BLACKOUT_UNTIL },
+        ],
+      ]);
+    });
+  });
+});
+
+/**
+ * Unbounded losses are byte-identical to main (`fbab99a`). Each pin is the
+ * digest of main's result for that surface, exact then greedy. This PR adds one
+ * field, `representation`, which is left out of the digest and asserted on its
+ * own — so any other change to an unbounded result turns a digest red.
+ */
+const UNBOUNDED_DIGESTS_ON_MAIN = {
+  'alder-park/pitch-1a-side-1': ['5e2ebd4161449611', '468600c4e3946dac'],
+  'alder-park/pitch-1b-side-1': ['04cf94d1da9552f1', '4efd508e56d930ce'],
+  'alder-park/pitch-2a': ['3215c6aeffee68a2', 'fbf26aea91b564a4'],
+  'alder-park/pitch-2b': ['9304f8d696462ac1', '5ccc76f98df2d8d6'],
+  'alder-park/pitch-3a': ['76a5b7e56ba8c7a3', 'b1b3f1581444c40a'],
+  'alder-park/pitch-3b': ['aaf81a7d727dc655', '231d3af94e21678b'],
+  'alder-park/pitch-4a-side-1': ['ea992308a901053f', '16fe505fc711581f'],
+  'alder-park/pitch-4b-side-1': ['208b868b4746b4d1', 'bcf0770c757f6865'],
+  'brookside-park/lower-a': ['1d11eb84683ebb3c', '177eabfa9d88b0b5'],
+  'brookside-park/lower-b': ['e865307981f0f5a2', '24c32f1b34d14032'],
+  'larkfield-green/field-1-a': ['739ec92c7266eb6d', 'bf8584ae0cac7b76'],
+  'maplewood-back/field-1-a': ['c03a65d5df73b9fb', '6e1bb1f7a6fee4ed'],
+  'maplewood-back/field-1-b': ['d42c8365143228ba', '9ecf35bfc51af45e'],
+  'maplewood-back/field-2-a': ['62d58baa09e0df3a', '7168734d65ae5f87'],
+  'maplewood-back/field-2-b': ['e7c09fae93d586f9', '69b10bbf928b88de'],
+  'maplewood-back/field-3-a': ['f74b0131296eed44', '2382391de109a4e4'],
+  'maplewood-back/field-3-b': ['98ac336158c47566', 'd7587a5f103090e8'],
+  'maplewood-back/field-4-a': ['f963de0ed6698c4f', 'cf0a57038dabce68'],
+  'maplewood-back/field-4-b': ['ab82a36dbf603ea7', 'b399aaa927b8f615'],
+  'orchard-park/field-1-a': ['9afa1a01336e1d5a', 'e37c831a9ebf2ef9'],
+  'orchard-park/field-1-b': ['be539902bfe068a5', 'e1980ebf5ab49387'],
+  'orchard-park/field-2-a': ['a37c56aa0a93c20b', 'a77b92c5855fac65'],
+  'orchard-park/field-2-b': ['4a9e3a8cf1daa11b', 'eafd9c383c32f1a4'],
+  'orchard-park/field-3-a': ['d7339a6b37a0fa24', 'd4429dfe52cd0b8f'],
+  'orchard-park/field-3-b': ['c5007d6f450dcd83', 'f9253f9b8fee6cbc'],
+  'orchard-park/field-4-a': ['c51af85456a117dc', 'e60cbf1da9982be6'],
+  'orchard-park/field-4-b': ['77a7e93083d95e80', '03315fbf1c1bd3d3'],
+  'orchard-park/field-5': ['d8e5b0f6d6ab6781', 'bc6a67849905c1fa'],
+  'orchard-park/field-6': ['30b404a45903b2ed', 'ff308d35502281e2'],
+};
+function resultDigest(result) {
+  const { representation: _representation, ...rest } = result;
+  const json = JSON.stringify(rest, (key, value) => {
+    if (value instanceof Map) return ['Map', [...value]];
+    if (value instanceof Set) return ['Set', [...value]];
+    return value;
+  });
+  return createHash('sha256').update(json).digest('hex').slice(0, 16);
+}
+
+describe('practice repair :: unbounded losses are unchanged (plan §1)', () => {
+  it('matches main on every corpus loss, exact and greedy, and says split', () => {
+    const digests = Object.fromEntries(
+      SURVEY.map(({ surfaceId, exact, greedy }) => [
+        surfaceId,
+        [resultDigest(exact), resultDigest(greedy)],
+      ])
+    );
+    expect(Object.keys(digests).length).toBe(29);
+    expect(digests).toEqual(UNBOUNDED_DIGESTS_ON_MAIN);
+    for (const { exact, greedy } of SURVEY) {
+      expect(exact.representation).toBe('split');
+      expect(greedy.representation).toBe('split');
+    }
+  });
+});
+
+describe('practice repair :: loss schema (plan §1)', () => {
+  const base = { surfaceIds: [OP('field-2')], from: LOSS_DATE, reason: 'maintenance' };
+  const parse = (loss) =>
+    PracticeRepairInputSchema.safeParse({
+      plan: { slots: [], assignments: [], source: 'constructed' },
+      graph,
+      loss,
+      inventory: [],
+    });
+
+  it('accepts a loss with no end, an end, and an end with minutes', () => {
+    expect(parse(base).success).toBe(true);
+    expect(parse({ ...base, until: LOSS_DATE }).success).toBe(true);
+    expect(
+      parse({ ...base, until: BLACKOUT_UNTIL, startMinutes: 0, endMinutes: 1440 }).success
+    ).toBe(true);
+  });
+
+  it.each([
+    ['until before from', { until: '2026-09-27' }],
+    ['until not a date', { until: '2026-10-XX' }],
+    ['start without end', { until: BLACKOUT_UNTIL, startMinutes: 1020 }],
+    ['end without start', { until: BLACKOUT_UNTIL, endMinutes: 1080 }],
+    ['an empty window', { until: BLACKOUT_UNTIL, startMinutes: 1080, endMinutes: 1080 }],
+    ['an inverted window', { until: BLACKOUT_UNTIL, startMinutes: 1080, endMinutes: 1020 }],
+    ['a negative start', { until: BLACKOUT_UNTIL, startMinutes: -1, endMinutes: 60 }],
+    ['an end past midnight', { until: BLACKOUT_UNTIL, startMinutes: 0, endMinutes: 1441 }],
+    ['fractional minutes', { until: BLACKOUT_UNTIL, startMinutes: 60.5, endMinutes: 120 }],
+    ['a free-text note', { until: BLACKOUT_UNTIL, note: 'resurfacing' }],
+    ['minutes on a loss with no end', { startMinutes: 1020, endMinutes: 1080 }],
+  ])('refuses %s', (_label, extra) => {
+    expect(parse({ ...base, ...extra }).success).toBe(false);
   });
 });

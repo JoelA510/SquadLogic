@@ -43,6 +43,25 @@
  * before the loss and a new assignment starts on the loss date, so every
  * occurrence before the loss materialises exactly as it did.
  *
+ * ## Bounded losses: a temporary override (8.6 PR 3b plan §1)
+ *
+ * A loss with `until` (a blackout) is not split. It ends, so splitting it
+ * would move every occurrence after it too. The result says
+ * `representation: 'override'`, and every re-homed and TIME TBD entry carries
+ * the series-window it covers: `window: { from, until }`, the series' own range
+ * intersected with `[loss.from, loss.until]`. The original series stays whole
+ * and locked. Only `plan`, the repaired plan held in memory, splits it around
+ * the window, so that it materialises correctly and the metrics stay
+ * series-based. A loss with no `until` (a retirement) splits as before and
+ * says `representation: 'split'`; its result is otherwise unchanged.
+ *
+ * A series is displaced when its range, intersected with the loss window, holds
+ * an occurrence on its weekday, and its time meets the loss minutes if there
+ * are any. Frozen series occupy their ground inside that window only: ground a
+ * frozen series holds before `from` or after `until` is free for a re-home.
+ * The lost ground itself is never offered as a re-home, even outside the loss
+ * minutes.
+ *
  * ## Minimality, and when it is claimed
  *
  * The default strategy is an exact branch-and-bound over the displaced series,
@@ -148,6 +167,18 @@ export function repairPracticeLoss(input) {
   const weights = resolveObjectiveWeights(parsed.weights ?? null);
   const lossDate = parsed.loss.from;
   const dayBefore = shiftDate(lossDate, -1);
+  // A blackout ends; a retirement does not (plan §1).
+  const lossUntil = parsed.loss.until ?? null;
+  const bounded = lossUntil !== null;
+  const lossMinutes =
+    parsed.loss.startMinutes === undefined
+      ? null
+      : { start: parsed.loss.startMinutes, end: /** @type {number} */ (parsed.loss.endMinutes) };
+  /** Whether a slot's clock time meets the loss minutes; always, when it states none. */
+  const hitsLossMinutes = (slot) =>
+    lossMinutes === null ||
+    (slot.startMinutes < lossMinutes.end &&
+      lossMinutes.start < slot.startMinutes + slot.durationMinutes);
   const coachesByTeam = parsed.coachesByTeam ?? {};
   const lossReason = parsed.loss.reason;
   const findings = [
@@ -232,8 +263,9 @@ export function repairPracticeLoss(input) {
     const from = assignment.effectiveFrom ?? slot.validFrom;
     const until = assignment.effectiveUntil ?? slot.validUntil;
     if (from === null || until === null) {
-      if (lostSurfaceIds.has(slot.surfaceId)) undatedOnLostGround.push(assignment.id);
-      else {
+      if (lostSurfaceIds.has(slot.surfaceId) && hitsLossMinutes(slot)) {
+        undatedOnLostGround.push(assignment.id);
+      } else {
         undatedOccupants.push({
           assignmentId: assignment.id,
           teamId: assignment.teamId,
@@ -249,9 +281,14 @@ export function repairPracticeLoss(input) {
       continue;
     }
     if (until < lossDate) continue;
-    // A series with no occurrence left from the loss date is not displaced by
-    // it: re-homing it would spend budget on a practice that never happens.
-    if (firstWeekdayOnOrAfter(from < lossDate ? lossDate : from, slot.weekday) > until) continue;
+    if (bounded && from > lossUntil) continue;
+    // Every series is held to the loss window: it is displaced, and it occupies
+    // ground as a frozen series, over its range within the window only.
+    const windowFrom = from < lossDate ? lossDate : from;
+    const windowUntil = bounded && until > lossUntil ? lossUntil : until;
+    // A series with no occurrence left in the window is not displaced by the
+    // loss: re-homing it would spend budget on a practice that never happens.
+    if (firstWeekdayOnOrAfter(windowFrom, slot.weekday) > windowUntil) continue;
     active.push({
       assignmentId: assignment.id,
       teamId: assignment.teamId,
@@ -260,8 +297,8 @@ export function repairPracticeLoss(input) {
       weekday: slot.weekday,
       startMinutes: slot.startMinutes,
       durationMinutes: slot.durationMinutes,
-      from: from < lossDate ? lossDate : from,
-      until,
+      from: windowFrom,
+      until: windowUntil,
     });
   }
   if (undatedOnLostGround.length > 0) {
@@ -274,7 +311,7 @@ export function repairPracticeLoss(input) {
     );
   }
   const displaced = active
-    .filter((series) => lostSurfaceIds.has(series.surfaceId))
+    .filter((series) => lostSurfaceIds.has(series.surfaceId) && hitsLossMinutes(series))
     .sort((a, b) => a.assignmentId.localeCompare(b.assignmentId));
   const displacedIds = new Set(displaced.map((series) => series.assignmentId));
   const frozen = active.filter((series) => !displacedIds.has(series.assignmentId));
@@ -575,8 +612,13 @@ export function repairPracticeLoss(input) {
     a.series.assignmentId.localeCompare(b.series.assignmentId)
   )) {
     splitAssignments.set(series.assignmentId, series);
+    // A blackout's entries name the series-window their temporary override covers.
+    const window = bounded ? { window: { from: series.from, until: series.until } } : {};
+    const span = bounded ? `from ${series.from} until ${series.until}` : `from ${series.from}`;
     if (candidate !== null) {
-      const slotId = `${series.slotId}~repair@${lossDate}#${series.assignmentId}`;
+      const slotId = bounded
+        ? `${series.slotId}~override@${series.from}..${series.until}#${series.assignmentId}`
+        : `${series.slotId}~repair@${lossDate}#${series.assignmentId}`;
       newSlots.push({
         id: slotId,
         surfaceId: candidate.shape.surfaceId,
@@ -587,11 +629,15 @@ export function repairPracticeLoss(input) {
         validUntil: series.until,
         capacity: 1,
         revisionId: slotById.get(series.slotId)?.revisionId ?? null,
-        label: `repair of ${series.slotId} from ${lossDate}: ${lossReason}`,
+        label: bounded
+          ? `override of ${series.slotId} ${span}: ${lossReason}`
+          : `repair of ${series.slotId} from ${lossDate}: ${lossReason}`,
         surfaceResolution: 'resolved',
       });
       newAssignments.push({
-        id: `${series.assignmentId}~repair@${lossDate}`,
+        id: bounded
+          ? `${series.assignmentId}~override@${series.from}`
+          : `${series.assignmentId}~repair@${lossDate}`,
         slotId,
         teamId: series.teamId,
         effectiveFrom: series.from,
@@ -607,6 +653,7 @@ export function repairPracticeLoss(input) {
         },
         to: { ...candidate.shape },
         effectiveFrom: series.from,
+        ...window,
         publishedTimeChanged: candidate.timeChanged,
         weekdayChanged: candidate.weekdayChanged,
         locationChanged: candidate.shape.surfaceId !== series.surfaceId,
@@ -616,7 +663,7 @@ export function repairPracticeLoss(input) {
       findings.push(
         makePracticeFinding(
           PRACTICE_REASON.REPAIR_REHOMED,
-          `${series.teamId}: ${series.weekday} ${series.startMinutes} on ${series.surfaceId} -> ${candidate.shape.weekday} ${candidate.shape.startMinutes} on ${candidate.shape.surfaceId} from ${series.from}${candidate.timeChanged ? ' (published time changed)' : ' (same published time)'}`,
+          `${series.teamId}: ${series.weekday} ${series.startMinutes} on ${series.surfaceId} -> ${candidate.shape.weekday} ${candidate.shape.startMinutes} on ${candidate.shape.surfaceId} ${span}${candidate.timeChanged ? ' (published time changed)' : ' (same published time)'}`,
           {
             assignmentId: series.assignmentId,
             teamId: series.teamId,
@@ -676,6 +723,7 @@ export function repairPracticeLoss(input) {
           weekday: series.weekday,
           startMinutes: series.startMinutes,
         },
+        ...window,
         reason,
         lossReason,
         sameVenueCandidates: entry.same.length,
@@ -684,7 +732,7 @@ export function repairPracticeLoss(input) {
       findings.push(
         makePracticeFinding(
           PRACTICE_REASON.REPAIR_TIME_TBD,
-          `${series.teamId}: the ${series.weekday} ${series.startMinutes} practice on ${series.surfaceId} is TIME TBD from ${series.from} (${reason}); ${crossVenueOptions.length} cross-venue option(s) offered for approval.`,
+          `${series.teamId}: the ${series.weekday} ${series.startMinutes} practice on ${series.surfaceId} is TIME TBD ${span} (${reason}); ${crossVenueOptions.length} cross-venue option(s) offered for approval.`,
           {
             assignmentId: series.assignmentId,
             teamId: series.teamId,
@@ -745,7 +793,7 @@ export function repairPracticeLoss(input) {
     findings.push(
       makePracticeFinding(
         PRACTICE_REASON.REPAIR_NOTHING_DISPLACED,
-        `The loss of ${[...parsed.loss.surfaceIds].join(', ')} from ${lossDate} displaced no dated series. Nothing was repaired; that is not the same as a repair that succeeded.`,
+        `The loss of ${[...parsed.loss.surfaceIds].join(', ')} from ${lossDate}${bounded ? ` until ${lossUntil}` : ''} displaced no dated series. Nothing was repaired; that is not the same as a repair that succeeded.`,
         { surfaceIds: [...parsed.loss.surfaceIds], activeSeries: active.length }
       )
     );
@@ -753,7 +801,39 @@ export function repairPracticeLoss(input) {
 
   /* -- the repaired plan: split, never edited ----------------------------- */
   const repairedSlots = [];
-  for (const slot of slotSet.slots) {
+  const repairedAssignments = [];
+  if (bounded) {
+    // A blackout ends, so the lost ground is kept whole. Each displaced series
+    // is split in memory around its window only: the part before keeps its id,
+    // the part after gets one, and the window holds the override (if any).
+    // Occurrences carry slot and team, not assignment, so every occurrence
+    // outside the window materialises exactly as it did.
+    const dayAfter = shiftDate(/** @type {string} */ (lossUntil), 1);
+    for (const slot of slotSet.slots) repairedSlots.push({ ...slot });
+    for (const assignment of slotSet.assignments) {
+      if (!splitAssignments.has(assignment.id)) {
+        repairedAssignments.push({ ...assignment });
+        continue;
+      }
+      const slot = /** @type {import('./types.js').PracticeSlot} */ (
+        slotById.get(assignment.slotId)
+      );
+      const from = /** @type {string} */ (assignment.effectiveFrom ?? slot.validFrom);
+      const until = /** @type {string} */ (assignment.effectiveUntil ?? slot.validUntil);
+      if (from < lossDate) {
+        repairedAssignments.push({ ...assignment, effectiveFrom: from, effectiveUntil: dayBefore });
+      }
+      if (until > /** @type {string} */ (lossUntil)) {
+        repairedAssignments.push({
+          ...assignment,
+          id: `${assignment.id}~after@${lossUntil}`,
+          effectiveFrom: dayAfter,
+          effectiveUntil: until,
+        });
+      }
+    }
+  }
+  for (const slot of bounded ? [] : slotSet.slots) {
     const onLost =
       lostSurfaceIds.has(slot.surfaceId) && slot.validFrom !== null && slot.validUntil !== null;
     if (onLost && slot.validUntil >= lossDate) {
@@ -762,8 +842,7 @@ export function repairPracticeLoss(input) {
     } else repairedSlots.push({ ...slot });
   }
   const keptSlotIds = new Set(repairedSlots.map((slot) => slot.id));
-  const repairedAssignments = [];
-  for (const assignment of slotSet.assignments) {
+  for (const assignment of bounded ? [] : slotSet.assignments) {
     const split = splitAssignments.get(assignment.id);
     if (!split) {
       repairedAssignments.push({ ...assignment });
@@ -852,6 +931,7 @@ export function repairPracticeLoss(input) {
   return {
     status: derivePracticeStatus(findings),
     lossDate,
+    representation: bounded ? 'override' : 'split',
     rehomed,
     timeTbd,
     coachDays: coachDayRows,

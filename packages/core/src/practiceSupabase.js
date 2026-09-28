@@ -210,8 +210,9 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
  * slot's window. ISO dates compare correctly as strings.
  */
 function resolveAssignmentWindow(assignment, slot, index) {
-  const ownFrom = assignment.effectiveFrom;
-  const ownUntil = assignment.effectiveUntil;
+  // null means "the slot's bound", as in PracticeAssignmentSchema and materialise.js.
+  const ownFrom = assignment.effectiveFrom ?? undefined;
+  const ownUntil = assignment.effectiveUntil ?? undefined;
   if (ownFrom === undefined && ownUntil === undefined) {
     return { from: slot.effectiveFrom, until: slot.effectiveUntil };
   }

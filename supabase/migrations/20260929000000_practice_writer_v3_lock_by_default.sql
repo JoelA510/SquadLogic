@@ -184,7 +184,14 @@ AS $$
                || COALESCE(pa.practice_slot_id::text, '') || '|'
                || COALESCE(pa.effective_date_range::text, '') || '|'
                || pa.source::text || '|' || pa.assigned_via,
-               ',' ORDER BY pa.id), ''))
+               ',' ORDER BY pa.id), '')
+               -- and the season's exceptions, live or withdrawn: a repair
+               -- planned before another admin recorded or withdrew one is stale.
+               || '#' || COALESCE((
+                   SELECT string_agg(pe.id::text || '|' || COALESCE(pe.withdrawn_at::text, ''),
+                                     ',' ORDER BY pe.id)
+                     FROM public.practice_exceptions pe
+                    WHERE pe.season_settings_id = p_season_settings_id), ''))
       FROM public.practice_assignments pa
       JOIN public.teams t ON t.id = pa.team_id
       JOIN public.divisions d ON d.id = t.division_id
@@ -838,6 +845,17 @@ BEGIN
      LIMIT 1;
     IF v_locked_id IS NOT NULL THEN
         RAISE EXCEPTION 'assignment % is locked: % -- list it in unlock, with a reason, to change it', v_locked_id, v_locked_why
+            USING ERRCODE = '22023';
+    END IF;
+
+    -- An exception on a series this same save prunes would have nothing to
+    -- attach to after the prune, and would vanish without a word.
+    SELECT (e.value->>'assignment_id')::uuid INTO v_bad_id
+      FROM jsonb_array_elements(exceptions) e
+     WHERE (e.value->>'assignment_id')::uuid = ANY (v_prune_ids)
+     LIMIT 1;
+    IF v_bad_id IS NOT NULL THEN
+        RAISE EXCEPTION 'exceptions names assignment %, which this save removes', v_bad_id
             USING ERRCODE = '22023';
     END IF;
 

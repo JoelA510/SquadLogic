@@ -44,6 +44,9 @@ R15="$REPO/docs/sql/20260929000000_revert.sql"
 # 8.9 PR 3: venue coordinates and their revert.
 M16="$REPO/supabase/migrations/20260930000000_location_coordinates.sql"
 R16="$REPO/docs/sql/20260930000000_revert.sql"
+# 8.6 PR 3b PR 8: the dead coaches.preferred_practice_* columns dropped.
+M17="$REPO/supabase/migrations/20261001000000_drop_coach_preferred_practice_columns.sql"
+R17="$REPO/docs/sql/20261001000000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -2967,6 +2970,41 @@ plant "R16 the coordinates warning stops counting organisations distinctly" "$R1
   "    SELECT count(*), count(organization_id)" \
   "revert 20260930000000: planted 3 venues with coordinates across 2 organisations (and 1 without) and the revert did not warn with those figures"
 
+# **8.6 PR 3b PR 8: the dead preferred_practice columns (plan §4 "Retire dead
+# fields", §5 decision 8).** The drop and its guard are table DDL and a DO
+# block (NA); the smoke's two halves -- the columns gone, and no catalogue
+# object naming them -- are planted separately, because each is the only thing
+# that would catch its own break.
+plant "M17 the drop leaves preferred_practice_window in place" "$M17" \
+  "    DROP COLUMN preferred_practice_days,
+    DROP COLUMN preferred_practice_window;" \
+  "    DROP COLUMN preferred_practice_days;" \
+  "FAIL smoke 20261001000000"
+
+# A reader written after the drop: plpgsql does not resolve the column until
+# it runs, so only the catalogue search can see it.
+plant "M17 a function still reads a dropped column" "$M17" \
+  "COMMIT;" \
+  "CREATE FUNCTION public.harness_plant_preferred_reader() RETURNS bigint
+    LANGUAGE plpgsql SET search_path = '' AS \$plant\$
+BEGIN
+    RETURN (SELECT count(preferred_practice_window) FROM public.coaches);
+END;
+\$plant\$;
+
+COMMIT;" \
+  "FAIL smoke 20261001000000"
+
+plant "M17 the drop's guard is removed" "$M17" \
+  "    IF v_held > 0 THEN" \
+  "    IF false THEN" \
+  "FAIL revert 20261001000000: re-applying the drop while a coach holds a preferred_practice value SUCCEEDED"
+
+plant "R17 the revert re-adds the window with the wrong type" "$R17" \
+  "    ADD COLUMN IF NOT EXISTS preferred_practice_window tsrange;" \
+  "    ADD COLUMN IF NOT EXISTS preferred_practice_window text;" \
+  "FAIL revert 20261001000000: the revert did not re-add both preferred_practice columns"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -3065,6 +3103,9 @@ declare -A CLAIM_PROVER=(
   ["(checked) the coordinates RPC stores the pair rounded to 2 decimals"]="M16 the coordinates RPC stops rounding"
   ["(checked) every accepted coordinates write, a clear included, leaves a location.coordinates_set audit row with its before and after"]="M16 the coordinates RPC stops auditing"
   ["(checked) the revert counted the venue coordinates it was about to destroy, and the organisations they span"]="R16 the coordinates warning stops counting organisations distinctly"
+  ["(checked) coaches.preferred_practice_days and _window are gone, and no function, view, policy, constraint, default or index in public names them"]="M17 the drop leaves preferred_practice_window in place|M17 a function still reads a dropped column"
+  ["(checked) the revert re-adds coaches.preferred_practice_days and _window, nullable, with their original types"]="R17 the revert re-adds the window with the wrong type"
+  ["(checked) the drop refuses while any coach holds a preferred_practice value, and both columns survive"]="M17 the drop's guard is removed"
 )
 
 # **`(unplantable)` is the one prefix that retires a HEALTH CLAIM, so it is

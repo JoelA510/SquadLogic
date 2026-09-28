@@ -588,6 +588,16 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "FAIL smoke ${id}: it passed without proving every coordinates write is audited with before and after"; STATUS=1
       fi
     fi
+    # **8.6 PR 3b PR 8: the dead preferred_practice columns are dropped.** A
+    # column dropped while still read is a live break, so the smoke searches
+    # every catalogue reader and proves its scans read something.
+    if [ "$id" = "20261001000000" ]; then
+      if grep -qF "preferred_practice columns: 0 of 2 remain on coaches, and 0 catalogue objects name them" /tmp/harness_smoke; then
+        echo "  | (checked) coaches.preferred_practice_days and _window are gone, and no function, view, policy, constraint, default or index in public names them"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the preferred_practice columns are gone and unread"; STATUS=1
+      fi
+    fi
     # **The production RLS drift replay** is the only evidence that the
     # reconcile fixes production rather than a repo chain where it has nothing
     # to do, so each half of it is a claim. The smoke RAISEs on any failed
@@ -903,7 +913,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1609,6 +1619,45 @@ NEEDLES
       else
         echo "FAIL revert ${id}: planted 3 venues with coordinates across 2 organisations (and 1 without) and the revert did not warn with those figures"
         STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261001000000" ]; then
+      # The revert re-adds both columns, nullable, with their original types.
+      if psql_cmd "SELECT 'COLUMNS-VERDICT:' || count(*) FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'coaches' AND is_nullable = 'YES'
+                      AND ((column_name = 'preferred_practice_days' AND udt_name = '_day_of_week')
+                        OR (column_name = 'preferred_practice_window' AND udt_name = 'tsrange'))" \
+           >/tmp/harness_cols 2>&1 && grep -q 'COLUMNS-VERDICT:2' /tmp/harness_cols; then
+        echo "  | (checked) the revert re-adds coaches.preferred_practice_days and _window, nullable, with their original types"
+      else
+        echo "FAIL revert ${id}: the revert did not re-add both preferred_practice columns, nullable, with their original types"
+        dump 10 /tmp/harness_cols; STATUS=1
+      fi
+      # The forward migration's guard: with the columns back and ONE coach
+      # holding a value, re-applying the drop must refuse and drop nothing.
+      # The coach is synthetic (an @example.test address, no real person).
+      if psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                  ('ed000000-0000-4000-8000-00000000000a','Preference Column Org','preference-column-org');
+                INSERT INTO public.coaches (organization_id, full_name, email, preferred_practice_days) VALUES
+                  ('ed000000-0000-4000-8000-00000000000a','Harness Coach','harness.coach@example.test',
+                   ARRAY['tue']::public.day_of_week[]);" >/tmp/harness_seed 2>&1; then
+        if psql_file "$REPO/supabase/migrations/20261001000000_drop_coach_preferred_practice_columns.sql" \
+             >/tmp/harness_reapply 2>&1; then
+          echo "FAIL revert ${id}: re-applying the drop while a coach holds a preferred_practice value SUCCEEDED -- the value was destroyed"
+          STATUS=1
+        elif grep -q 'refusing to drop coaches.preferred_practice_days/_window: 1 coach(es) hold a value' /tmp/harness_reapply &&
+             psql_cmd "SELECT 'SURVIVED:' || count(*) FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = 'coaches'
+                          AND column_name IN ('preferred_practice_days', 'preferred_practice_window')" \
+               >/tmp/harness_cols 2>&1 && grep -q 'SURVIVED:2' /tmp/harness_cols; then
+          echo "  | (checked) the drop refuses while any coach holds a preferred_practice value, and both columns survive"
+        else
+          echo "FAIL revert ${id}: re-applying the drop over a held value did not refuse with the count, or dropped a column anyway"
+          dump 10 /tmp/harness_reapply; STATUS=1
+        fi
+      else
+        echo "FAIL seeding ${id}: the coach holding a preferred_practice value was never inserted"
+        dump 10 /tmp/harness_seed; STATUS=1
       fi
     fi
     if [ "$id" = "20260927000000" ]; then

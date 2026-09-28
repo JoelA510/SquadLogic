@@ -416,8 +416,6 @@ begin
         email,
         phone,
         certifications,
-        preferred_practice_days,
-        preferred_practice_window,
         can_coach_multiple_teams,
         status
     ) values (
@@ -426,8 +424,6 @@ begin
         'maria.johnson@example.com',
         '+1-555-0101',
         'SafeSport',
-        array['mon']::day_of_week[],
-        null,
         false,
         'active'
     )
@@ -436,8 +432,6 @@ begin
         full_name = excluded.full_name,
         phone = excluded.phone,
         certifications = excluded.certifications,
-        preferred_practice_days = excluded.preferred_practice_days,
-        preferred_practice_window = excluded.preferred_practice_window,
         can_coach_multiple_teams = excluded.can_coach_multiple_teams,
         status = excluded.status
     returning id into coach_maria_id;
@@ -448,8 +442,6 @@ begin
         email,
         phone,
         certifications,
-        preferred_practice_days,
-        preferred_practice_window,
         can_coach_multiple_teams,
         status
     ) values (
@@ -457,8 +449,6 @@ begin
         'Jordan Patel',
         'jordan.patel@example.com',
         '+1-555-0112',
-        null,
-        array['mon']::day_of_week[],
         null,
         false,
         'active'
@@ -468,8 +458,6 @@ begin
         full_name = excluded.full_name,
         phone = excluded.phone,
         certifications = excluded.certifications,
-        preferred_practice_days = excluded.preferred_practice_days,
-        preferred_practice_window = excluded.preferred_practice_window,
         can_coach_multiple_teams = excluded.can_coach_multiple_teams,
         status = excluded.status
     returning id into coach_jordan_id;
@@ -480,8 +468,6 @@ begin
         email,
         phone,
         certifications,
-        preferred_practice_days,
-        preferred_practice_window,
         can_coach_multiple_teams,
         status
     ) values (
@@ -490,8 +476,6 @@ begin
         'devon.ramirez@example.com',
         '+1-555-0203',
         'SafeSport',
-        array['tue']::day_of_week[],
-        null,
         false,
         'active'
     )
@@ -500,8 +484,6 @@ begin
         full_name = excluded.full_name,
         phone = excluded.phone,
         certifications = excluded.certifications,
-        preferred_practice_days = excluded.preferred_practice_days,
-        preferred_practice_window = excluded.preferred_practice_window,
         can_coach_multiple_teams = excluded.can_coach_multiple_teams,
         status = excluded.status
     returning id into coach_devon_id;
@@ -512,8 +494,6 @@ begin
         email,
         phone,
         certifications,
-        preferred_practice_days,
-        preferred_practice_window,
         can_coach_multiple_teams,
         status
     ) values (
@@ -521,8 +501,6 @@ begin
         'Elena Thompson',
         'elena.thompson@example.com',
         '+1-555-0241',
-        null,
-        array['tue']::day_of_week[],
         null,
         false,
         'active'
@@ -532,8 +510,6 @@ begin
         full_name = excluded.full_name,
         phone = excluded.phone,
         certifications = excluded.certifications,
-        preferred_practice_days = excluded.preferred_practice_days,
-        preferred_practice_window = excluded.preferred_practice_window,
         can_coach_multiple_teams = excluded.can_coach_multiple_teams,
         status = excluded.status
     returning id into coach_elena_id;

@@ -120,12 +120,12 @@ Deno.test('checkHardConstraints - two name-only teams are never refused as one c
   const t1 = named('T1', 'Coach Mike');
   const t2 = named('T2', 'Coach Mike');
   assertEquals(t1.coachIds, []);
-  assertEquals(checkHardConstraints(t2, overlap, book(t1, early), capacity(), {}), true);
+  assertEquals(checkHardConstraints(t2, overlap, book(t1, early), capacity()), true);
   // POSITIVE CONTROL: the same two rows carrying one id are one person.
   const byId = (id: string) =>
     prepareTeam({ id, division: 'U10', coaches: [{ personId: 'mike', slot: 1 }] });
   assertEquals(
-    checkHardConstraints(byId('T2'), overlap, book(byId('T1'), early), capacity(), {}),
+    checkHardConstraints(byId('T2'), overlap, book(byId('T1'), early), capacity()),
     false
   );
 });
@@ -170,12 +170,12 @@ Deno.test('checkHardConstraints - two teams sharing an assistant cannot overlap'
   const t2: PreparedTeam = { id: 'T2', coachId: 'h2', coachIds: ['h2', 'shared'] };
   const booked = book(t1, early);
 
-  assertEquals(checkHardConstraints(t2, overlap, booked, capacity(), {}), false);
-  assertEquals(checkHardConstraints(t2, late, booked, capacity(), {}), true);
+  assertEquals(checkHardConstraints(t2, overlap, booked, capacity()), false);
+  assertEquals(checkHardConstraints(t2, late, booked, capacity()), true);
 
   // Control: a distinct assistant fits the overlapping slot.
   const t3: PreparedTeam = { id: 'T3', coachId: 'h3', coachIds: ['h3', 'other'] };
-  assertEquals(checkHardConstraints(t3, overlap, booked, capacity(), {}), true);
+  assertEquals(checkHardConstraints(t3, overlap, booked, capacity()), true);
 });
 
 Deno.test(
@@ -183,17 +183,9 @@ Deno.test(
   () => {
     const t1: PreparedTeam = { id: 'T1', coachId: 'h1', coachIds: ['h1', 'shared'] };
     const t2: PreparedTeam = { id: 'T2', coachId: null, coachIds: ['shared'] };
-    assertEquals(checkHardConstraints(t2, overlap, book(t1, early), capacity(), {}), false);
+    assertEquals(checkHardConstraints(t2, overlap, book(t1, early), capacity()), false);
   }
 );
-
-Deno.test("checkHardConstraints - an assistant coach's unavailability blocks the slot", () => {
-  const t2: PreparedTeam = { id: 'T2', coachId: null, coachIds: ['shared'] };
-  const prefs = { shared: { unavailableSlotIds: ['late'] } };
-  assertEquals(checkHardConstraints(t2, late, new Map(), capacity(), prefs), false);
-  // Control: the same team on a slot the assistant is available for.
-  assertEquals(checkHardConstraints(t2, early, new Map(), capacity(), prefs), true);
-});
 
 Deno.test(
   'TeamSchema - assistantCoachIds: null validates, and the team is scheduled on its head coach',
@@ -206,7 +198,7 @@ Deno.test(
     });
     const prepared: PreparedTeam = { ...parsed, coachIds: listTeamCoachIds(parsed) };
     assertEquals(prepared.coachIds, ['h1']);
-    assertEquals(checkHardConstraints(prepared, early, new Map(), capacity(), {}), true);
+    assertEquals(checkHardConstraints(prepared, early, new Map(), capacity()), true);
     // Control: the schema still rejects a non-array list.
     assertThrows(() =>
       TeamSchema.parse({ id: 'T1', division: 'U10', coachId: 'h1', assistantCoachIds: 'a1' })
@@ -229,7 +221,7 @@ Deno.test(
     // The same preparation index.ts performs, then the seat check the greedy pass runs.
     const prepared = parsed.data.teams.map((t) => ({ ...t, coachIds: listTeamCoachIds(t) }));
     assertEquals(prepared[0].coachIds, ['h1']);
-    assertEquals(checkHardConstraints(prepared[0], early, new Map(), capacity(), {}), true);
+    assertEquals(checkHardConstraints(prepared[0], early, new Map(), capacity()), true);
     // Control: the request schema still rejects a non-array list.
     const rejected = AutoSchedulerInputSchema.safeParse({
       organizationId: '11111111-1111-4111-8111-111111111111',

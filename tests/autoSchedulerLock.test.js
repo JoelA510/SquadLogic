@@ -101,7 +101,6 @@ async function runFixture() {
     slots: SLOTS,
     locked: ROWS.map((r) => ({ assignmentId: r.id, teamId: r.teamId, slotId: r.slotId })),
     placeableTeamIds: classification.placeable,
-    coachPreferences: {},
     config: { timeBudgetMs: 20000, maxIterations: 300, seed: 42 },
   });
   return { classification, run };

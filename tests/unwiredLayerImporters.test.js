@@ -649,10 +649,18 @@ const LAYERS = Object.freeze([
   //
   // Unwired from the solver by design. PR 4 made the repair a caller, and the
   // repair has no production caller either (the `practice/repair.js` pin
-  // above); PR 8 mirrors it in the Deno twin. PR 2 (the preferences UI) is its
-  // one production consumer so far, and a read-only one: the hook validates RPC
-  // payloads with `CoachPreferenceSchema`, and the approval dialog's re-judge
-  // (`coachPreferencePreview.js`) calls resolve + judge. Nothing schedules from it.
+  // above). PR 2 (the preferences UI) is a read-only consumer: the hook
+  // validates RPC payloads with `CoachPreferenceSchema`, and the approval
+  // dialog's re-judge (`coachPreferencePreview.js`) calls resolve + judge.
+  //
+  // PR 8: the RULE is now wired into a solver -- the auto-scheduler Edge
+  // Function -- through the Deno twin, which cannot import this module and so
+  // DEFINES same-named functions (`_shared/engines/coach-preferences.ts`) that
+  // its loader calls (`coach-preference-load.ts`). They are name matches, not
+  // imports, and are listed as the production consumers they are;
+  // `tests/coachPreferenceDrift.test.js` holds them to this module (it calls
+  // both arms through aliases, so it is an importer of the barrel, not a
+  // consumer by name).
   Object.freeze({
     layer: 'practice/coachPreferences.js',
     modulePath: 'packages/core/src/practice/coachPreferences.js',
@@ -670,15 +678,26 @@ const LAYERS = Object.freeze([
     consumers: Object.freeze([
       'frontend/src/utils/coachPreferencePreview.js',
       'packages/core/src/practice/repair.js',
+      'supabase/functions/_shared/engines/coach-preference-load.ts',
+      'supabase/functions/_shared/engines/coach-preferences.ts',
+      'supabase/functions/_shared/tests/coach-preferences_test.ts',
       'tests/coachPreferences.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
       'frontend/src/utils/coachPreferencePreview.js',
       'packages/core/src/practice/repair.js',
+      'supabase/functions/_shared/engines/coach-preference-load.ts',
+      'supabase/functions/_shared/engines/coach-preferences.ts',
+      // The twin's Deno test: under `supabase/`, so `isProductionFile` counts
+      // it (the `solar_test.ts` precedent above). Not a caller.
+      'supabase/functions/_shared/tests/coach-preferences_test.ts',
     ]),
     expectedExternalProductionConsumers: Object.freeze([
       'frontend/src/utils/coachPreferencePreview.js',
+      'supabase/functions/_shared/engines/coach-preference-load.ts',
+      'supabase/functions/_shared/engines/coach-preferences.ts',
+      'supabase/functions/_shared/tests/coach-preferences_test.ts',
     ]),
   }),
 ]);

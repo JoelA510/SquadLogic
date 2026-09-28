@@ -127,19 +127,21 @@ export function conflictPairKey(
 }
 
 /**
- * Capacity, then unavailability and time overlap for every coach on the team.
+ * Capacity, then time overlap for every coach on the team.
+ *
+ * A per-coach `unavailableSlotIds` used to be read here from the request body
+ * (`coachPreferences`). No client ever sent one, and a coach's availability is
+ * now an approved `coach_practice_preferences` row the Edge loads itself
+ * (8.6 PR 3b, PR 8: `coach-preference-load.ts`), so the body path is retired
+ * rather than left parsed and unread.
  */
 export function checkHardConstraints(
   team: PreparedTeam,
   slot: { id: string; start: Date; end: Date },
   coachAssignments: Map<string, TimeWindow[]>,
-  slotCapacity: Map<string, number>,
-  coachPreferences: Record<string, { unavailableSlotIds?: string[] }>
+  slotCapacity: Map<string, number>
 ): boolean {
   if ((slotCapacity.get(slot.id) ?? 0) <= 0) return false;
-  for (const coachId of team.coachIds) {
-    if (coachPreferences[coachId]?.unavailableSlotIds?.includes(slot.id)) return false;
-  }
   for (const coachId of team.coachIds) {
     const existing = coachAssignments.get(coachId) ?? [];
     for (const a of existing) {

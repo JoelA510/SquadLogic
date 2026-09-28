@@ -200,6 +200,7 @@ export interface LockReader {
 }
 
 export const LOCK_PAGE_SIZE = 1000;
+export const LOCK_MAX_PAGES = 1000;
 
 /**
  * Read every row of a query, page by page. PostgREST caps a response
@@ -215,7 +216,9 @@ async function readAllPages(
   pageSize: number
 ): Promise<{ rows: unknown[]; error: string | null }> {
   const rows: unknown[] = [];
-  for (;;) {
+  for (let pageNo = 0; ; pageNo += 1) {
+    // A read that never reaches an empty page is refused, never returned partial.
+    if (pageNo >= LOCK_MAX_PAGES) return { rows, error: `no end after ${LOCK_MAX_PAGES} pages` };
     const from = rows.length;
     const { data, error } = await build().range(from, from + pageSize - 1);
     if (error) return { rows, error: error.message ?? 'unknown error' };

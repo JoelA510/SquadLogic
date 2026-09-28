@@ -24,6 +24,7 @@ import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { useAutoScheduler } from '../hooks/useAutoScheduler.js';
+import { useSeasonPracticeAssignments } from '../hooks/useSeasonPracticeAssignments.js';
 import { useAutoRunOnNavigate } from '../hooks/useAutoRunOnNavigate.js';
 import { persistPracticeScheduleReview } from '../utils/practicePersistenceClient.js';
 import {
@@ -444,6 +445,17 @@ export default function PracticeSchedulingPage() {
 
   const autoScheduler = useAutoScheduler({ organizationId: currentOrganization?.id });
 
+  // The locked set: every current row of the SEASON, not of the latest run
+  // (writer v3 is add-only, so earlier runs' rows stay in the season). The
+  // auto-scheduler loads the same set with the same filter and refuses any
+  // mismatch, so the run and its review are built from this read only.
+  const seasonPractice = useSeasonPracticeAssignments({
+    organizationId: currentOrganization?.id,
+    seasonSettingsId: currentSeasonSetting?.id,
+  });
+  const seasonRows = seasonPractice.rows;
+  const refetchSeasonPractice = seasonPractice.refetch;
+
   useEffect(() => {
     if (practice?.assignments) {
       setAssignments(practice.assignments);
@@ -559,7 +571,7 @@ export default function PracticeSchedulingPage() {
     // unchanged, plus those placements -- which is also the payload an
     // ordinary save must carry for the v3 writer to have nothing to refuse.
     const placements = autoScheduler.result.assignments ?? [];
-    const lockedTeamIds = new Set(assignments.map(getAssignmentTeamId));
+    const lockedTeamIds = new Set(seasonRows.map(getAssignmentTeamId));
     const clash = placements.find((placement) => lockedTeamIds.has(placement.teamId));
     const seasonToday = seasonCalendarDate(Date.now(), timezone);
     // The function has no date model, so it can place a team in a slot whose
@@ -590,7 +602,7 @@ export default function PracticeSchedulingPage() {
     }
 
     const nextAssignments = [
-      ...assignments.map((assignment, index) =>
+      ...seasonRows.map((assignment, index) =>
         buildDisplayAssignment({ assignment, index, runId: null, teamById, slotById })
       ),
       ...placements.map((assignment, index) => {
@@ -616,10 +628,10 @@ export default function PracticeSchedulingPage() {
     setTeamWarnings([]);
     setReviewedSchedulerRunId(resultRunId);
   }, [
-    assignments,
     autoScheduler.result,
     autoScheduler.status,
     reviewedSchedulerRunId,
+    seasonRows,
     slotById,
     teamById,
     timezone,
@@ -630,17 +642,11 @@ export default function PracticeSchedulingPage() {
   const schoolDayEnd =
     currentSeasonSetting?.school_day_end ?? currentSeasonSetting?.schoolDayEnd ?? undefined;
 
-  // Every PERSISTED row, whatever its source: all of them are locked (ruling
-  // 2). The function loads the rows itself and uses this list only as a
-  // cross-check, refusing the run on any mismatch -- so it is the persisted
-  // schedule, not the staged review.
-  const lockedAssignments = useMemo(
-    () =>
-      assignments
-        .filter((assignment) => assignment.persisted !== false && assignment.id)
-        .map(toLockedAssignment),
-    [assignments]
-  );
+  // Every current row of the SEASON, whatever its source or run: all of them
+  // are locked (ruling 2). The function loads the same set itself and uses
+  // this list only as a cross-check, refusing the run on any mismatch -- so it
+  // is the season read, never the latest run's rows or the staged review.
+  const lockedAssignments = useMemo(() => seasonRows.map(toLockedAssignment), [seasonRows]);
 
   const overrideBaseSlots = useMemo(() => {
     const assignedBySlot = new Map();
@@ -675,7 +681,11 @@ export default function PracticeSchedulingPage() {
   // the season row still in hand belongs to the one just left, so it HAS a
   // timezone, every slot places against it, and the count arm is false while
   // the clock is another tenant's.
+  // Never run against a partial or missing lock set: until the season read
+  // completes (or after it fails) the scheduler stays disabled, with a reason.
+  const seasonPracticeUnread = !seasonPractice.loaded;
   const schedulerDisabled =
+    seasonPracticeUnread ||
     dashboardLoading.practice ||
     practiceSlotsLoading ||
     seasonClockLoading ||
@@ -713,7 +723,14 @@ export default function PracticeSchedulingPage() {
     [autoScheduler.result]
   );
 
+  const seasonPracticeMessage = seasonPractice.error
+    ? "This season's current practices could not be read, so the scheduler cannot " +
+      `honour them and will not run (${seasonPractice.error.message}).`
+    : seasonPractice.loading
+      ? "Loading this season's current practices…"
+      : null;
   const schedulerReadinessMessage =
+    seasonPracticeMessage ||
     practiceSlotsError ||
     (seasonClockLoading ? "Loading this season's settings…" : null) ||
     unplaceableSlotMessage ||
@@ -874,6 +891,9 @@ export default function PracticeSchedulingPage() {
       );
       setReviewAssignments(null);
       setApplyStatus('applied');
+      // The save created rows the page knows only by review ids. Re-read the
+      // season so the next run's cross-check names them by their real ids.
+      refetchSeasonPractice();
       // The schedule was persisted either way -- this is not an error -- but
       // a run with no readiness metrics must say so here. The panel can only
       // fall silent (it gates on `summary.unassignedTeams`), and a silent
@@ -905,6 +925,7 @@ export default function PracticeSchedulingPage() {
     currentSeasonSetting?.id,
     lockedAssignments.length,
     practice?.runId,
+    refetchSeasonPractice,
     reviewAssignments,
     schedulerSlots,
     // The array, not its length: the roster is now an input to the metrics

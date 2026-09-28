@@ -374,3 +374,80 @@ export async function persistPracticeAssignments(
 
   return data ?? null;
 }
+
+export const SEASON_PRACTICE_PAGE_SIZE = 1000;
+export const SEASON_PRACTICE_MAX_PAGES = 1000;
+
+/**
+ * Every CURRENT `practice_assignments` row of one season -- the page's side
+ * of the auto-scheduler's lock cross-check (8.6 PR 3b PR 7).
+ *
+ * **Why a season read, not a run read.** Writer v3 is add-only: rows placed
+ * by every earlier save stay in the season carrying their own `run_id`. A
+ * reader keyed on the latest run therefore stops listing them from the second
+ * run on, while the auto-scheduler loads by season and refuses the run.
+ *
+ * **One contract with the Edge loader.** Same table, same season scope (org +
+ * season through teams -> divisions, the writer's `scope`), same slot reading
+ * (`practice_slot_id ?? slot_id`, the writer's COALESCE), same paging: advance
+ * by the rows actually returned and stop only on an EMPTY page, so a server
+ * `max-rows` cap below `pageSize` is never read as the end. The twin is
+ * `loadSeasonPracticeLock` in `supabase/functions/_shared/engines/practice-lock.ts`;
+ * `tests/practiceSeasonLock.test.jsx` holds the two to one recorded query.
+ *
+ * Never partial: any failed page, or a read that does not end within
+ * `maxPages`, is `{ ok: false }` -- a caller must not lock against half a season.
+ *
+ * @param {{ from: (table: string) => any }} client - the caller's Supabase client (RLS applies)
+ * @param {{ organizationId: string, seasonSettingsId: string, pageSize?: number, maxPages?: number }} params
+ * @returns {Promise<{ ok: true, rows: Array<{ id: string, teamId: string, slotId: string|null,
+ *   effectiveDateRange: string|null, assignedVia: string|null, source: string|null,
+ *   runId: string|null }> } | { ok: false, message: string }>}
+ */
+export async function loadSeasonPracticeAssignments(client, params) {
+  const {
+    organizationId,
+    seasonSettingsId,
+    pageSize = SEASON_PRACTICE_PAGE_SIZE,
+    maxPages = SEASON_PRACTICE_MAX_PAGES,
+  } = params ?? {};
+  if (!organizationId || !seasonSettingsId) {
+    return { ok: false, message: 'an organization and a season are required' };
+  }
+  const raw = [];
+  for (let page = 0; ; page += 1) {
+    if (page >= maxPages) {
+      return { ok: false, message: `practice_assignments: no end after ${maxPages} pages` };
+    }
+    const from = raw.length;
+    const { data, error } = await client
+      .from('practice_assignments')
+      .select(
+        'id, team_id, practice_slot_id, slot_id, effective_date_range, assigned_via, source, ' +
+          'run_id, teams!inner(divisions!inner(season_settings_id))'
+      )
+      .eq('organization_id', organizationId)
+      .eq('teams.divisions.season_settings_id', seasonSettingsId)
+      .order('id', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) {
+      return { ok: false, message: `practice_assignments: ${error.message ?? 'unknown error'}` };
+    }
+    const rows = Array.isArray(data) ? data : [];
+    if (rows.length === 0) break;
+    raw.push(...rows);
+  }
+  const text = (value) => (value === null || value === undefined ? null : String(value));
+  return {
+    ok: true,
+    rows: raw.map((row) => ({
+      id: String(row.id),
+      teamId: String(row.team_id),
+      slotId: text(row.practice_slot_id ?? row.slot_id),
+      effectiveDateRange: text(row.effective_date_range),
+      assignedVia: text(row.assigned_via),
+      source: text(row.source),
+      runId: text(row.run_id),
+    })),
+  };
+}

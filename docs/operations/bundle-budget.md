@@ -37,7 +37,9 @@ Each `rules[]` entry must have either `maxGzipBytes` (preferred for JS/CSS) or
 noise).
 
 A rule with neither cap, or with both, fails the gate (`[CONFIG]`) rather than
-passing every file unchecked.
+passing every file unchecked. So does a missing, misspelt, non-number or
+non-positive `totalFirstPaintGzipBytes`, and a `rules` that is not a non-empty
+array. A check with no cap is reported, never skipped.
 
 **Every rule must match at least one built file.** A rule that matches none
 fails the gate with `[NO MATCH] rule "<label>"`: a renamed chunk would
@@ -97,6 +99,7 @@ Sizes in the `check:bundle` output and in the rationale fields are KiB
 | `total first-paint exceeds budget` but per-chunk OK | Multiple small growths summed | Tighten one of the large vendors first; first-paint cap is the global gate. |
 | `[NO MATCH] rule "..."` | Rule's regex matches no built file (for a `firstPaint` rule: no file `index.html` loads). Fails the gate. | Fix the regex (a chunk was renamed) or remove the rule (the chunk was deleted). |
 | `[UNBUDGETED FIRST-PAINT] assets/...` | `index.html` now loads a file no `firstPaint` rule matches (new `manualChunks` entry, renamed vendor). Fails the gate. | Add or fix a `firstPaint` rule; see "Adding a new rule". |
+| `[CONFIG] ...` | A rule without exactly one cap, a missing or non-number `totalFirstPaintGzipBytes`, or no `rules` array. Fails the gate. | Fix `config/bundle-budget.json`. |
 | `[FIRST-PAINT] index.html ...` | `dist/index.html` has no module entry, or references a file missing from `dist/assets`. Fails the gate. | Rebuild; if it persists, the build is broken. |
 | `WARN <n> lazy file(s) match no rule` | Informational. Lazy chunks are not budgeted one by one. | None required; add a rule if a lazy chunk deserves its own cap. |
 

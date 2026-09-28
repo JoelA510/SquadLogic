@@ -173,6 +173,28 @@ describe('evaluateBudget', () => {
     ]);
   });
 
+  it.each([
+    ['missing', undefined],
+    ['a string', '250000'],
+    ['zero', 0],
+    ['misspelt', undefined, 'totalFirstPaintGzipByte'],
+  ])('fails when totalFirstPaintGzipBytes is %s instead of skipping the total', (_, v, key) => {
+    const b = budget();
+    delete b.totalFirstPaintGzipBytes;
+    if (key) b[key] = 250000;
+    else if (v !== undefined) b.totalFirstPaintGzipBytes = v;
+    const r = run(b);
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0]).toMatch(
+      /^\[CONFIG\] budget needs a positive number totalFirstPaintGzipBytes/
+    );
+    expect(r.passed.join('\n')).not.toMatch(/total first-paint/);
+  });
+
+  it('fails when rules is not an array', () => {
+    expect(run(budget({ rules: { a: 1 } })).violations).toContain('[CONFIG] budget has no rules');
+  });
+
   it('fails when index.html has no entry or loads a file missing from dist', () => {
     expect(run(budget(), FILES, '<html></html>').violations).toContain(
       '[FIRST-PAINT] index.html has no <script type="module" src> entry'

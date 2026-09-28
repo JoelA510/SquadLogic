@@ -99,7 +99,7 @@ export function evaluateBudget({ files, budget, firstPaint, gzipSize }) {
   const passed = [];
   const warnings = [];
   const violations = [];
-  const rules = (budget && budget.rules) || [];
+  const rules = budget && Array.isArray(budget.rules) ? budget.rules : [];
   const byPath = new Map(files.map((f) => [f.path, f]));
   const fpSet = new Set(firstPaint.assets);
   const gzCache = new Map();
@@ -186,7 +186,13 @@ export function evaluateBudget({ files, budget, firstPaint, gzipSize }) {
     const f = byPath.get(p);
     if (f) firstPaintTotal += gz(f);
   }
-  if (typeof budget.totalFirstPaintGzipBytes === 'number') {
+  const totalCap = budget && budget.totalFirstPaintGzipBytes;
+  if (typeof totalCap !== 'number' || !(totalCap > 0)) {
+    violations.push(
+      '[CONFIG] budget needs a positive number totalFirstPaintGzipBytes; ' +
+        `got ${JSON.stringify(totalCap)}, so the first-paint total would go unchecked`
+    );
+  } else {
     const n = firstPaint.assets.length;
     if (firstPaintTotal > budget.totalFirstPaintGzipBytes) {
       violations.push(

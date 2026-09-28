@@ -70,7 +70,19 @@ export {
   resolveZonedInstant,
 } from './seasonClock.js';
 
-export { SUNSET_ZENITH_DEGREES, sunsetEnforcementMinutes, sunsetOnDate } from './solar.js';
+export {
+  SUNSET_ZENITH_DEGREES,
+  sunsetEnforcementMinutes,
+  sunsetOnDate,
+  utcOffsetMinutesOn,
+} from './solar.js';
+
+export {
+  SEASON_CLOCK_EVENT,
+  crossCheckClockChangeNotes,
+  deriveSeasonClockEvents,
+  parseClockChangeNote,
+} from './seasonEvents.js';
 
 export { computeGameWindows } from './windows.js';
 

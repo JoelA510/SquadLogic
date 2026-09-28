@@ -10,11 +10,14 @@
  * refraction at the horizon plus the sun's apparent radius). Nothing is fetched
  * at runtime and nothing geocodes: the caller hands the coordinates in.
  *
- * **Nothing in production calls this yet.** The daylight provider that turns a
- * venue's coordinates into a per-date limit is 8.9 PR 4; until it lands, the
- * date-keyed `sunsets.csv` table is the only sunset any evaluator reads.
- * `tests/unwiredLayerImporters.test.js` pins that, so the first production
- * caller fails the pin and the PR adding it has to edit the pin and this note.
+ * **One production caller: the daylight provider** (8.9 PR 4),
+ * `sunsetForVenue()` in `availability/calendar.js`, which turns a venue's
+ * coordinates into a per-date sunset where the date-keyed table has no record
+ * (decision D10: the table wins where present). Its first consumer is the
+ * practice daylight evaluator (`practice/daylight.js`); the game path still
+ * reads the table alone. `tests/unwiredLayerImporters.test.js` pins that list,
+ * so the next production caller fails the pin and the PR adding it has to edit
+ * the pin and this note.
  *
  * ## The clock
  *
@@ -173,6 +176,22 @@ function offsetOn(date, timeZone) {
   const offsetMinutes = (match[1] === '-' ? -1 : 1) * (Number(match[2]) * 60 + Number(match[3]));
   if (key !== null) offsetCache.set(key, offsetMinutes);
   return { offsetMinutes, findings: [] };
+}
+
+/**
+ * The zone's UTC offset at 12:00 wall time on `date`, in minutes east of UTC
+ * (`America/New_York` in summer is `-240`), or the season clock's refusal.
+ *
+ * The one offset reader this package has: `sunsetOnDate()` reads its clock
+ * here, and so does `seasonEvents.js` when it derives a daylight-saving change
+ * from two consecutive dates, so the sunset and the clock-change event can
+ * never disagree about which offset was in force. Never throws on its input.
+ *
+ * @param {{ date: string, timeZone: string|null|undefined }} input
+ * @returns {{ offsetMinutes: number|null, findings: Array<import('./types.js').TimingFinding> }}
+ */
+export function utcOffsetMinutesOn({ date, timeZone }) {
+  return offsetOn(date, timeZone);
 }
 
 /**

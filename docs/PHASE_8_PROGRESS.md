@@ -6280,3 +6280,24 @@ strictest wins, the candidate verdict. Unwired.
 - Evidence: five plants red on the real `run.sh`; pgTAP green in CI.
 
 **Not yet in production:** `20260927000000` (#453) and `20260928000000` (#454). The operator approved CI-applied migrations (2026-09-28); the first run of the new deploy job will apply both. Until then the broad policies remain, with no exposure: the only member is an admin.
+
+## 8.6 PR 3b, PR 3 — #458 merged (d795121): the repair handles bounded losses (blackouts)
+
+`loss` gains optional `until` and `startMinutes`/`endMinutes`. The minutes are
+allowed only with `until`: `/code-review` found that a minutes-bearing
+retirement silently cut slots it spared.
+- A bounded loss is represented as `'override'`. The series is never split; each
+  re-homed or TIME TBD entry carries `window` = the series' own range ∩ the loss
+  window, and the in-memory plan splits around it only.
+- Unbounded losses are unchanged apart from `representation: 'split'`.
+- Re-homes never land on the lost ground, even outside the loss minutes. This is
+  conservative and documented.
+- **One BLOCKING round.** Replacing the series-range ∩ loss-window intersection
+  with the loss window alone kept all 67 tests green: every corpus series spans
+  the same range. Four synthetic-range tests now pin it (a series ending inside
+  the window, one starting inside it, one entirely before it, and a frozen
+  series that ended earlier releasing its slot). The same plant turns 3 of them
+  red; a variant turns 5 red. (Supervisor-executed on the pre-fix head.)
+- Other evidence: 9 plants red; the 679-game displacement sweep shows 0 digest
+  differences against main; season fixture 1528/1528; 29-surface digests equal
+  to main's for unbounded losses.

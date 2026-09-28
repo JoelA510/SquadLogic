@@ -6280,3 +6280,50 @@ strictest wins, the candidate verdict. Unwired.
 - Evidence: five plants red on the real `run.sh`; pgTAP green in CI.
 
 **Not yet in production:** `20260927000000` (#453) and `20260928000000` (#454). The operator approved CI-applied migrations (2026-09-28); the first run of the new deploy job will apply both. Until then the broad policies remain, with no exposure: the only member is an admin.
+
+## 8.6 PR 3b, PR 3 — #458 merged (d795121): the repair handles bounded losses (blackouts)
+
+`loss` gains optional `until` and `startMinutes`/`endMinutes`. The minutes are
+allowed only with `until`: `/code-review` found that a minutes-bearing
+retirement silently cut slots it spared.
+- A bounded loss is represented as `'override'`. The series is never split; each
+  re-homed or TIME TBD entry carries `window` = the series' own range ∩ the loss
+  window, and the in-memory plan splits around it only.
+- Unbounded losses are unchanged apart from `representation: 'split'`.
+- Re-homes never land on the lost ground, even outside the loss minutes. This is
+  conservative and documented.
+- **One BLOCKING round.** Replacing the series-range ∩ loss-window intersection
+  with the loss window alone kept all 67 tests green: every corpus series spans
+  the same range. Four synthetic-range tests now pin it (a series ending inside
+  the window, one starting inside it, one entirely before it, and a frozen
+  series that ended earlier releasing its slot). The same plant turns 3 of them
+  red; a variant turns 5 red. (Supervisor-executed on the pre-fix head.)
+- Other evidence: 9 plants red; the 679-game displacement sweep shows 0 digest
+  differences against main; season fixture 1528/1528; 29-surface digests equal
+  to main's for unbounded losses.
+
+## 8.9 PR 2 — #459 merged (a2702e1): the Edge (Deno) twin of the NOAA sunset
+
+`supabase/functions/_shared/timing/solar.ts` is a line-for-line copy of core
+`timing/solar.js`. It follows the Edge `resolveZonedInstant` contract: it never
+throws, and a refusal is `minutes: null` plus one finding. Nothing wires it into
+a scheduler yet; the unwired pin fails on the first Edge Function that imports it
+(PR 6).
+- **Drift control:** `tests/solarDrift.test.js` compares the two arms in one
+  process for exact equality, over 75,920 grid points and 2,190 polar points plus
+  every refusal input. Both counts are literals.
+- **Vectors:** 316 grid-point vectors (no real or fitted coordinates) are read by
+  a core runner and a Deno runner. The mirror job's minimum file count is raised
+  to 6.
+- **Finding, NOTED:** Deno and Node round transcendental functions differently
+  in the last place. 4/316 vectors differ by about 3e-13 minute. The vector
+  runners compare minutes within 1e-9; codes, causes and the enforced floor are
+  compared exactly. A guard asserts that no vector lies within 1e-6 of a whole
+  minute (the closest is 0.0011). An Edge floor can therefore diverge from core
+  only when a sunset lies within about 1e-12 of a whole minute.
+- **Evidence:** plants red, then restored:
+  - W2: a one-digit coefficient change mismatches 75,920/75,920 grid points;
+  - W3: a host-offset leak turns exactly one zone red, in both Deno and Vitest;
+  - a stale vector turns both runners red.
+  CI green.
+- **Deferred to PR 6:** the Edge offset cache is never evicted.

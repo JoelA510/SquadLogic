@@ -1,5 +1,21 @@
 -- Smoke checks for 20260924000000_practice_writer_prunes_superseded.sql
 --
+-- **Updated for 20260929000000 (writer v3, lock-by-default).** Smokes run
+-- against the HEAD build, so this one now drives v3. #444's prune survives
+-- only for rows the caller unlocks, so every save below that removes a row
+-- names it in `unlock` (as the org admin); the assertions about WHAT is
+-- pruned, reported and audited are unchanged. Changed, each with its reason:
+--   * catalogue: the one overload is now the 8-argument v3 signature;
+--   * run 2 unlocks the 4 run-1 rows it replaces or drops (Teams 1-4);
+--   * the season-2 team named in a season-1 save gets a NON-overlapping range,
+--     because v3 refuses a new row overlapping one its team still holds;
+--   * allow_empty on season 2 unlocks Team 7's two auto rows;
+--   * the append of before-images under a re-saved run id is now shown by an
+--     ADMIN re-save that unlocks Team 5's row: a service-role caller has no
+--     uid to audit an unlock with, so v3 refuses it any unlock (42501) and it
+--     can supersede nothing. The service-role re-save keeps the other half:
+--     unaudited, says so, and the run's earlier before-images survive it.
+--
 -- Assertions RAISE; the NOTICEs are evidence of how much each one examined.
 -- `scripts/dbharness/prelude.sql` stubs `auth.uid()` from
 -- `request.jwt.claim.sub`, so the round trip runs the REAL RPC as a real
@@ -41,11 +57,11 @@ BEGIN
     IF v_ret <> 'jsonb' THEN
         RAISE EXCEPTION 'persist_practice_schedule returns %, expected jsonb', v_ret;
     END IF;
-    IF has_function_privilege('anon', 'public.persist_practice_schedule(jsonb, jsonb, boolean)', 'EXECUTE') THEN
+    IF has_function_privilege('anon', 'public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text)', 'EXECUTE') THEN
         RAISE EXCEPTION 'anon can EXECUTE persist_practice_schedule (LESSONS_LEARNED #5)';
     END IF;
-    IF NOT has_function_privilege('authenticated', 'public.persist_practice_schedule(jsonb, jsonb, boolean)', 'EXECUTE')
-       OR NOT has_function_privilege('service_role', 'public.persist_practice_schedule(jsonb, jsonb, boolean)', 'EXECUTE') THEN
+    IF NOT has_function_privilege('authenticated', 'public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text)', 'EXECUTE')
+       OR NOT has_function_privilege('service_role', 'public.persist_practice_schedule(jsonb, jsonb, boolean, jsonb, jsonb, jsonb, jsonb, text)', 'EXECUTE') THEN
         RAISE EXCEPTION 'authenticated or service_role lost EXECUTE on persist_practice_schedule';
     END IF;
     RAISE NOTICE 'catalogue: 1 persist_practice_schedule overload, returns jsonb, anon cannot EXECUTE, authenticated and service_role can';
@@ -78,6 +94,7 @@ DECLARE
     v_n int; v_m int; v_before int; v_audit_before int;
     v_slot uuid; v_range daterange; v_src text; v_run uuid;
     v_refused boolean;
+    v_unlock jsonb;
     v_examined int := 0;
     i int;
 BEGIN
@@ -163,8 +180,13 @@ BEGIN
         jsonb_build_object('team_id', v_t[2], 'practice_slot_id', v_sa,  'effective_date_range', c_r2, 'source', 'auto'),
         jsonb_build_object('team_id', v_t[3], 'practice_slot_id', v_sbl, 'effective_date_range', c_r,  'source', 'auto'),
         jsonb_build_object('team_id', v_t[5], 'practice_slot_id', v_sa,  'effective_date_range', c_r,  'source', 'auto'));
+    -- v3: the four rows run 2 replaces or drops are unlocked by the admin.
+    SELECT jsonb_agg(jsonb_build_object('assignment_id', pa.id, 'reason', 'P64 re-run'))
+      INTO v_unlock
+      FROM public.practice_assignments pa
+     WHERE pa.team_id = ANY (v_t[1:4]);
     v_run2 := public.persist_practice_schedule(
-        jsonb_build_object('id', v_r2, 'season_settings_id', v_s1), v_payload2);
+        jsonb_build_object('id', v_r2, 'season_settings_id', v_s1), v_payload2, unlock => v_unlock);
 
     -- Per team, from the roster.
     FOR i IN 1..6 LOOP
@@ -304,15 +326,19 @@ BEGIN
     v_res := public.persist_practice_schedule(
         jsonb_build_object('id', gen_random_uuid(), 'season_settings_id', v_s1),
         v_payload2 || jsonb_build_array(jsonb_build_object(
-            'team_id', v_t7, 'practice_slot_id', v_sbl, 'effective_date_range', c_r, 'source', 'auto')));
+            'team_id', v_t7, 'practice_slot_id', v_sbl, 'effective_date_range', '[2026-12-01,2026-12-31]', 'source', 'auto')));
     IF (v_res->>'superseded_count')::int <> 0
        OR (SELECT count(*) FROM public.practice_assignments WHERE team_id = v_t7) <> 2 THEN
         RAISE EXCEPTION 'a season-1 save naming a season-2 team pruned that team''s season-2 row: %', v_res;
     END IF;
 
     -- ---- control: allow_empty means it (season 2, Team 7's two auto rows) ----
+    SELECT jsonb_agg(jsonb_build_object('assignment_id', pa.id, 'reason', 'P64 empty season 2'))
+      INTO v_unlock
+      FROM public.practice_assignments pa WHERE pa.team_id = v_t7;
     v_res := public.persist_practice_schedule(
-        jsonb_build_object('id', v_r4, 'season_settings_id', v_s2), '[]'::jsonb, allow_empty => true);
+        jsonb_build_object('id', v_r4, 'season_settings_id', v_s2), '[]'::jsonb, allow_empty => true,
+        unlock => v_unlock);
     RESET ROLE;
     IF (v_res->>'superseded_count')::int <> 2
        OR (SELECT count(*) FROM public.practice_assignments WHERE team_id = v_t7) <> 0
@@ -320,13 +346,42 @@ BEGIN
         RAISE EXCEPTION 'allow_empty on season 2 should supersede Team 7''s two auto rows and nothing in season 1: %', v_res;
     END IF;
 
-    -- ---- the service-role path: prunes, records before-images, says so -------
-    -- Re-saved under run 2's id: the before-images run 2 already recorded must
-    -- survive the upsert that replaces `results`, and this save's be appended.
+    -- ---- a re-save under run 2's id APPENDS its before-images ---------------
+    -- (v3: as the admin, unlocking Team 5's slot-A row to move it to B.)
+    SET LOCAL ROLE authenticated;
+    SELECT jsonb_agg(jsonb_build_object('assignment_id', pa.id, 'reason', 'P64 move Team 5'))
+      INTO v_unlock
+      FROM public.practice_assignments pa WHERE pa.team_id = v_t[5];
+    v_res := public.persist_practice_schedule(
+        jsonb_build_object('id', v_r2, 'season_settings_id', v_s1),
+        jsonb_build_array(
+            jsonb_build_object('team_id', v_t[1], 'practice_slot_id', v_sbl, 'effective_date_range', c_r),
+            jsonb_build_object('team_id', v_t[2], 'practice_slot_id', v_sa,  'effective_date_range', c_r2),
+            jsonb_build_object('team_id', v_t[3], 'practice_slot_id', v_sbl, 'effective_date_range', c_r),
+            jsonb_build_object('team_id', v_t[5], 'practice_slot_id', v_sbl, 'effective_date_range', c_r)),
+        unlock => v_unlock);
+    RESET ROLE;
+    IF (v_res->>'superseded_count')::int <> 1 OR NOT (v_res->>'audited')::boolean THEN
+        RAISE EXCEPTION 'the admin re-save of run 2 should supersede Team 5''s slot-A row, audited: %', v_res;
+    END IF;
+    SELECT jsonb_array_length(results->'superseded_rows') INTO v_n
+      FROM public.scheduler_runs WHERE id = v_r2;
+    IF v_n IS DISTINCT FROM 5 THEN
+        RAISE EXCEPTION 'run 2 re-saved should carry its 4 earlier before-images plus this save''s 1, found %', v_n;
+    END IF;
+
+    -- ---- the service-role path: unaudited, says so, supersedes nothing ------
     PERFORM set_config('request.jwt.claim.sub', '', true);
     PERFORM set_config('request.jwt.claim.role', 'service_role', true);
     SET LOCAL ROLE service_role;
     SELECT count(*) INTO v_audit_before FROM public.audit_log WHERE organization_id = v_org;
+    v_refused := false;
+    BEGIN
+        PERFORM public.persist_practice_schedule(
+            jsonb_build_object('id', v_r2, 'season_settings_id', v_s1), v_payload2, unlock => v_unlock);
+    EXCEPTION WHEN insufficient_privilege THEN v_refused := true;
+    END;
+    IF NOT v_refused THEN RAISE EXCEPTION 'a service-role caller (no uid to audit) was allowed to unlock'; END IF;
     v_res := public.persist_practice_schedule(
         jsonb_build_object('id', v_r2, 'season_settings_id', v_s1, 'created_by', v_admin),
         jsonb_build_array(
@@ -335,9 +390,9 @@ BEGIN
             jsonb_build_object('team_id', v_t[3], 'practice_slot_id', v_sbl, 'effective_date_range', c_r),
             jsonb_build_object('team_id', v_t[5], 'practice_slot_id', v_sbl, 'effective_date_range', c_r)));
     RESET ROLE;
-    IF (v_res->>'superseded_count')::int <> 1 OR (v_res->>'audited')::boolean
+    IF (v_res->>'superseded_count')::int <> 0 OR (v_res->>'audited')::boolean
        OR v_res->>'audit_gap' IS NULL THEN
-        RAISE EXCEPTION 'the service-role save should supersede Team 5''s slot-A row and report audited=false with a reason: %', v_res;
+        RAISE EXCEPTION 'the service-role re-save should supersede nothing and report audited=false with a reason: %', v_res;
     END IF;
     IF (SELECT count(*) FROM public.audit_log WHERE organization_id = v_org) <> v_audit_before THEN
         RAISE EXCEPTION 'the service-role save wrote audit rows it reported it could not write';
@@ -345,9 +400,9 @@ BEGIN
     SELECT jsonb_array_length(results->'superseded_rows') INTO v_n
       FROM public.scheduler_runs WHERE id = v_r2;
     IF v_n IS DISTINCT FROM 5 THEN
-        RAISE EXCEPTION 'run 2 re-saved should carry its 4 earlier before-images plus this save''s 1, found %', v_n;
+        RAISE EXCEPTION 'the service-role re-save of run 2 should keep its 5 earlier before-images, found %', v_n;
     END IF;
-    RAISE NOTICE 'controls: identical re-save superseded 0; other season and other org untouched, and a season-1 save naming a season-2 team pruned none of its rows; empty payload, missing season and non-admin member each refused with rows unchanged; allow_empty superseded exactly season 2''s 2 auto rows; service-role re-save of run 2 superseded 1, appended it to the run''s 4 earlier before-images (5), wrote 0 audit rows and said audited=false';
+    RAISE NOTICE 'controls: identical re-save superseded 0; other season and other org untouched, and a season-1 save naming a season-2 team pruned none of its rows; empty payload, missing season and non-admin member each refused with rows unchanged; allow_empty (unlocked) superseded exactly season 2''s 2 auto rows; an admin re-save of run 2 superseded 1 and appended it to the run''s 4 earlier before-images (5); a service-role unlock was refused, and its re-save of run 2 superseded 0, kept the 5, wrote 0 audit rows and said audited=false';
 
     -- ---- clean up ------------------------------------------------------------
     DELETE FROM public.organizations WHERE id IN (v_org, v_orgb);

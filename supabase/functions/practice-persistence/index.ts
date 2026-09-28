@@ -36,6 +36,54 @@ function parseAllowedRolesEnv(
 }
 
 // ── Payload schema (Zod) ────────────────────────────────────────────────────
+// 8.6 PR 3b PR 6: the writer-v3 repair arguments, validated here and passed
+// through unchanged to persist_practice_schedule, which re-checks every one.
+const Uuid = z.string().uuid();
+const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+export const PracticeRepairSchema = z
+  .object({
+    unlock: z
+      .array(z.object({ assignment_id: Uuid, reason: z.string().trim().min(1).max(500) }).strict())
+      .default([]),
+    closes: z.array(z.object({ assignment_id: Uuid, last_day: IsoDate }).strict()).default([]),
+    exceptions: z
+      .array(
+        z
+          .object({
+            assignment_id: Uuid,
+            window: z.string().min(1).max(64),
+            kind: z.enum(['relocated', 'time_tbd']),
+            practice_slot_id: Uuid.optional(),
+            tbd_reason: z
+              .enum([
+                'no-legal-slot-at-venue',
+                'contended',
+                'change-budget',
+                'objective-preferred-tbd',
+                'coach-preference',
+                'declined',
+              ])
+              .optional(),
+            cause_kind: z.enum(['blackout', 'retirement']).optional(),
+            cause_id: Uuid.optional(),
+          })
+          .strict()
+          .refine((e) => (e.kind === 'relocated') === (e.practice_slot_id !== undefined), {
+            message: 'practice_slot_id is required for, and only for, a relocated exception',
+          })
+          .refine((e) => (e.kind === 'time_tbd') === (e.tbd_reason !== undefined), {
+            message: 'tbd_reason is required for, and only for, a time_tbd exception',
+          })
+      )
+      .default([]),
+    withdrawExceptions: z.array(z.object({ exception_id: Uuid }).strict()).default([]),
+    baseFingerprint: z
+      .string()
+      .regex(/^[0-9a-f]{32}$/)
+      .optional(),
+  })
+  .strict();
+
 const PersistencePayloadSchema = z.object({
   snapshot: z.object({
     payload: z.object({
@@ -48,6 +96,7 @@ const PersistencePayloadSchema = z.object({
   }),
   overrides: z.array(z.unknown()).optional(),
   runMetadata: z.record(z.unknown()).optional(),
+  repair: PracticeRepairSchema.optional(),
 });
 
 // ── Inlined persistence logic ───────────────────────────────────────────────
@@ -101,7 +150,8 @@ async function persistPracticeSnapshot(
     runId?: string | null;
   },
   runMetadata: RunMetadata = {},
-  now: Date = new Date()
+  now: Date = new Date(),
+  repair?: z.infer<typeof PracticeRepairSchema>
 ) {
   const { assignmentRows } = snapshot.payload;
   const effectiveRunId = runMetadata.runId ?? snapshot.lastRunId ?? snapshot.runId;
@@ -148,6 +198,15 @@ async function persistPracticeSnapshot(
   const { data, error } = await supabaseClient.rpc('persist_practice_schedule', {
     run_data: runData,
     assignments: assignmentRows,
+    ...(repair
+      ? {
+          unlock: repair.unlock,
+          closes: repair.closes,
+          exceptions: repair.exceptions,
+          withdraw_exceptions: repair.withdrawExceptions,
+          base_fingerprint: repair.baseFingerprint ?? null,
+        }
+      : {}),
   });
 
   if (error) throw error;
@@ -162,6 +221,12 @@ async function persistPracticeSnapshot(
     retained_manual?: unknown[];
     retained_manual_count?: number;
     teams_without_practice?: Array<{ team_id: string; team_name: string; had_prior_rows: boolean }>;
+    teams_time_tbd?: unknown[];
+    unlocked?: unknown[];
+    closed?: unknown[];
+    exceptions_recorded?: unknown[];
+    exceptions_withdrawn?: unknown[];
+    fingerprint?: string | null;
     audited?: boolean;
     audit_gap?: string | null;
   };
@@ -175,6 +240,12 @@ async function persistPracticeSnapshot(
     // Every season team the save left with no practice, from the roster. The
     // pre-20260924000000 uuid result carries none, so it reads as empty.
     teamsWithoutPractice: report.teams_without_practice ?? [],
+    teamsTimeTbd: report.teams_time_tbd ?? [],
+    unlocked: report.unlocked ?? [],
+    closed: report.closed ?? [],
+    exceptionsRecorded: report.exceptions_recorded ?? [],
+    exceptionsWithdrawn: report.exceptions_withdrawn ?? [],
+    fingerprint: report.fingerprint ?? null,
     audited: report.audited ?? false,
     auditGap: report.audit_gap ?? null,
     message: 'Persistence successful.',
@@ -352,7 +423,8 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
         userClient,
         body.snapshot as Parameters<typeof persistPracticeSnapshot>[1],
         (body.runMetadata ?? {}) as RunMetadata,
-        new Date()
+        new Date(),
+        body.repair
       );
 
       return jsonResponse(result, 200);

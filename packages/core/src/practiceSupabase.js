@@ -202,11 +202,46 @@ export function expandSupabasePracticeSlots({ rows, seasonPhases }) {
   return expandPracticeSlotsForSeason({ slots: normalizedSlots, seasonPhases });
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * One assignment's date window: its own `effectiveFrom`/`effectiveUntil` when
+ * given, each defaulting to the slot's bound, validated to lie inside the
+ * slot's window. ISO dates compare correctly as strings.
+ */
+function resolveAssignmentWindow(assignment, slot, index) {
+  const ownFrom = assignment.effectiveFrom;
+  const ownUntil = assignment.effectiveUntil;
+  if (ownFrom === undefined && ownUntil === undefined) {
+    return { from: slot.effectiveFrom, until: slot.effectiveUntil };
+  }
+  for (const [name, value] of [
+    ['effectiveFrom', ownFrom],
+    ['effectiveUntil', ownUntil],
+  ]) {
+    if (value !== undefined && (typeof value !== 'string' || !ISO_DATE.test(value))) {
+      throw new Error(`assignments[${index}].${name} must be an ISO date (YYYY-MM-DD)`);
+    }
+  }
+  const from = ownFrom ?? slot.effectiveFrom;
+  const until = ownUntil ?? slot.effectiveUntil;
+  if (from < slot.effectiveFrom || until > slot.effectiveUntil || from > until) {
+    throw new Error(
+      `assignments[${index}] range [${from},${until}] must lie inside slot "${slot.id}" ` +
+        `window [${slot.effectiveFrom},${slot.effectiveUntil}]`
+    );
+  }
+  return { from, until };
+}
+
 /**
  * Build Supabase-ready `practice_assignments` rows from scheduler outputs.
  *
  * @param {Object} params
- * @param {Array<{ teamId: string, slotId: string, source?: string }>} params.assignments
+ * @param {Array<{ teamId: string, slotId: string, source?: string, effectiveFrom?: string, effectiveUntil?: string }>} params.assignments
+ *   `effectiveFrom`/`effectiveUntil` (ISO dates, 8.6 PR 3b plan §3) narrow one
+ *   assignment's range inside its slot's window -- a repair placement starts
+ *   mid-season. Absent, the row spans the slot's window as before.
  * @param {Array<Object>} params.slots - Slot definitions that include `effectiveFrom` and `effectiveUntil`.
  * @param {string} [params.runId] - Optional scheduler run identifier to persist alongside assignments.
  * @returns {Array<Object>} Row payloads keyed `team_id`, `practice_slot_id`,
@@ -275,6 +310,7 @@ export function buildPracticeAssignmentRows(
     }
 
     const normalizedSource = normalizeSource(assignment.source, index);
+    const { from, until } = resolveAssignmentWindow(assignment, slot, index);
 
     // Every key here must be received by something. `base_slot_id`,
     // `season_phase_id`, `effective_from` and `effective_until` were not:
@@ -292,7 +328,7 @@ export function buildPracticeAssignmentRows(
     return {
       team_id: assignment.teamId,
       practice_slot_id: slot.id,
-      effective_date_range: `[${slot.effectiveFrom},${slot.effectiveUntil}]`,
+      effective_date_range: `[${from},${until}]`,
       source: normalizedSource,
       run_id: runId ?? null,
     };

@@ -14,7 +14,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseAst } from 'rollup/parseAst';
+import ts from 'typescript';
 import { describe, it, expect } from 'vitest';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -37,17 +37,20 @@ function staticMockImports(source) {
   return [...source.matchAll(re)].map((m) => m[1]);
 }
 
-/** AwaitExpressions reachable without entering a function body. */
+/** Parse JavaScript source with the TypeScript compiler (a direct devDependency). */
+function parseAst(code) {
+  return ts.createSourceFile('source.js', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+}
+
+/** Await expressions (and `for await`) reachable without entering a function body. */
 function topLevelAwaits(node, found = []) {
-  if (!node || typeof node.type !== 'string') return found;
-  if (/Function/.test(node.type)) return found;
-  if (node.type === 'AwaitExpression' || (node.type === 'ForOfStatement' && node.await)) {
-    found.push(node.start);
+  if (ts.isFunctionLike(node)) return found;
+  if (ts.isAwaitExpression(node) || (ts.isForOfStatement(node) && node.awaitModifier)) {
+    found.push(node.getStart());
   }
-  for (const value of Object.values(node)) {
-    if (Array.isArray(value)) value.forEach((child) => topLevelAwaits(child, found));
-    else if (value && typeof value === 'object') topLevelAwaits(value, found);
-  }
+  ts.forEachChild(node, (child) => {
+    topLevelAwaits(child, found);
+  });
   return found;
 }
 
@@ -81,7 +84,7 @@ describe('mock Supabase client stays out of the main bundle', () => {
 
   it('supabaseClient.js has no top-level await', () => {
     const ast = parseAst(readFileSync(CLIENT, 'utf8'));
-    expect(ast.body.length).toBeGreaterThan(0);
+    expect(ast.statements.length).toBeGreaterThan(0);
     expect(topLevelAwaits(ast)).toEqual([]);
   });
 

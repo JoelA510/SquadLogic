@@ -90,8 +90,8 @@ Measured on a build with no credentials (as CI builds), 2026-09-28:
 
 | File | Before | After |
 | --- | --- | --- |
-| main entry | 137.16 KB (140,447 B) | 114.26 KB (116,999 B) |
-| total first paint (5 files) | 231.21 KB (236,757 B) | 208.31 KB (213,309 B) |
+| main entry | 137.16 KB (140,447 B) | 114.38 KB (117,125 B) |
+| total first paint (5 files) | 231.21 KB (236,757 B) | 208.43 KB (213,435 B) |
 | `mockSupabaseClient-*.js` (lazy) | in main entry | 22.69 KB (23,239 B), fetched only in mock mode |
 
 The caps are unchanged. The main-entry cap now has ~23 KB of headroom and can

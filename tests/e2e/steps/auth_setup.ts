@@ -2,7 +2,7 @@ import { createBdd } from 'playwright-bdd';
 import { expect, Page } from '@playwright/test';
 import { randomUUID } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
-import { waitForMockClient } from './mockReady';
+import { waitForMockClient } from './mockReady.js';
 
 const { Given, After } = createBdd();
 

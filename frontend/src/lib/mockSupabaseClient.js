@@ -9,6 +9,7 @@
 import { logger } from './logger.js';
 import { HEADER_ALIASES, RESERVED_KEYS } from '../utils/telemetryUtils.js';
 import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js';
+import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 
 const mockId = (prefix = '') =>
   prefix + (crypto.randomUUID?.() || crypto.getRandomValues(new Uint32Array(4)).join('-'));
@@ -2312,6 +2313,17 @@ export const mockSupabase = {
       );
       return ['admin', 'tenant_admin'].includes(String(member?.role || ''));
     };
+
+    if (import.meta.env.DEV || import.meta.env.VITE_USE_MOCK_SUPABASE === 'true') {
+      // Coach practice preferences (migration 20260927000000): the three RPCs,
+      // refusals included. Behind the DEV/mock guard like the other late arms,
+      // so a production build eliminates the call and the module with it.
+      const handled = handleCoachPreferenceRpc(db, name, params, { currentUserId });
+      if (handled) {
+        if (!handled.error) saveDB(db);
+        return handled;
+      }
+    }
 
     if (name === 'admin_set_season_timezone') {
       // Mirrors `admin_set_season_timezone` in

@@ -67,6 +67,13 @@ export const NAV = [
         path: '/teams/builder',
         permission: PERMISSIONS.MANAGE_ALL_TEAMS,
       },
+      {
+        id: 'practice-preferences',
+        label: 'Practice Preferences',
+        icon: UserRoundCheck,
+        path: '/coaches/practice-preferences',
+        permission: PERMISSIONS.DECIDE_PRACTICE_PREFERENCE,
+      },
     ],
   },
   {
@@ -222,6 +229,12 @@ export const ROLE_NAV = {
     { id: 'practices', label: 'Practices', icon: Calendar, path: '/schedule/practice' },
     { id: 'games', label: 'Game Schedule', icon: Flag, path: '/schedule/game' },
     { id: 'standings', label: 'Standings', icon: Trophy, path: '/standings' },
+    {
+      id: 'practice-preferences',
+      label: 'Practice Preferences',
+      icon: UserRoundCheck,
+      path: '/coaches/practice-preferences',
+    },
   ],
   parent: [
     { id: 'home', label: 'My Dashboard', icon: Home, path: '/' },
@@ -230,7 +243,9 @@ export const ROLE_NAV = {
   ],
 };
 ROLE_NAV.player = ROLE_NAV.parent;
-ROLE_NAV.staff = ROLE_NAV.coach;
+// Staff share the coach nav minus the preference page: staff hold no coach
+// record and no REQUEST_PRACTICE_PREFERENCE (flat items are not permission-filtered).
+ROLE_NAV.staff = ROLE_NAV.coach.filter((item) => item.id !== 'practice-preferences');
 
 /** path -> { label, groupLabel } for breadcrumbs / PageHeader. */
 export const ROUTE_META = {};
@@ -264,4 +279,5 @@ export const FULL_BLEED_ROUTES = new Set([
   '/exports',
   '/admin/members',
   '/settings',
+  '/coaches/practice-preferences',
 ]);

@@ -105,7 +105,7 @@ const earlierOf = (a, b) => (a < b ? a : b);
  * @param {string} date
  * @returns {string[]}
  */
-function teamsOn(slotSet, slot, date) {
+export function teamsOn(slotSet, slot, date) {
   /** @type {string[]} */
   const teams = [];
   for (const assignment of slotSet.assignments) {

@@ -397,6 +397,9 @@ const LAYERS = Object.freeze([
     modulePath: 'packages/core/src/practice/slots.js',
     functions: Object.freeze(['buildPracticeSlotSet', 'getPracticeSlot', 'firstWeekdayOnOrAfter']),
     importers: Object.freeze([
+      // 8.9 PR 5: the duration-phase reports enumerate slot x dates on the
+      // same weekday walk.
+      'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/index.js',
       // Shares the one weekday walk rather than writing a second one.
       'packages/core/src/practice/materialise.js',
@@ -406,14 +409,17 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/repair.js',
     ]),
     consumers: Object.freeze([
+      'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/materialise.js',
       'packages/core/src/practice/metricsInput.js',
       'packages/core/src/practice/repair.js',
       'tests/practiceDaylight.test.js',
+      'tests/practiceDurationPhases.test.js',
       'tests/practiceSlotModel.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
+      'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/materialise.js',
       'packages/core/src/practice/metricsInput.js',
       'packages/core/src/practice/repair.js',
@@ -424,7 +430,13 @@ const LAYERS = Object.freeze([
     layer: 'practice/materialise.js',
     modulePath: 'packages/core/src/practice/materialise.js',
     functions: Object.freeze(['materialisePracticeOccurrences']),
-    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    // 8.9 PR 5: `durationPhases.js` imports `teamsOn()`, the one reading of
+    // which assignments hold a slot on a date, and does not materialise --
+    // so it is an importer, and the empty production list below still holds.
+    importers: Object.freeze([
+      'packages/core/src/practice/durationPhases.js',
+      'packages/core/src/practice/index.js',
+    ]),
     consumers: Object.freeze([
       'tests/practiceDaylight.test.js',
       'tests/practiceRepair.test.js',
@@ -529,6 +541,7 @@ const LAYERS = Object.freeze([
       'supabase/functions/_shared/tests/solar_test.ts',
       'supabase/functions/_shared/timing/solar.ts',
       'tests/practiceDaylight.test.js',
+      'tests/practiceDurationPhases.test.js',
       'tests/reasonCodeReachability.test.js',
       'tests/solar.test.js',
       // Not `solarDrift`/`solarVectors`: they call both arms through renamed
@@ -566,12 +579,14 @@ const LAYERS = Object.freeze([
     // 8.9 PR 4: `availability/calendar.js` and `tests/practiceDaylight.test.js`
     // appear by name only -- they call *core's* `sunsetOnDate()`. `importers`
     // above, which does not name them, is what says the Edge arm is unused.
+    // 8.9 PR 5's `tests/practiceDurationPhases.test.js` likewise.
     consumers: Object.freeze([
       'packages/core/src/availability/calendar.js',
       'packages/core/src/timing/solar.js',
       'scripts/generate-solar-vectors.mjs',
       'supabase/functions/_shared/tests/solar_test.ts',
       'tests/practiceDaylight.test.js',
+      'tests/practiceDurationPhases.test.js',
       'tests/reasonCodeReachability.test.js',
       'tests/solar.test.js',
       // Not `solarDrift`/`solarVectors`: they call both arms through renamed
@@ -599,14 +614,34 @@ const LAYERS = Object.freeze([
     layer: 'practice/daylight.js',
     modulePath: 'packages/core/src/practice/daylight.js',
     functions: Object.freeze(['evaluatePracticeDaylight']),
+    // 8.9 PR 5: `durationPhases.js` imports the margin constant, not the
+    // evaluator -- an importer, not a consumer.
     importers: Object.freeze([
       'packages/core/src/constraints/adapters/season2026Constraints.js',
+      'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/index.js',
     ]),
     consumers: Object.freeze([
       'tests/practiceDaylight.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
+    expectedProductionConsumers: Object.freeze([]),
+    expectedExternalProductionConsumers: Object.freeze([]),
+  }),
+  // 8.9 PR 5: duration phases, compression and the DST survival report.
+  // Reports and proposals only -- cascade proposals leave as change-log
+  // entries and nothing applies them. Nothing in the app or the Edge calls
+  // it; the Edge post-pass (8.9 PR 6) is a Deno twin, not a caller.
+  Object.freeze({
+    layer: 'practice/durationPhases.js',
+    modulePath: 'packages/core/src/practice/durationPhases.js',
+    functions: Object.freeze([
+      'derivePracticeDurationPhases',
+      'buildPracticeCompressionReport',
+      'buildDstSurvivalReport',
+    ]),
+    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    consumers: Object.freeze(['tests/practiceDurationPhases.test.js']),
     expectedProductionConsumers: Object.freeze([]),
     expectedExternalProductionConsumers: Object.freeze([]),
   }),

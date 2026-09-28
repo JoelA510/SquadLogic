@@ -66,3 +66,7 @@ dist.old/
 # belt-and-braces reasoning as the `*.orig` entry above: the harness cleans
 # these up, and this stops a survivor being committed when it does not.
 .claude/
+
+# Local ESLint output dump. One was committed from a developer machine with an
+# absolute home-directory path in it and went stale; keep it out of the repo.
+frontend/lint_results.txt

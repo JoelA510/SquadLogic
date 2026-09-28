@@ -3,7 +3,7 @@ import PropTypes from 'prop-types';
 import { PERSISTENCE_THEMES } from '../utils/themes.js';
 
 /**
- * Shared shell rendered by Team/Practice/Game persistence panels.
+ * Shared shell rendered by `TeamPersistencePanel`.
  * Accepts either the legacy `theme` prop or the newer `colorTheme`; either
  * maps to a `PERSISTENCE_THEMES` key (currently 'blue' | 'green').
  */

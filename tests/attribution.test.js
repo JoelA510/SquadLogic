@@ -1785,7 +1785,7 @@ describe('attribution :: the minimal set reports one claim per member', () => {
     expect(wrong).toEqual([]);
     // Every blocked placement in the corpus, each with its own relaxation
     // search: slower than a sample and the only version that means anything.
-  }, 60_000);
+  }, 70_000); // every blocked placement the corpus supports: 9.4 s alone, 11.3 / 8.1 / 16.7 / 14.0 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 
   it('runs the category-only guard over its claims, as every other answer does', () => {
     // The acceptance case for minimality was the one answer that counted its

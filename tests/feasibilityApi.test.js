@@ -1980,7 +1980,7 @@ describe('feasibility :: finding 2 — a margin’s basis names the bound it cam
     // "name the first-claimed bound" would pass. Stated in the PR and filed; a
     // constructed witness belongs with the feasibility work, not in #61.
     void firstIsNotTightest;
-  }, 120_000);
+  }, 475_000); // 528 corpus answers: 66.9 s alone, 59.0 / 60.1 / 117.7 / 82.7 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 
   it('never reports a basis without a margin, on any answer shape', () => {
     // **The rule.** A basis is the name of the bound the number came from, so
@@ -2038,7 +2038,7 @@ describe('feasibility :: finding 2 — a margin’s basis names the bound it cam
     expect(checked).toBeGreaterThan(1000);
     expect(withBasis).toBeGreaterThan(0);
     expect(withoutBasis).toBeGreaterThan(0);
-  }, 120_000);
+  }, 140_000); // every corpus answer shape: 15.6 s alone, 17.3 / 17.1 / 33.8 / 22.3 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 });
 
 describe('feasibility :: finding 3 — a team asked about the slot it already holds', () => {

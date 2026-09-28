@@ -1198,7 +1198,7 @@ describe('the positive control :: the same scenario, globally re-optimised', () 
     expect(nearest.report.objective.resolvedSchedule.total).toBeGreaterThan(
       nearest.report.objective.baseline.total
     );
-  });
+  }, 20_000); // whole-season re-optimisation: 2.9 s alone, 3.1 / 3.6 / 2.9 / 3.8 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 
   it('cannot come back clean, however valid the schedule it produces is', () => {
     const finding = run.findings.find(

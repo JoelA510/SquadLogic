@@ -62,6 +62,7 @@
 - [E2E Master Plan](testing/e2e_master_plan.md) — Playwright-BDD scope, Gherkin feature map, mock/live split.
 - [pgTAP](testing/pgtap.md) — Database-level RLS/RBAC regression testing.
 - [Test Helpers & Factories](testing/test-helpers.md) — Shared test factory/helper usage, hoisted auth-mock idiom, and migration patterns.
+- [Test Timeouts](testing/test-timeouts.md) — When a heavy test gets an explicit timeout, and how to size it from measured durations.
 
 ## Governance
 

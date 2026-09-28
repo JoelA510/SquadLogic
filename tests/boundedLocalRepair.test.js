@@ -855,7 +855,7 @@ describe('the change budget bounds the neighbourhood rather than judging the res
     // below means "could not fire" rather than "was never asked".
     expect(lifted.meta.gamesDislodged).toBeGreaterThan(100);
     expect(lifted.meta.movesRefusedByBudget).toBe(0);
-  });
+  }, 25_000); // one whole-season re-optimisation: 3.4 s alone, 3.2 / 3.8 / 5.8 / 4.6 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 });
 
 describe('published-time hold, counted from the baseline roster', () => {

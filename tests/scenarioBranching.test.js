@@ -1535,7 +1535,7 @@ describe('the memo answers the question it was asked, not merely the branch', ()
     expect(memo.resolve(inputs, scenario, runOptions)).toBe(viaMemoSearched);
     expect(memo.hits).toBe(1);
     expect(memo.misses).toBe(2);
-  });
+  }, 35_000); // memo derivations: 4.8 s alone, 4.6 / 5.1 / 8.6 / 5.6 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 
   it('separates two runs that differ only by the stated relocation search', () => {
     const memo = new ScenarioMemo();
@@ -1547,7 +1547,7 @@ describe('the memo answers the question it was asked, not merely the branch', ()
     expect(narrower).not.toBe(stated);
     expect(narrower.relocations.surfaceIds).toEqual(policy.surfaceIds.slice(1));
     expect(stated.relocations.surfaceIds).toEqual(policy.surfaceIds);
-  });
+  }, 60_000); // two searched derivations: 7.7 s alone, 6.6 / 8.8 / 15.0 / 10.7 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 
   it('re-establishes the acceptance and the control figures through the memo path', () => {
     // The acceptance numbers in `docs/SCENARIOS.md` were read off direct
@@ -1572,7 +1572,7 @@ describe('the memo answers the question it was asked, not merely the branch', ()
     expect(viaMemoControl.displaced.length).toBe(control.displaced.length);
     expect(viaMemoControl.relocations.proposals.length).toBe(0);
     expect(viaMemoControl.unplaced.length).toBe(control.unplaced.length);
-  });
+  }, 35_000); // memo derivations: 4.2 s alone, 4.2 / 4.1 / 8.5 / 7.2 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 });
 
 describe('nothing a branch loses is answered by silence', () => {
@@ -4209,7 +4209,7 @@ describe('the branch’s waiver ledger reaches the re-solve, not only the scenar
     expect(excepted.run.objective.resolvedSchedule.qualityCost).toBeLessThan(
       hardened.run.objective.resolvedSchedule.qualityCost
     );
-  });
+  }, 40_000); // branch re-solves: 7.9 s alone, 3.2 / 5.1 / 9.7 / 5.1 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 });
 
 /**
@@ -4807,7 +4807,7 @@ describe('proposeRelocations :: the capacity reports it asks for, carried whole'
         rationale: 'a branch whose capacity report names ground it does not cover',
       })
     ).toThrow();
-  });
+  }, 35_000); // cold scenario derivation: 8.5 s alone, 3.9 / 4.0 / 8.6 / 6.2 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 
   it('does not block on a shortfall against a requirement it invented for itself', () => {
     // The other half of the line, and it has to be asserted or the rule above

@@ -904,7 +904,7 @@ describe('practice repair :: the 100:1 ratio on the corpus (measured, not change
       }
     }
     expect(compared).toBe(SURVEY.length * 4);
-  }, 20_000); // 116 corpus repairs, each now with its tier-2 search (8.6 PR 5): 7.3 s measured alone, over the 5 s default.
+  }, 65_000); // 116 corpus repairs, each with its tier-2 search (8.6 PR 5): 8.9 s alone, 7.6 / 7.8 / 15.2 / 9.6 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 });
 
 /* -------------------------------------------------------------------------- */

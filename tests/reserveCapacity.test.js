@@ -771,7 +771,7 @@ describe('acceptance 2 :: an unplaced fixture appears in totals and exports with
       (finding) => finding.code === RESERVE_REASON.FIXTURE_TIME_TBD
     );
     expect(/** @type {Object} */ (tbd).details.causeKind).toBe('global-reoptimisation');
-  });
+  }, 20_000); // one whole-season re-optimisation: 3.1 s alone, 3.7 / 3.7 / 4.3 / 4.3 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 });
 
 /* -------------------------------------------------------------------------- */

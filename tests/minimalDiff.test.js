@@ -848,7 +848,7 @@ describe('a re-solve is a dry run, and committing is a different verb', () => {
     });
     expect(global.committed).toBe(false);
     expect(global.report.dryRun).toBe(true);
-  });
+  }, 30_000); // corpus re-solves from both entry points: 2.6 s alone, 2.8 / 3.3 / 6.7 / 2.7 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 
   it('commits only when asked, by name, with a literal acknowledgement', () => {
     expect(() =>
@@ -922,7 +922,7 @@ describe('a re-solve is a dry run, and committing is a different verb', () => {
     });
     expect(committed.committed).toBe(true);
     expect(committed.acceptedFindingCodes).toEqual(['FREEZE_GLOBAL_REOPTIMISATION']);
-  });
+  }, 25_000); // corpus re-solves: 2.6 s alone, 2.5 / 3.1 / 5.7 / 3.4 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 
   it('refuses a run whose quality was never measured, unless that is accepted too', () => {
     // `verify: false` means the standing rule engine never ran. "No quality
@@ -1559,7 +1559,7 @@ describe('review finding 5 :: an override was detected by object identity', () =
     expect(codesOf(runWith(undefined))).not.toContain(OVERRIDDEN);
     expect(objectiveWeightsAreDefault(resolveObjectiveWeights({}))).toBe(true);
     expect(objectiveWeightsAreDefault(resolveObjectiveWeights(undefined))).toBe(true);
-  });
+  }, 20_000); // corpus re-solves: 2.6 s alone, 2.2 / 2.3 / 4.0 / 3.6 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 
   it('still says so when the weights genuinely differ', () => {
     // The other half: a check that cannot fire is a check nobody has tested.

@@ -357,7 +357,7 @@ describe('fragility 5: a refused approval is re-placed from its own ground', () 
     const alone = displace(G, { search: null });
     expect(whereIs(run, G)).toEqual(whereIs(alone, G));
     expect(whereIs(run, G)?.venueId).toBe(byId.get(G)?.venueId);
-  });
+  }, 15_000); // corpus re-solves: 1.8 s alone, 1.5 / 1.8 / 3.3 / 2.0 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 });
 
 /* -------------------------------------------------------------------------- */

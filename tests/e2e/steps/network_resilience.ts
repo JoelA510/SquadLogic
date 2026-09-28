@@ -1,5 +1,6 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
+import { waitForMockClient } from './mockReady.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -18,6 +19,7 @@ Given('the user has modified the {string} roster', async ({ page }, teamName: st
 
   // Inject a mock pending override so the Sync button becomes active
   // CRITICAL FIX: Seed run-1 directly (sessionStorage may not have initialMockData yet)
+  await waitForMockClient(page);
   await page.evaluate((tName) => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';

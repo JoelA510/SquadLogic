@@ -1,10 +1,12 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
+import { waitForMockClient } from './mockReady.js';
 
 const { Given, When, Then } = createBdd();
 
 Given('I am authenticated with zero organizations', async ({ page }) => {
   await page.goto('/login');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     localStorage.removeItem('squadlogic_active_org');
     const session = {
@@ -47,6 +49,7 @@ When('I complete and submit the onboarding organization form', async ({ page }) 
 
 When('I submit onboarding with a duplicate organization slug', async ({ page }) => {
   await page.goto('/organizations/new');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     db.organizations = db.organizations || [];

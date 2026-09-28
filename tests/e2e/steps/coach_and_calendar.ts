@@ -1,11 +1,13 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
+import { waitForMockClient } from './mockReady.js';
 
 const { Given, When, Then } = createBdd();
 
 // --- Pillar 2: Coach Daily Loop ---
 
 Given('I have been assigned to the {string}', async ({ page }, teamName: string) => {
+  await waitForMockClient(page);
   await page.evaluate((name) => {
     // CRITICAL FIX: Aggressively clear state to prevent parallel worker contamination
     const db = JSON.parse(
@@ -86,6 +88,7 @@ Given('I have been assigned to the {string}', async ({ page }, teamName: string)
 });
 
 Given('my team has {int} players assigned', async ({ page }, count: number) => {
+  await waitForMockClient(page);
   await page.evaluate((num) => {
     const db = JSON.parse(
       sessionStorage.getItem('__MOCK_DB__') ||

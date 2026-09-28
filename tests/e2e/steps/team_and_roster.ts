@@ -1,5 +1,6 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
+import { waitForMockClient } from './mockReady.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -7,6 +8,7 @@ const { Given, When, Then } = createBdd();
  * Helper to ensure a player exists in the "imports" table so TeamAnalysisPage can hydrate it.
  */
 async function syncPlayerToImports(page: Page, player: Record<string, unknown>) {
+  await waitForMockClient(page);
   await page.evaluate(
     ({ p }) => {
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -58,6 +60,7 @@ async function syncPlayerToImports(page: Page, player: Record<string, unknown>) 
 // ────────────────────────────────────────────────────────────
 
 Given('teams have been generated for the current season', async ({ page }) => {
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -107,6 +110,7 @@ Given('teams have been generated for the current season', async ({ page }) => {
 });
 
 Given('all players are correctly assigned to eligible teams', async ({ page }) => {
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
@@ -120,6 +124,7 @@ Given('all players are correctly assigned to eligible teams', async ({ page }) =
 Given(
   'a buddy pair {string} and {string} are in the same division',
   async ({ page }, p1: string, p2: string) => {
+    await waitForMockClient(page);
     await page.evaluate(
       ({ name1, name2 }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -169,6 +174,7 @@ Given(
 Given(
   'a player {string} is assigned to a {string} team',
   async ({ page }, player: string, teamGender: string) => {
+    await waitForMockClient(page);
     await page.evaluate(
       ({ pName, tGender }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -211,6 +217,7 @@ Given(
 Given(
   'a player {string} of age {int} is assigned to a {string} team',
   async ({ page }, player: string, age: number, division: string) => {
+    await waitForMockClient(page);
     await page.evaluate(
       ({ pName, pAge: _pAge, div }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -259,6 +266,7 @@ Given(
 Given(
   'a player {string} of age {int} is assigned to {string}',
   async ({ page }, player: string, age: number, team: string) => {
+    await waitForMockClient(page);
     await page.evaluate(
       ({ playerName, playerAge, teamName }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -322,6 +330,7 @@ Then('no conflict banner should be displayed', async ({ page }) => {
 Then(
   'a new row should be inserted into the {string} table',
   async ({ page }, tableName: string) => {
+    await waitForMockClient(page);
     const rows = await page.evaluate((table) => {
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
       return db[table] || [];
@@ -333,6 +342,7 @@ Then(
 Then(
   'the run should have run_type {string} and status {string}',
   async ({ page }, type: string, status: string) => {
+    await waitForMockClient(page);
     const match = await page.evaluate(
       ({ t, s }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');

@@ -1,5 +1,6 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
+import { waitForMockClient } from './mockReady.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -39,6 +40,7 @@ type Seed = { venueName: string; halves: boolean; booked: boolean };
 
 async function seedEstate(page, { venueName, halves, booked }: Seed) {
   if (page.url() === 'about:blank') await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(
     ({ vName, withHalves, withBooking, ids, pitchNames }) => {
       const db = JSON.parse(

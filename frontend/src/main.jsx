@@ -2,6 +2,8 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import * as Sentry from '@sentry/react';
 import App from './App.jsx';
+import { supabaseReady } from './lib/supabaseClient.js';
+import { logger } from './lib/logger.js';
 import './index.css';
 
 // ---------------------------------------------------------------------------
@@ -40,8 +42,25 @@ if (SENTRY_DSN) {
 // ---------------------------------------------------------------------------
 const ProfiledApp = Sentry.withProfiler(App);
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <ProfiledApp />
-  </React.StrictMode>
+// Mock mode loads the mock client as its own chunk; render only once it is
+// assigned (see lib/supabaseClient.js). The real client is ready at once.
+// If the client cannot be set up, say so on the page: never a blank root.
+const root = ReactDOM.createRoot(document.getElementById('root'));
+
+supabaseReady.then(
+  () =>
+    root.render(
+      <React.StrictMode>
+        <ProfiledApp />
+      </React.StrictMode>
+    ),
+  (error) => {
+    logger.error('[Supabase] Client failed to initialize', error);
+    root.render(
+      <main className="empty" role="alert">
+        <h1>SquadLogic could not start</h1>
+        <p>The data client failed to load. Reload the page to try again.</p>
+      </main>
+    );
+  }
 );

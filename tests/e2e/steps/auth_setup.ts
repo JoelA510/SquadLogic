@@ -2,6 +2,7 @@ import { createBdd } from 'playwright-bdd';
 import { expect, Page } from '@playwright/test';
 import { randomUUID } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
+import { waitForMockClient } from './mockReady.js';
 
 const { Given, After } = createBdd();
 
@@ -29,6 +30,7 @@ async function setupIsolatedTenant(page: Page, role: string = 'admin') {
     );
 
     // CRITICAL FIX: Fully seed the mock DB so the app doesn't get stuck on "Loading League Data"
+    await waitForMockClient(page);
     await page.evaluate(
       ({ orgId, roleName, uId }) => {
         localStorage.setItem('squadlogic_active_org', orgId);
@@ -148,6 +150,7 @@ Given(
     if (isMockMode) {
       await page.goto('/');
 
+      await waitForMockClient(page);
       const isPreSeeded = await page.evaluate(
         ({ emailStr, roleName, defaultUid, rawRoleName }) => {
           sessionStorage.removeItem('__MOCK_SESSION__');

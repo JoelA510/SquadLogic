@@ -1,5 +1,6 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
+import { waitForMockClient } from './mockReady.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -21,6 +22,7 @@ Given('the admin views the reporting dashboard', async ({ page }) => {
   await pinToOrg1(page);
 
   // Seed data the EnterpriseDashboard needs: view_org_metrics, players, view_compliance_stats
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';

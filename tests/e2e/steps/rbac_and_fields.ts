@@ -1,5 +1,6 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
+import { waitForMockClient } from './mockReady.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -25,6 +26,7 @@ Given(
     rbacState.orgs[org2] = orgId2;
 
     await page.goto('/');
+    await waitForMockClient(page);
     await page.evaluate(
       ({ o1, id1, o2, id2 }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -173,6 +175,7 @@ Given(
 
     rbacState.users[user] = { org, role: cleanRole, orgId };
 
+    await waitForMockClient(page);
     await page.evaluate(
       ({ uId, oId, roleName, orgName, userName }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -371,6 +374,7 @@ Given('I am logged in as an administrator', async ({ page }) => {
 });
 
 Given('an organization has multiple fields configured', async ({ page }) => {
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';

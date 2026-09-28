@@ -1,10 +1,12 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
+import { waitForMockClient } from './mockReady.js';
 
 const { Given, When, Then } = createBdd();
 
 Given('an organization and season are active', async ({ page }) => {
   await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = 'org-1';
@@ -48,6 +50,7 @@ Then('the League Status panel should show the active season name', async ({ page
 
 Given('I have imported player data', async ({ page }) => {
   await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const activeOrg = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -83,6 +86,7 @@ Given('I have imported player data', async ({ page }) => {
 
 Given('I have not generated teams', async ({ page }) => {
   await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     db.scheduler_runs = db.scheduler_runs || [];
@@ -94,6 +98,7 @@ Given('I have not generated teams', async ({ page }) => {
 
 Given('I have not generated a practice schedule', async ({ page }) => {
   await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     db.scheduler_runs = db.scheduler_runs || [];
@@ -105,6 +110,7 @@ Given('I have not generated a practice schedule', async ({ page }) => {
 
 Given('I have not generated a game schedule', async ({ page }) => {
   await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     db.scheduler_runs = db.scheduler_runs || [];
@@ -116,6 +122,7 @@ Given('I have not generated a game schedule', async ({ page }) => {
 
 Given('all setup steps are complete', async ({ page }) => {
   await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const now = new Date().toISOString();
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -192,6 +199,7 @@ Given('all setup steps are complete', async ({ page }) => {
 
 Given('I have generated teams', async ({ page }) => {
   await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -242,6 +250,7 @@ Given('I have generated teams', async ({ page }) => {
 
 Given('I have generated a practice schedule', async ({ page }) => {
   await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -271,6 +280,7 @@ Given('I have generated a practice schedule', async ({ page }) => {
 
 Given('I have generated a game schedule', async ({ page }) => {
   await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -331,6 +341,7 @@ Given(
   'I belong to organizations {string} and {string}',
   async ({ page }, org1: string, org2: string) => {
     await page.goto('/');
+    await waitForMockClient(page);
     await page.evaluate(
       ({ o1, o2 }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -380,6 +391,7 @@ Given(
 Given(
   'the sidebar shows {string} as the active organization',
   async ({ page }, orgName: string) => {
+    await waitForMockClient(page);
     await page.evaluate((name) => {
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
       const org = (db.organizations || []).find((o: Record<string, unknown>) => o.name === name);
@@ -498,6 +510,7 @@ Then('localStorage should be updated with the valid season', async ({ page }) =>
 });
 
 Given('I have selected {string} as the active organization', async ({ page }, orgName: string) => {
+  await waitForMockClient(page);
   await page.evaluate((name) => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const org = (db.organizations || []).find((o: Record<string, unknown>) => o.name === name);
@@ -509,6 +522,7 @@ Given('I have selected {string} as the active organization', async ({ page }, or
 });
 
 Given('a valid season is selected', async ({ page }) => {
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const seasons = db.season_settings || [];

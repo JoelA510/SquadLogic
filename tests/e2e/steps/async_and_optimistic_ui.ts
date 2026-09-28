@@ -1,5 +1,6 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
+import { waitForMockClient } from './mockReady.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -7,6 +8,7 @@ const { Given, When, Then } = createBdd();
 When('I change the {string} input to {string}', async ({ page }, label: string, value: string) => {
   // CRITICAL FIX: Go to root first to set origin, then clear scheduler runs
   await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     db.scheduler_runs = [
@@ -70,6 +72,7 @@ Then('the resulting teams summary should reflect the new constraints', async ({ 
 
   // Simulate backend completing the run so the UI transitions out of "Generating Teams...".
   // If the app already inserted a completed run, leave it in place.
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -195,6 +198,7 @@ Given(
   'I am viewing a registration for {string} with a {string} medical status',
   async ({ page }, name: string, status: string) => {
     await page.goto('/');
+    await waitForMockClient(page);
     await page.evaluate((playerName) => {
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
       const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -254,6 +258,7 @@ Given('I am on the {string} workflow step on Dashboard', async ({ page }, step: 
   // Establish origin first, seed storage, then use the workflow page's
   // query param consumed by WorkflowPage's controlled workflow state.
   await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     // Seed data so the Output Generation panel has something to export
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -329,6 +334,7 @@ Then('eventually display a green success message confirming completion', async (
 // --- Recharts ---
 When('I hover my mouse over the {string} chart', async ({ page }, _chartName: string) => {
   await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -421,6 +427,7 @@ Then('a dark-themed tooltip should appear showing exact counts', async ({ page }
 
 Given('I have generated a new set of teams', async ({ page }) => {
   // Seed the DB with a completed team run so the persistence panel is visible
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';

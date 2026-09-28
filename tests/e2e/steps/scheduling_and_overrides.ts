@@ -1,5 +1,6 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
+import { waitForMockClient } from './mockReady.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -88,6 +89,7 @@ async function mockGamePersistenceRoutes(page: Page) {
 // ────────────────────────────────────────────────────────────
 
 Given('a set of registered players and available field slots', async ({ page }) => {
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -148,6 +150,7 @@ Given('a set of registered players and available field slots', async ({ page }) 
 });
 
 Given('coach availability and preference constraints are defined', async ({ page }) => {
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -179,6 +182,7 @@ Given(
   /there are (\d+) players in the (.*) division/,
   async ({ page }, countStr: string, division: string) => {
     const playerCount = parseInt(countStr, 10);
+    await waitForMockClient(page);
     await page.evaluate(
       ({ count, div }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -207,6 +211,7 @@ Given(
 );
 
 Given('a target roster size of {int}', async ({ page }, targetSize: number) => {
+  await waitForMockClient(page);
   await page.evaluate(
     ({ size }) => {
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
@@ -235,6 +240,7 @@ Given('a target roster size of {int}', async ({ page }, targetSize: number) => {
 });
 
 When('I trigger the team generation algorithm', async ({ page }) => {
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -332,6 +338,7 @@ Then('mutual buddy requests should be respected where possible', async ({ page }
 // ────────────────────────────────────────────────────────────
 
 Given('multiple teams require weekly practice slots', async ({ page }) => {
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -358,6 +365,7 @@ Given('multiple teams require weekly practice slots', async ({ page }) => {
 });
 
 Given('a team is located in a specific timezone', async ({ page }) => {
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -371,6 +379,7 @@ Given('a team is located in a specific timezone', async ({ page }) => {
 });
 
 When('the scheduler runs', async ({ page }) => {
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -397,6 +406,7 @@ When('the scheduler runs', async ({ page }) => {
 });
 
 Then('practice assignments should respect the local timezone offsets', async ({ page }) => {
+  await waitForMockClient(page);
   const state = await page.evaluate(() =>
     JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}')
   );
@@ -407,6 +417,7 @@ Then('practice assignments should respect the local timezone offsets', async ({ 
 });
 
 Then('no coach should be scheduled for two concurrent practices', async ({ page }) => {
+  await waitForMockClient(page);
   const state = await page.evaluate(() =>
     JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}')
   );
@@ -417,6 +428,7 @@ Then('no coach should be scheduled for two concurrent practices', async ({ page 
 });
 
 Then('no field slot should exceed its maximum capacity', async ({ page }) => {
+  await waitForMockClient(page);
   const state = await page.evaluate(() =>
     JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}')
   );
@@ -431,6 +443,7 @@ Then('no field slot should exceed its maximum capacity', async ({ page }) => {
 // ────────────────────────────────────────────────────────────
 
 Given('a list of teams in a division', async ({ page }) => {
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -453,6 +466,7 @@ Given('a list of teams in a division', async ({ page }) => {
 });
 
 When('I generate a round-robin game schedule', async ({ page }) => {
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -532,6 +546,7 @@ Then('consecutive games for the same coach should be avoided if possible', async
 
 Given('I am viewing the Team Roster page', async ({ page }) => {
   await page.goto('/');
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -649,6 +664,7 @@ Then(
 Given('the automated schedule has been generated', async ({ page }) => {
   await mockPracticeSchedulerRoutes(page);
   // ERADICATE NOISE: Wipe the specific tables first to ensure no competing hardcoded runs exist
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -767,6 +783,7 @@ Given('I am on the Game Scheduling page viewing an identified conflict', async (
   await page.waitForLoadState('domcontentloaded');
 
   // Step 2: Seed the mock DB with conflict data while ON the page
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -996,6 +1013,7 @@ Then('updates the game schedule if the selected slot is valid', async ({ page })
 Given('a practice schedule has been generated', async ({ page }) => {
   await mockPracticeSchedulerRoutes(page);
   // ERADICATE NOISE: Wipe the specific tables first to ensure no competing hardcoded runs exist
+  await waitForMockClient(page);
   await page.evaluate(() => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';

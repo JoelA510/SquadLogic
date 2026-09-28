@@ -61,7 +61,7 @@ const comparable = (result) => ({
  *
  * @param {Array<{date: unknown, latitude: unknown, longitude: unknown, timeZone: unknown}>} inputs
  */
-function compare(inputs) {
+function compare(inputs, edgeArm = edgeSunset) {
   const diffs = [];
   const codes = new Map();
   let exercised = 0;
@@ -70,7 +70,7 @@ function compare(inputs) {
     // Refusal inputs are deliberately malformed, hence the widened type.
     const loose = /** @type {any} */ (input);
     const core = comparable(coreSunset(loose));
-    const edge = comparable(edgeSunset(loose));
+    const edge = comparable(edgeArm(loose));
     exercised += 1;
     codes.set(core.code, (codes.get(core.code) ?? 0) + 1);
     const same =
@@ -162,6 +162,16 @@ describe('solar drift :: the Edge twin is the same algorithm as core', () => {
   });
 
   it('the comparison can fail: a sunset one ulp away is a difference', () => {
+    // Through `compare()` itself, the function every grid test above relies on.
+    const perturbed = (input) => {
+      const result = edgeSunset(input);
+      return { ...result, minutes: result.minutes * (1 + Number.EPSILON) };
+    };
+    const probe = compare(
+      [{ date: '2026-07-01', latitude: 45, longitude: 0, timeZone: 'Europe/London' }],
+      perturbed
+    );
+    expect(probe.diffs[0]).toBe('1 mismatched');
     const input = { date: '2026-07-01', latitude: 45, longitude: 0, timeZone: 'Europe/London' };
     const core = comparable(coreSunset(input));
     const nudged = {

@@ -32,7 +32,12 @@ const ZONES = [
   { timeZone: 'America/New_York', meridian: -75, edges: ['2026-03-08', '2026-11-01'] },
   { timeZone: 'America/Los_Angeles', meridian: -120, edges: ['2026-03-08', '2026-11-01'] },
   { timeZone: 'Europe/London', meridian: 0, edges: ['2026-03-29', '2026-10-25'] },
-  { timeZone: 'Australia/Sydney', meridian: 150, edges: ['2026-04-05', '2026-10-04'] },
+  {
+    timeZone: 'Australia/Sydney',
+    meridian: 150,
+    southern: true,
+    edges: ['2026-04-05', '2026-10-04'],
+  },
 ];
 
 const GRID_LATITUDES = [-45, -15, 15, 45];
@@ -71,8 +76,8 @@ function add(tags, input) {
   });
 }
 
-for (const { timeZone, meridian, edges } of ZONES) {
-  const hemisphere = meridian === 150 ? ['southern-zone'] : [];
+for (const { timeZone, meridian, edges, southern = false } of ZONES) {
+  const hemisphere = southern ? ['southern-zone'] : [];
   for (const latitude of GRID_LATITUDES) {
     for (const date of MONTHLY) {
       add(['baseline', ...hemisphere], { date, latitude, longitude: meridian, timeZone });
@@ -165,7 +170,8 @@ const table = {
     'Do not hand-edit. It is read by both arms:',
     '  tests/solarVectors.test.js                 core AND the TS arm under Vitest',
     '  supabase/functions/_shared/tests/solar_test.ts  the TS arm under Deno, two host zones',
-    'Minutes are compared exactly: JSON round-trips a double, and the arms share every operation.',
+    'Minutes are compared within 1e-9 (the engines differ in the last ulp across runtimes);',
+    'code, cause and the floor minute exactly. The in-process comparison is tests/solarDrift.test.js.',
     '',
     "No real coordinates: grid latitudes and each zone's standard meridian (or 7.5 deg off it).",
   ],

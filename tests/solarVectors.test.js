@@ -198,6 +198,15 @@ describe('solar vectors :: the table is the table both arms are held to', () => 
     expect(runner).toContain('../timing/solar.ts');
     expect(runner).toContain(`EXPECTED_CASE_COUNT = ${EXPECTED_CASE_COUNT}`);
     expect(runner).toContain(`MINUTES_TOLERANCE = ${MINUTES_TOLERANCE}`);
+    for (const tag of REQUIRED_TAGS) expect(runner).toContain(`'${tag}'`);
+  });
+
+  it('is discovered by the Deno mirror job and not excluded from it', () => {
+    const mirror = readFileSync(path.join(REPO_ROOT, 'scripts/deno-mirror-tests.sh'), 'utf8');
+    expect(mirror).toContain('supabase/functions/_shared/tests');
+    const excluded = /^EXCLUDED=\(([^)]*)\)/m.exec(mirror);
+    expect(excluded).not.toBeNull();
+    expect(excluded[1]).not.toContain(path.basename(DENO_RUNNER_PATH));
   });
 });
 
@@ -215,6 +224,12 @@ describe('solar vectors :: both arms reproduce every vector', () => {
   });
 
   it('the comparison can fail: a sunset moved by a thousandth of a minute is caught', () => {
+    // Through `mismatches()` itself, which both reproduction tests rely on.
+    const perturbed = (input) => {
+      const result = coreSunset(input);
+      return { ...result, minutes: result.minutes === null ? null : result.minutes + 1e-3 };
+    };
+    expect(mismatches(perturbed, coreEnforcement).failures.length).toBeGreaterThan(250);
     // The meta-assertion for the two above: the tolerance is far below what a
     // changed coefficient does, so it cannot swallow one.
     const vector = cases.find((c) => typeof c.expect.minutes === 'number');

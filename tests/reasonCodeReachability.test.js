@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 543 codes, of
- * which 531 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 547 codes, of
+ * which 535 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -98,6 +98,7 @@ import {
   latestLegalKickoff,
   resolveLighting,
   resolvePermitWindow,
+  sunsetForVenue,
   weekdayCodeOf,
 } from '@squadlogic/core/availability/index.js';
 import {
@@ -235,7 +236,10 @@ import {
   PRACTICE_REASON,
   buildPracticeHistory,
   buildPracticeSlotSet,
+  evaluatePracticeDaylight,
   materialisePracticeOccurrences,
+  createRecommendationState,
+  declineRecommendation,
   repairPracticeLoss,
   resolveCoachPreferences,
 } from '@squadlogic/core/practice/index.js';
@@ -401,7 +405,7 @@ const TABLES = Object.freeze({
  */
 const NOT_A_FINDING_TABLE = Object.freeze({
   PRACTICE_TBD_REASON:
-    'why repairPracticeLoss() left a displaced series TIME TBD (no legal slot at its venue, contended, change budget). It is a classification carried on a TIME TBD entry and in the details of PRACTICE_REPAIR_TIME_TBD, which is the finding and is audited above.',
+    'why repairPracticeLoss() left a displaced series TIME TBD (no legal slot at its venue, contended, change budget). It is a classification carried on a TIME TBD entry and in the details of PRACTICE_REPAIR_TIME_TBD, which is the finding and is audited above. DECLINED (8.6 PR 5) is carried on a recommendation entry after a decline and named in PRACTICE_REPAIR_RECOMMENDATION_LOCAL, which is audited above; tests/practiceRecommendations.test.js produces it.',
   DORMANCY_REASON:
     'the three verdicts detectDormantWaivers() gives a waiver (never-matched, not-status-bearing, load-bearing). It is a classification carried on a dormancy row, not a finding code: the findings that report it are WAIVER_DORMANT and WAIVER_NOT_STATUS_BEARING, and both are audited above.',
   IDENTITY_SIGNAL:
@@ -1126,6 +1130,67 @@ harvest(
     ],
   })
 );
+
+/*
+ * 8.9 PR 4: the daylight provider and the practice daylight evaluator.
+ * SYNTHETIC coordinates (round numbers, not a place). The table row sits well
+ * away from the computed sunset, so the provider reports the disagreement; a
+ * note naming the wrong fall-back date fails its cross-check; an unlit
+ * practice ending at 23:00 runs past any October sunset.
+ */
+const daylightCalendar = harvest(
+  'buildAvailabilityCalendar(a note naming the wrong DST date)',
+  buildAvailabilityCalendar({
+    timeZone: 'America/New_York',
+    sunsets: [
+      { date: '2026-10-31', sunsetMinutes: 1020 },
+      { date: '2026-11-07', sunsetMinutes: 1000, note: 'DST ends 11/08' },
+    ],
+    venueDaylight: [{ venueId: 'rig', latitude: 40, longitude: -75 }],
+  })
+);
+harvest(
+  'sunsetForVenue(table and coordinates more than two minutes apart)',
+  sunsetForVenue(daylightCalendar, { venueId: 'rig', date: '2026-10-31' })
+);
+{
+  const darkRig = buildFacilityGraph({
+    venues: [{ id: 'dark', name: 'Dark Park', lit: false }],
+    surfaces: [{ id: 'dark/f', venueId: 'dark', name: 'F', sizes: ['7v7'], lined: ['7v7'] }],
+  });
+  const lateSlotSet = buildPracticeSlotSet({
+    slots: [
+      {
+        id: 'late',
+        surfaceId: 'dark/f',
+        weekday: 'TUE',
+        startMinutes: 22 * 60,
+        durationMinutes: 60,
+        validFrom: '2026-10-06',
+        validUntil: '2026-10-06',
+        capacity: 1,
+        revisionId: 'r',
+        label: null,
+      },
+    ],
+    assignments: [{ id: 'a', slotId: 'late', teamId: 'T' }],
+    source: 'audit',
+  });
+  harvest(
+    'evaluatePracticeDaylight(an unlit practice ending at 23:00)',
+    evaluatePracticeDaylight({
+      occurrences: materialisePracticeOccurrences(lateSlotSet, {
+        from: '2026-10-06',
+        to: '2026-10-06',
+      }).occurrences,
+      graph: darkRig,
+      calendar: buildAvailabilityCalendar({
+        timeZone: 'America/New_York',
+        venueDaylight: [{ venueId: 'dark', latitude: 40, longitude: -75 }],
+      }),
+    })
+  );
+}
 
 const kickoffQuery = (overrides = {}) => ({
   surfaceId: 'rig/half',
@@ -6262,6 +6327,44 @@ harvest(
     inventory: [{ surface: 'field-3-a', weekday: 'THU', startMinutes: 1020 }],
     extra: { weights: { changedWeekday: 0 } },
   })
+);
+
+// 8.6 PR 5: a decline re-offers the slot and stamps the result local.
+harvest(
+  'declineRecommendation(a re-homed series declines its slot)',
+  declineRecommendation(
+    createRecommendationState({
+      plan: {
+        slots: [
+          {
+            id: 'rd-0',
+            surfaceId: 'orchard-park/field-2-a',
+            weekday: 'TUE',
+            startMinutes: 1020,
+            durationMinutes: 60,
+            validFrom: '2026-09-01',
+            validUntil: '2026-11-30',
+            capacity: 1,
+            revisionId: 'r1',
+            label: null,
+            surfaceResolution: 'resolved',
+          },
+        ],
+        assignments: [{ id: 'rda-0', slotId: 'rd-0', teamId: 'RD' }],
+      },
+      graph: repairGraph,
+      loss: { surfaceIds: ['orchard-park/field-2'], from: '2026-10-05', reason: 'audit' },
+      inventory: [
+        {
+          surfaceId: 'orchard-park/field-3-a',
+          weekday: 'TUE',
+          startMinutes: 1020,
+          durationMinutes: 60,
+        },
+      ],
+    }),
+    'rda-0'
+  )
 );
 
 harvest(

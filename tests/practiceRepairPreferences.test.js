@@ -51,6 +51,7 @@ import {
   objectiveCountsForSchedule,
   scoreObjective,
 } from '@squadlogic/core/resolve/index.js';
+import { tier1Projection } from './helpers/practiceRepairTier1.js';
 
 /* -------------------------------------------------------------------------- */
 /* The corpus, dated as tests/practiceRepair.test.js dates it                  */
@@ -162,247 +163,250 @@ function displacedBy(surfaceId) {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Main's result for every corpus surface, digested whole (nothing left out):
+ * Main's result for every corpus surface, digested through `tier1Projection()`:
  * retirement exact/greedy, blackout exact/greedy, blackout-with-minutes
- * exact/greedy. Computed on `origin/main` at 8166837, before this PR.
+ * exact/greedy. Computed on `origin/main` at 6db3c1b (#464), by running the
+ * same projection over main's result. The projection leaves out only what 8.6
+ * PR 5 replaced (the standalone cross-venue options) or added (the tier-2
+ * recommendations); everything tier 1 decides is digested whole.
  */
 const MAIN_SWEEP_DIGESTS = {
   'alder-park/pitch-1a-side-1': [
-    'f4e4b23883eb677d',
-    'c056bcc4ad43257a',
-    '69a81a904cab8c13',
-    '65163270f91899d9',
-    '69a81a904cab8c13',
-    '65163270f91899d9',
+    '1680727867090ed3',
+    '5df079ed75a45af0',
+    '5bbf65af61543732',
+    'f418c99496b7aa27',
+    '5bbf65af61543732',
+    'f418c99496b7aa27',
   ],
   'alder-park/pitch-1b-side-1': [
-    '14fdbeb5c6afa8b9',
-    '161a6d36349e8489',
-    'e8bccfeb5db08d39',
-    'ec8c708421e35b37',
-    'e8bccfeb5db08d39',
-    'ec8c708421e35b37',
+    '35879a889052642b',
+    '82a822764e536b3e',
+    'c2682cd8ac51612e',
+    'd40b77bad669809a',
+    'c2682cd8ac51612e',
+    'd40b77bad669809a',
   ],
   'alder-park/pitch-2a': [
-    '065c46808a330457',
-    '70993e4112f80495',
-    '533522cc767fdbe5',
-    '53aa8230d086cb7c',
-    '533522cc767fdbe5',
-    '53aa8230d086cb7c',
+    '2a754b4ccf43b88c',
+    '78ad414896fea926',
+    '4d22e90e3136ebba',
+    '104297b9c0905998',
+    '4d22e90e3136ebba',
+    '104297b9c0905998',
   ],
   'alder-park/pitch-2b': [
-    'f5adeb3eced59235',
-    'a8e827ecfc063238',
-    'c16c80acfcaad9c4',
-    '867ea784ce7f9420',
-    'c16c80acfcaad9c4',
-    '867ea784ce7f9420',
+    'b2de45741b535b0e',
+    '04b12d22a6dc1588',
+    '37bfb71d5fa6fe80',
+    'e171b7fd420be1e5',
+    '37bfb71d5fa6fe80',
+    'e171b7fd420be1e5',
   ],
   'alder-park/pitch-3a': [
-    '7d08b6053db6ad9c',
-    'a7c3b52ea3f37473',
-    '091737fad3273290',
-    '9fa56f548ddad197',
-    '091737fad3273290',
-    '9fa56f548ddad197',
+    '8086585ec6501329',
+    'fb9eaa0429264951',
+    'adae785feb2739d0',
+    '973ed5cb29b93448',
+    'adae785feb2739d0',
+    '973ed5cb29b93448',
   ],
   'alder-park/pitch-3b': [
-    '02bd24d5a7a0f662',
-    '413f7b7ee300f9bf',
-    'd91650280ef9c411',
-    'e23ffad452bd8d25',
-    'd91650280ef9c411',
-    'e23ffad452bd8d25',
+    'e7cf14df988397e1',
+    '3e0017540b1661bf',
+    'f63e359c31fd4e0d',
+    'f6cb39e173754be7',
+    'f63e359c31fd4e0d',
+    'f6cb39e173754be7',
   ],
   'alder-park/pitch-4a-side-1': [
-    '9e22ed110d6b68c1',
-    'dc6230120c4271ac',
-    '315de6a61ed9beb9',
-    '510e831f7ae1d9a5',
-    '315de6a61ed9beb9',
-    '510e831f7ae1d9a5',
+    '763c281bbc8c6454',
+    '6e656f1ad45c0f48',
+    '4900e769b700299b',
+    '717f94f4d60cbfb1',
+    '4900e769b700299b',
+    '717f94f4d60cbfb1',
   ],
   'alder-park/pitch-4b-side-1': [
-    '9a7ebbae446224ef',
-    'e9efcf460efd9a9c',
-    '40b3c74211606bcd',
-    '0fc37c6ea7358f19',
-    '40b3c74211606bcd',
-    '0fc37c6ea7358f19',
+    'e84c1e64d562de7f',
+    'bd19b67cfbd7cf2d',
+    '94640321ce38d4cc',
+    '8fea154c4b76efe1',
+    '94640321ce38d4cc',
+    '8fea154c4b76efe1',
   ],
   'brookside-park/lower-a': [
-    '2b6cb682105d5f94',
-    '20cc7ed6d1b96659',
-    'b0f318e658166fa9',
-    'b82cf4e7564d4d82',
-    'b0f318e658166fa9',
-    'b82cf4e7564d4d82',
+    'a35ca3fd8408f84f',
+    'e103296649de3e9a',
+    '2766c9e8290fed66',
+    '8f95a60d2f67655a',
+    '2766c9e8290fed66',
+    '8f95a60d2f67655a',
   ],
   'brookside-park/lower-b': [
-    '09b07cc416a09b7f',
-    'ef3040782e9d9700',
-    '7a23ebec5af87cfd',
-    '97c604b2eff9797f',
-    '7a23ebec5af87cfd',
-    '97c604b2eff9797f',
+    'a562165159c8801f',
+    'abd53e7ba3218021',
+    '296f953d6ecf61ff',
+    '37857d43a1164484',
+    '296f953d6ecf61ff',
+    '37857d43a1164484',
   ],
   'larkfield-green/field-1-a': [
-    '607a168592010423',
-    '50cbe9debabf45d8',
-    '715d3661a2467e01',
-    '54658292758a4ff3',
-    '715d3661a2467e01',
-    '54658292758a4ff3',
+    '6512de4eeb1ae3b9',
+    '24466d741c948181',
+    '0a9815d147989fa0',
+    '04f9c57b61c6e03d',
+    '0a9815d147989fa0',
+    '04f9c57b61c6e03d',
   ],
   'maplewood-back/field-1-a': [
-    'e1c8cf377cbc3636',
-    '537d06d675253a24',
-    'aa649dd350c504a9',
-    'c45781c89109807f',
-    '7d39c07b5a0a49fb',
-    'b2ca396908ea7ca3',
+    'ba535c3e8f6455d5',
+    'c48053a7172d2b39',
+    'eac7725443cb4eb8',
+    'd03351ef8a29c055',
+    '7de40f36f3adea72',
+    '84703a5ae8c54c89',
   ],
   'maplewood-back/field-1-b': [
-    '8c81ece054c6f0c4',
-    '7ef49daf2ce68081',
-    '531ddbb137e83a13',
-    '178cbab4785e91d9',
-    '5157225bf0f48b7f',
-    'da4b3f4883c6320b',
+    '6bd9d08629158fff',
+    '77d4a35240bb7b4a',
+    '00e05209adc07f09',
+    'a67dddb4115b3731',
+    'dceae9a9f4ddca4c',
+    '4281e77218e4e69f',
   ],
   'maplewood-back/field-2-a': [
-    '782043cd26a41747',
-    'ed32f9c191a3906a',
-    '5c41c66e49e88cc3',
-    'd84d3661137f859b',
-    '425827606a48edd4',
-    'a62d8c91a6c57428',
+    '76e90cc79363f869',
+    '9f6a5936d85ca23b',
+    'ab88a4c7e13d0199',
+    '1441823fd52799ad',
+    '3583c7929571f15b',
+    '4f3c92f526c17d74',
   ],
   'maplewood-back/field-2-b': [
-    'c652798cd3397e3c',
-    'ee369cf8ada9ce2d',
-    '371e03494fdfb847',
-    '60b0b88736f82b7e',
-    '0dc1b32ac7c119cf',
-    '783ee15e3c2c5147',
+    '5706312ecbb0f483',
+    '3d9842ff1dc0a8bb',
+    'c2f5284409f055fb',
+    '66d73bb8327c2951',
+    '52dd65c907eb9c15',
+    'd5dd7a965ca82045',
   ],
   'maplewood-back/field-3-a': [
-    'a01d752f3ed0325b',
-    'de1b2563e0baf990',
-    '998a8e6f88c8367f',
-    '9d9243a0ece6e0ac',
-    '3825f226a21be6ac',
-    '806ad4edc26dcd90',
+    '451fa928182c6955',
+    'e0c9a4240cf678fd',
+    'ada6934938499de7',
+    '766c70b9b04397a7',
+    'af40ff58a3badaee',
+    '24990041eec2144f',
   ],
   'maplewood-back/field-3-b': [
-    'fc9a5e6f00cbafab',
-    '44d3c8419e34b274',
-    '4801da1b9b362f45',
-    'f7c3e1c35e4e2d61',
-    '7b50251366ae309b',
-    '0415ee83da9225bb',
+    '15337162095bd9bc',
+    'e1906f8c1fff3cba',
+    'd248e5e630427f04',
+    '519900298004c844',
+    'a710154da08a5bc0',
+    '617fd822fc9a6917',
   ],
   'maplewood-back/field-4-a': [
-    '260523033f9efa43',
-    '7c9cac42798b23aa',
-    'f4288ebe30270b99',
-    '3067a42797baa7bf',
-    'f4288ebe30270b99',
-    '3067a42797baa7bf',
+    '7a3d8555e2fe4287',
+    '75d743fd95365822',
+    '1085ff6225914fdf',
+    'a178e788af3cc460',
+    '1085ff6225914fdf',
+    'a178e788af3cc460',
   ],
   'maplewood-back/field-4-b': [
-    'b6f2850c2e1f520b',
-    '5916d8236df2e165',
-    '28bab6a50e2f2fb0',
-    '61452ebabf049e7b',
-    '28bab6a50e2f2fb0',
-    '61452ebabf049e7b',
+    '68aef23f6c032685',
+    '4a5e3abe703312a8',
+    '6d0d3538d3399156',
+    'f1b7bb7b2dba8916',
+    '6d0d3538d3399156',
+    'f1b7bb7b2dba8916',
   ],
   'orchard-park/field-1-a': [
-    '2ce7c2febadfef8d',
-    '1a907f0bb1928fb1',
-    'b14ddb3e74437cd7',
-    '59c053589e33dacd',
-    'c739c3ce689e4019',
-    'dce05a7acb8d9b64',
+    '4c9e2c13834d1e4b',
+    '440563a3fe33855a',
+    '5e86e05b85847ae7',
+    '2dac304cf0eb880c',
+    'ddadcbcf4ddeab51',
+    'cb0e8b11c66a527e',
   ],
   'orchard-park/field-1-b': [
-    '0ee09a8d70782abe',
-    '4b47d3190253c5f9',
-    '1528fcb943bec788',
-    'b6bd7cc4de617ea2',
-    '1528fcb943bec788',
-    'b6bd7cc4de617ea2',
+    'fd12ea3b0d9549cd',
+    'cd45a992efad5360',
+    '1929764d55698309',
+    '9f03655ad4ac42b8',
+    '1929764d55698309',
+    '9f03655ad4ac42b8',
   ],
   'orchard-park/field-2-a': [
-    '6b45c136e0dac23f',
-    '320e8cdce0a7ad01',
-    '182632cd1b927dbf',
-    '19842387a306b15d',
-    '182632cd1b927dbf',
-    '19842387a306b15d',
+    '2c188154cf5634de',
+    'd08a301623b2e152',
+    '22fd5751aa2ebab7',
+    'd5960f1222edd35e',
+    '22fd5751aa2ebab7',
+    'd5960f1222edd35e',
   ],
   'orchard-park/field-2-b': [
-    '31447e175f01f7ab',
-    'e3b3783eb9916ec5',
-    'd34856fc73dd788d',
-    'a79a7969a4717e00',
-    '630be088ea051d90',
-    '17c5111a6120e367',
+    '9b41c9b2199b6ea9',
+    'af0216dfcec1ace4',
+    '971d5c0bf2377ca5',
+    '0a45b20a084b3c87',
+    '55c6ce2b16ab8a68',
+    '322266f760e761e6',
   ],
   'orchard-park/field-3-a': [
-    '4ed11fb6a0083752',
-    'bc95a08f3544e851',
-    '3d25554f59cdc5a2',
-    '2b94074c614223a1',
-    '3d25554f59cdc5a2',
-    '2b94074c614223a1',
+    '8e29681d1ec0aedd',
+    '233c0217024ea4d4',
+    'fc5e3669e2fb4a17',
+    'caab94052439d2b9',
+    'fc5e3669e2fb4a17',
+    'caab94052439d2b9',
   ],
   'orchard-park/field-3-b': [
-    'b01140c22e4627f5',
-    'b9c6af99a17f1b0f',
-    '8c9bdfede92a57d3',
-    '8bf212fd0dd86e27',
-    '8c9bdfede92a57d3',
-    '8bf212fd0dd86e27',
+    '92c4263f5b0f3601',
+    'ed411c6101b6f200',
+    '5f58ecc5417389db',
+    'f5c5cdf7e1208757',
+    '5f58ecc5417389db',
+    'f5c5cdf7e1208757',
   ],
   'orchard-park/field-4-a': [
-    'e708c5466e75439e',
-    '7583981d8a18d027',
-    'db833ad1017a5e09',
-    'fb3cb88293631576',
-    'db833ad1017a5e09',
-    'fb3cb88293631576',
+    '2ae6f41b2ee2daf3',
+    '55d34ba16ea9015d',
+    'b463a1bb1d17df81',
+    '773428fde9d61b02',
+    'b463a1bb1d17df81',
+    '773428fde9d61b02',
   ],
   'orchard-park/field-4-b': [
-    '0a63094ade60052a',
-    '9587c46604973c87',
-    '91227c9b478485be',
-    'f049f9ee6ec9c02d',
-    '91227c9b478485be',
-    'f049f9ee6ec9c02d',
+    '216dd71ce1616a86',
+    '5d804035a891f3c3',
+    '9d0bd74e34a671e8',
+    '3ef2033d95ae7b9d',
+    '9d0bd74e34a671e8',
+    '3ef2033d95ae7b9d',
   ],
   'orchard-park/field-5': [
-    '9e51ee8866785a92',
-    'fde15010325af98a',
-    '28a34716a4bb21a3',
-    '8f71dc5b14719468',
-    '28a34716a4bb21a3',
-    '8f71dc5b14719468',
+    '7e23dbf0022acf29',
+    '12c474183ba0b804',
+    '3aba13936645c708',
+    '7ba6ffa729c12dfb',
+    '3aba13936645c708',
+    '7ba6ffa729c12dfb',
   ],
   'orchard-park/field-6': [
-    'b9938eabf1f72759',
-    '34b77e6a0f90817f',
-    'd0b1b50a6cf53db6',
-    '3a0706b9b452640a',
-    'd0b1b50a6cf53db6',
-    '3a0706b9b452640a',
+    '717af098148a5a40',
+    'f0873ee51bb69168',
+    'be6b55a67e951494',
+    '2986d50b49567ee8',
+    'be6b55a67e951494',
+    '2986d50b49567ee8',
   ],
 };
 
 function resultDigest(result) {
-  const json = JSON.stringify(result, (key, value) => {
+  const json = JSON.stringify(tier1Projection(result), (key, value) => {
     if (value instanceof Map) return ['Map', [...value]];
     if (value instanceof Set) return ['Set', [...value]];
     return value;
@@ -595,8 +599,9 @@ describe('coach preferences :: must_keep is a hard candidate filter (plan §4)',
     expect(run.timeTbd[0]).toMatchObject({
       reason: PRACTICE_TBD_REASON.COACH_PREFERENCE,
       mustKeepDimensions: ['start_time'],
-      crossVenueOptions: [],
     });
+    // must_keep venue refuses the Alder Park shape too: no recommendation.
+    expect(run.recommendations[0].to).toBeNull();
   });
 
   it('with no legal candidate before the filter the reason stays no-legal-slot-at-venue', () => {
@@ -610,24 +615,35 @@ describe('coach preferences :: must_keep is a hard candidate filter (plan §4)',
     expect(run.timeTbd[0].mustKeepDimensions).toBeUndefined();
   });
 
-  it('filters cross-venue options too: must_keep on venue offers none, and weekday only same-day ones', () => {
+  it('filters tier-2 candidates too: must_keep on venue recommends none, and weekday only a same-day one', () => {
     const inventory = [
       { surfaceId: AP('pitch-2a'), weekday: 'TUE', startMinutes: 1020 },
       { surfaceId: AP('pitch-2a'), weekday: 'WED', startMinutes: 1020 },
     ];
     expect(ALDER).not.toBe(ORCHARD);
+    // One series, so one recommendation; the filter decides whether there is one
+    // and which day it may be.
     const unfiltered = constructed({ inventory });
-    expect(unfiltered.timeTbd[0].crossVenueOptions).toHaveLength(2);
+    expect(unfiltered.recommendations[0]).toMatchObject({ tier: 'cross-venue' });
     const byVenue = constructed({
       inventory,
       preferences: [pref('coach-1', 'venue', 'must_keep')],
     });
-    expect(byVenue.timeTbd[0].crossVenueOptions).toEqual([]);
+    expect(byVenue.recommendations[0].to).toBeNull();
     const byDay = constructed({
       inventory,
+      preferences: [
+        pref('coach-1', 'weekday', 'must_keep'),
+        pref('coach-1', 'start_time', 'prefer_keep'),
+      ],
+    });
+    expect(byDay.recommendations[0].to.weekday).toBe('TUE');
+    // Control: with the Tuesday shape gone, must_keep weekday leaves nothing.
+    const noTuesday = constructed({
+      inventory: [inventory[1]],
       preferences: [pref('coach-1', 'weekday', 'must_keep')],
     });
-    expect(byDay.timeTbd[0].crossVenueOptions.map((option) => option.to.weekday)).toEqual(['TUE']);
+    expect(noTuesday.recommendations[0].to).toBeNull();
   });
 });
 
@@ -942,13 +958,12 @@ describe('coach preferences :: prefer_keep is coachPreferenceBreached, weight 10
     expect(run.rehomed[0].to).toMatchObject({ weekday: 'TUE', startMinutes: 1290 });
   });
 
-  it('prices cross-venue options in their standalone objective', () => {
+  it('prices a tier-2 recommendation through the one objective', () => {
     const inventory = [{ surfaceId: AP('pitch-2a'), weekday: 'TUE', startMinutes: 1020 }];
-    const free = constructed({ inventory }).timeTbd[0].crossVenueOptions[0].objective.total;
+    const free = constructed({ inventory }).recommendations[0].objective.total;
     const run = constructed({ inventory, preferences: [pref('coach-1', 'venue', 'prefer_keep')] });
-    expect(run.timeTbd[0].crossVenueOptions[0].objective.total).toBe(
-      free + PLAN_COACH_PREFERENCE_WEIGHT
-    );
+    expect(run.recommendations[0].tier).toBe('cross-venue');
+    expect(run.recommendations[0].objective.total).toBe(free + PLAN_COACH_PREFERENCE_WEIGHT);
   });
 });
 

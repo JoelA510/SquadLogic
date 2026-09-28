@@ -35,6 +35,7 @@ export {
   FacilityGraphInputSchema,
   FacilitySurfaceInputSchema,
   FacilityVenueSchema,
+  LocationCoordinatesSchema,
   OverlapPairSchema,
 } from './schemas.js';
 

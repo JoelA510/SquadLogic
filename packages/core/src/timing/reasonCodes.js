@@ -204,6 +204,17 @@ export const TIMING_REASON = Object.freeze({
    * a refusal is a result.
    */
   SUNSET_COORDINATES_UNREADABLE: 'SUNSET_COORDINATES_UNREADABLE',
+  /**
+   * A note names a daylight-saving change ("DST ends 11/01") that the season's
+   * zone does not make on that date (`seasonEvents.js`, decision D12 of the
+   * 8.9 plan). The zone's date is applied; the note is the claim that failed
+   * its cross-check.
+   *
+   * `compromise`: the derived date is still correct, but a source that states
+   * the wrong clock-change date may have stated other things on the wrong
+   * clock, and a human has to decide which.
+   */
+  CLOCK_CHANGE_NOTE_DISAGREES: 'CLOCK_CHANGE_NOTE_DISAGREES',
 
   /* -- inverse ("what kickoff would work?") queries ------------------------ */
   /** No kickoff in the searched horizon yields the requested warm-up. */
@@ -257,6 +268,7 @@ export const TIMING_REASON_SEVERITY = Object.freeze({
 
   [TIMING_REASON.SUNSET_UNDEFINED_AT_LATITUDE]: TIMING_SEVERITY.BLOCKING,
   [TIMING_REASON.SUNSET_COORDINATES_UNREADABLE]: TIMING_SEVERITY.BLOCKING,
+  [TIMING_REASON.CLOCK_CHANGE_NOTE_DISAGREES]: TIMING_SEVERITY.COMPROMISE,
 
   [TIMING_REASON.KICKOFF_SEARCH_EXHAUSTED]: TIMING_SEVERITY.BLOCKING,
   [TIMING_REASON.KICKOFF_BOUND_BY_OTHER_SURFACE]: TIMING_SEVERITY.INFO,

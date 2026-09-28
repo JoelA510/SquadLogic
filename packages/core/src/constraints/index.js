@@ -108,5 +108,7 @@ export {
   ORCHARD_PARK_VENUE_ID,
   SEASON_2026_CONSTRAINTS,
   SEASON_2026_CONSTRAINT_ID,
+  SEASON_2026_PRACTICE_DAYLIGHT_CONSTRAINT,
   buildSeason2026ConstraintRegistry,
+  buildSeason2026PracticeConstraintRegistry,
 } from './adapters/season2026Constraints.js';

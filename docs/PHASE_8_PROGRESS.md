@@ -6496,3 +6496,123 @@ conflict logic is reused, not copied. Loading them from the DB is PR 9.
     and a slug graph is refused when preferences are present;
   - derive `coachesByTeam` from the same assignment rows, so there is one coach
     source.
+
+## 8.9 PR 3 — #467 merged (c292156): venue coordinates
+
+`20260930000000_location_coordinates` adds nullable `locations.latitude`/`longitude
+numeric(7,4)`, `coordinates_set_at` and `coordinates_set_by`, with two CHECKs
+(both-or-neither, range).
+- **RPC.** `admin_set_location_coordinates` follows the `admin_create_location`
+  pattern: SECURITY DEFINER with a pinned search_path, and an org-admin check on the
+  location's own org.
+  - Both-or-neither; NULL/NULL clears.
+  - The range is judged *before* rounding, so 90.004 is refused. Values are rounded
+    to 2 decimals (D9, data minimisation).
+  - Audited as `location.coordinates_set` with before/after.
+  - No new policy: the RPC is the only client writer.
+- **Core.** Adds a `LocationCoordinatesSchema`, a mock arm and pgTAP (12 assertions,
+  green in CI).
+- **Privacy.** Only synthetic coordinates are in the repo (40/-75, 41.5/-73.5 and
+  range/rounding probes). Nothing geocodes; nothing is fetched.
+- **Evidence.** 9 of 9 plants caught on the real `run.sh`, including the revert's
+  distinct-org count and "range after rounding". Harness OK. Supervisor check
+  (static): the smoke's audit assertions would catch `before` captured from the
+  new row.
+- **Process note.** The first agent hung on a `useradd` the permission system
+  refused. It was stopped with nothing lost and re-briefed to use the existing
+  private harness user `pgrunner2`. No refusal was routed around.
+
+## 8.6 PR 3b, PR 5 — #468 merged (cc692de): tier-2 joint search and the decline chain
+
+- **Tier 2.** A joint exact search over cross-venue candidates for the series tier 1
+  left TBD, with tier-1 placements frozen as occupants. It uses the repair's own
+  `marginal()` clash check and honours #464's preferences.
+  - It replaces the standalone cross-venue options and `sharedWith`.
+  - Past its node limit it returns its best clash-free result with
+    `PRACTICE_REPAIR_MINIMALITY_UNPROVEN` (tier `cross-venue`).
+  - A new min-cost lower bound means no corpus loss hits the limit (at most 18,131
+    nodes).
+- **Recommendations.** One recommendation per displaced series-window. Tier-2
+  series stay in `timeTbd` until enacted (PR 11).
+- **`practice/recommendations.js`** (pure) holds `declineRecommendation` and
+  `undoDecline`, implementing plan §2:
+  - the declined set Δ;
+  - the eight eligibility conditions;
+  - gain from the one objective;
+  - the re-offer chain with visited set V;
+  - the `declined` TBD reason;
+  - the `PRACTICE_REPAIR_RECOMMENDATION_LOCAL` stamp.
+- **Tier 1 unchanged.** Tier-1 projection digests are identical to main in 522/522
+  corpus repairs. Tier 2 recommends 814 cross-venue moves across 318 repairs.
+- **BLOCKING round.**
+  - *Visited set.* The visited-set plant never turned red, so the guarantee was
+    declared, not proven. A fixture reached through production calls only
+    (decline, decline, undo) now makes a series move twice without V.
+  - *Ruling on plan ambiguity 1.* Δ alone bars the decliner from X. On later
+    released slots the decliner is an ordinary candidate (plan §2 amended).
+  - *`/code-review`.* Six fixes, including restoring `PHASE_8_PROGRESS.md`, which a
+    soft-reset squash had silently deleted.
+  - *Timeouts.* Four timeouts in untouched files were fixed by sharing the corpus
+    pass, not by raising other files' limits.
+- **Squash hazard caught.** The agent's planned `git reset --soft origin/main` on a
+  branch cut from an older main would have reverted main's later commits. It was
+  redirected to rebase first, and the diff was verified: 11 intended files, no
+  deletions.
+- **Evidence.**
+  - All 6 witness plants are red.
+  - Supervisor plant: removing "cross-venue only if T is TBD" turns 2 red.
+  - Full suite: 4248 passed, 0 failed (twice).
+
+## 8.9 PR 3b — #470 merged (5813dba): the venue coordinates admin form
+
+- **The form.** Each venue row in Field Management gets a coordinates panel.
+  - It is validated with #467's core `LocationCoordinatesSchema` before the RPC is
+    called. Half pairs, out-of-range values and non-numbers are shown field by
+    field and tied to their inputs.
+  - A blank Save is refused; clearing goes only through Clear (null/null).
+  - After a save it displays the RPC's rounded answer.
+  - Non-admins get a read-only view.
+  - Every RPC refusal reaches the alert banner. The error codes are enumerated
+    from the migration's `RAISE … USING ERRCODE` lines.
+- **The badge.** A "No coordinates" badge appears only for unlit or undeclared
+  venues without a pair. Undeclared lighting counts as unlit, per plan D5 and §2.
+- **Privacy.** Only synthetic values. The supervisor grep found no geolocation,
+  fetch or geocoding.
+- **Evidence.**
+  - 21 tests, including real page, hook and form renders.
+  - 7 plants red, one of them a `/code-review` finding: a refetch left the inputs
+    stale, so Save could overwrite a newer pair.
+  - Supervisor plant: making a blank Save clear the pair turns 1 red.
+
+## 8.9 PR 4 — #472 merged (8c0713c): daylight provider, DST event, practice daylight evaluator
+
+- **Provider.** `sunsetForVenue` takes the date-keyed table first (authoritative),
+  then computes the sunset from the venue's coordinates in the season timezone,
+  then returns unknown.
+  - A difference of more than 2 minutes between the sources gives
+    `SUNSET_SOURCES_DISAGREE`.
+  - Missing data gives `SUNSET_UNKNOWN` with cause `venue-coordinates-missing`.
+  - Enforcement uses `floor`.
+- **DST event.** `timing/seasonEvents.js` derives the DST end from the zone's
+  offset change. The sunsets.csv `Note` column is finally read, as a cross-check
+  (`CLOCK_CHANGE_NOTE_DISAGREES`). The corpus derives 2026-11-01.
+- **Evaluator.** `practice/daylight.js` implements the operator rule: an unlit or
+  undeclared practice occurrence ends at or before floor(sunset), with
+  `PRACTICE_SUNSET_MARGIN_MINUTES = 0`.
+  - Lit venues are exempt.
+  - An unknown sunset is counted and never allowed.
+  - Attribution kind is `sunset`; the violation code is `PRACTICE_PAST_SUNSET`.
+- **Registry.** The claim lives in a separate
+  `buildSeason2026PracticeConstraintRegistry`. Putting it in the game registry
+  flipped game feasibility to `unknown` (no game rule claims it), so game results
+  are unchanged. The live game path is stated as declared, not enforced (D7).
+- **Corpus.** With synthetic coordinates, 656 of 1,833 unlit occurrences are
+  flagged: 380 before DST and 276/282 after. The flagged set equals an
+  independent derivation. The plan's F1 ("every slot fails after DST") was
+  corrected: the early-evening 16:00-16:45 slots survive.
+- **Evidence.**
+  - W4/W5/W6/W8/W11/W15: 8 plants, all red.
+  - Supervisor plant: switching the computed sunset from `floor` to `ceil` turns
+    3 red. The same change on table sunsets is a no-op, because the schema only
+    allows integer minutes.
+  - Fixture suite 2,050 → 2,076, all passing.

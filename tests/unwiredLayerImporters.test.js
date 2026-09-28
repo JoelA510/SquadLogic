@@ -397,6 +397,9 @@ const LAYERS = Object.freeze([
     modulePath: 'packages/core/src/practice/slots.js',
     functions: Object.freeze(['buildPracticeSlotSet', 'getPracticeSlot', 'firstWeekdayOnOrAfter']),
     importers: Object.freeze([
+      // 8.9 PR 5: the duration-phase reports enumerate slot x dates on the
+      // same weekday walk.
+      'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/index.js',
       // Shares the one weekday walk rather than writing a second one.
       'packages/core/src/practice/materialise.js',
@@ -406,13 +409,17 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/repair.js',
     ]),
     consumers: Object.freeze([
+      'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/materialise.js',
       'packages/core/src/practice/metricsInput.js',
       'packages/core/src/practice/repair.js',
+      'tests/practiceDaylight.test.js',
+      'tests/practiceDurationPhases.test.js',
       'tests/practiceSlotModel.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
+      'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/materialise.js',
       'packages/core/src/practice/metricsInput.js',
       'packages/core/src/practice/repair.js',
@@ -423,8 +430,15 @@ const LAYERS = Object.freeze([
     layer: 'practice/materialise.js',
     modulePath: 'packages/core/src/practice/materialise.js',
     functions: Object.freeze(['materialisePracticeOccurrences']),
-    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    // 8.9 PR 5: `durationPhases.js` imports `teamsOn()`, the one reading of
+    // which assignments hold a slot on a date, and does not materialise --
+    // so it is an importer, and the empty production list below still holds.
+    importers: Object.freeze([
+      'packages/core/src/practice/durationPhases.js',
+      'packages/core/src/practice/index.js',
+    ]),
     consumers: Object.freeze([
+      'tests/practiceDaylight.test.js',
       'tests/practiceRepair.test.js',
       'tests/practiceSlotModel.test.js',
       'tests/reasonCodeReachability.test.js',
@@ -454,12 +468,33 @@ const LAYERS = Object.freeze([
     layer: 'practice/repair.js',
     modulePath: 'packages/core/src/practice/repair.js',
     functions: Object.freeze(['repairPracticeLoss']),
-    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    importers: Object.freeze([
+      'packages/core/src/practice/index.js',
+      // 8.6 PR 5: the decline chain starts from the repair and re-offers
+      // through its own `marginal()`. The layer using itself, not a caller.
+      'packages/core/src/practice/recommendations.js',
+    ]),
     consumers: Object.freeze([
+      'packages/core/src/practice/recommendations.js',
+      'tests/practiceRecommendations.test.js',
       'tests/practiceRepair.test.js',
       'tests/practiceRepairPreferences.test.js',
       'tests/reasonCodeReachability.test.js',
       'tests/unknownSurfaceDiscipline.test.js',
+    ]),
+    expectedProductionConsumers: Object.freeze(['packages/core/src/practice/recommendations.js']),
+    expectedExternalProductionConsumers: Object.freeze([]),
+  }),
+  // 8.6 PR 5: declines and the re-offer chain. Unwired like the repair it
+  // extends (`PRACTICE_REPAIR_UNWIRED`); PR 10's panel is its first caller.
+  Object.freeze({
+    layer: 'practice/recommendations.js',
+    modulePath: 'packages/core/src/practice/recommendations.js',
+    functions: Object.freeze(['createRecommendationState', 'declineRecommendation', 'undoDecline']),
+    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    consumers: Object.freeze([
+      'tests/practiceRecommendations.test.js',
+      'tests/reasonCodeReachability.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([]),
     expectedExternalProductionConsumers: Object.freeze([]),
@@ -473,10 +508,13 @@ const LAYERS = Object.freeze([
     expectedProductionConsumers: Object.freeze([]),
     expectedExternalProductionConsumers: Object.freeze([]),
   }),
-  // 8.9 PR 1: the computed sunset. Nothing in production calls it until the
-  // daylight provider (8.9 PR 4); that provider is the first entry the
-  // production lists below will gain, and the PR adding it rewrites this entry
-  // and the "nothing in production calls this yet" note in `solar.js`.
+  // 8.9 PR 1: the computed sunset. 8.9 PR 4 gave it its first production
+  // caller, the daylight provider (`sunsetForVenue()` in
+  // `availability/calendar.js`), and its first sibling importer,
+  // `timing/seasonEvents.js`, which reads the zone's offset through
+  // `utcOffsetMinutesOn()` to derive the DST season event. Those two are the
+  // whole production list; the next caller fails this entry and rewrites the
+  // "One production caller" note in `solar.js`.
   //
   // 8.9 PR 2 added its Deno twin, and **consumers are matched by name**, so the
   // two arms now appear in each other's lists. The three non-`tests/` files
@@ -490,26 +528,33 @@ const LAYERS = Object.freeze([
     modulePath: 'packages/core/src/timing/solar.js',
     functions: Object.freeze(['sunsetOnDate', 'sunsetEnforcementMinutes']),
     importers: Object.freeze([
+      'packages/core/src/availability/calendar.js',
       'packages/core/src/timing/index.js',
+      'packages/core/src/timing/seasonEvents.js',
       'scripts/generate-solar-vectors.mjs',
       'tests/solarDrift.test.js',
       'tests/solarVectors.test.js',
     ]),
     consumers: Object.freeze([
+      'packages/core/src/availability/calendar.js',
       'scripts/generate-solar-vectors.mjs',
       'supabase/functions/_shared/tests/solar_test.ts',
       'supabase/functions/_shared/timing/solar.ts',
+      'tests/practiceDaylight.test.js',
+      'tests/practiceDurationPhases.test.js',
       'tests/reasonCodeReachability.test.js',
       'tests/solar.test.js',
       // Not `solarDrift`/`solarVectors`: they call both arms through renamed
       // imports, which the name match cannot see. `importers` lists them.
     ]),
     expectedProductionConsumers: Object.freeze([
+      'packages/core/src/availability/calendar.js',
       'scripts/generate-solar-vectors.mjs',
       'supabase/functions/_shared/tests/solar_test.ts',
       'supabase/functions/_shared/timing/solar.ts',
     ]),
     expectedExternalProductionConsumers: Object.freeze([
+      'packages/core/src/availability/calendar.js',
       'scripts/generate-solar-vectors.mjs',
       'supabase/functions/_shared/tests/solar_test.ts',
       'supabase/functions/_shared/timing/solar.ts',
@@ -531,25 +576,74 @@ const LAYERS = Object.freeze([
       'tests/solarDrift.test.js',
       'tests/solarVectors.test.js',
     ]),
+    // 8.9 PR 4: `availability/calendar.js` and `tests/practiceDaylight.test.js`
+    // appear by name only -- they call *core's* `sunsetOnDate()`. `importers`
+    // above, which does not name them, is what says the Edge arm is unused.
+    // 8.9 PR 5's `tests/practiceDurationPhases.test.js` likewise.
     consumers: Object.freeze([
+      'packages/core/src/availability/calendar.js',
       'packages/core/src/timing/solar.js',
       'scripts/generate-solar-vectors.mjs',
       'supabase/functions/_shared/tests/solar_test.ts',
+      'tests/practiceDaylight.test.js',
+      'tests/practiceDurationPhases.test.js',
       'tests/reasonCodeReachability.test.js',
       'tests/solar.test.js',
       // Not `solarDrift`/`solarVectors`: they call both arms through renamed
       // imports, which the name match cannot see. `importers` lists them.
     ]),
     expectedProductionConsumers: Object.freeze([
+      'packages/core/src/availability/calendar.js',
       'packages/core/src/timing/solar.js',
       'scripts/generate-solar-vectors.mjs',
       'supabase/functions/_shared/tests/solar_test.ts',
     ]),
     expectedExternalProductionConsumers: Object.freeze([
+      'packages/core/src/availability/calendar.js',
       'packages/core/src/timing/solar.js',
       'scripts/generate-solar-vectors.mjs',
       'supabase/functions/_shared/tests/solar_test.ts',
     ]),
+  }),
+  // 8.9 PR 4: the practice daylight evaluator. Enforced in core evaluation
+  // only (its registry claim says so); nothing in the app or the Edge calls it.
+  // The season constraint adapter imports its two constants, not the
+  // evaluator, so it is an importer and not a consumer. The Edge post-pass
+  // (8.9 PR 6) is a Deno twin, not a caller of this file.
+  Object.freeze({
+    layer: 'practice/daylight.js',
+    modulePath: 'packages/core/src/practice/daylight.js',
+    functions: Object.freeze(['evaluatePracticeDaylight']),
+    // 8.9 PR 5: `durationPhases.js` imports the margin constant, not the
+    // evaluator -- an importer, not a consumer.
+    importers: Object.freeze([
+      'packages/core/src/constraints/adapters/season2026Constraints.js',
+      'packages/core/src/practice/durationPhases.js',
+      'packages/core/src/practice/index.js',
+    ]),
+    consumers: Object.freeze([
+      'tests/practiceDaylight.test.js',
+      'tests/reasonCodeReachability.test.js',
+    ]),
+    expectedProductionConsumers: Object.freeze([]),
+    expectedExternalProductionConsumers: Object.freeze([]),
+  }),
+  // 8.9 PR 5: duration phases, compression and the DST survival report.
+  // Reports and proposals only -- cascade proposals leave as change-log
+  // entries and nothing applies them. Nothing in the app or the Edge calls
+  // it; the Edge post-pass (8.9 PR 6) is a Deno twin, not a caller.
+  Object.freeze({
+    layer: 'practice/durationPhases.js',
+    modulePath: 'packages/core/src/practice/durationPhases.js',
+    functions: Object.freeze([
+      'derivePracticeDurationPhases',
+      'buildPracticeCompressionReport',
+      'buildDstSurvivalReport',
+    ]),
+    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    consumers: Object.freeze(['tests/practiceDurationPhases.test.js']),
+    expectedProductionConsumers: Object.freeze([]),
+    expectedExternalProductionConsumers: Object.freeze([]),
   }),
   /* -- Phase 8.6 PR 3b, PR 1: coach practice preferences ---------------- */
   //

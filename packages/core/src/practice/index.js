@@ -70,6 +70,8 @@ export {
   PracticeSlotSetInputSchema,
   PracticeWeekdaySchema,
   PracticeWindowSchema,
+  PracticeDurationPhaseOptionsSchema,
+  PracticeDurationPhaseOverrideSchema,
 } from './schemas.js';
 
 export { buildPracticeSlotSet, firstWeekdayOnOrAfter, getPracticeSlot } from './slots.js';
@@ -78,9 +80,36 @@ export { materialisePracticeOccurrences, toFacilityBooking } from './materialise
 
 export { buildPracticeHistory, describePracticeHistory } from './history.js';
 
+export {
+  PRACTICE_DAYLIGHT_CONSTRAINT_ID,
+  PRACTICE_SUNSET_MARGIN_MINUTES,
+  evaluatePracticeDaylight,
+} from './daylight.js';
+
+export {
+  PRACTICE_CASCADE_UNASSIGNED_LABEL,
+  PRACTICE_PHASE_SOURCE,
+  PRACTICE_SUNSET_CASCADE_REASON_TEXT,
+  PRACTICE_SUNSET_CASCADE_SOURCES,
+  PRACTICE_SUNSET_CASCADE_SOURCE_ID,
+  PRACTICE_SURVIVAL_FIX_KIND,
+  PRACTICE_SURVIVAL_VERDICT,
+  buildDstSurvivalReport,
+  buildPracticeCompressionReport,
+  derivePracticeDurationPhases,
+  endsByDaylightLimit,
+} from './durationPhases.js';
+
 export { toPracticeMetricsInput } from './metricsInput.js';
 
 export { PRACTICE_TBD_REASON, repairPracticeLoss } from './repair.js';
+
+export {
+  PRACTICE_CHAIN_STOP,
+  createRecommendationState,
+  declineRecommendation,
+  undoDecline,
+} from './recommendations.js';
 
 export {
   COACH_PREFERENCE_DIMENSION,

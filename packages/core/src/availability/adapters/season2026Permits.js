@@ -52,7 +52,7 @@ export const SEASON_2026_PERMIT_MARGIN_MINUTES = 15;
  *
  * @param {ReadonlyArray<Object>} permits - `Season2026Permit[]`
  * @param {ReadonlyArray<Object>} sunsets - `Season2026Sunset[]`
- * @param {{ lighting?: Array<Object>, sunsetMarginMinutes?: number, permitMarginMinutes?: number, source?: string|null }} [options]
+ * @param {{ lighting?: Array<Object>, sunsetMarginMinutes?: number, permitMarginMinutes?: number, source?: string|null, venueDaylight?: Array<Object>, timeZone?: string|null }} [options]
  * @returns {import('../types.js').AvailabilityCalendarInput}
  */
 export function toAvailabilityCalendarInput(permits, sunsets, options = {}) {
@@ -103,6 +103,10 @@ export function toAvailabilityCalendarInput(permits, sunsets, options = {}) {
     lighting: (options.lighting ?? []).map((record) => ({ ...record })),
     sunsetMarginMinutes: options.sunsetMarginMinutes ?? SEASON_2026_SUNSET_MARGIN_MINUTES,
     permitMarginMinutes: options.permitMarginMinutes ?? SEASON_2026_PERMIT_MARGIN_MINUTES,
+    // The corpus names no zone and no venue coordinates. Both are the caller's
+    // to supply (a test's assumption, or the database), never defaulted here.
+    venueDaylight: (options.venueDaylight ?? []).map((record) => ({ ...record })),
+    timeZone: options.timeZone ?? null,
   });
 }
 
@@ -112,7 +116,7 @@ export function toAvailabilityCalendarInput(permits, sunsets, options = {}) {
  *
  * @param {ReadonlyArray<Object>} permits - `Season2026Permit[]`
  * @param {ReadonlyArray<Object>} sunsets - `Season2026Sunset[]`
- * @param {{ lighting?: Array<Object>, sunsetMarginMinutes?: number, permitMarginMinutes?: number, source?: string|null }} [options]
+ * @param {{ lighting?: Array<Object>, sunsetMarginMinutes?: number, permitMarginMinutes?: number, source?: string|null, venueDaylight?: Array<Object>, timeZone?: string|null }} [options]
  * @returns {import('../types.js').AvailabilityCalendar}
  */
 export function buildAvailabilityCalendarFromSeason2026(permits, sunsets, options = {}) {

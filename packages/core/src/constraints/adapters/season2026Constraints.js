@@ -37,6 +37,10 @@ import { AVAILABILITY_REASON } from '../../availability/reasonCodes.js';
 import { FACILITY_REASON } from '../../facility/reasonCodes.js';
 import { TIMING_REASON } from '../../timing/reasonCodes.js';
 import { season2026VenueId } from '../../facility/adapters/season2026Geometry.js';
+import {
+  PRACTICE_DAYLIGHT_CONSTRAINT_ID,
+  PRACTICE_SUNSET_MARGIN_MINUTES,
+} from '../../practice/daylight.js';
 import { CONSTRAINT_ENFORCEMENT, CONSTRAINT_SCOPE_KIND, CONSTRAINT_TYPE } from '../reasonCodes.js';
 import { buildConstraintRegistry } from '../registry.js';
 
@@ -427,7 +431,7 @@ export const SEASON_2026_CONSTRAINTS = Object.freeze([
       setBy: 'club operations',
       setAt: null,
       reference: `${INVARIANTS} — "No unlit game ends within 15 min of sunset"; per-date sunsets in fixtures/season-2026/sunsets.csv`,
-      note: 'recorded as a corpus invariant rather than as a dated decision',
+      note: 'recorded as a corpus invariant rather than as a dated decision. Enforced in core evaluation only (availability/kickoff.js, the rule engine); the live game path -- gameScheduling.js and the Edge game functions -- reads no sunset, so there it is declared, not enforced (8.9 plan, F2 and D7)',
     },
     effectiveFrom: null,
     effectiveTo: null,
@@ -470,6 +474,47 @@ export const SEASON_2026_CONSTRAINTS = Object.freeze([
 ]);
 
 /**
+ * The practice daylight claim (8.9 PR 4): unlit practices end by sunset.
+ *
+ * **Kept out of {@link SEASON_2026_CONSTRAINTS} on purpose.** That set is the
+ * registry the rule engine and the feasibility queries run over, and both
+ * treat a hard constraint no *game* rule claims as unenforced: added there,
+ * this record would put `RULE_CONSTRAINT_UNENFORCED` into every game run and
+ * turn every feasible game answer into `unknown` -- a change to game results
+ * the 8.9 plan rules out. It governs practices, which the rule engine does not
+ * evaluate; its evaluator is `practice/daylight.js`, and
+ * {@link buildSeason2026PracticeConstraintRegistry} is the registry that
+ * carries it.
+ *
+ * @type {Readonly<Object>}
+ */
+export const SEASON_2026_PRACTICE_DAYLIGHT_CONSTRAINT = Object.freeze({
+  id: PRACTICE_DAYLIGHT_CONSTRAINT_ID,
+  policy: 'practice-daylight',
+  name: 'Unlit practices end by sunset',
+  type: CONSTRAINT_TYPE.HARD,
+  scope: GLOBAL,
+  parameters: { marginMinutes: PRACTICE_SUNSET_MARGIN_MINUTES },
+  restrictiveDirection: 'higher',
+  rationale:
+    'On unlit or undeclared ground a practice must end at or before sunset (floor of the minute). The civil twilight after sunset is the teardown window for equipment, not practice time; games keep their own fifteen-minute margin.',
+  source: {
+    setBy: 'operator',
+    setAt: '2026-09-27',
+    reference:
+      'docs/PHASE_8_9_PLAN.md — operator ruling 2026-09-27 ("teams don\'t practice after sunset at unlit fields, and the right margin is sunset"); decisions D1, D2, D5, D6',
+    note: 'enforced in core evaluation by practice/daylight.js over materialised occurrences. Not enforced by the core practiceScheduling.js or autoScheduler.js, which do not call it: the live practice scheduler is the Deno auto-scheduler, whose daylight post-pass is 8.9 PR 6. The season adapts through practice/durationPhases.js (8.9 PR 5): duration phases, hold-start and cascade compression, the DST survival report. Those report and propose; cascade proposals are 8.8 change-log entries and are never applied. Optimising toward surviving slots is declared, not optimised (D11): no durations, starts or nights are chosen to maximise survivors',
+  },
+  effectiveFrom: null,
+  effectiveTo: null,
+  enforcement: CONSTRAINT_ENFORCEMENT.REASON_CODES,
+  reasonCodes: [AVAILABILITY_REASON.PRACTICE_PAST_SUNSET],
+  weight: null,
+  waivable: false,
+  history: [],
+});
+
+/**
  * Build the seeded registry.
  *
  * @param {{ extraConstraints?: ReadonlyArray<Object> }} [options]
@@ -480,5 +525,22 @@ export function buildSeason2026ConstraintRegistry(options = {}) {
     name: 'season-2026',
     source: 'fixtures/season-2026 + the incident log',
     constraints: [...SEASON_2026_CONSTRAINTS, ...(options.extraConstraints ?? [])],
+  });
+}
+
+/**
+ * The seeded registry plus the practice daylight claim: the registry a
+ * practice evaluation resolves `PRACTICE_PAST_SUNSET` through. The game
+ * registry above is unchanged by it.
+ *
+ * @param {{ extraConstraints?: ReadonlyArray<Object> }} [options]
+ * @returns {import('../types.js').ConstraintRegistry}
+ */
+export function buildSeason2026PracticeConstraintRegistry(options = {}) {
+  return buildSeason2026ConstraintRegistry({
+    extraConstraints: [
+      SEASON_2026_PRACTICE_DAYLIGHT_CONSTRAINT,
+      ...(options.extraConstraints ?? []),
+    ],
   });
 }

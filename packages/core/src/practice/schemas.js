@@ -307,3 +307,43 @@ export const PracticeRepairInputSchema = z
       path: ['teamCoachAssignments'],
     }
   );
+
+/**
+ * An operator's pin on one venue's practice duration from a date (8.9 PR 5,
+ * `durationPhases.js`). It is applied **before** that date is judged, so an
+ * override that would leave a practice past sunset is superseded on the spot
+ * by a derived phase and the supersession is recorded -- never honoured
+ * silently, never dropped silently.
+ */
+export const PracticeDurationPhaseOverrideSchema = z
+  .object({
+    venueId: IdSchema,
+    effectiveFrom: IsoDateSchema,
+    durationMinutes: z.number().int().positive(),
+    reason: z.string().min(1, { message: 'a duration override carries its reason' }),
+  })
+  .strict();
+
+/**
+ * The options every 8.9 PR 5 derivation takes.
+ *
+ * `minimumDurationMinutes` is **required**: the plan asks whether a slot
+ * "survives at any phase duration" and sets no floor, and a default here would
+ * be a policy nobody decided. `durationStepMinutes` defaults to 1 -- no
+ * rounding, so a phase shortens a practice by exactly what sunset takes and no
+ * more (maximum freeze).
+ */
+export const PracticeDurationPhaseOptionsSchema = z
+  .object({
+    window: z
+      .object({ from: IsoDateSchema, to: IsoDateSchema })
+      .strict()
+      .refine((window) => window.to >= window.from, {
+        message: 'window `to` must not precede `from`',
+        path: ['to'],
+      }),
+    minimumDurationMinutes: z.number().int().positive(),
+    durationStepMinutes: z.number().int().positive().default(1),
+    overrides: z.array(PracticeDurationPhaseOverrideSchema).default([]),
+  })
+  .strict();

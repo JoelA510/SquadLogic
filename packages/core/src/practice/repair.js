@@ -31,8 +31,9 @@
  *   not anything else looks at it. A surface clash or a team double-booked is
  *   refused outright.
  * - **Propose, never apply, across venues (#53/#441).** Only same-venue
- *   candidates are placed. A series with none goes TIME TBD and carries up to
- *   three cross-venue options with an `applyAs` the operator may approve.
+ *   candidates are placed. A series with none goes TIME TBD, and the joint
+ *   cross-venue search (tier 2, below) may recommend it a move to another
+ *   venue, which an operator enacts as an approved option or does not.
  * - **The change budget** bounds the search (a cap on published-time changes),
  *   not a report checked afterwards.
  *
@@ -91,6 +92,32 @@
  *   a reference) nothing here runs and the result is byte-identical to a
  *   repair that was never handed them.
  *
+ * ## Recommendations: two tiers, one per series-window (8.6 PR 3b plan §2)
+ *
+ * Every displaced series-window gets exactly one entry in `recommendations`,
+ * a placement or TIME TBD with a reason (plan §5, decision 5):
+ *
+ * 1. **Tier 1** is the exact same-venue search below, unchanged. What it
+ *    places is `rehomed` and is in `plan`, exactly as before.
+ * 2. **Tier 2** is a joint exact search over the cross-venue candidates of the
+ *    series tier 1 left TIME TBD, with every tier-1 placement a frozen
+ *    occupant. It is the same search and the same `marginal()` as tier 1, so
+ *    two recommendations clash by the repair's own definition or not at all:
+ *    no two of them name conflicting ground at an overlapping time, and none
+ *    lands on a tier-1 placement. `must_keep` filters its candidates and
+ *    `prefer_keep` is priced, as in tier 1. It replaces #441's standalone
+ *    cross-venue options and their `sharedWith`, which named competing
+ *    offers instead of resolving them. A tier-2 recommendation is never
+ *    placed: its series stays in `timeTbd` and out of `plan` until it is
+ *    enacted, with `origin: 'approved-option'` (PR 11).
+ * 3. The rest is TIME TBD with tier 1's reason, never dropped.
+ *
+ * Tier 2 visits at most `searchNodeLimit` nodes of its own. Past that it
+ * returns the best it found (seeded by its greedy pass, so still clash-free)
+ * and stamps `PRACTICE_REPAIR_MINIMALITY_UNPROVEN` with `tier: 'cross-venue'`;
+ * `recommendationSearch` says which. Declines and the re-offer chain are
+ * `practice/recommendations.js`.
+ *
  * ## Minimality, and when it is claimed
  *
  * The default strategy is an exact branch-and-bound over the displaced series,
@@ -134,6 +161,7 @@ import {
   resolveCoachPreferences,
 } from './coachPreferences.js';
 import { PRACTICE_REASON, derivePracticeStatus, makePracticeFinding } from './reasonCodes.js';
+import { CHANGE_ORIGIN } from '../resolve/schemas.js';
 import { PracticeRepairInputSchema } from './schemas.js';
 import { buildPracticeSlotSet, firstWeekdayOnOrAfter } from './slots.js';
 
@@ -155,12 +183,16 @@ export const PRACTICE_TBD_REASON = Object.freeze({
    * coach preference (8.6 PR 3b plan §4).
    */
   COACH_PREFERENCE: 'coach-preference',
+  /**
+   * Its recommendation was declined, and nothing it had not declined was free
+   * and admissible for it afterwards (plan §2, `practice/recommendations.js`).
+   */
+  DECLINED: 'declined',
 });
 
 const DEFAULT_SEARCH_NODE_LIMIT = 200000;
 /** What `coachPreferences.js` accepts as a location id: its contract, not a copy. */
 const LocationIdSchema = CoachPreferencePlacementSchema.shape.locationId;
-const MAX_CROSS_VENUE_OPTIONS = 3;
 
 /**
  * @typedef {Object} Series
@@ -180,8 +212,12 @@ function shiftDate(date, days) {
   return isoDateOfDayNumber(isoDayNumber(date) + days);
 }
 
-/** @returns {string} */
-function shapeKey(shape) {
+/**
+ * The one spelling of a slot shape, shared with `recommendations.js`.
+ *
+ * @returns {string}
+ */
+export function shapeKey(shape) {
   return `${shape.surfaceId}|${shape.weekday}|${shape.startMinutes}|${shape.durationMinutes}`;
 }
 
@@ -200,12 +236,15 @@ function rangesOverlap(a, b) {
 }
 
 /**
- * Re-home the practice series a loss of ground displaces.
+ * Everything the repair decides with, before it searches: the displaced
+ * series, their priced candidates, the search order, `marginal()` and the
+ * joint search. `repairPracticeLoss()` runs both tiers on it, and
+ * `practice/recommendations.js` re-offers declined slots through the same
+ * `marginal()`, so a clash means one thing in both. Internal: not in the barrel.
  *
  * @param {Object} input - see `PracticeRepairInputSchema`
- * @returns {Object} the repair result; see the module doc and `tests/practiceRepair.test.js`
  */
-export function repairPracticeLoss(input) {
+export function buildPracticeRepairContext(input) {
   const parsed = PracticeRepairInputSchema.parse(input);
   const { graph } = input;
   const slotSet = buildPracticeSlotSet(parsed.plan);
@@ -631,81 +670,287 @@ export function repairPracticeLoss(input) {
   );
   const timeChangeOf = (candidate) => (candidate !== null && candidate.timeChanged ? 1 : 0);
 
-  // Greedy: in search order, each series takes its cheapest admissible slot.
-  const greedy = () => {
-    const placed = [];
-    let coachDays = baseCoachDays;
-    let cost = 0;
-    let timeChanges = 0;
-    for (const { entry } of order) {
-      let best = null;
-      for (const candidate of entry.same) {
-        if (budget !== null && timeChanges + timeChangeOf(candidate) > budget) continue;
-        const m = marginal(entry.series, candidate, placed, coachDays);
-        if (m === null) continue;
-        if (best === null || m.cost < best.m.cost) best = { candidate, m };
+  /**
+   * The joint search both tiers run (plan §2). Each series of `searchOrder`
+   * takes one of `candidatesOf(entry)` or goes TIME TBD at `tbdCost`, on top of
+   * `occupants` (placements already made, held fixed), under the change budget
+   * with `timeChanges0` already spent. Greedy seeds the incumbent; `exact`
+   * then branch-and-bounds to the optimum unless it passes `nodeLimit`, and
+   * `exhausted` says whether it finished. Only the new placements come back.
+   */
+  const jointSearch = (
+    searchOrder,
+    candidatesOf,
+    occupants,
+    coachDays0,
+    timeChanges0,
+    { matchingBound = false } = {}
+  ) => {
+    // Greedy: in search order, each series takes its cheapest admissible slot.
+    const greedy = () => {
+      const placed = [...occupants];
+      let coachDays = coachDays0;
+      let cost = 0;
+      let timeChanges = timeChanges0;
+      for (const { entry } of searchOrder) {
+        let best = null;
+        for (const candidate of candidatesOf(entry)) {
+          if (budget !== null && timeChanges + timeChangeOf(candidate) > budget) continue;
+          const m = marginal(entry.series, candidate, placed, coachDays);
+          if (m === null) continue;
+          if (best === null || m.cost < best.m.cost) best = { candidate, m };
+        }
+        if (best === null || best.m.cost >= tbdCost) {
+          placed.push({ series: entry.series, candidate: null });
+          cost += tbdCost;
+        } else {
+          placed.push({ series: entry.series, candidate: best.candidate });
+          coachDays = coachDaysAfter(coachDays, entry.series, best.candidate);
+          cost += best.m.cost;
+          timeChanges += timeChangeOf(best.candidate);
+        }
       }
-      if (best === null || best.m.cost >= tbdCost) {
+      return { placed: placed.slice(occupants.length), cost };
+    };
+
+    let incumbent = greedy();
+    let nodes = 0;
+    let exhausted = true;
+    if (strategy === 'exact') {
+      // Admissible bound: each remaining series at its cheapest standalone cost.
+      const standalone = searchOrder.map(({ entry }) =>
+        Math.min(tbdCost, ...candidatesOf(entry).map((candidate) => candidate.cost))
+      );
+      const suffix = new Array(searchOrder.length + 1).fill(0);
+      for (let k = searchOrder.length - 1; k >= 0; k -= 1) {
+        suffix[k] = suffix[k + 1] + standalone[k];
+      }
+      const placed = [...occupants];
+      // Tier 2's bound: the remaining series' cheapest ASSIGNMENT to ground,
+      // not the sum of their cheapest candidates. They contend for the same
+      // few shapes, and the sum ignores that, so a search whose answer leaves
+      // one series TIME TBD could not cut anything until the leaves. It is a
+      // relaxation, so it stays admissible:
+      // - each series is priced at its standalone cost, which a marginal
+      //   never undercuts (weights are non-negative);
+      // - a shape clashing with ground a placed series holds is dropped, and
+      //   the rest are grouped into cliques of mutually clashing shapes (by
+      //   the repair's own `conflictsWith` and `timesOverlap`), each hosting at
+      //   most one series. Any clique partition is sound; a greedy one is used.
+      // Both need every range to meet every other, or two series could share
+      // ground on different dates; otherwise the plain sum stands. A bound
+      // changes which subtrees are cut, never which leaf is found first.
+      const everySeries = [
+        ...occupants.map((placement) => placement.series),
+        ...searchOrder.map(({ entry }) => entry.series),
+      ];
+      const useMatching =
+        matchingBound && everySeries.every((a) => everySeries.every((b) => rangesOverlap(a, b)));
+      const clash = (a, b) => timesOverlap(a, b) && conflictsWith(a.surfaceId).has(b.surfaceId);
+      const remainingBound = (depth) => {
+        if (!useMatching) return suffix[depth];
+        const held = placed
+          .filter((placement) => placement.candidate !== null)
+          .map((placement) => placement.candidate.shape);
+        const cliques = [];
+        const cliqueOf = new Map();
+        const rows = searchOrder.slice(depth).map(({ entry }) => {
+          const row = [];
+          for (const candidate of candidatesOf(entry)) {
+            const shape = candidate.shape;
+            const key = shapeKey(shape);
+            if (!cliqueOf.has(key)) {
+              if (held.some((other) => clash(shape, other))) cliqueOf.set(key, -1);
+              else {
+                let index = cliques.findIndex((members) => members.every((m) => clash(shape, m)));
+                if (index === -1) index = cliques.push([]) - 1;
+                cliques[index].push(shape);
+                cliqueOf.set(key, index);
+              }
+            }
+            const column = /** @type {number} */ (cliqueOf.get(key));
+            if (column !== -1) row.push({ column, cost: candidate.cost });
+          }
+          return row;
+        });
+        return minimumAssignment(rows, cliques.length, tbdCost);
+      };
+      const walk = (depth, cost, coachDays, timeChanges) => {
+        if (!exhausted) return;
+        nodes += 1;
+        if (nodes > nodeLimit) {
+          exhausted = false;
+          return;
+        }
+        if (cost + remainingBound(depth) >= incumbent.cost) return;
+        if (depth === searchOrder.length) {
+          incumbent = { placed: placed.slice(occupants.length), cost };
+          return;
+        }
+        const { entry } = searchOrder[depth];
+        const options = [];
+        for (const candidate of candidatesOf(entry)) {
+          if (budget !== null && timeChanges + timeChangeOf(candidate) > budget) continue;
+          const m = marginal(entry.series, candidate, placed, coachDays);
+          if (m !== null) options.push({ candidate, cost: m.cost });
+        }
+        options.sort((a, b) => a.cost - b.cost);
+        for (const option of options) {
+          placed.push({ series: entry.series, candidate: option.candidate });
+          walk(
+            depth + 1,
+            cost + option.cost,
+            coachDaysAfter(coachDays, entry.series, option.candidate),
+            timeChanges + timeChangeOf(option.candidate)
+          );
+          placed.pop();
+          if (!exhausted) return;
+        }
         placed.push({ series: entry.series, candidate: null });
-        cost += tbdCost;
-      } else {
-        placed.push({ series: entry.series, candidate: best.candidate });
-        coachDays = coachDaysAfter(coachDays, entry.series, best.candidate);
-        cost += best.m.cost;
-        timeChanges += timeChangeOf(best.candidate);
-      }
+        walk(depth + 1, cost + tbdCost, coachDays, timeChanges);
+        placed.pop();
+      };
+      walk(0, 0, coachDays0, timeChanges0);
     }
-    return { placed, cost };
+    return { incumbent, nodes, exhausted };
   };
 
-  let incumbent = greedy();
-  let nodes = 0;
-  let exhausted = true;
-  if (strategy === 'exact') {
-    // Admissible bound: each remaining series at its cheapest standalone cost.
-    const standalone = order.map(({ entry }) =>
-      Math.min(tbdCost, ...entry.same.map((candidate) => candidate.cost))
-    );
-    const suffix = new Array(order.length + 1).fill(0);
-    for (let k = order.length - 1; k >= 0; k -= 1) suffix[k] = suffix[k + 1] + standalone[k];
-    const placed = [];
-    const walk = (depth, cost, coachDays, timeChanges) => {
-      if (!exhausted) return;
-      nodes += 1;
-      if (nodes > nodeLimit) {
-        exhausted = false;
-        return;
+  return {
+    parsed,
+    slotSet,
+    slotById,
+    weights,
+    lossDate,
+    dayBefore,
+    lossUntil,
+    bounded,
+    lossReason,
+    findings,
+    lostSurfaceIds,
+    venueOf,
+    active,
+    undatedOnLostGround,
+    displaced,
+    publishedCoachDays,
+    candidatesBySeries,
+    tbdCost,
+    budget,
+    nodeLimit,
+    strategy,
+    order,
+    marginal,
+    coachDaysAfter,
+    baseCoachDays,
+    timeChangeOf,
+    jointSearch,
+  };
+}
+
+/**
+ * The least total cost of giving each row one column (each column to at most
+ * one row) or TIME TBD at `tbdCost`: the Hungarian method with potentials,
+ * O(n²m), on n rows and m = `columns` + n TIME TBD columns. Tier 2's lower
+ * bound; see `jointSearch()`.
+ *
+ * @param {Array<Array<{ column: number, cost: number }>>} rows
+ * @param {number} columns
+ * @param {number} tbdCost
+ * @returns {number}
+ */
+function minimumAssignment(rows, columns, tbdCost) {
+  const n = rows.length;
+  if (n === 0) return 0;
+  const m = columns + n;
+  // Row i may take its own TIME TBD column and no other row's.
+  const cost = rows.map((row, i) => {
+    const line = new Array(m).fill(Infinity);
+    for (const { column, cost: c } of row) line[column] = Math.min(line[column], c);
+    line[columns + i] = tbdCost;
+    return line;
+  });
+  const u = new Array(n + 1).fill(0);
+  const v = new Array(m + 1).fill(0);
+  const match = new Array(m + 1).fill(0);
+  const way = new Array(m + 1).fill(0);
+  for (let i = 1; i <= n; i += 1) {
+    match[0] = i;
+    let j0 = 0;
+    const minv = new Array(m + 1).fill(Infinity);
+    const used = new Array(m + 1).fill(false);
+    do {
+      used[j0] = true;
+      const i0 = match[j0];
+      let delta = Infinity;
+      let j1 = 0;
+      for (let j = 1; j <= m; j += 1) {
+        if (used[j]) continue;
+        const reduced = cost[i0 - 1][j - 1] - u[i0] - v[j];
+        if (reduced < minv[j]) {
+          minv[j] = reduced;
+          way[j] = j0;
+        }
+        if (minv[j] < delta) {
+          delta = minv[j];
+          j1 = j;
+        }
       }
-      if (cost + suffix[depth] >= incumbent.cost) return;
-      if (depth === order.length) {
-        incumbent = { placed: [...placed], cost };
-        return;
+      for (let j = 0; j <= m; j += 1) {
+        if (used[j]) {
+          u[match[j]] += delta;
+          v[j] -= delta;
+        } else minv[j] -= delta;
       }
-      const { entry } = order[depth];
-      const options = [];
-      for (const candidate of entry.same) {
-        if (budget !== null && timeChanges + timeChangeOf(candidate) > budget) continue;
-        const m = marginal(entry.series, candidate, placed, coachDays);
-        if (m !== null) options.push({ candidate, cost: m.cost });
-      }
-      options.sort((a, b) => a.cost - b.cost);
-      for (const option of options) {
-        placed.push({ series: entry.series, candidate: option.candidate });
-        walk(
-          depth + 1,
-          cost + option.cost,
-          coachDaysAfter(coachDays, entry.series, option.candidate),
-          timeChanges + timeChangeOf(option.candidate)
-        );
-        placed.pop();
-        if (!exhausted) return;
-      }
-      placed.push({ series: entry.series, candidate: null });
-      walk(depth + 1, cost + tbdCost, coachDays, timeChanges);
-      placed.pop();
-    };
-    walk(0, 0, baseCoachDays, 0);
+      j0 = j1;
+    } while (match[j0] !== 0);
+    do {
+      const j1 = way[j0];
+      match[j0] = match[j1];
+      j0 = j1;
+    } while (j0 !== 0);
   }
+  let total = 0;
+  for (let j = 1; j <= m; j += 1) if (match[j] !== 0) total += cost[match[j] - 1][j - 1];
+  return total;
+}
+
+/**
+ * Re-home the practice series a loss of ground displaces.
+ *
+ * @param {Object} input - see `PracticeRepairInputSchema`
+ * @returns {Object} the repair result; see the module doc and `tests/practiceRepair.test.js`
+ */
+export function repairPracticeLoss(input) {
+  const context = buildPracticeRepairContext(input);
+  const {
+    parsed,
+    slotSet,
+    slotById,
+    lossDate,
+    dayBefore,
+    lossUntil,
+    bounded,
+    lossReason,
+    findings,
+    lostSurfaceIds,
+    active,
+    undatedOnLostGround,
+    displaced,
+    publishedCoachDays,
+    candidatesBySeries,
+    budget,
+    nodeLimit,
+    strategy,
+    order,
+    marginal,
+    coachDaysAfter,
+    baseCoachDays,
+    timeChangeOf,
+    jointSearch,
+  } = context;
+
+  // Tier 1: the exact same-venue search (plan §2), unchanged.
+  const tier1 = jointSearch(order, (entry) => entry.same, [], baseCoachDays, 0);
+  const { incumbent, nodes, exhausted } = tier1;
   const provenOptimal = strategy === 'exact' && exhausted;
   if (!provenOptimal) {
     findings.push(
@@ -742,8 +987,41 @@ export function repairPracticeLoss(input) {
     finalPlaced.push({ series: entry.series, candidate });
   }
 
+  /* -- tier 2: the joint cross-venue search (plan §2) --------------------- */
+  // Over the series tier 1 left TIME TBD, in the same search order, with every
+  // tier-1 placement a frozen occupant and tier 1's published-time changes
+  // already spent against the budget. `coachDays` is the plan after tier 1.
+  const tier2Order = order.filter(
+    ({ entry }) => (chosenById.get(entry.series.assignmentId) ?? null) === null
+  );
+  const tier2 = jointSearch(
+    tier2Order,
+    (entry) => entry.cross,
+    finalPlaced.filter((placement) => placement.candidate !== null),
+    coachDays,
+    finalPlaced.reduce((sum, placement) => sum + timeChangeOf(placement.candidate), 0),
+    { matchingBound: true }
+  );
+  if (strategy === 'exact' && !tier2.exhausted) {
+    findings.push(
+      makePracticeFinding(
+        PRACTICE_REASON.REPAIR_MINIMALITY_UNPROVEN,
+        `The joint cross-venue search stopped at its ${nodeLimit}-node limit. Its recommendations are the best found, not a proven optimum; no two of them clash either way.`,
+        { strategy, nodes: tier2.nodes, nodeLimit, tier: 'cross-venue' }
+      )
+    );
+  }
+  /** Every displaced series' recommendation: tier 1's placement, else tier 2's, else none. */
+  const recommended = new Map(
+    [...finalPlaced, ...tier2.incumbent.placed]
+      .filter((placement) => placement.candidate !== null)
+      .map((placement) => [placement.series.assignmentId, placement.candidate])
+  );
+
   const rehomed = [];
   const timeTbd = [];
+  /** Tier 1's reason for each TIME TBD, for the recommendations of the ones tier 2 cannot place. */
+  const tbdReasons = new Map();
   const newSlots = [];
   const splitAssignments = new Map();
   const newAssignments = [];
@@ -829,34 +1107,9 @@ export function repairPracticeLoss(input) {
             ? PRACTICE_TBD_REASON.CHANGE_BUDGET
             : PRACTICE_TBD_REASON.OBJECTIVE_PREFERRED_TBD;
       } else reason = PRACTICE_TBD_REASON.CONTENDED;
-      const crossVenueOptions = entry.cross
-        .filter((candidate) => marginal(series, candidate, occupied, coachDays) !== null)
-        .slice(0, MAX_CROSS_VENUE_OPTIONS)
-        .map((candidate) => {
-          const optionId = `${series.assignmentId}->${shapeKey(candidate.shape)}`;
-          return {
-            optionId,
-            to: { ...candidate.shape },
-            toVenueId: venueOf(candidate.shape.surfaceId),
-            // Filled below, once every TIME TBD series has its options.
-            sharedWith: /** @type {string[]} */ ([]),
-            // Standalone: against the frozen plan, before any coach-day
-            // effect of the other re-homes. A proposal, not a placement.
-            objective: {
-              basis: 'standalone',
-              total: candidate.cost,
-              counts: { ...candidate.counts },
-            },
-            applyAs: {
-              assignmentId: series.assignmentId,
-              teamId: series.teamId,
-              ...candidate.shape,
-              effectiveFrom: series.from,
-              effectiveUntil: series.until,
-              reason: `approved cross-venue option ${optionId}`,
-            },
-          };
-        });
+      tbdReasons.set(series.assignmentId, reason);
+      const crossVenue = recommended.get(series.assignmentId) ?? null;
+      const crossVenueKey = crossVenue === null ? null : shapeKey(crossVenue.shape);
       timeTbd.push({
         assignmentId: series.assignmentId,
         teamId: series.teamId,
@@ -872,41 +1125,20 @@ export function repairPracticeLoss(input) {
           ? { mustKeepDimensions: entry.mustKeepViolated }
           : {}),
         sameVenueCandidates: entry.same.length,
-        crossVenueOptions,
       });
       findings.push(
         makePracticeFinding(
           PRACTICE_REASON.REPAIR_TIME_TBD,
-          `${series.teamId}: the ${series.weekday} ${series.startMinutes} practice on ${series.surfaceId} is TIME TBD ${span} (${reason}); ${crossVenueOptions.length} cross-venue option(s) offered for approval.`,
+          `${series.teamId}: the ${series.weekday} ${series.startMinutes} practice on ${series.surfaceId} is TIME TBD ${span} (${reason}); ${crossVenue === null ? 'no cross-venue recommendation' : `cross-venue recommendation ${crossVenueKey}, to enact or decline`}.`,
           {
             assignmentId: series.assignmentId,
             teamId: series.teamId,
             reason,
             lossReason,
-            crossVenueOptions: crossVenueOptions.length,
+            crossVenueRecommendation: crossVenueKey,
           }
         )
       );
-    }
-  }
-
-  // Two TIME TBD series can be offered the same cross-venue ground. Each
-  // option names the others it competes with, so approving both is a choice
-  // made knowingly — #441's `sharedWith`.
-  for (const entry of timeTbd) {
-    for (const option of entry.crossVenueOptions) {
-      option.sharedWith = timeTbd
-        .filter(
-          (other) =>
-            other !== entry &&
-            other.crossVenueOptions.some(
-              (theirs) =>
-                timesOverlap(theirs.to, option.to) &&
-                conflictsWith(theirs.to.surfaceId).has(option.to.surfaceId)
-            )
-        )
-        .map((other) => other.assignmentId)
-        .sort();
     }
   }
 
@@ -1083,5 +1315,118 @@ export function repairPracticeLoss(input) {
     plan: repairedPlan,
     findings,
     stats,
+    recommendations: describePracticeRecommendations(context, recommended, (id) =>
+      tbdReasons.get(id)
+    ),
+    recommendationSearch: {
+      strategy,
+      series: tier2Order.length,
+      recommended: tier2.incumbent.placed.filter((placement) => placement.candidate !== null)
+        .length,
+      nodes: tier2.nodes,
+      nodeLimit,
+      provenOptimal: strategy === 'exact' && tier2.exhausted,
+    },
   };
+}
+
+/**
+ * One recommendation per displaced series-window (plan §2, §5 decision 5),
+ * in assignment-id order: where `chosen` puts it, priced by `marginal()`
+ * against every other recommendation, or TIME TBD with `reasonOf(id)`.
+ * Each price is the plan's `marginal(T, X, R∖{T}, coachDays(R∖{T}))`, the one
+ * the decline chain ranks by — a marginal, not a share: a coach day two
+ * recommendations add together, or an overlap between them, shows on each
+ * entry as its own marginal sees it, so the entries need not sum to the
+ * search's total.
+ * Shared by `repairPracticeLoss()` and `practice/recommendations.js`, so a
+ * decline reports its result exactly as the repair reports its own.
+ * Internal: not in the barrel.
+ *
+ * @param {ReturnType<typeof buildPracticeRepairContext>} context
+ * @param {Map<string, any>} chosen - assignment id -> candidate; absent is TIME TBD
+ * @param {(assignmentId: string) => string | undefined} reasonOf
+ */
+export function describePracticeRecommendations(context, chosen, reasonOf) {
+  const { displaced, bounded, venueOf, marginal, tbdCost } = context;
+  return displaced.map((series) => {
+    const candidate = chosen.get(series.assignmentId) ?? null;
+    const head = {
+      assignmentId: series.assignmentId,
+      teamId: series.teamId,
+      from: {
+        surfaceId: series.surfaceId,
+        weekday: series.weekday,
+        startMinutes: series.startMinutes,
+      },
+      effectiveFrom: series.from,
+      effectiveUntil: series.until,
+      ...(bounded ? { window: { from: series.from, until: series.until } } : {}),
+    };
+    if (candidate === null) {
+      const reason = reasonOf(series.assignmentId);
+      if (reason === undefined) {
+        throw new Error(`repair: ${series.assignmentId} is TIME TBD with no reason`);
+      }
+      return {
+        ...head,
+        tier: null,
+        to: null,
+        reason,
+        objective: { total: tbdCost, counts: { [RESOLVE_OBJECTIVE_TERM.UNPLACED_GAME]: 1 } },
+        coachOverlaps: [],
+        coachDaysWorsened: 0,
+        origin: null,
+      };
+    }
+    const { placed: others, coachDays } = placementsExcept(context, chosen, series.assignmentId);
+    const m = marginal(series, candidate, others, coachDays);
+    if (m === null) {
+      throw new Error(`repair: the recommendation for ${series.assignmentId} clashes with another`);
+    }
+    const crossVenue = venueOf(candidate.shape.surfaceId) !== venueOf(series.surfaceId);
+    const compromise = candidate.frozenOverlaps.length + m.newOverlaps.length + m.worsened;
+    return {
+      ...head,
+      tier: crossVenue ? 'cross-venue' : 'same-venue',
+      to: { ...candidate.shape },
+      reason: null,
+      objective: {
+        total: m.cost,
+        counts: {
+          ...candidate.counts,
+          ...(compromise > 0 ? { [RESOLVE_OBJECTIVE_TERM.COMPROMISE_VIOLATION]: compromise } : {}),
+        },
+      },
+      coachOverlaps: [...candidate.frozenOverlaps, ...m.newOverlaps],
+      coachDaysWorsened: m.worsened,
+      // Enacting a cross-venue recommendation is an operator approving an
+      // option (#441's precedent); a same-venue one is the repair's own.
+      origin: crossVenue ? CHANGE_ORIGIN.APPROVED_OPTION : null,
+    };
+  });
+}
+
+/**
+ * Every displaced series' placement in `chosen` except `assignmentId`'s, the
+ * coach days they give, and their published-time changes: the plan's R∖{T}.
+ * Shared by `describePracticeRecommendations()` and `recommendations.js`.
+ * Internal: not in the barrel.
+ *
+ * @param {ReturnType<typeof buildPracticeRepairContext>} context
+ * @param {Map<string, any>} chosen
+ * @param {string | null} assignmentId
+ */
+export function placementsExcept(context, chosen, assignmentId) {
+  const placed = [];
+  let coachDays = context.baseCoachDays;
+  let timeChanges = 0;
+  for (const series of context.displaced) {
+    const candidate = chosen.get(series.assignmentId) ?? null;
+    if (series.assignmentId === assignmentId || candidate === null) continue;
+    placed.push({ series, candidate });
+    coachDays = context.coachDaysAfter(coachDays, series, candidate);
+    timeChanges += context.timeChangeOf(candidate);
+  }
+  return { placed, coachDays, timeChanges };
 }

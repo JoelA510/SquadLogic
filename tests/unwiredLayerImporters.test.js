@@ -454,12 +454,33 @@ const LAYERS = Object.freeze([
     layer: 'practice/repair.js',
     modulePath: 'packages/core/src/practice/repair.js',
     functions: Object.freeze(['repairPracticeLoss']),
-    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    importers: Object.freeze([
+      'packages/core/src/practice/index.js',
+      // 8.6 PR 5: the decline chain starts from the repair and re-offers
+      // through its own `marginal()`. The layer using itself, not a caller.
+      'packages/core/src/practice/recommendations.js',
+    ]),
     consumers: Object.freeze([
+      'packages/core/src/practice/recommendations.js',
+      'tests/practiceRecommendations.test.js',
       'tests/practiceRepair.test.js',
       'tests/practiceRepairPreferences.test.js',
       'tests/reasonCodeReachability.test.js',
       'tests/unknownSurfaceDiscipline.test.js',
+    ]),
+    expectedProductionConsumers: Object.freeze(['packages/core/src/practice/recommendations.js']),
+    expectedExternalProductionConsumers: Object.freeze([]),
+  }),
+  // 8.6 PR 5: declines and the re-offer chain. Unwired like the repair it
+  // extends (`PRACTICE_REPAIR_UNWIRED`); PR 10's panel is its first caller.
+  Object.freeze({
+    layer: 'practice/recommendations.js',
+    modulePath: 'packages/core/src/practice/recommendations.js',
+    functions: Object.freeze(['createRecommendationState', 'declineRecommendation', 'undoDecline']),
+    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    consumers: Object.freeze([
+      'tests/practiceRecommendations.test.js',
+      'tests/reasonCodeReachability.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([]),
     expectedExternalProductionConsumers: Object.freeze([]),

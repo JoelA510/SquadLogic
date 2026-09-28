@@ -1711,6 +1711,13 @@ const createMockQuery = (table, data = null) => {
           }
           return String(current) === String(val);
         }
+        // An embedded-resource filter (`teams.divisions.season_settings_id`),
+        // as PostgREST applies it to a `!inner` embed the select populated.
+        if (item[col] === undefined && col.includes('.')) {
+          let current = item;
+          for (const part of col.split('.')) current = current?.[part];
+          return current !== undefined && String(current) === String(val);
+        }
         const itemVal = item[col] !== undefined ? String(item[col]) : 'undefined';
         return itemVal === String(val);
       });

@@ -68,6 +68,7 @@ export {
   isZonelessTimestamp,
   requireZonedInstant,
   resolveZonedInstant,
+  seasonCalendarDate,
 } from './seasonClock.js';
 
 export {

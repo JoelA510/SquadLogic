@@ -54,20 +54,14 @@ When('I navigate to the Practice Scheduling page', async ({ page }) => {
       const lockedAssignments = Array.isArray(requestBody.lockedAssignments)
         ? requestBody.lockedAssignments
         : [];
-      const lockedByTeam = new Map(
-        lockedAssignments.map((assignment: { teamId: string; slotId: string }) => [
-          assignment.teamId,
-          assignment.slotId,
-        ])
+      // The 8.6 PR 3b PR 7 contract: every persisted row is locked, and the
+      // function returns placements ONLY for teams with no row. The page keeps
+      // its own rows and refuses a placement for a team that already has one.
+      const lockedTeams = new Set(
+        lockedAssignments.map((assignment: { teamId: string }) => assignment.teamId)
       );
-      const assignments = MOCK_AUTO_SCHEDULER_RESPONSE.assignments.map((assignment) =>
-        lockedByTeam.has(assignment.teamId)
-          ? {
-              ...assignment,
-              slotId: lockedByTeam.get(assignment.teamId),
-              source: 'locked',
-            }
-          : assignment
+      const assignments = MOCK_AUTO_SCHEDULER_RESPONSE.assignments.filter(
+        (assignment) => !lockedTeams.has(assignment.teamId)
       );
       await route.fulfill({
         status: 200,
@@ -97,7 +91,38 @@ When('I navigate to the Practice Scheduling page', async ({ page }) => {
     });
   });
 
+  // The mock's default practice slot (`ps-1`) is valid for 2025 only, a season
+  // that has ended. A new placement starts at max(slot.validFrom, today on the
+  // season clock) (8.6 PR 3b plan §3), so the page correctly refuses to stage a
+  // placement into a slot whose dates are all past. Give the slot a window
+  // around today, relative to the run date so this seed never goes stale again.
+  // The mock creates its store on first load, so the page is loaded, the slot
+  // re-dated, and the page reloaded to read it.
   await page.goto('/schedule/practice');
+  await page.waitForLoadState('networkidle');
+  await page.evaluate(() => {
+    // Seeded through the sanctioned producer (`window.__saveMockDB__`, which is
+    // `saveDB`), never by writing `__MOCK_DB__` directly: see
+    // tests/mockDeleteTombstones.test.js. The page's live store is re-dated in
+    // place and saved.
+    const db = window.__MOCK_DB__ as Record<string, Array<Record<string, unknown>>> | undefined;
+    if (!db || !Array.isArray(db.practice_slots)) throw new Error('mock store not initialised');
+    const iso = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+    const slot = db.practice_slots.find((row: Record<string, unknown>) => row.id === 'ps-1');
+    // The default row on `ps-1` (`pa-1`) is re-dated with its slot, so the
+    // seed stays consistent: a saved row lies inside its slot's window, and an
+    // Apply re-sends it with its key unchanged (the v3 lock).
+    const row = (db.practice_assignments || []).find(
+      (r: Record<string, unknown>) => r.id === 'pa-1'
+    );
+    if (!slot || !row) throw new Error('mock seed ps-1 / pa-1 missing');
+    slot.valid_from = iso(-30);
+    slot.valid_until = iso(90);
+    row.effective_date_range = `[${iso(-30)},${iso(91)})`;
+    window.__saveMockDB__(db);
+  });
+
+  await page.reload();
   await page.waitForLoadState('networkidle');
 });
 
@@ -290,6 +315,8 @@ Given(
         if (!db.practice_assignments) db.practice_assignments = [];
         db.practice_assignments.push({
           id: `locked-${tId}-${sId}`,
+          // CLAUDE.md §8 rule 1: the season read filters by organization.
+          organization_id: localStorage.getItem('squadlogic_active_org') || 'org-1',
           team_id: tId,
           slot_id: sId,
           practice_slot_id: sId,

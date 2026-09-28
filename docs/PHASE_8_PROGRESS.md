@@ -6368,3 +6368,38 @@ Operator ruling (2026-09-28): "CI should apply database migrations from now on."
   3. drop the backup table after the first green deploy.
 - **Hazard noted:** an Edge deploy is not held back when the migration deploy
   skips. #461 must keep ordinary saves on the v2 RPC argument set.
+
+## 8.6 PR 3b, PR 2 — #463 merged (aec827c): coach practice-preferences UI
+
+Operator ruling: coaches request; only admins change (approve, reject, approve with a
+changed level or value, or set directly).
+- **Page.** New lazy page `/coaches/practice-preferences` behind the new permissions
+  `REQUEST_PRACTICE_PREFERENCE` and `DECIDE_PRACTICE_PREFERENCE`.
+  - Coach view: approved, pending and history, plus one request form per dimension.
+    It has no decision controls.
+  - Admin view: the pending queue, and the preferences in force per coach.
+- **Re-judge at approval.** For a must_keep, the dialog lists the coach's teams'
+  current series that the decision would make unsatisfiable. It uses core
+  `resolveCoachPreferences` and `judgeCoachPreferenceCandidate`. Teams come from
+  `team_coach_assignments` (the roster), never from the preferences. "None" is
+  explicit.
+- **Writes.** Writes go only through the three #453 RPCs, after checking the payload
+  with the core schema. A missing migration (42P01 / PGRST205 / PGRST202 / 42883)
+  shows a named error state, never an empty list. Production still lacks
+  `20260927000000` until the CI deploy secret is set.
+- **Mock.** The mock mirrors the RPC refusals and supersession. It adds 0 B to the
+  main bundle. The main-entry budget was raised by 350 B, with its rationale
+  recorded.
+- **One BLOCKING round.** Supervisor plant: the approve / approve-with-change / set
+  catch was changed to swallow the error, and all 13 tests stayed green. The fix:
+  - one refusal test per RPC path (request, reject, approve, approve-with-change,
+    set). The path list is checked against the `callRpc` sites parsed from the
+    hook, and a planted sixth site turns it red;
+  - four load and compute failure tests.
+  All nine swallow plants turn red; the supervisor re-ran its own plant and got 3
+  red. 23 UI tests and 7 mock tests.
+- **Deferred:**
+  - no E2E, because no comparable approval flow has one;
+  - the mock's table read does not emulate coach-self RLS;
+  - approve-with-change cannot clear a requested value; the admin must reject and
+    then set.

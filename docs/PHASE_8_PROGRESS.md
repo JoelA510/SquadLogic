@@ -6616,3 +6616,40 @@ numeric(7,4)`, `coordinates_set_at` and `coordinates_set_by`, with two CHECKs
     3 red. The same change on table sunsets is a no-op, because the schema only
     allows integer minutes.
   - Fixture suite 2,050 → 2,076, all passing.
+
+## 8.9 PR 5 — #474 merged (bffe156): duration phases, compression report, DST survival report
+
+New `practice/durationPhases.js`. Nothing is applied: everything here is derived
+or reported.
+- **G3, `derivePracticeDurationPhases`.** Derives per-venue
+  `(effectiveFrom, durationMinutes)` phases, each recording the sunset, limit,
+  source and binding slot.
+  - The output is exactly the `seasonPhases`/`seasonOverrides` that
+    `expandPracticeSlotsForSeason` consumes.
+  - Overrides are Zod-validated. One that would run past sunset is superseded and
+    recorded, never honoured.
+  - Unsaveable slot-dates are held out and reported, so one slot can't drag down
+    its whole venue.
+- **G4, `buildPracticeCompressionReport`.**
+  - Hold-start flags for every slot-date still past sunset.
+  - Cascade proposals only as 8.8 `buildChangeLog` entries (source
+    `practice-sunset-cascade`); the input stays byte-identical.
+- **G5, `buildDstSurvivalReport`.** Enumerates the input plan's slots × dates.
+  Each slot that doesn't survive gets its D8 `tbdFrom` and three fix kinds (lit
+  field, earlier start, another night). D8 is reported here; PR 6 applies it.
+- **Corpus** (synthetic coordinates, minimum practice 30 min):
+  - 15 season phases (35 transitions, 60 → 31 min);
+  - 412 hold-starts, equal to an independent derivation;
+  - 222 cascade entries;
+  - 25 slots survive and 116 don't, equal to the independent set, each with at
+    least one fix.
+- **Evidence.**
+  - W12 (`>` for `>=`: 8 red), W13 (auto-apply: 10 red) and G5 coverage (a dropped
+    slot: 5 red; the meta-check is also red on an extra row, a lost date or an
+    empty universe).
+  - Supervisor plant: keeping a past-sunset override unchecked turns 1 red.
+  - `/code-review` (high): 9 of 10 findings fixed.
+- **Open operator question.** Phases use the longest legal duration with no
+  rounding, which gives near-weekly changes (up to 13 per venue). Should
+  durations step in fixed increments (e.g. 15 minutes) so there are fewer
+  changes? That is one parameter, `durationStepMinutes`.

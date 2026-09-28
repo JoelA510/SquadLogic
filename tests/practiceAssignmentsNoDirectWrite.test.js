@@ -28,11 +28,14 @@ const SOURCE_EXT = /\.(js|jsx|ts|tsx|mjs)$/;
 
 const FROM_TABLE = /\.from\(\s*(['"`])practice_assignments\1\s*\)/g;
 const WRITE_METHOD = /\.(insert|upsert|update|delete)\s*\(/;
-// `\b` cannot sit before a leading `$`, and `$` in a name must be escaped.
-const WRITE_ON = (name) =>
-  new RegExp(
-    `(?<![\\w$])${name.replace(/\$/g, '\\$')}\\s*(\\.\\s*(insert|upsert|update|delete)\\b|\\[)`
-  );
+// A write through any identifier: `x.insert` / `x.upsert` / `x.update` /
+// `x.delete` / `x[...]`. The identifier is captured and compared to the bound
+// name as a string, so no RegExp is ever built from source text (no escaping
+// to get wrong). `(?<![\w$.])` keeps `a.x.insert` and `ax.insert` from
+// matching `x`; `\b` alone cannot sit before a leading `$`.
+const WRITE_THROUGH =
+  /(?<![\w$.])([A-Za-z_$][\w$]*)\s*(?:\.\s*(?:insert|upsert|update|delete)\b|\[)/g;
+const writesThrough = (name, text) => [...text.matchAll(WRITE_THROUGH)].some((m) => m[1] === name);
 
 function walk(dir) {
   const out = [];
@@ -76,7 +79,7 @@ function findDirectWrites(text) {
     const binding = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?[\w$.]*\s*$/.exec(
       before.slice(statementStart)
     );
-    if (binding && WRITE_ON(binding[1]).test(rest)) {
+    if (binding && writesThrough(binding[1], rest)) {
       writes.push({ line, form: `binding ${binding[1]}` });
     }
   }
@@ -102,6 +105,18 @@ describe('practice_assignments has no direct table writer', () => {
     expect(findDirectWrites(boundMultiline).writes).toHaveLength(1);
     expect(findDirectWrites(boundDollar).writes).toHaveLength(1);
     expect(findDirectWrites(read)).toEqual({ writes: [], sites: 1 });
+
+    // `$` is the only regex metacharacter an identifier can hold; `a$b` would
+    // read as an anchor if the name were ever interpolated into a pattern.
+    const boundInnerDollar = "const a$b = client.from('practice_assignments');\na$b.delete();";
+    expect(findDirectWrites(boundInnerDollar).writes).toHaveLength(1);
+    const doubleQuoted = 'await supabase.from("practice_assignments").delete().eq("id", id);';
+    expect(findDirectWrites(doubleQuoted).writes).toHaveLength(1);
+    // Near misses: a longer name, or the same name as a property, is not the binding.
+    const nearMiss =
+      "const table = client.from('practice_assignments');\n" +
+      'xtable.upsert(rows);\nother.table.insert(rows);';
+    expect(findDirectWrites(nearMiss)).toEqual({ writes: [], sites: 1 });
   });
 
   it('app source only reads practice_assignments', () => {

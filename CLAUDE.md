@@ -353,7 +353,8 @@ GitHub Actions (`.github/workflows/ci.yml`):
 
 The Build & Test job also runs `scripts/ci/migrationVersions.mjs`. It checks
 that migration names are well formed and versions are unique. On a PR it also
-checks that every added migration has a version above the base branch's latest.
+checks that every added migration has a version above the base branch's latest,
+and that no existing migration was renamed, edited or removed.
 
 On **push to `main`** only, two deploy jobs follow:
 
@@ -367,7 +368,8 @@ On **push to `main`** only, two deploy jobs follow:
 
 Both jobs skip, with a `::warning::`, when their Supabase secrets are missing.
 Runbook and operator setup: `docs/operations/ci-cd.md`. The one-time ledger
-fix is in `docs/operations/migration-ledger-normalisation.md`.
+fix (executed on production 2026-09-28) is in
+`docs/operations/migration-ledger-normalisation.md`.
 
 Plus a **weekly keepalive** cron job (Monday noon UTC) that pings the Supabase REST API to prevent free-tier project pausing.
 

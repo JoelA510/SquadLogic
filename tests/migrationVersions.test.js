@@ -1,5 +1,11 @@
 /**
  * PR-time static check on migration versions (scripts/ci/migrationVersions.mjs).
+ *
+ * That script is the single owner of the version-uniqueness rule. The ledger
+ * keys on the version alone, so two files sharing one cannot both be applied:
+ * two open PRs picked `20260927000000` independently (#453 and #454), and
+ * nothing would have said so until the ledger did, in production. This file
+ * absorbed #454's `migrationVersionUnique.test.js`, which duplicated the rule.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -22,6 +28,16 @@ describe('migration versions: the real directory', () => {
 
   it('is well named and has no duplicate versions', () => {
     expect(checkNames(files)).toEqual([]);
+  });
+
+  it('reports a duplicate planted on a real version, naming both files', () => {
+    // The check must be able to fail on the real set, not only on a toy list.
+    const real = files[0];
+    const version = versionOf(real);
+    const planted = `${version}_planted_duplicate.sql`;
+    expect(checkNames([...files, planted])).toEqual([
+      `version ${version} is used by ${real}, ${planted}`,
+    ]);
   });
 
   it('reads the committed tree with blob ids (meta-assertion)', () => {

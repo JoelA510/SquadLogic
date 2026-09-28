@@ -124,9 +124,11 @@ start on the same push.
 **PR-time static check.** The Build & Test job runs
 [`scripts/ci/migrationVersions.mjs`](../../scripts/ci/migrationVersions.mjs).
 It checks that every migration is named `<14-digit version>_<name>.sql` (the CLI
-silently skips anything else) and that every version is unique. On pull
-requests it also checks that every **added** migration has a version greater
-than the latest on the base branch. It needs no secrets.
+silently skips anything else) and that every version is unique (the single
+owner of that rule; `tests/migrationVersions.test.js` runs it against the real
+directory). On pull requests it also checks that every **added** migration has a
+version greater than the latest on the base branch, and that no existing
+migration was renamed, edited or removed. It needs no secrets.
 
 ### Operator setup (GitHub)
 
@@ -141,15 +143,18 @@ than the latest on the base branch. It needs no secrets.
    `deploy-edge-functions` job as well, which does not use the environment.
 3. Optional **variable `MAX_PENDING_MIGRATIONS`** (Settings → Variables) to
    change the default limit of 5.
-4. **Before the first run**, apply the one-time ledger normalisation in
-   [`migration-ledger-normalisation.md`](./migration-ledger-normalisation.md).
-   Until it runs, the guard fails every run: the ledger's apply-time versions
-   are remote-only.
+4. The one-time ledger normalisation in
+   [`migration-ledger-normalisation.md`](./migration-ledger-normalisation.md)
+   was **executed on production on 2026-09-28** (117 rows, `20240405180000` …
+   `20260924000000`; the original 141 rows are kept in
+   `supabase_migrations.schema_migrations_backup_20260928`). Without it the
+   guard would fail every run, because the ledger's apply-time versions were
+   remote-only.
 
-**First run.** After normalisation, the first push to `main` applies
-`20260927000000_coach_practice_preferences`, plus
-`20260928000000_reconcile_prod_rls_drift` if #454 has merged, and nothing
-else.
+**First run.** The first push to `main` after this job lands applies
+`20260927000000_coach_practice_preferences` (#453) and
+`20260928000000_reconcile_prod_rls_drift` (#454), and nothing else. Once that
+run is green, drop the ledger backup table (see the normalisation doc).
 
 **From now on, CI is the only writer of repo migrations.** Do not apply a repo
 migration through the Supabase MCP `apply_migration` tool. It records an

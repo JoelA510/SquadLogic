@@ -4,10 +4,22 @@
 
 # Migration Ledger Normalisation (one-time, 2026-09-28)
 
-> **Status:** written and verified against a local, production-shaped ledger.
-> **Not yet run on production.** It is run once, by the supervisor, through the
-> Supabase MCP `execute_sql` tool against project `mmwupqsjkikqzvmdvuzm` only
-> (never AIAdvocate), after review. Record the run date here when it happens.
+> **Status: EXECUTED on production 2026-09-28** (project `mmwupqsjkikqzvmdvuzm`,
+> run once by the supervisor through the Supabase MCP `execute_sql` tool, after
+> review and after the local verification below). Verified read-only on
+> 2026-09-28 at about 04:32 UTC:
+>
+> - `supabase_migrations.schema_migrations`: **117 rows, 117 distinct
+>   versions**, min `20240405180000`, max `20260924000000`;
+> - `supabase_migrations.schema_migrations_backup_20260928`: the original
+>   **141 rows**;
+> - application data unchanged (`coaches` 130, `organizations` 1).
+>
+> Still pending in production, to be applied by the first `deploy-migrations`
+> run: `20260927000000` (#453) and `20260928000000` (#454).
+>
+> **Do not run the SQL below again.** It is kept as the record of what ran; its
+> precondition (`141 rows`) now aborts it.
 >
 > Companion: [`ci-cd.md` § Database migrations](./ci-cd.md#database-migrations-deploy-migrations).
 
@@ -21,7 +33,7 @@ the **filename timestamp** of each file in `supabase/migrations/` with the
 Production's ledger was written by the Supabase MCP connector
 (`apply_migration`), which keys each row on the **time it was applied**
 (e.g. `20260927155035`), not on the file's timestamp. So, before this
-normalisation, the ledger has 141 rows and not one of their versions matches a
+normalisation, the ledger had 141 rows and not one of their versions matched a
 repo file. Measured on the local replica of that shape (CLI 2.118.0):
 
 - `supabase migration list` shows every repo file as local-only and every
@@ -54,8 +66,8 @@ equivalent, and must be recorded as applied so the CLI never runs them:
 | `20260421002500_lock_search_path_remaining_definers`   | equivalent applied                          |
 
 Genuinely pending (and deliberately **not** in the insert list, so CI applies
-them): `20260927000000_coach_practice_preferences` (#453), and
-`20260928000000_reconcile_prod_rls_drift` once #454 merges.
+them): `20260927000000_coach_practice_preferences` (#453) and
+`20260928000000_reconcile_prod_rls_drift` (#454).
 
 ## What it changes
 
@@ -303,27 +315,72 @@ in local migrations directory` (suggesting `repair --status reverted` of all
 
 ## Verification after the production run
 
-Run from a machine with the CLI (2.118.0) linked to `mmwupqsjkikqzvmdvuzm`, or
-let the first `deploy-migrations` run do it:
+Done read-only on 2026-09-28 (counts in the status block above). The CLI-side
+check is left to the first `deploy-migrations` run, whose "Migration list
+(before)" and "Dry run" steps must show:
 
 - `supabase migration list` -- every row up to `20260924000000` has Local and
-  Remote equal; only `20260927000000` (and `20260928000000` if #454 merged) is
-  local-only; nothing is remote-only.
-- `supabase db push --dry-run` -- lists exactly those one or two files.
+  Remote equal; only `20260927000000` and `20260928000000` are local-only;
+  nothing is remote-only.
+- `supabase db push --dry-run` -- lists exactly those two files.
 
 ## Rollback (ledger only)
 
+Restore the apply-time ledger from the backup in **one transaction**: delete
+the normalised rows and insert the backup's rows back. The guards abort (and
+roll back) if the backup is not the 141-row original, or if the live ledger is
+no longer the normalised 117 rows (that is, CI has deployed since).
+
 ```sql
 BEGIN;
+
+DO $rb$
+DECLARE
+  b int;
+  n int;
+  hi text;
+BEGIN
+  IF to_regclass('supabase_migrations.schema_migrations_backup_20260928') IS NULL THEN
+    RAISE EXCEPTION 'backup table is gone -- nothing to restore from';
+  END IF;
+  SELECT count(*) INTO b FROM supabase_migrations.schema_migrations_backup_20260928;
+  IF b <> 141 THEN
+    RAISE EXCEPTION 'backup has % rows, expected 141 -- stop', b;
+  END IF;
+  -- Only the untouched normalised ledger may be rolled back. Once CI has
+  -- applied anything, the ledger holds rows the backup lacks, and a restore
+  -- would un-record migrations whose schema changes are already live.
+  SELECT count(*), max(version) INTO n, hi FROM supabase_migrations.schema_migrations;
+  IF n <> 117 OR hi <> '20260924000000' THEN
+    RAISE EXCEPTION 'ledger has % rows, max %; expected the normalised 117 / 20260924000000 -- CI has deployed since, do not roll back', n, hi;
+  END IF;
+END
+$rb$;
+
 DELETE FROM supabase_migrations.schema_migrations;
 INSERT INTO supabase_migrations.schema_migrations
   SELECT * FROM supabase_migrations.schema_migrations_backup_20260928;
+
 COMMIT;
 ```
 
 Rolling back restores the apply-time ledger, which puts CI straight back into
-the refusal described above; the `deploy-migrations` guard would then fail every
-run. Keep the backup table until at least one CI push has succeeded.
+the refusal described above: the `deploy-migrations` guard would then fail every
+run. It is only sensible **before** the first CI deploy. After that deploy, the
+ledger also holds the CLI's rows for `20260927000000` and `20260928000000`,
+which the backup does not; a restore would erase them.
+
+**When to drop the backup table.** After the first successful `deploy-migrations`
+run on `main` (its "Verify nothing pending" step green, `migration list`
+showing Local = Remote for every file). From then on the normalised ledger is
+the proven state and rollback is no longer a path. Then run:
+
+```sql
+DROP TABLE supabase_migrations.schema_migrations_backup_20260928;
+```
+
+If the statements that were actually applied are wanted as a record, export
+the backup table before dropping it.
 
 ## From now on
 

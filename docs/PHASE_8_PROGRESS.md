@@ -6276,7 +6276,7 @@ strictest wins, the candidate verdict. Unwired.
 - It ends in a **catalogue-wide** assertion: no write policy in `public` is member-satisfiable unless an allowlist entry names it with a reason. The allowlist today is telemetry insert and own-profile update.
 - A semantic census in the smoke tries every write policy as a plain member.
 - One BLOCKING round: the first version reconciled a hand-picked table list and left `scheduler_runs` open.
-- A migration-version collision with #453 is now guarded by `tests/migrationVersionUnique.test.js`.
+- A migration-version collision with #453 is now guarded by `tests/migrationVersionUnique.test.js` (folded into `tests/migrationVersions.test.js` by #457, which makes `scripts/ci/migrationVersions.mjs` the single owner of the uniqueness rule).
 - Evidence: five plants red on the real `run.sh`; pgTAP green in CI.
 
 **Not yet in production:** `20260927000000` (#453) and `20260928000000` (#454). The operator approved CI-applied migrations (2026-09-28); the first run of the new deploy job will apply both. Until then the broad policies remain, with no exposure: the only member is an admin.

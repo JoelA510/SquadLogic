@@ -6496,3 +6496,69 @@ conflict logic is reused, not copied. Loading them from the DB is PR 9.
     and a slug graph is refused when preferences are present;
   - derive `coachesByTeam` from the same assignment rows, so there is one coach
     source.
+
+## 8.9 PR 3 — #467 merged (c292156): venue coordinates
+
+`20260930000000_location_coordinates` adds nullable `locations.latitude`/`longitude
+numeric(7,4)`, `coordinates_set_at` and `coordinates_set_by`, with two CHECKs
+(both-or-neither, range).
+- **RPC.** `admin_set_location_coordinates` follows the `admin_create_location`
+  pattern: SECURITY DEFINER with a pinned search_path, and an org-admin check on the
+  location's own org.
+  - Both-or-neither; NULL/NULL clears.
+  - The range is judged *before* rounding, so 90.004 is refused. Values are rounded
+    to 2 decimals (D9, data minimisation).
+  - Audited as `location.coordinates_set` with before/after.
+  - No new policy: the RPC is the only client writer.
+- **Core.** Adds a `LocationCoordinatesSchema`, a mock arm and pgTAP (12 assertions,
+  green in CI).
+- **Privacy.** Only synthetic coordinates are in the repo (40/-75, 41.5/-73.5 and
+  range/rounding probes). Nothing geocodes; nothing is fetched.
+- **Evidence.** 9 of 9 plants caught on the real `run.sh`, including the revert's
+  distinct-org count and "range after rounding". Harness OK. Supervisor check
+  (static): the smoke's audit assertions would catch `before` captured from the
+  new row.
+- **Process note.** The first agent hung on a `useradd` the permission system
+  refused. It was stopped with nothing lost and re-briefed to use the existing
+  private harness user `pgrunner2`. No refusal was routed around.
+
+## 8.6 PR 3b, PR 5 — #468 merged (cc692de): tier-2 joint search and the decline chain
+
+- **Tier 2.** A joint exact search over cross-venue candidates for the series tier 1
+  left TBD, with tier-1 placements frozen as occupants. It uses the repair's own
+  `marginal()` clash check and honours #464's preferences.
+  - It replaces the standalone cross-venue options and `sharedWith`.
+  - Past its node limit it returns its best clash-free result with
+    `PRACTICE_REPAIR_MINIMALITY_UNPROVEN` (tier `cross-venue`).
+  - A new min-cost lower bound means no corpus loss hits the limit (at most 18,131
+    nodes).
+- **Recommendations.** One recommendation per displaced series-window. Tier-2
+  series stay in `timeTbd` until enacted (PR 11).
+- **`practice/recommendations.js`** (pure) holds `declineRecommendation` and
+  `undoDecline`, implementing plan §2:
+  - the declined set Δ;
+  - the eight eligibility conditions;
+  - gain from the one objective;
+  - the re-offer chain with visited set V;
+  - the `declined` TBD reason;
+  - the `PRACTICE_REPAIR_RECOMMENDATION_LOCAL` stamp.
+- **Tier 1 unchanged.** Tier-1 projection digests are identical to main in 522/522
+  corpus repairs. Tier 2 recommends 814 cross-venue moves across 318 repairs.
+- **BLOCKING round.**
+  - *Visited set.* The visited-set plant never turned red, so the guarantee was
+    declared, not proven. A fixture reached through production calls only
+    (decline, decline, undo) now makes a series move twice without V.
+  - *Ruling on plan ambiguity 1.* Δ alone bars the decliner from X. On later
+    released slots the decliner is an ordinary candidate (plan §2 amended).
+  - *`/code-review`.* Six fixes, including restoring `PHASE_8_PROGRESS.md`, which a
+    soft-reset squash had silently deleted.
+  - *Timeouts.* Four timeouts in untouched files were fixed by sharing the corpus
+    pass, not by raising other files' limits.
+- **Squash hazard caught.** The agent's planned `git reset --soft origin/main` on a
+  branch cut from an older main would have reverted main's later commits. It was
+  redirected to rebase first, and the diff was verified: 11 intended files, no
+  deletions.
+- **Evidence.**
+  - All 6 witness plants are red.
+  - Supervisor plant: removing "cross-venue only if T is TBD" turns 2 red.
+  - Full suite: 4248 passed, 0 failed (twice).

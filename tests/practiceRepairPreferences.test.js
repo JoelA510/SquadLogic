@@ -731,6 +731,45 @@ describe('coach preferences :: an approved value is the reference (ruling 2026-0
     expect(kept.rehomed[0].counts.coachPreferenceBreached).toBeUndefined();
   });
 
+  // Start times are compared to the minute: every case here is 30 minutes off.
+  it('must_keep start_time 17:30 lands only on 17:30, not on the cheaper 17:00', () => {
+    const inventory = [same('TUE', 1020), same('TUE', 1050)];
+    // Control: unpreferred, the 17:00 slot keeps the published time.
+    expect(constructed({ inventory }).rehomed[0].to.startMinutes).toBe(1020);
+    const run = constructed({
+      inventory,
+      preferences: [pref('coach-1', 'start_time', 'must_keep', 1050)],
+      rows: rowsFor(['coach-1']),
+    });
+    expect(run.rehomed.map((e) => [e.to.weekday, e.to.startMinutes])).toEqual([['TUE', 1050]]);
+  });
+
+  it('must_keep start_time 17:30 with only a 17:00 candidate is TIME TBD coach-preference', () => {
+    const run = constructed({
+      inventory: [same('TUE', 1020)],
+      preferences: [pref('coach-1', 'start_time', 'must_keep', 1050)],
+      rows: rowsFor(['coach-1']),
+    });
+    expect(run.rehomed).toEqual([]);
+    expect(run.timeTbd[0]).toMatchObject({
+      reason: PRACTICE_TBD_REASON.COACH_PREFERENCE,
+      mustKeepDimensions: ['start_time'],
+    });
+  });
+
+  it('prefer_keep start_time 17:30 against a 17:00 candidate breaches once (+100)', () => {
+    const inventory = [same('TUE', 1020)];
+    const free = constructed({ inventory });
+    const run = constructed({
+      inventory,
+      preferences: [pref('coach-1', 'start_time', 'prefer_keep', 1050)],
+      rows: rowsFor(['coach-1']),
+    });
+    expect(run.rehomed[0].to.startMinutes).toBe(1020);
+    expect(run.rehomed[0].counts.coachPreferenceBreached).toBe(1);
+    expect(run.stats.objectiveTotal).toBe(free.stats.objectiveTotal + PLAN_COACH_PREFERENCE_WEIGHT);
+  });
+
   it('a null value keeps the series being moved, not any other day', () => {
     const run = constructed({
       inventory: [same('TUE', 1080), same('WED', 1080), same('THU')],

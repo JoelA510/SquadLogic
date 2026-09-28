@@ -111,7 +111,9 @@ export default function TeamPersistencePanel({
         : 'Validating overrides and preparing Supabase payload...'
     );
     persistenceTimeoutRef.current = setTimeout(() => {
-      setPersistenceActionState('blocked');
+      // 'error', not 'blocked': the blocked-state effect resets 'blocked' to idle whenever no
+      // override is pending, which overwrote this message with "All manual overrides...".
+      setPersistenceActionState('error');
       setPersistenceActionMessage('Supabase sync timed out. Please retry.');
     }, SUPABASE_SYNC_TIMEOUT_MS);
 
@@ -171,20 +173,19 @@ export default function TeamPersistencePanel({
   let panelStatus = 'idle';
   if (persistenceActionState === 'submitting') panelStatus = 'syncing';
   if (persistenceActionState === 'ready') panelStatus = 'success';
-  if (persistenceActionState === 'error' || persistenceActionState === 'blocked')
-    panelStatus = 'error';
+  if (persistenceActionState === 'blocked') panelStatus = 'blocked';
+  if (persistenceActionState === 'error') panelStatus = 'error';
 
   return (
     <PersistencePanel
       title="Team Persistence"
-      colorTheme="blue"
       stats={[
         { label: 'Last Run', value: teamPersistenceSnapshot.lastRunId || '-' },
         { label: 'Synced', value: lastSyncedAt ? formatDateTime(lastSyncedAt) : 'Never' },
         { label: 'Prepared', value: `${teamPersistenceSnapshot.preparedTeamRows || 0} teams` },
       ]}
       onSync={handlePersist}
-      status={/** @type {'idle'|'syncing'|'success'|'error'} */ (panelStatus)}
+      status={/** @type {'idle'|'syncing'|'success'|'blocked'|'error'} */ (panelStatus)}
       message={persistenceActionMessage}
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

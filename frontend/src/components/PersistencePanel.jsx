@@ -1,27 +1,69 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import { PERSISTENCE_THEMES } from '../utils/themes.js';
+import Badge from './ui/Badge.jsx';
+
+/**
+ * Per-status display. Live-region contract follows `AutoSchedulerPanel`: progress and success
+ * are `role="status"` + `aria-live="polite"`, failure is `role="alert"` + `aria-live="assertive"`.
+ * `idle` is the resting state and is not announced. `blocked` (pending manual overrides) is a
+ * standing precondition rather than a failed sync, so it is announced politely.
+ */
+const STATUS_DISPLAY = {
+  idle: { label: 'System Ready', tone: 'neutral', dot: 'bg-status-pending' },
+  syncing: {
+    label: 'Syncing active...',
+    tone: 'info',
+    dot: 'bg-brand',
+    role: 'status',
+    live: 'polite',
+  },
+  success: {
+    label: 'Sync complete',
+    tone: 'success',
+    dot: 'bg-status-success',
+    role: 'status',
+    live: 'polite',
+  },
+  blocked: {
+    label: 'Sync blocked',
+    tone: 'warning',
+    dot: 'bg-status-warning',
+    role: 'status',
+    live: 'polite',
+  },
+  error: {
+    label: 'Sync failed',
+    tone: 'danger',
+    dot: 'bg-status-error',
+    role: 'alert',
+    live: 'assertive',
+  },
+};
+
+const UNKNOWN_STATUS_DISPLAY = {
+  label: 'Status unknown',
+  tone: 'warning',
+  dot: 'bg-status-warning',
+  role: 'status',
+  live: 'polite',
+};
 
 /**
  * Shared shell rendered by `TeamPersistencePanel`.
- * Accepts either the legacy `theme` prop or the newer `colorTheme`; either
- * maps to a `PERSISTENCE_THEMES` key (currently 'blue' | 'green').
  */
 export default function PersistencePanel({
   title = 'Supabase Persistence',
   status,
   lastSync = undefined,
-  theme = undefined,
-  colorTheme = undefined,
   onSync,
   stats = undefined,
   message = undefined,
   children = undefined,
 }) {
-  const themeKey = colorTheme || theme || 'blue';
-  const palette = PERSISTENCE_THEMES[themeKey] || PERSISTENCE_THEMES.blue;
-
-  const statusLabel = status === 'syncing' ? 'Syncing active...' : 'System Ready';
+  const palette = PERSISTENCE_THEMES.blue;
+  // An unrecognised status must never read as "System Ready".
+  const display = STATUS_DISPLAY[status] ?? UNKNOWN_STATUS_DISPLAY;
   const statusDetail = lastSync ? `Last updated ${lastSync}` : message || 'No recent sync';
 
   return (
@@ -31,15 +73,24 @@ export default function PersistencePanel({
       <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
         <div className="flex items-center gap-4">
           <div className="relative flex h-12 w-12 items-center justify-center rounded-full bg-bg-glass">
-            <div className={`h-3 w-3 rounded-full ${palette.dotColor} ${palette.shadowColor}`} />
-            <div
-              className={`absolute inset-0 animate-ping rounded-full ${palette.dotColor} opacity-20`}
-            />
+            <div className={`h-3 w-3 rounded-full ${display.dot}`} aria-hidden="true" />
+            {status === 'syncing' && (
+              <div
+                className={`absolute inset-0 animate-ping rounded-full ${display.dot} opacity-20`}
+                aria-hidden="true"
+              />
+            )}
           </div>
           <div>
             <h3 className="text-lg font-bold text-text-primary">{title}</h3>
-            <div className="flex items-center gap-2 mt-1">
-              <span className={`text-sm font-medium ${palette.statusText}`}>{statusLabel}</span>
+            <div
+              key={status}
+              className="flex items-center gap-2 mt-1"
+              role={display.role}
+              aria-live={display.live}
+              data-testid="persistence-status"
+            >
+              <Badge tone={display.tone}>{display.label}</Badge>
               <span className="text-text-muted">•</span>
               <span className="text-sm text-text-muted">{statusDetail}</span>
             </div>
@@ -83,10 +134,8 @@ export default function PersistencePanel({
 
 PersistencePanel.propTypes = {
   title: PropTypes.string,
-  status: PropTypes.string.isRequired,
+  status: PropTypes.oneOf(Object.keys(STATUS_DISPLAY)).isRequired,
   lastSync: PropTypes.string,
-  theme: PropTypes.oneOf(['blue', 'green']),
-  colorTheme: PropTypes.oneOf(['blue', 'green']),
   onSync: PropTypes.func.isRequired,
   stats: PropTypes.arrayOf(
     PropTypes.shape({

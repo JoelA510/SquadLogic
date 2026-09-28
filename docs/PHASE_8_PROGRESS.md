@@ -6301,3 +6301,29 @@ retirement silently cut slots it spared.
 - Other evidence: 9 plants red; the 679-game displacement sweep shows 0 digest
   differences against main; season fixture 1528/1528; 29-surface digests equal
   to main's for unbounded losses.
+
+## 8.9 PR 2 — #459 merged (a2702e1): the Edge (Deno) twin of the NOAA sunset
+
+`supabase/functions/_shared/timing/solar.ts` is a line-for-line copy of core
+`timing/solar.js`. It follows the Edge `resolveZonedInstant` contract: it never
+throws, and a refusal is `minutes: null` plus one finding. Nothing wires it into
+a scheduler yet; the unwired pin fails on the first Edge Function that imports it
+(PR 6).
+- **Drift control:** `tests/solarDrift.test.js` compares the two arms in one
+  process for exact equality, over 75,920 grid points and 2,190 polar points plus
+  every refusal input. Both counts are literals.
+- **Vectors:** 316 grid-point vectors (no real or fitted coordinates) are read by
+  a core runner and a Deno runner. The mirror job's minimum file count is raised
+  to 6.
+- **Finding, NOTED:** Deno and Node round transcendental functions differently
+  in the last place. 4/316 vectors differ by about 3e-13 minute. The vector
+  runners compare minutes within 1e-9; codes, causes and the enforced floor are
+  compared exactly. A guard asserts that no vector lies within 1e-6 of a whole
+  minute (the closest is 0.0011). An Edge floor can therefore diverge from core
+  only when a sunset lies within about 1e-12 of a whole minute.
+- **Evidence:** plants red, then restored:
+  - W2: a one-digit coefficient change mismatches 75,920/75,920 grid points;
+  - W3: a host-offset leak turns exactly one zone red, in both Deno and Vitest;
+  - a stale vector turns both runners red.
+  CI green.
+- **Deferred to PR 6:** the Edge offset cache is never evicted.

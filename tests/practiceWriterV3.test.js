@@ -145,6 +145,37 @@ describe('practice-persistence Edge passthrough (source pin)', () => {
     assert.match(source, /new Date\(\),\s*body\.repair\s*\)/, 'the handler drops body.repair');
     assert.match(source, /teamsTimeTbd:\s*report\.teams_time_tbd/);
   });
+
+  it('sends exactly the v2 argument set when there is no repair body', () => {
+    // The Edge deploy can reach production before 20260929000000 does, and a
+    // v2 database has only persist_practice_schedule(run_data, assignments,
+    // allow_empty): PostgREST refuses a call naming any other argument.
+    const start = source.indexOf(".rpc('persist_practice_schedule', {");
+    assert.ok(start >= 0, 'the RPC call was not found; this pin is stale');
+    const open = source.indexOf('{', start);
+    let depth = 0;
+    let end = open;
+    for (; end < source.length; end += 1) {
+      if (source[end] === '{') depth += 1;
+      if (source[end] === '}') depth -= 1;
+      if (depth === 0) break;
+    }
+    const argsObject = source.slice(open + 1, end);
+    const guarded = argsObject.match(/\.\.\.\(repair\s*\?\s*\{[\s\S]*?\}\s*:\s*\{\}\)/);
+    assert.ok(guarded, 'the v3 arguments are not behind a repair-only spread');
+    const unconditional = argsObject.replace(guarded[0], '');
+    const keys = [...unconditional.matchAll(/^\s*(\w+)\s*:/gm)].map((m) => m[1]).sort();
+    assert.deepEqual(keys, ['allow_empty', 'assignments', 'run_data']);
+    for (const v3 of [
+      'unlock',
+      'closes',
+      'exceptions',
+      'withdraw_exceptions',
+      'base_fingerprint',
+    ]) {
+      assert.ok(guarded[0].includes(`${v3}:`), `${v3} is not sent only with a repair`);
+    }
+  });
 });
 
 describe('persistPracticeRepair', () => {

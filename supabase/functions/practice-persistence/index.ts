@@ -195,9 +195,16 @@ async function persistPracticeSnapshot(
         updated_at: now.toISOString(),
       };
 
+  // Without a `repair` body the call carries exactly the v2 argument set
+  // (run_data, assignments, allow_empty), so an ordinary save still works
+  // against a database that has not yet applied 20260929000000 -- the Edge
+  // deploy can reach production before the migration does. The v3 keys are
+  // sent only with a repair, which needs 20260929000000 applied.
+  // tests/practiceWriterV3.test.js pins this key set.
   const { data, error } = await supabaseClient.rpc('persist_practice_schedule', {
     run_data: runData,
     assignments: assignmentRows,
+    allow_empty: false,
     ...(repair
       ? {
           unlock: repair.unlock,

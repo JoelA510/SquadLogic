@@ -6327,3 +6327,44 @@ a scheduler yet; the unwired pin fails on the first Edge Function that imports i
   - a stale vector turns both runners red.
   CI green.
 - **Deferred to PR 6:** the Edge offset cache is never evicted.
+
+## CI applies migrations — #457 merged (ca3d048)
+
+Operator ruling (2026-09-28): "CI should apply database migrations from now on."
+- **Deploy job:** a `deploy-migrations` job runs on pushes to `main`, in
+  `environment: production`, with the Supabase CLI pinned at 2.118.0. It runs
+  link → list → dry run → guard → push → verify. `deploy-edge-functions` needs it.
+- **Guard:** `scripts/ci/migrationGuard.mjs` refuses:
+  - out-of-order pending versions;
+  - more than 5 pending;
+  - an empty or unmappable remote ledger;
+  - disagreement between the list and the dry run;
+  - seed data;
+  - unparseable output.
+- **PR-time check:** `scripts/ci/migrationVersions.mjs` checks that names are
+  well formed and versions unique, that a new version is above the base's
+  latest, and that no existing migration was renamed, edited or removed. It is
+  now the single owner of the uniqueness rule: #454's test was folded into it.
+- **Ledger normalisation, executed on production 2026-09-28.** Production's
+  ledger was keyed by apply-time versions, so the CLI would have replayed
+  everything. It was re-keyed in one transaction to the 117 repo versions
+  (20240405180000..20260924000000). The original 141 rows are kept in
+  `supabase_migrations.schema_migrations_backup_20260928`. Data unchanged
+  (130 coaches, 1 org), verified read-only by the supervisor. The rollback now
+  refuses unless the ledger is still the normalised 117.
+- **Plants:**
+  - the agent's plant (a duplicate file) turned the tests red;
+  - supervisor code plants: uniqueness disabled → 2/16 red; the "new below
+    latest" check disabled → 1/16 red.
+  - A `/code-review` finding was fixed: a rollback after a CI deploy would have
+    un-recorded #453/#454.
+  - One agent stalled on a production query and was replaced; no work was lost.
+- **First run on main:** `Deploy Database Migrations` **skipped** (secret not
+  set), as designed. `Deploy Edge Functions` ran. Pending in production:
+  `20260927000000` and `20260928000000`.
+- **Operator to do, in this order:**
+  1. create the `production` environment with a required reviewer;
+  2. add `SUPABASE_DB_PASSWORD`;
+  3. drop the backup table after the first green deploy.
+- **Hazard noted:** an Edge deploy is not held back when the migration deploy
+  skips. #461 must keep ordinary saves on the v2 RPC argument set.

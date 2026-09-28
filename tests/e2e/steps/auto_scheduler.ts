@@ -101,49 +101,25 @@ When('I navigate to the Practice Scheduling page', async ({ page }) => {
   await page.goto('/schedule/practice');
   await page.waitForLoadState('networkidle');
   await page.evaluate(() => {
-    // The mock merges this partial store over its defaults by id, so the
-    // default `ps-1` is replaced whole, re-dated around today.
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    // Seeded through the sanctioned producer (`window.__saveMockDB__`, which is
+    // `saveDB`), never by writing `__MOCK_DB__` directly: see
+    // tests/mockDeleteTombstones.test.js. The page's live store is re-dated in
+    // place and saved.
+    const db = window.__MOCK_DB__ as Record<string, Array<Record<string, unknown>>> | undefined;
+    if (!db || !Array.isArray(db.practice_slots)) throw new Error('mock store not initialised');
     const iso = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    const current = {
-      id: 'ps-1',
-      day_of_week: 'tue',
-      start_time: '18:00',
-      end_time: '19:30',
-      capacity: 2,
-      valid_from: iso(-30),
-      valid_until: iso(90),
-      field_id: 'v1',
-      organization_id: orgId,
-    };
-    db.practice_slots = [
-      ...(db.practice_slots || []).filter((slot: Record<string, unknown>) => slot.id !== 'ps-1'),
-      current,
-    ];
+    const slot = db.practice_slots.find((row: Record<string, unknown>) => row.id === 'ps-1');
     // The default row on `ps-1` (`pa-1`) is re-dated with its slot, so the
     // seed stays consistent: a saved row lies inside its slot's window, and an
     // Apply re-sends it with its key unchanged (the v3 lock).
-    db.practice_assignments = [
-      ...(db.practice_assignments || []).filter(
-        (row: Record<string, unknown>) => row.id !== 'pa-1'
-      ),
-      {
-        id: 'pa-1',
-        organization_id: orgId,
-        team_id: '00000000-0000-0000-0000-000000000001',
-        slot_id: 'ps-1',
-        practice_slot_id: 'ps-1',
-        run_id: 'run-practice-1',
-        day_of_week: 'tue',
-        start_time: '18:00',
-        end_time: '19:30',
-        field_id: 'v1',
-        source: 'auto',
-        effective_date_range: `[${iso(-30)},${iso(91)})`,
-      },
-    ];
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    const row = (db.practice_assignments || []).find(
+      (r: Record<string, unknown>) => r.id === 'pa-1'
+    );
+    if (!slot || !row) throw new Error('mock seed ps-1 / pa-1 missing');
+    slot.valid_from = iso(-30);
+    slot.valid_until = iso(90);
+    row.effective_date_range = `[${iso(-30)},${iso(91)})`;
+    window.__saveMockDB__(db);
   });
 
   await page.reload();

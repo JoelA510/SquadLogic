@@ -7,7 +7,6 @@ import {
   buildPracticeSlotsFromSupabaseRows,
   expandSupabasePracticeSlots,
   buildPracticeAssignmentRows,
-  persistPracticeAssignments,
 } from '../packages/core/src/practiceSupabase.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -504,18 +503,17 @@ describe('buildPracticeAssignmentRows', () => {
 
     // `run_id` is the one key outside the recordset, and the exemption is
     // proven rather than asserted: a migration adds it as a real column on
-    // `practice_assignments`, which is where `persistPracticeAssignments`
-    // writes it directly. Everything else must be a column the RPC declares.
+    // `practice_assignments`. Everything else must be a column the RPC declares.
     // (It was the RPC's own migration until 20260924000000 redefined the RPC
     // without re-adding a column that already exists, so the column is looked
     // for across the migration set rather than in the RPC's latest file.)
     //
     // Stated plainly, because the exemption is narrower than it looks: the
     // RPC drops `run_id` like any other undeclared key and fills the column
-    // from `run_data` instead, so the only reader of this key is the direct
-    // insert — and that function has no caller outside this file today. It
-    // stays because it addresses a real column through a real exported API,
-    // not because the live path uses it.
+    // from `run_data` instead. Its one reader was the direct-insert
+    // `persistPracticeAssignments`, retired in #66 (no caller), so today this
+    // key has no receiver at all; it survives only because a real column of
+    // that name exists. Dropping it from the builder is a separate change.
     const migrationDir = path.join(REPO_ROOT, 'supabase/migrations');
     const addsRunId = readdirSync(migrationDir)
       .filter((name) => name.endsWith('.sql'))
@@ -536,165 +534,6 @@ describe('buildPracticeAssignmentRows', () => {
       [],
       `buildPracticeAssignmentRows emits ${orphans.join(', ')}, which ${file} declares nowhere; ` +
         `jsonb_to_recordset drops undeclared keys silently. Declared: ${[...declared].join(', ')}`
-    );
-  });
-});
-
-describe('persistPracticeAssignments', () => {
-  const sampleSlots = [
-    {
-      id: 'slot-1::early',
-      baseSlotId: 'slot-1',
-      seasonPhaseId: 'early',
-      effectiveFrom: '2024-08-01',
-      effectiveUntil: '2024-09-15',
-    },
-  ];
-
-  it('inserts practice assignments through Supabase client', async () => {
-    const calls = [];
-    const supabaseClient = {
-      from(table) {
-        calls.push({ table });
-        return {
-          insert: async (rows) => {
-            calls.push({ rows });
-            return { data: rows, error: null };
-          },
-        };
-      },
-    };
-
-    const result = await persistPracticeAssignments({
-      supabaseClient,
-      assignments: [{ teamId: 'team-1', slotId: 'slot-1::early' }],
-      slots: sampleSlots,
-      runId: 'run-123',
-    });
-
-    assert.deepEqual(calls, [
-      { table: 'practice_assignments' },
-      {
-        rows: [
-          {
-            team_id: 'team-1',
-            practice_slot_id: 'slot-1::early',
-            effective_date_range: '[2024-08-01,2024-09-15]',
-            source: 'auto',
-            run_id: 'run-123',
-          },
-        ],
-      },
-    ]);
-
-    assert.deepEqual(result, [
-      {
-        team_id: 'team-1',
-        practice_slot_id: 'slot-1::early',
-        effective_date_range: '[2024-08-01,2024-09-15]',
-        source: 'auto',
-        run_id: 'run-123',
-      },
-    ]);
-  });
-
-  it('supports upserts when requested', async () => {
-    const calls = [];
-    const supabaseClient = {
-      from(table) {
-        calls.push({ table });
-        return {
-          upsert: async (rows) => {
-            calls.push({ upserted: rows });
-            return { data: rows, error: null };
-          },
-        };
-      },
-    };
-
-    await persistPracticeAssignments({
-      supabaseClient,
-      assignments: [{ teamId: 'team-1', slotId: 'slot-1::early' }],
-      slots: sampleSlots,
-      upsert: true,
-    });
-
-    assert.deepEqual(calls, [
-      { table: 'practice_assignments' },
-      {
-        upserted: [
-          {
-            team_id: 'team-1',
-            practice_slot_id: 'slot-1::early',
-            effective_date_range: '[2024-08-01,2024-09-15]',
-            source: 'auto',
-            run_id: null,
-          },
-        ],
-      },
-    ]);
-  });
-
-  it('skips Supabase writes when there are no assignments', async () => {
-    const supabaseClient = {
-      from() {
-        throw new Error('should not call Supabase when no rows are present');
-      },
-    };
-
-    const result = await persistPracticeAssignments({
-      supabaseClient,
-      assignments: [],
-      slots: sampleSlots,
-    });
-
-    assert.deepEqual(result, []);
-  });
-
-  it('surfaces Supabase errors with context', async () => {
-    const supabaseClient = {
-      from() {
-        return {
-          insert: async () => ({
-            data: null,
-            error: { message: 'insert failed' },
-          }),
-        };
-      },
-    };
-
-    await assert.rejects(
-      () =>
-        persistPracticeAssignments({
-          supabaseClient,
-          assignments: [{ teamId: 'team-1', slotId: 'slot-1::early' }],
-          slots: sampleSlots,
-        }),
-      /Failed to persist practice assignments: insert failed/
-    );
-  });
-
-  it('validates Supabase client presence', async () => {
-    // Null client should throw "from() method is required"
-    await assert.rejects(
-      () =>
-        persistPracticeAssignments({
-          supabaseClient: null,
-          assignments: [{ teamId: 'team-1', slotId: 'slot-1::early' }],
-          slots: sampleSlots,
-        }),
-      /supabaseClient with a from\(\) method is required/
-    );
-
-    // Client whose from() returns a non-object should throw "query builder object"
-    await assert.rejects(
-      () =>
-        persistPracticeAssignments({
-          supabaseClient: { from: () => null },
-          assignments: [{ teamId: 'team-1', slotId: 'slot-1::early' }],
-          slots: sampleSlots,
-        }),
-      /supabaseClient\.from must return a query builder object/
     );
   });
 });

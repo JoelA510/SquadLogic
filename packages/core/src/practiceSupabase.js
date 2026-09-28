@@ -248,8 +248,9 @@ function resolveAssignmentWindow(assignment, slot, index) {
  * @returns {Array<Object>} Row payloads keyed `team_id`, `practice_slot_id`,
  *   `effective_date_range`, `source` and `run_id` — the first four are what
  *   `persist_practice_schedule` declares in its `jsonb_to_recordset`, and
- *   `run_id` is the `practice_assignments` column the direct-insert path
- *   below writes. Nothing else may be added without a receiver.
+ *   `run_id` is a real `practice_assignments` column that the RPC drops from
+ *   the payload and fills from `run_data` instead, so no writer reads this key.
+ *   Nothing else may be added without a receiver.
  */
 export function buildPracticeAssignmentRows(
   { assignments, slots, runId } = { assignments: [], slots: [] }
@@ -318,8 +319,7 @@ export function buildPracticeAssignmentRows(
     // `persist_practice_schedule` declares only `team_id`,
     // `practice_slot_id`, `slot_id`, `effective_date_range` and `source` in
     // its `jsonb_to_recordset`, which drops every key it does not name, and
-    // the `practice_assignments` table that `persistPracticeAssignments`
-    // inserts into directly has no such columns at all.
+    // the `practice_assignments` table has no such columns at all.
     // `effective_from`/`effective_until` were the misleading pair: they read
     // as an alternative the RPC might accept instead of
     // `effective_date_range`, which is composed from those same two values
@@ -334,45 +334,6 @@ export function buildPracticeAssignmentRows(
       run_id: runId ?? null,
     };
   });
-}
-
-export async function persistPracticeAssignments(
-  { supabaseClient, assignments, slots, runId = undefined, upsert = false } = {
-    supabaseClient: undefined,
-    assignments: [],
-    slots: [],
-  }
-) {
-  if (!supabaseClient || typeof supabaseClient.from !== 'function') {
-    throw new TypeError('supabaseClient with a from() method is required');
-  }
-
-  const rows = buildPracticeAssignmentRows({ assignments, slots, runId });
-  if (rows.length === 0) {
-    return [];
-  }
-
-  const table = supabaseClient.from('practice_assignments');
-
-  if (!table || typeof table !== 'object') {
-    throw new TypeError('supabaseClient.from must return a query builder object');
-  }
-
-  const action = upsert ? table.upsert : table.insert;
-  const actionName = upsert ? 'upsert' : 'insert';
-
-  if (typeof action !== 'function') {
-    throw new TypeError(`practice_assignments builder must expose a ${actionName}() method`);
-  }
-
-  const { data, error } = await action.call(table, rows);
-
-  if (error) {
-    const message = error.message ?? String(error);
-    throw new Error(`Failed to persist practice assignments: ${message}`);
-  }
-
-  return data ?? null;
 }
 
 export const SEASON_PRACTICE_PAGE_SIZE = 1000;

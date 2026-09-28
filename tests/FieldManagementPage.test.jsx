@@ -3,6 +3,11 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import FieldManagementPage from '../frontend/src/pages/FieldManagementPage.jsx';
 
 vi.mock('../frontend/src/hooks/useFields.js', () => ({ useFields: vi.fn() }));
+// The page reads the admin gate for the venue coordinates form (8.9 PR 3b);
+// these tests render it outside the organisation provider, as an admin.
+vi.mock('../frontend/src/hooks/usePermission.js', () => ({
+  usePermission: () => ({ can: () => true }),
+}));
 
 import { useFields } from '../frontend/src/hooks/useFields.js';
 
@@ -37,6 +42,7 @@ const baseHook = {
   unretireLocation: vi.fn(),
   retireFieldSubunit: vi.fn(),
   unretireFieldSubunit: vi.fn(),
+  setLocationCoordinates: vi.fn(),
   refresh: vi.fn(),
 };
 

@@ -6760,3 +6760,95 @@ Operator ruling 2 now holds in the auto-scheduler as well as in the RPC.
   `scoringWeights` without reading them. Core `autoScheduler.js` and
   `practiceScheduling.js` (the client-side scheduler) still read
   `unavailableSlotIds`.
+
+## 8.9 PR 7 — #479 merged (41c7c6f): daylight gate on practice repair candidates
+
+- **Gate.** `repairPracticeLoss()` takes an optional daylight calendar. Every
+  re-home candidate, in tier 1 and in the tier-2 joint search, goes through the
+  existing `evaluatePracticeDaylight()` before it is priced. Its contract comes
+  with it: lit ground is exempt, undeclared lighting counts as unlit (D5), an
+  end exactly at `floor(sunset)` is legal (D2/D6), and an unknown sunset is
+  never allowed (D4).
+- **Refused, not truncated.** D8 applies to the Edge post-pass. A repair gives
+  each series-window exactly one recommendation, so a partly-legal candidate is
+  refused.
+- **New TIME TBD reasons** `past-sunset` and `sunset-unknown`; unknown wins
+  when a venue's refusals mix. The gate runs before `must_keep`, so
+  `coach-preference` keeps its meaning. New findings:
+  `PRACTICE_REPAIR_CANDIDATES_PAST_SUNSET`, `..._SUNSET_UNKNOWN` and
+  `PRACTICE_REPAIR_DAYLIGHT_UNCHECKED` (no calendar supplied).
+- **Evidence.** Agent plants: W10 (gate removed) 17 red, unknown-as-allowed 3,
+  `<=` to `<` 2, a dropped TBD entry 3. The none-dropped universe comes from the
+  plan: taken from the output, the corpus check stays green. Supervisor plant:
+  the gate skipped for cross-venue (tier-2) candidates turned 4 red.
+- **Flags.** DAYLIGHT_UNCHECKED stays info until 3b PR 10. A re-home onto a
+  weekday with no date inside the window is only counted. The shared
+  `weekdayDates()` refactor was declined. The two new reasons are not yet
+  persistable (PR 6b below).
+
+## 8.9 PR 6 — #480 merged (99fca92): the auto-scheduler daylight post-pass
+
+- **Store over body.** The Edge reads venue coordinates, lighting and each
+  slot's field, end time and dates from the DB as the caller through RLS,
+  paged. Nothing comes from the request body (W9). A failed or partial read
+  refuses with `VENUE_DAYLIGHT_UNREADABLE`, the preference loader's contract.
+- **New placements.** Each is truncated at the first date past `floor(sunset)`
+  on unlit or undeclared ground (D8), judged from the season's today. The rest
+  becomes TIME TBD `past-sunset` with its date, audited. A placement whose first
+  date is dark is withdrawn, and the score and evaluation are re-measured. An
+  unknown sunset is flagged and counted but stays placed (D4).
+- **Locked rows are never changed.** One past sunset is reported with a
+  proposed fix (`applied: false`).
+- **Margin twin** pinned to core `PRACTICE_SUNSET_MARGIN_MINUTES = 0`. With
+  every venue lit, the solver output is byte-identical (tested).
+- **Round 1 (supervisor).** The Edge had a third spelling of the reason,
+  `daylight-past-sunset`. It now uses core's `past-sunset`, pinned by a test
+  (one-character plant 1 red).
+- **Evidence.** Agent plants: W7 x4, W9 x3, W15 twin 5 red. Supervisor plant:
+  an unknown-sunset placement counted but not reported turned 2 red.
+- **Open.** The TIME TBD remainder is not saved on Apply; the row just ends.
+  The persistence plan ("8.9 PR 6b") is awaiting operator approval. Also: in a
+  spring season, D8 withdraws a whole placement whose first date is dark even
+  when later dates are light; and the result cache key ignores venue data.
+
+## Task #66 — #481 merged (8344853): the second practice writer retired
+
+- `persistPracticeAssignments` (`packages/core/src/practiceSupabase.js`), a
+  direct table writer bypassing `persist_practice_schedule`, had no caller. It
+  and its 5 tests are deleted.
+- `tests/practiceAssignmentsNoDirectWrite.test.js` scans frontend, core and
+  Edge source and fails on any write to `practice_assignments`, whether chained
+  or through a bound variable.
+- **Evidence.** Agent guard plants 4 red. Supervisor plant: a double-quoted
+  `.from("practice_assignments").delete()` turned it red.
+- **Round 1 (CI).** CodeQL raised a HIGH `js/incomplete-sanitization` on a
+  RegExp built from a name that escaped only `$`. The guard now uses one fixed
+  pattern and compares names as strings.
+- **Flags.** `run_id` in `buildPracticeAssignmentRows` rows has no reader
+  (removing it needs a persistence plan). `persistPracticeRepair` has no
+  frontend caller yet.
+
+## Task #47 — #482 merged (9be022d): orphan persistence panels removed
+
+- `PracticePersistencePanel` and `GamePersistencePanel` had no importer (census
+  independently confirmed by the supervisor). Their flows are live on
+  `PracticeSchedulingPage` and `GameSchedulingPage`. Only the two files were
+  deleted; their dependencies are used elsewhere.
+- **Round 1 (supervisor).** A stale `frontend/lint_results.txt` named both
+  panels and embedded a local home-directory path with a personal username. It
+  is deleted and ignored; nothing read it. History was not rewritten.
+- **Flags.** The shared `PersistencePanel` shows "System Ready" after a failed
+  sync, and it carries unused theme props.
+
+## Task #70 — harness concurrency: hazard reproduced, blocked
+
+- Two concurrent `run.sh` runs as `pgrunner2`: one killed the other's cluster
+  mid-run (38 FAILs), and the other ran the first's staged SQL through the
+  shared `~/.harness.sql`. Shared resources include the fixed `~/pgdata`,
+  `~/sock`, `pkill -u`, 23 fixed `/tmp/harness_*` scratch files and the stub
+  extension copy.
+- **Blocked.** The permission classifier refused stopping the leftover cluster
+  (PID 32193, `pgrunner2`) that the agent's own old-code run left. It is not
+  routed around and awaits the operator. Until then no agent runs the harness
+  as `pgrunner2`. The fix (a private run dir per run, PID-scoped stop,
+  per-run scratch) is planned, not written.

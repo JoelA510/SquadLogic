@@ -31,8 +31,10 @@
   - `id` (UUID)
   - `player_id` (UUID, nullable) linking to their child participant
   - `email`, `phone`, `certifications`
-  - `preferred_practice_days` (`day_of_week[]` limited to Mon–Thu)
-  - `preferred_practice_window` (tsrange) for time-of-day preferences
+  - (`preferred_practice_days` / `preferred_practice_window` were dropped in
+    `20261001000000`: nothing ever read them. A coach's practice preferences
+    are rows in `coach_practice_preferences`, requested by the coach and
+    approved by an admin.)
   - `can_coach_multiple_teams` (boolean)
   - `status` (`active`, `pending-confirmation`, `inactive`, `interested`)
 - **Indexes & constraints**:

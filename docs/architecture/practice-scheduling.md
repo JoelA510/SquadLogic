@@ -21,7 +21,7 @@ This document elaborates the roadmap's practice scheduling phase into concrete i
 
 - **Teams**: Records from the `teams` table joined with `divisions`.
 - **Practice Slots**: Rows from `practice_slots` joined to `field_subunits` and `fields`, filtered by the current effective date range.
-- **Coach Availability**: Time preferences from the `coaches` table (`preferred_practice_days`, `preferred_practice_window`, `can_coach_multiple_teams`).
+- **Coach Availability**: `coaches.can_coach_multiple_teams`, and the approved rows of `coach_practice_preferences` (weekday, start time and venue, each `must_keep` / `prefer_keep` / `dont_care`) for the coaches `team_coach_assignments` holds current. The auto-scheduler Edge Function loads these itself, as the caller through RLS, and never from the request body (8.6 PR 3b PR 8). The old `coaches.preferred_practice_days` / `preferred_practice_window` columns were never read and were dropped in `20261001000000`.
 - **Season Configuration**: Values from `season_settings` describing early/late season durations, fallback days, and scoring weights for preference satisfaction.
 - **Manual Overrides**: Optional locks stored in `practice_assignments` with `source = 'manual'` that should not be reassigned automatically.
 

@@ -88,7 +88,6 @@ export function useAutoScheduler({ organizationId }) {
     async ({
       teams,
       slots,
-      coachPreferences,
       divisionPreferences,
       lockedAssignments,
       scoringWeights,
@@ -112,7 +111,6 @@ export function useAutoScheduler({ organizationId }) {
         season_settings_id: seasonSettingsId ?? null,
         teams,
         slots,
-        coachPreferences: coachPreferences ?? {},
         divisionPreferences: divisionPreferences ?? {},
         lockedAssignments: lockedAssignments ?? [],
         scoringWeights: scoringWeights ?? {},
@@ -193,7 +191,6 @@ export function useAutoScheduler({ organizationId }) {
             seasonSettingsId,
             teams,
             slots,
-            coachPreferences: coachPreferences ?? {},
             divisionPreferences: divisionPreferences ?? {},
             lockedAssignments: lockedAssignments ?? [],
             scoringWeights: scoringWeights ?? {},
@@ -221,6 +218,10 @@ export function useAutoScheduler({ organizationId }) {
           // that promise false one layer up, which is the `timezone`-shaped
           // defect this whole change is about.
           timingFindings: data.timingFindings ?? [],
+          // The approved coach preferences the run honoured (8.6 PR 3b PR 8):
+          // counts, prefer_keep breaches, and every conflict or
+          // no-reference finding. Carried through for the same reason.
+          approvedPreferences: data.approvedPreferences ?? null,
         };
         // Wave 6b Task 1: cache the successful run. Errors are intentionally
         // NOT cached so retries after a failed run go back to the Edge Function.

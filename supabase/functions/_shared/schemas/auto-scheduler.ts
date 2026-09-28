@@ -30,20 +30,24 @@ const SlotSchema = z
   })
   .passthrough();
 
-const CoachPreferenceSchema = z
-  .object({
-    preferredDays: z.array(z.string()).optional(),
-    preferredSlotIds: z.array(z.string()).optional(),
-    unavailableSlotIds: z.array(z.string()).optional(),
-  })
-  .passthrough();
+/**
+ * `coachPreferences` used to be declared here (`preferredDays`,
+ * `preferredSlotIds`, `unavailableSlotIds`). Only `unavailableSlotIds` was
+ * ever read, no client sent any of them, and a preference taken from the body
+ * is one the caller chose. Retired (8.6 PR 3b, PR 8): approved coach
+ * preferences are loaded server-side, as the caller through RLS, by
+ * `_shared/engines/coach-preference-load.ts`. The key is not listed, so an
+ * older client that still sends it is not rejected -- Zod strips it, and
+ * nothing reads it.
+ */
+/** The optimiser's defaults, read by the field defaults and the object default alike. */
+const CONFIG_DEFAULTS = Object.freeze({ timeBudgetMs: 25000, maxIterations: 2000, seed: 42 });
 
 export const AutoSchedulerInputSchema = z.object({
   organizationId: z.string().uuid(),
   seasonSettingsId: z.string().uuid().optional(),
   teams: z.array(TeamSchema).min(1),
   slots: z.array(SlotSchema).min(1),
-  coachPreferences: z.record(z.string(), CoachPreferenceSchema).optional().default({}),
   divisionPreferences: z
     .record(
       z.string(),
@@ -104,10 +108,25 @@ export const AutoSchedulerInputSchema = z.object({
    */
   config: z
     .object({
-      timeBudgetMs: z.number().int().min(1000).max(25000).optional().default(25000),
-      maxIterations: z.number().int().min(10).max(5000).optional().default(2000),
-      seed: z.number().int().optional().default(42),
+      timeBudgetMs: z
+        .number()
+        .int()
+        .min(1000)
+        .max(25000)
+        .optional()
+        .default(CONFIG_DEFAULTS.timeBudgetMs),
+      maxIterations: z
+        .number()
+        .int()
+        .min(10)
+        .max(5000)
+        .optional()
+        .default(CONFIG_DEFAULTS.maxIterations),
+      seed: z.number().int().optional().default(CONFIG_DEFAULTS.seed),
     })
     .optional()
-    .default({}),
+    // The whole object rather than `{}`: the same parsed value, one source for
+    // each default, and a literal both the Deno zod (3.x) and the Node zod the
+    // Vitest witnesses type-check against accept as the output type.
+    .default({ ...CONFIG_DEFAULTS }),
 });

@@ -401,8 +401,6 @@ CREATE TABLE IF NOT EXISTS public.coaches (
     player_id           uuid REFERENCES public.players(id) ON DELETE SET NULL,
     full_name           text NOT NULL,
     email               text NOT NULL CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
-    preferred_practice_days day_of_week[],
-    preferred_practice_window tsrange,
     can_coach_multiple_teams boolean DEFAULT false,
     status              text DEFAULT 'active' CHECK (status IN ('active', 'pending-confirmation', 'inactive')),
     ...

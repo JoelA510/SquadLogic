@@ -177,7 +177,7 @@ export function classifyTeamsForRun(
 // Loading, as the calling user
 // ---------------------------------------------------------------------------
 
-interface QueryResult {
+export interface QueryResult {
   data: unknown[] | null;
   error: { message?: string } | null;
 }
@@ -211,7 +211,7 @@ export const LOCK_MAX_PAGES = 1000;
  * page: a short page proves nothing when the server's cap is below
  * `pageSize`, so "fewer than asked" is never read as "the end".
  */
-async function readAllPages(
+export async function readAllPages(
   build: () => { range: (from: number, to: number) => PromiseLike<QueryResult> },
   pageSize: number
 ): Promise<{ rows: unknown[]; error: string | null }> {

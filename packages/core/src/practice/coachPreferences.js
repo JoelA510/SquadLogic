@@ -46,8 +46,14 @@
  * candidate filter there, with `PRACTICE_TBD_REASON.COACH_PREFERENCE` when it
  * empties a series' venue, and `prefer_keep` is priced by the objective as
  * `coachPreferenceBreached`. The repair itself has no production caller yet
- * (the `practice/` unwired pin), so nothing a family sees honours a preference
- * until PR 9-10 wire it. PR 8 mirrors the rule in the Deno twin.
+ * (the `practice/` unwired pin) until PR 9-10 wire it.
+ *
+ * The auto-scheduler Edge Function honours the same rule through its Deno
+ * twin, `supabase/functions/_shared/engines/coach-preferences.ts` (PR 8):
+ * `must_keep` filters new placements, `prefer_keep` breaks ties (plan §5
+ * decision 3). `tests/coachPreferenceDrift.test.js` holds the twin to this
+ * module over the full enumerated product; change a rule here and that test
+ * fails until the twin and its digest follow.
  */
 
 import { z } from 'zod';

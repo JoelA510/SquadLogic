@@ -26,12 +26,25 @@
  * date model here, so a locked row consumes its slot for the whole season --
  * never a double-booking, possibly an under-used slot. See
  * `_shared/engines/practice-lock.ts` and `_shared/engines/auto-scheduler-solver.ts`.
+ *
+ * Coach preferences (8.6 PR 3b PR 8, plan §4 and §5 decision 3): approved
+ * `coach_practice_preferences`, with coaches from `team_coach_assignments`
+ * current on the season's date, are loaded here -- AS THE CALLER through RLS,
+ * never from the request body. `must_keep` is a hard filter on new
+ * placements (a team it leaves with no legal slot is unplaced with reason
+ * `coach-preference`); `prefer_keep` is a lexicographic tiebreak, fewer
+ * breaches first. Locked rows are never judged. A failed or partial read
+ * refuses the run. See `_shared/engines/coach-preference-load.ts`.
  */
 
 import { serve } from 'https://deno.land/std@0.223.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
 import { AutoSchedulerInputSchema } from '../_shared/schemas/auto-scheduler.ts';
 import { prepareTeam } from '../_shared/engines/practice-coaches.ts';
+import {
+  loadCoachPreferenceContext,
+  seasonRunDate,
+} from '../_shared/engines/coach-preference-load.ts';
 import { runPracticeOptimizer } from '../_shared/engines/auto-scheduler-solver.ts';
 import {
   classifyTeamsForRun,
@@ -253,6 +266,18 @@ serve(async (req) => {
       );
     }
 
+    // `anchored.rows` already carries `start`/`end` as instants on the season's
+    // clock. `new Date(s.start)` here is what LIVE-7 was: a host-zone read of a
+    // naive string.
+    const slots = anchored.rows.map((s) => ({
+      id: s.id,
+      day: s.day ?? null,
+      start: s.start,
+      end: s.end,
+      capacity: s.capacity,
+      baseSlotId: s.baseSlotId,
+    }));
+
     //     Every roster team lands in exactly one of: placeable (no row, no
     //     TIME TBD series), locked (has a row), TIME TBD (excluded; decision 4).
     const classification = classifyTeamsForRun(
@@ -260,6 +285,46 @@ serve(async (req) => {
       lock.rows,
       lock.timeTbdTeamIds
     );
+
+    // 5d. COACH PREFERENCES (plan §4). Approved rows, and the coaches current
+    //     on the season's date, loaded as the caller through RLS. A failed or
+    //     partial read refuses the run: it never runs as if there were none.
+    const preferences = await loadCoachPreferenceContext(
+      createUserClient(req, supabaseUrl, anonKey),
+      supabase,
+      {
+        organizationId: input.organizationId,
+        runDate: seasonRunDate(Date.now(), season.timezone),
+        placeableTeamIds: classification.placeable,
+        slotIds: slots.map((s) => s.id),
+      }
+    );
+    if (!preferences.ok) {
+      edgeLogger.error('Auto-scheduler could not read coach preferences', {
+        orgId: input.organizationId,
+        seasonSettingsId,
+        code: preferences.code,
+        message: preferences.message,
+      });
+      await recordAuditNow(supabase, {
+        organizationId: input.organizationId,
+        action: 'scheduler.auto_refused',
+        resourceType: 'practice_schedule',
+        metadata: { reason: preferences.code, message: preferences.message },
+      });
+      await edgeLogger.flush();
+      return jsonResponse(
+        {
+          error:
+            'Approved coach preferences could not be read in full, so the run was refused ' +
+            `rather than scheduled as if there were none (${preferences.message}).`,
+          code: preferences.code,
+        },
+        // Invisible rows are a permission condition, not an outage: retrying
+        // cannot help; an org admin (who reads every row) can run it.
+        preferences.code === 'COACH_PREFERENCES_NOT_VISIBLE' ? 403 : 503
+      );
+    }
 
     // 6. Audit + structured logging: scheduler started
     edgeLogger.info('Auto-scheduler invoked', {
@@ -282,24 +347,16 @@ serve(async (req) => {
         lockedLoaded: lock.rows.length,
         placeableTeams: classification.placeable.length,
         timeTbdExcluded: classification.timeTbd.length,
+        approvedPreferencesLoaded: preferences.preferencesLoaded,
+        teamsConstrainedByPreferences: preferences.teamsConstrained,
+        coachAssignmentsLoaded: preferences.coachAssignmentsLoaded,
         config: input.config,
       },
     });
 
-    // 7. Prepare data
+    // 7. Prepare data (the slots were prepared at 5c-bis, before the
+    //    preference load that judges them).
     const teams = input.teams.map((t) => prepareTeam(t));
-
-    // `anchored.rows` already carries `start`/`end` as instants on the season's
-    // clock. `new Date(s.start)` here is what LIVE-7 was: a host-zone read of a
-    // naive string.
-    const slots = anchored.rows.map((s) => ({
-      id: s.id,
-      day: s.day ?? null,
-      start: s.start,
-      end: s.end,
-      capacity: s.capacity,
-      baseSlotId: s.baseSlotId,
-    }));
 
     // 8-9. Greedy seed + hill climbing over the placeable teams only. Every
     //      loaded row -- a TIME TBD series' row included -- is fixed
@@ -313,7 +370,7 @@ serve(async (req) => {
         slotId: row.slotId,
       })),
       placeableTeamIds: classification.placeable,
-      coachPreferences: input.coachPreferences,
+      preferenceGate: preferences.gate,
       config: input.config,
       onProgress: (progress) => {
         // Emit progress audit (fire-and-forget). `recordAudit` returns `void`
@@ -360,6 +417,8 @@ serve(async (req) => {
         timeTbdExcluded: timeTbdExcluded.length,
         assignedCount: bestAssignments.length,
         unassignedCount: bestUnassigned.length,
+        approvedPreferencesLoaded: preferences.preferencesLoaded,
+        preferKeepBreaches: run.preferKeepBreaches,
       },
       input_snapshot: {
         teamCount: teams.length,
@@ -375,8 +434,10 @@ serve(async (req) => {
     const findings = bestUnassigned.map((u) => ({
       severity: 'warning',
       finding_code: 'UNASSIGNED_TEAM',
-      description: `Team ${u.teamId} could not be assigned: ${u.reason}`,
-      affected_entities: [{ teamId: u.teamId }],
+      description:
+        `Team ${u.teamId} could not be assigned: ${u.reason}` +
+        (u.dimensions?.length ? ` (must_keep ${u.dimensions.join(', ')})` : ''),
+      affected_entities: [{ teamId: u.teamId, reason: u.reason, dimensions: u.dimensions ?? [] }],
     }));
 
     const metrics = [
@@ -427,6 +488,10 @@ serve(async (req) => {
         lockedOutsideRun: run.lockedOutsideRun.length,
         assignedCount: bestAssignments.length,
         unassignedCount: bestUnassigned.length,
+        approvedPreferencesLoaded: preferences.preferencesLoaded,
+        teamsConstrainedByPreferences: preferences.teamsConstrained,
+        coachPreferenceTbd: bestUnassigned.filter((u) => u.reason === 'coach-preference').length,
+        preferKeepBreaches: run.preferKeepBreaches,
       },
     });
 
@@ -457,6 +522,17 @@ serve(async (req) => {
           lockedTeams: classification.locked.length,
           lockedOutsideRun: run.lockedOutsideRun.map((row) => row.assignmentId),
           timeTbdExcluded,
+        },
+        // The approved coach preferences this run honoured, as loaded
+        // server-side: how many, the run date they were current on, the
+        // prefer_keep breaches the placements carry, and every finding (a
+        // conflict, or a preference with nothing to keep).
+        approvedPreferences: {
+          runDate: preferences.runDate,
+          loaded: preferences.preferencesLoaded,
+          teamsConstrained: preferences.teamsConstrained,
+          preferKeepBreaches: run.preferKeepBreaches,
+          findings: preferences.findings,
         },
         evaluation: run.evaluation,
         // Non-blocking timing findings -- today only WALL_TIME_AMBIGUOUS, a

@@ -21,6 +21,8 @@
  */
 import { evaluatePracticeSchedule } from './scoring-engine.ts';
 import { checkHardConstraints, type PreparedTeam, type TimeWindow } from './practice-coaches.ts';
+import { COACH_PREFERENCE_TBD_REASON } from './coach-preferences.ts';
+import { EMPTY_PREFERENCE_GATE, type PreferenceGate } from './coach-preference-load.ts';
 
 export type SchedulerTeam = PreparedTeam & { division: string };
 
@@ -49,9 +51,47 @@ export interface Placement {
 export interface Unplaced {
   teamId: string;
   reason: string;
+  /** For `coach-preference`: the `must_keep` dimensions no legal slot kept. */
+  dimensions?: string[];
 }
 
-type CoachPreferences = Record<string, { unavailableSlotIds?: string[] }>;
+// ---------------------------------------------------------------------------
+// Coach preferences (8.6 PR 3b, PR 8; plan §5 decision 3)
+// ---------------------------------------------------------------------------
+//
+// `must_keep` is a hard filter on NEW placements: `admissible` refuses a slot
+// whose verdict is violated, everywhere the search seats a team. `prefer_keep`
+// is a lexicographic tiebreak: the greedy seed takes the legal slot with the
+// fewest breaches (slot order breaking ties, which is today's order), and the
+// climb accepts an equal-scoring move that breaches less. Locked rows are
+// never judged: they are occupancy, not candidates. With no preferences every
+// verdict is zero and every step below is byte-identical to before.
+
+function mustKeepViolated(gate: PreferenceGate, teamId: string, slotId: string): boolean {
+  return gate.verdicts.get(teamId)?.get(slotId)?.mustKeepViolated ?? false;
+}
+
+function breachesOf(gate: PreferenceGate, teamId: string, slotId: string): number {
+  return gate.verdicts.get(teamId)?.get(slotId)?.preferKeepBreaches ?? 0;
+}
+
+/** Total `prefer_keep` breaches of a set of new placements. */
+export function totalBreaches(gate: PreferenceGate, placements: Placement[]): number {
+  let total = 0;
+  for (const p of placements) total += breachesOf(gate, p.teamId, p.slotId);
+  return total;
+}
+
+function admissible(
+  gate: PreferenceGate,
+  team: PreparedTeam,
+  slot: { id: string; start: Date; end: Date },
+  coachAssignments: Map<string, TimeWindow[]>,
+  slotCapacity: Map<string, number>
+): boolean {
+  if (mustKeepViolated(gate, team.id, slot.id)) return false;
+  return checkHardConstraints(team, slot, coachAssignments, slotCapacity);
+}
 
 // ---------------------------------------------------------------------------
 // Seeded PRNG (mulberry32)
@@ -175,7 +215,7 @@ interface OptimizerState {
   teamsById: Map<string, SchedulerTeam>;
   slotCapacity: Map<string, number>;
   coachAssignments: Map<string, TimeWindow[]>;
-  coachPreferences: CoachPreferences;
+  gate: PreferenceGate;
   placeableTeamIds: string[];
   unassignedTeamIds: string[];
 }
@@ -192,7 +232,7 @@ function buildState(
   placeableTeamIds: string[],
   teamsById: Map<string, SchedulerTeam>,
   slotsById: Map<string, SchedulerSlot>,
-  coachPreferences: CoachPreferences
+  gate: PreferenceGate
 ): OptimizerState {
   const assignmentMap = new Map<string, string>();
   const autoTeams: string[] = [];
@@ -222,7 +262,7 @@ function buildState(
     teamsById,
     slotCapacity,
     coachAssignments,
-    coachPreferences,
+    gate,
     placeableTeamIds,
     unassignedTeamIds: placeableTeamIds.filter((id) => !assignmentMap.has(id)),
   };
@@ -232,7 +272,7 @@ function tryMutate(
   state: OptimizerState,
   rand: () => number
 ): { placements: Placement[]; unassigned: Unplaced[]; type: string } | null {
-  const { autoTeams, unassignedTeamIds, slotsById, teamsById, coachPreferences } = state;
+  const { autoTeams, unassignedTeamIds, slotsById, teamsById, gate } = state;
   const hasUnassigned = unassignedTeamIds.length > 0;
   const hasMultipleAuto = autoTeams.length >= 2;
 
@@ -268,7 +308,7 @@ function tryMutate(
     const team = teamsById.get(teamId);
     const slot = slotsById.get(slotId);
     if (!team || !slot) return false;
-    if (!checkHardConstraints(team, slot, newCoach, newCap, coachPreferences)) return false;
+    if (!admissible(gate, team, slot, newCoach, newCap)) return false;
     newMap.set(teamId, slotId);
     newCap.set(slotId, (newCap.get(slotId) ?? 0) - 1);
     for (const coachId of team.coachIds) {
@@ -337,7 +377,7 @@ function generateGreedySeed(
   teams: SchedulerTeam[],
   placeableTeamIds: string[],
   slots: SchedulerSlot[],
-  coachPreferences: CoachPreferences
+  gate: PreferenceGate
 ): { placements: Placement[]; unassigned: Unplaced[] } {
   const slotsById = new Map(slots.map((s) => [s.id, s]));
   const slotCapacity = new Map(base.slotCapacity);
@@ -382,12 +422,22 @@ function generateGreedySeed(
       return bc - ac || a.id.localeCompare(b.id);
     });
 
-  // 3. Greedy assignment, placeable teams only
+  // 3. Greedy assignment, placeable teams only. Among the admissible slots
+  //    (must_keep already filtered), fewest prefer_keep breaches first, then
+  //    slot order -- so with no preferences this is the first legal slot.
   for (const team of sorted) {
     if (assignedTeamIds.has(team.id)) continue;
-    const bestSlot = slots.find((slot) =>
-      checkHardConstraints(team, slot, coachAssignments, slotCapacity, coachPreferences)
-    );
+    let bestSlot: SchedulerSlot | undefined;
+    let bestBreaches = Infinity;
+    for (const slot of slots) {
+      if (!admissible(gate, team, slot, coachAssignments, slotCapacity)) continue;
+      const breaches = breachesOf(gate, team.id, slot.id);
+      if (breaches < bestBreaches) {
+        bestSlot = slot;
+        bestBreaches = breaches;
+        if (breaches === 0) break;
+      }
+    }
     if (bestSlot) assign(team, bestSlot.id);
   }
 
@@ -396,6 +446,44 @@ function generateGreedySeed(
     .map((t) => ({ teamId: t.id, reason: 'no-slot-available' }));
 
   return { placements, unassigned };
+}
+
+// ---------------------------------------------------------------------------
+// Why a team is unplaced
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-derive each unplaced team's reason against the FINAL schedule, the rule
+ * core's repair applies (plan §4): legal slots before the `must_keep` filter
+ * and none after is TIME TBD `coach-preference`, naming the dimensions. No
+ * legal slot at all keeps the search's own reason. The subject set is the
+ * search's unplaced list, which both the seed and `tryMutate` derive from the
+ * placeable roster minus the placements -- never from the placements alone.
+ */
+function explainUnplaced(
+  gate: PreferenceGate,
+  base: BaseOccupancy,
+  placements: Placement[],
+  unassigned: Unplaced[],
+  teamsById: Map<string, SchedulerTeam>,
+  slotsById: Map<string, SchedulerSlot>
+): Unplaced[] {
+  if (gate.verdicts.size === 0) return unassigned;
+  const final = buildState(base, placements, [], teamsById, slotsById, gate);
+  return unassigned.map((entry) => {
+    const verdicts = gate.verdicts.get(entry.teamId);
+    const team = teamsById.get(entry.teamId);
+    if (!verdicts || !team) return entry;
+    const legal = [...slotsById.values()].filter((slot) =>
+      checkHardConstraints(team, slot, final.coachAssignments, final.slotCapacity)
+    );
+    const kept = legal.filter((slot) => !verdicts.get(slot.id)?.mustKeepViolated);
+    if (legal.length === 0 || kept.length > 0) return entry;
+    const dimensions = [
+      ...new Set(legal.flatMap((slot) => verdicts.get(slot.id)?.violatedDimensions ?? [])),
+    ].sort();
+    return { teamId: entry.teamId, reason: COACH_PREFERENCE_TBD_REASON, dimensions };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -413,6 +501,8 @@ export interface OptimizerResult {
   placements: Placement[];
   /** Placeable teams the run could not place, each with its reason. */
   unassigned: Unplaced[];
+  /** `prefer_keep` breaches across the returned placements (0 with no preferences). */
+  preferKeepBreaches: number;
   /** Locked rows whose slot is not in this run (still locked). */
   lockedOutsideRun: LockedOccupant[];
   evaluation: ReturnType<typeof evaluatePracticeSchedule>;
@@ -437,7 +527,11 @@ export async function runPracticeOptimizer(params: {
   slots: SchedulerSlot[];
   locked: LockedOccupant[];
   placeableTeamIds: string[];
-  coachPreferences: CoachPreferences;
+  /**
+   * Approved coach preferences, as verdicts per (placeable team, slot). Loaded
+   * server-side (`coach-preference-load.ts`); never from the request body.
+   */
+  preferenceGate?: PreferenceGate;
   config: OptimizerConfig;
   /** Called at each CPU yield, e.g. for a progress audit. */
   onProgress?: (progress: {
@@ -447,22 +541,29 @@ export async function runPracticeOptimizer(params: {
     restartCount: number;
   }) => void;
 }): Promise<OptimizerResult> {
-  const { teams, slots, locked, placeableTeamIds, coachPreferences, config: cfg } = params;
+  const { teams, slots, locked, placeableTeamIds, config: cfg } = params;
+  const gate = params.preferenceGate ?? EMPTY_PREFERENCE_GATE;
   const startTime = Date.now();
   const teamsById = new Map(teams.map((t) => [t.id, t]));
   const slotsById = new Map(slots.map((s) => [s.id, s]));
   const base = buildLockedOccupancy(locked, teamsById, slotsById);
   const rand = createPRNG(cfg.seed);
 
-  const seed = generateGreedySeed(base, teams, placeableTeamIds, slots, coachPreferences);
+  const seed = generateGreedySeed(base, teams, placeableTeamIds, slots, gate);
   const seedScoring = scoreSchedule(base, seed.placements, seed.unassigned, teams, slots);
   let bestPlacements = seed.placements;
   let bestUnassigned = seed.unassigned;
   let bestScore = seedScoring.score;
   let bestEvaluation = seedScoring.evaluation;
+  const seedBreaches = totalBreaches(gate, seed.placements);
+  let bestBreaches = seedBreaches;
 
   let currentPlacements = seed.placements;
   let currentScore = bestScore;
+  let currentBreaches = seedBreaches;
+  // Lexicographic: a higher score wins; at an equal score, fewer breaches.
+  const better = (score: number, breaches: number, than: number, thanBreaches: number) =>
+    score > than || (score === than && breaches < thanBreaches);
 
   let iteration = 0;
   let stallCount = 0;
@@ -487,14 +588,7 @@ export async function runPracticeOptimizer(params: {
 
     iteration++;
 
-    const state = buildState(
-      base,
-      currentPlacements,
-      placeableTeamIds,
-      teamsById,
-      slotsById,
-      coachPreferences
-    );
+    const state = buildState(base, currentPlacements, placeableTeamIds, teamsById, slotsById, gate);
     const mutated = tryMutate(state, rand);
 
     if (!mutated) {
@@ -502,8 +596,9 @@ export async function runPracticeOptimizer(params: {
       if (stallCount >= stallLimit && restartCount < maxRestarts) {
         restartCount++;
         stallCount = 0;
-        const restart = generateGreedySeed(base, teams, placeableTeamIds, slots, coachPreferences);
+        const restart = generateGreedySeed(base, teams, placeableTeamIds, slots, gate);
         currentPlacements = restart.placements;
+        currentBreaches = totalBreaches(gate, restart.placements);
         currentScore = scoreSchedule(
           base,
           currentPlacements,
@@ -527,15 +622,18 @@ export async function runPracticeOptimizer(params: {
       slots
     );
 
-    if (candidateScoring.score > currentScore) {
+    const candidateBreaches = totalBreaches(gate, mutated.placements);
+    if (better(candidateScoring.score, candidateBreaches, currentScore, currentBreaches)) {
       currentPlacements = mutated.placements;
       currentScore = candidateScoring.score;
+      currentBreaches = candidateBreaches;
       stallCount = 0;
 
-      if (candidateScoring.score > bestScore) {
+      if (better(candidateScoring.score, candidateBreaches, bestScore, bestBreaches)) {
         bestPlacements = mutated.placements;
         bestUnassigned = mutated.unassigned;
         bestScore = candidateScoring.score;
+        bestBreaches = candidateBreaches;
         bestEvaluation = candidateScoring.evaluation;
       }
     } else {
@@ -545,6 +643,7 @@ export async function runPracticeOptimizer(params: {
         stallCount = 0;
         currentPlacements = seed.placements;
         currentScore = seedScoring.score;
+        currentBreaches = seedBreaches;
       }
     }
 
@@ -574,7 +673,8 @@ export async function runPracticeOptimizer(params: {
 
   return {
     placements: bestPlacements,
-    unassigned: bestUnassigned,
+    unassigned: explainUnplaced(gate, base, bestPlacements, bestUnassigned, teamsById, slotsById),
+    preferKeepBreaches: bestBreaches,
     lockedOutsideRun: base.outsideRun,
     evaluation: bestEvaluation,
     seedScore: seedScoring.score,

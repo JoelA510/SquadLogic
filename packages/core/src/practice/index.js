@@ -78,6 +78,12 @@ export { materialisePracticeOccurrences, toFacilityBooking } from './materialise
 
 export { buildPracticeHistory, describePracticeHistory } from './history.js';
 
+export {
+  PRACTICE_DAYLIGHT_CONSTRAINT_ID,
+  PRACTICE_SUNSET_MARGIN_MINUTES,
+  evaluatePracticeDaylight,
+} from './daylight.js';
+
 export { toPracticeMetricsInput } from './metricsInput.js';
 
 export { PRACTICE_TBD_REASON, repairPracticeLoss } from './repair.js';

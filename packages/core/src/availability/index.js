@@ -29,6 +29,7 @@ export {
   AVAILABILITY_REASON_SEVERITY,
   AVAILABILITY_SEVERITY,
   AVAILABILITY_STATUS,
+  SUNSET_SOURCES_TOLERANCE_MINUTES,
   availabilitySeverityOf,
   deriveAvailabilityStatus,
   makeAvailabilityFinding,
@@ -44,6 +45,7 @@ export {
   PermitWindowSchema,
   SunsetRecordSchema,
   SurfaceLightingSchema,
+  VenueDaylightSchema,
 } from './schemas.js';
 
 export {
@@ -51,6 +53,7 @@ export {
   daylightLimitMinutes,
   resolveLighting,
   resolvePermitWindow,
+  sunsetForVenue,
   sunsetOn,
   venueIdOfSurface,
   weekdayCodeOf,

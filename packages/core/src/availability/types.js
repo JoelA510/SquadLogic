@@ -44,18 +44,46 @@
  */
 
 /**
- * Sunset for one date, as data rather than as a computation.
+ * Sunset for one date, as a stored record.
  *
- * GAP-06 allows either storing or computing this. Phase 1 stores it: the corpus
- * publishes the numbers the season was actually built against, and recomputing
- * them from a latitude would silently disagree with the schedule families were
- * given.
+ * GAP-06 allows either storing or computing this, and since 8.9 PR 4 the
+ * calendar does both. The **table wins where it has a record** (decision D10):
+ * the corpus publishes the numbers the season was built against, and silently
+ * replacing them with a computation would disagree with the schedule families
+ * were given. Where it has none, the daylight provider (`sunsetForVenue()`)
+ * computes the sunset from the venue's coordinates ({@link VenueDaylight}),
+ * and a gap between the two above two minutes is reported as
+ * `SUNSET_SOURCES_DISAGREE`, never resolved silently. The game path still
+ * reads this record alone.
  *
  * @typedef {Object} SunsetRecord
  * @property {string} date - ISO `YYYY-MM-DD`
  * @property {number} sunsetMinutes
  * @property {string|null} note
  * @property {string|null} source
+ */
+
+/**
+ * One venue's daylight source. See `VenueDaylightSchema`.
+ *
+ * @typedef {Object} VenueDaylight
+ * @property {string} venueId
+ * @property {number|null} latitude - degrees north; null with longitude
+ * @property {number|null} longitude - degrees east; null with latitude
+ * @property {string|null} source
+ */
+
+/**
+ * The daylight provider's answer for one venue on one date.
+ *
+ * @typedef {Object} VenueSunset
+ * @property {number|null} sunsetMinutes - the enforcement minute, `floor`ed
+ *   (decision D2); null exactly when `source` is `'unknown'`
+ * @property {'table'|'computed'|'unknown'} source
+ * @property {number|null} tableMinutes
+ * @property {number|null} computedMinutes - fractional; null without coordinates
+ * @property {AvailabilityFinding[]} findings - `SUNSET_SOURCES_DISAGREE` or
+ *   `SUNSET_UNKNOWN`, at most one
  */
 
 /**
@@ -88,6 +116,8 @@
  * @property {number} [sunsetMarginMinutes]
  * @property {number} [permitMarginMinutes]
  * @property {string|null} [source]
+ * @property {VenueDaylight[]} [venueDaylight]
+ * @property {string|null} [timeZone]
  */
 
 /**
@@ -99,6 +129,14 @@
  * @property {Record<string, PermitWindow[]>} permitsByVenue
  * @property {Record<string, SunsetRecord>} sunsetsByDate
  * @property {Record<string, SurfaceLighting>} lightingBySurface
+ * @property {Record<string, VenueDaylight>} daylightByVenue
+ * @property {string|null} timeZone
+ * @property {Array<import('../timing/seasonEvents.js').SeasonClockEvent>} clockChanges -
+ *   derived from `timeZone` over the sunset table's date span, the span whose
+ *   `Note` cells it cross-checks. Empty without a zone **or without table
+ *   rows**, which is "not derived", not "no change": a caller with a wider
+ *   season asks `deriveSeasonClockEvents()` for its own range. Computed
+ *   sunsets never read this list; they read the zone directly.
  * @property {number} sunsetMarginMinutes
  * @property {number} permitMarginMinutes
  * @property {string|null} source
@@ -122,6 +160,8 @@
  * @property {number} litPermitCount
  * @property {number} sunsetCount
  * @property {number} lightingRecordCount
+ * @property {number} daylightVenueCount
+ * @property {number} clockChangeNotesExamined - notes that named a clock change
  */
 
 /**

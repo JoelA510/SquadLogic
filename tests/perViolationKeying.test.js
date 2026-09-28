@@ -182,7 +182,10 @@ describe('every placement finding code has a locus, and the universe is the one 
     // `CARRIED_CODES` in `resolve/instances.js` or accept PLACED -- and updates
     // the count in the same change. TIMING_REASON is 30 since 8.9 PR 1: its two
     // sunset codes stay PLACED, as each turns on the venue and date a game is
-    // placed at.
+    // placed at. 8.9 PR 4 adds SUNSET_SOURCES_DISAGREE, PRACTICE_PAST_SUNSET
+    // (AVAILABILITY_REASON 35) and CLOCK_CHANGE_NOTE_DISAGREES (TIMING_REASON
+    // 31); all three stay PLACED -- each turns on a venue, a date or the
+    // calendar, never on the game -- and the gate emits none of them today.
     expect(
       Object.fromEntries(
         Object.entries(PLACEMENT_REASON_REGISTRIES).map(([name, registry]) => [
@@ -190,7 +193,7 @@ describe('every placement finding code has a locus, and the universe is the one 
           Object.keys(registry).length,
         ])
       )
-    ).toEqual({ FACILITY_REASON: 30, AVAILABILITY_REASON: 33, TIMING_REASON: 30 });
+    ).toEqual({ FACILITY_REASON: 30, AVAILABILITY_REASON: 35, TIMING_REASON: 31 });
     expect(
       Object.entries(FINDING_LOCUS_BY_CODE)
         .filter(([, locus]) => locus === FINDING_LOCUS.CARRIED)

@@ -111,6 +111,27 @@ export const SurfaceLightingSchema = z
   .strict();
 
 /**
+ * One venue's daylight source: the coordinates its sunset is computed from.
+ *
+ * Coordinates are data the caller hands in -- in production, per-venue columns
+ * in the database (8.9 plan section 2). Nothing here geocodes or fetches, and
+ * no coordinate is ever committed to the repository. `null`/`null` states
+ * "this venue has none", which the provider reports rather than guesses around.
+ */
+export const VenueDaylightSchema = z
+  .object({
+    venueId: IdSchema,
+    latitude: z.number().min(-90).max(90).nullable(),
+    longitude: z.number().min(-180).max(180).nullable(),
+    source: z.string().nullable().default(null),
+  })
+  .strict()
+  .refine((record) => (record.latitude === null) === (record.longitude === null), {
+    message: 'a venue carries both coordinates or neither',
+    path: ['longitude'],
+  });
+
+/**
  * Input for `buildAvailabilityCalendar()`.
  *
  * The **margins are configurable and defaulted here, once**. 15 minutes is the
@@ -129,8 +150,41 @@ export const AvailabilityCalendarInputSchema = z
     /** How little room against the permit close counts as "tight". */
     permitMarginMinutes: z.number().int().min(0).default(15),
     source: z.string().nullable().default(null),
+    /**
+     * Per-venue daylight sources for the provider (8.9 PR 4). Optional: a
+     * calendar without them answers from the date-keyed table alone, exactly
+     * as before.
+     */
+    venueDaylight: z.array(VenueDaylightSchema).default([]),
+    /**
+     * The season's IANA zone (`season_settings.timezone`). A computed sunset
+     * is read onto this clock, and the season's daylight-saving events are
+     * derived from it. Venues use the season zone; per-venue zones are out of
+     * scope.
+     */
+    timeZone: z.string().min(1).nullable().default(null),
   })
-  .strict();
+  .strict()
+  .superRefine((input, ctx) => {
+    const seen = new Set();
+    input.venueDaylight.forEach((record, index) => {
+      if (seen.has(record.venueId)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `two daylight sources claim venue ${record.venueId}`,
+          path: ['venueDaylight', index, 'venueId'],
+        });
+      }
+      seen.add(record.venueId);
+    });
+    if (input.timeZone === null && input.venueDaylight.some((record) => record.latitude !== null)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'a computed sunset needs the season timeZone to be read onto its clock',
+        path: ['timeZone'],
+      });
+    }
+  });
 
 /** Query accepted by `checkKickoffAvailability()`. */
 export const KickoffAvailabilityQuerySchema = z

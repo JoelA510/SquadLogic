@@ -168,8 +168,31 @@ export const AVAILABILITY_REASON = Object.freeze({
    * The ground is unlit and no sunset is recorded for the date, so the daylight
    * rule cannot be applied. `compromise` for the same reason
    * `OCCUPANCY_FOOTPRINT_UNKNOWN` is: an unjudgeable rule must be visible.
+   *
+   * The daylight provider (`sunsetForVenue()`, 8.9 PR 4) reuses this code for
+   * a venue with no table record for the date and no coordinates to compute
+   * one from, with `details.cause = 'venue-coordinates-missing'`; a computation
+   * the solar module refused carries `cause = 'sunset-not-computable'` and the
+   * timing code. Unknown is never read as "no limit": the practice daylight
+   * evaluator counts it and never allows the occurrence.
    */
   SUNSET_UNKNOWN: 'SUNSET_UNKNOWN',
+  /**
+   * The date-keyed table and the sunset computed from the venue's coordinates
+   * differ by more than {@link SUNSET_SOURCES_TOLERANCE_MINUTES} minutes. The
+   * table is applied (decision D10 of the 8.9 plan: it is what the season was
+   * built against); the disagreement says one of the two is wrong -- the
+   * coordinates, or the table, as it was for two rows of `sunsets.csv`.
+   */
+  SUNSET_SOURCES_DISAGREE: 'SUNSET_SOURCES_DISAGREE',
+  /**
+   * A practice occurrence on unlit or undeclared ground ends after sunset less
+   * `PRACTICE_SUNSET_MARGIN_MINUTES` (0: operator ruling 2026-09-27, "teams
+   * don't practice after sunset at unlit fields"). Emitted by
+   * `practice/daylight.js`, never by the game path, which keeps its own margin
+   * and {@link SUNSET_MARGIN_VIOLATED}.
+   */
+  PRACTICE_PAST_SUNSET: 'PRACTICE_PAST_SUNSET',
   /** Worst-case occupancy runs past sunset less the safety margin. */
   SUNSET_MARGIN_VIOLATED: 'SUNSET_MARGIN_VIOLATED',
   /** The ground is lit, so sunset does not bound it. Provenance. */
@@ -264,6 +287,15 @@ export const AVAILABILITY_REASON = Object.freeze({
 });
 
 /**
+ * How far apart the table sunset and the computed one may be before the
+ * provider reports `SUNSET_SOURCES_DISAGREE` (decision D10: "above 2 min").
+ * Two minutes clears the table's own rounding (0.5) and the NOAA model's fit
+ * to the corpus (about 1.05, `tests/solar.test.js`), and still catches the
+ * 5-6 minute errors the 2026-09-24 correction removed.
+ */
+export const SUNSET_SOURCES_TOLERANCE_MINUTES = 2;
+
+/**
  * Severity of every reason code.
  *
  * The permit close is `blocking` in Phase 1. That is a *policy* recorded in a
@@ -295,6 +327,8 @@ export const AVAILABILITY_REASON_SEVERITY = Object.freeze({
   [AVAILABILITY_REASON.SUNSET_MARGIN_VIOLATED]: AVAILABILITY_SEVERITY.BLOCKING,
   [AVAILABILITY_REASON.SUNSET_NOT_BINDING_WHEN_LIT]: AVAILABILITY_SEVERITY.INFO,
   [AVAILABILITY_REASON.SUNSET_PRECEDENCE_AMBIGUOUS]: AVAILABILITY_SEVERITY.INFO,
+  [AVAILABILITY_REASON.SUNSET_SOURCES_DISAGREE]: AVAILABILITY_SEVERITY.COMPROMISE,
+  [AVAILABILITY_REASON.PRACTICE_PAST_SUNSET]: AVAILABILITY_SEVERITY.BLOCKING,
 
   [AVAILABILITY_REASON.OCCUPANCY_BOUND_BY_BOOKING]: AVAILABILITY_SEVERITY.INFO,
   [AVAILABILITY_REASON.OCCUPANCY_UNBOUNDED]: AVAILABILITY_SEVERITY.INFO,

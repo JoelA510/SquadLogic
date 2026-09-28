@@ -76,7 +76,7 @@ passing.
 | [GAP-03](#gap-03) | Spatial overlap between distinct fields            | `facility_geometry.json`                                   | Closed · `facility/` |
 | [GAP-04](#gap-04) | Field size vs. lining eligibility                  | `facility_geometry.json`                                   | Closed · `facility/` |
 | [GAP-05](#gap-05) | Venue lighting                                     | `facility_geometry.json`, `facility_permits.csv`           | Closed · `facility/` + `availability/` |
-| [GAP-06](#gap-06) | Sunset per date                                    | `sunsets.csv`                                              | Closed · `availability/` |
+| [GAP-06](#gap-06) | Sunset per date                                    | `sunsets.csv`                                              | Closed · `availability/` — stored and computed |
 | [GAP-07](#gap-07) | Venue permit windows                               | `facility_permits.csv`                                     | Closed · `availability/` |
 | [GAP-08](#gap-08) | Per-venue-per-date permit exceptions and blackouts | `facility_permits.csv`                                     | Closed · `availability/` |
 | [GAP-09](#gap-09) | Occupancy vs. play time                            | `game_formats.csv`                                         | Closed · `timing/` |
@@ -173,6 +173,18 @@ passing.
 - **Today**: there is no sunset, daylight or per-date environment concept in any type. The 15-minute margin also has nowhere to live — see GAP-12.
 - **Needed by**: Phase 2 (daylight constraint), Phase 4 (what-if "latest legal kickoff").
 - **Status**: **Closed** — `SunsetRecord`, `sunsetOn()` and `daylightLimitMinutes()` in `availability/calendar.js`, consumed by `checkKickoffAvailability()` and `latestLegalKickoff()` (`availability/kickoff.js`) as one of four ranked constraints. Sunset is **stored, not computed** (the corpus publishes the numbers the season was built against), and the 15-minute margin is a calendar parameter — `SEASON_2026_SUNSET_MARGIN_MINUTES` — not a literal in a check. `tests/facilityAvailability.test.js` "acceptance 1 — the latest unlit kickoff is bound by sunset" (4:24 PM, derived), "moves with the margin, which is configurable and never hard-coded", "moves with the date", and the full-corpus replay.
+  *Annotation (8.9 PR 4): sunset is now **stored and computed**. The date-keyed
+  table stays authoritative wherever it has a record and the game path still
+  reads it alone (`sunsetOn()`, 15-minute margin, unchanged). Where it has no
+  record, the daylight provider `sunsetForVenue()` computes the sunset from the
+  venue's coordinates with `timing/solar.js`, on the season's clock
+  (`timeZone`); the two sources more than 2 minutes apart raise
+  `SUNSET_SOURCES_DISAGREE`, and a venue with neither raises `SUNSET_UNKNOWN`
+  with `details.cause = 'venue-coordinates-missing'`. The calendar also derives
+  the season's DST events from the zone and cross-checks the `Note` column
+  against them (`CLOCK_CHANGE_NOTE_DISAGREES`). The first consumer is the
+  practice daylight evaluator, `practice/daylight.js` (unlit practices end by
+  `floor(sunset)`, margin 0). `tests/practiceDaylight.test.js`.*
 
 <a id="gap-07"></a>
 

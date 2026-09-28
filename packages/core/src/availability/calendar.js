@@ -6,7 +6,8 @@
  *
  * ```text
  * resolvePermitWindow()   which permit governs this venue on this date
- * sunsetOn()              what time the sun sets on this date
+ * sunsetOn()              what time the sun sets on this date (the table)
+ * sunsetForVenue()        ... at this venue: table, else coordinates, else unknown
  * resolveLighting()       is this *field* lit, and until when
  * ```
  *
@@ -24,9 +25,12 @@
 
 import { getSurface, requireSurface } from '../facility/facilityGraph.js';
 import { isoDayNumber } from '../facility/eligibility.js';
+import { crossCheckClockChangeNotes, deriveSeasonClockEvents } from '../timing/seasonEvents.js';
+import { sunsetEnforcementMinutes, sunsetOnDate } from '../timing/solar.js';
 import { AvailabilityCalendarInputSchema } from './schemas.js';
 import {
   AVAILABILITY_REASON,
+  SUNSET_SOURCES_TOLERANCE_MINUTES,
   deriveAvailabilityStatus,
   makeAvailabilityFinding,
 } from './reasonCodes.js';
@@ -238,12 +242,43 @@ export function buildAvailabilityCalendar(input) {
     lightingBySurface[record.surfaceId] = applied;
   }
 
+  /** @type {Record<string, import('./types.js').VenueDaylight>} */
+  const daylightByVenue = {};
+  for (const record of parsed.venueDaylight) {
+    daylightByVenue[record.venueId] = /** @type {import('./types.js').VenueDaylight} */ (record);
+  }
+
+  // G2 of the 8.9 plan: the season's clock changes are derived from its zone,
+  // over the span the table covers, and the table's `Note` column is read as a
+  // claim checked against them (D12). No zone or no table rows, no events --
+  // "not derived", never "none". Computed sunsets do not depend on this list:
+  // `sunsetOnDate()` reads the zone's offset for each date itself.
+  /** @type {import('../timing/seasonEvents.js').SeasonClockEvent[]} */
+  let clockChanges = [];
+  let clockChangeNotesExamined = 0;
+  if (parsed.timeZone !== null && parsed.sunsets.length > 0) {
+    const dates = parsed.sunsets.map((record) => record.date).sort();
+    const derived = deriveSeasonClockEvents({
+      from: dates[0],
+      to: dates[dates.length - 1],
+      timeZone: parsed.timeZone,
+    });
+    clockChanges = derived.events;
+    findings.push(...derived.findings);
+    const checked = crossCheckClockChangeNotes({ notes: parsed.sunsets, events: clockChanges });
+    clockChangeNotesExamined = checked.notesExamined;
+    findings.push(...checked.findings);
+  }
+
   const permitWindows = /** @type {import('./types.js').PermitWindow[]} */ (parsed.permitWindows);
   const calendar = {
     permitWindows,
     permitsByVenue,
     sunsetsByDate,
     lightingBySurface,
+    daylightByVenue,
+    timeZone: parsed.timeZone,
+    clockChanges,
     sunsetMarginMinutes: parsed.sunsetMarginMinutes,
     permitMarginMinutes: parsed.permitMarginMinutes,
     source: parsed.source,
@@ -259,6 +294,8 @@ export function buildAvailabilityCalendar(input) {
       litPermitCount: permitWindows.filter((w) => w.lit === true).length,
       sunsetCount: Object.keys(sunsetsByDate).length,
       lightingRecordCount: Object.keys(lightingBySurface).length,
+      daylightVenueCount: Object.keys(daylightByVenue).length,
+      clockChangeNotesExamined,
     },
   };
 
@@ -336,6 +373,115 @@ export function resolvePermitWindow(calendar, { venueId, date }) {
  */
 export function sunsetOn(calendar, date) {
   return calendar.sunsetsByDate[date] ?? null;
+}
+
+/**
+ * The daylight provider: sunset at one venue on one date, and where it came from.
+ *
+ * Precedence (8.9 plan, decision D10):
+ *
+ * 1. **the date-keyed table** -- authoritative wherever it has a record,
+ *    because it is what the season was built against;
+ * 2. **computed** from the venue's coordinates by `timing/solar.js`, on the
+ *    season's clock (`calendar.timeZone`);
+ * 3. **unknown** -- `SUNSET_UNKNOWN` with `details.cause`
+ *    `'venue-coordinates-missing'` (or `'sunset-not-computable'` when the solar
+ *    module refused), and `sunsetMinutes: null`. Never a default, never "late".
+ *
+ * When both sources exist and differ by more than
+ * `SUNSET_SOURCES_TOLERANCE_MINUTES`, the table is still applied and
+ * `SUNSET_SOURCES_DISAGREE` says so.
+ *
+ * `sunsetMinutes` is the **enforcement** minute: the `floor` of the source
+ * (decision D2), the earlier minute. The table's minutes are whole already;
+ * a computed sunset is fractional and is floored here, so every consumer
+ * compares against the same conservative integer.
+ *
+ * The game path does not call this: `sunsetConstraint()` in `kickoff.js` reads
+ * the table through {@link sunsetOn}, with its own margin, unchanged.
+ *
+ * @param {import('./types.js').AvailabilityCalendar} calendar
+ * @param {{ venueId: string|null, date: string }} query
+ * @returns {import('./types.js').VenueSunset}
+ */
+export function sunsetForVenue(calendar, { venueId, date }) {
+  const record = sunsetOn(calendar, date);
+  const tableMinutes = record ? record.sunsetMinutes : null;
+  const daylight = venueId === null ? null : (calendar.daylightByVenue?.[venueId] ?? null);
+  const hasCoordinates = daylight !== null && daylight.latitude !== null;
+  const base = { venueId, date };
+
+  /** @type {import('./types.js').AvailabilityFinding[]} */
+  const findings = [];
+  /** @type {number|null} */
+  let computedMinutes = null;
+  /** @type {string|null} */
+  let computedRefusal = null;
+  if (hasCoordinates) {
+    const computed = sunsetOnDate({
+      date,
+      latitude: /** @type {number} */ (daylight.latitude),
+      longitude: /** @type {number} */ (daylight.longitude),
+      timeZone: calendar.timeZone,
+    });
+    computedMinutes = computed.minutes;
+    computedRefusal = computed.code;
+  }
+
+  if (tableMinutes !== null) {
+    if (
+      computedMinutes !== null &&
+      Math.abs(computedMinutes - tableMinutes) > SUNSET_SOURCES_TOLERANCE_MINUTES
+    ) {
+      findings.push(
+        makeAvailabilityFinding(
+          AVAILABILITY_REASON.SUNSET_SOURCES_DISAGREE,
+          `on ${date} the sunset table says minute ${tableMinutes} and venue ${venueId}'s coordinates give minute ${computedMinutes.toFixed(1)}; the table is applied`,
+          {
+            ...base,
+            tableMinutes,
+            computedMinutes,
+            toleranceMinutes: SUNSET_SOURCES_TOLERANCE_MINUTES,
+          }
+        )
+      );
+    }
+    return {
+      sunsetMinutes: Math.floor(tableMinutes),
+      source: 'table',
+      tableMinutes,
+      computedMinutes,
+      findings,
+    };
+  }
+
+  if (computedMinutes !== null) {
+    return {
+      sunsetMinutes: sunsetEnforcementMinutes({ minutes: computedMinutes }),
+      source: 'computed',
+      tableMinutes: null,
+      computedMinutes,
+      findings,
+    };
+  }
+
+  const cause = hasCoordinates ? 'sunset-not-computable' : 'venue-coordinates-missing';
+  findings.push(
+    makeAvailabilityFinding(
+      AVAILABILITY_REASON.SUNSET_UNKNOWN,
+      hasCoordinates
+        ? `no sunset is recorded for ${date} and venue ${venueId}'s coordinates give none (${computedRefusal}), so the daylight rule cannot be applied to unlit ground`
+        : `no sunset is recorded for ${date} and venue ${venueId ?? '(unknown)'} has no coordinates to compute one from, so the daylight rule cannot be applied to unlit ground`,
+      { ...base, cause, timingCode: computedRefusal }
+    )
+  );
+  return {
+    sunsetMinutes: null,
+    source: 'unknown',
+    tableMinutes: null,
+    computedMinutes: null,
+    findings,
+  };
 }
 
 /**

@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 544 codes, of
- * which 532 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 547 codes, of
+ * which 535 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -98,6 +98,7 @@ import {
   latestLegalKickoff,
   resolveLighting,
   resolvePermitWindow,
+  sunsetForVenue,
   weekdayCodeOf,
 } from '@squadlogic/core/availability/index.js';
 import {
@@ -235,6 +236,7 @@ import {
   PRACTICE_REASON,
   buildPracticeHistory,
   buildPracticeSlotSet,
+  evaluatePracticeDaylight,
   materialisePracticeOccurrences,
   createRecommendationState,
   declineRecommendation,
@@ -1128,6 +1130,67 @@ harvest(
     ],
   })
 );
+
+/*
+ * 8.9 PR 4: the daylight provider and the practice daylight evaluator.
+ * SYNTHETIC coordinates (round numbers, not a place). The table row sits well
+ * away from the computed sunset, so the provider reports the disagreement; a
+ * note naming the wrong fall-back date fails its cross-check; an unlit
+ * practice ending at 23:00 runs past any October sunset.
+ */
+const daylightCalendar = harvest(
+  'buildAvailabilityCalendar(a note naming the wrong DST date)',
+  buildAvailabilityCalendar({
+    timeZone: 'America/New_York',
+    sunsets: [
+      { date: '2026-10-31', sunsetMinutes: 1020 },
+      { date: '2026-11-07', sunsetMinutes: 1000, note: 'DST ends 11/08' },
+    ],
+    venueDaylight: [{ venueId: 'rig', latitude: 40, longitude: -75 }],
+  })
+);
+harvest(
+  'sunsetForVenue(table and coordinates more than two minutes apart)',
+  sunsetForVenue(daylightCalendar, { venueId: 'rig', date: '2026-10-31' })
+);
+{
+  const darkRig = buildFacilityGraph({
+    venues: [{ id: 'dark', name: 'Dark Park', lit: false }],
+    surfaces: [{ id: 'dark/f', venueId: 'dark', name: 'F', sizes: ['7v7'], lined: ['7v7'] }],
+  });
+  const lateSlotSet = buildPracticeSlotSet({
+    slots: [
+      {
+        id: 'late',
+        surfaceId: 'dark/f',
+        weekday: 'TUE',
+        startMinutes: 22 * 60,
+        durationMinutes: 60,
+        validFrom: '2026-10-06',
+        validUntil: '2026-10-06',
+        capacity: 1,
+        revisionId: 'r',
+        label: null,
+      },
+    ],
+    assignments: [{ id: 'a', slotId: 'late', teamId: 'T' }],
+    source: 'audit',
+  });
+  harvest(
+    'evaluatePracticeDaylight(an unlit practice ending at 23:00)',
+    evaluatePracticeDaylight({
+      occurrences: materialisePracticeOccurrences(lateSlotSet, {
+        from: '2026-10-06',
+        to: '2026-10-06',
+      }).occurrences,
+      graph: darkRig,
+      calendar: buildAvailabilityCalendar({
+        timeZone: 'America/New_York',
+        venueDaylight: [{ venueId: 'dark', latitude: 40, longitude: -75 }],
+      }),
+    })
+  );
+}
 
 const kickoffQuery = (overrides = {}) => ({
   surfaceId: 'rig/half',

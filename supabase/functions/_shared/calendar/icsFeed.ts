@@ -235,8 +235,12 @@ function noteCodesOf(findings: TimingFinding[]): string[] {
   return [...new Set(findings.filter((f) => !isBlockingFinding(f)).map((f) => f.code))];
 }
 
-/** `getUTCDay()` offsets for the `day_of_week` enum. */
-const DAY_MAP: Record<string, number> = {
+/**
+ * `getUTCDay()` offsets for the `day_of_week` enum. Import-free twin of core
+ * `DAY_OF_WEEK_ENUM` (`utils/practiceOccurrences.js`), pinned to it by
+ * `tests/dayOfWeekEnum.test.js`.
+ */
+export const DAY_MAP: Record<string, number> = {
   sun: 0,
   mon: 1,
   tue: 2,

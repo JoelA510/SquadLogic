@@ -1,8 +1,4 @@
 export const PERSISTENCE_THEMES = {
-  blue: {
-    gradientFrom: 'from-blue-500/5',
-    gradientTo: 'to-purple-500/5',
-  },
   green: {
     gradientFrom: 'from-green-500/5',
     gradientTo: 'to-emerald-500/5',

@@ -49,7 +49,7 @@ const clickSync = async () => {
 const SCENARIOS = {
   idle: {
     label: 'System Ready',
-    role: null,
+    role: 'status',
     async reach() {
       renderPanel();
     },
@@ -145,18 +145,69 @@ describe('PersistencePanel status display (via TeamPersistencePanel)', () => {
       expect(within(region).getByText(scenario.detail)).toBeVisible();
     }
 
-    if (scenario.role) {
-      expect(region).toHaveAttribute('role', scenario.role);
-      expect(region).toHaveAttribute(
-        'aria-live',
-        scenario.role === 'alert' ? 'assertive' : 'polite'
-      );
-    } else {
-      expect(region).not.toHaveAttribute('role');
-      expect(region).not.toHaveAttribute('aria-live');
-    }
-    // Failure is the only state that interrupts.
-    expect(screen.queryAllByRole('alert')).toHaveLength(state === 'error' ? 1 : 0);
+    // The row sits inside the live region matching its state; the other region is empty.
+    const liveRegion = region.parentElement;
+    expect(liveRegion).toHaveAttribute('role', scenario.role);
+    expect(liveRegion).toHaveAttribute(
+      'aria-live',
+      scenario.role === 'alert' ? 'assertive' : 'polite'
+    );
+    const otherRole = scenario.role === 'alert' ? 'status' : 'alert';
+    expect(screen.getByRole(otherRole)).toBeEmptyDOMElement();
+  });
+
+  it('keeps both live regions mounted across state changes so updates are announced', async () => {
+    triggerTeamPersistence.mockReturnValue(new Promise(() => {}));
+    renderPanel();
+    const polite = screen.getByRole('status');
+    const assertive = screen.getByRole('alert');
+    await clickSync();
+    expect(screen.getByRole('status')).toBe(polite);
+    expect(screen.getByRole('alert')).toBe(assertive);
+    expect(within(polite).getByText('Syncing active...')).toBeVisible();
+  });
+
+  it('an endpoint "blocked" result keeps its own message instead of resetting to idle', async () => {
+    triggerTeamPersistence.mockResolvedValue({
+      status: 'blocked',
+      message: 'Server has 2 pending overrides.',
+    });
+    renderPanel();
+    await clickSync();
+
+    const status = screen.getByRole('status');
+    expect(within(status).getByText('Sync blocked')).toBeVisible();
+    expect(within(status).getByText('Server has 2 pending overrides.')).toBeVisible();
+    expect(screen.queryByText('All manual overrides have been reviewed.')).toBeNull();
+  });
+
+  it('an unexpected result status is a failure, not a success', async () => {
+    triggerTeamPersistence.mockResolvedValue({
+      status: 'queued',
+      message: 'Unexpected response from persistence endpoint.',
+    });
+    renderPanel();
+    await clickSync();
+
+    const alert = screen.getByRole('alert');
+    expect(within(alert).getByText('Sync failed')).toBeVisible();
+    expect(within(alert).getByText('Unexpected response from persistence endpoint.')).toBeVisible();
+    expect(screen.queryByText('Sync complete')).toBeNull();
+  });
+
+  it('announces politely when reviewing the last pending override clears the block', async () => {
+    renderPanel(
+      makeSnapshot([{ id: 'o-1', teamName: 'Team A', field: 'name', status: 'pending' }])
+    );
+    expect(within(screen.getByRole('status')).getByText('Sync blocked')).toBeVisible();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /mark.*(reviewed|applied)/i }));
+    });
+
+    const status = screen.getByRole('status');
+    expect(within(status).getByText('System Ready')).toBeVisible();
+    expect(within(status).getByText('All manual overrides have been reviewed.')).toBeVisible();
   });
 
   it('a thrown sync error renders as a failure alert', async () => {
@@ -184,6 +235,33 @@ describe('PersistencePanel status display (via TeamPersistencePanel)', () => {
     expect(within(alert).getByText('Sync failed')).toBeVisible();
     expect(within(alert).getByText('Supabase sync timed out. Please retry.')).toBeVisible();
     expect(screen.queryByText('All manual overrides have been reviewed.')).toBeNull();
+    expect(triggerTeamPersistence.mock.calls[0][0].signal.aborted).toBe(true);
+  });
+
+  it('a timed-out request that resolves late cannot overwrite a retry', async () => {
+    vi.useFakeTimers();
+    let resolveFirst;
+    triggerTeamPersistence
+      .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
+      .mockReturnValueOnce(new Promise(() => {}));
+    renderPanel();
+    await clickSync();
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    await clickSync();
+    expect(within(screen.getByRole('status')).getByText('Syncing active...')).toBeVisible();
+
+    await act(async () => {
+      resolveFirst({ status: 'success', syncedAt: '2026-09-01T12:00:00Z', updatedTeams: 2 });
+    });
+    expect(within(screen.getByRole('status')).getByText('Syncing active...')).toBeVisible();
+
+    // The retry's own timeout was not cleared by the stale request's `finally`.
+    await act(async () => {
+      vi.advanceTimersByTime(10000);
+    });
+    expect(within(screen.getByRole('alert')).getByText('Sync failed')).toBeVisible();
   });
 
   it('only animates the indicator while a sync is in flight', async () => {

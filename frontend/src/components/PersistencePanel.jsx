@@ -1,52 +1,25 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import { PERSISTENCE_THEMES } from '../utils/themes.js';
 import Badge from './ui/Badge.jsx';
 
 /**
- * Per-status display. Live-region contract follows `AutoSchedulerPanel`: progress and success
- * are `role="status"` + `aria-live="polite"`, failure is `role="alert"` + `aria-live="assertive"`.
- * `idle` is the resting state and is not announced. `blocked` (pending manual overrides) is a
- * standing precondition rather than a failed sync, so it is announced politely.
+ * Per-status display. Live-region contract follows `AutoSchedulerPanel`: failure goes to a
+ * `role="alert"` + `aria-live="assertive"` region, every other state to `role="status"` +
+ * `aria-live="polite"`. Both regions stay mounted and only their content changes, so updates are
+ * announced (a live region inserted already filled is often skipped by screen readers).
  */
 const STATUS_DISPLAY = {
   idle: { label: 'System Ready', tone: 'neutral', dot: 'bg-status-pending' },
-  syncing: {
-    label: 'Syncing active...',
-    tone: 'info',
-    dot: 'bg-brand',
-    role: 'status',
-    live: 'polite',
-  },
-  success: {
-    label: 'Sync complete',
-    tone: 'success',
-    dot: 'bg-status-success',
-    role: 'status',
-    live: 'polite',
-  },
-  blocked: {
-    label: 'Sync blocked',
-    tone: 'warning',
-    dot: 'bg-status-warning',
-    role: 'status',
-    live: 'polite',
-  },
-  error: {
-    label: 'Sync failed',
-    tone: 'danger',
-    dot: 'bg-status-error',
-    role: 'alert',
-    live: 'assertive',
-  },
+  syncing: { label: 'Syncing active...', tone: 'info', dot: 'bg-brand' },
+  success: { label: 'Sync complete', tone: 'success', dot: 'bg-status-success' },
+  blocked: { label: 'Sync blocked', tone: 'warning', dot: 'bg-status-warning' },
+  error: { label: 'Sync failed', tone: 'danger', dot: 'bg-status-error', alert: true },
 };
 
 const UNKNOWN_STATUS_DISPLAY = {
   label: 'Status unknown',
   tone: 'warning',
   dot: 'bg-status-warning',
-  role: 'status',
-  live: 'polite',
 };
 
 /**
@@ -61,14 +34,20 @@ export default function PersistencePanel({
   message = undefined,
   children = undefined,
 }) {
-  const palette = PERSISTENCE_THEMES.blue;
   // An unrecognised status must never read as "System Ready".
   const display = STATUS_DISPLAY[status] ?? UNKNOWN_STATUS_DISPLAY;
   const statusDetail = lastSync ? `Last updated ${lastSync}` : message || 'No recent sync';
+  const statusRow = (
+    <div className="flex items-center gap-2" data-testid="persistence-status">
+      <Badge tone={display.tone}>{display.label}</Badge>
+      <span className="text-text-muted">•</span>
+      <span className="text-sm text-text-muted">{statusDetail}</span>
+    </div>
+  );
 
   return (
     <div
-      className={`relative overflow-hidden rounded-xl border border-border-subtle bg-gradient-to-br ${palette.gradientFrom} ${palette.gradientTo} p-6`}
+      className={`relative overflow-hidden rounded-xl border border-border-subtle bg-gradient-to-br from-brand/5 to-transparent p-6`}
     >
       <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
         <div className="flex items-center gap-4">
@@ -83,16 +62,13 @@ export default function PersistencePanel({
           </div>
           <div>
             <h3 className="text-lg font-bold text-text-primary">{title}</h3>
-            <div
-              key={status}
-              className="flex items-center gap-2 mt-1"
-              role={display.role}
-              aria-live={display.live}
-              data-testid="persistence-status"
-            >
-              <Badge tone={display.tone}>{display.label}</Badge>
-              <span className="text-text-muted">•</span>
-              <span className="text-sm text-text-muted">{statusDetail}</span>
+            <div className="mt-1">
+              <div role="status" aria-live="polite">
+                {!display.alert && statusRow}
+              </div>
+              <div role="alert" aria-live="assertive">
+                {display.alert && statusRow}
+              </div>
             </div>
           </div>
         </div>

@@ -484,6 +484,44 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "FAIL smoke ${id}: it passed without proving one approved preference per coach and dimension"; STATUS=1
       fi
     fi
+    # **The production RLS drift replay** is the only evidence that the
+    # reconcile fixes production rather than a repo chain where it has nothing
+    # to do, so each half of it is a claim. The smoke RAISEs on any failed
+    # assertion; these fail if the evidence lines ever stop printing.
+    if [ "$id" = "20260928000000" ]; then
+      if grep -q 'reconciled over the production drift: broad ALL policy gone from all 11 tables' /tmp/harness_smoke &&
+         grep -q 'non-admin member after reconcile: inserts into teams, fields and practice_slots refused by RLS; update and delete reached 0 rows' /tmp/harness_smoke; then
+        echo "  | (checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the broad policy gone and member writes refused over the production drift"
+        STATUS=1
+      fi
+      if grep -q '9 read policies restored' /tmp/harness_smoke &&
+         grep -q 'non-admin member after reconcile: reads 1 of 1 own-org team and 1 of 1 own-org practice slot, and 0 of org B' /tmp/harness_smoke; then
+        echo "  | (checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the read policies restored and member reads scoped over the production drift"
+        STATUS=1
+      fi
+      if grep -qF 'a member-writable table nobody listed each abort the reconcile' /tmp/harness_smoke; then
+        echo "  | (checked) the reconcile's own end-state check refuses a member-writable policy on a table nobody listed"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the end-state check covers tables nobody listed"
+        STATUS=1
+      fi
+      if grep -qF 'member-satisfiable exactly {"telemetry_log: Insert telemetry for own organization"}, allowlisted; a planted member-writable table is flagged' /tmp/harness_smoke; then
+        echo "  | (checked) every write policy in public, evaluated as a plain member on an own-org row, is admin-gated or allowlisted -- direct-column gates only, a gate through a parent row is not reached"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the semantic census of every write policy in public"
+        STATUS=1
+      fi
+      if grep -qF 'scheduler_runs: a member reads 1 own-org run and 0 of org B, and cannot insert or update; an admin session inserts and updates' /tmp/harness_smoke; then
+        echo "  | (checked) scheduler_runs is closed to member writes and scoped member reads, and an admin session still writes it"
+      else
+        echo "FAIL smoke ${id}: it passed without proving scheduler_runs closed to members and open to admins"
+        STATUS=1
+      fi
+    fi
   elif [ -n "$needle" ] && grep -qF "$needle" /tmp/harness_smoke &&
        grep -qF "$ctx" /tmp/harness_smoke; then
     echo "PASS smoke ${id} (refused, as recorded)"
@@ -761,7 +799,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old

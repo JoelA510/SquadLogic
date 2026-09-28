@@ -91,7 +91,62 @@ When('I navigate to the Practice Scheduling page', async ({ page }) => {
     });
   });
 
+  // The mock's default practice slot (`ps-1`) is valid for 2025 only, a season
+  // that has ended. A new placement starts at max(slot.validFrom, today on the
+  // season clock) (8.6 PR 3b plan §3), so the page correctly refuses to stage a
+  // placement into a slot whose dates are all past. Give the slot a window
+  // around today, relative to the run date so this seed never goes stale again.
+  // The mock creates its store on first load, so the page is loaded, the slot
+  // re-dated, and the page reloaded to read it.
   await page.goto('/schedule/practice');
+  await page.waitForLoadState('networkidle');
+  await page.evaluate(() => {
+    // The mock merges this partial store over its defaults by id, so the
+    // default `ps-1` is replaced whole, re-dated around today.
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    const iso = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+    const current = {
+      id: 'ps-1',
+      day_of_week: 'tue',
+      start_time: '18:00',
+      end_time: '19:30',
+      capacity: 2,
+      valid_from: iso(-30),
+      valid_until: iso(90),
+      field_id: 'v1',
+      organization_id: orgId,
+    };
+    db.practice_slots = [
+      ...(db.practice_slots || []).filter((slot: Record<string, unknown>) => slot.id !== 'ps-1'),
+      current,
+    ];
+    // The default row on `ps-1` (`pa-1`) is re-dated with its slot, so the
+    // seed stays consistent: a saved row lies inside its slot's window, and an
+    // Apply re-sends it with its key unchanged (the v3 lock).
+    db.practice_assignments = [
+      ...(db.practice_assignments || []).filter(
+        (row: Record<string, unknown>) => row.id !== 'pa-1'
+      ),
+      {
+        id: 'pa-1',
+        organization_id: orgId,
+        team_id: '00000000-0000-0000-0000-000000000001',
+        slot_id: 'ps-1',
+        practice_slot_id: 'ps-1',
+        run_id: 'run-practice-1',
+        day_of_week: 'tue',
+        start_time: '18:00',
+        end_time: '19:30',
+        field_id: 'v1',
+        source: 'auto',
+        effective_date_range: `[${iso(-30)},${iso(91)})`,
+      },
+    ];
+    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+  });
+
+  await page.reload();
   await page.waitForLoadState('networkidle');
 });
 
@@ -284,6 +339,8 @@ Given(
         if (!db.practice_assignments) db.practice_assignments = [];
         db.practice_assignments.push({
           id: `locked-${tId}-${sId}`,
+          // CLAUDE.md §8 rule 1: the season read filters by organization.
+          organization_id: localStorage.getItem('squadlogic_active_org') || 'org-1',
           team_id: tId,
           slot_id: sId,
           practice_slot_id: sId,

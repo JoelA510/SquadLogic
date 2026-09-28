@@ -1010,7 +1010,13 @@ Given('a practice schedule has been generated', async ({ page }) => {
     db.scheduler_runs = [];
     db.practice_assignments = [];
 
-    // 1. Seed base tables
+    // 1. Seed base tables. The team's division belongs to the active season:
+    //    the page's locked set is a SEASON read (org + season through
+    //    teams -> divisions), exactly as the auto-scheduler loads it.
+    db.divisions = [
+      ...(db.divisions || []).filter((d: Record<string, unknown>) => d.id !== 'div-1'),
+      { id: 'div-1', name: 'U10', organization_id: orgId, season_settings_id: seasonId },
+    ];
     db.teams = [{ id: 'team-a', name: 'Team A', division_id: 'div-1', organization_id: orgId }];
     db.practice_slots = [
       {
@@ -1043,9 +1049,14 @@ Given('a practice schedule has been generated', async ({ page }) => {
     // 3. Link the assignment directly to that future-dated run
     db.practice_assignments.push({
       id: 'assign-team-a',
+      // CLAUDE.md §8 rule 1, and the columns a real persisted row carries.
+      organization_id: orgId,
       run_id: 'active-run-id',
       team_id: 'team-a',
       slot_id: 'slot-1',
+      practice_slot_id: 'slot-1',
+      effective_date_range: '[2025-01-01,2026-01-01)',
+      assigned_via: 'auto',
       source: 'auto',
       // Hydrate objects to bypass any mock client join failures
       teams: { name: 'Team A', divisions: { name: 'U10' } },
@@ -1124,14 +1135,29 @@ Given('{string} has a locked practice assignment', async ({ page }, teamName: st
   }
 });
 
+// Operator ruling 2 (8.6 PR 3b plan §3): every assigned practice is locked,
+// whatever its lock toggle says, and an ordinary run places only teams with no
+// practice. The staged review after the run is the season's rows, unchanged,
+// plus new placements -- so "unchanged" is asserted on the row itself: still
+// staged, exactly once, on the same slot, with no refusal. (The amber toggle
+// this step used to check was a staged, unsaved `source: manual` edit, which a
+// re-run rebuilds from the saved row; the row's lock no longer depends on it.)
 Then('the assignment for {string} should remain unchanged', async ({ page }, teamName: string) => {
-  const row = page.locator('tr').filter({ hasText: teamName }).first();
-  await expect(row.locator('button.text-amber-500').first()).toBeVisible();
+  const review = page.locator('section[aria-label="Practice schedule review"]');
+  await expect(review).toContainText('Review Practice Changes', { timeout: 10000 });
+  await expect(review.locator('[role="alert"]')).toHaveCount(0);
+  const rows = page.locator('tr').filter({ hasText: teamName });
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('17:00');
 });
 
+// Obsolete under ruling 2 as written ("unlocked assignments ... updated"): an
+// ordinary run never moves an assigned team. What the engine may change is
+// the set of teams with NO practice, so assert that the locked team was not
+// given a second one: the auto-scheduler received Team A's row as locked and
+// the staged review holds no additional row for it.
 Then('other unlocked assignments should be updated by the engine', async ({ page }) => {
-  // Visually check for success indicator of the scheduling engine running in the UI
-  await expect(page.locator('.text-status-success, text="Schedule Generated"').first())
-    .toBeVisible({ timeout: 5000 })
-    .catch(() => {});
+  const review = page.locator('section[aria-label="Practice schedule review"]');
+  await expect(review).toContainText('Review Practice Changes', { timeout: 10000 });
+  await expect(page.locator('tr').filter({ hasText: 'Team A' })).toHaveCount(1);
 });

@@ -1,0 +1,5156 @@
+{
+  "$comment": [
+    "The computed sunset cross-arm vector table. (date, latitude, longitude, IANA zone) ->",
+    "fractional minutes past local midnight on the season clock, the refusal code, and the",
+    "floor enforcement minute (plus, for a polar null, whether it is polar night or midnight sun).",
+    "",
+    "GENERATED from packages/core/src/timing/solar.js by scripts/generate-solar-vectors.mjs.",
+    "Do not hand-edit. It is read by both arms:",
+    "  tests/solarVectors.test.js                 core AND the TS arm under Vitest",
+    "  supabase/functions/_shared/tests/solar_test.ts  the TS arm under Deno, two host zones",
+    "Minutes are compared within 1e-9 (the engines differ in the last ulp across runtimes);",
+    "code, cause and the floor minute exactly. The in-process comparison is tests/solarDrift.test.js.",
+    "",
+    "No real coordinates: grid latitudes and each zone's standard meridian (or 7.5 deg off it)."
+  ],
+  "cases": [
+    {
+      "id": "v001",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-01-21",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1180.8322749433173,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1180
+      }
+    },
+    {
+      "id": "v002",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-02-21",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1140.1699366829316,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1140
+      }
+    },
+    {
+      "id": "v003",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-03-21",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1149.5675537076265,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1149
+      }
+    },
+    {
+      "id": "v004",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-04-21",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1093.9988883551193,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1093
+      }
+    },
+    {
+      "id": "v005",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-05-21",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1055.0608470408765,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1055
+      }
+    },
+    {
+      "id": "v006",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-06-21",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1044.8139341436747,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1044
+      }
+    },
+    {
+      "id": "v007",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-07-21",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1064.88033994996,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1064
+      }
+    },
+    {
+      "id": "v008",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-08-21",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1099.4515002214127,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1099
+      }
+    },
+    {
+      "id": "v009",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-09-21",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1136.0079524580192,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1136
+      }
+    },
+    {
+      "id": "v010",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-10-21",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1174.1267712680838,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1174
+      }
+    },
+    {
+      "id": "v011",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-11-21",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1157.183689211298,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1157
+      }
+    },
+    {
+      "id": "v012",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-12-21",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1186.8400274977794,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1186
+      }
+    },
+    {
+      "id": "v013",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-07",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1115.5968968004147,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1115
+      }
+    },
+    {
+      "id": "v014",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-08",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1173.767696421491,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1173
+      }
+    },
+    {
+      "id": "v015",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-09",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1171.9317073682882,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1171
+      }
+    },
+    {
+      "id": "v016",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-31",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1187.9196518797996,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1187
+      }
+    },
+    {
+      "id": "v017",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-01",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1129.3218524242354,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1129
+      }
+    },
+    {
+      "id": "v018",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-02",
+      "latitude": -45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1130.726873616576,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1130
+      }
+    },
+    {
+      "id": "v019",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-01-21",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1117.1740793643382,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1117
+      }
+    },
+    {
+      "id": "v020",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-02-21",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1108.1886297798883,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1108
+      }
+    },
+    {
+      "id": "v021",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-03-21",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1149.872881952556,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1149
+      }
+    },
+    {
+      "id": "v022",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-04-21",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1128.9574824258668,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1128
+      }
+    },
+    {
+      "id": "v023",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-05-21",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1117.5466388792513,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1117
+      }
+    },
+    {
+      "id": "v024",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-06-21",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1119.021006123622,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1119
+      }
+    },
+    {
+      "id": "v025",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-07-21",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1127.3915650857082,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1127
+      }
+    },
+    {
+      "id": "v026",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-08-21",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1133.6730123146638,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1133
+      }
+    },
+    {
+      "id": "v027",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-09-21",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1135.9428913184997,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1135
+      }
+    },
+    {
+      "id": "v028",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-10-21",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1139.9355425962153,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1139
+      }
+    },
+    {
+      "id": "v029",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-11-21",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1092.1350790452123,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1092
+      }
+    },
+    {
+      "id": "v030",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-12-21",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1108.785765140397,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1108
+      }
+    },
+    {
+      "id": "v031",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-07",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1099.689329144814,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1099
+      }
+    },
+    {
+      "id": "v032",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-08",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1159.0183993887208,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1159
+      }
+    },
+    {
+      "id": "v033",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-09",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1158.3411601431271,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1158
+      }
+    },
+    {
+      "id": "v034",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-31",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1142.8381038801285,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1142
+      }
+    },
+    {
+      "id": "v035",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-01",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1083.1839486174042,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1083
+      }
+    },
+    {
+      "id": "v036",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-02",
+      "latitude": -15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1083.5400715766998,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1083
+      }
+    },
+    {
+      "id": "v037",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-01-21",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1073.0465143033323,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1073
+      }
+    },
+    {
+      "id": "v038",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-02-21",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1085.9016340216597,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1085
+      }
+    },
+    {
+      "id": "v039",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-03-21",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1151.0212142140817,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1151
+      }
+    },
+    {
+      "id": "v040",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-04-21",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1155.3399929201464,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1155
+      }
+    },
+    {
+      "id": "v041",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-05-21",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1163.155334389692,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1163
+      }
+    },
+    {
+      "id": "v042",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-06-21",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1172.3990449441276,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1172
+      }
+    },
+    {
+      "id": "v043",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-07-21",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1172.9456379392066,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1172
+      }
+    },
+    {
+      "id": "v044",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-08-21",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1159.4645659613668,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1159
+      }
+    },
+    {
+      "id": "v045",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-09-21",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1136.8192302895375,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1136
+      }
+    },
+    {
+      "id": "v046",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-10-21",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1116.1402443847894,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1116
+      }
+    },
+    {
+      "id": "v047",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-11-21",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1047.1705666415467,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1047
+      }
+    },
+    {
+      "id": "v048",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-12-21",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1055.3948888647537,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1055
+      }
+    },
+    {
+      "id": "v049",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-07",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1088.98724911162,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1088
+      }
+    },
+    {
+      "id": "v050",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-08",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1149.1590685535753,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1149
+      }
+    },
+    {
+      "id": "v051",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-09",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1149.3257271708976,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1149
+      }
+    },
+    {
+      "id": "v052",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-31",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1111.4016391184653,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1111
+      }
+    },
+    {
+      "id": "v053",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-01",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1051.0151383225927,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1051
+      }
+    },
+    {
+      "id": "v054",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-02",
+      "latitude": 15,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1050.6457638017866,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1050
+      }
+    },
+    {
+      "id": "v055",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-01-21",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1012.6318322391687,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1012
+      }
+    },
+    {
+      "id": "v056",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-02-21",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1056.5576536179033,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1056
+      }
+    },
+    {
+      "id": "v057",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-03-21",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1153.856442152724,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1153
+      }
+    },
+    {
+      "id": "v058",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-04-21",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1193.1925184637528,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1193
+      }
+    },
+    {
+      "id": "v059",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-05-21",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1229.1797577852703,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1229
+      }
+    },
+    {
+      "id": "v060",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-06-21",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1250.4329541292745,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1250
+      }
+    },
+    {
+      "id": "v061",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-07-21",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1238.7737729066773,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1238
+      }
+    },
+    {
+      "id": "v062",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-08-21",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1196.3848794541148,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1196
+      }
+    },
+    {
+      "id": "v063",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-09-21",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1139.2761164409885,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1139
+      }
+    },
+    {
+      "id": "v064",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-10-21",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1084.7835046904863,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1084
+      }
+    },
+    {
+      "id": "v065",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-11-21",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 985.639402109372,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 985
+      }
+    },
+    {
+      "id": "v066",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-12-21",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 981.1708351234579,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 981
+      }
+    },
+    {
+      "id": "v067",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-07",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1075.60793788916,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1075
+      }
+    },
+    {
+      "id": "v068",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-08",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1136.9345269202684,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1136
+      }
+    },
+    {
+      "id": "v069",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-09",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1138.2569989713868,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1138
+      }
+    },
+    {
+      "id": "v070",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-31",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1069.3535704022756,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1069
+      }
+    },
+    {
+      "id": "v071",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-01",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1007.9325641747973,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1007
+      }
+    },
+    {
+      "id": "v072",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-02",
+      "latitude": 45,
+      "longitude": -75,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1006.5364285843702,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1006
+      }
+    },
+    {
+      "id": "v073",
+      "tags": [
+        "off-meridian"
+      ],
+      "date": "2026-06-21",
+      "latitude": 30,
+      "longitude": -82.5,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1234.2562351323227,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1234
+      }
+    },
+    {
+      "id": "v074",
+      "tags": [
+        "off-meridian"
+      ],
+      "date": "2026-06-21",
+      "latitude": 30,
+      "longitude": -67.5,
+      "timeZone": "America/New_York",
+      "expect": {
+        "minutes": 1174.2477301025879,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1174
+      }
+    },
+    {
+      "id": "v075",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-01-21",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1180.726231889262,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1180
+      }
+    },
+    {
+      "id": "v076",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-02-21",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1139.9616669984566,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1139
+      }
+    },
+    {
+      "id": "v077",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-03-21",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1149.3331165541172,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1149
+      }
+    },
+    {
+      "id": "v078",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-04-21",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1093.795679233229,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1093
+      }
+    },
+    {
+      "id": "v079",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-05-21",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1054.9504649708458,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1054
+      }
+    },
+    {
+      "id": "v080",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-06-21",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1044.8437854503607,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1044
+      }
+    },
+    {
+      "id": "v081",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-07-21",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1065.0045510816954,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1065
+      }
+    },
+    {
+      "id": "v082",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-08-21",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1099.597609259612,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1099
+      }
+    },
+    {
+      "id": "v083",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-09-21",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1136.1583173409113,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1136
+      }
+    },
+    {
+      "id": "v084",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-10-21",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1174.2960481113807,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1174
+      }
+    },
+    {
+      "id": "v085",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-11-21",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1157.3502041610177,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1157
+      }
+    },
+    {
+      "id": "v086",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-12-21",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1186.9008259856378,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1186
+      }
+    },
+    {
+      "id": "v087",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-07",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1115.3686370617065,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1115
+      }
+    },
+    {
+      "id": "v088",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-08",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1173.5385576395108,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1173
+      }
+    },
+    {
+      "id": "v089",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-09",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1171.7017590468179,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1171
+      }
+    },
+    {
+      "id": "v090",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-31",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1188.094758603047,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1188
+      }
+    },
+    {
+      "id": "v091",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-01",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1129.4973344347986,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1129
+      }
+    },
+    {
+      "id": "v092",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-02",
+      "latitude": -45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1130.902678274229,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1130
+      }
+    },
+    {
+      "id": "v093",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-01-21",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1117.1728244099656,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1117
+      }
+    },
+    {
+      "id": "v094",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-02-21",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1108.1218717346162,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1108
+      }
+    },
+    {
+      "id": "v095",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-03-21",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1149.782715941065,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1149
+      }
+    },
+    {
+      "id": "v096",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-04-21",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1128.8863174198766,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1128
+      }
+    },
+    {
+      "id": "v097",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-05-21",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1117.5260633806142,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1117
+      }
+    },
+    {
+      "id": "v098",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-06-21",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1119.0488576853209,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1119
+      }
+    },
+    {
+      "id": "v099",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-07-21",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1127.4263193903398,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1127
+      }
+    },
+    {
+      "id": "v100",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-08-21",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1133.6879159777952,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1133
+      }
+    },
+    {
+      "id": "v101",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-09-21",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1135.9507614447898,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1135
+      }
+    },
+    {
+      "id": "v102",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-10-21",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1139.9657813713973,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1139
+      }
+    },
+    {
+      "id": "v103",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-11-21",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1092.2015639149315,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1092
+      }
+    },
+    {
+      "id": "v104",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-12-21",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1108.8475403327056,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1108
+      }
+    },
+    {
+      "id": "v105",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-07",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1099.6058221848743,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1099
+      }
+    },
+    {
+      "id": "v106",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-08",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1158.9340810075494,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1158
+      }
+    },
+    {
+      "id": "v107",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-09",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1158.2560823056415,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1158
+      }
+    },
+    {
+      "id": "v108",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-31",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1142.8807724670992,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1142
+      }
+    },
+    {
+      "id": "v109",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-01",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1083.2279019332625,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1083
+      }
+    },
+    {
+      "id": "v110",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-02",
+      "latitude": -15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1083.5853093323221,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1083
+      }
+    },
+    {
+      "id": "v111",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-01-21",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1073.1145419974046,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1073
+      }
+    },
+    {
+      "id": "v112",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-02-21",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1085.9357641949407,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1085
+      }
+    },
+    {
+      "id": "v113",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-03-21",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1151.0368234600594,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1151
+      }
+    },
+    {
+      "id": "v114",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-04-21",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1155.3634493591499,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1155
+      }
+    },
+    {
+      "id": "v115",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-05-21",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1163.1954847305913,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1163
+      }
+    },
+    {
+      "id": "v116",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-06-21",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1172.4253955631038,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1172
+      }
+    },
+    {
+      "id": "v117",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-07-21",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1172.919754956265,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1172
+      }
+    },
+    {
+      "id": "v118",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-08-21",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1159.3855136580116,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1159
+      }
+    },
+    {
+      "id": "v119",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-09-21",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1136.7229230349144,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1136
+      }
+    },
+    {
+      "id": "v120",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-10-21",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1116.0719624259834,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1116
+      }
+    },
+    {
+      "id": "v121",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-11-21",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1047.171093892221,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1047
+      }
+    },
+    {
+      "id": "v122",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-12-21",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1055.4570532604937,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1055
+      }
+    },
+    {
+      "id": "v123",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-07",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1089.0090177476845,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1089
+      }
+    },
+    {
+      "id": "v124",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-08",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1149.180177713742,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1149
+      }
+    },
+    {
+      "id": "v125",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-09",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1149.3462097767274,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1149
+      }
+    },
+    {
+      "id": "v126",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-31",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1111.352399688856,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1111
+      }
+    },
+    {
+      "id": "v127",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-01",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1050.9680241132871,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1050
+      }
+    },
+    {
+      "id": "v128",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-02",
+      "latitude": 15,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1050.6008101260275,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1050
+      }
+    },
+    {
+      "id": "v129",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-01-21",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1012.8015441989853,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1012
+      }
+    },
+    {
+      "id": "v130",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-02-21",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1056.7318227663334,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1056
+      }
+    },
+    {
+      "id": "v131",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-03-21",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1154.0168204644813,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1154
+      }
+    },
+    {
+      "id": "v132",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-04-21",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1193.350362049168,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1193
+      }
+    },
+    {
+      "id": "v133",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-05-21",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1229.3122714889575,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1229
+      }
+    },
+    {
+      "id": "v134",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-06-21",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1250.4566087534577,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1250
+      }
+    },
+    {
+      "id": "v135",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-07-21",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1238.6555234538935,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1238
+      }
+    },
+    {
+      "id": "v136",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-08-21",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1196.1728964752153,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1196
+      }
+    },
+    {
+      "id": "v137",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-09-21",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1139.0376392987257,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1139
+      }
+    },
+    {
+      "id": "v138",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-10-21",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1084.5784218495141,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1084
+      }
+    },
+    {
+      "id": "v139",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-11-21",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 985.5426501828576,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 985
+      }
+    },
+    {
+      "id": "v140",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-12-21",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 981.2332598600185,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 981
+      }
+    },
+    {
+      "id": "v141",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-07",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1075.7739907337416,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1075
+      }
+    },
+    {
+      "id": "v142",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-08",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1137.1000585916543,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1137
+      }
+    },
+    {
+      "id": "v143",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-09",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1138.422024625504,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1138
+      }
+    },
+    {
+      "id": "v144",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-31",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1069.1746077731482,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1069
+      }
+    },
+    {
+      "id": "v145",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-01",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1007.7566731445188,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1007
+      }
+    },
+    {
+      "id": "v146",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-11-02",
+      "latitude": 45,
+      "longitude": -120,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1006.3636943014094,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1006
+      }
+    },
+    {
+      "id": "v147",
+      "tags": [
+        "off-meridian"
+      ],
+      "date": "2026-06-21",
+      "latitude": 30,
+      "longitude": -127.5,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1234.28153502859,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1234
+      }
+    },
+    {
+      "id": "v148",
+      "tags": [
+        "off-meridian"
+      ],
+      "date": "2026-06-21",
+      "latitude": 30,
+      "longitude": -112.5,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1174.2731376222857,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1174
+      }
+    },
+    {
+      "id": "v149",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-01-21",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1181.007721718913,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1181
+      }
+    },
+    {
+      "id": "v150",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-02-21",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1140.5165047197024,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1140
+      }
+    },
+    {
+      "id": "v151",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-03-21",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1089.958285294147,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1089
+      }
+    },
+    {
+      "id": "v152",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-04-21",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1094.338133250121,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1094
+      }
+    },
+    {
+      "id": "v153",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-05-21",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1055.245954883629,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1055
+      }
+    },
+    {
+      "id": "v154",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-06-21",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1044.7653936612248,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1044
+      }
+    },
+    {
+      "id": "v155",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-07-21",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1064.6738073171873,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1064
+      }
+    },
+    {
+      "id": "v156",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-08-21",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1099.2080096947298,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1099
+      }
+    },
+    {
+      "id": "v157",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-09-21",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1135.7574474347205,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1135
+      }
+    },
+    {
+      "id": "v158",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-10-21",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1173.8448404650528,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1173
+      }
+    },
+    {
+      "id": "v159",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-11-21",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1156.905748341437,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1156
+      }
+    },
+    {
+      "id": "v160",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-12-21",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1186.7372449114205,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1186
+      }
+    },
+    {
+      "id": "v161",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-28",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1076.8585753203347,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1076
+      }
+    },
+    {
+      "id": "v162",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-29",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1134.9972991264092,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1134
+      }
+    },
+    {
+      "id": "v163",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-30",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1133.1400634256158,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1133
+      }
+    },
+    {
+      "id": "v164",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-24",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1177.927943446876,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1177
+      }
+    },
+    {
+      "id": "v165",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-25",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1119.299716571707,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1119
+      }
+    },
+    {
+      "id": "v166",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-26",
+      "latitude": -45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1120.6765527566001,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1120
+      }
+    },
+    {
+      "id": "v167",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-01-21",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1117.1754965011598,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1117
+      }
+    },
+    {
+      "id": "v168",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-02-21",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1108.2994625514639,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1108
+      }
+    },
+    {
+      "id": "v169",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-03-21",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1090.023124584171,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1090
+      }
+    },
+    {
+      "id": "v170",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-04-21",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1129.076445525308,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1129
+      }
+    },
+    {
+      "id": "v171",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-05-21",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1117.5814566008648,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1117
+      }
+    },
+    {
+      "id": "v172",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-06-21",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1118.974860026223,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1118
+      }
+    },
+    {
+      "id": "v173",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-07-21",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1127.333525226481,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1127
+      }
+    },
+    {
+      "id": "v174",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-08-21",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1133.648003443599,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1133
+      }
+    },
+    {
+      "id": "v175",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-09-21",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1135.9298423376547,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1135
+      }
+    },
+    {
+      "id": "v176",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-10-21",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1139.8854698459386,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1139
+      }
+    },
+    {
+      "id": "v177",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-11-21",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1092.024496088274,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1092
+      }
+    },
+    {
+      "id": "v178",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-12-21",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1108.6824656585284,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1108
+      }
+    },
+    {
+      "id": "v179",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-28",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1084.9727256143226,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1084
+      }
+    },
+    {
+      "id": "v180",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-29",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1144.2549656063502,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1144
+      }
+    },
+    {
+      "id": "v181",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-30",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1143.5393080928777,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1143
+      }
+    },
+    {
+      "id": "v182",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-24",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1140.6462880846316,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1140
+      }
+    },
+    {
+      "id": "v183",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-25",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1080.9192352166642,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1080
+      }
+    },
+    {
+      "id": "v184",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-26",
+      "latitude": -15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1081.2020561331924,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1081
+      }
+    },
+    {
+      "id": "v185",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-01-21",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1072.9329198368544,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1072
+      }
+    },
+    {
+      "id": "v186",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-02-21",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1085.8444547649106,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1085
+      }
+    },
+    {
+      "id": "v187",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-03-21",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1090.995142078988,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1090
+      }
+    },
+    {
+      "id": "v188",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-04-21",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1155.3010641357976,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1155
+      }
+    },
+    {
+      "id": "v189",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-05-21",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1163.0884936849677,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1163
+      }
+    },
+    {
+      "id": "v190",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-06-21",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1172.3547863257882,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1172
+      }
+    },
+    {
+      "id": "v191",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-07-21",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1172.9882227543098,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1172
+      }
+    },
+    {
+      "id": "v192",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-08-21",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1159.595974280129,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1159
+      }
+    },
+    {
+      "id": "v193",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-09-21",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1136.979789482015,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1136
+      }
+    },
+    {
+      "id": "v194",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-10-21",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1116.254514444415,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1116
+      }
+    },
+    {
+      "id": "v195",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-11-21",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1047.170379014788,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1047
+      }
+    },
+    {
+      "id": "v196",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-12-21",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1055.2916408172719,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1055
+      }
+    },
+    {
+      "id": "v197",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-28",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1091.8464810639316,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1091
+      }
+    },
+    {
+      "id": "v198",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-29",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1151.966684819308,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1151
+      }
+    },
+    {
+      "id": "v199",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-30",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1152.0873072250681,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1152
+      }
+    },
+    {
+      "id": "v200",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-24",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1114.6666992696285,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1114
+      }
+    },
+    {
+      "id": "v201",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-25",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1054.1658949540301,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1054
+      }
+    },
+    {
+      "id": "v202",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-26",
+      "latitude": 15,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1053.6799189732678,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1053
+      }
+    },
+    {
+      "id": "v203",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-01-21",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1012.349383770112,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1012
+      }
+    },
+    {
+      "id": "v204",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-02-21",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1056.267213455742,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1056
+      }
+    },
+    {
+      "id": "v205",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-03-21",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1093.5890698384878,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1093
+      }
+    },
+    {
+      "id": "v206",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-04-21",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1192.9294156352898,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1192
+      }
+    },
+    {
+      "id": "v207",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-05-21",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1228.9583523479223,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1228
+      }
+    },
+    {
+      "id": "v208",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-06-21",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1250.3922145737615,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1250
+      }
+    },
+    {
+      "id": "v209",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-07-21",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1238.969698211419,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1238
+      }
+    },
+    {
+      "id": "v210",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-08-21",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1196.7376622881632,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1196
+      }
+    },
+    {
+      "id": "v211",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-09-21",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1139.6736087898773,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1139
+      }
+    },
+    {
+      "id": "v212",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-10-21",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1085.1259195778882,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1085
+      }
+    },
+    {
+      "id": "v213",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-11-21",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 985.8019749151013,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 985
+      }
+    },
+    {
+      "id": "v214",
+      "tags": [
+        "baseline"
+      ],
+      "date": "2026-12-21",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 981.0682230081605,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 981
+      }
+    },
+    {
+      "id": "v215",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-28",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1102.5296140218159,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1102
+      }
+    },
+    {
+      "id": "v216",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-29",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1163.801132517274,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1163
+      }
+    },
+    {
+      "id": "v217",
+      "tags": [
+        "dst-edge-1"
+      ],
+      "date": "2026-03-30",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1165.0716480894573,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1165
+      }
+    },
+    {
+      "id": "v218",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-24",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1080.2711129539975,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1080
+      }
+    },
+    {
+      "id": "v219",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-25",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1018.6907576827559,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1018
+      }
+    },
+    {
+      "id": "v220",
+      "tags": [
+        "dst-edge-2"
+      ],
+      "date": "2026-10-26",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1017.1304441657262,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1017
+      }
+    },
+    {
+      "id": "v221",
+      "tags": [
+        "off-meridian"
+      ],
+      "date": "2026-06-21",
+      "latitude": 30,
+      "longitude": -7.5,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1234.2133520514033,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1234
+      }
+    },
+    {
+      "id": "v222",
+      "tags": [
+        "off-meridian"
+      ],
+      "date": "2026-06-21",
+      "latitude": 30,
+      "longitude": 7.5,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1174.204668191588,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1174
+      }
+    },
+    {
+      "id": "v223",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-01-21",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1241.353750858222,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1241
+      }
+    },
+    {
+      "id": "v224",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-02-21",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1201.2075644159013,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1201
+      }
+    },
+    {
+      "id": "v225",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-03-21",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1150.7397430913059,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1150
+      }
+    },
+    {
+      "id": "v226",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-04-21",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1035.018716233883,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1035
+      }
+    },
+    {
+      "id": "v227",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-05-21",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 995.6204220989348,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 995
+      }
+    },
+    {
+      "id": "v228",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-06-21",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 984.6728701316352,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 984
+      }
+    },
+    {
+      "id": "v229",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-07-21",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1004.2625880355411,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1004
+      }
+    },
+    {
+      "id": "v230",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-08-21",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1038.7211244450014,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1038
+      }
+    },
+    {
+      "id": "v231",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-09-21",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1075.2568183638546,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1075
+      }
+    },
+    {
+      "id": "v232",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-10-21",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1173.2817222692318,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1173
+      }
+    },
+    {
+      "id": "v233",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-11-21",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1216.348340318396,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1216
+      }
+    },
+    {
+      "id": "v234",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-12-21",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1246.5262541137981,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1246
+      }
+    },
+    {
+      "id": "v235",
+      "tags": [
+        "dst-edge-1",
+        "southern-zone"
+      ],
+      "date": "2026-04-04",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1124.693600353833,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1124
+      }
+    },
+    {
+      "id": "v236",
+      "tags": [
+        "dst-edge-1",
+        "southern-zone"
+      ],
+      "date": "2026-04-05",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1062.868207997072,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1062
+      }
+    },
+    {
+      "id": "v237",
+      "tags": [
+        "dst-edge-1",
+        "southern-zone"
+      ],
+      "date": "2026-04-06",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1061.0501905710362,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1061
+      }
+    },
+    {
+      "id": "v238",
+      "tags": [
+        "dst-edge-2",
+        "southern-zone"
+      ],
+      "date": "2026-10-03",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1089.9243842750702,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1089
+      }
+    },
+    {
+      "id": "v239",
+      "tags": [
+        "dst-edge-2",
+        "southern-zone"
+      ],
+      "date": "2026-10-04",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1151.17464104375,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1151
+      }
+    },
+    {
+      "id": "v240",
+      "tags": [
+        "dst-edge-2",
+        "southern-zone"
+      ],
+      "date": "2026-10-05",
+      "latitude": -45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1152.4299379063843,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1152
+      }
+    },
+    {
+      "id": "v241",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-01-21",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1177.1758018736678,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1177
+      }
+    },
+    {
+      "id": "v242",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-02-21",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1168.5195007779516,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1168
+      }
+    },
+    {
+      "id": "v243",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-03-21",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1150.3234690460072,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1150
+      }
+    },
+    {
+      "id": "v244",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-04-21",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1069.3156922545525,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1069
+      }
+    },
+    {
+      "id": "v245",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-05-21",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1057.6530621907543,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1057
+      }
+    },
+    {
+      "id": "v246",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-06-21",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1058.8836052281924,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1058
+      }
+    },
+    {
+      "id": "v247",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-07-21",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1067.2170187113832,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1067
+      }
+    },
+    {
+      "id": "v248",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-08-21",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1073.5973461885621,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1073
+      }
+    },
+    {
+      "id": "v249",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-09-21",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1075.9039900414691,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1075
+      }
+    },
+    {
+      "id": "v250",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-10-21",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1139.786538743591,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1139
+      }
+    },
+    {
+      "id": "v251",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-11-21",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1151.8041869123524,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1151
+      }
+    },
+    {
+      "id": "v252",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-12-21",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1168.474606802744,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1168
+      }
+    },
+    {
+      "id": "v253",
+      "tags": [
+        "dst-edge-1",
+        "southern-zone"
+      ],
+      "date": "2026-04-04",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1140.2968562833107,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1140
+      }
+    },
+    {
+      "id": "v254",
+      "tags": [
+        "dst-edge-1",
+        "southern-zone"
+      ],
+      "date": "2026-04-05",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1079.599940911116,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1079
+      }
+    },
+    {
+      "id": "v255",
+      "tags": [
+        "dst-edge-1",
+        "southern-zone"
+      ],
+      "date": "2026-04-06",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1078.9076154116406,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1078
+      }
+    },
+    {
+      "id": "v256",
+      "tags": [
+        "dst-edge-2",
+        "southern-zone"
+      ],
+      "date": "2026-10-03",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1076.852658032497,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1076
+      }
+    },
+    {
+      "id": "v257",
+      "tags": [
+        "dst-edge-2",
+        "southern-zone"
+      ],
+      "date": "2026-10-04",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1136.958366685487,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1136
+      }
+    },
+    {
+      "id": "v258",
+      "tags": [
+        "dst-edge-2",
+        "southern-zone"
+      ],
+      "date": "2026-10-05",
+      "latitude": -15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1137.0694597318184,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1137
+      }
+    },
+    {
+      "id": "v259",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-01-21",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1132.7049364883044,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1132
+      }
+    },
+    {
+      "id": "v260",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-02-21",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1145.7289823370118,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1145
+      }
+    },
+    {
+      "id": "v261",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-03-21",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1150.9427762603511,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1150
+      }
+    },
+    {
+      "id": "v262",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-04-21",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1095.2238231225713,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1095
+      }
+    },
+    {
+      "id": "v263",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-05-21",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1102.9551084139284,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1102
+      }
+    },
+    {
+      "id": "v264",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-06-21",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1112.265003229169,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1112
+      }
+    },
+    {
+      "id": "v265",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-07-21",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1113.0713164408867,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1113
+      }
+    },
+    {
+      "id": "v266",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-08-21",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1099.8574848595206,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1099
+      }
+    },
+    {
+      "id": "v267",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-09-21",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1077.3010716044528,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1077
+      }
+    },
+    {
+      "id": "v268",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-10-21",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1116.4847928345425,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1116
+      }
+    },
+    {
+      "id": "v269",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-11-21",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1107.1725964778284,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1107
+      }
+    },
+    {
+      "id": "v270",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-12-21",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1115.086509915545,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1115
+      }
+    },
+    {
+      "id": "v271",
+      "tags": [
+        "dst-edge-1",
+        "southern-zone"
+      ],
+      "date": "2026-04-04",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1152.652425012599,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1152
+      }
+    },
+    {
+      "id": "v272",
+      "tags": [
+        "dst-edge-1",
+        "southern-zone"
+      ],
+      "date": "2026-04-05",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1092.7798588529868,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1092
+      }
+    },
+    {
+      "id": "v273",
+      "tags": [
+        "dst-edge-1",
+        "southern-zone"
+      ],
+      "date": "2026-04-06",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1092.9092778457427,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1092
+      }
+    },
+    {
+      "id": "v274",
+      "tags": [
+        "dst-edge-2",
+        "southern-zone"
+      ],
+      "date": "2026-10-03",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1068.2410755256342,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1068
+      }
+    },
+    {
+      "id": "v275",
+      "tags": [
+        "dst-edge-2",
+        "southern-zone"
+      ],
+      "date": "2026-10-04",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1127.5151533437615,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1127
+      }
+    },
+    {
+      "id": "v276",
+      "tags": [
+        "dst-edge-2",
+        "southern-zone"
+      ],
+      "date": "2026-10-05",
+      "latitude": 15,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1126.7956109389786,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1126
+      }
+    },
+    {
+      "id": "v277",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-01-21",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1071.7860363723812,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1071
+      }
+    },
+    {
+      "id": "v278",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-02-21",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1115.6857429266906,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1115
+      }
+    },
+    {
+      "id": "v279",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-03-21",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1153.0540382507365,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1153
+      }
+    },
+    {
+      "id": "v280",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-04-21",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1132.4031022604017,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1132
+      }
+    },
+    {
+      "id": "v281",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-05-21",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1168.5135075690598,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1168
+      }
+    },
+    {
+      "id": "v282",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-06-21",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1190.3058151749342,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1190
+      }
+    },
+    {
+      "id": "v283",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-07-21",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1179.3571926577738,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1179
+      }
+    },
+    {
+      "id": "v284",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-08-21",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1137.4412515209165,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1137
+      }
+    },
+    {
+      "id": "v285",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-09-21",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1080.4686915359325,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1080
+      }
+    },
+    {
+      "id": "v286",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-10-21",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1085.813016725332,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1085
+      }
+    },
+    {
+      "id": "v287",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-11-21",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1046.132050266805,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1046
+      }
+    },
+    {
+      "id": "v288",
+      "tags": [
+        "baseline",
+        "southern-zone"
+      ],
+      "date": "2026-12-21",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1040.8683751318183,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1040
+      }
+    },
+    {
+      "id": "v289",
+      "tags": [
+        "dst-edge-1",
+        "southern-zone"
+      ],
+      "date": "2026-04-04",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1170.8854044674954,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1170
+      }
+    },
+    {
+      "id": "v290",
+      "tags": [
+        "dst-edge-1",
+        "southern-zone"
+      ],
+      "date": "2026-04-05",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1112.1524522823536,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1112
+      }
+    },
+    {
+      "id": "v291",
+      "tags": [
+        "dst-edge-1",
+        "southern-zone"
+      ],
+      "date": "2026-04-06",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1113.4191930895513,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1113
+      }
+    },
+    {
+      "id": "v292",
+      "tags": [
+        "dst-edge-2",
+        "southern-zone"
+      ],
+      "date": "2026-10-03",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1057.7549480646787,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1057
+      }
+    },
+    {
+      "id": "v293",
+      "tags": [
+        "dst-edge-2",
+        "southern-zone"
+      ],
+      "date": "2026-10-04",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1115.8933515398794,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1115
+      }
+    },
+    {
+      "id": "v294",
+      "tags": [
+        "dst-edge-2",
+        "southern-zone"
+      ],
+      "date": "2026-10-05",
+      "latitude": 45,
+      "longitude": 150,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1114.0390039536683,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1114
+      }
+    },
+    {
+      "id": "v295",
+      "tags": [
+        "off-meridian",
+        "southern-zone"
+      ],
+      "date": "2026-06-21",
+      "latitude": 30,
+      "longitude": 142.5,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1174.1249109609892,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1174
+      }
+    },
+    {
+      "id": "v296",
+      "tags": [
+        "off-meridian",
+        "southern-zone"
+      ],
+      "date": "2026-06-21",
+      "latitude": 30,
+      "longitude": 157.5,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 1114.1158714974486,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1114
+      }
+    },
+    {
+      "id": "v297",
+      "tags": [
+        "date-line-shift"
+      ],
+      "date": "2026-01-21",
+      "latitude": 0,
+      "longitude": 150,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1455.0723956990107,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1455
+      }
+    },
+    {
+      "id": "v298",
+      "tags": [
+        "date-line-shift"
+      ],
+      "date": "2026-01-21",
+      "latitude": 0,
+      "longitude": -120,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 794.7326980746548,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 794
+      }
+    },
+    {
+      "id": "v299",
+      "tags": [
+        "date-line-shift"
+      ],
+      "date": "2026-07-21",
+      "latitude": 0,
+      "longitude": 150,
+      "timeZone": "America/Los_Angeles",
+      "expect": {
+        "minutes": 1510.041927762361,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1510
+      }
+    },
+    {
+      "id": "v300",
+      "tags": [
+        "date-line-shift"
+      ],
+      "date": "2026-07-21",
+      "latitude": 0,
+      "longitude": -120,
+      "timeZone": "Australia/Sydney",
+      "expect": {
+        "minutes": 729.9930285394487,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 729
+      }
+    },
+    {
+      "id": "v301",
+      "tags": [
+        "polar",
+        "polar-null"
+      ],
+      "date": "2026-06-21",
+      "latitude": 75,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": null,
+        "code": "SUNSET_UNDEFINED_AT_LATITUDE",
+        "cause": "midnight-sun",
+        "enforcementMinutes": null
+      }
+    },
+    {
+      "id": "v302",
+      "tags": [
+        "polar",
+        "polar-null"
+      ],
+      "date": "2026-06-21",
+      "latitude": 85,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": null,
+        "code": "SUNSET_UNDEFINED_AT_LATITUDE",
+        "cause": "midnight-sun",
+        "enforcementMinutes": null
+      }
+    },
+    {
+      "id": "v303",
+      "tags": [
+        "polar",
+        "polar-null"
+      ],
+      "date": "2026-06-21",
+      "latitude": -75,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": null,
+        "code": "SUNSET_UNDEFINED_AT_LATITUDE",
+        "cause": "polar-night",
+        "enforcementMinutes": null
+      }
+    },
+    {
+      "id": "v304",
+      "tags": [
+        "polar",
+        "polar-null"
+      ],
+      "date": "2026-06-21",
+      "latitude": -85,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": null,
+        "code": "SUNSET_UNDEFINED_AT_LATITUDE",
+        "cause": "polar-night",
+        "enforcementMinutes": null
+      }
+    },
+    {
+      "id": "v305",
+      "tags": [
+        "polar",
+        "polar-null"
+      ],
+      "date": "2026-12-21",
+      "latitude": 75,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": null,
+        "code": "SUNSET_UNDEFINED_AT_LATITUDE",
+        "cause": "polar-night",
+        "enforcementMinutes": null
+      }
+    },
+    {
+      "id": "v306",
+      "tags": [
+        "polar",
+        "polar-null"
+      ],
+      "date": "2026-12-21",
+      "latitude": 85,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": null,
+        "code": "SUNSET_UNDEFINED_AT_LATITUDE",
+        "cause": "polar-night",
+        "enforcementMinutes": null
+      }
+    },
+    {
+      "id": "v307",
+      "tags": [
+        "polar",
+        "polar-null"
+      ],
+      "date": "2026-12-21",
+      "latitude": -75,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": null,
+        "code": "SUNSET_UNDEFINED_AT_LATITUDE",
+        "cause": "midnight-sun",
+        "enforcementMinutes": null
+      }
+    },
+    {
+      "id": "v308",
+      "tags": [
+        "polar",
+        "polar-null"
+      ],
+      "date": "2026-12-21",
+      "latitude": -85,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": null,
+        "code": "SUNSET_UNDEFINED_AT_LATITUDE",
+        "cause": "midnight-sun",
+        "enforcementMinutes": null
+      }
+    },
+    {
+      "id": "v309",
+      "tags": [
+        "polar-equinox"
+      ],
+      "date": "2026-03-20",
+      "latitude": 75,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1101.151685540362,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1101
+      }
+    },
+    {
+      "id": "v310",
+      "tags": [
+        "polar-equinox"
+      ],
+      "date": "2026-09-22",
+      "latitude": 75,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": 1146.9954003835721,
+        "code": null,
+        "cause": null,
+        "enforcementMinutes": 1146
+      }
+    },
+    {
+      "id": "v311",
+      "tags": [
+        "coordinates-unreadable"
+      ],
+      "date": "2026-06-21",
+      "latitude": 91,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": null,
+        "code": "SUNSET_COORDINATES_UNREADABLE",
+        "cause": null,
+        "enforcementMinutes": null
+      }
+    },
+    {
+      "id": "v312",
+      "tags": [
+        "coordinates-unreadable"
+      ],
+      "date": "2026-06-21",
+      "latitude": 0,
+      "longitude": -181,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": null,
+        "code": "SUNSET_COORDINATES_UNREADABLE",
+        "cause": null,
+        "enforcementMinutes": null
+      }
+    },
+    {
+      "id": "v313",
+      "tags": [
+        "coordinates-unreadable"
+      ],
+      "date": "2026-06-21",
+      "latitude": "45",
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": null,
+        "code": "SUNSET_COORDINATES_UNREADABLE",
+        "cause": null,
+        "enforcementMinutes": null
+      }
+    },
+    {
+      "id": "v314",
+      "tags": [
+        "timezone-missing"
+      ],
+      "date": "2026-06-21",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": null,
+      "expect": {
+        "minutes": null,
+        "code": "SEASON_TIMEZONE_MISSING",
+        "cause": null,
+        "enforcementMinutes": null
+      }
+    },
+    {
+      "id": "v315",
+      "tags": [
+        "timezone-unknown"
+      ],
+      "date": "2026-06-21",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Mars/Olympus",
+      "expect": {
+        "minutes": null,
+        "code": "SEASON_TIMEZONE_UNKNOWN",
+        "cause": null,
+        "enforcementMinutes": null
+      }
+    },
+    {
+      "id": "v316",
+      "tags": [
+        "date-unreadable"
+      ],
+      "date": "2026-02-30",
+      "latitude": 45,
+      "longitude": 0,
+      "timeZone": "Europe/London",
+      "expect": {
+        "minutes": null,
+        "code": "WALL_TIME_UNREADABLE",
+        "cause": null,
+        "enforcementMinutes": null
+      }
+    }
+  ]
+}

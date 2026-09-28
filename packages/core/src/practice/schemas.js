@@ -230,17 +230,50 @@ const PracticeShapeSchema = z
   })
   .strict();
 
+/**
+ * A loss of ground (8.6 PR 3b plan §1). With no `until` it is a retirement:
+ * the ground is gone from `from` on. With `until` it is a blackout, over
+ * `[from, until]` inclusive. `startMinutes`/`endMinutes` narrow it to a time of
+ * day (both or neither, `[start, end)`, as `field_blackouts` stores them).
+ */
+const PracticeLossSchema = z
+  .object({
+    surfaceIds: z.array(IdSchema).min(1, { message: 'a loss names at least one surface' }),
+    from: IsoDateSchema,
+    until: IsoDateSchema.optional(),
+    startMinutes: MinutesSchema.max(1440).optional(),
+    endMinutes: MinutesSchema.max(1440).optional(),
+    reason: z.string().min(1, { message: 'a loss must say why' }),
+  })
+  .strict()
+  .refine((loss) => loss.until === undefined || loss.until >= loss.from, {
+    message: 'a loss `until` must not precede its `from`',
+    path: ['until'],
+  })
+  .refine((loss) => (loss.startMinutes === undefined) === (loss.endMinutes === undefined), {
+    message: 'a loss states `startMinutes` and `endMinutes` together, or neither',
+    path: ['endMinutes'],
+  })
+  .refine(
+    (loss) =>
+      loss.startMinutes === undefined ||
+      loss.endMinutes === undefined ||
+      loss.startMinutes < loss.endMinutes,
+    { message: 'a loss `startMinutes` must precede its `endMinutes`', path: ['endMinutes'] }
+  )
+  // Minutes come from blackouts, which end. A retirement is the whole ground
+  // from `from` on: its split cuts every slot there, so a series spared by the
+  // minutes would silently lose its practices.
+  .refine((loss) => loss.startMinutes === undefined || loss.until !== undefined, {
+    message: 'a loss with `startMinutes`/`endMinutes` must state `until`',
+    path: ['until'],
+  });
+
 export const PracticeRepairInputSchema = z
   .object({
     plan: PracticeSlotSetInputSchema,
     graph: z.object({ surfaces: z.record(z.string(), z.any()) }).passthrough(),
-    loss: z
-      .object({
-        surfaceIds: z.array(IdSchema).min(1, { message: 'a loss names at least one surface' }),
-        from: IsoDateSchema,
-        reason: z.string().min(1, { message: 'a loss must say why' }),
-      })
-      .strict(),
+    loss: PracticeLossSchema,
     inventory: z.array(PracticeShapeSchema),
     coachesByTeam: z.record(z.string(), z.array(z.string())).optional(),
     weights: z.record(z.string(), z.number()).optional(),

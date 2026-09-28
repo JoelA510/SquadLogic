@@ -36,7 +36,10 @@ import {
 import { prepareTeam } from '../supabase/functions/_shared/engines/practice-coaches.js';
 import { anchorWallTimes } from '../supabase/functions/_shared/timing/anchorWallTimes.js';
 import { AutoSchedulerInputSchema } from '../supabase/functions/_shared/schemas/auto-scheduler.js';
-import { PRACTICE_SUNSET_MARGIN_MINUTES as CORE_MARGIN } from '../packages/core/src/practice/index.js';
+import {
+  PRACTICE_SUNSET_MARGIN_MINUTES as CORE_MARGIN,
+  PRACTICE_TBD_REASON,
+} from '../packages/core/src/practice/index.js';
 import { AVAILABILITY_REASON } from '../packages/core/src/availability/reasonCodes.js';
 import { sunsetEnforcementMinutes, sunsetOnDate } from '../packages/core/src/timing/solar.js';
 import { newPlacementRange } from '../frontend/src/pages/PracticeSchedulingPage.jsx';
@@ -356,6 +359,11 @@ describe('W15 (Deno twin): the practice margin is 0 and equals core', () => {
   it('the twin equals core, and both are 0', () => {
     assert.equal(EDGE_MARGIN, CORE_MARGIN);
     assert.equal(EDGE_MARGIN, 0);
+  });
+
+  it("the TIME TBD reason is core's, not a third spelling", () => {
+    assert.equal(DAYLIGHT_TBD_REASON, PRACTICE_TBD_REASON.PAST_SUNSET);
+    assert.equal(DAYLIGHT_TBD_REASON, 'past-sunset');
   });
 
   it('the codes are spelled as core spells them', () => {

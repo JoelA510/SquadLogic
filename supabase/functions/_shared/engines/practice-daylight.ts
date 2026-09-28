@@ -60,8 +60,13 @@ import { LOCK_PAGE_SIZE, readAllPages, type QueryResult } from './practice-lock.
  */
 export const PRACTICE_SUNSET_MARGIN_MINUTES = 0;
 
-/** A TIME TBD remainder's, or a withdrawn placement's, reason. */
-export const DAYLIGHT_TBD_REASON = 'daylight-past-sunset';
+/**
+ * A TIME TBD remainder's, or a withdrawn placement's, reason: core
+ * `PRACTICE_TBD_REASON.PAST_SUNSET` (`practice/repair.js`), spelled
+ * identically -- one reason for one cause, whichever path finds it.
+ * `tests/autoSchedulerDaylight.test.js` pins the two equal.
+ */
+export const DAYLIGHT_TBD_REASON = 'past-sunset';
 
 /** Spelled as core `AVAILABILITY_REASON` spells them (the drift test compares). */
 export const DAYLIGHT_CODE = Object.freeze({

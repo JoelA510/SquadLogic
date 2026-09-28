@@ -77,7 +77,8 @@ the Edge counterpart of core `practice/daylight.js`:
   the page starts a new placement) to the slot's `effectiveUntil`. At the first
   date past the limit the placement is truncated (`effectiveUntil` = the day
   before, which the page honours in `newPlacementRange`), and the remainder is
-  TIME TBD with reason `daylight-past-sunset` and the date. If the first
+  TIME TBD with reason `past-sunset` (core `PRACTICE_TBD_REASON.PAST_SUNSET`,
+  pinned) and the date. If the first
   occurrence is already past the limit, the placement is withdrawn and the team
   is unplaced with that reason. Every remainder is returned in `daylight.timeTbd`,
   written as a `DAYLIGHT_TIME_TBD` run finding, and audited on
@@ -92,7 +93,7 @@ the Edge counterpart of core `practice/daylight.js`:
   another team.
 - **Not persisted here.** The TIME TBD remainder is reported, audited and shown.
   This pass does not write a `practice_exceptions` row for it, and
-  `practice-persistence` has no `daylight-past-sunset` TBD reason yet; that is
+  neither the `tbd_reason` CHECK nor `practice-persistence` admits `past-sunset` yet; that is
   follow-up persistence work.
 - **Autumn-shaped (D8).** Truncating at the first date past sunset suits a season
   whose sunsets get earlier. In a spring season an early dark date withdraws the

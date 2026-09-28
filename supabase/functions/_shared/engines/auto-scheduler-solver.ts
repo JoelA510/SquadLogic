@@ -67,7 +67,7 @@ export interface Unplaced {
   reason: string;
   /** For `coach-preference`: the `must_keep` dimensions no legal slot kept. */
   dimensions?: string[];
-  /** For `daylight-past-sunset`: the first date past sunset. */
+  /** For `past-sunset`: the first date past sunset. */
   date?: string;
 }
 

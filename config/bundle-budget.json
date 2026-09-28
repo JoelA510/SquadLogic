@@ -1,55 +1,55 @@
 {
-  "$schema-comment": "Wave 6a Task 1 bundle budgets. Sizes in BYTES (gzipped). Edited via PR with rationale per docs/operations/bundle-budget.md.",
+  "$schema-comment": "Wave 6a Task 1 bundle budgets. Sizes in BYTES: gzipped for maxGzipBytes rules, raw for maxRawBytes rules. The KB figures in the rationales are KiB (1024 B), as npm run check:bundle prints them. Edited via PR with rationale per docs/operations/bundle-budget.md.",
   "rules": [
     {
       "match": "^assets/index-.*\\.js$",
       "label": "main entry",
       "maxGzipBytes": 140450,
-      "rationale": "Redesign: 131.1 KB after the Lightning-class chrome (TopBar/SideNav/navigation) plus expanded mock-client seeds & RPC handlers, which ship in main because supabaseClient imports the mock statically. 140 KB cap leaves ~9 KB for remaining phases; follow-ups: dynamic-import the mock client and route-split chart-vendor, then tighten. +100 B (fix #64): the strict PGRST201 practice_slots embed check in the mock, which ships in main for the reason above; measured 136.55 -> 136.76 KB after two compaction passes. +350 B (8.6 3b PR 2, coach practice preferences): the page itself is React.lazy and its mock RPC arms sit behind the DEV/mock guard (measured: 0 B in main), so what ships in main is only the lazy route with its __vite__mapDeps preload list, two nav entries and two permission constants; measured 136.78 -> 137.10 KB. Reusing an already-imported nav icon was tried first (no measurable change)."
+      "rationale": "Current 137.15 KB (140,445 B) against a 140,450 B (137.16 KB) cap: 5 B of headroom, so the ~9 KB the redesign note below left has been spent and the next main-bundle addition must first remove bytes. The regex also matches a ~965 B lazy shared chunk named index-*.js (imported by the game, practice and team-analysis pages); it is checked under this label and counted in the first-paint total. History -- Redesign: 131.1 KB after the Lightning-class chrome (TopBar/SideNav/navigation) plus expanded mock-client seeds & RPC handlers, which ship in main because supabaseClient imports the mock statically. 140 KB cap leaves ~9 KB for remaining phases; follow-ups: dynamic-import the mock client and route-split chart-vendor, then tighten. +100 B (fix #64): the strict PGRST201 practice_slots embed check in the mock, which ships in main for the reason above; measured 136.55 -> 136.76 KB after two compaction passes. +350 B (8.6 3b PR 2, coach practice preferences): the page itself is React.lazy and its mock RPC arms sit behind the DEV/mock guard (measured: 0 B in main), so what ships in main is only the lazy route with its __vite__mapDeps preload list, two nav entries and two permission constants; measured 136.78 -> 137.10 KB. Reusing an already-imported nav icon was tried first (no measurable change)."
     },
     {
       "match": "^assets/index-.*\\.css$",
       "label": "main css",
       "maxGzipBytes": 30000,
-      "rationale": "Redesign ships the Lightning-class design system (light+dark tokens + chrome/grid/page component CSS) in the main stylesheet: 21.7 KB after Phase 1. 30 KB cap leaves ~8 KB for the remaining redesign phases; revisit after Phase 9."
+      "rationale": "Redesign ships the Lightning-class design system (light+dark tokens + chrome/grid/page component CSS) in the main stylesheet. Current 21.05 KB (21.7 KB after Phase 1); the 30,000 B (29.30 KB) cap leaves ~8.2 KB; revisit after Phase 9."
     },
     {
       "match": "^assets/chart-vendor-.*\\.js$",
       "label": "chart vendor",
       "maxGzipBytes": 130000,
-      "rationale": "Current 119.92 KB; 130 KB cap. F-4-02 follow-up (route-split) targets <50 KB; tighten then."
+      "rationale": "Current 116.12 KB; 130,000 B (126.95 KB) cap. Lazy: not modulepreloaded, not in first paint. F-4-02 follow-up (route-split) targets <50 KB; tighten then."
     },
     {
       "match": "^assets/supabase-vendor-.*\\.js$",
       "label": "supabase vendor",
       "maxGzipBytes": 60000,
-      "rationale": "Current 49.93 KB; 60 KB cap absorbs minor SDK growth."
+      "rationale": "Current 48.51 KB; 60,000 B (58.59 KB) cap absorbs minor SDK growth."
     },
     {
       "match": "^assets/react-vendor-.*\\.js$",
       "label": "react vendor",
       "maxGzipBytes": 25000,
-      "rationale": "Current 17.41 KB; 25 KB cap absorbs React 19.x patch growth."
+      "rationale": "Current 16.92 KB; 25,000 B (24.41 KB) cap absorbs React 19.x patch growth."
     },
     {
       "match": "^assets/dnd-vendor-.*\\.js$",
       "label": "dnd vendor",
       "maxGzipBytes": 25000,
-      "rationale": "Current 16.53 KB; 25 KB cap."
+      "rationale": "Current 16.06 KB; 25,000 B (24.41 KB) cap."
     },
     {
       "match": "^assets/.*\\.png$",
       "label": "images (any png)",
       "maxRawBytes": 100000,
-      "rationale": "F-4-03 resolved by the redesign rebrand: SL-Logo assets are quantized PNGs ≤ 15 KB. 100 KB cap guards against future unoptimized image additions."
+      "rationale": "F-4-03 resolved by the redesign rebrand: SL-Logo assets are quantized PNGs (current 5.47 KB). 100,000 B cap guards against future unoptimized image additions."
     },
     {
       "match": "^assets/.*\\.woff2$",
       "label": "fonts (woff2)",
       "maxRawBytes": 35000,
-      "rationale": "Self-hosted Public Sans variable fonts (CSP font-src 'self'): upright 27 KB + italic 28 KB, latin subset. Cap 35 KB per file; woff2 is already compressed so raw bytes are gated."
+      "rationale": "Self-hosted Public Sans variable fonts (CSP font-src 'self'): upright 26.20 KB + italic 27.63 KB, latin subset. Cap 35,000 B (34.18 KB) per file; woff2 is already compressed so raw bytes are gated."
     }
   ],
   "totalFirstPaintGzipBytes": 250000,
-  "totalFirstPaintRationale": "Sum of main + react-vendor + supabase-vendor + main-css gzip. Current ~201 KB; cap 250 KB."
+  "totalFirstPaintRationale": "Sum of every file matching the main entry, react vendor, supabase vendor and main css rules, gzipped (the main-entry regex also catches the ~965 B lazy index-*.js chunk). Current 224.58 KB; cap 250,000 B (244.14 KB). lucide-vendor (~7.6 KB gz) is modulepreloaded by index.html but matches no rule, so it is neither budgeted nor counted here; virtual-vendor (~5.0 KB gz, lazy) matches no rule either."
 }

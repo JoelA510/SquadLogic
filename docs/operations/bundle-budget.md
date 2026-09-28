@@ -35,9 +35,19 @@ Each `rules[]` entry must have either `maxGzipBytes` (preferred for JS/CSS) or
 `maxRawBytes` (preferred for binary assets — gzip on already-compressed PNG is
 noise).
 
-`totalFirstPaintGzipBytes` is summed over the `main entry`, `main css`,
-`react vendor`, and `supabase vendor` chunks — the assets the browser must
-download before any UI paints.
+`totalFirstPaintGzipBytes` is summed over every file matching the `main entry`,
+`main css`, `react vendor`, and `supabase vendor` rules — meant as the assets the
+browser must download before any UI paints. Two gaps against that intent, as
+of the current build: the `main entry` regex (`^assets/index-.*\.js$`) also
+matches a ~1 KB lazy shared chunk that Rollup names `index-*.js`, which is
+therefore checked as "main entry" and counted in the total; and
+`lucide-vendor-*.js`, which `index.html` modulepreloads, matches no rule, so it
+is neither budgeted nor counted. `virtual-vendor-*.js` (lazy) also matches no
+rule.
+
+Sizes in the `check:bundle` output and in the rationale fields are KiB
+(1024 B); the caps in the config are bytes, so a `250000` cap prints as
+`244.14 KB`.
 
 ## Updating the budget — the policy
 
@@ -62,7 +72,7 @@ download before any UI paints.
 | `cannot read dist at .../dist/assets` | Forgot `npm run frontend:build` | `npm run frontend:build && npm run check:bundle` |
 | `[GZIP] main entry ... exceeds budget` | Bundle grew | Diagnose with `npm run frontend:build -- --debug` + Vite's chunk analysis. |
 | `total first-paint exceeds budget` but per-chunk OK | Multiple small growths summed | Tighten one of the large vendors first; first-paint cap is the global gate. |
-| `no files matched (rule ...)` | Rule's regex doesn't match any built file | Either fix the regex or remove the rule (e.g., we deleted a chunk). |
+| `no files matched (rule ...)` | Rule's regex doesn't match any built file. The line is printed among the passing lines and does **not** fail the gate, so read the output rather than the exit code. | Either fix the regex or remove the rule (e.g., we deleted a chunk). |
 
 ## Adding a new rule
 

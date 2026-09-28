@@ -39,8 +39,12 @@ import { isoDateOfDayNumber, isoDayNumber } from '../facility/eligibility.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** The `day_of_week` enum (`20260331000000_definitive_schema.sql`). */
-const DAY_OF_WEEK_ENUM = Object.freeze(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
+/**
+ * The `day_of_week` enum (`20260331000000_definitive_schema.sql`), indexed by
+ * `getUTCDay()`. Pinned to the migrations and the Edge twin (`icsFeed.ts`
+ * `DAY_MAP`) by `tests/dayOfWeekEnum.test.js`.
+ */
+export const DAY_OF_WEEK_ENUM = Object.freeze(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
 
 /**
  * Why a row produced no dates. The same codes the calendar feed reports for

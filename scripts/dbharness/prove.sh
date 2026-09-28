@@ -41,6 +41,9 @@ M14="$REPO/supabase/migrations/20260928000000_reconcile_prod_rls_drift.sql"
 # 8.6 PR 3b PR 6: writer v3 (lock-by-default) and its revert.
 M15="$REPO/supabase/migrations/20260929000000_practice_writer_v3_lock_by_default.sql"
 R15="$REPO/docs/sql/20260929000000_revert.sql"
+# 8.9 PR 3: venue coordinates and their revert.
+M16="$REPO/supabase/migrations/20260930000000_location_coordinates.sql"
+R16="$REPO/docs/sql/20260930000000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -2905,6 +2908,65 @@ plant "R15 the revert drops unresolved exceptions without archiving" "$R15" \
   "    IF false THEN" \
   "revert 20260929000000: it dropped practice_exceptions while 2 unresolved exceptions existed and archive mode was off"
 
+# **8.9 PR 3: venue coordinates (plan §4 W14).** One plant per claim the
+# smoke's evidence prints. The four RPC anchors sit in the only definition of
+# admin_set_location_coordinates (anchor_liveness: LIVE); the two CHECKs are
+# table DDL (NA). The RPC guards and the CHECKs are planted separately
+# because each is the only thing standing between its own write path -- the
+# RPC, or a write that bypasses it -- and a bad pair.
+plant "M16 the coordinates RPC stops checking the caller is an admin of the venue's org" "$M16" \
+  "    IF NOT public.is_org_admin(v_before.organization_id) THEN" \
+  "    IF false THEN" \
+  "FAIL smoke 20260930000000"
+
+plant "M16 the range CHECK is dropped" "$M16" \
+  "    CHECK (latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180);" \
+  "    CHECK (true);" \
+  "FAIL smoke 20260930000000"
+
+plant "M16 the both-or-neither CHECK is dropped" "$M16" \
+  "    CHECK ((latitude IS NULL) = (longitude IS NULL));" \
+  "    CHECK (true);" \
+  "FAIL smoke 20260930000000"
+
+plant "M16 the coordinates RPC stops auditing" "$M16" \
+  "    PERFORM public.record_audit_event(
+        v_before.organization_id,
+        'location.coordinates_set'," \
+  "    PERFORM jsonb_build_array(
+        v_before.organization_id,
+        'location.coordinates_set'," \
+  "FAIL smoke 20260930000000"
+
+plant "M16 the coordinates RPC stops rounding" "$M16" \
+  "    v_latitude numeric := round(p_latitude, 2);" \
+  "    v_latitude numeric := p_latitude;" \
+  "FAIL smoke 20260930000000"
+
+plant "M16 the coordinates RPC stops refusing a half pair" "$M16" \
+  "    IF (p_latitude IS NULL) <> (p_longitude IS NULL) THEN" \
+  "    IF false THEN" \
+  "FAIL smoke 20260930000000"
+
+plant "M16 the coordinates RPC stops refusing an out-of-range pair" "$M16" \
+  "       AND NOT (p_latitude BETWEEN -90 AND 90 AND p_longitude BETWEEN -180 AND 180) THEN" \
+  "       AND false THEN" \
+  "FAIL smoke 20260930000000"
+
+# The range is judged on the value AS GIVEN; judging the rounded value lets
+# 90.004 through as 90.00. The smoke's 90.004 case is what must go red.
+plant "M16 the coordinates RPC judges the range after rounding" "$M16" \
+  "       AND NOT (p_latitude BETWEEN -90 AND 90 AND p_longitude BETWEEN -180 AND 180) THEN" \
+  "       AND NOT (v_latitude BETWEEN -90 AND 90 AND v_longitude BETWEEN -180 AND 180) THEN" \
+  "FAIL smoke 20260930000000"
+
+# Its revert destroys every venue's coordinates, so the warning is the claim.
+# The seed plants 3 venues across 2 organisations; non-distinct prints 3.
+plant "R16 the coordinates warning stops counting organisations distinctly" "$R16" \
+  "    SELECT count(*), count(DISTINCT organization_id)" \
+  "    SELECT count(*), count(organization_id)" \
+  "revert 20260930000000: planted 3 venues with coordinates across 2 organisations (and 1 without) and the revert did not warn with those figures"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -2995,6 +3057,14 @@ declare -A CLAIM_PROVER=(
   ["(checked) the reconcile's own end-state check refuses a member-writable policy on a table nobody listed"]="M14 the end-state check goes back to a hand-picked table list"
   ["(checked) every write policy in public, evaluated as a plain member on an own-org row, is admin-gated or allowlisted -- direct-column gates only, a gate through a parent row is not reached"]="M14 the scheduler_runs admin write also admits members"
   ["(checked) scheduler_runs is closed to member writes and scoped member reads, and an admin session still writes it"]="M14 scheduler_runs gets no admin write policy"
+  ["(checked) only an admin of the venue's own organisation sets its coordinates: a coach and another organisation's admin are refused"]="M16 the coordinates RPC stops checking the caller is an admin of the venue's org"
+  ["(checked) the coordinates RPC refuses a half pair (22023)"]="M16 the coordinates RPC stops refusing a half pair"
+  ["(checked) the both-or-neither CHECK refuses a half-pair coordinates write that bypasses the RPC"]="M16 the both-or-neither CHECK is dropped"
+  ["(checked) the coordinates RPC refuses an out-of-range pair (22023), judged before rounding"]="M16 the coordinates RPC stops refusing an out-of-range pair|M16 the coordinates RPC judges the range after rounding"
+  ["(checked) the range CHECK refuses an out-of-range coordinates write that bypasses the RPC"]="M16 the range CHECK is dropped"
+  ["(checked) the coordinates RPC stores the pair rounded to 2 decimals"]="M16 the coordinates RPC stops rounding"
+  ["(checked) every accepted coordinates write, a clear included, leaves a location.coordinates_set audit row with its before and after"]="M16 the coordinates RPC stops auditing"
+  ["(checked) the revert counted the venue coordinates it was about to destroy, and the organisations they span"]="R16 the coordinates warning stops counting organisations distinctly"
 )
 
 # **`(unplantable)` is the one prefix that retires a HEALTH CLAIM, so it is

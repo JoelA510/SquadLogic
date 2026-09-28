@@ -144,3 +144,31 @@ export const FacilityBookingSchema = z
     message: 'booking endMinutes must not precede startMinutes',
     path: ['endMinutes'],
   });
+
+/**
+ * **A venue's latitude/longitude pair, as `admin_set_location_coordinates`
+ * accepts it** (migration `20260930000000`, plan 8.9 §2).
+ *
+ * Both or neither: `{ latitude: null, longitude: null }` is the clear, and a
+ * half pair is refused, matching the RPC's 22023 and the table's
+ * `locations_coordinates_both_or_neither` CHECK. Ranges are inclusive,
+ * latitude -90..90 and longitude -180..180, judged on the value AS GIVEN --
+ * the RPC's contract too, so 90.004 is refused by both rather than rounded
+ * into range by one of them. Rounding to 2 decimals (D9) is the RPC's; this
+ * schema validates and does not transform.
+ *
+ * Both keys are required, `null` included. An omitted key is not read as a
+ * clear: clearing destroys an admin's entry, so it has to be stated. Numbers
+ * only -- a form's string is the caller's to convert, and `NaN`/`Infinity`
+ * are refused. Nothing geocodes.
+ */
+export const LocationCoordinatesSchema = z
+  .object({
+    latitude: z.number().min(-90).max(90).nullable(),
+    longitude: z.number().min(-180).max(180).nullable(),
+  })
+  .strict()
+  .refine((pair) => (pair.latitude === null) === (pair.longitude === null), {
+    message: 'latitude and longitude are both given or both null',
+    path: ['longitude'],
+  });

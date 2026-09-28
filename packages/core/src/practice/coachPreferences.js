@@ -39,11 +39,12 @@
  *
  * ## Declared, not enforced
  *
- * Nothing outside tests calls this module (the `practice/` unwired pin). PR 4
- * wires `must_keep` into the repair as a candidate filter and `prefer_keep`
- * into the objective as `coachPreferenceBreached`, and adds
- * `PRACTICE_TBD_REASON.COACH_PREFERENCE` where the repair first emits it. PR 8
- * mirrors the rule in the Deno twin.
+ * Its one caller is `practice/repair.js` (8.6 PR 3b, PR 4): `must_keep` is a
+ * candidate filter there, with `PRACTICE_TBD_REASON.COACH_PREFERENCE` when it
+ * empties a series' venue, and `prefer_keep` is priced by the objective as
+ * `coachPreferenceBreached`. The repair itself has no production caller yet
+ * (the `practice/` unwired pin), so nothing a family sees honours a preference
+ * until PR 9-10 wire it. PR 8 mirrors the rule in the Deno twin.
  */
 
 import { z } from 'zod';

@@ -22,6 +22,7 @@
 
 import { z } from 'zod';
 
+import { TEAM_COACH_ROLE } from './assignmentChange.js';
 import { ASSIGNMENT_STATUS, COMMITMENT_SOURCE, PERSONAL_CONSTRAINT_KIND } from './reasonCodes.js';
 
 /** Inclusive ISO calendar date, `YYYY-MM-DD`. No `Date` construction anywhere. */
@@ -239,3 +240,19 @@ export const IdentityDecisionSchema = z
     note: z.string().min(1).nullable().default(null),
   })
   .strict();
+
+/**
+ * One `team_coach_assignments` row, as the table stores it (8.8 PR 2) and as
+ * `people/assignmentHistory.js` reads it: the typedef `TeamCoachAssignmentRow`
+ * in `assignmentChange.js`, made checkable. Dates are inclusive; a null
+ * `effective_to` is an open row. Columns the readers do not use are stripped,
+ * not carried.
+ */
+export const TeamCoachAssignmentRowSchema = z.object({
+  id: IdSchema.optional(),
+  team_id: IdSchema,
+  coach_id: IdSchema,
+  role: z.enum(Object.values(TEAM_COACH_ROLE)),
+  effective_from: IsoDateSchema,
+  effective_to: IsoDateSchema.nullable().default(null),
+});

@@ -19,6 +19,7 @@
 import { z } from 'zod';
 
 import { IdSchema, IsoDateSchema } from '../availability/schemas.js';
+import { TeamCoachAssignmentRowSchema } from '../people/schemas.js';
 
 /**
  * Three-letter weekday code.
@@ -280,5 +281,29 @@ export const PracticeRepairInputSchema = z
     changeBudget: z.number().int().min(0).nullable().optional(),
     searchNodeLimit: z.number().int().positive().optional(),
     strategy: z.enum(['exact', 'greedy']).optional(),
+    /**
+     * APPROVED coach practice preferences (8.6 PR 3b plan §4), as input data;
+     * loading them is the adapter's job (PR 9). Each element is checked by
+     * `repairPracticeLoss()` against `practice/coachPreferences.js`
+     * `CoachPreferenceInputSchema`, the one contract for a preference: that
+     * module imports this one, so importing it back here would be a cycle.
+     */
+    coachPreferences: z.array(z.unknown()).optional(),
+    /**
+     * The `team_coach_assignments` rows that say which coaches are CURRENT on a
+     * team on a date. Preferences are judged over those coaches only.
+     */
+    teamCoachAssignments: z.array(TeamCoachAssignmentRowSchema).optional(),
   })
-  .strict();
+  .strict()
+  // Preferences with no rows would bind no coach to any team, so every one of
+  // them would be inert and the repair would say nothing. Refused instead.
+  .refine(
+    (input) =>
+      (input.coachPreferences ?? []).length === 0 || (input.teamCoachAssignments ?? []).length > 0,
+    {
+      message:
+        'coach preferences need `teamCoachAssignments` rows: without them no coach is current on any team, and every preference would be silently inert',
+      path: ['teamCoachAssignments'],
+    }
+  );

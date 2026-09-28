@@ -62,6 +62,34 @@
  * The lost ground itself is never offered as a re-home, even outside the loss
  * minutes.
  *
+ * ## Coach preferences (8.6 PR 3b plan §4)
+ *
+ * Approved preferences and the `team_coach_assignments` rows are input data
+ * (`coachPreferences`, `teamCoachAssignments`); loading them is PR 9's. The
+ * meaning is `practice/coachPreferences.js`'s, reused rather than restated: for
+ * each displaced series, its team's CURRENT coaches are the rows that cover the
+ * date the repair takes effect for that series (`coachesOfTeamOn()` on the
+ * series-window's first day), strictest wins among them, and the reference is
+ * the series itself, because every series the repair judges is being moved.
+ * Venue is the location: the facility graph's `venueId`, which must then be the
+ * location id.
+ *
+ * - `must_keep` is a hard candidate filter, same-venue and cross-venue alike.
+ *   A series that had legal same-venue candidates and has none after the
+ *   filter is TIME TBD with `PRACTICE_TBD_REASON.COACH_PREFERENCE`, never
+ *   dropped; `mustKeepDimensions` names what emptied its venue.
+ * - **A preference's `value` is not read here.** The reference is the series
+ *   being moved, so every coach on a dimension keeps the same thing, and two
+ *   `must_keep` values that differ cannot conflict in a repair: that is the
+ *   no-series case (placing an unassigned team), where `value` is the
+ *   reference and `PRACTICE_COACH_PREFERENCE_CONFLICT` can fire.
+ * - `prefer_keep` is priced: each breached dimension is one
+ *   `coachPreferenceBreached` in the candidate's counts, weighed by the one
+ *   objective like every other term.
+ * - **No preferences, no effect.** With none supplied (or none that resolve to
+ *   a reference) nothing here runs and the result is byte-identical to a
+ *   repair that was never handed them.
+ *
  * ## Minimality, and when it is claimed
  *
  * The default strategy is an exact branch-and-bound over the displaced series,
@@ -85,16 +113,25 @@ import {
   isoDateOfDayNumber,
   isoDayNumber,
 } from '../facility/index.js';
+import { coachesOfTeamOn } from '../people/assignmentHistory.js';
 import {
   RESOLVE_CHANGE_TERMS,
   RESOLVE_OBJECTIVE_TERM,
   RESOLVE_OBJECTIVE_WEIGHTS,
   RESOLVE_PRACTICE_CHANGE_TERMS,
   changeCountsFor,
+  coachPreferenceCountsFor,
   objectiveWeightsAreDefault,
   resolveObjectiveWeights,
   scoreObjective,
 } from '../resolve/objective.js';
+import {
+  COACH_PREFERENCE_LEVEL,
+  CoachPreferenceInputSchema,
+  CoachPreferencePlacementSchema,
+  judgeCoachPreferenceCandidate,
+  resolveCoachPreferences,
+} from './coachPreferences.js';
 import { PRACTICE_REASON, derivePracticeStatus, makePracticeFinding } from './reasonCodes.js';
 import { PracticeRepairInputSchema } from './schemas.js';
 import { buildPracticeSlotSet, firstWeekdayOnOrAfter } from './slots.js';
@@ -112,9 +149,16 @@ export const PRACTICE_TBD_REASON = Object.freeze({
    * priced placing it at or above leaving it TIME TBD.
    */
   OBJECTIVE_PREFERRED_TBD: 'objective-preferred-tbd',
+  /**
+   * It had legal slots at its venue, and every one of them breaks a `must_keep`
+   * coach preference (8.6 PR 3b plan §4).
+   */
+  COACH_PREFERENCE: 'coach-preference',
 });
 
 const DEFAULT_SEARCH_NODE_LIMIT = 200000;
+/** What `coachPreferences.js` accepts as a location id: its contract, not a copy. */
+const LocationIdSchema = CoachPreferencePlacementSchema.shape.locationId;
 const MAX_CROSS_VENUE_OPTIONS = 3;
 
 /**
@@ -352,6 +396,71 @@ export function repairPracticeLoss(input) {
     }
   }
 
+  /* -- coach preferences (plan §4) ---------------------------------------- */
+  // The one contract for a preference, applied to the whole list: an element
+  // that is not an approved preference, or a second row for one (coach,
+  // dimension), refuses the repair here, whether or not anything is displaced.
+  const coachPreferences = CoachPreferenceInputSchema.parse({
+    coachIds: [],
+    preferences: parsed.coachPreferences ?? [],
+  }).preferences;
+  const coachRows = parsed.teamCoachAssignments ?? [];
+  // Venue = location (plan §5, decision 2). Once any preference asks for
+  // something, every venue must be a location id, checked here for the whole
+  // graph so that the refusal does not depend on which teams happen to be
+  // displaced.
+  if (coachPreferences.some((p) => p.level !== COACH_PREFERENCE_LEVEL.DONT_CARE)) {
+    const notLocations = [
+      ...new Set(Object.values(graph.surfaces).map((surface) => surface?.venueId ?? null)),
+    ]
+      .filter((venueId) => !LocationIdSchema.safeParse(venueId).success)
+      .sort();
+    if (notLocations.length > 0) {
+      throw new Error(
+        `repair: coach preferences compare venues as location ids, and the facility graph's venues ${JSON.stringify(notLocations)} are not; build the graph from locations before passing preferences`
+      );
+    }
+  }
+  /** A series or a candidate, as `coachPreferences.js` reads one. Venue = location. */
+  const placementOf = (shape) => ({
+    weekday: shape.weekday,
+    startMinutes: shape.startMinutes,
+    locationId: venueOf(shape.surfaceId),
+  });
+  /**
+   * One displaced series' resolved preferences, or `null` when none applies:
+   * none were supplied, or none of its team's current coaches holds one with a
+   * reference. `null` is what keeps a repair without preferences unchanged.
+   */
+  const preferencesOf = (series) => {
+    if (coachPreferences.length === 0) return null;
+    const { lead, assistants } = coachesOfTeamOn(coachRows, series.teamId, series.from);
+    const current = new Set([...lead, ...assistants]);
+    // `dont_care` asks nothing of a candidate: resolving it yields no
+    // reference, no finding and no verdict, so a team whose current coaches
+    // hold nothing else is left exactly as a team with no preferences.
+    const holds = coachPreferences.some(
+      (preference) =>
+        current.has(preference.coachId) && preference.level !== COACH_PREFERENCE_LEVEL.DONT_CARE
+    );
+    if (!holds) return null;
+    const resolution = resolveCoachPreferences({
+      coachIds: [...current].sort(),
+      preferences: coachPreferences,
+      series: placementOf(series),
+    });
+    for (const finding of resolution.findings) {
+      findings.push(
+        makePracticeFinding(finding.code, `${series.teamId}: ${finding.message}`, {
+          ...finding.details,
+          assignmentId: series.assignmentId,
+          teamId: series.teamId,
+        })
+      );
+    }
+    return resolution.dimensions.some((entry) => entry.references.length > 0) ? resolution : null;
+  };
+
   /* -- candidates --------------------------------------------------------- */
   const inventory = new Map();
   for (const shape of parsed.inventory) {
@@ -386,11 +495,33 @@ export function repairPracticeLoss(input) {
   const candidatesBySeries = displaced.map((series) => {
     const same = [];
     const cross = [];
+    const preferences = preferencesOf(series);
+    // Legal same-venue candidates before the `must_keep` filter, and the
+    // dimensions it filtered on: what tells COACH_PREFERENCE from no slot at all.
+    let sameBeforeMustKeep = 0;
+    const mustKeepViolated = new Set();
     for (const shape of inventoryShapes) {
       if (shape.durationMinutes !== series.durationMinutes) continue;
       const overlaps = againstFrozen(series, shape);
       if (overlaps === null) continue;
-      const counts = changeCountsFor(series, shape);
+      const sameVenue = venueOf(shape.surfaceId) === venueOf(series.surfaceId);
+      let breaches = 0;
+      if (preferences !== null) {
+        if (sameVenue) sameBeforeMustKeep += 1;
+        const verdict = judgeCoachPreferenceCandidate(preferences, placementOf(shape));
+        if (verdict.mustKeepViolated) {
+          // Only what emptied the venue explains a COACH_PREFERENCE TIME TBD.
+          if (sameVenue) {
+            for (const dimension of verdict.violatedDimensions) mustKeepViolated.add(dimension);
+          }
+          continue;
+        }
+        breaches = verdict.preferKeepBreaches;
+      }
+      const counts = {
+        ...changeCountsFor(series, shape),
+        ...coachPreferenceCountsFor(shape, breaches),
+      };
       // Standalone: would this slot give one of the team's coaches a day the
       // frozen plan does not already have, past the published count? Recorded
       // for the ratio measurement only; the search counts it jointly.
@@ -412,10 +543,17 @@ export function repairPracticeLoss(input) {
           weights
         ).total,
       };
-      (venueOf(shape.surfaceId) === venueOf(series.surfaceId) ? same : cross).push(entry);
+      (sameVenue ? same : cross).push(entry);
     }
     const order = (a, b) => a.cost - b.cost || shapeKey(a.shape).localeCompare(shapeKey(b.shape));
-    return { series, same: same.sort(order), cross: cross.sort(order) };
+    return {
+      series,
+      same: same.sort(order),
+      cross: cross.sort(order),
+      // Legal at its venue before the filter, and nothing left after it.
+      mustKeepEmptied: sameBeforeMustKeep > 0 && same.length === 0,
+      mustKeepViolated: [...mustKeepViolated].sort(),
+    };
   });
 
   /* -- the search --------------------------------------------------------- */
@@ -680,8 +818,11 @@ export function repairPracticeLoss(input) {
         (candidate) => marginal(series, candidate, occupied, coachDays) !== null
       );
       let reason;
-      if (entry.same.length === 0) reason = PRACTICE_TBD_REASON.NO_LEGAL_SLOT_AT_VENUE;
-      else if (freeNow.length > 0) {
+      if (entry.same.length === 0) {
+        reason = entry.mustKeepEmptied
+          ? PRACTICE_TBD_REASON.COACH_PREFERENCE
+          : PRACTICE_TBD_REASON.NO_LEGAL_SLOT_AT_VENUE;
+      } else if (freeNow.length > 0) {
         reason =
           budget !== null
             ? PRACTICE_TBD_REASON.CHANGE_BUDGET
@@ -726,6 +867,9 @@ export function repairPracticeLoss(input) {
         ...window,
         reason,
         lossReason,
+        ...(reason === PRACTICE_TBD_REASON.COACH_PREFERENCE
+          ? { mustKeepDimensions: entry.mustKeepViolated }
+          : {}),
         sameVenueCandidates: entry.same.length,
         crossVenueOptions,
       });

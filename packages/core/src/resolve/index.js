@@ -144,14 +144,17 @@ export {
 } from './instances.js';
 
 export {
+  COACH_PREFERENCE_BREACHED_WEIGHT,
   RESOLVE_CHANGE_TERMS,
   RESOLVE_OBJECTIVE_TERM,
   RESOLVE_OBJECTIVE_WEIGHTS,
   RESOLVE_PRACTICE_CHANGE_TERMS,
+  RESOLVE_PRACTICE_QUALITY_TERMS,
   RESOLVE_QUALITY_TERMS,
   candidateObjectiveCounts,
   changeCountsFor,
   changeTermsDisabled,
+  coachPreferenceCountsFor,
   disabledChangeTerms,
   isPracticeSeriesSlot,
   objectiveCountsForSchedule,

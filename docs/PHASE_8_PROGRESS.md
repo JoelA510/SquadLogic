@@ -6403,3 +6403,59 @@ changed level or value, or set directly).
   - the mock's table read does not emulate coach-self RLS;
   - approve-with-change cannot clear a requested value; the admin must reject and
     then set.
+
+## 8.6 PR 3b, PR 6 — #461 merged (654deb0): practice writer v3, lock-by-default
+
+This implements operator ruling 2: every assigned practice is locked unless an admin
+accepts an override. The rule is enforced in the RPC as well as the UI.
+`20260929000000_practice_writer_v3_lock_by_default` is a whole-function copy of
+the 20260924 writer (LESSONS #11), and has a verbatim revert.
+- **Locking.** Any save that would delete, re-range or move an existing row refuses
+  with 22023 "assignment X is locked" unless the row is in `unlock`. Unlocks are
+  per row.
+  - `unlock` has its own gate: an org admin with a uid. A service-role caller can
+    therefore never unlock, close or withdraw.
+  - Each unlock writes one `practice.unlock_accepted` audit row with the
+    before-image.
+- **`closes`** ends a row in place and keeps its id.
+- **`practice_exceptions`** holds overrides and TIME TBD windows, never as extra
+  assignment rows.
+  - Rows cannot overlap each other (a btree_gist exclusion constraint).
+  - Deleting their assignment is refused (ON DELETE RESTRICT).
+  - Members read; admins write.
+- **Other additions.**
+  - `base_fingerprint` makes the save refuse a stale plan with 40001.
+  - The new column `assigned_via` records how each row was assigned.
+  - The result reports `teams_time_tbd`, taken from the roster.
+  - `admin_cancel_practice_assignment` withdraws a series' exceptions in the same
+    transaction.
+- **BLOCKING round 1: the new-row rule was wrong, and it came from the supervisor's
+  own plan (§3).** "A new row overlapping any row the team holds, by date range"
+  would have blocked a second weekly practice. 176 of 281 (sheet, team) pairs in
+  the corpus practise on two weekdays. The rule is now a same-weekday time clash.
+  A new row is refused only when:
+  - its date range overlaps a row the team keeps, and
+  - it is on the same `day_of_week`, and
+  - its minutes overlap under a strict comparison.
+  An addition removes nothing, so locked rows stay protected either way. The plan
+  is amended.
+- **Deploy order.** Main's first CI run showed Edge deploys proceed while the
+  migration deploy is skipped. With no `repair` body, the Edge function therefore
+  sends exactly the v2 argument set, so ordinary saves work against a v2 database.
+  A source pin turns red on an unconditional `unlock: []`.
+- **Supervisor plant, round 2.** Flipping the minute comparison to `<=` (back-to-back
+  17:00-18:00 / 18:00-19:00) was uncaught. Case (d) now pins it, and the plant
+  turns only (d) red.
+- **Evidence.**
+  - 13/13 plants plus the boundary plant are red on the real `run.sh`, run on a
+    private harness cluster (`HARNESS_PGUSER`, a new override that avoids killing
+    other clusters).
+  - Anchor pre-flight 164/164.
+  - pgTAP, Build & Test and Deno Mirror are green.
+- **Follow-ups (not reachable until 3b PRs 9/11 write exceptions):**
+  - exception windows are not bounded by the assignment's range, and `closes` does
+    not trim them;
+  - withdrawn exceptions still block team, org, field and slot deletes;
+  - admins can write `practice_exceptions` directly, unaudited.
+- **Consequence.** Deleting a team or org whose rows carry exceptions now fails
+  with 23503.

@@ -58,7 +58,7 @@ import {
   type GameRow,
   type PracticeRow,
 } from '../_shared/calendar/icsFeed.ts';
-import { readSeasonTimezone } from '../_shared/timing/seasonSettings.ts';
+import { readSeasonTimezone, type SeasonSettingsReader } from '../_shared/timing/seasonSettings.ts';
 
 serve(async (req) => {
   try {
@@ -87,7 +87,11 @@ serve(async (req) => {
         'id, name, organization_id, division_id, calendar_token_expires_at, organizations(name)'
       )
       .eq('calendar_token', token)
-      .single();
+      .single()
+      // Untyped client: the SDK cannot see that teams.organization_id is a
+      // to-one FK, so it types the embed as an array. PostgREST returns one
+      // object (or null). Type-only; `overrideTypes` returns `this`.
+      .overrideTypes<{ organizations: { name: string | null } | null }>();
 
     if (teamErr || !team) {
       return new Response('Invalid calendar token or team not found.', { status: 404 });
@@ -118,7 +122,10 @@ serve(async (req) => {
     // calls itself "the one server-side read of a season's clock", and a second
     // copy in this file is how `.single()` ends up fixed on one arm and not the
     // other -- the twin-arm shape this whole change exists to stop.
-    const season = await readSeasonTimezone(supabase, organizationId);
+    // Cast, not checked: matching supabase-js 2.87's builder against the structural reader
+    // overflows TypeScript's instantiation depth (TS2589, #483); runtime shape is unchanged.
+    const seasonReader = supabase as unknown as SeasonSettingsReader;
+    const season = await readSeasonTimezone(seasonReader, organizationId);
     if (season.errored) {
       // Not fatal. A feed that 500s takes every family's calendar down; every
       // event becomes TIME TBD instead, which says the true thing.

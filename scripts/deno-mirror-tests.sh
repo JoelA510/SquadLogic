@@ -55,19 +55,21 @@ ZONES=(UTC America/Los_Angeles)
 # a deleted file. Deriving it by counting what discovery found would compare
 # the glob against itself and could never fail.
 #
-# Adding a test file needs no change here: discovery runs it already.
+# Adding a test file needs no change here: discovery runs it already. Raising
+# the floor with it is optional and makes that file's deletion trip it too
+# (8.9 PR 2 raised it to 6 for `solar_test.ts`).
 #
 # **Adding an EXCLUDED entry DOES require lowering this number, and that
 # friction is the point.** It is checked against RUNNABLE, so one exclusion
-# takes the suite to 4 and trips the floor. The obvious softening --
+# takes the suite to 5 and trips the floor. The obvious softening --
 # `${#DISCOVERED[@]} - ${#EXCLUDED[@]}` -- is the hollow version of this
 # check: the bar would move down by exactly the amount each new exclusion
 # removes, so no exclusion could ever trip it and the floor would only ever
 # catch deletions. Suppressing a file must therefore be written down twice,
 # once in EXCLUDED and once here, and the lowered number is the durable record
-# in the diff that coverage went down. A reviewer seeing `5` become `4` is the
+# in the diff that coverage went down. A reviewer seeing `6` become `5` is the
 # entire mechanism.
-EXPECTED_MIN_TEST_FILES=5
+EXPECTED_MIN_TEST_FILES=6
 
 # Test files that must NOT run, each with the reason. Empty is the correct
 # state.

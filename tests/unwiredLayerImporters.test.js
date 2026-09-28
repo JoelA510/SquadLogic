@@ -476,14 +476,79 @@ const LAYERS = Object.freeze([
   // daylight provider (8.9 PR 4); that provider is the first entry the
   // production lists below will gain, and the PR adding it rewrites this entry
   // and the "nothing in production calls this yet" note in `solar.js`.
+  //
+  // 8.9 PR 2 added its Deno twin, and **consumers are matched by name**, so the
+  // two arms now appear in each other's lists. The three non-`tests/` files
+  // below are not callers and the production lists name them for that reason:
+  // the twin *defines* both functions, its Deno test sits under `supabase/`
+  // (which `isProductionFile` counts as production), and the vector generator
+  // is a dev script under `scripts/`. Each is named exactly, so the first real
+  // production caller is still a new file and still fails this entry.
   Object.freeze({
     layer: 'timing/solar.js',
     modulePath: 'packages/core/src/timing/solar.js',
     functions: Object.freeze(['sunsetOnDate', 'sunsetEnforcementMinutes']),
-    importers: Object.freeze(['packages/core/src/timing/index.js']),
-    consumers: Object.freeze(['tests/reasonCodeReachability.test.js', 'tests/solar.test.js']),
-    expectedProductionConsumers: Object.freeze([]),
-    expectedExternalProductionConsumers: Object.freeze([]),
+    importers: Object.freeze([
+      'packages/core/src/timing/index.js',
+      'scripts/generate-solar-vectors.mjs',
+      'tests/solarDrift.test.js',
+      'tests/solarVectors.test.js',
+    ]),
+    consumers: Object.freeze([
+      'scripts/generate-solar-vectors.mjs',
+      'supabase/functions/_shared/tests/solar_test.ts',
+      'supabase/functions/_shared/timing/solar.ts',
+      'tests/reasonCodeReachability.test.js',
+      'tests/solar.test.js',
+      // Not `solarDrift`/`solarVectors`: they call both arms through renamed
+      // imports, which the name match cannot see. `importers` lists them.
+    ]),
+    expectedProductionConsumers: Object.freeze([
+      'scripts/generate-solar-vectors.mjs',
+      'supabase/functions/_shared/tests/solar_test.ts',
+      'supabase/functions/_shared/timing/solar.ts',
+    ]),
+    expectedExternalProductionConsumers: Object.freeze([
+      'scripts/generate-solar-vectors.mjs',
+      'supabase/functions/_shared/tests/solar_test.ts',
+      'supabase/functions/_shared/timing/solar.ts',
+    ]),
+  }),
+  // 8.9 PR 2: the Deno twin of the computed sunset. **Unused until 8.9 PR 6**
+  // wires it into the auto-scheduler. The load-bearing pin is `importers`:
+  // an Edge Function cannot reach this file without importing it, so the day
+  // `auto-scheduler/index.ts` does, this list fails and PR 6 rewrites this
+  // entry and the "Nothing calls this yet" note in `solar.ts`. The name-matched
+  // lists carry the same caveat as the core entry above: core's definitions
+  // and the generator appear by name, not as callers of this file.
+  Object.freeze({
+    layer: '_shared/timing/solar.ts',
+    modulePath: 'supabase/functions/_shared/timing/solar.ts',
+    functions: Object.freeze(['sunsetOnDate', 'sunsetEnforcementMinutes']),
+    importers: Object.freeze([
+      'supabase/functions/_shared/tests/solar_test.ts',
+      'tests/solarDrift.test.js',
+      'tests/solarVectors.test.js',
+    ]),
+    consumers: Object.freeze([
+      'packages/core/src/timing/solar.js',
+      'scripts/generate-solar-vectors.mjs',
+      'supabase/functions/_shared/tests/solar_test.ts',
+      'tests/reasonCodeReachability.test.js',
+      'tests/solar.test.js',
+      // Not `solarDrift`/`solarVectors`: they call both arms through renamed
+      // imports, which the name match cannot see. `importers` lists them.
+    ]),
+    expectedProductionConsumers: Object.freeze([
+      'packages/core/src/timing/solar.js',
+      'scripts/generate-solar-vectors.mjs',
+      'supabase/functions/_shared/tests/solar_test.ts',
+    ]),
+    expectedExternalProductionConsumers: Object.freeze([
+      'packages/core/src/timing/solar.js',
+      'scripts/generate-solar-vectors.mjs',
+      'supabase/functions/_shared/tests/solar_test.ts',
+    ]),
   }),
   /* -- Phase 8.6 PR 3b, PR 1: coach practice preferences ---------------- */
   //

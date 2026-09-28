@@ -6459,3 +6459,40 @@ the 20260924 writer (LESSONS #11), and has a verbatim revert.
   - admins can write `practice_exceptions` directly, unaudited.
 - **Consequence.** Deleting a team or org whose rows carry exceptions now fails
   with 23503.
+
+## 8.6 PR 3b, PR 4 — #464 merged (6db3c1b): coach preferences in the repair
+
+The repair takes approved `coachPreferences` and `teamCoachAssignments` rows as
+input data. They are validated with #453's schemas plus a new
+`TeamCoachAssignmentRowSchema`, and #453's resolve / strictest-wins / judge /
+conflict logic is reused, not copied. Loading them from the DB is PR 9.
+- **must_keep** is a hard candidate filter, same-venue and cross-venue alike. When it
+  empties a series' venue, the series goes TIME TBD with the new
+  `PRACTICE_TBD_REASON.COACH_PREFERENCE = 'coach-preference'` plus
+  `mustKeepDimensions`.
+- **prefer_keep** adds the practice-only quality term `coachPreferenceBreached`,
+  weight **100** (`RESOLVE_OBJECTIVE_WEIGHTS`), once per breached dimension. It is
+  guarded like `changedWeekday`, so games never count it.
+- **No preferences ⇒ byte-identical.** 29 surfaces × 3 loss kinds × exact/greedy
+  (174 runs) match main's digests in three variants: none, an empty list, and all
+  `dont_care`. The one known non-identical surface: the weights-overridden finding
+  now echoes the new key.
+- **BLOCKING round 1: the repair ignored the approved value.** The plan's reference
+  rule used the series being moved, so an approved `must_keep weekday=TUE` on a team
+  on WED was enforced as "keep WED". That contradicted the operator ruling ("honor
+  the change") and #463's approval dialog. The rule is now:
+  - a value that is set is the reference;
+  - a null value keeps the current series.
+  It is changed once, in #453's `resolveCoachPreferences`, so the UI and the repair
+  read the same rule. Conflicts between must_keep values are now reachable (#453's
+  `PRACTICE_COACH_PREFERENCE_CONFLICT`). Plan §4 is amended.
+- **Supervisor plant, round 2.** Truncating the candidate start to the hour left
+  57/57 green: every start_time case differed by at least an hour. Three
+  17:00-vs-17:30 cases were added, and the plant now turns one red.
+- **Evidence.** The agent's 13 plants are red. Season-2026 fixture suite 2185/2185.
+  Full suite 4214 passed.
+- **PR 9 must:**
+  - build the graph with location-uuid venues; the preference schema requires them,
+    and a slug graph is refused when preferences are present;
+  - derive `coachesByTeam` from the same assignment rows, so there is one coach
+    source.

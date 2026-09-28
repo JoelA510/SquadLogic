@@ -1246,7 +1246,7 @@ describe('practice repair :: bounded losses are a temporary override (plan §1)'
       losses += expected.length > 0 ? 1 : 0;
     }
     expect(losses).toBe(SURVEY.length);
-  });
+  }, 20_000); // every corpus surface blacked out, one bounded repair each: 1.8-2.6 s alone, 2.7 s in a local full run, over the 5 s default in CI (58fa722).
 
   it('puts no displaced team on the lost ground inside the window', () => {
     const lost = new Set(conflictingSurfacesOf(graph, CHOSEN.surfaceId));

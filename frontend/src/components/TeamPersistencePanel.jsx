@@ -23,6 +23,8 @@ export default function TeamPersistencePanel({
     teamPersistenceSnapshot?.manualOverrides ?? []
   );
   const persistenceTimeoutRef = useRef(null);
+  // AbortController of the in-flight sync; a timed-out or superseded request must not write state.
+  const activeSyncRef = useRef(null);
 
   useEffect(() => {
     setPersistenceOverrides(teamPersistenceSnapshot?.manualOverrides ?? []);
@@ -59,6 +61,7 @@ export default function TeamPersistencePanel({
       if (persistenceTimeoutRef.current) {
         clearTimeout(persistenceTimeoutRef.current);
       }
+      activeSyncRef.current?.abort();
     };
   }, []);
 
@@ -71,15 +74,21 @@ export default function TeamPersistencePanel({
     );
   }, [persistenceCounts.pending]);
 
+  // Only a block raised by local pending overrides is cleared when they are reviewed; a 'blocked'
+  // result from the endpoint keeps its own message.
+  const wasLocallyBlockedRef = useRef(false);
   useEffect(() => {
     if (hasBlockingOverrides) {
+      wasLocallyBlockedRef.current = true;
       if (persistenceActionState !== 'submitting') {
         setBlockedState();
       }
       return;
     }
 
-    if (persistenceActionState === 'blocked') {
+    const wasLocallyBlocked = wasLocallyBlockedRef.current;
+    wasLocallyBlockedRef.current = false;
+    if (wasLocallyBlocked && persistenceActionState === 'blocked') {
       setPersistenceActionState('idle');
       setPersistenceActionMessage('All manual overrides have been reviewed.');
     }
@@ -110,8 +119,13 @@ export default function TeamPersistencePanel({
         ? 'Validating overrides and pushing Supabase payload...'
         : 'Validating overrides and preparing Supabase payload...'
     );
+    const controller = new AbortController();
+    activeSyncRef.current = controller;
     persistenceTimeoutRef.current = setTimeout(() => {
-      setPersistenceActionState('blocked');
+      // A timeout is a failed sync, not a blocked precondition. Abort so a late response cannot
+      // overwrite this state or a retry's.
+      controller.abort();
+      setPersistenceActionState('error');
       setPersistenceActionMessage('Supabase sync timed out. Please retry.');
     }, SUPABASE_SYNC_TIMEOUT_MS);
 
@@ -121,7 +135,9 @@ export default function TeamPersistencePanel({
         overrides: persistenceOverrides,
         endpoint: persistenceEndpoint,
         accessToken: session?.access_token,
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
 
       if (result.status === 'blocked') {
         setPersistenceActionState('blocked');
@@ -129,8 +145,8 @@ export default function TeamPersistencePanel({
         return;
       }
 
-      if (result.status === 'error') {
-        setPersistenceActionState('idle');
+      // Only an explicit success is a success; any other status is surfaced as a failure.
+      if (result.status !== 'success') {
         setPersistenceActionMessage(
           result.message || 'Snapshot unavailable. Refresh and try again.'
         );
@@ -145,10 +161,12 @@ export default function TeamPersistencePanel({
       );
       onPersistSuccess?.(result);
     } catch {
+      if (controller.signal.aborted) return;
       setPersistenceActionState('error');
       setPersistenceActionMessage('Supabase sync failed. Please retry.');
     } finally {
-      if (persistenceTimeoutRef.current) {
+      if (activeSyncRef.current === controller) {
+        activeSyncRef.current = null;
         clearTimeout(persistenceTimeoutRef.current);
         persistenceTimeoutRef.current = null;
       }
@@ -171,20 +189,19 @@ export default function TeamPersistencePanel({
   let panelStatus = 'idle';
   if (persistenceActionState === 'submitting') panelStatus = 'syncing';
   if (persistenceActionState === 'ready') panelStatus = 'success';
-  if (persistenceActionState === 'error' || persistenceActionState === 'blocked')
-    panelStatus = 'error';
+  if (persistenceActionState === 'blocked') panelStatus = 'blocked';
+  if (persistenceActionState === 'error') panelStatus = 'error';
 
   return (
     <PersistencePanel
       title="Team Persistence"
-      colorTheme="blue"
       stats={[
         { label: 'Last Run', value: teamPersistenceSnapshot.lastRunId || '-' },
         { label: 'Synced', value: lastSyncedAt ? formatDateTime(lastSyncedAt) : 'Never' },
         { label: 'Prepared', value: `${teamPersistenceSnapshot.preparedTeamRows || 0} teams` },
       ]}
       onSync={handlePersist}
-      status={/** @type {'idle'|'syncing'|'success'|'error'} */ (panelStatus)}
+      status={/** @type {'idle'|'syncing'|'success'|'blocked'|'error'} */ (panelStatus)}
       message={persistenceActionMessage}
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

@@ -6701,3 +6701,62 @@ Operator ruling 2 now holds in the auto-scheduler as well as in the RPC.
   - E2E 10/10.
 - **Follow-up.** Editing a slot's window after rows are saved on it makes Apply
   refuse loudly until the row or the slot is fixed.
+
+## Task #73 — #476 merged (b1f2d52): measured per-test timeouts
+
+- **Why.** Heavy game-solver and corpus tests sat at the 5 s default and failed
+  intermittently under CI load (`minimalDiff`, `boundedLocalRepair`,
+  `reserveCapacity`, `freezeScopes`); `feasibilityApi:1949` ran 117.7 s against a
+  120 s limit in one full run.
+- **What.** 16 tests get an explicit timeout of max(15 s, 4x the worst measured
+  time), rounded up to 5 s. The worst time comes from four full local runs plus
+  each file run alone. Each timeout carries a one-line comment with its
+  measurements. No assertion changed, no test was skipped, and the global
+  `testTimeout` is unchanged. The rule and measurement commands are in
+  `docs/testing/test-timeouts.md`.
+- **Evidence.** Two final full runs: 4,364 passed, 34 skipped, 6 todo, 0 failed.
+  Supervisor plant: one new timeout set to 100 ms turns exactly that test red
+  (1 of 35 in the file), so the per-test override is honoured where it sits.
+- **Follow-up.** `feasibilityApi:1949` now has a 475 s limit. A shared cache of
+  its 528 fixture answers would make it much cheaper.
+
+## 8.6 PR 3b, PR 8 — #477 merged (93b5e55): Deno preference twin, Edge loads preferences, dead columns dropped
+
+- **Deno twin.** `_shared/engines/coach-preferences.ts` is an import-free copy of
+  core's strictest-wins rule and verdict, including the value-is-reference rule
+  (#464). `tests/coachPreferenceDrift.test.js` compares the full product (19,898
+  cases) value by value plus a digest. A Deno test holds the twin to the same
+  digest, and the weight is pinned to `RESOLVE_OBJECTIVE_WEIGHTS`.
+- **Edge loads preferences itself.** `coach-preference-load.ts` reads current
+  coach assignments, approved preferences and slot weekday/start/venue as the
+  caller through RLS, paged. Nothing comes from the request body. A failed read
+  refuses with 503.
+  - **Completeness.** A service-role count of the same approved rows (count
+    only, scoped by organization and status, after membership is verified)
+    must equal what the caller read, or the run refuses with 403
+    `COACH_PREFERENCES_NOT_VISIBLE`.
+  - **Consequence (operator question open).** Once any approved preference
+    exists, a coach or staff user running the auto-scheduler is refused,
+    because RLS shows them only their own preferences. Alternatives:
+    admin-only runs, or a server-side read.
+- **Solver.** `must_keep` is a hard filter on new placements; a team left with
+  no legal slot is TIME TBD `coach-preference` naming the dimensions.
+  `prefer_keep` breaks ties by fewer breaches, after score. Locked rows are
+  never judged. With no preferences the output is byte-identical.
+- **Retired.** The Edge `CoachPreferenceSchema`, the `unavailableSlotIds` path in
+  `checkHardConstraints`, and the hook's `coachPreferences` body. Migration
+  `20261001000000` drops `coaches.preferred_practice_days` and
+  `preferred_practice_window`. It locks the table and refuses (55000) if any
+  coach holds a value. The revert re-adds both columns nullable with the old
+  CHECK. The seeds and docs were converted; only frozen historical migrations
+  still name the columns.
+- **Evidence.** Agent plants red: strictest-wins flipped (Vitest and Deno), the
+  value-is-reference rule inverted, weight 99, a body read, a swallowed read
+  failure, the refusal removed, and the `coach-preference` reason, `must_keep`
+  filter and tiebreak each removed. DB plants M17 x3 and R17 hit their FAIL
+  lines; HARNESS OK. Supervisor plant: the completeness check changed to `<`
+  (a partial read never refused) turns 1 red.
+- **Noted, not changed.** The Edge schema still parses `divisionPreferences` and
+  `scoringWeights` without reading them. Core `autoScheduler.js` and
+  `practiceScheduling.js` (the client-side scheduler) still read
+  `unavailableSlotIds`.

@@ -6852,3 +6852,54 @@ Operator ruling 2 now holds in the auto-scheduler as well as in the RPC.
   routed around and awaits the operator. Until then no agent runs the harness
   as `pgrunner2`. The fix (a private run dir per run, PID-scoped stop,
   per-run scratch) is planned, not written.
+
+## Task #69 (part) — #483 merged (f8dcefd): weekday lists pinned, bundle text re-synced
+
+- **Census.** Four Node-side weekday lists in two orders: sun..sat
+  (`DAY_OF_WEEK_ENUM`, the mock client) and mon..sun (`ISO_DAY_NAMES`,
+  FieldManagementPage). Each inline copy matches a core list of the same order,
+  so nothing was collapsed. Twins: the Edge `DAY_MAP` and the migrations'
+  `day_of_week` enum.
+- **Pins.** `tests/dayOfWeekEnum.test.js` pins both core lists to the migration
+  enum and to `DAY_MAP`, and refuses `ALTER TYPE day_of_week`. A source scan
+  requires every inline weekday literal to equal one of the two core orders,
+  with a meta-assertion that the two known literals are found.
+- **Round 1 (supervisor).** The plant (mock `'fri'` changed to `'fr'`) stayed
+  green: the inline copies were found but not pinned. The source scan fixed it.
+  9 agent plants plus the supervisor's are red.
+- **Bundle text** re-synced to measured sizes, with no budget numbers changed.
+
+## #485 merged (1080f7f): the bundle gate fails loudly
+
+- A rule matching zero files fails (`[NO MATCH]`). First paint is read from
+  `dist/index.html` (entry, modulepreloads, stylesheets), and every file it
+  loads must match a `firstPaint` rule (`[UNBUDGETED FIRST-PAINT]`). The lazy
+  `index-*.js` chunk no longer counts as the main entry. A rule with zero or two
+  caps, a missing or invalid total cap, or non-array `rules` fails as `[CONFIG]`.
+- New rules: `lucide vendor` (firstPaint, 10,000 B) and `virtual vendor`
+  (7,000 B), each measured size x1.2. No existing budget number changed. 80
+  unmatched lazy chunks warn, not fail.
+- **Round 1 (supervisor).** The plant (a budget without
+  `totalFirstPaintGzipBytes` returned zero violations; a `typeof` skip) was
+  BLOCKING. It now fails as `[CONFIG]`.
+- **Numbers.** Main-entry headroom is 3 B (140,447 against 140,450). Counting
+  lucide-vendor, first paint is 236,757 B against a 250,000 B cap.
+- **Follow-ups.** The `tee` report misses stderr violation lines. A reverted
+  firstPaint filter is caught only by the unit tests, not the gate.
+
+## #486 merged (bc56474): every Edge entrypoint type-checked in CI
+
+- `deno check` on all 7 entrypoints. Only `calendar-feed` failed on main
+  (TS2339 :109, TS2589 :121). TS2339 is fixed with `.overrideTypes<...>()` for
+  the to-one embed. TS2589 is cleared by one `as unknown as
+  SeasonSettingsReader` cast, so that call is no longer compile-checked. Neither
+  change affects runtime behaviour.
+- `scripts/deno-check-edge.sh` discovers every non-`_` function directory,
+  failing on zero directories or a directory without `index.ts`. It runs in the
+  `deno-mirror-tests` job, which gates `deploy-edge-functions`.
+- **Evidence.** 4 agent plants. Supervisor plant: a type error in
+  `_shared/engines/practice-lock.ts` (imported only via auto-scheduler) failed
+  6 of 7.
+- **Open.** Whether `supabase functions deploy` type-checks is unknown (docs
+  are silent). CLAUDE.md §11 does not list the Deno job; it is incomplete, not
+  wrong, and left for the operator.

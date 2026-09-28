@@ -56,6 +56,7 @@ import {
   RESOLVE_OBJECTIVE_TERM,
   RESOLVE_OBJECTIVE_WEIGHTS,
   RESOLVE_PRACTICE_CHANGE_TERMS,
+  RESOLVE_PRACTICE_QUALITY_TERMS,
   RESOLVE_QUALITY_TERMS,
   RESOLVE_REASON,
   STAGE_PROBE,
@@ -285,15 +286,27 @@ describe('the scenarios, before anything is judged', () => {
 
 describe('the objective', () => {
   it('weighs change and quality as two families of one score', () => {
-    // Three lists, two families: the practice-only change terms (8.6 PR 3a) are
+    // Four lists, two families: the practice-only change terms (8.6 PR 3a) are
     // change cost, kept out of `RESOLVE_CHANGE_TERMS` so that what game runs
-    // report about disabled change terms is unchanged.
+    // report about disabled change terms is unchanged; the practice-only
+    // quality term (8.6 PR 3b, `coachPreferenceBreached`) is quality cost, kept
+    // out of `RESOLVE_QUALITY_TERMS` for the same reason.
     expect(
-      [...RESOLVE_CHANGE_TERMS, ...RESOLVE_PRACTICE_CHANGE_TERMS, ...RESOLVE_QUALITY_TERMS].sort()
+      [
+        ...RESOLVE_CHANGE_TERMS,
+        ...RESOLVE_PRACTICE_CHANGE_TERMS,
+        ...RESOLVE_QUALITY_TERMS,
+        ...RESOLVE_PRACTICE_QUALITY_TERMS,
+      ].sort()
     ).toEqual(Object.values(RESOLVE_OBJECTIVE_TERM).sort());
     // Disjoint: a term that counted as both would be added to the total twice.
     for (const term of [...RESOLVE_CHANGE_TERMS, ...RESOLVE_PRACTICE_CHANGE_TERMS]) {
       expect(RESOLVE_QUALITY_TERMS).not.toContain(term);
+      expect(RESOLVE_PRACTICE_QUALITY_TERMS).not.toContain(term);
+    }
+    for (const term of RESOLVE_PRACTICE_QUALITY_TERMS) {
+      expect(RESOLVE_QUALITY_TERMS).not.toContain(term);
+      expect(scoreObjective({ [term]: 1 }, RESOLVE_OBJECTIVE_WEIGHTS).changeCost).toBe(0);
     }
     for (const term of RESOLVE_PRACTICE_CHANGE_TERMS) {
       expect(RESOLVE_CHANGE_TERMS).not.toContain(term);
@@ -314,6 +327,9 @@ describe('the objective', () => {
     // A practice's day move sits between a changed series and a compromise.
     expect(w.changedGame).toBeGreaterThan(w.changedWeekday);
     expect(w.changedWeekday).toBeGreaterThan(w.compromiseViolation);
+    // A breached prefer_keep coach preference costs one compromise (8.6 PR 3b
+    // plan §5, decision 1).
+    expect(w.coachPreferenceBreached).toBe(w.compromiseViolation);
     expect(w.driftMinute).toBeGreaterThan(0);
     expect(w.changedSurface).toBeGreaterThan(0);
   });

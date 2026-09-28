@@ -13,10 +13,13 @@
  * ## The rules
  *
  * **Reference.** A preference keeps something, and the reference is what it
- * keeps. When the team's current series is being moved, the reference is that
- * series' own weekday, start or venue: the coach asked to keep what they have.
- * Otherwise it is the preference's `value`. With neither, the preference does
- * nothing, and a `PRACTICE_COACH_PREFERENCE_NO_REFERENCE` finding says so.
+ * keeps. A preference with a `value` keeps that value, whether the team's
+ * series is being moved or the team is unplaced: an admin who approved
+ * `must_keep weekday=TUE` expects Tuesday (operator ruling, 2026-09-28; the
+ * #463 approval dialog judges current series against the value too). A
+ * preference with no `value` keeps what the team has: the current series'
+ * weekday, start or venue. With neither, the preference does nothing, and a
+ * `PRACTICE_COACH_PREFERENCE_NO_REFERENCE` finding says so.
  *
  * **Strictest wins** across the team's current coaches: `must_keep` >
  * `prefer_keep` > `dont_care`. Every coach at the strictest level must be kept,
@@ -39,11 +42,12 @@
  *
  * ## Declared, not enforced
  *
- * Nothing outside tests calls this module (the `practice/` unwired pin). PR 4
- * wires `must_keep` into the repair as a candidate filter and `prefer_keep`
- * into the objective as `coachPreferenceBreached`, and adds
- * `PRACTICE_TBD_REASON.COACH_PREFERENCE` where the repair first emits it. PR 8
- * mirrors the rule in the Deno twin.
+ * Its one caller is `practice/repair.js` (8.6 PR 3b, PR 4): `must_keep` is a
+ * candidate filter there, with `PRACTICE_TBD_REASON.COACH_PREFERENCE` when it
+ * empties a series' venue, and `prefer_keep` is priced by the objective as
+ * `coachPreferenceBreached`. The repair itself has no production caller yet
+ * (the `practice/` unwired pin), so nothing a family sees honours a preference
+ * until PR 9-10 wire it. PR 8 mirrors the rule in the Deno twin.
  */
 
 import { z } from 'zod';
@@ -190,7 +194,12 @@ export function resolveCoachPreferences(input) {
     for (const preference of preferences) {
       if (preference.dimension !== dimension || !onTeam.has(preference.coachId)) continue;
       if (preference.level === COACH_PREFERENCE_LEVEL.DONT_CARE) continue;
-      const reference = series ? series[PLACEMENT_KEY[dimension]] : preference.value;
+      const fromValue = preference.value !== null;
+      const reference = fromValue
+        ? preference.value
+        : series
+          ? series[PLACEMENT_KEY[dimension]]
+          : null;
       if (reference === null) {
         findings.push(
           makePracticeFinding(
@@ -201,7 +210,12 @@ export function resolveCoachPreferences(input) {
         );
         continue;
       }
-      holders.push({ coachId: preference.coachId, level: preference.level, reference });
+      holders.push({
+        coachId: preference.coachId,
+        level: preference.level,
+        reference,
+        source: fromValue ? 'value' : 'series',
+      });
     }
 
     const level = strictestCoachPreferenceLevel(holders.map((holder) => holder.level));
@@ -224,7 +238,12 @@ export function resolveCoachPreferences(input) {
     return Object.freeze({
       dimension,
       level,
-      source: strictest.length === 0 ? null : series ? 'series' : 'value',
+      source:
+        strictest.length === 0
+          ? null
+          : strictest.every((holder) => holder.source === strictest[0].source)
+            ? strictest[0].source
+            : 'mixed',
       references: Object.freeze(references),
       coachIds: Object.freeze(strictest.map((holder) => holder.coachId)),
       unsatisfiable: level === COACH_PREFERENCE_LEVEL.MUST_KEEP && references.length > 1,

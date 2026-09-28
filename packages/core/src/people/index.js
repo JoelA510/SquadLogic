@@ -75,6 +75,7 @@ export {
   PersonSchema,
   PersonalConstraintPolicyInputSchema,
   PersonalConstraintSchema,
+  TeamCoachAssignmentRowSchema,
 } from './schemas.js';
 
 export {

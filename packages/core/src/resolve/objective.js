@@ -30,7 +30,7 @@
  * | family | terms | counted from |
  * |---|---|---|
  * | **change** | `changedGame`, `driftMinute`, `changedSurface`, `changedWeekday` (practice series only) | the reference schedule, game by game or series by series |
- * | **quality** | `unplacedGame`, `blockingViolation`, `compromiseViolation` | the standing rule engine / the facility check |
+ * | **quality** | `unplacedGame`, `blockingViolation`, `compromiseViolation`, `coachPreferenceBreached` (practice series only) | the standing rule engine / the facility check / the approved coach preferences |
  *
  * The weights are **policy, not data** — nothing in the corpus can supply them —
  * so what is asserted about them is their *ordering*, and every one of them is
@@ -80,6 +80,15 @@ export const RESOLVE_OBJECTIVE_TERM = Object.freeze({
   BLOCKING_VIOLATION: 'blockingViolation',
   /** One compromise violation or compromise placement finding. */
   COMPROMISE_VIOLATION: 'compromiseViolation',
+  /**
+   * One `prefer_keep` coach preference dimension a practice candidate does not
+   * keep (8.6 PR 3b plan §4): once per breached dimension, never per coach.
+   *
+   * **Counted for practice series only** (see {@link coachPreferenceCountsFor}),
+   * the same guard as {@link RESOLVE_OBJECTIVE_TERM.CHANGED_WEEKDAY}: a coach
+   * preference is about a weekly practice, and no game can count it.
+   */
+  COACH_PREFERENCE_BREACHED: 'coachPreferenceBreached',
 });
 
 /**
@@ -118,13 +127,32 @@ export const RESOLVE_QUALITY_TERMS = Object.freeze([
 ]);
 
 /**
+ * Quality terms only a practice series can count (see
+ * {@link coachPreferenceCountsFor}). Kept out of {@link RESOLVE_QUALITY_TERMS}
+ * for the reason `changedWeekday` is kept out of {@link RESOLVE_CHANGE_TERMS}:
+ * no game run can be steered by it. Not in any change list either, so it is
+ * booked as quality cost, and zeroing it is reported as an overridden weight,
+ * never as a disabled change term.
+ */
+export const RESOLVE_PRACTICE_QUALITY_TERMS = Object.freeze([
+  RESOLVE_OBJECTIVE_TERM.COACH_PREFERENCE_BREACHED,
+]);
+
+/**
+ * The price of one breached `prefer_keep` dimension: **100, as much as a
+ * compromise** (8.6 PR 3b plan §5, decision 1). A named constant so that the
+ * decision has one home, and `tests/practiceRepairPreferences.test.js` pins it.
+ */
+export const COACH_PREFERENCE_BREACHED_WEIGHT = 100;
+
+/**
  * The default weights.
  *
  * Policy, and stated as a strict ordering rather than as tuned numbers, because
  * a tuned number invites the next reader to re-tune it:
  *
  * ```text
- * unplacedGame > blockingViolation > changedGame > changedWeekday > compromiseViolation > driftMinute = changedSurface
+ * unplacedGame > blockingViolation > changedGame > changedWeekday > compromiseViolation = coachPreferenceBreached > driftMinute = changedSurface
  * ```
  *
  * Read as sentences: a game with no time is worse than an illegal one; an
@@ -140,6 +168,11 @@ export const RESOLVE_QUALITY_TERMS = Object.freeze([
  * this term existed the weekday move was the *cheaper* one, because a changed
  * day counted no drift at all.
  *
+ * `coachPreferenceBreached` (8.6 PR 3b, practice series only) costs one
+ * compromise per breached `prefer_keep` dimension (plan §5, decision 1): a
+ * coach's soft preference weighs as much as any other accepted compromise, and
+ * never as much as moving a published time.
+ *
  * @type {Readonly<Record<string, number>>}
  */
 export const RESOLVE_OBJECTIVE_WEIGHTS = Object.freeze({
@@ -150,6 +183,7 @@ export const RESOLVE_OBJECTIVE_WEIGHTS = Object.freeze({
   [RESOLVE_OBJECTIVE_TERM.COMPROMISE_VIOLATION]: 100,
   [RESOLVE_OBJECTIVE_TERM.DRIFT_MINUTE]: 1,
   [RESOLVE_OBJECTIVE_TERM.CHANGED_SURFACE]: 1,
+  [RESOLVE_OBJECTIVE_TERM.COACH_PREFERENCE_BREACHED]: COACH_PREFERENCE_BREACHED_WEIGHT,
 });
 
 /**
@@ -344,6 +378,27 @@ export function isPracticeSeriesSlot(slot) {
     (slot.date === undefined || slot.date === null) &&
     Number.isInteger(slot.startMinutes)
   );
+}
+
+/**
+ * The coach-preference term one candidate carries: `breaches` breached
+ * `prefer_keep` dimensions, as `practice/coachPreferences.js`
+ * `judgeCoachPreferenceCandidate()` counts them. Counts only; weighs nothing.
+ *
+ * **Practice series only**, guarded exactly as {@link changeCountsFor}'s
+ * practice arm is: a slot with a `date`, or without a `weekday`, is a game slot
+ * and counts nothing here, whatever it is handed. A game can never count it.
+ *
+ * @param {import('./types.js').Slot|PracticeSeriesSlot|null} slot - the candidate
+ * @param {number} breaches
+ * @returns {Record<string, number>}
+ */
+export function coachPreferenceCountsFor(slot, breaches) {
+  if (slot === null || !isPracticeSeriesSlot(slot)) return {};
+  if (!Number.isInteger(breaches) || breaches < 0) {
+    throw new RangeError(`resolve: a breach count is a whole number >= 0, not ${String(breaches)}`);
+  }
+  return breaches === 0 ? {} : { [RESOLVE_OBJECTIVE_TERM.COACH_PREFERENCE_BREACHED]: breaches };
 }
 
 /**

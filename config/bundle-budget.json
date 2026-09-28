@@ -4,8 +4,8 @@
     {
       "match": "^assets/index-.*\\.js$",
       "label": "main entry",
-      "maxGzipBytes": 140100,
-      "rationale": "Redesign: 131.1 KB after the Lightning-class chrome (TopBar/SideNav/navigation) plus expanded mock-client seeds & RPC handlers, which ship in main because supabaseClient imports the mock statically. 140 KB cap leaves ~9 KB for remaining phases; follow-ups: dynamic-import the mock client and route-split chart-vendor, then tighten. +100 B (fix #64): the strict PGRST201 practice_slots embed check in the mock, which ships in main for the reason above; measured 136.55 -> 136.76 KB after two compaction passes."
+      "maxGzipBytes": 140450,
+      "rationale": "Redesign: 131.1 KB after the Lightning-class chrome (TopBar/SideNav/navigation) plus expanded mock-client seeds & RPC handlers, which ship in main because supabaseClient imports the mock statically. 140 KB cap leaves ~9 KB for remaining phases; follow-ups: dynamic-import the mock client and route-split chart-vendor, then tighten. +100 B (fix #64): the strict PGRST201 practice_slots embed check in the mock, which ships in main for the reason above; measured 136.55 -> 136.76 KB after two compaction passes. +350 B (8.6 3b PR 2, coach practice preferences): the page itself is React.lazy and its mock RPC arms sit behind the DEV/mock guard (measured: 0 B in main), so what ships in main is only the lazy route with its __vite__mapDeps preload list, two nav entries and two permission constants; measured 136.78 -> 137.10 KB. Reusing an already-imported nav icon was tried first (no measurable change)."
     },
     {
       "match": "^assets/index-.*\\.css$",

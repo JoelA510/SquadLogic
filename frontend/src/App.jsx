@@ -48,6 +48,7 @@ const ExportsPage = lazy(() => import('./pages/ExportsPage.jsx'));
 const MembersPage = lazy(() => import('./pages/MembersPage.jsx'));
 const FeaturesSetupPage = lazy(() => import('./pages/FeaturesSetupPage.jsx'));
 const PlayerRecordPage = lazy(() => import('./pages/PlayerRecordPage.jsx'));
+const CoachPreferencesPage = lazy(() => import('./pages/CoachPreferencesPage.jsx'));
 import OfflineGuard from './components/OfflineGuard.jsx';
 import ToastHost from './components/ui/ToastHost.jsx';
 
@@ -226,6 +227,14 @@ function AppContent() {
             element={
               <ProtectedRoute requiredPermission={PERMISSIONS.MANAGE_ORGANIZATION}>
                 <CoachesPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/coaches/practice-preferences"
+            element={
+              <ProtectedRoute requiredPermission={PERMISSIONS.REQUEST_PRACTICE_PREFERENCE}>
+                <CoachPreferencesPage />
               </ProtectedRoute>
             }
           />

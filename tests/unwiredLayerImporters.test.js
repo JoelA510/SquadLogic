@@ -552,8 +552,12 @@ const LAYERS = Object.freeze([
   }),
   /* -- Phase 8.6 PR 3b, PR 1: coach practice preferences ---------------- */
   //
-  // Unwired by design: PR 4 wires it into the repair and the objective, PR 8
-  // mirrors it in the Deno twin. Until then nothing outside tests may call it.
+  // Unwired from the solver by design: PR 4 wires it into the repair and the
+  // objective, PR 8 mirrors it in the Deno twin. PR 2 (the preferences UI) is
+  // its one production consumer so far, and a read-only one: the hook
+  // validates RPC payloads with `CoachPreferenceSchema`, and the approval
+  // dialog's re-judge (`coachPreferencePreview.js`) calls resolve + judge.
+  // Nothing schedules from it.
   Object.freeze({
     layer: 'practice/coachPreferences.js',
     modulePath: 'packages/core/src/practice/coachPreferences.js',
@@ -562,13 +566,20 @@ const LAYERS = Object.freeze([
       'resolveCoachPreferences',
       'strictestCoachPreferenceLevel',
     ]),
-    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    importers: Object.freeze([
+      'frontend/src/hooks/useCoachPracticePreferences.js',
+      'frontend/src/utils/coachPreferencePreview.js',
+      'packages/core/src/practice/index.js',
+    ]),
     consumers: Object.freeze([
+      'frontend/src/utils/coachPreferencePreview.js',
       'tests/coachPreferences.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
-    expectedProductionConsumers: Object.freeze([]),
-    expectedExternalProductionConsumers: Object.freeze([]),
+    expectedProductionConsumers: Object.freeze(['frontend/src/utils/coachPreferencePreview.js']),
+    expectedExternalProductionConsumers: Object.freeze([
+      'frontend/src/utils/coachPreferencePreview.js',
+    ]),
   }),
 ]);
 

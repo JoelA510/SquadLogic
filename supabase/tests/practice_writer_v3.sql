@@ -37,7 +37,9 @@ VALUES
     ('a1111111-1111-1111-1111-0000000066a1', 'a1111111-1111-1111-1111-111111111111',
      'a1111111-1111-1111-1111-0000000066f1', 'mon', '17:00', '18:00', '2026-09-01', '2026-11-30'),
     ('a1111111-1111-1111-1111-0000000066a2', 'a1111111-1111-1111-1111-111111111111',
-     'a1111111-1111-1111-1111-0000000066f1', 'wed', '17:00', '18:00', '2026-09-01', '2026-11-30');
+     'a1111111-1111-1111-1111-0000000066f1', 'wed', '17:00', '18:00', '2026-09-01', '2026-11-30'),
+    ('a1111111-1111-1111-1111-0000000066a3', 'a1111111-1111-1111-1111-111111111111',
+     'a1111111-1111-1111-1111-0000000066f1', 'mon', '17:30', '18:30', '2026-09-01', '2026-11-30');
 INSERT INTO public.practice_assignments (id, organization_id, team_id, slot_id, practice_slot_id, effective_date_range, source)
 VALUES ('a1111111-1111-1111-1111-000000006609', 'a1111111-1111-1111-1111-111111111111',
         'a1111111-1111-1111-1111-0000000066e9', 'a1111111-1111-1111-1111-0000000066a1',
@@ -68,16 +70,16 @@ SELECT throws_ok(
     '22023', NULL,
     'an ordinary save omitting an existing row is refused as locked');
 
--- 2. A new row overlapping one its team still holds.
+-- 2. A new row that double-books its team (same weekday, overlapping minutes).
 SELECT throws_ok(
     $$ SELECT public.persist_practice_schedule(
            jsonb_build_object('season_settings_id', 'a1111111-1111-1111-1111-111111111aaa'),
            (SELECT p FROM v3_payload) || jsonb_build_array(jsonb_build_object(
                'team_id', 'a1111111-1111-1111-1111-0000000066e1',
-               'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a2',
+               'practice_slot_id', 'a1111111-1111-1111-1111-0000000066a3',
                'effective_date_range', '[2026-10-01,2026-11-30]'))) $$,
     '22023', NULL,
-    'a new row overlapping an existing row of the same team is refused as locked');
+    'a new row clashing in time with an existing row of the same team is refused as locked');
 
 -- 3. A stale fingerprint.
 SELECT throws_ok(

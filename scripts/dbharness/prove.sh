@@ -2857,6 +2857,32 @@ plant "M15 practice_exceptions' assignment FK cascades" "$M15" \
   "        REFERENCES public.practice_assignments(id) ON DELETE CASCADE," \
   "FAIL smoke 20260929000000"
 
+# The double-booking rule is a TIME clash (coordinator ruling on #461). Three
+# plants, one per case: range-only turns (a) red, never-clash turns (b) red,
+# weekday-only turns (c) red.
+plant "M15 the double-booking rule reverts to range-only" "$M15" \
+  "     WHERE ps.day_of_week = ks.day_of_week
+       AND ps.start_time < ks.end_time
+       AND ks.start_time < ps.end_time
+" \
+  "     WHERE true
+" \
+  "FAIL smoke 20260929000000"
+
+plant "M15 the double-booking time predicate is dropped entirely" "$M15" \
+  "     WHERE ps.day_of_week = ks.day_of_week
+" \
+  "     WHERE false AND ps.day_of_week = ks.day_of_week
+" \
+  "FAIL smoke 20260929000000"
+
+plant "M15 the double-booking rule ignores minutes" "$M15" \
+  "       AND ps.start_time < ks.end_time
+       AND ks.start_time < ps.end_time
+" \
+  "" \
+  "FAIL smoke 20260929000000"
+
 plant "M15 the base_fingerprint check is skipped" "$M15" \
   "    IF base_fingerprint IS NOT NULL AND base_fingerprint IS DISTINCT FROM v_fingerprint THEN" \
   "    IF false AND base_fingerprint IS NOT NULL THEN" \
@@ -2900,6 +2926,9 @@ declare -A CLAIM_PROVER=(
   ["(checked) a practice exception is stored in practice_exceptions, not as an assignment row, and survives a later ordinary save"]="M15 exceptions are stored as assignment rows"
   ["(checked) deleting a practice series that holds a live exception is refused (23503); cancelling it withdraws the exception in the same transaction, audited"]="M15 practice_exceptions' assignment FK cascades"
   ["(checked) a practice save carrying a stale base_fingerprint is refused (40001) and writes nothing"]="M15 the base_fingerprint check is skipped"
+  ["(checked) a practice save adding a second weekday over the same range to a team is accepted: a double-booking is a time clash, not a range overlap"]="M15 the double-booking rule reverts to range-only"
+  ["(checked) a practice save adding a same-weekday slot at overlapping minutes to a team is refused as locked, naming the row it clashes with"]="M15 the double-booking time predicate is dropped entirely"
+  ["(checked) a practice save adding a same-weekday slot at non-overlapping minutes to a team is accepted"]="M15 the double-booking rule ignores minutes"
   ["(checked) the writer-v3 revert refused while 2 unresolved practice exceptions existed, then archived all 3 onto their run before dropping the table"]="R15 the revert drops unresolved exceptions without archiving"
   ["(checked) the revert named the retirement it was about to erase"]="R1 revert erases a future retirement silently"
   ["(checked) the revert counted the practice assignment it was about to expose"]="R3 revert exposes dangling rows silently"

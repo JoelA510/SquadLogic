@@ -520,6 +520,21 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
       else
         echo "FAIL smoke ${id}: it passed without printing the evidence that deleting a practice series that holds a live exception is refused (23503); cancelling it withdraws the exception in the same transaction, audited"; STATUS=1
       fi
+      if grep -qF "time clash (a): a team holding Monday 17:00-18:00 gained Wednesday 17:00-18:00 over the same range in a later save -- accepted, 2 rows" /tmp/harness_smoke; then
+        echo "  | (checked) a practice save adding a second weekday over the same range to a team is accepted: a double-booking is a time clash, not a range overlap"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save adding a second weekday over the same range to a team is accepted: a double-booking is a time clash, not a range overlap"; STATUS=1
+      fi
+      if grep -qF "time clash (b): a second Monday slot at 17:30-18:30 against Monday 17:00-18:00 was refused 22023 naming the Monday row; 2 rows unchanged" /tmp/harness_smoke; then
+        echo "  | (checked) a practice save adding a same-weekday slot at overlapping minutes to a team is refused as locked, naming the row it clashes with"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save adding a same-weekday slot at overlapping minutes to a team is refused as locked, naming the row it clashes with"; STATUS=1
+      fi
+      if grep -qF "time clash (c): a Monday slot at 18:30-19:30 beside Monday 17:00-18:00 was accepted -- 3 rows" /tmp/harness_smoke; then
+        echo "  | (checked) a practice save adding a same-weekday slot at non-overlapping minutes to a team is accepted"
+      else
+        echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save adding a same-weekday slot at non-overlapping minutes to a team is accepted"; STATUS=1
+      fi
       if grep -qF "fingerprint: a save carrying a stale base_fingerprint was refused 40001 and wrote nothing" /tmp/harness_smoke; then
         echo "  | (checked) a practice save carrying a stale base_fingerprint is refused (40001) and writes nothing"
       else

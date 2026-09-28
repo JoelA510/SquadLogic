@@ -22,8 +22,12 @@
 --     22023 "assignment X is locked", unless X is listed in
 --     `unlock => [{assignment_id, reason}]`. The unlock is PER ROW: a team's
 --     other rows stay locked.
---   * A NEW row that overlaps the range of a row its team still holds refuses
---     the same way (a move disguised as an addition).
+--   * A NEW row that double-books its team -- a row the team still holds
+--     whose date range overlaps AND whose slot is on the same weekday with
+--     overlapping minutes -- refuses the same way. A second practice on
+--     another weekday, or at a non-overlapping time, is an addition and is
+--     allowed: 176 of the 281 (sheet, team) pairs in the season-2026 corpus
+--     practise on two weekdays over the same range.
 --   * `unlock` requires an org admin WITH a uid, checked by its own gate
 --     before the general admin check, and writes one `practice.unlock_accepted`
 --     audit row per assignment carrying the before-image. A service-role
@@ -961,9 +965,14 @@ BEGIN
        AND d.season_settings_id = v_season_id
        AND pa.team_id <> ALL (v_payload_teams);
 
-    -- v3: a NEW key must not overlap a row its team still holds. Checked after
-    -- closes and the prune, so an unlocked row that is removed or shortened
-    -- makes room; one that stays does not.
+    -- v3: a NEW key must not double-book its team. An addition removes
+    -- nothing -- the rows the team holds stay protected by the delete,
+    -- re-range and move locks above -- so the only harm it can do is a clash:
+    -- a row the team still holds whose date range overlaps the new key's AND
+    -- whose slot falls on the same weekday at overlapping minutes. A second
+    -- weekday, or the same weekday at another time, is allowed (the corpus's
+    -- normal two-weekday shape). Checked after closes and the prune, so an
+    -- unlocked row that is removed or shortened makes room.
     WITH payload AS (
         SELECT DISTINCT
             NULLIF(p.team_id, '')::uuid AS team_id,
@@ -979,10 +988,17 @@ BEGIN
     SELECT pa.id
       INTO v_overlap_id
       FROM payload k
+      JOIN public.practice_slots ks
+        ON ks.id = k.practice_slot_id
       JOIN public.practice_assignments pa
         ON pa.team_id = k.team_id
        AND pa.effective_date_range && k.effective_date_range
-     WHERE NOT EXISTS (
+      JOIN public.practice_slots ps
+        ON ps.id = pa.practice_slot_id
+     WHERE ps.day_of_week = ks.day_of_week
+       AND ps.start_time < ks.end_time
+       AND ks.start_time < ps.end_time
+       AND NOT EXISTS (
                SELECT 1
                  FROM public.practice_assignments e
                 WHERE e.team_id = k.team_id
@@ -991,7 +1007,7 @@ BEGIN
      ORDER BY pa.id
      LIMIT 1;
     IF v_overlap_id IS NOT NULL THEN
-        RAISE EXCEPTION 'assignment % is locked: a new row for its team overlaps its range -- unlock and remove or close it first', v_overlap_id
+        RAISE EXCEPTION 'assignment % is locked: a new row for its team overlaps it in time -- unlock and remove or close it first', v_overlap_id
             USING ERRCODE = '22023';
     END IF;
 

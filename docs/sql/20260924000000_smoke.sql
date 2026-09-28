@@ -7,8 +7,6 @@
 -- pruned, reported and audited are unchanged. Changed, each with its reason:
 --   * catalogue: the one overload is now the 8-argument v3 signature;
 --   * run 2 unlocks the 4 run-1 rows it replaces or drops (Teams 1-4);
---   * the season-2 team named in a season-1 save gets a NON-overlapping range,
---     because v3 refuses a new row overlapping one its team still holds;
 --   * allow_empty on season 2 unlocks Team 7's two auto rows;
 --   * the append of before-images under a re-saved run id is now shown by an
 --     ADMIN re-save that unlocks Team 5's row: a service-role caller has no
@@ -326,7 +324,7 @@ BEGIN
     v_res := public.persist_practice_schedule(
         jsonb_build_object('id', gen_random_uuid(), 'season_settings_id', v_s1),
         v_payload2 || jsonb_build_array(jsonb_build_object(
-            'team_id', v_t7, 'practice_slot_id', v_sbl, 'effective_date_range', '[2026-12-01,2026-12-31]', 'source', 'auto')));
+            'team_id', v_t7, 'practice_slot_id', v_sbl, 'effective_date_range', c_r, 'source', 'auto')));
     IF (v_res->>'superseded_count')::int <> 0
        OR (SELECT count(*) FROM public.practice_assignments WHERE team_id = v_t7) <> 2 THEN
         RAISE EXCEPTION 'a season-1 save naming a season-2 team pruned that team''s season-2 row: %', v_res;

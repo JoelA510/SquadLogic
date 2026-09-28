@@ -4,12 +4,14 @@
     {
       "match": "^assets/index-.*\\.js$",
       "label": "main entry",
+      "firstPaint": true,
       "maxGzipBytes": 140450,
-      "rationale": "Current 137.15 KB (140,445 B) against a 140,450 B (137.16 KB) cap: 5 B of headroom, so the ~9 KB the redesign note below left has been spent and the next main-bundle addition must first remove bytes. The regex also matches a ~965 B lazy shared chunk named index-*.js (imported by the game, practice and team-analysis pages); it is checked under this label and counted in the first-paint total. History -- Redesign: 131.1 KB after the Lightning-class chrome (TopBar/SideNav/navigation) plus expanded mock-client seeds & RPC handlers, which ship in main because supabaseClient imports the mock statically. 140 KB cap leaves ~9 KB for remaining phases; follow-ups: dynamic-import the mock client and route-split chart-vendor, then tighten. +100 B (fix #64): the strict PGRST201 practice_slots embed check in the mock, which ships in main for the reason above; measured 136.55 -> 136.76 KB after two compaction passes. +350 B (8.6 3b PR 2, coach practice preferences): the page itself is React.lazy and its mock RPC arms sit behind the DEV/mock guard (measured: 0 B in main), so what ships in main is only the lazy route with its __vite__mapDeps preload list, two nav entries and two permission constants; measured 136.78 -> 137.10 KB. Reusing an already-imported nav icon was tried first (no measurable change)."
+      "rationale": "Current 137.15 KB (140,445 B) against a 140,450 B (137.16 KB) cap: 5 B of headroom, so the ~9 KB the redesign note below left has been spent and the next main-bundle addition must first remove bytes. The regex also matches a ~965 B lazy shared chunk named index-*.js (imported by the game, practice and team-analysis pages). The rule is firstPaint, so it only matches the entry script dist/index.html loads: the lazy chunk is printed as SKIP and is neither checked under this label nor counted in the first-paint total (both files are index-<hash>.js, so no regex alone can separate them). History -- Redesign: 131.1 KB after the Lightning-class chrome (TopBar/SideNav/navigation) plus expanded mock-client seeds & RPC handlers, which ship in main because supabaseClient imports the mock statically. 140 KB cap leaves ~9 KB for remaining phases; follow-ups: dynamic-import the mock client and route-split chart-vendor, then tighten. +100 B (fix #64): the strict PGRST201 practice_slots embed check in the mock, which ships in main for the reason above; measured 136.55 -> 136.76 KB after two compaction passes. +350 B (8.6 3b PR 2, coach practice preferences): the page itself is React.lazy and its mock RPC arms sit behind the DEV/mock guard (measured: 0 B in main), so what ships in main is only the lazy route with its __vite__mapDeps preload list, two nav entries and two permission constants; measured 136.78 -> 137.10 KB. Reusing an already-imported nav icon was tried first (no measurable change)."
     },
     {
       "match": "^assets/index-.*\\.css$",
       "label": "main css",
+      "firstPaint": true,
       "maxGzipBytes": 30000,
       "rationale": "Redesign ships the Lightning-class design system (light+dark tokens + chrome/grid/page component CSS) in the main stylesheet. Current 21.05 KB (21.7 KB after Phase 1); the 30,000 B (29.30 KB) cap leaves ~8.2 KB; revisit after Phase 9."
     },
@@ -22,20 +24,35 @@
     {
       "match": "^assets/supabase-vendor-.*\\.js$",
       "label": "supabase vendor",
+      "firstPaint": true,
       "maxGzipBytes": 60000,
       "rationale": "Current 48.51 KB; 60,000 B (58.59 KB) cap absorbs minor SDK growth."
     },
     {
       "match": "^assets/react-vendor-.*\\.js$",
       "label": "react vendor",
+      "firstPaint": true,
       "maxGzipBytes": 25000,
       "rationale": "Current 16.92 KB; 25,000 B (24.41 KB) cap absorbs React 19.x patch growth."
+    },
+    {
+      "match": "^assets/lucide-vendor-.*\\.js$",
+      "label": "lucide vendor",
+      "firstPaint": true,
+      "maxGzipBytes": 10000,
+      "rationale": "Added with the zero-match gate: index.html modulepreloads this chunk, so it is first paint, but no rule matched it and it was neither budgeted nor counted. Current 7.63 KB (7,810 B); cap = actual x 1.2 rounded up to the next 1,000 B."
     },
     {
       "match": "^assets/dnd-vendor-.*\\.js$",
       "label": "dnd vendor",
       "maxGzipBytes": 25000,
       "rationale": "Current 16.06 KB; 25,000 B (24.41 KB) cap."
+    },
+    {
+      "match": "^assets/virtual-vendor-.*\\.js$",
+      "label": "virtual vendor",
+      "maxGzipBytes": 7000,
+      "rationale": "Added with the zero-match gate: @tanstack/react-virtual manualChunk (lazy), previously matched by no rule. Current 5.04 KB (5,158 B); cap = actual x 1.2 rounded up to the next 1,000 B."
     },
     {
       "match": "^assets/.*\\.png$",
@@ -51,5 +68,5 @@
     }
   ],
   "totalFirstPaintGzipBytes": 250000,
-  "totalFirstPaintRationale": "Sum of every file matching the main entry, react vendor, supabase vendor and main css rules, gzipped (the main-entry regex also catches the ~965 B lazy index-*.js chunk). Current 224.58 KB; cap 250,000 B (244.14 KB). lucide-vendor (~7.6 KB gz) is modulepreloaded by index.html but matches no rule, so it is neither budgeted nor counted here; virtual-vendor (~5.0 KB gz, lazy) matches no rule either."
+  "totalFirstPaintRationale": "Sum of the gzip size of every file dist/index.html loads (entry module script, modulepreloads, stylesheets); each must be matched by a firstPaint rule (main entry, main css, react vendor, lucide vendor, supabase vendor). Measured 231.21 KB (236,757 B) (was 224.52 KB under the old label-based sum, which counted the ~965 B lazy index-*.js chunk and missed the modulepreloaded lucide-vendor, 7,810 B); cap 250,000 B (244.14 KB)."
 }

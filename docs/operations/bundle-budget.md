@@ -11,7 +11,7 @@
 
 | Trigger | Command | Effect |
 | --- | --- | --- |
-| Local pre-push smoke | `npm run check:bundle` | Runs after `npm run frontend:build`. Fails if any chunk exceeds the budget. |
+| Local pre-push smoke | `npm run check:bundle` | Runs after `npm run frontend:build`. Fails if any chunk exceeds the budget, a rule matches no file, or a first-paint file is unbudgeted. |
 | CI full matrix | `npm run check:bundle` after `npm run frontend:build` | Same as local; PR cannot merge if budget is busted. Docs-only PRs intentionally skip the full matrix; see [`ci-cd.md`](./ci-cd.md). |
 
 ## Budget file shape
@@ -22,6 +22,7 @@
     {
       "match": "<regex against `assets/<path>`>",
       "label": "<human-readable name>",
+      "firstPaint": true,               // optional; see below
       "maxGzipBytes": <number>,         // OR maxRawBytes
       "rationale": "<why this number>"
     }
@@ -35,15 +36,39 @@ Each `rules[]` entry must have either `maxGzipBytes` (preferred for JS/CSS) or
 `maxRawBytes` (preferred for binary assets — gzip on already-compressed PNG is
 noise).
 
-`totalFirstPaintGzipBytes` is summed over every file matching the `main entry`,
-`main css`, `react vendor`, and `supabase vendor` rules — meant as the assets the
-browser must download before any UI paints. Two gaps against that intent, as
-of the current build: the `main entry` regex (`^assets/index-.*\.js$`) also
-matches a ~1 KB lazy shared chunk that Rollup names `index-*.js`, which is
-therefore checked as "main entry" and counted in the total; and
-`lucide-vendor-*.js`, which `index.html` modulepreloads, matches no rule, so it
-is neither budgeted nor counted. `virtual-vendor-*.js` (lazy) also matches no
-rule.
+A rule with neither cap, or with both, fails the gate (`[CONFIG]`) rather than
+passing every file unchecked. So does a missing, misspelt, non-number or
+non-positive `totalFirstPaintGzipBytes`, and a `rules` that is not a non-empty
+array. A check with no cap is reported, never skipped.
+
+**Every rule must match at least one built file.** A rule that matches none
+fails the gate with `[NO MATCH] rule "<label>"`: a renamed chunk would
+otherwise escape its budget while the gate stayed green. There is no per-rule
+opt-out, because no current rule needs one. If a rule's chunk is deliberately
+gone, delete the rule.
+
+**First paint is read from `dist/index.html`, not from the rules.** The gate
+parses the entry `<script type="module" src>`, every
+`<link rel="modulepreload">` and every `<link rel="stylesheet">`, and:
+
+- `totalFirstPaintGzipBytes` is the gzip sum of exactly those files. A chunk
+  Vite starts preloading is counted whether or not a rule names it.
+- Every one of those files must be matched by a rule with `"firstPaint": true`,
+  or the gate fails with `[UNBUDGETED FIRST-PAINT]`. Today those rules are
+  `main entry`, `main css`, `react vendor`, `lucide vendor` and
+  `supabase vendor`.
+- A `firstPaint` rule only matches files `index.html` loads. This is how
+  `main entry` is told apart from the ~1 KB lazy shared chunk Rollup also names
+  `index-*.js`: both are `index-<hash>.js`, so no regex can separate them.
+  The lazy one is printed as `SKIP main entry (...)` and is neither checked
+  against the main-entry cap nor counted in the total.
+
+**Lazy files that match no rule are listed as a warning, not a failure.** Route
+and shared chunks are lazy by design and were never budgeted one by one. The
+`WARN <n> lazy file(s) match no rule` block keeps them visible without
+requiring a rule per page. Each named vendor chunk (`manualChunks` in
+`vite.config.js`) has a rule, lazy or not; add one when you add a vendor
+chunk.
 
 Sizes in the `check:bundle` output and in the rationale fields are KiB
 (1024 B); the caps in the config are bytes, so a `250000` cap prints as
@@ -72,7 +97,11 @@ Sizes in the `check:bundle` output and in the rationale fields are KiB
 | `cannot read dist at .../dist/assets` | Forgot `npm run frontend:build` | `npm run frontend:build && npm run check:bundle` |
 | `[GZIP] main entry ... exceeds budget` | Bundle grew | Diagnose with `npm run frontend:build -- --debug` + Vite's chunk analysis. |
 | `total first-paint exceeds budget` but per-chunk OK | Multiple small growths summed | Tighten one of the large vendors first; first-paint cap is the global gate. |
-| `no files matched (rule ...)` | Rule's regex doesn't match any built file. The line is printed among the passing lines and does **not** fail the gate, so read the output rather than the exit code. | Either fix the regex or remove the rule (e.g., we deleted a chunk). |
+| `[NO MATCH] rule "..."` | Rule's regex matches no built file (for a `firstPaint` rule: no file `index.html` loads). Fails the gate. | Fix the regex (a chunk was renamed) or remove the rule (the chunk was deleted). |
+| `[UNBUDGETED FIRST-PAINT] assets/...` | `index.html` now loads a file no `firstPaint` rule matches (new `manualChunks` entry, renamed vendor). Fails the gate. | Add or fix a `firstPaint` rule; see "Adding a new rule". |
+| `[CONFIG] ...` | A rule without exactly one cap, a missing or non-number `totalFirstPaintGzipBytes`, or no `rules` array. Fails the gate. | Fix `config/bundle-budget.json`. |
+| `[FIRST-PAINT] index.html ...` | `dist/index.html` has no module entry, or references a file missing from `dist/assets`. Fails the gate. | Rebuild; if it persists, the build is broken. |
+| `WARN <n> lazy file(s) match no rule` | Informational. Lazy chunks are not budgeted one by one. | None required; add a rule if a lazy chunk deserves its own cap. |
 
 ## Adding a new rule
 
@@ -82,7 +111,8 @@ If you ship a new vendor chunk (e.g., a new `analytics-vendor`):
 2. Add a rule to `config/bundle-budget.json` with `maxGzipBytes` set to
    `actual_size * 1.20` (20% headroom) rounded up to the nearest 1 KB.
 3. Add a rationale explaining what the chunk contains and why the headroom is
-   what it is.
+   what it is. If `index.html` loads it (modulepreload or stylesheet), set
+   `"firstPaint": true`; the gate fails until you do.
 4. Re-run `npm run check:bundle` to confirm the rule passes.
 
 ## Re-running outside CI

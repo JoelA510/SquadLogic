@@ -145,27 +145,28 @@ function checkLedger(list) {
 
 /**
  * The pre-push decision.
+ *
+ * The ledger, ordering and count checks run on `migration list` FIRST, before
+ * the dry-run is even parsed: the CLI's own dry-run exits non-zero on an
+ * out-of-order file (suggesting `--include-all`, the unsafe path), so the
+ * guard's actionable message must not depend on the dry-run having succeeded.
+ * `dryRunExit` is the dry-run's exit status; non-zero is a failure even when
+ * its output looks well formed.
+ * @param {{ listText: string, dryRunText: string, dryRunExit?: number | string, maxPending?: number }} args
  * @returns {{ pending: string[], highestApplied: string }}
  */
-export function evaluate({ listText, dryRunText, maxPending = DEFAULT_MAX_PENDING }) {
+export function evaluate({
+  listText,
+  dryRunText,
+  dryRunExit = 0,
+  maxPending = DEFAULT_MAX_PENDING,
+}) {
   const list = parseMigrationList(listText);
-  const dry = parseDryRun(dryRunText);
   checkLedger(list);
 
   const fromList = [...list.pending].sort(cmp);
-  const fromDry = [...dry.pending].sort(cmp);
-  if (fromList.join(',') !== fromDry.join(',')) {
-    throw new GuardError(
-      `migration list says pending [${fromList.join(', ')}] but the dry-run would push ` +
-        `[${fromDry.join(', ')}] -- the two CLI views disagree; investigate before pushing`
-    );
-  }
-  if (dry.seeds.length > 0) {
-    throw new GuardError(`the dry-run would push seed data (${dry.seeds.join(', ')}); refusing`);
-  }
-
   const highestApplied = [...list.applied].sort(cmp).at(-1);
-  const outOfOrder = fromDry.filter((v) => cmp(v, highestApplied) <= 0);
+  const outOfOrder = fromList.filter((v) => cmp(v, highestApplied) <= 0);
   if (outOfOrder.length > 0) {
     throw new GuardError(
       `out-of-order migration(s) ${outOfOrder.join(', ')} are <= the highest applied ` +
@@ -175,13 +176,31 @@ export function evaluate({ listText, dryRunText, maxPending = DEFAULT_MAX_PENDIN
         '"supabase migration repair --status applied <version>") and re-run.'
     );
   }
-  if (fromDry.length > maxPending) {
+  if (fromList.length > maxPending) {
     throw new GuardError(
-      `${fromDry.length} migrations pending (${fromDry.join(', ')}), more than the ` +
+      `${fromList.length} migrations pending (${fromList.join(', ')}), more than the ` +
         `limit of ${maxPending}. That many at once usually means the ledger has drifted. ` +
         'Check "supabase migration list" against production; if the set is genuinely ' +
         'intended, raise the MAX_PENDING_MIGRATIONS repository variable for one run.'
     );
+  }
+
+  const dry = parseDryRun(dryRunText);
+  if (!/^[0-9]+$/.test(String(dryRunExit).trim())) {
+    throw new GuardError(`db push --dry-run exit status "${dryRunExit}" is not a number`);
+  }
+  if (Number(dryRunExit) !== 0) {
+    throw new GuardError(`db push --dry-run exited ${dryRunExit} without reporting an error`);
+  }
+  const fromDry = [...dry.pending].sort(cmp);
+  if (fromList.join(',') !== fromDry.join(',')) {
+    throw new GuardError(
+      `migration list says pending [${fromList.join(', ')}] but the dry-run would push ` +
+        `[${fromDry.join(', ')}] -- the two CLI views disagree; investigate before pushing`
+    );
+  }
+  if (dry.seeds.length > 0) {
+    throw new GuardError(`the dry-run would push seed data (${dry.seeds.join(', ')}); refusing`);
   }
   return { pending: fromDry, highestApplied };
 }
@@ -221,6 +240,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
     const { pending, highestApplied } = evaluate({
       listText,
       dryRunText: readFileSync(dryPath, 'utf8'),
+      dryRunExit: arg(argv, '--dry-run-exit') ?? 0,
       maxPending,
     });
     summary(

@@ -330,23 +330,33 @@ jobs:
           supabase migration list --linked
           supabase migration list --linked --output-format json > migration-list.json
 
+      # The exit status is captured, not acted on here: the CLI's dry run exits
+      # non-zero on an out-of-order file (suggesting --include-all, the unsafe
+      # path), and the guard must still run to say what to do instead.
       - name: Dry run
+        id: dryrun
         if: steps.secrets.outputs.configured == 'true'
         run: |
-          set -euo pipefail
+          set -uo pipefail
           supabase db push --linked --dry-run --output-format json > dry-run.json
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
           cat dry-run.json
 
       - name: Safety guard
+        id: guard
         if: steps.secrets.outputs.configured == 'true'
-        run: node scripts/ci/migrationGuard.mjs --list migration-list.json --dry-run dry-run.json
+        env:
+          DRY_RUN_EXIT: ${{ steps.dryrun.outputs.exit }}
+        run: node scripts/ci/migrationGuard.mjs --list migration-list.json --dry-run dry-run.json --dry-run-exit "${DRY_RUN_EXIT}"
 
       - name: Push migrations
         if: steps.secrets.outputs.configured == 'true'
         run: supabase db push --linked --yes
 
+      # Runs even when the push failed part-way, so the list shows which
+      # migrations of the batch did apply.
       - name: Verify nothing pending
-        if: steps.secrets.outputs.configured == 'true'
+        if: ${{ !cancelled() && steps.secrets.outputs.configured == 'true' && steps.guard.outcome == 'success' }}
         run: |
           set -euo pipefail
           supabase migration list --linked

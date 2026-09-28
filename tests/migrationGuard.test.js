@@ -138,6 +138,7 @@ describe('migration guard: pre-push decision', () => {
 describe('migration guard: unparseable output fails, never passes', () => {
   const ok = listJson({ pending: ['20260927000000'] });
   const okDry = dryJson(['20260927000000']);
+  /** @type {Record<string, [string, string, RegExp]>} */
   const cases = {
     'empty dry-run file': [ok, '', /dry-run: output is not JSON/],
     'empty list file': ['', okDry, /list: output is not JSON/],
@@ -183,6 +184,32 @@ describe('migration guard: unparseable output fails, never passes', () => {
       /"README.md" is not a migration file name/,
     ],
   };
+  it('names the out-of-order file even when the CLI dry run itself refused (real shape)', () => {
+    // Captured from CLI 2.118.0: exit 1, and a suggestion to use --include-all.
+    const refused =
+      '{"_tag":"Error","error":{"code":"DbPushMissingRemoteError","message":"Found local ' +
+      'migration files to be inserted before the last migration on remote database."}}';
+    expect(() =>
+      evaluate({
+        listText: listJson({ pending: ['20260921000000'] }),
+        dryRunText: refused,
+        dryRunExit: 1,
+      })
+    ).toThrow(/out-of-order migration\(s\) 20260921000000.*Rename each/);
+  });
+
+  it('fails a non-zero dry-run exit even when its output looks well formed', () => {
+    expect(() => evaluate({ listText: ok, dryRunText: okDry, dryRunExit: '1' })).toThrow(
+      /exited 1/
+    );
+  });
+
+  it('fails a missing dry-run exit status rather than reading it as success', () => {
+    expect(() => evaluate({ listText: ok, dryRunText: okDry, dryRunExit: '' })).toThrow(
+      /is not a number/
+    );
+  });
+
   for (const [name, [listText, dryRunText, message]] of Object.entries(cases)) {
     it(`fails on ${name}, for that reason`, () => {
       expect(() => evaluate({ listText, dryRunText })).toThrow(GuardError);

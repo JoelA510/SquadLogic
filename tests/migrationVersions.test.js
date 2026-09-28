@@ -4,7 +4,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  checkAddedAfterBase,
+  baseEntries,
+  checkAgainstBase,
   checkNames,
   listHead,
   versionOf,
@@ -21,6 +22,13 @@ describe('migration versions: the real directory', () => {
 
   it('is well named and has no duplicate versions', () => {
     expect(checkNames(files)).toEqual([]);
+  });
+
+  it('reads the committed tree with blob ids (meta-assertion)', () => {
+    const head = baseEntries('HEAD');
+    expect(head.length).toBeGreaterThanOrEqual(118);
+    expect(head.every((e) => /^[0-9a-f]{40}$/.test(e.blob))).toBe(true);
+    expect(checkAgainstBase(head, head)).toEqual([]);
   });
 });
 
@@ -47,29 +55,45 @@ describe('migration versions: names and uniqueness', () => {
   });
 });
 
-describe('migration versions: added files must follow the base', () => {
-  const base = ['20260923000000_a.sql', '20260924000000_b.sql'];
+describe('migration versions: the head against the base', () => {
+  const e = (file, blob = 'x') => ({ file, blob });
+  const base = [e('20260923000000_a.sql'), e('20260924000000_b.sql')];
 
-  it('passes a file added above the latest on the base', () => {
-    expect(checkAddedAfterBase(base, [...base, '20260927000000_c.sql'])).toEqual([]);
+  it('passes a version added above the latest on the base', () => {
+    expect(checkAgainstBase(base, [...base, e('20260927000000_c.sql')])).toEqual([]);
   });
 
-  it('fails a file added below the latest on the base', () => {
-    const errors = checkAddedAfterBase(base, [...base, '20260923120000_c.sql']);
+  it('fails a version added below the latest on the base', () => {
+    const errors = checkAgainstBase(base, [...base, e('20260923120000_c.sql')]);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatch(/20260923120000_c\.sql.*not greater.*20260924000000/);
   });
 
-  it('fails a file added AT the latest version (a renamed twin)', () => {
-    expect(checkAddedAfterBase(base, [...base, '20260924000000_c.sql'])).toHaveLength(1);
+  it('reports a renamed migration as a rename, not as an out-of-order addition', () => {
+    const errors = checkAgainstBase(base, [base[0], e('20260924000000_b_renamed.sql')]);
+    expect(errors).toEqual([
+      '20260924000000_b.sql was renamed to 20260924000000_b_renamed.sql; applied migrations keep their name',
+    ]);
   });
 
-  it('does not re-judge files already on the base', () => {
-    expect(checkAddedAfterBase(base, base)).toEqual([]);
+  it('fails an edit to an existing migration', () => {
+    const errors = checkAgainstBase(base, [base[0], e('20260924000000_b.sql', 'y')]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/was edited/);
+  });
+
+  it('fails a removed migration', () => {
+    expect(checkAgainstBase(base, [base[0]])).toEqual([
+      '20260924000000_b.sql (version 20260924000000) was removed',
+    ]);
+  });
+
+  it('passes an unchanged head', () => {
+    expect(checkAgainstBase(base, base)).toEqual([]);
   });
 
   it('fails when the base has no migrations to compare against', () => {
-    expect(checkAddedAfterBase([], ['20260927000000_c.sql'])).toHaveLength(1);
+    expect(checkAgainstBase([], [e('20260927000000_c.sql')])).toHaveLength(1);
   });
 });
 

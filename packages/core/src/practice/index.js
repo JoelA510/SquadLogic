@@ -72,6 +72,12 @@ export {
   PracticeWindowSchema,
   PracticeDurationPhaseOptionsSchema,
   PracticeDurationPhaseOverrideSchema,
+  PRACTICE_COMPRESSION_STEP_MINUTES,
+  PRACTICE_COMPRESSION_STRATEGY,
+  PRACTICE_EARLIEST_START_WEEKDAYS,
+  PRACTICE_MINIMUM_DURATION_MINUTES,
+  PracticeCompressionStrategySchema,
+  PracticeLightingOverrideSchema,
 } from './schemas.js';
 
 export { buildPracticeSlotSet, firstWeekdayOnOrAfter, getPracticeSlot } from './slots.js';
@@ -84,11 +90,14 @@ export {
   PRACTICE_DAYLIGHT_CONSTRAINT_ID,
   PRACTICE_SUNSET_MARGIN_MINUTES,
   evaluatePracticeDaylight,
+  lightingOverrideCovers,
 } from './daylight.js';
 
 export {
   PRACTICE_CASCADE_UNASSIGNED_LABEL,
   PRACTICE_PHASE_SOURCE,
+  PRACTICE_RETIME_KIND,
+  PRACTICE_RETIME_REFUSAL,
   PRACTICE_SUNSET_CASCADE_REASON_TEXT,
   PRACTICE_SUNSET_CASCADE_SOURCES,
   PRACTICE_SUNSET_CASCADE_SOURCE_ID,
@@ -98,6 +107,8 @@ export {
   buildPracticeCompressionReport,
   derivePracticeDurationPhases,
   endsByDaylightLimit,
+  ladderDuration,
+  shiftedStart,
 } from './durationPhases.js';
 
 export { toPracticeMetricsInput } from './metricsInput.js';

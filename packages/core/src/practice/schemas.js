@@ -36,6 +36,52 @@ export const PracticeWeekdaySchema = z.enum(['SUN', 'MON', 'TUE', 'WED', 'THU', 
 const MinutesSchema = z.number().int().min(0);
 
 /**
+ * The D14 constants (8.9 D14, operator 2026-09-29), exported so the Edge twin
+ * (PR C) can pin itself to them.
+ *
+ * - {@link PRACTICE_COMPRESSION_STEP_MINUTES}: a phase shortens a practice to
+ *   `D0 - 10k`, D0 its own length, k the fewest steps that end it by sunset.
+ * - {@link PRACTICE_MINIMUM_DURATION_MINUTES}: shortening stops at 40; below
+ *   it the practice shifts earlier if the floor allows, else it is TIME TBD.
+ * - {@link PRACTICE_EARLIEST_START_WEEKDAYS}: the nights
+ *   `season_settings.school_day_end` bounds (Mon-Thu, as `practiceMetrics.js`
+ *   reads it). On any other night the floor is unknown and a shift is refused.
+ */
+export const PRACTICE_COMPRESSION_STEP_MINUTES = 10;
+export const PRACTICE_MINIMUM_DURATION_MINUTES = 40;
+export const PRACTICE_EARLIEST_START_WEEKDAYS = Object.freeze(
+  /** @type {const} */ (['MON', 'TUE', 'WED', 'THU'])
+);
+
+/** How an unlit slot adapts to sunset: an admin's choice per slot (D14). */
+export const PRACTICE_COMPRESSION_STRATEGY = Object.freeze({
+  SHORTEN: 'shorten',
+  SHIFT_EARLIER: 'shift-earlier',
+});
+
+export const PracticeCompressionStrategySchema = z.enum([
+  PRACTICE_COMPRESSION_STRATEGY.SHORTEN,
+  PRACTICE_COMPRESSION_STRATEGY.SHIFT_EARLIER,
+]);
+
+/**
+ * An approved portable-lighting window on one slot (8.9 D14): the slot's dates
+ * in `[from, until]` are not judged against sunset, need no coordinates and are
+ * never compressed. An input only: the table is PR B, the Edge read PR C.
+ */
+export const PracticeLightingOverrideSchema = z
+  .object({
+    slotId: IdSchema,
+    from: IsoDateSchema,
+    until: IsoDateSchema,
+  })
+  .strict()
+  .refine((override) => override.until >= override.from, {
+    message: 'a lighting override `until` must not precede its `from`',
+    path: ['until'],
+  });
+
+/**
  * A recurring practice slot: ground, a weekday, a start, a duration, and the
  * range over which that arrangement holds.
  *
@@ -308,6 +354,12 @@ export const PracticeRepairInputSchema = z
       })
       .passthrough()
       .optional(),
+    /**
+     * Approved portable-lighting windows on the plan's slots (8.9 D14), as
+     * input data. A candidate shape is exempt on a date only when every plan
+     * slot with that shape has a window covering it.
+     */
+    lightingOverrides: z.array(PracticeLightingOverrideSchema).optional(),
   })
   .strict()
   // Preferences with no rows would bind no coach to any team, so every one of
@@ -323,15 +375,15 @@ export const PracticeRepairInputSchema = z
   );
 
 /**
- * An operator's pin on one venue's practice duration from a date (8.9 PR 5,
- * `durationPhases.js`). It is applied **before** that date is judged, so an
- * override that would leave a practice past sunset is superseded on the spot
- * by a derived phase and the supersession is recorded -- never honoured
- * silently, never dropped silently.
+ * An operator's pin on one slot's practice duration from a date (8.9 PR 5,
+ * `durationPhases.js`; keyed by slot since D14 made cuts per slot). It is
+ * applied **before** that date is judged, so an override that would leave a
+ * practice past sunset is superseded on the spot by a derived phase and the
+ * supersession is recorded -- never honoured silently, never dropped silently.
  */
 export const PracticeDurationPhaseOverrideSchema = z
   .object({
-    venueId: IdSchema,
+    slotId: IdSchema,
     effectiveFrom: IsoDateSchema,
     durationMinutes: z.number().int().positive(),
     reason: z.string().min(1, { message: 'a duration override carries its reason' }),
@@ -341,11 +393,15 @@ export const PracticeDurationPhaseOverrideSchema = z
 /**
  * The options every 8.9 PR 5 derivation takes.
  *
- * `minimumDurationMinutes` is **required**: the plan asks whether a slot
- * "survives at any phase duration" and sets no floor, and a default here would
- * be a policy nobody decided. `durationStepMinutes` defaults to 1 -- no
- * rounding, so a phase shortens a practice by exactly what sunset takes and no
- * more (maximum freeze).
+ * - `minimumDurationMinutes` defaults to 40 and `durationStepMinutes` to 10
+ *   (operator 2026-09-29, D14).
+ * - `strategies` maps a slot id to its strategy; a slot not named shortens.
+ * - `earliestStartMinutes` is `season_settings.school_day_end`, the floor on
+ *   the `earliestStartWeekdays` (default Mon-Thu). It is **required** when any
+ *   slot is set to shift earlier. Without it, and on any other night, every
+ *   shift -- the automatic fallback included -- is refused with a reason; the
+ *   floor is never assumed.
+ * - `lightingOverrides` exempt their slot's dates (portable lighting).
  */
 export const PracticeDurationPhaseOptionsSchema = z
   .object({
@@ -356,8 +412,25 @@ export const PracticeDurationPhaseOptionsSchema = z
         message: 'window `to` must not precede `from`',
         path: ['to'],
       }),
-    minimumDurationMinutes: z.number().int().positive(),
-    durationStepMinutes: z.number().int().positive().default(1),
+    minimumDurationMinutes: z.number().int().positive().default(PRACTICE_MINIMUM_DURATION_MINUTES),
+    durationStepMinutes: z.number().int().positive().default(PRACTICE_COMPRESSION_STEP_MINUTES),
     overrides: z.array(PracticeDurationPhaseOverrideSchema).default([]),
+    strategies: z.record(z.string(), PracticeCompressionStrategySchema).default({}),
+    earliestStartMinutes: MinutesSchema.max(1439).nullable().default(null),
+    earliestStartWeekdays: z
+      .array(PracticeWeekdaySchema)
+      .min(1)
+      .default(() => [...PRACTICE_EARLIEST_START_WEEKDAYS]),
+    lightingOverrides: z.array(PracticeLightingOverrideSchema).default([]),
   })
-  .strict();
+  .strict()
+  .refine(
+    (options) =>
+      options.earliestStartMinutes !== null ||
+      !Object.values(options.strategies).includes(PRACTICE_COMPRESSION_STRATEGY.SHIFT_EARLIER),
+    {
+      message:
+        'a slot set to shift earlier needs `earliestStartMinutes` (season_settings.school_day_end): the floor is never assumed',
+      path: ['earliestStartMinutes'],
+    }
+  );

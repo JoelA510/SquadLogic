@@ -724,3 +724,73 @@ describe('season-2026: every corpus loss, gated', () => {
     expect(judged).toBeGreaterThan(0);
   }, 15_000); // 58 corpus repairs: 2.3 s alone, 3.4 s in a local full run; the 15 s floor of docs/testing/test-timeouts.md.
 });
+
+/* -------------------------------------------------------------------------- */
+/* W29 -- a lighting override lights a shape only when it lights every slot   */
+/* -------------------------------------------------------------------------- */
+
+describe('W29: repair honours a lighting override only when every plan slot of the shape has one', () => {
+  // Plant 1: ignore the overrides (hand the evaluator none). The fully lit
+  // case stays refused and goes red. Plant 2: `some` for `every` in
+  // shapeExemptOn(); the half-lit case is re-homed and goes red.
+  const series = [{ teamId: 'T1', surfaceId: 'dusk/f1', startMinutes: 16 * 60 }];
+  // One candidate: dusk/f2 16:00, which ends 17:00 -- past sunset after DST.
+  const inventory = [{ surfaceId: 'dusk/f2', startMinutes: 16 * 60 }];
+  /** Two unassigned plan slots with the candidate's shape. */
+  const twin = (id) => ({
+    id,
+    surfaceId: 'dusk/f2',
+    weekday: 'TUE',
+    startMinutes: 16 * 60,
+    durationMinutes: 60,
+    validFrom: SERIES_FROM,
+    validUntil: SERIES_UNTIL,
+    capacity: 1,
+    revisionId: 'r1',
+    label: null,
+    surfaceResolution: 'resolved',
+  });
+  const run = (lightingOverrides) => {
+    const input = rigInput({ series, inventory, calendar: rigCalendar() });
+    input.plan.slots.push(twin('x1'), twin('x2'));
+    return repairPracticeLoss({ ...input, lightingOverrides });
+  };
+  const whole = (slotId, until = SERIES_UNTIL) => ({ slotId, from: SERIES_FROM, until });
+
+  it('with no override the candidate is refused past sunset (the case is not vacuous)', () => {
+    const result = run([]);
+    expect(result.rehomed).toHaveLength(0);
+    expect(result.timeTbd.map((entry) => entry.reason)).toEqual([PRACTICE_TBD_REASON.PAST_SUNSET]);
+  });
+
+  it('one of two identical slots overridden: still refused', () => {
+    const result = run([whole('x1')]);
+    expect(result.rehomed).toHaveLength(0);
+    expect(result.daylight.candidatesRefusedPastSunset).toBe(1);
+    expect(result.daylight.occurrencesLightingOverrideExempt).toBe(0);
+    expectNoneDropped(result, ['a0']);
+  });
+
+  it('every slot of the shape overridden for the window: exempt, and re-homed there', () => {
+    const result = run([whole('x1'), whole('x2')]);
+    expect(result.rehomed).toHaveLength(1);
+    expect(result.rehomed[0].to).toMatchObject({ surfaceId: 'dusk/f2', startMinutes: 16 * 60 });
+    expect(result.daylight.candidatesLightingOverrideExempt).toBe(1);
+    expect(result.daylight.candidatesRefusedPastSunset).toBe(0);
+    expect(result.daylight.occurrencesLightingOverrideExempt).toBe(
+      result.daylight.occurrencesExamined
+    );
+    expectNoneDropped(result, ['a0']);
+  });
+
+  it('a window that stops before DST leaves the late dates judged: partly legal is refused', () => {
+    const result = run([whole('x1', '2026-10-31'), whole('x2', '2026-10-31')]);
+    expect(result.rehomed).toHaveLength(0);
+    expect(result.daylight.refused[0].date).toBe('2026-11-03');
+    expect(result.daylight.occurrencesLightingOverrideExempt).toBeGreaterThan(0);
+  });
+
+  it('an override on a slot the plan does not hold is refused', () => {
+    expect(() => run([whole('ghost')])).toThrow(/not in the plan/);
+  });
+});

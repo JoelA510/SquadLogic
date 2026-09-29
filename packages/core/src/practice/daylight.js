@@ -52,6 +52,8 @@
  * @module practice/daylight
  */
 
+import { z } from 'zod';
+
 import { getSurface } from '../facility/facilityGraph.js';
 import { resolveLighting, sunsetForVenue } from '../availability/calendar.js';
 import {
@@ -60,6 +62,7 @@ import {
   deriveAvailabilityStatus,
   makeAvailabilityFinding,
 } from '../availability/reasonCodes.js';
+import { PracticeLightingOverrideSchema } from './schemas.js';
 
 /**
  * Minutes before sunset an unlit practice must be over: **0**, by operator
@@ -70,6 +73,28 @@ export const PRACTICE_SUNSET_MARGIN_MINUTES = 0;
 
 /** The registry claim this evaluator's violations are governed by. */
 export const PRACTICE_DAYLIGHT_CONSTRAINT_ID = 'practice-daylight';
+
+/**
+ * The one reading of portable-lighting overrides (8.9 D14): a predicate
+ * `(slotId, date) => boolean`, true when an override on that slot covers the
+ * date, `[from, until]` inclusive. `durationPhases.js` and `repair.js` read
+ * overrides through this, so a window means one thing everywhere.
+ *
+ * @param {ReadonlyArray<{ slotId: string, from: string, until: string }>|undefined} lightingOverrides
+ * @returns {(slotId: string, date: string) => boolean}
+ */
+export function lightingOverrideCovers(lightingOverrides) {
+  const overrides = z.array(PracticeLightingOverrideSchema).parse(lightingOverrides ?? []);
+  /** @type {Map<string, Array<{ from: string, until: string }>>} */
+  const bySlot = new Map();
+  for (const { slotId, from, until } of overrides) {
+    const list = bySlot.get(slotId) ?? [];
+    list.push({ from, until });
+    bySlot.set(slotId, list);
+  }
+  return (slotId, date) =>
+    (bySlot.get(slotId) ?? []).some((window) => window.from <= date && date <= window.until);
+}
 
 /**
  * @typedef {Object} PracticeDaylightMeta
@@ -83,6 +108,13 @@ export const PRACTICE_DAYLIGHT_CONSTRAINT_ID = 'practice-daylight';
  * @property {number} litPracticeOccurrencesExempt
  * @property {number} litOccurrencesWithLightsOff - of the exempt, those whose
  *   field states a lights-off time this evaluator does not check
+ * @property {number} lightingOverrideOccurrencesExempt - unlit occurrences a
+ *   portable-lighting override covers (8.9 D14): not judged, never unknown, and
+ *   never folded into the lit counter. Not in
+ *   `unlitPracticeOccurrencesExamined`: unlit ground = examined + this
+ * @property {number} lightingOverridesUnused - overrides that exempted no
+ *   occurrence of this input (a slot or window it does not hold): reported,
+ *   not refused, since the input is a window of the season, not the plan
  * @property {number} daylightUnknownOccurrences
  * @property {number} practiceOccurrencesPastSunset
  * @property {number} practiceOccurrencesWithinDaylight
@@ -112,17 +144,22 @@ export const PRACTICE_DAYLIGHT_CONSTRAINT_ID = 'practice-daylight';
  * @param {import('../facility/types.js').FacilityGraph} input.graph
  * @param {import('../availability/types.js').AvailabilityCalendar} input.calendar - the
  *   daylight provider: its table, its per-venue coordinates and its zone
+ * @param {ReadonlyArray<{ slotId: string, from: string, until: string }>} [input.lightingOverrides] -
+ *   approved portable-lighting windows (8.9 D14), matched on `occurrence.slotId`
  * @returns {{
  *   flagged: Array<PracticeDaylightVerdict & { overrunMinutes: number, attribution: Object }>,
  *   unknown: PracticeDaylightVerdict[],
  *   allowed: string[],
+ *   exempt: string[],
  *   findings: import('../availability/types.js').AvailabilityFinding[],
  *   status: string,
  *   marginMinutes: number,
  *   meta: PracticeDaylightMeta,
  * }}
  */
-export function evaluatePracticeDaylight({ occurrences, graph, calendar }) {
+export function evaluatePracticeDaylight({ occurrences, graph, calendar, lightingOverrides }) {
+  const windows = z.array(PracticeLightingOverrideSchema).parse(lightingOverrides ?? []);
+  const overridden = lightingOverrideCovers(windows);
   if (!Array.isArray(occurrences)) {
     throw new TypeError('evaluatePracticeDaylight requires the materialised occurrences');
   }
@@ -139,6 +176,8 @@ export function evaluatePracticeDaylight({ occurrences, graph, calendar }) {
     unknownSurfaceOccurrences: 0,
     litPracticeOccurrencesExempt: 0,
     litOccurrencesWithLightsOff: 0,
+    lightingOverrideOccurrencesExempt: 0,
+    lightingOverridesUnused: 0,
     daylightUnknownOccurrences: 0,
     practiceOccurrencesPastSunset: 0,
     practiceOccurrencesWithinDaylight: 0,
@@ -148,6 +187,10 @@ export function evaluatePracticeDaylight({ occurrences, graph, calendar }) {
   const unknown = [];
   /** @type {string[]} */
   const allowed = [];
+  /** @type {string[]} */
+  const exempt = [];
+  /** @type {import('./types.js').PracticeOccurrence[]} */
+  const exemptOn = [];
   /** @type {import('../availability/types.js').AvailabilityFinding[]} */
   const findings = [];
 
@@ -162,6 +205,14 @@ export function evaluatePracticeDaylight({ occurrences, graph, calendar }) {
     if (lit === true) {
       meta.litPracticeOccurrencesExempt += 1;
       if (lighting?.lightsOffMinutes != null) meta.litOccurrencesWithLightsOff += 1;
+      continue;
+    }
+    // Portable lighting (D14): not judged, so no sunset is asked for and none
+    // can be unknown. Counted apart from lit ground, never folded into it.
+    if (overridden(occurrence.slotId, occurrence.date)) {
+      meta.lightingOverrideOccurrencesExempt += 1;
+      exempt.push(occurrence.id);
+      exemptOn.push(occurrence);
       continue;
     }
     meta.unlitPracticeOccurrencesExamined += 1;
@@ -240,10 +291,23 @@ export function evaluatePracticeDaylight({ occurrences, graph, calendar }) {
     );
   }
 
+  // An override that exempted nothing here (a slot or a window this input does
+  // not hold) is counted, never silently unread.
+  meta.lightingOverridesUnused = windows.filter(
+    (window) =>
+      !exemptOn.some(
+        (occurrence) =>
+          occurrence.slotId === window.slotId &&
+          window.from <= occurrence.date &&
+          occurrence.date <= window.until
+      )
+  ).length;
+
   return {
     flagged,
     unknown,
     allowed,
+    exempt,
     findings,
     status: deriveAvailabilityStatus(findings),
     marginMinutes: PRACTICE_SUNSET_MARGIN_MINUTES,

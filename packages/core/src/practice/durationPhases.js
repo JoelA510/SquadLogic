@@ -1,24 +1,26 @@
 /**
- * Practice duration phases, compression and the DST survival report (8.9 PR 5).
+ * Practice duration phases, compression and the DST survival report (8.9 PR 5,
+ * reworked by 8.9 D14).
  *
  * `practice/daylight.js` says which practices run past sunset. This module
  * says how the season adapts, in three reports over the same universe, and
  * **applies nothing**:
  *
- * - **G3, the DurationPhase schedule.** Per venue, an ordered
- *   `(effectiveFrom, durationMinutes)` list, each phase showing the date, the
- *   sunset and the slot that bound it. The output is exactly the
- *   `seasonPhases` + per-slot `seasonOverrides` that
- *   `expandPracticeSlotsForSeason()` already takes -- no second mechanism.
+ * - **G3, the DurationPhase schedule.** Per unlit slot, an ordered list of
+ *   `(effectiveFrom, startMinutes, durationMinutes)` phases, each showing the
+ *   date, the sunset and what bound it (`slotPhases`). The output is exactly
+ *   the `seasonPhases` + per-slot `seasonOverrides` (`durationMinutes`, and
+ *   `startTime` for a shifted slot) that `expandPracticeSlotsForSeason()`
+ *   already takes -- no second mechanism.
  * - **G4, the compression report.** *Hold-starts*: every slot-date still
- *   ending past sunset under that schedule. *Cascade*: a proposal to shift the
- *   later slots of a night earlier, into the minutes the shortened practices
- *   before them gave up. Cascade proposals leave this module **only** as 8.8
- *   change-log entries (`changelog/classify.js` `buildChangeLog()`); nothing
- *   here writes a start time back (W13).
- * - **G5, the DST survival report.** Per unlit slot: does it survive at any
- *   phase duration, and if not, what would fix it -- a lit field, an earlier
- *   start, another night.
+ *   ending past sunset under that schedule. *Cascade*: a proposal to move the
+ *   later slots of a night earlier, into the minutes the practices before them
+ *   gave up. Cascade proposals leave this module **only** as 8.8 change-log
+ *   entries (`changelog/classify.js` `buildChangeLog()`); nothing here writes
+ *   a start time back (W13).
+ * - **G5, the DST survival report.** Per unlit slot: does it survive, and if
+ *   not, what would fix it -- a lit field, an earlier start, another night, a
+ *   portable-lighting override.
  *
  * ## The one comparison (W12)
  *
@@ -30,53 +32,69 @@
  * date the last unlit end *exceeds* the limit, never the date it merely
  * reaches it.
  *
- * ## How a phase is derived
+ * ## How a slot's phases are derived (D14, operator 2026-09-29)
  *
- * Per venue, over the dates any of its unlit slots occurs, in order. The
- * venue's duration starts at the longest of its slots' own durations (a cap
- * that binds nothing). On each date every occurring slot is judged at
- * `min(its duration, the cap)` with its **start held**. If any ends past the
- * limit, a phase begins on that date, and its duration is the longest that
- * brings the tightest such slot back inside the limit, floored to
- * `durationStepMinutes`. That is the least shortening that date needs, and
- * the cap never lengthens again on its own (maximum freeze). A slot whose
- * longest legal duration on a date is below `minimumDurationMinutes` cannot
- * be saved by any phase on that date; it does not drag its venue's cap down
- * to nothing -- it is **held out**, counted, and reported by G4 and G5.
+ * **Per slot**, never per venue: a 17:00 slot is not cut because the 18:00
+ * slot beside it needed it. Over the slot's dates in order, each date that
+ * ends past the limit retimes the slot by its strategy, an admin's input
+ * (`strategies`, default SHORTEN):
  *
- * Operator overrides pin a venue's duration from a date. They apply before
- * the date is judged, so one that leaves a practice past sunset is superseded
- * by a derived phase on the same date and the phase records what it
+ * - **SHORTEN** keeps the start and runs `D0 - step*k` minutes, D0 the slot's
+ *   own length, k the fewest steps ({@link ladderDuration}; step 10) that end
+ *   it by the limit. k never decreases (maximum freeze); one date may take
+ *   several steps. Never below `minimumDurationMinutes` (40): when the ladder
+ *   would go below it, the slot **falls back** to shifting earlier.
+ * - **SHIFT_EARLIER** keeps the duration and moves the start earlier in the
+ *   same steps ({@link shiftedStart}), never before the earliest-start floor
+ *   (`season_settings.school_day_end`, an input, on its weekdays) and never
+ *   into an earlier slot on the same surface that night. An unknown floor
+ *   refuses the shift; it is never assumed.
+ *
+ * A date neither can save is **held out**: TIME TBD (D8) with its date and the
+ * reason, listed in `slotPhases[].tbd` -- never emitted shorter than the
+ * minimum and never dropped. It leaves the slot's state as it was.
+ *
+ * Operator duration overrides pin a slot's duration from a date. They apply
+ * before the date is judged, so one that leaves a practice past sunset is
+ * superseded by a derived phase on the same date and the phase records what it
  * superseded.
+ *
+ * ## Portable lighting (D14)
+ *
+ * A `lightingOverrides` window on a slot exempts its dates: they are not
+ * judged, need no sunset, are never unknown, run as planned, and are counted
+ * on their own (`slotDatesExempt`), never folded into the lit counters. The
+ * windows' edges are season-phase boundaries, so the schedule can say so.
  *
  * ## What is declared, not optimised (D11)
  *
  * Nothing here chooses durations, starts or nights to maximise the number of
- * surviving slots. The phase is the least shortening per date; the cascade
+ * surviving slots. Each retiming is the least that date needs; the cascade
  * keeps each night's first start and every gap; the fixes G5 lists are
  * candidates whose permits, sizes and capacities are **not checked**. The
  * `practice-daylight` registry claim states the same.
  *
  * ## What D8 gets from here
  *
- * A weekly slot that is legal early and illegal late is truncated at its
- * first illegal date and the remainder goes TIME TBD. That truncation belongs
- * to the Edge post-pass (8.9 PR 6). G5 reports the date for every slot that
- * needs it (`d8.tbdFrom`), so nothing it will truncate is discovered there
- * for the first time.
+ * The scheduler only **proposes** shortening or shifting. A weekly slot that
+ * is legal early and illegal late is truncated at its first illegal date and
+ * the remainder goes TIME TBD; that truncation belongs to the Edge post-pass
+ * (8.9 PR 6). G5 reports the date for every slot that needs it
+ * (`d8.tbdFrom`), so nothing it will truncate is discovered there for the
+ * first time.
  *
  * ## Universes come from the input
  *
  * Every report enumerates the **input plan's** slots x dates (weekday within
  * the slot's range, clamped to the window) -- never the materialised
- * occurrences and never another report's output. Lit slots, undated slots and
- * slot-dates with no known sunset are listed and counted, never omitted.
- * Dated one-off exceptions are out of scope: they are judged per occurrence
- * by `evaluatePracticeDaylight()`.
+ * occurrences and never another report's output. Lit slots, undated slots,
+ * exempt slot-dates and slot-dates with no known sunset are listed and
+ * counted, never omitted. Dated one-off exceptions are out of scope: they are
+ * judged per occurrence by `evaluatePracticeDaylight()`.
  *
  * Enforced nowhere live: the core `practiceScheduling.js`/`autoScheduler.js`
  * do not call this, and the Edge post-pass (8.9 PR 6) is a Deno twin, not a
- * caller.
+ * caller. The D14 constants are exported for the Edge twin (PR C) to pin.
  *
  * @module practice/durationPhases
  */
@@ -86,16 +104,36 @@ import { isoDateOfDayNumber, isoDayNumber } from '../facility/eligibility.js';
 import { resolveLighting, sunsetForVenue } from '../availability/calendar.js';
 import { AVAILABILITY_REASON } from '../availability/reasonCodes.js';
 import { buildChangeLog } from '../changelog/classify.js';
-import { PRACTICE_SUNSET_MARGIN_MINUTES } from './daylight.js';
+import { PRACTICE_SUNSET_MARGIN_MINUTES, lightingOverrideCovers } from './daylight.js';
 import { teamsOn } from './materialise.js';
-import { PracticeDurationPhaseOptionsSchema } from './schemas.js';
+import {
+  PRACTICE_COMPRESSION_STEP_MINUTES,
+  PRACTICE_COMPRESSION_STRATEGY,
+  PracticeDurationPhaseOptionsSchema,
+} from './schemas.js';
 import { firstWeekdayOnOrAfter } from './slots.js';
 
-/** Where a phase's duration came from. */
+/** Where a phase's timing came from. */
 export const PRACTICE_PHASE_SOURCE = Object.freeze({
   BASE: 'base',
   DERIVED: 'derived',
   OVERRIDE: 'override',
+});
+
+/** How a derived phase retimed its slot (D14). */
+export const PRACTICE_RETIME_KIND = Object.freeze({
+  SHORTEN: 'shorten',
+  SHIFT_EARLIER: 'shift-earlier',
+  /** A SHORTEN slot whose ladder would go below the minimum, shifted instead. */
+  FALLBACK_SHIFT: 'fallback-shift',
+});
+
+/** Why a date could not be retimed, and so is TIME TBD (D14). */
+export const PRACTICE_RETIME_REFUSAL = Object.freeze({
+  BELOW_MINIMUM: 'below-minimum',
+  EARLIEST_START_FLOOR: 'earliest-start-floor',
+  EARLIEST_START_UNKNOWN: 'earliest-start-unknown',
+  OVERLAP: 'overlap',
 });
 
 /** The fixes G5 can name for a slot that does not survive. */
@@ -103,6 +141,7 @@ export const PRACTICE_SURVIVAL_FIX_KIND = Object.freeze({
   LIT_FIELD: 'lit-field',
   EARLIER_START: 'earlier-start',
   ANOTHER_NIGHT: 'another-night',
+  LIGHTING_OVERRIDE: 'lighting-override',
 });
 
 /** G5's verdict per unlit slot. */
@@ -111,6 +150,8 @@ export const PRACTICE_SURVIVAL_VERDICT = Object.freeze({
   DOES_NOT_SURVIVE: 'does-not-survive',
   UNKNOWN: 'unknown',
   NO_DATES: 'no-dates-in-window',
+  /** Every date in the window is under a portable-lighting override. */
+  EXEMPT: 'exempt',
 });
 
 /** The declared change-log source every cascade proposal is filed under. */
@@ -159,25 +200,80 @@ export function endsByDaylightLimit(endMinutes, limitMinutes) {
 }
 
 /**
- * The longest duration, in whole steps, a practice starting at `startMinutes`
- * can run and still end by the limit; 0 when none.
+ * The shortening ladder (D14): the duration a practice starting at
+ * `startMinutes` runs so it ends by the limit, as `D0 - step*k` with D0 the
+ * slot's own length and k the fewest steps that fit. k never falls below the
+ * steps the current duration already took (maximum freeze), so the ladder
+ * never lengthens a practice. 0 when no rung above zero fits; the caller
+ * holds it against the minimum.
  *
- * @param {number} limitMinutes
- * @param {number} startMinutes
- * @param {number} step
+ * @param {Object} input
+ * @param {number} input.plannedDurationMinutes - D0, the slot's own length
+ * @param {number} [input.currentDurationMinutes] - the duration it runs now (default D0)
+ * @param {number} input.startMinutes
+ * @param {number} input.limitMinutes
+ * @param {number} [input.stepMinutes] - default {@link PRACTICE_COMPRESSION_STEP_MINUTES}
  * @returns {number}
  */
-function longestLegalDuration(limitMinutes, startMinutes, step) {
-  const room = limitMinutes - startMinutes;
-  return room <= 0 ? 0 : Math.floor(room / step) * step;
+export function ladderDuration({
+  plannedDurationMinutes,
+  currentDurationMinutes = plannedDurationMinutes,
+  startMinutes,
+  limitMinutes,
+  stepMinutes = PRACTICE_COMPRESSION_STEP_MINUTES,
+}) {
+  const stepsTaken = Math.ceil((plannedDurationMinutes - currentDurationMinutes) / stepMinutes);
+  const stepsNeeded = Math.ceil(
+    (startMinutes + plannedDurationMinutes - limitMinutes) / stepMinutes
+  );
+  return Math.max(0, plannedDurationMinutes - stepMinutes * Math.max(0, stepsTaken, stepsNeeded));
 }
 
 /**
- * Can some phase save this slot on a date, start held? Yes when it already
- * ends by the limit at its own length (a slot shorter than the minimum is not
- * penalised for it), or when its longest legal duration in whole steps is at
- * least the minimum. The one survivability contract: G3's held-out slots and
- * G5's verdicts both read it.
+ * SHIFT_EARLIER (D14): the start, moved earlier in whole steps, at which a
+ * practice of `durationMinutes` ends by the limit -- or why it may not move
+ * there. Refused, never assumed: with no floor (`floorMinutes` null) as
+ * `earliest-start-unknown`; before the floor as `earliest-start-floor`; before
+ * the end of an earlier slot on the same surface that night as `overlap`.
+ *
+ * @param {Object} input
+ * @param {number} input.startMinutes - the start it runs at now
+ * @param {number} input.durationMinutes - kept as it is
+ * @param {number} input.limitMinutes
+ * @param {number|null} input.floorMinutes - `season_settings.school_day_end`, or null when unknown
+ * @param {number|null} [input.earlierEndMinutes] - the latest end of the earlier slots that night
+ * @param {number} [input.stepMinutes]
+ * @returns {{ startMinutes: number|null, refused: string|null, wouldStartMinutes: number }}
+ */
+export function shiftedStart({
+  startMinutes,
+  durationMinutes,
+  limitMinutes,
+  floorMinutes,
+  earlierEndMinutes = null,
+  stepMinutes = PRACTICE_COMPRESSION_STEP_MINUTES,
+}) {
+  const over = startMinutes + durationMinutes - limitMinutes;
+  const start =
+    over <= 0 ? startMinutes : startMinutes - stepMinutes * Math.ceil(over / stepMinutes);
+  const refuse = (/** @type {string} */ refused) => ({
+    startMinutes: null,
+    refused,
+    wouldStartMinutes: start,
+  });
+  if (floorMinutes === null) return refuse(PRACTICE_RETIME_REFUSAL.EARLIEST_START_UNKNOWN);
+  if (start < floorMinutes) return refuse(PRACTICE_RETIME_REFUSAL.EARLIEST_START_FLOOR);
+  if (earlierEndMinutes !== null && start < earlierEndMinutes) {
+    return refuse(PRACTICE_RETIME_REFUSAL.OVERLAP);
+  }
+  return { startMinutes: start, refused: null, wouldStartMinutes: start };
+}
+
+/**
+ * Can this slot, start held, be saved on a date by shortening alone? Yes when
+ * it already ends by the limit at its own length (a slot shorter than the
+ * minimum is not penalised for it), or when its ladder rung is at least the
+ * minimum. G5's another-night fix reads it.
  *
  * @param {number} limitMinutes
  * @param {{ startMinutes: number, durationMinutes: number }} slot
@@ -187,7 +283,14 @@ function longestLegalDuration(limitMinutes, startMinutes, step) {
  */
 function survivesOnDate(limitMinutes, slot, step, minimum) {
   if (endsByDaylightLimit(slot.startMinutes + slot.durationMinutes, limitMinutes)) return true;
-  return longestLegalDuration(limitMinutes, slot.startMinutes, step) >= minimum;
+  return (
+    ladderDuration({
+      plannedDurationMinutes: slot.durationMinutes,
+      startMinutes: slot.startMinutes,
+      limitMinutes,
+      stepMinutes: step,
+    }) >= minimum
+  );
 }
 
 const laterOf = (/** @type {string} */ a, /** @type {string} */ b) => (a > b ? a : b);
@@ -220,11 +323,20 @@ function clockOf(minutes) {
 }
 
 /**
+ * @param {string} clock - `HH:MM`, as {@link clockOf} writes it
+ * @returns {number}
+ */
+function minutesOfClock(clock) {
+  return Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3, 5));
+}
+
+/**
  * @typedef {Object} SlotDate
  * @property {string} date
- * @property {number|null} sunsetMinutes - the enforcement minute (floored)
+ * @property {boolean} exempt - under a portable-lighting override: not judged
+ * @property {number|null} sunsetMinutes - the enforcement minute (floored); null when exempt
  * @property {number|null} limitMinutes
- * @property {'table'|'computed'|'unknown'} sunsetSource
+ * @property {'table'|'computed'|'unknown'|null} sunsetSource - null when exempt
  */
 
 /**
@@ -237,17 +349,19 @@ function clockOf(minutes) {
 
 /**
  * The universe every report here enumerates: the input plan's slots, split by
- * lighting, each unlit one with its dates and the limit on each.
+ * lighting, each unlit one with its dates, each date exempt (a lighting
+ * override covers it: no sunset is asked for) or judged against its limit.
  *
- * @param {{ slotSet: import('./types.js').PracticeSlotSet, graph: Object, calendar: Object, window: { from: string, to: string } }} input
+ * @param {{ slotSet: import('./types.js').PracticeSlotSet, graph: Object, calendar: Object, window: { from: string, to: string }, lightingOverrides?: ReadonlyArray<Object> }} input
  */
-function buildUnlitUniverse({ slotSet, graph, calendar, window }) {
+function buildUnlitUniverse({ slotSet, graph, calendar, window, lightingOverrides }) {
   if (!slotSet || !Array.isArray(slotSet.slots)) {
     throw new TypeError('durationPhases: requires the practice slot set');
   }
   if (!graph || !calendar) {
     throw new TypeError('durationPhases: requires the facility graph and the calendar');
   }
+  const exemptOn = lightingOverrideCovers(lightingOverrides);
 
   /** @type {UnlitSlotEntry[]} */
   const unlit = [];
@@ -263,8 +377,8 @@ function buildUnlitUniverse({ slotSet, graph, calendar, window }) {
   // Sunset is a property of a venue on a date, so its findings are reported
   // once per venue-date -- their details already carry `venueId` and `date` --
   // rather than once per slot sharing it. Only lookups for the plan's own
-  // slot-dates report; G5's what-if lookups (another night) do not, so no
-  // finding names a date nothing is scheduled on. Every plan lookup happens
+  // judged slot-dates report; G5's what-if lookups (another night) do not, so
+  // no finding names a date nothing is scheduled on. Every plan lookup happens
   // while this universe is built, before any what-if, so the cache cannot
   // swallow a plan date's finding.
   const daylightOn = (
@@ -297,9 +411,15 @@ function buildUnlitUniverse({ slotSet, graph, calendar, window }) {
     const from = laterOf(slot.validFrom, window.from);
     const to = earlierOf(slot.validUntil, window.to);
     const dates = weekdayDates(slot.weekday, from, to).map((date) => {
+      // Exempt: not judged, so no sunset is asked for -- no coordinates are
+      // needed and the date can never be SUNSET_UNKNOWN.
+      if (exemptOn(slot.id, date)) {
+        return { date, exempt: true, sunsetMinutes: null, limitMinutes: null, sunsetSource: null };
+      }
       const daylight = daylightOn(venueId, date);
       return {
         date,
+        exempt: false,
         sunsetMinutes: daylight.sunsetMinutes,
         limitMinutes:
           daylight.sunsetMinutes === null
@@ -315,119 +435,176 @@ function buildUnlitUniverse({ slotSet, graph, calendar, window }) {
 }
 
 /**
- * G3: derive the DurationPhase schedule.
+ * The options G3 and G5 share, parsed once. A strategy or a lighting override
+ * that names no slot of the plan is refused, not ignored: it would otherwise
+ * be an admin's choice silently unread.
  *
  * @param {Object} input
- * @param {import('./types.js').PracticeSlotSet} input.slotSet - the input plan
- * @param {Object} input.graph - the facility graph
- * @param {Object} input.calendar - the daylight provider
- * @param {{ from: string, to: string }} input.window
- * @param {number} input.minimumDurationMinutes
- * @param {number} [input.durationStepMinutes]
- * @param {Array<Object>} [input.overrides]
  */
-export function derivePracticeDurationPhases(input) {
+function parseOptions(input) {
   const options = PracticeDurationPhaseOptionsSchema.parse({
     window: input.window,
     minimumDurationMinutes: input.minimumDurationMinutes,
     durationStepMinutes: input.durationStepMinutes,
     overrides: input.overrides,
+    strategies: input.strategies,
+    earliestStartMinutes: input.earliestStartMinutes,
+    earliestStartWeekdays: input.earliestStartWeekdays,
+    lightingOverrides: input.lightingOverrides,
   });
-  const { window, minimumDurationMinutes, durationStepMinutes, overrides } = options;
-  const universe = buildUnlitUniverse({ ...input, window });
+  return options;
+}
 
-  /** @type {Map<string, UnlitSlotEntry[]>} */
-  const byVenue = new Map();
-  /** Unlit slots on ground the graph cannot place: no venue, so no phases. */
-  const slotsWithoutVenue = [];
-  for (const entry of universe.unlit) {
-    if (entry.venueId === null) {
-      slotsWithoutVenue.push(entry.slot.id);
-      continue;
-    }
-    const list = byVenue.get(entry.venueId) ?? [];
-    list.push(entry);
-    byVenue.set(entry.venueId, list);
-  }
+/**
+ * The one per-slot derivation (D14) G3 and G5 both read, so a slot survives in
+ * G5 exactly when G3 saves every one of its judged dates.
+ *
+ * Slots are derived in order of planned start, so when a slot shifts, every
+ * earlier slot on its surface that night already has its timing for the date.
+ * An earlier slot occupies its derived end; on a date it is exempt, its
+ * planned start plus the operator pin in force (it runs as planned); on an
+ * unknown-sunset date, its current end; on a date it is held out, nothing (it
+ * is TIME TBD, not on the surface). A shifted slot is re-checked against that
+ * every night, and a night it would overlap is held out `overlap`.
+ *
+ * `retimeRefusals` counts held-out dates only, by each refusal that held one
+ * out (a SHORTEN date refused by the ladder and the shift counts in both).
+ *
+ * @param {ReturnType<typeof buildUnlitUniverse>} universe
+ * @param {ReturnType<typeof parseOptions>} options
+ */
+function deriveSlotTimelines(universe, options) {
+  const {
+    window,
+    minimumDurationMinutes: minimum,
+    durationStepMinutes: step,
+    overrides,
+    strategies,
+    earliestStartMinutes,
+    earliestStartWeekdays,
+  } = options;
+  const floorOn = (/** @type {string} */ weekday) =>
+    earliestStartWeekdays.includes(/** @type {any} */ (weekday)) ? earliestStartMinutes : null;
 
-  for (const override of overrides) {
-    if (!byVenue.has(override.venueId)) {
+  const unlitById = new Map(universe.unlit.map((entry) => [entry.slot.id, entry]));
+  // The duration overrides' contract, for every per-slot input: a strategy or
+  // a lighting window on a slot that is not an unlit, dated slot of this plan
+  // would be parsed and never read, so it is refused.
+  const named = [
+    ...Object.keys(strategies).map((slotId) => ['a strategy', slotId]),
+    ...options.lightingOverrides.map((override) => ['a lighting override', override.slotId]),
+  ];
+  for (const [what, slotId] of named) {
+    if (!unlitById.has(slotId)) {
       throw new TypeError(
-        `durationPhases: override for venue "${override.venueId}" names no venue with an unlit slot in this plan`
+        `durationPhases: ${what} names slot "${slotId}", which is no unlit, dated slot in this plan`
+      );
+    }
+  }
+  /** slotId -> effectiveFrom -> override */
+  const overridesBySlot = new Map();
+  for (const override of overrides) {
+    const entry = unlitById.get(override.slotId);
+    if (!entry) {
+      throw new TypeError(
+        `durationPhases: override for slot "${override.slotId}" names no unlit slot in this plan`
       );
     }
     if (override.effectiveFrom < window.from || override.effectiveFrom > window.to) {
       throw new TypeError(
-        `durationPhases: override for venue "${override.venueId}" is dated ${override.effectiveFrom}, outside the window ${window.from}..${window.to}`
+        `durationPhases: override for slot "${override.slotId}" is dated ${override.effectiveFrom}, outside the window ${window.from}..${window.to}`
       );
     }
+    // A pin may not lengthen the plan, and may not go below the minimum a
+    // derived phase is held to: either would emit what D14 rules out.
+    if (override.durationMinutes > entry.slot.durationMinutes) {
+      throw new TypeError(
+        `durationPhases: override for slot "${override.slotId}" (${override.durationMinutes} min) is longer than the slot's own ${entry.slot.durationMinutes} min`
+      );
+    }
+    if (override.durationMinutes < Math.min(minimum, entry.slot.durationMinutes)) {
+      throw new TypeError(
+        `durationPhases: override for slot "${override.slotId}" (${override.durationMinutes} min) is below the ${minimum}-minute minimum`
+      );
+    }
+    const byDate = overridesBySlot.get(override.slotId) ?? new Map();
+    // Refused, not resolved: two pins on one slot-date would leave one of
+    // them silently unapplied.
+    if (byDate.has(override.effectiveFrom)) {
+      throw new TypeError(
+        `durationPhases: two overrides pin slot "${override.slotId}" on ${override.effectiveFrom}; one would be silently lost`
+      );
+    }
+    byDate.set(override.effectiveFrom, override);
+    overridesBySlot.set(override.slotId, byDate);
   }
 
-  const meta = {
-    slotsExamined:
-      universe.unlit.length + universe.litSlotIds.length + universe.undatedSlotIds.length,
-    unlitSlotsEnumerated: universe.unlit.length,
-    litSlotsExempt: universe.litSlotIds.length,
-    undatedSlots: universe.undatedSlotIds.length,
-    unlitSlotsWithoutVenue: slotsWithoutVenue.length,
+  const counters = {
     unlitSlotDatesExamined: 0,
+    slotDatesExempt: 0,
     slotDatesSunsetUnknown: 0,
     slotDatesHeldOut: 0,
     phaseTransitionsDerived: 0,
+    shortenings: 0,
+    shifts: 0,
+    fallbackShifts: 0,
     overridesApplied: 0,
     overridesSuperseded: 0,
+    retimeRefusals: /** @type {Record<string, number>} */ (
+      Object.fromEntries(Object.values(PRACTICE_RETIME_REFUSAL).map((code) => [code, 0]))
+    ),
   };
 
-  const venues = [];
-  for (const venueId of [...byVenue.keys()].sort()) {
-    const entries = /** @type {UnlitSlotEntry[]} */ (byVenue.get(venueId));
-    const baseDuration = Math.max(...entries.map((entry) => entry.slot.durationMinutes));
+  /** `surfaceId\u0000date` -> the ends of the slots already derived that night */
+  const nightEnds = new Map();
+  const ordered = [...universe.unlit].sort(
+    (a, b) =>
+      a.slot.startMinutes - b.slot.startMinutes ||
+      (a.slot.id < b.slot.id ? -1 : a.slot.id > b.slot.id ? 1 : 0)
+  );
+  /** @type {Map<string, Object>} */
+  const timelines = new Map();
+
+  for (const entry of ordered) {
+    const { slot } = entry;
+    const strategy = strategies[slot.id] ?? PRACTICE_COMPRESSION_STRATEGY.SHORTEN;
+    const floor = floorOn(slot.weekday);
+    let start = slot.startMinutes;
+    let duration = slot.durationMinutes;
+    /** The operator pins applied, in date order: what an exempt date runs at. */
+    const pins = [];
     /** @type {Array<Object>} */
     const phases = [
       {
         effectiveFrom: window.from,
-        durationMinutes: baseDuration,
+        startMinutes: start,
+        durationMinutes: duration,
         source: PRACTICE_PHASE_SOURCE.BASE,
-        reason: 'the longest of the venue’s own slot durations: shortens nothing',
+        retime: null,
+        reason: 'the slot as planned: shortens and moves nothing',
         bound: null,
         supersedes: null,
       },
     ];
-    /** date -> the slot-dates judged on it */
-    const onDate = new Map();
-    for (const entry of entries) {
-      for (const slotDate of entry.dates) {
-        const list = onDate.get(slotDate.date) ?? [];
-        list.push({ entry, slotDate });
-        onDate.set(slotDate.date, list);
-      }
-    }
-    /** @type {Map<string, Object>} */
-    const venueOverrides = new Map();
-    for (const override of overrides) {
-      if (override.venueId !== venueId) continue;
-      // Refused, not resolved: two pins on one venue-date would leave one of
-      // them silently unapplied.
-      if (venueOverrides.has(override.effectiveFrom)) {
-        throw new TypeError(
-          `durationPhases: two overrides pin venue "${venueId}" on ${override.effectiveFrom}; one would be silently lost`
-        );
-      }
-      venueOverrides.set(override.effectiveFrom, override);
-    }
-    const dates = [...new Set([...onDate.keys(), ...venueOverrides.keys()])].sort();
+    /** @type {Array<Object>} */
+    const tbd = [];
+    let exemptDates = 0;
+    const slotOverrides = overridesBySlot.get(slot.id) ?? new Map();
+    const byDate = new Map(entry.dates.map((slotDate) => [slotDate.date, slotDate]));
+    const dates = [...new Set([...byDate.keys(), ...slotOverrides.keys()])].sort();
 
-    let cap = baseDuration;
-    let heldOut = 0;
     for (const date of dates) {
-      const override = venueOverrides.get(date);
+      const override = slotOverrides.get(date);
       if (override) {
-        cap = override.durationMinutes;
-        meta.overridesApplied += 1;
+        duration = override.durationMinutes;
+        pins.push({ effectiveFrom: date, durationMinutes: duration });
+        counters.overridesApplied += 1;
         const phase = {
           effectiveFrom: date,
-          durationMinutes: cap,
+          startMinutes: start,
+          durationMinutes: duration,
           source: PRACTICE_PHASE_SOURCE.OVERRIDE,
+          retime: null,
           reason: override.reason,
           bound: null,
           supersedes: null,
@@ -440,84 +617,245 @@ export function derivePracticeDurationPhases(input) {
         }
       }
 
-      let binding = null;
-      for (const { entry, slotDate } of onDate.get(date) ?? []) {
-        meta.unlitSlotDatesExamined += 1;
-        if (slotDate.limitMinutes === null) {
-          meta.slotDatesSunsetUnknown += 1;
-          continue;
-        }
-        const { slot } = entry;
-        const endMinutes = slot.startMinutes + Math.min(slot.durationMinutes, cap);
-        if (endsByDaylightLimit(endMinutes, slotDate.limitMinutes)) continue;
-        const longest = longestLegalDuration(
-          slotDate.limitMinutes,
-          slot.startMinutes,
-          durationStepMinutes
-        );
-        if (
-          !survivesOnDate(slotDate.limitMinutes, slot, durationStepMinutes, minimumDurationMinutes)
-        ) {
-          heldOut += 1;
-          continue;
-        }
-        if (
-          binding === null ||
-          longest < binding.longest ||
-          (longest === binding.longest && slot.id < binding.slot.id)
-        ) {
-          binding = { slot, slotDate, endMinutes, longest };
+      const slotDate = byDate.get(date);
+      if (!slotDate) continue;
+      const nightKey = `${slot.surfaceId}\u0000${date}`;
+      const ends = nightEnds.get(nightKey) ?? [];
+      nightEnds.set(nightKey, ends);
+      const earlierEnd = ends.length > 0 ? Math.max(...ends) : null;
+
+      if (slotDate.exempt) {
+        // Exempt from daylight and compression, not from the operator: it
+        // runs at its planned start and at the pin in force, if any.
+        exemptDates += 1;
+        counters.slotDatesExempt += 1;
+        ends.push(slot.startMinutes + (pins.at(-1)?.durationMinutes ?? slot.durationMinutes));
+        continue;
+      }
+      counters.unlitSlotDatesExamined += 1;
+      if (slotDate.limitMinutes === null) {
+        counters.slotDatesSunsetUnknown += 1;
+        ends.push(start + duration);
+        continue;
+      }
+      const limit = slotDate.limitMinutes;
+      const numbers = {
+        sunsetMinutes: slotDate.sunsetMinutes,
+        limitMinutes: limit,
+        marginMinutes: PRACTICE_SUNSET_MARGIN_MINUTES,
+        sunsetSource: slotDate.sunsetSource,
+      };
+      // A shift was legal on the night it was made. An earlier slot can run
+      // later on another night (its own lighting window, an operator pin), so
+      // a shifted slot is re-checked every night, never assumed clear.
+      if (start < slot.startMinutes && earlierEnd !== null && start < earlierEnd) {
+        counters.slotDatesHeldOut += 1;
+        counters.retimeRefusals[PRACTICE_RETIME_REFUSAL.OVERLAP] += 1;
+        tbd.push({
+          date,
+          code: AVAILABILITY_REASON.PRACTICE_PAST_SUNSET,
+          shortenRefused: null,
+          shiftRefused: PRACTICE_RETIME_REFUSAL.OVERLAP,
+          reason: `on ${date} slot ${slot.id}, moved to ${clockOf(start)}, would overlap an earlier slot on its surface that ends ${clockOf(earlierEnd)}`,
+          startMinutes: start,
+          durationMinutes: duration,
+          wouldStartMinutes: start,
+          floorMinutes: floor,
+          earlierEndMinutes: earlierEnd,
+          ...numbers,
+        });
+        continue;
+      }
+      if (endsByDaylightLimit(start + duration, limit)) {
+        ends.push(start + duration);
+        continue;
+      }
+
+      /** @type {{ start: number, duration: number }|null} */
+      let next = null;
+      let retime = null;
+      /** @type {{ code: string, durationMinutes: number }|null} */
+      let shortenRefused = null;
+      let shift = null;
+      // SHORTEN walks the ladder until it has shifted once; from then on the
+      // slot keeps its duration and moves, as SHIFT_EARLIER does.
+      if (strategy === PRACTICE_COMPRESSION_STRATEGY.SHORTEN && start === slot.startMinutes) {
+        const rung = ladderDuration({
+          plannedDurationMinutes: slot.durationMinutes,
+          currentDurationMinutes: duration,
+          startMinutes: start,
+          limitMinutes: limit,
+          stepMinutes: step,
+        });
+        if (rung >= minimum) {
+          next = { start, duration: rung };
+          retime = PRACTICE_RETIME_KIND.SHORTEN;
+        } else {
+          shortenRefused = { code: PRACTICE_RETIME_REFUSAL.BELOW_MINIMUM, durationMinutes: rung };
         }
       }
-      if (binding === null) continue;
+      if (next === null) {
+        shift = shiftedStart({
+          startMinutes: start,
+          durationMinutes: duration,
+          limitMinutes: limit,
+          floorMinutes: floor,
+          earlierEndMinutes: earlierEnd,
+          stepMinutes: step,
+        });
+        if (shift.refused === null) {
+          next = { start: /** @type {number} */ (shift.startMinutes), duration };
+          retime =
+            strategy === PRACTICE_COMPRESSION_STRATEGY.SHIFT_EARLIER
+              ? PRACTICE_RETIME_KIND.SHIFT_EARLIER
+              : PRACTICE_RETIME_KIND.FALLBACK_SHIFT;
+        }
+      }
 
-      const previousDuration = cap;
-      cap = binding.longest;
-      meta.phaseTransitionsDerived += 1;
+      const past = `on ${date} slot ${slot.id} (${clockOf(start)}, ${duration} min) would end at ${clockOf(start + duration)}, past the limit ${clockOf(limit)} (sunset ${clockOf(/** @type {number} */ (slotDate.sunsetMinutes))}, ${slotDate.sunsetSource}, margin ${PRACTICE_SUNSET_MARGIN_MINUTES})`;
+      const shortenText =
+        shortenRefused === null
+          ? ''
+          : `; shortening would leave ${shortenRefused.durationMinutes} min, below the ${minimum}-minute minimum`;
+
+      if (next === null) {
+        // Held out: TIME TBD on this date (D8), with its reason. The state is
+        // left as it was, so one bad date does not drag the slot down. Its
+        // practice is not on this surface tonight, so it occupies nothing.
+        // Refusals are counted here only: each counts a held-out date.
+        const refused = /** @type {NonNullable<typeof shift>} */ (shift);
+        counters.slotDatesHeldOut += 1;
+        if (shortenRefused) counters.retimeRefusals[shortenRefused.code] += 1;
+        counters.retimeRefusals[/** @type {string} */ (refused.refused)] += 1;
+        tbd.push({
+          date,
+          code: AVAILABILITY_REASON.PRACTICE_PAST_SUNSET,
+          shortenRefused: shortenRefused?.code ?? null,
+          shiftRefused: refused.refused,
+          reason: `${past}${shortenText}; starting at ${clockOf(refused.wouldStartMinutes)} is refused (${refused.refused}${refused.refused === PRACTICE_RETIME_REFUSAL.EARLIEST_START_FLOOR ? `, floor ${clockOf(/** @type {number} */ (floor))}` : ''}${refused.refused === PRACTICE_RETIME_REFUSAL.OVERLAP ? `, an earlier slot ends ${clockOf(/** @type {number} */ (earlierEnd))}` : ''})`,
+          startMinutes: start,
+          durationMinutes: duration,
+          wouldStartMinutes: refused.wouldStartMinutes,
+          floorMinutes: floor,
+          earlierEndMinutes: earlierEnd,
+          ...numbers,
+        });
+        continue;
+      }
+
+      counters.phaseTransitionsDerived += 1;
+      if (retime === PRACTICE_RETIME_KIND.SHORTEN) counters.shortenings += 1;
+      else if (retime === PRACTICE_RETIME_KIND.SHIFT_EARLIER) counters.shifts += 1;
+      else counters.fallbackShifts += 1;
       const phase = {
         effectiveFrom: date,
-        durationMinutes: cap,
+        startMinutes: next.start,
+        durationMinutes: next.duration,
         source: PRACTICE_PHASE_SOURCE.DERIVED,
-        reason: `on ${date} slot ${binding.slot.id} (${clockOf(binding.slot.startMinutes)}) would end at ${clockOf(binding.endMinutes)}, past the limit ${clockOf(binding.slotDate.limitMinutes)} (sunset ${clockOf(binding.slotDate.sunsetMinutes)}, ${binding.slotDate.sunsetSource}, margin ${PRACTICE_SUNSET_MARGIN_MINUTES})`,
+        retime,
+        reason:
+          retime === PRACTICE_RETIME_KIND.SHORTEN
+            ? `${past}: shortened to ${next.duration} min (${slot.durationMinutes} - ${step} x ${(slot.durationMinutes - next.duration) / step})`
+            : `${past}${shortenText}: starts ${clockOf(next.start)}, keeping ${next.duration} min`,
         bound: {
           date,
-          slotId: binding.slot.id,
-          surfaceId: binding.slot.surfaceId,
-          startMinutes: binding.slot.startMinutes,
-          previousDurationMinutes: previousDuration,
-          previousEndMinutes: binding.endMinutes,
-          sunsetMinutes: binding.slotDate.sunsetMinutes,
-          limitMinutes: binding.slotDate.limitMinutes,
-          marginMinutes: PRACTICE_SUNSET_MARGIN_MINUTES,
-          sunsetSource: binding.slotDate.sunsetSource,
+          slotId: slot.id,
+          surfaceId: slot.surfaceId,
+          previousStartMinutes: start,
+          previousDurationMinutes: duration,
+          previousEndMinutes: start + duration,
+          ...numbers,
+          ...(retime === PRACTICE_RETIME_KIND.SHORTEN
+            ? {}
+            : { floorMinutes: floor, earlierEndMinutes: earlierEnd }),
         },
         supersedes: null,
       };
       if (phases[phases.length - 1].effectiveFrom === date) {
         const superseded = phases[phases.length - 1];
-        if (superseded.source === PRACTICE_PHASE_SOURCE.OVERRIDE) meta.overridesSuperseded += 1;
+        if (superseded.source === PRACTICE_PHASE_SOURCE.OVERRIDE) counters.overridesSuperseded += 1;
         phase.supersedes = supersededBy(superseded);
         phases[phases.length - 1] = phase;
       } else {
         phases.push(phase);
       }
+      start = next.start;
+      duration = next.duration;
+      ends.push(start + duration);
     }
-    meta.slotDatesHeldOut += heldOut;
-    venues.push({
-      venueId,
-      slotIds: entries.map((entry) => entry.slot.id),
+
+    timelines.set(slot.id, {
+      slotId: slot.id,
+      surfaceId: slot.surfaceId,
+      venueId: entry.venueId,
+      weekday: slot.weekday,
+      strategy,
+      earliestStartMinutes: floor,
+      plannedStartMinutes: slot.startMinutes,
+      plannedDurationMinutes: slot.durationMinutes,
       phases,
-      slotDatesHeldOut: heldOut,
+      pins,
+      tbd,
+      slotDatesExempt: exemptDates,
     });
   }
 
-  // The season's phases: every venue's boundaries, merged. Within one of
-  // these, every venue's duration is constant.
-  const boundaries = [
-    ...new Set(venues.flatMap((venue) => venue.phases.map((phase) => phase.effectiveFrom))),
-  ];
-  if (!boundaries.includes(window.from)) boundaries.push(window.from);
-  boundaries.sort();
+  return { timelines, counters };
+}
+
+/**
+ * G3: derive the DurationPhase schedule.
+ *
+ * @param {Object} input
+ * @param {import('./types.js').PracticeSlotSet} input.slotSet - the input plan
+ * @param {Object} input.graph - the facility graph
+ * @param {Object} input.calendar - the daylight provider
+ * @param {{ from: string, to: string }} input.window
+ * @param {number} [input.minimumDurationMinutes] - default 40
+ * @param {number} [input.durationStepMinutes] - default 10
+ * @param {Array<Object>} [input.overrides] - `{ slotId, effectiveFrom, durationMinutes, reason }`
+ * @param {Record<string, string>} [input.strategies] - slot id -> `shorten` | `shift-earlier`
+ * @param {number|null} [input.earliestStartMinutes] - `season_settings.school_day_end`
+ * @param {string[]} [input.earliestStartWeekdays] - default Mon-Thu
+ * @param {Array<Object>} [input.lightingOverrides] - `{ slotId, from, until }`
+ */
+export function derivePracticeDurationPhases(input) {
+  const options = parseOptions(input);
+  const { window, lightingOverrides } = options;
+  const universe = buildUnlitUniverse({ ...input, window, lightingOverrides });
+  const { timelines, counters } = deriveSlotTimelines(universe, options);
+  /** Unlit slots on ground the graph cannot place: judged, but named. */
+  const slotsWithoutVenue = universe.unlit
+    .filter((entry) => entry.venueId === null)
+    .map((entry) => entry.slot.id);
+
+  const meta = {
+    slotsExamined:
+      universe.unlit.length + universe.litSlotIds.length + universe.undatedSlotIds.length,
+    unlitSlotsEnumerated: universe.unlit.length,
+    litSlotsExempt: universe.litSlotIds.length,
+    undatedSlots: universe.undatedSlotIds.length,
+    unlitSlotsWithoutVenue: slotsWithoutVenue.length,
+    ...counters,
+  };
+
+  // Input order, not derivation order.
+  const slotPhases = universe.unlit.map((entry) => timelines.get(entry.slot.id));
+
+  // The season's phases: every slot's boundaries and every lighting window's
+  // edges, merged. Within one of these, every slot's timing is constant.
+  const boundarySet = new Set([window.from]);
+  for (const timeline of slotPhases) {
+    for (const phase of timeline.phases) boundarySet.add(phase.effectiveFrom);
+  }
+  for (const override of lightingOverrides) {
+    if (!timelines.has(override.slotId)) continue;
+    if (override.until < window.from || override.from > window.to) continue;
+    boundarySet.add(laterOf(override.from, window.from));
+    const after = isoDateOfDayNumber(isoDayNumber(override.until) + 1);
+    if (after <= window.to) boundarySet.add(after);
+  }
+  const boundaries = [...boundarySet].sort();
   const seasonPhases = boundaries.map((startDate, index) => ({
     id: `duration-phase-${String(index + 1).padStart(2, '0')}`,
     startDate,
@@ -528,28 +866,46 @@ export function derivePracticeDurationPhases(input) {
     label: `practice durations from ${startDate}`,
   }));
 
-  const capOn = (/** @type {string} */ venueId, /** @type {string} */ date) => {
-    const venue = venues.find((candidate) => candidate.venueId === venueId);
-    if (!venue) return null;
-    let current = null;
-    for (const phase of venue.phases) if (phase.effectiveFrom <= date) current = phase;
-    return current ? current.durationMinutes : null;
+  const exemptOn = lightingOverrideCovers(lightingOverrides);
+  const timingOn = (/** @type {Object} */ timeline, /** @type {string} */ date) => {
+    let current = timeline.phases[0];
+    for (const phase of timeline.phases) if (phase.effectiveFrom <= date) current = phase;
+    return current;
   };
 
-  // Every dated slot of the plan, lit ones and venue-less ones included, so the
-  // schedule is complete; overrides only where a phase shortens the slot.
-  const unlitById = new Map(universe.unlit.map((entry) => [entry.slot.id, entry]));
+  // Every dated slot of the plan, lit ones included, so the schedule is
+  // complete; overrides only where a phase retimes the slot. A shifted slot
+  // carries its duration with its start: `expandPracticeSlotsForSeason()`
+  // would otherwise keep the planned end and shorten it silently.
+  const unlitLighting = new Map(universe.unlit.map((entry) => [entry.slot.id, entry.lit]));
   const slots = [];
   for (const slot of input.slotSet.slots) {
     if (slot.validFrom === null || slot.validUntil === null) continue;
-    const entry = unlitById.get(slot.id);
-    /** @type {Record<string, { durationMinutes: number }>} */
+    const timeline = timelines.get(slot.id);
+    /** @type {Record<string, { durationMinutes: number, startTime?: string }>} */
     const seasonOverrides = {};
-    if (entry && entry.venueId !== null) {
+    if (timeline) {
       for (const phase of seasonPhases) {
-        const cap = capOn(entry.venueId, phase.startDate);
-        if (cap !== null && cap < slot.durationMinutes) {
-          seasonOverrides[phase.id] = { durationMinutes: cap };
+        // A lighting window's edges are phase boundaries, so a whole phase is
+        // inside it or outside it: inside, the slot runs at its planned start
+        // and at the operator pin in force -- never silently unpinned.
+        if (exemptOn(slot.id, phase.startDate)) {
+          let pinned = slot.durationMinutes;
+          for (const pin of timeline.pins) {
+            if (pin.effectiveFrom <= phase.startDate) pinned = pin.durationMinutes;
+          }
+          if (pinned !== slot.durationMinutes) {
+            seasonOverrides[phase.id] = { durationMinutes: pinned };
+          }
+          continue;
+        }
+        const timing = timingOn(timeline, phase.startDate);
+        const shifted = timing.startMinutes !== slot.startMinutes;
+        if (shifted || timing.durationMinutes !== slot.durationMinutes) {
+          seasonOverrides[phase.id] = {
+            durationMinutes: timing.durationMinutes,
+            ...(shifted ? { startTime: clockOf(timing.startMinutes) } : {}),
+          };
         }
       }
     }
@@ -562,8 +918,10 @@ export function derivePracticeDurationPhases(input) {
       validFrom: slot.validFrom,
       validUntil: slot.validUntil,
       fieldId: slot.surfaceId,
-      venueId: entry ? entry.venueId : (getSurface(input.graph, slot.surfaceId)?.venueId ?? null),
-      lit: entry ? entry.lit : true,
+      venueId: timeline
+        ? timeline.venueId
+        : (getSurface(input.graph, slot.surfaceId)?.venueId ?? null),
+      lit: unlitLighting.has(slot.id) ? unlitLighting.get(slot.id) : true,
       seasonOverrides,
     });
   }
@@ -571,9 +929,12 @@ export function derivePracticeDurationPhases(input) {
   return deepFreeze({
     window,
     marginMinutes: PRACTICE_SUNSET_MARGIN_MINUTES,
-    minimumDurationMinutes,
-    durationStepMinutes,
-    venues,
+    minimumDurationMinutes: options.minimumDurationMinutes,
+    durationStepMinutes: options.durationStepMinutes,
+    earliestStartMinutes: options.earliestStartMinutes,
+    earliestStartWeekdays: options.earliestStartWeekdays,
+    lightingOverrides,
+    slotPhases,
     seasonPhases,
     slots,
     litSlotIds: universe.litSlotIds,
@@ -581,37 +942,48 @@ export function derivePracticeDurationPhases(input) {
     slotsWithoutVenue,
     findings: universe.findings,
     meta,
-    // False means nothing was examined: a caller must treat it as a loud
+    // False means nothing was judged: a caller must treat it as a loud
     // failure, never as a clean report (CLAUDE.md, meta-assertions).
-    exercised: meta.unlitSlotDatesExamined > 0,
+    // Enumerated and exempt counts as exercised: a season wholly under
+    // approved lighting windows is a correct report, not an empty one.
+    exercised: meta.unlitSlotDatesExamined + meta.slotDatesExempt > 0,
   });
 }
 
 /**
  * @param {Object} phase
- * @returns {{ source: string, durationMinutes: number, reason: string }}
+ * @returns {{ source: string, startMinutes: number, durationMinutes: number, reason: string }}
  */
 function supersededBy(phase) {
-  return { source: phase.source, durationMinutes: phase.durationMinutes, reason: phase.reason };
+  return {
+    source: phase.source,
+    startMinutes: phase.startMinutes,
+    durationMinutes: phase.durationMinutes,
+    reason: phase.reason,
+  };
 }
 
 /**
- * The duration a slot runs on a date under a phase schedule, read from the
+ * The timing a slot runs on a date under a phase schedule, read from the
  * `seasonPhases`/`seasonOverrides` pair exactly as `expandPracticeSlotsForSeason()`
- * reads it (the phase-specific key, then `default`, then the slot's own).
+ * reads it (the phase-specific key, then `default`, then the slot's own):
+ * `startTime` moves the start, `durationMinutes` sets the length.
  *
  * @param {Object} phaseSchedule
  * @param {Object} scheduledSlot
  * @param {string} date
- * @returns {number}
+ * @returns {{ startMinutes: number, durationMinutes: number }}
  */
-function durationUnder(phaseSchedule, scheduledSlot, date) {
+function timingUnder(phaseSchedule, scheduledSlot, date) {
   const phase = phaseSchedule.seasonPhases.find(
-    (candidate) => candidate.startDate <= date && date <= candidate.endDate
+    (/** @type {any} */ candidate) => candidate.startDate <= date && date <= candidate.endDate
   );
   const overrides = scheduledSlot.seasonOverrides ?? {};
   const override = (phase ? overrides[phase.id] : undefined) ?? overrides.default ?? null;
-  return override?.durationMinutes ?? scheduledSlot.durationMinutes;
+  return {
+    startMinutes: minutesOfClock(override?.startTime ?? scheduledSlot.start),
+    durationMinutes: override?.durationMinutes ?? scheduledSlot.durationMinutes,
+  };
 }
 
 /**
@@ -620,6 +992,14 @@ function durationUnder(phaseSchedule, scheduledSlot, date) {
  * **Applies nothing.** The input plan and the phase schedule are read, never
  * written; the cascade's proposed starts leave only as the entries of an 8.8
  * change log, filed under {@link PRACTICE_SUNSET_CASCADE_SOURCE_ID} (W13).
+ *
+ * Every slot-date is read at the schedule's timing (its start and duration,
+ * {@link timingUnder}); dates under a lighting override are not judged and are
+ * counted in `slotDatesExempt`. The cascade packs each night from the
+ * schedule: a slot may start at the proposed end of the slot before it plus
+ * their planned gap, never later than the schedule's own start. Each entry is
+ * relative to the schedule: `before` is the schedule's start that date,
+ * `after` the cascade's, and one is filed where that pair first changes.
  *
  * @param {Object} input
  * @param {import('./types.js').PracticeSlotSet} input.slotSet - the input plan
@@ -636,12 +1016,17 @@ export function buildPracticeCompressionReport(input) {
       'compression: requires the phase schedule derivePracticeDurationPhases() returned'
     );
   }
-  const universe = buildUnlitUniverse({ ...input, window: phaseSchedule.window });
+  const universe = buildUnlitUniverse({
+    ...input,
+    window: phaseSchedule.window,
+    lightingOverrides: phaseSchedule.lightingOverrides,
+  });
   const scheduledById = new Map(phaseSchedule.slots.map((slot) => [slot.id, slot]));
 
   const meta = {
     unlitSlotsEnumerated: universe.unlit.length,
     unlitSlotDatesExamined: 0,
+    slotDatesExempt: 0,
     slotDatesSunsetUnknown: 0,
     holdStartSlotDatesPastSunset: 0,
     holdStartSlotDatesSavedByCascade: 0,
@@ -666,41 +1051,52 @@ export function buildPracticeCompressionReport(input) {
 
   /** `slotId\u0000date` -> the cascade's proposed start */
   const proposedStart = new Map();
-  /** slotId -> date -> the duration under the schedule */
-  const durationOf = (/** @type {Object} */ slot, /** @type {string} */ date) =>
-    durationUnder(phaseSchedule, scheduledById.get(slot.id), date);
+  /** The start and duration a slot runs on a date under the schedule. */
+  const timingOf = (/** @type {Object} */ slot, /** @type {string} */ date) =>
+    timingUnder(phaseSchedule, scheduledById.get(slot.id), date);
 
   for (const chain of chains.values()) {
     const byDate = new Map();
+    /** `slotId\u0000date` of the chain's exempt slot-dates */
+    const exempt = new Set();
     for (const entry of chain) {
       for (const slotDate of entry.dates) {
         const list = byDate.get(slotDate.date) ?? [];
         list.push(entry.slot);
         byDate.set(slotDate.date, list);
+        if (slotDate.exempt) exempt.add(`${entry.slot.id}\u0000${slotDate.date}`);
       }
     }
     for (const [date, members] of byDate) {
       members.sort((a, b) => a.startMinutes - b.startMinutes || (a.id < b.id ? -1 : 1));
-      let shift = 0;
       let broken = false;
       // The latest planned end of every slot before this one, not only the
       // one immediately before: an overlap with any of them is an overlap.
       let latestEnd = -Infinity;
+      let previousPlannedEnd = 0;
+      let previousProposedEnd = 0;
       members.forEach((slot, index) => {
-        if (index > 0 && !broken) {
-          const previous = members[index - 1];
+        const timing = timingOf(slot, date);
+        let proposed = timing.startMinutes;
+        // A slot under portable lighting is never compressed, the cascade
+        // included: it keeps the schedule's start and the night packs around it.
+        if (index > 0 && !broken && !exempt.has(`${slot.id}\u0000${date}`)) {
           if (slot.startMinutes < latestEnd) {
             // Overlapping slots are not a sequence: from here on, nothing on
-            // this surface this night moves.
+            // this surface this night moves beyond the schedule.
             broken = true;
-            shift = 0;
             meta.cascadeNightsBrokenByOverlap += 1;
           } else {
-            shift += previous.durationMinutes - durationOf(previous, date);
+            proposed = Math.min(
+              timing.startMinutes,
+              previousProposedEnd + (slot.startMinutes - previousPlannedEnd)
+            );
           }
         }
         latestEnd = Math.max(latestEnd, slot.startMinutes + slot.durationMinutes);
-        proposedStart.set(`${slot.id}\u0000${date}`, slot.startMinutes - (broken ? 0 : shift));
+        previousPlannedEnd = slot.startMinutes + slot.durationMinutes;
+        previousProposedEnd = proposed + timing.durationMinutes;
+        proposedStart.set(`${slot.id}\u0000${date}`, proposed);
       });
     }
   }
@@ -709,17 +1105,21 @@ export function buildPracticeCompressionReport(input) {
   for (const entry of universe.unlit) {
     const { slot } = entry;
     for (const slotDate of entry.dates) {
+      if (slotDate.exempt) {
+        meta.slotDatesExempt += 1;
+        continue;
+      }
       meta.unlitSlotDatesExamined += 1;
       const cascadeStart = /** @type {number} */ (
         proposedStart.get(`${slot.id}\u0000${slotDate.date}`)
       );
-      if (cascadeStart !== slot.startMinutes) meta.cascadeSlotDatesShifted += 1;
+      const { startMinutes, durationMinutes: duration } = timingOf(slot, slotDate.date);
+      if (cascadeStart !== startMinutes) meta.cascadeSlotDatesShifted += 1;
       if (slotDate.limitMinutes === null) {
         meta.slotDatesSunsetUnknown += 1;
         continue;
       }
-      const duration = durationOf(slot, slotDate.date);
-      const endMinutes = slot.startMinutes + duration;
+      const endMinutes = startMinutes + duration;
       if (endsByDaylightLimit(endMinutes, slotDate.limitMinutes)) continue;
       const savedByCascade = endsByDaylightLimit(cascadeStart + duration, slotDate.limitMinutes);
       meta.holdStartSlotDatesPastSunset += 1;
@@ -730,8 +1130,8 @@ export function buildPracticeCompressionReport(input) {
         venueId: entry.venueId,
         date: slotDate.date,
         code: AVAILABILITY_REASON.PRACTICE_PAST_SUNSET,
-        reason: `start held at ${clockOf(slot.startMinutes)}: at the phase duration of ${duration} min it ends ${clockOf(endMinutes)}, ${endMinutes - slotDate.limitMinutes} min past the limit`,
-        startMinutes: slot.startMinutes,
+        reason: `start held at the schedule's ${clockOf(startMinutes)}: at its duration of ${duration} min it ends ${clockOf(endMinutes)}, ${endMinutes - slotDate.limitMinutes} min past the limit`,
+        startMinutes,
         durationMinutes: duration,
         endMinutes,
         sunsetMinutes: slotDate.sunsetMinutes,
@@ -747,16 +1147,23 @@ export function buildPracticeCompressionReport(input) {
   }
 
   // The cascade, as change-log entries only: one per team (or one for an
-  // unassigned slot) at each date the proposed start changes from the state
-  // before it. The first "before" is the plan's own start.
+  // unassigned slot) at each date the cascade's start, against the schedule's
+  // start that date, first changes. `before` is the schedule's start.
   const rawEntries = [];
   const practiceLabels = new Set([PRACTICE_CASCADE_UNASSIGNED_LABEL]);
   for (const entry of universe.unlit) {
     const { slot } = entry;
-    let current = slot.startMinutes;
+    let last = null;
     for (const { date } of entry.dates) {
       const proposed = /** @type {number} */ (proposedStart.get(`${slot.id}\u0000${date}`));
-      if (proposed === current) continue;
+      const current = timingOf(slot, date).startMinutes;
+      if (proposed === current) {
+        last = null;
+        continue;
+      }
+      const pair = `${current}\u0000${proposed}`;
+      if (pair === last) continue;
+      last = pair;
       const label = `practice ${slot.id}`;
       practiceLabels.add(label);
       const teams = teamsOn(slotSet, slot, date);
@@ -771,7 +1178,6 @@ export function buildPracticeCompressionReport(input) {
           after: { raw: null, startMinutes: proposed, location: slot.surfaceId, scheduled: true },
         });
       }
-      current = proposed;
     }
   }
   meta.proposalEntries = rawEntries.length;
@@ -799,37 +1205,33 @@ export function buildPracticeCompressionReport(input) {
     meta,
     // False means nothing was examined: a caller must treat it as a loud
     // failure, never as a clean report (CLAUDE.md, meta-assertions).
-    exercised: meta.unlitSlotDatesExamined > 0,
+    // Enumerated and exempt counts as exercised: a season wholly under
+    // approved lighting windows is a correct report, not an empty one.
+    exercised: meta.unlitSlotDatesExamined + meta.slotDatesExempt > 0,
   });
 }
 
 /**
  * G5: the DST survival report -- per unlit slot of the **input** plan, does it
- * survive at any phase duration, and if not, what fixes it.
+ * survive the season's retiming, and if not, what fixes it.
  *
- * A slot survives on a date when, start held, its longest legal duration in
- * whole steps is at least `minimumDurationMinutes`. It survives when it does
- * on every date with a known sunset. The fixes are candidates, stated with
- * what was not checked (D11): a lit surface is named for its lighting only;
- * an earlier start is not checked against permits or the slots around it;
- * another night is judged on this venue's sunset at this start.
+ * It reads the one per-slot derivation G3 does ({@link deriveSlotTimelines}),
+ * with the same options: a slot survives when G3 retimes every judged date
+ * legally, by the ladder or a shift, and does not survive when any date is
+ * held out as TIME TBD. A slot whose every date is under a lighting override
+ * is `exempt`. The fixes are candidates, stated with what was not checked
+ * (D11): a lit surface is named for its lighting only; an earlier start is not
+ * checked against permits or the slots around it; another night is judged on
+ * this venue's sunset at this start, shortening only; a lighting override
+ * needs its request approved.
  *
- * @param {Object} input
- * @param {import('./types.js').PracticeSlotSet} input.slotSet
- * @param {Object} input.graph
- * @param {Object} input.calendar
- * @param {{ from: string, to: string }} input.window
- * @param {number} input.minimumDurationMinutes
- * @param {number} [input.durationStepMinutes]
+ * @param {Object} input - as {@link derivePracticeDurationPhases}
  */
 export function buildDstSurvivalReport(input) {
-  const options = PracticeDurationPhaseOptionsSchema.parse({
-    window: input.window,
-    minimumDurationMinutes: input.minimumDurationMinutes,
-    durationStepMinutes: input.durationStepMinutes,
-  });
-  const { window, minimumDurationMinutes, durationStepMinutes } = options;
-  const universe = buildUnlitUniverse({ ...input, window });
+  const options = parseOptions(input);
+  const { window, minimumDurationMinutes, durationStepMinutes, lightingOverrides } = options;
+  const universe = buildUnlitUniverse({ ...input, window, lightingOverrides });
+  const { timelines } = deriveSlotTimelines(universe, options);
 
   const litSurfaces = Object.keys(input.graph.surfaces ?? {})
     .sort()
@@ -852,27 +1254,36 @@ export function buildDstSurvivalReport(input) {
     litSlotsExempt: universe.litSlotIds.length,
     undatedSlots: universe.undatedSlotIds.length,
     slotDatesExamined: 0,
+    slotDatesExempt: 0,
     slotDatesSunsetUnknown: 0,
     slotsSurviving: 0,
     slotsNotSurviving: 0,
     slotsUnknown: 0,
     slotsWithNoDates: 0,
+    slotsExempt: 0,
     fixesAvailableByKind: {
       [PRACTICE_SURVIVAL_FIX_KIND.LIT_FIELD]: 0,
       [PRACTICE_SURVIVAL_FIX_KIND.EARLIER_START]: 0,
       [PRACTICE_SURVIVAL_FIX_KIND.ANOTHER_NIGHT]: 0,
+      [PRACTICE_SURVIVAL_FIX_KIND.LIGHTING_OVERRIDE]: 0,
     },
+    // No scheduling fix (lit field, earlier start, another night). A lighting
+    // override is always a candidate -- it needs only an approval -- so it is
+    // not counted here, or this counter could never move.
     slotsWithNoFix: 0,
   };
 
   const rows = universe.unlit.map((entry) => {
     const { slot } = entry;
-    meta.slotDatesExamined += entry.dates.length;
-    const unknownDates = entry.dates.filter((d) => d.limitMinutes === null).map((d) => d.date);
+    const timeline = timelines.get(slot.id);
+    const judged = entry.dates.filter((d) => !d.exempt);
+    const exemptDates = entry.dates.filter((d) => d.exempt).map((d) => d.date);
+    meta.slotDatesExamined += judged.length;
+    meta.slotDatesExempt += exemptDates.length;
+    const unknownDates = judged.filter((d) => d.limitMinutes === null).map((d) => d.date);
     meta.slotDatesSunsetUnknown += unknownDates.length;
-    const failing = entry.dates.filter(
-      (d) => d.limitMinutes !== null && !survivesOn(d.limitMinutes, slot)
-    );
+    /** @type {Array<Object>} */
+    const failing = timeline.tbd;
     const base = {
       slotId: slot.id,
       surfaceId: slot.surfaceId,
@@ -880,10 +1291,23 @@ export function buildDstSurvivalReport(input) {
       weekday: slot.weekday,
       startMinutes: slot.startMinutes,
       durationMinutes: slot.durationMinutes,
+      strategy: timeline.strategy,
       datesExamined: entry.dates.length,
+      exemptDates,
       unknownDates,
     };
 
+    if (entry.dates.length > 0 && judged.length === 0) {
+      meta.slotsExempt += 1;
+      return {
+        ...base,
+        verdict: PRACTICE_SURVIVAL_VERDICT.EXEMPT,
+        reason: 'every date in the window is under a portable-lighting override: none is judged',
+        failingDates: [],
+        d8: null,
+        fixes: [],
+      };
+    }
     if (entry.dates.length === 0) {
       meta.slotsWithNoDates += 1;
       return {
@@ -908,7 +1332,7 @@ export function buildDstSurvivalReport(input) {
         reason:
           verdict === PRACTICE_SURVIVAL_VERDICT.UNKNOWN
             ? `no sunset is known on ${unknownDates.length} date(s), so survival cannot be shown (never read as surviving)`
-            : `ends by sunset on every date, at its own length or at a duration of at least ${minimumDurationMinutes} min`,
+            : `ends by sunset on every judged date: as planned, shortened to no less than ${minimumDurationMinutes} min, or started earlier`,
         failingDates: [],
         d8: null,
         fixes: [],
@@ -920,8 +1344,8 @@ export function buildDstSurvivalReport(input) {
     // A date with no known sunset is never read as legal (it is listed in
     // `unknownDates`), so `legalThrough` names the last date shown legal.
     const lastLegal =
-      entry.dates.filter((d) => d.date < first.date && d.limitMinutes !== null).at(-1) ?? null;
-    const knownLimits = entry.dates.filter((d) => d.limitMinutes !== null);
+      judged.filter((d) => d.date < first.date && d.limitMinutes !== null).at(-1) ?? null;
+    const knownLimits = judged.filter((d) => d.limitMinutes !== null);
     const tightest = knownLimits.reduce((a, b) =>
       /** @type {number} */ (b.limitMinutes) < /** @type {number} */ (a.limitMinutes) ? b : a
     );
@@ -929,6 +1353,7 @@ export function buildDstSurvivalReport(input) {
     const startAtFullDuration = tightestLimit - slot.durationMinutes;
     const startAtMinimum = tightestLimit - Math.min(minimumDurationMinutes, slot.durationMinutes);
     const floor = earliestPlannedStart.get(slot.surfaceId) ?? null;
+    const schoolFloor = timeline.earliestStartMinutes;
     const usableLitSurfaceIds = litSurfaces
       .filter(
         (lit) =>
@@ -965,29 +1390,42 @@ export function buildDstSurvivalReport(input) {
       {
         kind: PRACTICE_SURVIVAL_FIX_KIND.EARLIER_START,
         // Only inside the hours this plan already runs practices on this
-        // surface: an earlier start than the plan's earliest there is a
-        // guess about school hours and permits, not a fix.
-        available: floor !== null && startAtMinimum >= floor,
+        // surface, and never before the school-day floor -- which must be
+        // known, as G3 requires: an earlier start than that is a guess about
+        // school hours and permits, not a fix.
+        available:
+          floor !== null &&
+          startAtMinimum >= floor &&
+          schoolFloor !== null &&
+          startAtMinimum >= schoolFloor,
         startMinutesAtFullDuration: startAtFullDuration >= 0 ? startAtFullDuration : null,
         startMinutesAtMinimumDuration: startAtMinimum >= 0 ? startAtMinimum : null,
         earliestPlannedStartMinutes: floor,
+        earliestStartFloorMinutes: schoolFloor,
         bindingDate: tightest.date,
         unchecked:
-          'bounded below by the earliest start this plan uses on the surface; permit windows and the occupancy of the slots it would move into are not checked',
+          'bounded below by the earliest start this plan uses on the surface and the school-day floor where known; permit windows and the occupancy of the slots it would move into are not checked',
       },
       {
         kind: PRACTICE_SURVIVAL_FIX_KIND.ANOTHER_NIGHT,
         available: otherNights.length > 0,
         weekdays: otherNights,
         unchecked:
-          'judged on this venue’s sunset at this start; permits and occupancy are not checked',
+          'judged on this venue’s sunset at this start, shortening only; permits and occupancy are not checked',
+      },
+      {
+        kind: PRACTICE_SURVIVAL_FIX_KIND.LIGHTING_OVERRIDE,
+        available: true,
+        window: { from: first.date, until: failing[failing.length - 1].date },
+        unchecked:
+          'a coach requests it and an admin approves it (8.9 D14 PR B); the window has no lights-off time, which is declared, not enforced',
       },
     ];
     let any = false;
     for (const fix of fixes) {
       if (!fix.available) continue;
-      any = true;
       meta.fixesAvailableByKind[fix.kind] += 1;
+      if (fix.kind !== PRACTICE_SURVIVAL_FIX_KIND.LIGHTING_OVERRIDE) any = true;
     }
     if (!any) meta.slotsWithNoFix += 1;
 
@@ -995,12 +1433,21 @@ export function buildDstSurvivalReport(input) {
       ...base,
       verdict: PRACTICE_SURVIVAL_VERDICT.DOES_NOT_SURVIVE,
       code: AVAILABILITY_REASON.PRACTICE_PAST_SUNSET,
-      reason: `from ${first.date} its longest legal duration, start held at ${clockOf(slot.startMinutes)}, is below ${minimumDurationMinutes} min (limit ${clockOf(/** @type {number} */ (first.limitMinutes))}, sunset ${first.sunsetSource})`,
+      reason: `from ${first.date} it cannot be retimed: ${first.reason}`,
       failingDates: failing.map((d) => d.date),
+      refusals: failing.map((d) => ({
+        date: d.date,
+        shortenRefused: d.shortenRefused,
+        shiftRefused: d.shiftRefused,
+      })),
+      // D8 truncates at the first held-out date, so `tbdDates` counts every
+      // judged date from there on -- dates G3 could retime included.
+      // `heldOutDates` counts only the dates G3 itself holds out.
       d8: {
         legalThrough: lastLegal ? lastLegal.date : null,
         tbdFrom: first.date,
-        tbdDates: entry.dates.filter((d) => d.date >= first.date).length,
+        tbdDates: judged.filter((d) => d.date >= first.date).length,
+        heldOutDates: failing.length,
       },
       fixes,
     };
@@ -1011,6 +1458,9 @@ export function buildDstSurvivalReport(input) {
     marginMinutes: PRACTICE_SUNSET_MARGIN_MINUTES,
     minimumDurationMinutes,
     durationStepMinutes,
+    earliestStartMinutes: options.earliestStartMinutes,
+    earliestStartWeekdays: options.earliestStartWeekdays,
+    lightingOverrides,
     rows,
     litSlotIds: universe.litSlotIds,
     undatedSlotIds: universe.undatedSlotIds,
@@ -1018,6 +1468,6 @@ export function buildDstSurvivalReport(input) {
     meta,
     // False means nothing was examined: a caller must treat it as a loud
     // failure, never as a clean report (CLAUDE.md, meta-assertions).
-    exercised: meta.slotDatesExamined > 0,
+    exercised: meta.slotDatesExamined + meta.slotDatesExempt > 0,
   });
 }

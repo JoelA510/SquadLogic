@@ -19,8 +19,9 @@
  * - It takes an explicit list of commitments. It does **not** build them: no
  *   roster join, no identity resolution, no external-commitment ingestion. That
  *   is the personal timeline, it is GAP-19, and it is Prompt 3.1's subject.
- * - It judges **consecutive same-day pairs for one person** and nothing else.
- *   No maximum-gap preference, no fairness, no whole-day shape.
+ * - It judges the **gap floors on consecutive same-day pairs for one person**,
+ *   and **overlap on every same-day pair** (#62), and nothing else. No
+ *   maximum-gap preference, no fairness, no whole-day shape.
  * - It reads its numbers from the registry (`resolvePolicy`) rather than
  *   carrying any, so when 3.1 generalises it there is no second copy of "60" to
  *   find.
@@ -40,6 +41,15 @@
  * exactly the model Prompt 3.1's requirement 1 asks for. The pairwise
  * team-comparison the build plan condemns is `gameValidation.checkCoachConflict()`,
  * not this.
+ *
+ * **Consecutive was right for the floors and wrong for overlap** (#62). A
+ * travel gap is a neighbour question: the next thing a coach must reach is the
+ * next commitment. Being in two places at once is not: a long commitment with a
+ * short one inside it overlaps whatever follows the short one, and a
+ * neighbour-only scan never sets the two side by side. So the floors stay
+ * consecutive and overlap is judged over every pair, adopting the contract
+ * `resolve/ruleGate.js` already used ("pairwise, not consecutive"): one
+ * definition of an overlap, every pair covered, no pair reported twice.
  *
  * Moving the codes would also have moved the **waiver seam** —
  * {@link travelConstraintIdByCode}, incident 9's board exception and the ledger
@@ -218,6 +228,13 @@ export function createTravelMeta() {
      * than assume it (incident 4).
      */
     withinComplexTransitions: 0,
+    /**
+     * Same-day pairs judged for overlap: every pair, `n(n-1)/2` per
+     * person-day, the neighbours included. Equal to `transitionsExamined`
+     * exactly when no person-day holds three or more commitments, which is
+     * why season-2026 (at most two) did not move under #62.
+     */
+    overlapPairsCompared: 0,
     policiesResolved: 0,
     violationsFound: 0,
   };
@@ -280,7 +297,13 @@ export function travelConstraintIdByCode(registry, context = {}) {
 }
 
 /**
- * Evaluate every consecutive same-day pair of commitments for every person.
+ * Evaluate every person's same-day commitments: the gap floors over each
+ * consecutive pair, and overlap over every pair (#62).
+ *
+ * `transitions` holds one entry per consecutive pair, plus one per
+ * non-consecutive pair that overlaps or whose overlap cannot be judged. A
+ * non-consecutive pair that clears is counted in `overlapPairsCompared` and
+ * carries no entry, because no gap floor is judged on it (see the pass below).
  *
  * @param {ReadonlyArray<Object>} commitments - see {@link CoachCommitmentSchema}
  * @param {{ registry: import('../constraints/types.js').ConstraintRegistry, venueComplexes?: import('../facility/types.js').VenueComplexMap }} options
@@ -347,18 +370,11 @@ export function evaluateCoachTravel(commitments, options) {
         const from = ordered[index];
         const to = ordered[index + 1];
         meta.transitionsExamined += 1;
-        const sameVenue = from.venueId === to.venueId;
-        // One *site*, which is not the same question as one venue name: two
-        // venues an operator has declared to be one complex are a walk apart.
-        const oneSite = sameVenueComplex(venueComplexes, from.venueId, to.venueId);
-        // Null unless the complex is what made the two one site: naming the
-        // `from` venue's complex on a transition that leaves it would read as
-        // though the complex governed a decision it had no part in.
-        const complexId = oneSite ? complexIdOf(venueComplexes, from.venueId) : null;
+        meta.overlapPairsCompared += 1;
+        const { sameVenue, oneSite, complexId, policy } = siteOf(venueComplexes, from, to);
         const crossVenueWithinComplex = oneSite && !sameVenue;
         if (!sameVenue) meta.crossVenueTransitions += 1;
         if (crossVenueWithinComplex) meta.withinComplexTransitions += 1;
-        const policy = oneSite ? TRAVEL_POLICY.WITHIN_VENUE : TRAVEL_POLICY.BETWEEN_VENUES;
         const code = oneSite
           ? TRAVEL_REASON.TRAVEL_WITHIN_VENUE_TOO_SHORT
           : TRAVEL_REASON.TRAVEL_BETWEEN_VENUES_TOO_SHORT;
@@ -368,10 +384,12 @@ export function evaluateCoachTravel(commitments, options) {
 
         if (from.endMinutes === null) {
           findings.push(
-            makeTravelFinding(
-              TRAVEL_REASON.TRAVEL_FOOTPRINT_UNKNOWN,
+            unknownEndFinding(
               `commitment "${from.id}" has no known end, so the gap before "${to.id}" cannot be measured`,
-              { transitionId: id, personId, date, commitmentId: from.id }
+              id,
+              personId,
+              date,
+              from
             )
           );
           transitions.push(
@@ -399,13 +417,7 @@ export function evaluateCoachTravel(commitments, options) {
 
         if (gapMinutes < 0) {
           meta.violationsFound += 1;
-          findings.push(
-            makeTravelFinding(
-              TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP,
-              `"${personId}" is committed to "${from.id}" until ${from.endMinutes} and to "${to.id}" from ${to.startMinutes} on ${date}; the two overlap by ${-gapMinutes} minutes`,
-              { transitionId: id, personId, date, gapMinutes, fromId: from.id, toId: to.id }
-            )
-          );
+          findings.push(overlapFinding(id, personId, date, from, to, gapMinutes));
           transitions.push(
             buildTransition({
               id,
@@ -516,6 +528,64 @@ export function evaluateCoachTravel(commitments, options) {
           })
         );
       }
+
+      // -- every other pair, for overlap only (#62) ---------------------------
+      //
+      // The neighbours above were already judged for overlap, so this pass
+      // takes only the pairs they skip (`j >= i + 2`) and no pair is reported
+      // twice. It decides each one exactly as the neighbour loop does, on the
+      // start-sorted pair: `to.start - from.end < 0` is an overlap, and an
+      // unknown end is unjudged, never clear. That is the contract
+      // `resolve/ruleGate.js` gets by handing this function one pair at a time.
+      //
+      // **No gap floor is judged here, by the plan's decision** (#62, §2.4a).
+      // Declared rather than hidden: when a short commitment sits inside a
+      // long one, the journey the coach actually makes after the long one is
+      // to a non-neighbour, and a short gap on that journey is not reported.
+      // The day already carries the overlap that makes it so. The gate does
+      // judge that floor, because it hands the evaluator the bare pair.
+      for (let i = 0; i < ordered.length - 2; i += 1) {
+        for (let j = i + 2; j < ordered.length; j += 1) {
+          meta.overlapPairsCompared += 1;
+          const from = ordered[i];
+          const to = ordered[j];
+          const gapMinutes = from.endMinutes === null ? null : to.startMinutes - from.endMinutes;
+          if (gapMinutes !== null && gapMinutes >= 0) continue;
+          const id = `${personId}|${date}|${from.id}->${to.id}`;
+          /** @type {import('../constraints/types.js').ConstraintFinding} */
+          let finding;
+          if (gapMinutes === null) {
+            finding = unknownEndFinding(
+              `commitment "${from.id}" has no known end, so whether it overlaps "${to.id}" cannot be judged`,
+              id,
+              personId,
+              date,
+              from
+            );
+          } else {
+            meta.violationsFound += 1;
+            finding = overlapFinding(id, personId, date, from, to, gapMinutes);
+          }
+          const { sameVenue, oneSite, complexId, policy } = siteOf(venueComplexes, from, to);
+          transitions.push(
+            buildTransition({
+              id,
+              personId,
+              date,
+              from,
+              to,
+              sameVenue,
+              sameComplex: oneSite,
+              complexId,
+              policy,
+              gapMinutes,
+              minimumGapMinutes: null,
+              constraintId: null,
+              findings: [finding],
+            })
+          );
+        }
+      }
     }
   }
 
@@ -538,6 +608,67 @@ export function evaluateCoachTravel(commitments, options) {
     meta,
     status: deriveConstraintStatus(findings),
   };
+}
+
+/**
+ * Which site question a pair of commitments poses, and so which floor governs.
+ *
+ * @param {import('../facility/types.js').VenueComplexMap} venueComplexes
+ * @param {Object} from
+ * @param {Object} to
+ * @returns {{ sameVenue: boolean, oneSite: boolean, complexId: string|null, policy: string }}
+ */
+function siteOf(venueComplexes, from, to) {
+  const sameVenue = from.venueId === to.venueId;
+  // One *site*, which is not the same question as one venue name: two
+  // venues an operator has declared to be one complex are a walk apart.
+  const oneSite = sameVenueComplex(venueComplexes, from.venueId, to.venueId);
+  // Null unless the complex is what made the two one site: naming the
+  // `from` venue's complex on a transition that leaves it would read as
+  // though the complex governed a decision it had no part in.
+  const complexId = oneSite ? complexIdOf(venueComplexes, from.venueId) : null;
+  const policy = oneSite ? TRAVEL_POLICY.WITHIN_VENUE : TRAVEL_POLICY.BETWEEN_VENUES;
+  return { sameVenue, oneSite, complexId, policy };
+}
+
+/**
+ * The overlap finding, worded once for both coverages: the consecutive loop
+ * and the every-pair pass (#62) must not be able to describe one differently.
+ *
+ * @param {string} id - the pair's transition id
+ * @param {string} personId
+ * @param {string} date
+ * @param {Object} from - the earlier-starting commitment
+ * @param {Object} to
+ * @param {number} gapMinutes - negative
+ * @returns {import('../constraints/types.js').ConstraintFinding}
+ */
+function overlapFinding(id, personId, date, from, to, gapMinutes) {
+  return makeTravelFinding(
+    TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP,
+    `"${personId}" is committed to "${from.id}" until ${from.endMinutes} and to "${to.id}" from ${to.startMinutes} on ${date}; the two overlap by ${-gapMinutes} minutes`,
+    { transitionId: id, personId, date, gapMinutes, fromId: from.id, toId: to.id }
+  );
+}
+
+/**
+ * The finding for a pair whose earlier commitment has no known end: unjudged,
+ * never clear (GAP-14).
+ *
+ * @param {string} message
+ * @param {string} id - the pair's transition id
+ * @param {string} personId
+ * @param {string} date
+ * @param {Object} from - the commitment of unknown length
+ * @returns {import('../constraints/types.js').ConstraintFinding}
+ */
+function unknownEndFinding(message, id, personId, date, from) {
+  return makeTravelFinding(TRAVEL_REASON.TRAVEL_FOOTPRINT_UNKNOWN, message, {
+    transitionId: id,
+    personId,
+    date,
+    commitmentId: from.id,
+  });
 }
 
 /**

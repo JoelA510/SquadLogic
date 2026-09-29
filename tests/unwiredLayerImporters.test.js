@@ -747,6 +747,8 @@ const LAYERS = Object.freeze([
       'supabase/functions/_shared/engines/practice-lighting-overrides.ts',
       'supabase/functions/_shared/tests/lighting-overrides_test.ts',
       'tests/practiceLightingOverrides.test.js',
+      // PR D: holds the UI's window conversion (utils/lightingOverrides.js) to this one.
+      'tests/practiceLightingOverridesMock.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
       'supabase/functions/_shared/engines/practice-lighting-overrides.ts',

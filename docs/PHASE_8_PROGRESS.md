@@ -6903,3 +6903,50 @@ Operator ruling 2 now holds in the auto-scheduler as well as in the RPC.
 - **Open.** Whether `supabase functions deploy` type-checks is unknown (docs
   are silent). CLAUDE.md §11 does not list the Deno job; it is incomplete, not
   wrong, and left for the operator.
+
+## Task #69 (part) — #488 merged (9cab61c): the mock client leaves the main bundle
+
+- **Why.** The main entry was 140,447 B against a 140,450 B cap. A lazy-chunk
+  edit elsewhere (the #489 panel fix) tripped it by 2 B through content-hash
+  noise in the preload list.
+- **Mechanism.** `supabase` is now `export let`, and a new `supabaseReady`
+  promise settles once the client is assigned. `main.jsx` renders after it,
+  and on rejection logs and renders a visible `role="alert"` message. None of
+  the 63 importers reads `supabase` at module load (grep census). A
+  credentialed build emits no mock chunk; the no-credentials production build
+  still boots in mock mode.
+- **Rejected: top-level await.** It deadlocked in mock mode (the mock chunk
+  imports back from the main entry) and added two unbudgeted first-paint files.
+- **Sizes.** Main entry 140,447 -> 117,125 B. First paint 236,757 -> 213,435 B
+  (the same 5 files). The mock is a 23,239 B lazy chunk. No cap changed.
+- **E2E.** The mock now arrives after page load, so a shared
+  `waitForMockClient(page)` helper (`tests/e2e/steps/mockReady.ts`) was added
+  before 81 `__MOCK_DB__`/`__saveMockDB__` sites in 17 step files. No
+  assertion changed. 80/80 passed, up from 76/80 without the helper.
+- **Evidence.** Restoring the static import puts the main entry back over the
+  cap and turns 2 guard tests red. Supervisor plant: rendering without
+  awaiting `supabaseReady` turned 1 red.
+- **Follow-ups.** The main-entry cap could be tightened (~23 KB headroom).
+  Prettier reformats `docs/operations/bundle-budget.md`, which is not linted.
+
+## Task #47 follow-up — #489 merged (bc7f69b): the persistence panel tells the truth
+
+- **Before.** The shared `PersistencePanel` showed "System Ready" for success,
+  blocked, error and timeout, and nothing was announced. A client timeout reset
+  to idle at once, losing its message.
+- **After.** idle, submitting, ready, blocked and error each render their own
+  label. A polite `role="status"` region and an assertive `role="alert"` region
+  stay mounted, so every change is announced. Only a `'success'` result counts
+  as success; an unknown status is a failure. The timeout sets `'error'` and
+  aborts its request, and a stale response cannot overwrite a retry. A server
+  block keeps its own message.
+- **Removed.** The unused `theme`/`colorTheme` props, `btnBg`/`btnShadow`/
+  `statusText`, and the whole `blue` palette. The gradient now uses the brand
+  token.
+- **Evidence.** 14 tests render through `TeamPersistencePanel`, and the state
+  list is enumerated from the caller's `setPersistenceActionState` calls.
+  Agent plants: error label 3 red, enumeration red, abort signal 1, stale guard
+  1. Supervisor plant: `role="alert"` demoted turned 10 of 14 red. E2E
+  (Persist 5, Team 8) passed.
+- **Follow-ups.** No caller passes `lastSync`. The `.text-red-400` branch in an
+  E2E step is dead.

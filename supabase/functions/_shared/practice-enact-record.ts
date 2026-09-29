@@ -13,7 +13,10 @@
  * `enact_practice_recommendation` fills it from the writer's return, and
  * refuses a record that already carries one.
  */
-// @ts-ignore -- `npm run typecheck` (tsc) cannot resolve a Deno URL import; `deno check` does.
+// `npm run typecheck` (tsc) cannot resolve a Deno URL import; `deno check` does, so the
+// error is tsc's alone, and @ts-expect-error would fail deno check as unused.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
 import type { z as Zod } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
 
 type ZodNamespace = typeof Zod;

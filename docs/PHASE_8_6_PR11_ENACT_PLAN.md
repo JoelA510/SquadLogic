@@ -1,8 +1,10 @@
 # 8.6 PR 3b, PR 11: enacting a repair recommendation (admin-only): plan
 
-Status: **DRAFT for operator review.** This is a plan only. No production code,
-tests or migrations are written until it is approved (CLAUDE.md §3, "Plan
-before implementing on any task that touches ... persistence").
+Status: **APPROVED by the operator 2026-09-29**, with the answers in
+"Operator answers (2026-09-29)" below folded in. Answer Q3 (enact **only after
+the retirement is committed**) overrides this plan's first recommended
+default, and every part that assumed enact from the preview has been
+rewritten. A PR that departs from this plan says so in its body.
 
 It refines row 11 of the approved 3b plan (`docs/PHASE_8_6_PR3B_PLAN.md:285`,
 "Enact + override prompt, admin-only, ~600") under that plan's §2 "Enact"
@@ -13,6 +15,16 @@ Every claim about current code was **statically reviewed** at `6700723`
 (origin/main) and cites file:line on that commit. Nothing was executed and no
 test was run for this plan. Open PR #501 (`fix/8.6-3b-adapter-existing-closures`,
 head `55e3e04`) is assumed merged; §9 lists what depends on it.
+
+## Operator answers (2026-09-29)
+
+| Q | Answer | Where it lands |
+|---|---|---|
+| Q1 | **Retirement-only now.** 11a/11b/11c enact retirements. Blackout enact is **PR 11d**, after PR 12 **and** after the adapter reads live `practice_exceptions` | §3, §7 |
+| Q2 | **The wrapper RPC `enact_practice_recommendation`.** The writer is unchanged | §5 |
+| Q3 | **ONLY AFTER COMMIT.** This overrides the recommended default. Enact is disabled in the retirement dry-run preview, with a visible reason, and allowed once the retirement is saved | §1 "The commit gate", §2, §5 (step 2a, `cause.stored_effective_to`), §6 witnesses 24-25, §7 |
+| Q4 | **Generated** unlock reason: ids and the date only | §2 |
+| Q5 | **No fingerprint widening in PR 11.** The click-to-commit latency is declared in the dialog and the audit | §4 |
 
 ## 0. What exists today, and the gaps PR 11 must close
 
@@ -38,9 +50,10 @@ One click per recommendation. Each step names the module that performs it.
 
 | # | Step | Module |
 |---|---|---|
-| 1 | Admin clicks **Enact** on one row. For a retirement this opens the override prompt (§2). Non-admins see the button disabled with a visible reason, as in #444 | `PracticeRepairPanel.jsx` `Recommendations` (`:103`) → new `components/scheduling/PracticeEnactDialog.jsx` |
+| 1 | Admin clicks **Enact** on one row. The button is enabled only when the caller is an admin **and** the retirement is committed (the commit gate below). Otherwise it is disabled with a visible reason, as in #444. For a retirement it opens the override prompt (§2) | `PracticeRepairPanel.jsx` `Recommendations` (`:103`) → new `components/scheduling/PracticeEnactDialog.jsx` |
 | 2 | On **Confirm**, mint `enactKey` (uuid v4) once for this confirmed intent. A retry of the same intent reuses it | new `frontend/src/utils/practiceRepairEnact.js` `enactPracticeRecommendation({client, send, state, recommendation, shown, answer, enactKey})` |
 | 3 | **Fresh read, fingerprint first.** Call `rpc('practice_schedule_fingerprint')`, **then** read the rows. Any write after the fingerprint read makes the writer refuse. Also read `assigned_via` and PR #501's closures | `usePracticeRepairSnapshot.js` `loadPracticeRepairSnapshot` (extended: returns `fingerprint`, keeps all-or-nothing) |
+| 3a | **The commit gate, checked again on the fresh read.** The fresh `fields` row of the cause field must carry a stored `effective_to` equal to the loss's date. Otherwise the enact is refused and nothing is sent: `retirement-uncommitted` when none is stored, `retirement-changed` when the stored date differs | new core `retirementCommitOf(freshRows, loss)` in `practice/enact.js` |
 | 4 | Adapt the fresh rows, with `baseFingerprint` = the fingerprint from step 3 | core `buildPracticeRepairInput` (`repairAdapter.js:153`, `:341`), unchanged |
 | 5 | **Re-base** the session state (recommendations, Δ, enacted) onto the fresh input (see "Re-validate" below) | new core `rebaseRecommendationState(state, freshInput)` in `practice/recommendations.js`. It must live there because it reuses the private `open`/`reoffer` |
 | 6 | **Re-judge** the one recommendation: its series is still displaced, its `to` is still one of its candidates, and `marginal(S, to, R∖{S}, coachDays(R∖{S}))` is not null. Then compare what the admin was shown against the fresh judgement: `to` (all four shape fields), `tier`, `origin` and `objective.counts`, exactly. Any difference → **stale: nothing is sent**, the dialog shows old against new and asks again (`stages.js:1033-1034`) | new core `judgeEnact(rebased, assignmentId, shown)` in new `practice/enact.js` |
@@ -48,8 +61,49 @@ One click per recommendation. Each step names the module that performs it.
 | 8 | Build the enact record (§5), Zod-validated, strict | new core `PracticeEnactRecordSchema` + `buildEnactRecord` in `practice/enact.js`, exported from `practice/index.js` |
 | 9 | **Send**: the adapter's DB rows go **verbatim** as `snapshot.payload.assignmentRows`, with `repair` and `enact` bodies, and `runMetadata.runId = enactKey` | new `persistPracticeEnact` in `utils/practicePersistenceClient.js`. It does not call `preparePracticePersistenceSnapshot` |
 | 10 | Edge validates `enact` (strict Zod twin of the core schema). It requires `repair.baseFingerprint`, and calls the new RPC as the user | `supabase/functions/practice-persistence/index.ts` (extended) |
-| 11 | In one transaction: take the season lock, check idempotency, call `persist_practice_schedule` (which checks the fingerprint, the lock and the unlock audit), check that only S was touched, and write the `practice.recommendation_enacted` audit row | new migration: `public.enact_practice_recommendation(...)` (§5) |
+| 11 | In one transaction: take the season lock, check idempotency, **check the commit gate again in SQL** (§5, step 2a), call `persist_practice_schedule` (which checks the fingerprint, the lock and the unlock audit), check that only S was touched, and write the `practice.recommendation_enacted` audit row | new migration: `public.enact_practice_recommendation(...)` (§5) |
 | 12 | **After success**, read fresh again (steps 3-4). Add S to `enacted`, and re-base. Recommendations that are now inadmissible are released through the chain rule. The panel announces the result in a `role="status"` region | `practiceRepairEnact.js` → `rebaseRecommendationState` |
+
+**The commit gate (operator answer Q3).**
+
+A retirement is committed when `fields.effective_to` is stored:
+
+- `admin_retire_field` writes it
+  (`20260907000000_field_delete_booking_guard.sql:769`, `SET effective_to =
+  p_effective_to`).
+- The field card already reads it: it shows "Retires after"
+  (`FieldManagementPage.jsx:509-513`) and offers the un-retire button in place
+  of the retire button (`:527-534`).
+
+The dry-run preview has **not** written it. The retirement dialog passes a
+loss built from its own unsaved date state (`RetireEstateNodeDialog.jsx:245-250`,
+`field: { id: node.id, effective_to: effectiveTo }`). The date is written only
+when a confirmed attempt succeeds, and the dialog then closes (`:153-162`).
+
+- **How the panel knows.** It never trusts the `loss` prop.
+  - The rule: committed ⇔ the cause field's stored `effective_to` is non-null
+    **and** equals `loss.field.effective_to`.
+  - The source: the loader's `fields` read. PR #501 adds `effective_to` to it;
+    today it selects `id, location_id, name` (`usePracticeRepairSnapshot.js:32`).
+  - The test runs three times: on the rows the panel opened with, to enable or
+    disable the button; on the fresh read (step 3a); and in SQL in the wrapper
+    (§5, step 2a). The disabled button is therefore not the only gate.
+- **In the preview**, the panel stays as PR 10 left it: recommendations,
+  decline and undo. Every Enact button is disabled, with the visible reason
+  "Save the retirement first: enacting moves practices, and the retirement date
+  is not saved yet."
+- **The entry point after commit.** The preview dialog closes once the
+  retirement succeeds, so PR 11c adds a "Repair practices" launcher to the
+  retired field's card, beside "Retires after" (`FieldManagementPage.jsx:509-513`).
+  It opens the same `PracticeRepairLauncher`, with the loss built from the
+  **stored** row: `{kind: 'retirement', field: {id, effective_to:
+  field.effective_to}}`.
+- **Un-retiring after an enact.** Clearing the end date (`:527-534`) does not
+  move enacted practices back. They are locked rows, and moving them is the
+  override prompt's job. The un-retire confirmation gains one line: how many
+  series were enacted off this field, counted from the
+  `practice.recommendation_enacted` audit rows whose `cause.id` is this field.
+  This is declared; nothing is undone.
 
 **Why the series joins the enacted set and is locked.** The lock needs no new
 code. The new row is an ordinary `practice_assignments` row with
@@ -101,7 +155,9 @@ A retirement enact always re-ranges or replaces a locked row
 (`repairAdapter.js:532-546`), so the dialog is the override prompt of 3b plan
 `:162-169` for that one assignment.
 
-**The dialog lists**, for the recommendation's team, each row in
+**The dialog opens only for a committed retirement** (§1, the commit gate).
+Its heading names the field and the **stored** retirement date, never a date
+typed into a preview. **The dialog lists**, for the recommendation's team, each row in
 `plan.unlockRequired`: weekday, time, ground, range and `assigned_via` (from
 the fresh read). It also says exactly what happens to each row:
 
@@ -162,9 +218,9 @@ button is therefore not the only gate (§6, 12).
 
 **Recommendation: ship PR 11 retirement-only. Do not wait for PR 12.**
 
-- *For shipping now:* retirements are the case with an existing admin flow. The
-  panel already opens from the retirement preview
-  (`RetireEstateNodeDialog.jsx:242-250`), and a retirement's tail windows are
+- *For shipping now:* retirements are the case with an existing admin flow:
+  the retire dialog, and after commit the field card (§1, "The commit gate").
+  A retirement's tail windows are
   persistable today (the writer and adapter contract, `repairAdapter.js:576-591`).
   The persistence path (wrapper RPC, audit, idempotency, stale handling) then
   lands and is proven on one arm. PR 12 stays small and reader-only.
@@ -250,6 +306,12 @@ The RPC does these steps, in order:
 
 1. Refuse unless `auth.uid()` is set and `is_org_admin(org)` (42501).
 2. Refuse a NULL `base_fingerprint` (22023).
+2a. **The commit gate (Q3).** For `cause.kind = 'retirement'`, read
+   `fields.effective_to` of `cause.id` in the caller's org, and require it to
+   equal `cause.loss.from - 1`. A NULL refuses with 22023 "retirement of field X
+   is not committed"; a different date refuses with "... committed with a
+   different date". It **executes immediately after step 4 takes the season
+   lock** and before the writer runs. It is listed here with the other refusals.
 3. Validate the `enact` shape and require `run_data.id = enact.enact_key`.
 4. Take `pg_advisory_xact_lock` with the writer's key (`20261002000000:311-314`).
 5. Check idempotency (§4).
@@ -292,7 +354,7 @@ numbers only. The one free-text field is the generated unlock reason.
     "id": "<field uuid>",
     "loss": { "from": "YYYY-MM-DD", "until": null, "surface_ids": ["<uuid>"],
               "start_minutes": null, "end_minutes": null, "reason": "retirement" },
-    "committed": false                 // the retirement preview (§8 Q3)
+    "stored_effective_to": "YYYY-MM-DD" // read by the RPC (step 2a) from fields.effective_to; = loss.from - 1
   },
   "series": {
     "assignment_id": "<uuid>", "team_id": "<uuid>",
@@ -377,6 +439,8 @@ the meta-assertion must go red.
 | 20 | An enacted series still displaced is loud | Same: a fresh input where the write "did not land" throws | Ignore enacted ids |
 | 21 | Ordinary saves are unchanged | Edge test: a call without `repair` keeps today's 500 mapping and key set (`tests/practiceWriterV3.test.js` pin) | Map errors for all calls |
 | 22 | Edge and core enact schemas agree | `tests/practiceEnactSchemaDrift.test.js`: identical key sets and enums (the `practiceWriterV3` source-pin precedent) | Add a key to one arm only |
+| 24 | Enact is refused while the retirement is uncommitted | pgTAP/dbharness: the wrapper, with the cause field's `effective_to` NULL, gives 22023 and zero changed rows and zero audit rows. A different stored date gives the same. `practiceRepairEnact.test.js`: a fresh read whose field row has no `effective_to` gives 0 fetches and the `retirement-uncommitted` refusal, while the `loss` prop claims a date. Panel test: opened from `RetireEstateNodeDialog` (the preview), every Enact button is disabled with the visible reason. Subject set: every recommendation of the fixture, enumerated from the pre-enact snapshot | Plant A: drop step 2a from the wrapper. Plant B: `retirementCommitOf` reads `loss.field.effective_to` instead of the fresh row. Plant C: enable the button in the preview. Each must turn its own test red |
+| 25 | The post-commit entry point uses the stored date | `FieldManagementPage` test: the retired card's launcher passes the row's `field.effective_to` | Pass the dialog's default date |
 | 23 | The prompt's count is true | `PracticeEnactDialog` test: the count equals occurrences in `[D, until]` from the core expander over the fixture row | Count weeks, not weekday occurrences |
 
 Also for every PR: `/code-review` before opening, and the season-2026 fixture
@@ -390,12 +454,12 @@ parallel; 11c needs both.
 
 | PR | Contents | Touches | Size |
 |---|---|---|---|
-| **11a** core | `rebaseRecommendationState` (`recommendations.js`). New `practice/enact.js` (`judgeEnact`, `buildEnactPayload`, `PracticeEnactRecordSchema`, `buildEnactRecord`). The adapter's optional `assignedVia`. Barrel exports. Witnesses 1-2, 9, 13, 16-20 | S, D | ~750 |
-| **11b** persistence | Migration `enact_practice_recommendation` + revert + smoke. pgTAP/dbharness 5-8, 10-11, 14-15. Edge `enact` body, Zod twin, error mapping (21), drift test (22) | P | ~700 |
-| **11c** UI | Loader fingerprint + `assigned_via`. `persistPracticeEnact`. `practiceRepairEnact.js`. `PracticeEnactDialog.jsx`. The panel's enact button and disabled reasons. Mock-client handlers for the new RPC. E2E `practice_repair_enact.feature` (retirement: enact, stale, non-admin). Witnesses 3-4, 12, 23 | — | ~650 |
+| **11a** core | `rebaseRecommendationState` (`recommendations.js`). New `practice/enact.js` (`retirementCommitOf`, `judgeEnact`, `buildEnactPayload`, `PracticeEnactRecordSchema`, `buildEnactRecord`). The adapter's optional `assignedVia`. Barrel exports. Witnesses 1-2, 9, 13, 16-20 | S, D | ~750 |
+| **11b** persistence | Migration `enact_practice_recommendation` + revert + smoke. pgTAP/dbharness 5-8, 10-11, 14-15, and the SQL arm of 24. Edge `enact` body, Zod twin, error mapping (21), drift test (22) | P | ~700 |
+| **11c** UI | Loader fingerprint + `assigned_via`. `persistPracticeEnact`. `practiceRepairEnact.js`. `PracticeEnactDialog.jsx`. The panel's enact button and its disabled reasons, including the uncommitted preview. The retired field card's "Repair practices" launcher (`FieldManagementPage.jsx:509-513`). Mock-client handlers for the new RPC. E2E `practice_repair_enact.feature` (retirement: the preview shows Enact disabled; after commit, enact succeeds; stale; non-admin). Witnesses 3-4, 12, 23, the client arms of 24, and 25 | — | ~700 |
 | 11d (after PR 12) | Blackout enact: the loader and adapter read live exceptions; the button is enabled | D, P reads | ~500 |
 
-## 8. Open questions for the operator
+## 8. Open questions for the operator (answered 2026-09-29: see "Operator answers" at the top)
 
 Q1. **Ship PR 11 retirement-only, with blackout enact as PR 11d after PR 12?**
 Recommended default: **yes**. Retirements are persistable today. Blackout
@@ -408,7 +472,7 @@ a full copy of the writer (LESSONS #11, ~1,300 lines), or an Edge
 `record_audit_event` after the RPC (not atomic). Recommended default: **the
 wrapper RPC**.
 
-Q3. **May an admin enact during the retirement preview, before the retirement
+Q3. *(Answered: ONLY AFTER COMMIT, which overrides the default below.)* **May an admin enact during the retirement preview, before the retirement
 is committed?** The panel opens from the dry-run preview, with the dialog's
 date (`RetireEstateNodeDialog.jsx:242-250`). If the admin then changes the date
 or cancels the retirement, the enacted series stays moved and locked. Recommended
@@ -432,5 +496,6 @@ and the `effective_to` columns, all or nothing. Enact inherits both, because
 step 3 **is** that loader. Without #501, the fresh re-judge would accept a
 shape an existing blackout or retirement closes on some date, and enact would
 persist it. **PR 11a/11c must be rebased on #501 and must not merge before
-it.** #501 does not widen the fingerprint (Q5), and its
+it.** #501 is also what puts `fields.effective_to` into the loader's fresh
+read, which the client side of the commit gate (Q3) reads. #501 does not widen the fingerprint (Q5), and its
 `declared.closures` block goes into the audit's `solver.closures_supplied`.

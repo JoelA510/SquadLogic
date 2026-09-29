@@ -83,7 +83,11 @@ export {
   PracticeLightingOverrideRowSchema,
 } from './schemas.js';
 
-export { approvedLightingOverridesFromRows } from './lightingOverrides.js';
+export {
+  approvedLightingOverridesFromRows,
+  lightingOverrideWindowDates,
+  lightingOverrideWindowOf,
+} from './lightingOverrides.js';
 
 export { buildPracticeSlotSet, firstWeekdayOnOrAfter, getPracticeSlot } from './slots.js';
 

@@ -10,6 +10,7 @@ import { logger } from './logger.js';
 import { HEADER_ALIASES, RESERVED_KEYS } from '../utils/telemetryUtils.js';
 import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js';
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
+import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
 
 const mockId = (prefix = '') =>
   prefix + (crypto.randomUUID?.() || crypto.getRandomValues(new Uint32Array(4)).join('-'));
@@ -303,6 +304,8 @@ const initialMockData = {
       effective_date_range: '[2025-01-01,2025-12-31)',
     },
   ],
+  // 8.9 D14: written only by the four lighting-override RPCs (mockLightingOverrides.js).
+  practice_lighting_overrides: [],
   event_rsvps: [
     {
       id: 'rsvp-1',
@@ -2329,6 +2332,13 @@ export const mockSupabase = {
       if (handled) {
         if (!handled.error) saveDB(db);
         return handled;
+      }
+      // Portable-lighting overrides (migration 20261003000000): the four RPCs,
+      // refusals included (self-decide, overlap, coach scoping).
+      const lighting = handleLightingOverrideRpc(db, name, params, { currentUserId });
+      if (lighting) {
+        if (!lighting.error) saveDB(db);
+        return lighting;
       }
     }
 

@@ -18,6 +18,7 @@ import {
   BarChart3,
   History,
   Settings,
+  Lightbulb,
 } from 'lucide-react';
 import { PERMISSIONS } from './permissions.js';
 
@@ -108,6 +109,13 @@ export const NAV = [
         icon: CalendarOff,
         path: '/scheduling/blackouts',
         permission: PERMISSIONS.MANAGE_ORGANIZATION,
+      },
+      {
+        id: 'practice-lighting',
+        label: 'Practice Lighting',
+        icon: Lightbulb,
+        path: '/schedule/practice-lighting',
+        permission: PERMISSIONS.DECIDE_PRACTICE_LIGHTING_OVERRIDE,
       },
     ],
   },
@@ -235,6 +243,12 @@ export const ROLE_NAV = {
       icon: UserRoundCheck,
       path: '/coaches/practice-preferences',
     },
+    {
+      id: 'practice-lighting',
+      label: 'Practice Lighting',
+      icon: Lightbulb,
+      path: '/schedule/practice-lighting',
+    },
   ],
   parent: [
     { id: 'home', label: 'My Dashboard', icon: Home, path: '/' },
@@ -243,9 +257,12 @@ export const ROLE_NAV = {
   ],
 };
 ROLE_NAV.player = ROLE_NAV.parent;
-// Staff share the coach nav minus the preference page: staff hold no coach
-// record and no REQUEST_PRACTICE_PREFERENCE (flat items are not permission-filtered).
-ROLE_NAV.staff = ROLE_NAV.coach.filter((item) => item.id !== 'practice-preferences');
+// Staff share the coach nav minus the preference and lighting pages: staff hold
+// no coach record, no REQUEST_PRACTICE_PREFERENCE and no
+// REQUEST_PRACTICE_LIGHTING_OVERRIDE (flat items are not permission-filtered).
+ROLE_NAV.staff = ROLE_NAV.coach.filter(
+  (item) => item.id !== 'practice-preferences' && item.id !== 'practice-lighting'
+);
 
 /** path -> { label, groupLabel } for breadcrumbs / PageHeader. */
 export const ROUTE_META = {};
@@ -280,4 +297,5 @@ export const FULL_BLEED_ROUTES = new Set([
   '/admin/members',
   '/settings',
   '/coaches/practice-preferences',
+  '/schedule/practice-lighting',
 ]);

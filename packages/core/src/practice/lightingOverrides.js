@@ -12,9 +12,11 @@
  * row is dropped here, whatever the caller selected, so a reader that forgot
  * its `status = 'approved'` filter still cannot exempt a date nobody approved.
  *
- * Nothing in production calls this module: the Edge read (PR C) runs its Deno
- * twin, `_shared/engines/practice-lighting-overrides.ts`, which
- * `tests/lightingOverrideDrift.test.js` holds to this function (W27).
+ * The Edge read (PR C) runs its Deno twin,
+ * `_shared/engines/practice-lighting-overrides.ts`, which
+ * `tests/lightingOverrideDrift.test.js` holds to this function (W27). The UI
+ * (PR D, `frontend/src/utils/lightingOverrides.js`) reads and writes windows
+ * through {@link lightingOverrideWindowDates} and {@link lightingOverrideWindowOf}.
  *
  * @module practice/lightingOverrides
  */
@@ -25,6 +27,40 @@ import {
   PracticeLightingOverrideRowSchema,
   PracticeLightingOverrideSchema,
 } from './schemas.js';
+
+const CANONICAL_WINDOW = /^\[(\d{4}-\d{2}-\d{2}),(\d{4}-\d{2}-\d{2})\)$/;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A stored window, `[from,end)` with the end EXCLUSIVE, as its INCLUSIVE
+ * dates. The one conversion: {@link approvedLightingOverridesFromRows} and the
+ * UI both call it.
+ *
+ * @param {unknown} window
+ * @returns {{ from: string, until: string } | null} null for anything not
+ *   spelled as a canonical bounded range. An empty range (`[d,d)`) comes back
+ *   with `until` before `from`, and a non-calendar date is read as a day number
+ *   (the Deno twin's reading, pinned by the drift test): a caller that needs a
+ *   stored window refuses both.
+ */
+export function lightingOverrideWindowDates(window) {
+  const match = typeof window === 'string' ? CANONICAL_WINDOW.exec(window) : null;
+  if (!match) return null;
+  return { from: match[1], until: isoDateOfDayNumber(isoDayNumber(match[2]) - 1) };
+}
+
+/**
+ * Inclusive dates -> the window the RPCs store, `daterange(from, until, '[]')`,
+ * which Postgres prints canonically as `[from,until + 1)`.
+ *
+ * @param {string} from
+ * @param {string} until
+ * @returns {string | null} null unless both are `YYYY-MM-DD`
+ */
+export function lightingOverrideWindowOf(from, until) {
+  if (!ISO_DATE.test(String(from)) || !ISO_DATE.test(String(until))) return null;
+  return `[${from},${isoDateOfDayNumber(isoDayNumber(until) + 1)})`;
+}
 
 /**
  * @param {ReadonlyArray<unknown>} rows - `practice_lighting_overrides` rows
@@ -40,11 +76,7 @@ export function approvedLightingOverridesFromRows(rows) {
     .map((row) => PracticeLightingOverrideRowSchema.parse(row))
     .filter((row) => row.status === PRACTICE_LIGHTING_OVERRIDE_STATUS.APPROVED)
     .map((row) => {
-      const [from, end] = row.window.slice(1, -1).split(',');
-      return PracticeLightingOverrideSchema.parse({
-        slotId: row.practice_slot_id,
-        from,
-        until: isoDateOfDayNumber(isoDayNumber(end) - 1),
-      });
+      const { from, until } = lightingOverrideWindowDates(row.window);
+      return PracticeLightingOverrideSchema.parse({ slotId: row.practice_slot_id, from, until });
     });
 }

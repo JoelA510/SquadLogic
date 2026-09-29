@@ -489,6 +489,67 @@ describe('applyPracticeExceptions: witnesses', () => {
     ]);
   });
 
+  describe('Q9: relocated dates are clipped to the row range', () => {
+    // A Tuesday row [2026-09-08, 2026-09-29] moved to Thursday over a window
+    // that starts BEFORE the row (2026-09-01) and runs PAST it (2026-10-14).
+    const Q9 = {
+      rows: [
+        {
+          id: 'pa-q',
+          effective_date_range: '[2026-09-08,2026-09-30)',
+          slot: slot('tue', '17:30:00', 'Field 1'),
+        },
+      ],
+      exceptions: [
+        exc({
+          id: 'pe-q',
+          assignment_id: 'pa-q',
+          window: '[2026-09-01,2026-10-15)',
+          kind: 'relocated',
+          slot: slot('thu', '16:00:00', 'Field 7'),
+          cause_kind: 'blackout',
+        }),
+      ],
+    };
+
+    /**
+     * The exercise check: some relocated window in `fixture` has relocated-weekday
+     * dates outside its own row, before AND after it -- so an unclipped arm would
+     * show dates this one must not. Computed from the seed, never from the output.
+     */
+    const reachesOutsideRow = (fixture) =>
+      fixture.exceptions.some((e) => {
+        if (e.kind !== 'relocated' || !e.slot) return false;
+        const range = oracleBounds(rowOf(fixture, e.assignment_id).effective_date_range);
+        const w = oracleBounds(e.window);
+        const all = w ? weekdays(e.slot.day_of_week, w.first, w.last) : [];
+        return all.some((d) => d < range.first) && all.some((d) => d > range.last);
+      });
+
+    it('the fixture exercises it, and the exercise check can fail', () => {
+      expect(reachesOutsideRow(Q9)).toBe(true);
+      const inside = {
+        rows: Q9.rows,
+        exceptions: [{ ...Q9.exceptions[0], window: '[2026-09-08,2026-09-30)' }],
+      };
+      expect(reachesOutsideRow(inside)).toBe(false);
+    });
+
+    it('no relocated occurrence falls outside the row, and the count is the oracle count', () => {
+      const out = applyPracticeExceptions(Q9);
+      const range = oracleBounds(Q9.rows[0].effective_date_range);
+      const w = oracleBounds(Q9.exceptions[0].window);
+      const moved = out.occurrences.filter((o) => o.kind === 'relocated');
+      // The oracle, stated independently of `expectedDatesOf`: Thursdays in W ∩ range.
+      const oracle = weekdays('thu', w.first, w.last).filter((d) => within(d, range));
+      expect(oracle).toEqual(['2026-09-10', '2026-09-17', '2026-09-24']);
+      expect(weekdays('thu', w.first, w.last).length).toBeGreaterThan(oracle.length);
+      expect(moved.map((o) => o.date)).toEqual(oracle);
+      expect(moved.every((o) => within(o.date, range))).toBe(true);
+      expect(out.occurrences.filter((o) => !within(o.date, range))).toEqual([]);
+    });
+  });
+
   it('rule 8: an exception naming an unread row is a finding, never applied', () => {
     const out = applyPracticeExceptions({
       rows: [SEED.rows[0]],

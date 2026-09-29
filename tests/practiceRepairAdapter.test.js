@@ -18,7 +18,6 @@ import {
   PRACTICE_TBD_REASON,
   buildPracticeRepairInput,
   buildPracticeRepairPayload,
-  parseDateRange,
   repairPracticeLoss,
 } from '../packages/core/src/practice/index.js';
 
@@ -659,7 +658,7 @@ describe('payload contract', () => {
       assert.ok(['blackout', 'retirement'].includes(e.cause_kind), e.cause_kind);
       assert.equal(e.kind === 'relocated', 'practice_slot_id' in e);
       assert.equal(e.kind === 'time_tbd', reasons.has(e.tbd_reason));
-      assert.ok(parseDateRange(e.window), e.window);
+      assert.ok(inclusive(e.window).from <= inclusive(e.window).until, e.window);
     }
   });
 
@@ -681,21 +680,76 @@ describe('payload contract', () => {
   });
 });
 
-describe('parseDateRange', () => {
-  it('reads canonical, inclusive and open ranges', () => {
-    assert.deepEqual(parseDateRange('[2026-09-01,2026-12-01)'), {
-      from: '2026-09-01',
-      until: '2026-11-30',
-    });
-    assert.deepEqual(parseDateRange('[2026-09-01,2026-11-30]'), {
-      from: '2026-09-01',
-      until: '2026-11-30',
-    });
-    assert.deepEqual(parseDateRange('(2026-08-31,2026-12-01)'), {
-      from: '2026-09-01',
-      until: '2026-11-30',
-    });
-    assert.equal(parseDateRange('[2026-09-01,)'), null);
-    assert.equal(parseDateRange(null), null);
+/* -- snapshot edge cases (code review) ------------------------------------- */
+const withA1 = (patch) => ({
+  rows: { practiceAssignments: [{ ...SNAPSHOT[0], ...patch }, ...SNAPSHOT.slice(1)] },
+});
+describe('snapshot rows', () => {
+  it('an open upper bound runs to its slot end; no range inherits the slot', () => {
+    for (const range of ['[2026-09-01,)', null]) {
+      const { adapted, written } = run(RETIREMENT, withA1({ effective_date_range: range }));
+      const a1 = adapted.input.plan.assignments.find((a) => a.id === A1);
+      assert.deepEqual([a1.effectiveFrom, a1.effectiveUntil], ['2026-09-01', '2026-11-30']);
+      assert.ok(
+        written.plan.closes.some((c) => c.assignment_id === A1),
+        String(range)
+      );
+    }
+  });
+
+  it('keeps an open-ended row lower bound (never the slot start)', () => {
+    const { adapted } = run(RETIREMENT, withA1({ effective_date_range: '[2026-10-01,)' }));
+    const a1 = adapted.input.plan.assignments.find((a) => a.id === A1);
+    assert.deepEqual([a1.effectiveFrom, a1.effectiveUntil], ['2026-10-01', '2026-11-30']);
+  });
+
+  it('replaces a row that starts after D: its key is not re-sent, the new row keeps its start', () => {
+    const late = '[2026-10-20,2026-12-01)';
+    const { written } = run(RETIREMENT, withA1({ effective_date_range: late }));
+    assert.deepEqual(written.refused, []);
+    assert.ok(written.payload, 'the save was refused');
+    const keys = written.payload.assignmentRows.map((r) => `${r.team_id}${r.effective_date_range}`);
+    assert.ok(!keys.includes(`${T1}${late}`), 'the replaced key was re-sent');
+    assert.ok(keys.includes(`${T1}[2026-10-20,2026-11-30]`), 'the re-home lost its start');
+    assert.ok(!written.plan.closes.some((c) => c.assignment_id === A1));
+    assert.ok(written.plan.unlockRequired.some((u) => u.assignment_id === A1));
+  });
+
+  it('keeps a manual series manual when it is re-homed', () => {
+    const { written } = run(RETIREMENT, withA1({ source: 'manual' }));
+    const repaired = written.plan.assignmentRows.filter((r) => r.assigned_via === 'repair');
+    assert.deepEqual(
+      repaired.map((r) => [r.team_id, r.source]),
+      [[T1, 'manual']]
+    );
+  });
+
+  it('refuses a slot that names no field', () => {
+    const bad = [{ ...SLOTS[0], field_id: null }, ...SLOTS.slice(1)];
+    assert.throws(
+      () => buildPracticeRepairInput(rowsFor(RETIREMENT, { rows: { practiceSlots: bad } })),
+      /names no field/
+    );
+  });
+});
+
+describe('options and declarations', () => {
+  it('passes only the search knobs through options', () => {
+    const { input } = buildPracticeRepairInput(
+      rowsFor(RETIREMENT, {
+        rows: { options: { strategy: 'greedy', coachesByTeam: {}, graph: null } },
+      })
+    );
+    assert.equal(/** @type {any} */ (input).strategy, 'greedy');
+    assert.deepEqual(input.coachesByTeam[T1], [C1]);
+    assert.ok(input.graph);
+  });
+
+  it('declares missing coach rows', () => {
+    const { declared } = buildPracticeRepairInput(
+      rowsFor(RETIREMENT, { rows: { teamCoachAssignments: [] } })
+    );
+    assert.equal(declared.coaches.supplied, false);
+    assert.match(declared.coaches.note, /no coach overlap/);
   });
 });

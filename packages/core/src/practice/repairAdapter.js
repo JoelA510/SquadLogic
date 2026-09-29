@@ -37,9 +37,13 @@
  * The whole intended write is in `plan`, enumerated from the repair result's
  * `rehomed` and `timeTbd` (every displaced series-window, once). A retirement
  * splits: the row is closed at D-1 (`closes`) and a re-home is a new row from
- * D (`assigned_via: 'repair'`); a TIME TBD is a `time_tbd` exception on the
- * closed row over `[D, until]`, after its new range. A blackout never splits:
- * each window is an exception on the original row.
+ * D (`assigned_via: 'repair'`, its `source` kept); a TIME TBD is a `time_tbd`
+ * exception on the closed row over `[D, until]`, after its new range. A row
+ * that starts on or after D is replaced by its re-home (its key is not
+ * re-sent). A blackout never splits: each window is an exception on the
+ * original row. A row's dates are its own range, an open upper bound running
+ * to its slot's last day, and no range its slot's validity: what the repair
+ * reads, so the two cannot disagree.
  *
  * **Refused until 3b PR 12.** Readers expand only an assignment's own range
  * and do not apply exceptions yet, so any exception whose window still lies
@@ -51,8 +55,10 @@
  * would have written (in `plan`), and `payload` is then `null`: the whole
  * save is refused, nothing is dropped.
  *
- * `unlockRequired` lists the locked rows the save re-ranges. The unlock itself
- * is the admin's answer to the override prompt (PR 11), never this adapter's.
+ * `unlockRequired` lists the locked rows the save re-ranges or replaces. The
+ * unlock itself is the admin's answer to the override prompt (PR 11), never
+ * this adapter's, so `payload.repair.unlock` is always empty: sent as it is,
+ * a payload with `closes` is refused by the writer's lock (22023), loudly.
  *
  * @module practice/repairAdapter
  */
@@ -61,6 +67,7 @@ import { buildAvailabilityCalendar } from '../availability/calendar.js';
 import { buildFacilityGraph, isoDateOfDayNumber, isoDayNumber } from '../facility/index.js';
 import { coachesOfTeamOn } from '../people/assignmentHistory.js';
 import { buildPracticeAssignmentRows } from '../practiceSupabase.js';
+import { practiceRangeBounds } from '../utils/practiceOccurrences.js';
 import { CoachPreferencePlacementSchema } from './coachPreferences.js';
 
 /** `practice_exceptions.kind` (20260929000000), pinned to the Edge enum. */
@@ -85,13 +92,12 @@ export const PRACTICE_REPAIR_PAYLOAD_REFUSAL = Object.freeze({
   MID_RANGE_WINDOW: 'mid-range-window',
   /** The window reaches the series' end but lies inside its unclosed row. */
   WINDOW_INSIDE_ROW: 'window-inside-row',
-  /** A retirement row that starts on or after D cannot be closed at D-1. */
-  ROW_NOT_CLOSABLE: 'row-not-closable',
   /** No practice slot of the re-home's shape is valid over its window. */
   NO_SLOT_FOR_SHAPE: 'no-slot-for-shape',
 });
 
 const WEEKDAYS = new Set(['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']);
+const SEARCH_OPTIONS = new Set(['weights', 'changeBudget', 'searchNodeLimit', 'strategy']);
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** What `coachPreferences.js` accepts as a location id: its contract, not a copy. */
 const LocationIdSchema = CoachPreferencePlacementSchema.shape.locationId;
@@ -120,18 +126,28 @@ function timeToMinutes(value, what) {
 }
 
 /**
- * A `daterange` as read back (`[a,b)` canonically; `[a,b]` as written) as
- * inclusive `{from, until}`, or `null` when either end is open or missing.
+ * The dates a row is in force, as the repair reads it: its own
+ * `effective_date_range` (read by `practiceRangeBounds`, the feed's and the
+ * portal's parser); an open upper bound runs to its slot's last day (the
+ * page's season-end fallback); no readable range inherits the slot's
+ * validity (the repair's own fallback). `null` when neither says: undated.
+ *
+ * @param {unknown} text
+ * @param {{validFrom: string|null, validUntil: string|null}} slot
+ * @returns {{from: string, until: string} | null}
  */
-export function parseDateRange(text) {
-  const match =
-    typeof text === 'string'
-      ? text.trim().match(/^([[(])\s*"?([^,"]*)"?\s*,\s*"?([^\])"]*)"?\s*([\])])$/)
-      : null;
-  if (!match || !ISO_DATE.test(match[2]) || !ISO_DATE.test(match[3])) return null;
-  const from = match[1] === '(' ? shiftDate(match[2], 1) : match[2];
-  const until = match[4] === ')' ? shiftDate(match[3], -1) : match[3];
-  return until < from ? null : { from, until };
+function effectiveRangeOf(text, slot) {
+  const own = practiceRangeBounds(text);
+  if (own) return { from: own.first, until: own.last };
+  const open = /^([[(])([^,]*),\s*(infinity)?\s*\)$/.exec(String(text ?? '').trim());
+  if (open && ISO_DATE.test(open[2].trim()) && slot.validUntil !== null) {
+    const closed = practiceRangeBounds(`${open[1]}${open[2].trim()},${slot.validUntil}]`);
+    return closed ? { from: closed.first, until: closed.last } : null;
+  }
+  if (text == null && slot.validFrom !== null && slot.validUntil !== null) {
+    return { from: slot.validFrom, until: slot.validUntil };
+  }
+  return null;
 }
 
 /**
@@ -202,6 +218,9 @@ export function buildPracticeRepairInput(rows) {
   /* -- slots, and the shape each one offers ------------------------------- */
   const slotRows = new Map();
   const slots = (rows.practiceSlots ?? []).map((row) => {
+    if (row.field_subunit_id == null && row.field_id == null) {
+      throw new TypeError(`repair adapter: slot ${row.id} names no field`);
+    }
     const surfaceId = id(row.field_subunit_id ?? row.field_id);
     const startMinutes = timeToMinutes(row.start_time, `slot ${row.id} start_time`);
     const weekday = String(row.day_of_week).toUpperCase();
@@ -242,7 +261,7 @@ export function buildPracticeRepairInput(rows) {
       teamId: id(row.team_id),
       slotId,
       rangeText: row.effective_date_range ?? null,
-      range: parseDateRange(row.effective_date_range),
+      range: effectiveRangeOf(row.effective_date_range ?? null, slotRows.get(slotId)),
       source: row.source ?? null,
     };
   });
@@ -316,7 +335,10 @@ export function buildPracticeRepairInput(rows) {
     ...(coachPreferences.length > 0 ? { coachPreferences, teamCoachAssignments: coachRows } : {}),
     ...(calendar ? { calendar } : {}),
     ...(lightingOverrides.length > 0 ? { lightingOverrides } : {}),
-    ...(rows.options ?? {}),
+    // Only the search's own knobs: nothing the adapter derived can be replaced.
+    ...Object.fromEntries(
+      Object.entries(rows.options ?? {}).filter(([key]) => SEARCH_OPTIONS.has(key))
+    ),
   };
   return {
     input,
@@ -339,6 +361,14 @@ export function buildPracticeRepairInput(rows) {
               note: 'no portable-lighting windows supplied: no date is exempt from the daylight limit (their table is 8.9 D14 PR B)',
             },
       coachPreferences: { rowsRead: preferenceRows.length, approved: coachPreferences.length },
+      coaches:
+        coachRows.length > 0
+          ? { supplied: true, rowsRead: coachRows.length }
+          : {
+              supplied: false,
+              rowsRead: 0,
+              note: 'no team_coach_assignments rows: no coach overlap or coach day is judged',
+            },
     },
   };
 }
@@ -424,6 +454,7 @@ export function buildPracticeRepairPayload(adapted, result) {
   const exceptions = [];
   const newRows = [];
   const unlockRequired = [];
+  const replaced = new Set();
   const refused = [];
   const causeFields = { cause_kind: cause.kind, cause_id: cause.causeId };
 
@@ -445,10 +476,13 @@ export function buildPracticeRepairPayload(adapted, result) {
    * still meets that range would leave its practices shown: refused, and
    * kept in `plan` so the refusal names exactly what it withholds.
    */
+  // For a blackout the window always lies inside the unclosed row, so every
+  // blackout exception is refused until then; only a closed split row's
+  // TIME TBD window lies after its row.
   const planException = (row, rowLastDay, exception) => {
     exceptions.push(exception);
-    const { from, until } = /** @type {{from: string, until: string}} */ (
-      parseDateRange(exception.window)
+    const { first: from, last: until } = /** @type {{first: string, last: string}} */ (
+      practiceRangeBounds(exception.window)
     );
     if (from > rowLastDay) return;
     refused.push({
@@ -472,7 +506,12 @@ export function buildPracticeRepairPayload(adapted, result) {
     if (!row || !row.range) {
       throw new Error(`repair adapter: ${entry.assignmentId} is not a dated snapshot row`);
     }
-    const from = split ? result.lossDate : entry.window.from;
+    // A split window is the series' own: from D, or from its start when later.
+    const from = split
+      ? row.range.from > result.lossDate
+        ? row.range.from
+        : result.lossDate
+      : entry.window.from;
     const until = split ? row.range.until : entry.window.until;
     const window = `[${from},${until}]`;
     const slotId = placed ? slotFor(entry.to, from, until) : null;
@@ -487,20 +526,33 @@ export function buildPracticeRepairPayload(adapted, result) {
     }
 
     if (split) {
-      if (row.range.from >= from) {
-        refused.push({
+      // A row that starts on or after D has nothing before D to keep: a
+      // re-home replaces it (its key is not re-sent, so the writer prunes it
+      // under the unlock), and a TIME TBD cannot be closed away from it.
+      const closable = row.range.from < from;
+      if (closable) {
+        closes.push({ assignment_id: row.id, last_day: shiftDate(from, -1) });
+        unlockRequired.push({ assignment_id: row.id, why: 'closes re-ranges it' });
+      } else if (placed) {
+        replaced.add(row.id);
+        unlockRequired.push({
           assignment_id: row.id,
-          window,
-          why: PRACTICE_REPAIR_PAYLOAD_REFUSAL.ROW_NOT_CLOSABLE,
+          why: 'the payload no longer carries its key',
         });
-        continue;
       }
-      closes.push({ assignment_id: row.id, last_day: shiftDate(from, -1) });
-      unlockRequired.push({ assignment_id: row.id, why: 'closes re-ranges it' });
       if (placed) {
         const slot = /** @type {any} */ (slots.get(/** @type {string} */ (slotId)));
         const [built] = buildPracticeAssignmentRows({
-          assignments: [{ teamId: row.teamId, slotId, effectiveFrom: from, effectiveUntil: until }],
+          // The series keeps its provenance: a manual row stays manual.
+          assignments: [
+            {
+              teamId: row.teamId,
+              slotId,
+              effectiveFrom: from,
+              effectiveUntil: until,
+              source: row.source ?? undefined,
+            },
+          ],
           slots: [
             {
               id: slotId,
@@ -517,8 +569,9 @@ export function buildPracticeRepairPayload(adapted, result) {
           assigned_via: 'repair',
         });
       } else {
-        // After the close the window lies wholly after the row: a tail window.
-        planException(row, shiftDate(from, -1), {
+        // Closed, the window lies wholly after the row: a tail window. Not
+        // closable, it lies inside the row, and is refused below.
+        planException(row, closable ? shiftDate(from, -1) : row.range.until, {
           assignment_id: row.id,
           window,
           kind: PRACTICE_EXCEPTION_ROW_KIND.TIME_TBD,
@@ -551,12 +604,13 @@ export function buildPracticeRepairPayload(adapted, result) {
     );
   }
 
-  // Every snapshot row's key is re-sent unless `closes` keeps it by id: a
-  // save that left one out would prune it (and the lock would refuse).
+  // Every snapshot row's key is re-sent unless `closes` keeps it by id or a
+  // re-home replaces it: a save that left one out would prune it (and the
+  // lock would refuse).
   const closed = new Set(closes.map((close) => close.assignment_id));
   const assignmentRows = [
     ...snapshot
-      .filter((row) => !closed.has(row.id))
+      .filter((row) => !closed.has(row.id) && !replaced.has(row.id))
       .map((row) => ({
         team_id: row.teamId,
         practice_slot_id: row.slotId,

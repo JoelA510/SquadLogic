@@ -1,15 +1,29 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useId, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import { useOrganization } from '../../contexts/OrganizationContext.jsx';
 import { usePracticeRepairSnapshot } from '../../hooks/usePracticeRepairSnapshot.js';
+import { supabase } from '../../lib/supabaseClient.js';
 import {
+  TBD_REASON_TEXT,
   declineIn,
+  describeShape,
   namesOf,
   openPracticeRepair,
   panelRowsOf,
   undoIn,
 } from '../../utils/practiceRepairPanel.js';
+import {
+  ENACT_REFUSAL_TEXT,
+  enactGateOf,
+  enactPlanOf,
+  enactPracticeRecommendation,
+  enactPromptOf,
+  enactedRowsOf,
+  mintEnactKey,
+} from '../../utils/practiceRepairEnact.js';
+import { persistPracticeEnact } from '../../utils/practicePersistenceClient.js';
 import Button from '../ui/Button.jsx';
+import PracticeEnactDialog from './PracticeEnactDialog.jsx';
 import { PRACTICE_REASON } from '@squadlogic/core/practice/index.js';
 
 /** The finding a decline or undo stamps (`practice/recommendations.js`). */
@@ -28,15 +42,22 @@ const LOCAL_CODE = PRACTICE_REASON.REPAIR_RECOMMENDATION_LOCAL;
  *   memory (decisions are not persisted, 3b decision 10). After any, the
  *   panel carries `PRACTICE_REPAIR_RECOMMENDATION_LOCAL`: locally repaired,
  *   not proven optimal.
- * - **Read-only.** No enact, no RPC, no write: the only client calls are the
- *   snapshot's selects. Each window shows whether a save would be refused
- *   and why (every blackout window is, until 3b PR 12), never hiding one.
+ * - Each window shows whether a save would be refused and why (every
+ *   blackout window is, until 3b PR 12), never hiding one.
+ * - **Enact** (3b PR 11c, retirements only): one button per recommendation,
+ *   admin-only, enabled only once the retirement is COMMITTED (operator
+ *   answer Q3). In the retirement dialog's dry-run preview (`preview`) every
+ *   button is disabled with the reason; for a blackout it is disabled with
+ *   the save refusal (Q1). Its confirmation is the ruling-2 override prompt
+ *   (`PracticeEnactDialog`); the flow is `utils/practiceRepairEnact.js`,
+ *   which re-reads, re-judges and sends ONE write, never a retry. Nothing
+ *   else writes: declines and undos stay on screen only.
  * - **A failed or partial read shows no recommendations**, only the error,
  *   in a `role="alert"`. So does an input the adapter refuses.
  *
- * @param {{ loss: Object, subject: string }} props
+ * @param {{ loss: Object, subject: string, isAdmin?: boolean, preview?: boolean }} props
  */
-export default function PracticeRepairPanel({ loss, subject }) {
+export default function PracticeRepairPanel({ loss, subject, isAdmin = false, preview = false }) {
   const org = /** @type {any} */ (useOrganization() ?? {});
   const organizationId = org.currentOrganization?.id ?? null;
   const season = org.currentSeasonSetting ?? null;
@@ -45,6 +66,7 @@ export default function PracticeRepairPanel({ loss, subject }) {
     seasonSettingsId: season?.id ?? null,
   });
   const lossKey = JSON.stringify(loss);
+  const titleId = `practice-repair-title${useId().replace(/:/g, '')}`;
 
   let body;
   if (snapshot.error) {
@@ -70,6 +92,10 @@ export default function PracticeRepairPanel({ loss, subject }) {
         lossKey={lossKey}
         timeZone={season?.timezone ?? null}
         subject={subject}
+        isAdmin={isAdmin}
+        preview={preview}
+        organizationId={organizationId}
+        seasonSettingsId={season?.id ?? null}
       />
     );
   }
@@ -77,15 +103,17 @@ export default function PracticeRepairPanel({ loss, subject }) {
   return (
     <section
       className="card mt-2 p-3"
-      aria-labelledby="practice-repair-title"
+      aria-labelledby={titleId}
       data-testid="practice-repair-panel"
     >
-      <h3 id="practice-repair-title" className="text-sm" tabIndex={-1}>
+      <h3 id={titleId} className="text-sm" tabIndex={-1}>
         <strong>Practice repair recommendations</strong>
       </h3>
       <p className="text-sm" data-testid="practice-repair-read-only">
-        Read-only. Nothing here is saved or sent: declining only re-offers a slot on this screen,
-        and enacting a recommendation is not available yet.
+        Declining only re-offers a slot on this screen and is never saved.{' '}
+        {loss?.kind === 'retirement'
+          ? 'Enact saves one recommendation and locks it: admin-only, and only once the retirement is saved.'
+          : 'Enacting a blackout recommendation is not available yet.'}
       </p>
       {body}
     </section>
@@ -95,24 +123,59 @@ export default function PracticeRepairPanel({ loss, subject }) {
 PracticeRepairPanel.propTypes = {
   loss: PropTypes.object.isRequired,
   subject: PropTypes.string.isRequired,
+  isAdmin: PropTypes.bool,
+  preview: PropTypes.bool,
 };
 
 /**
- * @param {{ rows: Record<string, any[]>, lossKey: string, timeZone: string|null, subject: string }} props
+ * @param {{ rows: Record<string, any[]>, lossKey: string, timeZone: string|null, subject: string,
+ *   isAdmin: boolean, preview: boolean, organizationId: string|null,
+ *   seasonSettingsId: string|null }} props
  */
-function Recommendations({ rows, lossKey, timeZone, subject }) {
-  const opened = useMemo(() => {
+function Recommendations({
+  rows: openedRows,
+  lossKey,
+  timeZone,
+  subject,
+  isAdmin,
+  preview,
+  organizationId,
+  seasonSettingsId,
+}) {
+  const firstOpen = useMemo(() => {
     try {
-      return { ok: true, value: openPracticeRepair(rows, JSON.parse(lossKey), { timeZone }) };
+      return { ok: true, value: openPracticeRepair(openedRows, JSON.parse(lossKey), { timeZone }) };
     } catch (err) {
       return { ok: false, message: err?.message ?? String(err) };
     }
-  }, [rows, lossKey, timeZone]);
-  const [state, setState] = useState(opened.ok ? opened.value.state : null);
+  }, [openedRows, lossKey, timeZone]);
+  // After an enact (or a stale re-judge) the panel shows the FRESH read the
+  // flow re-based onto: its rows, its repair and its state, together.
+  const [fresh, setFresh] = useState(
+    /** @type {{ rows: Record<string, any[]>, opened: any } | null} */ (null)
+  );
+  const rows = fresh?.rows ?? openedRows;
+  const opened = useMemo(
+    () => /** @type {any} */ (fresh ? { ok: true, value: fresh.opened } : firstOpen),
+    [fresh, firstOpen]
+  );
+  const [state, setState] = useState(firstOpen.ok ? firstOpen.value.state : null);
   const [announce, setAnnounce] = useState('');
   const [actionError, setActionError] = useState(/** @type {string|null} */ (null));
+  const [dialog, setDialog] = useState(/** @type {any} */ (null));
+  const [busy, setBusy] = useState(false);
+  // The enacts of this session, as confirmed and written (shown from the fresh read).
+  const [enactLog, setEnactLog] = useState(
+    /** @type {Array<{ assignmentId: string, teamId: string, written: any }>} */ ([])
+  );
+  // Set when a write's outcome is unknown or its season unread: no further
+  // enact from this panel until it is reopened.
+  const [halted, setHalted] = useState(false);
+  // One write in flight, whatever React has rendered yet (a double click).
+  const inFlight = useRef(false);
   const headingRef = useRef(/** @type {HTMLParagraphElement|null} */ (null));
   const names = useMemo(() => namesOf(rows), [rows]);
+  const loss = useMemo(() => JSON.parse(lossKey), [lossKey]);
   // The payload builder runs here (for each window's refusal): guarded like
   // the repair itself, so a throw is the alert below, never a crashed dialog.
   const view = useMemo(() => {
@@ -149,6 +212,145 @@ function Recommendations({ rows, lossKey, timeZone, subject }) {
   };
 
   const local = state.findings.filter((f) => f.code === LOCAL_CODE);
+  const enactedRows = enactedRowsOf(rows, enactLog, names);
+
+  /** Open the override prompt for one recommendation, on the rows shown. */
+  const openEnact = (row) => {
+    const shown = state.recommendations.find((r) => r.assignmentId === row.assignmentId);
+    try {
+      setDialog({ ...dialogFor(shown, adapted, rows, names, loss, subject), notice: null });
+      setActionError(null);
+    } catch (err) {
+      setActionError(err?.message ?? String(err));
+    }
+  };
+
+  const adoptView = (view) => {
+    setFresh({ rows: view.rows, opened: view.opened });
+    setState(view.state);
+  };
+
+  const confirmEnact = async () => {
+    if (inFlight.current || !dialog) return;
+    inFlight.current = true;
+    setBusy(true);
+    const current = dialog;
+    try {
+      const outcome = await enactPracticeRecommendation({
+        client: supabase,
+        send: persistPracticeEnact,
+        organizationId,
+        seasonSettingsId,
+        loss,
+        timeZone,
+        state,
+        shown: current.shown,
+        shownPrompt: current.prompt,
+        answer: { accepted: true },
+        enactKey: mintEnactKey(),
+      });
+      if (outcome.status === 'enacted' || outcome.status === 'enacted-unread') {
+        setEnactLog((log) => [
+          ...log,
+          {
+            assignmentId: current.shown.assignmentId,
+            teamId: current.shown.teamId,
+            written: outcome.written,
+          },
+        ]);
+      }
+      if (outcome.status === 'enacted-unread') {
+        setHalted(true);
+        setDialog(null);
+        setActionError(
+          `The practice for ${current.team} was enacted, but the season could not be read again (${outcome.message}). Close and reopen this panel before enacting anything else.`
+        );
+        headingRef.current?.focus();
+        return;
+      }
+      if (outcome.status === 'enacted') {
+        adoptView(outcome.view);
+        setDialog(null);
+        setAnnounce(
+          `Enacted the recommendation for ${current.team}. Its practice is saved and locked.`
+        );
+        headingRef.current?.focus();
+        return;
+      }
+      if (outcome.view) adoptView(outcome.view);
+      if (outcome.status === 'stale') {
+        const fresher = outcome.view?.state.recommendations.find(
+          (r) => r.assignmentId === current.shown.assignmentId
+        );
+        if (outcome.unread) {
+          setHalted(true);
+          setDialog({
+            ...current,
+            notice: {
+              tone: 'alert',
+              text: `The season changed since this was shown, and it could not be read again (${outcome.unread}). Nothing was enacted. Close and reopen the panel.`,
+            },
+            blocked: 'The season could not be read again.',
+          });
+          return;
+        }
+        const again = outcome.stillStands
+          ? 'It still stands: tick the box and confirm again to enact it.'
+          : `It changed (${(outcome.differences ?? []).join(', ') || outcome.why}): now ${
+              !fresher
+                ? 'no longer displaced'
+                : fresher.to
+                  ? describeShape(fresher.to, names)
+                  : 'TIME TBD'
+            }. Close this and review the updated recommendation.`;
+        // Still standing: the prompt is rebuilt on the fresh read, so what is
+        // ticked again is what the next Confirm will check.
+        const rebuilt =
+          outcome.stillStands && fresher
+            ? dialogFor(
+                fresher,
+                outcome.view.opened.adapted,
+                outcome.view.rows,
+                namesOf(outcome.view.rows),
+                loss,
+                subject
+              )
+            : {};
+        setDialog({
+          ...current,
+          ...rebuilt,
+          notice: { tone: 'alert', text: `The season changed since this was shown. ${again}` },
+          blocked: outcome.stillStands ? null : 'This recommendation changed since it was shown.',
+        });
+        return;
+      }
+      if (outcome.status === 'error' && outcome.sent) {
+        // The write went out and its answer did not come back: say so.
+        setHalted(true);
+        setDialog({
+          ...current,
+          notice: {
+            tone: 'alert',
+            text: `It is not known whether the practice was enacted: ${outcome.message}. Close and reopen the panel to see the season as saved.`,
+          },
+          blocked: 'The outcome of the last enact is unknown.',
+        });
+        return;
+      }
+      const text =
+        outcome.status === 'refused'
+          ? (ENACT_REFUSAL_TEXT[outcome.refusal] ?? outcome.refusal)
+          : outcome.message;
+      setDialog({
+        ...current,
+        notice: { tone: 'alert', text: `Nothing was enacted: ${text}` },
+        blocked: text,
+      });
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  };
 
   return (
     <>
@@ -236,6 +438,12 @@ function Recommendations({ rows, lossKey, timeZone, subject }) {
                     )}
                   </td>
                   <td>
+                    <EnactControl
+                      row={row}
+                      gate={enactGateOf({ isAdmin, preview, rows, loss, refusals: row.refusals })}
+                      busy={busy || halted}
+                      onEnact={() => openEnact(row)}
+                    />
                     {row.canDecline && (
                       <Button
                         size="sm"
@@ -273,6 +481,56 @@ function Recommendations({ rows, lossKey, timeZone, subject }) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {enactedRows.length > 0 && (
+        <div className="mt-2" data-testid="practice-repair-enacted">
+          <p className="text-sm">
+            <strong>Enacted this session</strong> (the change budget counts only this
+            session&rsquo;s enacts):
+          </p>
+          <ul className="text-sm">
+            {enactedRows.map((e) => (
+              <li
+                key={e.assignmentId}
+                data-testid="practice-repair-enacted-row"
+                data-assignment-id={e.assignmentId}
+              >
+                {e.team}:{' '}
+                {e.closedRange ? `its series now ends ${e.closedRange}` : 'its series was replaced'}
+                {e.timeTbd ? ', TIME TBD after it' : ''}
+                {e.missing > 0 ? `; ${e.missing} written row(s) not found on the fresh read` : ''}
+                {e.locked.map((l) => {
+                  const slot = adapted.context.slots.get(l.slotId);
+                  return (
+                    <span key={l.id} data-testid="practice-repair-enacted-locked">
+                      ; moved to {slot ? describeShape(slot, names) : l.slotId}, {l.range}{' '}
+                      <span className="badge warning">Locked</span>
+                    </span>
+                  );
+                })}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {dialog && (
+        <PracticeEnactDialog
+          open
+          fieldName={dialog.fieldName}
+          storedDate={dialog.storedDate}
+          team={dialog.team}
+          teams={dialog.teams}
+          rows={dialog.rows}
+          replacement={dialog.replacement}
+          affected={dialog.affected}
+          busy={busy}
+          notice={dialog.notice}
+          blocked={dialog.blocked}
+          onConfirm={confirmEnact}
+          onClose={() => setDialog(null)}
+        />
       )}
 
       <p className="text-sm mt-2">
@@ -320,4 +578,89 @@ Recommendations.propTypes = {
   lossKey: PropTypes.string.isRequired,
   timeZone: PropTypes.string,
   subject: PropTypes.string.isRequired,
+  isAdmin: PropTypes.bool.isRequired,
+  preview: PropTypes.bool.isRequired,
+  organizationId: PropTypes.string,
+  seasonSettingsId: PropTypes.string,
+};
+
+/**
+ * The override prompt's content for one recommendation, from ONE read (its
+ * adapter output and rows): the prompt record the enact will check, and the
+ * words the dialog shows.
+ */
+function dialogFor(shown, adapted, rows, names, loss, subject) {
+  const prompt = enactPromptOf(adapted, rows, enactPlanOf(adapted, shown));
+  const snapshotRow = adapted.context.snapshot.find((r) => r.id === shown.assignmentId);
+  const field = (rows.fields ?? []).find(
+    (f) => String(f.id).toLowerCase() === String(loss.field?.id).toLowerCase()
+  );
+  const team = names.team(shown.teamId);
+  return {
+    shown,
+    prompt,
+    team,
+    teams: [{ id: shown.teamId, name: team }],
+    fieldName: field?.name ?? subject,
+    // The STORED date: the gate enabled the button only when it is set.
+    storedDate: field?.effective_to ?? '',
+    rows: prompt.record.rows.map((r) => ({
+      assignmentId: r.assignment_id,
+      now: describeShape(shown.from, names),
+      range: snapshotRow ? `${snapshotRow.range.from} to ${snapshotRow.range.until}` : '',
+      assignedVia: r.assigned_via,
+      effect: r.effect,
+      rangeAfter: r.range_after,
+    })),
+    replacement: shown.to
+      ? `${describeShape(shown.to, names)}, from ${prompt.lossDate} to ${shown.effectiveUntil}`
+      : `TIME TBD from ${prompt.lossDate}, because ${TBD_REASON_TEXT[shown.reason] ?? shown.reason}`,
+    affected: prompt.record.published_practices_affected,
+    blocked: null,
+  };
+}
+
+/**
+ * One row's Enact button, and its visible reason when it is disabled.
+ *
+ * @param {{ row: any, gate: { enabled: boolean, why: string|null, text: string|null },
+ *   busy: boolean, onEnact: () => void }} props
+ */
+function EnactControl({ row, gate, busy, onEnact }) {
+  // A blackout splits one series into several windows: one id per control.
+  const reasonId = `practice-enact-why${useId().replace(/:/g, '')}`;
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="primary"
+        disabled={!gate.enabled || busy}
+        aria-busy={busy}
+        aria-describedby={gate.enabled ? undefined : reasonId}
+        aria-label={`Enact the recommendation for ${row.team}`}
+        data-testid="practice-repair-enact"
+        data-enact-gate={gate.why ?? 'open'}
+        onClick={onEnact}
+      >
+        Enact
+      </Button>
+      {!gate.enabled && (
+        <span
+          id={reasonId}
+          className="text-sm block"
+          data-testid="practice-repair-enact-why"
+          data-enact-gate={gate.why}
+        >
+          {gate.text}
+        </span>
+      )}
+    </>
+  );
+}
+
+EnactControl.propTypes = {
+  row: PropTypes.object.isRequired,
+  gate: PropTypes.object.isRequired,
+  busy: PropTypes.bool.isRequired,
+  onEnact: PropTypes.func.isRequired,
 };

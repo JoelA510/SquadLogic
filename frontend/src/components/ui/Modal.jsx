@@ -18,8 +18,19 @@ const FOCUSABLE =
  * @param {React.ReactNode} [props.footer] - Footer actions (rendered in .modal-foot).
  * @param {React.ReactNode} [props.icon] - Optional leading element in the header.
  * @param {boolean} [props.wide]
+ * @param {{ current: HTMLElement | null }} [props.initialFocusRef] - focused on open instead of
+ *   the first focusable element (e.g. a heading with `tabIndex={-1}`)
  */
-export default function Modal({ open, onClose, title, children, footer, icon, wide = false }) {
+export default function Modal({
+  open,
+  onClose,
+  title,
+  children,
+  footer,
+  icon,
+  wide = false,
+  initialFocusRef = undefined,
+}) {
   const dialogRef = useRef(null);
   const previousFocusRef = useRef(null);
 
@@ -29,7 +40,7 @@ export default function Modal({ open, onClose, title, children, footer, icon, wi
 
     const dialog = dialogRef.current;
     const first = dialog?.querySelector(FOCUSABLE);
-    (first || dialog)?.focus();
+    (initialFocusRef?.current || first || dialog)?.focus();
 
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') {
@@ -56,7 +67,7 @@ export default function Modal({ open, onClose, title, children, footer, icon, wi
       document.removeEventListener('keydown', handleKeyDown, true);
       previousFocusRef.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open, onClose, initialFocusRef]);
 
   if (!open) return null;
 
@@ -109,4 +120,5 @@ Modal.propTypes = {
   footer: PropTypes.node,
   icon: PropTypes.node,
   wide: PropTypes.bool,
+  initialFocusRef: PropTypes.shape({ current: PropTypes.any }),
 };

@@ -15,12 +15,20 @@ import { PREFERENCE_COLUMNS } from './useCoachPracticePreferences.js';
  * the table: a repair planned over a partial estate or a partial season
  * would recommend ground somebody already holds, so none is shown.
  *
- * Read-only by construction: `select` only. Nothing here geocodes or fetches
+ * Read-only by construction: `select` and the read-only
+ * `practice_schedule_fingerprint` only. Nothing here geocodes or fetches
  * anything but these rows.
+ *
+ * **Fingerprint first** (8.6 3b PR 11c, `docs/PHASE_8_6_PR11_ENACT_PLAN.md`
+ * §1 step 3, §4): the writer's fingerprint is read BEFORE any row, so a write
+ * that lands between the two reads makes the base stale (the writer refuses
+ * 40001), never a stale plan under a fresh base. It is part of the
+ * all-or-nothing read: an unreadable fingerprint fails the snapshot. Each
+ * practice row also carries its `assigned_via`, which the enact prompt shows.
  *
  * @param {any} client - the supabase client (`lib/supabaseClient.js`)
  * @param {{ organizationId: string, seasonSettingsId: string }} params
- * @returns {Promise<{ ok: true, rows: Record<string, any[]> } | { ok: false, message: string }>}
+ * @returns {Promise<{ ok: true, rows: Record<string, any[]>, fingerprint: string } | { ok: false, message: string }>}
  */
 export async function loadPracticeRepairSnapshot(client, { organizationId, seasonSettingsId }) {
   if (!organizationId || !seasonSettingsId) {
@@ -52,6 +60,15 @@ export async function loadPracticeRepairSnapshot(client, { organizationId, seaso
       'id, source, closes_location_id, closes_field_id, blackout_from, blackout_until, start_minutes, end_minutes, reason',
     ],
   ];
+  const print = await client.rpc('practice_schedule_fingerprint', {
+    p_season_settings_id: seasonSettingsId,
+  });
+  if (print?.error || typeof print?.data !== 'string' || print.data === '') {
+    return {
+      ok: false,
+      message: `practice_schedule_fingerprint: ${print?.error?.message ?? 'unreadable'}`,
+    };
+  }
   // In parallel (the sibling readers' `Promise.all` over `fetchAllPages`);
   // each read's failure is caught as its own, so any one fails the whole.
   const [reads, season] = await Promise.all([
@@ -85,8 +102,9 @@ export async function loadPracticeRepairSnapshot(client, { organizationId, seaso
     practice_slot_id: row.slotId,
     effective_date_range: row.effectiveDateRange,
     source: row.source,
+    assigned_via: row.assignedVia,
   }));
-  return { ok: true, rows };
+  return { ok: true, rows, fingerprint: print.data };
 }
 
 /**

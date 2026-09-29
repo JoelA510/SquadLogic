@@ -131,9 +131,12 @@ export function daylightPlanFor(locations, timeZone) {
  *
  * @param {Record<string, any[]>} rows - `loadPracticeRepairSnapshot()` rows
  * @param {Object} loss - the adapter's `{kind:'retirement', field}` or `{kind:'blackout', blackout}`
- * @param {{ timeZone?: string|null }} [options]
+ * @param {{ timeZone?: string|null, baseFingerprint?: string|null }} [options] -
+ *   `baseFingerprint`: the writer fingerprint read with `rows` (3b PR 11c's
+ *   enact reads it first and plans its write on it; the panel's own open
+ *   plans no write and passes none)
  */
-export function openPracticeRepair(rows, loss, { timeZone = null } = {}) {
+export function openPracticeRepair(rows, loss, { timeZone = null, baseFingerprint = null } = {}) {
   const daylightPlan = daylightPlanFor(rows.locations ?? [], timeZone);
   const adapted = buildPracticeRepairInput({
     locations: rows.locations,
@@ -146,6 +149,7 @@ export function openPracticeRepair(rows, loss, { timeZone = null } = {}) {
     fieldClosures: rows.fieldClosures,
     loss,
     ...(daylightPlan.daylight ? { daylight: daylightPlan.daylight } : {}),
+    ...(baseFingerprint ? { baseFingerprint } : {}),
   });
   const result = repairPracticeLoss(adapted.input);
   const state = createRecommendationState(adapted.input);

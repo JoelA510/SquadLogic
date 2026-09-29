@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState } from 'react';
+import React, { Suspense, lazy, useId, useState } from 'react';
 import PropTypes from 'prop-types';
 import { usePermission } from '../../hooks/usePermission.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
@@ -14,13 +14,19 @@ const PracticeRepairPanel = lazy(() => import('./PracticeRepairPanel.jsx'));
  * two arms have one contract. Admin-only: anyone else sees the button
  * disabled with the reason beside it.
  *
- * @param {{ loss: Object, subject: string }} props - `loss` in the adapter's
- *   shape: `{kind:'retirement', field}` or `{kind:'blackout', blackout}`
+ * 8.6 3b PR 11c: the field card of a RETIRED field opens it too, with the
+ * loss built from the stored `effective_to`. `preview` marks the retirement
+ * dialog's dry run: the panel then disables every Enact button (Q3).
+ *
+ * @param {{ loss: Object, subject: string, preview?: boolean, label?: string }} props - `loss`
+ *   in the adapter's shape: `{kind:'retirement', field}` or `{kind:'blackout', blackout}`
  */
-export default function PracticeRepairLauncher({ loss, subject }) {
+export default function PracticeRepairLauncher({ loss, subject, preview = false, label = null }) {
   const { can } = usePermission();
   const isAdmin = can(PERMISSIONS.MANAGE_ORGANIZATION);
   const [open, setOpen] = useState(false);
+  // A retired field's card holds one launcher each, so the region is per launcher.
+  const regionId = `practice-repair-region${useId().replace(/:/g, '')}`;
 
   return (
     <div data-testid="practice-repair-launcher" className="mt-2">
@@ -29,11 +35,13 @@ export default function PracticeRepairLauncher({ loss, subject }) {
         size="sm"
         disabled={!isAdmin}
         aria-expanded={open}
-        aria-controls={open ? 'practice-repair-region' : undefined}
+        aria-controls={open ? regionId : undefined}
         aria-describedby={isAdmin ? undefined : 'practice-repair-admin-only'}
         onClick={() => setOpen((value) => !value)}
       >
-        {open ? 'Hide practice repair recommendations' : 'Show practice repair recommendations'}
+        {open
+          ? 'Hide practice repair recommendations'
+          : (label ?? 'Show practice repair recommendations')}
       </Button>
       {!isAdmin && (
         <p id="practice-repair-admin-only" className="text-sm">
@@ -41,7 +49,7 @@ export default function PracticeRepairLauncher({ loss, subject }) {
         </p>
       )}
       {open && isAdmin && (
-        <div id="practice-repair-region">
+        <div id={regionId}>
           <Suspense
             fallback={
               <p className="text-sm" role="status">
@@ -49,7 +57,12 @@ export default function PracticeRepairLauncher({ loss, subject }) {
               </p>
             }
           >
-            <PracticeRepairPanel loss={loss} subject={subject} />
+            <PracticeRepairPanel
+              loss={loss}
+              subject={subject}
+              isAdmin={isAdmin}
+              preview={preview}
+            />
           </Suspense>
         </div>
       )}
@@ -60,4 +73,6 @@ export default function PracticeRepairLauncher({ loss, subject }) {
 PracticeRepairLauncher.propTypes = {
   loss: PropTypes.object.isRequired,
   subject: PropTypes.string.isRequired,
+  preview: PropTypes.bool,
+  label: PropTypes.string,
 };

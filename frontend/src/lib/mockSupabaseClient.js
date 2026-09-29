@@ -11,6 +11,7 @@ import { HEADER_ALIASES, RESERVED_KEYS } from '../utils/telemetryUtils.js';
 import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js';
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
+import { handlePracticeEnactRpc } from './mockPracticeEnact.js';
 
 const mockId = (prefix = '') =>
   prefix + (crypto.randomUUID?.() || crypto.getRandomValues(new Uint32Array(4)).join('-'));
@@ -2339,6 +2340,18 @@ export const mockSupabase = {
       if (lighting) {
         if (!lighting.error) saveDB(db);
         return lighting;
+      }
+      // 8.6 3b PR 11c: the writer fingerprint and the enact wrapper RPC
+      // (migrations 20260929000000, 20261004000000); `mockPracticeEnact.js`
+      // lists what is mirrored and what is not.
+      const enacted = handlePracticeEnactRpc(db, name, params, {
+        currentUserId,
+        isOrgAdmin,
+        newId: () => globalThis.crypto.randomUUID(),
+      });
+      if (enacted) {
+        if (!enacted.error) saveDB(db);
+        return enacted;
       }
     }
 

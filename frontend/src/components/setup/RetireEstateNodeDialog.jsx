@@ -244,6 +244,8 @@ export default function RetireEstateNodeDialog({
                     repairPanel: (
                       <PracticeRepairLauncher
                         subject={node.name}
+                        // The dry run: nothing is stored yet, so no enact (Q3).
+                        preview
                         loss={{
                           kind: 'retirement',
                           field: { id: node.id, effective_to: effectiveTo },

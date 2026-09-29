@@ -54,6 +54,12 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => {
   const supabase = {
     from,
     rpc: (name) => {
+      // 8.6 3b PR 11c: the loader reads the writer fingerprint first. It is
+      // a read (STABLE, SECURITY INVOKER); any other RPC is counted a write.
+      if (name === 'practice_schedule_fingerprint') {
+        h.reads.push(`rpc:${name}`);
+        return Promise.resolve({ data: '0123456789abcdef0123456789abcdef', error: null });
+      }
       h.writes.push(['rpc', name]);
       return Promise.resolve({ data: null, error: null });
     },

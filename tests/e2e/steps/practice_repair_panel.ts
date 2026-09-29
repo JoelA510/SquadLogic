@@ -122,6 +122,8 @@ Given(
           slot_id: slotId,
           run_id: 'run-repair-panel',
           source: 'auto',
+          // The column's default (20260929000000): the enact prompt shows it.
+          assigned_via: 'auto',
           effective_date_range: '[2026-09-01,2026-12-01)',
         });
         db.practice_assignments = [

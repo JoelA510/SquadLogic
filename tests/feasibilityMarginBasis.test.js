@@ -11,11 +11,12 @@
  * to "name the first-claimed bound" would pass it. This file is the constructed
  * witness for `marginFrom()`.
  *
- * **Not covered here:** the roll-up in `canTeamPlay()` that copies the chosen
- * candidate's basis (`marginBasis: best?.marginBasis`, `feasibility/queries.js`).
- * The original defect was there, as `best?.binding?.[0]?.kind`. Reverting it
- * would pass this file, because no answer-level case with a divergent binding
- * exists yet.
+ * **The roll-up is witnessed elsewhere.** `canTeamPlay()` copies the chosen
+ * candidate's basis (`marginBasis: best?.marginBasis`, `feasibility/queries.js`);
+ * the original defect was there, as `best?.binding?.[0]?.kind`. Reverting it
+ * passes this file but fails the corpus witness in `feasibilityApi.test.js`
+ * ("the roll-up names the best candidate's tightest bound, not its first
+ * claimed").
  *
  * **Reachable, not forged.** The binding set is built by the production
  * `boundsOf()`, which orders bounds by `kind` alphabetically. That order says

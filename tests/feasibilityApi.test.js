@@ -1949,13 +1949,12 @@ describe('feasibility :: finding 2 — a margin’s basis names the bound it cam
   it('names the bound whose slack the margin is, not whichever was claimed first', () => {
     // The corpus's instance was 06GMicro01 at 12:30: three bounds, the first
     // claimed 5 minutes short and the tightest 55. #61 made the coach overlap
-    // compromise, that answer's binding changed, and **no answer this corpus
-    // produces now has a tightest bound that is not also its first** — searched
-    // over every team at four kickoffs (528 answers). So the order-independence
-    // the original instance proved is no longer witnessed here; it is stated
-    // rather than left passing over nothing, and filed as #63. What every answer can
-    // still show is the invariant itself: the basis is the argmin of the slack
-    // and the margin is that slack.
+    // compromise, that answer's binding changed, and **no answer at the four
+    // kickoffs below has a tightest bound that is not also its first** (528
+    // answers). The order-independence the original instance proved is
+    // witnessed by the next test instead (#63), at a kickoff outside these four.
+    // What every answer here can still show is the invariant itself: the basis is
+    // the argmin of the slack and the margin is that slack.
     const dates = [...new Set(schedule.games.map((game) => game.date))].sort();
     const teamIds = [...new Set(schedule.teams.map((team) => team.id))].sort();
     let multiBound = 0;
@@ -1975,15 +1974,54 @@ describe('feasibility :: finding 2 — a margin’s basis names the bound it cam
     }
     // The meta-assertion: answers with more than one bound were examined.
     expect(multiBound).toBeGreaterThan(0);
-    // `firstIsNotTightest` is counted, not asserted: on this corpus it is 0, so
-    // the order-independence above is **not witnessed here** — a regression to
-    // "name the first-claimed bound" would pass. #63 added a constructed witness
-    // for `marginFrom()` in `tests/feasibilityMarginBasis.test.js`, which goes red
-    // when it picks the first-claimed or loosest bound. The roll-up copy in
-    // `canTeamPlay()` (`marginBasis: best?.marginBasis`) still has no divergent
-    // case: reverting it to `binding[0].kind` would pass here and there.
+    // `firstIsNotTightest` is counted, not asserted: at these kickoffs it is 0,
+    // so this loop alone would pass a regression to "name the first-claimed
+    // bound". The two witnesses that go red on it are the next test (the
+    // `canTeamPlay()` roll-up) and `tests/feasibilityMarginBasis.test.js`
+    // (`marginFrom()` itself).
     void firstIsNotTightest;
   }, 475_000); // 528 corpus answers: 66.9 s alone, 59.0 / 60.1 / 117.7 / 82.7 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
+
+  it('the roll-up names the best candidate’s tightest bound, not its first claimed (#63)', () => {
+    // **The original defect's site.** `canTeamPlay()` copies the best
+    // candidate's basis; it used to take `binding[0].kind`, which is claim order.
+    // A cell's binding is merged from its groups without reordering inside one,
+    // and the coach-travel group arrives in transition order, so a looser
+    // transition can be claimed before a tighter one of another kind. 10G7v701
+    // at 08:15 is such an answer on this corpus: found by a search over every
+    // team at every 15 minutes from 08:00, named here because that search is too
+    // slow to run as a test. If the corpus stops producing the divergence, the
+    // meta-assertion fails rather than the test passing over nothing.
+    const answer = canTeamPlay(
+      context,
+      {
+        teamId: '10G7v701',
+        dates: [...new Set(schedule.games.map((game) => game.date))].sort(),
+        kickoffMinutes: 8 * 60 + 15,
+      },
+      { venueComplexes }
+    );
+    const best =
+      answer.candidates.find((candidate) => candidate.verdict === FEASIBILITY_VERDICT.FEASIBLE) ??
+      answer.candidates.find((candidate) => candidate.verdict === FEASIBILITY_VERDICT.INFEASIBLE);
+    expect(best).toBeDefined();
+    const measured = best.binding.filter((bound) => typeof bound.slackMinutes === 'number');
+    const least = Math.min(...measured.map((bound) => bound.slackMinutes));
+    const tightestKinds = new Set(
+      measured.filter((bound) => bound.slackMinutes === least).map((bound) => bound.kind)
+    );
+
+    // The meta-assertion, from the candidate the roll-up reads: one kind is
+    // tightest, and it is not the kind claimed first.
+    expect(tightestKinds.size).toBe(1);
+    const [tightestKind] = tightestKinds;
+    expect(best.binding[0].kind).not.toBe(tightestKind);
+
+    // The roll-up.
+    expect(answer.binding).toEqual(best.binding);
+    expect(answer.marginBasis).toBe(tightestKind);
+    expect(answer.marginMinutes).toBe(least);
+  });
 
   it('never reports a basis without a margin, on any answer shape', () => {
     // **The rule.** A basis is the name of the bound the number came from, so

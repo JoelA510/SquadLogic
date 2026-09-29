@@ -243,6 +243,7 @@ in 3b changes the default weights.
 | 9 | Who reads preferences | Admins and the coach themself |
 | 10 | Declines | Not persisted alone; the enact audit records declined pairs |
 | 11 | Delete-field arm | Show "retire to repair"; no repair computed for a deletion |
+| 12 | Non-admin auto-scheduler runs once approved preferences exist (operator 2026-09-29) | Refuse with 403 `COACH_PREFERENCES_NOT_VISIBLE` (#477): RLS shows a coach or staff user only their own preferences, so a partial read is refused rather than used. Admins unaffected |
 
 ## 6. Witnesses (each enumerated from roster, registry or pre-apply snapshot)
 

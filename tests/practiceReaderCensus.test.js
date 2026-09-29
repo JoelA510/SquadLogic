@@ -136,8 +136,14 @@ function walk(dir, out = []) {
   return out;
 }
 
-const stripJsComments = (src) =>
-  src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+/**
+ * SQL comments are stripped: migrations narrate the table in `--` lines, and
+ * a commented-out `DROP FUNCTION` must not delete a live definition. JS is
+ * scanned **unstripped**: a regex cannot tell a `/*` inside a string (a glob,
+ * say) from a comment, and stripping one would hide real code. A commented
+ * mention is therefore counted as a reader -- a false positive the registry
+ * must answer, which fails loud, rather than a false negative, which would not.
+ */
 const stripSqlComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--.*$/gm, '');
 
 /** The JS patterns: a select from the table, or an embed of it. */
@@ -147,7 +153,10 @@ const JS_READS = [
 ];
 
 /** @param {string} src */
-const jsReadsTable = (src) => JS_READS.some((re) => re.test(stripJsComments(src)));
+const jsReadsTable = (src) => JS_READS.some((re) => re.test(src));
+
+/** An import statement of either arm of the helper. */
+const IMPORTS_HELPER = /\bfrom\s+(['"])[^'"]*\/practiceExceptions(?:\.js|\.ts)?\1/;
 
 function jsSubjects() {
   const files = JS_ROOTS.flatMap((root) => walk(path.join(REPO, root)))
@@ -255,8 +264,7 @@ describe('practice-reader census (W16)', () => {
       if (entry.class === 'pending') expect(entry.pr, key).toMatch(/^12[bcd]$/);
       // A SQL function cannot import the helper; 12d states its own rule in pgTAP.
       if (key.startsWith('sql:')) continue;
-      const src = stripJsComments(readFileSync(path.join(REPO, key), 'utf8'));
-      const imports = /practiceExceptions(?:\.js|\.ts)?['"`]/.test(src);
+      const imports = IMPORTS_HELPER.test(readFileSync(path.join(REPO, key), 'utf8'));
       if (entry.class === 'applies') expect(imports, key).toBe(true);
       if (entry.class === 'pending') {
         expect(imports, `${key} imports the helper: move it to applies`).toBe(false);
@@ -268,8 +276,17 @@ describe('practice-reader census (W16)', () => {
     expect(jsReadsTable(`await supabase.from('practice_assignments').select('id');`)).toBe(true);
     expect(jsReadsTable('db.from("practice_assignments")')).toBe(true);
     expect(jsReadsTable("select('id, practice_assignments!team_id(id)')")).toBe(true);
-    expect(jsReadsTable("// .from('practice_assignments')")).toBe(false);
+    // A read behind a glob string is still seen; a commented read is counted (fails loud).
+    expect(jsReadsTable("const g = 'src/**/*.js';\ndb.from('practice_assignments');")).toBe(true);
+    expect(jsReadsTable("// .from('practice_assignments')")).toBe(true);
     expect(jsReadsTable("const msg = 'practice_assignments';")).toBe(false);
+    expect(
+      IMPORTS_HELPER.test("import { a } from '@squadlogic/core/utils/practiceExceptions.js';")
+    ).toBe(true);
+    expect(
+      IMPORTS_HELPER.test("import { a } from '../_shared/calendar/practiceExceptions.ts';")
+    ).toBe(true);
+    expect(IMPORTS_HELPER.test("import { a } from './practiceOccurrences.js';")).toBe(false);
     const { latest } = latestSqlBodies([
       {
         name: '1.sql',

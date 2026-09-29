@@ -114,7 +114,9 @@ export function practiceRangeBounds(range) {
 
 /**
  * The first date a `daterange` literal covers, read from its lower bound
- * alone, or `null` when that bound does not read.
+ * alone, or `null` when that bound does not read. `upperUnbounded` says
+ * whether the upper bound is absent (`[2026-11-02,)`, or `infinity`) rather
+ * than present and unreadable.
  *
  * The lower half of {@link practiceRangeBounds} -- the same literal, the same
  * marker rule -- for a caller that must act on a range whose upper bound is
@@ -123,7 +125,7 @@ export function practiceRangeBounds(range) {
  * both read {@link RANGE_LITERAL}.
  *
  * @param {unknown} range
- * @returns {string | null}
+ * @returns {{ first: string, upperUnbounded: boolean } | null}
  */
 export function practiceRangeLowerBound(range) {
   const match = RANGE_LITERAL.exec(String(range ?? '').trim());
@@ -131,7 +133,9 @@ export function practiceRangeLowerBound(range) {
   const lower = match[2].trim();
   if (!ISO_DATE.test(lower)) return null;
   const first = isoDayNumber(lower) + (match[1] === '[' ? 0 : 1);
-  return Number.isFinite(first) ? isoDateOfDayNumber(first) : null;
+  if (!Number.isFinite(first)) return null;
+  const upper = match[3].trim().toLowerCase();
+  return { first: isoDateOfDayNumber(first), upperUnbounded: upper === '' || upper === 'infinity' };
 }
 
 /**

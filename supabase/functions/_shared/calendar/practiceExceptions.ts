@@ -59,6 +59,8 @@ export const PRACTICE_EXCEPTION_CODE = Object.freeze({
   UNREADABLE: 'PRACTICE_EXCEPTION_UNREADABLE',
   ROW_UNREAD: 'PRACTICE_EXCEPTION_ROW_UNREAD',
   TBD_SHADOWED: 'PRACTICE_TBD_SHADOWED',
+  ROW_REFUSED: 'PRACTICE_EXCEPTION_ROW_REFUSED',
+  RELOCATION_UNMATCHED: 'PRACTICE_EXCEPTION_RELOCATION_UNMATCHED',
 });
 
 // A PostgREST row: its fields are read, never trusted, by the rules below.
@@ -130,13 +132,17 @@ export function practiceRangeBounds(range: unknown): { first: string; last: stri
 }
 
 /** Core `practiceRangeLowerBound`. */
-export function practiceRangeLowerBound(range: unknown): string | null {
+export function practiceRangeLowerBound(
+  range: unknown
+): { first: string; upperUnbounded: boolean } | null {
   const match = RANGE_LITERAL.exec(String(range ?? '').trim());
   if (match === null) return null;
   const lower = match[2].trim();
   if (!ISO_DATE.test(lower)) return null;
   const first = isoDayNumber(lower) + (match[1] === '[' ? 0 : 1);
-  return Number.isFinite(first) ? isoDateOfDayNumber(first) : null;
+  if (!Number.isFinite(first)) return null;
+  const upper = match[3].trim().toLowerCase();
+  return { first: isoDateOfDayNumber(first), upperUnbounded: upper === '' || upper === 'infinity' };
 }
 
 /** Core `practiceOccurrenceDates`. */
@@ -185,11 +191,19 @@ function readClaim(exception: Rec, bounds: { first: string; last: string }, rowD
   const exceptionId = exception.id ?? null;
   const causeKind = exception.cause_kind ?? null;
   const whole = practiceRangeBounds(exception.window);
-  const first = whole ? whole.first : practiceRangeLowerBound(exception.window);
-  if (first === null) return { exceptionId, causeKind, unreadableWindow: true } as const;
+  const lower = whole ? null : practiceRangeLowerBound(exception.window);
+  if (whole === null && lower === null) {
+    return { exceptionId, causeKind, unreadableWindow: true } as const;
+  }
+  const first = whole ? whole.first : (lower as { first: string }).first;
   const last = whole ? whole.last : null;
   const claim = { exceptionId, causeKind, unreadableWindow: false, first, last };
-  if (last === null) return { ...claim, effect: 'open', dates: [] } as Claim;
+  if (last === null) {
+    const code = (lower as { upperUnbounded: boolean }).upperUnbounded
+      ? PRACTICE_EXCEPTION_CODE.WINDOW_OPEN
+      : PRACTICE_EXCEPTION_CODE.WINDOW_UNREADABLE;
+    return { ...claim, effect: 'open', code, dates: [] } as Claim;
+  }
 
   const kind = exception.kind;
   const readable =
@@ -269,7 +283,12 @@ export function applyPracticeExceptions(input: {
     datesSuppressed: 0,
   };
 
-  const rowIds = new Set(rows.map((row) => (isRecord(row) ? row.id : undefined)));
+  const rowIds = new Set(
+    rows
+      .filter(isRecord)
+      .map((row) => row.id)
+      .filter((id) => id != null)
+  );
   const liveByRow = new Map<unknown, Rec[]>();
   for (const exception of exceptions) {
     if (!isRecord(exception)) {
@@ -286,7 +305,7 @@ export function applyPracticeExceptions(input: {
       continue;
     }
     meta.exceptionsLive += 1;
-    if (!rowIds.has(exception.assignment_id)) {
+    if (exception.assignment_id == null || !rowIds.has(exception.assignment_id)) {
       findings.push({
         code: PRACTICE_EXCEPTION_CODE.ROW_UNREAD,
         assignmentId: exception.assignment_id ?? null,
@@ -302,23 +321,29 @@ export function applyPracticeExceptions(input: {
   for (const raw of rows) {
     const row: Rec = isRecord(raw) ? raw : {};
     const assignmentId = row.id ?? null;
+    const live = row.id == null ? [] : (liveByRow.get(row.id) ?? []);
+    // Rule 1, and rule 8's ROW_REFUSED.
+    const refuse = (code: string) => {
+      undated.push({ assignmentId, exceptionId: null, code });
+      for (const e of live) {
+        findings.push({
+          code: PRACTICE_EXCEPTION_CODE.ROW_REFUSED,
+          assignmentId,
+          exceptionId: e.id ?? null,
+        });
+      }
+    };
     if (!isRecord(row.slot)) {
-      undated.push({
-        assignmentId,
-        exceptionId: null,
-        code: PRACTICE_OCCURRENCE_REFUSAL.SLOT_MISSING,
-      });
+      refuse(PRACTICE_OCCURRENCE_REFUSAL.SLOT_MISSING);
       continue;
     }
     const series = practiceOccurrenceDates(row.effective_date_range, row.slot.day_of_week);
     if (series.refusal !== null) {
-      undated.push({ assignmentId, exceptionId: null, code: series.refusal });
+      refuse(series.refusal);
       continue;
     }
     const bounds = practiceRangeBounds(row.effective_date_range) as { first: string; last: string };
-    const read = (liveByRow.get(row.id) ?? []).map((e) =>
-      readClaim(e, bounds, row.slot.day_of_week)
-    );
+    const read = live.map((e) => readClaim(e, bounds, row.slot.day_of_week));
     meta.exceptionsApplied += read.length;
 
     // Rule 6, unreadable lower bound.
@@ -339,9 +364,21 @@ export function applyPracticeExceptions(input: {
     for (const c of claims) {
       if (c.effect !== 'open') continue;
       const entry = { assignmentId, exceptionId: c.exceptionId };
-      undated.push({ ...entry, code: PRACTICE_EXCEPTION_CODE.WINDOW_OPEN });
-      findings.push({ code: PRACTICE_EXCEPTION_CODE.WINDOW_OPEN, ...entry });
+      undated.push({ ...entry, code: c.code as string });
+      findings.push({ code: c.code as string, ...entry });
       if (openFrom === null || c.first < openFrom) openFrom = c.first;
+    }
+
+    // Rule 8's RELOCATION_UNMATCHED.
+    for (const c of claims) {
+      if (c.effect !== 'relocated') continue;
+      if (c.dates.length < series.dates.filter((d) => covers(c, d)).length) {
+        findings.push({
+          code: PRACTICE_EXCEPTION_CODE.RELOCATION_UNMATCHED,
+          assignmentId,
+          exceptionId: c.exceptionId,
+        });
+      }
     }
 
     // Rule 7.

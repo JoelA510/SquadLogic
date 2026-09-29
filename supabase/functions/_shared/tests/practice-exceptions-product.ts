@@ -202,6 +202,47 @@ export function enumerateCases(): ExceptionCase[] {
       input: { rows: [row], exceptions: [live(literal(range[0], range[1]))] },
     });
   }
+  // A readable lower bound with a corrupt (reversed) upper: suppressed, and
+  // worded as unreadable rather than "no end date".
+  cases.push({
+    id: 'extra-reversed-upper',
+    input: {
+      rows: rowsFor(range, 'one-row'),
+      exceptions: [live(`[${shift(range[0], 7)},${shift(range[0], 1)})`)],
+    },
+  });
+  // An `infinity` upper bound is as open as an absent one.
+  cases.push({
+    id: 'extra-infinity-upper',
+    input: {
+      rows: rowsFor(range, 'one-row'),
+      exceptions: [live(`[${shift(range[0], 7)},infinity)`)],
+    },
+  });
+  // Tuesdays 1 and 8 days in move to Monday: two removed, one added.
+  cases.push({
+    id: 'extra-relocation-unmatched',
+    input: {
+      rows: rowsFor(range, 'one-row'),
+      exceptions: [
+        exception(
+          'pe-x',
+          literal(shift(range[0], 1), shift(range[0], 8)),
+          'relocated',
+          slot('mon', '16:00:00', 'Field 3'),
+          'live'
+        ),
+      ],
+    },
+  });
+  // A row with no id, and an exception naming no row: never matched.
+  cases.push({
+    id: 'extra-no-ids',
+    input: {
+      rows: [{ effective_date_range: literal(range[0], range[1]), slot: ROW_SLOT }],
+      exceptions: [{ ...live(literal(range[0], range[1])), assignment_id: undefined }],
+    },
+  });
   // Non-array inputs: both arms refuse.
   cases.push({ id: 'extra-rows-not-array', input: { rows: null, exceptions: [] } });
   cases.push({ id: 'extra-exceptions-not-array', input: { rows: [], exceptions: 'x' } });

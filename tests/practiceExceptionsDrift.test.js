@@ -65,9 +65,9 @@ const sha256 = (value) => createHash('sha256').update(JSON.stringify(value)).dig
  * The product's size, from the plan's own arithmetic -- NOT from the
  * enumerator, which is what a shrunken product would corrupt. Per range and
  * row set: one zero-exception case, plus 8 positions x 3 kinds x 4 relocated
- * slots x 3 withdrawn spellings x 2 multiplicities. Then 8 extras.
+ * slots x 3 withdrawn spellings x 2 multiplicities. Then 12 extras.
  */
-const EXPECTED_CASES = 2 * 2 * (1 + 8 * 3 * 4 * 3 * 2) + 8;
+const EXPECTED_CASES = 2 * 2 * (1 + 8 * 3 * 4 * 3 * 2) + 12;
 
 /** @param {any} o */
 const valueOf = (o) => /** @type {any} */ (o).value;
@@ -106,6 +106,26 @@ describe('the practice-exception arms agree over the full product (W9)', () => {
     expect(values.some((v) => v.meta.exceptionsWithdrawn > 0)).toBe(true);
     expect(values.some((v) => v.meta.datesSuppressed > 0)).toBe(true);
     expect(core.filter((o) => 'refused' in o)).toHaveLength(2);
+  });
+
+  it('every exception read is accounted for, in every case (rule 8)', () => {
+    const count = (v, code) => v.findings.filter((f) => f.code === code).length;
+    let accounted = 0;
+    for (const [i, outcome] of core.entries()) {
+      if (!('value' in outcome)) continue;
+      const v = valueOf(outcome);
+      const nonObjects = v.findings.filter(
+        (f) => f.code === CORE_CODE.UNREADABLE && f.assignmentId === null && f.exceptionId === null
+      ).length;
+      expect(v.meta.exceptionsRead, CASES[i].id).toBe(
+        v.meta.exceptionsLive + v.meta.exceptionsWithdrawn + nonObjects
+      );
+      expect(v.meta.exceptionsLive, CASES[i].id).toBe(
+        v.meta.exceptionsApplied + count(v, CORE_CODE.ROW_UNREAD) + count(v, CORE_CODE.ROW_REFUSED)
+      );
+      accounted += v.meta.exceptionsRead;
+    }
+    expect(accounted).toBeGreaterThan(EXPECTED_CASES);
   });
 
   it('the twin equals core on every case, value by value', () => {

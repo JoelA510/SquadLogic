@@ -31,8 +31,11 @@
  *    removed dates into dated TIME TBD with the existing refusal code.
  * 6. A window never shows a timed practice unless it reads. Lower bound reads
  *    but the whole does not (open or unreadable upper): every date from the
- *    lower bound on is suppressed and one undated `WINDOW_OPEN` is emitted.
- *    Lower bound does not read: the whole row is undated `WINDOW_UNREADABLE`.
+ *    lower bound on is suppressed and one undated entry is emitted --
+ *    `WINDOW_OPEN` when the upper bound is absent, `WINDOW_UNREADABLE` when it
+ *    is present and does not read (the wording must not say "no end date" of
+ *    a corrupt one). Lower bound does not read: the whole row is undated
+ *    `WINDOW_UNREADABLE`.
  *    6b (not in the plan's list, declared in the PR): an exception whose
  *    `kind` or `tbd_reason` is outside the table's CHECK, or which carries no
  *    `withdrawn_at`, turns the row's series dates in its window into dated
@@ -40,8 +43,14 @@
  * 7. Overlapping live windows on one row (the EXCLUDE constraint forbids
  *    them; this does not trust it): every date in the overlap is TIME TBD
  *    `CONFLICT`. Reported, never thrown -- the feed must not 500.
- * 8. An exception naming a row not in `rows` is a partial read: finding
- *    `ROW_UNREAD`, never applied.
+ * 8. An exception naming a row not in `rows` (or naming no row) is a partial
+ *    read: finding `ROW_UNREAD`, never applied. One on a row the series
+ *    refused (rule 1) is finding `ROW_REFUSED`. So `meta.exceptionsLive` is
+ *    always `exceptionsApplied` + `ROW_UNREAD` + `ROW_REFUSED` findings.
+ *    A relocation that adds fewer dates than it removes (the new weekday of
+ *    the window's last week falls outside it) is shown as written, with
+ *    finding `RELOCATION_UNMATCHED`: the reader does not invent a date the
+ *    writer did not record.
  * 9. A dated TIME TBD on a date another row of the team has a timed practice:
  *    both are kept, finding `PRACTICE_TBD_SHADOWED` (Q10).
  *
@@ -98,6 +107,10 @@ export const PRACTICE_EXCEPTION_CODE = Object.freeze({
   UNREADABLE: 'PRACTICE_EXCEPTION_UNREADABLE',
   ROW_UNREAD: 'PRACTICE_EXCEPTION_ROW_UNREAD',
   TBD_SHADOWED: 'PRACTICE_TBD_SHADOWED',
+  /** Findings only: a live exception on a row the series itself refused. */
+  ROW_REFUSED: 'PRACTICE_EXCEPTION_ROW_REFUSED',
+  /** Findings only: a relocation that adds fewer dates than it removes. */
+  RELOCATION_UNMATCHED: 'PRACTICE_EXCEPTION_RELOCATION_UNMATCHED',
 });
 
 /** @param {unknown} value @returns {value is Record<string, any>} */
@@ -139,11 +152,18 @@ function readClaim(exception, bounds, rowDay) {
   const exceptionId = exception.id ?? null;
   const causeKind = exception.cause_kind ?? null;
   const whole = practiceRangeBounds(exception.window);
-  const first = whole ? whole.first : practiceRangeLowerBound(exception.window);
-  if (first === null) return { exceptionId, causeKind, unreadableWindow: true };
+  const lower = whole ? null : practiceRangeLowerBound(exception.window);
+  if (whole === null && lower === null) return { exceptionId, causeKind, unreadableWindow: true };
+  const first = whole ? whole.first : lower.first;
   const last = whole ? whole.last : null;
   const claim = { exceptionId, causeKind, unreadableWindow: false, first, last };
-  if (last === null) return { ...claim, effect: 'open', dates: [] };
+  if (last === null) {
+    // Suppressed from `first` on either way; only the wording differs.
+    const code = lower.upperUnbounded
+      ? PRACTICE_EXCEPTION_CODE.WINDOW_OPEN
+      : PRACTICE_EXCEPTION_CODE.WINDOW_UNREADABLE;
+    return { ...claim, effect: 'open', code, dates: [] };
+  }
 
   const kind = exception.kind;
   const readable =
@@ -217,7 +237,13 @@ export function applyPracticeExceptions({ rows, exceptions }) {
     datesSuppressed: 0,
   };
 
-  const rowIds = new Set(rows.map((row) => (isRecord(row) ? row.id : undefined)));
+  // A row with no id can be named by no exception.
+  const rowIds = new Set(
+    rows
+      .filter(isRecord)
+      .map((row) => row.id)
+      .filter((id) => id != null)
+  );
   /** @type {Map<any, Record<string, any>[]>} */
   const liveByRow = new Map();
   for (const exception of exceptions) {
@@ -235,7 +261,7 @@ export function applyPracticeExceptions({ rows, exceptions }) {
       continue;
     }
     meta.exceptionsLive += 1;
-    if (!rowIds.has(exception.assignment_id)) {
+    if (exception.assignment_id == null || !rowIds.has(exception.assignment_id)) {
       findings.push({
         code: PRACTICE_EXCEPTION_CODE.ROW_UNREAD,
         assignmentId: exception.assignment_id ?? null,
@@ -251,12 +277,20 @@ export function applyPracticeExceptions({ rows, exceptions }) {
   for (const raw of rows) {
     const row = isRecord(raw) ? raw : {};
     const assignmentId = row.id ?? null;
+    const live = row.id == null ? [] : (liveByRow.get(row.id) ?? []);
+    // Rule 1: a refused row stays one undated entry; its exceptions are named, not lost.
+    const refuse = (code) => {
+      undated.push({ assignmentId, exceptionId: null, code });
+      for (const e of live) {
+        findings.push({
+          code: PRACTICE_EXCEPTION_CODE.ROW_REFUSED,
+          assignmentId,
+          exceptionId: e.id ?? null,
+        });
+      }
+    };
     if (!isRecord(row.slot)) {
-      undated.push({
-        assignmentId,
-        exceptionId: null,
-        code: PRACTICE_OCCURRENCE_REFUSAL.SLOT_MISSING,
-      });
+      refuse(PRACTICE_OCCURRENCE_REFUSAL.SLOT_MISSING);
       continue;
     }
     const series = practiceOccurrenceDates({
@@ -264,15 +298,14 @@ export function applyPracticeExceptions({ rows, exceptions }) {
       dayOfWeek: row.slot.day_of_week,
     });
     if (series.refusal !== null) {
-      undated.push({ assignmentId, exceptionId: null, code: series.refusal });
+      refuse(series.refusal);
       continue;
     }
     const bounds = /** @type {{ first: string, last: string }} */ (
       practiceRangeBounds(row.effective_date_range)
     );
-    const claims = (liveByRow.get(row.id) ?? []).map((e) =>
-      readClaim(e, bounds, row.slot.day_of_week)
-    );
+    const claims = live.map((e) => readClaim(e, bounds, row.slot.day_of_week));
+    // Read against an expandable row, whatever that reading could show.
     meta.exceptionsApplied += claims.length;
 
     // Rule 6, unreadable lower bound: the whole row is undated.
@@ -292,9 +325,22 @@ export function applyPracticeExceptions({ rows, exceptions }) {
     for (const c of claims) {
       if (c.effect !== 'open') continue;
       const entry = { assignmentId, exceptionId: c.exceptionId };
-      undated.push({ ...entry, code: PRACTICE_EXCEPTION_CODE.WINDOW_OPEN });
-      findings.push({ code: PRACTICE_EXCEPTION_CODE.WINDOW_OPEN, ...entry });
+      undated.push({ ...entry, code: c.code });
+      findings.push({ code: c.code, ...entry });
       if (openFrom === null || c.first < openFrom) openFrom = c.first;
+    }
+
+    // A relocation that adds fewer dates than it removes (another weekday
+    // falling outside the window or the range) is shown as written, and said.
+    for (const c of claims) {
+      if (c.effect !== 'relocated') continue;
+      if (c.dates.length < series.dates.filter((d) => covers(c, d)).length) {
+        findings.push({
+          code: PRACTICE_EXCEPTION_CODE.RELOCATION_UNMATCHED,
+          assignmentId,
+          exceptionId: c.exceptionId,
+        });
+      }
     }
 
     // Rule 7: overlapping live windows, reported once per exception involved.

@@ -402,6 +402,37 @@ describe('applyPracticeExceptions: witnesses', () => {
     expect(missing.every((o) => o.code === PRACTICE_OCCURRENCE_REFUSAL.SLOT_MISSING)).toBe(true);
   });
 
+  it('W6: a relocation that adds fewer dates than it removes is said, never silent', () => {
+    // Tuesdays 2026-09-22 and -29 move to Monday; only Monday 2026-09-28 is in the window.
+    const e = exc({
+      id: 'pe-short',
+      assignment_id: 'pa-a',
+      window: '[2026-09-22,2026-09-30)',
+      kind: 'relocated',
+      slot: slot('mon', '17:00:00', 'Field 9'),
+    });
+    const w = oracleBounds(e.window);
+    const removed = seriesOf(SEED.rows[0]).filter((d) => within(d, w));
+    const added = expectedDatesOf({ rows: [SEED.rows[0]], exceptions: [e] }, e);
+    expect([removed.length, added.length]).toEqual([2, 1]);
+    const out = applyPracticeExceptions({ rows: [SEED.rows[0]], exceptions: [e] });
+    expect(out.occurrences).toHaveLength(seriesOf(SEED.rows[0]).length - 2 + 1);
+    expect(out.findings).toEqual([
+      {
+        code: PRACTICE_EXCEPTION_CODE.RELOCATION_UNMATCHED,
+        assignmentId: 'pa-a',
+        exceptionId: 'pe-short',
+      },
+    ]);
+    // The seed's relocations are matched one for one, and say nothing.
+    for (const x of liveOf(SEED).filter((y) => y.kind === 'relocated' && y.slot)) {
+      const xw = oracleBounds(x.window);
+      const xRemoved = seriesOf(rowOf(SEED, x.assignment_id)).filter((d) => within(d, xw));
+      expect(expectedDatesOf(SEED, x).length, x.id).toBe(xRemoved.length);
+      expect(OUT.findings.filter((f) => f.exceptionId === x.id)).toEqual([]);
+    }
+  });
+
   it('W7: an open or unreadable window never shows a timed practice', () => {
     const open = SEED.exceptions.find((e) => e.id === 'pe-open');
     const lower = openLower(open.window);

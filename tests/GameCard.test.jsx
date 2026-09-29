@@ -1,8 +1,13 @@
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
 import { DndContext } from '@dnd-kit/core';
 import GameCard, { GameCardPreview } from '../frontend/src/components/scheduling/GameCard.jsx';
+
+// Mocked like the sibling component tests: the real module starts the lazy
+// mock-client import (`supabaseReady`) on load, and nothing here awaits it, so
+// it can outlive this file's jsdom environment (EnvironmentTeardownError).
+vi.mock('../frontend/src/lib/supabaseClient.js', () => ({ supabase: {} }));
 
 /** Wrap components that use useDraggable in a DndContext. */
 function DndWrapper({ children }) {

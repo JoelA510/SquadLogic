@@ -7171,3 +7171,62 @@ The plan is `docs/PHASE_8_6_PR11_ENACT_PLAN.md`. Operator answers:
   and the click-to-commit latency is declared.
 - **Split.** 11a core (~750), 11b persistence (~700), 11c UI (~700), and 11d
   later.
+
+## 8.6 3b PR 11a — #505 merged (80173e4): enact core, retirements only
+
+- **What.** New `practice/enact.js`:
+  - `retirementCommitOf` reads the fresh field row, never the `loss` prop.
+  - `judgeEnact` re-judges one recommendation against the fresh snapshot. It
+    reports stale if anything shown changed, or if the shape was declined or is
+    over budget.
+  - `buildEnactPayload` builds the write for that one entry. It sets
+    `assigned_via='recommendation'` and writes a tier-2 move as the move. The
+    unlock reason is generated from ids and the date. It refuses a blackout
+    with a null payload, and refuses a payload built from a different read.
+  - `buildEnactRecord` builds the audit metadata.
+- **Recommendations.** `rebaseRecommendationState` carries an
+  `enactedTimeChanges` counter and the remaining change budget, which closes
+  the plan's budget hole.
+- **Refuted plan claim.** Reopening with `createRecommendationState(fresh,
+  {enacted})` and carrying Δ lets a declined slot come back without undo,
+  because the fresh repair does not know about Δ. The reopen now declines each
+  carried pair again, as a recorded chain, and this is witnessed.
+- **Evidence.** 19 agent plants, all CAUGHT. One first reported MISSED only
+  because its filter matched no test; the script now reports that case as
+  "NOT RUN". Supervisor plant: disabling the blackout refusal in
+  `buildEnactPayload` turned 1 red. The main-digest sweeps are unchanged.
+- **Not wired.** There is no production caller until 11c; the module is pinned
+  as an unwired layer.
+
+## 8.9 D14 PR D — #506 merged (309ec26): the lighting override UI
+
+- **What.** A coach page at `/schedule/practice-lighting` lets a coach request
+  a window on a slot they currently coach, see their own requests, and
+  withdraw requested or approved ones. An admin queue lets an admin approve or
+  reject, and both are disabled with the reason on the admin's own request.
+  Admins can also set an override directly.
+- **Messages.** The EXCLUDE overlap refusal (23P01) shows its own message, in
+  `role="alert"` with focus. "No lights-off time" is stated as declared, not
+  enforced.
+- **Writes and permissions.** Writes go only through the four RPCs, with Zod.
+  The new permissions are `REQUEST_PRACTICE_LIGHTING_OVERRIDE` and
+  `DECIDE_PRACTICE_LIGHTING_OVERRIDE`. The page is a lazy 6.13 KB chunk; no cap
+  changed.
+- **Core.** `lightingOverrideWindowDates` and `lightingOverrideWindowOf` are
+  now the single date conversion.
+- **Not mirrored by the mock.**
+  - The read policy: the mock returns every org row, so the coach view filters
+    itself.
+  - Audit writes.
+  - CHECKs the RPCs cannot reach.
+  - Row locks.
+  - The block on direct table writes.
+  - The server's `current_date`.
+- **Evidence.** 12 agent plants, all CAUGHT. P1a was MISSED at E2E level until
+  the seed gained an ended coaching assignment. Supervisor plant: Reject left
+  enabled on the admin's own request turned 1 red. E2E ran with the new
+  feature 2/2 plus the RBAC and nav suites.
+- **Incident.** The scratchpad is shared between agents, and this agent ran a
+  leftover plant script from another agent by mistake. The affected worktrees
+  checked clean. Briefs now require a per-agent scratch subdirectory and forbid
+  running scripts the agent did not write.

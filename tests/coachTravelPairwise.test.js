@@ -6,7 +6,7 @@
  * with whatever followed the short one. `resolve/ruleGate.js` already asked
  * every pair ("pairwise, not consecutive"), so the gate and `verify` could
  * disagree about the same coach-day. These witnesses are W8 to W12 of
- * `docs/PLAN_60_62_GATE_GAPS.md`. All data is synthetic except W12, which pins
+ * `docs/PLAN_60_62_GATE_GAPS.md` (PR #513). All data is synthetic except W12, which pins
  * the season-2026 corpus the plan measured a delta of 0 on.
  */
 

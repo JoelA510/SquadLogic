@@ -303,7 +303,7 @@ export function travelConstraintIdByCode(registry, context = {}) {
  * `transitions` holds one entry per consecutive pair, plus one per
  * non-consecutive pair that overlaps or whose overlap cannot be judged. A
  * non-consecutive pair that clears is counted in `overlapPairsCompared` and
- * carries no entry: it was never a journey, so there is no gap to report.
+ * carries no entry, because no gap floor is judged on it (see the pass below).
  *
  * @param {ReadonlyArray<Object>} commitments - see {@link CoachCommitmentSchema}
  * @param {{ registry: import('../constraints/types.js').ConstraintRegistry, venueComplexes?: import('../facility/types.js').VenueComplexMap }} options
@@ -537,43 +537,53 @@ export function evaluateCoachTravel(commitments, options) {
       // start-sorted pair: `to.start - from.end < 0` is an overlap, and an
       // unknown end is unjudged, never clear. That is the contract
       // `resolve/ruleGate.js` gets by handing this function one pair at a time.
-      // No gap floor is judged here: a non-consecutive pair is not a journey.
+      //
+      // **No gap floor is judged here, by the plan's decision** (#62, §2.4a).
+      // Declared rather than hidden: when a short commitment sits inside a
+      // long one, the journey the coach actually makes after the long one is
+      // to a non-neighbour, and a short gap on that journey is not reported.
+      // The day already carries the overlap that makes it so. The gate does
+      // judge that floor, because it hands the evaluator the bare pair.
       for (let i = 0; i < ordered.length - 2; i += 1) {
         for (let j = i + 2; j < ordered.length; j += 1) {
           meta.overlapPairsCompared += 1;
           const from = ordered[i];
           const to = ordered[j];
+          const gapMinutes = from.endMinutes === null ? null : to.startMinutes - from.endMinutes;
+          if (gapMinutes !== null && gapMinutes >= 0) continue;
           const id = `${personId}|${date}|${from.id}->${to.id}`;
-          const { sameVenue, oneSite, complexId, policy } = siteOf(venueComplexes, from, to);
-          const pair = {
-            id,
-            personId,
-            date,
-            from,
-            to,
-            sameVenue,
-            sameComplex: oneSite,
-            complexId,
-            policy,
-            minimumGapMinutes: null,
-            constraintId: null,
-          };
-          if (from.endMinutes === null) {
-            const unknown = unknownEndFinding(
+          /** @type {import('../constraints/types.js').ConstraintFinding} */
+          let finding;
+          if (gapMinutes === null) {
+            finding = unknownEndFinding(
               `commitment "${from.id}" has no known end, so whether it overlaps "${to.id}" cannot be judged`,
               id,
               personId,
               date,
               from
             );
-            transitions.push(buildTransition({ ...pair, gapMinutes: null, findings: [unknown] }));
-            continue;
+          } else {
+            meta.violationsFound += 1;
+            finding = overlapFinding(id, personId, date, from, to, gapMinutes);
           }
-          const gapMinutes = to.startMinutes - from.endMinutes;
-          if (gapMinutes >= 0) continue;
-          meta.violationsFound += 1;
-          const overlap = overlapFinding(id, personId, date, from, to, gapMinutes);
-          transitions.push(buildTransition({ ...pair, gapMinutes, findings: [overlap] }));
+          const { sameVenue, oneSite, complexId, policy } = siteOf(venueComplexes, from, to);
+          transitions.push(
+            buildTransition({
+              id,
+              personId,
+              date,
+              from,
+              to,
+              sameVenue,
+              sameComplex: oneSite,
+              complexId,
+              policy,
+              gapMinutes,
+              minimumGapMinutes: null,
+              constraintId: null,
+              findings: [finding],
+            })
+          );
         }
       }
     }

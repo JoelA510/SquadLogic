@@ -182,9 +182,12 @@ export function ruleGateInstances(context, state, gameId, slot, options = {}) {
   // sets those two side by side. The gate asks the same evaluator about the
   // moving game against each other commitment in turn, so its *definition* of
   // an overlap is the rule engine's and its *coverage* is every pair. Since
-  // #62 `evaluateCoachTravel()` judges overlap over every pair too, so
-  // `verify` and the gate cover the same pairs; this loop still asks one pair
-  // at a time, which is what keys an instance by the other game.
+  // #62 `evaluateCoachTravel()` judges overlap over every pair too, so for
+  // overlap `verify` and the gate cover the same pairs. The gap floors differ:
+  // `verify` judges them on neighbours only, while each bare pair here is its
+  // own neighbour, so a non-neighbour's floor code can reach `travelCodes`
+  // (#53) that `verify` never reports. This loop still asks one pair at a
+  // time, which is what keys an instance by the other game.
   const index = context.commitmentIndex;
   const persons = index.personsByGame.get(gameId) ?? [];
   if (persons.length > 0) {

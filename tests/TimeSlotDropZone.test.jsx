@@ -4,6 +4,11 @@ import React from 'react';
 import { DndContext } from '@dnd-kit/core';
 import TimeSlotDropZone from '../frontend/src/components/scheduling/TimeSlotDropZone.jsx';
 
+// Mocked like the sibling component tests: the real module starts the lazy
+// mock-client import (`supabaseReady`) on load, and nothing here awaits it, so
+// it can outlive this file's jsdom environment (EnvironmentTeardownError).
+vi.mock('../frontend/src/lib/supabaseClient.js', () => ({ supabase: {} }));
+
 const dndMocks = vi.hoisted(() => ({
   isOver: false,
   setNodeRef: vi.fn(),

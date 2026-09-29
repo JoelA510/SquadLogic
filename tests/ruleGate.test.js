@@ -416,9 +416,10 @@ describe('(d) a commitment naming no game is part of the coach’s day', () => {
     expect(index.personsByGame.get(x.id)).toContain(personId);
   });
 
-  it('catches an overlap the consecutive-pair scan hides behind a short commitment', () => {
+  it('catches an overlap the consecutive pairs hide behind a short commitment, as verify now does', () => {
     // A long window with a short one inside it, both before X starts: sorted,
-    // the rule engine pairs long-short and short-X, never long-X.
+    // the neighbours are long-short and short-X, never long-X. Since #62 the
+    // evaluator judges overlap over every pair, so `verify` and the gate agree.
     const long = {
       ...external,
       id: 'external-long',
@@ -432,18 +433,26 @@ describe('(d) a commitment naming no game is part of the coach’s day', () => {
       endMinutes: x.startMinutes - 40,
     };
     const day = [...schedule.commitments, long, short];
-    // The meta-assertion: the consecutive scan really does miss it.
-    const consecutive = evaluateCoachTravel(
-      day
-        .filter((c) => c.personId === personId && c.date === x.date)
-        .map((c) => projectCommitment(c, state)),
-      { registry: engines.registry, venueComplexes }
-    ).subjects.flatMap((subject) =>
+    const coachDay = day
+      .filter((c) => c.personId === personId && c.date === x.date)
+      .map((c) => projectCommitment(c, state));
+    // The meta-assertion, from the input alone: long-X is not a neighbour pair.
+    const ordered = [...coachDay].sort(
+      (a, b) => a.startMinutes - b.startMinutes || String(a.id).localeCompare(String(b.id))
+    );
+    const neighbours = ordered.slice(1).map((to, i) => [ordered[i].id, to.id].sort().join('+'));
+    const longX = ['external-long', template.id].sort().join('+');
+    expect(neighbours).toContain(['external-long', 'external-short'].sort().join('+'));
+    expect(neighbours).not.toContain(longX);
+    const overlaps = evaluateCoachTravel(coachDay, {
+      registry: engines.registry,
+      venueComplexes,
+    }).subjects.flatMap((subject) =>
       subject.findings.filter((f) => f.code === 'TRAVEL_COMMITMENTS_OVERLAP')
     );
-    const pairs = consecutive.map((f) => [f.details.fromId, f.details.toId].sort().join('+'));
+    const pairs = overlaps.map((f) => [f.details.fromId, f.details.toId].sort().join('+'));
     expect(pairs).toContain(['external-long', 'external-short'].sort().join('+'));
-    expect(pairs).not.toContain(['external-long', template.id].sort().join('+'));
+    expect(pairs.filter((pair) => pair === longX)).toHaveLength(1);
     const instances = ruleGateInstances(
       { engines, commitmentIndex: indexCommitments(day) },
       state,

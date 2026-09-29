@@ -177,13 +177,14 @@ export function ruleGateInstances(context, state, gameId, slot, options = {}) {
 
   // -- a coach in two places ------------------------------------------------
   //
-  // **Pairwise, not consecutive.** `evaluateCoachTravel()` compares each
-  // commitment only with the next one in the coach's day, so a long commitment
-  // with a short one inside it hides an overlap with anything after the short
-  // one. The gate asks the same evaluator about the moving game against each
-  // other commitment in turn, so its *definition* of an overlap is the rule
-  // engine's and its *coverage* is every pair. `verify` keeps the consecutive
-  // blind spot; that is the rule engine's to fix, and filed.
+  // **Pairwise, not consecutive.** A long commitment with a short one inside
+  // it overlaps anything after the short one, and a neighbour-only scan never
+  // sets those two side by side. The gate asks the same evaluator about the
+  // moving game against each other commitment in turn, so its *definition* of
+  // an overlap is the rule engine's and its *coverage* is every pair. Since
+  // #62 `evaluateCoachTravel()` judges overlap over every pair too, so
+  // `verify` and the gate cover the same pairs; this loop still asks one pair
+  // at a time, which is what keys an instance by the other game.
   const index = context.commitmentIndex;
   const persons = index.personsByGame.get(gameId) ?? [];
   if (persons.length > 0) {

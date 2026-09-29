@@ -1143,6 +1143,11 @@ export const coachConflictRule = Object.freeze({
         personPairsJudged: travel.meta.transitionsJudged,
         crossVenuePairsCompared: travel.meta.crossVenueTransitions,
         withinComplexPairsCompared: travel.meta.withinComplexTransitions,
+        // Not `overlapPairsCompared` (#62): the evaluator counts it, and on a
+        // season with at most two commitments per coach-day it equals
+        // `personPairsCompared` above. Left off so the rule's output, and every
+        // digest of it, stays byte-identical; `personPairsCompared` still
+        // carries the exercise minimum.
       },
       matched: {
         [RULE_IDENTIFIER_KIND.PERSON]: [...personIds].sort(),

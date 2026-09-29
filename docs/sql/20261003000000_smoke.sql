@@ -46,6 +46,8 @@ BEGIN
        OR has_table_privilege('authenticated', 'public.practice_lighting_overrides', 'UPDATE')
        OR has_table_privilege('authenticated', 'public.practice_lighting_overrides', 'DELETE')
        OR has_table_privilege('service_role', 'public.practice_lighting_overrides', 'INSERT')
+       OR has_table_privilege('service_role', 'public.practice_lighting_overrides', 'UPDATE')
+       OR has_table_privilege('service_role', 'public.practice_lighting_overrides', 'DELETE')
        OR has_table_privilege('anon', 'public.practice_lighting_overrides', 'SELECT') THEN
         RAISE EXCEPTION 'a client role holds a write (or anon a read) privilege on practice_lighting_overrides';
     END IF;
@@ -268,7 +270,24 @@ BEGIN
     IF v_refused <> 1 THEN
         RAISE EXCEPTION '(f) coach B withdrew coach A''s lighting override request';
     END IF;
-    RAISE NOTICE 'lighting overrides: 1 rejection, 2 withdrawals (a requested row by its coach, an approved row by an admin); another coach withdrawing was refused';
+    -- Nor may coach A once their appointment has lapsed. The probe runs in a
+    -- sub-block that is rolled back, so no count below moves.
+    v_refused := 0;
+    BEGIN
+        UPDATE public.team_coach_assignments
+           SET effective_to = current_date - 1, ended_via = 'smoke'
+         WHERE coach_id = v_ca;
+        PERFORM set_config('request.jwt.claim.sub', v_ua::text, true);
+        BEGIN PERFORM public.withdraw_practice_lighting_override(v_r4);
+        EXCEPTION WHEN insufficient_privilege THEN v_refused := 1; END;
+        RAISE EXCEPTION 'smoke: roll back the lapsed-requester probe';
+    EXCEPTION WHEN raise_exception THEN
+        NULL;
+    END;
+    IF v_refused <> 1 THEN
+        RAISE EXCEPTION '(f) coach A withdrew their request after their appointment lapsed';
+    END IF;
+    RAISE NOTICE 'lighting overrides: 1 rejection, 2 withdrawals (a requested row by its coach, an approved row by an admin); another coach, and the requester once lapsed, withdrawing were refused';
 
     -- ---- (g) W24: a reader of approved overrides gets approved rows only ----
     -- The expected set is the list of calls above, not the table.
@@ -389,6 +408,23 @@ BEGIN
     -- The positive control: a one-day window is accepted.
     PERFORM public.request_practice_lighting_override(v_slot1, '2026-11-20', '2026-11-20');
     RAISE NOTICE 'lighting overrides: 5 of 5 malformed writes refused (until before from, twice; an unknown kind; an unbounded window; an approval with no decider); a one-day window accepted';
+
+    -- ---- (k) a slot holding overrides is not deleted out from under them --
+    -- The practice_exceptions contract: NO ACTION, so a field delete, a
+    -- subunit delete or an import rollback fails 23503 rather than destroying
+    -- approved windows unreported.
+    SELECT count(*) INTO v_n FROM public.practice_lighting_overrides WHERE practice_slot_id = v_slot1;
+    IF v_n < 1 THEN
+        RAISE EXCEPTION '(k) slot 1 holds no override, so the delete below would test nothing';
+    END IF;
+    v_refused := 0;
+    BEGIN DELETE FROM public.practice_slots WHERE id = v_slot1;
+    EXCEPTION WHEN foreign_key_violation THEN v_refused := 1; END;
+    IF v_refused <> 1
+       OR (SELECT count(*) FROM public.practice_lighting_overrides WHERE practice_slot_id = v_slot1) <> v_n THEN
+        RAISE EXCEPTION '(k) deleting slot 1 was not refused 23503, or its % override(s) did not all survive', v_n;
+    END IF;
+    RAISE NOTICE 'lighting overrides: deleting a slot holding % override(s) was refused 23503 and all of them survived', v_n;
 END;
 $$;
 

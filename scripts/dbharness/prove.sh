@@ -3142,6 +3142,11 @@ plant "M19 the read policy lets every org member read every override" "$M19" \
             OR public.caller_coaches_practice_slot(practice_slot_id)" \
   "FAIL smoke 20261003000000"
 
+plant "M19 a slot delete cascades to its lighting overrides" "$M19" \
+  "    practice_slot_id uuid NOT NULL REFERENCES public.practice_slots(id)," \
+  "    practice_slot_id uuid NOT NULL REFERENCES public.practice_slots(id) ON DELETE CASCADE," \
+  "FAIL smoke 20261003000000"
+
 # Its revert destroys every override, so the warning is the claim. The seed
 # plants 3 rows across 2 slots; counting non-distinct slots prints 3.
 plant "R19 the lighting override warning stops counting slots distinctly" "$R19" \
@@ -3247,6 +3252,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) every lighting override write leaves its audit row, 12 of 12, each naming the row it wrote"]="M19 the decide RPC stops auditing"
   ["(checked) a coach reads the lighting overrides of their own teams' slots only, and an admin reads all of the organisation's"]="M19 the read policy lets every org member read every override"
   ["(checked) the revert counted the lighting overrides it was about to destroy, the slots they span, and the approved ones"]="R19 the lighting override warning stops counting slots distinctly"
+  ["(checked) a practice slot holding lighting overrides cannot be deleted out from under them (23503); none is destroyed unreported"]="M19 a slot delete cascades to its lighting overrides"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"
   ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M14 the reconcile skips dropping the broad policy"
   ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M14 the reconcile skips creating the missing read policies"

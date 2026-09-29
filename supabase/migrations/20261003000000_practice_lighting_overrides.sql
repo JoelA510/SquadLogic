@@ -41,18 +41,24 @@
 -- without review uses admin_set_practice_lighting_override, audited as such.
 --
 -- **Withdraw** is new (20260927000000 supersedes instead). The requester
--- withdraws their own requested or approved row; an admin withdraws any row of
--- the organisation in those states (the only way to end an approved window).
+-- withdraws their own requested or approved row while they could still
+-- request it (they still coach the slot); an admin withdraws any row of the
+-- organisation in those states (the only way to end an approved window).
 -- Withdrawing only ever REMOVES an exemption, so it fails safe.
 --
--- **Cascade.** `practice_slot_id` is ON DELETE CASCADE: an override is its
--- slot's own part and means nothing without it. The table therefore joins the
--- cascade closures from `fields` and `field_subunits`, which
--- docs/sql/20260907000000_smoke.sql and 20260909000000_smoke.sql now declare
--- (not a booking: the slot it hangs off is read as one).
+-- **No cascade.** `practice_slot_id` is a plain (NO ACTION) foreign key, the
+-- practice_exceptions -> practice_slots contract (20260929000000) adopted
+-- rather than a third: deleting a slot that holds an override -- by
+-- admin_delete_field, a subunit delete or rollback_field_import_job -- fails
+-- 23503 instead of destroying approved windows unreported and unaudited. The
+-- table still joins the closures from `fields` and `field_subunits` (through
+-- practice_slots), which docs/sql/20260907000000_smoke.sql and
+-- 20260909000000_smoke.sql now declare.
 --
 -- **Declared, not enforced.** An override has no lights-off time (plan
--- default 4). The window is not checked against the slot's valid_from /
+-- default 4). "Current today" for a coach is the database's `current_date`
+-- (UTC on Supabase), the reading team_coach_assignments' writers use, not the
+-- organisation's local date. The window is not checked against the slot's valid_from /
 -- valid_until. Nothing reads approved rows yet: the Edge read is PR C, the UI
 -- PR D.
 --
@@ -80,7 +86,7 @@ INSERT INTO public.audit_actions (action) VALUES
 CREATE TABLE IF NOT EXISTS public.practice_lighting_overrides (
     id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id  uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    practice_slot_id uuid NOT NULL REFERENCES public.practice_slots(id) ON DELETE CASCADE,
+    practice_slot_id uuid NOT NULL REFERENCES public.practice_slots(id),
     "window"         daterange NOT NULL,
     kind             text NOT NULL DEFAULT 'portable-lighting',
     status           text NOT NULL DEFAULT 'requested',
@@ -356,8 +362,12 @@ BEGIN
      WHERE id = p_override_id
        FOR UPDATE;
 
+    -- The requester only while they still coach the slot: a lapsed coach
+    -- cannot read the row (the policy), so cannot end it either.
     IF NOT FOUND OR v_uid IS NULL
-       OR NOT ((v_uid = v_row.requested_by AND public.is_org_member(v_row.organization_id))
+       OR NOT ((v_uid = v_row.requested_by
+                AND public.caller_coaches_practice_slot(v_row.practice_slot_id)
+                AND public.is_org_member(v_row.organization_id))
                OR public.is_org_admin(v_row.organization_id)) THEN
         RAISE EXCEPTION 'Access denied: only the requester or an organization admin withdraws a lighting override'
             USING ERRCODE = '42501';
@@ -463,7 +473,7 @@ COMMENT ON FUNCTION public.request_practice_lighting_override(uuid, date, date) 
 COMMENT ON FUNCTION public.admin_decide_practice_lighting_override(uuid, text) IS
   'Org admins only, never the requester: approve or reject a requested lighting override. An approval overlapping an approved window on the slot is refused (23P01). Audited as practice_lighting_override.approved / .rejected.';
 COMMENT ON FUNCTION public.withdraw_practice_lighting_override(uuid) IS
-  'The requester, or an org admin: withdraw a requested or approved lighting override. Audited as practice_lighting_override.withdrawn.';
+  'The requester while they still coach the slot, or an org admin: withdraw a requested or approved lighting override. Audited as practice_lighting_override.withdrawn.';
 COMMENT ON FUNCTION public.admin_set_practice_lighting_override(uuid, date, date) IS
   'Org admins only: write a lighting override directly as approved (inclusive dates). Refused (23P01) when it overlaps an approved window on the slot. Audited as practice_lighting_override.set.';
 

@@ -685,6 +685,17 @@ const LAYERS = Object.freeze([
     expectedProductionConsumers: Object.freeze([]),
     expectedExternalProductionConsumers: Object.freeze([]),
   }),
+  // 8.9 D14 PR B: stored lighting-override rows -> PR A's input. Unwired
+  // until the Edge read (PR C), which is a Deno twin, not a caller.
+  Object.freeze({
+    layer: 'practice/lightingOverrides.js',
+    modulePath: 'packages/core/src/practice/lightingOverrides.js',
+    functions: Object.freeze(['approvedLightingOverridesFromRows']),
+    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    consumers: Object.freeze(['tests/practiceLightingOverrides.test.js']),
+    expectedProductionConsumers: Object.freeze([]),
+    expectedExternalProductionConsumers: Object.freeze([]),
+  }),
   /* -- Phase 8.6 PR 3b, PR 1: coach practice preferences ---------------- */
   //
   // Unwired from the solver by design. PR 4 made the repair a caller, and the

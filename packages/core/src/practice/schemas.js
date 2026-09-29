@@ -108,11 +108,10 @@ const CanonicalDateRangeSchema = z
 /**
  * A `practice_lighting_overrides` row as read from the database (8.9 D14 PR
  * B): only the columns a reader turns into a {@link PracticeLightingOverrideSchema}
- * input. The who-and-when columns stay in the database and the audit log;
- * nothing here reads them, so nothing here parses them.
+ * input. The row's id and its who-and-when columns stay in the database and
+ * the audit log; nothing here reads them, so nothing here parses them.
  */
 export const PracticeLightingOverrideRowSchema = z.object({
-  id: IdSchema,
   practice_slot_id: IdSchema,
   window: CanonicalDateRangeSchema,
   kind: z.literal(PRACTICE_LIGHTING_OVERRIDE_KIND),

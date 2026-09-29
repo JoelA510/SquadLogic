@@ -764,6 +764,11 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
       else
         echo "FAIL smoke ${id}: it passed without proving the lighting override read policy is admin-or-slot-coach"; STATUS=1
       fi
+      if grep -qF "deleting a slot holding 6 override(s) was refused 23503 and all of them survived" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a practice slot holding lighting overrides cannot be deleted out from under them (23503); none is destroyed unreported"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a slot delete cannot destroy its lighting overrides"; STATUS=1
+      fi
     fi
     # **The production RLS drift replay** is the only evidence that the
     # reconcile fixes production rather than a repo chain where it has nothing

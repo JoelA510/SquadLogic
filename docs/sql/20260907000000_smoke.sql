@@ -169,9 +169,11 @@ DECLARE
     -- at a practice_assignments or practice_slots row, both of which are read
     -- as bookings above. It is never the only thing a delete costs.
     'practice_exceptions',
-    -- 20261003000000 (8.9 D14 PR B): a lighting override is its slot's own
-    -- part, destroyed with it (practice_slot_id ON DELETE CASCADE, its only
-    -- FK into the closure), and the slot is read as a booking above.
+    -- 20261003000000 (8.9 D14 PR B): practice_lighting_overrides joins by its
+    -- one FK into the closure, practice_slot_id (NO ACTION, the
+    -- practice_exceptions contract). A field delete cannot destroy an
+    -- override -- it fails with 23503 -- and every override points at a
+    -- practice_slots row, which is read as a booking above.
     'practice_lighting_overrides'
   ];
   v_def text;

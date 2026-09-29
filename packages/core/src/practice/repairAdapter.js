@@ -41,9 +41,11 @@
  * exception on the closed row over `[D, until]`, after its new range. A row
  * that starts on or after D is replaced by its re-home (its key is not
  * re-sent). A blackout never splits: each window is an exception on the
- * original row. A row's dates are its own range, an open upper bound running
- * to its slot's last day, and no range its slot's validity: what the repair
- * reads, so the two cannot disagree.
+ * original row. A row's dates are its own `effective_date_range`, read by
+ * `practiceRangeBounds` (the feed's parser): a snapshot row it cannot read
+ * (NULL, open or empty) refuses the whole input, naming the rows, because
+ * the feed cannot show it, the writer cannot key it, and the repair would
+ * otherwise read it through its slot's validity instead.
  *
  * **Refused until 3b PR 12.** Readers expand only an assignment's own range
  * and do not apply exceptions yet, so any exception whose window still lies
@@ -94,6 +96,11 @@ export const PRACTICE_REPAIR_PAYLOAD_REFUSAL = Object.freeze({
   WINDOW_INSIDE_ROW: 'window-inside-row',
   /** No practice slot of the re-home's shape is valid over its window. */
   NO_SLOT_FOR_SHAPE: 'no-slot-for-shape',
+  /**
+   * A retirement TIME TBD on a row that starts on or after D: nothing before
+   * D to close it to, and a row-less exception is deferred (8.9 D13 b).
+   */
+  ROW_NOT_CLOSABLE: 'row-not-closable',
 });
 
 const WEEKDAYS = new Set(['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']);
@@ -123,31 +130,6 @@ function timeToMinutes(value, what) {
     throw new TypeError(`repair adapter: ${what} "${value}" is not a whole-minute time`);
   }
   return minutes;
-}
-
-/**
- * The dates a row is in force, as the repair reads it: its own
- * `effective_date_range` (read by `practiceRangeBounds`, the feed's and the
- * portal's parser); an open upper bound runs to its slot's last day (the
- * page's season-end fallback); no readable range inherits the slot's
- * validity (the repair's own fallback). `null` when neither says: undated.
- *
- * @param {unknown} text
- * @param {{validFrom: string|null, validUntil: string|null}} slot
- * @returns {{from: string, until: string} | null}
- */
-function effectiveRangeOf(text, slot) {
-  const own = practiceRangeBounds(text);
-  if (own) return { from: own.first, until: own.last };
-  const open = /^([[(])([^,]*),\s*(infinity)?\s*\)$/.exec(String(text ?? '').trim());
-  if (open && ISO_DATE.test(open[2].trim()) && slot.validUntil !== null) {
-    const closed = practiceRangeBounds(`${open[1]}${open[2].trim()},${slot.validUntil}]`);
-    return closed ? { from: closed.first, until: closed.last } : null;
-  }
-  if (text == null && slot.validFrom !== null && slot.validUntil !== null) {
-    return { from: slot.validFrom, until: slot.validUntil };
-  }
-  return null;
 }
 
 /**
@@ -227,12 +209,16 @@ export function buildPracticeRepairInput(rows) {
     if (!WEEKDAYS.has(weekday)) {
       throw new TypeError(`repair adapter: slot ${row.id} day_of_week "${row.day_of_week}"`);
     }
+    const durationMinutes = timeToMinutes(row.end_time, `slot ${row.id} end_time`) - startMinutes;
+    if (durationMinutes <= 0) {
+      throw new TypeError(`repair adapter: slot ${row.id} does not end after it starts`);
+    }
     const slot = {
       id: id(row.id),
       surfaceId,
       weekday,
       startMinutes,
-      durationMinutes: timeToMinutes(row.end_time, `slot ${row.id} end_time`) - startMinutes,
+      durationMinutes,
       validFrom: row.valid_from ?? null,
       validUntil: row.valid_until ?? null,
     };
@@ -261,10 +247,16 @@ export function buildPracticeRepairInput(rows) {
       teamId: id(row.team_id),
       slotId,
       rangeText: row.effective_date_range ?? null,
-      range: effectiveRangeOf(row.effective_date_range ?? null, slotRows.get(slotId)),
+      range: rangeOf(practiceRangeBounds(row.effective_date_range)),
       source: row.source ?? null,
     };
   });
+  const unreadable = snapshot.filter((row) => row.range === null).map((row) => row.id);
+  if (unreadable.length > 0) {
+    throw new TypeError(
+      `repair adapter: ${unreadable.length} snapshot row(s) have no readable effective_date_range (${unreadable.join(', ')}): the feed cannot show them and the writer cannot key them, so no repair is planned over them`
+    );
+  }
   const assignments = snapshot.map((row) => ({
     id: row.id,
     slotId: row.slotId,
@@ -336,9 +328,7 @@ export function buildPracticeRepairInput(rows) {
     ...(calendar ? { calendar } : {}),
     ...(lightingOverrides.length > 0 ? { lightingOverrides } : {}),
     // Only the search's own knobs: nothing the adapter derived can be replaced.
-    ...Object.fromEntries(
-      Object.entries(rows.options ?? {}).filter(([key]) => SEARCH_OPTIONS.has(key))
-    ),
+    ...searchOptionsOf(rows.options ?? {}),
   };
   return {
     input,
@@ -371,6 +361,20 @@ export function buildPracticeRepairInput(rows) {
             },
     },
   };
+}
+
+/** The search knobs; any other key is refused, never read and dropped. */
+function searchOptionsOf(options) {
+  const unknown = Object.keys(options).filter((key) => !SEARCH_OPTIONS.has(key));
+  if (unknown.length > 0) {
+    throw new TypeError(`repair adapter: unknown options ${JSON.stringify(unknown.sort())}`);
+  }
+  return options;
+}
+
+/** @param {{first: string, last: string} | null} bounds */
+function rangeOf(bounds) {
+  return bounds === null ? null : { from: bounds.first, until: bounds.last };
 }
 
 /** `numeric` may arrive as a string from PostgREST. */
@@ -479,19 +483,17 @@ export function buildPracticeRepairPayload(adapted, result) {
   // For a blackout the window always lies inside the unclosed row, so every
   // blackout exception is refused until then; only a closed split row's
   // TIME TBD window lies after its row.
-  const planException = (row, rowLastDay, exception) => {
+  const planException = (row, from, until, rowLastDay, exception, why = null) => {
     exceptions.push(exception);
-    const { first: from, last: until } = /** @type {{first: string, last: string}} */ (
-      practiceRangeBounds(exception.window)
-    );
     if (from > rowLastDay) return;
     refused.push({
       assignment_id: row.id,
       window: exception.window,
       why:
-        until < row.range.until
+        why ??
+        (until < row.range.until
           ? PRACTICE_REPAIR_PAYLOAD_REFUSAL.MID_RANGE_WINDOW
-          : PRACTICE_REPAIR_PAYLOAD_REFUSAL.WINDOW_INSIDE_ROW,
+          : PRACTICE_REPAIR_PAYLOAD_REFUSAL.WINDOW_INSIDE_ROW),
       exception,
     });
   };
@@ -570,14 +572,21 @@ export function buildPracticeRepairPayload(adapted, result) {
         });
       } else {
         // Closed, the window lies wholly after the row: a tail window. Not
-        // closable, it lies inside the row, and is refused below.
-        planException(row, closable ? shiftDate(from, -1) : row.range.until, {
-          assignment_id: row.id,
-          window,
-          kind: PRACTICE_EXCEPTION_ROW_KIND.TIME_TBD,
-          tbd_reason: entry.reason,
-          ...causeFields,
-        });
+        // closable, it lies inside the row, and is refused for that reason.
+        planException(
+          row,
+          from,
+          until,
+          closable ? shiftDate(from, -1) : row.range.until,
+          {
+            assignment_id: row.id,
+            window,
+            kind: PRACTICE_EXCEPTION_ROW_KIND.TIME_TBD,
+            tbd_reason: entry.reason,
+            ...causeFields,
+          },
+          closable ? null : PRACTICE_REPAIR_PAYLOAD_REFUSAL.ROW_NOT_CLOSABLE
+        );
       }
       continue;
     }
@@ -585,6 +594,8 @@ export function buildPracticeRepairPayload(adapted, result) {
     // A blackout: an exception on the unclosed row, over its window.
     planException(
       row,
+      from,
+      until,
       row.range.until,
       placed
         ? {

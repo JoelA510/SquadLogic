@@ -685,22 +685,40 @@ const withA1 = (patch) => ({
   rows: { practiceAssignments: [{ ...SNAPSHOT[0], ...patch }, ...SNAPSHOT.slice(1)] },
 });
 describe('snapshot rows', () => {
-  it('an open upper bound runs to its slot end; no range inherits the slot', () => {
-    for (const range of ['[2026-09-01,)', null]) {
-      const { adapted, written } = run(RETIREMENT, withA1({ effective_date_range: range }));
-      const a1 = adapted.input.plan.assignments.find((a) => a.id === A1);
-      assert.deepEqual([a1.effectiveFrom, a1.effectiveUntil], ['2026-09-01', '2026-11-30']);
-      assert.ok(
-        written.plan.closes.some((c) => c.assignment_id === A1),
+  it('refuses a snapshot row the feed cannot read (NULL, open, empty), naming it', () => {
+    for (const range of ['[2026-09-01,)', null, 'empty', '(,2026-12-01)']) {
+      assert.throws(
+        () => run(RETIREMENT, withA1({ effective_date_range: range })),
+        (error) => error instanceof TypeError && error.message.includes(A1),
         String(range)
       );
     }
   });
 
-  it('keeps an open-ended row lower bound (never the slot start)', () => {
-    const { adapted } = run(RETIREMENT, withA1({ effective_date_range: '[2026-10-01,)' }));
-    const a1 = adapted.input.plan.assignments.find((a) => a.id === A1);
-    assert.deepEqual([a1.effectiveFrom, a1.effectiveUntil], ['2026-10-01', '2026-11-30']);
+  it('refuses a retirement TIME TBD on a row that starts after D as not closable', () => {
+    const late = '[2026-10-20,2026-12-01)';
+    const noFreeSlot = SLOTS.filter((s) => s.id !== SL3);
+    const { result, written } = run(RETIREMENT, {
+      rows: {
+        practiceSlots: noFreeSlot,
+        practiceAssignments: [{ ...SNAPSHOT[0], effective_date_range: late }, ...SNAPSHOT.slice(1)],
+      },
+    });
+    assert.ok(result.timeTbd.some((e) => e.assignmentId === A1));
+    const a1 = written.refused.filter((r) => r.assignment_id === A1);
+    assert.deepEqual(
+      a1.map((r) => [r.why, r.window]),
+      [[PRACTICE_REPAIR_PAYLOAD_REFUSAL.ROW_NOT_CLOSABLE, '[2026-10-20,2026-11-30]']]
+    );
+    assert.equal(written.payload, null);
+  });
+
+  it('refuses a slot that does not end after it starts', () => {
+    const bad = [{ ...SLOTS[0], end_time: '17:00:00' }, ...SLOTS.slice(1)];
+    assert.throws(
+      () => buildPracticeRepairInput(rowsFor(RETIREMENT, { rows: { practiceSlots: bad } })),
+      /does not end after it starts/
+    );
   });
 
   it('replaces a row that starts after D: its key is not re-sent, the new row keeps its start', () => {
@@ -734,15 +752,18 @@ describe('snapshot rows', () => {
 });
 
 describe('options and declarations', () => {
-  it('passes only the search knobs through options', () => {
+  it('passes the search knobs and refuses any other option key', () => {
     const { input } = buildPracticeRepairInput(
-      rowsFor(RETIREMENT, {
-        rows: { options: { strategy: 'greedy', coachesByTeam: {}, graph: null } },
-      })
+      rowsFor(RETIREMENT, { rows: { options: { strategy: 'greedy', changeBudget: 1 } } })
     );
     assert.equal(/** @type {any} */ (input).strategy, 'greedy');
-    assert.deepEqual(input.coachesByTeam[T1], [C1]);
-    assert.ok(input.graph);
+    assert.equal(/** @type {any} */ (input).changeBudget, 1);
+    for (const options of [{ coachesByTeam: {} }, { graph: null }, { changebudget: 2 }]) {
+      assert.throws(
+        () => buildPracticeRepairInput(rowsFor(RETIREMENT, { rows: { options } })),
+        /unknown options/
+      );
+    }
   });
 
   it('declares missing coach rows', () => {

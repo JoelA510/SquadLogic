@@ -392,10 +392,6 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
     } catch {
       return jsonResponse({ status: 'error', message: 'Invalid JSON' }, 400);
     }
-    const enactRefusal = enactBodyRefusal(body);
-    if (enactRefusal) {
-      return jsonResponse({ status: 'error', message: enactRefusal }, 400);
-    }
 
     // 3. Verify organization membership via assignment → team chain
     const userOrgIds = await getUserOrgIds(serviceClient, user.id);
@@ -452,6 +448,13 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
         },
         403
       );
+    }
+
+    // 8.6 3b PR 11b: an enact body's cross-field refusals, only once the
+    // caller is known to be an admin of the season's organisation.
+    const enactRefusal = enactBodyRefusal(body);
+    if (enactRefusal) {
+      return jsonResponse({ status: 'error', message: enactRefusal }, 400);
     }
 
     const teamIds = [...new Set(assignmentRows.map((r) => r.team_id).filter(Boolean))] as string[];

@@ -30,19 +30,22 @@
 --      "not committed", a different date "committed with a different date"
 --      (22023). The dry-run preview never stores it, so the disabled button
 --      in the panel is not the only gate;
---   5. idempotency, keyed by the run id under that lock: a `scheduler_runs`
---      row with this id whose `parameters.enact_key` is this key means this
---      enact already committed, and the call returns
---      `{idempotent: true, run_id, fingerprint}` and writes nothing. A run
---      with this id that is NOT this enact refuses (22023) rather than being
---      overwritten;
+--   5. idempotency, keyed by the run id under that lock: a
+--      `practice.recommendation_enacted` audit row carrying this key means
+--      this enact already committed, and the call returns
+--      `{idempotent: true, run_id, fingerprint}` and writes nothing. (Not
+--      `scheduler_runs.parameters`: a later save under the same run id
+--      rewrites them.) A run with this id that is NOT an enact refuses (22023)
+--      rather than being overwritten;
 --   6. call the writer with `withdraw_exceptions => '[]'` (decision 6 is out
 --      of PR 11) and the base fingerprint, which the writer compares under the
 --      same lock (40001 when stale);
 --   7. check the write touched only the one series S: `closed`, `unlocked`
 --      and `superseded` name S alone, S is among them, every recorded
---      exception is on S, and every row this call created is S's team's,
---      `assigned_via = 'recommendation'`, and as many as the record declares:
+--      exception is on S, every other row of the organisation is unchanged
+--      in team, slot, range, source and assigned_via, and every row this call
+--      created is S's team's, `assigned_via = 'recommendation'`, and exactly
+--      the (team, slot, range) set the record declares in `writes.new_rows`:
 --      one new row for a re-home, none plus one tail exception for a TIME TBD
 --      (22023 otherwise, so everything rolls back);
 --   8. write `practice.recommendation_enacted` (plan §5 metadata) in the same
@@ -50,8 +53,7 @@
 --      `result_fingerprint` from the writer's return;
 --   9. return the writer's result plus `{enact_audited: true, idempotent: false}`.
 --
--- The run's `parameters` gain `enact_key` here, not from the caller, so the
--- idempotency key cannot be forged or forgotten by a client.
+-- The run's `parameters` also gain `enact_key` here, as provenance only.
 --
 -- ## What this does NOT do
 --
@@ -60,7 +62,12 @@
 -- blackouts, closures or coach data, and the record says so in
 -- `fingerprint_covers`; step 2a re-reads the one field that decides the gate.
 -- A repeat with the same key but a different payload is not compared: the
--- key names one confirmed intent, and the first commit of it stands.
+-- key names one confirmed intent, and the first commit of it stands. The
+-- commit gate runs before the idempotency lookup (plan §5: step 2a directly
+-- after the lock), so a repeat of a committed enact whose field has since
+-- been re-dated or un-retired is refused 22023 rather than answered
+-- idempotent; the client re-reads and finds the series no longer displaced.
+-- Ids are compared as lowercase text, as core and the Edge twin emit them.
 --
 -- Reversible: see docs/sql/20261004000000_revert.sql.
 -- Smoke checks: see docs/sql/20261004000000_smoke.sql.
@@ -106,6 +113,8 @@ DECLARE
     v_stray text;
     v_new_count integer;
     v_new_bad integer;
+    v_new_undeclared integer;
+    v_before_rows jsonb;
     v_meta jsonb;
 BEGIN
     IF run_data IS NULL OR jsonb_typeof(run_data) IS DISTINCT FROM 'object' THEN
@@ -179,7 +188,16 @@ BEGIN
     v_key := (enact->>'enact_key')::uuid;
     v_series := (enact->'series'->>'assignment_id')::uuid;
     v_field := (enact->'cause'->>'id')::uuid;
-    v_loss_from := (enact->'cause'->'loss'->>'from')::date;
+    -- The regexes above admit 2026-02-30; the cast refuses it as 22008, which
+    -- is a malformed record (22023), not a crash.
+    BEGIN
+        v_loss_from := (enact->'cause'->'loss'->>'from')::date;
+        PERFORM (enact->'cause'->>'stored_effective_to')::date;
+    EXCEPTION WHEN datetime_field_overflow OR invalid_datetime_format THEN
+        RAISE EXCEPTION 'enact record carries an impossible date (loss.from %, stored_effective_to %)',
+            enact->'cause'->'loss'->>'from', enact->'cause'->>'stored_effective_to'
+            USING ERRCODE = '22023';
+    END;
 
     -- 4. The writer's own season lock (re-entrant within this transaction).
     PERFORM pg_advisory_xact_lock(
@@ -205,14 +223,20 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
-    -- 5. Idempotency, under the lock.
-    IF EXISTS (SELECT 1 FROM public.scheduler_runs sr
-                WHERE sr.id = v_key AND sr.organization_id = v_org_id
-                  AND sr.parameters->>'enact_key' = v_key::text) THEN
+    -- 5. Idempotency, under the lock, keyed on the enact's own audit row:
+    -- immutable, and written only by step 8 of a committed enact. (The run's
+    -- `parameters` are not the key: any later save under the same run id
+    -- rewrites them.)
+    IF EXISTS (SELECT 1 FROM public.audit_log al
+                WHERE al.organization_id = v_org_id
+                  AND al.action = 'practice.recommendation_enacted'
+                  AND al.metadata->>'enact_key' = v_key::text) THEN
         RETURN jsonb_build_object(
             'idempotent', true,
             'run_id', v_key,
-            'fingerprint', public.practice_schedule_fingerprint(v_season_id)
+            'fingerprint', public.practice_schedule_fingerprint(v_season_id),
+            'audited', true,
+            'enact_audited', true
         );
     END IF;
     IF EXISTS (SELECT 1 FROM public.scheduler_runs sr WHERE sr.id = v_key) THEN
@@ -233,12 +257,16 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
-    SELECT COALESCE(array_agg(pa.id), '{}'::uuid[]) INTO v_before
+    -- The ORGANISATION's rows before the write, not the season's: the
+    -- writer's insert is scoped by organisation, so a row it creates for
+    -- another season's team must still be seen below.
+    SELECT COALESCE(array_agg(pa.id), '{}'::uuid[]),
+           COALESCE(jsonb_agg(jsonb_build_object(
+               'id', pa.id, 'team_id', pa.team_id, 'slot', pa.practice_slot_id,
+               'range', pa.effective_date_range::text, 'source', pa.source, 'via', pa.assigned_via)), '[]'::jsonb)
+      INTO v_before, v_before_rows
       FROM public.practice_assignments pa
-      JOIN public.teams t ON t.id = pa.team_id
-      JOIN public.divisions d ON d.id = t.division_id
-     WHERE pa.organization_id = v_org_id
-       AND d.season_settings_id = v_season_id;
+     WHERE pa.organization_id = v_org_id;
 
     -- 6. The writer, unchanged.
     v_run_data := jsonb_set(run_data, '{parameters}',
@@ -269,16 +297,41 @@ BEGIN
         RAISE EXCEPTION 'enact of series % neither closed nor replaced it: nothing was enacted', v_series
             USING ERRCODE = '22023';
     END IF;
-    SELECT count(*), count(*) FILTER (WHERE pa.team_id <> v_team OR pa.assigned_via <> 'recommendation')
-      INTO v_new_count, v_new_bad
+    -- Every pre-enact row but S still stands unchanged in team, slot, range,
+    -- source and assigned_via: the writer's upsert (ON CONFLICT DO UPDATE)
+    -- can rewrite a re-sent row that none of the lists above names.
+    SELECT string_agg(b.value->>'id', ', ') INTO v_stray
+      FROM jsonb_array_elements(v_before_rows) b
+     WHERE (b.value->>'id')::uuid <> v_series
+       AND NOT EXISTS (
+           SELECT 1 FROM public.practice_assignments pa
+            WHERE pa.id = (b.value->>'id')::uuid
+              AND pa.team_id IS NOT DISTINCT FROM (b.value->>'team_id')::uuid
+              AND pa.practice_slot_id IS NOT DISTINCT FROM (b.value->>'slot')::uuid
+              AND pa.effective_date_range IS NOT DISTINCT FROM (b.value->>'range')::daterange
+              AND pa.source::text IS NOT DISTINCT FROM b.value->>'source'
+              AND pa.assigned_via IS NOT DISTINCT FROM b.value->>'via');
+    IF v_stray IS NOT NULL THEN
+        RAISE EXCEPTION 'enact of series % changed other rows: %', v_series, v_stray
+            USING ERRCODE = '22023';
+    END IF;
+    SELECT count(*), count(*) FILTER (WHERE pa.team_id <> v_team OR pa.assigned_via <> 'recommendation'),
+           count(*) FILTER (WHERE NOT EXISTS (
+               SELECT 1 FROM jsonb_array_elements(enact->'writes'->'new_rows') n
+                WHERE n.value->>'team_id' = pa.team_id::text
+                  AND n.value->>'practice_slot_id' = pa.practice_slot_id::text
+                  AND n.value->>'effective_date_range' IS NOT NULL
+                  AND (n.value->>'effective_date_range')::daterange = pa.effective_date_range))
+      INTO v_new_count, v_new_bad, v_new_undeclared
       FROM public.practice_assignments pa
-      JOIN public.teams t ON t.id = pa.team_id
-      JOIN public.divisions d ON d.id = t.division_id
      WHERE pa.organization_id = v_org_id
-       AND d.season_settings_id = v_season_id
        AND NOT (pa.id = ANY (v_before));
     IF v_new_bad > 0 THEN
         RAISE EXCEPTION 'enact of series % created % row(s) that are not its team''s assigned_via = recommendation', v_series, v_new_bad
+            USING ERRCODE = '22023';
+    END IF;
+    IF v_new_undeclared > 0 THEN
+        RAISE EXCEPTION 'enact of series % created % row(s) its record does not declare in writes.new_rows (team, slot, range)', v_series, v_new_undeclared
             USING ERRCODE = '22023';
     END IF;
     IF v_new_count <> jsonb_array_length(enact->'writes'->'new_rows')

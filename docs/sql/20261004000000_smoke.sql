@@ -42,7 +42,8 @@ DECLARE
     c_k2 constant uuid := 'e1100000-0000-4000-8000-00000000e002';
     c_d  constant date := '2026-10-15';
     v_org uuid; v_loc uuid; v_f1 uuid; v_f2 uuid; v_s uuid; v_div uuid;
-    v_t1 uuid; v_t2 uuid; v_t3 uuid;
+    v_t1 uuid; v_t2 uuid; v_t3 uuid; v_s2 uuid; v_div2 uuid; v_t4 uuid;
+    v_n2 int;
     v_tue uuid; v_wed uuid; v_mon2 uuid; v_thu2 uuid;
     v_sa uuid; v_o1 uuid; v_o2 uuid;
     v_fp text;
@@ -83,6 +84,10 @@ BEGIN
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_div, 'E11 Team 1') RETURNING id INTO v_t1;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_div, 'E11 Team 2') RETURNING id INTO v_t2;
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_div, 'E11 Team 3') RETURNING id INTO v_t3;
+    -- Another season of the same organisation, for the org-scoped new-row check.
+    INSERT INTO public.season_settings (organization_id, name) VALUES (v_org, 'E11 Spring') RETURNING id INTO v_s2;
+    INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_s2, 'E11 Spring U12') RETURNING id INTO v_div2;
+    INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_div2, 'E11 Team 4 (spring)') RETURNING id INTO v_t4;
     INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
       VALUES (v_org, v_f1, 'tue', '18:00', '19:30', '2026-09-01', '2026-11-30') RETURNING id INTO v_tue;
     INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
@@ -275,7 +280,31 @@ BEGIN
     IF v_state IS DISTINCT FROM '22023' OR v_msg NOT LIKE '%touched more than it: closed ' || v_o1 || '%' OR v_after <> v_digest THEN
         RAISE EXCEPTION 'a write that also closed another series was not refused 22023 and rolled back: % %', v_state, v_msg;
     END IF;
-    RAISE NOTICE 'only S: a payload whose closes and unlock also name another series was refused 22023 and rolled back; 0 rows and 0 audit rows changed';
+    v_n := 0;
+    IF v_state = '22023' THEN v_n := 1; END IF;
+    -- The upsert path: O2's key re-sent with its source flipped to manual.
+    v_state := NULL;
+    BEGIN
+        SET LOCAL ROLE authenticated;
+        PERFORM public.enact_practice_recommendation(v_run,
+            jsonb_set(v_assign, '{1,source}', '"manual"'::jsonb),
+            v_unlock, v_closes, '[]'::jsonb, v_fp, v_rec);
+        v_state := 'accepted';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+    END;
+    RESET ROLE;
+    SELECT md5(COALESCE((SELECT string_agg(pa.id || '|' || pa.practice_slot_id || '|' || pa.effective_date_range::text
+                                           || '|' || pa.assigned_via, ',' ORDER BY pa.id)
+                           FROM public.practice_assignments pa WHERE pa.organization_id = v_org), '')
+               || (SELECT count(*) FROM public.practice_exceptions pe WHERE pe.organization_id = v_org)::text
+               || '/' || (SELECT count(*) FROM public.audit_log al WHERE al.organization_id = v_org)::text)
+      INTO v_after;
+    IF v_state IS DISTINCT FROM '22023' OR v_msg NOT LIKE '%changed other rows: ' || v_o2 || '%' OR v_after <> v_digest THEN
+        RAISE EXCEPTION 'a write that rewrote another series'' source was not refused 22023 and rolled back: % %', v_state, v_msg;
+    END IF;
+    v_n := v_n + 1;
+    RAISE NOTICE 'only S: a payload whose closes and unlock also name another series, and one re-sending another series with its source changed, were each refused 22023, % of 2, and rolled back; 0 rows and 0 audit rows changed', v_n;
 
     -- ---- 11. the new row is marked -------------------------------------------
     v_state := NULL;
@@ -292,7 +321,52 @@ BEGIN
     IF v_state IS DISTINCT FROM '22023' OR v_msg NOT LIKE '%not its team''s assigned_via = recommendation%' THEN
         RAISE EXCEPTION 'an enacted row marked repair was not refused 22023: % %', v_state, v_msg;
     END IF;
-    RAISE NOTICE 'marked: an enact whose new row is assigned_via repair, not recommendation, was refused 22023';
+    -- An extra row for another season's team, undeclared: the writer's insert
+    -- is scoped by organisation, so the wrapper must look org-wide.
+    v_state := NULL;
+    BEGIN
+        SET LOCAL ROLE authenticated;
+        PERFORM public.enact_practice_recommendation(v_run,
+            v_assign || jsonb_build_array(jsonb_build_object('team_id', v_t4, 'practice_slot_id', v_mon2,
+                'effective_date_range', '[2026-10-15,2026-11-30]', 'source', 'auto', 'assigned_via', 'recommendation')),
+            v_unlock, v_closes, '[]'::jsonb, v_fp, v_rec);
+        v_state := 'accepted';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+    END;
+    RESET ROLE;
+    IF v_state IS DISTINCT FROM '22023' OR v_msg NOT LIKE '%not its team''s assigned_via = recommendation%' THEN
+        RAISE EXCEPTION 'an extra row for another season''s team was not refused 22023: % %', v_state, v_msg;
+    END IF;
+    -- The record declares the new row on another slot than the one written.
+    v_state := NULL;
+    BEGIN
+        SET LOCAL ROLE authenticated;
+        PERFORM public.enact_practice_recommendation(v_run, v_assign, v_unlock, v_closes, '[]'::jsonb, v_fp,
+            jsonb_set(v_rec, '{writes,new_rows,0,practice_slot_id}', to_jsonb(v_mon2::text)));
+        v_state := 'accepted';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+    END;
+    RESET ROLE;
+    IF v_state IS DISTINCT FROM '22023' OR v_msg NOT LIKE '%does not declare in writes.new_rows%' THEN
+        RAISE EXCEPTION 'a new row the record does not declare was not refused 22023: % %', v_state, v_msg;
+    END IF;
+    -- An impossible date is a malformed record (22023), not a crash.
+    v_state := NULL;
+    BEGIN
+        SET LOCAL ROLE authenticated;
+        PERFORM public.enact_practice_recommendation(v_run, v_assign, v_unlock, v_closes, '[]'::jsonb, v_fp,
+            jsonb_set(v_rec, '{cause,loss,from}', '"2026-02-30"'::jsonb));
+        v_state := 'accepted';
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+    END;
+    RESET ROLE;
+    IF v_state IS DISTINCT FROM '22023' OR v_msg NOT LIKE '%impossible date%' THEN
+        RAISE EXCEPTION 'an impossible loss date was not refused 22023: % %', v_state, v_msg;
+    END IF;
+    RAISE NOTICE 'marked: an enact whose new row is assigned_via repair, one adding a row for another season''s team, and one whose record declares another slot were each refused 22023, 3 of 3; an impossible date refused 22023';
 
     -- ---- 5. stale ------------------------------------------------------------
     -- v_fp was read; a write lands after it; the enact then carries v_fp.

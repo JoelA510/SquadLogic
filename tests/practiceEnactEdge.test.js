@@ -51,7 +51,10 @@ describe('repairErrorResponse (plan §4)', () => {
   });
 
   it('covers every row of the plan table, each status at least once', () => {
-    const statuses = new Set(cases.map((c) => c[2]));
+    // From what the function RETURNS over the cases, not the table's own column.
+    const statuses = new Set(
+      cases.map(([code, message]) => repairErrorResponse({ code, message }).status)
+    );
     expect([...statuses].sort()).toEqual([403, 409, 422, 500]);
   });
 });

@@ -3196,6 +3196,27 @@ plant "M20 the enact wrapper drops the only-S check" "$M20" \
   "     WHERE false;" \
   "FAIL smoke 20261004000000"
 
+plant "M20 the enact wrapper stops checking the other rows are unchanged" "$M20" \
+  "              AND pa.source::text IS NOT DISTINCT FROM b.value->>'source'" \
+  "              AND true" \
+  "FAIL smoke 20261004000000"
+
+# The review's cross-season case: a new-row check scoped to the season misses
+# a row the org-scoped writer inserts for another season's team.
+plant "M20 the enact new-row check looks at the season only" "$M20" \
+  "     WHERE pa.organization_id = v_org_id
+       AND NOT (pa.id = ANY (v_before));" \
+  "     WHERE pa.organization_id = v_org_id
+       AND pa.team_id IN (SELECT t.id FROM public.teams t JOIN public.divisions d ON d.id = t.division_id
+                           WHERE d.season_settings_id = v_season_id)
+       AND NOT (pa.id = ANY (v_before));" \
+  "FAIL smoke 20261004000000"
+
+plant "M20 the enact wrapper accepts new rows its record does not declare" "$M20" \
+  "    IF v_new_undeclared > 0 THEN" \
+  "    IF false THEN" \
+  "FAIL smoke 20261004000000"
+
 plant "M20 the enact wrapper accepts a new row not marked recommendation" "$M20" \
   "count(*) FILTER (WHERE pa.team_id <> v_team OR pa.assigned_via <> 'recommendation')" \
   "count(*) FILTER (WHERE pa.team_id <> v_team)" \
@@ -3236,8 +3257,8 @@ plant "M20 the enact audit leaves result_fingerprint unfilled" "$M20" \
   "FAIL smoke 20261004000000"
 
 plant "M20 the enact wrapper drops the idempotency lookup" "$M20" \
-  "                  AND sr.parameters->>'enact_key' = v_key::text) THEN" \
-  "                  AND sr.parameters->>'enact_key' = v_key::text AND false) THEN" \
+  "                  AND al.metadata->>'enact_key' = v_key::text) THEN" \
+  "                  AND al.metadata->>'enact_key' = v_key::text AND false) THEN" \
   "FAIL smoke 20261004000000"
 
 plant "R20 the revert does not drop the enact wrapper" "$R20" \
@@ -3347,11 +3368,11 @@ declare -A CLAIM_PROVER=(
   ["(checked) only an org admin with a uid enacts a practice recommendation: a coach, a parent and a no-uid caller are refused by the wrapper itself"]="M20 the enact wrapper stops checking the caller is an org admin"
   ["(checked) an enact is refused while the retirement is uncommitted, or committed with a different date, reading the stored fields.effective_to, and writes nothing"]="M20 Plant A: the enact wrapper drops the commit gate (step 2a)"
   ["(checked) an enact with no base_fingerprint is refused (22023): it is never blind"]="M20 the enact wrapper accepts a NULL base_fingerprint"
-  ["(checked) an enact that touches any series but its own is refused (22023) and rolled back"]="M20 the enact wrapper drops the only-S check"
-  ["(checked) an enact's new row must be its team's and assigned_via = recommendation, or the enact is refused"]="M20 the enact wrapper accepts a new row not marked recommendation"
+  ["(checked) an enact that touches any series but its own, by a list the writer returns or by its upsert, is refused (22023) and rolled back"]="M20 the enact wrapper drops the only-S check"
+  ["(checked) an enact's new rows, organisation-wide, must be its team's, assigned_via = recommendation, and exactly the rows its record declares, or the enact is refused"]="M20 the enact wrapper accepts a new row not marked recommendation"
   ["(checked) an enact on a stale base_fingerprint is refused (40001) and writes nothing"]="M20 the enact wrapper passes the writer no base_fingerprint"
   ["(checked) the enact audit row is written in the enact's own transaction: an audit failure fails the enact"]="M20 the enact audit failure is swallowed"
-  ["(checked) an enact changes only its own series: every other pre-enact row unchanged, the series closed the day before D, and exactly one new recommendation row"]="M20 the enact wrapper drops the only-S check"
+  ["(checked) an enact changes only its own series: every other pre-enact row unchanged, the series closed the day before D, and exactly one new recommendation row"]="M20 the enact wrapper stops checking the other rows are unchanged"
   ["(checked) an enact leaves one practice.recommendation_enacted row on its series with the plan section 5 keys, the stored retirement date and the writer's result fingerprint"]="M20 the enact audit leaves result_fingerprint unfilled"
   ["(checked) a repeated enact key is idempotent: the second call returns idempotent: true and writes nothing"]="M20 the enact wrapper drops the idempotency lookup"
   ["(checked) the enact revert drops enact_practice_recommendation and leaves the 20261002000000 writer in place"]="R20 the revert does not drop the enact wrapper"

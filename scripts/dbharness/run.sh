@@ -791,13 +791,13 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
       else
         echo "FAIL smoke ${id}: it passed without proving a blind enact is refused"; STATUS=1
       fi
-      if grep -qF "only S: a payload whose closes and unlock also name another series was refused 22023 and rolled back; 0 rows and 0 audit rows changed" $SCRATCH/harness_smoke; then
-        echo "  | (checked) an enact that touches any series but its own is refused (22023) and rolled back"
+      if grep -qF "only S: a payload whose closes and unlock also name another series, and one re-sending another series with its source changed, were each refused 22023, 2 of 2, and rolled back; 0 rows and 0 audit rows changed" $SCRATCH/harness_smoke; then
+        echo "  | (checked) an enact that touches any series but its own, by a list the writer returns or by its upsert, is refused (22023) and rolled back"
       else
         echo "FAIL smoke ${id}: it passed without proving an enact touching another series is refused"; STATUS=1
       fi
-      if grep -qF "marked: an enact whose new row is assigned_via repair, not recommendation, was refused 22023" $SCRATCH/harness_smoke; then
-        echo "  | (checked) an enact's new row must be its team's and assigned_via = recommendation, or the enact is refused"
+      if grep -qF "marked: an enact whose new row is assigned_via repair, one adding a row for another season's team, and one whose record declares another slot were each refused 22023, 3 of 3" $SCRATCH/harness_smoke; then
+        echo "  | (checked) an enact's new rows, organisation-wide, must be its team's, assigned_via = recommendation, and exactly the rows its record declares, or the enact is refused"
       else
         echo "FAIL smoke ${id}: it passed without proving an enact's new row must be marked recommendation"; STATUS=1
       fi

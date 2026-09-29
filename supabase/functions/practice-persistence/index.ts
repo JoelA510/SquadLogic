@@ -38,6 +38,12 @@ function parseAllowedRolesEnv(
 }
 
 // ── Payload schema (Zod) ────────────────────────────────────────────────────
+// 8.6 3b PR 11b: the enact audit record (plan §5), the strict twin of core
+// PracticeEnactRecordSchema; tests/practiceEnactSchemaDrift.test.js pins them.
+// Above `const Uuid`: tests/practiceRepairAdapter.test.js evaluates the block
+// from there to PersistencePayloadSchema as the repair schema alone.
+export const PracticeEnactSchema = buildPracticeEnactRecordSchema(z);
+
 // 8.6 PR 3b PR 6: the writer-v3 repair arguments, validated here and passed
 // through unchanged to persist_practice_schedule, which re-checks every one.
 const Uuid = z.string().uuid();
@@ -111,10 +117,6 @@ export const PracticeRepairSchema = z
       .optional(),
   })
   .strict();
-
-// 8.6 3b PR 11b: the enact audit record (plan §5), the strict twin of core
-// PracticeEnactRecordSchema; tests/practiceEnactSchemaDrift.test.js pins them.
-export const PracticeEnactSchema = buildPracticeEnactRecordSchema(z);
 
 const PersistencePayloadSchema = z.object({
   snapshot: z.object({

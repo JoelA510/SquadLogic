@@ -9,13 +9,15 @@
  *   1. structurally: every key, at every depth, its type, strictness, enum
  *      values, literals and checks (regex sources, bounds) -- canonical trees
  *      compared whole;
- *   2. behaviourally: a valid record both accept, and a mutation product over
+ *   2. behaviourally, under zod 4 AND zod 3 (the Deno Edge's major): a valid
+ *      record all accept, and a mutation product over
  *      every path of it (removed, nulled, re-typed, an extra key beside it),
  *      judged identically by both arms.
  * The `practiceWriterV3` source-pin precedent, made executable.
  */
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { z as z3 } from 'zod/v3';
 
 import {
   PRACTICE_CHAIN_STOP,
@@ -29,6 +31,8 @@ import {
 } from '../supabase/functions/_shared/practice-enact-record.ts';
 
 const edge = buildPracticeEnactRecordSchema(/** @type {any} */ (z));
+// The same factory under zod v3, the major the Deno Edge imports (3.22.4).
+const edgeV3 = buildPracticeEnactRecordSchema(/** @type {any} */ (z3));
 
 /** A canonical tree of a zod 4 schema: what a drift in either arm changes. */
 function tree(schema) {
@@ -192,6 +196,7 @@ describe('the enact record schemas agree (witness 22)', () => {
   it('both accept the valid record, and judge every mutation of it alike', () => {
     expect(PracticeEnactRecordSchema.safeParse(VALID).success).toBe(true);
     expect(edge.safeParse(VALID).success).toBe(true);
+    expect(edgeV3.safeParse(VALID).success).toBe(true);
     /** @type {Array<[string, any]>} */
     const cases = [];
     for (const { path } of nodes(VALID)) {
@@ -209,6 +214,7 @@ describe('the enact record schemas agree (witness 22)', () => {
     for (const [name, record] of cases) {
       const coreOk = PracticeEnactRecordSchema.safeParse(record).success;
       expect(edge.safeParse(record).success, name).toBe(coreOk);
+      expect(edgeV3.safeParse(record).success, `${name} (zod v3)`).toBe(coreOk);
       if (coreOk) accepted += 1;
       else refused += 1;
     }

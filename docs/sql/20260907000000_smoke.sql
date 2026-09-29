@@ -141,7 +141,8 @@ DECLARE
     'field_availability_scenario_members','field_blackout_windows',
     'field_blackouts','field_equipment_requirements','field_subunits',
     'game_assignments','game_slots','games',
-    'practice_assignments','practice_exceptions','practice_slots'
+    'practice_assignments','practice_exceptions','practice_lighting_overrides',
+    'practice_slots'
   ];
   -- Read by admin_delete_field. The other six are excluded for reasons the
   -- two migration headers state; section 4b holds it to both halves.
@@ -167,7 +168,13 @@ DECLARE
     -- exception -- it would fail with 23503 -- and every exception row points
     -- at a practice_assignments or practice_slots row, both of which are read
     -- as bookings above. It is never the only thing a delete costs.
-    'practice_exceptions'
+    'practice_exceptions',
+    -- 20261003000000 (8.9 D14 PR B): practice_lighting_overrides joins by its
+    -- one FK into the closure, practice_slot_id (NO ACTION, the
+    -- practice_exceptions contract). A field delete cannot destroy an
+    -- override -- it fails with 23503 -- and every override points at a
+    -- practice_slots row, which is read as a booking above.
+    'practice_lighting_overrides'
   ];
   v_def text;
   t text;
@@ -250,7 +257,7 @@ BEGIN
                        'game_assignments','game_slots','practice_assignments','practice_slots'] THEN
     RAISE EXCEPTION 'the field_id family changed: %', v_actual;
   END IF;
-  RAISE NOTICE 'field_id family: 7 tables, a subset of the 13-table cascade closure';
+  RAISE NOTICE 'field_id family: 7 tables, a subset of the 14-table cascade closure';
 END $$;
 
 -- ---------------------------------------------------------------------------

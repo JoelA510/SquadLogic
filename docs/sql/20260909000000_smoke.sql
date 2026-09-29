@@ -227,7 +227,12 @@ BEGIN
   -- one points at a practice_slots or practice_assignments row, so the
   -- single practice_slots check below still cuts the closure. The direct-edge
   -- check after this still requires practice_slots to be the only way in.
-  IF v_closure <> ARRAY['practice_assignments','practice_exceptions','practice_slots'] THEN
+  -- 20261003000000 added practice_lighting_overrides, reached through its
+  -- one NO ACTION edge, practice_slot_id: a subunit delete or an import
+  -- rollback cannot destroy one (it would fail with 23503), and each points
+  -- at a practice_slots row, so the single practice_slots check still cuts it.
+  IF v_closure <> ARRAY['practice_assignments','practice_exceptions',
+                        'practice_lighting_overrides','practice_slots'] THEN
     RAISE EXCEPTION
       'the cascade closure from field_subunits changed: it now reaches %. rollback_field_import_job''s single practice_slots check is no longer a complete cut and the arm must adopt an enumerator.',
       v_closure;

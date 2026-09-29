@@ -686,6 +686,8 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/repair.js',
       'tests/practiceDaylight.test.js',
       'tests/practiceDurationPhases.test.js',
+      // 8.9 D14 PR B: pins the stored-row conversion against this reading.
+      'tests/practiceLightingOverrides.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
@@ -711,6 +713,17 @@ const LAYERS = Object.freeze([
     ]),
     importers: Object.freeze(['packages/core/src/practice/index.js']),
     consumers: Object.freeze(['tests/practiceDurationPhases.test.js']),
+    expectedProductionConsumers: Object.freeze([]),
+    expectedExternalProductionConsumers: Object.freeze([]),
+  }),
+  // 8.9 D14 PR B: stored lighting-override rows -> PR A's input. Unwired
+  // until the Edge read (PR C), which is a Deno twin, not a caller.
+  Object.freeze({
+    layer: 'practice/lightingOverrides.js',
+    modulePath: 'packages/core/src/practice/lightingOverrides.js',
+    functions: Object.freeze(['approvedLightingOverridesFromRows']),
+    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    consumers: Object.freeze(['tests/practiceLightingOverrides.test.js']),
     expectedProductionConsumers: Object.freeze([]),
     expectedExternalProductionConsumers: Object.freeze([]),
   }),

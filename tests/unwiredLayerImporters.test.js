@@ -519,16 +519,20 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/index.js',
     ]),
     consumers: Object.freeze([
+      // 8.6 3b PR 11c: the enact prompt is built from the one-entry plan.
+      'frontend/src/utils/practiceRepairEnact.js',
       'frontend/src/utils/practiceRepairPanel.js',
       'packages/core/src/practice/enact.js',
       'tests/practiceEnact.test.js',
       'tests/practiceRepairAdapter.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
+      'frontend/src/utils/practiceRepairEnact.js',
       'frontend/src/utils/practiceRepairPanel.js',
       'packages/core/src/practice/enact.js',
     ]),
     expectedExternalProductionConsumers: Object.freeze([
+      'frontend/src/utils/practiceRepairEnact.js',
       'frontend/src/utils/practiceRepairPanel.js',
     ]),
   }),
@@ -551,6 +555,8 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/index.js',
     ]),
     consumers: Object.freeze([
+      // 8.6 3b PR 11c: the enact flow re-bases the session state.
+      'frontend/src/utils/practiceRepairEnact.js',
       'frontend/src/utils/practiceRepairPanel.js',
       'tests/practiceEnact.test.js',
       'tests/practiceRecommendations.test.js',
@@ -559,15 +565,18 @@ const LAYERS = Object.freeze([
       'tests/practiceRepairDaylight.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
-    expectedProductionConsumers: Object.freeze(['frontend/src/utils/practiceRepairPanel.js']),
+    expectedProductionConsumers: Object.freeze([
+      'frontend/src/utils/practiceRepairEnact.js',
+      'frontend/src/utils/practiceRepairPanel.js',
+    ]),
     expectedExternalProductionConsumers: Object.freeze([
+      'frontend/src/utils/practiceRepairEnact.js',
       'frontend/src/utils/practiceRepairPanel.js',
     ]),
   }),
   // 8.6 3b PR 11a: enacting one recommendation, the core half (commit gate,
-  // re-judge, one-entry payload, audit record). UNWIRED: no production caller
-  // until 3b PR 11c wires the panel's Enact button to it; that PR flips
-  // `expectedProductionConsumers` here.
+  // re-judge, one-entry payload, audit record). WIRED by 3b PR 11c: the
+  // panel's Enact button calls it through `utils/practiceRepairEnact.js`.
   Object.freeze({
     layer: 'practice/enact.js',
     modulePath: 'packages/core/src/practice/enact.js',
@@ -578,9 +587,14 @@ const LAYERS = Object.freeze([
       'retirementCommitOf',
     ]),
     importers: Object.freeze(['packages/core/src/practice/index.js']),
-    consumers: Object.freeze(['tests/practiceEnact.test.js']),
-    expectedProductionConsumers: Object.freeze([]),
-    expectedExternalProductionConsumers: Object.freeze([]),
+    consumers: Object.freeze([
+      'frontend/src/utils/practiceRepairEnact.js',
+      'tests/practiceEnact.test.js',
+    ]),
+    expectedProductionConsumers: Object.freeze(['frontend/src/utils/practiceRepairEnact.js']),
+    expectedExternalProductionConsumers: Object.freeze([
+      'frontend/src/utils/practiceRepairEnact.js',
+    ]),
   }),
   Object.freeze({
     layer: 'practice/metricsInput.js',

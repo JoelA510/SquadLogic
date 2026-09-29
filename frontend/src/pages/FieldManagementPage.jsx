@@ -3,6 +3,10 @@ import Button from '../components/ui/Button.jsx';
 import { MapPin, Plus, Edit2, Trash2, X, Check, CalendarX, RotateCcw } from 'lucide-react';
 import { useFields } from '../hooks/useFields.js';
 import RetireEstateNodeDialog from '../components/setup/RetireEstateNodeDialog.jsx';
+import PracticeRepairLauncher from '../components/scheduling/PracticeRepairLauncher.jsx';
+import { useOrganization } from '../contexts/OrganizationContext.jsx';
+import { supabase } from '../lib/supabaseClient.js';
+import { countSeriesEnactedOff } from '../utils/practiceEnactCount.js';
 import LocationCoordinatesForm, {
   hasCoordinates,
 } from '../components/setup/LocationCoordinatesForm.jsx';
@@ -62,6 +66,7 @@ export default function FieldManagementPage() {
   // The route is already admin-only; this is the same gate, held again at the
   // field so the coordinates form never renders for a caller the RPC refuses.
   const canEditCoordinates = can(PERMISSIONS.MANAGE_ORGANIZATION);
+  const organizationId = /** @type {any} */ (useOrganization())?.currentOrganization?.id ?? null;
   const [openCoordinatesId, setOpenCoordinatesId] = useState(/** @type {string|null} */ (null));
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -232,6 +237,20 @@ export default function FieldManagementPage() {
     // ordinarily deactivated stays deactivated -- both arms carried the
     // opposite defect once, and a passing test certified it.
     setLifecycleError(null);
+    // 8.6 3b PR 11c: clearing a field's end date moves no enacted practice
+    // back. The confirmation says how many series were enacted off it, from
+    // the enact audit rows; nothing is undone.
+    if (kind === 'field') {
+      const counted = await countSeriesEnactedOff(supabase, {
+        organizationId,
+        fieldId: node.id,
+        storedEffectiveTo: /** @type {any} */ (node).effective_to ?? null,
+      });
+      const enacted = counted.ok
+        ? `${counted.count} practice series ${counted.count === 1 ? 'was' : 'were'} enacted off this field for this retirement.${counted.count === 0 ? '' : ` ${counted.count === 1 ? 'It' : 'They'} will not move back: enacted practices stay where they were moved, locked.`}`
+        : `How many practice series were enacted off this field could not be read (${'message' in counted ? counted.message : 'unreadable'}). Any that were will not move back.`;
+      if (!window.confirm(`Clear the end date on ${node.name}?\n\n${enacted}`)) return;
+    }
     try {
       await RETIRE_BY_KIND[kind].unretire(node.id);
     } catch (err) {
@@ -509,6 +528,16 @@ export default function FieldManagementPage() {
             {field.effective_to && (
               <div className="text-xs text-text-secondary mb-2" data-testid={`retired-${field.id}`}>
                 Retires after {field.effective_to}
+                {/* 8.6 3b PR 11c: after the commit, the repair opens from here,
+                    over the STORED date (witness 25). */}
+                <PracticeRepairLauncher
+                  subject={field.name}
+                  label="Repair practices"
+                  loss={{
+                    kind: 'retirement',
+                    field: { id: field.id, effective_to: field.effective_to },
+                  }}
+                />
               </div>
             )}
 

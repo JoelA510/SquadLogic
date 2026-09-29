@@ -35,8 +35,9 @@
  * Every refusal is a `payload: null` with a named `refusal`: the caller sends
  * nothing. A refusal is never a partial write.
  *
- * **Unwired.** Nothing in production calls this module until 3b PR 11c
- * (`tests/unwiredLayerImporters.test.js` pins that).
+ * **Wired** by 3b PR 11c: its production caller is
+ * `frontend/src/utils/practiceRepairEnact.js`, behind the panel's Enact
+ * button (`tests/unwiredLayerImporters.test.js` pins that).
  *
  * **Declared, not enforced here.** The writer's fingerprint does not cover
  * slots, fields, `effective_to`, blackouts, closures or coach data (plan §4,

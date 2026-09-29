@@ -7230,3 +7230,86 @@ The plan is `docs/PHASE_8_6_PR11_ENACT_PLAN.md`. Operator answers:
   leftover plant script from another agent by mistake. The affected worktrees
   checked clean. Briefs now require a per-agent scratch subdirectory and forbid
   running scripts the agent did not write.
+
+## Task #63 — #508 merged (b4bdd73): the tightest-bound margin guard is witnessed again
+
+- **Gap.** #439 had replaced the corpus answer that witnessed "margin names
+  the tightest bound, not the first claimed". The replacement loop counted
+  divergences but never asserted them, so a regression passed.
+- **Unit witness.** `tests/feasibilityMarginBasis.test.js` builds a binding
+  through the production `boundsOf()` in which the first-claimed, tightest and
+  loosest bounds are three different kinds. A meta-assertion on the input keeps
+  them distinct.
+- **Roll-up witness.** `tests/feasibilityApi.test.js` covers the `canTeamPlay`
+  roll-up (`queries.js:1234`, the original defect site) through the public
+  entry. It uses corpus case 10G7v701 at 08:15, where coach-travel claims arrive
+  in transition order, so a looser travel claim precedes a tighter one.
+- **Evidence.** Supervisor plant: reverting `:1234` to `binding[0].kind` was
+  MISSED by the first version (3/3 green). The roll-up witness then turned it
+  red. The agent's plants P1, P2, M1, M1b and RM were all CAUGHT.
+
+## Incident — main red from 15:07 to 17:06 UTC; #509 (55cc887) and #510 (7deb440)
+
+- **What.** Main push run 1138, for #506 (`309ec26`), failed Build & Test. The
+  cause was an unhandled `EnvironmentTeardownError`: every test passed, but
+  `npm run test` exited 1. #508's PR run failed the same way.
+- **Cause.** In tests, importing `frontend/src/lib/supabaseClient.js` starts a
+  lazy import of the mock client (`supabaseReady`, from #488). Test files that
+  never awaited it could end with that import still in flight. #506 lengthened
+  the chain (`mockLightingOverrides` -> `utils/lightingOverrides` -> core), so
+  under full-suite load a short file's jsdom environment was torn down
+  mid-import.
+- **Why it got through.** The failure is intermittent: #506's own PR run passed.
+  The supervisor merged on green PR CI without checking main's push run
+  afterwards. **Lesson: main's push run is now checked after every merge.**
+- **Fix 1, #509.** `SettingsPage`, `FieldColumn`, `GameCard` and
+  `TimeSlotDropZone` tests mock `supabaseClient`, as 34 sibling tests already
+  did. The full suite went from 2/2 failing to 2/2 exit 0 with the same counts,
+  and the file alone passed 20/20. `/code-review` was not run (the agent hit its
+  tool cap); the supervisor accepted the 22-line test-only diff on static review.
+- **Fix 2, #510.** One `afterAll(() => vi.dynamicImportSettled())` in
+  `tests/setup.js` waits for every in-flight module load in every test file.
+  That closes the 24 other exposed files and any future ones, with no suite-time
+  cost (about 247 s before and after).
+  - The error itself was never reproduced locally. A forced 1000 ms transform
+    delay showed the chain cut off at teardown without the hook and completed
+    with it.
+  - Supervisor plant: removing the settle call turned 1 of 3 red.
+- **Follow-up.** #509's four per-file mocks are now redundant for this race;
+  removing them is a later cleanup.
+
+## 3b PR 11b — #511 merged (aa124f5): enact persistence
+
+- **Migration `20261004000000`.** The wrapper `enact_practice_recommendation` is
+  SECURITY INVOKER, with the writer's grants, and calls the unchanged
+  `persist_practice_schedule`. Its checks, in order:
+  1. The caller is an admin.
+  2. A base fingerprint is present.
+  3. The record has the exact §5 key set, and matches the payload.
+  4. The season lock is taken.
+  5. Step 2a: stored `fields.effective_to` = `loss.from - 1` (operator Q3).
+  6. Idempotency, keyed on the audit row.
+  7. The write.
+  8. Only S changed. Every other org row is compared directly, because
+     "closed/unlocked ⊆ {S}" alone missed upsert drift.
+- **Audit.** A `practice.recommendation_enacted` row is written in the same
+  transaction, with `cause.stored_effective_to` and `result_fingerprint`.
+- **Edge.** Enact calls get a strict Zod twin and route to the wrapper. The
+  error mapping applies only to repair calls:
+  - 40001 -> 409 `PRACTICE_SCHEDULE_STALE`;
+  - "is locked" -> 409 `PRACTICE_ASSIGNMENT_LOCKED`;
+  - 42501 -> 403;
+  - other 22023 -> 422.
+  Ordinary saves are unchanged.
+- **Evidence.** HARNESS OK. The census resolves 208/208 anchors. 15 SQL/JS
+  plants, all CAUGHT, including Plant A (step 2a dropped). Supervisor plant:
+  disabling the "is locked" mapping turned 1 of 13 red.
+- **Declared.**
+  - Step 2a precedes idempotency (plan order), so a re-sent committed enact after
+    a re-date gets 22023.
+  - Ids are compared as lowercase text.
+  - A same-key, different-payload repeat is not compared.
+- **Process.** The agent was killed by a container restart and resumed, then
+  lost the GitHub connector. The supervisor opened the PR from its pushed
+  branch.
+- **Deploy (operator).** This is the 8th pending production migration.

@@ -1953,7 +1953,7 @@ describe('feasibility :: finding 2 — a margin’s basis names the bound it cam
     // produces now has a tightest bound that is not also its first** — searched
     // over every team at four kickoffs (528 answers). So the order-independence
     // the original instance proved is no longer witnessed here; it is stated
-    // rather than left passing over nothing, and filed. What every answer can
+    // rather than left passing over nothing, and filed as #63. What every answer can
     // still show is the invariant itself: the basis is the argmin of the slack
     // and the margin is that slack.
     const dates = [...new Set(schedule.games.map((game) => game.date))].sort();
@@ -1977,8 +1977,11 @@ describe('feasibility :: finding 2 — a margin’s basis names the bound it cam
     expect(multiBound).toBeGreaterThan(0);
     // `firstIsNotTightest` is counted, not asserted: on this corpus it is 0, so
     // the order-independence above is **not witnessed here** — a regression to
-    // "name the first-claimed bound" would pass. Stated in the PR and filed; a
-    // constructed witness belongs with the feasibility work, not in #61.
+    // "name the first-claimed bound" would pass. #63 added a constructed witness
+    // for `marginFrom()` in `tests/feasibilityMarginBasis.test.js`, which goes red
+    // when it picks the first-claimed or loosest bound. The roll-up copy in
+    // `canTeamPlay()` (`marginBasis: best?.marginBasis`) still has no divergent
+    // case: reverting it to `binding[0].kind` would pass here and there.
     void firstIsNotTightest;
   }, 475_000); // 528 corpus answers: 66.9 s alone, 59.0 / 60.1 / 117.7 / 82.7 s in four local full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 

@@ -278,10 +278,12 @@ export function conflictSpreadInstances(context, state, groups, override = null)
     /** @type {any} */ ({ registry: context.engines.registry, resources: {} })
   );
   meta.groupsExamined = result.counters.groupsExamined;
-  // **Loud, not silent (plan §1.3 step 7).** Every group asked about has
-  // roster teams, so the rule must have examined each of them; fewer means the
-  // spread went unjudged, and a gate reporting "nothing grew" over groups it
-  // never examined is the falsely clean result this repository keeps finding.
+  // **Loud, not silent (plan §1.3 step 7).** The rule must have examined every
+  // group asked about; fewer means a spread went unjudged — a group label the
+  // roster index does not hold, so no team of it reached the rule — and a gate
+  // reporting "nothing grew" over a group it never examined is the falsely
+  // clean result this repository keeps finding. The stages only ask about
+  // labels read from the index itself; an exported caller may ask about any.
   const asked = new Set(groups).size;
   if (meta.groupsExamined !== asked) {
     throw new Error(

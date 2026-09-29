@@ -907,3 +907,62 @@ describe('#60 W5/W6: a requested move that grows the spread is allowed, and warn
     expect(gate[`CONFLICT_SPREAD_EXCEEDED|${SPREAD_GROUP}`]).toBe(1);
   });
 });
+
+describe('#60: pass 1 refuses spread growth that adds no overlap', () => {
+  // #564 carries 08GJunior01's one published conflict: coach oakley ulmer is
+  // also at #548 (06BMicro03, one registered coach, so it counts nothing).
+  // In SYN = {14BSelect01 at 2 synthetic conflicts, 08GJunior01 at 1} the
+  // spread is 1. Displaced, #564 finds a clean slot on the season as
+  // published; there it overlaps nobody, 08GJunior01 drops to 0 and the spread
+  // grows to 2 — growth no overlap refusal can see.
+  const X = 'combined_schedule.csv#564';
+  const MIN_TEAM = '08GJunior01';
+  const withRoster = spreadSchedule(2, SPREAD_TEAM, [SPREAD_TEAM, MIN_TEAM]);
+  const sched = { ...withRoster, teams: withRoster.teams.filter((t) => t.id !== ROSTER_ONLY) };
+  const clean = /** @type {any} */ (whereIs(displaceOn(schedule, X), X));
+  const run = displaceOn(sched, X);
+
+  it('from the input: the plain slot adds no overlap and grows the group by one', () => {
+    expect(publishedExcess(sched)).toBe(0);
+    expect(clean).not.toBeNull();
+    const ruled = ruleGateInstances(gateContext(sched), state, X, slotOf(clean));
+    expect(
+      Object.keys(ruled.instances).filter((key) => key.startsWith('TRAVEL_COMMITMENTS_OVERLAP|'))
+    ).toEqual([]);
+    expect(ruled.instances[`CONFLICT_SPREAD_EXCEEDED|${SPREAD_GROUP}`]).toBe(1);
+  });
+
+  it('is refused on that slot in pass 1, and shelved as TIME TBD naming the spread', () => {
+    // Measured: both facility-admitted candidates grow SYN without an overlap,
+    // so pass 2's pool is empty and #564 is shelved. Shelving it also removes
+    // 08GJunior01's conflict, so the group ends at spread 2 all the same, and
+    // that is surfaced by the warning rather than hidden (declared, not fixed:
+    // the gate does not weigh a slot against the TIME TBD outcome).
+    expect(whereIs(run, X)).toBeNull();
+    expect(run.meta.overlapFallbackEntered).toBe(0);
+    expect(run.unplaced.find((entry) => entry.gameId === X)?.reason).toMatch(
+      /\d+ for CONFLICT_SPREAD_EXCEEDED/
+    );
+    expect(
+      run.findings
+        .filter((f) => f.code === 'RESOLVE_CONFLICT_SPREAD_CARRIED')
+        .map((f) => f.details.groupLabel)
+    ).toEqual([SPREAD_GROUP]);
+  });
+});
+
+describe('#60: the spread gate refuses to report a group it never examined', () => {
+  const context = gateContext(schedule);
+
+  it('examines every group the roster holds, over the season', () => {
+    const groups = [...context.teamIndex.byGroup.keys()];
+    expect(groups.length).toBe(9);
+    expect(conflictSpreadInstances(context, state, groups).meta.groupsExamined).toBe(9);
+  });
+
+  it('throws for a group label the roster index does not hold, rather than call it within bound', () => {
+    expect(() => conflictSpreadInstances(context, state, ['U10', 'U99'])).toThrow(
+      /asked about 2 age group\(s\) and the fairness rule examined 1/
+    );
+  });
+});

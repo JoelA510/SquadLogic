@@ -723,6 +723,48 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "FAIL smoke ${id}: it passed without proving the mid-range and season-scope refusals"; STATUS=1
       fi
     fi
+    # **8.9 D14 PR B: portable-lighting overrides (plan W30, W24).** One claim
+    # per plant in prove.sh. The smoke RAISEs on each; these fail if its
+    # evidence stops. (The withdraw refusal and the malformed-window refusals
+    # RAISE in the same smoke and print as NOTICEs above; they carry no plant,
+    # so they are not claims.)
+    if [ "$id" = "20261003000000" ]; then
+      if grep -qF "a coach of another slot's team, a lapsed coach, a parent and another organisation's admin were each refused 42501, 4 of 4, and wrote nothing" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only a current coach of a team on the slot, or an admin, requests a lighting override: another slot's coach, a lapsed coach, a parent and another organisation's admin are refused"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a non-coach cannot request a lighting override"; STATUS=1
+      fi
+      if grep -qF "a coach approving was refused (42501), 2 of 2 (their own request and another coach's), and the row is still requested" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an org admin decides a lighting override; a coach approving is refused, their own request or another's"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a coach cannot approve a lighting override"; STATUS=1
+      fi
+      if grep -qF "self-approval by the requesting admin was refused (42501) and the row stayed requested; a second admin approved it" $SCRATCH/harness_smoke; then
+        echo "  | (checked) the admin who requested a lighting override may not approve it; another admin may"
+      else
+        echo "FAIL smoke ${id}: it passed without proving self-approval of a lighting override is refused"; STATUS=1
+      fi
+      if grep -qF "an approval over an approved window and an admin set sharing its last day were each refused 23P01, 2 of 2; the adjacent window and the same dates on another slot were accepted" $SCRATCH/harness_smoke; then
+        echo "  | (checked) the database refuses two overlapping approved lighting windows on one slot, a shared last day included"
+      else
+        echo "FAIL smoke ${id}: it passed without proving overlapping approved lighting windows are refused"; STATUS=1
+      fi
+      if grep -qF "a reader selecting approved overrides through RLS got exactly the 3 approved of 7 rows; 1 requested, 1 rejected and 2 withdrawn left out" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a reader selecting approved lighting overrides gets exactly the approved rows; requested, rejected and withdrawn rows are left out"
+      else
+        echo "FAIL smoke ${id}: it passed without proving only approved lighting overrides are read as approved"; STATUS=1
+      fi
+      if grep -qF "every write audited -- 12 of 12 (5 requested, 2 approved, 1 rejected, 2 withdrawn, 2 set), each naming its row" $SCRATCH/harness_smoke; then
+        echo "  | (checked) every lighting override write leaves its audit row, 12 of 12, each naming the row it wrote"
+      else
+        echo "FAIL smoke ${id}: it passed without proving every lighting override write is audited"; STATUS=1
+      fi
+      if grep -qF "coach A read the 5 rows of slot 1 and none of slot 2; coach B the 2 of slot 2 and none of slot 1; a lapsed coach and a parent 0; the admin 7 of 7; another organisation's admin 0" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a coach reads the lighting overrides of their own teams' slots only, and an admin reads all of the organisation's"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the lighting override read policy is admin-or-slot-coach"; STATUS=1
+      fi
+    fi
     # **The production RLS drift replay** is the only evidence that the
     # reconcile fixes production rather than a repo chain where it has nothing
     # to do, so each half of it is a claim. The smoke RAISEs on any failed
@@ -1038,7 +1080,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1549,6 +1591,34 @@ for id in "${REVERT_CHECKS[@]}"; do
     fi
   fi
 
+  # **20261003000000's revert DESTROYS every portable-lighting override**, so
+  # its warning is the check. THREE rows across TWO slots, ONE approved: all
+  # figures distinct, so a count of rows where slots were meant (or of every
+  # row where approved ones were meant) prints a different number. Inserted as
+  # the table owner: the RPCs gate on a JWT psql_cmd does not carry, and the
+  # RPC path is exercised in the smoke. Every name is synthetic.
+  if [ "$id" = "20261003000000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('ed000000-0000-4000-8000-00000000000a','Lighting Org','lighting-org');
+              INSERT INTO public.locations (id, organization_id, name) VALUES
+                ('ed000000-0000-4000-8000-00000000000b','ed000000-0000-4000-8000-00000000000a','Lighting Park');
+              INSERT INTO public.fields (id, organization_id, location_id, name, active) VALUES
+                ('ed000000-0000-4000-8000-00000000000c','ed000000-0000-4000-8000-00000000000a','ed000000-0000-4000-8000-00000000000b','Lighting Pitch', true);
+              INSERT INTO public.practice_slots (id, organization_id, field_id, day_of_week, start_time, end_time) VALUES
+                ('ed000000-0000-4000-8000-000000000001','ed000000-0000-4000-8000-00000000000a','ed000000-0000-4000-8000-00000000000c','mon','17:00','18:00'),
+                ('ed000000-0000-4000-8000-000000000002','ed000000-0000-4000-8000-00000000000a','ed000000-0000-4000-8000-00000000000c','wed','17:00','18:00');
+              INSERT INTO public.practice_lighting_overrides
+                (organization_id, practice_slot_id, \\\"window\\\", status, requested_by, decided_by, decided_at)
+              VALUES
+                ('ed000000-0000-4000-8000-00000000000a','ed000000-0000-4000-8000-000000000001','[2026-10-01,2026-10-16)','approved','ed000000-0000-4000-8000-0000000000f1','ed000000-0000-4000-8000-0000000000f2',now()),
+                ('ed000000-0000-4000-8000-00000000000a','ed000000-0000-4000-8000-000000000001','[2026-10-10,2026-10-21)','requested','ed000000-0000-4000-8000-0000000000f1',NULL,NULL),
+                ('ed000000-0000-4000-8000-00000000000a','ed000000-0000-4000-8000-000000000002','[2026-10-01,2026-10-16)','requested','ed000000-0000-4000-8000-0000000000f1',NULL,NULL);" \
+       >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the three lighting override rows the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
   # **20260930000000's revert DESTROYS every venue's coordinates**, so its
   # warning is the check. THREE venues with coordinates across TWO
   # organisations, plus ONE without: all figures distinct, so counting every
@@ -1862,6 +1932,15 @@ NEEDLES
       else
         echo "FAIL seeding ${id}: the coach holding a preferred_practice value was never inserted"
         dump 10 $SCRATCH/harness_seed; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261003000000" ]; then
+      # The seed planted 3 rows across 2 slots, 1 approved -- all distinct.
+      if grep -q 'this revert DESTROYS 3 practice lighting override row(s) across 2 slot(s); 1 of them are APPROVED' $SCRATCH/harness_rev; then
+        echo "  | (checked) the revert counted the lighting overrides it was about to destroy, the slots they span, and the approved ones"
+      else
+        echo "FAIL revert ${id}: planted 3 lighting override rows across 2 slots, 1 approved, and the revert did not warn with those figures"
+        STATUS=1
       fi
     fi
     if [ "$id" = "20260927000000" ]; then

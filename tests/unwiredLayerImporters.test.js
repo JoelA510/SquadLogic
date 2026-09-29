@@ -655,6 +655,8 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/repair.js',
       'tests/practiceDaylight.test.js',
       'tests/practiceDurationPhases.test.js',
+      // 8.9 D14 PR B: pins the stored-row conversion against this reading.
+      'tests/practiceLightingOverrides.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([

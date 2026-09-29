@@ -50,6 +50,9 @@ R17="$REPO/docs/sql/20261001000000_revert.sql"
 # 8.9 PR 6b: daylight TIME TBD exceptions, and the writer copied whole.
 M18="$REPO/supabase/migrations/20261002000000_practice_exceptions_daylight.sql"
 R18="$REPO/docs/sql/20261002000000_revert.sql"
+# 8.9 D14 PR B: portable-lighting overrides and their revert.
+M19="$REPO/supabase/migrations/20261003000000_practice_lighting_overrides.sql"
+R19="$REPO/docs/sql/20261003000000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -3090,6 +3093,62 @@ plant "R18 the revert does not restore the writer" "$R18" \
   "CREATE OR REPLACE FUNCTION public.harness_plant_unrestored_writer(" \
   "FAIL revert 20261002000000"
 
+# **8.9 D14 PR B: portable-lighting overrides (plan W30, W24).** One plant per
+# claim the smoke's evidence prints. The function-body anchors sit in the only
+# definition of their function (anchor_liveness: LIVE); the constraint and the
+# policy are not function bodies (NA).
+plant "M19 the request RPC stops checking the caller coaches the slot" "$M19" \
+  "       OR NOT ((v_by_coach AND public.is_org_member(v_org)) OR public.is_org_admin(v_org)) THEN" \
+  "       OR NOT ((public.is_org_member(v_org)) OR public.is_org_admin(v_org)) THEN" \
+  "FAIL smoke 20261003000000"
+
+plant "M19 the decide RPC stops checking the caller is an org admin" "$M19" \
+  "    IF NOT FOUND OR NOT public.is_org_admin(v_row.organization_id) THEN
+        RAISE EXCEPTION 'Access denied: only an organization admin decides a lighting override'" \
+  "    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Access denied: only an organization admin decides a lighting override'" \
+  "FAIL smoke 20261003000000"
+
+plant "M19 the requester may approve their own request" "$M19" \
+  "    IF v_uid IS NULL OR v_uid = v_row.requested_by THEN" \
+  "    IF v_uid IS NULL THEN" \
+  "FAIL smoke 20261003000000"
+
+plant "M19 the exclusion constraint compares windows for equality, not overlap" "$M19" \
+  "        EXCLUDE USING gist (practice_slot_id WITH =, \"window\" WITH &&)" \
+  "        EXCLUDE USING gist (practice_slot_id WITH =, \"window\" WITH =)" \
+  "FAIL smoke 20261003000000"
+
+# W24: a withdraw that writes nothing leaves an approved row approved, and the
+# reader of approved overrides then returns a window nobody has in force.
+plant "M19 withdraw leaves the row as it was" "$M19" \
+  "       SET status = 'withdrawn', withdrawn_by = v_uid, withdrawn_at = clock_timestamp()" \
+  "       SET status = status" \
+  "FAIL smoke 20261003000000"
+
+plant "M19 the decide RPC stops auditing" "$M19" \
+  "    PERFORM public.record_audit_event(
+        v_row.organization_id,
+        'practice_lighting_override.' || v_status," \
+  "    PERFORM jsonb_build_array(
+        v_row.organization_id,
+        'practice_lighting_override.' || v_status," \
+  "FAIL smoke 20261003000000"
+
+plant "M19 the read policy lets every org member read every override" "$M19" \
+  "            public.is_org_admin(organization_id)
+            OR public.caller_coaches_practice_slot(practice_slot_id)" \
+  "            true
+            OR public.caller_coaches_practice_slot(practice_slot_id)" \
+  "FAIL smoke 20261003000000"
+
+# Its revert destroys every override, so the warning is the claim. The seed
+# plants 3 rows across 2 slots; counting non-distinct slots prints 3.
+plant "R19 the lighting override warning stops counting slots distinctly" "$R19" \
+  "    SELECT count(*), count(DISTINCT practice_slot_id), count(*) FILTER (WHERE status = 'approved')" \
+  "    SELECT count(*), count(practice_slot_id), count(*) FILTER (WHERE status = 'approved')" \
+  "revert 20261003000000: planted 3 lighting override rows across 2 slots, 1 approved, and the revert did not warn with those figures"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -3180,6 +3239,14 @@ declare -A CLAIM_PROVER=(
   ["(checked) a coach reads only their own practice preferences and the admin reads all of the organisation's"]="M13 the read policy lets every org member read every coach's preferences"
   ["(checked) every coach practice preference write leaves its audit row, 9 of 9, each naming the row it wrote"]="M13 the request RPC stops auditing"
   ["(checked) the database refuses a second approved practice preference for one coach and dimension"]="M13 the one-approved index stops being unique"
+  ["(checked) only a current coach of a team on the slot, or an admin, requests a lighting override: another slot's coach, a lapsed coach, a parent and another organisation's admin are refused"]="M19 the request RPC stops checking the caller coaches the slot"
+  ["(checked) only an org admin decides a lighting override; a coach approving is refused, their own request or another's"]="M19 the decide RPC stops checking the caller is an org admin"
+  ["(checked) the admin who requested a lighting override may not approve it; another admin may"]="M19 the requester may approve their own request"
+  ["(checked) the database refuses two overlapping approved lighting windows on one slot, a shared last day included"]="M19 the exclusion constraint compares windows for equality, not overlap"
+  ["(checked) a reader selecting approved lighting overrides gets exactly the approved rows; requested, rejected and withdrawn rows are left out"]="M19 withdraw leaves the row as it was"
+  ["(checked) every lighting override write leaves its audit row, 12 of 12, each naming the row it wrote"]="M19 the decide RPC stops auditing"
+  ["(checked) a coach reads the lighting overrides of their own teams' slots only, and an admin reads all of the organisation's"]="M19 the read policy lets every org member read every override"
+  ["(checked) the revert counted the lighting overrides it was about to destroy, the slots they span, and the approved ones"]="R19 the lighting override warning stops counting slots distinctly"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"
   ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M14 the reconcile skips dropping the broad policy"
   ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M14 the reconcile skips creating the missing read policies"

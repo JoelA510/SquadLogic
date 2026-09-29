@@ -78,7 +78,12 @@ export {
   PRACTICE_MINIMUM_DURATION_MINUTES,
   PracticeCompressionStrategySchema,
   PracticeLightingOverrideSchema,
+  PRACTICE_LIGHTING_OVERRIDE_KIND,
+  PRACTICE_LIGHTING_OVERRIDE_STATUS,
+  PracticeLightingOverrideRowSchema,
 } from './schemas.js';
+
+export { approvedLightingOverridesFromRows } from './lightingOverrides.js';
 
 export { buildPracticeSlotSet, firstWeekdayOnOrAfter, getPracticeSlot } from './slots.js';
 

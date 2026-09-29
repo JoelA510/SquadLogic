@@ -82,6 +82,44 @@ export const PracticeLightingOverrideSchema = z
   });
 
 /**
+ * The statuses of a `practice_lighting_overrides` row (8.9 D14 PR B,
+ * `supabase/migrations/20261003000000_practice_lighting_overrides.sql`, whose
+ * status CHECK this list must equal). Only `approved` exempts anything.
+ */
+export const PRACTICE_LIGHTING_OVERRIDE_STATUS = Object.freeze({
+  REQUESTED: 'requested',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+  WITHDRAWN: 'withdrawn',
+});
+
+/** The table's one `kind` (its CHECK): the only override D14 defines. */
+export const PRACTICE_LIGHTING_OVERRIDE_KIND = 'portable-lighting';
+
+/**
+ * A `daterange` as Postgres prints a canonical, bounded one: `[from,end)`,
+ * the end EXCLUSIVE. The table refuses an empty or unbounded window, so any
+ * other spelling is a read that did not come from it.
+ */
+const CanonicalDateRangeSchema = z
+  .string()
+  .regex(/^\[\d{4}-\d{2}-\d{2},\d{4}-\d{2}-\d{2}\)$/, 'a canonical bounded daterange `[from,end)`');
+
+/**
+ * A `practice_lighting_overrides` row as read from the database (8.9 D14 PR
+ * B): only the columns a reader turns into a {@link PracticeLightingOverrideSchema}
+ * input. The who-and-when columns stay in the database and the audit log;
+ * nothing here reads them, so nothing here parses them.
+ */
+export const PracticeLightingOverrideRowSchema = z.object({
+  id: IdSchema,
+  practice_slot_id: IdSchema,
+  window: CanonicalDateRangeSchema,
+  kind: z.literal(PRACTICE_LIGHTING_OVERRIDE_KIND),
+  status: z.enum(Object.values(PRACTICE_LIGHTING_OVERRIDE_STATUS)),
+});
+
+/**
  * A recurring practice slot: ground, a weekday, a start, a duration, and the
  * range over which that arrangement holds.
  *

@@ -20,7 +20,7 @@
 | System              | Expected state                                                                                 | How to verify                                       |
 | ------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | Vercel deployment   | Latest `main` production deployment is `READY`                                                  | Vercel dashboard or connector deployment list       |
-| Vercel Node runtime | Project currently reports Node `24.x`; CI baseline remains Node 20                              | Vercel project settings and `.github/workflows/ci.yml` |
+| Vercel Node runtime | Project reports Node `24.x`; CI verifies on Node 24 (parity since 2026-06-12)                   | Vercel project settings and `.github/workflows/ci.yml` |
 | Vercel env vars     | `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` set, `VITE_USE_MOCK_SUPABASE` absent            | Vercel dashboard → Settings → Environment Variables |
 | Supabase project    | `ACTIVE_HEALTHY`                                                                                | Supabase dashboard or MCP `get_project`             |
 | Database migrations | Production has all repo-required migrations applied; local repo currently has 49 migration files | Supabase dashboard → Database → Migrations          |

@@ -480,12 +480,25 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/recommendations.js',
       'tests/practiceRecommendations.test.js',
       'tests/practiceRepair.test.js',
+      // 8.6 3b PR 9: the adapter's witnesses run the repair on its output.
+      'tests/practiceRepairAdapter.test.js',
       'tests/practiceRepairDaylight.test.js',
       'tests/practiceRepairPreferences.test.js',
       'tests/reasonCodeReachability.test.js',
       'tests/unknownSurfaceDiscipline.test.js',
     ]),
     expectedProductionConsumers: Object.freeze(['packages/core/src/practice/recommendations.js']),
+    expectedExternalProductionConsumers: Object.freeze([]),
+  }),
+  // 8.6 3b PR 9: DB rows -> repair input, repair result -> persist payload.
+  // Unwired like the repair it feeds; PR 10's panel is its first caller.
+  Object.freeze({
+    layer: 'practice/repairAdapter.js',
+    modulePath: 'packages/core/src/practice/repairAdapter.js',
+    functions: Object.freeze(['buildPracticeRepairInput', 'buildPracticeRepairPayload']),
+    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    consumers: Object.freeze(['tests/practiceRepairAdapter.test.js']),
+    expectedProductionConsumers: Object.freeze([]),
     expectedExternalProductionConsumers: Object.freeze([]),
   }),
   // 8.6 PR 5: declines and the re-offer chain. Unwired like the repair it
@@ -712,6 +725,8 @@ const LAYERS = Object.freeze([
       'frontend/src/utils/coachPreferencePreview.js',
       'packages/core/src/practice/index.js',
       'packages/core/src/practice/repair.js',
+      // 8.6 3b PR 9: reuses the location-id contract, consults nothing.
+      'packages/core/src/practice/repairAdapter.js',
     ]),
     consumers: Object.freeze([
       'frontend/src/utils/coachPreferencePreview.js',

@@ -116,6 +116,15 @@ export { toPracticeMetricsInput } from './metricsInput.js';
 export { PRACTICE_TBD_REASON, repairPracticeLoss } from './repair.js';
 
 export {
+  PRACTICE_EXCEPTION_ROW_KIND,
+  PRACTICE_REPAIR_CAUSE_KIND,
+  PRACTICE_REPAIR_PAYLOAD_REFUSAL,
+  buildPracticeRepairInput,
+  buildPracticeRepairPayload,
+  parseDateRange,
+} from './repairAdapter.js';
+
+export {
   PRACTICE_CHAIN_STOP,
   createRecommendationState,
   declineRecommendation,

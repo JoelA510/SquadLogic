@@ -8,6 +8,43 @@ const { Given, When, Then } = createBdd();
 interface AutoSchedulerPage extends Page {
   __autoSchedulerResolve?: (value: unknown) => void;
   __autoSchedulerUnavailable?: boolean;
+  __daylightTruncation?: boolean;
+  __persistenceBodies?: Array<Record<string, unknown>>;
+}
+
+/** `YYYY-MM-DD`, `days` from now (UTC). */
+const isoFromToday = (days: number) =>
+  new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+
+/**
+ * 8.9 PR 6b: the daylight post-pass truncated t2's new placement the day
+ * before D (today + 14) and reported the remainder as TIME TBD; a second
+ * placement (t9) was withdrawn whole and has no row. The shape is the Edge's
+ * (supabase/functions/_shared/engines/practice-daylight.ts).
+ */
+function daylightTruncationReport() {
+  const entry = (teamId: string, from: string, withdrawn: boolean) => ({
+    teamId,
+    slotId: 'ps-1',
+    from,
+    until: isoFromToday(90),
+    reason: 'past-sunset',
+    code: 'PRACTICE_PAST_SUNSET',
+    marginMinutes: 0,
+    withdrawn,
+    date: from,
+    endMinutes: 1170,
+    sunsetMinutes: 1150,
+    limitMinutes: 1150,
+  });
+  return {
+    marginMinutes: 0,
+    today: isoFromToday(0),
+    meta: { placementsTruncated: 1, placementsWithdrawn: 1 },
+    timeTbd: [entry('t2', isoFromToday(14), false), entry('t9', isoFromToday(0), true)],
+    unknown: [],
+    lockedPastSunset: [],
+  };
 }
 
 // --- Navigation ---
@@ -61,18 +98,31 @@ When('I navigate to the Practice Scheduling page', async ({ page }) => {
       const lockedTeams = new Set(
         lockedAssignments.map((assignment: { teamId: string }) => assignment.teamId)
       );
-      const assignments = MOCK_AUTO_SCHEDULER_RESPONSE.assignments.filter(
-        (assignment) => !lockedTeams.has(assignment.teamId)
-      );
+      const truncate = (page as AutoSchedulerPage).__daylightTruncation === true;
+      const assignments = MOCK_AUTO_SCHEDULER_RESPONSE.assignments
+        .filter((assignment) => !lockedTeams.has(assignment.teamId))
+        .map((assignment) =>
+          truncate && assignment.teamId === 't2'
+            ? { ...assignment, effectiveUntil: isoFromToday(13) }
+            : assignment
+        );
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ...MOCK_AUTO_SCHEDULER_RESPONSE, assignments }),
+        body: JSON.stringify({
+          ...MOCK_AUTO_SCHEDULER_RESPONSE,
+          assignments,
+          ...(truncate ? { daylight: daylightTruncationReport() } : {}),
+        }),
       });
     });
   }
 
+  (page as AutoSchedulerPage).__persistenceBodies = [];
   await page.route('**/functions/v1/practice-persistence', async (route) => {
+    (page as AutoSchedulerPage).__persistenceBodies?.push(
+      JSON.parse(route.request().postData() || '{}')
+    );
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -212,6 +262,49 @@ Then('I should see the practice schedule review panel', async ({ page }) => {
   await expect(panel).toBeVisible({ timeout: 10000 });
   await expect(panel).toContainText('Review Practice Changes');
 });
+
+Given('the auto-scheduler truncates a placement at sunset', async ({ page }) => {
+  (page as AutoSchedulerPage).__daylightTruncation = true;
+});
+
+// The request the page sent, as the network carried it: one daylight
+// exception per reported truncated placement, enumerated from the report
+// above (t2), none for the withdrawn t9, naming the new row by its key.
+Then(
+  'the applied save records one daylight TIME TBD exception for the truncated placement',
+  async ({ page }) => {
+    const bodies = (page as AutoSchedulerPage).__persistenceBodies ?? [];
+    await expect.poll(() => bodies.length, { timeout: 10000 }).toBe(1);
+    const body = bodies[0] as {
+      repair?: { exceptions?: Array<Record<string, unknown>> };
+      snapshot?: { payload?: { assignmentRows?: Array<Record<string, unknown>> } };
+    };
+    const reported = daylightTruncationReport().timeTbd.filter((entry) => !entry.withdrawn);
+    const exceptions = body.repair?.exceptions ?? [];
+    expect(exceptions).toHaveLength(reported.length);
+    const [exception] = exceptions;
+    const key = exception.new_assignment as Record<string, string>;
+    expect(key.team_id).toBe('t2');
+    expect(key.practice_slot_id).toBe('ps-1');
+    expect(key.effective_date_range.endsWith(`,${isoFromToday(13)}]`)).toBe(true);
+    expect(exception).toMatchObject({
+      window: `[${reported[0].from},${reported[0].until}]`,
+      kind: 'time_tbd',
+      tbd_reason: 'past-sunset',
+      cause_kind: 'daylight',
+    });
+    // The key is a row the same save inserts.
+    const rows = body.snapshot?.payload?.assignmentRows ?? [];
+    expect(
+      rows.filter(
+        (row) =>
+          row.team_id === key.team_id &&
+          row.practice_slot_id === key.practice_slot_id &&
+          row.effective_date_range === key.effective_date_range
+      )
+    ).toHaveLength(1);
+  }
+);
 
 When('I apply the practice schedule', async ({ page }) => {
   await page.getByRole('button', { name: /Apply Schedule/i }).click();

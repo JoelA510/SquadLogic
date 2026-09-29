@@ -50,10 +50,22 @@ export const PracticeRepairSchema = z
       .array(
         z
           .object({
-            assignment_id: Uuid,
+            // 8.9 PR 6b: an existing row by id, OR a row this same save
+            // places, by its (team, slot, range) key -- exactly one.
+            assignment_id: Uuid.optional(),
+            new_assignment: z
+              .object({
+                team_id: Uuid,
+                practice_slot_id: Uuid,
+                effective_date_range: z.string().min(1).max(64),
+              })
+              .strict()
+              .optional(),
             window: z.string().min(1).max(64),
             kind: z.enum(['relocated', 'time_tbd']),
             practice_slot_id: Uuid.optional(),
+            // The DB CHECK's list (20261002000000); tests/practiceWriterV3.test.js
+            // pins it to that CHECK and to core PRACTICE_TBD_REASON.
             tbd_reason: z
               .enum([
                 'no-legal-slot-at-venue',
@@ -62,12 +74,17 @@ export const PracticeRepairSchema = z
                 'objective-preferred-tbd',
                 'coach-preference',
                 'declined',
+                'past-sunset',
+                'sunset-unknown',
               ])
               .optional(),
-            cause_kind: z.enum(['blackout', 'retirement']).optional(),
+            cause_kind: z.enum(['blackout', 'retirement', 'daylight']).optional(),
             cause_id: Uuid.optional(),
           })
           .strict()
+          .refine((e) => (e.assignment_id === undefined) !== (e.new_assignment === undefined), {
+            message: 'name the row by exactly one of assignment_id and new_assignment',
+          })
           .refine((e) => (e.kind === 'relocated') === (e.practice_slot_id !== undefined), {
             message: 'practice_slot_id is required for, and only for, a relocated exception',
           })

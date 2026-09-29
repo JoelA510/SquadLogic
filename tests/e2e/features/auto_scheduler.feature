@@ -47,6 +47,19 @@ Feature: Intelligent Auto-Scheduler
     When I apply the practice schedule
     Then I should see "Practice Schedule Applied" in the practice schedule review panel
 
+  Scenario: Practice Apply records a daylight TIME TBD remainder from the Auto-Scheduler
+    Given I have imported player data
+    And I have generated teams
+    And I have generated a practice schedule
+    And the auto-scheduler truncates a placement at sunset
+    When I navigate to the Practice Scheduling page
+    And I click the "Auto-Generate" button
+    And the auto-scheduler completes
+    Then I should see the practice schedule review panel
+    When I apply the practice schedule
+    Then I should see "Practice Schedule Applied" in the practice schedule review panel
+    And the applied save records one daylight TIME TBD exception for the truncated placement
+
   Scenario: Manual practice override can be staged and applied through persistence
     Given I have imported player data
     And I have generated teams

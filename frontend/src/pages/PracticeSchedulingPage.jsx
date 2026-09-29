@@ -27,7 +27,11 @@ import { PERMISSIONS } from '../constants/permissions.js';
 import { useAutoScheduler } from '../hooks/useAutoScheduler.js';
 import { useSeasonPracticeAssignments } from '../hooks/useSeasonPracticeAssignments.js';
 import { useAutoRunOnNavigate } from '../hooks/useAutoRunOnNavigate.js';
-import { persistPracticeScheduleReview } from '../utils/practicePersistenceClient.js';
+import {
+  persistPracticeRepair,
+  persistPracticeScheduleReview,
+} from '../utils/practicePersistenceClient.js';
+import { buildDaylightExceptions } from '../utils/daylightExceptions.js';
 import {
   buildPracticeApplyStatus,
   buildTeamsWithoutPracticeWarnings,
@@ -852,6 +856,25 @@ export default function PracticeSchedulingPage() {
       return;
     }
 
+    // 8.9 PR 6b (plan D13 a): each truncated placement's dark remainder is
+    // recorded as a daylight TIME TBD exception on its new row, one per
+    // `daylight.timeTbd` entry the run reported as not withdrawn. An entry
+    // with no staged placement refuses the Apply rather than being dropped.
+    const daylightTbd = buildDaylightExceptions({
+      daylight: autoScheduler.result?.daylight,
+      assignments: persistenceAssignments,
+      slots: schedulerSlots,
+    });
+    if (daylightTbd.unmatched.length > 0) {
+      setApplyError(
+        `The daylight check made ${daylightTbd.unmatched.map((entry) => entry.teamId).join(', ')} ` +
+          'TIME TBD from a date past sunset, and the staged schedule no longer holds that ' +
+          'placement, so it cannot be recorded. Run the auto-scheduler again.'
+      );
+      setApplyStatus('error');
+      return;
+    }
+
     const runId = autoScheduler.result?.runId ?? practice?.runId ?? undefined;
     const now = new Date().toISOString();
 
@@ -882,7 +905,13 @@ export default function PracticeSchedulingPage() {
     });
 
     try {
-      const result = await persistPracticeScheduleReview({
+      // Only a save with daylight exceptions carries a repair body: without
+      // one the Edge sends the v2 argument set (#461).
+      const persist =
+        daylightTbd.exceptions.length > 0
+          ? (request) => persistPracticeRepair({ ...request, exceptions: daylightTbd.exceptions })
+          : persistPracticeScheduleReview;
+      const result = await persist({
         assignments: persistenceAssignments,
         slots: schedulerSlots,
         runId,

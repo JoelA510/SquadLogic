@@ -42,6 +42,20 @@
  * reported in `lockedPastSunset` with a proposed fix (`applied: false`); the
  * operator applies it, or does not.
  *
+ * **Portable-lighting overrides are exempt (8.9 D14 PR C).** An approved
+ * `practice_lighting_overrides` window on a slot, loaded as the caller by
+ * `practice-lighting-overrides.ts` (never from the body, W25), exempts that
+ * slot's dates in `[from, until]`: such a date is not judged, asks for no
+ * sunset and so needs no coordinates, never truncates the placement, and keeps
+ * the practice's full length. It is counted in its own
+ * `lightingOverrideOccurrencesExempt`, never in the lit counter nor in
+ * `occurrencesExamined`. **Declared, not enforced:** an override has no
+ * lights-off time (plan default 4), so an exempt date is exempt however late
+ * the practice ends. A covered date AFTER a non-exempt date that truncates is
+ * part of the TIME TBD remainder -- D8 keeps one contiguous range per
+ * placement, so there is no gap to keep it in -- and is counted in
+ * `lightingOverrideOccurrencesInTimeTbd` rather than silently lost.
+ *
  * **Declared, not optimised (D11).** The search does not steer toward slots
  * that survive the season: the pass truncates what the search chose, and a
  * withdrawn placement's capacity is not offered to another team.
@@ -52,6 +66,7 @@ import { sunsetEnforcementMinutes, sunsetOnDate } from '../timing/solar.ts';
 import { dateRangeBounds } from '../calendar/icsFeed.ts';
 import { startMinutesOf, weekdayCode } from './coach-preference-load.ts';
 import { LOCK_PAGE_SIZE, readAllPages, type QueryResult } from './practice-lock.ts';
+import { lightingOverrideCovers, type LightingOverride } from './practice-lighting-overrides.ts';
 
 /**
  * Minutes before sunset an unlit practice must be over: **0** (D6). The Deno
@@ -116,6 +131,11 @@ export interface DaylightContext {
   timeZone: string | null;
   /** The season's calendar date: nothing earlier is judged. `null` judges from each slot's start. */
   today: string | null;
+  /**
+   * Approved portable-lighting windows, as `loadLightingOverrides` read them
+   * from the store (never the body). Absent or empty: nothing is exempt.
+   */
+  lightingOverrides?: readonly LightingOverride[];
 }
 
 // ---------------------------------------------------------------------------
@@ -361,12 +381,22 @@ interface PastSunset {
 
 type SeriesVerdict =
   | { kind: 'lit' }
-  | { kind: 'unknown'; cause: string; occurrences: number | null; undeclared: boolean }
+  | {
+      kind: 'unknown';
+      cause: string;
+      /** Unjudged occurrences: the span's dates less the {@link exempt} ones. */
+      occurrences: number | null;
+      undeclared: boolean;
+      /** Dates a lighting override covers: not judged, and not unknown. */
+      exempt?: number;
+    }
   | {
       kind: 'judged';
       undeclared: boolean;
       /** Every occurrence date in the span, in order. */
       dates: string[];
+      /** Dates before the first past sunset that an override covers: not judged. */
+      exemptDates: string[];
       withinDaylight: number;
       unknownDates: string[];
       firstPastSunset: PastSunset | null;
@@ -386,7 +416,8 @@ function judgeSeries(
   venue: VenueDaylight | undefined,
   timeZone: string | null,
   from: string | null,
-  until: string | null
+  until: string | null,
+  covered: (slotId: string, date: string) => boolean
 ): SeriesVerdict {
   if (venue?.lit === true) return { kind: 'lit' };
   const undeclared = venue?.lit !== false;
@@ -400,16 +431,37 @@ function judgeSeries(
   }
   const dates = occurrenceDates(slot.firstDate, from ?? slot.firstDate, until);
   if (venue.latitude === null || venue.longitude === null) {
+    // An exempt date asks for no sunset, so it needs no coordinates.
+    const exempt = dates.filter((date) => covered(slot.id, date));
+    if (exempt.length > 0 && exempt.length === dates.length) {
+      return {
+        kind: 'judged',
+        undeclared,
+        dates,
+        exemptDates: exempt,
+        withinDaylight: 0,
+        unknownDates: [],
+        firstPastSunset: null,
+      };
+    }
     return {
       kind: 'unknown',
       cause: DAYLIGHT_UNKNOWN_CAUSE.VENUE_COORDINATES_MISSING,
-      occurrences: dates.length,
+      occurrences: dates.length - exempt.length,
       undeclared,
+      exempt: exempt.length,
     };
   }
   let withinDaylight = 0;
   const unknownDates: string[] = [];
+  const exemptDates: string[] = [];
   for (const date of dates) {
+    // Portable lighting (D14): not judged, never truncated, full length kept.
+    // Declared, not enforced: an override has no lights-off time (default 4).
+    if (covered(slot.id, date)) {
+      exemptDates.push(date);
+      continue;
+    }
     const sunset = sunsetOnDate({
       date,
       latitude: venue.latitude,
@@ -427,6 +479,7 @@ function judgeSeries(
         kind: 'judged',
         undeclared,
         dates,
+        exemptDates,
         withinDaylight,
         unknownDates,
         firstPastSunset: {
@@ -439,7 +492,15 @@ function judgeSeries(
     }
     withinDaylight += 1;
   }
-  return { kind: 'judged', undeclared, dates, withinDaylight, unknownDates, firstPastSunset: null };
+  return {
+    kind: 'judged',
+    undeclared,
+    dates,
+    exemptDates,
+    withinDaylight,
+    unknownDates,
+    firstPastSunset: null,
+  };
 }
 
 const later = (a: string | null, b: string | null) =>
@@ -528,6 +589,12 @@ export interface DaylightReport {
     lockedRowsExamined: number;
     lockedRowsPastSunset: number;
     lockedRowsUnknown: number;
+    /** New placements' dates an approved lighting override exempted: not judged, kept. */
+    lightingOverrideOccurrencesExempt: number;
+    /** Covered dates after a non-exempt truncation, so inside a TIME TBD remainder (D8). */
+    lightingOverrideOccurrencesInTimeTbd: number;
+    /** Locked rows' dates an approved lighting override exempted. */
+    lockedRowOccurrencesLightingExempt: number;
   };
   timeTbd: DaylightTimeTbd[];
   unknown: DaylightUnknown[];
@@ -569,6 +636,9 @@ export function applyDaylightPostPass<P extends DaylightPlacement, U extends Day
       lockedRowsExamined: 0,
       lockedRowsPastSunset: 0,
       lockedRowsUnknown: 0,
+      lightingOverrideOccurrencesExempt: 0,
+      lightingOverrideOccurrencesInTimeTbd: 0,
+      lockedRowOccurrencesLightingExempt: 0,
     },
     timeTbd: [],
     unknown: [],
@@ -576,6 +646,7 @@ export function applyDaylightPostPass<P extends DaylightPlacement, U extends Day
   };
   const { meta } = report;
   const venueOf = (slot: DaylightSlot) => (slot.fieldId ? venues.get(slot.fieldId) : undefined);
+  const covered = lightingOverrideCovers(params.lightingOverrides);
 
   const placements: Array<P | (P & { effectiveUntil: string })> = [];
   const withdrawn: DaylightUnplaced[] = [];
@@ -590,7 +661,7 @@ export function applyDaylightPostPass<P extends DaylightPlacement, U extends Day
     let judged = bySlot.get(placement.slotId);
     if (!judged) {
       judged = slot
-        ? judgeSeries(slot, venueOf(slot), timeZone, today, slot.effectiveUntil)
+        ? judgeSeries(slot, venueOf(slot), timeZone, today, slot.effectiveUntil, covered)
         : {
             kind: 'unknown',
             cause: DAYLIGHT_UNKNOWN_CAUSE.SLOT_DATES_UNREADABLE,
@@ -607,6 +678,7 @@ export function applyDaylightPostPass<P extends DaylightPlacement, U extends Day
     meta.unlitPlacementsExamined += 1;
     if (judged.undeclared) meta.undeclaredLightingPlacements += 1;
     if (judged.kind === 'unknown') {
+      meta.lightingOverrideOccurrencesExempt += judged.exempt ?? 0;
       meta.daylightUnknownPlacements += 1;
       meta.daylightUnknownOccurrences += judged.occurrences ?? 0;
       report.unknown.push({
@@ -621,7 +693,9 @@ export function applyDaylightPostPass<P extends DaylightPlacement, U extends Day
     }
     const past = judged.firstPastSunset;
     const examined = past ? judged.dates.indexOf(past.date) + 1 : judged.dates.length;
-    meta.occurrencesExamined += examined;
+    // An exempt date is not judged, so it is not examined (core's contract).
+    meta.occurrencesExamined += examined - judged.exemptDates.length;
+    meta.lightingOverrideOccurrencesExempt += judged.exemptDates.length;
     meta.occurrencesWithinDaylight += judged.withinDaylight;
     if (judged.unknownDates.length > 0) {
       meta.daylightUnknownOccurrences += judged.unknownDates.length;
@@ -637,6 +711,9 @@ export function applyDaylightPostPass<P extends DaylightPlacement, U extends Day
       placements.push(placement);
       continue;
     }
+    meta.lightingOverrideOccurrencesInTimeTbd += judged.dates.filter(
+      (date) => date > past.date && covered(placement.slotId, date)
+    ).length;
     const nothingLeft = past.date === judged.dates[0];
     report.timeTbd.push({
       teamId: placement.teamId,
@@ -673,7 +750,8 @@ export function applyDaylightPostPass<P extends DaylightPlacement, U extends Day
           venueOf(slot),
           timeZone,
           later(today, bounds.first),
-          earlier(slot.effectiveUntil, bounds.last)
+          earlier(slot.effectiveUntil, bounds.last),
+          covered
         )
       : ({
           kind: 'unknown',
@@ -683,6 +761,12 @@ export function applyDaylightPostPass<P extends DaylightPlacement, U extends Day
         } as const);
     if (judged.kind === 'lit') continue;
     meta.lockedRowsExamined += 1;
+    meta.lockedRowOccurrencesLightingExempt +=
+      judged.kind !== 'unknown'
+        ? judged.exemptDates.length
+        : 'exempt' in judged
+          ? (judged.exempt ?? 0)
+          : 0;
     if (judged.kind === 'unknown' || judged.unknownDates.length > 0) {
       meta.lockedRowsUnknown += 1;
       report.unknown.push({

@@ -26,6 +26,7 @@ import {
   PRACTICE_TBD_REASON,
   createRecommendationState,
   declineRecommendation,
+  rebaseRecommendationState,
   repairPracticeLoss,
   toSeason2026PracticePlan,
   undoDecline,
@@ -850,4 +851,250 @@ describe('recommendations :: a declined slot never returns without undo (plan §
     }
     expect(checked).toBeGreaterThan(20);
   }, 60_000);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Re-base onto a fresh read (8.6 3b PR 11 plan §1, §6 witnesses 16-20)        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A plan of explicit rows, each with its own slot and, when given, its own
+ * range: what a fresh read after an enact looks like (the enacted row closed
+ * at D-1, its replacement from D). Built the way the writer leaves the rows,
+ * never by editing the state under test.
+ */
+function dated({ rows, inventory, changeBudget }) {
+  return {
+    plan: {
+      slots: rows.map((r) => ({
+        id: `slot-${r.id}`,
+        ...r.shape,
+        durationMinutes: 60,
+        validFrom: '2026-09-01',
+        validUntil: '2026-11-30',
+        capacity: 1,
+        revisionId: 'constructed',
+        label: null,
+        surfaceResolution: 'resolved',
+      })),
+      assignments: rows.map((r) => ({
+        id: r.id,
+        slotId: `slot-${r.id}`,
+        teamId: r.teamId,
+        effectiveFrom: r.from ?? '2026-09-01',
+        effectiveUntil: r.until ?? '2026-11-30',
+      })),
+      source: 'constructed',
+    },
+    graph,
+    loss: { surfaceIds: [OP('field-2')], from: '2026-10-05', reason: 'maintenance' },
+    inventory: inventory.map((shape) => ({ durationMinutes: 60, ...shape })),
+    ...(changeBudget === undefined ? {} : { changeBudget }),
+  };
+}
+
+/*
+ * A (Tue 17:00) has one shape, XA (Tue 18:00: a published-time change). C
+ * (Tue 20:00) holds XC (Tue 20:00 elsewhere: no change) and could take YC
+ * (Tue 21:00: a change). E (Wed 17:00) holds XE (no change). Budget 1: A
+ * spends it. The fresh read after enacting A closes A at D-1, adds its
+ * replacement on XA from D, and (elsewhere in the season) a frozen row Z on XC.
+ */
+const RB_XA = { surfaceId: OP('field-3-a'), weekday: 'TUE', startMinutes: 1080 };
+const RB_XC = { surfaceId: OP('field-4-a'), weekday: 'TUE', startMinutes: 1200 };
+const RB_YC = { surfaceId: OP('field-5'), weekday: 'TUE', startMinutes: 1260 };
+const RB_XE = { surfaceId: OP('field-3-a'), weekday: 'WED', startMinutes: 1020 };
+const RB_ROWS = [
+  {
+    id: 'rb-a',
+    teamId: 'A',
+    shape: { surfaceId: OP('field-2-a'), weekday: 'TUE', startMinutes: 1020 },
+  },
+  {
+    id: 'rb-c',
+    teamId: 'C',
+    shape: { surfaceId: OP('field-2-b'), weekday: 'TUE', startMinutes: 1200 },
+  },
+  {
+    id: 'rb-e',
+    teamId: 'E',
+    shape: { surfaceId: OP('field-2-a'), weekday: 'WED', startMinutes: 1020 },
+  },
+];
+const RB_INVENTORY = [RB_XA, RB_XC, RB_YC, RB_XE];
+const RB_BEFORE = dated({ rows: RB_ROWS, inventory: RB_INVENTORY, changeBudget: 1 });
+/** The season after enacting `rb-a` onto `to`, with `extra` rows written elsewhere. */
+const rbAfterEnact = (to, extra = [], changeBudget = 1) =>
+  dated({
+    rows: [
+      ...RB_ROWS.map((r) => (r.id === 'rb-a' ? { ...r, until: '2026-10-04' } : r)),
+      { id: 'rb-a-r', teamId: 'A', shape: to, from: '2026-10-05' },
+      ...extra,
+    ],
+    inventory: RB_INVENTORY,
+    changeBudget,
+  });
+const RB_Z = { id: 'rb-z', teamId: 'Z', shape: RB_XC };
+const RB_N = {
+  id: 'rb-n',
+  teamId: 'N',
+  shape: { surfaceId: OP('field-2-b'), weekday: 'WED', startMinutes: 1200 },
+};
+
+/** Brute force: the carried placements the fresh read makes inadmissible (its own clash test). */
+function inadmissibleOnFreshRead(freshInput, state) {
+  const { lost, series } = snapshot(freshInput);
+  const frozen = series.filter((s) => !s.displaced);
+  const inventory = new Set(freshInput.inventory.map(key));
+  const displacedIds = new Set(series.filter((s) => s.displaced).map((s) => s.id));
+  return state.recommendations
+    .filter((r) => r.to !== null && displacedIds.has(r.assignmentId))
+    .filter((r) => {
+      const at = placedOf(r);
+      return (
+        lost.has(r.to.surfaceId) ||
+        !inventory.has(key(r.to)) ||
+        frozen.some((other) => clash(at, other))
+      );
+    })
+    .map((r) => r.assignmentId)
+    .sort();
+}
+
+/** The published-time changes a list of recommendations spends, priced from the snapshot. */
+function timeChangesOf(input, recommendations) {
+  const byId = new Map(snapshot(input).series.map((s) => [s.id, s]));
+  return recommendations
+    .filter((r) => r.to !== null)
+    .reduce(
+      (sum, r) =>
+        sum +
+        (changeCountsFor(byId.get(r.assignmentId), { ...r.to })[
+          RESOLVE_OBJECTIVE_TERM.CHANGED_GAME
+        ] ?? 0),
+      0
+    );
+}
+
+describe('recommendations :: re-base onto a fresh read (PR 11 plan §1, §6 16-20)', () => {
+  const start = () => createRecommendationState(RB_BEFORE);
+  const aTo = () => start().recommendations.find((r) => r.assignmentId === 'rb-a').to;
+
+  it('the fixture exercises what it claims (meta-assertions, each with its vacuity plant)', () => {
+    const state = start();
+    expect(requireExamined(snapshot(RB_BEFORE).displaced.length, 'displaced series')).toBe(3);
+    expect(key(aTo())).toBe(key({ ...RB_XA, durationMinutes: 60 }));
+    const fresh = rbAfterEnact(aTo(), [RB_Z]);
+    expect(requireExamined(inadmissibleOnFreshRead(fresh, state).length, 'release')).toBe(1);
+    // The vacuity plant: the loss moved off every series.
+    const off = { ...RB_BEFORE, loss: { ...RB_BEFORE.loss, surfaceIds: [OP('field-5')] } };
+    expect(() => requireExamined(snapshot(off).displaced.length, 'displaced series')).toThrow(
+      'examined no displaced series'
+    );
+    const quiet = rbAfterEnact(aTo());
+    expect(() => requireExamined(inadmissibleOnFreshRead(quiet, state).length, 'release')).toThrow(
+      'examined no release'
+    );
+  });
+
+  it('16: no two recommendations clash after a re-base, and none lands on a fresh frozen row', () => {
+    const fresh = rbAfterEnact(aTo(), [RB_Z]);
+    const rebased = rebaseRecommendationState(start(), fresh, { enacted: ['rb-a'] });
+    expect(requireExamined(assertNoClash(fresh, rebased.recommendations), 'pair')).toBeGreaterThan(
+      0
+    );
+  });
+
+  it('17: releases exactly the inadmissible carried recommendations, by brute force', () => {
+    const state = start();
+    const fresh = rbAfterEnact(aTo(), [RB_Z]);
+    const expected = inadmissibleOnFreshRead(fresh, state);
+    const rebased = rebaseRecommendationState(state, fresh, { enacted: ['rb-a'] });
+    const released = rebased.chains.filter((c) => c.kind === 'release').map((c) => c.assignmentId);
+    expect(requireExamined(released.length, 'release')).toBe(expected.length);
+    expect(released.sort()).toEqual(expected);
+    expect(rebased.findings.map((f) => f.code)).toEqual([
+      PRACTICE_REASON.REPAIR_RECOMMENDATION_LOCAL,
+    ]);
+    // A release is not a decline: Δ is unchanged.
+    expect(rebased.declined).toEqual([]);
+    // And nothing is released when the fresh read changes nothing it holds.
+    const quiet = rebaseRecommendationState(state, rbAfterEnact(aTo()), { enacted: ['rb-a'] });
+    expect(quiet.chains).toEqual([]);
+  });
+
+  it('18: every carried series and every fresh-displaced series appears exactly once', () => {
+    const state = start();
+    for (const fresh of [rbAfterEnact(aTo(), [RB_Z]), rbAfterEnact(aTo(), [RB_N])]) {
+      const rebased = rebaseRecommendationState(state, fresh, { enacted: ['rb-a'] });
+      expect(
+        requireExamined(assertEveryWindowOnce(fresh, rebased.recommendations), 'window')
+      ).toBeGreaterThan(1);
+      const answered = rebased.recommendations.map((r) => r.assignmentId);
+      const carried = RB_ROWS.map((r) => r.id).filter((id) => id !== 'rb-a');
+      for (const id of carried) expect(answered.filter((a) => a === id)).toEqual([id]);
+      expect(answered).not.toContain('rb-a');
+      expect(rebased.enacted).toEqual(['rb-a']);
+    }
+  });
+
+  it('19: the change budget spans enacts: budget 1, A enacted with a change, C cannot change', () => {
+    const state = start();
+    const enactedChanges = timeChangesOf(RB_BEFORE, [
+      state.recommendations.find((r) => r.assignmentId === 'rb-a'),
+    ]);
+    expect(requireExamined(enactedChanges, 'enacted time change')).toBe(1);
+    for (const fresh of [rbAfterEnact(aTo(), [RB_Z]), rbAfterEnact(aTo(), [RB_N])]) {
+      const rebased = rebaseRecommendationState(state, fresh, { enacted: ['rb-a'] });
+      expect(rebased.enactedTimeChanges).toBe(1);
+      expect(enactedChanges + timeChangesOf(fresh, rebased.recommendations)).toBeLessThanOrEqual(1);
+    }
+    const released = rebaseRecommendationState(state, rbAfterEnact(aTo(), [RB_Z]), {
+      enacted: ['rb-a'],
+    }).recommendations.find((r) => r.assignmentId === 'rb-c');
+    expect(released.to).toBeNull();
+    expect(released.reason).toBe(PRACTICE_TBD_REASON.CHANGE_BUDGET);
+  });
+
+  it('20: an enacted series still displaced on the fresh read is loud', () => {
+    expect(() => rebaseRecommendationState(start(), RB_BEFORE, { enacted: ['rb-a'] })).toThrow(
+      'did not land'
+    );
+    expect(() => rebaseRecommendationState(start(), RB_BEFORE, { enacted: ['nope'] })).toThrow(
+      'cannot have been enacted'
+    );
+  });
+
+  it('reopens on a season changed elsewhere, and a carried decline still never returns without undo', () => {
+    let state = start();
+    const declinedShape = state.recommendations.find((r) => r.assignmentId === 'rb-c').to;
+    state = declineRecommendation(state, 'rb-c');
+    expect(requireExamined(state.declined.length, 'decline')).toBe(1);
+    const fresh = rbAfterEnact(aTo(), [RB_N]);
+    const rebased = rebaseRecommendationState(state, fresh, { enacted: ['rb-a'] });
+    expect(rebased.findings.find((f) => f.details?.reopened)?.details).toMatchObject({
+      reopened: true,
+      appeared: ['rb-n'],
+    });
+    // The fresh repair offered C its declined shape again: declined again, recorded.
+    expect(rebased.chains.at(-1)).toMatchObject({ kind: 'decline', assignmentId: 'rb-c' });
+    expect(rebased.declined.map((d) => `${d.assignmentId}@${key(d.to)}`)).toEqual([
+      `rb-c@${key(declinedShape)}`,
+    ]);
+    const c = rebased.recommendations.find((r) => r.assignmentId === 'rb-c');
+    expect(c.to === null ? null : key(c.to)).not.toBe(key(declinedShape));
+    expect(assertEveryWindowOnce(fresh, rebased.recommendations)).toBe(3);
+    assertNoClash(fresh, rebased.recommendations);
+  });
+
+  it('carries the state through when nothing changed, and is deterministic', () => {
+    const state = declineRecommendation(start(), 'rb-e');
+    const same = rebaseRecommendationState(state, RB_BEFORE);
+    expect(same.recommendations).toEqual(state.recommendations);
+    expect(same.declined).toEqual(state.declined);
+    const fresh = rbAfterEnact(aTo(), [RB_Z]);
+    expect(rebaseRecommendationState(state, fresh, { enacted: ['rb-a'] })).toEqual(
+      rebaseRecommendationState(state, fresh, { enacted: ['rb-a'] })
+    );
+  });
 });

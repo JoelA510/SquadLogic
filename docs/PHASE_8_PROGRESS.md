@@ -6950,3 +6950,74 @@ Operator ruling 2 now holds in the auto-scheduler as well as in the RPC.
   (Persist 5, Team 8) passed.
 - **Follow-ups.** No caller passes `lastSync`. The `.text-red-400` branch in an
   E2E step is dead.
+
+## Task #70 — #492 merged (94051b5): harness runs are isolated
+
+- Each run gets a private `mktemp` directory and its own scratch. Its stop is
+  scoped to the PID it started, behind a trap, and there is no `pkill -u`, so
+  one run can no longer stop or overwrite another. The leftover cluster from
+  the earlier hazard was already gone after a container restart.
+- #491 and #493 were docs: the 2026-09-29 operator rulings, the CLAUDE.md §11
+  Deno job note, and the approved D14 plan (`docs/PHASE_8_9_D14_PLAN.md`).
+
+## 8.9 D14 PR A — #494 merged (339bfae): the 10-minute ladder, shift-earlier, overrides as input
+
+- **Ladder.** A slot's duration on a date is `D0 - 10k`, where D0 is the slot's
+  own length. k is the smallest number of steps that ends the practice by
+  sunset, and it never decreases. The floor is
+  `PRACTICE_MINIMUM_DURATION_MINUTES = 40`. Cuts are per slot, not per venue.
+- **Shift-earlier.** 10-minute steps, the duration kept, never before
+  `school_day_end`. The new `earliestStartWeekdays` input defaults to Mon-Thu,
+  so a Friday shift is refused as `earliest-start-unknown`. When shortening
+  would go below 40, the auto-fallback shifts earlier with the ladder duration
+  kept; otherwise the slot is TIME TBD with its date. A slot with a planned
+  overlap on its surface never shifts.
+- **Overrides.** Duration overrides are re-keyed to `slotId`. Lighting
+  overrides are an input only; the table is D14 PR B.
+- **Corpus** (the old column is quoted from this file's earlier entry):
+
+  | | Old | New |
+  |---|---|---|
+  | Season phases | 15 | 35 |
+  | Slot-dates still past sunset | 412 | 312 |
+  | Survive | 25 | 51 |
+
+  45-minute slots never shorten, because 35 is below the minimum.
+- **Evidence.** 17 witness plants went red (agent). Supervisor plant: setting
+  the minimum to 30 turned 9 of 49 red in `practiceDurationPhases.test.js`.
+- **Not done in PR A.** The season constraint registry note does not mention
+  D14 yet.
+
+## 8.9 PR 6b — #495 merged (cb1a4bb): daylight TIME TBD is persisted (D13 a + c)
+
+- **Migration `20261002000000`.** The `tbd_reason` CHECK admits `past-sunset`
+  and `sunset-unknown`. The `cause_kind` CHECK admits `daylight`, and a new
+  CHECK, `practice_exceptions_daylight_shape`, holds `daylight` to a
+  sunset-reason `time_tbd` with a NULL `cause_id`.
+- **Writer.** `persist_practice_schedule` is copied whole. An exception may
+  name a row the same save inserts, by `new_assignment` (team, slot, range)
+  instead of `assignment_id`; exactly one is allowed. The key must be one of
+  this save's assignments (22023) and in the season scope (42501). A count
+  check refuses the save if fewer exceptions were recorded than were sent
+  (23503). A mid-range daylight window is refused (22023). 3b PR 9 must refuse
+  every mid-range window until PR 12.
+- **Page.** Apply sends one exception per non-withdrawn `daylight.timeTbd`
+  entry, keyed by the same `buildPracticeAssignmentRows` the snapshot uses. An
+  entry with no staged placement refuses the Apply instead of being dropped.
+  Withdrawn teams stay in `teams_without_practice` (D13 b deferred).
+- **Revert.** It refuses while daylight rows exist, unless
+  `squadlogic.revert_practice_exceptions_daylight = 'archive'` is set.
+- **Evidence.** 16 plants, all CAUGHT, including the 3 SQL plants added in the
+  code-review round (shape CHECK, mid-range refusal, season scope), each run
+  in its own `pgrunner2` harness pass. Supervisor plant: removing the
+  withdrawn-entry filter turned 2 of 5 red. 10 re-aimed writer plants are
+  anchor-checked only.
+- **Review.** `/code-review` at high effort raised 10 findings. 5 were fixed.
+  5 were declined with reasons: a lost-response retry hits 23P01 loudly (an
+  idempotent retry is a follow-up); a re-sent existing key resolves to the
+  same row; deploy skew fails loudly; payload keys are re-parsed per
+  exception; and the revert's archive mode writes no audit row, which matches
+  the 20260929 revert.
+- **Deploy (operator).** This is the 6th pending production migration, and the
+  guard allows at most 5. Deploy the migration and the Edge function with, or
+  before, the frontend.

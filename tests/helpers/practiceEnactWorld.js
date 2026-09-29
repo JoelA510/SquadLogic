@@ -18,7 +18,11 @@ export const F3 = uuid(203);
 export const RETIRED_AFTER = '2026-10-14';
 export const D = '2026-10-15';
 export const RANGE = '[2026-09-01,2026-12-01)';
-export const RETIREMENT = { kind: 'retirement', field: { id: F1, effective_to: RETIRED_AFTER } };
+/** The loss prop the panel passes (the adapter's shape). */
+export const RETIREMENT = /** @type {any} */ ({
+  kind: 'retirement',
+  field: { id: F1, effective_to: RETIRED_AFTER },
+});
 export const FINGERPRINT = '0123456789abcdef0123456789abcdef';
 export const ENACT_KEY = uuid(999);
 export const SEASON = uuid(900);

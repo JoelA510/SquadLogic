@@ -12,11 +12,15 @@
  *    loss's date. It reads the FRESH field row, never the `loss` prop, which
  *    the dry-run preview builds from its own unsaved date.
  * 2. {@link judgeEnact}: does the one recommendation still stand, exactly as
- *    it was shown? Its series is still displaced, its `to` is still one of its
- *    candidates, its marginal against every other recommendation is not
- *    null, and `to`, `tier`, `origin`, `reason` and `objective.counts` equal
- *    what the admin was shown. Anything else is STALE and nothing is sent
- *    (the approved-option precedent, `resolve/stages.js:1011-1034`).
+ *    it was shown? Its series is still displaced and not enacted, its `to` is
+ *    still one of its candidates, not declined, within the change budget
+ *    left, and its marginal against every other recommendation is not null;
+ *    and the fresh recommendation equals the shown one field for field
+ *    (`to`, `tier`, `origin`, `reason` and `objective.counts`, as the plan
+ *    names, and also the price, the coach overlaps and the series' window,
+ *    which reach the write and the record). Anything else is STALE and
+ *    nothing is sent (the approved-option precedent,
+ *    `resolve/stages.js:1011-1034`).
  * 3. {@link buildEnactPayload}: the write for that one entry only, built by
  *    the adapter's own builder from the FRESH recommendation, never from
  *    `result.rehomed` (a tier-2 move sits in `timeTbd`, `repair.js:108-113`,
@@ -45,6 +49,8 @@
 import { z } from 'zod';
 
 import { isoDateOfDayNumber, isoDayNumber } from '../facility/index.js';
+import { canonicalJson } from '../scenario/inputs.js';
+import { PRACTICE_REASON } from './reasonCodes.js';
 import {
   buildPracticeRepairContext,
   placementsExcept,
@@ -82,6 +88,10 @@ export const PRACTICE_ENACT_STALE = Object.freeze({
   NOT_A_CANDIDATE: 'not-a-candidate',
   /** The shown shape clashes with another recommendation. */
   CLASHES: 'clashes',
+  /** The shown shape would take the change budget past what is left of it. */
+  OVER_BUDGET: 'over-budget',
+  /** The series has declined the shown shape (it is in Δ). */
+  DECLINED: 'declined',
   /** The fresh recommendation differs from the shown one. */
   CHANGED: 'changed',
 });
@@ -100,18 +110,6 @@ function shiftDate(date, days) {
 /** @param {unknown} value */
 function id(value) {
   return String(value).toLowerCase();
-}
-
-/** One spelling of a JSON value with its keys sorted, for an exact comparison. */
-function canonical(value) {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (value !== null && typeof value === 'object') {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value ?? null);
 }
 
 /**
@@ -161,26 +159,15 @@ export function retirementCommitOf(freshRows, loss) {
   return { committed: true, refusal: null, fieldId, stored, claimed };
 }
 
-/** The fields of a recommendation the admin is shown, and that must not change. */
-function shownFieldsOf(recommendation) {
-  return {
-    to: recommendation.to === null ? null : { ...recommendation.to },
-    tier: recommendation.tier,
-    origin: recommendation.origin,
-    reason: recommendation.reason,
-    counts: recommendation.objective.counts,
-  };
-}
-
 /**
  * Re-judge ONE recommendation against a re-based state (plan §1, step 6).
  *
- * @param {{ input: Object, recommendations: any[], enacted: string[] }} rebased -
+ * @param {{ input: any, recommendations: any[], enacted: string[], declined: any[] }} rebased -
  *   the session state re-based onto the fresh input
  * @param {string} assignmentId - S
  * @param {Object} shown - S's recommendation exactly as the admin was shown it
  * @returns {{ stands: boolean, why: string | null, assignmentId: string,
- *   differences: string[], shown: Object, fresh: any }}
+ *   differences: string[], shown: any, fresh: any, basis: any }}
  */
 export function judgeEnact(rebased, assignmentId, shown) {
   const verdict = (why, fresh, differences = []) =>
@@ -191,6 +178,8 @@ export function judgeEnact(rebased, assignmentId, shown) {
       differences,
       shown,
       fresh,
+      // The fresh read this was judged on: the payload must be built from the same one.
+      basis: rebased.input.plan,
     });
   if (shown?.assignmentId !== assignmentId) {
     throw new Error(`enact: the shown recommendation is not ${assignmentId}'s`);
@@ -210,6 +199,10 @@ export function judgeEnact(rebased, assignmentId, shown) {
     };
     const candidate = candidateFor(assignmentId, shown.to);
     if (candidate === null) return verdict(PRACTICE_ENACT_STALE.NOT_A_CANDIDATE, fresh);
+    const declinedKey = `${assignmentId}@${shapeKey(shown.to)}`;
+    if (rebased.declined.some((d) => `${d.assignmentId}@${shapeKey(d.to)}` === declinedKey)) {
+      return verdict(PRACTICE_ENACT_STALE.DECLINED, fresh);
+    }
     const chosen = new Map();
     for (const other of rebased.recommendations) {
       if (other.to === null || other.assignmentId === assignmentId) continue;
@@ -221,16 +214,24 @@ export function judgeEnact(rebased, assignmentId, shown) {
     }
     const series = entryById.get(assignmentId).series;
     const rest = placementsExcept(context, chosen, assignmentId);
+    if (
+      context.budget !== null &&
+      rest.timeChanges + context.timeChangeOf(candidate) > context.budget
+    ) {
+      return verdict(PRACTICE_ENACT_STALE.OVER_BUDGET, fresh);
+    }
     if (context.marginal(series, candidate, rest.placed, rest.coachDays) === null) {
       return verdict(PRACTICE_ENACT_STALE.CLASHES, fresh);
     }
   }
 
-  const before = shownFieldsOf(shown);
-  const after = shownFieldsOf(fresh);
-  const differences = Object.keys(before).filter(
-    (key) => canonical(before[key]) !== canonical(after[key])
-  );
+  // Everything the admin was shown, field by field: the shape, its tier and
+  // origin, the reason, the price and its counts, the coach overlaps, and the
+  // series' own shape and window (plan §1 step 6 names `to`, `tier`, `origin`
+  // and the counts; the rest reaches the write or the record too).
+  const differences = [...new Set([...Object.keys(shown), ...Object.keys(fresh)])]
+    .filter((key) => canonicalJson(shown[key]) !== canonicalJson(fresh[key]))
+    .sort();
   return verdict(
     differences.length === 0 ? null : PRACTICE_ENACT_STALE.CHANGED,
     fresh,
@@ -269,6 +270,9 @@ export function buildEnactPayload(adapted, judged, answer, commit) {
   // The gate must have judged THIS loss: its field, and D-1 stored.
   if (commit.fieldId !== cause.causeId || commit.stored !== shiftDate(lossDate, -1)) {
     return refuse(PRACTICE_ENACT_REFUSAL.RETIREMENT_CHANGED);
+  }
+  if (judged.basis !== adapted.input.plan) {
+    throw new Error('enact: the recommendation was judged on another read than the one adapted');
   }
   if (!judged.stands) return refuse(PRACTICE_ENACT_REFUSAL.STALE);
   if (typeof baseFingerprint !== 'string' || baseFingerprint === '') {
@@ -310,7 +314,7 @@ export function buildEnactPayload(adapted, judged, answer, commit) {
     return refuse(PRACTICE_ENACT_REFUSAL.UNLOCK_NOT_ACCEPTED, { plan: built.plan });
   }
   let unlock = [];
-  if (accepted) {
+  if (accepted && unlockRequired.length > 0) {
     const enactKey = answer?.enactKey;
     if (typeof enactKey !== 'string' || !UUID.test(enactKey)) {
       throw new TypeError('enact: an accepted answer needs its enactKey (a lowercase uuid)');
@@ -479,7 +483,7 @@ export function buildEnactRecord({
   }
   const promptIds = prompt.rows.map((row) => row.assignment_id).sort();
   const requiredIds = enactment.plan.unlockRequired.map((row) => row.assignment_id).sort();
-  if (canonical(promptIds) !== canonical(requiredIds)) {
+  if (canonicalJson(promptIds) !== canonicalJson(requiredIds)) {
     throw new Error('enact: the prompt shown does not list the rows the write unlocks');
   }
   const recommendation = judged.fresh;
@@ -487,7 +491,17 @@ export function buildEnactRecord({
   const row = snapshot.find((r) => r.id === recommendation.assignmentId);
   const loss = adapted.input.loss;
   const fresh = repairPracticeLoss(state.input);
-  const local = state.chains.length > 0;
+  // Locally repaired: any chain, or a reopen, stamped the state LOCAL.
+  const local =
+    state.chains.length > 0 ||
+    state.findings.some((f) => f.code === PRACTICE_REASON.REPAIR_RECOMMENDATION_LOCAL);
+  // Proven optimal only when the session's recommendations ARE the fresh
+  // repair's own, and it proved them: a carried placement is not.
+  const provenOptimal =
+    fresh.stats.provenOptimal &&
+    fresh.recommendationSearch.provenOptimal &&
+    !local &&
+    canonicalJson(state.recommendations) === canonicalJson(fresh.recommendations);
   const overlaps = [...new Set(recommendation.coachOverlaps.map((o) => o.coach))].sort();
   return PracticeEnactRecordSchema.parse({
     schema_version: 1,
@@ -560,8 +574,7 @@ export function buildEnactRecord({
     fingerprint_covers: PRACTICE_ENACT_FINGERPRINT_COVERS,
     solver: {
       strategy: fresh.stats.strategy,
-      proven_optimal:
-        fresh.stats.provenOptimal && fresh.recommendationSearch.provenOptimal && !local,
+      proven_optimal: provenOptimal,
       daylight_supplied: adapted.declared.daylight.supplied,
       closures_supplied: adapted.declared.closures.blackoutsSupplied,
     },

@@ -161,6 +161,29 @@ describe('enact :: 1, a changed world is stale and sends nothing', () => {
     expect(requireExamined(subjects.length, 'series')).toBe(2);
   });
 
+  it('a shape S declined, or one past the change budget left, is stale', () => {
+    const state = createRecommendationState(adapt(main()).input);
+    const shown = recOf(state, uuid(601));
+    const declined = declineRecommendation(state, uuid(601));
+    expect(judgeEnact(declined, uuid(601), shown).why).toBe(PRACTICE_ENACT_STALE.DECLINED);
+    // A time-changing shape judged on a state whose budget is spent (a real
+    // repair input with `changeBudget: 0`, as the panel may pass).
+    const moved = recOf(declined, uuid(601));
+    expect(moved.objective.counts.changedGame).toBe(1);
+    const spent = createRecommendationState(
+      buildPracticeRepairInput({ ...main(), loss: RETIREMENT, options: { changeBudget: 0 } }).input
+    );
+    expect(judgeEnact(spent, uuid(601), moved).why).toBe(PRACTICE_ENACT_STALE.OVER_BUDGET);
+  });
+
+  it('a payload is never built from a read other than the one judged', () => {
+    const state = createRecommendationState(adapt(main()).input);
+    const judged = judgeEnact(state, uuid(601), recOf(state, uuid(601)));
+    expect(() =>
+      buildEnactPayload(adapt(main()), judged, ACCEPT, retirementCommitOf(main(), RETIREMENT))
+    ).toThrow('another read');
+  });
+
   it('an already-enacted or no-longer-displaced series is stale', () => {
     const state = createRecommendationState(adapt(main()).input);
     const shown = recOf(state, uuid(601));
@@ -184,7 +207,7 @@ describe('enact :: 2, a fresh coach overlap on a cross-venue recommendation is s
     const fresh = cross([coach(401, 311), coach(401, 313)]);
     const out = enactOn(fresh, state, uuid(611));
     expect(out.judged.fresh.to).toEqual(shown.to);
-    expect(out.judged.differences).toEqual(['counts']);
+    expect(out.judged.differences).toEqual(['coachOverlaps', 'objective']);
     expect(out.judged.stands).toBe(false);
     expect(out.refusal).toBe(PRACTICE_ENACT_REFUSAL.STALE);
     expect(out.payload).toBeNull();
@@ -313,8 +336,8 @@ describe('enact :: the write covers S alone, marked and moved', () => {
   });
 
   it('refuses a blind enact (no base fingerprint) and an adapter refusal', () => {
-    const state = createRecommendationState(adapt(main()).input);
     const blind = adapt(main(), RETIREMENT, null);
+    const state = createRecommendationState(blind.input);
     const judged = judgeEnact(state, uuid(601), recOf(state, uuid(601)));
     const out = buildEnactPayload(blind, judged, ACCEPT, retirementCommitOf(main(), RETIREMENT));
     expect(out.refusal).toBe(PRACTICE_ENACT_REFUSAL.NO_BASE_FINGERPRINT);
@@ -373,6 +396,64 @@ describe('enact :: 24, refused while the retirement is uncommitted (Q3)', () => 
       expect(out.refusal).toBe(PRACTICE_ENACT_REFUSAL.RETIREMENT_CHANGED);
       expect(out.payload).toBeNull();
     }
+  });
+});
+
+/* -- a carried TIME TBD takes the fresh read's reason ----------------------- */
+
+describe('enact :: a TIME TBD carried through a re-base says why on the FRESH read', () => {
+  it('re-reads a stale reason (the sibling repair contract), and keeps `declined`', () => {
+    const rows = (extra = []) => ({
+      ...rowsOf({
+        slots: [slot(501, F1, 'mon', '17:00', '18:00'), slot(505, F2, 'mon', '18:00', '19:00')],
+        assignments: [assignment(601, 301, 501), ...extra],
+      }),
+      loss: RETIREMENT,
+      baseFingerprint: FINGERPRINT,
+      options: { changeBudget: 0 },
+    });
+    const state = createRecommendationState(buildPracticeRepairInput(rows()).input);
+    expect(recOf(state, uuid(601)).reason).toBe('change-budget');
+    // Someone else now holds Mon 18:00: no legal slot is left at the venue.
+    const fresh = buildPracticeRepairInput(rows([assignment(698, 398, 505)])).input;
+    const rebased = rebaseRecommendationState(state, fresh);
+    expect(recOf(rebased, uuid(601)).reason).toBe(repairPracticeLoss(fresh).timeTbd[0].reason);
+    expect(recOf(rebased, uuid(601)).reason).toBe('no-legal-slot-at-venue');
+  });
+});
+
+/* -- the record never claims an optimum the session does not hold ----------- */
+
+describe('enact :: the record claims proven optimality only for the fresh optimum', () => {
+  it('a carried placement that is admissible but no longer optimal is not proven optimal', () => {
+    // Opened while a frozen row held F2 Mon 17:00, so T301 was recommended Mon 18:00.
+    const opened = main({ assignments: [...MAIN_ROWS, assignment(699, 399, 503)] });
+    const state = createRecommendationState(adapt(opened).input);
+    const s = uuid(601);
+    expect(recOf(state, s).to.startMinutes).toBe(1080);
+    // The frozen row is gone on the fresh read: Mon 18:00 is still admissible and
+    // kept, with no chain, while the fresh optimum is Mon 17:00.
+    const out = enactOn(main(), state, s);
+    expect(out.judged.stands).toBe(true);
+    expect(out.rebased.chains).toEqual([]);
+    const fresh = createRecommendationState(adapt(main()).input);
+    expect(recOf(fresh, s).to.startMinutes).toBe(1020);
+    const record = buildEnactRecord({
+      enactKey: ENACT_KEY,
+      seasonSettingsId: SEASON,
+      adapted: out.adapted,
+      state: out.rebased,
+      judged: out.judged,
+      commit: out.commit,
+      enactment: out,
+      prompt: {
+        rows: [{ assignment_id: s, assigned_via: 'auto', effect: 'closed', range_after: null }],
+        published_practices_affected: 7,
+        accepted: true,
+      },
+    });
+    expect(record.local).toBe(false);
+    expect(record.solver.proven_optimal).toBe(false);
   });
 });
 
@@ -436,6 +517,20 @@ describe('enact :: 13, the record carries every declined pair of the session', (
     expect(record.writes.closes).toEqual([{ assignment_id: s, last_day: '2026-10-14' }]);
     expect(record.writes.new_rows).toHaveLength(1);
     expect(record.solver.proven_optimal).toBe(false);
+    // With no decline on an unchanged read, the record may claim the optimum.
+    const plain = createRecommendationState(adapt(main()).input);
+    const plainOut = enactOn(main(), plain, s);
+    const plainRecord = buildEnactRecord({
+      enactKey: ENACT_KEY,
+      seasonSettingsId: SEASON,
+      adapted: plainOut.adapted,
+      state: plainOut.rebased,
+      judged: plainOut.judged,
+      commit: plainOut.commit,
+      enactment: plainOut,
+      prompt,
+    });
+    expect(plainRecord).toMatchObject({ local: false, solver: { proven_optimal: true } });
     // Strict: an extra key, or free text in the unlock reason, is refused.
     expect(() => PracticeEnactRecordSchema.parse({ ...record, note: 'x' })).toThrow();
     expect(() =>

@@ -408,7 +408,8 @@ function timeChangeOfRecommendation(recommendation) {
  *    Each that fails is RELEASED: its shape is re-offered exactly as a
  *    decline's is (S barred from it for the first hop only), then S takes the
  *    decline fallback, else is TIME TBD with the reason the fresh repair gives
- *    it (`contended` when the fresh repair placed it). A release is not a
+ *    it (`contended` when the fresh repair placed it); a carried TIME TBD
+ *    keeps `declined`, or takes that reason too. A release is not a
  *    decline: (S, X) does not join Δ. Each release stamps
  *    `PRACTICE_REPAIR_RECOMMENDATION_LOCAL` and a `kind: 'release'` chain.
  *
@@ -417,7 +418,9 @@ function timeChangeOfRecommendation(recommendation) {
  * `changeBudget` (the caller passes the adapter's, unreduced) is charged with
  * every time change enacted this session, and the state keeps the total in
  * `enactedTimeChanges`. Enacts from an earlier session are not counted:
- * declared, not enforced.
+ * declared, not enforced. Each enacted series is charged from its
+ * recommendation in `state`, so `state` must be the state it was judged and
+ * enacted on (the re-based one), not an older one.
  *
  * @param {ReturnType<typeof createRecommendationState>} state
  * @param {Object} freshInput - a `repairPracticeLoss()` input from a fresh read
@@ -465,13 +468,30 @@ export function rebaseRecommendationState(state, freshInput, { enacted: newly = 
     });
   }
 
+  // The sibling's contract for a series TIME TBD on the fresh read: the fresh
+  // repair's own reason (`contended` when the fresh repair placed it). Run
+  // once, and only when some series is TIME TBD.
+  let freshTbd = null;
+  const freshReasonOf = (assignmentId) => {
+    freshTbd ??= new Map(
+      repairPracticeLoss(input).timeTbd.map((entry) => [entry.assignmentId, entry.reason])
+    );
+    return freshTbd.get(assignmentId) ?? PRACTICE_TBD_REASON.CONTENDED;
+  };
+
   // Step 3: walk the carried placements in the search's own order.
   const released = [];
   for (const { entry } of context.order) {
     const assignmentId = entry.series.assignmentId;
     const carried = /** @type {any} */ (carriedById.get(assignmentId));
     if (carried.to === null) {
-      work.reasons.set(assignmentId, carried.reason);
+      // A decline's TIME TBD stays `declined`; any other reason is re-read.
+      work.reasons.set(
+        assignmentId,
+        carried.reason === PRACTICE_TBD_REASON.DECLINED
+          ? carried.reason
+          : freshReasonOf(assignmentId)
+      );
       continue;
     }
     const candidate = work.candidateFor(assignmentId, carried.to);
@@ -490,12 +510,8 @@ export function rebaseRecommendationState(state, freshInput, { enacted: newly = 
   const chains = [];
   const findings = [];
   if (released.length > 0) {
-    // The sibling's contract for a series left TIME TBD: the fresh repair's reason.
-    const freshTbd = new Map(
-      repairPracticeLoss(input).timeTbd.map((entry) => [entry.assignmentId, entry.reason])
-    );
     for (const { assignmentId } of released) {
-      work.reasons.set(assignmentId, freshTbd.get(assignmentId) ?? PRACTICE_TBD_REASON.CONTENDED);
+      work.reasons.set(assignmentId, freshReasonOf(assignmentId));
     }
     for (const { assignmentId, shape } of released) {
       const chain = reoffer(work, enacted, assignmentId, shape);

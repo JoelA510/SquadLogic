@@ -8,40 +8,20 @@
  * Nothing here decides anything: every write is one of its four definer RPCs.
  */
 
-/** A `daterange` as Postgres prints a canonical bounded one: `[from,end)`. */
-const CANONICAL_WINDOW = /^\[(\d{4}-\d{2}-\d{2}),(\d{4}-\d{2}-\d{2})\)$/;
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** `YYYY-MM-DD` shifted by whole days, in UTC so no local offset moves it. */
-export function shiftIsoDate(iso, days) {
-  const [year, month, day] = iso.split('-').map(Number);
-  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
-}
+import {
+  lightingOverrideWindowDates,
+  lightingOverrideWindowOf,
+} from '@squadlogic/core/practice/lightingOverrides.js';
 
 /**
- * A stored window -> its INCLUSIVE dates. The same conversion core's
- * `approvedLightingOverridesFromRows` makes (`until = upper(window) - 1`), which
- * `tests/practiceLightingOverridesMock.test.js` holds this to. Returns null for
- * a window that is not a canonical bounded range, so a caller can refuse it
- * rather than render a guess.
- *
- * @param {unknown} window
- * @returns {{ from: string, until: string } | null}
+ * A stored window -> its INCLUSIVE dates, or null for anything but a canonical
+ * bounded range. Core's one conversion, the same `approvedLightingOverridesFromRows`
+ * uses, so the UI and the scheduler never disagree about a window's last date.
  */
-export function datesOfWindow(window) {
-  const match = typeof window === 'string' ? CANONICAL_WINDOW.exec(window) : null;
-  if (!match) return null;
-  return { from: match[1], until: shiftIsoDate(match[2], -1) };
-}
+export const datesOfWindow = lightingOverrideWindowDates;
 
-/**
- * Inclusive dates -> the canonical window the RPCs store,
- * `daterange(p_from, p_until, '[]')`, which Postgres prints as `[from,until+1)`.
- */
-export function windowOfDates(from, until) {
-  if (!ISO_DATE.test(String(from)) || !ISO_DATE.test(String(until))) return null;
-  return `[${from},${shiftIsoDate(until, 1)})`;
-}
+/** Inclusive dates -> the canonical `[from,until+1)` window the RPCs store (core's). */
+export const windowOfDates = lightingOverrideWindowOf;
 
 /** Two canonical windows share at least one date (the EXCLUDE's `&&`). */
 export function windowsOverlap(a, b) {

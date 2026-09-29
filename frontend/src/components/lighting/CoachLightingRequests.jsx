@@ -1,91 +1,21 @@
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
-import Button from '../ui/Button.jsx';
 import {
   requestLightingOverride,
   useLightingSlotContext,
   usePracticeLightingOverrides,
   withdrawLightingOverride,
 } from '../../hooks/usePracticeLightingOverrides.js';
-import { WITHDRAWABLE_STATUSES, practiceSlotLabel } from '../../utils/lightingOverrides.js';
+import { WITHDRAWABLE_STATUSES } from '../../utils/lightingOverrides.js';
 import {
   ActionMessage,
   LightingLoadError,
-  LightingStatusBadge,
+  OverrideTable,
   OverrideWindowForm,
   outcomeOf,
 } from './LightingOverrideFields.jsx';
 
-function OverrideTable({
-  caption,
-  rows,
-  slotById,
-  fieldNames,
-  emptyText,
-  onWithdraw = undefined,
-  busyId = null,
-}) {
-  if (rows.length === 0) return <p className="text-sm text-text-muted m-0">{emptyText}</p>;
-  return (
-    <div className="grid-wrap">
-      <table className="grid">
-        <caption className="sr-only">{caption}</caption>
-        <thead>
-          <tr>
-            <th scope="col">Slot</th>
-            <th scope="col">First date</th>
-            <th scope="col">Last date</th>
-            <th scope="col">Status</th>
-            {onWithdraw && <th scope="col">Actions</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => {
-            const label = practiceSlotLabel(slotById.get(String(row.practice_slot_id)), fieldNames);
-            return (
-              <tr key={row.id} data-testid="lighting-override-row">
-                <td>{label}</td>
-                <td>{row.from}</td>
-                <td>{row.until}</td>
-                <td>
-                  <LightingStatusBadge status={row.status} />
-                </td>
-                {onWithdraw && (
-                  <td>
-                    {WITHDRAWABLE_STATUSES.includes(row.status) ? (
-                      <Button
-                        size="sm"
-                        variant="ghost-danger"
-                        disabled={busyId === row.id}
-                        loading={busyId === row.id}
-                        aria-label={`Withdraw the ${row.status} override on ${label} from ${row.from} to ${row.until}`}
-                        onClick={() => onWithdraw(row)}
-                      >
-                        Withdraw
-                      </Button>
-                    ) : (
-                      <span className="text-text-muted">&mdash;</span>
-                    )}
-                  </td>
-                )}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-OverrideTable.propTypes = {
-  caption: PropTypes.string.isRequired,
-  rows: PropTypes.array.isRequired,
-  slotById: PropTypes.instanceOf(Map).isRequired,
-  fieldNames: PropTypes.instanceOf(Map).isRequired,
-  emptyText: PropTypes.string.isRequired,
-  onWithdraw: PropTypes.func,
-  busyId: PropTypes.string,
-};
+const canWithdrawOwn = (row) => WITHDRAWABLE_STATUSES.includes(row.status);
 
 /**
  * The coach's view: request a portable-lighting window on a slot they coach,
@@ -94,10 +24,10 @@ OverrideTable.propTypes = {
  */
 export default function CoachLightingRequests({ orgId, userId, toast }) {
   const context = useLightingSlotContext(orgId, { userId, coachScoped: true });
-  const { rows, loading, error, refresh } = usePracticeLightingOverrides(orgId, {
+  const { rows, loaded, error, refresh } = usePracticeLightingOverrides(orgId, {
     enabled: !context.loading && !context.error,
   });
-  const [busyId, setBusyId] = useState(/** @type {string|null} */ (null));
+  const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState(/** @type {any} */ (null));
 
   if (context.loading) {
@@ -138,14 +68,17 @@ export default function CoachLightingRequests({ orgId, userId, toast }) {
   };
 
   const withdraw = async (row) => {
-    setBusyId(row.id);
+    setBusy(true);
     const result = await outcomeOf(
       () => withdrawLightingOverride({ id: row.id }),
       'Lighting override withdrawn.'
     );
     setOutcome(result);
-    setBusyId(null);
-    if (!result.error) await refresh();
+    setBusy(false);
+    if (!result.error) {
+      toast(result.message, 'success');
+      await refresh();
+    }
   };
 
   return (
@@ -174,12 +107,12 @@ export default function CoachLightingRequests({ orgId, userId, toast }) {
             fieldNames={context.fieldNames}
             submitLabel="Request lighting override"
             onSubmit={submit}
-            disabled={Boolean(error) || loading}
+            disabled={Boolean(error) || !loaded}
           />
         )}
       </section>
       <LightingLoadError error={error} what="lighting overrides" />
-      {!error && !loading && (
+      {!error && loaded && (
         <>
           <section aria-labelledby="coach-lighting-mine-heading">
             <h2
@@ -188,15 +121,17 @@ export default function CoachLightingRequests({ orgId, userId, toast }) {
             >
               Your requests
             </h2>
-            <ActionMessage outcome={outcome} />
+            <ActionMessage outcome={outcome} testId="lighting-list" />
             <OverrideTable
               caption="Your lighting override requests"
               rows={mine}
               slotById={slotById}
               fieldNames={context.fieldNames}
               emptyText="You have not requested any lighting overrides."
+              rowTestId="lighting-override-row"
               onWithdraw={withdraw}
-              busyId={busyId}
+              canWithdraw={canWithdrawOwn}
+              busy={busy}
             />
           </section>
           <section aria-labelledby="coach-lighting-others-heading">
@@ -212,6 +147,7 @@ export default function CoachLightingRequests({ orgId, userId, toast }) {
               slotById={slotById}
               fieldNames={context.fieldNames}
               emptyText="No one else has requested lighting on your slots."
+              rowTestId="lighting-override-row"
             />
           </section>
         </>

@@ -14,7 +14,8 @@ const { Given, When, Then } = createBdd();
  * seed and not from what the page rendered.
  *
  * Synthetic names only. `mock-coach-id` coaches team `t1` and `c2` coaches `t2`
- * in the base mock seed (`team_coach_assignments`).
+ * in the base mock seed (`team_coach_assignments`); the seed adds an ENDED
+ * assignment of `mock-coach-id` to `t-light-ended`.
  */
 
 const SEED_SLOTS = [
@@ -36,6 +37,17 @@ const SEED_SLOTS = [
     label: 'Wed 17:00–18:00 · Lantern Field',
     coachedByMockCoach: false,
   },
+  {
+    // mock-coach-id coached this team only until 2026-02-01 (seeded below), so
+    // the slot is NOT theirs today: the current-assignment half of the rule.
+    id: 'ps-light-ended',
+    team: 't-light-ended',
+    day: 'thu',
+    start: '16:00:00',
+    end: '17:00:00',
+    label: 'Thu 16:00\u201317:00 \u00b7 Lantern Field',
+    coachedByMockCoach: false,
+  },
 ];
 
 Given('practice slots with lighting overrides are seeded', async ({ page }) => {
@@ -54,6 +66,19 @@ Given('practice slots with lighting overrides are seeded', async ({ page }) => {
       organization_id: orgId,
       location_id: 'loc-1',
       active: true,
+    });
+    db.team_coach_assignments = (db.team_coach_assignments || []).filter(
+      (a) => a.id !== 'tca-light-ended'
+    );
+    db.team_coach_assignments.push({
+      id: 'tca-light-ended',
+      organization_id: orgId,
+      team_id: 't-light-ended',
+      coach_id: 'mock-coach-id',
+      role: 'lead',
+      effective_from: '2026-01-01',
+      effective_to: '2026-02-01',
+      started_via: 'backfill',
     });
     db.practice_slots = (db.practice_slots || []).filter((s) => !ids.has(s.id));
     db.practice_assignments = (db.practice_assignments || []).filter(
@@ -148,7 +173,7 @@ When(
     await page.getByLabel('First date').fill(from);
     await page.getByLabel('Last date (inclusive)').fill(until);
     await page.getByRole('button', { name: 'Request lighting override' }).click();
-    await expect(page.getByTestId('lighting-action-status')).toBeFocused();
+    await expect(page.getByTestId('lighting-form-status')).toBeFocused();
   }
 );
 
@@ -215,7 +240,7 @@ When('I approve the pending request from {string}', async ({ page }, from: strin
 });
 
 Then('I see the lighting overlap message', async ({ page }) => {
-  const alert = page.getByTestId('lighting-action-error');
+  const alert = page.getByTestId('lighting-list-error');
   await expect(alert).toBeVisible();
   await expect(alert).toHaveAttribute('role', 'alert');
   await expect(alert).toContainText('overlap a lighting override already approved');

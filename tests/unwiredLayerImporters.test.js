@@ -741,8 +741,16 @@ const LAYERS = Object.freeze([
   Object.freeze({
     layer: 'practice/lightingOverrides.js',
     modulePath: 'packages/core/src/practice/lightingOverrides.js',
-    functions: Object.freeze(['approvedLightingOverridesFromRows']),
-    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    functions: Object.freeze([
+      'approvedLightingOverridesFromRows',
+      // PR D: the one window conversion, which the UI reads and writes through.
+      'lightingOverrideWindowDates',
+      'lightingOverrideWindowOf',
+    ]),
+    importers: Object.freeze([
+      'frontend/src/utils/lightingOverrides.js',
+      'packages/core/src/practice/index.js',
+    ]),
     consumers: Object.freeze([
       'supabase/functions/_shared/engines/practice-lighting-overrides.ts',
       'supabase/functions/_shared/tests/lighting-overrides_test.ts',

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { z } from 'zod';
 import {
   PracticeLightingOverrideRowSchema,
   PracticeLightingOverrideSchema,
@@ -13,14 +14,16 @@ import { coachedPracticeSlotIds, datesOfWindow } from '../utils/lightingOverride
  * Portable-lighting overrides (8.9 D14 PR D): reads under RLS, writes through
  * the four definer RPCs of migration `20261003000000` only.
  *
- * Copies `useCoachPracticePreferences`: every write validates its input with
- * the core `PracticeLightingOverrideSchema` first, so an inverted window is
- * refused here with the schema's message, and every RPC error is thrown with
- * the database's own message and code for the caller to surface.
+ * Copies `useCoachPracticePreferences`: every write validates its input with a
+ * Zod schema first (the core `PracticeLightingOverrideSchema` for a window), so
+ * an inverted window is refused here with the schema's message, and every RPC
+ * error is thrown with the database's own message and code for the caller to
+ * surface.
  */
 
+/** Only the columns a view reads: nothing here shows who decided or withdrew. */
 export const OVERRIDE_COLUMNS =
-  'id, organization_id, practice_slot_id, window, kind, status, requested_by, requested_at, decided_by, decided_at, withdrawn_by, withdrawn_at';
+  'id, practice_slot_id, window, kind, status, requested_by, requested_at';
 
 /** An `Error` carrying the PostgREST/Postgres code (23P01 is the overlap refusal). */
 export class LightingOverrideRpcError extends Error {
@@ -32,8 +35,16 @@ export class LightingOverrideRpcError extends Error {
   }
 }
 
-function validateWindow({ slotId, from, until }) {
-  const parsed = PracticeLightingOverrideSchema.safeParse({ slotId, from, until });
+const DecisionSchema = z
+  .object({
+    id: z.string().min(1, 'an override id is required'),
+    decision: z.enum(['approve', 'reject']),
+  })
+  .strict();
+const WithdrawalSchema = z.object({ id: z.string().min(1, 'an override id is required') }).strict();
+
+function validate(schema, input) {
+  const parsed = schema.safeParse(input);
   if (!parsed.success) {
     throw new LightingOverrideRpcError({
       code: 'VALIDATION',
@@ -51,7 +62,7 @@ async function callRpc(name, args) {
 
 /** A coach of the slot (or an admin) requests a window. Never in force until decided. */
 export async function requestLightingOverride({ slotId, from, until }) {
-  const window = validateWindow({ slotId, from, until });
+  const window = validate(PracticeLightingOverrideSchema, { slotId, from, until });
   return callRpc('request_practice_lighting_override', {
     p_practice_slot_id: window.slotId,
     p_from: window.from,
@@ -61,7 +72,7 @@ export async function requestLightingOverride({ slotId, from, until }) {
 
 /** An admin writes an approved window directly. */
 export async function setLightingOverride({ slotId, from, until }) {
-  const window = validateWindow({ slotId, from, until });
+  const window = validate(PracticeLightingOverrideSchema, { slotId, from, until });
   return callRpc('admin_set_practice_lighting_override', {
     p_practice_slot_id: window.slotId,
     p_from: window.from,
@@ -71,21 +82,17 @@ export async function setLightingOverride({ slotId, from, until }) {
 
 /** An admin other than the requester approves or rejects a requested row. */
 export async function decideLightingOverride({ id, decision }) {
-  if (decision !== 'approve' && decision !== 'reject') {
-    throw new LightingOverrideRpcError({
-      code: 'VALIDATION',
-      message: `A decision is approve or reject, not ${decision}`,
-    });
-  }
+  const input = validate(DecisionSchema, { id, decision });
   return callRpc('admin_decide_practice_lighting_override', {
-    p_override_id: id,
-    p_decision: decision,
+    p_override_id: input.id,
+    p_decision: input.decision,
   });
 }
 
 /** The requester (while they coach the slot) or an admin withdraws a requested or approved row. */
 export async function withdrawLightingOverride({ id }) {
-  return callRpc('withdraw_practice_lighting_override', { p_override_id: id });
+  const input = validate(WithdrawalSchema, { id });
+  return callRpc('withdraw_practice_lighting_override', { p_override_id: input.id });
 }
 
 /**
@@ -108,26 +115,33 @@ function parseRows(data) {
 
 /**
  * Load the organization's override rows (RLS narrows a coach's to the slots
- * they coach). `error` is set, and `rows` emptied, on any failure: the view
- * shows the error, never an empty list that reads as "no overrides".
+ * they coach).
+ *
+ * `loaded` is true only once rows for THIS `orgId` have arrived, and stays true
+ * through a later refresh, so a view renders its lists on `!error && loaded`:
+ * never an empty list before the first read lands (which would read as "no
+ * overrides"), and never unmounting a half-filled form on every refresh. Any
+ * failure sets `error` and empties `rows`.
  *
  * @param {string | null | undefined} orgId
  */
 export function usePracticeLightingOverrides(orgId, { enabled = true } = {}) {
-  const [rows, setRows] = useState(/** @type {any[]} */ ([]));
+  const [state, setState] = useState(
+    /** @type {{ rows: any[], loadedFor: string | null, error: any }} */ ({
+      rows: [],
+      loadedFor: null,
+      error: null,
+    })
+  );
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(/** @type {any} */ (null));
   const requestRef = useRef(0);
 
   const refresh = useCallback(async () => {
-    if (!orgId || !enabled) {
-      setRows([]);
-      setError(null);
-      return;
-    }
+    // Bumped even when disabled, so a read still in flight from before an org
+    // switch can never land; `loaded` below hides whatever state is left.
     const requestId = ++requestRef.current;
+    if (!orgId || !enabled) return;
     setLoading(true);
-    setError(null);
     try {
       const data = await fetchAllPages(() =>
         supabase
@@ -136,14 +150,18 @@ export function usePracticeLightingOverrides(orgId, { enabled = true } = {}) {
           .eq('organization_id', orgId)
       );
       if (requestRef.current !== requestId) return;
-      setRows(
-        parseRows(data).sort((a, b) => String(b.requested_at).localeCompare(String(a.requested_at)))
+      const rows = parseRows(data).sort((a, b) =>
+        String(b.requested_at).localeCompare(String(a.requested_at))
       );
+      setState({ rows, loadedFor: orgId, error: null });
     } catch (err) {
       if (requestRef.current !== requestId) return;
       logger.error('Failed to load practice lighting overrides', err);
-      setRows([]);
-      setError(err || { message: 'Failed to load practice lighting overrides' });
+      setState({
+        rows: [],
+        loadedFor: null,
+        error: err || { message: 'Failed to load practice lighting overrides' },
+      });
     } finally {
       if (requestRef.current === requestId) setLoading(false);
     }
@@ -153,11 +171,23 @@ export function usePracticeLightingOverrides(orgId, { enabled = true } = {}) {
     refresh();
   }, [refresh]);
 
-  return { rows, loading, error, refresh };
+  const loaded = Boolean(orgId) && enabled && state.loadedFor === orgId;
+  const active = Boolean(orgId) && enabled;
+  return {
+    rows: loaded ? state.rows : [],
+    loading: active && loading,
+    loaded,
+    error: active ? state.error : null,
+    refresh,
+  };
 }
 
-/** @type {Readonly<{ slots: any[], fieldNames: Map<string, string>, coaches: any[], coachedSlotIds: Set<string>, error: any, loading: boolean }>} */
+/**
+ * @type {Readonly<{ forOrg: string | null, slots: any[], fieldNames: Map<string, string>,
+ *   coaches: any[], coachedSlotIds: Set<string>, error: any, loading: boolean }>}
+ */
 const LOADING_CONTEXT = Object.freeze({
+  forOrg: null,
   slots: [],
   fieldNames: new Map(),
   coaches: [],
@@ -166,10 +196,17 @@ const LOADING_CONTEXT = Object.freeze({
   loading: true,
 });
 
+const idsOf = (rows, key) => [...new Set(rows.map((row) => String(row[key])))];
+
 /**
- * The slots a view offers, their field names, the org's coaches (for requester
- * names), and -- for a coach -- the slots they coach, enumerated from the
- * roster tables the way `caller_coaches_practice_slot` does.
+ * The slots a view offers, their field names, coaches (the org's for an admin,
+ * the caller's own for a coach), and -- for a coach -- the slots they coach,
+ * enumerated from the roster tables the way `caller_coaches_practice_slot`
+ * does. A coach's roster reads are narrowed to their own coach rows and teams
+ * rather than paging the organization's whole history.
+ *
+ * Until the load for the CURRENT org, user and scope lands, the loading context
+ * is returned, so a switch never shows (or filters by) the previous one's.
  *
  * @param {string | null | undefined} orgId
  * @param {{ userId?: string | null, coachScoped?: boolean }} options
@@ -177,21 +214,15 @@ const LOADING_CONTEXT = Object.freeze({
 export function useLightingSlotContext(orgId, { userId = null, coachScoped = false } = {}) {
   const [state, setState] = useState(LOADING_CONTEXT);
 
+  const key = `${orgId}|${userId ?? ''}|${coachScoped}`;
+
   useEffect(() => {
     if (!orgId) return undefined;
     let cancelled = false;
     (async () => {
       setState(LOADING_CONTEXT);
       try {
-        const coachQuery = () => {
-          let query = supabase
-            .from('coaches')
-            .select('id, organization_id, full_name, user_id')
-            .eq('organization_id', orgId);
-          if (coachScoped) query = query.eq('user_id', userId ?? '');
-          return query;
-        };
-        const [slots, fields, coaches, rosterRows, assignments] = await Promise.all([
+        const [slots, fields, coaches] = await Promise.all([
           fetchAllPages(() =>
             supabase
               .from('practice_slots')
@@ -201,26 +232,37 @@ export function useLightingSlotContext(orgId, { userId = null, coachScoped = fal
           fetchAllPages(() =>
             supabase.from('fields').select('id, name').eq('organization_id', orgId)
           ),
-          fetchAllPages(coachQuery),
-          coachScoped
-            ? fetchAllPages(() =>
-                supabase
-                  .from('team_coach_assignments')
-                  .select('id, organization_id, team_id, coach_id, effective_from, effective_to')
-                  .eq('organization_id', orgId)
-              )
-            : Promise.resolve([]),
-          coachScoped
-            ? fetchAllPages(() =>
-                supabase
-                  .from('practice_assignments')
-                  .select('id, organization_id, team_id, slot_id, practice_slot_id')
-                  .eq('organization_id', orgId)
-              )
-            : Promise.resolve([]),
+          fetchAllPages(() => {
+            const query = supabase
+              .from('coaches')
+              .select('id, organization_id, full_name, user_id')
+              .eq('organization_id', orgId);
+            return coachScoped ? query.eq('user_id', userId ?? '') : query;
+          }),
         ]);
+        let rosterRows = [];
+        let assignments = [];
+        if (coachScoped && coaches.length > 0) {
+          rosterRows = await fetchAllPages(() =>
+            supabase
+              .from('team_coach_assignments')
+              .select('id, organization_id, team_id, coach_id, effective_from, effective_to')
+              .eq('organization_id', orgId)
+              .in('coach_id', idsOf(coaches, 'id'))
+          );
+          if (rosterRows.length > 0) {
+            assignments = await fetchAllPages(() =>
+              supabase
+                .from('practice_assignments')
+                .select('id, organization_id, team_id, slot_id, practice_slot_id')
+                .eq('organization_id', orgId)
+                .in('team_id', idsOf(rosterRows, 'team_id'))
+            );
+          }
+        }
         if (cancelled) return;
         setState({
+          forOrg: key,
           slots,
           fieldNames: new Map(fields.map((field) => [String(field.id), field.name])),
           coaches,
@@ -243,6 +285,7 @@ export function useLightingSlotContext(orgId, { userId = null, coachScoped = fal
         logger.error('Failed to load practice slots for lighting overrides', err);
         setState({
           ...LOADING_CONTEXT,
+          forOrg: key,
           error: err || { message: 'unknown error' },
           loading: false,
         });
@@ -251,7 +294,7 @@ export function useLightingSlotContext(orgId, { userId = null, coachScoped = fal
     return () => {
       cancelled = true;
     };
-  }, [orgId, userId, coachScoped]);
+  }, [orgId, userId, coachScoped, key]);
 
-  return state;
+  return state.forOrg === key ? state : LOADING_CONTEXT;
 }

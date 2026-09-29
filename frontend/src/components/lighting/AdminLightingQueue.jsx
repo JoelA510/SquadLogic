@@ -12,8 +12,8 @@ import { practiceSlotLabel } from '../../utils/lightingOverrides.js';
 import {
   ActionMessage,
   LightingLoadError,
-  LightingStatusBadge,
   NoLightsOffNote,
+  OverrideTable,
   OverrideWindowForm,
   outcomeOf,
 } from './LightingOverrideFields.jsx';
@@ -30,10 +30,12 @@ const SELF_REASON =
  */
 export default function AdminLightingQueue({ orgId, userId, toast }) {
   const context = useLightingSlotContext(orgId, { userId, coachScoped: false });
-  const { rows, loading, error, refresh } = usePracticeLightingOverrides(orgId, {
+  const { rows, loaded, error, refresh } = usePracticeLightingOverrides(orgId, {
     enabled: !context.loading && !context.error,
   });
-  const [busyId, setBusyId] = useState(/** @type {string|null} */ (null));
+  // One flag for every row: while any decision or withdrawal runs, all row
+  // actions are disabled, so no second click can race the first.
+  const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState(/** @type {any} */ (null));
 
   if (context.loading) {
@@ -58,11 +60,11 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
   const pending = rows.filter((row) => row.status === 'requested');
   const approved = rows.filter((row) => row.status === 'approved');
 
-  const act = async (row, action, message) => {
-    setBusyId(row.id);
+  const act = async (action, message) => {
+    setBusy(true);
     const result = await outcomeOf(action, message);
     setOutcome(result);
-    setBusyId(null);
+    setBusy(false);
     if (!result.error) {
       toast(result.message, 'success');
       await refresh();
@@ -81,7 +83,7 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
   return (
     <div className="flex flex-col gap-6" data-testid="admin-lighting-view">
       <LightingLoadError error={error} what="lighting overrides" />
-      {!error && !loading && (
+      {!error && loaded && (
         <>
           <section aria-labelledby="admin-lighting-pending-heading">
             <h2
@@ -93,7 +95,7 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
             <div className="mb-3">
               <NoLightsOffNote id={NOTE_ID} />
             </div>
-            <ActionMessage outcome={outcome} />
+            <ActionMessage outcome={outcome} testId="lighting-list" />
             {pending.length === 0 ? (
               <p className="text-sm text-text-muted m-0">No requests are waiting.</p>
             ) : (
@@ -117,15 +119,22 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
                       const what = `the request for ${label} from ${row.from} to ${row.until}`;
                       const own = String(row.requested_by) === String(userId);
                       const reasonId = `lighting-self-${row.id}`;
-                      const busy = busyId === row.id;
                       return (
                         <tr key={row.id} data-testid="lighting-pending-row">
-                          <td>{label}</td>
-                          <td>{row.from}</td>
-                          <td>{row.until}</td>
-                          <td>{requesterName(row)}</td>
                           <td>
-                            <div className="flex flex-wrap gap-2 items-center">
+                            <div className="cell">{label}</div>
+                          </td>
+                          <td>
+                            <div className="cell whitespace-nowrap">{row.from}</div>
+                          </td>
+                          <td>
+                            <div className="cell whitespace-nowrap">{row.until}</div>
+                          </td>
+                          <td>
+                            <div className="cell">{requesterName(row)}</div>
+                          </td>
+                          <td>
+                            <div className="cell flex-wrap gap-2 py-1">
                               <Button
                                 size="sm"
                                 variant="primary"
@@ -134,7 +143,6 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
                                 aria-describedby={own ? `${reasonId} ${NOTE_ID}` : NOTE_ID}
                                 onClick={() =>
                                   act(
-                                    row,
                                     () =>
                                       decideLightingOverride({ id: row.id, decision: 'approve' }),
                                     'Lighting override approved.'
@@ -151,7 +159,6 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
                                 aria-describedby={own ? reasonId : undefined}
                                 onClick={() =>
                                   act(
-                                    row,
                                     () =>
                                       decideLightingOverride({ id: row.id, decision: 'reject' }),
                                     'Lighting override rejected.'
@@ -169,7 +176,6 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
                                     aria-label={`Withdraw ${what}`}
                                     onClick={() =>
                                       act(
-                                        row,
                                         () => withdrawLightingOverride({ id: row.id }),
                                         'Lighting override withdrawn.'
                                       )
@@ -204,57 +210,19 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
             >
               Approved overrides ({approved.length})
             </h2>
-            {approved.length === 0 ? (
-              <p className="text-sm text-text-muted m-0">No approved overrides.</p>
-            ) : (
-              <div className="grid-wrap">
-                <table className="grid">
-                  <caption className="sr-only">Approved lighting overrides</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Slot</th>
-                      <th scope="col">First date</th>
-                      <th scope="col">Last date</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {approved.map((row) => {
-                      const label = labelOf(row);
-                      return (
-                        <tr key={row.id} data-testid="lighting-approved-row">
-                          <td>{label}</td>
-                          <td>{row.from}</td>
-                          <td>{row.until}</td>
-                          <td>
-                            <LightingStatusBadge status={row.status} />
-                          </td>
-                          <td>
-                            <Button
-                              size="sm"
-                              variant="ghost-danger"
-                              disabled={busyId === row.id}
-                              loading={busyId === row.id}
-                              aria-label={`Withdraw the approved override on ${label} from ${row.from} to ${row.until}`}
-                              onClick={() =>
-                                act(
-                                  row,
-                                  () => withdrawLightingOverride({ id: row.id }),
-                                  'Lighting override withdrawn.'
-                                )
-                              }
-                            >
-                              Withdraw
-                            </Button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <OverrideTable
+              caption="Approved lighting overrides"
+              rows={approved}
+              slotById={slotById}
+              fieldNames={context.fieldNames}
+              emptyText="No approved overrides."
+              rowTestId="lighting-approved-row"
+              onWithdraw={(row) =>
+                act(() => withdrawLightingOverride({ id: row.id }), 'Lighting override withdrawn.')
+              }
+              canWithdraw={() => true}
+              busy={busy}
+            />
           </section>
 
           <section aria-labelledby="admin-lighting-set-heading">

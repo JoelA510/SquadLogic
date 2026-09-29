@@ -126,7 +126,11 @@ function builder(table) {
   const run = () => {
     if (tableErrors[table]) return { data: null, error: tableErrors[table] };
     let rows = (tables[table] || []).filter((row) =>
-      filters.every(([column, value]) => String(row[column]) === String(value))
+      filters.every(([column, value]) =>
+        Array.isArray(value)
+          ? value.map(String).includes(String(row[column]))
+          : String(row[column]) === String(value)
+      )
     );
     if (range) rows = rows.slice(range[0], range[1] + 1);
     return { data: rows.map((row) => ({ ...row })), error: null };
@@ -135,6 +139,10 @@ function builder(table) {
     select: () => b,
     eq: (column, value) => {
       filters.push([column, value]);
+      return b;
+    },
+    in: (column, values) => {
+      filters.push([column, values]);
       return b;
     },
     order: () => b,
@@ -226,7 +234,7 @@ describe('coach request form', () => {
       target: { value: '2026-12-04' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Request lighting override' }));
-    const status = await screen.findByTestId('lighting-action-status');
+    const status = await screen.findByTestId('lighting-form-status');
     expect(status).toHaveAttribute('role', 'status');
     await waitFor(() => expect(document.activeElement).toBe(status));
     expect(supabase.rpc).toHaveBeenCalledWith('request_practice_lighting_override', {
@@ -253,7 +261,7 @@ describe('coach request form', () => {
     fireEvent.submit(
       screen.getByRole('button', { name: 'Request lighting override' }).closest('form')
     );
-    const alert = await screen.findByTestId('lighting-action-error');
+    const alert = await screen.findByTestId('lighting-form-error');
     expect(alert).toHaveAttribute('role', 'alert');
     expect(alert).toHaveTextContent(/must not precede/);
     expect(supabase.rpc).not.toHaveBeenCalled();
@@ -370,7 +378,7 @@ describe('admin approval queue', () => {
     fireEvent.click(
       within(rowFor(LABEL.S2, '2026-10-05')).getByRole('button', { name: /^Approve/ })
     );
-    const alert = await screen.findByTestId('lighting-action-error');
+    const alert = await screen.findByTestId('lighting-list-error');
     expect(alert).toHaveAttribute('role', 'alert');
     expect(alert).toHaveTextContent(OVERLAP_MESSAGE);
     await waitFor(() => expect(document.activeElement).toBe(alert));

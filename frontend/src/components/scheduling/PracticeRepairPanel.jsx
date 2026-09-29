@@ -10,9 +10,10 @@ import {
   undoIn,
 } from '../../utils/practiceRepairPanel.js';
 import Button from '../ui/Button.jsx';
+import { PRACTICE_REASON } from '@squadlogic/core/practice/index.js';
 
 /** The finding a decline or undo stamps (`practice/recommendations.js`). */
-const LOCAL_CODE = 'PRACTICE_REPAIR_RECOMMENDATION_LOCAL';
+const LOCAL_CODE = PRACTICE_REASON.REPAIR_RECOMMENDATION_LOCAL;
 
 /**
  * The practice repair recommendation panel (8.6 3b plan §7, PR 10).
@@ -62,7 +63,9 @@ export default function PracticeRepairPanel({ loss, subject }) {
   } else {
     body = (
       <Recommendations
-        key={lossKey}
+        // Keyed on every input of `opened`, so the decline state is never
+        // carried over onto a result computed from a different input.
+        key={`${lossKey}|${season?.timezone ?? ''}`}
         rows={snapshot.rows}
         lossKey={lossKey}
         timeZone={season?.timezone ?? null}
@@ -73,10 +76,9 @@ export default function PracticeRepairPanel({ loss, subject }) {
 
   return (
     <section
-      className="card"
+      className="card mt-2 p-3"
       aria-labelledby="practice-repair-title"
       data-testid="practice-repair-panel"
-      style={{ marginTop: 10, padding: 12 }}
     >
       <h3 id="practice-repair-title" className="text-sm" tabIndex={-1}>
         <strong>Practice repair recommendations</strong>
@@ -111,18 +113,29 @@ function Recommendations({ rows, lossKey, timeZone, subject }) {
   const [actionError, setActionError] = useState(/** @type {string|null} */ (null));
   const headingRef = useRef(/** @type {HTMLParagraphElement|null} */ (null));
   const names = useMemo(() => namesOf(rows), [rows]);
+  // The payload builder runs here (for each window's refusal): guarded like
+  // the repair itself, so a throw is the alert below, never a crashed dialog.
+  const view = useMemo(() => {
+    if (!opened.ok || !state) return null;
+    try {
+      return { ok: true, rows: panelRowsOf(opened.value, state, names) };
+    } catch (err) {
+      return { ok: false, message: err?.message ?? String(err) };
+    }
+  }, [opened, state, names]);
 
-  if (!opened.ok || !state) {
+  if (!opened.ok || !state || !view?.ok) {
+    const message = !opened.ok ? opened.message : view && !view.ok ? view.message : 'no state';
     return (
       <p className="badge danger" role="alert" data-testid="practice-repair-error">
-        The practice repair refused this season&rsquo;s data, so no recommendation is shown:{' '}
-        {opened.ok ? 'no state' : opened.message}
+        No repair could be computed for this loss over this season&rsquo;s data, so no
+        recommendation is shown: {message}
       </p>
     );
   }
 
   const { result, adapted, daylightPlan } = opened.value;
-  const view = panelRowsOf(opened.value, state, names);
+  const windows = view.rows;
 
   const act = (next, message) => {
     try {
@@ -139,15 +152,9 @@ function Recommendations({ rows, lossKey, timeZone, subject }) {
 
   return (
     <>
-      <p
-        ref={headingRef}
-        tabIndex={-1}
-        className="text-sm"
-        data-testid="practice-repair-count"
-        style={{ marginTop: 6 }}
-      >
-        <strong>{view.length}</strong> practice series-window{view.length === 1 ? '' : 's'}{' '}
-        {view.length === 1 ? 'is' : 'are'} displaced by <strong>{subject}</strong>.
+      <p ref={headingRef} tabIndex={-1} className="text-sm" data-testid="practice-repair-count">
+        <strong>{windows.length}</strong> practice series-window{windows.length === 1 ? '' : 's'}{' '}
+        {windows.length === 1 ? 'is' : 'are'} displaced by <strong>{subject}</strong>.
       </p>
       <p className="sr-only" aria-live="polite" data-testid="practice-repair-announce">
         {announce}
@@ -159,10 +166,9 @@ function Recommendations({ rows, lossKey, timeZone, subject }) {
       )}
       {local.length > 0 && (
         <p
-          className="badge warning"
+          className="badge warning mt-2"
           data-testid="practice-repair-local"
           data-reason-code={LOCAL_CODE}
-          style={{ marginTop: 6 }}
         >
           {LOCAL_CODE}: after {local.length} decline{local.length === 1 ? '' : 's'} or undo
           {local.length === 1 ? '' : 's'}, these recommendations are locally repaired, not proven
@@ -170,13 +176,13 @@ function Recommendations({ rows, lossKey, timeZone, subject }) {
         </p>
       )}
 
-      {view.length === 0 ? (
+      {windows.length === 0 ? (
         <p className="text-sm" data-testid="practice-repair-none">
           No practice series is displaced. This is the repair&rsquo;s answer over the whole season,
           not an empty panel.
         </p>
       ) : (
-        <div style={{ overflowX: 'auto', marginTop: 8 }}>
+        <div className="overflow-x-auto mt-2">
           <table className="grid" data-testid="practice-repair-rows">
             <caption className="sr-only">
               One recommendation per practice series-window displaced by {subject}
@@ -192,7 +198,7 @@ function Recommendations({ rows, lossKey, timeZone, subject }) {
               </tr>
             </thead>
             <tbody>
-              {view.map((row) => (
+              {windows.map((row) => (
                 <tr
                   key={row.assignmentId}
                   data-testid="practice-repair-window"
@@ -220,10 +226,9 @@ function Recommendations({ rows, lossKey, timeZone, subject }) {
                       row.refusals.map((r) => (
                         <span
                           key={r.why}
-                          className="text-sm"
+                          className="text-sm block"
                           data-testid="practice-repair-save-refused"
                           data-refusal={r.why}
-                          style={{ display: 'block' }}
                         >
                           <span className="badge danger">Refused</span> {r.text}
                         </span>
@@ -270,7 +275,15 @@ function Recommendations({ rows, lossKey, timeZone, subject }) {
         </div>
       )}
 
-      <ul className="text-sm" data-testid="practice-repair-findings" style={{ marginTop: 8 }}>
+      <p className="text-sm mt-2">
+        <strong>Findings of the repair run</strong>, before any decline or undo (the table above is
+        current):
+      </p>
+      <ul className="text-sm" data-testid="practice-repair-findings">
+        <li data-testid="practice-repair-closures-declared">
+          Existing blackouts and other retirements are not consulted: a recommendation may land on
+          ground they already close. Check it before enacting.
+        </li>
         {result.findings.map((finding, index) => (
           <li
             key={`${finding.code}-${index}`}

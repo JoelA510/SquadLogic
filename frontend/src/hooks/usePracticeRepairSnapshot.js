@@ -29,7 +29,7 @@ export async function loadPracticeRepairSnapshot(client, { organizationId, seaso
   /** @type {Array<[string, string, string]>} key, table, columns */
   const tables = [
     ['locations', 'locations', 'id, name, lighting_available, latitude, longitude'],
-    ['fields', 'fields', 'id, location_id, name, effective_to'],
+    ['fields', 'fields', 'id, location_id, name'],
     ['fieldSubunits', 'field_subunits', 'id, field_id, label'],
     [
       'practiceSlots',
@@ -44,18 +44,29 @@ export async function loadPracticeRepairSnapshot(client, { organizationId, seaso
     ],
     ['coachPreferences', 'coach_practice_preferences', PREFERENCE_COLUMNS],
   ];
+  // In parallel (the sibling readers' `Promise.all` over `fetchAllPages`);
+  // each read's failure is caught as its own, so any one fails the whole.
+  const [reads, season] = await Promise.all([
+    Promise.all(
+      tables.map(([key, table, columns]) =>
+        fetchAllPages(() =>
+          client.from(table).select(columns).eq('organization_id', organizationId)
+        ).then(
+          (data) => ({ key, table, data, error: null }),
+          (err) => ({ key, table, data: null, error: err })
+        )
+      )
+    ),
+    loadSeasonPracticeAssignments(client, { organizationId, seasonSettingsId }),
+  ]);
   /** @type {Record<string, any[]>} */
   const rows = {};
-  for (const [key, table, columns] of tables) {
-    try {
-      rows[key] = await fetchAllPages(() =>
-        client.from(table).select(columns).eq('organization_id', organizationId)
-      );
-    } catch (err) {
-      return { ok: false, message: `${table}: ${err?.message ?? 'unreadable'}` };
+  for (const read of reads) {
+    if (read.error || !Array.isArray(read.data)) {
+      return { ok: false, message: `${read.table}: ${read.error?.message ?? 'unreadable'}` };
     }
+    rows[read.key] = read.data;
   }
-  const season = await loadSeasonPracticeAssignments(client, { organizationId, seasonSettingsId });
   if (season.ok !== true) {
     return { ok: false, message: 'message' in season ? season.message : 'practice_assignments' };
   }

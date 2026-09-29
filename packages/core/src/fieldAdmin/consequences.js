@@ -532,7 +532,7 @@ const REPAIR_NOT_COMPUTED = Object.freeze({
   delete: {
     code: FIELD_ADMIN_REASON.REPAIR_NOT_FOR_DELETION,
     message:
-      'No repair is computed for a deletion. Retire this ground instead to see the practice ' +
+      'No repair is computed for a deletion. Retire the field instead to see its practice ' +
       'repair recommendations. This is not a statement that no repair is needed.',
   },
   'retire-location': {

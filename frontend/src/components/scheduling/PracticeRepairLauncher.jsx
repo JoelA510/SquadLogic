@@ -23,7 +23,7 @@ export default function PracticeRepairLauncher({ loss, subject }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div data-testid="practice-repair-launcher" style={{ marginTop: 10 }}>
+    <div data-testid="practice-repair-launcher" className="mt-2">
       <Button
         variant="secondary"
         size="sm"

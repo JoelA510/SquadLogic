@@ -259,6 +259,8 @@ pinned. Annotate, do not rewrite, PHASE_8_PLAN's "75-minute drop … 4:44 PM"
 | D10 | Source precedence | Table wins where present; `SUNSET_SOURCES_DISAGREE` above 2 min |
 | D11 | Optimising toward surviving slots | Deferred; declared, not optimised |
 | D12 | The `Note` column | Read as the DST cross-check (W11) |
+| D13 | Persisting daylight TIME TBD (PR 6b; operator 2026-09-29) | (a) truncated remainder recorded as a `time_tbd` exception, `tbd_reason` `past-sunset`, new `cause_kind` `daylight`, the row kept truncated; (c) repair `past-sunset`/`sunset-unknown` tail windows only, mid-range refused until 3b PR 12; (b) row-less withdrawn team **deferred** (it stays in the writer's `teams_without_practice`) |
+| D14 | Compression strategy and step (operator 2026-09-29) | Either **shorten** or **move earlier**; default is shorten by **10 minutes** per slot; a per-slot override for portable lighting. Plan pending approval |
 
 Every PR: `/code-review` before opening; the season-2026 fixture suite when it
 touches domain types, constraints or solver stages; each new guarantee shown red

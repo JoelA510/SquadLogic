@@ -356,6 +356,13 @@ that migration names are well formed and versions are unique. On a PR it also
 checks that every added migration has a version above the base branch's latest,
 and that no existing migration was renamed, edited or removed.
 
+A separate **Deno Mirror Tests** job runs on every push and PR:
+`scripts/deno-mirror-tests.sh` (the Deno twins of core logic, under two host
+time zones) and `scripts/deno-check-edge.sh` (`deno check` on every
+`supabase/functions/*/index.ts`, discovered by directory, failing on zero
+found). `deploy-edge-functions` needs this job, so an Edge type error does not
+deploy.
+
 On **push to `main`** only, two deploy jobs follow:
 
 - **`deploy-migrations`** (environment `production`). Runs `supabase db push`

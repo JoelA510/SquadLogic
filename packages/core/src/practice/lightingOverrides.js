@@ -12,7 +12,9 @@
  * row is dropped here, whatever the caller selected, so a reader that forgot
  * its `status = 'approved'` filter still cannot exempt a date nobody approved.
  *
- * Nothing in production calls this yet: the Edge read is PR C.
+ * Nothing in production calls this module: the Edge read (PR C) runs its Deno
+ * twin, `_shared/engines/practice-lighting-overrides.ts`, which
+ * `tests/lightingOverrideDrift.test.js` holds to this function (W27).
  *
  * @module practice/lightingOverrides
  */

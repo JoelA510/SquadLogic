@@ -44,6 +44,14 @@
  * venue with no coordinates is flagged and counted, not refused (D4); a
  * locked row past sunset is reported with a proposed fix, never changed.
  * See `_shared/engines/practice-daylight.ts`.
+ *
+ * Portable-lighting overrides (8.9 D14 PR C): approved
+ * `practice_lighting_overrides` on the run's slots, loaded as the caller
+ * through RLS and never from the body, exempt their dates from the daylight
+ * pass. A failed read refuses the run; a partial read (a coach sees only the
+ * slots they coach) only removes exemptions, so it fails safe and runs, and
+ * the response and audit say whose view it was (`lightingOverrideRead`). See
+ * `_shared/engines/practice-lighting-overrides.ts`.
  */
 
 import { serve } from 'https://deno.land/std@0.223.0/http/server.ts';
@@ -56,6 +64,7 @@ import {
   seasonRunDate,
 } from '../_shared/engines/coach-preference-load.ts';
 import { loadVenueDaylight, toDaylightSlot } from '../_shared/engines/practice-daylight.ts';
+import { loadLightingOverrides } from '../_shared/engines/practice-lighting-overrides.ts';
 import { runPracticeOptimizer } from '../_shared/engines/auto-scheduler-solver.ts';
 import {
   classifyTeamsForRun,
@@ -70,6 +79,7 @@ import {
   createUserClient,
   getUserFromRequest,
   getUserOrgIds,
+  verifyOrgAdmin,
   verifyOrgMembership,
   corsHeaders,
   jsonResponse,
@@ -371,6 +381,51 @@ serve(async (req) => {
       );
     }
 
+    // 5f. PORTABLE LIGHTING (8.9 D14 PR C). Approved overrides on the run's
+    //     slots, loaded as the caller through RLS -- never from the body
+    //     (W25). A failed read refuses (W26): it never runs as if there were
+    //     none. A partial read is not refused: a row the caller cannot see
+    //     only leaves its dates judged, so the run can come out stricter than
+    //     the data allows, never looser.
+    const lightingOverrides = await loadLightingOverrides(
+      createUserClient(req, supabaseUrl, anonKey),
+      { organizationId: input.organizationId, slotIds: anchored.rows.map((s) => s.id) }
+    );
+    if (!lightingOverrides.ok) {
+      edgeLogger.error('Auto-scheduler could not read lighting overrides', {
+        orgId: input.organizationId,
+        seasonSettingsId,
+        message: lightingOverrides.message,
+      });
+      await recordAuditNow(supabase, {
+        organizationId: input.organizationId,
+        action: 'scheduler.auto_refused',
+        resourceType: 'practice_schedule',
+        metadata: { reason: lightingOverrides.code, message: lightingOverrides.message },
+      });
+      await edgeLogger.flush();
+      return jsonResponse(
+        {
+          error:
+            'Approved portable-lighting overrides could not be read, so the run was refused ' +
+            `rather than scheduled as if there were none (${lightingOverrides.message}).`,
+          code: lightingOverrides.code,
+        },
+        503
+      );
+    }
+    //     Disclosed, not refused: an org admin's read is every approved row;
+    //     anyone else's is the rows on slots they coach, so the run may be
+    //     stricter than the data. Membership only -- no override content is
+    //     read with the service role.
+    const lightingOverrideRead = {
+      loaded: lightingOverrides.rowsLoaded,
+      onRunSlots: lightingOverrides.overrides.length,
+      visibility: (await verifyOrgAdmin(supabase, user.id, input.organizationId))
+        ? ('organization' as const)
+        : ('caller-scoped' as const),
+    };
+
     // 6. Audit + structured logging: scheduler started
     edgeLogger.info('Auto-scheduler invoked', {
       userId: user.id,
@@ -395,6 +450,7 @@ serve(async (req) => {
         approvedPreferencesLoaded: preferences.preferencesLoaded,
         teamsConstrainedByPreferences: preferences.teamsConstrained,
         coachAssignmentsLoaded: preferences.coachAssignmentsLoaded,
+        lightingOverrideRead,
         config: input.config,
       },
     });
@@ -427,6 +483,7 @@ serve(async (req) => {
         venues: venueDaylight.venues,
         timeZone: season.timezone,
         today: seasonCalendarDate(Date.now(), season.timezone),
+        lightingOverrides: lightingOverrides.overrides,
       },
       config: input.config,
       onProgress: (progress) => {
@@ -604,6 +661,7 @@ serve(async (req) => {
           assignmentId: l.assignmentId,
           date: l.date,
         })),
+        lightingOverrideRead,
       },
     });
 
@@ -652,6 +710,9 @@ serve(async (req) => {
         // allowed), and each locked row past sunset with its proposed,
         // unapplied fix. Always present.
         daylight,
+        // The portable-lighting overrides the pass was given (8.9 D14 PR C):
+        // approved rows read, those on this run's slots, and whose view.
+        lightingOverrideRead,
         evaluation: run.evaluation,
         // Non-blocking timing findings -- today only WALL_TIME_AMBIGUOUS, a
         // wall time that occurs twice on a fall-back night and was resolved to

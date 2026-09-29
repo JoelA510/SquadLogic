@@ -683,9 +683,17 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/index.js',
       'packages/core/src/practice/repair.js',
     ]),
+    // 8.9 D14 PR C: the Edge DEFINES a same-named `lightingOverrideCovers`
+    // (`practice-lighting-overrides.ts`) that its daylight post-pass calls --
+    // name matches, not imports, listed as the production consumers they are
+    // (the coach-preference precedent below). `lightingOverrideDrift.test.js`
+    // holds the twin to this module through aliases.
     consumers: Object.freeze([
       'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/repair.js',
+      'supabase/functions/_shared/engines/practice-daylight.ts',
+      'supabase/functions/_shared/engines/practice-lighting-overrides.ts',
+      'supabase/functions/_shared/tests/lighting-overrides_test.ts',
       'tests/practiceDaylight.test.js',
       'tests/practiceDurationPhases.test.js',
       // 8.9 D14 PR B: pins the stored-row conversion against this reading.
@@ -695,8 +703,16 @@ const LAYERS = Object.freeze([
     expectedProductionConsumers: Object.freeze([
       'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/repair.js',
+      'supabase/functions/_shared/engines/practice-daylight.ts',
+      'supabase/functions/_shared/engines/practice-lighting-overrides.ts',
+      // The twin's Deno test: under `supabase/`, so `isProductionFile` counts it.
+      'supabase/functions/_shared/tests/lighting-overrides_test.ts',
     ]),
-    expectedExternalProductionConsumers: Object.freeze([]),
+    expectedExternalProductionConsumers: Object.freeze([
+      'supabase/functions/_shared/engines/practice-daylight.ts',
+      'supabase/functions/_shared/engines/practice-lighting-overrides.ts',
+      'supabase/functions/_shared/tests/lighting-overrides_test.ts',
+    ]),
   }),
   // 8.9 PR 5: duration phases, compression and the DST survival report.
   // Reports and proposals only -- cascade proposals leave as change-log
@@ -718,16 +734,28 @@ const LAYERS = Object.freeze([
     expectedProductionConsumers: Object.freeze([]),
     expectedExternalProductionConsumers: Object.freeze([]),
   }),
-  // 8.9 D14 PR B: stored lighting-override rows -> PR A's input. Unwired
-  // until the Edge read (PR C), which is a Deno twin, not a caller.
+  // 8.9 D14 PR B: stored lighting-override rows -> PR A's input. PR C: the
+  // Edge read is a Deno twin, not a caller -- it DEFINES a same-named
+  // `approvedLightingOverridesFromRows` (`practice-lighting-overrides.ts`)
+  // that its loader calls, held to this module by `lightingOverrideDrift.test.js`.
   Object.freeze({
     layer: 'practice/lightingOverrides.js',
     modulePath: 'packages/core/src/practice/lightingOverrides.js',
     functions: Object.freeze(['approvedLightingOverridesFromRows']),
     importers: Object.freeze(['packages/core/src/practice/index.js']),
-    consumers: Object.freeze(['tests/practiceLightingOverrides.test.js']),
-    expectedProductionConsumers: Object.freeze([]),
-    expectedExternalProductionConsumers: Object.freeze([]),
+    consumers: Object.freeze([
+      'supabase/functions/_shared/engines/practice-lighting-overrides.ts',
+      'supabase/functions/_shared/tests/lighting-overrides_test.ts',
+      'tests/practiceLightingOverrides.test.js',
+    ]),
+    expectedProductionConsumers: Object.freeze([
+      'supabase/functions/_shared/engines/practice-lighting-overrides.ts',
+      'supabase/functions/_shared/tests/lighting-overrides_test.ts',
+    ]),
+    expectedExternalProductionConsumers: Object.freeze([
+      'supabase/functions/_shared/engines/practice-lighting-overrides.ts',
+      'supabase/functions/_shared/tests/lighting-overrides_test.ts',
+    ]),
   }),
   /* -- Phase 8.6 PR 3b, PR 1: coach practice preferences ---------------- */
   //

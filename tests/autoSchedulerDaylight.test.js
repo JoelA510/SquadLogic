@@ -18,6 +18,7 @@
  * Coordinates are synthetic (40.00/-75.00, 41.50/-73.50). Nothing geocodes.
  */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'vitest';
@@ -33,6 +34,7 @@ import {
   loadVenueDaylight,
   toDaylightSlot,
 } from '../supabase/functions/_shared/engines/practice-daylight.js';
+import { loadLightingOverrides } from '../supabase/functions/_shared/engines/practice-lighting-overrides.js';
 import { prepareTeam } from '../supabase/functions/_shared/engines/practice-coaches.js';
 import { anchorWallTimes } from '../supabase/functions/_shared/timing/anchorWallTimes.js';
 import { AutoSchedulerInputSchema } from '../supabase/functions/_shared/schemas/auto-scheduler.js';
@@ -207,20 +209,30 @@ async function loadDaylight(tables = TABLES, rows = anchoredSlots()) {
 }
 
 /**
- * The solver as `index.ts` calls it.
+ * The solver as `index.ts` calls it. `overrides`, when given, are
+ * `practice_lighting_overrides` rows, loaded through the Edge's own loader.
  *
- * @param {{ daylight?: boolean, tables?: any, bodySlots?: any[], roster?: any[] }} [options]
+ * @param {{ daylight?: boolean, tables?: any, bodySlots?: any[], roster?: any[], overrides?: any[] }} [options]
  */
 async function run({
   daylight = true,
   tables = TABLES,
   bodySlots = BODY_SLOTS,
   roster = ROSTER,
+  overrides = undefined,
 } = {}) {
   /** @type {any[]} */
   const rows = anchoredSlots(bodySlots);
   const placeable = roster.map((t) => t.id).filter((id) => id !== 't-locked');
   const loaded = daylight ? await loadDaylight(tables, rows) : null;
+  /** @type {any} */
+  const lighting = overrides
+    ? await loadLightingOverrides(fakeClient({ practice_lighting_overrides: overrides }), {
+        organizationId: ORG,
+        slotIds: rows.map((s) => String(s.id)),
+      })
+    : null;
+  if (lighting && !lighting.ok) throw new Error(`the override load refused: ${lighting.message}`);
   return runPracticeOptimizer({
     teams: roster.map((t) => prepareTeam(t)),
     slots: rows.map((s) => ({
@@ -239,6 +251,7 @@ async function run({
           venues: loaded.venues,
           timeZone: ZONE,
           today: TODAY,
+          ...(lighting ? { lightingOverrides: lighting.overrides } : {}),
         }
       : undefined,
   });
@@ -796,5 +809,466 @@ describe('auto-scheduler/index.ts wiring (source pin)', () => {
       source,
       /\.(?:fieldId|latitude|longitude|lightingAvailable|lighting_available)\b/
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8.9 D14 PR C -- portable-lighting overrides (W23-W26, W28; W27 is
+// `tests/lightingOverrideDrift.test.js`).
+// ---------------------------------------------------------------------------
+
+/** A `practice_lighting_overrides` row as PostgREST returns it: a canonical `[from,end)`. */
+function overrideRow(n, slotId, window, status = 'approved') {
+  return {
+    id: `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
+    organization_id: ORG,
+    practice_slot_id: slotId,
+    window,
+    kind: 'portable-lighting',
+    status,
+  };
+}
+
+/**
+ * The fixture's overrides. Every date named is a Tuesday the slot runs on;
+ * the comments say what the rule must make of each row.
+ */
+const OVERRIDE_ROWS = [
+  // s-a-unlit is past sunset from 09-22: 09-22, 09-29, 10-06 exempt, cut at 10-13.
+  overrideRow(1, 's-a-unlit', '[2026-09-22,2026-10-07)'),
+  // s-c-late is past sunset on every date: all four exempt, so not withdrawn.
+  overrideRow(2, 's-c-late', '[2026-11-03,2026-11-25)'),
+  // s-e-nocoords has no coordinates: every date exempt, none unknown.
+  overrideRow(3, 's-e-nocoords', '[2026-09-01,2026-11-25)'),
+  // s-f-undeclared is cut at 09-15, before this window: its three covered
+  // dates sit in the TIME TBD remainder (D8 keeps one range).
+  overrideRow(4, 's-f-undeclared', '[2026-10-20,2026-11-04)'),
+  // The locked row's slot, past sunset from 09-08: 09-08 and 09-15 exempt.
+  overrideRow(5, 's-h-locked', '[2026-09-08,2026-09-16)'),
+  // Not approved: each would exempt a whole span if it counted (W24).
+  overrideRow(6, 's-a-unlit', '[2026-09-01,2026-11-25)', 'requested'),
+  overrideRow(7, 's-f-undeclared', '[2026-09-01,2026-11-25)', 'rejected'),
+  overrideRow(8, 's-h-locked', '[2026-09-01,2026-11-25)', 'withdrawn'),
+  // Approved, on a slot this run does not hold.
+  overrideRow(9, 's-not-in-run', '[2026-09-01,2026-11-25)'),
+  // The locked row's slot again, after its first past sunset (09-22): 11-10
+  // and 11-17 fall in the proposed remainder, and the row exempts nothing.
+  overrideRow(10, 's-h-locked', '[2026-11-10,2026-11-18)'),
+];
+const APPROVED_ROWS = OVERRIDE_ROWS.filter((r) => r.status === 'approved');
+
+/**
+ * An input row's window, read here and not by either arm's converter:
+ * `[from, end)` -> inclusive `until` = end - 1 day.
+ */
+function windowOf(row) {
+  const m = /^\[(\d{4}-\d{2}-\d{2}),(\d{4}-\d{2}-\d{2})\)$/.exec(row.window);
+  assert.ok(m, `fixture window ${row.window} is not canonical`);
+  const until = new Date(Date.parse(`${m[2]}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+  return { slotId: row.practice_slot_id, from: m[1], until };
+}
+
+/**
+ * What the rule says of one input slot's dates under `rows` (approved only),
+ * derived from the input slot, CORE's sunset and the rows -- no Edge module.
+ */
+function deriveExempt(slotId, rows) {
+  const dates = derivedDates(slotId);
+  const windows = rows.filter((r) => r.status === 'approved').map(windowOf);
+  const covers = (d) => windows.some((w) => w.slotId === slotId && w.from <= d && d <= w.until);
+  const s = BODY_BY_ID.get(slotId);
+  const loc = FIELD_BY_ID.get(s.fieldId);
+  const coords = loc.latitude !== null && loc.longitude !== null;
+  const end = minutesOf(s.endTime);
+  const exemptDates = [];
+  let judged = 0;
+  let firstIllegal = null;
+  for (const date of dates) {
+    if (covers(date)) {
+      exemptDates.push(date);
+      continue;
+    }
+    if (!coords) continue;
+    judged += 1;
+    const limit =
+      sunsetEnforcementMinutes(
+        sunsetOnDate({
+          date,
+          latitude: Number(loc.latitude),
+          longitude: Number(loc.longitude),
+          timeZone: ZONE,
+        })
+      ) - CORE_MARGIN;
+    if (end > limit) {
+      firstIllegal = date;
+      break;
+    }
+  }
+  const inTbd = firstIllegal ? dates.filter((d) => d > firstIllegal && covers(d)).length : 0;
+  return {
+    exempt: exemptDates.length,
+    exemptDates,
+    judged,
+    inTbd,
+    firstIllegal,
+    covered: dates.filter(covers),
+  };
+}
+
+const OVERRIDE_KEYS = [
+  'lightingOverrideOccurrencesExempt',
+  'lightingOverrideOccurrencesInTimeTbd',
+  'lockedRowOccurrencesLightingExempt',
+  'lockedRowOccurrencesLightingInProposedTbd',
+  'lightingOverridesUnused',
+];
+/** The run with the five override counters removed and the clock zeroed. */
+function withoutOverrideKeys(r) {
+  const meta = { ...r.daylight.meta };
+  for (const key of OVERRIDE_KEYS) delete meta[key];
+  return JSON.stringify({ ...r, elapsedMs: 0, daylight: { ...r.daylight, meta } });
+}
+const bytes = (r) => JSON.stringify({ ...r, elapsedMs: 0 });
+const sha256 = (text) => createHash('sha256').update(text).digest('hex');
+/**
+ * `run()`'s full result on `origin/main` 3fa69ec, before this PR, hashed as
+ * {@link withoutOverrideKeys} hashes it (elapsedMs zeroed). Captured by
+ * executing main's modules over this file's fixture.
+ */
+const MAIN_POST_PASS_SHA256 = 'f79c9f82b512ea18eca285673a0395238f2e2491444ee18bdf54e26176a9c926';
+
+const byTeam = (list) => new Map(list.map((x) => [x.teamId, x]));
+
+describe('no overrides: the post-pass is byte-identical to main', () => {
+  it('an empty approved read reproduces main exactly, and adds only five zero counters', async () => {
+    const r = await run({ overrides: [] });
+    assert.equal(sha256(withoutOverrideKeys(r)), MAIN_POST_PASS_SHA256);
+    for (const key of OVERRIDE_KEYS) assert.equal(r.daylight.meta[key], 0, key);
+    // No context key at all (a caller that loaded nothing) is the same result.
+    assert.equal(bytes(await run()), bytes(r));
+  });
+});
+
+describe('W23: an override exempts only its own window, on its own slot', () => {
+  it('from and until are inclusive: the covered dates are kept, the cut moves past them', async () => {
+    const r = await run({ overrides: [OVERRIDE_ROWS[0]] });
+    const expected = deriveExempt('s-a-unlit', [OVERRIDE_ROWS[0]]);
+    assert.deepEqual(expected.covered, ['2026-09-22', '2026-09-29', '2026-10-06']);
+    assert.equal(expected.firstIllegal, '2026-10-13');
+    // t1 holds s-a-unlit in the search's placement.
+    assert.equal(byTeam(r.placements).get('t1').slotId, 's-a-unlit');
+    assert.equal(byTeam(r.placements).get('t1').effectiveUntil, '2026-10-12');
+    assert.equal(byTeam(r.daylight.timeTbd).get('t1').from, expected.firstIllegal);
+    assert.equal(r.daylight.meta.lightingOverrideOccurrencesExempt, expected.exempt);
+    assert.equal(r.daylight.meta.lightingOverrideOccurrencesInTimeTbd, 0);
+  });
+
+  it('the day before `from` and the day after `until` are judged, not exempt', async () => {
+    // [09-23, 10-05]: 09-22 is the day before `from`, 10-06 the day after `until`.
+    const row = overrideRow(1, 's-a-unlit', '[2026-09-23,2026-10-06)');
+    const r = await run({ overrides: [row] });
+    const baseline = await run({ overrides: [] });
+    // 09-22 is judged past sunset, exactly as with no override: D8 cuts there.
+    assert.equal(byTeam(r.daylight.timeTbd).get('t1').from, '2026-09-22');
+    assert.equal(byTeam(r.placements).get('t1').effectiveUntil, '2026-09-21');
+    assert.equal(r.daylight.meta.lightingOverrideOccurrencesExempt, 0);
+    // Only 09-29 is covered, and it lies in the remainder; 10-06 is not covered.
+    assert.deepEqual(deriveExempt('s-a-unlit', [row]).covered, ['2026-09-29']);
+    assert.equal(r.daylight.meta.lightingOverrideOccurrencesInTimeTbd, 1);
+    assert.equal(JSON.stringify(r.placements), JSON.stringify(baseline.placements));
+  });
+
+  it('an override on one slot leaves every other slot, on the same field too, as it was', async () => {
+    const r = await run({ overrides: [OVERRIDE_ROWS[0]] });
+    const baseline = await run({ overrides: [] });
+    const before = byTeam(baseline.placements);
+    const beforeTbd = byTeam(baseline.daylight.timeTbd);
+    let compared = 0;
+    for (const p of r.placements) {
+      if (p.slotId === 's-a-unlit') continue;
+      assert.deepEqual(p, before.get(p.teamId));
+      compared += 1;
+    }
+    for (const t of r.daylight.timeTbd) {
+      if (t.slotId === 's-a-unlit') continue;
+      assert.deepEqual(t, beforeTbd.get(t.teamId));
+    }
+    assert.deepEqual(r.unassigned, baseline.unassigned);
+    // s-h-locked shares s-a-unlit's field; its locked report is unchanged.
+    assert.deepEqual(r.daylight.lockedPastSunset, baseline.daylight.lockedPastSunset);
+    assert.ok(compared >= 5, `only ${compared} other placements were compared`);
+  });
+});
+
+describe('W24: only approved rows exempt', () => {
+  it('requested, rejected and withdrawn rows change nothing, though each would if approved', async () => {
+    const all = await run({ overrides: OVERRIDE_ROWS });
+    const approvedOnly = await run({ overrides: APPROVED_ROWS });
+    assert.equal(bytes(all), bytes(approvedOnly));
+    // Non-vacuity: every non-approved row, were it approved, changes the run.
+    const others = OVERRIDE_ROWS.filter((r) => r.status !== 'approved');
+    assert.deepEqual(others.map((r) => r.status).sort(), ['rejected', 'requested', 'withdrawn']);
+    for (const row of others) {
+      const rest = APPROVED_ROWS.filter((r) => r.practice_slot_id !== row.practice_slot_id);
+      const flipped = await run({ overrides: [...rest, { ...row, status: 'approved' }] });
+      const base = await run({ overrides: rest });
+      assert.notEqual(
+        bytes(flipped),
+        bytes(base),
+        `${row.status} would change nothing if approved`
+      );
+    }
+  });
+
+  it('the loader asks the store for approved rows only, under the org', async () => {
+    const client = fakeClient({ practice_lighting_overrides: OVERRIDE_ROWS });
+    /** @type {any} */
+    const loaded = await loadLightingOverrides(client, {
+      organizationId: ORG,
+      slotIds: BODY_SLOTS.map((s) => s.id),
+    });
+    assert.equal(loaded.ok, true);
+    assert.equal(client.calls[0].table, 'practice_lighting_overrides');
+    assert.deepEqual(client.calls[0].filters, [
+      ['organization_id', ORG],
+      ['status', 'approved'],
+    ]);
+    // Six approved rows returned (the fake ignores filters); five on run slots.
+    assert.equal(loaded.rowsLoaded, APPROVED_ROWS.length);
+    assert.deepEqual(
+      loaded.overrides.map((o) => o.slotId),
+      APPROVED_ROWS.filter((r) => BODY_BY_ID.has(r.practice_slot_id)).map((r) => r.practice_slot_id)
+    );
+  });
+});
+
+describe('W25: lighting claimed in the request body is ignored', () => {
+  it('a body override list, or a slot claiming portable lighting, changes nothing', async () => {
+    const whole = { from: '2026-09-01', until: '2026-11-24' };
+    const claims = BODY_SLOTS.map((s) => ({
+      ...s,
+      lightingOverride: whole,
+      lightingOverrides: [{ slotId: s.id, ...whole }],
+      portableLighting: true,
+    }));
+    const parsed = AutoSchedulerInputSchema.parse({
+      organizationId: ORG,
+      teams: ROSTER,
+      slots: claims,
+      lightingOverrides: BODY_SLOTS.map((s) => ({ slotId: s.id, ...whole })),
+    });
+    // The top-level claim does not survive the schema; the slot claims pass
+    // through it, and nothing reads them.
+    assert.equal('lightingOverrides' in parsed, false);
+    assert.equal(/** @type {any} */ (parsed.slots[0]).portableLighting, true);
+    const claimed = await run({ bodySlots: claims, overrides: [] });
+    const plain = await run({ overrides: [] });
+    // Non-vacuity: without the claims, the run truncates and withdraws.
+    assert.ok(plain.daylight.timeTbd.length >= 3);
+    assert.equal(claimed.daylight.meta.lightingOverrideOccurrencesExempt, 0);
+    assert.equal(bytes(claimed), bytes(plain));
+  });
+});
+
+describe('W26: a failed override read refuses the run, never an empty list', () => {
+  it('an error on the first page, or a later one, refuses with its code', async () => {
+    const args = { organizationId: ORG, slotIds: ['s-a-unlit'], pageSize: 1 };
+    /** @type {any} */
+    const first = await loadLightingOverrides(
+      fakeClient({}, { fail: 'practice_lighting_overrides' }),
+      args
+    );
+    assert.equal(first.ok, false);
+    assert.equal(first.code, 'LIGHTING_OVERRIDES_UNREADABLE');
+    assert.equal('overrides' in first, false);
+    // Page two fails after page one returned a row: refused, not partial.
+    const paged = fakeClient({ practice_lighting_overrides: APPROVED_ROWS });
+    const from = paged.from.bind(paged);
+    let pages = 0;
+    paged.from = (table) => {
+      const q = from(table);
+      const range = q.range;
+      q.range = (a, b) =>
+        ++pages === 2 ? Promise.resolve({ data: null, error: { message: 'boom' } }) : range(a, b);
+      return q;
+    };
+    /** @type {any} */
+    const second = await loadLightingOverrides(paged, args);
+    assert.equal(pages, 2);
+    assert.equal(second.ok, false);
+    assert.equal(second.code, 'LIGHTING_OVERRIDES_UNREADABLE');
+  });
+
+  it('a row that cannot be read refuses too, whatever its status', async () => {
+    const bad = [
+      { ...OVERRIDE_ROWS[0], window: '[2026-09-22,2026-10-07]' },
+      { ...OVERRIDE_ROWS[5], kind: 'floodlight' },
+      { ...OVERRIDE_ROWS[0], status: 'APPROVED' },
+    ];
+    for (const row of bad) {
+      /** @type {any} */
+      const loaded = await loadLightingOverrides(
+        fakeClient({ practice_lighting_overrides: [OVERRIDE_ROWS[1], row] }),
+        { organizationId: ORG, slotIds: ['s-a-unlit', 's-c-late'] }
+      );
+      assert.equal(loaded.ok, false, JSON.stringify(row));
+      assert.equal(loaded.code, 'LIGHTING_OVERRIDES_UNREADABLE');
+    }
+  });
+
+  it('a partial read fails safe: fewer visible rows only ever keep less', async () => {
+    // A coach's RLS view is a subset of the approved rows. It is not refused
+    // (see `practice-lighting-overrides.ts`) because it can only be stricter.
+    const full = await run({ overrides: APPROVED_ROWS });
+    const keptUntil = (r, teamId) => {
+      const p = byTeam(r.placements).get(teamId);
+      return p ? (p.effectiveUntil ?? '9999-12-31') : '0000-00-00';
+    };
+    let subsets = 0;
+    let stricter = 0;
+    for (let mask = 0; mask < 1 << APPROVED_ROWS.length; mask += 1) {
+      const visible = APPROVED_ROWS.filter((_, i) => mask & (1 << i));
+      const partial = await run({ overrides: visible });
+      for (const id of PLACEABLE) {
+        assert.ok(keptUntil(partial, id) <= keptUntil(full, id), `${id} kept more, mask ${mask}`);
+        if (keptUntil(partial, id) < keptUntil(full, id)) stricter += 1;
+      }
+      const lockedPartial = partial.daylight.lockedPastSunset[0]?.date ?? '9999-12-31';
+      const lockedFull = full.daylight.lockedPastSunset[0]?.date ?? '9999-12-31';
+      assert.ok(lockedPartial <= lockedFull, `the locked row judged later, mask ${mask}`);
+      subsets += 1;
+    }
+    assert.equal(subsets, 2 ** APPROVED_ROWS.length);
+    // Non-vacuity: hiding rows did make some runs stricter.
+    assert.ok(stricter > 0, 'no subset changed anything');
+  }, 120_000);
+});
+
+describe('W28: the exempt count matches an independent derivation, and is non-zero', () => {
+  it('placements, the locked row and TIME TBD remainders, each from input rows x slot dates', async () => {
+    const baseline = await run({ daylight: false });
+    const r = await run({ overrides: OVERRIDE_ROWS });
+    let exempt = 0;
+    let inTbd = 0;
+    let judged = 0;
+    /** @type {Map<string, string[]>} */
+    const exemptedBySlot = new Map();
+    // Universe: the search's own placements, by their INPUT slot's dates.
+    for (const p of baseline.placements) {
+      const s = BODY_BY_ID.get(p.slotId);
+      if (FIELD_BY_ID.get(s.fieldId)?.lighting_available === true || !s.effectiveUntil) continue;
+      const d = deriveExempt(p.slotId, OVERRIDE_ROWS);
+      exempt += d.exempt;
+      inTbd += d.inTbd;
+      judged += d.judged;
+      exemptedBySlot.set(p.slotId, d.exemptDates);
+    }
+    // The locked row: its stored range [09-01, 11-24], from TODAY.
+    const locked = deriveExempt('s-h-locked', OVERRIDE_ROWS);
+    assert.equal(r.daylight.meta.lightingOverrideOccurrencesExempt, exempt);
+    assert.equal(r.daylight.meta.lightingOverrideOccurrencesInTimeTbd, inTbd);
+    assert.equal(r.daylight.meta.lockedRowOccurrencesLightingExempt, locked.exempt);
+    assert.equal(r.daylight.meta.lockedRowOccurrencesLightingInProposedTbd, locked.inTbd);
+    exemptedBySlot.set('s-h-locked', locked.exemptDates);
+    // Unused: an approved row on a run slot none of whose dates was exempted.
+    const onRun = APPROVED_ROWS.filter((row) => BODY_BY_ID.has(row.practice_slot_id));
+    const unused = onRun.filter((row) => {
+      const w = windowOf(row);
+      return !(exemptedBySlot.get(w.slotId) ?? []).some((d) => w.from <= d && d <= w.until);
+    });
+    assert.equal(r.daylight.meta.lightingOverridesUnused, unused.length);
+    assert.ok(unused.length > 0 && unused.length < onRun.length, 'unused is all or nothing');
+    assert.ok(locked.inTbd > 0, 'no covered date falls in the proposed remainder');
+    // An exempt date is not judged, so it is not examined (core's contract).
+    assert.equal(r.daylight.meta.occurrencesExamined, judged);
+    // Meta-assertions: non-zero, and every approved row on a run slot covers a date.
+    assert.ok(exempt > 0 && inTbd > 0 && locked.exempt > 0, 'the fixture exempts nothing');
+    for (const row of APPROVED_ROWS.filter((x) => BODY_BY_ID.has(x.practice_slot_id))) {
+      assert.ok(deriveExempt(row.practice_slot_id, [row]).covered.length > 0, row.window);
+    }
+    // Its own counter: the lit counter is untouched.
+    const none = await run({ overrides: [] });
+    assert.equal(r.daylight.meta.litPlacementsExempt, none.daylight.meta.litPlacementsExempt);
+  });
+
+  it('exempt dates keep the practice, need no coordinates, and leave D8 intact elsewhere', async () => {
+    const r = await run({ overrides: OVERRIDE_ROWS });
+    const placed = byTeam(r.placements);
+    const tbd = byTeam(r.daylight.timeTbd);
+    // t3 (s-c-late) is withdrawn without an override; every date is exempt,
+    // so it is kept whole and untouched: the slot's own instants, full length.
+    assert.equal(placed.get('t3').slotId, 's-c-late');
+    assert.equal('effectiveUntil' in placed.get('t3'), false);
+    assert.equal(
+      r.unassigned.some((u) => u.teamId === 't3'),
+      false
+    );
+    // t5 (s-e-nocoords): every date exempt, so no sunset was needed: not unknown.
+    assert.equal(placed.get('t5').slotId, 's-e-nocoords');
+    assert.equal(
+      r.daylight.unknown.some((u) => u.slotId === 's-e-nocoords'),
+      false
+    );
+    // t6 (s-f-undeclared): its first past-sunset date is not covered, so D8
+    // truncates exactly as with no override.
+    assert.equal(tbd.get('t6').from, '2026-09-15');
+    assert.equal(placed.get('t6').effectiveUntil, '2026-09-14');
+    // The locked row: 09-08 and 09-15 exempt, so first past sunset 09-22, proposed only.
+    const lockedRow = r.daylight.lockedPastSunset.find((l) => l.assignmentId === 'a-locked');
+    assert.equal(lockedRow.date, '2026-09-22');
+    assert.equal(lockedRow.proposedFix.applied, false);
+  });
+});
+
+describe('an exempt date needs no coordinates', () => {
+  it('no coordinates and a partial window: covered dates exempt, the rest unknown, counted apart', async () => {
+    const row = overrideRow(3, 's-e-nocoords', '[2026-09-01,2026-09-16)');
+    const r = await run({ overrides: [row] });
+    const d = deriveExempt('s-e-nocoords', [row]);
+    assert.deepEqual(d.covered, ['2026-09-01', '2026-09-08', '2026-09-15']);
+    const unknown = r.daylight.unknown.find((u) => u.slotId === 's-e-nocoords');
+    assert.equal(unknown.cause, DAYLIGHT_UNKNOWN_CAUSE.VENUE_COORDINATES_MISSING);
+    assert.equal(unknown.occurrences, derivedDates('s-e-nocoords').length - d.covered.length);
+    assert.equal(r.daylight.meta.lightingOverrideOccurrencesExempt, d.exempt);
+    // Still placed, whole: an unknown sunset never truncates (D4).
+    assert.equal('effectiveUntil' in byTeam(r.placements).get('t5'), false);
+  });
+});
+
+describe('auto-scheduler/index.ts override wiring (source pin)', () => {
+  const source = readFileSync(
+    path.join(process.cwd(), 'supabase/functions/auto-scheduler/index.ts'),
+    'utf8'
+  );
+
+  it('loads overrides as the caller and refuses a failed read before the solver runs (W26)', () => {
+    assert.match(
+      source,
+      /loadLightingOverrides\(\s*createUserClient\(req, supabaseUrl, anonKey\),\s*\{ organizationId: input\.organizationId, slotIds: anchored\.rows\.map\(\(s\) => s\.id\) \}/
+    );
+    const guard = source.indexOf('if (!lightingOverrides.ok) {');
+    const solve = source.indexOf('await runPracticeOptimizer(');
+    assert.ok(guard >= 0 && solve > guard, 'the refusal does not precede the solver');
+    assert.match(
+      source.slice(guard, guard + 1500),
+      /return jsonResponse\([\s\S]*?code: lightingOverrides\.code,[\s\S]*?503/
+    );
+  });
+
+  it('discloses whose view the read was, and what it loaded, in the response and audit', () => {
+    assert.match(
+      source,
+      /visibility: \(await verifyOrgAdmin\(supabase, user\.id, input\.organizationId\)\)/
+    );
+    assert.match(source, /loaded: lightingOverrides\.rowsLoaded,/);
+    // The started audit, the completed audit and the response.
+    assert.equal(source.match(/^ {8}lightingOverrideRead,$/gm)?.length, 3);
+  });
+
+  it('hands the solver the loaded overrides, and nothing from the body (W25)', () => {
+    assert.match(source, /^ {8}lightingOverrides: lightingOverrides\.overrides,$/m);
+    assert.equal(source.match(/lightingOverrides:/g)?.length, 1);
+    assert.doesNotMatch(source, /(?:input|body|parseResult\.data)\.lightingOverrides/);
+    assert.doesNotMatch(source, /\.(?:portableLighting|lightingOverride)\b/);
   });
 });

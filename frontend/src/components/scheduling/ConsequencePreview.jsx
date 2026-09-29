@@ -23,9 +23,12 @@ import { AlertTriangle, HelpCircle, Layers, Users } from 'lucide-react';
  *    third vocabulary here — rendering an em dash, or defaulting to "deleted" —
  *    would put a wrong word in front of the person deciding. The column is
  *    absent when the arm does not produce it, and a sentence says why.
- * 3. **The repair proposal is named as unavailable.** 8.6 does not exist. A
- *    blank space where a repair belongs reads as "no repair is needed", which
- *    is a stronger claim than "nothing has been computed" and a false one.
+ * 3. **The repair half is never blank.** A field retirement passes
+ *    `repairPanel`, the practice repair recommendation launcher (8.6 3b
+ *    PR 10). Every other arm passes `repair`, `repairNotComputed()`'s named
+ *    reason that none is computed: a blank space where a repair belongs reads
+ *    as "no repair is needed", which is a stronger claim than "nothing has
+ *    been computed" and a false one.
  * 4. **A venue retirement's consequence has TWO halves, and only one is a
  *    booking list.** `admin_retire_location` returns `contained` beside
  *    `affected`: every field and sub-surface the venue holds, each flagged
@@ -53,7 +56,9 @@ import { AlertTriangle, HelpCircle, Layers, Users } from 'lucide-react';
  * @param {number} [props.affectedCount] - the RPC's own count, NOT `rows.length`
  *   (required for `'delete'`/`'retire'`; a `'reassign'` has no bookings half)
  * @param {Array<Record<string, any>>} [props.rows] - the RPC's `affected` array
- * @param {{ available: false, finding: { code: string, message: string } }} props.repair
+ * @param {{ available: false, finding: { code: string, message: string } }} [props.repair]
+ *   - why no repair is computed; required unless `repairPanel` is given
+ * @param {React.ReactNode} [props.repairPanel] - the repair recommendations, in its place
  * @param {string} [props.titleId] - id of the heading paragraph, for `aria-labelledby`
  * @param {Array<Record<string, any>>} [props.contained] - the RPC's `contained`
  *   array. **Pass it only when the RPC produced one**; leave it `undefined` at
@@ -68,7 +73,8 @@ export default function ConsequencePreview({
   operation,
   affectedCount = 0,
   rows = undefined,
-  repair,
+  repair = undefined,
+  repairPanel = undefined,
   titleId = undefined,
   contained = undefined,
   containedCount = undefined,
@@ -107,7 +113,7 @@ export default function ConsequencePreview({
     return (
       <section aria-labelledby={titleId} data-testid="consequence-preview">
         <CoverageConsequence subject={subject} coverage={coverage} titleId={titleId} />
-        <RepairUnavailable repair={repair} />
+        {repairPanel ?? <RepairUnavailable repair={repair} />}
       </section>
     );
   }
@@ -261,19 +267,24 @@ export default function ConsequencePreview({
         </div>
       )}
 
-      <RepairUnavailable repair={repair} />
+      {repairPanel ?? <RepairUnavailable repair={repair} />}
     </section>
   );
 }
 
 /**
- * The repair half of the clause. Rendered whether or not anything is
- * affected, because "there is no repair engine" is true either way and an
- * operator who sees it only on the bad path learns the wrong lesson.
+ * The repair half of the clause, for an arm that computes none. Rendered
+ * whether or not anything is affected, because "no repair is computed here"
+ * is true either way and an operator who sees it only on the bad path learns
+ * the wrong lesson.
  *
- * @param {{ repair: { finding: { code: string, message: string } } }} props
+ * @param {{ repair?: { finding: { code: string, message: string } } }} props
  */
 function RepairUnavailable({ repair }) {
+  if (!repair) {
+    // Neither half given: refuse rather than render the blank this avoids.
+    throw new Error('ConsequencePreview: pass `repair` or `repairPanel`');
+  }
   return (
     <p
       className="text-sm"
@@ -372,7 +383,7 @@ RepairUnavailable.propTypes = {
       code: PropTypes.string.isRequired,
       message: PropTypes.string.isRequired,
     }).isRequired,
-  }).isRequired,
+  }),
 };
 
 ConsequencePreview.propTypes = {
@@ -386,7 +397,8 @@ ConsequencePreview.propTypes = {
       code: PropTypes.string.isRequired,
       message: PropTypes.string.isRequired,
     }).isRequired,
-  }).isRequired,
+  }),
+  repairPanel: PropTypes.node,
   titleId: PropTypes.string,
   contained: PropTypes.array,
   containedCount: PropTypes.number,

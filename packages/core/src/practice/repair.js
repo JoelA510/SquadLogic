@@ -6,15 +6,16 @@
  * > cannot place as TIME TBD with a reason, and leaves every tracked metric
  * > unchanged or better. Never silently drop an unplaceable slot."*
  *
- * ## Declared, not wired
+ * ## Wired read-only (8.6 3b PR 10)
  *
- * **Nothing in the app calls this.** The live practice scheduler is the Deno
- * twin `supabase/functions/auto-scheduler/`, and a mid-season change today is a
- * re-run of it with only manual assignments locked
- * (`PracticeSchedulingPage.jsx`, `lockedAssignments`). This module is the
- * operator that should replace that re-run; 8.6 PR 3b wires it. Every result
- * carries `PRACTICE_REPAIR_UNWIRED` so that nobody reads a passing test here as
- * a change to what families see.
+ * The app calls this through the practice repair recommendation panel
+ * (`frontend/src/utils/practiceRepairPanel.js`), opened by an admin from the
+ * field retirement dialog and the blackout editor. The panel is **read-only**:
+ * it shows each recommendation, and declines and undoes them in memory, but
+ * nothing it computes is written. Enacting a recommendation is 3b PR 11; until
+ * then the live practice scheduler is still the Deno twin
+ * `supabase/functions/auto-scheduler/`, and nothing here changes what
+ * families see.
  *
  * ## What it reuses from `resolve/`, and what it does not
  *
@@ -153,8 +154,8 @@
  *   Exempt dates are not judged; a candidate exempt on some dates and past
  *   sunset on others is still refused -- partly legal is not legal.
  *
- * Enforced in this module; **not live** until 8.6 3b PRs 9-11 wire the
- * repair, like everything else here.
+ * Enforced in this module and shown by the read-only panel (3b PR 10); **not
+ * live** for families until 3b PR 11 enacts a recommendation.
  *
  * ## Minimality, and when it is claimed
  *
@@ -328,13 +329,7 @@ export function buildPracticeRepairContext(input) {
       lossMinutes.start < slot.startMinutes + slot.durationMinutes);
   const coachesByTeam = parsed.coachesByTeam ?? {};
   const lossReason = parsed.loss.reason;
-  const findings = [
-    makePracticeFinding(
-      PRACTICE_REASON.REPAIR_UNWIRED,
-      'Practice repair has no production caller: the live scheduler is the auto-scheduler Edge Function. 8.6 PR 3b wires this.',
-      { wiredBy: '8.6 PR 3b' }
-    ),
-  ];
+  const findings = [];
 
   // The sibling contract (`resolve.js`): a run scored under other weights says
   // so, naming the terms; a zeroed change term — which undoes the freeze —
@@ -372,7 +367,7 @@ export function buildPracticeRepairContext(input) {
       makePracticeFinding(
         PRACTICE_REASON.REPAIR_DAYLIGHT_UNCHECKED,
         'No daylight calendar was supplied, so no re-home candidate was judged against sunset. This is not a daylight pass.',
-        { wiredBy: '8.6 PR 3b' }
+        {}
       )
     );
   }

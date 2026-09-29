@@ -16,7 +16,7 @@
 import React, { useState } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import { repairProposal } from '@squadlogic/core/fieldAdmin/index.js';
+import { repairNotComputed } from '@squadlogic/core/fieldAdmin/index.js';
 import ConsequencePreview from '../frontend/src/components/scheduling/ConsequencePreview.jsx';
 import RetireEstateNodeDialog from '../frontend/src/components/setup/RetireEstateNodeDialog.jsx';
 
@@ -89,7 +89,7 @@ function renderPreview(overrides = {}) {
       operation="retire"
       affectedCount={VENUE_REFUSAL.affected_count}
       rows={VENUE_REFUSAL.affected}
-      repair={repairProposal({ affectedCount: VENUE_REFUSAL.affected_count })}
+      repair={repairNotComputed('retire-location', { affectedCount: VENUE_REFUSAL.affected_count })}
       titleId="t"
       {...overrides}
     />
@@ -175,7 +175,7 @@ describe('ConsequencePreview: the containment half of a venue retirement', () =>
         operation="retire"
         affectedCount={0}
         rows={[]}
-        repair={repairProposal({ affectedCount: 0 })}
+        repair={repairNotComputed('retire-location', { affectedCount: 0 })}
         contained={CONTAINED_NODES}
         containedCount={99}
       />
@@ -201,12 +201,12 @@ describe('ConsequencePreview: the containment half of a venue retirement', () =>
     expect(screen.queryByTestId('contained-none')).toBeNull();
   });
 
-  it('still names the repair as unavailable on the containment path', () => {
+  it('still names why no repair is computed on the containment path', () => {
     renderPreview({ contained: CONTAINED_NODES, containedCount: 2 });
-    // Reused, not reinvented: 8.6 does not exist at any depth.
+    // The adapter models a field retirement only: a venue says so by name.
     expect(screen.getByTestId('repair-proposal-unavailable')).toHaveAttribute(
       'data-reason-code',
-      'REPAIR_PROPOSAL_UNAVAILABLE'
+      'REPAIR_NOT_AT_THIS_DEPTH'
     );
   });
 });

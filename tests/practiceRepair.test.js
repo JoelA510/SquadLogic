@@ -52,7 +52,7 @@ import {
 } from '@squadlogic/core/fixtures/index.js';
 import { changeCountsFor } from '@squadlogic/core/resolve/index.js';
 import { evaluatePracticeSchedule } from '@squadlogic/core/practiceMetrics.js';
-import { tier1Projection } from './helpers/practiceRepairTier1.js';
+import { asOnMain, tier1Projection } from './helpers/practiceRepairTier1.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -447,8 +447,11 @@ describe('practice repair :: the acceptance criterion', () => {
     expect(RUN.stats.locationChanges).toBe(RUN.stats.rehomed);
   });
 
-  it('says it is unwired, on the result itself', () => {
-    expect(RUN.findings.some((f) => f.code === PRACTICE_REASON.REPAIR_UNWIRED)).toBe(true);
+  it('no longer says it is unwired: the 3b PR 10 panel is its caller', () => {
+    // The declaration went with its biconditional's other half, the
+    // `practice/repair.js` pin in `tests/unwiredLayerImporters.test.js`.
+    expect(RUN.findings.map((f) => f.code)).not.toContain('PRACTICE_REPAIR_UNWIRED');
+    expect(Object.values(PRACTICE_REASON)).not.toContain('PRACTICE_REPAIR_UNWIRED');
   });
 
   describe('every tracked metric: enumerated from the report, then held', () => {
@@ -1414,7 +1417,8 @@ const UNBOUNDED_DIGESTS_ON_MAIN = {
   'orchard-park/field-6': ['26c0548ed2baf5bb', '129d4c878692be0a'],
 };
 function resultDigest(result) {
-  const { representation: _representation, ...rest } = tier1Projection(result);
+  // Main's pins, main's shape: the finding 3b PR 10 removed is put back.
+  const { representation: _representation, ...rest } = asOnMain(tier1Projection(result));
   const json = JSON.stringify(rest, (key, value) => {
     if (value instanceof Map) return ['Map', [...value]];
     if (value instanceof Set) return ['Set', [...value]];

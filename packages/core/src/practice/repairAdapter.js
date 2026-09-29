@@ -4,8 +4,10 @@
  * `practice-persistence` repair payload out. Pure: it reads nothing and
  * fetches nothing. Loading the rows is the caller's, as the user, through RLS.
  *
- * **Unwired**, like the repair it feeds: nothing in the app calls it until
- * 3b PR 10's panel (pinned by `tests/unwiredLayerImporters.test.js`).
+ * Called read-only by the 3b PR 10 recommendation panel
+ * (`frontend/src/utils/practiceRepairPanel.js`, pinned by
+ * `tests/unwiredLayerImporters.test.js`): the payload is built there only to
+ * show each window's refusal, never sent. Sending it is 3b PR 11.
  *
  * ## Rows -> repair input ({@link buildPracticeRepairInput})
  *

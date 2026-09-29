@@ -51,7 +51,7 @@ import {
   objectiveCountsForSchedule,
   scoreObjective,
 } from '@squadlogic/core/resolve/index.js';
-import { tier1Projection } from './helpers/practiceRepairTier1.js';
+import { asOnMain, tier1Projection } from './helpers/practiceRepairTier1.js';
 
 /* -------------------------------------------------------------------------- */
 /* The corpus, dated as tests/practiceRepair.test.js dates it                  */
@@ -406,7 +406,8 @@ const MAIN_SWEEP_DIGESTS = {
 };
 
 function resultDigest(result) {
-  const json = JSON.stringify(tier1Projection(result), (key, value) => {
+  // Main's pins, main's shape: the finding 3b PR 10 removed is put back.
+  const json = JSON.stringify(asOnMain(tier1Projection(result)), (key, value) => {
     if (value instanceof Map) return ['Map', [...value]];
     if (value instanceof Set) return ['Set', [...value]];
     return value;

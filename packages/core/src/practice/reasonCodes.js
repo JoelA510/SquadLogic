@@ -212,8 +212,6 @@ export const PRACTICE_REASON = Object.freeze({
   REPAIR_WEIGHTS_OVERRIDDEN: 'PRACTICE_REPAIR_WEIGHTS_OVERRIDDEN',
   /** A change term was weighted zero, so the repair no longer prefers holding published practices. */
   REPAIR_CHANGE_TERM_DISABLED: 'PRACTICE_REPAIR_CHANGE_TERM_DISABLED',
-  /** The repair has no production caller (8.6 PR 3b wires it). On every result. */
-  REPAIR_UNWIRED: 'PRACTICE_REPAIR_UNWIRED',
   /**
    * A recommendation was declined (or a decline undone) and re-offered along
    * the chain (`recommendations.js`): the result is locally repaired, not
@@ -222,7 +220,7 @@ export const PRACTICE_REASON = Object.freeze({
   REPAIR_RECOMMENDATION_LOCAL: 'PRACTICE_REPAIR_RECOMMENDATION_LOCAL',
   /*
    * -- the daylight gate (8.9 PR 7, `repair.js`) --------------------------
-   * Enforced in the module; not live until 8.6 3b PRs 9-11 wire the repair.
+   * Enforced in the module; shown to admins by the 8.6 3b PR 10 panel.
    */
   /**
    * Re-home candidates for one displaced series were refused because a
@@ -292,7 +290,6 @@ export const PRACTICE_REASON_SEVERITY = Object.freeze({
   // zeroed change term (which undoes the freeze) is the loud one.
   [PRACTICE_REASON.REPAIR_WEIGHTS_OVERRIDDEN]: PRACTICE_SEVERITY.INFO,
   [PRACTICE_REASON.REPAIR_CHANGE_TERM_DISABLED]: PRACTICE_SEVERITY.COMPROMISE,
-  [PRACTICE_REASON.REPAIR_UNWIRED]: PRACTICE_SEVERITY.INFO,
   // The sibling of REPAIR_MINIMALITY_UNPROVEN: nothing proves the result optimal.
   [PRACTICE_REASON.REPAIR_RECOMMENDATION_LOCAL]: PRACTICE_SEVERITY.COMPROMISE,
   // The gate doing its job: a refused candidate was never legal.
@@ -300,9 +297,11 @@ export const PRACTICE_REASON_SEVERITY = Object.freeze({
   // A candidate that may have been legal could not be judged: the result may
   // be worse than one with coordinates, so an admin must see it (D4).
   [PRACTICE_REASON.REPAIR_CANDIDATES_SUNSET_UNKNOWN]: PRACTICE_SEVERITY.COMPROMISE,
-  // The REPAIR_UNWIRED idiom: a statement of scope on the result, not a defect
-  // in it. Info, so a repair run without a calendar keeps its status.
-  [PRACTICE_REASON.REPAIR_DAYLIGHT_UNCHECKED]: PRACTICE_SEVERITY.INFO,
+  // Info while the repair was unwired; raised by 8.6 3b PR 10, which wires it
+  // into the recommendation panel (the note carried forward from 8.9 PR 7): a
+  // wired repair with no sunset judged may recommend a practice into the
+  // dark, so an admin must see it, as with SUNSET_UNKNOWN above.
+  [PRACTICE_REASON.REPAIR_DAYLIGHT_UNCHECKED]: PRACTICE_SEVERITY.COMPROMISE,
   // A preference with nothing to keep does nothing; the schedule is not
   // compromised by it, but the coach who holds it should be told.
   [PRACTICE_REASON.COACH_PREFERENCE_NO_REFERENCE]: PRACTICE_SEVERITY.INFO,

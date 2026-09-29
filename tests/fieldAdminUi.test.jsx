@@ -14,7 +14,7 @@
 import React, { useState } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import { repairProposal } from '@squadlogic/core/fieldAdmin/index.js';
+import { repairNotComputed } from '@squadlogic/core/fieldAdmin/index.js';
 import ConsequencePreview from '../frontend/src/components/scheduling/ConsequencePreview.jsx';
 import RetireEstateNodeDialog from '../frontend/src/components/setup/RetireEstateNodeDialog.jsx';
 import BlackoutEditor from '../frontend/src/components/setup/BlackoutEditor.jsx';
@@ -44,7 +44,7 @@ describe('ConsequencePreview', () => {
         operation="retire"
         affectedCount={0}
         rows={[]}
-        repair={repairProposal()}
+        repair={repairNotComputed('retire-location')}
       />
     );
     // **"Nothing is booked" and "we did not look" render identically as white
@@ -60,7 +60,7 @@ describe('ConsequencePreview', () => {
         operation="delete"
         affectedCount={2}
         rows={DELETE_REFUSAL_ROWS}
-        repair={repairProposal({ affectedCount: 2 })}
+        repair={repairNotComputed('delete', { affectedCount: 2 })}
       />
     );
     const table = screen.getByTestId('consequence-rows');
@@ -78,7 +78,7 @@ describe('ConsequencePreview', () => {
         operation="retire"
         affectedCount={2}
         rows={RETIRE_REFUSAL.affected}
-        repair={repairProposal({ affectedCount: 2 })}
+        repair={repairNotComputed('retire-location', { affectedCount: 2 })}
       />
     );
     const table = screen.getByTestId('consequence-rows');
@@ -104,7 +104,7 @@ describe('ConsequencePreview', () => {
           ...DELETE_REFUSAL_ROWS,
           { kind: 'practice_assignment', id: 'pa-1', on_date: '2026-10-03' },
         ]}
-        repair={repairProposal({ affectedCount: 3 })}
+        repair={repairNotComputed('delete', { affectedCount: 3 })}
       />
     );
     const table = screen.getByTestId('consequence-rows');
@@ -122,13 +122,13 @@ describe('ConsequencePreview', () => {
         operation="delete"
         affectedCount={97}
         rows={DELETE_REFUSAL_ROWS}
-        repair={repairProposal({ affectedCount: 97 })}
+        repair={repairNotComputed('delete', { affectedCount: 97 })}
       />
     );
     expect(screen.getByTestId('consequence-sampled')).toHaveTextContent('Showing 2 of 97');
   });
 
-  it('names the missing repair engine on both paths', () => {
+  it('names why a deletion computes no repair, on both paths', () => {
     for (const affectedCount of [0, 2]) {
       const { unmount } = render(
         <ConsequencePreview
@@ -136,11 +136,11 @@ describe('ConsequencePreview', () => {
           operation="delete"
           affectedCount={affectedCount}
           rows={affectedCount === 0 ? [] : DELETE_REFUSAL_ROWS}
-          repair={repairProposal({ affectedCount })}
+          repair={repairNotComputed('delete', { affectedCount })}
         />
       );
       const panel = screen.getByTestId('repair-proposal-unavailable');
-      expect(panel).toHaveAttribute('data-reason-code', 'REPAIR_PROPOSAL_UNAVAILABLE');
+      expect(panel).toHaveAttribute('data-reason-code', 'REPAIR_NOT_FOR_DELETION');
       expect(panel).toHaveTextContent(/not a statement that no repair is needed/i);
       unmount();
     }

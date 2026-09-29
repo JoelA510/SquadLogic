@@ -8,10 +8,11 @@
  *      question is asked against `public.field_closures` -- the single reader
  *      `20260906000100_field_blackouts.sql` created over both blackout tables
  *      -- and against the bookings the shipped pages already load.
- *   2. **"what the repair from 8.6 proposes"**, which cannot be shown, because
- *      8.6 does not exist. {@link repairProposal} says so by name rather than
- *      returning an empty list, and an empty panel where a repair belongs reads
- *      as "no repair needed".
+ *   2. **"what the repair from 8.6 proposes"**. Since 8.6 3b PR 10 a field
+ *      retirement and a blackout open the practice repair recommendation
+ *      panel; every other arm computes no repair, and {@link repairNotComputed}
+ *      says which and why by name rather than returning an empty list, because
+ *      an empty panel where a repair belongs reads as "no repair needed".
  *
  * ## What this module is NOT
  *
@@ -519,29 +520,61 @@ export function findBlackoutConflicts(input) {
   return { findings, meta };
 }
 
+/** What {@link repairNotComputed} answers for each arm, and why none is computed. */
+const REPAIR_NOT_COMPUTED = Object.freeze({
+  reassign: {
+    code: FIELD_ADMIN_REASON.REPAIR_NOT_FOR_COACH_CHANGE,
+    message:
+      'No practice repair is computed for a coaching change: the repair re-homes practices ' +
+      'displaced by lost ground (a retirement or a blackout), and a coaching change takes no ' +
+      'ground away. This is not a statement that no practice is affected.',
+  },
+  delete: {
+    code: FIELD_ADMIN_REASON.REPAIR_NOT_FOR_DELETION,
+    message:
+      'No repair is computed for a deletion. Retire this ground instead to see the practice ' +
+      'repair recommendations. This is not a statement that no repair is needed.',
+  },
+  'retire-location': {
+    code: FIELD_ADMIN_REASON.REPAIR_NOT_AT_THIS_DEPTH,
+    message:
+      'No practice repair is computed for a venue retirement: the repair models one field ' +
+      'retired at a time. Retire the fields one by one to see their recommendations. This is ' +
+      'not a statement that no repair is needed.',
+  },
+  'retire-field_subunit': {
+    code: FIELD_ADMIN_REASON.REPAIR_NOT_AT_THIS_DEPTH,
+    message:
+      'No practice repair is computed for a sub-surface retirement: the repair models a whole ' +
+      'field retired. This is not a statement that no repair is needed.',
+  },
+});
+
 /**
- * What the repair from 8.6 proposes.
+ * The arms of a consequence preview that compute no repair, each named.
  *
- * **8.6 does not exist**, so the honest answer is a named refusal. The plan's
- * clause "and what the repair from 8.6 proposes" is the one part of 8.4's third
- * capability that cannot be built, and a consequence panel that simply left the
- * space empty would read as "no repair is needed" -- which is a stronger claim
- * than "nothing has been computed", and a false one.
+ * A field retirement and a blackout open the practice repair recommendation
+ * panel (8.6 3b PR 10). Every other arm has none, and a blank space where a
+ * repair belongs reads as "no repair is needed" -- a stronger and false claim.
+ * This is `CLAUDE.md` §3's "declared is not enforced" applied to a screen.
+ * It replaces `repairProposal()`, whose "8.6 does not exist" stopped being true.
  *
- * This is `CLAUDE.md` §3's "declared is not enforced" applied to a screen: a
- * policy nothing optimises toward must say so.
+ * Throws on an arm it does not know rather than defaulting: a new arm must
+ * say whether it has a repair.
  *
+ * @param {'reassign'|'delete'|'retire-location'|'retire-field_subunit'} operation
  * @param {{ affectedCount?: number }} [context]
  * @returns {{ available: false, finding: import('./types.js').FieldAdminFinding }}
  */
-export function repairProposal({ affectedCount = 0 } = {}) {
+export function repairNotComputed(operation, { affectedCount = 0 } = {}) {
+  const entry = Object.hasOwn(REPAIR_NOT_COMPUTED, operation)
+    ? REPAIR_NOT_COMPUTED[operation]
+    : null;
+  if (!entry) {
+    throw new Error(`repairNotComputed: unknown arm ${JSON.stringify(operation)}`);
+  }
   return {
     available: /** @type {false} */ (false),
-    finding: makeFieldAdminFinding(
-      FIELD_ADMIN_REASON.REPAIR_PROPOSAL_UNAVAILABLE,
-      'No repair can be proposed: the repair engine (Phase 8.6) does not exist yet. ' +
-        'This is not a statement that no repair is needed.',
-      { affectedCount, blockedOn: '8.6' }
-    ),
+    finding: makeFieldAdminFinding(entry.code, entry.message, { affectedCount, operation }),
   };
 }

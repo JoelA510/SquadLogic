@@ -7106,3 +7106,68 @@ Operator ruling 2 now holds in the auto-scheduler as well as in the RPC.
   helper per row, which PR C should measure.
 - **Deploy (operator).** This is the 7th pending production migration; the
   guard allows 5.
+
+## 8.6 3b — #501 merged (64ed114): the repair honours existing closures
+
+- **What.** The adapter reads the org's other blackouts (`field_closures`) and
+  every `effective_to` on location, field and sub-surface rows as closed
+  ground. The loss being repaired is excluded.
+  - `repair.js` gains an optional `closures` input in the loss's own shape,
+    judged by the loss's own displacement test. With none supplied it is
+    byte-identical to main; the main-digest sweeps are unchanged.
+  - Containment runs downward only, the same as 8.4's `surfaceIsLiveOn`.
+  - The panel reads closures in parallel with its other reads. A failed read
+    shows `role="alert"` and no recommendations.
+- **Refuted claim.** The repair had no existing input for other closed
+  ground. Graph validity windows are never read. The occupancy footprint
+  would block upward, which breaks the 8.4 sub-surface contract; plant P6
+  proves the difference.
+- **Evidence.** 10 agent plants, all CAUGHT. Supervisor plant: changing the
+  closure's half-open minute check `<` to `<=` was MISSED (129/129 green). A
+  four-case adjacent/overlap witness then went in. It turns red under that
+  plant, under its mirror, and when minutes are ignored.
+- **Still uncovered, declared.** A field switched off (`active = false`) with
+  no `effective_to`. Saved `practice_exceptions` are not adapter inputs.
+
+## 8.9 D14 PR C — #503 merged (3d3dc22): the Edge honours lighting overrides
+
+- **What.**
+  - The auto-scheduler reads approved `practice_lighting_overrides` as the
+    caller through RLS. A failed read refuses the run.
+  - In the daylight post-pass (`_shared/engines/practice-daylight.ts`) an
+    exempt date is neither judged nor truncated and needs no coordinates.
+  - It has its own counter, and the response carries
+    `lightingOverrideRead { loaded, onRunSlots, visibility }`.
+  - With no overrides, main's result is byte-identical.
+  - The Deno twin is pinned to core over a 761-case product.
+- **Refuted claims.**
+  - A non-admin partial read needs no preference-style refusal. A hidden
+    override leaves its dates judged, so a run can only come out stricter;
+    this was checked over all 128 visibility subsets.
+  - The Edge does not surface PR A's shorten/shift proposals at all (task
+    #74).
+- **Limit.** A covered date after a non-exempt truncation still lands in the
+  TIME TBD remainder, counted in `lightingOverrideOccurrencesInTimeTbd`.
+  Keeping it needs a stored "retimed" representation (PR E).
+- **Evidence.** 20 agent plants, all CAUGHT. Supervisor plant: treating a
+  partly exempt venue without coordinates as judged turned 1 red.
+
+## 3b PR 11 plan — #502 merged (40b2f87): enact, APPROVED 2026-09-29
+
+The plan is `docs/PHASE_8_6_PR11_ENACT_PLAN.md`. Operator answers:
+
+- **Retirements only.** Blackout enact becomes PR 11d, after PR 12 and after
+  the adapter reads live `practice_exceptions`.
+- **Audit.** A wrapper RPC, `enact_practice_recommendation`, writes the audit
+  row in the save's transaction. The writer is unchanged.
+- **Enact only after the retirement is committed** (this overrides the plan's
+  default). Committed means the cause field's stored `fields.effective_to`
+  equals the loss date. It is checked in the panel, in core
+  `retirementCommitOf` on the fresh read, and in SQL step 2a. The preview
+  disables every Enact button, and a post-commit launcher on the retired
+  field's card opens the panel with the stored date.
+- **Unlock reason.** Generated from ids and the date; no free text.
+- **Fingerprint.** Not widened in PR 11. The re-judge reads everything fresh,
+  and the click-to-commit latency is declared.
+- **Split.** 11a core (~750), 11b persistence (~700), 11c UI (~700), and 11d
+  later.

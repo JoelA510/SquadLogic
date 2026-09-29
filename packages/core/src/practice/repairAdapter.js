@@ -118,6 +118,8 @@ export const PRACTICE_REPAIR_PAYLOAD_REFUSAL = Object.freeze({
   ROW_NOT_CLOSABLE: 'row-not-closable',
 });
 
+/** The `assigned_via` a repair's new row may carry (3b plan `:138-140`). */
+const ASSIGNED_VIA = new Set(['repair', 'recommendation']);
 const WEEKDAYS = new Set(['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']);
 const SEARCH_OPTIONS = new Set(['weights', 'changeBudget', 'searchNodeLimit', 'strategy']);
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -588,13 +590,19 @@ function lossOf(loss, fields) {
  *
  * @param {ReturnType<typeof buildPracticeRepairInput>} adapted
  * @param {Object} result - `repairPracticeLoss(adapted.input)`
+ * @param {{ assignedVia?: 'repair' | 'recommendation' }} [options] - the new
+ *   rows' `assigned_via`: `'repair'` by default (the panel's refusal preview),
+ *   `'recommendation'` for an enacted recommendation (3b PR 11, `practice/enact.js`)
  * @returns {{
  *   plan: { assignmentRows: Object[], closes: Object[], exceptions: Object[], unlockRequired: Object[] },
  *   refused: Object[],
  *   payload: { assignmentRows: Object[], repair: Object } | null,
  * }}
  */
-export function buildPracticeRepairPayload(adapted, result) {
+export function buildPracticeRepairPayload(adapted, result, { assignedVia = 'repair' } = {}) {
+  if (!ASSIGNED_VIA.has(assignedVia)) {
+    throw new TypeError(`repair adapter: assigned_via ${JSON.stringify(assignedVia)}`);
+  }
   const { cause, snapshot, slots, baseFingerprint } = adapted.context;
   const expected = cause.kind === PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT ? 'split' : 'override';
   if (result.representation !== expected) {
@@ -718,7 +726,7 @@ export function buildPracticeRepairPayload(adapted, result) {
           practice_slot_id: built.practice_slot_id,
           effective_date_range: built.effective_date_range,
           source: built.source,
-          assigned_via: 'repair',
+          assigned_via: assignedVia,
         });
       } else {
         // Closed, the window lies wholly after the row: a tail window. Not

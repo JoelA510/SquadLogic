@@ -474,6 +474,9 @@ const LAYERS = Object.freeze([
     modulePath: 'packages/core/src/practice/repair.js',
     functions: Object.freeze(['repairPracticeLoss']),
     importers: Object.freeze([
+      // 8.6 3b PR 11a: enact re-judges on the repair's own context and
+      // `marginal()`. The layer using itself, not a caller.
+      'packages/core/src/practice/enact.js',
       'packages/core/src/practice/index.js',
       // 8.6 PR 5: the decline chain starts from the repair and re-offers
       // through its own `marginal()`. The layer using itself, not a caller.
@@ -481,7 +484,9 @@ const LAYERS = Object.freeze([
     ]),
     consumers: Object.freeze([
       'frontend/src/utils/practiceRepairPanel.js',
+      'packages/core/src/practice/enact.js',
       'packages/core/src/practice/recommendations.js',
+      'tests/practiceEnact.test.js',
       'tests/practiceRecommendations.test.js',
       'tests/practiceRepair.test.js',
       // 8.6 3b PR 9: the adapter's witnesses run the repair on its output.
@@ -493,6 +498,7 @@ const LAYERS = Object.freeze([
     ]),
     expectedProductionConsumers: Object.freeze([
       'frontend/src/utils/practiceRepairPanel.js',
+      'packages/core/src/practice/enact.js',
       'packages/core/src/practice/recommendations.js',
     ]),
     expectedExternalProductionConsumers: Object.freeze([
@@ -506,12 +512,22 @@ const LAYERS = Object.freeze([
     layer: 'practice/repairAdapter.js',
     modulePath: 'packages/core/src/practice/repairAdapter.js',
     functions: Object.freeze(['buildPracticeRepairInput', 'buildPracticeRepairPayload']),
-    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    importers: Object.freeze([
+      // 8.6 3b PR 11a: enact builds its one-entry write with the adapter's
+      // own builder. The layer using itself, not a caller.
+      'packages/core/src/practice/enact.js',
+      'packages/core/src/practice/index.js',
+    ]),
     consumers: Object.freeze([
       'frontend/src/utils/practiceRepairPanel.js',
+      'packages/core/src/practice/enact.js',
+      'tests/practiceEnact.test.js',
       'tests/practiceRepairAdapter.test.js',
     ]),
-    expectedProductionConsumers: Object.freeze(['frontend/src/utils/practiceRepairPanel.js']),
+    expectedProductionConsumers: Object.freeze([
+      'frontend/src/utils/practiceRepairPanel.js',
+      'packages/core/src/practice/enact.js',
+    ]),
     expectedExternalProductionConsumers: Object.freeze([
       'frontend/src/utils/practiceRepairPanel.js',
     ]),
@@ -521,10 +537,22 @@ const LAYERS = Object.freeze([
   Object.freeze({
     layer: 'practice/recommendations.js',
     modulePath: 'packages/core/src/practice/recommendations.js',
-    functions: Object.freeze(['createRecommendationState', 'declineRecommendation', 'undoDecline']),
-    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    // 8.6 3b PR 11a adds the re-base onto a fresh read; its production
+    // caller is 3b PR 11c.
+    functions: Object.freeze([
+      'createRecommendationState',
+      'declineRecommendation',
+      'rebaseRecommendationState',
+      'undoDecline',
+    ]),
+    importers: Object.freeze([
+      // 8.6 3b PR 11a: the chain's stop vocabulary, for the enact record.
+      'packages/core/src/practice/enact.js',
+      'packages/core/src/practice/index.js',
+    ]),
     consumers: Object.freeze([
       'frontend/src/utils/practiceRepairPanel.js',
+      'tests/practiceEnact.test.js',
       'tests/practiceRecommendations.test.js',
       // Existing closures: a decline never re-offers closed ground.
       'tests/practiceRepairAdapter.test.js',
@@ -535,6 +563,24 @@ const LAYERS = Object.freeze([
     expectedExternalProductionConsumers: Object.freeze([
       'frontend/src/utils/practiceRepairPanel.js',
     ]),
+  }),
+  // 8.6 3b PR 11a: enacting one recommendation, the core half (commit gate,
+  // re-judge, one-entry payload, audit record). UNWIRED: no production caller
+  // until 3b PR 11c wires the panel's Enact button to it; that PR flips
+  // `expectedProductionConsumers` here.
+  Object.freeze({
+    layer: 'practice/enact.js',
+    modulePath: 'packages/core/src/practice/enact.js',
+    functions: Object.freeze([
+      'buildEnactPayload',
+      'buildEnactRecord',
+      'judgeEnact',
+      'retirementCommitOf',
+    ]),
+    importers: Object.freeze(['packages/core/src/practice/index.js']),
+    consumers: Object.freeze(['tests/practiceEnact.test.js']),
+    expectedProductionConsumers: Object.freeze([]),
+    expectedExternalProductionConsumers: Object.freeze([]),
   }),
   Object.freeze({
     layer: 'practice/metricsInput.js',

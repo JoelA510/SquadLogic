@@ -132,8 +132,20 @@ export {
   PRACTICE_CHAIN_STOP,
   createRecommendationState,
   declineRecommendation,
+  rebaseRecommendationState,
   undoDecline,
 } from './recommendations.js';
+
+export {
+  PRACTICE_ENACT_FINGERPRINT_COVERS,
+  PRACTICE_ENACT_REFUSAL,
+  PRACTICE_ENACT_STALE,
+  PracticeEnactRecordSchema,
+  buildEnactPayload,
+  buildEnactRecord,
+  judgeEnact,
+  retirementCommitOf,
+} from './enact.js';
 
 export {
   COACH_PREFERENCE_DIMENSION,

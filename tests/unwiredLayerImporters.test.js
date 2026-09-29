@@ -464,8 +464,11 @@ const LAYERS = Object.freeze([
   }),
   /* -- Phase 8.6 PR 3a: bounded local repair, practice side ------------- */
   //
-  // `PRACTICE_REPAIR_UNWIRED` claims the external list is empty: nothing in
-  // the app reaches the repair until 8.6 PR 3b wires it.
+  // 8.6 3b PR 10 FLIPPED this pin: the read-only recommendation panel's model
+  // (`frontend/src/utils/practiceRepairPanel.js`) is the repair's first
+  // external production caller, and `PRACTICE_REPAIR_UNWIRED` -- which
+  // claimed this list was empty -- is removed with it. The panel reaches the
+  // repair through the barrel, so it is a consumer by name, not an importer.
   Object.freeze({
     layer: 'practice/repair.js',
     modulePath: 'packages/core/src/practice/repair.js',
@@ -477,6 +480,7 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/recommendations.js',
     ]),
     consumers: Object.freeze([
+      'frontend/src/utils/practiceRepairPanel.js',
       'packages/core/src/practice/recommendations.js',
       'tests/practiceRecommendations.test.js',
       'tests/practiceRepair.test.js',
@@ -487,34 +491,48 @@ const LAYERS = Object.freeze([
       'tests/reasonCodeReachability.test.js',
       'tests/unknownSurfaceDiscipline.test.js',
     ]),
-    expectedProductionConsumers: Object.freeze(['packages/core/src/practice/recommendations.js']),
-    expectedExternalProductionConsumers: Object.freeze([]),
+    expectedProductionConsumers: Object.freeze([
+      'frontend/src/utils/practiceRepairPanel.js',
+      'packages/core/src/practice/recommendations.js',
+    ]),
+    expectedExternalProductionConsumers: Object.freeze([
+      'frontend/src/utils/practiceRepairPanel.js',
+    ]),
   }),
   // 8.6 3b PR 9: DB rows -> repair input, repair result -> persist payload.
-  // Unwired like the repair it feeds; PR 10's panel is its first caller.
+  // 3b PR 10's panel is its first caller (read-only: the payload it builds is
+  // only read for its refusals, never sent).
   Object.freeze({
     layer: 'practice/repairAdapter.js',
     modulePath: 'packages/core/src/practice/repairAdapter.js',
     functions: Object.freeze(['buildPracticeRepairInput', 'buildPracticeRepairPayload']),
     importers: Object.freeze(['packages/core/src/practice/index.js']),
-    consumers: Object.freeze(['tests/practiceRepairAdapter.test.js']),
-    expectedProductionConsumers: Object.freeze([]),
-    expectedExternalProductionConsumers: Object.freeze([]),
+    consumers: Object.freeze([
+      'frontend/src/utils/practiceRepairPanel.js',
+      'tests/practiceRepairAdapter.test.js',
+    ]),
+    expectedProductionConsumers: Object.freeze(['frontend/src/utils/practiceRepairPanel.js']),
+    expectedExternalProductionConsumers: Object.freeze([
+      'frontend/src/utils/practiceRepairPanel.js',
+    ]),
   }),
-  // 8.6 PR 5: declines and the re-offer chain. Unwired like the repair it
-  // extends (`PRACTICE_REPAIR_UNWIRED`); PR 10's panel is its first caller.
+  // 8.6 PR 5: declines and the re-offer chain. 3b PR 10's panel is its first
+  // caller: decline and undo, in memory, never persisted (decision 10).
   Object.freeze({
     layer: 'practice/recommendations.js',
     modulePath: 'packages/core/src/practice/recommendations.js',
     functions: Object.freeze(['createRecommendationState', 'declineRecommendation', 'undoDecline']),
     importers: Object.freeze(['packages/core/src/practice/index.js']),
     consumers: Object.freeze([
+      'frontend/src/utils/practiceRepairPanel.js',
       'tests/practiceRecommendations.test.js',
       'tests/practiceRepairDaylight.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
-    expectedProductionConsumers: Object.freeze([]),
-    expectedExternalProductionConsumers: Object.freeze([]),
+    expectedProductionConsumers: Object.freeze(['frontend/src/utils/practiceRepairPanel.js']),
+    expectedExternalProductionConsumers: Object.freeze([
+      'frontend/src/utils/practiceRepairPanel.js',
+    ]),
   }),
   Object.freeze({
     layer: 'practice/metricsInput.js',

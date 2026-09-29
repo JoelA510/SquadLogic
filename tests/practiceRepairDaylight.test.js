@@ -40,6 +40,7 @@ import {
   PRACTICE_TBD_REASON,
   createRecommendationState,
   declineRecommendation,
+  derivePracticeStatus,
   repairPracticeLoss,
   toSeason2026PracticePlan,
 } from '@squadlogic/core/practice/index.js';
@@ -464,13 +465,22 @@ describe('the boundary: ending at floor(sunset) is legal, one minute later is no
 /* Lit ground: byte-identical to a repair with no gate                         */
 /* -------------------------------------------------------------------------- */
 
-/** A result less the two things the gate adds: its block and the unchecked finding. */
-const withoutGate = (result) =>
-  JSON.stringify({
+/**
+ * A result less the two things the gate adds: its block and the unchecked
+ * finding -- and, since 3b PR 10 raised that finding to `compromise`, the
+ * status it moves, re-derived from what is left.
+ */
+const withoutGate = (result) => {
+  const findings = result.findings.filter(
+    (f) => f.code !== PRACTICE_REASON.REPAIR_DAYLIGHT_UNCHECKED
+  );
+  return JSON.stringify({
     ...result,
+    status: derivePracticeStatus(findings),
     daylight: undefined,
-    findings: result.findings.filter((f) => f.code !== PRACTICE_REASON.REPAIR_DAYLIGHT_UNCHECKED),
+    findings,
   });
+};
 
 describe('every venue lit: the result is byte-identical to one with no calendar', () => {
   // Control: with `bright` unlit, the same comparison differs (below).

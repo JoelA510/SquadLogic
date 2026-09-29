@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
 import { CalendarX } from 'lucide-react';
-import { repairProposal } from '@squadlogic/core/fieldAdmin/index.js';
+import { repairNotComputed } from '@squadlogic/core/fieldAdmin/index.js';
 import Modal from '../ui/Modal.jsx';
 import Button from '../ui/Button.jsx';
 import ConsequencePreview from '../scheduling/ConsequencePreview.jsx';
+import PracticeRepairLauncher from '../scheduling/PracticeRepairLauncher.jsx';
 
 /**
  * The three depths of the estate, and the only things that differ between them.
@@ -236,9 +237,26 @@ export default function RetireEstateNodeDialog({
               operation="retire"
               affectedCount={preview.affected_count ?? (preview.affected || []).length}
               rows={preview.affected || []}
-              repair={repairProposal({
-                affectedCount: preview.affected_count ?? (preview.affected || []).length,
-              })}
+              {...(kind === 'field'
+                ? {
+                    // 8.6 3b PR 10: a field retirement opens the practice
+                    // repair panel, over the loss this date would cause.
+                    repairPanel: (
+                      <PracticeRepairLauncher
+                        subject={node.name}
+                        loss={{
+                          kind: 'retirement',
+                          field: { id: node.id, effective_to: effectiveTo },
+                        }}
+                      />
+                    ),
+                  }
+                : {
+                    // The adapter models a field retirement only: said, not blank.
+                    repair: repairNotComputed(`retire-${kind}`, {
+                      affectedCount: preview.affected_count ?? (preview.affected || []).length,
+                    }),
+                  })}
               titleId="retire-consequence-title"
               {...containedProps(preview)}
             />

@@ -260,19 +260,36 @@ export const FIELD_ADMIN_REASON = Object.freeze({
    * ground is either closed or played on.
    */
   BLACKOUT_BLOCKS_BOOKING: 'BLACKOUT_BLOCKS_BOOKING',
-  /**
-   * No repair could be proposed for an affected booking, because the repair
-   * engine does not exist.
-   *
+  /*
+   * -- no repair computed, said by name (8.6 3b PR 10) ---------------------
    * 8.4's third capability asks a consequence preview to show "what the repair
-   * from 8.6 proposes". 8.6 is unbuilt, so the honest rendering is this code
-   * rather than an empty panel -- blank space where a repair belongs reads as
-   * "no repair is needed", which is a stronger and false claim.
-   *
-   * `compromise`: the operator can still decide, and is told what they are
-   * deciding without.
+   * from 8.6 proposes". Since 8.6 3b PR 10 a field retirement and a blackout
+   * open the practice repair recommendation panel. Every other arm computes
+   * no repair, and says which and why by one of these codes rather than
+   * leaving blank space -- which would read as "no repair is needed", a
+   * stronger and false claim. They replace `REPAIR_PROPOSAL_UNAVAILABLE`
+   * ("8.6 does not exist"), which stopped being true. Emitted by
+   * `consequences.js` `repairNotComputed()`.
    */
-  REPAIR_PROPOSAL_UNAVAILABLE: 'REPAIR_PROPOSAL_UNAVAILABLE',
+  /**
+   * A coaching change. The 3b repair re-homes practices displaced by lost
+   * GROUND (a retirement or a blackout, plan §1); a coaching change takes no
+   * ground away, and the 3b plan gives it no repair. `info`: nothing was
+   * withheld, there is no repair of this kind to compute.
+   */
+  REPAIR_NOT_FOR_COACH_CHANGE: 'REPAIR_NOT_FOR_COACH_CHANGE',
+  /**
+   * A deletion. 3b decision 11: "show 'retire to repair'; no repair computed
+   * for a deletion". `compromise`: a repair exists for the same ground,
+   * reached by retiring it instead.
+   */
+  REPAIR_NOT_FOR_DELETION: 'REPAIR_NOT_FOR_DELETION',
+  /**
+   * A venue or sub-surface retirement. The repair adapter
+   * (`practice/repairAdapter.js`) models a FIELD retirement only, so none is
+   * computed at this depth. `compromise`: the operator decides without one.
+   */
+  REPAIR_NOT_AT_THIS_DEPTH: 'REPAIR_NOT_AT_THIS_DEPTH',
 
   // **Privacy is enforced by refusal, not by a finding.** An earlier draft of
   // this table carried a `NOTE_IDENTITY_SHAPE` code. `NoteSchema` in
@@ -285,10 +302,9 @@ export const FIELD_ADMIN_REASON = Object.freeze({
   //
   // `REPAIR_PROPOSAL_UNAVAILABLE` was likewise absent here rather than declared
   // and unemittable: the consequence report it belongs to needs the persistence
-  // and app layers, so the code arrives with its producer rather than ahead of
-  // it. **PR 3 is that producer** -- `consequences.js` `repairProposal()` -- so
-  // it is declared above, beside the conflict code it appears next to on the
-  // screen.
+  // and app layers, so the code arrived with its producer rather than ahead of
+  // it (8.4 PR 3, `repairProposal()`). 8.6 3b PR 10 replaced both with the
+  // `REPAIR_NOT_*` codes above and their producer, `repairNotComputed()`.
 });
 
 /**
@@ -319,7 +335,9 @@ export const FIELD_ADMIN_REASON_SEVERITY = Object.freeze({
   [FIELD_ADMIN_REASON.REGISTRY_NOT_PERSISTED]: FIELD_ADMIN_SEVERITY.INFO,
 
   [FIELD_ADMIN_REASON.BLACKOUT_BLOCKS_BOOKING]: FIELD_ADMIN_SEVERITY.BLOCKING,
-  [FIELD_ADMIN_REASON.REPAIR_PROPOSAL_UNAVAILABLE]: FIELD_ADMIN_SEVERITY.COMPROMISE,
+  [FIELD_ADMIN_REASON.REPAIR_NOT_FOR_COACH_CHANGE]: FIELD_ADMIN_SEVERITY.INFO,
+  [FIELD_ADMIN_REASON.REPAIR_NOT_FOR_DELETION]: FIELD_ADMIN_SEVERITY.COMPROMISE,
+  [FIELD_ADMIN_REASON.REPAIR_NOT_AT_THIS_DEPTH]: FIELD_ADMIN_SEVERITY.COMPROMISE,
 });
 
 /**

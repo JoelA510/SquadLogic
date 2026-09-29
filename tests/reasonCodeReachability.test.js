@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 550 codes, of
- * which 538 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 551 codes, of
+ * which 539 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -126,7 +126,7 @@ import {
   buildFieldRegistry,
   changeSetPartitionFindings,
   findBlackoutConflicts,
-  repairProposal,
+  repairNotComputed,
 } from '@squadlogic/core/fieldAdmin/index.js';
 import {
   FACILITY_REASON,
@@ -6087,7 +6087,9 @@ harvest(
     recurring: [{ kind: 'practice', id: 'p1', fieldId: 'f1', dayOfWeek: 3 }],
   }).findings
 );
-harvest('repairProposal(8.6 does not exist)', repairProposal({ affectedCount: 2 }).finding);
+harvest('repairNotComputed(a coaching change)', repairNotComputed('reassign').finding);
+harvest('repairNotComputed(a deletion)', repairNotComputed('delete', { affectedCount: 2 }).finding);
+harvest('repairNotComputed(a venue retirement)', repairNotComputed('retire-location').finding);
 
 /* -------------------------------------------------------------------------- */
 /* practice: the recurring-practice model (Phase 8.5)                          */

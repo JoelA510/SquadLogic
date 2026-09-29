@@ -6,10 +6,10 @@ import {
   clockToMinutes,
   findBlackoutConflicts,
   minutesToClock,
-  repairProposal,
 } from '@squadlogic/core/fieldAdmin/index.js';
 import Modal from '../ui/Modal.jsx';
 import Button from '../ui/Button.jsx';
+import PracticeRepairLauncher from '../scheduling/PracticeRepairLauncher.jsx';
 import { BlackoutDraftSchema } from '../../hooks/useFieldClosures.js';
 
 /**
@@ -174,6 +174,26 @@ export default function BlackoutEditor({
       recurring,
     });
   }, [draft, fields, dated, recurring]);
+
+  // 8.6 3b PR 10: the same draft as the repair adapter's blackout loss, in
+  // `field_blackouts` column names. The reason is the enum, never the note.
+  const repairLoss = useMemo(() => {
+    const parsed = BlackoutDraftSchema.safeParse(draft);
+    if (!parsed.success) return null;
+    return {
+      kind: 'blackout',
+      blackout: {
+        id: editing?.id ?? 'draft',
+        field_id: parsed.data.scope === 'field' ? parsed.data.scopeId : null,
+        location_id: parsed.data.scope === 'location' ? parsed.data.scopeId : null,
+        blackout_from: parsed.data.blackoutFrom,
+        blackout_until: parsed.data.blackoutUntil,
+        start_minutes: parsed.data.startMinutes,
+        end_minutes: parsed.data.endMinutes,
+        reason: parsed.data.reason,
+      },
+    };
+  }, [draft, editing]);
 
   const close = () => {
     setForm(initial);
@@ -440,9 +460,9 @@ export default function BlackoutEditor({
                 </li>
               ))}
             </ul>
-            <p className="text-sm" data-reason-code={repairProposal().finding.code}>
-              <strong>{repairProposal().finding.code}</strong> — {repairProposal().finding.message}
-            </p>
+            {repairLoss && (
+              <PracticeRepairLauncher subject="this blackout window" loss={repairLoss} />
+            )}
           </div>
         )}
       </div>

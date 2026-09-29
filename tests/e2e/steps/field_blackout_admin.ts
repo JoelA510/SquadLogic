@@ -139,10 +139,22 @@ Then(
   }
 );
 
-Then('the consequence preview should name the missing repair engine', async ({ page }) => {
+// 8.6 3b PR 10: a field retirement opens the practice repair panel; a venue
+// retirement says by code that the repair is not computed at that depth.
+Then('the consequence preview should offer practice repair recommendations', async ({ page }) => {
+  const launcher = page.getByTestId('practice-repair-launcher');
+  await expect(launcher).toBeVisible();
+  await expect(
+    launcher.getByRole('button', { name: 'Show practice repair recommendations' })
+  ).toBeEnabled();
+  await expect(page.getByTestId('repair-proposal-unavailable')).toHaveCount(0);
+});
+
+Then('the consequence preview should say no repair is computed for a venue', async ({ page }) => {
   const panel = page.getByTestId('repair-proposal-unavailable');
   await expect(panel).toBeVisible();
-  await expect(panel).toHaveAttribute('data-reason-code', 'REPAIR_PROPOSAL_UNAVAILABLE');
+  await expect(panel).toHaveAttribute('data-reason-code', 'REPAIR_NOT_AT_THIS_DEPTH');
+  await expect(page.getByTestId('practice-repair-launcher')).toHaveCount(0);
 });
 
 Then('{string} should not yet show a retirement date', async ({ page }, fieldName: string) => {

@@ -26,7 +26,7 @@ import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
 import { coachChangeConsequence } from '@squadlogic/core/people/assignmentHistory.js';
-import { repairProposal } from '@squadlogic/core/fieldAdmin/index.js';
+import { repairNotComputed } from '@squadlogic/core/fieldAdmin/index.js';
 
 const STATUS_FILTERS = [
   { id: 'all', label: 'All statuses' },
@@ -913,7 +913,7 @@ export default function CoachesPage() {
                   operation="reassign"
                   titleId="coach-change-preview-title"
                   coverage={pendingCoverage}
-                  repair={repairProposal()}
+                  repair={repairNotComputed('reassign')}
                 />
                 <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                   <Button variant="primary" size="sm" disabled={busy} onClick={handleConfirmChange}>

@@ -33,7 +33,7 @@ import {
   isoDayOfWeek,
   isoDayOfWeekName,
   minuteWindowsOverlap,
-  repairProposal,
+  repairNotComputed,
   toDayNumber,
 } from '@squadlogic/core/fieldAdmin/index.js';
 import { FIELD_ADMIN_REASON, FIELD_ADMIN_SEVERITY } from '@squadlogic/core/fieldAdmin/index.js';
@@ -368,16 +368,40 @@ describe('consequences :: what a blackout closes', () => {
   });
 });
 
-describe('consequences :: the repair that does not exist', () => {
-  it('names its unavailability instead of returning an empty proposal', () => {
-    const proposal = repairProposal({ affectedCount: 3 });
-    expect(proposal.available).toBe(false);
-    expect(proposal.finding.code).toBe(FIELD_ADMIN_REASON.REPAIR_PROPOSAL_UNAVAILABLE);
-    expect(proposal.finding.severity).toBe(FIELD_ADMIN_SEVERITY.COMPROMISE);
-    expect(proposal.finding.details).toEqual({ affectedCount: 3, blockedOn: '8.6' });
-    // The message has to say the thing a blank panel would not: that silence
-    // here is not the same as "no repair is needed".
-    expect(proposal.finding.message).toMatch(/not a statement that no repair is needed/i);
+describe('consequences :: the arms that compute no repair (8.6 3b PR 10)', () => {
+  // Enumerated from the arms ConsequencePreview can be shown for, less the two
+  // that open the panel (a field retirement, a blackout): each names its own
+  // code, and none is the retired "8.6 does not exist".
+  const ARMS = [
+    ['reassign', FIELD_ADMIN_REASON.REPAIR_NOT_FOR_COACH_CHANGE, FIELD_ADMIN_SEVERITY.INFO],
+    ['delete', FIELD_ADMIN_REASON.REPAIR_NOT_FOR_DELETION, FIELD_ADMIN_SEVERITY.COMPROMISE],
+    [
+      'retire-location',
+      FIELD_ADMIN_REASON.REPAIR_NOT_AT_THIS_DEPTH,
+      FIELD_ADMIN_SEVERITY.COMPROMISE,
+    ],
+    [
+      'retire-field_subunit',
+      FIELD_ADMIN_REASON.REPAIR_NOT_AT_THIS_DEPTH,
+      FIELD_ADMIN_SEVERITY.COMPROMISE,
+    ],
+  ];
+
+  it.each(ARMS)('%s names why no repair is computed, by its code', (arm, code, severity) => {
+    const said = repairNotComputed(/** @type {any} */ (arm), { affectedCount: 3 });
+    expect(said.available).toBe(false);
+    expect(said.finding.code).toBe(code);
+    expect(said.finding.severity).toBe(severity);
+    expect(said.finding.details).toEqual({ affectedCount: 3, operation: arm });
+    // The thing a blank panel would not say: silence is not "nothing needed".
+    expect(said.finding.message).toMatch(/not a statement that no (repair is needed|practice)/i);
+    expect(said.finding.message).not.toMatch(/does not exist/i);
+  });
+
+  it('refuses an arm it does not know rather than defaulting, including the panel arms', () => {
+    for (const arm of ['retire', 'retire-field', 'blackout', 'toString', '']) {
+      expect(() => repairNotComputed(/** @type {any} */ (arm))).toThrow(/unknown arm/);
+    }
   });
 });
 

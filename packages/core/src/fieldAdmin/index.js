@@ -140,6 +140,6 @@ export {
   isoDayOfWeekName,
   minuteWindowsOverlap,
   minutesToClock,
-  repairProposal,
+  repairNotComputed,
   toDayNumber,
 } from './consequences.js';

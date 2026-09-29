@@ -10,13 +10,13 @@
 import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { repairProposal } from '@squadlogic/core/fieldAdmin/index.js';
+import { repairNotComputed } from '@squadlogic/core/fieldAdmin/index.js';
 import ConsequencePreview from '../frontend/src/components/scheduling/ConsequencePreview.jsx';
 
 const base = {
   subject: 'Team A',
   operation: 'reassign',
-  repair: repairProposal(),
+  repair: repairNotComputed('reassign'),
   titleId: 'preview-title',
 };
 
@@ -65,6 +65,14 @@ describe('ConsequencePreview -- reassign', () => {
     );
     expect(screen.getByTestId('coverage-none')).toBeInTheDocument();
     expect(screen.queryByTestId('coverage-rows')).toBeNull();
+  });
+
+  it('says by reason code that a coaching change has no practice repair, never a fake proposal', () => {
+    render(<ConsequencePreview {...base} />);
+    const panel = screen.getByTestId('repair-proposal-unavailable');
+    expect(panel).toHaveAttribute('data-reason-code', 'REPAIR_NOT_FOR_COACH_CHANGE');
+    expect(panel).toHaveTextContent(/not a statement that no practice is affected/i);
+    expect(screen.queryByTestId('practice-repair-launcher')).toBeNull();
   });
 
   it('says "could not be computed" when there is no report, never a blank panel', () => {

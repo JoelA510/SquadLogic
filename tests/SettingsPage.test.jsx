@@ -4,6 +4,11 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import SettingsPage from '../frontend/src/pages/SettingsPage.jsx';
 
+// Mocked like the sibling component tests: the real module starts the lazy
+// mock-client import (`supabaseReady`) on load, and nothing here awaits it, so
+// it can outlive this file's jsdom environment (EnvironmentTeardownError).
+vi.mock('../frontend/src/lib/supabaseClient.js', () => ({ supabase: {} }));
+
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
     permissions: ['manage_global_settings', 'manage_organization'],

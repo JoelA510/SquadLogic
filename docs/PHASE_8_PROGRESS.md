@@ -7021,3 +7021,88 @@ Operator ruling 2 now holds in the auto-scheduler as well as in the RPC.
 - **Deploy (operator).** This is the 6th pending production migration, and the
   guard allows at most 5. Deploy the migration and the Edge function with, or
   before, the frontend.
+
+## 8.6 3b PR 9 — #497 merged (5b2d885): the repair adapter
+
+- **What.** `practice/repairAdapter.js` turns DB rows into repair input and the
+  repair result into the `persist_practice_schedule` payload.
+  - Venues are keyed by location id.
+  - `coachesByTeam` comes from the same `team_coach_assignments` rows as the
+    preferences, on the same date.
+  - The daylight calendar is an input. Without one, `DAYLIGHT_UNCHECKED` is
+    shown.
+  - Lighting overrides pass through in the PR A shape; supplying none is
+    declared in `declared.lightingOverrides`.
+  - The payload is validated against the Edge `PracticeRepairSchema`.
+- **Ruling (supervisor, 2026-09-29).** Every exception window that still
+  overlaps its row after the save is refused until 3b PR 12, not only
+  mid-range ones. That includes a blackout window reaching the series' end,
+  because the row stays open around it. So no blackout repair can be saved
+  before PR 12; retirement repairs can. The plan's "tail windows are safe"
+  note held only for windows after a truncated row. Refused exceptions stay
+  in `plan`, `refused` names each one, and `payload` is null.
+- **Evidence.** 20 agent plants, all CAUGHT; one of them (unapproved
+  preferences) was MISSED at first and fixed by adopting the Edge loader's
+  approved-only rule. Supervisor plant: `from >= rowLastDay` was MISSED (29/29
+  green), because a window starting on a series' last day was unwitnessed.
+  Boundary witnesses then turned it red (2 of 32); the opposite edge, refusing
+  the day after a close, turns 8 of 32 red.
+- **Refuted claims.** `repair.js` had no lighting-override code, and the Edge
+  preference loader has no date filter.
+
+## 8.6 3b PR 10 — #498 merged (e3b2676): the read-only repair panel
+
+- **What.** Admins open the panel from the field retirement dialog and the
+  blackout editor. It shows one row per displaced series-window, computed
+  adapter -> repair -> recommendations.
+  - TIME TBD reasons and every save refusal are shown.
+  - Decline and undo run in memory, with the LOCAL stamp.
+  - No enact and no write; a spy test pins zero write calls.
+  - A failed read shows `role="alert"` and no recommendations.
+- **Unwired flip.** `PRACTICE_REPAIR_UNWIRED` is removed, and
+  `DAYLIGHT_UNCHECKED` is raised from info to compromise.
+- **`repairProposal()` removed**, replaced by `repairNotComputed(arm)`:
+  `REPAIR_NOT_FOR_COACH_CHANGE`, `REPAIR_NOT_FOR_DELETION`, and
+  `REPAIR_NOT_AT_THIS_DEPTH`. The last is for venue and sub-surface
+  retirement, because the adapter models a field retirement only.
+- **Sunset table.** There is no stored table, so the panel passes an empty
+  one plus stored coordinates, and the calendar provider computes each
+  venue's sunset. A single date-keyed table would have overridden every other
+  venue.
+- **Bundle.** The main entry grew 114.36 -> 114.53 KB gzip. The panel is a
+  lazy 23.6 KB chunk. No cap changed.
+- **Evidence.** 13 agent plants, all CAUGHT. Supervisor plant: bypassing the
+  admin gate turned 1 red. E2E 6/6.
+- **Declared gaps.** Existing blackouts and other retirements are not adapter
+  inputs, so a recommendation can land on ground they already close. This is
+  a PR 11 prerequisite; a fix PR is in progress. The repair runs twice per
+  open and re-runs on every blackout-draft change (performance follow-up).
+
+## 8.9 D14 PR B — #499 merged (3fa69ec): the lighting overrides table
+
+- **Migration `20261003000000`.** It creates `practice_lighting_overrides`
+  (slot, window daterange, kind `portable-lighting`, status
+  requested/approved/rejected/withdrawn). An EXCLUDE constraint (btree_gist,
+  already in `extensions`) forbids overlapping approved windows on a slot.
+- **RPCs.**
+  - A coach requests for a slot one of their teams currently uses: the
+    definer helper `caller_coaches_practice_slot`, reading
+    `team_coach_assignments` joined to `practice_assignments`.
+  - An admin decides, never on their own request, or sets an override
+    directly.
+  - Withdraw is for the requester while they still coach the slot, or an
+    admin.
+  - Every change is audited, and RLS lets a coach see only their slots' rows.
+- **Beyond the brief.** The slot FK is NO ACTION, as for
+  `practice_exceptions`: deleting a slot that holds an override fails with
+  23503 instead of silently removing approved rows. The cascade-closure
+  smokes for `20260907000000` and `20260909000000` now list the table.
+- **Core.** `approvedLightingOverridesFromRows` converts `[from, until+1)` to
+  PR A's inclusive `{slotId, from, until}`.
+- **Evidence.** HARNESS OK. 9 SQL plants, all CAUGHT, each in its own harness
+  run. Supervisor plant: dropping the `- 1` in the conversion turned 4 of 8
+  red.
+- **Declared.** "Today" is the database's UTC date. The read policy calls the
+  helper per row, which PR C should measure.
+- **Deploy (operator).** This is the 7th pending production migration; the
+  guard allows 5.

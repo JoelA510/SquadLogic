@@ -157,6 +157,30 @@
  * Enforced in this module and shown by the read-only panel (3b PR 10); **not
  * live** for families until 3b PR 11 enacts a recommendation.
  *
+ * ## Existing closures: ground already closed (8.6 3b, adapter fix)
+ *
+ * `closures` is ground that is closed ALREADY -- the org's other blackouts
+ * and retirements -- each in the loss's own shape (`PracticeLossSchema`), and
+ * judged by the loss's own displacement test: a candidate meets a closure
+ * when its surface is closed by it, the candidate's series-window
+ * intersected with the closure's `[from, until ?? ∞]` holds an occurrence on
+ * the candidate's weekday (`firstWeekdayOnOrAfter`), and its time meets the
+ * closure's minutes if it has any. Such a candidate is refused before it is
+ * priced, tier 1 and tier 2 alike (and so in every re-offer), and listed in
+ * the result's `closures` block. A closure displaces nothing: it is not the
+ * loss.
+ *
+ * **Containment is `facility/lifecycle.js`'s** (the 8.4 gate): a surface is
+ * closed when the closure names it or any ancestor in its `lineage`. It is
+ * downward only -- a closed pitch closes its halves; a closed half does not
+ * close the pitch (`field_subunits.effective_to`: retiring a sub-surface
+ * strands only what names it). A venue is closed by naming its fields, as
+ * the loss is. Not the occupancy footprint, which also blocks upward.
+ *
+ * **None supplied, no effect.** Without `closures` (or with none) nothing
+ * here runs and the result has no `closures` block: byte-identical to a
+ * repair that was never handed them.
+ *
  * ## Minimality, and when it is claimed
  *
  * The default strategy is an exact branch-and-bound over the displaced series,
@@ -179,6 +203,7 @@ import {
   getSurface,
   isoDateOfDayNumber,
   isoDayNumber,
+  lineageOf,
 } from '../facility/index.js';
 import { coachesOfTeamOn } from '../people/assignmentHistory.js';
 import {
@@ -539,6 +564,79 @@ export function buildPracticeRepairContext(input) {
   };
   const venueOf = (surfaceId) => getSurface(graph, surfaceId)?.venueId ?? null;
 
+  /* -- ground already closed (existing closures) -------------------------- */
+  const closures = (parsed.closures ?? []).map((closure, index) => {
+    for (const surfaceId of closure.surfaceIds) {
+      if (!getSurface(graph, surfaceId)) {
+        throw new TypeError(
+          `repair: closure ${index} names surface "${surfaceId}", which the facility graph does not hold`
+        );
+      }
+    }
+    return {
+      index,
+      surfaceIds: new Set(closure.surfaceIds),
+      from: closure.from,
+      until: closure.until ?? null,
+      minutes:
+        closure.startMinutes === undefined
+          ? null
+          : { start: closure.startMinutes, end: /** @type {number} */ (closure.endMinutes) },
+      reason: closure.reason,
+    };
+  });
+  /** What the closures refused: the caller's meta-assertion. `null` when none were supplied. */
+  const closureMeta =
+    closures.length === 0
+      ? null
+      : { supplied: closures.length, candidatesRefused: 0, refused: /** @type {any[]} */ ([]) };
+  // Indexed by the surface each names. One that ends before the loss date
+  // cannot meet a series-window (every one starts on or after it).
+  /** @type {Map<string, typeof closures>} */
+  const closuresBySurface = new Map();
+  for (const closure of closures) {
+    if (closure.until !== null && closure.until < lossDate) continue;
+    for (const surfaceId of closure.surfaceIds) {
+      const list = closuresBySurface.get(surfaceId) ?? [];
+      list.push(closure);
+      closuresBySurface.set(surfaceId, list);
+    }
+  }
+  /**
+   * The earliest date `shape` meets a closure over `series`' window, and the
+   * closure; `null` when none. The loss's own displacement test, with
+   * `lifecycle.js`'s containment (self or an ancestor is named).
+   */
+  const closureMet = (series, shape) => {
+    let met = null;
+    for (const surfaceId of lineageOf(graph, shape.surfaceId)) {
+      for (const closure of closuresBySurface.get(surfaceId) ?? []) {
+        if (
+          closure.minutes !== null &&
+          !(
+            shape.startMinutes < closure.minutes.end &&
+            closure.minutes.start < shape.startMinutes + shape.durationMinutes
+          )
+        ) {
+          continue;
+        }
+        const from = series.from > closure.from ? series.from : closure.from;
+        const until =
+          closure.until !== null && closure.until < series.until ? closure.until : series.until;
+        const date = firstWeekdayOnOrAfter(from, shape.weekday);
+        if (date > until) continue;
+        if (
+          met === null ||
+          date < met.date ||
+          (date === met.date && closure.index < met.closure.index)
+        ) {
+          met = { closure, date };
+        }
+      }
+    }
+    return met;
+  };
+
   /* -- the series in force from the loss date ----------------------------- */
   const slotById = new Map(slotSet.slots.map((slot) => [slot.id, slot]));
   /** @type {Series[]} */
@@ -755,9 +853,25 @@ export function buildPracticeRepairContext(input) {
     const refusedHere = { pastSunset: 0, sunsetUnknown: 0 };
     for (const shape of inventoryShapes) {
       if (shape.durationMinutes !== series.durationMinutes) continue;
+      const sameVenue = venueOf(shape.surfaceId) === venueOf(series.surfaceId);
+      if (closureMeta !== null) {
+        const met = closureMet(series, shape);
+        if (met !== null) {
+          closureMeta.candidatesRefused += 1;
+          closureMeta.refused.push({
+            assignmentId: series.assignmentId,
+            teamId: series.teamId,
+            tier: sameVenue ? 'same-venue' : 'cross-venue',
+            to: { ...shape },
+            closure: met.closure.index,
+            reason: met.closure.reason,
+            date: met.date,
+          });
+          continue;
+        }
+      }
       const overlaps = againstFrozen(series, shape);
       if (overlaps === null) continue;
-      const sameVenue = venueOf(shape.surfaceId) === venueOf(series.surfaceId);
       if (calendar !== null) {
         if (sameVenue) sameBeforeDaylight += 1;
         const refusal = judgeDaylight(series, shape);
@@ -1108,6 +1222,7 @@ export function buildPracticeRepairContext(input) {
     timeChangeOf,
     jointSearch,
     daylight,
+    closureMeta,
   };
 }
 
@@ -1212,6 +1327,7 @@ export function repairPracticeLoss(input) {
     timeChangeOf,
     jointSearch,
     daylight,
+    closureMeta,
   } = context;
 
   // Tier 1: the exact same-venue search (plan §2), unchanged.
@@ -1602,6 +1718,10 @@ export function repairPracticeLoss(input) {
       provenOptimal: strategy === 'exact' && tier2.exhausted,
     },
     daylight: { ...daylight, refused: [...daylight.refused] },
+    // Only when closures were supplied: none, and the result is main's, byte for byte.
+    ...(closureMeta === null
+      ? {}
+      : { closures: { ...closureMeta, refused: [...closureMeta.refused] } }),
   };
 }
 

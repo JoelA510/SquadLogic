@@ -327,6 +327,21 @@ D13):
   exception (a withdrawn placement) is deferred (D13 b): that team stays in
   the writer's `teams_without_practice`.
 
+Notes carried forward from the adapter fix (existing closures, after PR 10;
+lands before PR 11):
+- The adapter now passes the org's OTHER closures to the repair as
+  `closures`, in the loss's own shape: `field_closures` rows (both arms) and
+  the `effective_to` of every location, field and sub-surface row read. The
+  repair refuses a candidate that meets one on any date of its window, by the
+  loss's own displacement test, with `facility/lifecycle.js` containment
+  (downward only: a closed sub-surface does not close its field). The edited
+  blackout and the retired field's own stored date are the loss and are left
+  out. None supplied: byte-identical to before.
+- Still not read, and said so on the panel: a field switched off
+  (`active = false`) with no `effective_to`, and an import closure naming no
+  field (`declared.closures.unattributable`). PR 11 re-judges against a
+  fresh snapshot, so it inherits the same inputs.
+
 **Cross-plan sequencing with 8.9** (`docs/PHASE_8_9_PLAN.md`): both touch the
 auto-scheduler Edge Function (3b PR 7, 8.9 PR 6) and `repair.js` (3b PRs 3-5,
 8.9 PR 7). Land 3b PR 7 before 8.9 PR 6, and 3b PR 5 before 8.9 PR 7. Every new

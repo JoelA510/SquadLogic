@@ -28,9 +28,10 @@ export async function loadPracticeRepairSnapshot(client, { organizationId, seaso
   }
   /** @type {Array<[string, string, string]>} key, table, columns */
   const tables = [
-    ['locations', 'locations', 'id, name, lighting_available, latitude, longitude'],
-    ['fields', 'fields', 'id, location_id, name'],
-    ['fieldSubunits', 'field_subunits', 'id, field_id, label'],
+    // `effective_to` on every node: the retirements the repair must honour.
+    ['locations', 'locations', 'id, name, lighting_available, latitude, longitude, effective_to'],
+    ['fields', 'fields', 'id, location_id, name, effective_to'],
+    ['fieldSubunits', 'field_subunits', 'id, field_id, label, effective_to'],
     [
       'practiceSlots',
       'practice_slots',
@@ -43,6 +44,13 @@ export async function loadPracticeRepairSnapshot(client, { organizationId, seaso
       'id, team_id, coach_id, role, effective_from, effective_to',
     ],
     ['coachPreferences', 'coach_practice_preferences', PREFERENCE_COLUMNS],
+    // The org's blackouts, through THE closure reader (`useFieldClosures`'
+    // view): both arms, scope columns only, never the free-text note.
+    [
+      'fieldClosures',
+      'field_closures',
+      'id, source, closes_location_id, closes_field_id, blackout_from, blackout_until, start_minutes, end_minutes, reason',
+    ],
   ];
   // In parallel (the sibling readers' `Promise.all` over `fetchAllPages`);
   // each read's failure is caught as its own, so any one fails the whole.

@@ -397,6 +397,13 @@ export const PracticeRepairInputSchema = z
      * slot with that shape has a window covering it.
      */
     lightingOverrides: z.array(PracticeLightingOverrideSchema).optional(),
+    /**
+     * Ground ALREADY closed, besides the loss being repaired (existing
+     * blackouts and retirements), each in the loss's own shape: a re-home
+     * candidate that meets one on any date of its series-window is refused.
+     * Nothing on it is displaced: it is not the loss.
+     */
+    closures: z.array(PracticeLossSchema).optional(),
   })
   .strict()
   // Preferences with no rows would bind no coach to any team, so every one of

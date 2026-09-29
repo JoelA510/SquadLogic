@@ -18,6 +18,8 @@ import {
   PRACTICE_TBD_REASON,
   buildPracticeRepairInput,
   buildPracticeRepairPayload,
+  createRecommendationState,
+  declineRecommendation,
   repairPracticeLoss,
 } from '../packages/core/src/practice/index.js';
 
@@ -813,5 +815,331 @@ describe('options and declarations', () => {
     );
     assert.equal(declared.coaches.supplied, false);
     assert.match(declared.coaches.note, /no coach overlap/);
+  });
+});
+
+/* -- existing closures: ground already closed (3b adapter fix) ------------ */
+const SL6 = uuid(506); // a slot on the sub-surface S2A of F2
+const CLOSURE_ID = uuid(801);
+const SLOTS_WITH_HALF = [
+  ...SLOTS,
+  { ...slot(SL6, F2, 'mon', '17:00:00', '18:00:00'), field_subunit_id: S2A },
+];
+/** The witnesses' loss: F1 blacked out over two Mondays and two Wednesdays. */
+const WINDOW_LOSS = blackout('2026-10-05', '2026-10-18');
+const closureRow = (over) => ({
+  id: CLOSURE_ID,
+  source: 'field_blackouts',
+  closes_location_id: null,
+  closes_field_id: null,
+  blackout_from: '2026-10-12',
+  blackout_until: '2026-10-12',
+  start_minutes: null,
+  end_minutes: null,
+  reason: 'event',
+  ...over,
+});
+const lc = (v) => String(v).toLowerCase();
+const toMinutes = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+
+/**
+ * Every closure the INPUT rows state, the loss left out, as closed ground:
+ * surfaces by containment (a venue holds its fields, a field its
+ * sub-surfaces), inclusive dates, minutes. Computed here, not by the adapter.
+ */
+function closedGroundOf(rows) {
+  const subunits = rows.fieldSubunits ?? [];
+  const fieldsAt = (loc) =>
+    rows.fields.filter((f) => lc(f.location_id) === lc(loc)).map((f) => lc(f.id));
+  const withHalves = (fieldIds) => [
+    ...fieldIds,
+    ...subunits.filter((s) => fieldIds.includes(lc(s.field_id))).map((s) => lc(s.id)),
+  ];
+  const lossBlackout = rows.loss.kind === 'blackout' ? lc(rows.loss.blackout.id) : null;
+  const lossField = rows.loss.kind === 'retirement' ? lc(rows.loss.field.id) : null;
+  const open = (row) => ({
+    from: plusDays(row.effective_to, 1),
+    until: '9999-12-31',
+    minutes: null,
+  });
+  const out = [];
+  for (const l of rows.locations) {
+    if (l.effective_to) {
+      out.push({ what: `location ${lc(l.id)}`, surfaces: withHalves(fieldsAt(l.id)), ...open(l) });
+    }
+  }
+  for (const f of rows.fields) {
+    if (f.effective_to && lc(f.id) !== lossField) {
+      out.push({ what: `field ${lc(f.id)}`, surfaces: withHalves([lc(f.id)]), ...open(f) });
+    }
+  }
+  for (const s of subunits) {
+    if (s.effective_to) out.push({ what: `subunit ${lc(s.id)}`, surfaces: [lc(s.id)], ...open(s) });
+  }
+  for (const c of rows.fieldClosures ?? []) {
+    if (c.source === 'field_blackouts' && lc(c.id) === lossBlackout) continue;
+    const scope = c.closes_field_id
+      ? [lc(c.closes_field_id)]
+      : c.closes_location_id
+        ? fieldsAt(c.closes_location_id)
+        : null;
+    if (scope === null) continue;
+    out.push({
+      what: `blackout ${lc(c.id)}`,
+      surfaces: withHalves(scope),
+      from: c.blackout_from,
+      until: c.blackout_until,
+      minutes: c.start_minutes == null ? null : [c.start_minutes, c.end_minutes],
+    });
+  }
+  return out;
+}
+/** The closed dates `shape` meets over `[from, until]`, by `closure`. */
+function closedDatesOf(closure, shape, from, until) {
+  if (!closure.surfaces.includes(lc(shape.surfaceId))) return [];
+  const end = shape.startMinutes + shape.durationMinutes;
+  if (
+    closure.minutes !== null &&
+    !(shape.startMinutes < closure.minutes[1] && closure.minutes[0] < end)
+  ) {
+    return [];
+  }
+  const a = from > closure.from ? from : closure.from;
+  const b = until < closure.until ? until : closure.until;
+  return a > b ? [] : datesOn(shape.weekday.toLowerCase(), a, b);
+}
+/** Every recommendation (or re-home) landing on a closed date: must be none. */
+function landingsOnClosedGround(rows, recommendations) {
+  const closed = closedGroundOf(rows);
+  const out = [];
+  for (const rec of recommendations) {
+    if (!rec.to) continue;
+    const w = rec.window ?? { from: rec.effectiveFrom, until: rec.effectiveUntil };
+    for (const closure of closed) {
+      const dates = closedDatesOf(closure, rec.to, w.from, w.until);
+      if (dates.length > 0) {
+        out.push(`${rec.assignmentId} on ${rec.to.surfaceId} ${dates[0]} (${closure.what})`);
+      }
+    }
+  }
+  return out;
+}
+/**
+ * Meta-assertion: meetings of (displaced window x inventory shape of its
+ * length) with the input closures, from the SNAPSHOT, the slot rows and the
+ * closure rows alone. Zero means the witness would pass vacuously.
+ */
+function closureIntersections(rows) {
+  const loss = rows.loss.blackout;
+  const windows = displacedWindows(loss.blackout_from, loss.blackout_until);
+  const slots = rows.practiceSlots;
+  const closed = closedGroundOf(rows);
+  let hits = 0;
+  for (const [assignmentId, text] of windows) {
+    const w = inclusive(text);
+    const ownSlot = SNAPSHOT.find((r) => r.id === assignmentId).practice_slot_id;
+    const own = slots.find((s) => s.id === ownSlot);
+    const length = toMinutes(own.end_time) - toMinutes(own.start_time);
+    for (const s of slots) {
+      if (toMinutes(s.end_time) - toMinutes(s.start_time) !== length) continue;
+      if (s.field_id === F1) continue; // the lost ground itself
+      const shape = {
+        surfaceId: s.field_subunit_id ?? s.field_id,
+        weekday: s.day_of_week,
+        startMinutes: toMinutes(s.start_time),
+        durationMinutes: length,
+      };
+      for (const closure of closed) {
+        if (closedDatesOf(closure, shape, w.from, w.until).length > 0) hits += 1;
+      }
+    }
+  }
+  return hits;
+}
+function runRows(rows) {
+  const adapted = buildPracticeRepairInput(rows);
+  return { adapted, result: repairPracticeLoss(adapted.input) };
+}
+const recOf = (result, assignmentId) =>
+  result.recommendations.find((rec) => rec.assignmentId === assignmentId);
+
+describe('existing closures', () => {
+  it('control: with none, A1 is re-homed onto F2 (the ground the witnesses close)', () => {
+    const { result } = runRows(rowsFor(WINDOW_LOSS, { rows: { fieldClosures: [] } }));
+    assert.equal(recOf(result, A1).to?.surfaceId, F2);
+  });
+
+  it('with none supplied, the input has no closures and the result is unchanged', () => {
+    const plain = {
+      ...rowsFor(WINDOW_LOSS),
+      fields: FIELDS.map((f) => ({ ...f, effective_to: null })),
+    };
+    const a = runRows(plain);
+    const b = runRows({ ...plain, fieldClosures: [] });
+    assert.equal('closures' in a.adapted.input, false);
+    assert.equal('closures' in b.adapted.input, false);
+    assert.equal('closures' in a.result, false);
+    assert.equal(JSON.stringify(b.result), JSON.stringify(a.result));
+    assert.equal(a.adapted.declared.closures.blackoutsSupplied, false);
+    assert.match(a.adapted.declared.closures.note, /no existing blackout is honoured/);
+    assert.equal(b.adapted.declared.closures.blackoutsSupplied, true);
+  });
+
+  it('no recommendation lands on a date an existing blackout closes', () => {
+    const rows = rowsFor(WINDOW_LOSS, {
+      rows: { fieldClosures: [closureRow({ closes_field_id: F2 })] },
+    });
+    assert.ok(closureIntersections(rows) >= 1, 'the closure meets no candidate: vacuous');
+    const { result } = runRows(rows);
+    assert.deepEqual(landingsOnClosedGround(rows, result.recommendations), []);
+    assert.deepEqual(landingsOnClosedGround(rows, result.rehomed), []);
+    assert.ok(result.closures.candidatesRefused >= 1);
+  });
+
+  it('no recommendation lands on a date an existing retirement closes', () => {
+    const rows = rowsFor(WINDOW_LOSS, {
+      rows: {
+        fields: FIELDS.map((f) => (f.id === F2 ? { ...f, effective_to: '2026-10-08' } : f)),
+        fieldClosures: [],
+      },
+    });
+    assert.ok(closureIntersections(rows) >= 1, 'the retirement meets no candidate: vacuous');
+    const { result } = runRows(rows);
+    assert.deepEqual(landingsOnClosedGround(rows, result.recommendations), []);
+    assert.deepEqual(landingsOnClosedGround(rows, result.rehomed), []);
+  });
+
+  it('a closure off the candidate time (minutes) or off its dates closes nothing', () => {
+    for (const over of [
+      { closes_field_id: F2, start_minutes: 480, end_minutes: 540 },
+      { closes_field_id: F2, blackout_from: '2026-10-13', blackout_until: '2026-10-16' },
+    ]) {
+      const rows = rowsFor(WINDOW_LOSS, { rows: { fieldClosures: [closureRow(over)] } });
+      // Neither meets a Monday on F2 (the dates case does meet F2 on Wednesday).
+      const { result } = runRows(rows);
+      assert.deepEqual(landingsOnClosedGround(rows, result.recommendations), []);
+      assert.equal(recOf(result, A1).to?.surfaceId, F2);
+    }
+  });
+
+  it('a partial-day closure is half-open: adjacent is admitted, a one-minute overlap refused', () => {
+    // The candidate is F2 Mon 17:00-18:00 (1020-1080); the closure is on F2 on
+    // Monday 2026-10-12, inside A1's window. `admitted` is stated here and
+    // cross-checked against the independent helper over the input row.
+    const cases = [
+      { what: 'starts at the closure end', start: 960, end: 1020, admitted: true },
+      { what: 'ends at the closure start', start: 1080, end: 1140, admitted: true },
+      { what: 'overlaps its start by one minute', start: 960, end: 1021, admitted: false },
+      { what: 'overlaps its end by one minute', start: 1079, end: 1140, admitted: false },
+    ];
+    for (const c of cases) {
+      const row = closureRow({ closes_field_id: F2, start_minutes: c.start, end_minutes: c.end });
+      const rows = rowsFor(WINDOW_LOSS, { rows: { fieldClosures: [row] } });
+      // Enumerated from the input closure row: the helper's own reading agrees.
+      const closure = closedGroundOf(rows).find((g) => g.what === `blackout ${CLOSURE_ID}`);
+      assert.ok(closure?.minutes != null, `${c.what}: the row must be minute-scoped`);
+      const met = closedDatesOf(
+        closure,
+        { surfaceId: F2, weekday: 'MON', startMinutes: 1020, durationMinutes: 60 },
+        '2026-10-05',
+        '2026-10-18'
+      );
+      assert.equal(met.length === 0, c.admitted, `${c.what}: helper disagrees with the table`);
+      const { result } = runRows(rows);
+      assert.deepEqual(landingsOnClosedGround(rows, result.recommendations), [], c.what);
+      assert.equal(recOf(result, A1).to?.surfaceId === F2, c.admitted, c.what);
+      const refusedOnF2 = result.closures.refused.filter(
+        (r) => r.to.surfaceId === F2 && r.to.weekday === 'MON' && r.to.startMinutes === 1020
+      );
+      assert.equal(refusedOnF2.length > 0, !c.admitted, `${c.what}: refusal record`);
+    }
+  });
+
+  it('a venue-level closure closes its fields and their sub-surfaces', () => {
+    const cases = [
+      { fieldClosures: [closureRow({ closes_location_id: LOC_A })] },
+      {
+        fieldClosures: [],
+        locations: locations().map((l) =>
+          lc(l.id) === LOC_A ? { ...l, effective_to: '2026-10-08' } : l
+        ),
+      },
+    ];
+    for (const extra of cases) {
+      const rows = rowsFor(WINDOW_LOSS, { rows: { practiceSlots: SLOTS_WITH_HALF, ...extra } });
+      assert.ok(closureIntersections(rows) >= 2, 'the venue closure must meet F2 and its half');
+      const { result } = runRows(rows);
+      assert.deepEqual(landingsOnClosedGround(rows, result.recommendations), []);
+      assert.deepEqual(landingsOnClosedGround(rows, result.rehomed), []);
+      const refused = new Set(result.closures.refused.map((r) => r.to.surfaceId));
+      assert.ok(refused.has(F2) && refused.has(S2A), 'both the field and its half are refused');
+    }
+  });
+
+  it('a closed sub-surface closes only itself, never its field (containment is downward)', () => {
+    const rows = rowsFor(WINDOW_LOSS, {
+      rows: {
+        practiceSlots: SLOTS_WITH_HALF,
+        fieldSubunits: SUBUNITS.map((s) => ({ ...s, effective_to: '2026-10-08' })),
+        fieldClosures: [],
+      },
+    });
+    assert.ok(closureIntersections(rows) >= 1, 'the half retirement meets no candidate: vacuous');
+    const { adapted, result } = runRows(rows);
+    assert.deepEqual(landingsOnClosedGround(rows, result.recommendations), []);
+    assert.equal(recOf(result, A1).to?.surfaceId, F2);
+    // Declines re-offer through the same candidates: the half is never offered.
+    const state = declineRecommendation(createRecommendationState(adapted.input), A1);
+    assert.deepEqual(landingsOnClosedGround(rows, state.recommendations), []);
+  });
+
+  it('never counts the loss being repaired as an existing closure', () => {
+    // The blackout being edited was on F2 and is moved to F1: its stored row
+    // is what the edit replaces, so F2 stays open.
+    const stored = closureRow({
+      id: BLACKOUT,
+      closes_field_id: F2,
+      blackout_from: '2026-10-05',
+      blackout_until: '2026-10-18',
+    });
+    const rows = rowsFor(WINDOW_LOSS, { rows: { fieldClosures: [stored] } });
+    const { adapted, result } = runRows(rows);
+    // Enumerated from the input rows: each closure is applied once, the loss never.
+    assert.equal(adapted.input.closures?.length ?? 0, closedGroundOf(rows).length);
+    assert.deepEqual(adapted.declared.closures.excludedAsLoss, [
+      { kind: 'blackout', source: 'field_blackouts', id: BLACKOUT },
+    ]);
+    // No input closure is the stored row: none closes F2 over its dates.
+    assert.equal(
+      (adapted.input.closures ?? []).some((c) => c.surfaceIds.includes(F2)),
+      false
+    );
+    assert.equal(recOf(result, A1).to?.surfaceId, F2);
+    // Control: the same row under another id is an existing closure, and closes F2.
+    const other = rowsFor(WINDOW_LOSS, {
+      rows: { fieldClosures: [{ ...stored, id: CLOSURE_ID }] },
+    });
+    assert.ok(closureIntersections(other) >= 1);
+    assert.notEqual(recOf(runRows(other).result, A1).to?.surfaceId, F2);
+    // A retirement: the retired field's own stored date is the loss, not a closure.
+    const retired = runRows(rowsFor(RETIREMENT, { rows: { fieldClosures: [] } }));
+    assert.deepEqual(retired.adapted.declared.closures.excludedAsLoss, [
+      { kind: 'retirement', node: 'field', id: F1 },
+    ]);
+    assert.equal('closures' in retired.adapted.input, false);
+  });
+
+  it('refuses a closure naming unread ground; declares one naming none', () => {
+    for (const over of [{ closes_field_id: uuid(999) }, { closes_location_id: uuid(998) }]) {
+      const rows = rowsFor(WINDOW_LOSS, { rows: { fieldClosures: [closureRow(over)] } });
+      assert.throws(() => buildPracticeRepairInput(rows), /names unread/);
+    }
+    const unattributable = closureRow({ source: 'field_blackout_windows', reason: null });
+    const { adapted } = runRows(
+      rowsFor(WINDOW_LOSS, { rows: { fieldClosures: [unattributable] } })
+    );
+    assert.deepEqual(adapted.declared.closures.unattributable, [
+      { kind: 'blackout', source: 'field_blackout_windows', id: CLOSURE_ID },
+    ]);
   });
 });

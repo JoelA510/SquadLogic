@@ -297,7 +297,13 @@ describe('practice repair panel :: decline and undo', () => {
 });
 
 describe('practice repair panel :: a failed read shows no recommendations', () => {
-  for (const table of ['practice_slots', 'locations', 'practice_assignments', 'teams']) {
+  for (const table of [
+    'practice_slots',
+    'locations',
+    'practice_assignments',
+    'teams',
+    'field_closures',
+  ]) {
     it(`fails loudly when ${table} cannot be read`, async () => {
       h.fail = table;
       render(<PracticeRepairPanel loss={RETIRE_F1} subject="Pitch 1" />);

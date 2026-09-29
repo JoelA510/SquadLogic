@@ -33,6 +33,19 @@
  *   PR A shape (`{slotId, from, until}`). Their table lands in D14 PR B, and
  *   nothing here reads it: none supplied is declared in `declared`, never
  *   assumed silently.
+ * - **Ground already closed.** The org's other blackouts (`field_closures`
+ *   rows, `fieldClosures`) and every `effective_to` on the SAME location,
+ *   field and sub-surface rows the graph is built from become the repair's
+ *   `closures`, in the loss's own shape: a retirement closes from
+ *   `effective_to` + 1 with no end, a blackout over its dates and minutes. A
+ *   venue closes every field it holds (the loss's own reading); the repair
+ *   closes what those contain. The loss being repaired is never one of them:
+ *   the edited blackout (by id, `field_blackouts` arm) and the retired
+ *   field's own `effective_to` are left out and named in
+ *   `declared.closures.excludedAsLoss`. A closure naming an unread field or
+ *   location refuses the input (a partial read); an import closure naming no
+ *   ground at all is not applied and is named in `unattributable`, never
+ *   dropped silently. No `fieldClosures` supplied is declared, not assumed.
  *
  * ## Result -> payload ({@link buildPracticeRepairPayload})
  *
@@ -139,14 +152,16 @@ function timeToMinutes(value, what) {
  *
  * @param {Object} rows
  * @param {Array<{id: string, name?: string, lighting_available?: boolean|null,
- *   latitude?: number|string|null, longitude?: number|string|null}>} rows.locations
+ *   latitude?: number|string|null, longitude?: number|string|null,
+ *   effective_to?: string|null}>} rows.locations
  * @param {Array<{id: string, location_id: string, name?: string, effective_to?: string|null}>} rows.fields
- * @param {Array<{id: string, field_id: string, label?: string}>} [rows.fieldSubunits]
+ * @param {Array<{id: string, field_id: string, label?: string, effective_to?: string|null}>} [rows.fieldSubunits]
  * @param {Array<Object>} rows.practiceSlots - `practice_slots` rows
  * @param {Array<Object>} rows.practiceAssignments - the season's CURRENT rows: the pre-apply snapshot
  * @param {{kind: 'blackout', blackout: Object} | {kind: 'retirement', field: Object}} rows.loss
  * @param {Array<Object>} [rows.teamCoachAssignments] - `team_coach_assignments` rows
  * @param {Array<Object>} [rows.coachPreferences] - `coach_practice_preferences` rows
+ * @param {Array<Object>} [rows.fieldClosures] - `field_closures` rows: the org's blackouts
  * @param {{timeZone: string, sunsets?: Array<Object>}} [rows.daylight]
  * @param {Array<{slotId: string, from: string, until: string}>} [rows.lightingOverrides]
  * @param {Object} [rows.options] - `weights`, `changeBudget`, `searchNodeLimit`, `strategy`
@@ -270,6 +285,9 @@ export function buildPracticeRepairInput(rows) {
   /* -- the loss ------------------------------------------------------------ */
   const cause = lossOf(rows.loss, fields);
 
+  /* -- ground already closed ---------------------------------------------- */
+  const closed = closuresOf(rows, locations, fields, subunits);
+
   /* -- coaches: one source, one date -------------------------------------- */
   const coachRows = (rows.teamCoachAssignments ?? []).map((row) => ({
     team_id: id(row.team_id),
@@ -329,6 +347,7 @@ export function buildPracticeRepairInput(rows) {
     ...(coachPreferences.length > 0 ? { coachPreferences, teamCoachAssignments: coachRows } : {}),
     ...(calendar ? { calendar } : {}),
     ...(lightingOverrides.length > 0 ? { lightingOverrides } : {}),
+    ...(closed.closures.length > 0 ? { closures: closed.closures } : {}),
     // Only the search's own knobs: nothing the adapter derived can be replaced.
     ...searchOptionsOf(rows.options ?? {}),
   };
@@ -353,6 +372,7 @@ export function buildPracticeRepairInput(rows) {
               note: 'no portable-lighting windows supplied: no date is exempt from the daylight limit (their table is 8.9 D14 PR B)',
             },
       coachPreferences: { rowsRead: preferenceRows.length, approved: coachPreferences.length },
+      closures: closed.declared,
       coaches:
         coachRows.length > 0
           ? { supplied: true, rowsRead: coachRows.length }
@@ -389,17 +409,145 @@ function shapeKeyOf(shape) {
   return `${shape.surfaceId}|${shape.weekday}|${shape.startMinutes}|${shape.durationMinutes}`;
 }
 
+/** Every field of a location: what a location-scoped closure closes. */
+function fieldsOfLocation(fields, locationId) {
+  return fields
+    .filter((field) => id(field.location_id) === id(locationId))
+    .map((field) => id(field.id))
+    .sort();
+}
+
+/**
+ * The org's existing closures, the loss left out, as the repair's `closures`
+ * (the loss's own shape, in a stable order), and what was declared.
+ */
+function closuresOf(rows, locations, fields, subunits) {
+  const loss = rows.loss;
+  const fieldIds = new Set(fields.map((field) => id(field.id)));
+  const locationIds = new Set(locations.map((location) => id(location.id)));
+  const entries = [];
+  const excludedAsLoss = [];
+  const closesNoGround = [];
+  const unattributable = [];
+
+  /** An `effective_to` on a node row: closed from the day after, with no end. */
+  const retirement = (node, row, surfaceIds) => {
+    const to = row.effective_to ?? null;
+    if (to === null) return;
+    if (typeof to !== 'string' || !ISO_DATE.test(to)) {
+      throw new TypeError(`repair adapter: ${node} ${row.id} effective_to "${to}" is not a date`);
+    }
+    const source = { kind: PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT, node, id: id(row.id) };
+    if (surfaceIds.length === 0) {
+      closesNoGround.push(source);
+      return;
+    }
+    entries.push({
+      source,
+      closure: { surfaceIds, from: shiftDate(to, 1), reason: 'retirement' },
+    });
+  };
+  for (const location of locations) {
+    retirement('location', location, fieldsOfLocation(fields, location.id));
+  }
+  for (const field of fields) {
+    if (loss?.kind === 'retirement' && id(field.id) === id(loss.field?.id)) {
+      // The retirement being repaired: its stored date is the one it replaces.
+      if ((field.effective_to ?? null) !== null) {
+        excludedAsLoss.push({
+          kind: PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT,
+          node: 'field',
+          id: id(field.id),
+        });
+      }
+      continue;
+    }
+    retirement('field', field, [id(field.id)]);
+  }
+  for (const subunit of subunits) retirement('subunit', subunit, [id(subunit.id)]);
+
+  const closureRows = rows.fieldClosures;
+  for (const row of closureRows ?? []) {
+    const source = {
+      kind: PRACTICE_REPAIR_CAUSE_KIND.BLACKOUT,
+      source: String(row.source),
+      id: id(row.id),
+    };
+    // The blackout being repaired (edited in place): its stored row is what it replaces.
+    if (
+      loss?.kind === 'blackout' &&
+      row.source === 'field_blackouts' &&
+      id(row.id) === id(loss.blackout?.id)
+    ) {
+      excludedAsLoss.push(source);
+      continue;
+    }
+    let surfaceIds;
+    if (row.closes_field_id != null) {
+      if (!fieldIds.has(id(row.closes_field_id))) {
+        throw new TypeError(
+          `repair adapter: closure ${row.id} names unread field ${row.closes_field_id}`
+        );
+      }
+      surfaceIds = [id(row.closes_field_id)];
+    } else if (row.closes_location_id != null) {
+      if (!locationIds.has(id(row.closes_location_id))) {
+        throw new TypeError(
+          `repair adapter: closure ${row.id} names unread location ${row.closes_location_id}`
+        );
+      }
+      surfaceIds = fieldsOfLocation(fields, row.closes_location_id);
+    } else {
+      unattributable.push(source);
+      continue;
+    }
+    if (surfaceIds.length === 0) {
+      closesNoGround.push(source);
+      continue;
+    }
+    const minutes =
+      row.start_minutes == null
+        ? {}
+        : { startMinutes: row.start_minutes, endMinutes: row.end_minutes };
+    entries.push({
+      source,
+      closure: {
+        surfaceIds,
+        from: row.blackout_from,
+        until: row.blackout_until,
+        ...minutes,
+        // The enum value, never the free-text note; the import arm has none.
+        reason: String(row.reason ?? row.source ?? 'closure'),
+      },
+    });
+  }
+
+  const keyOf = (source) => `${source.kind}|${source.node ?? source.source}|${source.id}`;
+  entries.sort((a, b) => keyOf(a.source).localeCompare(keyOf(b.source)));
+  return {
+    closures: entries.map((entry) => entry.closure),
+    declared: {
+      blackoutsSupplied: closureRows !== undefined,
+      rowsRead: closureRows?.length ?? 0,
+      applied: entries.length,
+      excludedAsLoss,
+      unattributable,
+      closesNoGround,
+      ...(closureRows === undefined
+        ? {
+            note: 'no field_closures rows supplied: no existing blackout is honoured (retirements are read from the location, field and sub-surface rows)',
+          }
+        : {}),
+    },
+  };
+}
+
 /** The repair `loss`, and what caused it, from a blackout or a field retirement. */
 function lossOf(loss, fields) {
   if (loss?.kind === 'blackout') {
     const row = loss.blackout;
     const surfaceIds =
-      row.field_id != null
-        ? [id(row.field_id)]
-        : fields
-            .filter((field) => id(field.location_id) === id(row.location_id))
-            .map((field) => id(field.id))
-            .sort();
+      row.field_id != null ? [id(row.field_id)] : fieldsOfLocation(fields, row.location_id);
     const minutes =
       row.start_minutes == null
         ? {}

@@ -18,8 +18,9 @@ import { buildPracticeAssignmentRows } from '@squadlogic/core/practiceSupabase.j
  * named by the writer's `teams_without_practice` instead.
  *
  * An entry whose truncated placement is not staged exactly once -- the review
- * was edited, or the report and the placements disagree -- is returned in
- * `unmatched`, never dropped: the caller refuses the Apply.
+ * was edited, or the report and the placements disagree -- or whose row key
+ * cannot be built, is returned in `unmatched`, never dropped and never
+ * thrown: the caller refuses the Apply.
  *
  * @param {{
  *   daylight?: { timeTbd?: Array<{ teamId: string, slotId: string, from: string,
@@ -48,7 +49,16 @@ export function buildDaylightExceptions({ daylight, assignments, slots }) {
       unmatched.push(entry);
       continue;
     }
-    const [row] = buildPracticeAssignmentRows({ assignments: staged, slots });
+    // `buildPracticeAssignmentRows` throws on a range outside its slot or an
+    // unknown slot. The caller runs this before its own try, so a throw here
+    // would be a rejection nobody shows: report the entry instead.
+    let row;
+    try {
+      [row] = buildPracticeAssignmentRows({ assignments: staged, slots });
+    } catch {
+      unmatched.push(entry);
+      continue;
+    }
     exceptions.push({
       new_assignment: {
         team_id: row.team_id,

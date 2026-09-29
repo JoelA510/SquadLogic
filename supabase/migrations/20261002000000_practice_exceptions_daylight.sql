@@ -35,8 +35,8 @@
 --     `tbd_reason` CHECK. A repair window keeps its own cause_kind (blackout
 --     or retirement); the daylight part is only in the reason. **Tail windows
 --     only**: readers do not apply exceptions until 3b PR 12, so a mid-range
---     TIME TBD window would still be shown as a practice. The 3b PR 9 adapter
---     must refuse to emit one until then (docs/PHASE_8_6_PR3B_PLAN.md, "Notes
+--     TIME TBD window would still be shown as a practice, so the writer
+--     refuses one (22023), and the 3b PR 9 adapter must not emit one until then (docs/PHASE_8_6_PR3B_PLAN.md, "Notes
 --     carried forward from 8.9 PR 6b").
 --
 -- ## What this does NOT do
@@ -82,6 +82,16 @@ ALTER TABLE public.practice_exceptions
 ALTER TABLE public.practice_exceptions
     ADD CONSTRAINT practice_exceptions_cause_kind_check
     CHECK (cause_kind IS NULL OR cause_kind IN ('blackout', 'retirement', 'daylight'));
+-- ... and `daylight` means exactly that shape: a TIME TBD past sunset with no
+-- cause row. Declared above, enforced here.
+ALTER TABLE public.practice_exceptions
+    DROP CONSTRAINT IF EXISTS practice_exceptions_daylight_shape;
+ALTER TABLE public.practice_exceptions
+    ADD CONSTRAINT practice_exceptions_daylight_shape CHECK (
+        cause_kind IS DISTINCT FROM 'daylight'
+        OR (kind = 'time_tbd' AND cause_id IS NULL
+            AND tbd_reason IN ('past-sunset', 'sunset-unknown'))
+    );
 
 -- ---------------------------------------------------------------------------
 -- persist_practice_schedule v3, with same-save new-row exceptions
@@ -576,6 +586,24 @@ BEGIN
     IF v_bad_ref IS NOT NULL THEN
         RAISE EXCEPTION 'exceptions names new_assignment %, which is not a (team, slot, range) key this save''s assignments carry', v_bad_ref
             USING ERRCODE = '22023';
+    END IF;
+    -- The `assignment_id` path's season scope (42501, below), adopted: a
+    -- new row named here must belong to a team of THIS season.
+    SELECT e.value->'new_assignment'
+      INTO v_bad_ref
+      FROM jsonb_array_elements(exceptions) e
+     WHERE e.value ? 'new_assignment'
+       AND NOT EXISTS (
+            SELECT 1
+              FROM public.teams t
+              JOIN public.divisions d ON d.id = t.division_id
+             WHERE t.id = NULLIF(e.value#>>'{new_assignment,team_id}', '')::uuid
+               AND t.organization_id = v_org_id
+               AND d.season_settings_id = v_season_id)
+     LIMIT 1;
+    IF v_bad_ref IS NOT NULL THEN
+        RAISE EXCEPTION 'exceptions names new_assignment %, whose team is not a team of season %', v_bad_ref, v_season_id
+            USING ERRCODE = '42501';
     END IF;
 
     -- -----------------------------------------------------------------------
@@ -1074,6 +1102,24 @@ BEGIN
     IF jsonb_array_length(v_recorded) <> jsonb_array_length(exceptions) THEN
         RAISE EXCEPTION 'recorded % of % exceptions: an entry resolved to no assignment row', jsonb_array_length(v_recorded), jsonb_array_length(exceptions)
             USING ERRCODE = '23503';
+    END IF;
+    -- 8.9 plan D13 (c): a daylight TIME TBD window must be a TAIL window --
+    -- reaching the end of its series' range, or lying after it. Readers do
+    -- not apply exceptions until 3b PR 12, so a mid-range one would still be
+    -- shown as a practice. Refused here (the whole save rolls back), not
+    -- only noted for the 3b PR 9 adapter.
+    SELECT (r.value->>'assignment_id')::uuid
+      INTO v_bad_id
+      FROM jsonb_array_elements(v_recorded) r
+      JOIN public.practice_assignments pa ON pa.id = (r.value->>'assignment_id')::uuid
+     WHERE r.value->>'tbd_reason' IN ('past-sunset', 'sunset-unknown')
+       AND NOT (upper_inf((r.value->>'window')::daterange)
+                OR (NOT upper_inf(pa.effective_date_range)
+                    AND upper((r.value->>'window')::daterange) >= upper(pa.effective_date_range)))
+     LIMIT 1;
+    IF v_bad_id IS NOT NULL THEN
+        RAISE EXCEPTION 'a daylight TIME TBD window on assignment % ends before its series does: mid-range windows are refused until readers apply exceptions (3b PR 12)', v_bad_id
+            USING ERRCODE = '22023';
     END IF;
 
     -- #64: every team of the season left with NO practice by this save --

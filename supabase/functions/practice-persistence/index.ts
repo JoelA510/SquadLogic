@@ -91,6 +91,15 @@ export const PracticeRepairSchema = z
           .refine((e) => (e.kind === 'time_tbd') === (e.tbd_reason !== undefined), {
             message: 'tbd_reason is required for, and only for, a time_tbd exception',
           })
+          // practice_exceptions_daylight_shape (20261002000000), checked here too.
+          .refine(
+            (e) =>
+              e.cause_kind !== 'daylight' ||
+              (e.kind === 'time_tbd' &&
+                e.cause_id === undefined &&
+                (e.tbd_reason === 'past-sunset' || e.tbd_reason === 'sunset-unknown')),
+            { message: 'a daylight exception is a past-sunset TIME TBD with no cause_id' }
+          )
       )
       .default([]),
     withdrawExceptions: z.array(z.object({ exception_id: Uuid }).strict()).default([]),

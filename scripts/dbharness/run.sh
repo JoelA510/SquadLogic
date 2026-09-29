@@ -707,8 +707,8 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
       else
         echo "FAIL smoke ${id}: it passed without proving the tbd_reason CHECK admits both daylight reasons and refuses a misspelling"; STATUS=1
       fi
-      if grep -qF "cause_kind CHECK: daylight admitted; the unknown cause dusk refused 23514" $SCRATCH/harness_smoke; then
-        echo "  | (checked) the practice_exceptions cause_kind CHECK admits daylight, and refuses an unknown cause"
+      if grep -qF "cause_kind CHECK: daylight admitted; the unknown cause dusk and daylight on a contended reason refused 23514, 2 of 2" $SCRATCH/harness_smoke; then
+        echo "  | (checked) the practice_exceptions cause_kind CHECK admits daylight, and refuses an unknown cause and a daylight exception of any other shape"
       else
         echo "FAIL smoke ${id}: it passed without proving the cause_kind CHECK admits daylight and refuses an unknown cause"; STATUS=1
       fi
@@ -716,6 +716,11 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "  | (checked) a daylight exception naming a same-save new row by its key is recorded on exactly that row, not the team's other row on the slot"
       else
         echo "FAIL smoke ${id}: it passed without proving a same-save new-row exception is recorded on exactly its row"; STATUS=1
+      fi
+      if grep -qF "daylight guards: a mid-range past-sunset window (22023) and a new_assignment on another season's team (42501) were each refused, 2 of 2; nothing written" $SCRATCH/harness_smoke; then
+        echo "  | (checked) the practice writer refuses a mid-range daylight TIME TBD window, and a new_assignment on another season's team"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the mid-range and season-scope refusals"; STATUS=1
       fi
     fi
     # **The production RLS drift replay** is the only evidence that the

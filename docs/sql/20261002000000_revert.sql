@@ -69,6 +69,8 @@ END;
 $$;
 
 ALTER TABLE public.practice_exceptions
+    DROP CONSTRAINT IF EXISTS practice_exceptions_daylight_shape;
+ALTER TABLE public.practice_exceptions
     DROP CONSTRAINT IF EXISTS practice_exceptions_tbd_reason_check;
 ALTER TABLE public.practice_exceptions
     ADD CONSTRAINT practice_exceptions_tbd_reason_check CHECK (
@@ -1218,6 +1220,11 @@ BEGIN
        OR v_reason LIKE '%sunset%' OR v_cause LIKE '%daylight%'
        OR v_reason NOT LIKE '%declined%' OR v_cause NOT LIKE '%retirement%' THEN
         RAISE EXCEPTION 'revert did not restore the 20260929000000 CHECKs: tbd_reason %, cause_kind %', v_reason, v_cause;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint c
+                WHERE c.conrelid = 'public.practice_exceptions'::regclass
+                  AND c.conname = 'practice_exceptions_daylight_shape') THEN
+        RAISE EXCEPTION 'revert left practice_exceptions_daylight_shape in place';
     END IF;
     RAISE NOTICE 'revert verified: one 8-argument persist_practice_schedule without new_assignment; tbd_reason and cause_kind CHECKs back to the 20260929000000 lists.';
 END;

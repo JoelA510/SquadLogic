@@ -3052,6 +3052,31 @@ plant "M18 the new-row resolution resolves nothing" "$M18" \
   "                     WHERE false AND r.organization_id = v_org_id" \
   "FAIL smoke 20261002000000"
 
+# Review follow-ups: the daylight shape, the mid-range refusal (D13 c,
+# enforced rather than only noted) and the sibling path's season scope.
+plant "M18 the daylight shape CHECK admits any reason" "$M18" \
+  "            AND tbd_reason IN ('past-sunset', 'sunset-unknown'))" \
+  "            AND tbd_reason IS NOT NULL)" \
+  "FAIL smoke 20261002000000"
+
+plant "M18 the mid-range daylight window check is removed" "$M18" \
+  "    IF v_bad_id IS NOT NULL THEN
+        RAISE EXCEPTION 'a daylight TIME TBD window on assignment % ends before its series does" \
+  "    IF false THEN
+        RAISE EXCEPTION 'a daylight TIME TBD window on assignment % ends before its series does" \
+  "FAIL smoke 20261002000000"
+
+plant "M18 new_assignment skips the season scope" "$M18" \
+  "               AND d.season_settings_id = v_season_id)
+     LIMIT 1;
+    IF v_bad_ref IS NOT NULL THEN
+        RAISE EXCEPTION 'exceptions names new_assignment %, whose team" \
+  "               AND d.season_settings_id IS NOT NULL)
+     LIMIT 1;
+    IF v_bad_ref IS NOT NULL THEN
+        RAISE EXCEPTION 'exceptions names new_assignment %, whose team" \
+  "FAIL smoke 20261002000000"
+
 # The refusal is the claim: without it the archive-off application narrows
 # the CHECKs having archived the rows unasked.
 plant "R18 the revert archives daylight exceptions without being told to" "$R18" \
@@ -3102,7 +3127,8 @@ declare -A CLAIM_PROVER=(
   ["(checked) a practice save adding a same-weekday slot at non-overlapping minutes to a team is accepted"]="M15 the double-booking rule ignores minutes"
   ["(checked) the writer-v3 revert refused while 2 unresolved practice exceptions existed, then archived all 3 onto their run before dropping the table"]="R15 the revert drops unresolved exceptions without archiving"
   ["(checked) the practice_exceptions tbd_reason CHECK admits past-sunset and sunset-unknown, and refuses a misspelling"]="M18 the tbd_reason CHECK drops sunset-unknown"
-  ["(checked) the practice_exceptions cause_kind CHECK admits daylight, and refuses an unknown cause"]="M18 the cause_kind CHECK drops daylight"
+  ["(checked) the practice_exceptions cause_kind CHECK admits daylight, and refuses an unknown cause and a daylight exception of any other shape"]="M18 the cause_kind CHECK drops daylight|M18 the daylight shape CHECK admits any reason"
+  ["(checked) the practice writer refuses a mid-range daylight TIME TBD window, and a new_assignment on another season's team"]="M18 the mid-range daylight window check is removed|M18 new_assignment skips the season scope"
   ["(checked) a daylight exception naming a same-save new row by its key is recorded on exactly that row, not the team's other row on the slot"]="M18 the new-row resolution links the team's other row on the slot|M18 the new-row resolution resolves nothing"
   ["(checked) the daylight-exceptions revert refused while 2 daylight exceptions existed, then archived both onto their run and kept the older exception"]="R18 the revert archives daylight exceptions without being told to"
   ["(checked) the daylight-exceptions revert leaves exactly one persist_practice_schedule, the 20260929000000 writer without new_assignment, and the old tbd_reason and cause_kind CHECKs"]="R18 the revert does not restore the writer"

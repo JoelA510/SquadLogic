@@ -12,7 +12,8 @@
 --   2. the writer: an exception naming a same-save NEW row by its (team, slot,
 --      range) key is recorded and linked to exactly that row -- not the
 --      team's other row on the same slot; a key the save does not carry, and
---      an entry naming its row twice, are refused (22023); a withdrawn team
+--      an entry naming its row twice, are refused (22023); so are a mid-range
+--      daylight window (22023) and another season's team (42501); a withdrawn team
 --      (no row) stays in the roster-enumerated teams_without_practice
 --   3. the readers: the truncated row plus its out-of-range exception yield
 --      no occurrence on or after D, expanded exactly as calendar-feed reads
@@ -84,7 +85,18 @@ BEGIN
     IF v_state IS DISTINCT FROM '23514' THEN
         RAISE EXCEPTION 'the unknown cause_kind dusk was admitted';
     END IF;
-    RAISE NOTICE 'cause_kind CHECK: daylight admitted; the unknown cause dusk refused 23514';
+    -- `daylight` is only a past-sunset TIME TBD with no cause row.
+    v_state := NULL;
+    BEGIN
+        INSERT INTO public.practice_exceptions (organization_id, season_settings_id, team_id, assignment_id, "window", kind, tbd_reason, cause_kind)
+          VALUES (v_org, v_s, v_t, v_pa, '[2026-09-29,2026-09-29]', 'time_tbd', 'contended', 'daylight');
+    EXCEPTION WHEN check_violation THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+    END;
+    IF v_state IS DISTINCT FROM '23514' THEN
+        RAISE EXCEPTION 'a daylight exception with tbd_reason contended was admitted';
+    END IF;
+    RAISE NOTICE 'cause_kind CHECK: daylight admitted; the unknown cause dusk and daylight on a contended reason refused 23514, 2 of 2';
 END;
 $$;
 
@@ -108,6 +120,8 @@ DECLARE
     v_state text; v_msg text;
     v_refusals int := 0;
     v_roster_without text;
+    v_s2 uuid; v_d2 uuid; v_tc uuid;
+    v_guards int := 0;
 BEGIN
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
       (v_admin, 'p6b-admin@example.test', jsonb_build_object('password_length', 16));
@@ -124,6 +138,10 @@ BEGIN
     INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d, 'P6B Team B') RETURNING id INTO v_tb;
     INSERT INTO public.practice_slots (organization_id, field_id, day_of_week, start_time, end_time, valid_from, valid_until)
       VALUES (v_org, v_field, 'mon', '17:00', '18:00', '2026-09-01', '2026-11-30') RETURNING id INTO v_mon;
+    -- Another season of the same organisation, for the season-scope guard.
+    INSERT INTO public.season_settings (organization_id, name) VALUES (v_org, 'P6B2 Spring') RETURNING id INTO v_s2;
+    INSERT INTO public.divisions (organization_id, season_settings_id, name) VALUES (v_org, v_s2, 'P6B2 Spring U10') RETURNING id INTO v_d2;
+    INSERT INTO public.teams (organization_id, division_id, name) VALUES (v_org, v_d2, 'P6B Team C (spring)') RETURNING id INTO v_tc;
 
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
@@ -168,6 +186,39 @@ BEGIN
         RAISE EXCEPTION 'expected 2 refusals (22023) that wrote nothing, got % (last: % %)', v_refusals, v_state, v_msg;
     END IF;
     RAISE NOTICE 'new_assignment refusals: a key the save does not carry and an entry naming its row twice were each refused 22023, 2 of 2; nothing written';
+
+    -- D13 (c): a daylight window that ends before its series does (mid-range).
+    BEGIN
+        PERFORM public.persist_practice_schedule(jsonb_build_object('season_settings_id', v_s),
+            jsonb_build_array(
+                jsonb_build_object('team_id', v_ta, 'practice_slot_id', v_mon, 'effective_date_range', c_old),
+                jsonb_build_object('team_id', v_ta, 'practice_slot_id', v_mon, 'effective_date_range', c_new)),
+            exceptions => jsonb_build_array(jsonb_build_object(
+                'new_assignment', jsonb_build_object('team_id', v_ta, 'practice_slot_id', v_mon, 'effective_date_range', c_new),
+                'window', '[2026-10-05,2026-10-11]', 'kind', 'time_tbd', 'tbd_reason', 'past-sunset', 'cause_kind', 'blackout')));
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+        IF v_state = '22023' AND v_msg LIKE '%mid-range windows are refused%' THEN v_guards := v_guards + 1; END IF;
+    END;
+    -- The sibling assignment_id path's season scope: another season's team.
+    BEGIN
+        PERFORM public.persist_practice_schedule(jsonb_build_object('season_settings_id', v_s),
+            jsonb_build_array(
+                jsonb_build_object('team_id', v_ta, 'practice_slot_id', v_mon, 'effective_date_range', c_old),
+                jsonb_build_object('team_id', v_tc, 'practice_slot_id', v_mon, 'effective_date_range', c_new)),
+            exceptions => jsonb_build_array(jsonb_build_object(
+                'new_assignment', jsonb_build_object('team_id', v_tc, 'practice_slot_id', v_mon, 'effective_date_range', c_new),
+                'window', c_window, 'kind', 'time_tbd', 'tbd_reason', 'past-sunset', 'cause_kind', 'daylight')));
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
+        IF v_state = '42501' AND v_msg LIKE '%whose team is not a team of season%' THEN v_guards := v_guards + 1; END IF;
+    END;
+    IF v_guards <> 2
+       OR (SELECT count(*) FROM public.practice_assignments WHERE team_id IN (v_ta, v_tc)) <> 1
+       OR EXISTS (SELECT 1 FROM public.practice_exceptions WHERE organization_id = v_org) THEN
+        RAISE EXCEPTION 'expected the mid-range (22023) and season-scope (42501) refusals, writing nothing; got % (last: % %)', v_guards, v_state, v_msg;
+    END IF;
+    RAISE NOTICE 'daylight guards: a mid-range past-sunset window (22023) and a new_assignment on another season''s team (42501) were each refused, 2 of 2; nothing written';
 
     -- The Apply: the old row re-sent, the truncated placement added, and its
     -- remainder named by the NEW row's key.

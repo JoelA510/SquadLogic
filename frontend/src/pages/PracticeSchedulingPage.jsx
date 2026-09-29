@@ -867,7 +867,9 @@ export default function PracticeSchedulingPage() {
     });
     if (daylightTbd.unmatched.length > 0) {
       setApplyError(
-        `The daylight check made ${daylightTbd.unmatched.map((entry) => entry.teamId).join(', ')} ` +
+        `The daylight check made ${daylightTbd.unmatched
+          .map((entry) => teamById.get(entry.teamId)?.name ?? entry.teamId)
+          .join(', ')} ` +
           'TIME TBD from a date past sunset, and the staged schedule no longer holds that ' +
           'placement, so it cannot be recorded. Run the auto-scheduler again.'
       );
@@ -985,6 +987,7 @@ export default function PracticeSchedulingPage() {
     schedulerTeams,
     schoolDayEnd,
     slotById,
+    teamById,
     timezone,
   ]);
 

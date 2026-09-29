@@ -171,6 +171,26 @@ describe('buildDaylightExceptions', () => {
     );
   });
 
+  it('reports, never throws, when the row key cannot be built', () => {
+    // A staged range outside its slot (the slot was re-dated after the run),
+    // and a slot the page has not loaded: buildPracticeAssignmentRows throws
+    // on both, and the page calls this before its own try.
+    const outside = ASSIGNMENTS.map((a) =>
+      a.teamId === 'team-a' ? { ...a, effectiveFrom: '2026-08-01' } : a
+    );
+    const cases = [
+      { assignments: outside, slots: SLOTS },
+      { assignments: ASSIGNMENTS, slots: SLOTS.filter((slot) => slot.id !== 'slot-mon') },
+    ];
+    for (const { assignments, slots } of cases) {
+      const result = buildDaylightExceptions({ daylight: DAYLIGHT, assignments, slots });
+      assert.deepEqual(
+        result.unmatched.map((entry) => entry.teamId),
+        ['team-a']
+      );
+    }
+  });
+
   it('records nothing when the run reported no daylight TIME TBD', () => {
     for (const daylight of [undefined, null, {}, { timeTbd: [] }]) {
       assert.deepEqual(

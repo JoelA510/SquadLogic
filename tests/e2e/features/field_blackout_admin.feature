@@ -18,7 +18,7 @@ Feature: Field lifecycle and blackout administration
     And I set the retirement end date to "2026-09-30"
     And I click "Check and retire"
     Then I should see a consequence preview naming 1 affected booking
-    And the consequence preview should name the missing repair engine
+    And the consequence preview should offer practice repair recommendations
     And "Back Pitch" should not yet show a retirement date
     When I click "Retire anyway"
     Then "Back Pitch" should show a retirement date of "2026-09-30"

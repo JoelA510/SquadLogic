@@ -24,7 +24,7 @@ Feature: Retiring a venue and a sub-surface
     When I set the venue retirement end date to "2026-09-30"
     And I click "Check and retire"
     Then I should see a consequence preview naming 1 affected booking
-    And the consequence preview should name the missing repair engine
+    And the consequence preview should say no repair is computed for a venue
     And the consequence preview should list the ground the venue contains
     And the contained ground should not be listed as bookings
     And the venue "Maplewood Park" should not yet show a retirement date

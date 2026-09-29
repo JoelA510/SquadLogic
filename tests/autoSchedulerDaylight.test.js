@@ -851,6 +851,9 @@ const OVERRIDE_ROWS = [
   overrideRow(8, 's-h-locked', '[2026-09-01,2026-11-25)', 'withdrawn'),
   // Approved, on a slot this run does not hold.
   overrideRow(9, 's-not-in-run', '[2026-09-01,2026-11-25)'),
+  // The locked row's slot again, after its first past sunset (09-22): 11-10
+  // and 11-17 fall in the proposed remainder, and the row exempts nothing.
+  overrideRow(10, 's-h-locked', '[2026-11-10,2026-11-18)'),
 ];
 const APPROVED_ROWS = OVERRIDE_ROWS.filter((r) => r.status === 'approved');
 
@@ -877,12 +880,12 @@ function deriveExempt(slotId, rows) {
   const loc = FIELD_BY_ID.get(s.fieldId);
   const coords = loc.latitude !== null && loc.longitude !== null;
   const end = minutesOf(s.endTime);
-  let exempt = 0;
+  const exemptDates = [];
   let judged = 0;
   let firstIllegal = null;
   for (const date of dates) {
     if (covers(date)) {
-      exempt += 1;
+      exemptDates.push(date);
       continue;
     }
     if (!coords) continue;
@@ -902,15 +905,24 @@ function deriveExempt(slotId, rows) {
     }
   }
   const inTbd = firstIllegal ? dates.filter((d) => d > firstIllegal && covers(d)).length : 0;
-  return { exempt, judged, inTbd, firstIllegal, covered: dates.filter(covers) };
+  return {
+    exempt: exemptDates.length,
+    exemptDates,
+    judged,
+    inTbd,
+    firstIllegal,
+    covered: dates.filter(covers),
+  };
 }
 
 const OVERRIDE_KEYS = [
   'lightingOverrideOccurrencesExempt',
   'lightingOverrideOccurrencesInTimeTbd',
   'lockedRowOccurrencesLightingExempt',
+  'lockedRowOccurrencesLightingInProposedTbd',
+  'lightingOverridesUnused',
 ];
-/** The run with the three override counters removed and the clock zeroed. */
+/** The run with the five override counters removed and the clock zeroed. */
 function withoutOverrideKeys(r) {
   const meta = { ...r.daylight.meta };
   for (const key of OVERRIDE_KEYS) delete meta[key];
@@ -928,7 +940,7 @@ const MAIN_POST_PASS_SHA256 = 'f79c9f82b512ea18eca285673a0395238f2e2491444ee18bd
 const byTeam = (list) => new Map(list.map((x) => [x.teamId, x]));
 
 describe('no overrides: the post-pass is byte-identical to main', () => {
-  it('an empty approved read reproduces main exactly, and adds only three zero counters', async () => {
+  it('an empty approved read reproduces main exactly, and adds only five zero counters', async () => {
     const r = await run({ overrides: [] });
     assert.equal(sha256(withoutOverrideKeys(r)), MAIN_POST_PASS_SHA256);
     for (const key of OVERRIDE_KEYS) assert.equal(r.daylight.meta[key], 0, key);
@@ -1139,6 +1151,8 @@ describe('W28: the exempt count matches an independent derivation, and is non-ze
     let exempt = 0;
     let inTbd = 0;
     let judged = 0;
+    /** @type {Map<string, string[]>} */
+    const exemptedBySlot = new Map();
     // Universe: the search's own placements, by their INPUT slot's dates.
     for (const p of baseline.placements) {
       const s = BODY_BY_ID.get(p.slotId);
@@ -1147,12 +1161,24 @@ describe('W28: the exempt count matches an independent derivation, and is non-ze
       exempt += d.exempt;
       inTbd += d.inTbd;
       judged += d.judged;
+      exemptedBySlot.set(p.slotId, d.exemptDates);
     }
     // The locked row: its stored range [09-01, 11-24], from TODAY.
     const locked = deriveExempt('s-h-locked', OVERRIDE_ROWS);
     assert.equal(r.daylight.meta.lightingOverrideOccurrencesExempt, exempt);
     assert.equal(r.daylight.meta.lightingOverrideOccurrencesInTimeTbd, inTbd);
     assert.equal(r.daylight.meta.lockedRowOccurrencesLightingExempt, locked.exempt);
+    assert.equal(r.daylight.meta.lockedRowOccurrencesLightingInProposedTbd, locked.inTbd);
+    exemptedBySlot.set('s-h-locked', locked.exemptDates);
+    // Unused: an approved row on a run slot none of whose dates was exempted.
+    const onRun = APPROVED_ROWS.filter((row) => BODY_BY_ID.has(row.practice_slot_id));
+    const unused = onRun.filter((row) => {
+      const w = windowOf(row);
+      return !(exemptedBySlot.get(w.slotId) ?? []).some((d) => w.from <= d && d <= w.until);
+    });
+    assert.equal(r.daylight.meta.lightingOverridesUnused, unused.length);
+    assert.ok(unused.length > 0 && unused.length < onRun.length, 'unused is all or nothing');
+    assert.ok(locked.inTbd > 0, 'no covered date falls in the proposed remainder');
     // An exempt date is not judged, so it is not examined (core's contract).
     assert.equal(r.daylight.meta.occurrencesExamined, judged);
     // Meta-assertions: non-zero, and every approved row on a run slot covers a date.
@@ -1227,6 +1253,16 @@ describe('auto-scheduler/index.ts override wiring (source pin)', () => {
       source.slice(guard, guard + 1500),
       /return jsonResponse\([\s\S]*?code: lightingOverrides\.code,[\s\S]*?503/
     );
+  });
+
+  it('discloses whose view the read was, and what it loaded, in the response and audit', () => {
+    assert.match(
+      source,
+      /visibility: \(await verifyOrgAdmin\(supabase, user\.id, input\.organizationId\)\)/
+    );
+    assert.match(source, /loaded: lightingOverrides\.rowsLoaded,/);
+    // The started audit, the completed audit and the response.
+    assert.equal(source.match(/^ {8}lightingOverrideRead,$/gm)?.length, 3);
   });
 
   it('hands the solver the loaded overrides, and nothing from the body (W25)', () => {

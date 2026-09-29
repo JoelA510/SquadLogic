@@ -49,7 +49,8 @@
  * `practice_lighting_overrides` on the run's slots, loaded as the caller
  * through RLS and never from the body, exempt their dates from the daylight
  * pass. A failed read refuses the run; a partial read (a coach sees only the
- * slots they coach) only removes exemptions, so it fails safe and runs. See
+ * slots they coach) only removes exemptions, so it fails safe and runs, and
+ * the response and audit say whose view it was (`lightingOverrideRead`). See
  * `_shared/engines/practice-lighting-overrides.ts`.
  */
 
@@ -78,6 +79,7 @@ import {
   createUserClient,
   getUserFromRequest,
   getUserOrgIds,
+  verifyOrgAdmin,
   verifyOrgMembership,
   corsHeaders,
   jsonResponse,
@@ -412,6 +414,17 @@ serve(async (req) => {
         503
       );
     }
+    //     Disclosed, not refused: an org admin's read is every approved row;
+    //     anyone else's is the rows on slots they coach, so the run may be
+    //     stricter than the data. Membership only -- no override content is
+    //     read with the service role.
+    const lightingOverrideRead = {
+      loaded: lightingOverrides.rowsLoaded,
+      onRunSlots: lightingOverrides.overrides.length,
+      visibility: (await verifyOrgAdmin(supabase, user.id, input.organizationId))
+        ? ('organization' as const)
+        : ('caller-scoped' as const),
+    };
 
     // 6. Audit + structured logging: scheduler started
     edgeLogger.info('Auto-scheduler invoked', {
@@ -437,7 +450,7 @@ serve(async (req) => {
         approvedPreferencesLoaded: preferences.preferencesLoaded,
         teamsConstrainedByPreferences: preferences.teamsConstrained,
         coachAssignmentsLoaded: preferences.coachAssignmentsLoaded,
-        lightingOverridesLoaded: lightingOverrides.overrides.length,
+        lightingOverrideRead,
         config: input.config,
       },
     });
@@ -648,6 +661,7 @@ serve(async (req) => {
           assignmentId: l.assignmentId,
           date: l.date,
         })),
+        lightingOverrideRead,
       },
     });
 
@@ -696,6 +710,9 @@ serve(async (req) => {
         // allowed), and each locked row past sunset with its proposed,
         // unapplied fix. Always present.
         daylight,
+        // The portable-lighting overrides the pass was given (8.9 D14 PR C):
+        // approved rows read, those on this run's slots, and whose view.
+        lightingOverrideRead,
         evaluation: run.evaluation,
         // Non-blocking timing findings -- today only WALL_TIME_AMBIGUOUS, a
         // wall time that occurs twice on a fall-back night and was resolved to

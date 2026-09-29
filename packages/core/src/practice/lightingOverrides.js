@@ -37,8 +37,11 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
  * UI both call it.
  *
  * @param {unknown} window
- * @returns {{ from: string, until: string } | null} null for anything but a
- *   canonical bounded range, so a caller refuses it rather than guessing
+ * @returns {{ from: string, until: string } | null} null for anything not
+ *   spelled as a canonical bounded range. An empty range (`[d,d)`) comes back
+ *   with `until` before `from`, and a non-calendar date is read as a day number
+ *   (the Deno twin's reading, pinned by the drift test): a caller that needs a
+ *   stored window refuses both.
  */
 export function lightingOverrideWindowDates(window) {
   const match = typeof window === 'string' ? CANONICAL_WINDOW.exec(window) : null;

@@ -402,6 +402,31 @@ describe('admin approval queue', () => {
   });
 });
 
+describe('slot labels', () => {
+  // Plant: drop the sub-unit from practiceSlotLabel -> the two halves read the same -> red.
+  it('tells apart two slots on one field at the same time by sub-unit and label', async () => {
+    tables.field_subunits = [
+      { id: 'U1', organization_id: ORG, label: 'North half' },
+      { id: 'U2', organization_id: ORG, label: 'South half' },
+    ];
+    tables.practice_slots.push({
+      ...tables.practice_slots[0],
+      id: 'S1b',
+      field_subunit_id: 'U2',
+      label: 'U12 block',
+    });
+    tables.practice_slots[0].field_subunit_id = 'U1';
+    await adminView();
+    const form = screen.getByRole('button', { name: 'Set lighting override' }).closest('form');
+    const names = within(within(form).getByLabelText('Practice slot'))
+      .getAllByRole('option')
+      .map((option) => option.textContent);
+    expect(names).toContain(`${LABEL.S1} \u00b7 North half`);
+    expect(names).toContain(`${LABEL.S1} \u00b7 South half (U12 block)`);
+    expect(new Set(names).size).toBe(names.length);
+  });
+});
+
 describe('failed reads', () => {
   // Plant: render the lists even when `error` is set -> the empty text appears -> red.
   it.each([
@@ -428,6 +453,17 @@ describe('failed reads', () => {
     renderPage();
     expect(await screen.findByRole('alert')).toHaveTextContent(/your practice slots: boom/);
     expect(screen.queryByLabelText('Practice slot')).not.toBeInTheDocument();
+  });
+
+  it('an empty stored window is a load error too', async () => {
+    tables.practice_lighting_overrides.push(
+      override('empty', 'S1', '[2026-10-01,2026-10-01)', 'requested', 'coach-user')
+    );
+    asUser('admin', 'admin-a');
+    renderPage();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /\(empty\) is not a stored override/
+    );
   });
 
   it('a malformed stored row is a load error, never silently dropped', async () => {

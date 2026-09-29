@@ -102,10 +102,17 @@ export function handleLightingOverrideRpc(db, name, params, ctx) {
         String(row.id) !== String(exceptId) &&
         windowsOverlap(row.window, window)
     );
-  const badDates = () =>
-    !ISO_DATE.test(String(p.p_from)) || !ISO_DATE.test(String(p.p_until))
-      ? fail('22007', 'invalid input syntax for type date')
-      : null;
+  const calendarDate = (value) =>
+    ISO_DATE.test(String(value)) &&
+    new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === String(value);
+  const badDates = () => {
+    if (!ISO_DATE.test(String(p.p_from)) || !ISO_DATE.test(String(p.p_until))) {
+      return fail('22007', 'invalid input syntax for type date');
+    }
+    return calendarDate(p.p_from) && calendarDate(p.p_until)
+      ? null
+      : fail('22008', 'date/time field value out of range');
+  };
   const inverted = () =>
     p.p_until < p.p_from
       ? fail(

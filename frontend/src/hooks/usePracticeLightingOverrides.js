@@ -8,7 +8,11 @@ import { supabase } from '../lib/supabaseClient.js';
 import { fetchAllPages } from '../lib/pagedFetch.js';
 import { logger } from '../lib/logger.js';
 import { todayIso } from '../utils/today.js';
-import { coachedPracticeSlotIds, datesOfWindow } from '../utils/lightingOverrides.js';
+import {
+  coachedPracticeSlotIds,
+  datesOfWindow,
+  practiceSlotLabels,
+} from '../utils/lightingOverrides.js';
 
 /**
  * Portable-lighting overrides (8.9 D14 PR D): reads under RLS, writes through
@@ -103,7 +107,8 @@ function parseRows(data) {
   return data.map((row, index) => {
     const parsed = PracticeLightingOverrideRowSchema.safeParse(row);
     const dates = parsed.success ? datesOfWindow(row.window) : null;
-    if (!parsed.success || !dates) {
+    // An empty range (`[d,d)`) holds no date: Postgres never stores one.
+    if (!parsed.success || !dates || dates.until < dates.from) {
       throw new LightingOverrideRpcError({
         code: 'MALFORMED_ROW',
         message: `practice_lighting_overrides row ${index} (${row?.id ?? 'no id'}) is not a stored override`,
@@ -175,6 +180,7 @@ export function usePracticeLightingOverrides(orgId, { enabled = true } = {}) {
   const active = Boolean(orgId) && enabled;
   return {
     rows: loaded ? state.rows : [],
+    /** A read is in flight; the views mark their lists `aria-busy` with it. */
     loading: active && loading,
     loaded,
     error: active ? state.error : null,
@@ -183,13 +189,13 @@ export function usePracticeLightingOverrides(orgId, { enabled = true } = {}) {
 }
 
 /**
- * @type {Readonly<{ forOrg: string | null, slots: any[], fieldNames: Map<string, string>,
+ * @type {Readonly<{ forOrg: string | null, slots: any[], slotLabels: Map<string, string>,
  *   coaches: any[], coachedSlotIds: Set<string>, error: any, loading: boolean }>}
  */
 const LOADING_CONTEXT = Object.freeze({
   forOrg: null,
   slots: [],
-  fieldNames: new Map(),
+  slotLabels: new Map(),
   coaches: [],
   coachedSlotIds: new Set(),
   error: null,
@@ -222,15 +228,20 @@ export function useLightingSlotContext(orgId, { userId = null, coachScoped = fal
     (async () => {
       setState(LOADING_CONTEXT);
       try {
-        const [slots, fields, coaches] = await Promise.all([
+        const [slots, fields, subunits, coaches] = await Promise.all([
           fetchAllPages(() =>
             supabase
               .from('practice_slots')
-              .select('id, organization_id, day_of_week, start_time, end_time, field_id')
+              .select(
+                'id, organization_id, day_of_week, start_time, end_time, field_id, field_subunit_id, label'
+              )
               .eq('organization_id', orgId)
           ),
           fetchAllPages(() =>
             supabase.from('fields').select('id, name').eq('organization_id', orgId)
+          ),
+          fetchAllPages(() =>
+            supabase.from('field_subunits').select('id, label').eq('organization_id', orgId)
           ),
           fetchAllPages(() => {
             const query = supabase
@@ -264,7 +275,11 @@ export function useLightingSlotContext(orgId, { userId = null, coachScoped = fal
         setState({
           forOrg: key,
           slots,
-          fieldNames: new Map(fields.map((field) => [String(field.id), field.name])),
+          slotLabels: practiceSlotLabels(
+            slots,
+            new Map(fields.map((field) => [String(field.id), field.name])),
+            new Map(subunits.map((subunit) => [String(subunit.id), subunit.label]))
+          ),
           coaches,
           coachedSlotIds: coachScoped
             ? coachedPracticeSlotIds({

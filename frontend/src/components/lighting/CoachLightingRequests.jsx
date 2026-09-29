@@ -24,8 +24,8 @@ const canWithdrawOwn = (row) => WITHDRAWABLE_STATUSES.includes(row.status);
  */
 export default function CoachLightingRequests({ orgId, userId, toast }) {
   const context = useLightingSlotContext(orgId, { userId, coachScoped: true });
-  const { rows, loaded, error, refresh } = usePracticeLightingOverrides(orgId, {
-    enabled: !context.loading && !context.error,
+  const { rows, loading, loaded, error, refresh } = usePracticeLightingOverrides(orgId, {
+    enabled: !context.loading && !context.error && context.coaches.length > 0,
   });
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState(/** @type {any} */ (null));
@@ -45,7 +45,6 @@ export default function CoachLightingRequests({ orgId, userId, toast }) {
     );
   }
 
-  const slotById = new Map(context.slots.map((slot) => [String(slot.id), slot]));
   const coachedSlots = context.slots.filter((slot) => context.coachedSlotIds.has(String(slot.id)));
   // RLS already narrows a coach's read to the slots they coach; filtering here
   // keeps the view honest where it does not (the mock) and after a roster change.
@@ -74,15 +73,19 @@ export default function CoachLightingRequests({ orgId, userId, toast }) {
       'Lighting override withdrawn.'
     );
     setOutcome(result);
-    setBusy(false);
-    if (!result.error) {
-      toast(result.message, 'success');
-      await refresh();
+    try {
+      if (!result.error) {
+        toast(result.message, 'success');
+        await refresh();
+      }
+    } finally {
+      // Held through the refresh, so the row just withdrawn cannot be clicked again.
+      setBusy(false);
     }
   };
 
   return (
-    <div className="flex flex-col gap-6" data-testid="coach-lighting-view">
+    <div className="flex flex-col gap-6" data-testid="coach-lighting-view" aria-busy={loading}>
       <section aria-labelledby="coach-lighting-request-heading">
         <h2
           id="coach-lighting-request-heading"
@@ -104,7 +107,7 @@ export default function CoachLightingRequests({ orgId, userId, toast }) {
             idBase="coach-lighting"
             legend="New request"
             slots={coachedSlots}
-            fieldNames={context.fieldNames}
+            slotLabels={context.slotLabels}
             submitLabel="Request lighting override"
             onSubmit={submit}
             disabled={Boolean(error) || !loaded}
@@ -125,8 +128,7 @@ export default function CoachLightingRequests({ orgId, userId, toast }) {
             <OverrideTable
               caption="Your lighting override requests"
               rows={mine}
-              slotById={slotById}
-              fieldNames={context.fieldNames}
+              slotLabels={context.slotLabels}
               emptyText="You have not requested any lighting overrides."
               rowTestId="lighting-override-row"
               onWithdraw={withdraw}
@@ -144,8 +146,7 @@ export default function CoachLightingRequests({ orgId, userId, toast }) {
             <OverrideTable
               caption="Lighting overrides on your slots requested or set by someone else"
               rows={others}
-              slotById={slotById}
-              fieldNames={context.fieldNames}
+              slotLabels={context.slotLabels}
               emptyText="No one else has requested lighting on your slots."
               rowTestId="lighting-override-row"
             />

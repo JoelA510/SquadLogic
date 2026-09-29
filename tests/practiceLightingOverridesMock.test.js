@@ -143,6 +143,8 @@ describe('coach scoping (caller_coaches_practice_slot)', () => {
     const db = freshDb();
     expect(request(db, 'S1', null, '2026-10-02', 'coach-user').error?.code).toBe('23502');
     expect(request(db, 'S1', '2026-10-05', '2026-10-01', 'coach-user').error?.code).toBe('22023');
+    // A date Postgres cannot hold is refused, never rolled into March.
+    expect(request(db, 'S1', '2026-02-30', '2026-02-30', 'coach-user').error?.code).toBe('22008');
     expect(db.practice_lighting_overrides).toHaveLength(0);
   });
 });

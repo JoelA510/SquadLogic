@@ -119,20 +119,32 @@ const WEEKDAY_LABEL = {
   sun: 'Sun',
 };
 
-/** "Tue 18:00-19:30 · Back Pitch" from a `practice_slots` row. */
-export function practiceSlotLabel(slot, fieldNames) {
+/**
+ * "Tue 18:00-19:30 \u00b7 Back Pitch \u00b7 North half (U10 block)" from a
+ * `practice_slots` row: the sub-unit and the slot's own label are part of it,
+ * so two half-pitch slots at the same time never read the same.
+ */
+export function practiceSlotLabel(slot, fieldNames, subunitNames = null) {
   if (!slot) return 'Unknown slot';
   const day = WEEKDAY_LABEL[String(slot.day_of_week).toLowerCase()] || slot.day_of_week || '?';
   const clock = (value) => (value ? String(value).slice(0, 5) : '?');
+  const parts = [`${day} ${clock(slot.start_time)}\u2013${clock(slot.end_time)}`];
   const field = fieldNames?.get(String(slot.field_id));
-  return `${day} ${clock(slot.start_time)}–${clock(slot.end_time)}${field ? ` · ${field}` : ''}`;
+  if (field) parts.push(field);
+  const subunit = slot.field_subunit_id ? subunitNames?.get(String(slot.field_subunit_id)) : null;
+  if (subunit) parts.push(subunit);
+  const own = typeof slot.label === 'string' && slot.label.trim() ? ` (${slot.label.trim()})` : '';
+  return `${parts.join(' \u00b7 ')}${own}`;
 }
 
-/** "2026-10-05 to 2026-10-09" for a stored window, or the raw value if unreadable. */
-export function formatWindow(window) {
-  const dates = datesOfWindow(window);
-  if (!dates) return String(window);
-  return dates.from === dates.until ? dates.from : `${dates.from} to ${dates.until}`;
+/** Slot id -> its label, built once per load so every view names a slot the same way. */
+export function practiceSlotLabels(slots, fieldNames, subunitNames = null) {
+  return new Map(
+    (slots || []).map((slot) => [
+      String(slot.id),
+      practiceSlotLabel(slot, fieldNames, subunitNames),
+    ])
+  );
 }
 
 /** Statuses from which the withdraw RPC accepts a row. */

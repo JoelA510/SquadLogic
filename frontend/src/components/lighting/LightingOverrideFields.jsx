@@ -3,7 +3,7 @@ import PropTypes from 'prop-types';
 import Badge from '../ui/Badge.jsx';
 import Button from '../ui/Button.jsx';
 import DataErrorBanner from '../ui/DataErrorBanner.jsx';
-import { lightingOverrideErrorMessage, practiceSlotLabel } from '../../utils/lightingOverrides.js';
+import { lightingOverrideErrorMessage } from '../../utils/lightingOverrides.js';
 
 const STATUS_TONE = {
   requested: 'warning',
@@ -92,8 +92,7 @@ ActionMessage.propTypes = {
 export function OverrideTable({
   caption,
   rows,
-  slotById,
-  fieldNames,
+  slotLabels,
   emptyText,
   rowTestId,
   onWithdraw = undefined,
@@ -116,7 +115,7 @@ export function OverrideTable({
         </thead>
         <tbody>
           {rows.map((row) => {
-            const label = practiceSlotLabel(slotById.get(String(row.practice_slot_id)), fieldNames);
+            const label = slotLabels.get(String(row.practice_slot_id)) ?? 'Unknown slot';
             return (
               <tr key={row.id} data-testid={rowTestId}>
                 <td>
@@ -164,8 +163,7 @@ export function OverrideTable({
 OverrideTable.propTypes = {
   caption: PropTypes.string.isRequired,
   rows: PropTypes.array.isRequired,
-  slotById: PropTypes.instanceOf(Map).isRequired,
-  fieldNames: PropTypes.instanceOf(Map).isRequired,
+  slotLabels: PropTypes.instanceOf(Map).isRequired,
   emptyText: PropTypes.string.isRequired,
   rowTestId: PropTypes.string.isRequired,
   onWithdraw: PropTypes.func,
@@ -194,7 +192,7 @@ export function OverrideWindowForm({
   idBase,
   legend,
   slots,
-  fieldNames,
+  slotLabels,
   submitLabel,
   onSubmit,
   disabled = false,
@@ -240,7 +238,7 @@ export function OverrideWindowForm({
             <option value="">Choose a slot</option>
             {slots.map((slot) => (
               <option key={slot.id} value={String(slot.id)}>
-                {practiceSlotLabel(slot, fieldNames)}
+                {slotLabels.get(String(slot.id))}
               </option>
             ))}
           </select>
@@ -294,7 +292,7 @@ OverrideWindowForm.propTypes = {
   idBase: PropTypes.string.isRequired,
   legend: PropTypes.string.isRequired,
   slots: PropTypes.array.isRequired,
-  fieldNames: PropTypes.instanceOf(Map).isRequired,
+  slotLabels: PropTypes.instanceOf(Map).isRequired,
   submitLabel: PropTypes.string.isRequired,
   onSubmit: PropTypes.func.isRequired,
   disabled: PropTypes.bool,

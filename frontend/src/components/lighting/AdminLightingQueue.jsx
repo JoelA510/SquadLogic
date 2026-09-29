@@ -8,7 +8,6 @@ import {
   usePracticeLightingOverrides,
   withdrawLightingOverride,
 } from '../../hooks/usePracticeLightingOverrides.js';
-import { practiceSlotLabel } from '../../utils/lightingOverrides.js';
 import {
   ActionMessage,
   LightingLoadError,
@@ -30,7 +29,7 @@ const SELF_REASON =
  */
 export default function AdminLightingQueue({ orgId, userId, toast }) {
   const context = useLightingSlotContext(orgId, { userId, coachScoped: false });
-  const { rows, loaded, error, refresh } = usePracticeLightingOverrides(orgId, {
+  const { rows, loading, loaded, error, refresh } = usePracticeLightingOverrides(orgId, {
     enabled: !context.loading && !context.error,
   });
   // One flag for every row: while any decision or withdrawal runs, all row
@@ -45,7 +44,6 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
     return <LightingLoadError error={context.error} what="practice slots" />;
   }
 
-  const slotById = new Map(context.slots.map((slot) => [String(slot.id), slot]));
   const coachNames = new Map(
     context.coaches
       .filter((coach) => coach.user_id)
@@ -55,8 +53,7 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
     String(row.requested_by) === String(userId)
       ? 'You'
       : (coachNames.get(String(row.requested_by)) ?? 'Another user (no coach record)');
-  const labelOf = (row) =>
-    practiceSlotLabel(slotById.get(String(row.practice_slot_id)), context.fieldNames);
+  const labelOf = (row) => context.slotLabels.get(String(row.practice_slot_id)) ?? 'Unknown slot';
   const pending = rows.filter((row) => row.status === 'requested');
   const approved = rows.filter((row) => row.status === 'approved');
 
@@ -64,10 +61,14 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
     setBusy(true);
     const result = await outcomeOf(action, message);
     setOutcome(result);
-    setBusy(false);
-    if (!result.error) {
-      toast(result.message, 'success');
-      await refresh();
+    try {
+      if (!result.error) {
+        toast(result.message, 'success');
+        await refresh();
+      }
+    } finally {
+      // Held through the refresh, so a decided row cannot be decided twice.
+      setBusy(false);
     }
   };
 
@@ -81,7 +82,7 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
   };
 
   return (
-    <div className="flex flex-col gap-6" data-testid="admin-lighting-view">
+    <div className="flex flex-col gap-6" data-testid="admin-lighting-view" aria-busy={loading}>
       <LightingLoadError error={error} what="lighting overrides" />
       {!error && loaded && (
         <>
@@ -213,8 +214,7 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
             <OverrideTable
               caption="Approved lighting overrides"
               rows={approved}
-              slotById={slotById}
-              fieldNames={context.fieldNames}
+              slotLabels={context.slotLabels}
               emptyText="No approved overrides."
               rowTestId="lighting-approved-row"
               onWithdraw={(row) =>
@@ -241,7 +241,7 @@ export default function AdminLightingQueue({ orgId, userId, toast }) {
                 idBase="admin-lighting-set"
                 legend="Approved on save"
                 slots={context.slots}
-                fieldNames={context.fieldNames}
+                slotLabels={context.slotLabels}
                 submitLabel="Set lighting override"
                 onSubmit={setDirect}
                 describedBy={NOTE_ID}

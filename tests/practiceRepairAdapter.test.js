@@ -713,6 +713,47 @@ describe('snapshot rows', () => {
     assert.equal(written.payload, null);
   });
 
+  // The reader rule's boundary: a window starting ON the row's last day still
+  // overlaps it by one day; one starting the day after does not.
+  it('refuses a blackout window that starts on the row last day (one-day overlap)', () => {
+    // 2026-11-30 is a Monday and A1's last day; A2 (Wednesday) has no date in it.
+    const { written } = run(blackout('2026-11-30', '2026-12-31'));
+    assert.deepEqual(
+      written.refused.map((r) => [r.assignment_id, r.window, r.why]),
+      [[A1, '[2026-11-30,2026-11-30]', PRACTICE_REPAIR_PAYLOAD_REFUSAL.WINDOW_INSIDE_ROW]]
+    );
+    assert.equal(written.payload, null);
+  });
+
+  it('refuses a non-closable retirement TIME TBD that starts on the row last day', () => {
+    const { written } = run(RETIREMENT, {
+      rows: {
+        practiceSlots: SLOTS.filter((s) => s.id !== SL3),
+        practiceAssignments: [
+          { ...SNAPSHOT[0], effective_date_range: '[2026-11-30,2026-12-01)' },
+          ...SNAPSHOT.slice(1),
+        ],
+      },
+    });
+    assert.deepEqual(
+      written.refused.map((r) => [r.assignment_id, r.window, r.why]),
+      [[A1, '[2026-11-30,2026-11-30]', PRACTICE_REPAIR_PAYLOAD_REFUSAL.ROW_NOT_CLOSABLE]]
+    );
+    assert.equal(written.payload, null);
+  });
+
+  it('admits a closed retirement TIME TBD that starts the day after the row last day', () => {
+    const { written } = run(RETIREMENT);
+    const tbd = written.plan.exceptions.filter((e) => e.kind === 'time_tbd');
+    assert.ok(tbd.length > 0, 'the fixture has no TIME TBD to judge');
+    for (const e of tbd) {
+      const close = written.plan.closes.find((c) => c.assignment_id === e.assignment_id);
+      assert.equal(inclusive(e.window).from, plusDays(close.last_day, 1));
+    }
+    assert.deepEqual(written.refused, []);
+    assert.deepEqual(written.payload.repair.exceptions, written.plan.exceptions);
+  });
+
   it('refuses a slot that does not end after it starts', () => {
     const bad = [{ ...SLOTS[0], end_time: '17:00:00' }, ...SLOTS.slice(1)];
     assert.throws(

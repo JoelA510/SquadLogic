@@ -147,6 +147,11 @@
  *   calendar on which every candidate is lit, the result is identical to one
  *   without, less that finding and the `daylight` block
  *   (`tests/practiceRepairDaylight.test.js`).
+ * - **Portable lighting (8.9 D14).** `lightingOverrides` (approved windows on
+ *   plan slots, an input) exempt a candidate's date only when the plan has a
+ *   slot of that shape and **every** slot of that shape is overridden on it.
+ *   Exempt dates are not judged; a candidate exempt on some dates and past
+ *   sunset on others is still refused -- partly legal is not legal.
  *
  * Enforced in this module; **not live** until 8.6 3b PRs 9-11 wire the
  * repair, like everything else here.
@@ -197,7 +202,11 @@ import { PRACTICE_REASON, derivePracticeStatus, makePracticeFinding } from './re
 import { CHANGE_ORIGIN } from '../resolve/schemas.js';
 import { PracticeRepairInputSchema } from './schemas.js';
 import { buildPracticeSlotSet, firstWeekdayOnOrAfter } from './slots.js';
-import { PRACTICE_SUNSET_MARGIN_MINUTES, evaluatePracticeDaylight } from './daylight.js';
+import {
+  PRACTICE_SUNSET_MARGIN_MINUTES,
+  evaluatePracticeDaylight,
+  lightingOverrideCovers,
+} from './daylight.js';
 import { AVAILABILITY_REASON } from '../availability/reasonCodes.js';
 
 /** Why a displaced series is TIME TBD. */
@@ -376,7 +385,35 @@ export function buildPracticeRepairContext(input) {
     // table and a venue's coordinates disagree (the table was applied, D10).
     candidatesOnUndeclaredLighting: 0,
     sunsetSourcesDisagree: 0,
+    // Portable lighting (8.9 D14): candidates every occurrence of which a
+    // lighting override exempts, and the exempt occurrences themselves.
+    candidatesLightingOverrideExempt: 0,
+    occurrencesLightingOverrideExempt: 0,
     refused: [],
+  };
+  // A candidate is a shape, not a slot. It is exempt on a date only when the
+  // plan has a slot of that shape and every such slot is overridden then: an
+  // override on one of two identical slots cannot light the other.
+  const lightingOverrides = parsed.lightingOverrides ?? [];
+  const planSlotIds = new Set(slotSet.slots.map((slot) => slot.id));
+  for (const override of lightingOverrides) {
+    if (!planSlotIds.has(override.slotId)) {
+      throw new TypeError(
+        `repair: a lighting override names slot "${override.slotId}", which is not in the plan`
+      );
+    }
+  }
+  const litByOverride = lightingOverrideCovers(lightingOverrides);
+  /** shapeKey -> the plan's slot ids with that shape */
+  const planSlotsByShape = new Map();
+  for (const slot of slotSet.slots) {
+    const ids = planSlotsByShape.get(shapeKey(slot)) ?? [];
+    ids.push(slot.id);
+    planSlotsByShape.set(shapeKey(slot), ids);
+  }
+  const shapeExemptOn = (/** @type {Object} */ shape, /** @type {string} */ date) => {
+    const ids = planSlotsByShape.get(shapeKey(shape)) ?? [];
+    return ids.length > 0 && ids.every((/** @type {string} */ id) => litByOverride(id, date));
   };
   /** Verdicts by shape and window: they do not depend on the team. */
   const daylightVerdicts = new Map();
@@ -411,7 +448,18 @@ export function buildPracticeRepairContext(input) {
           exceptionIds: [],
         });
       }
-      const judged = evaluatePracticeDaylight({ occurrences, graph, calendar });
+      const judged = evaluatePracticeDaylight({
+        occurrences,
+        graph,
+        calendar,
+        lightingOverrides: occurrences
+          .filter((occurrence) => shapeExemptOn(shape, occurrence.date))
+          .map((occurrence) => ({
+            slotId: occurrence.slotId,
+            from: occurrence.date,
+            until: occurrence.date,
+          })),
+      });
       // Occurrences are in date order, so the first of each list is the earliest.
       const past = judged.flagged[0] ?? null;
       const unknown = judged.unknown[0] ?? null;
@@ -419,6 +467,7 @@ export function buildPracticeRepairContext(input) {
       verdict = {
         occurrences: occurrences.length,
         lit: judged.meta.litPracticeOccurrencesExempt > 0,
+        lightingOverrideExempt: judged.meta.lightingOverrideOccurrencesExempt,
         undeclared: judged.meta.undeclaredLightingOccurrences > 0,
         disagreements: judged.findings.filter(
           (finding) => finding.code === AVAILABILITY_REASON.SUNSET_SOURCES_DISAGREE
@@ -446,9 +495,12 @@ export function buildPracticeRepairContext(input) {
     daylight.occurrencesExamined += verdict.occurrences;
     if (verdict.undeclared) daylight.candidatesOnUndeclaredLighting += 1;
     daylight.sunsetSourcesDisagree += verdict.disagreements;
+    daylight.occurrencesLightingOverrideExempt += verdict.lightingOverrideExempt;
     if (verdict.occurrences === 0) daylight.candidatesWithNoOccurrence += 1;
     else if (verdict.lit) daylight.candidatesLitExempt += 1;
-    else if (verdict.refusal === null) daylight.candidatesWithinDaylight += 1;
+    else if (verdict.lightingOverrideExempt === verdict.occurrences) {
+      daylight.candidatesLightingOverrideExempt += 1;
+    } else if (verdict.refusal === null) daylight.candidatesWithinDaylight += 1;
     else if (verdict.refusal.reason === PRACTICE_TBD_REASON.PAST_SUNSET) {
       daylight.candidatesRefusedPastSunset += 1;
     } else daylight.candidatesRefusedSunsetUnknown += 1;

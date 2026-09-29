@@ -437,8 +437,10 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/index.js',
     ]),
+    // 8.9 D14: the W28 exempt-count witness materialises the corpus.
     consumers: Object.freeze([
       'tests/practiceDaylight.test.js',
+      'tests/practiceDurationPhases.test.js',
       'tests/practiceRepair.test.js',
       'tests/practiceSlotModel.test.js',
       'tests/reasonCodeReachability.test.js',
@@ -636,9 +638,12 @@ const LAYERS = Object.freeze([
   Object.freeze({
     layer: 'practice/daylight.js',
     modulePath: 'packages/core/src/practice/daylight.js',
-    functions: Object.freeze(['evaluatePracticeDaylight']),
+    // 8.9 D14: `lightingOverrideCovers()` is the one reading of a portable-
+    // lighting window; `durationPhases.js` and `repair.js` read windows
+    // through it, so both consume this layer (both are themselves unwired).
+    functions: Object.freeze(['evaluatePracticeDaylight', 'lightingOverrideCovers']),
     // 8.9 PR 5: `durationPhases.js` imports the margin constant, not the
-    // evaluator -- an importer, not a consumer.
+    // evaluator -- an importer, and since D14 a consumer of the override reading.
     importers: Object.freeze([
       'packages/core/src/constraints/adapters/season2026Constraints.js',
       'packages/core/src/practice/durationPhases.js',
@@ -646,11 +651,16 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/repair.js',
     ]),
     consumers: Object.freeze([
+      'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/repair.js',
       'tests/practiceDaylight.test.js',
+      'tests/practiceDurationPhases.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
-    expectedProductionConsumers: Object.freeze(['packages/core/src/practice/repair.js']),
+    expectedProductionConsumers: Object.freeze([
+      'packages/core/src/practice/durationPhases.js',
+      'packages/core/src/practice/repair.js',
+    ]),
     expectedExternalProductionConsumers: Object.freeze([]),
   }),
   // 8.9 PR 5: duration phases, compression and the DST survival report.
@@ -664,6 +674,9 @@ const LAYERS = Object.freeze([
       'derivePracticeDurationPhases',
       'buildPracticeCompressionReport',
       'buildDstSurvivalReport',
+      // 8.9 D14: the ladder and the shift, exported for the Edge twin (PR C).
+      'ladderDuration',
+      'shiftedStart',
     ]),
     importers: Object.freeze(['packages/core/src/practice/index.js']),
     consumers: Object.freeze(['tests/practiceDurationPhases.test.js']),

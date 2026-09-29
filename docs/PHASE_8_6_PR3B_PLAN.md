@@ -308,7 +308,24 @@ Notes carried forward from 8.9 PR 7 (the repair's daylight gate):
   CHECK and the `practice-persistence` Edge enum must admit the gate's two
   reasons, `past-sunset` and `sunset-unknown` (a migration; 8.9 PR 7 adds
   none). `tests/practiceWriterV3.test.js` names the pair as pending and goes
-  red when that lands.
+  red when that lands. *(Done by 8.9 PR 6b, below.)*
+
+Notes carried forward from 8.9 PR 6b (persisting daylight TIME TBD, 8.9 plan
+D13):
+- `20261002000000` admits `past-sunset` and `sunset-unknown` in the
+  `tbd_reason` CHECK and the `practice-persistence` Edge enum, and adds
+  `cause_kind` `daylight` (the auto-scheduler's truncated remainder only). A
+  repair window keeps its own `cause_kind` (blackout or retirement); the
+  daylight part is only in the reason.
+- **PR 9 must refuse to emit a mid-range TIME TBD window** (one that ends
+  before its series' range does) **until PR 12** teaches readers to apply
+  exceptions. Readers expand only the assignment's range, so a mid-range
+  window's practices would still be shown. Tail windows (running to the
+  series' end, or past it, as the daylight remainder does) are safe now.
+- An exception may name a row the same save inserts, by `new_assignment`
+  (its team, slot and range key) instead of `assignment_id`. A row-less
+  exception (a withdrawn placement) is deferred (D13 b): that team stays in
+  the writer's `teams_without_practice`.
 
 **Cross-plan sequencing with 8.9** (`docs/PHASE_8_9_PLAN.md`): both touch the
 auto-scheduler Edge Function (3b PR 7, 8.9 PR 6) and `repair.js` (3b PRs 3-5,

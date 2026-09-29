@@ -28,45 +28,69 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MIGRATION_DIR = path.join(REPO_ROOT, 'supabase/migrations');
 
-/** The migration that creates practice_exceptions LAST, and its text. */
-function exceptionsMigration() {
-  const defining = readdirSync(MIGRATION_DIR)
+/**
+ * The values the LAST migration to set a practice_exceptions CHECK admits.
+ * Enumerated from the migration directory, not a named file: a later
+ * migration that narrows or widens the CHECK is the one the database runs.
+ *
+ * @param {RegExp} pattern - captures the CHECK's `IN (...)` list
+ * @returns {Set<string>}
+ */
+function lastCheckValues(pattern) {
+  const setting = readdirSync(MIGRATION_DIR)
     .filter((name) => name.endsWith('.sql'))
     .sort()
-    .filter((name) =>
-      readFileSync(path.join(MIGRATION_DIR, name), 'utf8').includes(
-        'CREATE TABLE IF NOT EXISTS public.practice_exceptions'
-      )
-    );
-  assert.ok(defining.length > 0, 'no migration creates practice_exceptions');
-  return readFileSync(path.join(MIGRATION_DIR, defining[defining.length - 1]), 'utf8');
+    .map((name) => readFileSync(path.join(MIGRATION_DIR, name), 'utf8'))
+    .filter((sql) => pattern.test(sql));
+  assert.ok(setting.length > 0, `no migration sets ${pattern}; this test is stale`);
+  const block = setting[setting.length - 1].match(pattern);
+  return new Set([...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]));
+}
+
+const TBD_REASON_CHECK = /tbd_reason IS NULL OR tbd_reason IN \(([^)]*)\)/;
+const CAUSE_KIND_CHECK = /cause_kind IS NULL OR cause_kind IN \(([^)]*)\)/;
+
+/** The `z.enum([...])` values of the Edge exception schema's field `name`. */
+function edgeEnum(name) {
+  const source = readFileSync(
+    path.join(REPO_ROOT, 'supabase/functions/practice-persistence/index.ts'),
+    'utf8'
+  );
+  const found = source.match(new RegExp(`${name}: z\\s*\\.enum\\(\\[([^\\]]*)\\]\\)`));
+  assert.ok(found, `the Edge ${name} enum was not found; this test is stale`);
+  return new Set([...found[1].matchAll(/'([^']+)'/g)].map((m) => m[1]));
 }
 
 describe('practice_exceptions.tbd_reason CHECK', () => {
-  it('admits every PRACTICE_TBD_REASON value, plus exactly the two the plan adds', () => {
-    const sql = exceptionsMigration();
-    const block = sql.match(/tbd_reason IS NULL OR tbd_reason IN \(([^)]*)\)/);
-    assert.ok(block, 'the tbd_reason CHECK was not found; this test is stale');
-    const allowed = new Set([...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]));
+  it('admits exactly the PRACTICE_TBD_REASON values, none pending', () => {
+    const allowed = lastCheckValues(TBD_REASON_CHECK);
     const core = /** @type {string[]} */ (Object.values(PRACTICE_TBD_REASON));
     // Meta-assertion: the enum and the parse both matched something.
     assert.ok(core.length >= 4 && allowed.size >= 4, 'the enum or the CHECK parsed empty');
-    // 8.9 PR 7 added the daylight gate's two reasons to core. The repair is
-    // unwired, so nothing persists them yet; the CHECK (and the
-    // practice-persistence Edge enum) must admit them before 8.6 3b PRs 9-11
-    // wire it. Named exactly: this goes red when that migration lands, and
-    // when any other core reason is added without one.
-    const PENDING_CHECK_AMENDMENT = ['past-sunset', 'sunset-unknown'];
+    // 8.9 PR 6b (20261002000000) admitted the daylight gate's two reasons, so
+    // nothing core names is refused any more. Empty, and named exactly: this
+    // goes red when a core reason is added without a CHECK amendment.
+    const PENDING_CHECK_AMENDMENT = [];
     assert.deepEqual(
       core.filter((reason) => !allowed.has(reason)).sort(),
       PENDING_CHECK_AMENDMENT,
-      'the core reasons the CHECK refuses are not exactly the declared pending pair'
+      'a core PRACTICE_TBD_REASON value is refused by the tbd_reason CHECK'
     );
+    // Core now names plan §2's `declined` and §4's `coach-preference` too, so
+    // the other direction is exact as well: the CHECK admits nothing core
+    // does not name.
     const extra = [...allowed].filter((r) => !core.includes(r)).sort();
-    // plan §2 adds `declined`, §4 adds `coach-preference`; nothing else.
-    for (const r of extra) {
-      assert.ok(['coach-preference', 'declined'].includes(r), `unexpected CHECK value "${r}"`);
-    }
+    assert.deepEqual(extra, [], 'the tbd_reason CHECK admits a value core does not name');
+  });
+
+  it('matches the practice-persistence Edge enum exactly, reasons and causes', () => {
+    const reasons = lastCheckValues(TBD_REASON_CHECK);
+    const causes = lastCheckValues(CAUSE_KIND_CHECK);
+    assert.ok(causes.size >= 3, 'the cause_kind CHECK parsed short');
+    assert.deepEqual([...edgeEnum('tbd_reason')].sort(), [...reasons].sort());
+    assert.deepEqual([...edgeEnum('cause_kind')].sort(), [...causes].sort());
+    // D13 (a): the auto-scheduler's truncated remainder has its own cause.
+    assert.ok(causes.has('daylight'), 'the cause_kind CHECK does not admit daylight');
   });
 });
 

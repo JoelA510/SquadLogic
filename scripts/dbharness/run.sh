@@ -696,6 +696,33 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "FAIL smoke ${id}: it passed without proving the preferred_practice columns are gone and unread"; STATUS=1
       fi
     fi
+    # **8.9 PR 6b: persisting daylight TIME TBD (plan D13).** One claim per
+    # plant in prove.sh. The smoke RAISEs on each; these fail if its evidence
+    # stops. (The new_assignment refusals, the withdrawn team and the reader
+    # expansion RAISE in the same smoke and print as NOTICEs above; they carry
+    # no plant, so they are not claims.)
+    if [ "$id" = "20261002000000" ]; then
+      if grep -qF "tbd_reason CHECK: past-sunset and sunset-unknown admitted, 2 of 2; the misspelling past-sunet refused 23514" $SCRATCH/harness_smoke; then
+        echo "  | (checked) the practice_exceptions tbd_reason CHECK admits past-sunset and sunset-unknown, and refuses a misspelling"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the tbd_reason CHECK admits both daylight reasons and refuses a misspelling"; STATUS=1
+      fi
+      if grep -qF "cause_kind CHECK: daylight admitted; the unknown cause dusk and daylight on a contended reason refused 23514, 2 of 2" $SCRATCH/harness_smoke; then
+        echo "  | (checked) the practice_exceptions cause_kind CHECK admits daylight, and refuses an unknown cause and a daylight exception of any other shape"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the cause_kind CHECK admits daylight and refuses an unknown cause"; STATUS=1
+      fi
+      if grep -qF "new-row exception: 1 of 1 sent recorded on the save's new row (Team A, Monday, [2026-10-01,2026-10-18]), not the team's other row on that slot" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a daylight exception naming a same-save new row by its key is recorded on exactly that row, not the team's other row on the slot"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a same-save new-row exception is recorded on exactly its row"; STATUS=1
+      fi
+      if grep -qF "daylight guards: a mid-range past-sunset window (22023) and a new_assignment on another season's team (42501) were each refused, 2 of 2; nothing written" $SCRATCH/harness_smoke; then
+        echo "  | (checked) the practice writer refuses a mid-range daylight TIME TBD window, and a new_assignment on another season's team"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the mid-range and season-scope refusals"; STATUS=1
+      fi
+    fi
     # **The production RLS drift replay** is the only evidence that the
     # reconcile fixes production rather than a repo chain where it has nothing
     # to do, so each half of it is a claim. The smoke RAISEs on any failed
@@ -1011,7 +1038,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1444,6 +1471,47 @@ for id in "${REVERT_CHECKS[@]}"; do
       echo "FAIL seeding ${id}: could not set archive mode"; dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
+  # **20261002000000's revert narrows the CHECKs back**, which every row
+  # carrying a daylight reason or cause would violate, so it refuses unless
+  # told to archive them. The seed plants 3 exceptions on ONE run: a live
+  # past-sunset/daylight one, a withdrawn sunset-unknown/blackout one, and a
+  # live `contended` one the old CHECKs admit -- 2 to archive (1 live), 1 to
+  # keep. The revert is first applied WITHOUT archive mode, where it must
+  # refuse; archive mode is then set, and the ordinary step below must archive
+  # exactly the 2 and restore the old CHECKs and writer.
+  if [ "$id" = "20261002000000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('f6b00000-0000-4000-8000-00000000000f','Daylight Org','daylight-org');
+              INSERT INTO public.season_settings (id, organization_id, name) VALUES
+                ('f6b00000-0000-4000-8000-0000000000a1','f6b00000-0000-4000-8000-00000000000f','Daylight Season');
+              INSERT INTO public.divisions (id, organization_id, season_settings_id, name) VALUES
+                ('f6b00000-0000-4000-8000-0000000000a2','f6b00000-0000-4000-8000-00000000000f','f6b00000-0000-4000-8000-0000000000a1','Daylight Division');
+              INSERT INTO public.teams (id, organization_id, division_id, name) VALUES
+                ('f6b00000-0000-4000-8000-0000000000a3','f6b00000-0000-4000-8000-00000000000f','f6b00000-0000-4000-8000-0000000000a2','Daylight Team');
+              INSERT INTO public.scheduler_runs (id, organization_id, run_type, status, results) VALUES
+                ('f6b00000-0000-4000-8000-0000000000a5','f6b00000-0000-4000-8000-00000000000f','practice','completed','{}'::jsonb);
+              INSERT INTO public.practice_assignments (id, organization_id, team_id, effective_date_range, source) VALUES
+                ('f6b00000-0000-4000-8000-0000000000b1','f6b00000-0000-4000-8000-00000000000f','f6b00000-0000-4000-8000-0000000000a3','[2026-09-01,2026-10-18]','auto');
+              -- column order, because the column named window cannot be quoted inside psql_cmd
+              INSERT INTO public.practice_exceptions VALUES
+                (DEFAULT,'f6b00000-0000-4000-8000-00000000000f','f6b00000-0000-4000-8000-0000000000a1','f6b00000-0000-4000-8000-0000000000a3','f6b00000-0000-4000-8000-0000000000b1','[2026-10-19,2026-11-30]','time_tbd',NULL,'past-sunset','daylight',NULL,'f6b00000-0000-4000-8000-0000000000a5',NULL,DEFAULT,NULL,NULL),
+                (DEFAULT,'f6b00000-0000-4000-8000-00000000000f','f6b00000-0000-4000-8000-0000000000a1','f6b00000-0000-4000-8000-0000000000a3','f6b00000-0000-4000-8000-0000000000b1','[2026-09-07,2026-09-13]','time_tbd',NULL,'sunset-unknown','blackout',NULL,'f6b00000-0000-4000-8000-0000000000a5',NULL,DEFAULT,now(),NULL),
+                (DEFAULT,'f6b00000-0000-4000-8000-00000000000f','f6b00000-0000-4000-8000-0000000000a1','f6b00000-0000-4000-8000-0000000000a3','f6b00000-0000-4000-8000-0000000000b1','[2026-09-14,2026-09-20]','time_tbd',NULL,'contended',NULL,NULL,'f6b00000-0000-4000-8000-0000000000a5',NULL,DEFAULT,NULL,NULL);" \
+       >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the three practice exceptions the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+    if psql_file "$REPO/docs/sql/${id}_revert.sql" >$SCRATCH/harness_rev_refuse 2>&1; then
+      echo "FAIL revert ${id}: it narrowed the CHECKs while 2 daylight exceptions existed and archive mode was off"
+      STATUS=1; continue
+    elif ! grep -q 'refusing to revert: 2 practice exception(s), 1 live, carry a daylight reason or cause' $SCRATCH/harness_rev_refuse; then
+      echo "FAIL revert ${id}: it failed without the daylight-exception refusal"
+      dump 10 $SCRATCH/harness_rev_refuse; STATUS=1; continue
+    fi
+    if ! psql_cmd "ALTER DATABASE $DB SET squadlogic.revert_practice_exceptions_daylight = 'archive'" >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: could not set archive mode"; dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
   # **20260924000000's revert cannot restore what the pruning writer removed**,
   # so its warning counts the before-images it leaves on scheduler_runs. The
   # seed plants THREE runs holding 2, 1 and 0 superseded rows: 3 rows on 2
@@ -1707,6 +1775,44 @@ NEEDLES
       else
         echo "FAIL revert ${id}: planted 3 exceptions (2 unresolved) on 1 run and the revert did not archive them onto it"
         STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261002000000" ]; then
+      # Refused above with archive mode off; here it archived the 2 daylight
+      # rows onto the seeded run and kept the `contended` one. Read back from
+      # the run and the table, not only from the NOTICE.
+      if grep -q 'archived 2 daylight practice exception(s), 1 live, onto 1 run(s)' $SCRATCH/harness_rev &&
+         psql_cmd "SELECT 'ARCHIVE-VERDICT:' || jsonb_array_length(sr.results->'archived_exceptions')
+                          || ':' || (SELECT count(*) FROM public.practice_exceptions pe
+                                      WHERE pe.run_id = sr.id AND pe.tbd_reason = 'contended')
+                     FROM public.scheduler_runs sr WHERE sr.id = 'f6b00000-0000-4000-8000-0000000000a5'" \
+           >$SCRATCH/harness_archive 2>&1 && grep -q 'ARCHIVE-VERDICT:2:1' $SCRATCH/harness_archive; then
+        echo "  | (checked) the daylight-exceptions revert refused while 2 daylight exceptions existed, then archived both onto their run and kept the older exception"
+      else
+        echo "FAIL revert ${id}: planted 2 daylight exceptions and 1 older one on 1 run and the revert did not archive exactly the 2 onto it"
+        dump 10 $SCRATCH/harness_archive; STATUS=1
+      fi
+      # The old writer and CHECKs, read from the catalogue rather than from
+      # the revert's own NOTICE. `unreadable` fires when the lookup finds no
+      # writer at all, so a broken query cannot read as a clean revert.
+      if psql_cmd "SELECT 'WRITER-VERDICT:' || CASE
+               WHEN count(*) = 0 THEN 'unreadable'
+               WHEN count(*) = 1 AND max(p.prosrc) NOT LIKE '%new_assignment%'
+                    AND max(p.prosrc) LIKE '%practice_exceptions%'
+                    AND (SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+                          WHERE c.conname = 'practice_exceptions_tbd_reason_check') NOT LIKE '%sunset%'
+                    AND (SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c
+                          WHERE c.conname = 'practice_exceptions_cause_kind_check') NOT LIKE '%daylight%'
+                 THEN 'restored'
+               ELSE 'wrong' END
+             FROM pg_proc p
+            WHERE p.pronamespace = 'public'::regnamespace
+              AND p.proname = 'persist_practice_schedule';" \
+         >$SCRATCH/harness_writer 2>&1 && grep -q 'WRITER-VERDICT:restored' $SCRATCH/harness_writer; then
+        echo "  | (checked) the daylight-exceptions revert leaves exactly one persist_practice_schedule, the 20260929000000 writer without new_assignment, and the old tbd_reason and cause_kind CHECKs"
+      else
+        echo "FAIL revert ${id}: the 20261002000000 writer or CHECKs survived their own revert"
+        dump 10 $SCRATCH/harness_writer; STATUS=1
       fi
     fi
     if [ "$id" = "20260930000000" ]; then

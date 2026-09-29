@@ -47,6 +47,9 @@ R16="$REPO/docs/sql/20260930000000_revert.sql"
 # 8.6 PR 3b PR 8: the dead coaches.preferred_practice_* columns dropped.
 M17="$REPO/supabase/migrations/20261001000000_drop_coach_preferred_practice_columns.sql"
 R17="$REPO/docs/sql/20261001000000_revert.sql"
+# 8.9 PR 6b: daylight TIME TBD exceptions, and the writer copied whole.
+M18="$REPO/supabase/migrations/20261002000000_practice_exceptions_daylight.sql"
+R18="$REPO/docs/sql/20261002000000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -2683,8 +2686,10 @@ plant "R10 the assignment warning stops counting teams distinctly" "$R10" \
 # the moved team keeps both practices, which is the defect families saw.
 # (Re-aimed at 20260929000000 by 8.6 PR 3b PR 6: v3 drops and re-creates the
 # writer, so 20260924000000's body is superseded and a plant there is dead.
-# The prune survives in v3 for unlocked rows, and this smoke unlocks them.)
-plant "M11 the writer stops pruning superseded rows" "$M15" \
+# The prune survives in v3 for unlocked rows, and this smoke unlocks them.
+# Re-aimed again, at 20261002000000, by 8.9 PR 6b, which copies the writer
+# whole: 20260929000000's body is now superseded in turn.)
+plant "M11 the writer stops pruning superseded rows" "$M18" \
   "         WHERE pa.id = ANY (v_prune_ids)" \
   "         WHERE false AND pa.id = ANY (v_prune_ids)" \
   "FAIL smoke 20260924000000"
@@ -2693,7 +2698,7 @@ plant "M11 the writer stops pruning superseded rows" "$M15" \
 # instead -- with the roster count left intact, so the count meta-assertion
 # cannot be what catches it -- the dropped team and the never-scheduled one
 # both vanish: the exact silence the operator's condition on #64 forbids.
-plant "M12 teams without practice are listed from the payload, not the roster" "$M15" \
+plant "M12 teams without practice are listed from the payload, not the roster" "$M18" \
   "                   WHERE NOT EXISTS (
                        SELECT 1 FROM public.practice_assignments pa WHERE pa.team_id = t.id
                    )
@@ -2817,23 +2822,26 @@ plant "M14 scheduler_runs gets no admin write policy" "$M14" \
 # **8.6 PR 3b PR 6: writer v3, lock-by-default.** One plant per plan §6
 # witness for PR 6, each aimed at the only definition of its function
 # (anchor_liveness: LIVE) or at the table DDL (NA), each turning the claim
-# its smoke evidence prints red.
-plant "M15 the writer's lock check is removed" "$M15" \
+# its smoke evidence prints red. The writer's plants are aimed at $M18: 8.9
+# PR 6b (20261002000000) copies persist_practice_schedule whole, so the body
+# in $M15 is superseded and a plant there would be dead. The FK plant is
+# table DDL, which 20261002000000 does not touch, and stays on $M15.
+plant "M15 the writer's lock check is removed" "$M18" \
   "    IF v_locked_id IS NOT NULL THEN" \
   "    IF false THEN" \
   "FAIL smoke 20260929000000"
 
-plant "M15 unlock is by team, not by row" "$M15" \
+plant "M15 unlock is by team, not by row" "$M18" \
   "     WHERE NOT (t.id = ANY (v_unlock_ids))" \
   "     WHERE NOT (t.id IN (SELECT u.id FROM public.practice_assignments u WHERE u.team_id IN (SELECT w.team_id FROM public.practice_assignments w WHERE w.id = ANY (v_unlock_ids))))" \
   "FAIL smoke 20260929000000"
 
-plant "M15 the unlock gate stops checking is_org_admin" "$M15" \
+plant "M15 the unlock gate stops checking is_org_admin" "$M18" \
   "       AND (auth.uid() IS NULL OR NOT public.is_org_admin(v_org_id)) THEN" \
   "       AND (auth.uid() IS NULL) THEN" \
   "FAIL smoke 20260929000000"
 
-plant "M15 the unlock audit call is dropped" "$M15" \
+plant "M15 the unlock audit call is dropped" "$M18" \
   "        PERFORM public.record_audit_event(
             v_org_id,
             'practice.unlock_accepted'," \
@@ -2844,7 +2852,7 @@ plant "M15 the unlock audit call is dropped" "$M15" \
 
 # The representation plan §1 rejects: the temporary move written as a second
 # assignment row (on the relocated slot, or the series' own for TIME TBD).
-plant "M15 exceptions are stored as assignment rows" "$M15" \
+plant "M15 exceptions are stored as assignment rows" "$M18" \
   "        INSERT INTO public.practice_exceptions (
             organization_id, season_settings_id, team_id, assignment_id, \"window\",
             kind, practice_slot_id, tbd_reason, cause_kind, cause_id, run_id, created_by
@@ -2879,7 +2887,7 @@ plant "M15 practice_exceptions' assignment FK cascades" "$M15" \
 # The double-booking rule is a TIME clash (coordinator ruling on #461). Three
 # plants, one per case: range-only turns (a) red, never-clash turns (b) red,
 # weekday-only turns (c) red.
-plant "M15 the double-booking rule reverts to range-only" "$M15" \
+plant "M15 the double-booking rule reverts to range-only" "$M18" \
   "     WHERE ps.day_of_week = ks.day_of_week
        AND ps.start_time < ks.end_time
        AND ks.start_time < ps.end_time
@@ -2888,14 +2896,14 @@ plant "M15 the double-booking rule reverts to range-only" "$M15" \
 " \
   "FAIL smoke 20260929000000"
 
-plant "M15 the double-booking time predicate is dropped entirely" "$M15" \
+plant "M15 the double-booking time predicate is dropped entirely" "$M18" \
   "     WHERE ps.day_of_week = ks.day_of_week
 " \
   "     WHERE false AND ps.day_of_week = ks.day_of_week
 " \
   "FAIL smoke 20260929000000"
 
-plant "M15 the double-booking rule ignores minutes" "$M15" \
+plant "M15 the double-booking rule ignores minutes" "$M18" \
   "       AND ps.start_time < ks.end_time
        AND ks.start_time < ps.end_time
 " \
@@ -2903,7 +2911,7 @@ plant "M15 the double-booking rule ignores minutes" "$M15" \
   "FAIL smoke 20260929000000"
 
 # Case (d): back-to-back slots touch at a boundary and share no minute.
-plant "M15 the double-booking minute test counts a touching boundary as a clash" "$M15" \
+plant "M15 the double-booking minute test counts a touching boundary as a clash" "$M18" \
   "       AND ps.start_time < ks.end_time
        AND ks.start_time < ps.end_time
 " \
@@ -2912,7 +2920,7 @@ plant "M15 the double-booking minute test counts a touching boundary as a clash"
 " \
   "FAIL smoke 20260929000000"
 
-plant "M15 the base_fingerprint check is skipped" "$M15" \
+plant "M15 the base_fingerprint check is skipped" "$M18" \
   "    IF base_fingerprint IS NOT NULL AND base_fingerprint IS DISTINCT FROM v_fingerprint THEN" \
   "    IF false AND base_fingerprint IS NOT NULL THEN" \
   "FAIL smoke 20260929000000"
@@ -3018,6 +3026,70 @@ plant "R17 the revert re-adds the window with the wrong type" "$R17" \
   "    ADD COLUMN IF NOT EXISTS preferred_practice_window text;" \
   "FAIL revert 20261001000000: the revert did not re-add both preferred_practice columns"
 
+# **8.9 PR 6b: persisting daylight TIME TBD (plan D13).** The two CHECKs are
+# table DDL (NA); the resolution anchors sit in the only live definition of
+# the writer (anchor_liveness: LIVE). Two resolution plants, because the smoke
+# has two guards on it: linking the team's OTHER row on the slot passes the
+# writer's own count check and is caught only by the smoke's link assertion;
+# resolving nothing is caught by the count check.
+plant "M18 the tbd_reason CHECK drops sunset-unknown" "$M18" \
+  "            'past-sunset', 'sunset-unknown'" \
+  "            'past-sunset'" \
+  "FAIL smoke 20261002000000"
+
+plant "M18 the cause_kind CHECK drops daylight" "$M18" \
+  "IN ('blackout', 'retirement', 'daylight')" \
+  "IN ('blackout', 'retirement')" \
+  "FAIL smoke 20261002000000"
+
+plant "M18 the new-row resolution links the team's other row on the slot" "$M18" \
+  "                       AND r.effective_date_range = (e.value#>>'{new_assignment,effective_date_range}')::daterange))" \
+  "                       AND r.effective_date_range <> (e.value#>>'{new_assignment,effective_date_range}')::daterange))" \
+  "FAIL smoke 20261002000000"
+
+plant "M18 the new-row resolution resolves nothing" "$M18" \
+  "                     WHERE r.organization_id = v_org_id" \
+  "                     WHERE false AND r.organization_id = v_org_id" \
+  "FAIL smoke 20261002000000"
+
+# Review follow-ups: the daylight shape, the mid-range refusal (D13 c,
+# enforced rather than only noted) and the sibling path's season scope.
+plant "M18 the daylight shape CHECK admits any reason" "$M18" \
+  "            AND tbd_reason IN ('past-sunset', 'sunset-unknown'))" \
+  "            AND tbd_reason IS NOT NULL)" \
+  "FAIL smoke 20261002000000"
+
+plant "M18 the mid-range daylight window check is removed" "$M18" \
+  "    IF v_bad_id IS NOT NULL THEN
+        RAISE EXCEPTION 'a daylight TIME TBD window on assignment % ends before its series does" \
+  "    IF false THEN
+        RAISE EXCEPTION 'a daylight TIME TBD window on assignment % ends before its series does" \
+  "FAIL smoke 20261002000000"
+
+plant "M18 new_assignment skips the season scope" "$M18" \
+  "               AND d.season_settings_id = v_season_id)
+     LIMIT 1;
+    IF v_bad_ref IS NOT NULL THEN
+        RAISE EXCEPTION 'exceptions names new_assignment %, whose team" \
+  "               AND d.season_settings_id IS NOT NULL)
+     LIMIT 1;
+    IF v_bad_ref IS NOT NULL THEN
+        RAISE EXCEPTION 'exceptions names new_assignment %, whose team" \
+  "FAIL smoke 20261002000000"
+
+# The refusal is the claim: without it the archive-off application narrows
+# the CHECKs having archived the rows unasked.
+plant "R18 the revert archives daylight exceptions without being told to" "$R18" \
+  "    IF v_total > 0 AND v_mode IS DISTINCT FROM 'archive' THEN" \
+  "    IF false THEN" \
+  "FAIL revert 20261002000000: it narrowed the CHECKs while 2 daylight exceptions existed and archive mode was off"
+
+# The revert's writer restore goes to another name: the 6b writer survives.
+plant "R18 the revert does not restore the writer" "$R18" \
+  "CREATE OR REPLACE FUNCTION public.persist_practice_schedule(" \
+  "CREATE OR REPLACE FUNCTION public.harness_plant_unrestored_writer(" \
+  "FAIL revert 20261002000000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -3054,6 +3126,12 @@ declare -A CLAIM_PROVER=(
   ["(checked) a practice save adding a same-weekday slot at overlapping minutes to a team is refused as locked, naming the row it clashes with"]="M15 the double-booking time predicate is dropped entirely"
   ["(checked) a practice save adding a same-weekday slot at non-overlapping minutes to a team is accepted"]="M15 the double-booking rule ignores minutes"
   ["(checked) the writer-v3 revert refused while 2 unresolved practice exceptions existed, then archived all 3 onto their run before dropping the table"]="R15 the revert drops unresolved exceptions without archiving"
+  ["(checked) the practice_exceptions tbd_reason CHECK admits past-sunset and sunset-unknown, and refuses a misspelling"]="M18 the tbd_reason CHECK drops sunset-unknown"
+  ["(checked) the practice_exceptions cause_kind CHECK admits daylight, and refuses an unknown cause and a daylight exception of any other shape"]="M18 the cause_kind CHECK drops daylight|M18 the daylight shape CHECK admits any reason"
+  ["(checked) the practice writer refuses a mid-range daylight TIME TBD window, and a new_assignment on another season's team"]="M18 the mid-range daylight window check is removed|M18 new_assignment skips the season scope"
+  ["(checked) a daylight exception naming a same-save new row by its key is recorded on exactly that row, not the team's other row on the slot"]="M18 the new-row resolution links the team's other row on the slot|M18 the new-row resolution resolves nothing"
+  ["(checked) the daylight-exceptions revert refused while 2 daylight exceptions existed, then archived both onto their run and kept the older exception"]="R18 the revert archives daylight exceptions without being told to"
+  ["(checked) the daylight-exceptions revert leaves exactly one persist_practice_schedule, the 20260929000000 writer without new_assignment, and the old tbd_reason and cause_kind CHECKs"]="R18 the revert does not restore the writer"
   ["(checked) the revert named the retirement it was about to erase"]="R1 revert erases a future retirement silently"
   ["(checked) the revert counted the practice assignment it was about to expose"]="R3 revert exposes dangling rows silently"
   ["(checked) the revert named the retirement guard it was putting back"]="R3 revert reinstates the weaker guard silently"

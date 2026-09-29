@@ -242,6 +242,13 @@ export const PRACTICE_TBD_REASON = Object.freeze({
    * As `PAST_SUNSET`, but at least one refusal was an unknown sunset (no table
    * record, no coordinates): never read as allowed (D4), and coordinates
    * could make a candidate legal.
+   *
+   * Both daylight reasons are persistable since 8.9 PR 6b (20261002000000):
+   * a repair window keeps its own `cause_kind` (blackout or retirement), the
+   * daylight part only in this reason. **Tail windows only**: readers do not
+   * apply exceptions until 3b PR 12, so the 3b PR 9 adapter must refuse to
+   * emit a mid-range TIME TBD window until then -- a reader would still show
+   * that window's practices.
    */
   SUNSET_UNKNOWN: 'sunset-unknown',
 });

@@ -128,13 +128,23 @@ done
 # `=== baseline: ...`, the run continuing exactly as if nothing had happened.
 # The identical mistake as the thing being fixed, one layer in -- a loud message
 # that changes nothing is still a silent no-op.
+# **Private scratch.** The baseline and plant transcripts, and find's stderr,
+# used fixed `/tmp/harness_*` paths, shared by every proof on the machine. One
+# directory per run (fixed under /tmp, so the unquoted paths cannot split),
+# removed on exit: here until `on_exit` takes over below, then by
+# `on_exit`/`on_signal`. This isolates TRANSCRIPTS only. Plants still edit this
+# checkout's migrations in place with fixed `.orig` backups, so two proofs, or a
+# proof and a harness run, in ONE checkout still interfere: use one worktree each.
+PSCRATCH="$(mktemp -d /tmp/harness-prove.XXXXXX)" ||
+  { echo "REFUSING TO START: could not create a scratch directory" >&2; exit 3; }
+trap 'rm -rf -- "$PSCRATCH"' EXIT
 stale_backups() {
   local out status
-  out="$(find "${PLANT_DIRS[@]}" -name '*.orig' -type f 2>/tmp/harness_find_err)"
+  out="$(find "${PLANT_DIRS[@]}" -name '*.orig' -type f 2>$PSCRATCH/harness_find_err)"
   status=$?
   if [ "$status" -ne 0 ]; then
     echo "find over the plant directories failed (exit $status)" >&2
-    sed 's/^/  /' /tmp/harness_find_err >&2
+    sed 's/^/  /' $PSCRATCH/harness_find_err >&2
     return 3
   fi
   printf '%s\n' "$out"
@@ -261,7 +271,9 @@ kill_harness() {
 on_signal() {
   trap - EXIT INT TERM
   kill_harness
-  restore_all || exit 6
+  # After the restore: its sweep writes find's stderr into this directory.
+  restore_all || { rm -rf -- "$PSCRATCH"; exit 6; }
+  rm -rf -- "$PSCRATCH"
   exit 130
 }
 # **A trap that returns cannot change the exit status.** `trap restore_all EXIT`
@@ -274,6 +286,7 @@ on_signal() {
 on_exit() {
   local status=$?
   restore_all || status=6
+  rm -rf -- "$PSCRATCH"
   exit "$status"
 }
 trap on_exit EXIT
@@ -506,11 +519,11 @@ if [ -n "$ANCHORS_ONLY" ] || [ -n "$CENSUS_ONLY" ]; then
   :
 else
 echo "=== baseline: the unmutated harness must pass before any plant ==="
-bash "$REPO/scripts/dbharness/run.sh" >/tmp/harness_baseline_out 2>&1 &
+bash "$REPO/scripts/dbharness/run.sh" >$PSCRATCH/harness_baseline_out 2>&1 &
 HARNESS_PID=$!
 wait "$HARNESS_PID"; baseline_status=$?
 HARNESS_PID=""
-baseline_out="$(cat /tmp/harness_baseline_out)"
+baseline_out="$(cat $PSCRATCH/harness_baseline_out)"
 if [ "$baseline_status" -eq 0 ]; then
   echo "BASELINE GREEN"
 else
@@ -634,11 +647,11 @@ PY
   # migration that fails to APPLY exits early, so the loudest possible catch was
   # recorded as NOT CAUGHT. Six of ten results were wrong for that reason.
   local out status
-  bash "$REPO/scripts/dbharness/run.sh" >/tmp/harness_plant_out 2>&1 &
+  bash "$REPO/scripts/dbharness/run.sh" >$PSCRATCH/harness_plant_out 2>&1 &
   HARNESS_PID=$!
   wait "$HARNESS_PID"; status=$?
   HARNESS_PID=""
-  out="$(cat /tmp/harness_plant_out)"
+  out="$(cat $PSCRATCH/harness_plant_out)"
   python3 -c "
 import io,os,sys
 f=sys.argv[1]
@@ -3382,7 +3395,7 @@ while IFS= read -r claim; do
       census_ok=0
     fi
   done
-done < <(sed -n 's/^  | \((checked) .*\)$/\1/p' /tmp/harness_baseline_out)
+done < <(sed -n 's/^  | \((checked) .*\)$/\1/p' $PSCRATCH/harness_baseline_out)
 
 # The other direction: a claim that was renamed or removed leaves its entry here
 # naming nothing, and an entry nobody checks is the unread field this project

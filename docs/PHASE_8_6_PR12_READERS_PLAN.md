@@ -1,8 +1,6 @@
 # 8.6 PR 3b, PR 12: calendar readers apply saved practice exceptions: plan
 
-Status: **DRAFT, awaiting the operator.** Nothing here is approved. The
-questions in §9 are open; each carries a recommendation, which is not an
-answer.
+Status: **APPROVED 2026-09-29.** The operator answered Q1-Q11; see §10.
 
 It refines row 12 of the approved 3b plan (`docs/PHASE_8_6_PR3B_PLAN.md:286`,
 "Readers apply exceptions, P reads, ~400"). That plan's §1 defines the table
@@ -528,3 +526,35 @@ first: the feed is where families look.
   rows only.
 - That stopgap would be a second, narrower contract, which CLAUDE.md §3 warns
   against. It should be taken only by explicit ruling.
+
+## 10. Operator answers (2026-09-29)
+
+The operator took every recommendation in §9, as written:
+
+- **Q1 and Q2 (feed).** A relocated practice keeps the UID scheme
+  `<assignment>_<actual date>`. Original dates inside the window are removed,
+  not sent as `STATUS:CANCELLED`. The SUMMARY is `Practice (moved) - <team>`,
+  and the DESCRIPTION uses enum wording only. Each TIME TBD date gets one
+  all-day `STATUS:TENTATIVE` VEVENT and is counted in the CALDESC. An open or
+  unreadable window goes in the CALDESC only.
+- **Q3 and Q4 (portal and RSVP).** A moved practice shows at its new time and
+  place with a "Moved from" line. A TBD date shows "Time TBD on <date>:
+  <reason>" with RSVP hidden. Coaches and parents see the same thing. An RSVP
+  is keyed on (assignment id, new date). The RPC refuses TBD dates and
+  original dates inside a relocated window. Stored RSVPs are never deleted.
+  This makes 12d (the RSVP migration) part of PR 12.
+- **Q5-Q10.** Approved as recommended:
+  - Q5: an "INCOMPLETE" CALDESC and portal banner when the exceptions read
+    fails;
+  - Q6: exports and the player record stay series-level and state the count
+    of unshown changes; the latest-run-id question is filed separately;
+  - Q7: conservative TIME TBD for unreadable, open and overlapping windows;
+  - Q8: the refusals are lifted outside PR 12;
+  - Q9: relocated dates are clipped to the row's range, TIME TBD dates are
+    not;
+  - Q10: show both on a clash and log `PRACTICE_TBD_SHADOWED`.
+- **Q11.** No separate hotfix. Land 12a, then 12b first.
+  - The §2 unknown is resolved. A catalog-only check of production on
+    2026-09-29 found that `public.practice_exceptions` does not exist yet (its
+    migration is still pending) and there are 0 practice assignment rows.
+  - So no production row is affected today.

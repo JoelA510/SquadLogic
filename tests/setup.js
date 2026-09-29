@@ -35,9 +35,10 @@ if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
 // end with that chain still loading; Vitest then rejects the pending fetch with
 // an EnvironmentTeardownError and the run exits 1 (CI run 1138, #509, #77).
 // `vi.dynamicImportSettled()` waits for any module still being fetched or
-// evaluated, so it covers this chain and any other lazy import without loading
-// anything itself; with nothing loading it returns after one timer tick.
-// Registered here, it is the file's first afterAll, so under Vitest's default
+// evaluated, so it covers this chain and any other lazy import already in flight
+// (an import a timer has not yet started is not seen), and it loads nothing
+// itself; with nothing loading it returns after one timer tick.
+// Registered here, before any test file's hooks, so under Vitest's default
 // `sequence.hooks: 'stack'` it runs after the file's own afterAll hooks.
 afterAll(async () => {
   await vi.dynamicImportSettled();

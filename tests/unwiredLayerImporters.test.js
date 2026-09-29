@@ -526,6 +526,8 @@ const LAYERS = Object.freeze([
     consumers: Object.freeze([
       'frontend/src/utils/practiceRepairPanel.js',
       'tests/practiceRecommendations.test.js',
+      // Existing closures: a decline never re-offers closed ground.
+      'tests/practiceRepairAdapter.test.js',
       'tests/practiceRepairDaylight.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),

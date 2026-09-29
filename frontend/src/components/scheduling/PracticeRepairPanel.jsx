@@ -281,9 +281,16 @@ function Recommendations({ rows, lossKey, timeZone, subject }) {
       </p>
       <ul className="text-sm" data-testid="practice-repair-findings">
         <li data-testid="practice-repair-closures-declared">
-          Existing blackouts and other retirements are not consulted: a recommendation may land on
-          ground they already close. Check it before enacting.
+          Existing blackouts and retirements of venues, fields and sub-surfaces are honoured (
+          {adapted.declared.closures.applied} applied, {result.closures?.candidatesRefused ?? 0}{' '}
+          candidate slot(s) refused). Not read: a field switched off without a retirement date.
         </li>
+        {adapted.declared.closures.unattributable.length > 0 && (
+          <li data-testid="practice-repair-closures-unattributable">
+            {adapted.declared.closures.unattributable.length} imported blackout(s) name no field, so
+            they were not applied: a recommendation may land on ground they close.
+          </li>
+        )}
         {result.findings.map((finding, index) => (
           <li
             key={`${finding.code}-${index}`}

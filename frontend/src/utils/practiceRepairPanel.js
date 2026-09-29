@@ -25,6 +25,13 @@
  * **Lighting overrides** (8.9 D14): none passed; their table is D14 PR B.
  * The adapter's `declared.lightingOverrides` note is shown instead.
  *
+ * **Existing closures.** The org's other blackouts (`field_closures`) and the
+ * `effective_to` of every location, field and sub-surface read are passed to
+ * the adapter, which makes them the repair's `closures`: no recommendation
+ * lands on ground they close on any date of its window. What the adapter
+ * could not apply (an import closure naming no ground) is in
+ * `declared.closures` and shown.
+ *
  * @module utils/practiceRepairPanel
  */
 
@@ -136,6 +143,7 @@ export function openPracticeRepair(rows, loss, { timeZone = null } = {}) {
     practiceAssignments: rows.practiceAssignments,
     teamCoachAssignments: rows.teamCoachAssignments,
     coachPreferences: rows.coachPreferences,
+    fieldClosures: rows.fieldClosures,
     loss,
     ...(daylightPlan.daylight ? { daylight: daylightPlan.daylight } : {}),
   });

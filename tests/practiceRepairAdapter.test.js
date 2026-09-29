@@ -1022,6 +1022,39 @@ describe('existing closures', () => {
     }
   });
 
+  it('a partial-day closure is half-open: adjacent is admitted, a one-minute overlap refused', () => {
+    // The candidate is F2 Mon 17:00-18:00 (1020-1080); the closure is on F2 on
+    // Monday 2026-10-12, inside A1's window. `admitted` is stated here and
+    // cross-checked against the independent helper over the input row.
+    const cases = [
+      { what: 'starts at the closure end', start: 960, end: 1020, admitted: true },
+      { what: 'ends at the closure start', start: 1080, end: 1140, admitted: true },
+      { what: 'overlaps its start by one minute', start: 960, end: 1021, admitted: false },
+      { what: 'overlaps its end by one minute', start: 1079, end: 1140, admitted: false },
+    ];
+    for (const c of cases) {
+      const row = closureRow({ closes_field_id: F2, start_minutes: c.start, end_minutes: c.end });
+      const rows = rowsFor(WINDOW_LOSS, { rows: { fieldClosures: [row] } });
+      // Enumerated from the input closure row: the helper's own reading agrees.
+      const closure = closedGroundOf(rows).find((g) => g.what === `blackout ${CLOSURE_ID}`);
+      assert.ok(closure?.minutes != null, `${c.what}: the row must be minute-scoped`);
+      const met = closedDatesOf(
+        closure,
+        { surfaceId: F2, weekday: 'MON', startMinutes: 1020, durationMinutes: 60 },
+        '2026-10-05',
+        '2026-10-18'
+      );
+      assert.equal(met.length === 0, c.admitted, `${c.what}: helper disagrees with the table`);
+      const { result } = runRows(rows);
+      assert.deepEqual(landingsOnClosedGround(rows, result.recommendations), [], c.what);
+      assert.equal(recOf(result, A1).to?.surfaceId === F2, c.admitted, c.what);
+      const refusedOnF2 = result.closures.refused.filter(
+        (r) => r.to.surfaceId === F2 && r.to.weekday === 'MON' && r.to.startMinutes === 1020
+      );
+      assert.equal(refusedOnF2.length > 0, !c.admitted, `${c.what}: refusal record`);
+    }
+  });
+
   it('a venue-level closure closes its fields and their sub-surfaces', () => {
     const cases = [
       { fieldClosures: [closureRow({ closes_location_id: LOC_A })] },

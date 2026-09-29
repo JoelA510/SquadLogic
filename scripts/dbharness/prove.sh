@@ -53,6 +53,9 @@ R18="$REPO/docs/sql/20261002000000_revert.sql"
 # 8.9 D14 PR B: portable-lighting overrides and their revert.
 M19="$REPO/supabase/migrations/20261003000000_practice_lighting_overrides.sql"
 R19="$REPO/docs/sql/20261003000000_revert.sql"
+# 8.6 3b PR 11b: the enact wrapper and its revert.
+M20="$REPO/supabase/migrations/20261004000000_enact_practice_recommendation.sql"
+R20="$REPO/docs/sql/20261004000000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -3154,6 +3157,94 @@ plant "R19 the lighting override warning stops counting slots distinctly" "$R19"
   "    SELECT count(*), count(practice_slot_id), count(*) FILTER (WHERE status = 'approved')" \
   "revert 20261003000000: planted 3 lighting override rows across 2 slots, 1 approved, and the revert did not warn with those figures"
 
+# **8.6 3b PR 11b: enacting one recommendation (plan §6, the 11b
+# witnesses).** One plant per claim the smoke's evidence prints. Every anchor
+# sits in the only definition of enact_practice_recommendation
+# (anchor_liveness: LIVE).
+plant "M20 the enact wrapper stops checking the caller is an org admin" "$M20" \
+  "    IF auth.uid() IS NULL OR v_org_id IS NULL OR NOT public.is_org_admin(v_org_id) THEN" \
+  "    IF auth.uid() IS NULL OR v_org_id IS NULL THEN" \
+  "FAIL smoke 20261004000000"
+
+# Plant A (witness 24): drop step 2a, so the wrapper believes the record's
+# claimed date instead of reading fields.effective_to.
+plant "M20 Plant A: the enact wrapper drops the commit gate (step 2a)" "$M20" \
+  "    SELECT f.effective_to INTO v_stored
+      FROM public.fields f
+     WHERE f.id = v_field
+       AND f.organization_id = v_org_id;
+    IF v_stored IS NULL THEN
+        RAISE EXCEPTION 'retirement of field % is not committed: no effective_to is stored; save the retirement first', v_field
+            USING ERRCODE = '22023';
+    END IF;
+    IF v_stored <> v_loss_from - 1 THEN
+        RAISE EXCEPTION 'retirement of field % is committed with a different date: % stored, % expected (the day before %)', v_field, v_stored, v_loss_from - 1, v_loss_from
+            USING ERRCODE = '22023';
+    END IF;" \
+  "    v_stored := (enact->'cause'->>'stored_effective_to')::date;" \
+  "FAIL smoke 20261004000000"
+
+plant "M20 the enact wrapper accepts a NULL base_fingerprint" "$M20" \
+  "    IF base_fingerprint IS NULL THEN
+        RAISE EXCEPTION 'an enact is never blind" \
+  "    IF false THEN
+        RAISE EXCEPTION 'an enact is never blind" \
+  "FAIL smoke 20261004000000"
+
+plant "M20 the enact wrapper drops the only-S check" "$M20" \
+  "     WHERE t.id IS DISTINCT FROM v_series::text;" \
+  "     WHERE false;" \
+  "FAIL smoke 20261004000000"
+
+plant "M20 the enact wrapper accepts a new row not marked recommendation" "$M20" \
+  "count(*) FILTER (WHERE pa.team_id <> v_team OR pa.assigned_via <> 'recommendation')" \
+  "count(*) FILTER (WHERE pa.team_id <> v_team)" \
+  "FAIL smoke 20261004000000"
+
+# Witness 5's SQL arm: the wrapper hands the writer no base, so a stale one
+# is never compared (the "retry without base_fingerprint" defect).
+plant "M20 the enact wrapper passes the writer no base_fingerprint" "$M20" \
+  "v_run_data, assignments, false, unlock, closes, exceptions, '[]'::jsonb, base_fingerprint);" \
+  "v_run_data, assignments, false, unlock, closes, exceptions, '[]'::jsonb, NULL);" \
+  "FAIL smoke 20261004000000"
+
+# Witness 14: an audit that can fail without failing the enact is not atomic
+# with it (the "audit after the RPC" defect, inside the database).
+plant "M20 the enact audit failure is swallowed" "$M20" \
+  "    PERFORM public.record_audit_event(
+        v_org_id,
+        'practice.recommendation_enacted',
+        'practice_assignment',
+        v_series,
+        v_meta
+    );" \
+  "    BEGIN
+    PERFORM public.record_audit_event(
+        v_org_id,
+        'practice.recommendation_enacted',
+        'practice_assignment',
+        v_series,
+        v_meta
+    );
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;" \
+  "FAIL smoke 20261004000000"
+
+plant "M20 the enact audit leaves result_fingerprint unfilled" "$M20" \
+  "              || jsonb_build_object('result_fingerprint', v_result->'fingerprint');" \
+  "              || jsonb_build_object('result_fingerprint', NULL);" \
+  "FAIL smoke 20261004000000"
+
+plant "M20 the enact wrapper drops the idempotency lookup" "$M20" \
+  "                  AND sr.parameters->>'enact_key' = v_key::text) THEN" \
+  "                  AND sr.parameters->>'enact_key' = v_key::text AND false) THEN" \
+  "FAIL smoke 20261004000000"
+
+plant "R20 the revert does not drop the enact wrapper" "$R20" \
+  "DROP FUNCTION IF EXISTS public.enact_practice_recommendation(jsonb, jsonb, jsonb, jsonb, jsonb, text, jsonb);" \
+  "DROP FUNCTION IF EXISTS public.enact_practice_recommendation(jsonb);" \
+  "FAIL revert 20261004000000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -3253,6 +3344,17 @@ declare -A CLAIM_PROVER=(
   ["(checked) a coach reads the lighting overrides of their own teams' slots only, and an admin reads all of the organisation's"]="M19 the read policy lets every org member read every override"
   ["(checked) the revert counted the lighting overrides it was about to destroy, the slots they span, and the approved ones"]="R19 the lighting override warning stops counting slots distinctly"
   ["(checked) a practice slot holding lighting overrides cannot be deleted out from under them (23503); none is destroyed unreported"]="M19 a slot delete cascades to its lighting overrides"
+  ["(checked) only an org admin with a uid enacts a practice recommendation: a coach, a parent and a no-uid caller are refused by the wrapper itself"]="M20 the enact wrapper stops checking the caller is an org admin"
+  ["(checked) an enact is refused while the retirement is uncommitted, or committed with a different date, reading the stored fields.effective_to, and writes nothing"]="M20 Plant A: the enact wrapper drops the commit gate (step 2a)"
+  ["(checked) an enact with no base_fingerprint is refused (22023): it is never blind"]="M20 the enact wrapper accepts a NULL base_fingerprint"
+  ["(checked) an enact that touches any series but its own is refused (22023) and rolled back"]="M20 the enact wrapper drops the only-S check"
+  ["(checked) an enact's new row must be its team's and assigned_via = recommendation, or the enact is refused"]="M20 the enact wrapper accepts a new row not marked recommendation"
+  ["(checked) an enact on a stale base_fingerprint is refused (40001) and writes nothing"]="M20 the enact wrapper passes the writer no base_fingerprint"
+  ["(checked) the enact audit row is written in the enact's own transaction: an audit failure fails the enact"]="M20 the enact audit failure is swallowed"
+  ["(checked) an enact changes only its own series: every other pre-enact row unchanged, the series closed the day before D, and exactly one new recommendation row"]="M20 the enact wrapper drops the only-S check"
+  ["(checked) an enact leaves one practice.recommendation_enacted row on its series with the plan section 5 keys, the stored retirement date and the writer's result fingerprint"]="M20 the enact audit leaves result_fingerprint unfilled"
+  ["(checked) a repeated enact key is idempotent: the second call returns idempotent: true and writes nothing"]="M20 the enact wrapper drops the idempotency lookup"
+  ["(checked) the enact revert drops enact_practice_recommendation and leaves the 20261002000000 writer in place"]="R20 the revert does not drop the enact wrapper"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"
   ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M14 the reconcile skips dropping the broad policy"
   ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M14 the reconcile skips creating the missing read policies"

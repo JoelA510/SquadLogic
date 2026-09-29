@@ -770,6 +770,63 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "FAIL smoke ${id}: it passed without proving a slot delete cannot destroy its lighting overrides"; STATUS=1
       fi
     fi
+    # **8.6 3b PR 11b: enacting one recommendation (plan §6, the 11b
+    # witnesses).** One claim per plant in prove.sh. The smoke RAISEs on each;
+    # these fail if its evidence stops. (The locked-afterwards save, the TIME
+    # TBD enact and the grant posture RAISE in the same smoke and print as
+    # NOTICEs above; they carry no plant, so they are not claims.)
+    if [ "$id" = "20261004000000" ]; then
+      if grep -qF "enact access: a coach, a parent and a caller with no uid were each refused 42501 by the wrapper, 3 of 3, and wrote nothing" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an org admin with a uid enacts a practice recommendation: a coach, a parent and a no-uid caller are refused by the wrapper itself"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a non-admin cannot enact a practice recommendation"; STATUS=1
+      fi
+      if grep -qF "commit gate: with the cause field's effective_to NULL and with 2026-10-21 stored, the enact was refused 22023, 2 of 2 (not committed, a different date); 0 rows and 0 audit rows changed" $SCRATCH/harness_smoke; then
+        echo "  | (checked) an enact is refused while the retirement is uncommitted, or committed with a different date, reading the stored fields.effective_to, and writes nothing"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the enact commit gate reads the stored retirement date"; STATUS=1
+      fi
+      if grep -qF "never blind: an enact with no base_fingerprint was refused 22023" $SCRATCH/harness_smoke; then
+        echo "  | (checked) an enact with no base_fingerprint is refused (22023): it is never blind"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a blind enact is refused"; STATUS=1
+      fi
+      if grep -qF "only S: a payload whose closes and unlock also name another series was refused 22023 and rolled back; 0 rows and 0 audit rows changed" $SCRATCH/harness_smoke; then
+        echo "  | (checked) an enact that touches any series but its own is refused (22023) and rolled back"
+      else
+        echo "FAIL smoke ${id}: it passed without proving an enact touching another series is refused"; STATUS=1
+      fi
+      if grep -qF "marked: an enact whose new row is assigned_via repair, not recommendation, was refused 22023" $SCRATCH/harness_smoke; then
+        echo "  | (checked) an enact's new row must be its team's and assigned_via = recommendation, or the enact is refused"
+      else
+        echo "FAIL smoke ${id}: it passed without proving an enact's new row must be marked recommendation"; STATUS=1
+      fi
+      if grep -qF "stale: an enact whose base was read before another write was refused 40001; 0 rows and 0 audit rows changed" $SCRATCH/harness_smoke; then
+        echo "  | (checked) an enact on a stale base_fingerprint is refused (40001) and writes nothing"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a stale enact is refused 40001"; STATUS=1
+      fi
+      if grep -qF "audit atomicity: with practice.recommendation_enacted unregistered the enact itself failed 23503 at its audit row, so its writes rolled back with it" $SCRATCH/harness_smoke; then
+        echo "  | (checked) the enact audit row is written in the enact's own transaction: an audit failure fails the enact"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the enact audit is atomic with its write"; STATUS=1
+      fi
+      if grep -qF "only S changed: of 3 pre-enact rows, the 2 other than S are unchanged in id, slot, range and assigned_via; S is closed at 2026-10-14; exactly 1 new row (Team 1, Thursday, from 2026-10-15), assigned_via recommendation" $SCRATCH/harness_smoke; then
+        echo "  | (checked) an enact changes only its own series: every other pre-enact row unchanged, the series closed the day before D, and exactly one new recommendation row"
+      else
+        echo "FAIL smoke ${id}: it passed without proving an enact changes only its own series"; STATUS=1
+      fi
+      if grep -qF "enact audit: 1 practice.recommendation_enacted row on S by the admin, its 19 keys, cause.stored_effective_to 2026-10-14 as stored, result_fingerprint equal to the writer's" $SCRATCH/harness_smoke; then
+        echo "  | (checked) an enact leaves one practice.recommendation_enacted row on its series with the plan section 5 keys, the stored retirement date and the writer's result fingerprint"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the enact audit row carries what the RPC reads and fills"; STATUS=1
+      fi
+      if grep -qF "idempotency: a second call with the same enact key returned idempotent: true and wrote nothing; 1 enact audit row, 1 new row" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a repeated enact key is idempotent: the second call returns idempotent: true and writes nothing"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a repeated enact is idempotent"; STATUS=1
+      fi
+    fi
     # **The production RLS drift replay** is the only evidence that the
     # reconcile fixes production rather than a repo chain where it has nothing
     # to do, so each half of it is a claim. The smoke RAISEs on any failed
@@ -1085,7 +1142,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1937,6 +1994,25 @@ NEEDLES
       else
         echo "FAIL seeding ${id}: the coach holding a preferred_practice value was never inserted"
         dump 10 $SCRATCH/harness_seed; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261004000000" ]; then
+      # The wrapper gone and the writer untouched, read from the catalogue
+      # rather than from the revert's own NOTICE. `unreadable` fires when the
+      # lookup finds no writer at all, so a broken query cannot read as clean.
+      if psql_cmd "SELECT 'ENACT-VERDICT:' || CASE
+               WHEN (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+                        AND p.proname = 'persist_practice_schedule') = 0 THEN 'unreadable'
+               WHEN EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+                        AND p.proname = 'enact_practice_recommendation') THEN 'present'
+               WHEN (SELECT max(p.prosrc) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+                        AND p.proname = 'persist_practice_schedule') LIKE '%new_assignment%' THEN 'gone'
+               ELSE 'wrong' END;" \
+         >$SCRATCH/harness_enact 2>&1 && grep -q 'ENACT-VERDICT:gone' $SCRATCH/harness_enact; then
+        echo "  | (checked) the enact revert drops enact_practice_recommendation and leaves the 20261002000000 writer in place"
+      else
+        echo "FAIL revert ${id}: the enact wrapper survived its own revert, or the writer did not"
+        dump 10 $SCRATCH/harness_enact; STATUS=1
       fi
     fi
     if [ "$id" = "20261003000000" ]; then

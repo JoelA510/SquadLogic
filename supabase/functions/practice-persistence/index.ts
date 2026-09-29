@@ -16,6 +16,8 @@ import {
   jsonResponse,
 } from '../_shared/auth.ts';
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
+import { buildPracticeEnactRecordSchema } from '../_shared/practice-enact-record.ts';
+import { enactBodyRefusal, repairErrorResponse } from '../_shared/practice-repair-errors.ts';
 
 // ── Inlined constants & config ──────────────────────────────────────────────
 const DEFAULT_ALLOWED_ROLES = ['authenticated', 'service_role', 'admin', 'scheduler'];
@@ -110,6 +112,10 @@ export const PracticeRepairSchema = z
   })
   .strict();
 
+// 8.6 3b PR 11b: the enact audit record (plan §5), the strict twin of core
+// PracticeEnactRecordSchema; tests/practiceEnactSchemaDrift.test.js pins them.
+export const PracticeEnactSchema = buildPracticeEnactRecordSchema(z);
+
 const PersistencePayloadSchema = z.object({
   snapshot: z.object({
     payload: z.object({
@@ -123,6 +129,7 @@ const PersistencePayloadSchema = z.object({
   overrides: z.array(z.unknown()).optional(),
   runMetadata: z.record(z.unknown()).optional(),
   repair: PracticeRepairSchema.optional(),
+  enact: PracticeEnactSchema.optional(),
 });
 
 // ── Inlined persistence logic ───────────────────────────────────────────────
@@ -177,7 +184,8 @@ async function persistPracticeSnapshot(
   },
   runMetadata: RunMetadata = {},
   now: Date = new Date(),
-  repair?: z.infer<typeof PracticeRepairSchema>
+  repair?: z.infer<typeof PracticeRepairSchema>,
+  enact?: z.infer<typeof PracticeEnactSchema>
 ) {
   const { assignmentRows } = snapshot.payload;
   const effectiveRunId = runMetadata.runId ?? snapshot.lastRunId ?? snapshot.runId;
@@ -227,20 +235,37 @@ async function persistPracticeSnapshot(
   // deploy can reach production before the migration does. The v3 keys are
   // sent only with a repair, which needs 20260929000000 applied.
   // tests/practiceWriterV3.test.js pins this key set.
-  const { data, error } = await supabaseClient.rpc('persist_practice_schedule', {
-    run_data: runData,
-    assignments: assignmentRows,
-    allow_empty: false,
-    ...(repair
-      ? {
+  //
+  // 8.6 3b PR 11b: an enact goes to the wrapper `enact_practice_recommendation`
+  // instead, which takes the season lock, checks the commit gate, idempotency
+  // and "only this series", calls the writer unchanged and audits
+  // `practice.recommendation_enacted` in the same transaction. The handler has
+  // already refused an enact with no repair body or no base fingerprint.
+  const { data, error } =
+    enact && repair
+      ? await supabaseClient.rpc('enact_practice_recommendation', {
+          run_data: runData,
+          assignments: assignmentRows,
           unlock: repair.unlock,
           closes: repair.closes,
           exceptions: repair.exceptions,
-          withdraw_exceptions: repair.withdrawExceptions,
           base_fingerprint: repair.baseFingerprint ?? null,
-        }
-      : {}),
-  });
+          enact,
+        })
+      : await supabaseClient.rpc('persist_practice_schedule', {
+          run_data: runData,
+          assignments: assignmentRows,
+          allow_empty: false,
+          ...(repair
+            ? {
+                unlock: repair.unlock,
+                closes: repair.closes,
+                exceptions: repair.exceptions,
+                withdraw_exceptions: repair.withdrawExceptions,
+                base_fingerprint: repair.baseFingerprint ?? null,
+              }
+            : {}),
+        });
 
   if (error) throw error;
 
@@ -262,6 +287,8 @@ async function persistPracticeSnapshot(
     fingerprint?: string | null;
     audited?: boolean;
     audit_gap?: string | null;
+    idempotent?: boolean;
+    enact_audited?: boolean;
   };
 
   return {
@@ -283,6 +310,10 @@ async function persistPracticeSnapshot(
     auditGap: report.audit_gap ?? null,
     message: 'Persistence successful.',
     syncedAt: now.toISOString(),
+    // Only an enact reports these, so an ordinary save's key set is unchanged.
+    ...(enact
+      ? { idempotent: report.idempotent ?? false, enactAudited: report.enact_audited ?? false }
+      : {}),
   };
 }
 
@@ -358,6 +389,10 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
       body = parsed.data;
     } catch {
       return jsonResponse({ status: 'error', message: 'Invalid JSON' }, 400);
+    }
+    const enactRefusal = enactBodyRefusal(body);
+    if (enactRefusal) {
+      return jsonResponse({ status: 'error', message: enactRefusal }, 400);
     }
 
     // 3. Verify organization membership via assignment → team chain
@@ -457,12 +492,20 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
         body.snapshot as Parameters<typeof persistPracticeSnapshot>[1],
         (body.runMetadata ?? {}) as RunMetadata,
         new Date(),
-        body.repair
+        body.repair,
+        body.enact
       );
 
       return jsonResponse(result, 200);
     } catch (error) {
       console.error('Practice persistence error:', error);
+      // 8.6 3b PR 11b (plan §4): a repair call's refusals are told apart --
+      // a stale fingerprint is a 409 the client re-judges, not a crash. An
+      // ordinary save keeps the 500 below, unchanged.
+      if (body.repair) {
+        const mapped = repairErrorResponse(error);
+        return jsonResponse(mapped.body, mapped.status);
+      }
       return jsonResponse(
         {
           status: 'error',

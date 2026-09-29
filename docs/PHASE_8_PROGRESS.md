@@ -7313,3 +7313,81 @@ The plan is `docs/PHASE_8_6_PR11_ENACT_PLAN.md`. Operator answers:
   lost the GitHub connector. The supervisor opened the PR from its pushed
   branch.
 - **Deploy (operator).** This is the 8th pending production migration.
+
+## Plan for #60 and #62 — #513 merged (746170f)
+
+- **Plan.** `docs/PLAN_60_62_GATE_GAPS.md` covers two gaps in the placer's rule
+  gate (`resolve/ruleGate.js`):
+  - it does not judge the coach-conflict spread (#60);
+  - it ignores waivers, and `verify`'s coach check pairs only neighbours (#62).
+- **Operator answers (2026-09-29).**
+  - **Q1:** a solver placement that would grow a group's spread is refused, in
+    both solver passes.
+  - **Q2:** an operator-requested move that grows the spread is allowed, with
+    a warning.
+  - **Q3:** `conflict-fairness` stays non-waivable.
+- **Split.** PR A (every-pair overlap), then PR B (spread in the gate), then
+  PR C (the gate honours waivers).
+- **Main push run 1156.** It first failed on "Deploy Edge Functions", in the
+  `supabase/setup-cli@v1` step. With `version: latest`, the step asks the
+  GitHub API for the newest CLI release and got "rate limit exceeded". This
+  happened before any deploy command ran, and Build & Test had passed. One
+  re-run passed. **Follow-up:** pin the CLI version in both deploy jobs, so the
+  deploy does not depend on an unauthenticated API lookup.
+
+## 3b PR 11c — #514 merged (9a5ef80): enact UI, retirements only
+
+- The Enact button, and the ruling-2 confirmation dialog. The dialog has one
+  labelled checkbox per affected team, and Confirm stays disabled until every
+  box is ticked.
+- Enact is admin-only. It is disabled, with a visible reason, in these cases:
+  - in the retirement preview (Q3);
+  - for blackouts (Q1; blackout enact is PR 11d, after PR 12);
+  - for refused windows.
+- The enact path reads fresh state, re-judges, sends exactly once, then reads
+  again. A `PRACTICE_SCHEDULE_STALE` response is shown as stale, never
+  retried.
+- A retired field's card has a "Repair practices" launcher.
+- The mock client mirrors the fingerprint and enact RPCs.
+- **Evidence.**
+  - Agent-reported: all gates pass, 4705 tests, E2E 13/13, and 9 plants
+    caught.
+  - Main entry bundle is 114.82 KB, and no cap was raised.
+  - Supervisor plant: removing the admin check in `enactGateOf` turned 1 of 27
+    red.
+  - Main push run 1158 is green.
+
+## #62 PR A — #515 merged (f25c306): overlap over every pair
+
+- `evaluateCoachTravel` still judges the gap floors on start-sorted
+  neighbours only. A second pass now judges overlap on every non-neighbour
+  pair, so each pair is reported once. It uses the gate's own decision: an
+  unknown end is unjudged, never clear.
+- New counter `meta.overlapPairsCompared`. The coach rule's counters are
+  deliberately not extended, so the rule-engine output stays byte-identical.
+- **Evidence.**
+  - Season-2026 digests are identical before and after for `runRuleEngine`
+    (with and without the incident-9 ledger), the validation report, and the
+    travel transitions, subjects and findings. The corpus has at most two
+    commitments per coach-day.
+  - Five agent plants, all CAUGHT.
+  - Supervisor plant: dropping the violation count in the new pass turned
+    W8 red (2 expected, 1 counted).
+- **Declared.** On a nested day, the gap floor from the long commitment to a
+  non-neighbour is still not judged; this is the plan's decision, and the
+  code states it.
+
+## 3b PR 12 plan — #516 open, awaiting operator answers
+
+- **Census.** 10 readers expand practice assignments into dates, and none of
+  them reads `practice_exceptions`.
+- **Defect (verified statically by the supervisor).** A daylight Apply, or a
+  retirement enact whose decision is TIME TBD, ends a row at D-1 and records
+  `[D, until]` as a TIME TBD exception. The portal and the calendar feed
+  expand only the row's own range, so from D the team's practices disappear,
+  with no TIME TBD entry.
+- **Production impact.** None at 2026-09-29. A catalog-only check found that
+  `practice_exceptions` does not exist in prod yet (migrations pending) and
+  there are 0 practice assignments.
+- **Split proposed:** 12a core, then 12b feed, 12c portal and 12d RSVP
+  migration in parallel. 12d would be a 9th pending production migration.

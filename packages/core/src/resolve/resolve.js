@@ -29,7 +29,7 @@ import { runRuleEngine } from '../ruleEngine/engine.js';
 import { ScheduleSchema } from '../ruleEngine/schemas.js';
 
 import { buildSlotInventory } from './inventory.js';
-import { indexCommitments, projectCommitment } from './ruleGate.js';
+import { indexCommitments, indexTeams, projectCommitment } from './ruleGate.js';
 import { objectiveWeightsAreDefault, resolveObjectiveWeights } from './objective.js';
 import {
   RESOLVE_REASON,
@@ -340,6 +340,11 @@ function runResolve(input) {
      * day still contains.
      */
     commitmentIndex: indexCommitments(baseSchedule.commitments ?? []),
+    /**
+     * The schedule's teams by age group, from the team records, for the
+     * placer's coach-conflict spread check (#60).
+     */
+    teamIndex: indexTeams(baseSchedule.teams ?? []),
     /**
      * Each team's registered coaches — the schedule's own team records, which
      * the adapter builds from the roster's coach assignments. Read by the

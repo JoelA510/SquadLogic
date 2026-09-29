@@ -7313,3 +7313,42 @@ The plan is `docs/PHASE_8_6_PR11_ENACT_PLAN.md`. Operator answers:
   lost the GitHub connector. The supervisor opened the PR from its pushed
   branch.
 - **Deploy (operator).** This is the 8th pending production migration.
+
+## #60 PR B — the rule gate judges the coach-conflict spread
+
+Plan: `docs/PLAN_60_62_GATE_GAPS.md` §1.3, operator answers Q1-Q3 (§7).
+
+- **Gate.** `ruleGateInstances()` gains a spread arm. It asks
+  `conflictFairnessRule.evaluate()` over every team (from the roster) of each
+  age group the move can touch, and every commitment of everyone on them,
+  projected through `projectCommitment()`. The instance is
+  `CONFLICT_SPREAD_EXCEEDED|<group>`, valued at the excess over the bound.
+  Refused in both solver passes (Q1). Refusals reach the TIME TBD reason
+  through `ruleGateRefusals`. New counter `ruleGateGroupsExamined`.
+- **Baseline.** `recordBaselineSpread()` records each group's excess once, in
+  `baseline-ingest` and in `createPlacementProbe()`.
+- **Departure from §1.3, and why.** The accepted excess per group is the
+  larger of the baseline's and the schedule's as it stands, with the moving
+  game back on its published slot. Against the baseline alone, an exempt
+  requested move that grows a group would refuse every later candidate for
+  every game in it (witnessed: displaced #6 in the W6 group keeps its slot).
+  The groups touched are those of every team the game's coaches are committed
+  for, including the far side of each overlap, because a conflict counts for
+  both teams; §1.3 named only the moving game's groups. A requested group with
+  no examined result throws (§1.3 step 7).
+- **Requested moves (Q2).** `RESOLVE_CONFLICT_SPREAD_CARRIED` (compromise) is
+  emitted from the finished schedule whether or not `verify` runs, naming the
+  group, its teams, the spread and the bound. `conflict-fairness` stays
+  `waivable: false` (Q3).
+- **Sweep (679 displacement runs, measured).** Before → after: TIME TBD 0 → 4
+  (#51, #57, #649, #652, each naming `CONFLICT_SPREAD_EXCEEDED`); runs with a
+  new blocking `CONFLICT_SPREAD_EXCEEDED` in `verify` 28 → 24; pass 2 entered
+  30 → 26; coach overlaps carried 130 → 124. The other 675 runs are
+  byte-identical. All 24 remaining runs carry the new warning: the requested
+  game, which the gate does not judge, grew the group.
+- **Not witnessed.** Adding a conflict always adds an overlap, which pass 1
+  already refuses, so the pass-1 spread refusal is witnessed by no test (plant
+  P4 MISSED). It bites alone only when a clean slot removes the conflict of a
+  group's minimum team; that case is statically reviewed only. A game shelved
+  as TIME TBD can still grow a group, and is warned about. PR C (waivers in the
+  gate) plugs in beside the turnover and spread arms.

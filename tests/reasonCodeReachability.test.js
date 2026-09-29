@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 551 codes, of
- * which 539 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 552 codes, of
+ * which 540 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -2609,6 +2609,44 @@ harvest(
       });
     }
     throw new Error('reachability: no coach with two games on one date and a matching kickoff');
+  })()
+);
+harvest(
+  'applyChangeRequest(a requested move that grows an age group’s coach-conflict spread, verify off)',
+  (() => {
+    // #60: a requested move the gate does not judge, found by the 679-run
+    // displacement sweep — the same-format game requested onto #93's slot
+    // pushes its age group's spread past the bound.
+    const displaced = /** @type {any} */ (
+      schedule.games.find((game) => game.id === 'combined_schedule.csv#93')
+    );
+    const requested = /** @type {any} */ (
+      schedule.games.find(
+        (game) =>
+          game.id !== displaced.id &&
+          game.date === displaced.date &&
+          game.venueId === displaced.venueId &&
+          game.format === displaced.format &&
+          game.startMinutes !== displaced.startMinutes
+      )
+    );
+    return applyChangeRequest({
+      schedule,
+      changes: [
+        {
+          gameId: requested.id,
+          date: displaced.date,
+          surfaceId: displaced.surfaceId,
+          startMinutes: displaced.startMinutes,
+          reason: 'displace',
+        },
+      ],
+      engines,
+      holdChanges: true,
+      freeze: freezeAllExcept([{ date: displaced.date }]),
+      verify: false,
+      onUnsatisfiable: 'report',
+    });
   })()
 );
 

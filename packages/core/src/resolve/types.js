@@ -348,6 +348,8 @@
  * @property {number} candidatesRefusedByRules - of those, refused by the coach or turnover gate alone (#59)
  * @property {number} ruleGateCommitmentsExamined - coach commitments the placer's gate read (#59)
  * @property {number} ruleGateSurfacePairsExamined - same-surface pairs the placer's gate read (#59)
+ * @property {number} ruleGateGroupsExamined - age groups the placer's spread check judged, summed over candidates (#60)
+ * @property {number} conflictSpreadsCarried - age groups whose coach-conflict spread the result grew past the published one (#60)
  * @property {number} candidatesScored - survived legality and went to the objective
  * @property {number} conflictsExamined
  * @property {number} gamesDislodged

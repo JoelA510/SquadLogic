@@ -63,7 +63,7 @@ import {
   scoreObjective,
 } from './objective.js';
 import { RESOLVE_REASON, makeResolveFinding } from './reasonCodes.js';
-import { ruleGateInstances } from './ruleGate.js';
+import { conflictSpreadInstances, ruleGateInstances, spreadGroupsTouchedBy } from './ruleGate.js';
 import { CONSTRAINT_SEVERITY } from '../constraints/reasonCodes.js';
 import { RULE_VIOLATION_REASON } from '../ruleEngine/reasonCodes.js';
 import { TRAVEL_REASON } from '../waivers/coachTravel.js';
@@ -211,6 +211,52 @@ function acceptedRulesFor(context, gameId, slot) {
   // is nothing for the scope to open up — only a published overlap to refuse at
   // the game's own home slot.
   return acceptedAtSlot(context.baselineRules[gameId], slotKey(slot));
+}
+
+/**
+ * What the placer accepts of the **coach-conflict spread** (#60) for the age
+ * groups moving `gameId` can touch: per group, the larger of the excess the
+ * published schedule carried (`context.baselineSpread`, recorded once by
+ * `baseline-ingest`) and the excess the schedule carries **now with this game
+ * back on its published slot** — everything else where `state` has it.
+ *
+ * Why the published slot rather than where the game stands: a game the placer
+ * is re-placing stands nowhere, and lifting it off a conflict that was the
+ * group minimum's raises the excess by itself. Measured with the game lifted,
+ * that transient would be accepted and a clean slot could leave the group
+ * worse than published; measured with it home, only what other moves did is
+ * accepted, and what this placement does is judged.
+ *
+ * The sibling contract, {@link acceptedRulesFor}'s "refuse growth over what the
+ * baseline accepted", adapted to an instance that names a group rather than a
+ * game. A pair-keyed instance is the moving game's own; a group's excess is
+ * not, so measured against the baseline alone, one exempt requested move that
+ * grew a group would refuse every later candidate for every game in it,
+ * however little that candidate changed. Floored at the baseline, so the run is
+ * still never blamed for what the season published, and a placement is
+ * refused exactly when it would push the group further than it stands.
+ *
+ * @param {Object} context
+ * @param {import('./types.js').ResolveState} state
+ * @param {string} gameId
+ * @returns {Record<string, number>}
+ */
+function acceptedSpreadFor(context, state, gameId) {
+  const published = state.baseline[gameId];
+  const now = conflictSpreadInstances(context, state, spreadGroupsTouchedBy(context, gameId), {
+    gameId,
+    slot: {
+      date: published.date,
+      surfaceId: published.surfaceId,
+      startMinutes: published.startMinutes,
+    },
+  }).instances;
+  /** @type {Record<string, number>} */
+  const accepted = { ...context.baselineSpread };
+  for (const [key, excess] of Object.entries(now)) {
+    accepted[key] = Math.max(accepted[key] ?? 0, excess);
+  }
+  return accepted;
 }
 
 /**
@@ -550,6 +596,8 @@ function chooseSlot(state, context, gameId, options) {
    * @type {Array<{ slot: import('./types.js').Slot, placement: ReturnType<typeof checkPlacement>, overlapsAdded: number, score: number, findingsCarried: number }>}
    */
   const overlapOnly = [];
+  /** @type {Record<string, number>|null} */
+  let spreadAccepted = null;
 
   for (const candidate of candidateSlotsFor(state, gameId, anchor, context.weights)) {
     if (options.excludeSlotKey !== undefined && slotKey(candidate) === options.excludeSlotKey) {
@@ -591,10 +639,17 @@ function chooseSlot(state, context, gameId, options) {
     const ruled = gated
       ? ruleGateInstances(context, state, gameId, candidate)
       : { instances: {}, meta: null };
-    const acceptedRules = gated ? acceptedRulesFor(context, gameId, candidate) : {};
+    // The spread's accepted record reads `state`, which no candidate changes,
+    // so it is measured once per call rather than once per candidate.
+    if (gated && spreadAccepted === null)
+      spreadAccepted = acceptedSpreadFor(context, state, gameId);
+    const acceptedRules = gated
+      ? { ...acceptedRulesFor(context, gameId, candidate), ...spreadAccepted }
+      : {};
     if (gated) {
       state.ledger.meta.ruleGateCommitmentsExamined += ruled.meta.coachCommitmentsExamined;
       state.ledger.meta.ruleGateSurfacePairsExamined += ruled.meta.surfacePairsExamined;
+      state.ledger.meta.ruleGateGroupsExamined += ruled.meta.groupsExamined;
     }
     const ruleGrown = newBlockingCodes(ruled.instances, acceptedRules);
     const overlapOnlyRefusal =
@@ -634,8 +689,9 @@ function chooseSlot(state, context, gameId, options) {
       const refusals = (context.ruleGateRefusals[gameId] ??= {});
       for (const code of ruleGrown) refusals[code] = (refusals[code] ?? 0) + 1;
       // **Pass 2's pool: refused for a coach overlap and nothing else.** A
-      // turnover below the floor is HARD and refused in both passes (#61);
-      // the branch above already turned away anything else.
+      // turnover below the floor is HARD and refused in both passes (#61), as
+      // is a grown coach-conflict spread (#60, Q1); the branch above already
+      // turned away anything else.
       {
         overlapOnly.push({
           slot: candidate,
@@ -709,7 +765,7 @@ function chooseSlot(state, context, gameId, options) {
  * @param {string} gameId
  * @param {import('./types.js').Slot} slot
  * @param {import('./types.js').Slot} reference - where drift is measured from
- * @returns {{ placement: ReturnType<typeof checkPlacement>, blockingGrown: string[], ruleGrown: string[], overlapsAdded: number, turnoverAdded: number, cleared: boolean, compromiseCodes: string[], counts: Record<string, number>, score: number }}
+ * @returns {{ placement: ReturnType<typeof checkPlacement>, blockingGrown: string[], ruleGrown: string[], overlapsAdded: number, turnoverAdded: number, spreadAdded: number, cleared: boolean, compromiseCodes: string[], counts: Record<string, number>, score: number }}
  */
 export function evaluateCandidate(context, state, gameId, slot, reference) {
   const placement = checkPlacement(context.engines, state, gameId, slot);
@@ -718,7 +774,10 @@ export function evaluateCandidate(context, state, gameId, slot, reference) {
     acceptedBlockingFor(context, gameId, slot)
   );
   const ruled = ruleGateInstances(context, state, gameId, slot, { travelCodes: true });
-  const acceptedRules = acceptedRulesFor(context, gameId, slot);
+  const acceptedRules = {
+    ...acceptedRulesFor(context, gameId, slot),
+    ...acceptedSpreadFor(context, state, gameId),
+  };
   const ruleGrown = newBlockingCodes(ruled.instances, acceptedRules);
   const grownKeys = grownInstances(ruled.instances, acceptedRules);
   const added = (code) =>
@@ -747,6 +806,7 @@ export function evaluateCandidate(context, state, gameId, slot, reference) {
     ruleGrown,
     overlapsAdded: added(TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP),
     turnoverAdded: added(RULE_VIOLATION_REASON.TURNOVER_BELOW_MINIMUM),
+    spreadAdded: added(RULE_VIOLATION_REASON.CONFLICT_SPREAD_EXCEEDED),
     cleared: blockingGrown.length === 0 && ruleGrown.length === 0,
     compromiseCodes,
     counts,
@@ -889,11 +949,34 @@ export function recordBaselineAcceptance(context, state, gameId) {
   context.baselineFindings[gameId] = { slotKey: publishedSlotKey, instances: findingCounts };
   // And the rule-engine half the placer's gate reads (#59), recorded the
   // same way: what this game carried on the slot it was published on.
+  // The spread is not recorded here: it belongs to an age group, not to this
+  // game's slot, and is recorded once per group by `recordBaselineSpread()`.
   context.baselineRules[gameId] = {
     slotKey: publishedSlotKey,
-    instances: ruleGateInstances(context, state, gameId, slot).instances,
+    instances: ruleGateInstances(context, state, gameId, slot, { spread: false }).instances,
   };
   return placement;
+}
+
+/**
+ * Record each age group's coach-conflict **excess** on the published schedule
+ * (#60), once, beside `baselineRules`: `CONFLICT_SPREAD_EXCEEDED|<group>` →
+ * `max(0, spread − maxSpread)`, only groups over the bound present. Every game
+ * is projected from where it was **published**, whatever `state` holds now, so
+ * the record gives the same answer whenever it is taken.
+ *
+ * @param {Object} context
+ * @param {import('./types.js').ResolveState} state
+ * @returns {void}
+ */
+export function recordBaselineSpread(context, state) {
+  const published = /** @type {import('./types.js').ResolveState} */ ({
+    ...state,
+    games: state.baseline,
+  });
+  context.baselineSpread = conflictSpreadInstances(context, published, [
+    ...(context.teamIndex?.byGroup.keys() ?? []),
+  ]).instances;
 }
 
 /** @type {Object} */
@@ -928,6 +1011,7 @@ const baselineIngest = {
 
     // What the schedule was *already* carrying, so the run is never blamed for
     // it and never tries to repair it.
+    recordBaselineSpread(context, state);
     for (const gameId of state.gameIds) {
       const placement = recordBaselineAcceptance(context, state, gameId);
       if (context.repairScope.has(gameId)) {
@@ -1579,6 +1663,7 @@ const verify = {
     // Before the rule engine, and whether or not it runs: "allowed with a
     // warning" has to be true when a caller switches `verify` off (#61).
     reportCoachOverlapsCarried(state, context, this.id);
+    reportConflictSpreadCarried(state, context, this.id);
 
     const verification = verificationFor(context, state);
     if (verification === null) return state;
@@ -1686,7 +1771,10 @@ function reportCoachOverlapsCarried(state, context, stageId) {
     if (!game) continue;
     const slot = { date: game.date, surfaceId: game.surfaceId, startMinutes: game.startMinutes };
     if (slotKey(slot) === slotKey(published)) continue;
-    const ruled = ruleGateInstances(context, state, gameId, slot, { turnover: false });
+    const ruled = ruleGateInstances(context, state, gameId, slot, {
+      turnover: false,
+      spread: false,
+    });
     // **Pair-level, not slot-level.** The warning says the published schedule
     // did not carry this overlap, so it asks whether the published schedule had
     // these two games overlapping at all: a pair moved together and still
@@ -1731,6 +1819,51 @@ function reportCoachOverlapsCarried(state, context, stageId) {
         )
       );
     }
+  }
+}
+
+/**
+ * Warn about every age group whose coach-conflict spread the result pushes
+ * further past the bound than the published schedule did (#60, operator
+ * ruling Q2), from the finished schedule.
+ *
+ * The sibling of {@link reportCoachOverlapsCarried}, on the same terms: read
+ * from where every game **ended up**, so a requested move — which the placer's
+ * gate leaves alone — and anything else that grew a group are reported by one
+ * piece of code, and **independent of `verify`**, which a caller may switch
+ * off. Asked through the same `conflictSpreadInstances()` the placer's gate
+ * uses, against the same once-per-group baseline record. The details name the
+ * group, its teams (from the roster) and the spread.
+ *
+ * @param {import('./types.js').ResolveState} state
+ * @param {Object} context
+ * @param {string} stageId
+ * @returns {void}
+ */
+function reportConflictSpreadCarried(state, context, stageId) {
+  const finished = conflictSpreadInstances(context, state, [
+    ...(context.teamIndex?.byGroup.keys() ?? []),
+  ]);
+  for (const subject of finished.subjects) {
+    const baselineExcess = context.baselineSpread[subject.key] ?? 0;
+    if (finished.instances[subject.key] <= baselineExcess) continue;
+    state.ledger.meta.conflictSpreadsCarried += 1;
+    state.ledger.findings.push(
+      makeResolveFinding(
+        RESOLVE_REASON.RESOLVE_CONFLICT_SPREAD_CARRIED,
+        `age group "${subject.groupLabel}" now carries between ${subject.minConflicts} and ${subject.maxConflicts} coach conflicts per team across ${subject.teamIds.join(', ')}; the spread ${subject.spread} exceeds the permitted ${subject.maxSpread} by more than the published schedule did (${baselineExcess}). Allowed with a warning (#60): the placer refuses a placement that pushes a group further than it stands, so this came from a move the gate does not judge — a requested move, or a game lifted off a conflict`,
+        {
+          stageId,
+          groupLabel: subject.groupLabel,
+          teamIds: [...subject.teamIds],
+          spread: subject.spread,
+          maxSpread: subject.maxSpread,
+          minConflicts: subject.minConflicts,
+          maxConflicts: subject.maxConflicts,
+          baselineExcess,
+        }
+      )
+    );
   }
 }
 

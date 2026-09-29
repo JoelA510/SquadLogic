@@ -424,8 +424,21 @@ export function resolveContextDefaults() {
      * carried there (`ruleGate.js`); read only through `acceptedAtSlot()`.
      */
     baselineRules: {},
+    /**
+     * Per age group over the fairness bound, the coach-conflict excess the
+     * published schedule carried (#60), keyed `CONFLICT_SPREAD_EXCEEDED|<group>`;
+     * recorded once by `baseline-ingest`.
+     */
+    baselineSpread: {},
     /** The commitment index the placer's coach check reads; set per run. */
-    commitmentIndex: { byPerson: new Map(), personsByGame: new Map(), count: 0 },
+    commitmentIndex: {
+      byPerson: new Map(),
+      personsByGame: new Map(),
+      personsByTeam: new Map(),
+      count: 0,
+    },
+    /** The schedule's teams by id and by age group (`ruleGate.js` `indexTeams()`); set per run. */
+    teamIndex: { byId: new Map(), byGroup: new Map() },
     /** Per game, candidates the rule gate alone refused, per code. */
     ruleGateRefusals: {},
     /**

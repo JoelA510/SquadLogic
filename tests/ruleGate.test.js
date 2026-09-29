@@ -48,8 +48,10 @@ import {
   applyChangeRequest,
   buildSlotInventory,
   createResolveLedger,
+  conflictSpreadInstances,
   createResolveState,
   indexCommitments,
+  indexTeams,
   projectCommitment,
   ruleGateInstances,
   violationInstanceKey,
@@ -671,5 +673,237 @@ describe('#61: local-search never takes pass 2 for a game no change request name
           finding.code === 'RESOLVE_REPAIR_UNAVAILABLE' && finding.details.gameId === seven.id
       )
     ).toBe(true);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* #60: the coach-conflict spread, in the gate                                 */
+/* -------------------------------------------------------------------------- */
+
+// The corpus's nine age groups sit at spread ≤ 1, so a test over it alone
+// could not fail. Constructed instead, from the #61 cases above: displaced #7
+// (team 14BSelect01, coaches gray judd and perry yeats) has no overlap-free
+// slot, and every pass-2 slot double-books gray judd with #18 — a new conflict
+// for 14BSelect01. The group is synthetic: 14BSelect01, #6's team 14GSelect02
+// (one registered coach, so it never counts a conflict) and a roster-only team
+// with no commitment at all. Synthetic windows — one of the team's coaches
+// committed for it and for 16BSelect02 (no group, one coach) at once, on dates
+// no run thaws — give 14BSelect01 its published conflicts.
+const SPREAD_TEAM = '14BSelect01';
+const SPREAD_GROUP = 'SYN';
+const ROSTER_ONLY = 'SYN-ROSTER-ONLY';
+const SEVEN = 'combined_schedule.csv#7';
+const SIX = 'combined_schedule.csv#6';
+
+/** The season with `windows` published conflicts for 14BSelect01 in group SYN. */
+function spreadSchedule(windows, team = SPREAD_TEAM, members = [SPREAD_TEAM, '14GSelect02']) {
+  // One of the team's own coaches, committed twice at once on a date no run
+  // below thaws: once for the team, once for 16BSelect02. Neither names a
+  // game, so both pass through the projection untouched.
+  const template = /** @type {any} */ (
+    schedule.commitments.find((c) => c.teamId === team && typeof c.gameId === 'string')
+  );
+  const synthetic = Array.from({ length: windows }, (_, i) =>
+    ['own', 'other'].map((side) => ({
+      id: `syn-window-${i}-${side}`,
+      gameId: null,
+      personId: template.personId,
+      date: `2026-10-${String(3 + 7 * i).padStart(2, '0')}`,
+      startMinutes: 600,
+      endMinutes: 660,
+      venueId: template.venueId,
+      surfaceId: template.surfaceId,
+      teamId: side === 'own' ? team : '16BSelect02',
+    }))
+  ).flat();
+  return {
+    ...schedule,
+    teams: [
+      ...schedule.teams.map((t) =>
+        members.includes(t.id) ? { ...t, groupLabel: SPREAD_GROUP } : t
+      ),
+      { id: ROSTER_ONLY, divisionLabel: null, groupLabel: SPREAD_GROUP, personIds: [] },
+    ],
+    commitments: [...schedule.commitments, ...synthetic],
+  };
+}
+
+/** The gate's own context over a schedule, as `resolve.js` builds it. */
+const gateContext = (sched) => ({
+  engines,
+  commitmentIndex: indexCommitments(sched.commitments),
+  teamIndex: indexTeams(sched.teams),
+});
+
+/** The group's excess on `sched` as published, from the gate's evaluator. */
+const publishedExcess = (sched) =>
+  conflictSpreadInstances(gateContext(sched), state, [SPREAD_GROUP]).instances[
+    `CONFLICT_SPREAD_EXCEEDED|${SPREAD_GROUP}`
+  ] ?? 0;
+
+/** The standing rule engine's spread violations for the group. */
+const spreadViolations = (run) =>
+  /** @type {any} */ (run.verification).violations.filter(
+    (v) => v.code === 'CONFLICT_SPREAD_EXCEEDED' && v.details.groupLabel === SPREAD_GROUP
+  );
+
+/** Displace `displacedId` on `sched` with verify on. */
+function displaceOn(sched, displacedId) {
+  const displaced = /** @type {any} */ (byId.get(displacedId));
+  const requested = /** @type {any} */ (
+    sched.games.find(
+      (game) =>
+        game.id !== displaced.id &&
+        game.date === displaced.date &&
+        game.venueId === displaced.venueId &&
+        game.format === displaced.format &&
+        game.startMinutes !== displaced.startMinutes
+    )
+  );
+  return applyChangeRequest({
+    schedule: sched,
+    changes: [{ gameId: requested.id, ...slotOf(displaced), reason: 'displace' }],
+    engines,
+    freeze: freezeAllExcept([{ date: displaced.date }]),
+    holdChanges: true,
+    verify: true,
+    onUnsatisfiable: 'report',
+  });
+}
+
+describe('#60 W1/W4: a placement that grows a group’s spread is refused, in pass 2 as in pass 1', () => {
+  const sched = spreadSchedule(1);
+  const run = displaceOn(sched, SEVEN);
+
+  it('starts from a published spread of 1 — allowed — with the roster-only team at nought', () => {
+    expect(publishedExcess(sched)).toBe(0);
+    expect(spreadViolations(run)).toEqual([]);
+    // The meta-assertion, from the input: without the gate, #7 goes to pass 2
+    // (the #61 test above), and every pass-2 slot adds a 14BSelect01 conflict.
+    expect(displaceQuietly(SEVEN).meta.overlapFallbackEntered).toBe(1);
+  });
+
+  it('examined SYN itself — not only the real groups the same move also touches', () => {
+    // From the roster, not from the gate: #7's team has a group label.
+    const seven = /** @type {any} */ (byId.get(SEVEN));
+    expect(sched.teams.find((t) => t.id === seven.homeTeamId)?.groupLabel).toBe(SPREAD_GROUP);
+    expect(run.meta.ruleGateGroupsExamined).toBeGreaterThan(0);
+    // The counter alone would stay above 0 through U09 (gray judd's other
+    // team), so the gate is asked directly, at the slot pass 2 takes on the
+    // season as published: SYN must be judged there, and judged grown.
+    const pass2 = /** @type {any} */ (whereIs(displaceQuietly(SEVEN), SEVEN));
+    const ruled = ruleGateInstances(gateContext(sched), state, SEVEN, slotOf(pass2));
+    expect(ruled.instances[`CONFLICT_SPREAD_EXCEEDED|${SPREAD_GROUP}`]).toBe(1);
+  });
+
+  it('shelves #7 as TIME TBD naming CONFLICT_SPREAD_EXCEEDED, and never takes the pass-2 overlap', () => {
+    expect(whereIs(run, SEVEN)).toBeNull();
+    const reason = run.unplaced.find((entry) => entry.gameId === SEVEN)?.reason ?? '';
+    expect(reason).toMatch(/\d+ for CONFLICT_SPREAD_EXCEEDED/);
+    expect(run.meta.overlapFallbackEntered).toBe(0);
+    expect(spreadViolations(run)).toEqual([]);
+  });
+
+  it('W4: the group is read from the roster — the team with no commitment is its minimum', () => {
+    // SYN as 14BSelect01 and the roster-only team alone: the only other
+    // member is the one no commitment names, so a universe read from the
+    // commitments would hold 14BSelect01 by itself, spread 0 whatever it carries.
+    const paired = spreadSchedule(1, SPREAD_TEAM, [SPREAD_TEAM]);
+    expect(paired.commitments.some((c) => c.teamId === ROSTER_ONLY)).toBe(false);
+    expect(whereIs(displaceOn(paired, SEVEN), SEVEN)).toBeNull();
+    // The control: without the roster-only team the same move is placed.
+    const alone = { ...paired, teams: paired.teams.filter((t) => t.id !== ROSTER_ONLY) };
+    expect(whereIs(displaceOn(alone, SEVEN), SEVEN)).not.toBeNull();
+  });
+});
+
+describe('#60 W3: growing an already-over group is refused — counts, not presence', () => {
+  const sched = spreadSchedule(2);
+  const run = displaceOn(sched, SEVEN);
+
+  it('is published over the bound, excess 1, and the run is not blamed for it', () => {
+    expect(publishedExcess(sched)).toBe(1);
+    expect(spreadViolations(run).map((v) => v.details.spread)).toEqual([2]);
+  });
+
+  it('refuses the move that would make it 3', () => {
+    expect(whereIs(run, SEVEN)).toBeNull();
+    expect(run.unplaced.find((entry) => entry.gameId === SEVEN)?.reason).toMatch(
+      /CONFLICT_SPREAD_EXCEEDED/
+    );
+    expect(run.meta.overlapFallbackEntered).toBe(0);
+  });
+});
+
+describe('#60 W2: growth is measured against the baseline, not in absolute terms', () => {
+  // #117 (07BJunior13 v 07BJunior01) displaced finds a clean slot (#61 above).
+  // Its home team is put in a group published at spread 2.
+  const TEAM = '07BJunior13';
+  const sched = spreadSchedule(2, TEAM, [TEAM, '14GSelect02']);
+  const run = displaceOn(sched, 'combined_schedule.csv#117');
+
+  it('records the published excess as 1', () => {
+    expect(publishedExcess(sched)).toBe(1);
+  });
+
+  it('places the game, leaving the group at the spread it was published with', () => {
+    expect(run.meta.ruleGateGroupsExamined).toBeGreaterThan(0);
+    expect(whereIs(run, 'combined_schedule.csv#117')).not.toBeNull();
+    expect(spreadViolations(run).map((v) => v.details.spread)).toEqual([2]);
+  });
+});
+
+describe('#60 W5/W6: a requested move that grows the spread is allowed, and warned about', () => {
+  // #7 requested onto #6's slot, where gray judd is at #18 (the #61 case).
+  const sched = spreadSchedule(1);
+  const spreadWarnings = (run) =>
+    run.findings.filter((f) => f.code === 'RESOLVE_CONFLICT_SPREAD_CARRIED');
+
+  it('W6: warns with verify off, naming the group, its teams and the spread', () => {
+    const run = displaceQuietly(SIX, sched);
+    expect(run.verification).toBeNull();
+    expect(slotOf(/** @type {any} */ (whereIs(run, SEVEN)))).toEqual(
+      slotOf(/** @type {any} */ (byId.get(SIX)))
+    );
+    const warned = spreadWarnings(run);
+    expect(warned).toHaveLength(1);
+    expect(warned[0].severity).toBe('compromise');
+    expect(warned[0].details).toMatchObject({
+      groupLabel: SPREAD_GROUP,
+      teamIds: [ROSTER_ONLY, '14GSelect02', SPREAD_TEAM].sort(),
+      spread: 2,
+      maxSpread: 1,
+      baselineExcess: 0,
+    });
+    expect(run.meta.conflictSpreadsCarried).toBe(1);
+    // The control: the same move on the season as published warns nothing.
+    expect(spreadWarnings(displaceQuietly(SIX))).toEqual([]);
+  });
+
+  it('does not let the requested move refuse the game it displaced into the same group', () => {
+    // #6 (14GSelect02) is in SYN too. Against the baseline alone, SYN's excess
+    // of 1 — the operator's — would refuse every slot for #6; it must land
+    // where it lands on the season as published.
+    const run = displaceQuietly(SIX, sched);
+    const plain = displaceQuietly(SIX);
+    expect(whereIs(plain, SIX)).not.toBeNull();
+    expect(slotOf(/** @type {any} */ (whereIs(run, SIX)))).toEqual(
+      slotOf(/** @type {any} */ (whereIs(plain, SIX)))
+    );
+  });
+
+  it('W5: the gate and verify name the same group for the same placement', () => {
+    const run = displaceOn(sched, SIX);
+    const placed = /** @type {any} */ (whereIs(run, SEVEN));
+    // SYN is published within the bound, so any spread violation it carries
+    // on the result is one the run introduced.
+    expect(publishedExcess(sched)).toBe(0);
+    expect(spreadViolations(run).map((v) => v.details.groupLabel)).toEqual([SPREAD_GROUP]);
+    const finished = {
+      ...state,
+      games: Object.fromEntries(run.schedule.games.map((game) => [game.id, game])),
+    };
+    const gate = ruleGateInstances(gateContext(sched), finished, SEVEN, slotOf(placed)).instances;
+    expect(gate[`CONFLICT_SPREAD_EXCEEDED|${SPREAD_GROUP}`]).toBe(1);
   });
 });

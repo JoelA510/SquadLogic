@@ -241,9 +241,21 @@ export const RESOLVE_REASON = Object.freeze({
    */
   RESOLVE_COACH_OVERLAP_CARRIED: 'RESOLVE_COACH_OVERLAP_CARRIED',
   /**
+   * An age group's coach conflicts are shared out further past the permitted
+   * spread than the published schedule carried (#60).
+   *
+   * `compromise`: the operator allows it with a warning when a requested move
+   * causes it (ruling Q2); the placer's own placements refuse it in both
+   * passes (Q1), so this names a move the gate does not judge. Emitted from the
+   * finished schedule and **independent of `verify`**, like
+   * `RESOLVE_COACH_OVERLAP_CARRIED`. The details name the group, its teams from
+   * the roster, the spread and the bound.
+   */
+  RESOLVE_CONFLICT_SPREAD_CARRIED: 'RESOLVE_CONFLICT_SPREAD_CARRIED',
+  /**
    * A change whose slot a **machine** chose (`origin: 'proposer'`) would add a
-   * blocking facility finding, a coach overlap or a turnover shortfall, and was
-   * not applied (#53). The game stays where it stood, and the stages that
+   * blocking facility finding, a coach overlap, a turnover shortfall or a grown
+   * coach-conflict spread (#60), and was not applied (#53). The game stays where it stood, and the stages that
    * follow treat it like any other game on illegal ground.
    *
    * `compromise`. The proposer runs the same gate before it proposes, so on a
@@ -440,6 +452,7 @@ export const RESOLVE_REASON_SEVERITY = Object.freeze({
   [RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_DECLARED]: RESOLVE_SEVERITY.INFO,
   [RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_VACUOUS]: RESOLVE_SEVERITY.BLOCKING,
   [RESOLVE_REASON.RESOLVE_COACH_OVERLAP_CARRIED]: RESOLVE_SEVERITY.COMPROMISE,
+  [RESOLVE_REASON.RESOLVE_CONFLICT_SPREAD_CARRIED]: RESOLVE_SEVERITY.COMPROMISE,
   [RESOLVE_REASON.RESOLVE_CHANGE_REFUSED_BY_RULES]: RESOLVE_SEVERITY.COMPROMISE,
   [RESOLVE_REASON.RESOLVE_OPTION_STALE]: RESOLVE_SEVERITY.COMPROMISE,
   [RESOLVE_REASON.RESOLVE_RELOCATION_OPTIONS_OFFERED]: RESOLVE_SEVERITY.INFO,
@@ -520,8 +533,10 @@ export function createResolveMeta() {
     candidatesRefusedByRules: 0,
     overlapFallbackEntered: 0,
     coachOverlapsCarried: 0,
+    conflictSpreadsCarried: 0,
     ruleGateCommitmentsExamined: 0,
     ruleGateSurfacePairsExamined: 0,
+    ruleGateGroupsExamined: 0,
     candidatesScored: 0,
     conflictsExamined: 0,
     gamesDislodged: 0,

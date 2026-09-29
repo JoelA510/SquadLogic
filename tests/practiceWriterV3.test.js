@@ -174,7 +174,12 @@ describe('practice-persistence Edge passthrough (source pin)', () => {
     ]) {
       assert.ok(rpc.includes(arg), `the RPC call does not pass ${arg}`);
     }
-    assert.match(source, /new Date\(\),\s*body\.repair\s*\)/, 'the handler drops body.repair');
+    // 8.6 3b PR 11b: `body.enact` follows it.
+    assert.match(
+      source,
+      /new Date\(\),\s*body\.repair,?\s*(body\.enact\s*)?\)/,
+      'the handler drops body.repair'
+    );
     assert.match(source, /teamsTimeTbd:\s*report\.teams_time_tbd/);
   });
 

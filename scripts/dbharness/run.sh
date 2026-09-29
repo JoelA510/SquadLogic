@@ -17,6 +17,29 @@
 #
 # No network, no spend: PostgreSQL is already in the image and the cluster
 # listens on a unix socket only.
+#
+# **Concurrent runs do not interfere.** Every run owns a private cluster in
+# `mktemp -d ~/harness.XXXXXX` under the harness user's home (pgdata, the
+# socket directory, pg.log and the staged SQL), and a private root-side
+# `mktemp -d` for its transcripts. Nothing is shared by path, so two runs --
+# under one user or two -- cannot overwrite each other's SQL or verdicts. With
+# `listen_addresses` empty there is no TCP port; the only rendezvous is the
+# socket directory, which is private too. A run stops ONLY the cluster it
+# started, by its own data directory and the postmaster PID it recorded, from
+# an EXIT/INT/TERM trap. It never kills by user: this used to `pkill -u` the
+# harness user and `rm -rf ~/pgdata`, so a second run started 25s after a
+# first killed the first mid-smoke and executed the first run's staged SQL as
+# its own migration -- measured, both reported HARNESS FAILED.
+#
+# A run killed with SIGKILL cannot run its trap and leaves its cluster behind.
+# That cluster cannot break a later run (it is in its own directory), and a
+# later run REPORTS it rather than reaping it: a live `owner.pid` means another
+# run is using it, and even a dead one's cluster is not this run's to kill.
+# Its root-side transcript directory (`/tmp/harness.*`) leaks too. That is
+# fixed under /tmp, not $TMPDIR, so the unquoted `$SCRATCH/...` paths below
+# can never contain whitespace.
+#
+# `HARNESS_PGUSER` still selects the OS user that owns the cluster.
 set -uo pipefail
 
 PGUSER_LOCAL="${HARNESS_PGUSER:-pgrunner}"
@@ -26,16 +49,82 @@ DB=squadlogic_harness
 
 as_pg() { runuser -u "$PGUSER_LOCAL" -- bash -lc "export PATH=$PGBIN:\$PATH; $1"; }
 
+RUN_DIR="" PM_PID=""
+SCRATCH="$(mktemp -d /tmp/harness.XXXXXX)" ||
+  { echo "FAIL: could not create a scratch directory"; exit 1; }
+
+# Stops this run's cluster and nothing else. The data directory is this run's
+# own, so `pg_ctl -D` cannot reach another cluster; the recorded PID is the
+# fallback, and is killed only while its command line still names that
+# directory, so a recycled PID is left alone. A postmaster that survives both
+# keeps its directory, and the run says so rather than deleting files under it.
+pm_gone() { # seconds -- true once the recorded postmaster has exited
+  local i
+  [ -n "$PM_PID" ] || return 0
+  for ((i = 0; i < $1 * 10; i++)); do
+    pm_alive || return 0
+    sleep 0.1
+  done
+  ! pm_alive
+}
+# A zombie is gone: a container whose PID 1 does not reap would otherwise make
+# every clean stop look like a survivor.
+pm_alive() {
+  kill -0 "$PM_PID" 2>/dev/null &&
+    [ "$(cut -d' ' -f3 "/proc/$PM_PID/stat" 2>/dev/null)" != Z ]
+}
+cleanup() {
+  if [ -n "$RUN_DIR" ]; then
+    # A start that failed or timed out never recorded the PID; its postmaster
+    # may still be up, and its directory must not be deleted under it.
+    [ -n "$PM_PID" ] || PM_PID="$(head -n 1 "$RUN_DIR/pgdata/postmaster.pid" 2>/dev/null)"
+    as_pg "pg_ctl -D $RUN_DIR/pgdata -m immediate -w stop" >/dev/null 2>&1
+    # `pg_ctl -w` returns when postmaster.pid is gone, a moment before the
+    # process is: measured, an immediate check reported every clean stop as a
+    # survivor. So the exit is waited for before anything is concluded.
+    if ! pm_gone 5 &&
+       tr '\0' ' ' <"/proc/$PM_PID/cmdline" 2>/dev/null | grep -qF -- "$RUN_DIR/pgdata"; then
+      kill -KILL "$PM_PID" 2>/dev/null
+    fi
+    if ! pm_gone 5; then
+      echo "note: this run's postmaster $PM_PID survived shutdown; left $RUN_DIR in place" >&2
+    else
+      rm -rf -- "$RUN_DIR"
+    fi
+  fi
+  rm -rf -- "$SCRATCH"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Clusters that other runs left in this user's home, reported and never
+# touched. The line starts `note:` so no verdict or claim reader matches it.
+report_stale() {
+  local d owner
+  # Beside this run's own directory, so a home outside /home is covered too.
+  for d in "${RUN_DIR%/*}"/harness.*; do
+    [ -d "$d" ] && [ "$d" != "$RUN_DIR" ] || continue
+    # No owner.pid yet is a run between its mktemp and its first write, not an
+    # abandoned one: reporting it would hand out a command that kills a live run.
+    owner="$(cat "$d/owner.pid" 2>/dev/null)"
+    [ -n "$owner" ] || continue
+    kill -0 "$owner" 2>/dev/null && continue
+    echo "note: stale harness cluster $d (owner run $owner is gone); left in place."
+    echo "note:   to remove it: runuser -u $PGUSER_LOCAL -- $PGBIN/pg_ctl -D $d/pgdata -m immediate stop; rm -rf $d"
+  done
+}
+
 start_cluster() {
-  # Stop any cluster left running by a previous run BEFORE removing its data
-  # directory -- deleting pgdata under a live postmaster leaves a process with
-  # no files and the next connect fails with a socket that never appears.
-  as_pg 'pg_ctl -D ~/pgdata -m immediate -w stop' >/dev/null 2>&1 || true
-  as_pg "pkill -u $PGUSER_LOCAL postgres" >/dev/null 2>&1 || true
-  sleep 1
-  as_pg 'rm -rf ~/pgdata ~/sock ~/pg.log; mkdir -p ~/sock' >/dev/null 2>&1
-  as_pg 'initdb -D ~/pgdata -U postgres --auth=trust' >/dev/null 2>&1 || return 1
-  as_pg 'pg_ctl -D ~/pgdata -o "-k $HOME/sock -c listen_addresses=" -l ~/pg.log -w start' >/dev/null 2>&1
+  RUN_DIR="$(as_pg 'mktemp -d ~/harness.XXXXXX' 2>/dev/null | tail -n 1)"
+  if [ -z "$RUN_DIR" ] || [ ! -d "$RUN_DIR" ]; then RUN_DIR=""; return 1; fi
+  echo "$$" >"$RUN_DIR/owner.pid" || return 1
+  report_stale
+  as_pg "mkdir $RUN_DIR/sock" >/dev/null 2>&1 || return 1
+  as_pg "initdb -D $RUN_DIR/pgdata -U postgres --auth=trust" >/dev/null 2>&1 || return 1
+  as_pg "pg_ctl -D $RUN_DIR/pgdata -o '-k $RUN_DIR/sock -c listen_addresses=' -l $RUN_DIR/pg.log -w start" \
+    >/dev/null 2>&1 || return 1
+  PM_PID="$(head -n 1 "$RUN_DIR/pgdata/postmaster.pid" 2>/dev/null)"
 }
 
 # psql that FAILS THE RUN on any error. Without ON_ERROR_STOP a migration can
@@ -43,9 +132,9 @@ start_cluster() {
 # kind of check this whole phase exists to stop.
 psql_file() {
   local f="$1"
-  local staged="/home/$PGUSER_LOCAL/.harness.sql"
+  local staged="$RUN_DIR/harness.sql"
   # **The staging copy's status was thrown away, and the staging path is
-  # reused.** Every file is copied over the same `~/.harness.sql`, so a `cp`
+  # reused.** Every file is copied over the same staged path, so a `cp`
   # that failed left the PREVIOUS file in place and psql cheerfully re-ran it
   # and exited 0 -- a smoke could print PASS having executed the migration
   # before it. Identical in shape to the `fresh_db` prelude bug fixed last
@@ -56,9 +145,9 @@ psql_file() {
   rm -f "$staged"
   if ! cp "$f" "$staged"; then echo "psql_file: failed to stage $f" >&2; return 1; fi
   if ! chmod 644 "$staged"; then echo "psql_file: failed to chmod $staged" >&2; return 1; fi
-  as_pg "psql -v ON_ERROR_STOP=1 -h ~/sock -U postgres -d $DB -q -f ~/.harness.sql"
+  as_pg "psql -v ON_ERROR_STOP=1 -h $RUN_DIR/sock -U postgres -d $DB -q -f $staged"
 }
-psql_cmd() { as_pg "psql -v ON_ERROR_STOP=1 -h ~/sock -U postgres -d $DB -tAc \"$1\""; }
+psql_cmd() { as_pg "psql -v ON_ERROR_STOP=1 -h $RUN_DIR/sock -U postgres -d $DB -tAc \"$1\""; }
 
 # **Every dump of psql's own output is INDENTED, and that is load-bearing.**
 #
@@ -86,8 +175,8 @@ dump() { # lines file
 }
 
 fresh_db() {
-  if ! as_pg "psql -h ~/sock -U postgres -q -c 'DROP DATABASE IF EXISTS $DB' -c 'CREATE DATABASE $DB'" >/tmp/harness_freshdb 2>&1; then
-    echo "FAIL creating a fresh database"; dump 10 /tmp/harness_freshdb; return 1
+  if ! as_pg "psql -h $RUN_DIR/sock -U postgres -q -c 'DROP DATABASE IF EXISTS $DB' -c 'CREATE DATABASE $DB'" >$SCRATCH/harness_freshdb 2>&1; then
+    echo "FAIL creating a fresh database"; dump 10 $SCRATCH/harness_freshdb; return 1
   fi
   # **The prelude's exit status was thrown away.** `psql_file ... >/dev/null`
   # discarded both the output and, because nothing tested `$?`, the failure --
@@ -95,8 +184,8 @@ fresh_db() {
   # carried on against it. Found by trying to prove the baseline gate could
   # fail: a deliberately broken prelude produced BASELINE GREEN and fifteen
   # meaningless CAUGHTs. The gate was right; what it stood on was not.
-  if ! psql_file "$REPO/scripts/dbharness/prelude.sql" >/tmp/harness_prelude 2>&1; then
-    echo "FAIL applying the prelude"; dump 20 /tmp/harness_prelude; return 1
+  if ! psql_file "$REPO/scripts/dbharness/prelude.sql" >$SCRATCH/harness_prelude 2>&1; then
+    echo "FAIL applying the prelude"; dump 20 $SCRATCH/harness_prelude; return 1
   fi
 }
 
@@ -115,9 +204,9 @@ fresh_db() {
 apply_all() {
   local stop="${1:-}" applied=0 reached=0
   for m in "$REPO"/supabase/migrations/*.sql; do
-    if ! psql_file "$m" >/tmp/harness_err 2>&1; then
+    if ! psql_file "$m" >$SCRATCH/harness_err 2>&1; then
       echo "FAIL applying $(basename "$m")"
-      dump 20 /tmp/harness_err
+      dump 20 $SCRATCH/harness_err
       return 1
     fi
     applied=$((applied + 1))
@@ -142,13 +231,22 @@ apply_all() {
 # is installed so CREATE EXTENSION succeeds and the scheduling statements
 # apply. It schedules nothing -- the harness proves the migration APPLIES, not
 # that a job fires. Installed here rather than by hand so the run reproduces.
+#
+# The extension directory is the ONE path every run shares, so a file is
+# replaced only when it differs, and then atomically (temp file plus `mv`): a
+# plain `cp` truncates in place, and a concurrent run's CREATE EXTENSION could
+# read the half-written file.
 install_stub_ext() {
-  local dir
+  local dir f dst
   dir="$($PGBIN/pg_config --sharedir)/extension"
-  cp "$REPO/scripts/dbharness/stubext/pg_cron.control" "$dir/" 2>/dev/null || return 1
-  cp "$REPO/scripts/dbharness/stubext/pg_cron--1.0.sql" "$dir/" 2>/dev/null || return 1
-  cp "$REPO/scripts/dbharness/stubext/pgtap.control" "$dir/" 2>/dev/null || return 1
-  cp "$REPO/scripts/dbharness/stubext/pgtap--1.0.sql" "$dir/" 2>/dev/null || return 1
+  for f in pg_cron.control pg_cron--1.0.sql pgtap.control pgtap--1.0.sql; do
+    dst="$dir/$f"
+    cmp -s "$REPO/scripts/dbharness/stubext/$f" "$dst" && continue
+    # chmod: a new file takes root's umask, and postgres must be able to read it.
+    cp "$REPO/scripts/dbharness/stubext/$f" "$dst.tmp.$$" 2>/dev/null &&
+      chmod 644 "$dst.tmp.$$" 2>/dev/null &&
+      mv -f "$dst.tmp.$$" "$dst" 2>/dev/null || { rm -f "$dst.tmp.$$"; return 1; }
+  done
 }
 
 echo "=== installing stub extensions ==="
@@ -414,14 +512,14 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
   fi
   seeded=0
   if smoke_needs_seed "$id"; then
-    if ! smoke_plant "$id" >/tmp/harness_smoke_seed 2>&1; then
+    if ! smoke_plant "$id" >$SCRATCH/harness_smoke_seed 2>&1; then
       echo "FAIL smoke ${id}: the estate it reads could not be planted"
-      dump 10 /tmp/harness_smoke_seed; STATUS=1; continue
+      dump 10 $SCRATCH/harness_smoke_seed; STATUS=1; continue
     fi
     seeded=1
   fi
 
-  if psql_file "$smoke" >/tmp/harness_smoke 2>&1; then
+  if psql_file "$smoke" >$SCRATCH/harness_smoke 2>&1; then
     if [ -n "$needle" ]; then
       # A refusal smoke that SUCCEEDS is the alarming direction: the admin
       # guard its last statement calls did not fire.
@@ -438,14 +536,14 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # what a hollow smoke also prints. The NOTICEs say how many rows each
     # invariant was exercised on, and a run that exercised zero is visible here
     # instead of being indistinguishable from a run that exercised hundreds.
-    grep -E '^(psql:[^ ]+ )?(NOTICE|WARNING):' /tmp/harness_smoke |
+    grep -E '^(psql:[^ ]+ )?(NOTICE|WARNING):' $SCRATCH/harness_smoke |
       sed -E 's/^psql:[^ ]+ //; s/^/  | /' || true
     # **#64's per-team warning list is the operator's condition for accepting
     # that an unplaced team loses its old practice**, so it is a claim of its
     # own rather than one NOTICE among many. The smoke RAISEs on the wrong
     # set; this line fails if that assertion's evidence ever stops printing.
     if [ "$id" = "20260924000000" ]; then
-      if grep -q 'teams without practice after run 2: exactly P64 Team 4 (had a practice) and P64 Team 8 (never had one), enumerated from 7 season roster teams' /tmp/harness_smoke; then
+      if grep -q 'teams without practice after run 2: exactly P64 Team 4 (had a practice) and P64 Team 8 (never had one), enumerated from 7 season roster teams' $SCRATCH/harness_smoke; then
         echo "  | (checked) the practice writer names every season team left without a practice, from the roster, including one never scheduled"
       else
         echo "FAIL smoke ${id}: it passed without proving the per-team list of teams left without a practice"
@@ -458,27 +556,27 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # admin-or-self, every write is audited, one approved row per (coach,
     # dimension). The smoke RAISEs on each; these fail if its evidence stops.
     if [ "$id" = "20260927000000" ]; then
-      if grep -qF 'coach A requested for themself; coach A requesting for coach B was refused (42501)' /tmp/harness_smoke; then
+      if grep -qF 'coach A requested for themself; coach A requesting for coach B was refused (42501)' $SCRATCH/harness_smoke; then
         echo "  | (checked) a coach requests a practice preference for themself only, never for another coach"
       else
         echo "FAIL smoke ${id}: it passed without proving a coach cannot request for another coach"; STATUS=1
       fi
-      if grep -qF 'a coach approving their own request was refused (42501) and the row is still requested' /tmp/harness_smoke; then
+      if grep -qF 'a coach approving their own request was refused (42501) and the row is still requested' $SCRATCH/harness_smoke; then
         echo "  | (checked) only an org admin decides a coach practice preference; a coach approving their own request is refused"
       else
         echo "FAIL smoke ${id}: it passed without proving a coach cannot approve"; STATUS=1
       fi
-      if grep -qF "coach B read its 3 rows and none of coach A's; coach A read its 3 and none of coach B's; the admin read 6 of 6" /tmp/harness_smoke; then
+      if grep -qF "coach B read its 3 rows and none of coach A's; coach A read its 3 and none of coach B's; the admin read 6 of 6" $SCRATCH/harness_smoke; then
         echo "  | (checked) a coach reads only their own practice preferences and the admin reads all of the organisation's"
       else
         echo "FAIL smoke ${id}: it passed without proving the preference read policy is admin-or-self"; STATUS=1
       fi
-      if grep -qF 'every write audited -- 9 of 9 (4 requested, 2 approved, 1 rejected, 2 changed), each naming its row' /tmp/harness_smoke; then
+      if grep -qF 'every write audited -- 9 of 9 (4 requested, 2 approved, 1 rejected, 2 changed), each naming its row' $SCRATCH/harness_smoke; then
         echo "  | (checked) every coach practice preference write leaves its audit row, 9 of 9, each naming the row it wrote"
       else
         echo "FAIL smoke ${id}: it passed without proving every preference write is audited"; STATUS=1
       fi
-      if grep -qF 'a second approved row for one (coach, dimension) was refused by the one-approved index (23505)' /tmp/harness_smoke; then
+      if grep -qF 'a second approved row for one (coach, dimension) was refused by the one-approved index (23505)' $SCRATCH/harness_smoke; then
         echo "  | (checked) the database refuses a second approved practice preference for one coach and dimension"
       else
         echo "FAIL smoke ${id}: it passed without proving one approved preference per coach and dimension"; STATUS=1
@@ -490,57 +588,57 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # non-admin and teams_time_tbd witnesses RAISE in the same smoke and print
     # as NOTICEs above; they carry no plant, so they are not claims.)
     if [ "$id" = "20260929000000" ]; then
-      if grep -qF "lock: omitting, moving, re-ranging and overlapping an existing row were each refused 22023 naming that row, 4 of 4; all 4 run-1 rows unchanged" /tmp/harness_smoke; then
+      if grep -qF "lock: omitting, moving, re-ranging and overlapping an existing row were each refused 22023 naming that row, 4 of 4; all 4 run-1 rows unchanged" $SCRATCH/harness_smoke; then
         echo "  | (checked) an ordinary practice save that omits, moves, re-ranges or overlaps an existing row is refused as locked, 4 of 4, and changes nothing"
       else
         echo "FAIL smoke ${id}: it passed without printing the evidence that an ordinary practice save that omits, moves, re-ranges or overlaps an existing row is refused as locked, 4 of 4, and changes nothing"; STATUS=1
       fi
-      if grep -qF "unlock is per row: unlocking one of Team 1's two rows left the other locked (refused 22023 naming it) and both rows in place" /tmp/harness_smoke; then
+      if grep -qF "unlock is per row: unlocking one of Team 1's two rows left the other locked (refused 22023 naming it) and both rows in place" $SCRATCH/harness_smoke; then
         echo "  | (checked) a practice unlock is per row: unlocking one of a team's two rows leaves the other locked"
       else
         echo "FAIL smoke ${id}: it passed without printing the evidence that a practice unlock is per row: unlocking one of a team's two rows leaves the other locked"; STATUS=1
       fi
-      if grep -qF "unlock gate: a coach and a service-role caller (no uid) were each refused 42501 by the unlock gate itself" /tmp/harness_smoke; then
+      if grep -qF "unlock gate: a coach and a service-role caller (no uid) were each refused 42501 by the unlock gate itself" $SCRATCH/harness_smoke; then
         echo "  | (checked) only an org admin with a uid may unlock a practice row: a coach and a service-role caller are refused by the unlock gate itself"
       else
         echo "FAIL smoke ${id}: it passed without printing the evidence that only an org admin with a uid may unlock a practice row: a coach and a service-role caller are refused by the unlock gate itself"; STATUS=1
       fi
-      if grep -qF "unlock audit: 2 of 2 accepted unlocks each left one practice.unlock_accepted row carrying its before-image and reason" /tmp/harness_smoke; then
+      if grep -qF "unlock audit: 2 of 2 accepted unlocks each left one practice.unlock_accepted row carrying its before-image and reason" $SCRATCH/harness_smoke; then
         echo "  | (checked) every accepted practice unlock leaves one practice.unlock_accepted audit row carrying the row's before-image"
       else
         echo "FAIL smoke ${id}: it passed without printing the evidence that every accepted practice unlock leaves one practice.unlock_accepted audit row carrying the row's before-image"; STATUS=1
       fi
-      if grep -qF "exceptions: stored in practice_exceptions (not as assignment rows) and still live after a later ordinary save -- 5 of 5 roster teams" /tmp/harness_smoke; then
+      if grep -qF "exceptions: stored in practice_exceptions (not as assignment rows) and still live after a later ordinary save -- 5 of 5 roster teams" $SCRATCH/harness_smoke; then
         echo "  | (checked) a practice exception is stored in practice_exceptions, not as an assignment row, and survives a later ordinary save"
       else
         echo "FAIL smoke ${id}: it passed without printing the evidence that a practice exception is stored in practice_exceptions, not as an assignment row, and survives a later ordinary save"; STATUS=1
       fi
-      if grep -qF "overridden series: the unlocked prune and a raw DELETE were each refused 23503; admin_cancel_practice_assignment withdrew the exception in the same transaction" /tmp/harness_smoke; then
+      if grep -qF "overridden series: the unlocked prune and a raw DELETE were each refused 23503; admin_cancel_practice_assignment withdrew the exception in the same transaction" $SCRATCH/harness_smoke; then
         echo "  | (checked) deleting a practice series that holds a live exception is refused (23503); cancelling it withdraws the exception in the same transaction, audited"
       else
         echo "FAIL smoke ${id}: it passed without printing the evidence that deleting a practice series that holds a live exception is refused (23503); cancelling it withdraws the exception in the same transaction, audited"; STATUS=1
       fi
-      if grep -qF "time clash (a): a team holding Monday 17:00-18:00 gained Wednesday 17:00-18:00 over the same range in a later save -- accepted, 2 rows" /tmp/harness_smoke; then
+      if grep -qF "time clash (a): a team holding Monday 17:00-18:00 gained Wednesday 17:00-18:00 over the same range in a later save -- accepted, 2 rows" $SCRATCH/harness_smoke; then
         echo "  | (checked) a practice save adding a second weekday over the same range to a team is accepted: a double-booking is a time clash, not a range overlap"
       else
         echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save adding a second weekday over the same range to a team is accepted: a double-booking is a time clash, not a range overlap"; STATUS=1
       fi
-      if grep -qF "time clash (b): a second Monday slot at 17:30-18:30 against Monday 17:00-18:00 was refused 22023 naming the Monday row; 2 rows unchanged" /tmp/harness_smoke; then
+      if grep -qF "time clash (b): a second Monday slot at 17:30-18:30 against Monday 17:00-18:00 was refused 22023 naming the Monday row; 2 rows unchanged" $SCRATCH/harness_smoke; then
         echo "  | (checked) a practice save adding a same-weekday slot at overlapping minutes to a team is refused as locked, naming the row it clashes with"
       else
         echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save adding a same-weekday slot at overlapping minutes to a team is refused as locked, naming the row it clashes with"; STATUS=1
       fi
-      if grep -qF "time clash (c): a Monday slot at 18:30-19:30 beside Monday 17:00-18:00 was accepted -- 3 rows" /tmp/harness_smoke; then
+      if grep -qF "time clash (c): a Monday slot at 18:30-19:30 beside Monday 17:00-18:00 was accepted -- 3 rows" $SCRATCH/harness_smoke; then
         echo "  | (checked) a practice save adding a same-weekday slot at non-overlapping minutes to a team is accepted"
       else
         echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save adding a same-weekday slot at non-overlapping minutes to a team is accepted"; STATUS=1
       fi
-      if grep -qF "time clash (d): back-to-back Monday 18:00-19:00 after Monday 17:00-18:00 was accepted -- 2 rows" /tmp/harness_smoke; then
+      if grep -qF "time clash (d): back-to-back Monday 18:00-19:00 after Monday 17:00-18:00 was accepted -- 2 rows" $SCRATCH/harness_smoke; then
         echo "  | (checked) a practice save adding a same-weekday slot that only touches an existing one at its boundary is accepted: the minute test is strict"
       else
         echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save adding a same-weekday slot that only touches an existing one at its boundary is accepted: the minute test is strict"; STATUS=1
       fi
-      if grep -qF "fingerprint: a save carrying a stale base_fingerprint was refused 40001 and wrote nothing" /tmp/harness_smoke; then
+      if grep -qF "fingerprint: a save carrying a stale base_fingerprint was refused 40001 and wrote nothing" $SCRATCH/harness_smoke; then
         echo "  | (checked) a practice save carrying a stale base_fingerprint is refused (40001) and writes nothing"
       else
         echo "FAIL smoke ${id}: it passed without printing the evidence that a practice save carrying a stale base_fingerprint is refused (40001) and writes nothing"; STATUS=1
@@ -552,37 +650,37 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # the same smoke and print as NOTICEs above; they carry no plant, so they
     # are not claims.)
     if [ "$id" = "20260930000000" ]; then
-      if grep -qF "a coach and another organisation's admin were each refused 42501, 2 of 2, and the pair is unchanged; that admin set their own venue" /tmp/harness_smoke; then
+      if grep -qF "a coach and another organisation's admin were each refused 42501, 2 of 2, and the pair is unchanged; that admin set their own venue" $SCRATCH/harness_smoke; then
         echo "  | (checked) only an admin of the venue's own organisation sets its coordinates: a coach and another organisation's admin are refused"
       else
         echo "FAIL smoke ${id}: it passed without proving a coach and another organisation's admin cannot set a venue's coordinates"; STATUS=1
       fi
-      if grep -qF "the RPC refused both half pairs 22023, 2 of 2" /tmp/harness_smoke; then
+      if grep -qF "the RPC refused both half pairs 22023, 2 of 2" $SCRATCH/harness_smoke; then
         echo "  | (checked) the coordinates RPC refuses a half pair (22023)"
       else
         echo "FAIL smoke ${id}: it passed without proving the coordinates RPC refuses a half pair"; STATUS=1
       fi
-      if grep -qF "the both-or-neither CHECK refused both half-pair owner writes 23514, 2 of 2" /tmp/harness_smoke; then
+      if grep -qF "the both-or-neither CHECK refused both half-pair owner writes 23514, 2 of 2" $SCRATCH/harness_smoke; then
         echo "  | (checked) the both-or-neither CHECK refuses a half-pair coordinates write that bypasses the RPC"
       else
         echo "FAIL smoke ${id}: it passed without proving the both-or-neither CHECK refuses a half-pair write"; STATUS=1
       fi
-      if grep -qF "the RPC refused 6 of 6 out-of-range pairs 22023 (lat 90.01, -90.01, 90.004 and NaN; long 180.01, -180.01)" /tmp/harness_smoke; then
+      if grep -qF "the RPC refused 6 of 6 out-of-range pairs 22023 (lat 90.01, -90.01, 90.004 and NaN; long 180.01, -180.01)" $SCRATCH/harness_smoke; then
         echo "  | (checked) the coordinates RPC refuses an out-of-range pair (22023), judged before rounding"
       else
         echo "FAIL smoke ${id}: it passed without proving the coordinates RPC refuses an out-of-range pair"; STATUS=1
       fi
-      if grep -qF "the range CHECK refused both out-of-range owner writes 23514, 2 of 2" /tmp/harness_smoke; then
+      if grep -qF "the range CHECK refused both out-of-range owner writes 23514, 2 of 2" $SCRATCH/harness_smoke; then
         echo "  | (checked) the range CHECK refuses an out-of-range coordinates write that bypasses the RPC"
       else
         echo "FAIL smoke ${id}: it passed without proving the range CHECK refuses an out-of-range write"; STATUS=1
       fi
-      if grep -qF "40.1250/-75.1250 stored as 40.1300/-75.1300 -- rounded to 2 decimals, set_by the admin" /tmp/harness_smoke; then
+      if grep -qF "40.1250/-75.1250 stored as 40.1300/-75.1300 -- rounded to 2 decimals, set_by the admin" $SCRATCH/harness_smoke; then
         echo "  | (checked) the coordinates RPC stores the pair rounded to 2 decimals"
       else
         echo "FAIL smoke ${id}: it passed without proving the coordinates RPC rounds to 2 decimals"; STATUS=1
       fi
-      if grep -qF "every accepted write audited -- 4 of 4 on the venue, the first with before NULL/NULL and after 40.13/-75.13, the clear with before -90/-180 and after NULL/NULL" /tmp/harness_smoke; then
+      if grep -qF "every accepted write audited -- 4 of 4 on the venue, the first with before NULL/NULL and after 40.13/-75.13, the clear with before -90/-180 and after NULL/NULL" $SCRATCH/harness_smoke; then
         echo "  | (checked) every accepted coordinates write, a clear included, leaves a location.coordinates_set audit row with its before and after"
       else
         echo "FAIL smoke ${id}: it passed without proving every coordinates write is audited with before and after"; STATUS=1
@@ -592,7 +690,7 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # column dropped while still read is a live break, so the smoke searches
     # every catalogue reader and proves its scans read something.
     if [ "$id" = "20261001000000" ]; then
-      if grep -qF "preferred_practice columns: 0 of 2 remain on coaches, and 0 catalogue objects name them" /tmp/harness_smoke; then
+      if grep -qF "preferred_practice columns: 0 of 2 remain on coaches, and 0 catalogue objects name them" $SCRATCH/harness_smoke; then
         echo "  | (checked) coaches.preferred_practice_days and _window are gone, and no function, view, policy, constraint, default or index in public names them"
       else
         echo "FAIL smoke ${id}: it passed without proving the preferred_practice columns are gone and unread"; STATUS=1
@@ -603,54 +701,54 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # to do, so each half of it is a claim. The smoke RAISEs on any failed
     # assertion; these fail if the evidence lines ever stop printing.
     if [ "$id" = "20260928000000" ]; then
-      if grep -q 'reconciled over the production drift: broad ALL policy gone from all 11 tables' /tmp/harness_smoke &&
-         grep -q 'non-admin member after reconcile: inserts into teams, fields and practice_slots refused by RLS; update and delete reached 0 rows' /tmp/harness_smoke; then
+      if grep -q 'reconciled over the production drift: broad ALL policy gone from all 11 tables' $SCRATCH/harness_smoke &&
+         grep -q 'non-admin member after reconcile: inserts into teams, fields and practice_slots refused by RLS; update and delete reached 0 rows' $SCRATCH/harness_smoke; then
         echo "  | (checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"
       else
         echo "FAIL smoke ${id}: it passed without proving the broad policy gone and member writes refused over the production drift"
         STATUS=1
       fi
-      if grep -q '9 read policies restored' /tmp/harness_smoke &&
-         grep -q 'non-admin member after reconcile: reads 1 of 1 own-org team and 1 of 1 own-org practice slot, and 0 of org B' /tmp/harness_smoke; then
+      if grep -q '9 read policies restored' $SCRATCH/harness_smoke &&
+         grep -q 'non-admin member after reconcile: reads 1 of 1 own-org team and 1 of 1 own-org practice slot, and 0 of org B' $SCRATCH/harness_smoke; then
         echo "  | (checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"
       else
         echo "FAIL smoke ${id}: it passed without proving the read policies restored and member reads scoped over the production drift"
         STATUS=1
       fi
-      if grep -qF 'a member-writable table nobody listed each abort the reconcile' /tmp/harness_smoke; then
+      if grep -qF 'a member-writable table nobody listed each abort the reconcile' $SCRATCH/harness_smoke; then
         echo "  | (checked) the reconcile's own end-state check refuses a member-writable policy on a table nobody listed"
       else
         echo "FAIL smoke ${id}: it passed without proving the end-state check covers tables nobody listed"
         STATUS=1
       fi
-      if grep -qF 'member-satisfiable exactly {"telemetry_log: Insert telemetry for own organization"}, allowlisted; a planted member-writable table is flagged' /tmp/harness_smoke; then
+      if grep -qF 'member-satisfiable exactly {"telemetry_log: Insert telemetry for own organization"}, allowlisted; a planted member-writable table is flagged' $SCRATCH/harness_smoke; then
         echo "  | (checked) every write policy in public, evaluated as a plain member on an own-org row, is admin-gated or allowlisted -- direct-column gates only, a gate through a parent row is not reached"
       else
         echo "FAIL smoke ${id}: it passed without proving the semantic census of every write policy in public"
         STATUS=1
       fi
-      if grep -qF 'scheduler_runs: a member reads 1 own-org run and 0 of org B, and cannot insert or update; an admin session inserts and updates' /tmp/harness_smoke; then
+      if grep -qF 'scheduler_runs: a member reads 1 own-org run and 0 of org B, and cannot insert or update; an admin session inserts and updates' $SCRATCH/harness_smoke; then
         echo "  | (checked) scheduler_runs is closed to member writes and scoped member reads, and an admin session still writes it"
       else
         echo "FAIL smoke ${id}: it passed without proving scheduler_runs closed to members and open to admins"
         STATUS=1
       fi
     fi
-  elif [ -n "$needle" ] && grep -qF "$needle" /tmp/harness_smoke &&
-       grep -qF "$ctx" /tmp/harness_smoke; then
+  elif [ -n "$needle" ] && grep -qF "$needle" $SCRATCH/harness_smoke &&
+       grep -qF "$ctx" $SCRATCH/harness_smoke; then
     echo "PASS smoke ${id} (refused, as recorded)"
     v_ran=$((v_ran + 1))
     echo "  | (refused) it raised its documented refusal: ${needle}"
   elif [ -n "$needle" ]; then
     echo "FAIL smoke ${id}: it failed, but not with its documented refusal (\"${needle}\") raised by ${ctx}...)"
-    dump 15 /tmp/harness_smoke; STATUS=1
+    dump 15 $SCRATCH/harness_smoke; STATUS=1
   else
-    echo "FAIL smoke ${id}"; dump 15 /tmp/harness_smoke; STATUS=1
+    echo "FAIL smoke ${id}"; dump 15 $SCRATCH/harness_smoke; STATUS=1
   fi
 
-  [ "$seeded" -eq 1 ] && { smoke_unplant "$id" >/tmp/harness_smoke_seed 2>&1 || {
+  [ "$seeded" -eq 1 ] && { smoke_unplant "$id" >$SCRATCH/harness_smoke_seed 2>&1 || {
     echo "FAIL smoke ${id}: the planted estate could not be removed, so later stages would inherit it"
-    dump 10 /tmp/harness_smoke_seed; STATUS=1; }; }
+    dump 10 $SCRATCH/harness_smoke_seed; STATUS=1; }; }
 done
 
 # --- executed is not asserted, and the split is stated ----------------------
@@ -710,21 +808,21 @@ echo "=== shared scenario table, against Postgres ==="
 # to, and the harness printed "PASS scenario table" over a script that had
 # executed nothing. The generator itself refuses to emit for an empty table --
 # that guard was fine and this path went round it.
-rm -f /tmp/harness_scenarios.sql
-if ! python3 "$REPO/scripts/dbharness/scenarios.py" > /tmp/harness_scenarios.sql 2>/tmp/harness_scen_gen; then
-  echo "FAIL generating the scenario script"; dump 10 /tmp/harness_scen_gen; STATUS=1
-elif [ ! -s /tmp/harness_scenarios.sql ]; then
+rm -f $SCRATCH/harness_scenarios.sql
+if ! python3 "$REPO/scripts/dbharness/scenarios.py" > $SCRATCH/harness_scenarios.sql 2>$SCRATCH/harness_scen_gen; then
+  echo "FAIL generating the scenario script"; dump 10 $SCRATCH/harness_scen_gen; STATUS=1
+elif [ ! -s $SCRATCH/harness_scenarios.sql ]; then
   echo "FAIL the scenario generator produced an empty script"; STATUS=1
-elif psql_file /tmp/harness_scenarios.sql >/tmp/harness_scen_out 2>&1; then
+elif psql_file $SCRATCH/harness_scenarios.sql >$SCRATCH/harness_scen_out 2>&1; then
   echo "PASS scenario table"
   # The NOTICE carries `v_ran` of the table size, so a run that executed
   # nothing is visible here rather than hiding behind the word PASS.
-  if ! grep -qE 'NOTICE:.*scenarios executed against Postgres' /tmp/harness_scen_out; then
+  if ! grep -qE 'NOTICE:.*scenarios executed against Postgres' $SCRATCH/harness_scen_out; then
     echo "FAIL scenario table ran without reporting how many scenarios it executed"; STATUS=1
   fi
-  grep -E '^(psql:[^ ]+ )?NOTICE:' /tmp/harness_scen_out | sed -E 's/^psql:[^ ]+ //; s/^/  | /' || true
+  grep -E '^(psql:[^ ]+ )?NOTICE:' $SCRATCH/harness_scen_out | sed -E 's/^psql:[^ ]+ //; s/^/  | /' || true
 else
-  echo "FAIL scenario table"; dump 15 /tmp/harness_scen_out; STATUS=1
+  echo "FAIL scenario table"; dump 15 $SCRATCH/harness_scen_out; STATUS=1
 fi
 
 # ---------------------------------------------------------------------------
@@ -757,15 +855,15 @@ seed_opt_in_build() { # on|off  [full]
   local setting="$1" scope="${2:-truncated}" applied=0 reached=0 m
   fresh_db || return 1
   if [ "$setting" = "on" ]; then
-    if ! as_pg "psql -v ON_ERROR_STOP=1 -h ~/sock -U postgres -q -c \"ALTER DATABASE $DB SET squadlogic.seed_sample_data = 'on'\"" \
-         >/tmp/harness_seedguc 2>&1; then
-      echo "FAIL setting squadlogic.seed_sample_data=on"; dump 10 /tmp/harness_seedguc; return 1
+    if ! as_pg "psql -v ON_ERROR_STOP=1 -h $RUN_DIR/sock -U postgres -q -c \"ALTER DATABASE $DB SET squadlogic.seed_sample_data = 'on'\"" \
+         >$SCRATCH/harness_seedguc 2>&1; then
+      echo "FAIL setting squadlogic.seed_sample_data=on"; dump 10 $SCRATCH/harness_seedguc; return 1
     fi
   fi
   for m in "$REPO"/supabase/migrations/*.sql; do
-    if ! psql_file "$m" >/tmp/harness_seedopt 2>&1; then
+    if ! psql_file "$m" >$SCRATCH/harness_seedopt 2>&1; then
       echo "FAIL applying $(basename "$m") with squadlogic.seed_sample_data=${setting}"
-      dump 20 /tmp/harness_seedopt
+      dump 20 $SCRATCH/harness_seedopt
       return 1
     fi
     applied=$((applied + 1))
@@ -887,15 +985,15 @@ else
   # has gone stale and is no longer describing what it claims). The one thing
   # it will not do is print a reassuring PASS over an opt-in that aborts, which
   # is what leaving the third build out would have done.
-  if seed_opt_in_build on full >/tmp/harness_seedfull 2>&1; then
+  if seed_opt_in_build on full >$SCRATCH/harness_seedfull 2>&1; then
     echo "FAIL the seeded full build now SUCCEEDS. This is good news and a stale pin: the sample seed has been given organization_id, so replace this branch with a plain 'must apply' assertion."
     STATUS=1
-  elif grep -q 'FAIL applying 20260310000002_unified_rls_schema.sql' /tmp/harness_seedfull &&
-       grep -q 'organization_id' /tmp/harness_seedfull; then
+  elif grep -q 'FAIL applying 20260310000002_unified_rls_schema.sql' $SCRATCH/harness_seedfull &&
+       grep -q 'organization_id' $SCRATCH/harness_seedfull; then
     echo "  | (known gap, pinned) the seeded full build still aborts at 20260310000002: the 2024 sample seed predates multi-tenancy and names no organization_id. Backfilling one only moves the abort to 20260331000000, which refuses to replay over any data at all -- see the comment above."
   else
     echo "FAIL the seeded full build failed somewhere other than the known 20260310000002 organization_id gap"
-    dump 25 /tmp/harness_seedfull
+    dump 25 $SCRATCH/harness_seedfull
     STATUS=1
   fi
 fi
@@ -1036,9 +1134,9 @@ for id in "${REVERT_CHECKS[@]}"; do
               VALUES ('88888888-8888-8888-8888-888888888888','33333333-3333-3333-3333-333333333333','77777777-7777-7777-7777-777777777777','Expose Team');
               INSERT INTO public.practice_assignments (organization_id, team_id, field_id)
               VALUES ('33333333-3333-3333-3333-333333333333','88888888-8888-8888-8888-888888888888','55555555-5555-5555-5555-555555555555');" \
-         >/tmp/harness_seed 2>&1; then
+         >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the practice_assignment the revert check requires was never inserted"
-      dump 10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
 
@@ -1066,9 +1164,9 @@ for id in "${REVERT_CHECKS[@]}"; do
                 (organization_id, import_job_id, import_type, source_row_number, raw_payload, normalized_payload, validation_errors)
               VALUES ('99999999-9999-9999-9999-999999999999','9b999999-9999-9999-9999-999999999999','field_availability',1,'{}','{}',
                       jsonb_build_array(jsonb_build_object('reason','field_unresolved','location','Orphan Park','field_name','Ghost Pitch')));" \
-         >/tmp/harness_seed 2>&1; then
+         >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the field-less profile the revert check requires was never inserted"
-      dump 10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
 
@@ -1135,9 +1233,9 @@ for id in "${REVERT_CHECKS[@]}"; do
               INSERT INTO public.import_jobs (id, organization_id, job_type, storage_path, status, total_rows, warning_summary)
               VALUES ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','fields','attached/fields.csv','completed_with_warnings',1,
                       jsonb_build_object('field_rollback', jsonb_build_object('blocked_records',1,'blocked',jsonb_build_object('total',1,'omitted',0,'by_kind',jsonb_build_object('fields',1),'sample',jsonb_build_array(jsonb_build_object('kind','fields','reason','bookings_exist'))))));" \
-         >/tmp/harness_seed 2>&1; then
+         >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the attached profile and blocked-carrying job the revert check requires were never inserted"
-      dump 10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
 
@@ -1174,9 +1272,9 @@ for id in "${REVERT_CHECKS[@]}"; do
               VALUES ('f1111111-1111-1111-1111-111111111111','f6666666-6666-6666-6666-666666666666','2026-09-01','2026-09-30','blackout_months'),
                      ('f1111111-1111-1111-1111-111111111111','f6666666-6666-6666-6666-666666666666','2026-10-01','2026-10-31','blackout_months'),
                      ('f1111111-1111-1111-1111-111111111111','f6666666-6666-6666-6666-666666666666','2026-11-01','2026-11-30','blackout_months');" \
-         >/tmp/harness_seed 2>&1; then
+         >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the windows, the edit audit row and the import windows the revert check requires were never inserted"
-      dump 10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
 
@@ -1231,9 +1329,9 @@ for id in "${REVERT_CHECKS[@]}"; do
               VALUES ('d6666666-6666-6666-6666-66666666666d','d1111111-1111-1111-1111-11111111111d','d5555555-5555-5555-5555-55555555555d','Gate Exposed Pitch North');
               INSERT INTO public.fields (id, organization_id, location_id, name, active, effective_to)
               VALUES ('d7777777-7777-7777-7777-77777777777d','d1111111-1111-1111-1111-11111111111d','d3333333-3333-3333-3333-33333333333d','Gate Dated Pitch', true, current_date + 20);" \
-         >/tmp/harness_seed 2>&1; then
+         >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the venues the revert's exposure count requires were never inserted"
-      dump 10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
 
@@ -1251,9 +1349,9 @@ for id in "${REVERT_CHECKS[@]}"; do
               INSERT INTO public.field_subunits (id, organization_id, field_id, label, effective_to)
               VALUES ('c6666666-6666-6666-6666-66666666666c','c1111111-1111-1111-1111-11111111111c','c3333333-3333-3333-3333-33333333333c','Gap B Pitch One North', current_date + 45),
                      ('c7777777-7777-7777-7777-77777777777c','c1111111-1111-1111-1111-11111111111c','c4444444-4444-4444-4444-44444444444c','Gap B Pitch Two North', current_date + 50);" \
-         >/tmp/harness_seed 2>&1; then
+         >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the venue and sub-surface retirements the revert check requires were never inserted"
-      dump 10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
 
@@ -1301,9 +1399,9 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('e4444444-4444-4444-4444-44444444444e','e7777777-7777-7777-7777-77777777777e',gen_random_uuid(),'lead','2026-08-01','2026-08-31','harness','harness'),
                 ('e4444444-4444-4444-4444-44444444444e','e7777777-7777-7777-7777-77777777777e',gen_random_uuid(),'lead','2026-09-01',NULL,'harness',NULL),
                 ('e4444444-4444-4444-4444-44444444444e','e8888888-8888-8888-8888-88888888888e',gen_random_uuid(),'assistant','2026-09-01',NULL,'harness',NULL);" \
-         >/tmp/harness_seed 2>&1; then
+         >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the three assignment rows the revert check requires were never inserted"
-      dump 10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
   # **20260929000000's revert refuses to destroy unresolved practice
@@ -1331,19 +1429,19 @@ for id in "${REVERT_CHECKS[@]}"; do
                 (DEFAULT,'f9999999-9999-4999-8999-99999999999f','f9999999-9999-4999-8999-9999999999a1','f9999999-9999-4999-8999-9999999999a3','f9999999-9999-4999-8999-9999999999b1','[2026-10-01,2026-10-07]','time_tbd',NULL,'contended',NULL,NULL,'f9999999-9999-4999-8999-9999999999a5',NULL,DEFAULT,NULL,NULL),
                 (DEFAULT,'f9999999-9999-4999-8999-99999999999f','f9999999-9999-4999-8999-9999999999a1','f9999999-9999-4999-8999-9999999999a4','f9999999-9999-4999-8999-9999999999b2','[2026-10-01,2026-10-07]','time_tbd',NULL,'contended',NULL,NULL,'f9999999-9999-4999-8999-9999999999a5',NULL,DEFAULT,NULL,NULL),
                 (DEFAULT,'f9999999-9999-4999-8999-99999999999f','f9999999-9999-4999-8999-9999999999a1','f9999999-9999-4999-8999-9999999999a3','f9999999-9999-4999-8999-9999999999b1','[2026-10-01,2026-10-07]','time_tbd',NULL,'contended',NULL,NULL,'f9999999-9999-4999-8999-9999999999a5',NULL,DEFAULT,now(),NULL);" \
-       >/tmp/harness_seed 2>&1; then
+       >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the three practice exceptions the revert check requires were never inserted"
-      dump 10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
-    if psql_file "$REPO/docs/sql/${id}_revert.sql" >/tmp/harness_rev_refuse 2>&1; then
+    if psql_file "$REPO/docs/sql/${id}_revert.sql" >$SCRATCH/harness_rev_refuse 2>&1; then
       echo "FAIL revert ${id}: it dropped practice_exceptions while 2 unresolved exceptions existed and archive mode was off"
       STATUS=1; continue
-    elif ! grep -q 'refusing to revert: 2 unresolved practice exception(s) would be destroyed' /tmp/harness_rev_refuse; then
+    elif ! grep -q 'refusing to revert: 2 unresolved practice exception(s) would be destroyed' $SCRATCH/harness_rev_refuse; then
       echo "FAIL revert ${id}: it failed without the unresolved-exception refusal"
-      dump 10 /tmp/harness_rev_refuse; STATUS=1; continue
+      dump 10 $SCRATCH/harness_rev_refuse; STATUS=1; continue
     fi
-    if ! psql_cmd "ALTER DATABASE $DB SET squadlogic.revert_practice_exceptions = 'archive'" >/tmp/harness_seed 2>&1; then
-      echo "FAIL seeding ${id}: could not set archive mode"; dump 10 /tmp/harness_seed; STATUS=1; continue
+    if ! psql_cmd "ALTER DATABASE $DB SET squadlogic.revert_practice_exceptions = 'archive'" >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: could not set archive mode"; dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
   # **20260924000000's revert cannot restore what the pruning writer removed**,
@@ -1357,9 +1455,9 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('f4444444-4444-4444-4444-44444444444f','practice','completed',jsonb_build_object('superseded_rows', jsonb_build_array(1, 2))),
                 ('f4444444-4444-4444-4444-44444444444f','practice','completed',jsonb_build_object('superseded_rows', jsonb_build_array(3))),
                 ('f4444444-4444-4444-4444-44444444444f','practice','completed',jsonb_build_object('superseded_rows', jsonb_build_array()));" \
-       >/tmp/harness_seed 2>&1; then
+       >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the three scheduler runs the revert check requires were never inserted"
-      dump 10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
   # **20260927000000's revert DESTROYS every coach practice preference**, so
@@ -1377,9 +1475,9 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('e9999999-9999-4999-8999-99999999999e','e9a00000-0000-4000-8000-000000000001','weekday','must_keep',to_jsonb('TUE'::text),'approved',now(),'2026-09-01'),
                 ('e9999999-9999-4999-8999-99999999999e','e9a00000-0000-4000-8000-000000000001','start_time','prefer_keep',to_jsonb(1020),'requested',NULL,NULL),
                 ('e9999999-9999-4999-8999-99999999999e','e9a00000-0000-4000-8000-000000000002','venue','dont_care',NULL,'requested',NULL,NULL);" \
-       >/tmp/harness_seed 2>&1; then
+       >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the three preference rows the revert check requires were never inserted"
-      dump 10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
 
@@ -1398,9 +1496,9 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('ec000000-0000-4000-8000-00000000000a','Coordinate Park 2',41.50,-73.50),
                 ('ec000000-0000-4000-8000-00000000000b','Coordinate Park 3',40.00,-75.00),
                 ('ec000000-0000-4000-8000-00000000000b','Coordinate Park 4',NULL,NULL);" \
-       >/tmp/harness_seed 2>&1; then
+       >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the four venues the revert check requires were never inserted"
-      dump 10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
 
@@ -1422,9 +1520,9 @@ for id in "${REVERT_CHECKS[@]}"; do
                 ('e2222222-2222-2222-2222-22222222222e',1,1,'rev-b-1','B week 1','harness','2026-09-20T09:00:00','harness',
                  jsonb_build_array('Start'),
                  jsonb_build_array(jsonb_build_object('Start','2026-09-26T09:00:00')), 1, '00000000000000b1');" \
-         >/tmp/harness_seed 2>&1; then
+         >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the published baselines the revert's destruction warning requires were never inserted"
-      dump 10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
 
@@ -1435,9 +1533,9 @@ for id in "${REVERT_CHECKS[@]}"; do
               VALUES ('22222222-2222-2222-2222-222222222222','11111111-1111-1111-1111-111111111111','Revert Park');
               INSERT INTO public.fields (organization_id, location_id, name, active, effective_to)
               VALUES ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222','Closing Soon', true, current_date + 30);" \
-         >/tmp/harness_seed 2>&1; then
+         >$SCRATCH/harness_seed 2>&1; then
       echo "FAIL seeding ${id}: the future-dated retirement the revert check requires was never inserted"
-      dump 10 /tmp/harness_seed; STATUS=1; continue
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
     fi
   fi
 
@@ -1457,16 +1555,16 @@ for id in "${REVERT_CHECKS[@]}"; do
   # exactly as the revert expects to find it.
   if [ "$id" = "20260908000000" ]; then
     if psql_file "$REPO/supabase/migrations/20260908000000_field_availability_profile_field_resolution.sql" \
-         >/tmp/harness_reapply 2>&1; then
-      if grep -q 'PRE-EXISTING: 1 field_availability_profiles row(s) have field_id IS NULL, carrying 1 blackout window(s)' /tmp/harness_reapply; then
+         >$SCRATCH/harness_reapply 2>&1; then
+      if grep -q 'PRE-EXISTING: 1 field_availability_profiles row(s) have field_id IS NULL, carrying 1 blackout window(s)' $SCRATCH/harness_reapply; then
         echo "  | (checked) applying the migration onto a database that already holds a field-less profile warns and counts it"
       else
         echo "FAIL ${id}: re-applied onto a seeded database and the PRE-EXISTING warning did not name the orphan it found"
-        dump 10 /tmp/harness_reapply; STATUS=1
+        dump 10 $SCRATCH/harness_reapply; STATUS=1
       fi
     else
       echo "FAIL ${id}: the migration is not idempotent -- re-applying it failed"
-      dump 15 /tmp/harness_reapply; STATUS=1
+      dump 15 $SCRATCH/harness_reapply; STATUS=1
     fi
   fi
 
@@ -1515,22 +1613,22 @@ NEEDLES
   # leaves the database exactly as the revert expects to find it.
   if [ "$id" = "20260909000000" ]; then
     if psql_file "$REPO/supabase/migrations/20260909000000_rollback_field_import_booking_guard.sql" \
-         >/tmp/harness_reapply 2>&1; then
-      if grep -q 'LEAVING 2 field-less availability profile(s), carrying 3 blackout window(s)' /tmp/harness_reapply; then
+         >$SCRATCH/harness_reapply 2>&1; then
+      if grep -q 'LEAVING 2 field-less availability profile(s), carrying 3 blackout window(s)' $SCRATCH/harness_reapply; then
         echo "  | (checked) applying the migration onto a database that already holds a field-less profile counts what it leaves behind"
       else
         echo "FAIL ${id}: re-applied onto a seeded database and the LEAVING warning did not name the orphan it found"
-        dump 10 /tmp/harness_reapply; STATUS=1
+        dump 10 $SCRATCH/harness_reapply; STATUS=1
       fi
     else
       echo "FAIL ${id}: the migration is not idempotent -- re-applying it failed"
-      dump 15 /tmp/harness_reapply; STATUS=1
+      dump 15 $SCRATCH/harness_reapply; STATUS=1
     fi
   fi
 
-  if psql_file "$REPO/docs/sql/${id}_revert.sql" >/tmp/harness_rev 2>&1; then
+  if psql_file "$REPO/docs/sql/${id}_revert.sql" >$SCRATCH/harness_rev 2>&1; then
     echo "PASS revert ${id}"
-    grep -E '^(psql:[^ ]+ )?(NOTICE|WARNING):' /tmp/harness_rev |
+    grep -E '^(psql:[^ ]+ )?(NOTICE|WARNING):' $SCRATCH/harness_rev |
       sed -E 's/^psql:[^ ]+ //; s/^/  | /' || true
     if [ "$id" = "20260920000000" ]; then
       # **The one revert in this set whose cost is unrecoverable**, so the
@@ -1538,7 +1636,7 @@ NEEDLES
       # planted 3 baselines across 2 organisations -- unequal on purpose, and
       # a third organisation holds none, so a count over the wrong table
       # cannot print this line.
-      if grep -q 'this revert DESTROYS 3 published baseline(s) across 2 organisation(s)' /tmp/harness_rev; then
+      if grep -q 'this revert DESTROYS 3 published baseline(s) across 2 organisation(s)' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert counted the published baselines it was about to destroy, and the organisations they span"
       else
         echo "FAIL revert ${id}: planted 3 baselines across 2 organisations and the revert did not warn with those figures"
@@ -1556,17 +1654,17 @@ NEEDLES
                WHEN to_regclass('public.audit_log') IS NULL THEN 'unreadable'
                WHEN to_regclass('public.publication_baselines') IS NOT NULL THEN 'present'
                ELSE 'gone' END AS verdict;" \
-         >/tmp/harness_store 2>&1 && grep -q 'STORE-VERDICT:gone' /tmp/harness_store; then
+         >$SCRATCH/harness_store 2>&1 && grep -q 'STORE-VERDICT:gone' $SCRATCH/harness_store; then
         echo "  | (checked) publication_baselines is gone from the catalogue after the revert"
       else
         echo "FAIL revert ${id}: publication_baselines survived its own revert"
-        dump 10 /tmp/harness_store; STATUS=1
+        dump 10 $SCRATCH/harness_store; STATUS=1
       fi
     fi
     if [ "$id" = "20260923000000" ]; then
       # The seed planted 3 rows across 2 teams, 1 of them ended -- all three
       # figures distinct, so a count over the wrong column cannot print this.
-      if grep -q 'this revert DESTROYS 3 coach assignment row(s) across 2 team(s); 1 of them are ENDED' /tmp/harness_rev; then
+      if grep -q 'this revert DESTROYS 3 coach assignment row(s) across 2 team(s); 1 of them are ENDED' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert counted the coach assignment rows it was about to destroy, the teams they span, and the ended ones"
       else
         echo "FAIL revert ${id}: planted 3 assignment rows across 2 teams, 1 ended, and the revert did not warn with those figures"
@@ -1575,7 +1673,7 @@ NEEDLES
     fi
     if [ "$id" = "20260924000000" ]; then
       # The seed planted 3 superseded rows on 2 runs, plus a run holding none.
-      if grep -q '3 superseded row(s) recorded on 2 run(s) stay deleted' /tmp/harness_rev; then
+      if grep -q '3 superseded row(s) recorded on 2 run(s) stay deleted' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert counted the superseded practice rows it leaves deleted, and the runs recording them"
       else
         echo "FAIL revert ${id}: planted 3 superseded rows on 2 runs (and 1 empty run) and the revert did not warn with those figures"
@@ -1591,20 +1689,20 @@ NEEDLES
              FROM pg_proc p
             WHERE p.pronamespace = 'public'::regnamespace
               AND p.proname = 'persist_practice_schedule';" \
-         >/tmp/harness_writer 2>&1 && grep -q 'WRITER-VERDICT:restored' /tmp/harness_writer; then
+         >$SCRATCH/harness_writer 2>&1 && grep -q 'WRITER-VERDICT:restored' $SCRATCH/harness_writer; then
         echo "  | (checked) exactly one public.persist_practice_schedule survives the revert, returning uuid, and it no longer prunes"
       else
         echo "FAIL revert ${id}: the pruning writer, or a second overload, survived its own revert"
-        dump 10 /tmp/harness_writer; STATUS=1
+        dump 10 $SCRATCH/harness_writer; STATUS=1
       fi
     fi
     if [ "$id" = "20260929000000" ]; then
       # Refused above with archive mode off; here it archived all 3 onto the
       # one seeded run. Read back from the run, not only from the NOTICE.
-      if grep -q 'archived 3 practice exception(s), 2 unresolved, onto 1 run(s)' /tmp/harness_rev &&
+      if grep -q 'archived 3 practice exception(s), 2 unresolved, onto 1 run(s)' $SCRATCH/harness_rev &&
          psql_cmd "SELECT 'ARCHIVE-VERDICT:' || jsonb_array_length(results->'archived_exceptions')
                      FROM public.scheduler_runs WHERE id = 'f9999999-9999-4999-8999-9999999999a5'" \
-           >/tmp/harness_archive 2>&1 && grep -q 'ARCHIVE-VERDICT:3' /tmp/harness_archive; then
+           >$SCRATCH/harness_archive 2>&1 && grep -q 'ARCHIVE-VERDICT:3' $SCRATCH/harness_archive; then
         echo "  | (checked) the writer-v3 revert refused while 2 unresolved practice exceptions existed, then archived all 3 onto their run before dropping the table"
       else
         echo "FAIL revert ${id}: planted 3 exceptions (2 unresolved) on 1 run and the revert did not archive them onto it"
@@ -1614,7 +1712,7 @@ NEEDLES
     if [ "$id" = "20260930000000" ]; then
       # The seed planted 3 venues with coordinates across 2 organisations,
       # and 1 without -- all figures distinct.
-      if grep -q 'this revert DESTROYS the coordinates of 3 venue(s) across 2 organisation(s)' /tmp/harness_rev; then
+      if grep -q 'this revert DESTROYS the coordinates of 3 venue(s) across 2 organisation(s)' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert counted the venue coordinates it was about to destroy, and the organisations they span"
       else
         echo "FAIL revert ${id}: planted 3 venues with coordinates across 2 organisations (and 1 without) and the revert did not warn with those figures"
@@ -1627,11 +1725,11 @@ NEEDLES
                     WHERE table_schema = 'public' AND table_name = 'coaches' AND is_nullable = 'YES'
                       AND ((column_name = 'preferred_practice_days' AND udt_name = '_day_of_week')
                         OR (column_name = 'preferred_practice_window' AND udt_name = 'tsrange'))" \
-           >/tmp/harness_cols 2>&1 && grep -q 'COLUMNS-VERDICT:2' /tmp/harness_cols; then
+           >$SCRATCH/harness_cols 2>&1 && grep -q 'COLUMNS-VERDICT:2' $SCRATCH/harness_cols; then
         echo "  | (checked) the revert re-adds coaches.preferred_practice_days and _window, nullable, with their original types"
       else
         echo "FAIL revert ${id}: the revert did not re-add both preferred_practice columns, nullable, with their original types"
-        dump 10 /tmp/harness_cols; STATUS=1
+        dump 10 $SCRATCH/harness_cols; STATUS=1
       fi
       # The forward migration's guard: with the columns back and ONE coach
       # holding a value, re-applying the drop must refuse and drop nothing.
@@ -1640,29 +1738,29 @@ NEEDLES
                   ('ed000000-0000-4000-8000-00000000000a','Preference Column Org','preference-column-org');
                 INSERT INTO public.coaches (organization_id, full_name, email, preferred_practice_days) VALUES
                   ('ed000000-0000-4000-8000-00000000000a','Harness Coach','harness.coach@example.test',
-                   ARRAY['tue']::public.day_of_week[]);" >/tmp/harness_seed 2>&1; then
+                   ARRAY['tue']::public.day_of_week[]);" >$SCRATCH/harness_seed 2>&1; then
         if psql_file "$REPO/supabase/migrations/20261001000000_drop_coach_preferred_practice_columns.sql" \
-             >/tmp/harness_reapply 2>&1; then
+             >$SCRATCH/harness_reapply 2>&1; then
           echo "FAIL revert ${id}: re-applying the drop while a coach holds a preferred_practice value SUCCEEDED -- the value was destroyed"
           STATUS=1
-        elif grep -q 'refusing to drop coaches.preferred_practice_days/_window: 1 coach(es) hold a value' /tmp/harness_reapply &&
+        elif grep -q 'refusing to drop coaches.preferred_practice_days/_window: 1 coach(es) hold a value' $SCRATCH/harness_reapply &&
              psql_cmd "SELECT 'SURVIVED:' || count(*) FROM information_schema.columns
                         WHERE table_schema = 'public' AND table_name = 'coaches'
                           AND column_name IN ('preferred_practice_days', 'preferred_practice_window')" \
-               >/tmp/harness_cols 2>&1 && grep -q 'SURVIVED:2' /tmp/harness_cols; then
+               >$SCRATCH/harness_cols 2>&1 && grep -q 'SURVIVED:2' $SCRATCH/harness_cols; then
           echo "  | (checked) the drop refuses while any coach holds a preferred_practice value, and both columns survive"
         else
           echo "FAIL revert ${id}: re-applying the drop over a held value did not refuse with the count, or dropped a column anyway"
-          dump 10 /tmp/harness_reapply; STATUS=1
+          dump 10 $SCRATCH/harness_reapply; STATUS=1
         fi
       else
         echo "FAIL seeding ${id}: the coach holding a preferred_practice value was never inserted"
-        dump 10 /tmp/harness_seed; STATUS=1
+        dump 10 $SCRATCH/harness_seed; STATUS=1
       fi
     fi
     if [ "$id" = "20260927000000" ]; then
       # The seed planted 3 rows across 2 coaches, 1 approved -- all distinct.
-      if grep -q 'this revert DESTROYS 3 coach practice preference row(s) across 2 coach(es); 1 of them are APPROVED' /tmp/harness_rev; then
+      if grep -q 'this revert DESTROYS 3 coach practice preference row(s) across 2 coach(es); 1 of them are APPROVED' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"
       else
         echo "FAIL revert ${id}: planted 3 preference rows across 2 coaches, 1 approved, and the revert did not warn with those figures"
@@ -1673,8 +1771,8 @@ NEEDLES
       # **The exposure the revert creates, read back from its own transcript.**
       # Two figures, both made unique by the seed: the venue that loses a gate
       # is NAMED, and the totals separate "examined" from "exposed".
-      if grep -q 'venue Gate Exposed Park' /tmp/harness_rev &&
-         grep -q 'loses its containment gate: at least 3 node(s) have no end date of their own' /tmp/harness_rev; then
+      if grep -q 'venue Gate Exposed Park' $SCRATCH/harness_rev &&
+         grep -q 'loses its containment gate: at least 3 node(s) have no end date of their own' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert named the venue that loses its containment gate and counted the nodes exposed whatever date is chosen"
       else
         echo "FAIL revert ${id}: planted a live venue with three undated nodes and the revert did not name it, or miscounted them"
@@ -1691,7 +1789,7 @@ NEEDLES
       # chosen, so `examined` and `of which` are totals rather than floors --
       # which is why the reword that turned the PER-VENUE figure into a stated
       # lower bound left this line untouched.
-      if grep -q 'live venues examined: 2, of which 1 lose a gate' /tmp/harness_rev; then
+      if grep -q 'live venues examined: 2, of which 1 lose a gate' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert examined both live venues and counted only the one that loses a gate"
       else
         echo "FAIL revert ${id}: the revert's examined/exposed totals do not match the planted estate"
@@ -1701,7 +1799,7 @@ NEEDLES
       # floor; a transcript that prints the floor without saying which way it is
       # loose reads as a total, which is the overclaim the reword removed. If
       # this clause is ever dropped the numbers silently go back to overclaiming.
-      if grep -q 'the per-venue counts are a FLOOR' /tmp/harness_rev; then
+      if grep -q 'the per-venue counts are a FLOOR' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert says its per-venue exposure figure is a floor and which way it moves"
       else
         echo "FAIL revert ${id}: the revert printed a per-venue exposure count without naming it a floor"
@@ -1728,11 +1826,11 @@ NEEDLES
              (SELECT p.prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                WHERE n.nspname='public' AND p.proname='admin_retire_location')
              LIKE '%contained_estate_after_effective_to%')::text, 'unreadable') AS verdict;" \
-         >/tmp/harness_gate 2>&1 && grep -q 'GATE-VERDICT:false' /tmp/harness_gate; then
+         >$SCRATCH/harness_gate 2>&1 && grep -q 'GATE-VERDICT:false' $SCRATCH/harness_gate; then
         echo "  | (checked) the containment gate is gone from admin_retire_location after the revert"
       else
         echo "FAIL revert ${id}: admin_retire_location did not come back without the containment gate"
-        dump 10 /tmp/harness_gate; STATUS=1
+        dump 10 $SCRATCH/harness_gate; STATUS=1
       fi
     fi
 
@@ -1742,15 +1840,15 @@ NEEDLES
       # derived from `fields` rather than from anything the retirement wrote --
       # a retirement writes nothing to a child, so a check reading child state
       # would report zero for a total loss.
-      if grep -q 'LOSING venue retirement: Gap B Park' /tmp/harness_rev &&
-         grep -q 'closing 3 field(s)' /tmp/harness_rev; then
+      if grep -q 'LOSING venue retirement: Gap B Park' $SCRATCH/harness_rev &&
+         grep -q 'closing 3 field(s)' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert named the venue retirement it was about to erase and the fields its containment was closing"
       else
         echo "FAIL revert ${id}: planted a retired venue with three fields and the revert did not name it, or miscounted the containment"
         STATUS=1
       fi
-      if grep -q 'LOSING sub-surface retirement: Gap B Pitch One North' /tmp/harness_rev &&
-         grep -q 'erasing 1 venue retirement(s) and 2 sub-surface retirement(s)' /tmp/harness_rev; then
+      if grep -q 'LOSING sub-surface retirement: Gap B Pitch One North' $SCRATCH/harness_rev &&
+         grep -q 'erasing 1 venue retirement(s) and 2 sub-surface retirement(s)' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert named both sub-surface retirements and totalled the two kinds separately"
       else
         echo "FAIL revert ${id}: planted two retired sub-surfaces and the revert did not name or total them"
@@ -1763,7 +1861,7 @@ NEEDLES
       # destroyed schedule. The revert asserts this itself; this is the
       # independent confirmation, read from the catalogue rather than from the
       # revert's own NOTICE.
-      if grep -q 'the three-argument producer is restored with all 6 arms' /tmp/harness_rev; then
+      if grep -q 'the three-argument producer is restored with all 6 arms' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert proved its own restore of the three-argument producer"
       else
         echo "FAIL revert ${id}: the revert did not prove it restored the three-argument producer"
@@ -1825,7 +1923,7 @@ NEEDLES
       fi
     fi
     if [ "$id" = "20260906000000" ]; then
-      if grep -q 'LOSING future retirement: field Closing Soon' /tmp/harness_rev; then
+      if grep -q 'LOSING future retirement: field Closing Soon' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert named the retirement it was about to erase"
       else
         echo "FAIL revert ${id}: planted a future-dated retirement and the revert did not name it"
@@ -1836,7 +1934,7 @@ NEEDLES
       # It counted what the database already holds. The seed above planted
       # exactly one, so a revert that counted nothing -- or counted rows it
       # should not -- fails here instead of printing a reassuring zero.
-      if grep -q 'ORPHANS: 1 field-less availability profile' /tmp/harness_rev; then
+      if grep -q 'ORPHANS: 1 field-less availability profile' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert counted the field-less profile already in the database"
       else
         echo "FAIL revert ${id}: planted a field-less profile with a blackout window and the revert did not count it"
@@ -1844,7 +1942,7 @@ NEEDLES
       fi
       # And it named what restoring the old body costs. A revert that quietly
       # reinstates a silent accretion is the same silence one level up.
-      if grep -q 'RESTORING finalize_field_availability_import_job' /tmp/harness_rev; then
+      if grep -q 'RESTORING finalize_field_availability_import_job' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert named the import guard it was putting back"
       else
         echo "FAIL revert ${id}: restored the unguarded finalize without naming what that costs"
@@ -1857,8 +1955,8 @@ NEEDLES
       # reverting during an incident. The seed above plants a row refused with
       # reason=field_unresolved so the count in that warning cannot pass on an
       # empty table -- the same reasoning as the orphaned profile beside it.
-      if grep -q 'ALSO REVERTING two fixes bundled into 20260908000000' /tmp/harness_rev &&
-         grep -q '1 staged row(s) currently refused' /tmp/harness_rev; then
+      if grep -q 'ALSO REVERTING two fixes bundled into 20260908000000' $SCRATCH/harness_rev &&
+         grep -q '1 staged row(s) currently refused' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert named the two bundled fixes it also undoes, and counted the rows one of them strands"
       else
         echo "FAIL revert ${id}: planted a row refused with reason=field_unresolved and the revert did not name the two bundled fixes it undoes, or did not count it"
@@ -1895,27 +1993,27 @@ NEEDLES
       # countable ones count something that is really there". The seed above
       # planted exactly one attached profile with one window, and exactly one
       # import job carrying a field_rollback.blocked list.
-      if grep -q 'EXPOSING 1 availability profile(s) currently attached to a field, carrying 1 blackout window' /tmp/harness_rev &&
-         grep -q '2 profile(s) in this database are already in that state' /tmp/harness_rev; then
+      if grep -q 'EXPOSING 1 availability profile(s) currently attached to a field, carrying 1 blackout window' $SCRATCH/harness_rev &&
+         grep -q '2 profile(s) in this database are already in that state' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert counted the attached profile and its window it was about to expose, and the orphan already there"
       else
         echo "FAIL revert ${id}: planted an attached profile with a window and an already-orphaned one, and the revert did not count all three"
         STATUS=1
       fi
-      if grep -q 'RESTORING public.field_bookings to five kinds' /tmp/harness_rev; then
+      if grep -q 'RESTORING public.field_bookings to five kinds' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert named the sixth booking kind it was removing"
       else
         echo "FAIL revert ${id}: restored the five-kind producer without naming what that costs"
         STATUS=1
       fi
-      if grep -q 'RESTORING rollback_field_import_job to its two-table guard' /tmp/harness_rev; then
+      if grep -q 'RESTORING rollback_field_import_job to its two-table guard' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert named the rollback guard it was putting back"
       else
         echo "FAIL revert ${id}: restored the two-table rollback guard without naming what that costs"
         STATUS=1
       fi
-      if grep -q 'ALSO REVERTING two silent switch arms and the blocked list' /tmp/harness_rev &&
-         grep -q '1 existing import job(s) carry a field_rollback.blocked list' /tmp/harness_rev; then
+      if grep -q 'ALSO REVERTING two silent switch arms and the blocked list' $SCRATCH/harness_rev &&
+         grep -q '1 existing import job(s) carry a field_rollback.blocked list' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert named the two silent arms it restores, and counted the jobs whose blocked list is stranded"
       else
         echo "FAIL revert ${id}: planted a job carrying field_rollback.blocked and the revert did not name the silent arms it restores, or did not count it"
@@ -1999,19 +2097,19 @@ NEEDLES
       # above planted 2 admin windows, 1 edit audit row and 3 import windows --
       # three different figures, so a warning counting the WRONG set cannot
       # print the RIGHT number.
-      if grep -q 'RESTORING remove-and-re-add as the only way to change a blackout: each of the 2 admin-authored window(s)' /tmp/harness_rev; then
+      if grep -q 'RESTORING remove-and-re-add as the only way to change a blackout: each of the 2 admin-authored window(s)' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert counted the admin-authored windows that go back to losing their id on an edit"
       else
         echo "FAIL revert ${id}: planted 2 admin-authored blackouts and the revert did not name or count what they lose"
         STATUS=1
       fi
-      if grep -q 'ALSO REVERTING the single-entry edit audit shape: 1 existing audit row(s)' /tmp/harness_rev; then
+      if grep -q 'ALSO REVERTING the single-entry edit audit shape: 1 existing audit row(s)' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert counted the edit audit rows whose operation stops having a writer"
       else
         echo "FAIL revert ${id}: planted an admin_update_field_blackout audit row and the revert did not name or count the vocabulary it closes"
         STATUS=1
       fi
-      if grep -q 'ALSO REVERTING the 0A000 import-owned refusal: 3 window(s)' /tmp/harness_rev; then
+      if grep -q 'ALSO REVERTING the 0A000 import-owned refusal: 3 window(s)' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert counted the frozen import windows that lose their server-side refusal"
       else
         echo "FAIL revert ${id}: planted 3 import-owned windows and the revert did not name or count the refusal they lose"
@@ -2052,7 +2150,7 @@ NEEDLES
       fi
     fi
     if [ "$id" = "20260907000000" ]; then
-      if grep -q 'EXPOSING 1 practice_assignment' /tmp/harness_rev; then
+      if grep -q 'EXPOSING 1 practice_assignment' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert counted the practice assignment it was about to expose"
       else
         echo "FAIL revert ${id}: planted a practice_assignment with a field_id and the revert did not count it"
@@ -2061,7 +2159,7 @@ NEEDLES
       # It also puts admin_retire_field back on its own four-arm union, and must
       # say so: a revert that silently reinstates an under-reporting guard is
       # the same silence this PR exists to remove, one level up.
-      if grep -q 'RESTORING admin_retire_field' /tmp/harness_rev; then
+      if grep -q 'RESTORING admin_retire_field' $SCRATCH/harness_rev; then
         echo "  | (checked) the revert named the retirement guard it was putting back"
       else
         echo "FAIL revert ${id}: restored the old admin_retire_field without naming what that costs"
@@ -2129,8 +2227,8 @@ NEEDLES
       # that one -- the identical stale-staging shape `psql_file` was fixed for
       # last round, on the one call site that does its own staging. Removed
       # first so a failed write leaves nothing to run, and the write is checked.
-      rm -f /tmp/harness_rev_probe.sql
-      if ! cat >/tmp/harness_rev_probe.sql <<'PROBE'
+      rm -f $SCRATCH/harness_rev_probe.sql
+      if ! cat >$SCRATCH/harness_rev_probe.sql <<'PROBE'
 DO $probe$
 DECLARE
     v_org uuid; v_loc uuid; v_field uuid; v_user uuid := gen_random_uuid();
@@ -2199,16 +2297,16 @@ PROBE
       # Both plants aimed here carry `^` and the whole line, which is the only
       # form that separates the probe that RAN from the probe that could not be
       # staged.
-      elif psql_file /tmp/harness_rev_probe.sql >/tmp/harness_rev_probe 2>&1; then
+      elif psql_file $SCRATCH/harness_rev_probe.sql >$SCRATCH/harness_rev_probe 2>&1; then
         echo "  | (checked) the restored admin_retire_field resolves and runs both its refusal and its confirmed path"
       else
         echo "FAIL revert ${id} probe: the restored admin_retire_field does not resolve"
-        dump 5 /tmp/harness_rev_probe
+        dump 5 $SCRATCH/harness_rev_probe
         STATUS=1
       fi
     fi
   else
-    echo "FAIL revert ${id}"; dump 10 /tmp/harness_rev; STATUS=1
+    echo "FAIL revert ${id}"; dump 10 $SCRATCH/harness_rev; STATUS=1
   fi
 done
 
@@ -2242,9 +2340,9 @@ else
       echo "FAIL emergency rollback 20260504060000: expected exactly one admin_delete_field before it runs, found ${v_before}"
       STATUS=1
     elif psql_file "$REPO/docs/sql/reverts/20260504060000_admin_facility_mutation_rpcs.sql" \
-           >/tmp/harness_emerg 2>&1; then
+           >$SCRATCH/harness_emerg 2>&1; then
       echo "PASS emergency rollback 20260504060000"
-      grep -E '^(psql:[^ ]+ )?(NOTICE|WARNING):' /tmp/harness_emerg |
+      grep -E '^(psql:[^ ]+ )?(NOTICE|WARNING):' $SCRATCH/harness_emerg |
         sed -E 's/^psql:[^ ]+ //; s/^/  | /' || true
       v_left=$(psql_cmd "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                           WHERE n.nspname = 'public' AND p.proname IN
@@ -2266,7 +2364,7 @@ else
         STATUS=1
       fi
     else
-      echo "FAIL emergency rollback 20260504060000"; dump 10 /tmp/harness_emerg; STATUS=1
+      echo "FAIL emergency rollback 20260504060000"; dump 10 $SCRATCH/harness_emerg; STATUS=1
     fi
   fi
 fi

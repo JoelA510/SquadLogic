@@ -38,6 +38,8 @@ import { weekdayCodeOf } from '../availability/calendar.js';
 import { isoDateOfDayNumber, isoDayNumber } from '../facility/eligibility.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** A `daterange` literal: lower marker, lower bound, upper bound, upper marker. */
+const RANGE_LITERAL = /^([[(])([^,]*),([^,]*)([\])])$/;
 
 /**
  * The `day_of_week` enum (`20260331000000_definitive_schema.sql`), indexed by
@@ -67,6 +69,23 @@ export const PRACTICE_TBD_CAUSES = Object.freeze({
   PRACTICE_SLOT_MISSING: 'the practice assignment has no slot attached to expand',
   PRACTICE_RANGE_UNREADABLE: 'the practice assignment has no readable start and end date',
   PRACTICE_DAY_UNREADABLE: 'the practice slot names a day of the week this feed cannot read',
+  // 8.6 3b PR 12a: a saved practice exception (`utils/practiceExceptions.js`).
+  // One sentence per `tbd_reason` in the table's CHECK (20261002000000), enum
+  // wording only -- an exception's free-text note never reaches a family.
+  'no-legal-slot-at-venue':
+    'a field change left no practice slot at this venue that the team could use',
+  contended: 'a field change left fewer practice slots than the teams that needed one',
+  'change-budget': 'moving this practice would have changed more of the schedule than allowed',
+  'objective-preferred-tbd':
+    'the scheduler found no replacement slot better than leaving the time unconfirmed',
+  'coach-preference': "every replacement slot breaks a coach's must-keep preference",
+  declined: 'the proposed new time was declined and no other slot was free',
+  'past-sunset': 'the practice would run past sunset on ground with no lights',
+  'sunset-unknown': 'sunset at this ground is unknown, so the practice time cannot be confirmed',
+  PRACTICE_EXCEPTION_WINDOW_OPEN: 'a change to this practice has no end date yet',
+  PRACTICE_EXCEPTION_WINDOW_UNREADABLE: 'a change to this practice has dates that cannot be read',
+  PRACTICE_EXCEPTION_CONFLICT: 'two changes to this practice cover the same dates',
+  PRACTICE_EXCEPTION_UNREADABLE: 'a change to this practice could not be read',
 });
 
 /**
@@ -80,7 +99,7 @@ export const PRACTICE_TBD_CAUSES = Object.freeze({
  * @returns {{ first: string, last: string } | null}
  */
 export function practiceRangeBounds(range) {
-  const match = /^([[(])([^,]*),([^,]*)([\])])$/.exec(String(range ?? '').trim());
+  const match = RANGE_LITERAL.exec(String(range ?? '').trim());
   if (match === null) return null;
   const lower = match[2].trim();
   const upper = match[3].trim();
@@ -91,6 +110,28 @@ export function practiceRangeBounds(range) {
   const last = isoDayNumber(upper) - (match[4] === ']' ? 0 : 1);
   if (!Number.isFinite(first) || !Number.isFinite(last) || first > last) return null;
   return { first: isoDateOfDayNumber(first), last: isoDateOfDayNumber(last) };
+}
+
+/**
+ * The first date a `daterange` literal covers, read from its lower bound
+ * alone, or `null` when that bound does not read.
+ *
+ * The lower half of {@link practiceRangeBounds} -- the same literal, the same
+ * marker rule -- for a caller that must act on a range whose upper bound is
+ * unbounded or unreadable (8.6 3b PR 12a: an open exception window still
+ * suppresses every date from its start). It is not a second range parser:
+ * both read {@link RANGE_LITERAL}.
+ *
+ * @param {unknown} range
+ * @returns {string | null}
+ */
+export function practiceRangeLowerBound(range) {
+  const match = RANGE_LITERAL.exec(String(range ?? '').trim());
+  if (match === null) return null;
+  const lower = match[2].trim();
+  if (!ISO_DATE.test(lower)) return null;
+  const first = isoDayNumber(lower) + (match[1] === '[' ? 0 : 1);
+  return Number.isFinite(first) ? isoDateOfDayNumber(first) : null;
 }
 
 /**

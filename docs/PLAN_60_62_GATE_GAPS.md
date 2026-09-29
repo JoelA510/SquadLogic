@@ -1,7 +1,8 @@
 # Plan: #60 and #62, gaps in the placer's rule gate
 
-**Status:** plan only. No code has changed. Both items touch the solver and the
-rule engine, so CLAUDE.md §3 requires operator approval before implementation.
+**Status:** **APPROVED 2026-09-29.** The operator answered Q1-Q3; see §7. No
+code has changed yet. Both items touch the solver and the rule engine, so
+CLAUDE.md §3 required operator approval before implementation.
 
 **Evidence levels.** Each claim is marked with one of three labels:
 
@@ -540,3 +541,27 @@ Not put to the operator, with reasons:
   (§2.5), and any overlap it surfaces is already compromise under #61's ruling.
 - **Should the gate honour waivers the way `runRuleEngine` does?** That is the
   sibling-contract rule in CLAUDE.md. The only policy choice in it is Q3.
+
+---
+
+## 7. Operator answers (2026-09-29)
+
+All three answers match the recommended defaults. The plan is **APPROVED
+2026-09-29**.
+
+- **Q1: refuse, in both solver passes.** A placement that would grow an age
+  group's coach-conflict spread above the permitted maximum falls through in
+  this order:
+  1. the next candidate;
+  2. the #53 cross-venue options;
+  3. TIME TBD, with reason `CONFLICT_SPREAD_EXCEEDED`.
+
+  PR B implements this as §1.3 step 4, and W1 and W3 witness it.
+- **Q2: an operator-requested move that grows the spread is allowed, with a
+  warning.** The warning is always surfaced, whether or not `verify` runs. It
+  names the group, the teams and the spread. PR B implements this as §1.3
+  step 5, and W6 witnesses it.
+- **Q3: `conflict-fairness` stays `waivable: false`**
+  (`season2026Constraints.js:416`). PR C does not retype it. PR C also adds a W14
+  case against this record: a waiver naming `conflict-fairness` must not admit
+  a spread breach.

@@ -70,7 +70,7 @@ const REGISTRY = {
   },
   'frontend/src/hooks/usePracticeAssignments.js': {
     class: 'series-only',
-    why: 'R9: exports (CSV, coach email drafts) stay series-level (Q6, D4)',
+    why: "the scheduling page's grid (latest run); R9 now reads the season via practiceSupabase.js",
   },
   'frontend/src/pages/PlayerRecordPage.jsx': {
     class: 'series-only',
@@ -86,7 +86,9 @@ const REGISTRY = {
   },
   'packages/core/src/practiceSupabase.js': {
     class: 'series-only',
-    why: "X1: the lock's and the writer's series cross-check; makes no dates",
+    why:
+      "X1: the lock's and the writer's series cross-check; R9: the exports' season read " +
+      '(useCurrentPracticeSchedule), series-level (Q6, D4); makes no dates',
   },
   'supabase/functions/_shared/engines/practice-lock.ts': {
     class: 'series-only',

@@ -32,6 +32,13 @@ import {
   type TimingFinding,
 } from '../timing/seasonClock.ts';
 import { toInstant } from '../timing/anchorWallTimes.ts';
+import {
+  applyPracticeExceptions,
+  practiceRangeBounds,
+  PRACTICE_EXCEPTION_CODE,
+  PRACTICE_OCCURRENCE_REFUSAL,
+  type PracticeExceptionsResult,
+} from './practiceExceptions.ts';
 
 /**
  * Sanitize ICS field values to prevent header injection (Phase 1 Security).
@@ -106,6 +113,8 @@ export const PRACTICE_RANGE_UNREADABLE = 'PRACTICE_RANGE_UNREADABLE';
 export const PRACTICE_DAY_UNREADABLE = 'PRACTICE_DAY_UNREADABLE';
 /** A `games` row whose `game_slots` join came back empty. */
 export const GAME_SLOT_MISSING = 'GAME_SLOT_MISSING';
+/** The `readFailures` entry for a failed `practice_exceptions` read (PR 12 plan Q5). */
+export const PRACTICE_CHANGES_READ = 'practice changes';
 
 /**
  * The cause behind each reason code, phrased **without any one event in it**.
@@ -132,8 +141,8 @@ export const UNPLACEABLE_CAUSES: Record<string, string> = {
   [PRACTICE_DAY_UNREADABLE]: 'the practice slot names a day of the week this feed cannot read',
   [GAME_SLOT_MISSING]: 'the game has no scheduled slot yet',
   // 8.6 3b PR 12a: a saved practice exception (`practiceExceptions.ts`). One
-  // sentence per `tbd_reason` in the table's CHECK, enum wording only. No
-  // event carries these codes until the feed adopts the twin (PR 12b).
+  // sentence per `tbd_reason` in the table's CHECK, enum wording only. The
+  // feed has carried these codes since it adopted the twin (PR 12b).
   'no-legal-slot-at-venue':
     'a field change left no practice slot at this venue that the team could use',
   contended: 'a field change left fewer practice slots than the teams that needed one',
@@ -284,27 +293,79 @@ export interface GameRow {
   } | null;
 }
 
+/** A `practice_slots` row as the feed's selects embed one. */
+export interface PracticeSlotRef {
+  day_of_week: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  fields?: FieldRef | null;
+}
+
 export interface PracticeRow {
   id: string;
   effective_date_range: string;
-  practice_slots?: {
-    day_of_week: string;
-    start_time?: string | null;
-    end_time?: string | null;
-    fields?: FieldRef | null;
-  } | null;
+  practice_slots?: PracticeSlotRef | null;
+}
+
+/**
+ * A `practice_exceptions` row as `teamFeed.ts` selects one (8.6 3b PR 12b):
+ * the relocated slot is embedded as `slot`, the key the twin reads. Every
+ * field is read by the twin. The table carries no free text; of the audit
+ * columns, none is selected.
+ */
+export interface PracticeExceptionRow {
+  id: string;
+  assignment_id: string;
+  window: string;
+  kind: string;
+  practice_slot_id?: string | null;
+  tbd_reason?: string | null;
+  cause_kind?: string | null;
+  withdrawn_at: string | null;
+  slot?: PracticeSlotRef | null;
 }
 
 const locationOf = (fields: FieldRef | null | undefined): string =>
   `${fields?.locations?.name || 'Venue'}, ${fields?.name || 'Field'}`;
 
-const MS_PER_DAY = 86_400_000;
+/** A title the calendar app shows for a practice moved by a saved exception (Q1). */
+export const movedPracticeTitle = (teamName: string): string => `Practice (moved) - ${teamName}`;
 
-/** `YYYY-MM-DD` shifted by whole days, staying on the UTC calendar. */
-function shiftIsoDate(isoDate: string, days: number): string | null {
-  const at = new Date(`${isoDate}T00:00:00Z`);
-  if (Number.isNaN(at.getTime())) return null;
-  return new Date(at.getTime() + days * MS_PER_DAY).toISOString().slice(0, 10);
+const WEEKDAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+
+/**
+ * `cause_kind` in words. The CHECK's values only (`blackout`, `retirement`,
+ * `daylight`); anything else, including `null`, reads as a plain change. Only
+ * enum values reach a DESCRIPTION (Q1), plus the slot's own field and venue
+ * names, which the LOCATION line already carries.
+ */
+const CAUSE_KIND_WORDS: Record<string, string> = {
+  blackout: 'a field closure',
+  retirement: 'a field retirement',
+  daylight: 'early sunset',
+};
+
+/** The DESCRIPTION of a moved practice: what it replaces, and why, in enum wording (Q1). */
+function movedDescription(
+  teamName: string,
+  replaces: PracticeSlotRef | null | undefined,
+  causeKind: unknown
+): string {
+  const day = WEEKDAY_NAMES[DAY_MAP[String(replaces?.day_of_week ?? '').toLowerCase()]];
+  const time = /^\d{2}:\d{2}/.exec(String(replaces?.start_time ?? ''))?.[0];
+  const was = [day, time].filter(Boolean).join(' ');
+  const cause = CAUSE_KIND_WORDS[String(causeKind ?? '')] ?? 'a schedule change';
+  return `Practice session for ${teamName}, moved from ${was || 'its usual time'} at ${locationOf(
+    replaces?.fields
+  )} because of ${cause}.`;
 }
 
 /**
@@ -327,20 +388,15 @@ function shiftIsoDate(isoDate: string, days: number): string | null {
  * the upper bound as inclusive schedules one practice a week after the
  * assignment ends. `rangeLastDay` in `mockSupabaseClient.js` already reads the
  * marker this way; this is that contract, not a third one.
+ *
+ * **Since 8.6 3b PR 12b this is the twin's `practiceRangeBounds`**, not a
+ * reading of its own. The feed now expands rows through the twin, so a second
+ * parser here would be one the feed no longer used, while
+ * `tests/practiceOccurrences.test.js` went on pinning core to it. The alias
+ * keeps that pin honest: it now holds core to the reader the feed ships.
  */
-export function dateRangeBounds(range: unknown): { first: string; last: string } | null {
-  const match = /^([[(])([^,]*),([^,]*)([\])])$/.exec(String(range ?? '').trim());
-  if (match === null) return null;
-  const lower = match[2].trim();
-  const upper = match[3].trim();
-  if (!lower || !upper) return null;
-  // `[` covers the bound itself; `(` starts the day after it.
-  const first = match[1] === '[' ? lower : shiftIsoDate(lower, 1);
-  // `]` covers the bound itself; `)` stops the day before it.
-  const last = match[4] === ']' ? upper : shiftIsoDate(upper, -1);
-  if (!first || !last || first > last) return null;
-  return { first, last };
-}
+export const dateRangeBounds: (range: unknown) => { first: string; last: string } | null =
+  practiceRangeBounds;
 
 /**
  * Expand practice assignments and games into feed events on the season's clock.
@@ -350,139 +406,186 @@ export function dateRangeBounds(range: unknown): { first: string; last: string }
  * `unplaceable` with `SEASON_TIMEZONE_MISSING`, which is the established
  * ruling: refuse rather than guess. The hardcoded `America/New_York` that used
  * to stand in here was the bug, not the safety net.
+ *
+ * ## Saved practice exceptions (8.6 3b PR 12b)
+ *
+ * `exceptions` are the team's `practice_exceptions` rows. The practice arm no
+ * longer walks a row's range itself: every row, and every exception, goes
+ * through the import-free twin `applyPracticeExceptions`
+ * (`practiceExceptions.ts`), which is held to core by the drift digest. What
+ * it returns is rendered by the rules the plan's operator answers fixed
+ * (`docs/PHASE_8_6_PR12_READERS_PLAN.md` §10):
+ *
+ * - **series**: as before, a timed event, UID `<assignment>_<date>`.
+ * - **relocated** (Q1): a timed event on the relocated slot's times and ground,
+ *   composed by the same `resolveZonedInstant`; the same UID scheme, so a
+ *   same-day move updates the family's existing event; SUMMARY
+ *   `Practice (moved) - <team>`; the original dates are simply absent, never
+ *   sent as `STATUS:CANCELLED`.
+ * - **time_tbd** (Q2): a DATED `unplaceable`, so the renderer's all-day
+ *   `STATUS:TENTATIVE` VEVENT and the CALDESC count apply. It carries no
+ *   LOCATION: which ground is not known either.
+ * - **undated** (Q7, an open or unreadable window, or a row the series
+ *   refuses): `date: null`, the CALDESC count only.
+ *
+ * A season with no zone still refuses every timed event with
+ * `SEASON_TIMEZONE_MISSING`, moved ones included; a TIME TBD stays TIME TBD
+ * with its own code.
+ *
+ * `exceptions` is optional for the callers that predate it (tests with no
+ * practice changes). The one production caller, `teamFeed.ts`, always passes
+ * the rows it read, and `ics-feed_test.ts` runs that caller against a fake
+ * client, so passing `[]` there turns red.
  */
 export function buildFeedEvents(input: {
   teamName: string;
   timezone: string | null;
   games?: GameRow[] | null;
   practices?: PracticeRow[] | null;
+  exceptions?: PracticeExceptionRow[] | null;
+  /** Receives the twin's whole result, so a caller can log its findings and meta. */
+  onPracticeExceptions?: (result: PracticeExceptionsResult) => void;
 }): FeedEvent[] {
-  const { teamName, timezone, games, practices } = input;
+  const { teamName, timezone, games, practices, exceptions, onPracticeExceptions } = input;
   const events: FeedEvent[] = [];
+  const title = `Practice - ${teamName}`;
 
-  practices?.forEach((p) => {
-    const slot = p.practice_slots;
-    const location = locationOf(slot?.fields);
-    const title = `Practice - ${teamName}`;
+  const rowsById = new Map((practices ?? []).map((p) => [String(p.id), p]));
+  const applied = applyPracticeExceptions({
+    // The twin reads the slot as `slot`; the feed's select embeds it as
+    // `practice_slots`. Renamed here and nowhere else.
+    rows: (practices ?? []).map((p) => ({
+      id: p.id,
+      effective_date_range: p.effective_date_range,
+      slot: p.practice_slots ?? null,
+    })),
+    exceptions: exceptions ?? [],
+  });
+  onPracticeExceptions?.(applied);
 
-    /**
-     * An assignment that cannot be expanded at all.
-     *
-     * **Reported, not `return`ed.** The first cut of this function dropped
-     * three of these on the floor -- a missing `practice_slots` join, an
-     * unreadable `effective_date_range` (a `daterange` has no NOT NULL upper
-     * bound, so `[2026-11-02,)` is storable today) and a `day_of_week` outside
-     * the enum -- while the module header claimed nothing was dropped. A
-     * family whose practices vanish from the feed with nothing said is the
-     * exact failure CLAUDE.md §3 names. `date: null` means no VEVENT is
-     * written, because there is no day to write one on; the CALDESC count and
-     * the server log are where it exists.
-     */
-    const refuseAssignment = (code: string, reason: string) => {
+  /**
+   * An entry with no day at all.
+   *
+   * **Reported, not `return`ed.** The first cut of this function dropped
+   * three of these on the floor -- a missing `practice_slots` join, an
+   * unreadable `effective_date_range` (a `daterange` has no NOT NULL upper
+   * bound, so `[2026-11-02,)` is storable today) and a `day_of_week` outside
+   * the enum -- while the module header claimed nothing was dropped. A
+   * family whose practices vanish from the feed with nothing said is the
+   * exact failure CLAUDE.md §3 names. `date: null` means no VEVENT is
+   * written, because there is no day to write one on; the CALDESC count and
+   * the server log are where it exists. Since 12b the same holds for an
+   * exception window with no end date or no readable dates (Q7).
+   */
+  const ROW_REFUSALS = new Set<string>(Object.values(PRACTICE_OCCURRENCE_REFUSAL));
+  for (const entry of applied.undated) {
+    const id = String(entry.assignmentId);
+    const p = rowsById.get(id);
+    if (ROW_REFUSALS.has(entry.code)) {
+      const reason =
+        entry.code === PRACTICE_SLOT_MISSING
+          ? `practice assignment ${id} has no practice slot to expand`
+          : entry.code === PRACTICE_RANGE_UNREADABLE
+            ? `practice assignment ${id} has an effective date range this feed cannot read: ${String(
+                p?.effective_date_range
+              )}`
+            : `practice assignment ${id} names a day of week this feed does not know: ${String(
+                p?.practice_slots?.day_of_week
+              )}`;
       events.push({
         kind: 'unplaceable',
-        uid: String(p.id),
+        uid: id,
         title,
         date: null,
-        code,
+        code: entry.code,
         reason,
+        location: locationOf(p?.practice_slots?.fields),
+      });
+      continue;
+    }
+    events.push({
+      kind: 'unplaceable',
+      uid: `${id}_${String(entry.exceptionId)}`,
+      title,
+      date: null,
+      code: entry.code,
+      reason:
+        entry.code === PRACTICE_EXCEPTION_CODE.WINDOW_OPEN
+          ? `a saved change to practice assignment ${id} has no end date`
+          : `a saved change to practice assignment ${id} has dates this feed cannot read`,
+      location: '',
+    });
+  }
+
+  for (const o of applied.occurrences) {
+    const date = String(o.date);
+    const uid = `${String(o.assignmentId)}_${date}`;
+
+    if (o.kind === 'time_tbd') {
+      // Dated, so the renderer writes the all-day TENTATIVE VEVENT (Q2).
+      events.push({
+        kind: 'unplaceable',
+        uid,
+        title,
+        date,
+        code: String(o.code),
+        reason: `the practice on ${date} has no confirmed time`,
+        location: '',
+      });
+      continue;
+    }
+
+    const moved = o.kind === 'relocated';
+    const slot = o.slot as PracticeSlotRef;
+    const eventTitle = moved ? movedPracticeTitle(teamName) : title;
+    const location = locationOf(slot?.fields);
+
+    // Was ``new Date(`${isoDateStr}T${slot.start_time}Z`)`` -- a naive wall
+    // time with `Z` bolted on, which asserts the club practises in UTC. A
+    // moved practice is composed the same way, from the relocated slot.
+    const start = resolveZonedInstant({
+      date,
+      time: slot?.start_time,
+      timeZone: timezone,
+      label: 'practice start',
+    });
+    const end = resolveZonedInstant({
+      date,
+      time: slot?.end_time,
+      timeZone: timezone,
+      label: 'practice end',
+    });
+
+    const findings = [...start.findings, ...end.findings];
+    const startAt = start.iso ? toInstant(start.iso).date : null;
+    const endAt = end.iso ? toInstant(end.iso).date : null;
+
+    if (startAt && endAt) {
+      events.push({
+        kind: 'timed',
+        uid,
+        title: eventTitle,
+        dtstart: formatIcsDate(startAt),
+        dtend: formatIcsDate(endAt),
+        description: moved
+          ? movedDescription(teamName, o.replaces as PracticeSlotRef, o.causeKind)
+          : `Practice session for ${teamName}`,
+        location,
+        notes: noteCodesOf(findings),
+      });
+    } else {
+      const blocking = blockingCodeOf(findings);
+      events.push({
+        kind: 'unplaceable',
+        uid,
+        title: eventTitle,
+        date,
+        code: blocking?.code ?? SLOT_TIME_MISSING,
+        reason: blocking?.message ?? 'practice time could not be placed',
         location,
       });
-    };
-
-    if (!slot) {
-      refuseAssignment(
-        PRACTICE_SLOT_MISSING,
-        `practice assignment ${p.id} has no practice slot to expand`
-      );
-      return;
     }
-
-    const bounds = dateRangeBounds(p.effective_date_range);
-    if (!bounds) {
-      refuseAssignment(
-        PRACTICE_RANGE_UNREADABLE,
-        `practice assignment ${p.id} has an effective date range this feed cannot read: ${String(
-          p.effective_date_range
-        )}`
-      );
-      return;
-    }
-
-    const targetDay = DAY_MAP[String(slot.day_of_week ?? '').toLowerCase()];
-    if (targetDay === undefined) {
-      refuseAssignment(
-        PRACTICE_DAY_UNREADABLE,
-        `practice assignment ${p.id} names a day of week this feed does not know: ${String(
-          slot.day_of_week
-        )}`
-      );
-      return;
-    }
-
-    // The recurrence walk stays on a UTC-noon anchor: it enumerates CALENDAR
-    // DATES only, and noon keeps the date stable under any offset. The instant
-    // is composed from each date below, on the season's clock.
-    //
-    // `dateRangeBounds` has already proven both ends parse, so unlike the code
-    // this replaced the loop below cannot spin on an Invalid Date.
-    const currentDate = new Date(`${bounds.first}T12:00:00Z`);
-    const endDate = new Date(`${bounds.last}T12:00:00Z`);
-
-    while (currentDate.getUTCDay() !== targetDay) {
-      currentDate.setUTCDate(currentDate.getUTCDate() + 1);
-    }
-
-    while (currentDate <= endDate) {
-      const isoDateStr = currentDate.toISOString().split('T')[0];
-      const uid = `${p.id}_${isoDateStr}`;
-
-      // Was ``new Date(`${isoDateStr}T${slot.start_time}Z`)`` -- a naive wall
-      // time with `Z` bolted on, which asserts the club practises in UTC.
-      const start = resolveZonedInstant({
-        date: isoDateStr,
-        time: slot.start_time,
-        timeZone: timezone,
-        label: 'practice start',
-      });
-      const end = resolveZonedInstant({
-        date: isoDateStr,
-        time: slot.end_time,
-        timeZone: timezone,
-        label: 'practice end',
-      });
-
-      const findings = [...start.findings, ...end.findings];
-      const startAt = start.iso ? toInstant(start.iso).date : null;
-      const endAt = end.iso ? toInstant(end.iso).date : null;
-
-      if (startAt && endAt) {
-        events.push({
-          kind: 'timed',
-          uid,
-          title,
-          dtstart: formatIcsDate(startAt),
-          dtend: formatIcsDate(endAt),
-          description: `Practice session for ${teamName}`,
-          location,
-          notes: noteCodesOf(findings),
-        });
-      } else {
-        const blocking = blockingCodeOf(findings);
-        events.push({
-          kind: 'unplaceable',
-          uid,
-          title,
-          date: isoDateStr,
-          code: blocking?.code ?? SLOT_TIME_MISSING,
-          reason: blocking?.message ?? 'practice time could not be placed',
-          location,
-        });
-      }
-
-      currentDate.setUTCDate(currentDate.getUTCDate() + 7);
-    }
-  });
+  }
 
   games?.forEach((g) => {
     const slot = g.game_slots;
@@ -653,7 +756,8 @@ export function renderIcsCalendar(input: {
   timezone: string | null;
   events: FeedEvent[];
   /**
-   * Sources whose read failed (`'games'`, `'practices'`). Said in the CALDESC,
+   * Sources whose read failed (`'games'`, `'practices'`, and since 12b
+   * {@link PRACTICE_CHANGES_READ}). Said in the CALDESC,
    * because a failed read renders exactly like "nothing scheduled" otherwise:
    * a family would see a calendar with no practices and believe it (fix #64).
    * Not a 500 -- the ruling on the season read applies: a feed that 500s
@@ -684,9 +788,18 @@ export function renderIcsCalendar(input: {
   const summary = summariseUnplaceable(events);
   const notes = summariseNotes(events);
   const calDesc: string[] = [];
-  if (readFailures.length > 0) {
+  // A failed `practice_exceptions` read is a different claim from a failed
+  // schedule read: nothing is missing, but what is shown may be superseded.
+  // Q5 of the PR 12 plan fixed its sentence.
+  const schedules = readFailures.filter((source) => source !== PRACTICE_CHANGES_READ);
+  if (schedules.length > 0) {
     calDesc.push(
-      `INCOMPLETE: the ${readFailures.join(' and ')} schedule could not be read, so this calendar may be missing ${readFailures.join(' and ')}. It is not a sign that none are scheduled.`
+      `INCOMPLETE: the ${schedules.join(' and ')} schedule could not be read, so this calendar may be missing ${schedules.join(' and ')}. It is not a sign that none are scheduled.`
+    );
+  }
+  if (readFailures.includes(PRACTICE_CHANGES_READ)) {
+    calDesc.push(
+      'INCOMPLETE: practice changes could not be read, so some practices shown may have moved or have no confirmed time.'
     );
   }
   if (summary.count > 0) {

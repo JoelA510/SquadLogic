@@ -22,6 +22,18 @@ import {
   type GameRow,
   type PracticeRow,
 } from '../calendar/icsFeed.ts';
+import { composeTeamFeed } from '../calendar/teamFeed.ts';
+import {
+  exerciseOf,
+  expectedFeed,
+  fakeClient,
+  feedProblems,
+  parseIcs,
+  SEED,
+  seedRange,
+  seedWeekdays,
+  shiftWindows,
+} from './feed-exceptions-seed.ts';
 
 const NOW = new Date('2025-01-01T12:00:00Z');
 
@@ -218,3 +230,176 @@ Deno.test('calendar-feed - every content line is folded at 75 octets (RFC 5545 3
   assert(ics.includes('\r\n '), 'nothing was folded — the check proves nothing');
   assertStringIncludes(ics.replace(/\r\n /g, ''), '40 of 40 events have no confirmed time');
 });
+
+// ---------------------------------------------------------------------------
+// 8.6 3b PR 12b: the feed applies saved practice exceptions (plan §6 W4, W11,
+// W13). The seed, the independent oracle and the fake client are in
+// `feed-exceptions-seed.ts`; every subject set below comes from the seeded
+// rows, never from the feed's output. `composeTeamFeed` is the seam
+// `calendar-feed/index.ts` hands the service-role client to.
+// ---------------------------------------------------------------------------
+
+async function seededFeed(seed = SEED, opts: { fail?: string[] } = {}) {
+  const client = fakeClient(seed, opts);
+  const logged: string[] = [];
+  const result = await composeTeamFeed({
+    client,
+    team: seed.team,
+    orgName: 'Test Org',
+    now: NOW,
+    log: (message) => logged.push(message),
+  });
+  return { ...result, client, logged };
+}
+
+Deno.test('practice exceptions - the seed exercises every case, and the meter can go red', () => {
+  const counts = exerciseOf(SEED);
+  for (const [name, n] of Object.entries(counts)) {
+    assert(n >= 1, `the seed does not exercise ${name}`);
+  }
+  // The constructed failure: every window moved off every row takes every
+  // count to zero, so the meter above is not satisfied by the seed's mere size.
+  const off = exerciseOf(shiftWindows(SEED, 1100));
+  assertEquals(Object.values(off), [0, 0, 0, 0, 0], JSON.stringify(off));
+});
+
+Deno.test('practice exceptions (W11) - the feed shows exactly what the seed says', async () => {
+  const { ics, readFailures } = await seededFeed();
+  assertEquals(readFailures, []);
+  assertEquals(feedProblems(ics, SEED), []);
+  // Meta: the oracle expected moved, TIME TBD and plain practices, and undated.
+  const want = expectedFeed(SEED);
+  const summaries = [...want.vevents.values()].map((v) => v.summary);
+  assert(summaries.includes('Practice (moved) - Test Tigers'), 'oracle expects no moved practice');
+  assert(summaries.includes('TIME TBD - Practice - Test Tigers'), 'oracle expects no TIME TBD');
+  assert(summaries.includes('Practice - Test Tigers'), 'oracle expects no plain practice');
+  assert(want.undated >= 1, 'oracle expects no undated entry');
+});
+
+Deno.test(
+  'practice exceptions (W11) - the oracle rejects a feed handed no exceptions',
+  async () => {
+    // What "pass `exceptions: []`" renders: the bare series. The oracle must
+    // reject it, or the test above could not catch that plant.
+    const bare = await seededFeed({ ...SEED, exceptions: [] });
+    assert(feedProblems(bare.ics, SEED).length > 0, 'the bare series satisfies the oracle');
+  }
+);
+
+Deno.test('practice exceptions (W11, Q1) - UIDs, the moved SUMMARY and DESCRIPTION', async () => {
+  const { ics } = await seededFeed();
+  const byUid = new Map(parseIcs(ics).vevents.map((v) => [v.uid, v]));
+  const move = SEED.exceptions.find((e) => e.id === 'exc-move') as Record<string, string>;
+  const sameDay = SEED.exceptions.find((e) => e.id === 'exc-sameday') as Record<string, string>;
+  // Another weekday: the original Thursdays in the window are gone, not
+  // CANCELLED, and the Wednesdays are keyed by their own date.
+  const w = seedRange(move.window);
+  const thursdays = seedWeekdays('thu', w.first, w.last as string);
+  const wednesdays = seedWeekdays('wed', w.first, w.last as string);
+  assert(thursdays.length > 0 && wednesdays.length > 0, 'the move window covers no dates');
+  for (const d of thursdays) assert(!byUid.has(`asg-a2_${d}`), `original ${d} still sent`);
+  for (const d of wednesdays) {
+    const ev = byUid.get(`asg-a2_${d}`);
+    assertEquals(ev?.summary, 'Practice (moved) - Test Tigers');
+    assertEquals(ev?.allDay, false);
+    assertStringIncludes(ev?.location ?? '', 'Field 3C');
+    assertEquals(
+      ev?.description,
+      'Practice session for Test Tigers\\, moved from Thursday 18:00 at Synthetic North\\, Field 1A because of a field closure.'
+    );
+  }
+  // Composed on the season clock from the RELOCATED slot's times: Wed Oct 7
+  // 17:30 in Los Angeles (PDT, -07:00).
+  assertEquals(byUid.get('asg-a2_2026-10-07')?.dtstart, '20261008T003000Z');
+  // Same day: the UID is the original's, so the family's event updates.
+  const sd = seedRange(sameDay.window).first;
+  assertEquals(byUid.get(`asg-a3_${sd}`)?.summary, 'Practice (moved) - Test Tigers');
+  assertEquals(byUid.get(`asg-a3_${sd}`)?.dtstart, '20260912T180000Z');
+});
+
+Deno.test(
+  'practice exceptions (W4) - a tail TIME TBD shows every weekday of its window',
+  async () => {
+    const { ics } = await seededFeed();
+    const tail = SEED.exceptions.find((e) => e.id === 'exc-tail') as Record<string, string>;
+    const row = SEED.practices.find((r) => r.id === tail.assignment_id) as {
+      id: string;
+      effective_date_range: string;
+      practice_slots: { day_of_week: string };
+    };
+    const rowLast = seedRange(row.effective_date_range).last as string;
+    const w = seedRange(tail.window);
+    const dates = seedWeekdays(row.practice_slots.day_of_week, w.first, w.last as string);
+    // Meta: the window lies wholly after the row, and has weekdays in it.
+    assert(dates.length >= 4, `tail window has ${dates.length} weekdays`);
+    assert(
+      dates.every((d) => d > rowLast),
+      'the tail window overlaps its row'
+    );
+    const { caldesc, vevents } = parseIcs(ics);
+    const byUid = new Map(vevents.map((v) => [v.uid, v]));
+    for (const d of dates) {
+      const ev = byUid.get(`${row.id}_${d}`);
+      assertEquals(ev?.allDay, true, `no all-day TBD on ${d}`);
+      assertEquals(ev?.dtstart, d.replace(/-/g, ''));
+      assertEquals(ev?.status, 'TENTATIVE');
+      assertEquals(ev?.summary, 'TIME TBD - Practice - Test Tigers');
+      assertStringIncludes(ev?.description ?? '', '(past-sunset)');
+    }
+    // Counted in the CALDESC, under the code's family-facing sentence.
+    assertStringIncludes(caldesc, `${dates.length} because the practice would run past sunset`);
+  }
+);
+
+Deno.test(
+  'practice exceptions (W13) - a failed read is said, and the practices still show',
+  async () => {
+    const { ics, readFailures, logged } = await seededFeed(SEED, { fail: ['practice_exceptions'] });
+    assertEquals(readFailures, ['practice changes']);
+    assertStringIncludes(
+      parseIcs(ics).caldesc,
+      'INCOMPLETE: practice changes could not be read\\, so some practices shown may have moved or have no confirmed time.'
+    );
+    // Not hidden: the feed is the bare series, exactly.
+    assertEquals(feedProblems(ics, { ...SEED, exceptions: [] }), []);
+    assert(
+      logged.some((m) => m.includes('practice_exceptions read failed')),
+      'the failure was not logged'
+    );
+  }
+);
+
+Deno.test('practice exceptions (R4) - the read is scoped by team and organization', async () => {
+  const { client } = await seededFeed();
+  const reads = client.calls.filter((c) => c.table === 'practice_exceptions');
+  assertEquals(reads.length, 1);
+  assertEquals(reads[0].eq, [
+    ['team_id', 'team-t1'],
+    ['organization_id', 'org-o1'],
+  ]);
+  assertStringIncludes(reads[0].select, 'slot:practice_slots!practice_slot_id');
+  // A team with no organization cannot be scoped: not read, and said.
+  const noOrg = await composeTeamFeed({
+    client: fakeClient(SEED),
+    team: { ...SEED.team, organization_id: null },
+    orgName: 'Test Org',
+    now: NOW,
+    log: () => {},
+  });
+  assertEquals(noOrg.readFailures, ['practice changes']);
+});
+
+Deno.test(
+  'practice exceptions - no season zone: moved refuses, TIME TBD keeps its code',
+  async () => {
+    const { events } = await seededFeed({ ...SEED, timezone: null });
+    const byUid = new Map(events.map((e) => [e.uid, e]));
+    const moved = byUid.get('asg-a2_2026-10-07') as { kind: string; code?: string; title: string };
+    assertEquals(moved.kind, 'unplaceable');
+    assertEquals(moved.code, 'SEASON_TIMEZONE_MISSING');
+    assertEquals(moved.title, 'Practice (moved) - Test Tigers');
+    const tbd = byUid.get('asg-a1_2026-10-06') as { kind: string; code?: string };
+    assertEquals(tbd.kind, 'unplaceable');
+    assertEquals(tbd.code, 'past-sunset');
+  }
+);

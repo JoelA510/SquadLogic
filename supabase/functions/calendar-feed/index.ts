@@ -47,18 +47,18 @@
  * copy. It passed for the entire life of defect 1 above, because the copy was
  * never handed a bare `time`. The logic is now imported by the function and by
  * both test arms, so there is one implementation to be wrong.
+ *
+ * Since 8.6 3b PR 12b the reads live there too (`_shared/calendar/teamFeed.ts`,
+ * `composeTeamFeed`), with the client injected: this file validates the token
+ * and hands over. The reason is the third read, of saved practice exceptions.
+ * Its rows must reach the event builder, and only a test that runs the reads
+ * against seeded rows can tell a handler that passes them from one that reads
+ * them and passes `[]`.
  */
 
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.87.1';
-import {
-  buildFeedEvents,
-  renderIcsCalendar,
-  summariseUnplaceable,
-  type GameRow,
-  type PracticeRow,
-} from '../_shared/calendar/icsFeed.ts';
-import { readSeasonTimezone, type SeasonSettingsReader } from '../_shared/timing/seasonSettings.ts';
+import { composeTeamFeed, type TeamFeedClient } from '../_shared/calendar/teamFeed.ts';
 
 serve(async (req) => {
   try {
@@ -108,109 +108,18 @@ serve(async (req) => {
       }
     }
 
-    const teamId = team.id;
-    const organizationId = team.organization_id;
     const orgName = team.organizations?.name || 'SquadLogic';
 
-    // 2. Fetch the season's timezone.
+    // 2. The season clock, the games, the practices and the saved practice
+    // exceptions, placed and rendered. Every read failure is said in the
+    // CALDESC and logged, never a 500 (see `teamFeed.ts`).
     //
-    // No default. A season with no timezone refuses rather than guessing; the
-    // hardcoded `America/New_York` this replaced was the bug, not the safety
-    // net.
-    //
-    // `readSeasonTimezone` rather than a query written out here: its own header
-    // calls itself "the one server-side read of a season's clock", and a second
-    // copy in this file is how `.single()` ends up fixed on one arm and not the
-    // other -- the twin-arm shape this whole change exists to stop.
-    // Cast, not checked: matching supabase-js 2.87's builder against the structural reader
+    // Cast, not checked: matching supabase-js 2.87's builder against the structural client
     // overflows TypeScript's instantiation depth (TS2589, #483); runtime shape is unchanged.
-    const seasonReader = supabase as unknown as SeasonSettingsReader;
-    const season = await readSeasonTimezone(seasonReader, organizationId);
-    if (season.errored) {
-      // Not fatal. A feed that 500s takes every family's calendar down; every
-      // event becomes TIME TBD instead, which says the true thing.
-      console.error('calendar-feed: season_settings read failed', {
-        organizationId,
-        message: season.message,
-      });
-    }
-    const timezone = season.timezone;
-
-    // 3. Fetch Games.
-    //
-    // `slot_date` is the column this select was missing entirely: it asked for
-    // the two `time` columns alone and fed them straight to `new Date()`.
-    // `start`/`end` are the `timestamptz` pair, preferred when a row carries
-    // them -- the order `normalizeGameSlot` already uses.
-    const { data: games, error: gamesError } = await supabase
-      .from('games')
-      .select(
-        `
-          id,
-          game_slots ( slot_date, start_time, end_time, start, end, fields(name, locations(name)) ),
-          teams!games_home_team_id_fkey(name),
-          teams!games_away_team_id_fkey(name)
-      `
-      )
-      .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`);
-
-    // A failed read is recorded, not swallowed: it is rendered into the
-    // CALDESC below, because an empty feed reads as "nothing scheduled".
-    const readFailures: string[] = [];
-    if (gamesError) {
-      console.error('calendar-feed: games read failed', { teamId, message: gamesError.message });
-      readFailures.push('games');
-    }
-
-    // 4. Fetch Practice Assignments
-    const { data: practices, error: practicesError } = await supabase
-      .from('practice_assignments')
-      .select(
-        `
-          id,
-          effective_date_range,
-          practice_slots!practice_slot_id ( day_of_week, start_time, end_time, fields(name, locations(name)) )
-       `
-      )
-      .eq('team_id', teamId);
-
-    if (practicesError) {
-      console.error('calendar-feed: practice_assignments read failed', {
-        teamId,
-        message: practicesError.message,
-      });
-      readFailures.push('practices');
-    }
-
-    // 5. Place every occurrence on the season clock.
-    const events = buildFeedEvents({
-      teamName: team.name,
-      timezone,
-      games: (games ?? []) as unknown as GameRow[],
-      practices: (practices ?? []) as unknown as PracticeRow[],
-    });
-
-    const unplaceable = summariseUnplaceable(events);
-    if (unplaceable.count > 0) {
-      // Logged as well as rendered: the CALDESC reaches the family, this
-      // reaches whoever can fix it.
-      console.error('calendar-feed: events could not be placed on the season clock', {
-        teamId,
-        organizationId,
-        timezone,
-        unplaceableCount: unplaceable.count,
-        totalCount: events.length,
-        byCode: unplaceable.byCode,
-      });
-    }
-
-    // 6. Render (strict RFC 5545, CRLF).
-    const icsString = renderIcsCalendar({
+    const { ics: icsString } = await composeTeamFeed({
+      client: supabase as unknown as TeamFeedClient,
+      team: { id: team.id, name: team.name, organization_id: team.organization_id },
       orgName,
-      teamName: team.name,
-      timezone,
-      events,
-      readFailures,
     });
 
     return new Response(icsString, {

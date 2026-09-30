@@ -16,7 +16,8 @@
  * name which rule a block restates. **No `Date` is constructed** (GAP-30):
  * wall dates in, wall dates out.
  *
- * Not yet imported by `icsFeed.ts`: the feed adopts it in PR 12b.
+ * Imported by `icsFeed.ts` since PR 12b: the feed's practice arm, and its
+ * `dateRangeBounds`, run through this file.
  *
  * @module _shared/calendar/practiceExceptions
  */

@@ -152,6 +152,107 @@ describe('enact UI :: 3, the re-judge runs on a FRESH read', () => {
   });
 });
 
+describe('enact UI :: W17, the prompt counts only practices still published as their series', () => {
+  // 8.6 3b PR 12c (plan R8): a date the saved exceptions already show as TIME
+  // TBD or relocated is not a published practice the enact could change.
+  const dayMs = (iso) => Date.parse(`${iso}T00:00:00Z`);
+  const WEEKDAY = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+  /** Inclusive `[first, last]` of `[a,b)` / `[a,b]`, by hand (no core parser). */
+  const span = (literal) => {
+    const [a, b] = literal.slice(1, -1).split(',');
+    const last = literal.endsWith(')') ? new Date(dayMs(b) - 864e5).toISOString().slice(0, 10) : b;
+    return { first: a, last };
+  };
+  const weekdays = (day, first, last) => {
+    const out = [];
+    for (let t = dayMs(first); t <= dayMs(last); t += 864e5) {
+      if (new Date(t).getUTCDay() === WEEKDAY[day])
+        out.push(new Date(t).toISOString().slice(0, 10));
+    }
+    return out;
+  };
+  const ex = (n, row, window, kind, extra = {}) => ({
+    id: uuid(n),
+    organization_id: ORG,
+    assignment_id: uuid(row),
+    window,
+    kind,
+    tbd_reason: kind === 'time_tbd' ? 'contended' : null,
+    withdrawn_at: null,
+    ...extra,
+  });
+  // A live TIME TBD on 601, a live relocation on 602, and a withdrawn TIME TBD
+  // on 601 that must NOT reduce the count. All synthetic.
+  const EXCEPTIONS = [
+    ex(701, 601, '[2026-11-02,2026-11-10)', 'time_tbd'),
+    ex(702, 602, '[2026-10-21,2026-10-28)', 'relocated'),
+    ex(703, 601, '[2026-10-19,2026-10-27)', 'time_tbd', { withdrawn_at: '2026-10-01T00:00:00Z' }),
+  ];
+
+  const rowDay = (rowN) => {
+    const row = MAIN_ROWS.find((r) => r.id === uuid(rowN));
+    const day = MAIN_SLOTS.find((s) => s.id === row.practice_slot_id).day_of_week;
+    return { row, day, range: span(row.effective_date_range) };
+  };
+
+  /** The published count for `rowN`, from the seed: its weekdays on or after D, less live windows. */
+  function expectedCount(rowN, exceptions) {
+    const { row, day, range } = rowDay(rowN);
+    const live = exceptions
+      .filter((e) => e.assignment_id === row.id && e.withdrawn_at == null)
+      .map((e) => span(e.window));
+    return weekdays(day, range.first > D ? range.first : D, range.last).filter(
+      (d) => !live.some((w) => d >= w.first && d <= w.last)
+    ).length;
+  }
+
+  /** How many of `rowN`'s weekdays on or after D the seed's live (or withdrawn) windows cover. */
+  function covered(rowN, exceptions, withdrawn) {
+    const { row, day, range } = rowDay(rowN);
+    return exceptions
+      .filter((e) => e.assignment_id === row.id && (e.withdrawn_at != null) === withdrawn)
+      .flatMap((e) => {
+        const w = span(e.window);
+        return weekdays(day, w.first > D ? w.first : D, w.last).filter((d) => d <= range.last);
+      }).length;
+  }
+
+  it('the seed covers published dates with a live TBD, a live move and a withdrawn row (meta)', () => {
+    expect(requireExamined(covered(601, EXCEPTIONS, false), 'live TBD dates')).toBe(2);
+    expect(requireExamined(covered(602, EXCEPTIONS, false), 'live relocated dates')).toBe(1);
+    expect(requireExamined(covered(601, EXCEPTIONS, true), 'withdrawn dates')).toBe(2);
+    // The meter can fail: windows before D cover no published date.
+    const early = EXCEPTIONS.map((e) => ({ ...e, window: '[2026-09-01,2026-09-08)' }));
+    expect(covered(601, early, false) + covered(602, early, false)).toBe(0);
+  });
+
+  it('excludes the dates the helper marks TIME TBD or relocated, and only those', async () => {
+    const db = enactDbOf(main());
+    db.practice_exceptions = EXCEPTIONS.map((e) => ({ ...e }));
+    const s = await session(db);
+    for (const rowN of [601, 602]) {
+      const raw = expectedCount(rowN, []);
+      const want = expectedCount(rowN, EXCEPTIONS);
+      expect(want, `row ${rowN} has a changed date`).toBeLessThan(raw);
+      expect(s.promptOf(uuid(rowN)).record.published_practices_affected, `row ${rowN}`).toBe(want);
+    }
+  });
+
+  it('with no exceptions the count is the raw weekday count, as before', async () => {
+    const s = await session(enactDbOf(main()));
+    expect(s.promptOf(uuid(601)).record.published_practices_affected).toBe(expectedCount(601, []));
+    expect(expectedCount(601, [])).toBe(7);
+  });
+
+  it('refuses rows that were not read with their exceptions, never counting them as none', async () => {
+    const s = await session(enactDbOf(main()));
+    const { practiceExceptions: _unread, ...rows } = s.read.rows;
+    expect(() =>
+      enactPromptOf(s.opened.adapted, rows, enactPlanOf(s.opened.adapted, s.shownOf(uuid(601))))
+    ).toThrow('the practice exceptions were not read');
+  });
+});
+
 describe('enact UI :: stale is loud, and the write is never retried', () => {
   it('a writer 409 is shown as stale after a fresh re-judge, with ONE send', async () => {
     const db = enactDbOf(main());

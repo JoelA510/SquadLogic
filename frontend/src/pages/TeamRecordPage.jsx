@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import PropTypes from 'prop-types';
-import { useTeamPortal } from '../hooks/useTeamPortal.js';
+import { PRACTICE_CHANGES_UNREAD_TEXT, useTeamPortal } from '../hooks/useTeamPortal.js';
 import {
   Calendar,
   MessageSquare,
@@ -28,6 +28,45 @@ import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { supabase } from '../lib/supabaseClient.js';
 
+/** `practice_slots.day_of_week` in words, for the "Moved from" line. */
+const WEEKDAY_NAMES = Object.freeze({
+  sun: 'Sunday',
+  mon: 'Monday',
+  tue: 'Tuesday',
+  wed: 'Wednesday',
+  thu: 'Thursday',
+  fri: 'Friday',
+  sat: 'Saturday',
+});
+
+/** A wall date as "Monday, November 2", read at local midnight (never UTC). */
+const longDate = (date) =>
+  new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+
+/** "Moved from <weekday> <time>, <ground>" (plan §10 Q3). */
+function movedFromLine(movedFrom) {
+  const day = String(movedFrom?.dayOfWeek ?? '').toLowerCase();
+  const weekday = WEEKDAY_NAMES[day] ?? 'another day';
+  const time = movedFrom?.startTime
+    ? String(movedFrom.startTime).substring(0, 5)
+    : 'an unknown time';
+  return `Moved from ${weekday} ${time}, ${movedFrom?.location ?? 'Venue - Field'}`;
+}
+
+/**
+ * Whether an event takes an RSVP here. Never on a TIME TBD date (Q3). Not yet
+ * on a moved practice either: the RSVP rule that accepts a relocated date
+ * (`upsert_team_event_rsvp`, plan R6) lands in 8.6 3b PR 12d, and until then
+ * the RPC judges a date by the series weekday, so it would refuse a moved
+ * practice's new date and accept the original one the move removed. Once 12d
+ * merges, RSVP opens for moved practices keyed on (assignment id, new date).
+ */
+const rsvpOpen = (event) => !event.timeTbd && event.kind !== 'relocated';
+
 /**
  * Team record — the old Team Portal absorbed into the Lightning-class
  * record layout: hero (name, division, roster size, calendar subscribe)
@@ -43,6 +82,7 @@ export default function TeamRecordPage() {
     team,
     roster,
     events,
+    practiceChangesUnread,
     rsvps,
     messages,
     myPlayers,
@@ -182,6 +222,17 @@ export default function TeamRecordPage() {
                 Team Schedule
               </h2>
 
+              {practiceChangesUnread && (
+                // Q5: the practices below are the bare series; say so, never silently.
+                <div
+                  role="alert"
+                  data-testid="practice-changes-unread"
+                  className="bg-status-warning-bg text-text-primary border border-status-warning rounded-xl p-4 text-sm"
+                >
+                  {PRACTICE_CHANGES_UNREAD_TEXT}
+                </div>
+              )}
+
               <div className="space-y-4">
                 {events.length === 0 ? (
                   <div className="glass-panel p-8 text-center text-text-muted">
@@ -190,7 +241,7 @@ export default function TeamRecordPage() {
                 ) : (
                   events.map((event, idx) => (
                     <div
-                      key={`${event.type}-${event.id}-${event.date}`}
+                      key={`${event.type}-${event.id}-${event.date}-${event.reasonCode ?? ''}-${event.exceptionId ?? ''}`}
                       className="glass-panel p-5 animate-slideUp"
                       style={{ animationDelay: `${idx * 0.05}s` }}
                     >
@@ -213,12 +264,10 @@ export default function TeamRecordPage() {
                             <div className="flex items-center gap-1.5">
                               <Calendar size={14} />
                               {event.timeTbd
-                                ? `Date and time TBD: ${event.reason}`
-                                : new Date(event.date + 'T00:00:00').toLocaleDateString(undefined, {
-                                    weekday: 'long',
-                                    month: 'long',
-                                    day: 'numeric',
-                                  })}
+                                ? event.date
+                                  ? `Time TBD on ${longDate(event.date)}: ${event.reason}`
+                                  : `Date and time TBD: ${event.reason}`
+                                : longDate(event.date)}
                             </div>
                             <div className="flex items-center gap-1.5">
                               <Clock size={14} />
@@ -228,13 +277,19 @@ export default function TeamRecordPage() {
                             </div>
                             <div className="flex items-center gap-1.5 md:col-span-2">
                               <MapPin size={14} />
-                              {event.location}
+                              {event.location ?? 'Location TBD'}
                             </div>
+                            {event.kind === 'relocated' && (
+                              // Q3: one line naming what the move replaces.
+                              <p className="md:col-span-2 text-text-secondary">
+                                {movedFromLine(event.movedFrom)}
+                              </p>
+                            )}
                           </div>
                         </div>
 
                         <div className="flex flex-col gap-3 min-w-[200px]">
-                          {myPlayers.length > 0 && !event.timeTbd ? (
+                          {myPlayers.length > 0 && rsvpOpen(event) ? (
                             <div className="space-y-3">
                               <p className="text-xs font-bold text-text-muted uppercase tracking-widest">
                                 Your RSVPs
@@ -304,8 +359,12 @@ export default function TeamRecordPage() {
                             <div className="h-full flex items-center justify-end">
                               <span className="text-xs text-text-muted">
                                 {event.timeTbd
-                                  ? 'RSVP opens once a date is set'
-                                  : 'Viewing as Guest/Coach'}
+                                  ? event.date
+                                    ? 'RSVP opens once a time is set'
+                                    : 'RSVP opens once a date is set'
+                                  : event.kind === 'relocated'
+                                    ? 'RSVP for a moved practice is not open yet'
+                                    : 'Viewing as Guest/Coach'}
                               </span>
                             </div>
                           )}

@@ -54,10 +54,11 @@ const MIGRATIONS = 'supabase/migrations';
  */
 const REGISTRY = {
   // --- JavaScript and TypeScript readers (plan §1.2 / §1.3).
+  // R2, adopted in 12c: a second read of `practice_exceptions`, and
+  // `expandPractices(rows, exceptions)` runs the helper.
   'frontend/src/hooks/useTeamPortal.js': {
-    class: 'pending',
-    pr: '12c',
-    why: 'R2: the team portal expands rows into dated practices',
+    class: 'applies',
+    why: 'R2: the team portal expands rows and saved exceptions into dated practices',
   },
   // R4/R5, adopted in 12b. The feed's reads moved out of `calendar-feed/index.ts`
   // into this seam (the handler injects the client), so this is the file that

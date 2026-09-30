@@ -307,6 +307,25 @@ const initialMockData = {
   ],
   // 8.9 D14: written only by the four lighting-override RPCs (mockLightingOverrides.js).
   practice_lighting_overrides: [],
+  // 8.6 3b PR 12c (plan R7, read side): saved practice exceptions, read by the
+  // team portal. The one seeded row is WITHDRAWN, so it changes nothing shown:
+  // it holds the table's shape (with `organization_id`) and is exactly the
+  // row every reader must leave unapplied. E2E seeds its own live rows.
+  practice_exceptions: [
+    {
+      id: 'pe-withdrawn-1',
+      organization_id: 'org-1',
+      season_settings_id: 'season-1',
+      team_id: '00000000-0000-0000-0000-000000000001',
+      assignment_id: 'pa-1',
+      window: '[2025-03-01,2025-03-31]',
+      kind: 'time_tbd',
+      practice_slot_id: null,
+      tbd_reason: 'contended',
+      cause_kind: 'blackout',
+      withdrawn_at: '2025-02-20T00:00:00.000Z',
+    },
+  ],
   event_rsvps: [
     {
       id: 'rsvp-1',
@@ -1583,7 +1602,50 @@ const createMockQuery = (table, data = null) => {
           slotEmbed = { column: hint, key: key || 'practice_slots' };
         }
       }
+      // `practice_exceptions` has ONE foreign key to `practice_slots`
+      // (`practice_slot_id`, 20260929000000), so an unhinted embed resolves and
+      // only a hint naming another column is PGRST200 (8.6 3b PR 12c, plan R7).
+      let exceptionSlotEmbed = null;
+      if (table === 'practice_exceptions') {
+        for (const [, key, bangs] of String(query || '').matchAll(PRACTICE_SLOT_EMBED)) {
+          const hint = bangs
+            .split('!')
+            .map((w) => w.trim())
+            .find((w) => w && w !== 'inner' && w !== 'left');
+          if (hint && hint !== 'practice_slot_id') {
+            embedError = {
+              code: 'PGRST200',
+              message: 'Embed practice_slots via practice_slots!practice_slot_id',
+            };
+          }
+          exceptionSlotEmbed = { key: key || 'practice_slots' };
+        }
+      }
       if (results && results.length > 0 && queryContent) {
+        if (table === 'practice_exceptions' && exceptionSlotEmbed) {
+          // The slot with its ground, under the aliases the select names
+          // (`field:fields(..., location:locations(...))`), as PostgREST returns them.
+          const aliasOf = (name) =>
+            new RegExp(`(\\w+)\\s*:\\s*${name}\\s*\\(`).exec(queryContent)?.[1] || name;
+          const fieldKey = aliasOf('fields');
+          const locationKey = aliasOf('locations');
+          const slots = getMockData('practice_slots');
+          const fields = getMockData('fields');
+          const locations = getMockData('locations');
+          results = results.map((item) => {
+            const slot = slots.find((s) => String(s.id) === String(item.practice_slot_id));
+            const field = slot ? fields.find((f) => String(f.id) === String(slot.field_id)) : null;
+            const location = field
+              ? locations.find((l) => String(l.id) === String(field.location_id)) || null
+              : null;
+            return {
+              ...item,
+              [exceptionSlotEmbed.key]: slot
+                ? { ...slot, [fieldKey]: field ? { ...field, [locationKey]: location } : null }
+                : null,
+            };
+          });
+        }
         if (table === 'organization_members' && queryContent.includes('organizations')) {
           const orgs = getMockData('organizations');
           results = results.map((item) => ({
@@ -1767,6 +1829,13 @@ const createMockQuery = (table, data = null) => {
     },
     neq: (col, val) => {
       results = results.filter((item) => String(item[col]) !== String(val));
+      return proxy;
+    },
+    // PostgREST `is`: `null` matches a NULL (or, in the mock, absent) column.
+    is: (col, val) => {
+      results = results.filter((item) =>
+        val === null ? item[col] == null : String(item[col]) === String(val)
+      );
       return proxy;
     },
     in: (col, vals) => {

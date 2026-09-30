@@ -5,6 +5,7 @@ import { AuthProvider } from '../../frontend/src/contexts/AuthContext.jsx';
 import { OrganizationProvider } from '../../frontend/src/contexts/OrganizationContext.jsx';
 import { ImportProvider } from '../../frontend/src/contexts/ImportContext.jsx';
 import { ThemeProvider } from '../../frontend/src/contexts/ThemeContext.jsx';
+import { supabaseReady } from '../../frontend/src/lib/supabaseClient.js';
 import { makeOrganization, makeUser } from '../factories/index.js';
 
 /**
@@ -18,14 +19,20 @@ import { makeOrganization, makeUser } from '../factories/index.js';
  * - `<ErrorBoundary>` and `<OfflineGuard>` are omitted. Tests that need to
  *   assert error-boundary or offline behavior wrap manually.
  *
+ * Async, like `frontend/src/main.jsx`: it renders only once `supabaseReady`
+ * has settled. In mock mode `supabase` is assigned when the lazily imported
+ * mock client has loaded, and the providers' effects read it on mount, so a
+ * render before that reads `undefined` (see `lib/supabaseClient.js`). Await it.
+ *
  * @param {React.ReactElement} ui
  * @param {{
  *   user?: any,
  *   organization?: any,
  *   route?: string,
  * } & import('@testing-library/react').RenderOptions} [options]
+ * @returns {Promise<import('@testing-library/react').RenderResult>}
  */
-export function renderWithProviders(ui, options = {}) {
+export async function renderWithProviders(ui, options = {}) {
   const {
     user = makeUser(),
     organization = makeOrganization(),
@@ -50,5 +57,6 @@ export function renderWithProviders(ui, options = {}) {
     );
   }
 
+  await supabaseReady;
   return render(ui, { wrapper: Wrapper, ...rtlOptions });
 }

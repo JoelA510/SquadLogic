@@ -64,12 +64,14 @@ Guidance:
 ### `renderWithProviders`
 
 Use when a test requires app-level providers in the canonical app order.
+It is async: like `main.jsx`, it renders only once `supabaseReady` has
+settled, so the providers never read an unassigned mock client. Await it.
 
 ```jsx
 import { renderWithProviders } from '../helpers/index.js';
 import { makeUser, makeOrganization } from '../factories/index.js';
 
-renderWithProviders(<MyComponent />, {
+await renderWithProviders(<MyComponent />, {
   user: makeUser({ id: 'u-1' }),
   organization: makeOrganization({ id: 'org-1' }),
   route: '/dashboard',

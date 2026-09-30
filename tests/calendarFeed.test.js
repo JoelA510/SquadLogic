@@ -35,6 +35,17 @@ import {
   summariseUnplaceable,
   sanitizeIcsValue,
 } from '../supabase/functions/_shared/calendar/icsFeed.ts';
+import { composeTeamFeed } from '../supabase/functions/_shared/calendar/teamFeed.ts';
+import {
+  exerciseOf,
+  fakeClient,
+  feedProblems,
+  parseIcs,
+  SEED,
+  seedRange,
+  seedWeekdays,
+  shiftWindows,
+} from '../supabase/functions/_shared/tests/feed-exceptions-seed.ts';
 
 const NOW = new Date('2025-01-01T12:00:00Z');
 
@@ -601,12 +612,15 @@ describe('the /code-review findings, kept red-able', () => {
  * server log, never a 500 that would take the games down with it.
  *
  * The Edge handler (`calendar-feed/index.ts`) imports Deno-only modules and
- * has no Vitest harness, so its half is a source pin; the rendering half is
- * exercised through the real `renderIcsCalendar`.
+ * has no Vitest harness. Since 8.6 3b PR 12b its reads live in
+ * `_shared/calendar/teamFeed.ts`, which the handler calls with the client
+ * injected, so the reads are exercised below against a fake client; the
+ * source pins remain for the branches, and the handler's own half is a pin
+ * that it hands over to that seam.
  */
 describe('calendar feed: a failed read is visible in the feed', () => {
   const HANDLER = fs.readFileSync(
-    path.resolve(__dirname, '../supabase/functions/calendar-feed/index.ts'),
+    path.resolve(__dirname, '../supabase/functions/_shared/calendar/teamFeed.ts'),
     'utf8'
   );
 
@@ -647,12 +661,12 @@ describe('calendar feed: a failed read is visible in the feed', () => {
   });
 
   it('the handler records a failed practices read and hands it to the renderer', () => {
-    const practicesBranch = /if \(practicesError\) \{([\s\S]*?)\n {4}\}/.exec(HANDLER);
+    const practicesBranch = /if \(practicesError\) \{([\s\S]*?)\n {2}\}/.exec(HANDLER);
     // Meta: the branch was found, so the assertions below read real source.
     expect(practicesBranch, 'practicesError branch').not.toBeNull();
     expect(practicesBranch[1]).toContain("readFailures.push('practices')");
 
-    const gamesBranch = /if \(gamesError\) \{([\s\S]*?)\n {4}\}/.exec(HANDLER);
+    const gamesBranch = /if \(gamesError\) \{([\s\S]*?)\n {2}\}/.exec(HANDLER);
     expect(gamesBranch, 'gamesError branch').not.toBeNull();
     expect(gamesBranch[1]).toContain("readFailures.push('games')");
 
@@ -663,5 +677,82 @@ describe('calendar feed: a failed read is visible in the feed', () => {
 
   it('the handler embeds practice_slots through practice_slot_id', () => {
     expect(HANDLER).toMatch(/practice_slots!practice_slot_id\s*\(/);
+  });
+
+  it('the Edge handler hands the service-role client to composeTeamFeed and renders nothing itself', () => {
+    const ENTRY = fs.readFileSync(
+      path.resolve(__dirname, '../supabase/functions/calendar-feed/index.ts'),
+      'utf8'
+    );
+    const call = /await composeTeamFeed\(\{([\s\S]*?)\}\);/.exec(ENTRY);
+    expect(call, 'composeTeamFeed call').not.toBeNull();
+    expect(call[1]).toMatch(/client: supabase as unknown as TeamFeedClient/);
+    // The only table the handler reads itself is `teams` (the token check).
+    expect([...ENTRY.matchAll(/\.from\(\s*'(\w+)'\s*\)/g)].map((m) => m[1])).toEqual(['teams']);
+    // A second build or render path here would be one the seam's tests never run.
+    expect(ENTRY).not.toMatch(/\b(buildFeedEvents|renderIcsCalendar)\(/);
+  });
+});
+
+/**
+ * 8.6 3b PR 12b: the Vitest arm of the Deno witnesses in
+ * `_shared/tests/ics-feed_test.ts` (plan §6 W4, W11, W13), over the same seed,
+ * oracle and fake client (`_shared/tests/feed-exceptions-seed.ts`). Subject
+ * sets come from the seeded rows, never from the feed's output.
+ */
+describe('calendar feed applies saved practice exceptions (8.6 3b PR 12b)', () => {
+  const seeded = async (seed = SEED, opts = {}) => {
+    const logged = [];
+    const result = await composeTeamFeed({
+      client: fakeClient(seed, opts),
+      team: seed.team,
+      orgName: 'Test Org',
+      now: NOW,
+      log: (message) => logged.push(message),
+    });
+    return { ...result, logged };
+  };
+
+  it('the seed exercises every case, and the meter goes red with every window moved off', () => {
+    const counts = exerciseOf(SEED);
+    for (const [name, n] of Object.entries(counts)) expect(n, name).toBeGreaterThanOrEqual(1);
+    expect(Object.values(exerciseOf(shiftWindows(SEED, 1100)))).toEqual([0, 0, 0, 0, 0]);
+  });
+
+  it('W11: the rendered VEVENT set and CALDESC count are the seed oracle, exactly', async () => {
+    const { ics, readFailures } = await seeded();
+    expect(readFailures).toEqual([]);
+    expect(feedProblems(ics, SEED)).toEqual([]);
+    // The oracle is not satisfied by the bare series ("pass exceptions: []").
+    const bare = await seeded({ ...SEED, exceptions: [] });
+    expect(feedProblems(bare.ics, SEED).length).toBeGreaterThan(0);
+  });
+
+  it('W4: a tail TIME TBD gives one dated all-day TENTATIVE VEVENT per weekday of its window', async () => {
+    const { ics } = await seeded();
+    const tail = SEED.exceptions.find((e) => e.id === 'exc-tail');
+    const row = SEED.practices.find((r) => r.id === tail.assignment_id);
+    const w = seedRange(tail.window);
+    const dates = seedWeekdays(row.practice_slots.day_of_week, w.first, w.last);
+    expect(dates.length).toBeGreaterThanOrEqual(4);
+    expect(dates.every((d) => d > seedRange(row.effective_date_range).last)).toBe(true);
+    const byUid = new Map(parseIcs(ics).vevents.map((v) => [v.uid, v]));
+    for (const d of dates) {
+      expect(byUid.get(`${row.id}_${d}`), d).toMatchObject({
+        allDay: true,
+        status: 'TENTATIVE',
+        summary: 'TIME TBD - Practice - Test Tigers',
+      });
+    }
+  });
+
+  it('W13: a failed exceptions read says INCOMPLETE and still shows the practices', async () => {
+    const { ics, readFailures, logged } = await seeded(SEED, { fail: ['practice_exceptions'] });
+    expect(readFailures).toEqual(['practice changes']);
+    expect(parseIcs(ics).caldesc).toContain(
+      'INCOMPLETE: practice changes could not be read\\, so some practices shown may have moved'
+    );
+    expect(feedProblems(ics, { ...SEED, exceptions: [] })).toEqual([]);
+    expect(logged.some((m) => m.includes('practice_exceptions read failed'))).toBe(true);
   });
 });

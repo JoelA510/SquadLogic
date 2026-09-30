@@ -33,7 +33,8 @@ const KNOWN_SITES = [
   'frontend/src/hooks/usePracticeAssignments.js',
   'frontend/src/hooks/useTeamPortal.js',
   'frontend/src/pages/PlayerRecordPage.jsx',
-  'supabase/functions/calendar-feed/index.ts',
+  // The calendar feed's reads, moved out of calendar-feed/index.ts in 8.6 3b PR 12b.
+  'supabase/functions/_shared/calendar/teamFeed.ts',
 ];
 
 function walk(dir, out = []) {

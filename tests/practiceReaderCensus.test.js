@@ -59,10 +59,13 @@ const REGISTRY = {
     pr: '12c',
     why: 'R2: the team portal expands rows into dated practices',
   },
-  'supabase/functions/calendar-feed/index.ts': {
-    class: 'pending',
-    pr: '12b',
-    why: 'R4: the calendar feed expands rows into VEVENTs',
+  // R4/R5, adopted in 12b. The feed's reads moved out of `calendar-feed/index.ts`
+  // into this seam (the handler injects the client), so this is the file that
+  // selects the table; `tests/calendarFeed.test.js` pins that the handler reads
+  // only `teams` itself and hands over to `composeTeamFeed`.
+  'supabase/functions/_shared/calendar/teamFeed.ts': {
+    class: 'applies',
+    why: 'R4/R5: the calendar feed reads rows and exceptions; buildFeedEvents runs the twin',
   },
   'frontend/src/hooks/usePracticeAssignments.js': {
     class: 'series-only',
@@ -244,7 +247,7 @@ describe('practice-reader census (W16)', () => {
     expect(SQL.definitions).toBeGreaterThan(100);
     // The two readers the plan found only through SQL (R6) and the feed (R4).
     expect(SUBJECTS).toContain('sql:upsert_team_event_rsvp');
-    expect(SUBJECTS).toContain('supabase/functions/calendar-feed/index.ts');
+    expect(SUBJECTS).toContain('supabase/functions/_shared/calendar/teamFeed.ts');
   });
 
   it('every reader of practice_assignments is classified', () => {

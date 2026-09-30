@@ -391,6 +391,14 @@ export function feedProblems(ics: string, seed: FeedSeed): string[] {
   if (want.noTime > 0) {
     const count = `${want.noTime} of ${want.total} events have no confirmed time`;
     if (!caldesc.includes(count)) problems.push(`CALDESC lacks "${count}": ${caldesc}`);
+    // An entry with no day has no VEVENT, so the CALDESC must not claim one.
+    const where =
+      want.undated === 0
+        ? 'They appear as all-day "TIME TBD" entries.'
+        : want.undated === want.noTime
+          ? 'None has a known day'
+          : `except ${want.undated} with no known day`;
+    if (!caldesc.includes(where)) problems.push(`CALDESC lacks "${where}": ${caldesc}`);
   } else if (/events have no confirmed time/.test(caldesc)) {
     problems.push(`CALDESC counts events with no time, and the seed has none: ${caldesc}`);
   }
@@ -413,17 +421,28 @@ export function fakeClient(seed: FeedSeed, opts: { fail?: string[] } = {}) {
     practice_assignments: seed.practices,
     practice_exceptions: seed.exceptions,
   };
-  const calls: Array<{ table: string; select: string; eq: Array<[string, unknown]> }> = [];
+  interface Call {
+    table: string;
+    select: string;
+    eq: Array<[string, unknown]>;
+    is: Array<[string, unknown]>;
+    limit: number | null;
+  }
+  const calls: Call[] = [];
   return {
     calls,
     from(table: string) {
-      const call = { table, select: '', eq: [] as Array<[string, unknown]> };
+      const call: Call = { table, select: '', eq: [], is: [], limit: null };
       calls.push(call);
       const result = (single: boolean) => {
         if (opts.fail?.includes(table)) {
           return { data: null, error: { message: `${table}: synthetic read failure` } };
         }
-        const rows = (tables[table] ?? []).filter((r) => call.eq.every(([c, v]) => r[c] === v));
+        const rows = (tables[table] ?? [])
+          .filter((r) => call.eq.every(([c, v]) => r[c] === v))
+          // PostgREST `is.null` matches SQL NULL; an absent key reads as NULL.
+          .filter((r) => call.is.every(([c, v]) => (v === null ? r[c] == null : r[c] === v)))
+          .slice(0, call.limit ?? undefined);
         return single ? { data: rows[0] ?? null, error: null } : { data: rows, error: null };
       };
       const builder: Rec = {
@@ -435,13 +454,18 @@ export function fakeClient(seed: FeedSeed, opts: { fail?: string[] } = {}) {
           call.eq.push([column, value]);
           return builder;
         },
+        is(column: string, value: unknown) {
+          call.is.push([column, value]);
+          return builder;
+        },
         or() {
           return builder;
         },
         order() {
           return builder;
         },
-        limit() {
+        limit(count: number) {
+          call.limit = count;
           return builder;
         },
         maybeSingle() {

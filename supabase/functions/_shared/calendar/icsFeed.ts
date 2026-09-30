@@ -318,7 +318,6 @@ export interface PracticeExceptionRow {
   assignment_id: string;
   window: string;
   kind: string;
-  practice_slot_id?: string | null;
   tbd_reason?: string | null;
   cause_kind?: string | null;
   withdrawn_at: string | null;
@@ -344,8 +343,9 @@ const WEEKDAY_NAMES = [
 /**
  * `cause_kind` in words. The CHECK's values only (`blackout`, `retirement`,
  * `daylight`); anything else, including `null`, reads as a plain change. Only
- * enum values reach a DESCRIPTION (Q1), plus the slot's own field and venue
- * names, which the LOCATION line already carries.
+ * enum values reach a DESCRIPTION (Q1), plus the ORIGINAL slot's weekday,
+ * start time, field and venue names: the same kind of value every practice's
+ * LOCATION line carries, never free text.
  */
 const CAUSE_KIND_WORDS: Record<string, string> = {
   blackout: 'a field closure',
@@ -703,6 +703,18 @@ export function summariseNotes(events: FeedEvent[]): {
 }
 
 /**
+ * Where the events with no confirmed time can be found. The sentence used to
+ * say they all "appear as all-day TIME TBD entries", which was false for an
+ * entry with no day: it has no VEVENT and exists only in this count. Since
+ * 12b an open exception window (Q7) is one of those, so the count says which.
+ */
+function appearAs(undated: number, total: number): string {
+  if (undated === 0) return 'They appear as all-day "TIME TBD" entries.';
+  if (undated === total) return 'None has a known day, so none appears as an entry.';
+  return `They appear as all-day "TIME TBD" entries, except ${undated} with no known day, which appear only here.`;
+}
+
+/**
  * RFC 5545 §3.1 content-line folding: no line may exceed 75 **octets**, and a
  * continuation begins with a single space.
  *
@@ -804,7 +816,10 @@ export function renderIcsCalendar(input: {
   }
   if (summary.count > 0) {
     calDesc.push(
-      `${summary.count} of ${events.length} events have no confirmed time: ${summary.sentence}. They appear as all-day "TIME TBD" entries.`
+      `${summary.count} of ${events.length} events have no confirmed time: ${summary.sentence}. ${appearAs(
+        events.filter((ev) => ev.kind === 'unplaceable' && ev.date === null).length,
+        summary.count
+      )}`
     );
   }
   if (notes.count > 0) {

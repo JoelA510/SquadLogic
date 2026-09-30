@@ -22,7 +22,7 @@ import {
   type GameRow,
   type PracticeRow,
 } from '../calendar/icsFeed.ts';
-import { composeTeamFeed } from '../calendar/teamFeed.ts';
+import { composeTeamFeed, PRACTICE_EXCEPTIONS_READ_CAP } from '../calendar/teamFeed.ts';
 import {
   exerciseOf,
   expectedFeed,
@@ -377,6 +377,8 @@ Deno.test('practice exceptions (R4) - the read is scoped by team and organizatio
     ['team_id', 'team-t1'],
     ['organization_id', 'org-o1'],
   ]);
+  assertEquals(reads[0].is, [['withdrawn_at', null]]);
+  assertEquals(reads[0].limit, PRACTICE_EXCEPTIONS_READ_CAP);
   assertStringIncludes(reads[0].select, 'slot:practice_slots!practice_slot_id');
   // A team with no organization cannot be scoped: not read, and said.
   const noOrg = await composeTeamFeed({
@@ -387,7 +389,25 @@ Deno.test('practice exceptions (R4) - the read is scoped by team and organizatio
     log: () => {},
   });
   assertEquals(noOrg.readFailures, ['practice changes']);
+  assert(!noOrg.ics.includes('Practice (moved)'), 'unscoped exceptions were applied');
 });
+
+Deno.test(
+  'practice exceptions (R4) - a read that fills the row cap is said as incomplete',
+  async () => {
+    // PostgREST truncates at max_rows with no error. A full read may be partial.
+    const live = SEED.exceptions.find((e) => e.id === 'exc-mid') as Record<string, unknown>;
+    const many = Array.from({ length: PRACTICE_EXCEPTIONS_READ_CAP }, (_, i) => ({
+      ...live,
+      id: `exc-bulk-${String(i).padStart(4, '0')}`,
+    }));
+    const full = await seededFeed({ ...SEED, exceptions: many });
+    assertEquals(full.readFailures, ['practice changes']);
+    // Control: one row fewer is trusted as the whole set.
+    const under = await seededFeed({ ...SEED, exceptions: many.slice(1) });
+    assertEquals(under.readFailures, []);
+  }
+);
 
 Deno.test(
   'practice exceptions - no season zone: moved refuses, TIME TBD keeps its code',

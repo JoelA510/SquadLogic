@@ -26,9 +26,9 @@
  *   of a season's clock);
  * - `games` by home or away team;
  * - `practice_assignments` by team;
- * - `practice_exceptions` by team **and** the team's organization (R4), with
- *   the relocated slot embedded as `slot`. Withdrawn rows are read too: the
- *   twin filters them itself (plan §3 rule 2) and counts them in `meta`.
+ * - `practice_exceptions` by team **and** the team's organization (R4), live
+ *   rows only, with the relocated slot embedded as `slot`. The twin filters
+ *   withdrawn rows again itself (plan §3 rule 2), whatever this selects.
  *
  * A failed read never 500s and is never silent: it is pushed to
  * `readFailures`, which the renderer says in the CALDESC, and it is logged.
@@ -71,16 +71,28 @@ export interface TeamFeedClient {
 
 export type FeedLog = (message: string, details: Record<string, unknown>) => void;
 
-/** The `practice_exceptions` columns the twin reads, and the relocated slot. */
+/**
+ * The `practice_exceptions` columns the twin reads, and the relocated slot.
+ * `practice_slot_id` is used as the embed's hint and not selected: the twin
+ * reads the embedded `slot`, never the id.
+ */
 export const PRACTICE_EXCEPTIONS_SELECT =
-  'id, assignment_id, window, kind, practice_slot_id, tbd_reason, cause_kind, withdrawn_at, ' +
+  'id, assignment_id, window, kind, tbd_reason, cause_kind, withdrawn_at, ' +
   'slot:practice_slots!practice_slot_id ( day_of_week, start_time, end_time, fields(name, locations(name)) )';
+
+/**
+ * The most exception rows one read asks for: the project's PostgREST
+ * `max_rows` (`supabase/config.toml`). PostgREST truncates at that cap without
+ * an error, so a read that comes back full is said as incomplete rather than
+ * trusted as the whole set.
+ */
+export const PRACTICE_EXCEPTIONS_READ_CAP = 1000;
 
 export interface TeamFeedResult {
   ics: string;
   events: FeedEvent[];
   readFailures: string[];
-  /** The twin's result: `null` only if `buildFeedEvents` never reported one. */
+  /** The twin's result, as `buildFeedEvents` reported it. */
   practiceExceptions: PracticeExceptionsResult | null;
 }
 
@@ -178,11 +190,18 @@ export async function composeTeamFeed(input: {
     log('calendar-feed: practice_exceptions not read, team has no organization', { teamId });
     readFailures.push(PRACTICE_CHANGES_READ);
   } else {
+    // Live rows only. Withdrawn rows are kept forever (withdrawn, never
+    // edited), so an unfiltered read grows with every re-plan toward the
+    // row cap. The twin still filters withdrawn rows itself (plan §3 rule 2),
+    // so this filter is an economy, not the guarantee.
     const { data, error } = await client
       .from('practice_exceptions')
       .select(PRACTICE_EXCEPTIONS_SELECT)
       .eq('team_id', teamId)
-      .eq('organization_id', organizationId);
+      .eq('organization_id', organizationId)
+      .is('withdrawn_at', null)
+      .order('id', { ascending: true })
+      .limit(PRACTICE_EXCEPTIONS_READ_CAP);
     if (error) {
       // Q5: not a 500 and not hidden. The practices still show, and the
       // CALDESC says they may be superseded.
@@ -190,11 +209,19 @@ export async function composeTeamFeed(input: {
       readFailures.push(PRACTICE_CHANGES_READ);
     } else {
       exceptions = (data ?? []) as PracticeExceptionRow[];
+      if (exceptions.length >= PRACTICE_EXCEPTIONS_READ_CAP) {
+        // Applied as read, and said: rows past the cap may be missing.
+        log('calendar-feed: practice_exceptions read reached the row cap', {
+          teamId,
+          rows: exceptions.length,
+        });
+        readFailures.push(PRACTICE_CHANGES_READ);
+      }
     }
   }
 
   // 5. Place every occurrence on the season clock.
-  let practiceExceptions: PracticeExceptionsResult | null = null;
+  const report: { applied: PracticeExceptionsResult | null } = { applied: null };
   const events = buildFeedEvents({
     teamName: team.name,
     timezone,
@@ -202,11 +229,11 @@ export async function composeTeamFeed(input: {
     practices: (practices ?? []) as PracticeRow[],
     exceptions,
     onPracticeExceptions: (result) => {
-      practiceExceptions = result;
+      report.applied = result;
     },
   });
 
-  const applied = practiceExceptions as PracticeExceptionsResult | null;
+  const { applied } = report;
   if (applied && applied.findings.length > 0) {
     // Findings the family never sees (a shadowed TBD, an exception on a row
     // not read, a relocation that adds fewer dates than it removes). They

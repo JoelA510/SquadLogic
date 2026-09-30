@@ -34,10 +34,8 @@ import {
   rebaseRecommendationState,
   retirementCommitOf,
 } from '@squadlogic/core/practice/index.js';
-import {
-  practiceOccurrenceDates,
-  practiceRangeBounds,
-} from '@squadlogic/core/utils/practiceOccurrences.js';
+import { practiceRangeBounds } from '@squadlogic/core/utils/practiceOccurrences.js';
+import { applyPracticeExceptions } from '@squadlogic/core/utils/practiceExceptions.js';
 import { canonicalJson } from '@squadlogic/core/scenario/inputs.js';
 import { loadPracticeRepairSnapshot } from '../hooks/usePracticeRepairSnapshot.js';
 import { openPracticeRepair } from './practiceRepairPanel.js';
@@ -135,11 +133,16 @@ export function enactPlanOf(adapted, recommendation) {
  * practices could change. `record` is exactly what the audit stores
  * (`prompt` of `PracticeEnactRecordSchema`, less `accepted`).
  *
- * The count is the weekday occurrences of each row in `[D, until]`, from the
- * core occurrence expander the feed uses.
+ * The count is each row's **published** practices in `[D, until]`: its series
+ * dates with the saved exceptions applied by `applyPracticeExceptions`, the
+ * function the portal and the feed run (8.6 3b PR 12c, plan R8, W17). A date
+ * the helper already shows as TIME TBD or relocated is not a published
+ * practice the enact could change, so it is not counted; neither is a date an
+ * open or unreadable window suppresses.
  *
  * @param {any} adapted - the adapter output the plan was built from
- * @param {Record<string, any[]>} rows - the same read's rows (`assigned_via`, slot days)
+ * @param {Record<string, any[]>} rows - the same read's rows (`assigned_via`, slot days,
+ *   `practiceExceptions`)
  * @param {{ unlockRequired: Array<{ assignment_id: string, why: string }>,
  *   closes: Array<{ assignment_id: string, last_day: string }> }} plan
  */
@@ -149,6 +152,17 @@ export function enactPromptOf(adapted, rows, plan) {
   const rowById = new Map(adapted.context.snapshot.map((r) => [r.id, r]));
   const readById = new Map((rows.practiceAssignments ?? []).map((r) => [lower(r.id), r]));
   const dayBySlot = new Map((rows.practiceSlots ?? []).map((s) => [lower(s.id), s.day_of_week]));
+  // The snapshot always reads the table; a rows object without it was not
+  // read by `loadPracticeRepairSnapshot`, and counting it as "no exceptions"
+  // would be the silent over-count W17 exists to stop.
+  if (!Array.isArray(rows.practiceExceptions)) {
+    throw new Error('enact prompt: the practice exceptions were not read');
+  }
+  const exceptionsByRow = new Map();
+  for (const e of rows.practiceExceptions) {
+    const id = lower(e?.assignment_id);
+    exceptionsByRow.set(id, [...(exceptionsByRow.get(id) ?? []), e]);
+  }
   let affected = 0;
   const promptRows = plan.unlockRequired.map((required) => {
     const row = rowById.get(required.assignment_id);
@@ -159,10 +173,20 @@ export function enactPromptOf(adapted, rows, plan) {
     }
     const close = plan.closes.find((c) => c.assignment_id === required.assignment_id) ?? null;
     const from = row.range.from > lossDate ? row.range.from : lossDate;
-    affected += practiceOccurrenceDates({
-      range: `[${from},${row.range.until}]`,
-      dayOfWeek: dayBySlot.get(row.slotId),
-    }).dates.length;
+    const applied = applyPracticeExceptions({
+      rows: [
+        {
+          id: required.assignment_id,
+          effective_date_range: `[${row.range.from},${row.range.until}]`,
+          slot: { day_of_week: dayBySlot.get(row.slotId) },
+        },
+      ],
+      exceptions: (exceptionsByRow.get(required.assignment_id) ?? []).map((e) => ({
+        ...e,
+        assignment_id: required.assignment_id,
+      })),
+    });
+    affected += applied.occurrences.filter((o) => o.kind === 'series' && o.date >= from).length;
     return {
       assignment_id: required.assignment_id,
       assigned_via: assignedVia,

@@ -1,4 +1,8 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
+import {
+  practiceChangesNoteOf,
+  readUnshownPracticeChanges,
+} from '../utils/practiceExportChanges.js';
 import { generateScheduleExports } from '@squadlogic/core/outputGeneration.js';
 import { uploadScheduleExport } from '@squadlogic/core/storageSupabase.js';
 import {
@@ -440,6 +444,26 @@ export default function OutputGenerationPanel({
   const [emails, setEmails] = useState(null);
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
+  // R9 / Q6: the exports stay series-level and say how many practices have
+  // temporary changes they do not show. Its own line, beside the message.
+  const [practiceChangesNote, setPracticeChangesNote] = useState(null);
+  const practiceChangesRead = useRef(0);
+  /** Clear the note, and let no read still in flight set it again. */
+  const clearPracticeChanges = () => {
+    practiceChangesRead.current += 1;
+    setPracticeChangesNote(null);
+  };
+  /** @param {Array<Object>} exportedRows - exactly the practice rows the artifact holds */
+  const notePracticeChanges = (exportedRows) => {
+    clearPracticeChanges();
+    const token = practiceChangesRead.current;
+    readUnshownPracticeChanges(supabaseClient, exportedRows).then((result) => {
+      // Only the latest generation's answer is shown.
+      if (token === practiceChangesRead.current) {
+        setPracticeChangesNote(practiceChangesNoteOf(result));
+      }
+    });
+  };
   const { user } = useAuth() || {};
   const {
     baselines,
@@ -522,6 +546,13 @@ export default function OutputGenerationPanel({
     });
 
     setEmails(drafts);
+    // The rows the drafts were written from: the practices of the drafted teams.
+    const draftedTeamIds = new Set(sourceTeams.map((team) => String(team.id)));
+    notePracticeChanges(
+      practiceAssignments.filter((p) =>
+        [p.teamId, p.team_id].some((teamId) => draftedTeamIds.has(String(teamId)))
+      )
+    );
     setMessage(
       coachesWithoutDraft.size === 0
         ? `Generated ${drafts.length} email drafts, one per coach.`
@@ -548,6 +579,15 @@ export default function OutputGenerationPanel({
           gameAssignments: exportPayload.gameAssignments,
         });
         setGenerated(exports);
+        // Counted over the rows the CSV holds, filtered exactly as
+        // `buildExportPayload` filters them, never over rows it dropped.
+        const exportTeamIds = new Set(exportPayload.teams.map((team) => String(team.id)));
+        notePracticeChanges(
+          practiceAssignments.filter((assignment) => {
+            const exported = normalizePracticeForExport(assignment);
+            return exported && exportTeamIds.has(String(exported.teamId));
+          })
+        );
         // **A parity report describes one row set.** Leaving the previous
         // verdict on screen after a regenerate means a green "still matches"
         // describing a schedule that no longer exists.
@@ -587,6 +627,8 @@ export default function OutputGenerationPanel({
       } catch (err) {
         logger.error('Generation error:', err);
         setStatus('error');
+        // A note from an earlier run describes an export that no longer exists.
+        clearPracticeChanges();
         setMessage(`Generation failed: ${err.message}`);
       }
     }, 0);
@@ -935,6 +977,15 @@ export default function OutputGenerationPanel({
             )}
             {status === 'idle' && message && <span className="text-text-muted">{message}</span>}
           </div>
+          {practiceChangesNote && (
+            <p
+              role="status"
+              data-testid="export-practice-changes"
+              className="text-sm text-text-secondary"
+            >
+              {practiceChangesNote}
+            </p>
+          )}
         </div>
       </div>
     </div>

@@ -7391,3 +7391,77 @@ The plan is `docs/PHASE_8_6_PR11_ENACT_PLAN.md`. Operator answers:
   there are 0 practice assignments.
 - **Split proposed:** 12a core, then 12b feed, 12c portal and 12d RSVP
   migration in parallel. 12d would be a 9th pending production migration.
+
+## 3b PR 12 plan — #516 merged (02018f5): approved, answers in §10
+
+- The operator took every recommendation (Q1-Q11). The split is 12a core,
+  then 12b feed, 12c portal and 12d RSVP migration. 12b lands first, because
+  the feed is where families look.
+- 12d, the `upsert_team_event_rsvp` migration, is now part of PR 12. It would
+  be the 9th pending production migration.
+
+## 3b PR 12a — #518 merged (369352c): core `applyPracticeExceptions`
+
+- Adds `packages/core/src/utils/practiceExceptions.js`, the one function every
+  practice reader will use to apply saved exceptions, and its import-free Deno
+  twin `_shared/calendar/practiceExceptions.ts`.
+- **No reader adopts it yet.** The §2 defect (tail TIME TBD dates disappear)
+  is still live on main. The feed adopts it in 12b and the portal in 12c.
+- The rules, adopted from sibling contracts:
+  - the helper filters withdrawn exceptions itself;
+  - windows are read by `practiceRangeBounds` and its new lower half;
+  - TIME TBD dates are never clipped, and relocated dates are clipped to the
+    row (Q9);
+  - an open, unreadable or overlapping window never shows a timed practice
+    (Q7).
+- **Evidence.**
+  - A 2,320-case enumerated product and a committed digest. The two arms
+    agree on every case, under UTC and America/Los_Angeles.
+  - `tests/practiceReaderCensus.test.js` re-takes the reader census from disk
+    and fails on an unclassified reader.
+  - Agent-reported: 4,743 tests pass, and 11 plants CAUGHT.
+  - **Supervisor plant.** I removed the Q9 clip on relocated dates. At first
+    it was caught only indirectly, by the drift digest and a meta-test, and by
+    no witness named for Q9. I sent it back. A named Q9 witness, with a
+    window that reaches outside its row on both sides, now turns red
+    directly.
+  - Main push run 1167 is green.
+
+## #60 PR B — #519 merged (484f8b6): the rule gate judges the coach-conflict spread
+
+- The gate has a new spread arm. It calls `conflictFairnessRule.evaluate()`
+  over every age group a move can touch, with teams enumerated from the
+  roster.
+- A placement that grows a group's excess is refused in both solver passes
+  (Q1). It falls through to the next candidate, then to the #53 options, then
+  to TIME TBD naming `CONFLICT_SPREAD_EXCEEDED`.
+- A requested move that grows the spread is allowed. It gets the new warning
+  `RESOLVE_CONFLICT_SPREAD_CARRIED`, which is surfaced whether or not
+  `verify` runs (Q2).
+- `conflict-fairness` stays non-waivable (Q3).
+- **Departures, both accepted.**
+  - The accepted excess is the larger of the baseline excess and the excess
+    with the game on its published slot. Without the second term, one exempt
+    requested move would refuse every later slot in its group.
+  - The groups touched include those reached through the coaches' other
+    commitments.
+- **Evidence (sweep of 679 displacement runs, main -> branch).**
+  - TIME TBD went from 0 to 4 (#51, #57, #649, #652), each naming the spread.
+    The other 675 runs are byte-identical.
+  - The corpus rule-engine and no-op resolve digests are unchanged.
+- **Review.** The first hand-back had three blocking items, all fixed.
+  - My plant disabled the "fewer groups examined -> throw" guard. It was
+    MISSED at first, and is now caught by a production-reachable witness (a
+    label the roster index does not hold).
+  - The agent's own pass-1-only plant was MISSED at first. It is now caught
+    by a witness for spread growth that adds no overlap.
+  - The progress-doc conflict was removed.
+- **A policy question, raised to the operator.** When shelving a game as TIME
+  TBD would leave the spread no better, the pass-1 refusal costs a kickoff
+  and does not protect the bound. That case is pinned in a test as declared
+  and not fixed.
+- **Flaky test found.** `tests/helpers/__tests__/renderWithProviders.test.jsx`
+  is intermittent on clean main in the session container: `supabase` is
+  undefined at `ImportContext.jsx:521`, the same lazy mock-import race family
+  as #509 and #510. It is filed as a test-hygiene follow-up. CI on main has
+  stayed green.

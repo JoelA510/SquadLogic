@@ -215,6 +215,42 @@ export interface ExpectedVevent {
   allDay: boolean;
   /** For a TIME TBD: the code its DESCRIPTION must name. */
   code?: string;
+  /** For a timed event: its DTSTART in UTC, and its LOCATION (ICS-escaped). */
+  dtstart?: string;
+  location?: string;
+}
+
+/**
+ * `date` at wall `time` in `zone`, as RFC 5545 UTC, by asking `Intl` for the
+ * zone's offset near that instant. Independent of the season clock the feed
+ * uses (`resolveZonedInstant`); the seed has no time inside a DST gap or fold.
+ */
+export function seedInstant(date: string, time: string, zone: string): string {
+  const [y, mo, d] = date.split('-').map(Number);
+  const [h, mi] = time.split(':').map(Number);
+  const wall = Date.UTC(y, mo - 1, d, h, mi);
+  const offsetAt = (ms: number) => {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: zone,
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+        .formatToParts(new Date(ms))
+        .map((p) => [p.type, p.value])
+    );
+    const seen = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute);
+    return seen - ms;
+  };
+  const instant = wall - offsetAt(wall - offsetAt(wall));
+  return new Date(instant)
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}/, '');
 }
 
 export function expectedFeed(seed: FeedSeed): {
@@ -249,12 +285,20 @@ export function expectedFeed(seed: FeedSeed): {
         code,
       });
 
+    // A timed VEVENT: its wall start on the season clock, and its ground.
+    const timed = (date: string, summary: string, slot: Rec) =>
+      vevents.set(`${row.id}_${date}`, {
+        summary,
+        allDay: false,
+        dtstart: seed.timezone ? seedInstant(date, slot.start_time, seed.timezone) : undefined,
+        location: `${slot.fields.locations.name}\\, ${slot.fields.name}`,
+      });
+
     for (const date of seedWeekdays(day, range.first, last)) {
       if (openFrom && date >= openFrom) continue;
       const over = closed.find((x) => date >= x.first && date <= x.last);
       if (over?.e.kind === 'time_tbd') tbd(date, over.e.tbd_reason);
-      else if (!over)
-        vevents.set(`${row.id}_${date}`, { summary: `Practice - ${team}`, allDay: false });
+      else if (!over) timed(date, `Practice - ${team}`, row.practice_slots);
     }
     for (const x of closed) {
       if (x.e.kind === 'time_tbd') {
@@ -264,10 +308,7 @@ export function expectedFeed(seed: FeedSeed): {
         const from = x.first > range.first ? x.first : range.first;
         const until = x.last < last ? x.last : last;
         for (const date of seedWeekdays(x.e.slot.day_of_week, from, until)) {
-          vevents.set(`${row.id}_${date}`, {
-            summary: `Practice (moved) - ${team}`,
-            allDay: false,
-          });
+          timed(date, `Practice (moved) - ${team}`, x.e.slot);
         }
       }
     }
@@ -381,6 +422,12 @@ export function feedProblems(ics: string, seed: FeedSeed): string[] {
     }
     if (g.summary !== w.summary) problems.push(`${uid}: SUMMARY ${g.summary} != ${w.summary}`);
     if (g.allDay !== w.allDay) problems.push(`${uid}: all-day ${g.allDay} != ${w.allDay}`);
+    if (w.dtstart && g.dtstart !== w.dtstart) {
+      problems.push(`${uid}: DTSTART ${g.dtstart} != ${w.dtstart}`);
+    }
+    if (w.location && g.location !== w.location) {
+      problems.push(`${uid}: LOCATION ${g.location} != ${w.location}`);
+    }
     if (w.allDay && g.status !== 'TENTATIVE') problems.push(`${uid}: not TENTATIVE`);
     if (w.code && !g.description.includes(`(${w.code})`)) {
       problems.push(`${uid}: DESCRIPTION does not name ${w.code}`);

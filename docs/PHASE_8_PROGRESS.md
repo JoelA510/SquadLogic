@@ -7569,3 +7569,37 @@ The plan is `docs/PHASE_8_6_PR11_ENACT_PLAN.md`. Operator answers:
   - **Supervisor plant:** I re-opened RSVP on TIME TBD dates. It was CAUGHT.
 - **Next: 12d**, the `upsert_team_event_rsvp` migration. It will be the 9th
   pending production migration.
+
+## 3b PR 12d — #527 merged (d076819): RSVP follows the applied practice calendar
+
+- **Migration `20261005000000`** replaces `upsert_team_event_rsvp` with the
+  same signature, `SECURITY DEFINER` and `search_path`. Only the practice
+  branch changes.
+  - A date outside every live window keeps the old series rule.
+  - A moved practice is accepted on the relocated slot's weekday, inside both
+    the window and the row's own range (Q9 clip). Other dates in a relocated
+    window are refused with 22023.
+  - A TIME TBD date, an open or unreadable window, or overlapping windows are
+    refused with 22023 (Q7).
+  - Stored RSVPs are never deleted or updated (Q4).
+- Revert and smoke are under `docs/sql/`, pgTAP is `plan(21)`, and the harness
+  is wired.
+- One case table (`tests/fixtures/rsvpAppliedCalendarCases.json`, 16 cases)
+  drives the smoke, the pgTAP, the mock mirror and a check against
+  `applyPracticeExceptions`.
+- The portal now opens RSVP on moved practices.
+- **Evidence.**
+  - The DB harness ran locally: 126 migrations, 45 of 45 smokes including this
+    one and its revert.
+  - pgTAP passed in CI.
+  - Six agent plants, all CAUGHT.
+  - **Supervisor plant:** I removed the Q9 row-range clip in the SQL. It was
+    CAUGHT by the harness smoke: "B 2026-10-07: expected 22023, got accept".
+  - Two registered plants run only in the 5.4-hour full sweep, and were not
+    run: the Q4 "deletes stored RSVPs" plant and the revert-in-place plant.
+- **This is the 9th pending production migration**
+  (`20260927000000` .. `20261005000000`).
+- **3b PR 12 is complete (12a-12d).** The §2 tail-TIME-TBD defect is fixed in
+  the feed and the portal, and RSVP follows the applied calendar.
+- **Housekeeping:** 66 finished agent worktrees were removed, each clean and
+  with a merged or closed PR. Disk use went from 19G to 13G.

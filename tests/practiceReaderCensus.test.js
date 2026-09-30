@@ -94,10 +94,11 @@ const REGISTRY = {
   },
 
   // --- SQL: the latest definition of each function or view (plan §1.1 G6).
+  // R6, adopted in 12d (20261005000000): the RSVP validator reads the live
+  // exceptions on the assignment and mirrors the helper's rules in SQL.
   'sql:upsert_team_event_rsvp': {
-    class: 'pending',
-    pr: '12d',
-    why: 'R6: the RSVP validator accepts a date by the series weekday',
+    class: 'applies',
+    why: 'R6: the RSVP validator accepts a date only as the applied practice calendar shows it',
   },
   'sql:field_bookings': {
     class: 'series-only',
@@ -232,8 +233,15 @@ function sqlSubjects() {
     .filter(([, body]) => /\bpractice_assignments\b/i.test(body))
     .map(([name]) => `sql:${name}`)
     .sort();
-  return { files: files.length, definitions, readers };
+  return { files: files.length, definitions, readers, latest };
 }
+
+/**
+ * The SQL form of "imports the helper": a function cannot import it, so an
+ * `applies` SQL reader must read `practice_exceptions` in its LATEST body
+ * (comments stripped) and a `pending` one must not yet.
+ */
+const READS_EXCEPTIONS = /\bpractice_exceptions\b/i;
 
 // ----------------------------------------------------------------- the tests
 
@@ -266,8 +274,17 @@ describe('practice-reader census (W16)', () => {
       expect(['applies', 'pending', 'series-only', 'writer'], key).toContain(entry.class);
       expect(entry.why.length, key).toBeGreaterThan(10);
       if (entry.class === 'pending') expect(entry.pr, key).toMatch(/^12[bcd]$/);
-      // A SQL function cannot import the helper; 12d states its own rule in pgTAP.
-      if (key.startsWith('sql:')) continue;
+      // A SQL function cannot import the helper: it must read the exceptions
+      // table instead, and 12d states its rule in pgTAP and the harness smoke.
+      if (key.startsWith('sql:')) {
+        const body = SQL.latest.get(key.slice('sql:'.length)) ?? '';
+        const reads = READS_EXCEPTIONS.test(body);
+        if (entry.class === 'applies') expect(reads, `${key} reads practice_exceptions`).toBe(true);
+        if (entry.class === 'pending') {
+          expect(reads, `${key} reads practice_exceptions: move it to applies`).toBe(false);
+        }
+        continue;
+      }
       const imports = IMPORTS_HELPER.test(readFileSync(path.join(REPO, key), 'utf8'));
       if (entry.class === 'applies') expect(imports, key).toBe(true);
       if (entry.class === 'pending') {
@@ -305,6 +322,15 @@ describe('practice-reader census (W16)', () => {
         sql: 'CREATE FUNCTION g() RETURNS int AS $$ SELECT 1 FROM practice_assignments $$; DROP FUNCTION IF EXISTS public.g();',
       },
     ]);
+    // The SQL `applies` test: a body naming the table counts; a comment does not.
+    const read = (sql) =>
+      READS_EXCEPTIONS.test(latestSqlBodies([{ name: '1.sql', sql }]).latest.get('h') ?? '');
+    expect(
+      read('CREATE FUNCTION h() RETURNS int AS $$ SELECT 1 FROM practice_exceptions $$;')
+    ).toBe(true);
+    expect(
+      read('CREATE FUNCTION h() RETURNS int AS $$ SELECT 1 -- practice_exceptions\n $$;')
+    ).toBe(false);
     expect([...latest.keys()].sort()).toEqual(['f', 'v']);
     expect(/practice_assignments/.test(latest.get('f'))).toBe(false);
     expect(/practice_assignments/.test(latest.get('v'))).toBe(true);

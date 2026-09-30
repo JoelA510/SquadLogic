@@ -12,6 +12,10 @@ import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
 import { handlePracticeEnactRpc } from './mockPracticeEnact.js';
+import {
+  practiceRangeBounds,
+  practiceRangeLowerBound,
+} from '@squadlogic/core/utils/practiceOccurrences.js';
 
 const mockId = (prefix = '') =>
   prefix + (crypto.randomUUID?.() || crypto.getRandomValues(new Uint32Array(4)).join('-'));
@@ -1325,6 +1329,99 @@ const mockPruneEmptyScenarios = (db, orgId, scenarioIds, destroy) => {
   );
   destroy('field_availability_scenarios', doomed);
   return doomed.length;
+};
+
+const RSVP_DAY_CODES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+/**
+ * The practice-exception half of `upsert_team_event_rsvp`, as 20261005000000
+ * reads it (8.6 3b PR 12d, plan R7 mirroring R6). Windows are read by core
+ * `practiceRangeBounds` / `practiceRangeLowerBound`, the 12a helper's own
+ * readers, so the mock has no range parser of its own for them.
+ *
+ * Over the LIVE exceptions on the team's assignment (`withdrawn_at == null`,
+ * whatever organisation or team they name):
+ * - a window whose lower bound does not read refuses every date of the row;
+ * - two or more covering the date refuse it (the helper's CONFLICT);
+ * - one covering it: `time_tbd` and an open upper bound refuse; a bounded
+ *   `relocated` accepts only the relocated slot's weekday inside the window
+ *   and the row's own bounded range (Q9), on a row whose slot exists, for an
+ *   exception naming the organisation and the team;
+ * - none covering it: `series`, and the caller's unchanged series check rules.
+ *
+ * A reference that is not the team's own assignment is `series` too, so the
+ * caller's 42501 answers it exactly as before.
+ *
+ * @param {Record<string, any>} db
+ * @param {{ orgId: any, teamId: any, referenceId: any, date: string }} input
+ * @returns {{ verdict: 'series' | 'accept' } | { verdict: 'refuse', message: string }}
+ */
+export const mockRsvpPracticeException = (db, { orgId, teamId, referenceId, date }) => {
+  const row = (db.practice_assignments || []).find(
+    (a) =>
+      String(a.id) === String(referenceId) &&
+      String(a.team_id) === String(teamId) &&
+      String(a.organization_id ?? orgId) === String(orgId)
+  );
+  if (!row) return { verdict: 'series' };
+  const live = (db.practice_exceptions || []).filter(
+    (e) => String(e.assignment_id) === String(row.id) && e.withdrawn_at == null
+  );
+  const read = live.map((e) => ({
+    e,
+    whole: practiceRangeBounds(e.window),
+    lower: practiceRangeLowerBound(e.window),
+  }));
+  if (read.some((w) => w.lower === null)) {
+    return {
+      verdict: 'refuse',
+      message: `Practice ${referenceId} has a saved change whose dates cannot be read, so no date of it takes an RSVP`,
+    };
+  }
+  const covering = read.filter(
+    (w) => date >= w.lower.first && (w.whole === null || date <= w.whole.last)
+  );
+  if (covering.length === 0) return { verdict: 'series' };
+  if (covering.length > 1) {
+    return {
+      verdict: 'refuse',
+      message: `Practice ${referenceId} on ${date} is covered by ${covering.length} saved changes at once, so it takes no RSVP`,
+    };
+  }
+  const [{ e, whole }] = covering;
+  if (e.kind === 'time_tbd') {
+    return {
+      verdict: 'refuse',
+      message: `Practice ${referenceId} on ${date} falls inside a TIME TBD change (no confirmed time), so it takes no RSVP yet`,
+    };
+  }
+  if (e.kind !== 'relocated' || whole === null) {
+    return {
+      verdict: 'refuse',
+      message: `Practice ${referenceId} on ${date} is under a saved change with no end date, so it takes no RSVP`,
+    };
+  }
+  const slotOf = (id) =>
+    (db.practice_slots || []).find((slot) => id != null && String(slot.id) === String(id));
+  // The row's own slot as `slotDayForAssignment` finds it: embedded, or by id.
+  const rowSlot = row.slot || slotOf(row.practice_slot_id || row.slot_id);
+  const movedTo = slotOf(e.practice_slot_id);
+  const rowRange = practiceRangeBounds(row.effective_date_range);
+  const weekday = RSVP_DAY_CODES[new Date(`${date}T00:00:00Z`).getUTCDay()];
+  const moved =
+    rowSlot !== undefined &&
+    movedTo !== undefined &&
+    String(e.organization_id) === String(orgId) &&
+    String(e.team_id) === String(teamId) &&
+    rowRange !== null &&
+    date >= rowRange.first &&
+    date <= rowRange.last &&
+    String(movedTo.day_of_week ?? '').toLowerCase() === weekday;
+  if (moved) return { verdict: 'accept' };
+  return {
+    verdict: 'refuse',
+    message: `Practice ${referenceId} on ${date} was moved by a saved change; RSVP to the moved practice's date instead`,
+  };
 };
 
 const saveDB = (db) => {
@@ -2950,7 +3047,21 @@ export const mockSupabase = {
                   rangeContainsDate(assignment.effective_date_range, p.p_occurrence_date) &&
                   slotDayForAssignment(assignment) === dayCodeForDate(p.p_occurrence_date)
               );
-        if (!referenceAllowed) {
+        // 8.6 3b PR 12d (plan R7): the saved practice exceptions, as
+        // 20261005000000 reads them. The series check above is unchanged.
+        const byException =
+          p.p_event_type === 'practice'
+            ? mockRsvpPracticeException(db, {
+                orgId,
+                teamId: p.p_team_id,
+                referenceId: p.p_reference_id,
+                date: normalizeDate(p.p_occurrence_date),
+              })
+            : null;
+        if (byException?.verdict === 'refuse') {
+          return { data: null, error: { code: '22023', message: byException.message } };
+        }
+        if (byException?.verdict !== 'accept' && !referenceAllowed) {
           return {
             data: null,
             error: { message: 'Event reference is outside the requested team' },

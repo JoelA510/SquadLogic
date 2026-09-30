@@ -827,6 +827,28 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "FAIL smoke ${id}: it passed without proving a repeated enact is idempotent"; STATUS=1
       fi
     fi
+    # **8.6 3b PR 12d: RSVP follows the applied practice calendar (plan W14,
+    # W15, Q4).** One claim per plant in prove.sh. The smoke RAISEs on each;
+    # these fail if its evidence stops. (The fixture meta-assertion and the
+    # posture check RAISE in the same smoke and print as NOTICEs above; they
+    # carry no plant, so they are not claims.)
+    if [ "$id" = "20261005000000" ]; then
+      if grep -qF "rsvp cases: 16 of 16 as expected -- 6 accepted (series outside every window, relocated dates, a withdrawn window), 8 refused 22023 (TIME TBD, original and off dates in a relocated window, open and unreadable windows, the Q9 clip), 2 refused 42501 by the unchanged series rule" $SCRATCH/harness_smoke; then
+        echo "  | (checked) an RSVP follows the applied practice calendar: a moved practice's new date is accepted, its original date, a TIME TBD date and an open or unreadable window are refused 22023, and dates outside every window are judged as before"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the RSVP rule follows the applied practice calendar"; STATUS=1
+      fi
+      if grep -qF "stored rsvps: 2 of 2 stored on dates now TIME TBD or moved are unchanged, and the organisation holds exactly 2 + 6 rows" $SCRATCH/harness_smoke; then
+        echo "  | (checked) an RSVP stored on a date that became TIME TBD or moved is neither deleted nor rewritten"
+      else
+        echo "FAIL smoke ${id}: it passed without proving stored RSVPs are untouched"; STATUS=1
+      fi
+      if grep -qF "exception reads: the parent read 7 of 7 seeded rows, the same set as the admin; a non-member read 0" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a parent member reads the same practice_exceptions rows as an admin, and a non-member reads none"
+      else
+        echo "FAIL smoke ${id}: it passed without proving parents read practice exceptions as admins do"; STATUS=1
+      fi
+    fi
     # **The production RLS drift replay** is the only evidence that the
     # reconcile fixes production rather than a repo chain where it has nothing
     # to do, so each half of it is a claim. The smoke RAISEs on any failed
@@ -1142,7 +1164,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2013,6 +2035,26 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the enact wrapper survived its own revert, or the writer did not"
         dump 10 $SCRATCH/harness_enact; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261005000000" ]; then
+      # The body read back from the catalogue, not from the revert's own
+      # NOTICE: md5 of the 20260504070000 dollar-quoted text, and the posture.
+      # `missing` fires when the lookup finds no function, so a broken query
+      # cannot read as restored.
+      if psql_cmd "SELECT 'RSVP-VERDICT:' || CASE
+               WHEN to_regprocedure('public.upsert_team_event_rsvp(uuid, uuid, uuid, text, date, text)') IS NULL THEN 'missing'
+               WHEN (SELECT md5(p.prosrc) = '1e07e31e5b2f9391a8a4b7a2d83d3e0e' AND p.prosecdef
+                            AND p.proconfig = ARRAY['search_path=public']
+                       FROM pg_proc p
+                      WHERE p.oid = 'public.upsert_team_event_rsvp(uuid, uuid, uuid, text, date, text)'::regprocedure)
+                 THEN 'restored'
+               ELSE 'wrong' END;" \
+         >$SCRATCH/harness_rsvp 2>&1 && grep -q 'RSVP-VERDICT:restored' $SCRATCH/harness_rsvp; then
+        echo "  | (checked) the RSVP revert restores the 20260504070000 upsert_team_event_rsvp body byte for byte, SECURITY DEFINER with search_path=public"
+      else
+        echo "FAIL revert ${id}: the RSVP revert did not restore the previous upsert_team_event_rsvp body and posture"
+        dump 10 $SCRATCH/harness_rsvp; STATUS=1
       fi
     fi
     if [ "$id" = "20261003000000" ]; then

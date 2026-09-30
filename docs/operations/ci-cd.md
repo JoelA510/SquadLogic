@@ -102,9 +102,7 @@ migration run therefore also blocks the function deploy.
 **Steps.** `supabase link` → `supabase migration list` → `supabase db push
 --dry-run` → safety guard → `supabase db push --yes` → `supabase migration list`
 plus a verify step that fails if anything is still pending. The CLI is pinned to
-`2.118.0` through `supabase/setup-cli@v1`, because the guard parses that
-version's `--output-format json` output. (`deploy-edge-functions` still uses
-`version: latest`.)
+`2.118.0`; see [Supabase CLI version](#supabase-cli-version).
 
 **The guard** ([`scripts/ci/migrationGuard.mjs`](../../scripts/ci/migrationGuard.mjs),
 tests in `tests/migrationGuard.test.js`) fails the job before anything is
@@ -153,6 +151,43 @@ owner of that rule; `tests/migrationVersions.test.js` runs it against the real
 directory). On pull requests it also checks that every **added** migration has a
 version greater than the latest on the base branch, and that no existing
 migration was renamed, edited or removed. It needs no secrets.
+
+### Supabase CLI version
+
+Both deploy jobs install the CLI with `supabase/setup-cli@v1` and
+`version: ${{ env.SUPABASE_CLI_VERSION }}`. The version is set once, in the
+workflow-level `env:` block of `ci.yml`: **`2.118.0`**.
+
+**Why it is pinned.** With `version: latest`, setup-cli looks up the newest
+release through an unauthenticated GitHub API call. On push-to-main runs 1156
+(2026-09-29) and 1174 (2026-09-30), that call failed with `Failed to resolve
+latest Supabase CLI release: rate limit exceeded`. Each time "Deploy Edge
+Functions" failed and `main` went red, although Build & Test had passed and no
+deploy command had run. A pinned version needs no lookup. Also, the migration
+guard parses this version's `--output-format json` output:
+
+- `migration list`: `{"migrations": [{"local", "remote", ...}]}`;
+- `db push --dry-run`: `{"dryRun": true, "upToDate", "migrations": ["<version>_<name>.sql"], "seeds"}`;
+- a CLI failure: `{"_tag": "Error", "error": {"message"}}`.
+
+`tests/supabaseCliPin.test.js` fails if any `supabase/setup-cli` step in
+`.github/workflows/` uses `latest` or has no version. It also fails if the
+`ci.yml` steps disagree, or if the version differs from the one named in the
+`migrationGuard.mjs` header.
+
+**How to bump it.**
+
+1. Capture the new version's `migration list` and `db push --dry-run` JSON
+   against a local, production-shaped ledger (see
+   [`migration-ledger-normalisation.md`](./migration-ledger-normalisation.md)).
+   Update the fixture shapes in `tests/migrationGuard.test.js` if they changed.
+2. In one PR, change `SUPABASE_CLI_VERSION` in `ci.yml` and the version named in
+   the headers of `scripts/ci/migrationGuard.mjs` and
+   `tests/migrationGuard.test.js`.
+3. Run `npm run test`. The pin test fails until all of these agree.
+
+`pgtap.yml` pins its own CLI (`2.95.4`) for `supabase start`. It is a separate
+workflow, and this pin does not change it.
 
 ### Operator setup (GitHub)
 

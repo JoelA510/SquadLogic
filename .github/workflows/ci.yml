@@ -17,6 +17,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # The one Supabase CLI version for every `supabase/setup-cli` step in this
+  # workflow (deploy-migrations and deploy-edge-functions). Never `latest`:
+  # setup-cli resolves `latest` through an unauthenticated GitHub API call, which
+  # hit "rate limit exceeded" on push-to-main runs 1156 and 1174 and turned main
+  # red before any deploy ran. migrationGuard.mjs parses this version's
+  # `--output-format json` output, so bump it only after checking the new
+  # version's shapes against tests/migrationGuard.test.js. Bump procedure:
+  # docs/operations/ci-cd.md ("Supabase CLI version").
+  SUPABASE_CLI_VERSION: 2.118.0
+
 jobs:
   # ── Supabase keep-alive (scheduled runs only) ────────────────
   keepalive:
@@ -319,13 +330,12 @@ jobs:
         with:
           node-version: 20
 
-      # Pinned: the guard parses this version's `--output-format json` output.
-      # Bump deliberately, re-running tests/migrationGuard.test.js's shapes.
+      # Pinned (workflow env): the guard parses this version's JSON output.
       - name: Setup Supabase CLI
         if: steps.secrets.outputs.configured == 'true'
         uses: supabase/setup-cli@v1
         with:
-          version: 2.118.0
+          version: ${{ env.SUPABASE_CLI_VERSION }}
 
       - name: Link project
         if: steps.secrets.outputs.configured == 'true'
@@ -405,11 +415,13 @@ jobs:
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # Pinned (workflow env), not `latest`: resolving `latest` hit the GitHub
+      # API rate limit on runs 1156 and 1174.
       - name: Setup Supabase CLI
         if: steps.secrets.outputs.configured == 'true'
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: ${{ env.SUPABASE_CLI_VERSION }}
 
       - name: Deploy all edge functions
         if: steps.secrets.outputs.configured == 'true'

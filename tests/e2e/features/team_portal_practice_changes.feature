@@ -4,7 +4,8 @@ Feature: Team portal shows saved practice changes
   So that I never go to a practice at the wrong time or place
 
   # 8.6 3b PR 12c (docs/PHASE_8_6_PR12_READERS_PLAN.md §6): the portal applies
-  # saved practice exceptions. RSVP is hidden on TIME TBD dates (Q3).
+  # saved practice exceptions. RSVP is hidden on TIME TBD dates (Q3). 8.6 3b
+  # PR 12d: a moved practice takes an RSVP on its new date (Q4).
 
   Background:
     Given I am logged into SquadLogic as a "parent"
@@ -18,3 +19,9 @@ Feature: Team portal shows saved practice changes
     And I should see the TIME TBD date with its reason
     And RSVP should be hidden on the TIME TBD date
     And RSVP should be open on an unchanged practice of the same series
+
+  Scenario: A parent RSVPs to a moved practice on its new date
+    Given the "Tigers" have a Monday practice with one week moved and one week TIME TBD
+    And I am on the "Team Portal" page for the "Tigers"
+    When I mark my child as going to the moved practice
+    Then the moved practice should show my child as going

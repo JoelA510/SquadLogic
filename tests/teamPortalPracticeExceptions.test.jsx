@@ -400,7 +400,7 @@ describe('team portal: saved practice exceptions are applied (W12, W4 portal)', 
     }
   });
 
-  it('RSVP is hidden on TIME TBD dates and moved practices, and shown on the series', async () => {
+  it('RSVP is hidden on TIME TBD dates, and shown on the series and moved practices', async () => {
     await renderPortal();
     // Meta: the parent does RSVP somewhere, so an absence below is not vacuous.
     for (const e of byKind('series')) {
@@ -415,13 +415,13 @@ describe('team portal: saved practice exceptions are applied (W12, W4 portal)', 
       expect(within(card).queryAllByTitle('Going'), e.date).toHaveLength(0);
       expect(within(card).getByText('RSVP opens once a time is set')).toBeInTheDocument();
     }
-    // Until 12d: the RSVP rule does not yet accept a moved practice's new date.
+    // 12d (plan R6, Q4): a moved practice takes an RSVP on its new date. The
+    // loop must see one, or the assertion inside it is vacuous.
+    expect(byKind('moved').length).toBeGreaterThan(0);
     for (const e of byKind('moved')) {
       const card = cardWith(longDate(e.date));
-      expect(within(card).queryAllByTitle('Going'), e.date).toHaveLength(0);
-      expect(
-        within(card).getByText('RSVP for a moved practice is not open yet')
-      ).toBeInTheDocument();
+      expect(within(card).getByText('Practice (moved)')).toBeInTheDocument();
+      expect(within(card).queryAllByTitle('Going'), e.date).toHaveLength(1);
     }
   });
 

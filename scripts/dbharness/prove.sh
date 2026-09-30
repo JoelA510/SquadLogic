@@ -56,6 +56,9 @@ R19="$REPO/docs/sql/20261003000000_revert.sql"
 # 8.6 3b PR 11b: the enact wrapper and its revert.
 M20="$REPO/supabase/migrations/20261004000000_enact_practice_recommendation.sql"
 R20="$REPO/docs/sql/20261004000000_revert.sql"
+# 8.6 3b PR 12d: RSVP follows the applied practice calendar, and its revert.
+M21="$REPO/supabase/migrations/20261005000000_rsvp_applied_practice_calendar.sql"
+R21="$REPO/docs/sql/20261005000000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -3266,6 +3269,61 @@ plant "R20 the revert does not drop the enact wrapper" "$R20" \
   "DROP FUNCTION IF EXISTS public.enact_practice_recommendation(jsonb);" \
   "FAIL revert 20261004000000"
 
+# **8.6 3b PR 12d: RSVP follows the applied practice calendar (plan W14, W15,
+# Q4).** One plant per claim the smoke's evidence prints, and one for the
+# revert. Every M21 anchor sits in the only live definition of
+# upsert_team_event_rsvp (anchor_liveness: LIVE).
+# W14's plan plant: the old body, the series weekday alone.
+plant "M21 the RSVP rule keeps the series-only check" "$M21" \
+  "        IF v_assignment_found THEN" \
+  "        IF false THEN" \
+  "FAIL smoke 20261005000000"
+
+# W14: a TIME TBD date falls through to the series rule and is accepted.
+plant "M21 the RSVP rule accepts a TIME TBD date" "$M21" \
+  "                   count(*) FILTER (WHERE p_occurrence_date <@ pe.\"window\")" \
+  "                   count(*) FILTER (WHERE p_occurrence_date <@ pe.\"window\" AND pe.kind <> 'time_tbd')" \
+  "FAIL smoke 20261005000000"
+
+# Q7: an open relocated window read as "until the row ends".
+plant "M21 the RSVP rule accepts a moved practice under an open window" "$M21" \
+  "                IF v_cover.kind IS DISTINCT FROM 'relocated'
+                   OR upper_inf(v_cover.\"window\")
+                   OR upper(v_cover.\"window\") = 'infinity'::date THEN" \
+  "                IF v_cover.kind IS DISTINCT FROM 'relocated' THEN" \
+  "FAIL smoke 20261005000000"
+
+# Q4: a write that tidies stored RSVPs the calendar no longer shows.
+plant "M21 the RSVP write deletes stored RSVPs inside a live window" "$M21" \
+  "    SELECT *
+      INTO v_existing
+      FROM public.event_rsvps" \
+  "    DELETE FROM public.event_rsvps er
+     WHERE er.reference_id = p_reference_id
+       AND er.occurrence_date <> p_occurrence_date
+       AND EXISTS (SELECT 1 FROM public.practice_exceptions pe
+                    WHERE pe.assignment_id = er.reference_id AND pe.withdrawn_at IS NULL
+                      AND er.occurrence_date <@ pe.\"window\");
+
+    SELECT *
+      INTO v_existing
+      FROM public.event_rsvps" \
+  "FAIL smoke 20261005000000"
+
+# W15's plan plant: the select policy tightened to admins, so a parent reads
+# no exception (and the portal would show the series as if nothing changed).
+plant "M15 the practice_exceptions select policy admits admins only" "$M15" \
+  "    ON public.practice_exceptions FOR SELECT TO authenticated
+    USING (public.is_org_member(organization_id));" \
+  "    ON public.practice_exceptions FOR SELECT TO authenticated
+    USING (public.is_org_admin(organization_id));" \
+  "FAIL smoke 20261005000000"
+
+plant "R21 the revert leaves the 12d body in place" "$R21" \
+  "CREATE OR REPLACE FUNCTION public.upsert_team_event_rsvp(" \
+  "CREATE OR REPLACE FUNCTION public.upsert_team_event_rsvp_unused(" \
+  "FAIL revert 20261005000000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -3376,6 +3434,10 @@ declare -A CLAIM_PROVER=(
   ["(checked) an enact leaves one practice.recommendation_enacted row on its series with the plan section 5 keys, the stored retirement date and the writer's result fingerprint"]="M20 the enact audit leaves result_fingerprint unfilled"
   ["(checked) a repeated enact key is idempotent: the second call returns idempotent: true and writes nothing"]="M20 the enact wrapper drops the idempotency lookup"
   ["(checked) the enact revert drops enact_practice_recommendation and leaves the 20261002000000 writer in place"]="R20 the revert does not drop the enact wrapper"
+  ["(checked) an RSVP follows the applied practice calendar: a moved practice's new date is accepted, its original date, a TIME TBD date and an open or unreadable window are refused 22023, and dates outside every window are judged as before"]="M21 the RSVP rule keeps the series-only check|M21 the RSVP rule accepts a TIME TBD date|M21 the RSVP rule accepts a moved practice under an open window"
+  ["(checked) an RSVP stored on a date that became TIME TBD or moved is neither deleted nor rewritten"]="M21 the RSVP write deletes stored RSVPs inside a live window"
+  ["(checked) a parent member reads the same practice_exceptions rows as an admin, and a non-member reads none"]="M15 the practice_exceptions select policy admits admins only"
+  ["(checked) the RSVP revert restores the 20260504070000 upsert_team_event_rsvp body byte for byte, SECURITY DEFINER with search_path=public"]="R21 the revert leaves the 12d body in place"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"
   ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M14 the reconcile skips dropping the broad policy"
   ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M14 the reconcile skips creating the missing read policies"

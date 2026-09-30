@@ -58,14 +58,14 @@ function movedFromLine(movedFrom) {
 }
 
 /**
- * Whether an event takes an RSVP here. Never on a TIME TBD date (Q3). Not yet
- * on a moved practice either: the RSVP rule that accepts a relocated date
- * (`upsert_team_event_rsvp`, plan R6) lands in 8.6 3b PR 12d, and until then
- * the RPC judges a date by the series weekday, so it would refuse a moved
- * practice's new date and accept the original one the move removed. Once 12d
- * merges, RSVP opens for moved practices keyed on (assignment id, new date).
+ * Whether an event takes an RSVP here. Never on a TIME TBD date (Q3): the RSVP
+ * RPC (`upsert_team_event_rsvp`, 8.6 3b PR 12d, plan R6) refuses one with
+ * 22023. A moved practice does take one, keyed on (assignment id, **new**
+ * date) -- `event.id` is the assignment id and `event.date` the relocated
+ * date -- which is exactly the pair the RPC accepts; it refuses the original
+ * date the move removed (Q4).
  */
-const rsvpOpen = (event) => !event.timeTbd && event.kind !== 'relocated';
+const rsvpOpen = (event) => !event.timeTbd;
 
 /**
  * Team record — the old Team Portal absorbed into the Lightning-class
@@ -362,9 +362,7 @@ export default function TeamRecordPage() {
                                   ? event.date
                                     ? 'RSVP opens once a time is set'
                                     : 'RSVP opens once a date is set'
-                                  : event.kind === 'relocated'
-                                    ? 'RSVP for a moved practice is not open yet'
-                                    : 'Viewing as Guest/Coach'}
+                                  : 'Viewing as Guest/Coach'}
                               </span>
                             </div>
                           )}

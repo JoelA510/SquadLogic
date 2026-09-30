@@ -27,7 +27,7 @@ export const EXPORT_PRACTICE_CHANGES_UNREAD_TEXT =
   'Practice changes could not be read, so this export may list practices that have moved or have no confirmed time.';
 
 /**
- * The export's practice rows (`usePracticeAssignments`, camelCased) as the
+ * The export's practice rows (`useCurrentPracticeSchedule`, camelCased) as the
  * helper reads stored rows. A row with no id can be named by no exception.
  *
  * @param {Array<Record<string, any>>} assignments
@@ -48,7 +48,7 @@ function helperRowsOf(assignments) {
 /**
  * The count, from rows and exceptions already read. Exceptions on rows the
  * export does not hold are left out rather than reported as unread rows: the
- * read is by organization, and another run's rows are not this export's.
+ * read is by organization, and another season's rows are not this export's.
  *
  * @param {Array<Record<string, any>>} assignments
  * @param {Array<Record<string, any>>} exceptions

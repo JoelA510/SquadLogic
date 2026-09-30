@@ -340,6 +340,58 @@ export const SEASON_PRACTICE_PAGE_SIZE = 1000;
 export const SEASON_PRACTICE_MAX_PAGES = 1000;
 
 /**
+ * The season read behind `loadSeasonPracticeAssignments`, with the caller's
+ * columns: org + season through teams -> divisions, ordered by id, paged by
+ * the rows actually returned until an EMPTY page, never partial.
+ *
+ * `select` must embed `teams!inner(... divisions!inner(... season_settings_id))`:
+ * the season filter runs on that embed, and without `!inner` PostgREST would
+ * return every row of the organisation with the embed nulled out.
+ *
+ * The exports read their rows through this (not by the latest run id), so
+ * they list exactly the rows the lock, the repair snapshot and the scheduling
+ * page's locked set list.
+ *
+ * @param {{ from: (table: string) => any }} client - the caller's Supabase client (RLS applies)
+ * @param {{ organizationId?: string|null, seasonSettingsId?: string|null, select: string,
+ *   pageSize?: number, maxPages?: number }} params
+ * @returns {Promise<{ ok: true, rows: any[] } | { ok: false, message: string }>}
+ */
+export async function loadSeasonPracticeRows(client, params) {
+  const {
+    organizationId,
+    seasonSettingsId,
+    select,
+    pageSize = SEASON_PRACTICE_PAGE_SIZE,
+    maxPages = SEASON_PRACTICE_MAX_PAGES,
+  } = params ?? {};
+  if (!organizationId || !seasonSettingsId) {
+    return { ok: false, message: 'an organization and a season are required' };
+  }
+  const raw = [];
+  for (let page = 0; ; page += 1) {
+    if (page >= maxPages) {
+      return { ok: false, message: `practice_assignments: no end after ${maxPages} pages` };
+    }
+    const from = raw.length;
+    const { data, error } = await client
+      .from('practice_assignments')
+      .select(select)
+      .eq('organization_id', organizationId)
+      .eq('teams.divisions.season_settings_id', seasonSettingsId)
+      .order('id', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) {
+      return { ok: false, message: `practice_assignments: ${error.message ?? 'unknown error'}` };
+    }
+    const rows = Array.isArray(data) ? data : [];
+    if (rows.length === 0) break;
+    raw.push(...rows);
+  }
+  return { ok: true, rows: raw };
+}
+
+/**
  * Every CURRENT `practice_assignments` row of one season -- the page's side
  * of the auto-scheduler's lock cross-check (8.6 PR 3b PR 7).
  *
@@ -366,38 +418,14 @@ export const SEASON_PRACTICE_MAX_PAGES = 1000;
  *   runId: string|null }> } | { ok: false, message: string }>}
  */
 export async function loadSeasonPracticeAssignments(client, params) {
-  const {
-    organizationId,
-    seasonSettingsId,
-    pageSize = SEASON_PRACTICE_PAGE_SIZE,
-    maxPages = SEASON_PRACTICE_MAX_PAGES,
-  } = params ?? {};
-  if (!organizationId || !seasonSettingsId) {
-    return { ok: false, message: 'an organization and a season are required' };
-  }
-  const raw = [];
-  for (let page = 0; ; page += 1) {
-    if (page >= maxPages) {
-      return { ok: false, message: `practice_assignments: no end after ${maxPages} pages` };
-    }
-    const from = raw.length;
-    const { data, error } = await client
-      .from('practice_assignments')
-      .select(
-        'id, team_id, practice_slot_id, slot_id, effective_date_range, assigned_via, source, ' +
-          'run_id, teams!inner(divisions!inner(season_settings_id))'
-      )
-      .eq('organization_id', organizationId)
-      .eq('teams.divisions.season_settings_id', seasonSettingsId)
-      .order('id', { ascending: true })
-      .range(from, from + pageSize - 1);
-    if (error) {
-      return { ok: false, message: `practice_assignments: ${error.message ?? 'unknown error'}` };
-    }
-    const rows = Array.isArray(data) ? data : [];
-    if (rows.length === 0) break;
-    raw.push(...rows);
-  }
+  const read = await loadSeasonPracticeRows(client, {
+    ...(params ?? {}),
+    select:
+      'id, team_id, practice_slot_id, slot_id, effective_date_range, assigned_via, source, ' +
+      'run_id, teams!inner(divisions!inner(season_settings_id))',
+  });
+  if (read.ok !== true) return read;
+  const raw = read.rows;
   const text = (value) => (value === null || value === undefined ? null : String(value));
   return {
     ok: true,

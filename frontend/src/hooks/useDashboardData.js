@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useTeamSummary } from './useTeamSummary.js';
 import { usePracticeSummary } from './usePracticeSummary.js';
 import { usePracticeAssignments } from './usePracticeAssignments.js';
+import { useCurrentPracticeSchedule } from './useCurrentPracticeSchedule.js';
 import { useGameSummary } from './useGameSummary.js';
 import { useGameAssignments } from './useGameAssignments.js';
 import { ROADMAP_SECTIONS } from '../constants/roadmap.js';
@@ -61,6 +62,15 @@ export function useDashboardData() {
     error: practiceAssignmentsError,
   } = usePracticeAssignments(practiceRunId);
 
+  // The exports' rows: the season's current schedule, not the latest run's
+  // rows (`useCurrentPracticeSchedule` says why). `practiceAssignments` above
+  // still feeds the scheduling page's grid, which this does not change.
+  const {
+    assignments: practiceScheduleAssignments,
+    loading: practiceScheduleLoading,
+    error: practiceScheduleError,
+  } = useCurrentPracticeSchedule();
+
   const {
     gameSummary,
     gameReadinessSnapshot,
@@ -104,10 +114,17 @@ export function useDashboardData() {
   const errors = useMemo(
     () => ({
       team: firstErrorMessage([teamError]),
-      practice: firstErrorMessage([practiceError, practiceAssignmentsError]),
+      practice: firstErrorMessage([practiceError, practiceAssignmentsError, practiceScheduleError]),
       game: firstErrorMessage([gameError, gameAssignmentsError]),
     }),
-    [teamError, practiceError, practiceAssignmentsError, gameError, gameAssignmentsError]
+    [
+      teamError,
+      practiceError,
+      practiceAssignmentsError,
+      practiceScheduleError,
+      gameError,
+      gameAssignmentsError,
+    ]
   );
 
   const error = useMemo(
@@ -138,6 +155,8 @@ export function useDashboardData() {
     generatedAt: practiceGeneratedAt,
     runId: practiceRunId,
     assignments: practiceAssignments,
+    // What the exports list: every current row of the season.
+    scheduleAssignments: practiceScheduleAssignments,
   };
 
   const resolvedGame = {
@@ -156,7 +175,7 @@ export function useDashboardData() {
       // errors are: a source whose rows have not arrived is not a source that
       // returned none, and `practice` means the run and its rows to every
       // reader of it.
-      practice: practiceLoading || practiceAssignmentsLoading,
+      practice: practiceLoading || practiceAssignmentsLoading || practiceScheduleLoading,
       game: gameLoading || gameAssignmentsLoading,
     },
     error,

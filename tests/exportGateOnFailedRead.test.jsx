@@ -51,6 +51,7 @@ const reads = vi.hoisted(() => ({
     team: null,
     practiceSummary: null,
     practiceAssignments: null,
+    practiceSchedule: null,
     gameSummary: null,
     gameAssignments: null,
   },
@@ -112,6 +113,14 @@ vi.mock('../frontend/src/hooks/usePracticeAssignments.js', () => ({
     assignments: reads.errors.practiceAssignments ? [] : fixtures.PRACTICES,
     loading: false,
     error: reads.errors.practiceAssignments,
+  }),
+}));
+// The exports' own practice rows: the season's current schedule.
+vi.mock('../frontend/src/hooks/useCurrentPracticeSchedule.js', () => ({
+  useCurrentPracticeSchedule: () => ({
+    assignments: reads.errors.practiceSchedule ? [] : fixtures.PRACTICES,
+    loading: false,
+    error: reads.errors.practiceSchedule,
   }),
 }));
 vi.mock('../frontend/src/hooks/useGameSummary.js', () => ({
@@ -186,6 +195,7 @@ beforeEach(() => {
     team: null,
     practiceSummary: null,
     practiceAssignments: null,
+    practiceSchedule: null,
     gameSummary: null,
     gameAssignments: null,
   };
@@ -222,6 +232,16 @@ describe('useDashboardData reports its reads one by one', () => {
     // Meta-assertion: the empty list the operator would otherwise have
     // exported really is what the page receives.
     expect(result.current.practice.assignments).toEqual([]);
+  });
+
+  it("surfaces a refused read of the exports' season schedule on the practice arm", () => {
+    reads.errors.practiceSchedule = new Error(REFUSED);
+    const { result } = renderHook(() => useDashboardData());
+
+    expect(result.current.errors.practice).toBe(REFUSED);
+    // Meta-assertion: the export's rows really are empty, not the run's.
+    expect(result.current.practice.scheduleAssignments).toEqual([]);
+    expect(result.current.practice.assignments).toEqual(PRACTICES);
   });
 
   it('keeps the aggregate a string, and equal to one of the three arms', () => {

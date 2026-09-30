@@ -48,7 +48,7 @@ export default function ExportsPage() {
         <OutputGenerationPanel
           teams={team?.teams || []}
           teamSummary={team?.summary || null}
-          practiceAssignments={practice?.assignments || []}
+          practiceAssignments={practice?.scheduleAssignments || []}
           gameAssignments={game?.assignments || []}
           supabaseClient={supabase}
           sourceErrors={errors}

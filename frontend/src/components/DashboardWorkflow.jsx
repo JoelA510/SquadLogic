@@ -333,7 +333,7 @@ const DashboardWorkflow = ({
           <OutputGenerationPanel
             teams={teamData?.teams || []}
             teamSummary={teamData?.summary || null}
-            practiceAssignments={practiceData?.assignments || []}
+            practiceAssignments={practiceData?.scheduleAssignments || []}
             gameAssignments={gameData?.assignments || []}
             supabaseClient={supabase}
             sourceErrors={sourceErrors}

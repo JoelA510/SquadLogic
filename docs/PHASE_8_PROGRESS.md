@@ -7465,3 +7465,107 @@ The plan is `docs/PHASE_8_6_PR11_ENACT_PLAN.md`. Operator answers:
   undefined at `ImportContext.jsx:521`, the same lazy mock-import race family
   as #509 and #510. It is filed as a test-hygiene follow-up. CI on main has
   stayed green.
+
+## 3b PR 12b — #521 merged (ab60b4c): the calendar feed applies practice exceptions
+
+- `calendar-feed` reads `practice_exceptions` for the team and its
+  organization: live rows only, ordered, and capped at the PostgREST row
+  limit. The relocated slot is embedded. The reads move into
+  `_shared/calendar/teamFeed.ts`, so a test can run them against seeded rows.
+- `buildFeedEvents` runs the Deno twin of `applyPracticeExceptions`.
+  - **Moved practices:** on the relocated slot, with the same UID scheme and
+    the SUMMARY `Practice (moved) - <team>`. Original dates are removed, not
+    sent as CANCELLED (Q1).
+  - **TIME TBD:** each date is an all-day TENTATIVE event and is counted in
+    the CALDESC. This includes tail windows, so the §2 defect is fixed for the
+    feed (Q2).
+  - **Open or unreadable windows:** CALDESC only (Q7).
+  - A failed exceptions read, or a read that fills the row cap, is shown as
+    INCOMPLETE and never returns a 500 (Q5).
+- **Evidence.**
+  - Six agent plants, all CAUGHT in both the Deno and Vitest arms. One Vitest
+    miss was fixed by making the oracle check DTSTART and LOCATION for every
+    timed event.
+  - **Supervisor plant:** I removed the "row cap reached -> INCOMPLETE"
+    report. It was CAUGHT by the Deno arm under both time zones. CI runs that
+    arm.
+- **Production note.** Production does not have `practice_exceptions` yet,
+  because its migrations are pending. So every live feed would show the
+  INCOMPLETE note until the deploy. A catalog check found 0 teams in
+  production, so no one is affected today.
+- **Main run 1174** went red on Deploy Edge Functions: the `setup-cli`
+  `latest` lookup was rate-limited again, as in run 1156. One re-run went
+  green. The durable fix is #524.
+
+## #62 PR C — #522 merged (cffd55a): the rule gate honours the waiver ledger
+
+- The turnover and spread arms pass their subjects through `applyWaivers()`.
+  They use the run's `engines.waiverLedger` and the engine's own
+  `constraintIdsByReasonCode()` map, and refuse only a finding that is still
+  blocking after application.
+- A null ledger skips the applier, exactly as in `runRuleEngine`.
+- The overlap arm is unchanged, because its code is linked to no constraint.
+- W13-W15 are in `tests/ruleGateWaivers.test.js`. They include the Q3 case: a
+  waiver naming `conflict-fairness` does not admit a spread breach.
+- **Evidence.**
+  - The season-2026 rule-engine and no-op resolve digests are unchanged, and
+    so is the 679-run sweep. The sweep was also rerun with the incident-9
+    ledger attached, and it is unchanged too.
+  - Seven agent plants: six CAUGHT, and one MISSED for a stated reason. The
+    non-waivable bar is enforced twice, so removing one guard leaves the
+    other; removing both is CAUGHT.
+  - **Supervisor plant:** I made the gate refuse a finding even after a waiver
+    demoted it. It was CAUGHT, with 4 red including W13.
+- **#62 is complete** (PR A #515, PR C #522). #60 PR B is #519.
+
+## Test hygiene — #523 merged (053482b): the renderWithProviders mock-client race
+
+- **Root cause.** `tests/helpers/renderWithProviders.jsx` rendered before
+  `supabaseReady` resolved, so `ImportContext.jsx:521` read `supabase.auth`
+  while the mock client was still unassigned.
+- The app is not affected: `main.jsx` renders only inside
+  `supabaseReady.then()`.
+- The helper now awaits `supabaseReady`, adopting `main.jsx`'s contract.
+- `renderWithProvidersReady.test.jsx` controls when the client is assigned,
+  so it reproduces the race on every run.
+- **Supervisor plant:** an async helper that awaits the wrong promise. It was
+  CAUGHT, with the original TypeError.
+- No production code changed.
+
+## CI — #524 merged (eeeb851): the Supabase CLI is pinned in the deploy jobs
+
+- Both deploy jobs install `SUPABASE_CLI_VERSION: 2.118.0` instead of
+  `latest`. That is the version the migrations job already pinned, and the
+  one `migrationGuard`'s fixtures were captured with.
+- This ends the rate-limit failures of runs 1156 and 1174.
+- `tests/supabaseCliPin.test.js` fails in any of these cases:
+  - a setup-cli step uses `latest`, or has no version;
+  - the steps disagree;
+  - the pin differs from the guard's version.
+
+  It meta-asserts that it found at least 2 steps.
+- **Supervisor plant:** a different fixed version in the Edge job. It was
+  CAUGHT.
+- `pgtap.yml` pins its own `2.95.4`. Unifying the two is a follow-up.
+
+## 3b PR 12c — #525 merged (b04b91d): the portal applies practice exceptions
+
+- `useTeamPortal` reads `practice_exceptions` (paged, live rows, gated by
+  RLS) and expands the practices through the core helper.
+- `TeamRecordPage` shows the changes (Q3):
+  - a moved practice has a "Moved from <weekday> <time>, <ground>" line;
+  - a TIME TBD date reads "Time TBD on <date>: <reason>", with RSVP hidden;
+  - a failed read shows a `role="alert"` banner (Q5).
+- RSVP on moved practices stays hidden until 12d.
+- The §2 defect is now fixed for the portal as well.
+- **Also:**
+  - The enact dialog's "published practices that could change" count now
+    applies the helper (W17). Its snapshot reads exceptions, all or nothing.
+  - Exports state "N practices have temporary changes not shown in this
+    export" (Q6).
+- **Evidence.**
+  - Seven agent plants, all CAUGHT, and the E2E feature
+    `team_portal_practice_changes` passes.
+  - **Supervisor plant:** I re-opened RSVP on TIME TBD dates. It was CAUGHT.
+- **Next: 12d**, the `upsert_team_event_rsvp` migration. It will be the 9th
+  pending production migration.

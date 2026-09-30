@@ -44,11 +44,38 @@
  * the smallest input that can change — the moving game's coaches on that date,
  * the games on that surface that date, and every team (from the roster) of each
  * age group the move can touch, with every commitment of everyone on them — so
- * the gate and `verify` cannot disagree about what a breach is. Waivers are not
- * consulted: an overlap cannot be waived, and a waived turnover would be
- * refused here while `verify` accepts it. Stated rather than hidden; honouring
- * the ledger here is #62's second half (PR C), and the spread arm below is
- * where it plugs in beside turnover.
+ * the gate and `verify` cannot disagree about what a breach is.
+ *
+ * **It honours the run's waiver ledger exactly as `runRuleEngine` does** (#62,
+ * PR C). The turnover and spread subjects go through `applyWaivers()` with
+ * `engines.waiverLedger` and the engine's own `constraintIdsByReasonCode()`
+ * map, and only a finding still `blocking` afterwards is refused — so a slot
+ * `verify` would report as waived is not refused here. Scope matching, the
+ * `waivable: false` bar and the lifecycle are the applier's, not re-derived.
+ * A ledger of `null` skips the applier outright, the engine's own
+ * `ledger === null` contract.
+ *
+ * Declared, not enforced, beside that:
+ *
+ * - **The overlap arm does not consult the ledger.** The standing coach rule
+ *   links `TRAVEL_COMMITMENTS_OVERLAP` to no constraint (`rules.js`, its
+ *   `constraintIdByCode`), so no waiver reaches it in `verify` either, and the
+ *   arm gates it by code at any severity. A supplied `engines.ruleEngine` that
+ *   linked the code would let `verify` waive an overlap the gate still refuses
+ *   in pass 1 — failing safe, witnessed in `tests/ruleGateWaivers.test.js`.
+ * - **The carried-spread warning reads the same instances** (`stages.js`,
+ *   `RESOLVE_CONFLICT_SPREAD_CARRIED`), so a requested move whose growth a
+ *   waiver covers does not warn, and with `verify` off nothing then reports
+ *   the waiver. Unreachable under the season's record (ruling Q3).
+ * - **The #53 `travelCodes` are read before the ledger**, so an option can list
+ *   a travel-gap code `verify` would report waived (incident 9's shape).
+ * - **The applier's contract is adopted, not audited.** It lets a waiver on
+ *   any waivable constraint linked to a code cover a finding raised under
+ *   another — for turnover, one on the preference record would cover the
+ *   floor's shortfall. No season record permits that (all are
+ *   `waivable: false`); it is `applyWaivers()`'s to narrow, for both halves.
+ * - **The arms read the evaluator's severity**, not the registry's
+ *   per-subject re-severity `runRuleEngine` applies first (unchanged by #62).
  *
  * **Instances are keyed by the unordered pair of games**, not by the rule
  * engine's consecutive-pair subject. Reordering a coach's day re-pairs an
@@ -59,8 +86,10 @@
  */
 
 import { CONSTRAINT_SEVERITY } from '../constraints/reasonCodes.js';
+import { buildStandingRuleEngine, constraintIdsByReasonCode } from '../ruleEngine/engine.js';
 import { RULE_VIOLATION_REASON } from '../ruleEngine/reasonCodes.js';
 import { conflictFairnessRule, turnoverMinimumRule } from '../ruleEngine/rules.js';
+import { applyWaivers } from '../waivers/apply.js';
 import { TRAVEL_REASON, evaluateCoachTravel } from '../waivers/coachTravel.js';
 
 /**
@@ -74,6 +103,77 @@ export const GATED_RULE_CODES = Object.freeze([
   RULE_VIOLATION_REASON.TURNOVER_BELOW_MINIMUM,
   RULE_VIOLATION_REASON.CONFLICT_SPREAD_EXCEEDED,
 ]);
+
+/** The standing engine, built on first use by a run that supplies none. */
+/** @type {ReturnType<typeof buildStandingRuleEngine>|null} */
+let standingEngine = null;
+
+/**
+ * `constraintIdsByReasonCode()` per engine and registry: both are frozen for a
+ * run, and the gate asks once per candidate.
+ *
+ * @type {WeakMap<object, WeakMap<object, Record<string, string[]>>>}
+ */
+const constraintIdMaps = new WeakMap();
+
+/**
+ * `subjects` as `runRuleEngine` judges them against the run's waiver ledger:
+ * each with its findings after `applyWaivers()`, in the same order, keeping its
+ * own `context` (the applier's results carry none).
+ *
+ * The engine's contract, not a third one: the ledger is `engines.waiverLedger`,
+ * the one `verify` passes; the code-to-constraint map is
+ * `constraintIdsByReasonCode()` over `engines.ruleEngine` (the standing engine
+ * when none is supplied), the one `runRuleEngine` derives; and a ledger of
+ * `null` returns `subjects` untouched, as `runRuleEngine` then skips the
+ * applier. A covered blocking finding comes back `compromise` and stamped
+ * `waived`; a gated finding whose constraint is `waivable: false`, or whose
+ * code links to no constraint, comes back unchanged. The applier also appends
+ * its own `WAIVER_*` findings to a subject it judged; the arms read gated
+ * codes only, so those pass through them unread here (`verify` reports them).
+ *
+ * Only a subject carrying a blocking gated finding is handed to the applier —
+ * the only kind the arms refuse, and application is per subject, so the rest
+ * cannot change what the gate reports. The fallback for a subject the applier
+ * did not return is the engine's own (`waivers.byId[subject.id] ?? subject`).
+ *
+ * @template {{ id: string, findings: ReadonlyArray<{ code: string, severity: string }> }} S
+ * @param {Object} engines - the run's `engines`
+ * @param {ReadonlyArray<S>} subjects
+ * @returns {ReadonlyArray<S>}
+ */
+function waivedSubjects(engines, subjects) {
+  const ledger = engines.waiverLedger ?? null;
+  if (ledger === null) return subjects;
+  const judged = subjects.filter((subject) =>
+    subject.findings.some(
+      (finding) =>
+        GATED_RULE_CODES.includes(finding.code) && finding.severity === CONSTRAINT_SEVERITY.BLOCKING
+    )
+  );
+  if (judged.length === 0) return subjects;
+  const registry = engines.registry;
+  const engine = engines.ruleEngine ?? (standingEngine ??= buildStandingRuleEngine());
+  let byRegistry = constraintIdMaps.get(engine);
+  if (byRegistry === undefined) {
+    byRegistry = new WeakMap();
+    constraintIdMaps.set(engine, byRegistry);
+  }
+  let constraintIdByCode = byRegistry.get(registry);
+  if (constraintIdByCode === undefined) {
+    constraintIdByCode = constraintIdsByReasonCode(engine, registry);
+    byRegistry.set(registry, constraintIdByCode);
+  }
+  const applied = applyWaivers(/** @type {any} */ (judged), {
+    ledger,
+    registry,
+    constraintIdByCode,
+  });
+  return subjects.map((subject) => {
+    const waived = applied.byId[subject.id];
+    return waived === undefined ? subject : { ...subject, findings: waived.findings };
+  });
+}
 
 /**
  * Where a commitment stands in `state`. **The one projection**: `verify`
@@ -238,8 +338,9 @@ export function spreadGroupsTouchedBy(context, gameId) {
  * the projection `verify` uses. A team's count comes only from pairs one of
  * whose sides names it, and every such pair belongs to a person included here,
  * so each group's spread is the one the standing rule engine computes.
- * Blocking findings only, as the turnover arm: under the season's record the
- * spread is HARD.
+ * Blocking findings only, as the turnover arm, and read after the run's waiver
+ * ledger ({@link waivedSubjects}): under the season's record the spread is
+ * HARD and unwaivable.
  *
  * @param {{ engines: Object, commitmentIndex: ReturnType<typeof indexCommitments>, teamIndex?: ReturnType<typeof indexTeams> }} context
  * @param {import('./types.js').ResolveState} state
@@ -290,7 +391,11 @@ export function conflictSpreadInstances(context, state, groups, override = null)
       `resolve: the spread gate asked about ${asked} age group(s) and the fairness rule examined ${meta.groupsExamined}; refusing to report an unexamined group as within the bound`
     );
   }
-  for (const subject of result.subjects) {
+  // Through the ledger before the severity is read: a spread a waiver covers is
+  // `compromise` in `verify`, so it is not refused here. Under the season's
+  // record none can be (`conflict-fairness` is `waivable: false`, operator
+  // ruling Q3).
+  for (const subject of waivedSubjects(context.engines, result.subjects)) {
     for (const finding of subject.findings) {
       if (finding.code !== RULE_VIOLATION_REASON.CONFLICT_SPREAD_EXCEEDED) continue;
       if (finding.severity !== CONSTRAINT_SEVERITY.BLOCKING) continue;
@@ -442,7 +547,9 @@ export function ruleGateInstances(context, state, gameId, slot, options = {}) {
     /** @type {any} */ ({ registry: context.engines.registry, resources: {} })
   );
   meta.surfacePairsExamined = Math.max(0, games.length - 1);
-  for (const subject of turnover.subjects) {
+  // Through the ledger, as the spread arm: only a shortfall still blocking
+  // after application is refused.
+  for (const subject of waivedSubjects(context.engines, turnover.subjects)) {
     for (const finding of subject.findings) {
       if (!GATED_RULE_CODES.includes(finding.code)) continue;
       if (finding.severity !== CONSTRAINT_SEVERITY.BLOCKING) continue;

@@ -14,6 +14,13 @@
  * - `TURNOVER_BELOW_MINIMUM` — two consecutive games on one surface closer than
  *   the turnover floor. Blocking under the season's `TURNOVER_FLOOR_GLOBAL`
  *   (HARD).
+ * - `CONFLICT_SPREAD_EXCEEDED` (#60) — an age group's coach conflicts shared
+ *   out more unevenly than `conflict-fairness` permits. Blocking under that
+ *   record (HARD, `waivable: false`). Refused in **both** passes, as turnover
+ *   is (operator ruling Q1). The instance is the **group**, not a pair of
+ *   games — `CONFLICT_SPREAD_EXCEEDED|<groupLabel>`, valued at the group's
+ *   excess over the bound — because the violation is an aggregate that names
+ *   no game.
  *
  * Measured over 679 displacement runs on the corpus before this module
  * existed, `verify` reported 148 overlaps and 60 turnover shortfalls the runs
@@ -32,23 +39,28 @@
  * refused, or allowed with a finding is the operator's question, not this
  * module's.
  *
- * **It asks the rule engine's own evaluators**, `evaluateCoachTravel()` and
- * `turnoverMinimumRule.evaluate()`, over the smallest input that can change —
- * the moving game's coaches on that date, and the games on that surface that
- * date — so the gate and `verify` cannot disagree about what a breach is.
- * Waivers are not consulted: an overlap cannot be waived, and a waived turnover
- * would be refused here while `verify` accepts it. Stated rather than hidden.
+ * **It asks the rule engine's own evaluators**, `evaluateCoachTravel()`,
+ * `turnoverMinimumRule.evaluate()` and `conflictFairnessRule.evaluate()`, over
+ * the smallest input that can change — the moving game's coaches on that date,
+ * the games on that surface that date, and every team (from the roster) of each
+ * age group the move can touch, with every commitment of everyone on them — so
+ * the gate and `verify` cannot disagree about what a breach is. Waivers are not
+ * consulted: an overlap cannot be waived, and a waived turnover would be
+ * refused here while `verify` accepts it. Stated rather than hidden; honouring
+ * the ledger here is #62's second half (PR C), and the spread arm below is
+ * where it plugs in beside turnover.
  *
  * **Instances are keyed by the unordered pair of games**, not by the rule
  * engine's consecutive-pair subject. Reordering a coach's day re-pairs an
- * unchanged overlap, and a subject-keyed instance would read that as new.
+ * unchanged overlap, and a subject-keyed instance would read that as new. The
+ * spread is the exception, keyed by group, above.
  *
  * @module resolve/ruleGate
  */
 
 import { CONSTRAINT_SEVERITY } from '../constraints/reasonCodes.js';
 import { RULE_VIOLATION_REASON } from '../ruleEngine/reasonCodes.js';
-import { turnoverMinimumRule } from '../ruleEngine/rules.js';
+import { conflictFairnessRule, turnoverMinimumRule } from '../ruleEngine/rules.js';
 import { TRAVEL_REASON, evaluateCoachTravel } from '../waivers/coachTravel.js';
 
 /**
@@ -60,6 +72,7 @@ import { TRAVEL_REASON, evaluateCoachTravel } from '../waivers/coachTravel.js';
 export const GATED_RULE_CODES = Object.freeze([
   TRAVEL_REASON.TRAVEL_COMMITMENTS_OVERLAP,
   RULE_VIOLATION_REASON.TURNOVER_BELOW_MINIMUM,
+  RULE_VIOLATION_REASON.CONFLICT_SPREAD_EXCEEDED,
 ]);
 
 /**
@@ -122,16 +135,19 @@ export function gameOnSlot(state, gameId, slot) {
 }
 
 /**
- * The commitments indexed the two ways the gate reads them.
+ * The commitments indexed the ways the gate reads them: by person, the persons
+ * on each game, and the persons committed for each team (the spread arm, #60).
  *
  * @param {ReadonlyArray<Object>} commitments
- * @returns {{ byPerson: Map<string, Object[]>, personsByGame: Map<string, string[]>, count: number }}
+ * @returns {{ byPerson: Map<string, Object[]>, personsByGame: Map<string, string[]>, personsByTeam: Map<string, string[]>, count: number }}
  */
 export function indexCommitments(commitments) {
   /** @type {Map<string, Object[]>} */
   const byPerson = new Map();
   /** @type {Map<string, Set<string>>} */
   const persons = new Map();
+  /** @type {Map<string, Set<string>>} */
+  const teamPersons = new Map();
   for (const commitment of commitments) {
     if (!byPerson.has(commitment.personId)) byPerson.set(commitment.personId, []);
     /** @type {Object[]} */ (byPerson.get(commitment.personId)).push(commitment);
@@ -139,28 +155,183 @@ export function indexCommitments(commitments) {
       if (!persons.has(commitment.gameId)) persons.set(commitment.gameId, new Set());
       /** @type {Set<string>} */ (persons.get(commitment.gameId)).add(commitment.personId);
     }
+    if (typeof commitment.teamId === 'string') {
+      if (!teamPersons.has(commitment.teamId)) teamPersons.set(commitment.teamId, new Set());
+      /** @type {Set<string>} */ (teamPersons.get(commitment.teamId)).add(commitment.personId);
+    }
   }
   /** @type {Map<string, string[]>} */
   const personsByGame = new Map();
   for (const [gameId, ids] of persons) personsByGame.set(gameId, [...ids].sort());
-  return { byPerson, personsByGame, count: commitments.length };
+  /** @type {Map<string, string[]>} */
+  const personsByTeam = new Map();
+  for (const [teamId, ids] of teamPersons) personsByTeam.set(teamId, [...ids].sort());
+  return { byPerson, personsByGame, personsByTeam, count: commitments.length };
+}
+
+/**
+ * The schedule's teams, indexed for the spread arm (#60): each by id, and each
+ * age group's teams **from the team records** — the roster — never from the
+ * commitments or the games. A team with no commitment at all still stands in
+ * its group with nought conflicts, and that nought is the group's minimum; a
+ * universe read from the commitments would drop it exactly when it matters
+ * (incident 4's shape).
+ *
+ * @param {ReadonlyArray<{ id: string, groupLabel?: string|null, personIds?: ReadonlyArray<string> }>} teams
+ * @returns {{ byId: Map<string, { id: string, groupLabel: string|null, personIds: string[] }>, byGroup: Map<string, Array<{ id: string, groupLabel: string|null, personIds: string[] }>> }}
+ */
+export function indexTeams(teams) {
+  const byId = new Map();
+  const byGroup = new Map();
+  for (const source of teams) {
+    const team = {
+      id: source.id,
+      groupLabel: source.groupLabel ?? null,
+      personIds: [...(source.personIds ?? [])],
+    };
+    byId.set(team.id, team);
+    if (team.groupLabel === null) continue;
+    if (!byGroup.has(team.groupLabel)) byGroup.set(team.groupLabel, []);
+    byGroup.get(team.groupLabel).push(team);
+  }
+  return { byId, byGroup };
+}
+
+/**
+ * The age groups whose coach-conflict spread moving `gameId` can change.
+ *
+ * A conflict is counted for **both** teams of an overlapping pair, so the move
+ * reaches the group of every team any of the game's coaches is committed for —
+ * the moving game's own side and the far side of every overlap it can make or
+ * unmake. Nothing else: a move changes a count only through a commitment to
+ * the game, so the game's home and away labels add no group that could change.
+ *
+ * @param {{ commitmentIndex: ReturnType<typeof indexCommitments>, teamIndex?: ReturnType<typeof indexTeams> }} context
+ * @param {string} gameId
+ * @returns {string[]}
+ */
+export function spreadGroupsTouchedBy(context, gameId) {
+  const teams = context.teamIndex;
+  if (teams === undefined) return [];
+  /** @type {Set<string>} */
+  const groups = new Set();
+  const note = (teamId) => {
+    const group = typeof teamId === 'string' ? (teams.byId.get(teamId)?.groupLabel ?? null) : null;
+    if (group !== null) groups.add(group);
+  };
+  const index = context.commitmentIndex;
+  for (const personId of index.personsByGame.get(gameId) ?? []) {
+    for (const commitment of index.byPerson.get(personId) ?? []) note(commitment.teamId);
+  }
+  return [...groups].sort();
+}
+
+/**
+ * The spread instances `groups` carry with the schedule as `state` has it, or
+ * with one game stood on a candidate slot: `CONFLICT_SPREAD_EXCEEDED|<group>`,
+ * valued at the group's **excess** over the permitted spread. Counts, not
+ * presence: pushing an already-over group further is growth.
+ *
+ * Asks `conflictFairnessRule.evaluate()` itself, over every team of those
+ * groups (from {@link indexTeams}) and every commitment of every person
+ * rostered on or committed for them, each through {@link projectCommitment} —
+ * the projection `verify` uses. A team's count comes only from pairs one of
+ * whose sides names it, and every such pair belongs to a person included here,
+ * so each group's spread is the one the standing rule engine computes.
+ * Blocking findings only, as the turnover arm: under the season's record the
+ * spread is HARD.
+ *
+ * @param {{ engines: Object, commitmentIndex: ReturnType<typeof indexCommitments>, teamIndex?: ReturnType<typeof indexTeams> }} context
+ * @param {import('./types.js').ResolveState} state
+ * @param {ReadonlyArray<string>} groups
+ * @param {{ gameId: string, slot: import('./types.js').Slot }|null} [override]
+ * @returns {{ instances: Record<string, number>, subjects: Array<{ key: string, groupLabel: string, teamIds: string[], spread: number, maxSpread: number, minConflicts: number, maxConflicts: number }>, meta: { groupsExamined: number } }}
+ */
+export function conflictSpreadInstances(context, state, groups, override = null) {
+  /** @type {Record<string, number>} */
+  const instances = {};
+  /** @type {Array<{ key: string, groupLabel: string, teamIds: string[], spread: number, maxSpread: number, minConflicts: number, maxConflicts: number }>} */
+  const subjects = [];
+  const meta = { groupsExamined: 0 };
+  const teamIndex = context.teamIndex;
+  if (teamIndex === undefined || groups.length === 0) return { instances, subjects, meta };
+  const index = context.commitmentIndex;
+  const teams = [];
+  /** @type {Set<string>} */
+  const persons = new Set();
+  for (const group of [...new Set(groups)].sort()) {
+    for (const team of teamIndex.byGroup.get(group) ?? []) {
+      teams.push(team);
+      for (const personId of team.personIds) persons.add(personId);
+      for (const personId of index.personsByTeam?.get(team.id) ?? []) persons.add(personId);
+    }
+  }
+  const commitments = [];
+  for (const personId of [...persons].sort()) {
+    for (const commitment of index.byPerson.get(personId) ?? []) {
+      const projected = projectCommitment(commitment, state, override);
+      if (projected !== null) commitments.push(projected);
+    }
+  }
+  const result = conflictFairnessRule.evaluate(
+    /** @type {any} */ ({ games: [], teams, commitments }),
+    /** @type {any} */ ({ registry: context.engines.registry, resources: {} })
+  );
+  meta.groupsExamined = result.counters.groupsExamined;
+  // **Loud, not silent (plan §1.3 step 7).** The rule must have examined every
+  // group asked about; fewer means a spread went unjudged — a group label the
+  // roster index does not hold, so no team of it reached the rule — and a gate
+  // reporting "nothing grew" over a group it never examined is the falsely
+  // clean result this repository keeps finding. The stages only ask about
+  // labels read from the index itself; an exported caller may ask about any.
+  const asked = new Set(groups).size;
+  if (meta.groupsExamined !== asked) {
+    throw new Error(
+      `resolve: the spread gate asked about ${asked} age group(s) and the fairness rule examined ${meta.groupsExamined}; refusing to report an unexamined group as within the bound`
+    );
+  }
+  for (const subject of result.subjects) {
+    for (const finding of subject.findings) {
+      if (finding.code !== RULE_VIOLATION_REASON.CONFLICT_SPREAD_EXCEEDED) continue;
+      if (finding.severity !== CONSTRAINT_SEVERITY.BLOCKING) continue;
+      const { groupLabel, spread, maxSpread, minConflicts, maxConflicts } = /** @type {any} */ (
+        finding.details
+      );
+      const key = `${finding.code}|${groupLabel}`;
+      instances[key] = spread - maxSpread;
+      subjects.push({
+        key,
+        groupLabel,
+        teamIds: [.../** @type {any} */ (subject.context).teamIds],
+        spread,
+        maxSpread,
+        minConflicts,
+        maxConflicts,
+      });
+    }
+  }
+  return { instances, subjects, meta };
 }
 
 /**
  * The gated rule-engine instances `gameId` would carry on `slot`, keyed
  * `CODE|otherGameId` — the unordered pair, read from this game's side.
  *
- * @param {{ engines: Object, commitmentIndex: ReturnType<typeof indexCommitments> }} context
+ * The spread arm (#60) adds `CONFLICT_SPREAD_EXCEEDED|<groupLabel>` keys, one
+ * per touched group over the bound, valued at its excess (see
+ * {@link conflictSpreadInstances}).
+ *
+ * @param {{ engines: Object, commitmentIndex: ReturnType<typeof indexCommitments>, teamIndex?: ReturnType<typeof indexTeams> }} context
  * @param {import('./types.js').ResolveState} state
  * @param {string} gameId
  * @param {import('./types.js').Slot} slot
- * @param {{ turnover?: boolean, travelCodes?: boolean }} [options] - `turnover: false` asks about coaches only; `travelCodes: true` also returns the non-gated travel compromise codes the moving game would carry
- * @returns {{ travelCodes: string[], instances: Record<string, number>, overlaps: Array<{ key: string, personId: string, otherId: string, teamId: string|null, otherTeamId: string|null }>, meta: { coachCommitmentsExamined: number, surfacePairsExamined: number } }}
+ * @param {{ turnover?: boolean, spread?: boolean, travelCodes?: boolean }} [options] - `turnover: false` skips the surface; `spread: false` skips the age groups; `travelCodes: true` also returns the non-gated travel compromise codes the moving game would carry
+ * @returns {{ travelCodes: string[], instances: Record<string, number>, overlaps: Array<{ key: string, personId: string, otherId: string, teamId: string|null, otherTeamId: string|null }>, meta: { coachCommitmentsExamined: number, surfacePairsExamined: number, groupsExamined: number } }}
  */
 export function ruleGateInstances(context, state, gameId, slot, options = {}) {
   /** @type {Record<string, number>} */
   const instances = {};
-  const meta = { coachCommitmentsExamined: 0, surfacePairsExamined: 0 };
+  const meta = { coachCommitmentsExamined: 0, surfacePairsExamined: 0, groupsExamined: 0 };
   /** @type {Array<{ key: string, personId: string, otherId: string, teamId: string|null, otherTeamId: string|null }>} */
   const overlaps = [];
   // **Travel compromises, collected on request (#53).** A cross-venue option
@@ -236,6 +407,19 @@ export function ruleGateInstances(context, state, gameId, slot, options = {}) {
         }
       }
     }
+  }
+
+  // -- an age group's conflicts shared too unevenly (#60) --------------------
+  // Skipped by the overlap warning and by the per-game baseline record: the
+  // spread belongs to a group, not to a game's slot, so its baseline is
+  // recorded once per group (`recordBaselineSpread()` in `stages.js`).
+  if (options.spread !== false) {
+    const spread = conflictSpreadInstances(context, state, spreadGroupsTouchedBy(context, gameId), {
+      gameId,
+      slot,
+    });
+    meta.groupsExamined = spread.meta.groupsExamined;
+    Object.assign(instances, spread.instances);
   }
 
   // -- a surface turned over too fast ---------------------------------------

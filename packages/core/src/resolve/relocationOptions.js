@@ -66,9 +66,9 @@
 import { relocationOptionsFor } from '../scenario/relocation.js';
 
 import { RESOLVE_REASON, makeResolveFinding } from './reasonCodes.js';
-import { gameOnSlot, indexCommitments } from './ruleGate.js';
+import { gameOnSlot, indexCommitments, indexTeams } from './ruleGate.js';
 import { CHANGE_ORIGIN, relocationOptionId } from './schemas.js';
-import { evaluateCandidate, recordBaselineAcceptance } from './stages.js';
+import { evaluateCandidate, recordBaselineAcceptance, recordBaselineSpread } from './stages.js';
 import { resolveContextDefaults, slotKey } from './state.js';
 import { resolveObjectiveWeights } from './objective.js';
 
@@ -286,7 +286,7 @@ export function offerRelocationOptions(input) {
  * somewhere else.
  *
  * @param {Object} input
- * @param {{ games: ReadonlyArray<Object>, commitments?: ReadonlyArray<Object> }} input.schedule
+ * @param {{ games: ReadonlyArray<Object>, commitments?: ReadonlyArray<Object>, teams?: ReadonlyArray<Object> }} input.schedule
  * @param {Object} input.engines - the branch's engines
  * @param {Record<string, number>} [input.objectiveWeights]
  * @returns {{ evaluate: (gameId: string, slot: import('./types.js').Slot) => ReturnType<typeof evaluateCandidate>, hold: (gameId: string, slot: import('./types.js').Slot) => void }}
@@ -312,7 +312,9 @@ export function createPlacementProbe(input) {
     engines: input.engines,
     weights: resolveObjectiveWeights(input.objectiveWeights),
     commitmentIndex: indexCommitments(input.schedule.commitments ?? []),
+    teamIndex: indexTeams(input.schedule.teams ?? []),
   };
+  recordBaselineSpread(context, state);
   for (const gameId of state.gameIds) recordBaselineAcceptance(context, state, gameId);
   return {
     evaluate: (gameId, slot) =>

@@ -123,9 +123,12 @@ export { bookingsOn, checkPlacement } from './legality.js';
 
 export {
   GATED_RULE_CODES,
+  conflictSpreadInstances,
   indexCommitments,
+  indexTeams,
   projectCommitment,
   ruleGateInstances,
+  spreadGroupsTouchedBy,
 } from './ruleGate.js';
 
 export {

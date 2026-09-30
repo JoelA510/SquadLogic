@@ -7603,3 +7603,27 @@ The plan is `docs/PHASE_8_6_PR11_ENACT_PLAN.md`. Operator answers:
   the feed and the portal, and RSVP follows the applied calendar.
 - **Housekeeping:** 66 finished agent worktrees were removed, each clean and
   with a merged or closed PR. Disk use went from 19G to 13G.
+
+## Exports fix — #530 merged (794593f): exports read the current practice schedule
+
+- **Defect (found by the PR 12 reader census, then confirmed with a failing
+  test).** The CSV exports and coach email drafts read practice rows by the
+  latest run id. Writer v3 keeps live rows under older run ids, and two cases
+  were silently left out of the export:
+  - after a re-home enact, the displaced team's closed pre-loss series;
+  - after a save whose payload leaves teams out, those teams' manual rows.
+- **Fix.** The exports now read every current row of the active season
+  through `loadSeasonPracticeRows`. This is the paging loop of
+  `loadSeasonPracticeAssignments`, the lock's and repair snapshot's contract,
+  extracted with a byte-identical query.
+- **Evidence.**
+  - CI green on the PR and on main (run 1190).
+  - **Supervisor plant:** I reverted the dashboard call site to the
+    latest-run read. It was CAUGHT, but only by a static call-site pin; no
+    behaviour test drives the dashboard export path.
+- **Follow-ups (backlog, not started):**
+  - The scheduling grid (`PracticeSchedulingPage`) has the same latest-run
+    read. It works on series, so it needs its own check first.
+  - The mock enact does not re-stamp run ids and writes no `scheduler_runs`
+    row, unlike production.
+  - Add a behaviour test for the dashboard export path.

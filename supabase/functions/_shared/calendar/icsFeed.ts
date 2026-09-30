@@ -131,6 +131,23 @@ export const UNPLACEABLE_CAUSES: Record<string, string> = {
   [PRACTICE_RANGE_UNREADABLE]: 'the practice assignment has no readable start and end date',
   [PRACTICE_DAY_UNREADABLE]: 'the practice slot names a day of the week this feed cannot read',
   [GAME_SLOT_MISSING]: 'the game has no scheduled slot yet',
+  // 8.6 3b PR 12a: a saved practice exception (`practiceExceptions.ts`). One
+  // sentence per `tbd_reason` in the table's CHECK, enum wording only. No
+  // event carries these codes until the feed adopts the twin (PR 12b).
+  'no-legal-slot-at-venue':
+    'a field change left no practice slot at this venue that the team could use',
+  contended: 'a field change left fewer practice slots than the teams that needed one',
+  'change-budget': 'moving this practice would have changed more of the schedule than allowed',
+  'objective-preferred-tbd':
+    'the scheduler found no replacement slot better than leaving the time unconfirmed',
+  'coach-preference': "every replacement slot breaks a coach's must-keep preference",
+  declined: 'the proposed new time was declined and no other slot was free',
+  'past-sunset': 'the practice would run past sunset on ground with no lights',
+  'sunset-unknown': 'sunset at this ground is unknown, so the practice time cannot be confirmed',
+  PRACTICE_EXCEPTION_WINDOW_OPEN: 'a change to this practice has no end date yet',
+  PRACTICE_EXCEPTION_WINDOW_UNREADABLE: 'a change to this practice has dates that cannot be read',
+  PRACTICE_EXCEPTION_CONFLICT: 'two changes to this practice cover the same dates',
+  PRACTICE_EXCEPTION_UNREADABLE: 'a change to this practice could not be read',
 };
 
 /**

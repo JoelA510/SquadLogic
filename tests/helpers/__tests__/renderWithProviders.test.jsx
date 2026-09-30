@@ -44,31 +44,31 @@ describe('renderWithProviders', () => {
     });
   });
 
-  it('renders a child without error', () => {
-    renderWithProviders(<div>hello from inside providers</div>);
+  it('renders a child without error', async () => {
+    await renderWithProviders(<div>hello from inside providers</div>);
     expect(screen.getByText('hello from inside providers')).toBeInTheDocument();
   });
 
-  it('persists the active organization id to localStorage', () => {
+  it('persists the active organization id to localStorage', async () => {
     const organization = makeOrganization({ id: 'org-42' });
-    renderWithProviders(<div>stub</div>, { organization });
+    await renderWithProviders(<div>stub</div>, { organization });
     expect(localStorage.getItem('squadlogic_active_org')).toBe('org-42');
   });
 
-  it('persists the mock user to sessionStorage as JSON', () => {
+  it('persists the mock user to sessionStorage as JSON', async () => {
     const user = makeUser({ id: 'user-99', email: 'probe@example.com' });
-    renderWithProviders(<div>stub</div>, { user });
+    await renderWithProviders(<div>stub</div>, { user });
     const stored = JSON.parse(sessionStorage.getItem('squadlogic_mock_user') || 'null');
     expect(stored).toMatchObject({ id: 'user-99', email: 'probe@example.com' });
   });
 
-  it('seeds the MemoryRouter to the requested initial route', () => {
-    renderWithProviders(<RouteProbe />, { route: '/settings' });
+  it('seeds the MemoryRouter to the requested initial route', async () => {
+    await renderWithProviders(<RouteProbe />, { route: '/settings' });
     expect(screen.getByTestId('pathname').textContent).toBe('/settings');
   });
 
-  it('defaults to "/" when no route is passed', () => {
-    renderWithProviders(<RouteProbe />);
+  it('defaults to "/" when no route is passed', async () => {
+    await renderWithProviders(<RouteProbe />);
     expect(screen.getByTestId('pathname').textContent).toBe('/');
   });
 });

@@ -176,7 +176,10 @@ describe('SideNav', () => {
         <SideNav collapsed={false} onToggleCollapsed={vi.fn()} />
       </MemoryRouter>
     );
-    expect(screen.getByRole('link', { name: /Heat Forecast/ })).toHaveAttribute('href', '/schedule/heat');
+    expect(screen.getByRole('link', { name: /Heat Forecast/ })).toHaveAttribute(
+      'href',
+      '/schedule/heat'
+    );
   });
 
   it('collapses a group when its label is clicked', () => {

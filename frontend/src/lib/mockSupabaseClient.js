@@ -12,6 +12,7 @@ import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
 import { handleHeatSettingsRpc } from './mockHeatSettings.js';
+import { handleAdminWriteRpc, unmockedRpcError } from './mockAdminWrites.js';
 import { handlePracticeEnactRpc } from './mockPracticeEnact.js';
 import {
   practiceRangeBounds,
@@ -2513,6 +2514,16 @@ export const mockSupabase = {
       if (heat) {
         if (!heat.error) saveDB(db);
         return heat;
+      }
+      // The four RPCs that used to fall through to the silent catch-all below.
+      const adminWrite = handleAdminWriteRpc(db, name, params, {
+        currentUserId,
+        sessionUserId: storedSession ? currentUserId : null,
+        isOrgAdmin,
+      });
+      if (adminWrite) {
+        if (!adminWrite.error) saveDB(db);
+        return adminWrite;
       }
       // 8.6 3b PR 11c: the writer fingerprint and the enact wrapper RPC
       // (migrations 20260929000000, 20261004000000); `mockPracticeEnact.js`
@@ -7730,7 +7741,11 @@ export const mockSupabase = {
       return { data: null, error: null };
     }
 
-    return { data: null, error: null };
+    // No arm for this RPC. This used to return `{ data: null, error: null }`:
+    // every unmocked write "succeeded" without happening, and an E2E run over
+    // it passed. It now refuses the way PostgREST refuses a function it does
+    // not have, so the missing arm is the failure a test sees.
+    return unmockedRpcError(name);
   },
   functions: {
     invoke: async (name, options) => {

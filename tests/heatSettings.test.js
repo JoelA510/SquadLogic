@@ -31,6 +31,7 @@ const makeDb = () => ({
 const call = (db, params, user = ADMIN) =>
   handleHeatSettingsRpc(db, 'admin_set_org_heat_settings', params, { currentUserId: user });
 
+/** @type {Array<[string, any]>} */
 const BAD_LINK_LISTS = [
   ['not an array', 'not an array'],
   ['a non-object item', [1]],

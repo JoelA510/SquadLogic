@@ -161,6 +161,24 @@ describe('SideNav', () => {
     expect(screen.getByRole('link', { name: 'Audit Log' })).toBeInTheDocument();
   });
 
+  it('hides a feature-gated item until the org turns the feature on', () => {
+    mocks.org = { ...mocks.org, featureFlags: {} };
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/']}>
+        <SideNav collapsed={false} onToggleCollapsed={vi.fn()} />
+      </MemoryRouter>
+    );
+    expect(screen.queryByRole('link', { name: /Heat Forecast/ })).not.toBeInTheDocument();
+    unmount();
+    mocks.org = { ...mocks.org, featureFlags: { heat_forecast: true } };
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <SideNav collapsed={false} onToggleCollapsed={vi.fn()} />
+      </MemoryRouter>
+    );
+    expect(screen.getByRole('link', { name: /Heat Forecast/ })).toHaveAttribute('href', '/schedule/heat');
+  });
+
   it('collapses a group when its label is clicked', () => {
     render(
       <MemoryRouter initialEntries={['/']}>

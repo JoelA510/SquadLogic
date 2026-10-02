@@ -234,6 +234,25 @@
 .badge.square {
   border-radius: var(--r-xs);
 }
+/* Heat forecast bands: Orange shares the warning tone with Yellow and is told
+   apart by an outline; Black inverts the text tokens. Both re-theme, no new
+   colour. The band name is always printed as well. */
+.badge.badge-strong {
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+.badge.badge-inverse {
+  background: var(--text-primary);
+  color: var(--bg-surface);
+}
+/* An inline text link that reads as a link in both themes (WCAG 1.4.1:
+   colour plus underline, never colour alone). Beats the global unlayered
+   `a { color: inherit; text-decoration: none }`, which Tailwind's layered
+   `underline` utility cannot. */
+.text-link {
+  color: var(--primary-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 
 .chip {
   display: inline-flex;

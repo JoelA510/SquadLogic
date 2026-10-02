@@ -17,6 +17,7 @@
  */
 
 export const HEAT_CATEGORIES = Object.freeze([1, 2, 3]);
+/** @type {1|2|3} */
 export const DEFAULT_HEAT_CATEGORY = 1;
 
 /**

@@ -849,6 +849,40 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "FAIL smoke ${id}: it passed without proving parents read practice exceptions as admins do"; STATUS=1
       fi
     fi
+    # **Heat forecast: org heat settings.** One claim per plant in prove.sh.
+    # The smoke RAISEs on each; these fail if its evidence stops printing.
+    if [ "$id" = "20261006000000" ]; then
+      if grep -qF "a coach and another organisation's admin were each refused 42501, 2 of 2, and the settings are unchanged" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only an admin of the organisation sets its heat settings: a coach and another organisation's admin are refused"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a coach and another organisation's admin cannot set heat settings"; STATUS=1
+      fi
+      if grep -qF "the RPC refused 4 of 4 invalid categories 22023 (0, 4, -1, NULL)" $SCRATCH/harness_smoke; then
+        echo "  | (checked) the heat settings RPC refuses a threshold category outside 1-3 (22023)"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the heat settings RPC refuses an invalid category"; STATUS=1
+      fi
+      if grep -qF "the RPC refused 10 of 10 invalid link lists 22023" $SCRATCH/harness_smoke; then
+        echo "  | (checked) the heat settings RPC refuses a malformed, non-https or oversized guidance link list (22023)"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the heat settings RPC refuses invalid guidance links"; STATUS=1
+      fi
+      if grep -qF "the category and links CHECKs refused both owner writes 23514, 2 of 2" $SCRATCH/harness_smoke; then
+        echo "  | (checked) the category and links CHECKs refuse a heat settings write that bypasses the RPC"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the heat settings CHECKs refuse a write that bypasses the RPC"; STATUS=1
+      fi
+      if grep -qF "every accepted heat settings write audited -- 2 of 2, the first created with before null and after category 2, the clear updated from category 2 to 1 with no links" $SCRATCH/harness_smoke; then
+        echo "  | (checked) every accepted heat settings write, a clear included, leaves a settings.heat_updated audit row with its before and after"
+      else
+        echo "FAIL smoke ${id}: it passed without proving every heat settings write is audited with before and after"; STATUS=1
+      fi
+      if grep -qF "a coach reads their own organisation's heat settings and not the other organisation's (1 of 2 rows visible)" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a member reads only their own organisation's heat settings"
+      else
+        echo "FAIL smoke ${id}: it passed without proving heat settings reads are scoped to the member's organisation"; STATUS=1
+      fi
+    fi
     # **The production RLS drift replay** is the only evidence that the
     # reconcile fixes production rather than a repo chain where it has nothing
     # to do, so each half of it is a claim. The smoke RAISEs on any failed
@@ -1164,7 +1198,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -1703,6 +1737,28 @@ for id in "${REVERT_CHECKS[@]}"; do
     fi
   fi
 
+  # **20261006000000's revert DESTROYS every organisation's heat settings**, so
+  # its warning is the check. THREE organisations' settings, TWO of them with
+  # links, THREE links in all: every figure distinct, so counting rows for
+  # organisations-with-links, or links as rows, prints a different number.
+  if [ "$id" = "20261006000000" ]; then
+    if ! psql_cmd "INSERT INTO public.organizations (id, name, slug) VALUES
+                ('eb000000-0000-4000-8000-00000000000a','Heat Org A','heat-org-a'),
+                ('eb000000-0000-4000-8000-00000000000b','Heat Org B','heat-org-b'),
+                ('eb000000-0000-4000-8000-00000000000c','Heat Org C','heat-org-c');
+              INSERT INTO public.organization_heat_settings (organization_id, threshold_category, guidance_links) VALUES
+                ('eb000000-0000-4000-8000-00000000000a', 2,
+                 jsonb_build_array(jsonb_build_object('label','One','url','https://example.org/1'),
+                                   jsonb_build_object('label','Two','url','https://example.org/2'))),
+                ('eb000000-0000-4000-8000-00000000000b', 1,
+                 jsonb_build_array(jsonb_build_object('label','Three','url','https://example.org/3'))),
+                ('eb000000-0000-4000-8000-00000000000c', 3, jsonb_build_array());" \
+       >$SCRATCH/harness_seed 2>&1; then
+      echo "FAIL seeding ${id}: the three heat settings rows the revert check requires were never inserted"
+      dump 10 $SCRATCH/harness_seed; STATUS=1; continue
+    fi
+  fi
+
   # **20260930000000's revert DESTROYS every venue's coordinates**, so its
   # warning is the check. THREE venues with coordinates across TWO
   # organisations, plus ONE without: all figures distinct, so counting every
@@ -2055,6 +2111,15 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the RSVP revert did not restore the previous upsert_team_event_rsvp body and posture"
         dump 10 $SCRATCH/harness_rsvp; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261006000000" ]; then
+      # The seed planted 3 organisations' settings, 2 with links, 3 links.
+      if grep -q 'this revert DESTROYS the heat settings of 3 organisation(s), 2 of them with guidance links (3 link(s) in total)' $SCRATCH/harness_rev; then
+        echo "  | (checked) the revert counted the heat settings it was about to destroy, the organisations with links, and the links"
+      else
+        echo "FAIL revert ${id}: planted 3 organisations' heat settings (2 with links, 3 links) and the revert did not warn with those figures"
+        STATUS=1
       fi
     fi
     if [ "$id" = "20261003000000" ]; then

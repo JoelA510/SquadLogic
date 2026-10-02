@@ -12,6 +12,14 @@ export const MAX_GUIDANCE_LINKS = 10;
 export const MAX_GUIDANCE_LABEL = 80;
 export const MAX_GUIDANCE_URL = 500;
 
+/**
+ * The URL shape the database accepts (admin_set_org_heat_settings): https, a
+ * dotted host, no whitespace. Zod's own `.url()` admits `https://localhost`
+ * and other forms the database refuses, so the client checks the same pattern
+ * and an admin sees the refusal before the round trip, not after.
+ */
+export const GUIDANCE_URL_PATTERN = /^https:\/\/[^\s/?#]+\.[^\s/?#]+([/?#]\S*)?$/;
+
 export const GuidanceLinkSchema = z
   .object({
     label: z.string().trim().min(1, 'label is required').max(MAX_GUIDANCE_LABEL),
@@ -19,8 +27,7 @@ export const GuidanceLinkSchema = z
       .string()
       .trim()
       .max(MAX_GUIDANCE_URL)
-      .url('must be a full URL')
-      .refine((u) => u.startsWith('https://'), 'must start with https://'),
+      .regex(GUIDANCE_URL_PATTERN, 'must be an https:// URL with a full host name'),
   })
   .strict();
 

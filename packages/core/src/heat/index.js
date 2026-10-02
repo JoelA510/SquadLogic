@@ -55,6 +55,7 @@ export {
   parseIsoInstant,
 } from './gridpoint.js';
 export {
+  GUIDANCE_URL_PATTERN,
   GuidanceLinkSchema,
   MAX_GUIDANCE_LABEL,
   MAX_GUIDANCE_LINKS,

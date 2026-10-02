@@ -11,6 +11,7 @@ import { HEADER_ALIASES, RESERVED_KEYS } from '../utils/telemetryUtils.js';
 import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js';
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
 import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
+import { handleHeatSettingsRpc } from './mockHeatSettings.js';
 import { handlePracticeEnactRpc } from './mockPracticeEnact.js';
 import {
   practiceRangeBounds,
@@ -2506,6 +2507,12 @@ export const mockSupabase = {
       if (lighting) {
         if (!lighting.error) saveDB(db);
         return lighting;
+      }
+      // Heat forecast settings (migration 20261006000000), refusals included.
+      const heat = handleHeatSettingsRpc(db, name, params, { currentUserId });
+      if (heat) {
+        if (!heat.error) saveDB(db);
+        return heat;
       }
       // 8.6 3b PR 11c: the writer fingerprint and the enact wrapper RPC
       // (migrations 20260929000000, 20261004000000); `mockPracticeEnact.js`

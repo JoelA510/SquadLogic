@@ -19,7 +19,8 @@ font-src    'self' https://vercel.live https://assets.vercel.com;
 connect-src 'self'
             https://mmwupqsjkikqzvmdvuzm.supabase.co wss://mmwupqsjkikqzvmdvuzm.supabase.co
             https://*.ingest.sentry.io
-            https://vercel.live wss://ws-us3.pusher.com;
+            https://vercel.live wss://ws-us3.pusher.com
+            https://api.weather.gov;
 frame-src   'self' https://vercel.live;
 frame-ancestors 'none';
 object-src  'none';
@@ -32,7 +33,10 @@ Served as `Content-Security-Policy: …` (enforcing, flipped from Report-Only
 during hardening). Sentry ingest was later added to `connect-src` (DSN
 was set but captures were CSP-blocked). The `vercel.live` / `assets.vercel.com`
 / Pusher entries were added to unblock Vercel's preview-only comments &
-feedback widget; they are inert on production deploys.
+feedback widget; they are inert on production deploys. `https://api.weather.gov`
+was added for the field heat-stress (WBGT) forecast, which reads the NOAA
+National Weather Service gridpoint forecast directly from the browser (see
+§`api.weather.gov` below).
 
 ## Directive rationale
 
@@ -43,13 +47,48 @@ feedback widget; they are inert on production deploys.
 | `style-src` | `'self' 'unsafe-inline'` | **Waiver** — Tailwind 4 runtime injects classes via dynamic `<style>` tags and React's `style={{...}}` prop renders inline. Nonce migration requires Tailwind 4.x nonce-propagation (not yet stable) + audit of every inline style site. See §`Follow-ups`. |
 | `img-src` | `'self' data: blob: https://vercel.live https://vercel.com` | `data:` for small icons / placeholder SVGs in-bundle; `blob:` for the `OfflineGuard` Supabase-Storage-loaded brand assets. `vercel.live` + `vercel.com` for the preview feedback widget's avatars. No other third-party image CDNs. |
 | `font-src` | `'self' https://vercel.live https://assets.vercel.com` | All app fonts bundled via Vite (`index.css` imports). The Vercel domains serve the Inter webfont referenced by the preview feedback widget. No Google Fonts / other third-party font CDNs. |
-| `connect-src` | `'self' https://mmwupqsjkikqzvmdvuzm.supabase.co wss://mmwupqsjkikqzvmdvuzm.supabase.co https://*.ingest.sentry.io https://vercel.live wss://ws-us3.pusher.com` | Allows (1) same-origin XHR, (2) the SquadLogic-specific Supabase project over HTTPS + WSS for Realtime, (3) Sentry ingest, (4) Vercel Live + its Pusher realtime channel for the preview feedback widget. **Supabase host is pinned** to the specific project ref — an earlier draft used `*.supabase.co`; Gemini PR #175 review correctly flagged the wildcard as an XSS-exfiltration broadening. If the project ref ever changes, update this directive in the same PR that updates the Supabase env vars. **Sentry is wildcard-scoped** to `*.ingest.sentry.io` because the Sentry SDK dispatches to region/org-specific subdomains (`o<id>.ingest.sentry.io`) not known at deploy time; the apex `ingest.sentry.io` is Sentry-operated single-tenant and does not host guest content. |
+| `connect-src` | `'self' https://mmwupqsjkikqzvmdvuzm.supabase.co wss://mmwupqsjkikqzvmdvuzm.supabase.co https://*.ingest.sentry.io https://vercel.live wss://ws-us3.pusher.com https://api.weather.gov` | Allows (1) same-origin XHR, (2) the SquadLogic-specific Supabase project over HTTPS + WSS for Realtime, (3) Sentry ingest, (4) Vercel Live + its Pusher realtime channel for the preview feedback widget, (5) the NWS API for the heat forecast (exact host, no wildcard; see §`api.weather.gov`). **Supabase host is pinned** to the specific project ref — an earlier draft used `*.supabase.co`; Gemini PR #175 review correctly flagged the wildcard as an XSS-exfiltration broadening. If the project ref ever changes, update this directive in the same PR that updates the Supabase env vars. **Sentry is wildcard-scoped** to `*.ingest.sentry.io` because the Sentry SDK dispatches to region/org-specific subdomains (`o<id>.ingest.sentry.io`) not known at deploy time; the apex `ingest.sentry.io` is Sentry-operated single-tenant and does not host guest content. |
 | `frame-src` | `'self' https://vercel.live` | The Vercel preview feedback widget mounts its UI inside an iframe that loads from `vercel.live`. Production traffic doesn't render the widget. No other embedded frames are permitted. |
 | `frame-ancestors` | `'none'` | Clickjacking defense. SquadLogic is never embedded. |
 | `object-src` | `'none'` | Legacy `<object>` / Flash blocker — zero legitimate use. |
 | `base-uri` | `'self'` | Prevents `<base>` tag injection that would rewrite all relative URLs. |
 | `form-action` | `'self'` | All form submissions stay on origin (Supabase RPCs go via fetch, not form POST). |
 | `upgrade-insecure-requests` | present | Auto-upgrades any stray `http://` subresource to `https://` — defense against mixed-content regressions during refactors. |
+
+## `api.weather.gov` (heat forecast)
+
+Added with the field heat-stress (WBGT) forecast
+([`docs/architecture/heat-forecast.md`](../architecture/heat-forecast.md)).
+`frontend/src/lib/nwsClient.js` issues `GET /points/{lat},{lon}` and
+`GET /gridpoints/{wfo}/{x},{y}` from the browser.
+
+**Security review (the rule in §Editing the policy, item 3).**
+
+- **Host, not wildcard.** Only `https://api.weather.gov`. `*.weather.gov` would
+  admit every NWS web property; the client needs one.
+- **What the origin is.** A U.S. government (NOAA/NWS) read-only JSON API. It
+  hosts no user-supplied content and accepts no uploads; the client only issues
+  GETs.
+- **What it adds to the XSS threat model.** An injected script could already
+  reach nothing outside `connect-src`; with this entry it can also send GETs to
+  NWS. The only exfiltration channel that opens is data encoded into a request
+  path or query, landing in NWS's own request logs -- not attacker-readable.
+  The client additionally refuses to follow a `forecastGridData` URL that is not
+  an `api.weather.gov/gridpoints/...` path, and the browser fetch carries no
+  credentials (CORS default `same-origin` credentials mode).
+- **CORS, verified live 2026-10-02** in Chromium 141, page served under the
+  production CSP: both endpoints answer `access-control-allow-origin: *`, the
+  request is CORS-simple (only `Accept: application/geo+json`; the preflight
+  would allow only `API-Key, User-Agent`, so `Feature-Flags` must never be
+  sent), and NWS's `application/problem+json` error bodies are readable. With
+  the previous policy the same fetch was refused: "Refused to connect ...
+  violates the following Content Security Policy directive: connect-src ...".
+- **Client identification.** NWS asks for a User-Agent; browsers send their own
+  and a script cannot set it. No API key exists yet; when NWS ships one, it is a
+  follow-up (ROADMAP open items), not something to embed in the bundle.
+
+`tests/cspPolicy.test.js` holds `vercel.json` and this document's §Current
+policy to the same `connect-src` set.
 
 ## Companion headers (also in `vercel.json`)
 

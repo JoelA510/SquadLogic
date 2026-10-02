@@ -128,6 +128,11 @@ describe('WorkflowPage makes no claim about a source still in flight', () => {
     expect(screen.getAllByText('Checking…')).toHaveLength(3);
   });
 
+  it('shows the organization it belongs to (the guard that hid it named an undefined flag)', () => {
+    renderWorkflowPage(dashboardData({ loading: NONE_LOADING }));
+    expect(screen.getByText('Smoke FC')).toBeTruthy();
+  });
+
   it('negative control: once all three have answered it says the season is empty', () => {
     renderWorkflowPage(dashboardData({ loading: NONE_LOADING }));
     expect(screen.getByText(/hasn.t started yet/)).toBeTruthy();

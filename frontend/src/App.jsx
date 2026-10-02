@@ -50,6 +50,7 @@ const FeaturesSetupPage = lazy(() => import('./pages/FeaturesSetupPage.jsx'));
 const PlayerRecordPage = lazy(() => import('./pages/PlayerRecordPage.jsx'));
 const CoachPreferencesPage = lazy(() => import('./pages/CoachPreferencesPage.jsx'));
 const PracticeLightingPage = lazy(() => import('./pages/PracticeLightingPage.jsx'));
+const HeatForecastPage = lazy(() => import('./pages/HeatForecastPage.jsx'));
 import OfflineGuard from './components/OfflineGuard.jsx';
 import ToastHost from './components/ui/ToastHost.jsx';
 
@@ -244,6 +245,14 @@ function AppContent() {
             element={
               <ProtectedRoute requiredPermission={PERMISSIONS.REQUEST_PRACTICE_LIGHTING_OVERRIDE}>
                 <PracticeLightingPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/schedule/heat"
+            element={
+              <ProtectedRoute requiredPermission={PERMISSIONS.MANAGE_ORGANIZATION}>
+                <HeatForecastPage />
               </ProtectedRoute>
             }
           />

@@ -69,6 +69,7 @@ Every data table has a direct `organization_id` column (either native or backfil
 | **Exports & Logs**  | `export_jobs`, `email_log`, `audit_log`                                                                   | Direct `organization_id`                            |
 | **Registration**    | `registration_forms`, `registrations`                                                                     | Direct `organization_id` via `organization_members` |
 | **Staging**         | `staging_players`, `player_buddies`                                                                       | Direct `organization_id`                            |
+| **Heat forecast**   | `organization_heat_settings`                                                                              | Direct `organization_id` (PK); members SELECT, no write policy -- `admin_set_org_heat_settings` only |
 
 ## Edge Function Security
 

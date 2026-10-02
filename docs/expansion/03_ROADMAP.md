@@ -116,3 +116,13 @@ Engineering backlog:
 - [ ] One-click snapshot-aware teaming re-run from the co-ed merge/split modal (currently players move and rosters are rebuilt in the Team Builder).
 - [ ] v1.1 feature areas — import write-through completion (team promotion), division team-size configuration, placeholder coaches/admin swap — see [`v1.1-planning.md`](v1.1-planning.md).
 - [ ] Org-scoped coach email uniqueness (currently globally `UNIQUE`; a multi-org constraint change is needed before scaling beyond one org per deployment).
+
+Heat forecast follow-ups ([`heat-forecast.md`](../architecture/heat-forecast.md); deliberately not built with the first version):
+
+- [ ] Operator: confirm redistribution terms for the SoDa / Remund et al. (2003) Linke turbidity climatology that the 0.5-degree table is derived from (pvlib ships it under BSD-3; the underlying data's terms are unverified). Fallback if refused: a constant turbidity, effect measured in the design doc.
+- [ ] Record on-site WBGT readings against the forecast (out of scope for v1; on-site readings govern and are not yet captured).
+- [ ] Heat-triggered notifications (Red/Black forecasts to coaches and families).
+- [ ] Automatic Red/Black game modifications (hydration breaks, delays) -- a scheduling-engine change, behind the maximum-freeze default.
+- [ ] Send an NWS API key once NWS offers one (the docs say it will replace the User-Agent requirement); browsers cannot set a User-Agent today.
+- [ ] Zod validation on the field create/edit form (`FieldManagementPage` sends raw form data to `admin_create_field` / `admin_update_field`), including a surface value the heat model understands.
+- [ ] Compress the turbidity asset in transit (~117 KB gzipped vs 328 KB raw) if the host does not compress `application/octet-stream`.

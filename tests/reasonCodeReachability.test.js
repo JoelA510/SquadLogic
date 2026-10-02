@@ -410,6 +410,8 @@ const NOT_A_FINDING_TABLE = Object.freeze({
     'the three verdicts detectDormantWaivers() gives a waiver (never-matched, not-status-bearing, load-bearing). It is a classification carried on a dormancy row, not a finding code: the findings that report it are WAIVER_DORMANT and WAIVER_NOT_STATUS_BEARING, and both are audited above.',
   IDENTITY_SIGNAL:
     'a similarity-signal enum carried on identity proposals, weighted by IDENTITY_SIGNAL_WEIGHT; it never appears as a finding code and has no severity table',
+  HEAT_REASON:
+    "why a heat forecast row was not computed (no coordinates, outside the turbidity table, indoor or unknown surface, no season clock, NWS unavailable, a forecast gap, a gridpoint shape or unit refused, a model guard) or what it judged on less than its full window. The codes ride on a row's `reason`/`notes` and on `HeatError` as `{ code, message }` with no severity table; they are not make*Finding() findings. tests/heatReasonReachability.test.js produces every one from a public entry point fed input data.",
   BLACKOUT_REASON:
     "the enumerated reason a blackout closes ground (closure, school-event, maintenance, reseeding, weather, permit-not-granted, adjacency, third-party-booking, other). It is a *domain field* on BlackoutWindowSchema, deliberately an enum rather than free text so an operator's prose is not the place a family's name lands; it is never a finding code and has no severity table.",
 });

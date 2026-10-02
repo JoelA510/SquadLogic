@@ -86,10 +86,31 @@
 ### Fields & Locations
 
 - **Purpose**: Represent facilities and discrete playable areas.
-- **Tables**:
-  - `locations`: `id`, `name`, `address`, `lighting_available`.
-  - `fields`: `id`, `location_id`, `name`, `surface_type`, `supports_halves` (boolean).
-  - `field_subunits`: optional `id`, `field_id`, `label` (e.g., `A`, `B`) for split fields.
+- **Tables** (every one carries `organization_id`, `created_at`, `updated_at`):
+  - `locations` (a venue): `id`, `name` (unique per organization), `address`, `lighting_available`,
+    `effective_to` (date; the venue's last live day, inclusive, `20260911000000`; there is no
+    `locations.active`), and the coordinates from `20260930000000`:
+    - `latitude`, `longitude` -- `numeric(7,4)`, both or neither (CHECK
+      `locations_coordinates_both_or_neither`) and in range (CHECK
+      `locations_coordinates_in_range`). `admin_set_location_coordinates`, the only client writer,
+      rounds to 2 decimals (~1.1 km, data-minimisation decision D9). An admin types them; nothing
+      geocodes.
+    - `coordinates_set_at`, `coordinates_set_by` -- when and by whom the pair was last written
+      (`coordinates_set_by` has no FK).
+    - Readers: the practice daylight provider (sunset per venue) and the heat forecast (NWS point
+      and solar position).
+  - `fields`: `id`, `location_id`, `name` (unique per location), `surface_type` (free text, no
+    CHECK; the UI offers `Grass` | `Turf` | `Indoor`, and the heat forecast refuses anything but
+    grass or turf, case-insensitively), `size`, `supports_halves` (boolean), `max_age`,
+    `priority_rating`, `active` (deactivated, broader than retired), `effective_to` (date, inclusive
+    last live day, `20260906000000`; `field_is_live_on()` and core `isLiveOn()` are the one reading
+    of it).
+  - `field_subunits`: optional `id`, `field_id`, `label` (e.g., `A`, `B`) for split fields, and
+    `effective_to` (`20260911000000`).
+- **Writers**: SECURITY DEFINER admin RPCs only (`admin_create_location`, `admin_create_field`,
+  `admin_update_field`, the retire/unretire RPCs, `admin_set_location_coordinates`); members read
+  through one SELECT policy per table and there is no write policy. See
+  [`persistence-rpc-layer.md`](persistence-rpc-layer.md).
 
 ### Time Slots
 
@@ -115,6 +136,12 @@
 ### Configuration & Metadata
 
 - `season_settings`: Single-row table for league-wide parameters (roster formulas, daylight change dates, export templates).
+- `organization_heat_settings` (`20261006000000`): one row per organization for the heat forecast
+  -- `threshold_category` (smallint 1-3, U.S. Soccer Recognize to Recover region category, CHECK)
+  and `guidance_links` (jsonb array of up to 10 `{label, url}` https links, CHECK on shape), plus
+  `updated_at`/`updated_by`. No row means Category 1, which the forecast labels as the default.
+  Members read their own organization's row; `admin_set_org_heat_settings` is the only writer and
+  audits `settings.heat_updated`. See [`heat-forecast.md`](heat-forecast.md).
 - `import_jobs`: Tracks CSV uploads with status, source file references (Supabase Storage path), error logs, finalize summaries, and user id.
 - `staging_players`: Durable buffer for validated GotSport player rows. Rows include source row numbers and promotion metadata (`promoted_at`, `promoted_by`) so `finalize_import_job` can safely retry without duplicating players.
 

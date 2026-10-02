@@ -19,14 +19,17 @@ import {
   History,
   Settings,
   Lightbulb,
+  ThermometerSun,
 } from 'lucide-react';
 import { PERMISSIONS } from './permissions.js';
+import { FEATURE_FLAGS } from './featureFlags.js';
 
 /**
  * Single source of truth for the admin navigation tree, the role-scoped
  * flat navs, and per-route breadcrumb metadata.
  *
  * - `permission`: hides the item unless `usePermission().can(permission)`.
+ * - `feature`: hides the item unless `useFeatures().isEnabled(feature)`.
  * - `badge`: key into the counts returned by `useNavBadges`.
  * - `alert`: render the badge in the warning tone.
  */
@@ -116,6 +119,14 @@ export const NAV = [
         icon: Lightbulb,
         path: '/schedule/practice-lighting',
         permission: PERMISSIONS.DECIDE_PRACTICE_LIGHTING_OVERRIDE,
+      },
+      {
+        id: 'heat-forecast',
+        label: 'Heat Forecast',
+        icon: ThermometerSun,
+        path: '/schedule/heat',
+        permission: PERMISSIONS.MANAGE_ORGANIZATION,
+        feature: FEATURE_FLAGS.HEAT_FORECAST,
       },
     ],
   },
@@ -298,4 +309,5 @@ export const FULL_BLEED_ROUTES = new Set([
   '/settings',
   '/coaches/practice-preferences',
   '/schedule/practice-lighting',
+  '/schedule/heat',
 ]);

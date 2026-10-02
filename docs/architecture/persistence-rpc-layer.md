@@ -180,6 +180,15 @@ revoked, org-admin (or coach) checks inside, and `record_audit_event` calls —
 the audit `action` values are registered in the `audit_actions` lookup table
 (migration `20260613000006`; previously a CHECK constraint).
 
+### 2.19 Heat Forecast Settings
+
+The organisation's heat forecast settings (migration `20261006000000`; design in
+[`heat-forecast.md`](heat-forecast.md)):
+
+| RPC | Purpose |
+| --- | --- |
+| `admin_set_org_heat_settings(p_organization_id uuid, p_threshold_category integer, p_guidance_links jsonb) returns jsonb` | Org-admin-only upsert of `organization_heat_settings`: category 1-3, up to 10 `{label, url}` https links (22023 on any invalid value, re-validating `OrgHeatSettingsSchema`), stored trimmed. Audits `settings.heat_updated` with `operation` and before/after. The table has a members-SELECT policy and no write policy or grant, so this is its only client writer. |
+
 ## 3. Contract Pattern
 
 Every RPC in the inventory above follows the same template. When adding a new RPC, replicate this structure exactly:

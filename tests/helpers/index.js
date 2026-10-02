@@ -8,3 +8,15 @@ export {
   claimedReasonCodes,
   claimedReasonCodesByPath,
 } from './unwiredLayer.js';
+export {
+  REFERENCE_DATE,
+  REFERENCE_SITES,
+  REFERENCE_TZ,
+  loadGridpointJson,
+  loadHeatReference,
+  loadParsedGridpoint,
+  loadTurbidity,
+  referenceEstate,
+  referenceForecasts,
+} from './heatFixtures.js';
+export { REGION_SAMPLE_POINTS, SYNTHETIC_HEAT_SITES } from './heatSyntheticSites.js';

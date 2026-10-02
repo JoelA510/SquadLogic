@@ -97,6 +97,7 @@ DECLARE
         '{"links": [{"label": "x"}]}'::jsonb,
         '{"links": [{"label": "x", "url": "https://example.org", "extra": 1}]}'::jsonb,
         '{"links": [{"label": "   ", "url": "https://example.org"}]}'::jsonb,
+        '{"links": [{"label": "\t\n", "url": "https://example.org"}]}'::jsonb,
         '{"links": [{"label": "x", "url": "http://example.org"}]}'::jsonb,
         '{"links": [{"label": "x", "url": "https://localhost"}]}'::jsonb,
         '{"links": [{"label": "x", "url": "https://exa mple.org"}]}'::jsonb,
@@ -190,10 +191,10 @@ BEGIN
         IF v_code = '22023' THEN v_refused := v_refused + 1; END IF;
     END;
     SELECT * INTO v_row FROM public.organization_heat_settings WHERE organization_id = v_org;
-    IF v_refused <> 10 OR v_row.threshold_category <> 2 THEN
-        RAISE EXCEPTION 'the RPC refused % of 10 invalid link lists 22023; category now %', v_refused, v_row.threshold_category;
+    IF v_refused <> 11 OR v_row.threshold_category <> 2 THEN
+        RAISE EXCEPTION 'the RPC refused % of 11 invalid link lists 22023; category now %', v_refused, v_row.threshold_category;
     END IF;
-    RAISE NOTICE 'the RPC refused 10 of 10 invalid link lists 22023 (not an array, non-object, missing url, extra key, blank label, http, no dotted host, whitespace, non-string label, 11 links)';
+    RAISE NOTICE 'the RPC refused 11 of 11 invalid link lists 22023 (not an array, non-object, missing url, extra key, blank label, tab/newline-only label, http, no dotted host, whitespace, non-string label, 11 links)';
 
     -- ---- (e) the CHECKs refuse a write that bypasses the RPC ---------------
     v_refused := 0;

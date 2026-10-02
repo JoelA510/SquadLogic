@@ -862,7 +862,7 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
       else
         echo "FAIL smoke ${id}: it passed without proving the heat settings RPC refuses an invalid category"; STATUS=1
       fi
-      if grep -qF "the RPC refused 10 of 10 invalid link lists 22023" $SCRATCH/harness_smoke; then
+      if grep -qF "the RPC refused 11 of 11 invalid link lists 22023" $SCRATCH/harness_smoke; then
         echo "  | (checked) the heat settings RPC refuses a malformed, non-https or oversized guidance link list (22023)"
       else
         echo "FAIL smoke ${id}: it passed without proving the heat settings RPC refuses invalid guidance links"; STATUS=1

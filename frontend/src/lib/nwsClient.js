@@ -37,6 +37,13 @@ export const NWS_ORIGIN = 'https://api.weather.gov';
 export const POINTS_CACHE_TTL_MS = 24 * 3600 * 1000;
 export const SERVER_RETRY_DELAYS_MS = Object.freeze([2000, 4000]);
 export const RATE_LIMIT_RETRY_MS = 6000;
+/**
+ * How long a fetched gridpoint is reused within one page, so stepping through
+ * dates (one response covers ~7 days) does not refetch it. The reused response
+ * keeps its original `retrievedAt`, so the stale check stays truthful; Refresh
+ * passes `force` and refetches.
+ */
+export const GRIDPOINT_REUSE_MS = 10 * 60 * 1000;
 const STORAGE_PREFIX = 'sl-nws-points:';
 const GRIDPOINT_URL = /^https:\/\/api\.weather\.gov\/gridpoints\/[A-Z]{3}\/\d+,\d+$/;
 
@@ -95,10 +102,12 @@ export function createNwsClient(deps = {}) {
   const sleep = deps.sleep ?? defaultSleep;
   const now = deps.now ?? (() => Date.now());
   const storage = deps.storage === undefined ? defaultStorage() : deps.storage;
-  /** @type {Map<string, { gridpointUrl: string, gridId: string, gridX: number, gridY: number, cachedAt: number }>} */
+  /** @type {Map<string, { gridpointUrl: string, cachedAt: number }>} */
   const pointsMemo = new Map();
   /** In-flight `/points` lookups, so venues sharing a coordinate pair share one request. */
   const pointsInFlight = new Map();
+  /** @type {Map<string, { value: Promise<{ json: any, retrievedAt: string }>, at: number }>} */
+  const gridpointMemo = new Map();
 
   /**
    * @param {string} url
@@ -163,7 +172,7 @@ export function createNwsClient(deps = {}) {
             ? ' after one retry'
             : '';
       throw new NwsError(
-        `NWS ${response.status}${tries}: ${detail ?? response.statusText ?? 'request failed'}`,
+        `NWS ${response.status}${tries}: ${detail || response.statusText || 'request failed'}`,
         {
           kind,
           url,
@@ -222,13 +231,9 @@ export function createNwsClient(deps = {}) {
             url: pointsUrl,
           });
         }
-        const entry = {
-          gridpointUrl,
-          gridId: String(p.gridId ?? ''),
-          gridX: Number(p.gridX),
-          gridY: Number(p.gridY),
-          cachedAt: now(),
-        };
+        // Only the URL is read: the grid id and cell shown on screen come from
+        // the gridpoint response itself (`parseGridpoint` meta).
+        const entry = { gridpointUrl, cachedAt: now() };
         pointsMemo.set(key, entry);
         writeStored(key, entry);
         return entry;
@@ -243,16 +248,27 @@ export function createNwsClient(deps = {}) {
    * The raw gridpoint forecast at a grid URL from `/points`.
    *
    * @param {string} gridpointUrl
+   * @param {{ force?: boolean }} [options] - `force` skips the in-page reuse
    */
-  async function getGridpoint(gridpointUrl) {
+  async function getGridpoint(gridpointUrl, { force = false } = {}) {
     if (!GRIDPOINT_URL.test(gridpointUrl)) {
       throw new NwsError(`not an api.weather.gov gridpoint URL: ${gridpointUrl}`, {
         kind: 'client',
         url: gridpointUrl,
       });
     }
-    const { json, receivedAt } = await getJson(gridpointUrl, { cache: 'no-store' });
-    return { json, retrievedAt: new Date(receivedAt).toISOString() };
+    const hit = gridpointMemo.get(gridpointUrl);
+    if (!force && hit && now() - hit.at < GRIDPOINT_REUSE_MS) return hit.value;
+    const value = getJson(gridpointUrl, { cache: 'no-store' }).then(({ json, receivedAt }) => ({
+      json,
+      retrievedAt: new Date(receivedAt).toISOString(),
+    }));
+    gridpointMemo.set(gridpointUrl, { value, at: now() });
+    // A failure is not reused: the next call tries again.
+    value.catch(() => {
+      if (gridpointMemo.get(gridpointUrl)?.value === value) gridpointMemo.delete(gridpointUrl);
+    });
+    return value;
   }
 
   /**
@@ -260,10 +276,11 @@ export function createNwsClient(deps = {}) {
    * Never throws: each venue gets either `{ json, source }` or `{ error }`.
    *
    * @param {Array<{ id: string, latitude: number, longitude: number }>} venues
+   * @param {{ force?: boolean }} [options] - `force` refetches every gridpoint
    * @returns {Promise<Record<string, { json?: any, source?: { pointsUrl: string,
    *   gridpointUrl: string, retrievedAt: string }, error?: { message: string, kind?: string } }>>}
    */
-  async function getForecasts(venues) {
+  async function getForecasts(venues, { force = false } = {}) {
     /** @type {Record<string, any>} */
     const out = {};
     const points = await Promise.all(
@@ -287,7 +304,7 @@ export function createNwsClient(deps = {}) {
     await Promise.all(
       [...byGrid.entries()].map(async ([gridpointUrl, list]) => {
         try {
-          const { json, retrievedAt } = await getGridpoint(gridpointUrl);
+          const { json, retrievedAt } = await getGridpoint(gridpointUrl, { force });
           for (const { venue, point } of list) {
             out[venue.id] = {
               json,

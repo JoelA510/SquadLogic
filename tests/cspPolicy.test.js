@@ -30,6 +30,12 @@ function directive(policy, name) {
   return part ? part.split(/\s+/).slice(1) : null;
 }
 
+/** The host of a CSP source expression (`https://api.weather.gov` -> `api.weather.gov`). */
+const hostOf = (source) => /^[a-z]+:\/\/([^/:]+)/i.exec(source)?.[1]?.toLowerCase() ?? '';
+/** Is this source on weather.gov or any subdomain, judged on the parsed host? */
+const isWeatherGov = (source) =>
+  hostOf(source) === 'weather.gov' || hostOf(source).endsWith('.weather.gov');
+
 function documentedPolicy() {
   const doc = readFileSync(path.join(ROOT, 'docs/security/csp.md'), 'utf8');
   const section = doc.slice(doc.indexOf('## Current policy'));
@@ -49,7 +55,9 @@ describe('Content-Security-Policy', () => {
   it('allows the NWS API for the heat forecast, by exact host', () => {
     const connect = directive(headerPolicy(), 'connect-src');
     expect(connect).toContain('https://api.weather.gov');
-    expect(connect.filter((o) => o.includes('weather.gov'))).toEqual(['https://api.weather.gov']);
+    // Compared on the parsed host, not a substring: every weather.gov source in
+    // connect-src must be exactly the API host (no wildcard, no sibling site).
+    expect(connect.filter(isWeatherGov)).toEqual(['https://api.weather.gov']);
   });
 
   it('never allows a bare wildcard', () => {
@@ -58,6 +66,13 @@ describe('Content-Security-Policy', () => {
       expect(values, name).not.toContain('*');
       expect(values, name).not.toContain('https:');
     }
+  });
+
+  it('the host check would catch a wildcard or a sibling weather.gov host', () => {
+    expect(
+      ['https://*.weather.gov', 'https://forecast.weather.gov'].filter(isWeatherGov)
+    ).toHaveLength(2);
+    expect(isWeatherGov('https://weather.gov.evil.example')).toBe(false);
   });
 
   it('the comparison would fail if the document drifted', () => {

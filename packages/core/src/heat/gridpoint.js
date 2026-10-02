@@ -48,7 +48,6 @@ const LayerSchema = z.object({
 
 export const GridpointResponseSchema = z.object({
   properties: z.object({
-    '@id': z.string().url().optional(),
     updateTime: z.string(),
     gridId: z.string().min(1),
     gridX: z.number().int(),
@@ -158,7 +157,7 @@ export function expandLayer(layer, name) {
 
 /**
  * @typedef {Object} ParsedGridpoint
- * @property {{ id: string|null, updateTime: string, updateTimeMs: number,
+ * @property {{ updateTime: string, updateTimeMs: number,
  *   gridId: string, gridX: number, gridY: number, elevationM: number }} meta
  * @property {{ temperature: Map<number, number>, dewpoint: Map<number, number>,
  *   windSpeed: Map<number, number>, skyCover: Map<number, number>,
@@ -191,7 +190,6 @@ export function parseGridpoint(json) {
   const wbgtLayer = p.wetBulbGlobeTemperature;
   return {
     meta: {
-      id: p['@id'] ?? null,
       updateTime: p.updateTime,
       updateTimeMs: parseIsoInstant(p.updateTime),
       gridId: p.gridId,

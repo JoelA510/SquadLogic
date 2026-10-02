@@ -249,6 +249,9 @@ How WBGT responds to TL, at the reference site:
 - A `forecastGridData` that is not an `api.weather.gov/gridpoints/...` URL is refused.
 - One gridpoint request is made per distinct grid cell.
 - Gridpoints are fetched with `cache: 'no-store'`, so the recorded retrieval time is real.
+- A fetched gridpoint is reused within the page for 10 min (`GRIDPOINT_REUSE_MS`), so stepping
+  through dates does not refetch it. A reused response keeps its original retrieval time, so the
+  stale check stays truthful. **Refresh** forces a refetch, and a failed fetch is never reused.
 
 **Stale.** A forecast is flagged stale if its `updateTime` is more than **12 h** older than
 retrieval (`STALE_AFTER_HOURS`). NWS publishes no fixed gridpoint refresh cycle: NDFD mosaics

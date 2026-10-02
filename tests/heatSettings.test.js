@@ -38,6 +38,7 @@ const BAD_LINK_LISTS = [
   ['a missing url', [{ label: 'x' }]],
   ['an extra key', [{ label: 'x', url: 'https://example.org', extra: 1 }]],
   ['a blank label', [{ label: '   ', url: 'https://example.org' }]],
+  ['a tab/newline-only label', [{ label: '\t\n', url: 'https://example.org' }]],
   ['an http url', [{ label: 'x', url: 'http://example.org' }]],
   ['a host with no dot', [{ label: 'x', url: 'https://localhost' }]],
   ['whitespace in the url', [{ label: 'x', url: 'https://exa mple.org' }]],

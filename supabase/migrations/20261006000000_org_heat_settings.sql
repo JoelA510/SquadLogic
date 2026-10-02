@@ -123,8 +123,12 @@ BEGIN
             RAISE EXCEPTION 'guidance link % must be an object with exactly a string label and a string url', v_index
                 USING ERRCODE = '22023';
         END IF;
-        v_label := btrim(v_item ->> 'label');
-        v_url := btrim(v_item ->> 'url');
+        -- Trim every leading/trailing whitespace character, not only spaces
+        -- (btrim's default), as the client's String.prototype.trim() does: a
+        -- tab-only label must be refused here, or it is stored and then fails
+        -- the client's own schema on every read.
+        v_label := regexp_replace(v_item ->> 'label', '^[[:space:]]+|[[:space:]]+$', '', 'g');
+        v_url := regexp_replace(v_item ->> 'url', '^[[:space:]]+|[[:space:]]+$', '', 'g');
         IF char_length(v_label) NOT BETWEEN 1 AND 80 THEN
             RAISE EXCEPTION 'guidance link % label must be 1-80 characters', v_index
                 USING ERRCODE = '22023';

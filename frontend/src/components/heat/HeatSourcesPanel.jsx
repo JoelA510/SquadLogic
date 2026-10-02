@@ -99,8 +99,9 @@ export default function HeatSourcesPanel({
             <p className="text-text-muted">None configured for this organization.</p>
           ) : (
             <ul className="list-disc pl-5 space-y-1" data-testid="heat-guidance-links">
-              {guidanceLinks.map((l) => (
-                <li key={l.url}>
+              {/* Nothing forbids two links to one URL, so the URL alone is not a key. */}
+              {guidanceLinks.map((l, i) => (
+                <li key={`${i}|${l.url}`}>
                   <External href={l.url}>{l.label}</External>
                 </li>
               ))}

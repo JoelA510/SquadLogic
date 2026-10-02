@@ -2493,6 +2493,22 @@ export const mockSupabase = {
       return ['admin', 'tenant_admin'].includes(String(member?.role || ''));
     };
 
+    // The four RPCs that used to fall through to the silent catch-all below.
+    // Outside the DEV/mock guard on purpose: the catch-all now refuses, and it
+    // runs in every mock session -- including a production build that fell
+    // back to the mock for missing credentials, where the guard is false. Kept
+    // behind the guard, these four would have gone from a silent success to
+    // PGRST202 there. The module ships with `unmockedRpcError` regardless.
+    const adminWrite = handleAdminWriteRpc(db, name, params, {
+      currentUserId,
+      sessionUserId: storedSession ? currentUserId : null,
+      isOrgAdmin,
+    });
+    if (adminWrite) {
+      if (!adminWrite.error) saveDB(db);
+      return adminWrite;
+    }
+
     if (import.meta.env.DEV || import.meta.env.VITE_USE_MOCK_SUPABASE === 'true') {
       // Coach practice preferences (migration 20260927000000): the three RPCs,
       // refusals included. Behind the DEV/mock guard like the other late arms,
@@ -2514,16 +2530,6 @@ export const mockSupabase = {
       if (heat) {
         if (!heat.error) saveDB(db);
         return heat;
-      }
-      // The four RPCs that used to fall through to the silent catch-all below.
-      const adminWrite = handleAdminWriteRpc(db, name, params, {
-        currentUserId,
-        sessionUserId: storedSession ? currentUserId : null,
-        isOrgAdmin,
-      });
-      if (adminWrite) {
-        if (!adminWrite.error) saveDB(db);
-        return adminWrite;
       }
       // 8.6 3b PR 11c: the writer fingerprint and the enact wrapper RPC
       // (migrations 20260929000000, 20261004000000); `mockPracticeEnact.js`

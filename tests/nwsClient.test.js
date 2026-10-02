@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   NwsError,
+  GRIDPOINT_REUSE_MS,
   POINTS_CACHE_TTL_MS,
   RATE_LIMIT_RETRY_MS,
   SERVER_RETRY_DELAYS_MS,
@@ -203,6 +204,43 @@ describe('retry policy', () => {
       kind: 'rate-limit',
       status: 429,
     });
+    expect(calls).toHaveLength(2);
+  });
+});
+
+describe('gridpoint reuse', () => {
+  const URL = 'https://api.weather.gov/gridpoints/MTR/97,99';
+
+  it('reuses a gridpoint within the reuse window, keeping its original retrieval time', async () => {
+    const { client, calls, advance } = makeClient({
+      '/gridpoints/': [json(200, loadGridpointJson())],
+    });
+    const first = await client.getGridpoint(URL);
+    advance(GRIDPOINT_REUSE_MS - 1);
+    const second = await client.getGridpoint(URL);
+    expect(calls).toHaveLength(1);
+    expect(second.retrievedAt).toBe(first.retrievedAt);
+  });
+
+  it('refetches after the window, or at once when forced (Refresh)', async () => {
+    const { client, calls, advance } = makeClient({
+      '/gridpoints/': [json(200, loadGridpointJson())],
+    });
+    await client.getGridpoint(URL);
+    await client.getGridpoint(URL, { force: true });
+    expect(calls).toHaveLength(2);
+    advance(GRIDPOINT_REUSE_MS + 1);
+    const later = await client.getGridpoint(URL);
+    expect(calls).toHaveLength(3);
+    expect(later.retrievedAt).not.toBe('2026-10-02T16:00:00.000Z');
+  });
+
+  it('does not reuse a failure', async () => {
+    const { client, calls } = makeClient({
+      '/gridpoints/': [json(404, { detail: 'gone' }), json(200, loadGridpointJson())],
+    });
+    await expect(client.getGridpoint(URL)).rejects.toThrow(/404/);
+    await client.getGridpoint(URL);
     expect(calls).toHaveLength(2);
   });
 });

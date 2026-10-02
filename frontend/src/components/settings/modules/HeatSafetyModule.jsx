@@ -4,6 +4,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { HEAT_BANDS, MAX_GUIDANCE_LINKS } from '@squadlogic/core/heat/index.js';
 import { useOrgHeatSettings } from '../../../hooks/useOrgHeatSettings.js';
 import { usePermission } from '../../../hooks/usePermission.js';
+import { useOrganization } from '../../../contexts/OrganizationContext.jsx';
 
 const CATEGORY_HELP = {
   1: 'Cooler regions',
@@ -24,12 +25,16 @@ const bandsText = (cat) =>
  */
 export default function HeatSafetyModule() {
   const settings = useOrgHeatSettings();
+  const orgId = useOrganization()?.currentOrganization?.id ?? null;
   // Held here, not in the form: a successful save reloads the settings, which
   // unmounts the form and remounts it under a new key, and a message kept in
-  // the form's own state was lost with it.
-  const [message, setMessage] = useState(
-    /** @type {{ kind: 'error'|'ok', text: string }|null} */ (null)
+  // the form's own state was lost with it. Stamped with the organisation it
+  // was written for, so switching organisation does not carry it across.
+  const [stamped, setStamped] = useState(
+    /** @type {{ orgId: string|null, kind: 'error'|'ok', text: string }|null} */ (null)
   );
+  const message = stamped && stamped.orgId === orgId ? stamped : null;
+  const setMessage = (m) => setStamped(m ? { ...m, orgId } : null);
   if (settings.loading) {
     return (
       <p className="text-sm text-text-muted" role="status">

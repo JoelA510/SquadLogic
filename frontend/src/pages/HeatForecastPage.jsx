@@ -31,7 +31,7 @@ function nextDay(date) {
  * `heat_forecast` org feature.
  */
 export default function HeatForecastPage() {
-  const { isEnabled } = useFeatures();
+  const { isEnabled, loading } = useFeatures();
   const enabled = isEnabled(FEATURE_FLAGS.HEAT_FORECAST);
   return (
     <Page
@@ -47,7 +47,13 @@ export default function HeatForecastPage() {
         />
       }
     >
-      {enabled ? (
+      {/* Until the org's flags arrive every flag reads as its default (off for
+          this one), so "turned off" would flash for an org that has it on. */}
+      {loading ? (
+        <p className="text-sm text-text-muted" role="status">
+          Loading…
+        </p>
+      ) : enabled ? (
         <HeatForecastBody />
       ) : (
         <div className="empty" role="status" data-testid="heat-forecast-disabled">

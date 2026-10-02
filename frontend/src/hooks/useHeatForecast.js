@@ -101,8 +101,17 @@ export function useHeatForecast(date) {
     loadEstate();
   }, [loadEstate]);
 
-  /** Re-read the estate; the forecast recomputes (and refetches NWS) from it. */
+  /** The next compute refetches every gridpoint (Refresh), not the in-page copy. */
+  const forceNextFetch = useRef(false);
+  const takeForce = () => {
+    const force = forceNextFetch.current;
+    forceNextFetch.current = false;
+    return force;
+  };
+
+  /** Re-read the estate and refetch NWS; the forecast recomputes from both. */
   const refresh = useCallback(() => {
+    forceNextFetch.current = true;
     loadEstate();
   }, [loadEstate]);
 
@@ -209,7 +218,9 @@ export function useHeatForecast(date) {
 
       const [turbidity, raw] = await Promise.all([
         loadTurbidityTable(),
-        needed.size ? nwsClient().getForecasts([...needed.values()]) : Promise.resolve({}),
+        needed.size
+          ? nwsClient().getForecasts([...needed.values()], { force: takeForce() })
+          : Promise.resolve({}),
       ]);
       /** @type {Record<string, any>} */
       const forecasts = {};

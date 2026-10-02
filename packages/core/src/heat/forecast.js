@@ -212,6 +212,14 @@ export function buildHeatPlan({ date, timeZone, venues, fields, games }) {
   const grouped = new Map();
   /** @type {HeatPlanItem[]} */
   const loose = [];
+  /**
+   * Rows whose kickoff could not be read. They are listed under every date, so
+   * they must not decide the mode: one unreadable game would otherwise replace
+   * the no-game hourly view on every date with that single refused row.
+   *
+   * @type {HeatPlanItem[]}
+   */
+  const undated = [];
 
   for (const game of games) {
     let startMs = null;
@@ -227,10 +235,12 @@ export function buildHeatPlan({ date, timeZone, venues, fields, games }) {
     // An unreadable kickoff cannot be placed on any day; it is listed under the
     // requested date rather than lost, with the reason.
     if (startMs !== null && seasonCalendarDate(startMs, timeZone) !== date) continue;
+    const sink = startMs === null ? undated : loose;
+    const startLabel = startMs === null ? null : localLabel(startMs, day);
     const field = fieldById.get(game.fieldId);
     const venue = field ? venueById.get(field.locationId) : undefined;
     if (!field || !venue) {
-      loose.push({
+      sink.push({
         key: `game:${game.id}`,
         venueId: venue?.id ?? '',
         venueName: venue?.name ?? '(unknown venue)',
@@ -238,7 +248,7 @@ export function buildHeatPlan({ date, timeZone, venues, fields, games }) {
         surface: null,
         fieldNames: field ? [field.name] : [],
         gameIds: [game.id],
-        window: { kind: 'game', startMs: startMs ?? 0, endMs, startLabel: null, endLabel: null },
+        window: { kind: 'game', startMs: startMs ?? 0, endMs, startLabel, endLabel: null },
         refusal: {
           code: HEAT_REASON.FIELD_UNKNOWN,
           message: !game.fieldId
@@ -253,7 +263,7 @@ export function buildHeatPlan({ date, timeZone, venues, fields, games }) {
     }
     const n = normalizeSurface(field.surfaceType);
     if (timeError) {
-      loose.push({
+      sink.push({
         key: `game:${game.id}`,
         venueId: venue.id,
         venueName: venue.name,
@@ -265,7 +275,7 @@ export function buildHeatPlan({ date, timeZone, venues, fields, games }) {
           kind: 'game',
           startMs: startMs ?? 0,
           endMs: null,
-          startLabel: null,
+          startLabel,
           endLabel: null,
         },
         refusal: { code: HEAT_REASON.GAME_TIME_UNREADABLE, message: `The game ${timeError}.` },
@@ -310,7 +320,7 @@ export function buildHeatPlan({ date, timeZone, venues, fields, games }) {
         kind: 'game',
         startMs: /** @type {number} */ (startMs),
         endMs,
-        startLabel: localLabel(/** @type {number} */ (startMs), day),
+        startLabel,
         endLabel: endMs === null ? null : localLabel(endMs, day),
       },
       refusal: surfaceRefusal(n, field.surfaceType),
@@ -371,6 +381,7 @@ export function buildHeatPlan({ date, timeZone, venues, fields, games }) {
       }
     }
   }
+  items.push(...undated);
 
   const windowStart = (it) =>
     it.window.kind === 'game' ? it.window.startMs : (day.hours[it.window.localHour] ?? 0);
@@ -565,6 +576,12 @@ export function computeHeatRows({ plan, venues, category, categorySource, foreca
         windMph: /** @type {number} */ (L.windSpeed.get(key)),
         skyCoverPct: /** @type {number} */ (L.skyCover.get(key)),
       };
+      if (!(inputs.skyCoverPct >= 0 && inputs.skyCoverPct <= 100)) {
+        throw new HeatError(
+          HEAT_REASON.GRIDPOINT_INVALID,
+          `Forecast sky cover ${inputs.skyCoverPct}% at ${pad2(h)}:00 is outside 0-100.`
+        );
+      }
       const ghi = cloudReducedGhi(clear, inputs.skyCoverPct);
       const zen = (sp.apparentZenith * Math.PI) / 180;
       const pHpa = stationPressureHpa(elev);
@@ -609,19 +626,32 @@ export function computeHeatRows({ plan, venues, category, categorySource, foreca
     let triggers = triggerCache.get(tKey);
     if (!triggers) {
       const { dewpointF, windMph } = b.inputs;
-      triggers = {
-        red: airTrigger(surface, targets.red, dewpointF, windMph, b.ghi, b.zen, bestHour, b.pHpa),
-        black: airTrigger(
-          surface,
-          targets.black,
-          dewpointF,
-          windMph,
-          b.ghi,
-          b.zen,
-          bestHour,
-          b.pHpa
-        ),
-      };
+      // The trigger search evaluates the model far from the forecast (40-125 F
+      // air), where it can refuse; that refusal is this row's, not the page's.
+      try {
+        triggers = {
+          red: airTrigger(surface, targets.red, dewpointF, windMph, b.ghi, b.zen, bestHour, b.pHpa),
+          black: airTrigger(
+            surface,
+            targets.black,
+            dewpointF,
+            windMph,
+            b.ghi,
+            b.zen,
+            bestHour,
+            b.pHpa
+          ),
+        };
+      } catch (err) {
+        if (err instanceof HeatError) {
+          return refused(
+            item,
+            { code: err.code, message: `Air-temperature trigger: ${err.message}` },
+            { provenance, hourly }
+          );
+        }
+        throw err;
+      }
       triggerCache.set(tKey, triggers);
     }
 

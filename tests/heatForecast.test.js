@@ -141,6 +141,29 @@ describe('game windows: the hottest overlapped hour (approved rule)', () => {
     expect(row.reason.code).toBe(HEAT_REASON.GAME_TIME_UNREADABLE);
   });
 
+  it('a game with no field keeps its readable kickoff label', () => {
+    const games = [{ id: 'g', fieldId: null, start: at('10:15'), end: at('11:15') }];
+    const { plan, rows } = run({ games });
+    expect(plan.mode).toBe('games');
+    expect(rows[0].reason.code).toBe(HEAT_REASON.FIELD_UNKNOWN);
+    const { window } = rows[0];
+    expect(window.kind === 'game' && window.startLabel).toBe('10:15');
+  });
+
+  it('an unreadable kickoff is listed on the date but does not replace the hourly view', () => {
+    const games = [{ id: 'bad', fieldId: 'field-vannoy', start: 'not a time', end: null }];
+    const baseline = run().rows;
+    const { plan, rows } = run({ games });
+    expect(plan.mode).toBe('hours');
+    expect(rows).toHaveLength(baseline.length + 1);
+    const bad = rows.filter((r) => r.gameIds.includes('bad'));
+    expect(bad).toHaveLength(1);
+    expect(bad[0].reason.code).toBe(HEAT_REASON.GAME_TIME_UNREADABLE);
+    // Meta-assertion: the hourly rows are really there, not just the refusal.
+    expect(rows.filter((r) => r.window.kind === 'hour').length).toBe(baseline.length);
+    expect(baseline.length).toBeGreaterThan(0);
+  });
+
   it('a game running past midnight is judged on its in-day hours, with a note', () => {
     const games = [
       { id: 'g', fieldId: 'field-vannoy', start: at('23:30'), end: '2026-10-04T01:00:00-07:00' },

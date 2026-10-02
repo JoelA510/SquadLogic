@@ -119,7 +119,19 @@ export function useHeatForecast(date) {
     const request = ++computeRequest.current;
     const stale = () => request !== computeRequest.current;
     try {
-      if (!orgId || inputsLoading) return;
+      if (!orgId) {
+        // No organisation: drop the previous org's rows rather than keep them.
+        setResult({
+          status: 'idle',
+          mode: null,
+          rows: [],
+          forecasts: {},
+          planError: null,
+          error: null,
+        });
+        return;
+      }
+      if (inputsLoading) return;
       if (inputError) {
         setResult({
           status: 'error',
@@ -152,10 +164,11 @@ export function useHeatForecast(date) {
           surfaceType: f.surface_type ?? null,
         }));
       const games = (assignments || [])
-        .filter((a) => a.fieldId)
+        // A game with no field is kept: the plan refuses it as a row rather
+        // than the screen losing it.
         .map((a) => ({
           id: String(a.id),
-          fieldId: String(a.fieldId),
+          fieldId: a.fieldId ? String(a.fieldId) : null,
           start: a.start ?? null,
           end: a.end ?? null,
         }));
@@ -179,10 +192,11 @@ export function useHeatForecast(date) {
         throw err;
       }
 
+      const venueById = new Map(venues.map((v) => [v.id, v]));
       const needed = new Map();
       for (const item of plan.items) {
         if (item.refusal) continue;
-        const v = venues.find((x) => x.id === item.venueId);
+        const v = venueById.get(item.venueId);
         if (
           v &&
           v.latitude !== null &&

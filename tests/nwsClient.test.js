@@ -237,3 +237,30 @@ describe('getForecasts', () => {
     expect(out.a.json).toBe(out.b.json);
   });
 });
+
+describe('getPoint in-flight sharing', () => {
+  it('venues on the same coordinate pair share one /points request', async () => {
+    const { client, calls } = makeClient({
+      '/points/': [json(200, POINTS)],
+      '/gridpoints/': [json(200, { properties: {} })],
+    });
+    const out = await client.getForecasts([
+      { id: 'a', latitude: 37.7046, longitude: -122.0524 },
+      { id: 'b', latitude: 37.7046, longitude: -122.0524 },
+    ]);
+    expect(calls.filter((c) => c.url.includes('/points/'))).toHaveLength(1);
+    expect(out.a.source.gridpointUrl).toBe(out.b.source.gridpointUrl);
+  });
+
+  it('negative control: distinct coordinate pairs each get their own request', async () => {
+    const { client, calls } = makeClient({
+      '/points/': [json(200, POINTS)],
+      '/gridpoints/': [json(200, { properties: {} })],
+    });
+    await client.getForecasts([
+      { id: 'a', latitude: 37.7046, longitude: -122.0524 },
+      { id: 'b', latitude: 37.71, longitude: -122.06 },
+    ]);
+    expect(calls.filter((c) => c.url.includes('/points/'))).toHaveLength(2);
+  });
+});

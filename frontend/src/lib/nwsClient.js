@@ -97,6 +97,8 @@ export function createNwsClient(deps = {}) {
   const storage = deps.storage === undefined ? defaultStorage() : deps.storage;
   /** @type {Map<string, { gridpointUrl: string, gridId: string, gridX: number, gridY: number, cachedAt: number }>} */
   const pointsMemo = new Map();
+  /** In-flight `/points` lookups, so venues sharing a coordinate pair share one request. */
+  const pointsInFlight = new Map();
 
   /**
    * @param {string} url
@@ -208,24 +210,32 @@ export function createNwsClient(deps = {}) {
       pointsMemo.set(key, stored);
       return { pointsUrl, ...stored, fromCache: true };
     }
-    const { json } = await getJson(pointsUrl);
-    const p = json?.properties ?? {};
-    const gridpointUrl = p.forecastGridData;
-    if (typeof gridpointUrl !== 'string' || !GRIDPOINT_URL.test(gridpointUrl)) {
-      throw new NwsError(`NWS /points gave no usable forecastGridData for ${key}`, {
-        kind: 'shape',
-        url: pointsUrl,
-      });
+    let inFlight = pointsInFlight.get(key);
+    if (!inFlight) {
+      inFlight = (async () => {
+        const { json } = await getJson(pointsUrl);
+        const p = json?.properties ?? {};
+        const gridpointUrl = p.forecastGridData;
+        if (typeof gridpointUrl !== 'string' || !GRIDPOINT_URL.test(gridpointUrl)) {
+          throw new NwsError(`NWS /points gave no usable forecastGridData for ${key}`, {
+            kind: 'shape',
+            url: pointsUrl,
+          });
+        }
+        const entry = {
+          gridpointUrl,
+          gridId: String(p.gridId ?? ''),
+          gridX: Number(p.gridX),
+          gridY: Number(p.gridY),
+          cachedAt: now(),
+        };
+        pointsMemo.set(key, entry);
+        writeStored(key, entry);
+        return entry;
+      })().finally(() => pointsInFlight.delete(key));
+      pointsInFlight.set(key, inFlight);
     }
-    const entry = {
-      gridpointUrl,
-      gridId: String(p.gridId ?? ''),
-      gridX: Number(p.gridX),
-      gridY: Number(p.gridY),
-      cachedAt: now(),
-    };
-    pointsMemo.set(key, entry);
-    writeStored(key, entry);
+    const entry = await inFlight;
     return { pointsUrl, ...entry, fromCache: false };
   }
 

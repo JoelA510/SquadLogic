@@ -42,6 +42,10 @@ const codeOf = (fn) => {
   return null;
 };
 
+/**
+ * @param {{ venues: any[], fields: any[], games?: any[], forecasts?: Record<string, any>,
+ *   date?: string }} input `forecasts` defaults to the reference forecast.
+ */
 function rowCodes({ venues, fields, games = [], forecasts, date = REFERENCE_DATE }) {
   const plan = buildHeatPlan({ date, timeZone: REFERENCE_TZ, venues, fields, games });
   const rows = computeHeatRows({

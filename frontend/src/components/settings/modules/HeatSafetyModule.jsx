@@ -24,10 +24,25 @@ const bandsText = (cat) =>
  */
 export default function HeatSafetyModule() {
   const settings = useOrgHeatSettings();
+  // Held here, not in the form: a successful save reloads the settings, which
+  // unmounts the form and remounts it under a new key, and a message kept in
+  // the form's own state was lost with it.
+  const [message, setMessage] = useState(
+    /** @type {{ kind: 'error'|'ok', text: string }|null} */ (null)
+  );
   if (settings.loading) {
     return (
       <p className="text-sm text-text-muted" role="status">
         Loading heat settings…
+      </p>
+    );
+  }
+  // A failed read is an error, not a default: an editable form here would show
+  // Category 1 with no links and let a save overwrite settings nobody saw.
+  if (settings.error) {
+    return (
+      <p role="alert" className="text-sm text-status-error">
+        {settings.error}
       </p>
     );
   }
@@ -37,20 +52,23 @@ export default function HeatSafetyModule() {
     <HeatSafetyForm
       key={`${settings.source}|${settings.thresholdCategory}|${JSON.stringify(settings.guidanceLinks)}`}
       settings={settings}
+      message={message}
+      setMessage={setMessage}
     />
   );
 }
 
-/** @param {{ settings: ReturnType<typeof useOrgHeatSettings> }} props */
-function HeatSafetyForm({ settings }) {
+/**
+ * @param {{ settings: ReturnType<typeof useOrgHeatSettings>,
+ *   message: { kind: 'error'|'ok', text: string }|null,
+ *   setMessage: (m: { kind: 'error'|'ok', text: string }|null) => void }} props
+ */
+function HeatSafetyForm({ settings, message, setMessage }) {
   const { can, PERMISSIONS } = usePermission();
   const canEdit = can(PERMISSIONS.MANAGE_ORGANIZATION);
   const [category, setCategory] = useState(settings.thresholdCategory);
   const [links, setLinks] = useState(settings.guidanceLinks);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState(
-    /** @type {{ kind: 'error'|'ok', text: string }|null} */ (null)
-  );
 
   const save = async (event) => {
     event.preventDefault();
@@ -77,11 +95,6 @@ function HeatSafetyForm({ settings }) {
       <h3 id="heat-settings-heading" className="text-base font-semibold text-text-primary">
         Heat forecast
       </h3>
-      {settings.error && (
-        <p role="alert" className="text-sm text-status-error">
-          {settings.error}
-        </p>
-      )}
       <fieldset disabled={!canEdit || saving}>
         <legend className="block text-sm font-medium text-text-secondary mb-2">
           U.S. Soccer heat guidelines region category
@@ -191,7 +204,11 @@ HeatSafetyForm.propTypes = {
     thresholdCategory: PropTypes.oneOf([1, 2, 3]).isRequired,
     guidanceLinks: PropTypes.arrayOf(PropTypes.object).isRequired,
     source: PropTypes.oneOf(['configured', 'default']).isRequired,
-    error: PropTypes.string,
     save: PropTypes.func.isRequired,
   }).isRequired,
+  message: PropTypes.shape({
+    kind: PropTypes.oneOf(['error', 'ok']).isRequired,
+    text: PropTypes.string.isRequired,
+  }),
+  setMessage: PropTypes.func.isRequired,
 };

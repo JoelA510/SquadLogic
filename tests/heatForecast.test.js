@@ -214,6 +214,20 @@ describe('refusals are rows, never drops', () => {
     expect(rows.filter((r) => r.venueId === 'loc-fivecanyons')).toHaveLength(1);
   });
 
+  it('a game with no field assigned is a refused row on its date, not dropped', () => {
+    const games = [
+      { id: 'g', fieldId: null, start: at('10:00'), end: at('11:00') },
+      { id: 'other-day', fieldId: null, start: '2026-10-04T10:00:00-07:00', end: null },
+    ];
+    const { plan, rows } = run({ games });
+    expect(plan.mode).toBe('games');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].reason).toEqual({
+      code: HEAT_REASON.FIELD_UNKNOWN,
+      message: 'The game has no field assigned.',
+    });
+  });
+
   it('a game on a retired field is a refused row', () => {
     const games = [{ id: 'g', fieldId: 'field-gone', start: at('10:00'), end: at('11:00') }];
     const [row] = run({ games }).rows;

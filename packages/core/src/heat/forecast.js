@@ -145,7 +145,7 @@ function localLabel(ms, day) {
 /**
  * @typedef {Object} HeatGame
  * @property {string} id
- * @property {string} fieldId
+ * @property {string|null} fieldId - null when the game has no field assigned
  * @property {string|null} start - ISO instant with offset
  * @property {string|null} end - ISO instant with offset, or null
  */
@@ -241,9 +241,11 @@ export function buildHeatPlan({ date, timeZone, venues, fields, games }) {
         window: { kind: 'game', startMs: startMs ?? 0, endMs, startLabel: null, endLabel: null },
         refusal: {
           code: HEAT_REASON.FIELD_UNKNOWN,
-          message: field
-            ? "The game's field belongs to a venue that is not in the active estate."
-            : 'The game names a field that is not in the active estate (retired or deleted).',
+          message: !game.fieldId
+            ? 'The game has no field assigned.'
+            : field
+              ? "The game's field belongs to a venue that is not in the active estate."
+              : 'The game names a field that is not in the active estate (retired or deleted).',
         },
         notes: [],
       });

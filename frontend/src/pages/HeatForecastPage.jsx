@@ -64,9 +64,11 @@ export default function HeatForecastPage() {
 function HeatForecastBody() {
   const { currentSeasonSetting } = useOrganization() || {};
   const timeZone = currentSeasonSetting?.timezone ?? null;
-  const [date, setDate] = useState(() =>
-    nextDay(seasonCalendarDate(Date.now(), timeZone) ?? todayIso())
-  );
+  // Until the admin picks a day, the default follows the season clock, so a
+  // timezone that arrives after mount moves "tomorrow" onto the season's day.
+  const [openedAt] = useState(() => Date.now());
+  const [pickedDate, setDate] = useState(/** @type {string|null} */ (null));
+  const date = pickedDate ?? nextDay(seasonCalendarDate(openedAt, timeZone) ?? todayIso());
   const forecast = useHeatForecast(date);
 
   const formatInstant = useMemo(() => {

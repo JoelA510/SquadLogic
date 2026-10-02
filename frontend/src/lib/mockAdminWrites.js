@@ -203,7 +203,8 @@ export function handleAdminWriteRpc(db, name, params, ctx) {
     }
     if (!INVITE_ROLES.includes(p.p_role)) return fail('22023', `Invalid role: ${p.p_role}`);
     let expiresAt = null;
-    if (!Object.hasOwn(p, 'p_expires_in')) {
+    // `undefined` is absent on the wire (JSON drops it), so it takes the default too.
+    if (p.p_expires_in === undefined) {
       expiresAt = new Date(now.getTime() + 7 * 86400000).toISOString();
     } else if (p.p_expires_in !== null) {
       const ms = intervalMs(p.p_expires_in);

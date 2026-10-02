@@ -35,7 +35,15 @@ export function useOrgHeatSettings() {
     const request = ++requestRef.current;
     try {
       if (!orgId) {
-        setState((s) => ({ ...s, loading: false, error: null }));
+        // No organisation: nothing configured. Keeping the previous org's
+        // category and links here would show them under no org at all.
+        setState({
+          thresholdCategory: DEFAULT_HEAT_CATEGORY,
+          guidanceLinks: [],
+          source: 'default',
+          loading: false,
+          error: null,
+        });
         return;
       }
       setState((s) => ({ ...s, loading: true, error: null }));

@@ -158,4 +158,24 @@ describe('useOrgHeatSettings', () => {
     });
     expect(out).toEqual({ ok: false, error: 'Access denied' });
   });
+
+  it('an organisation going away drops its category and links', async () => {
+    vi.mocked(supabase.from).mockReturnValue(
+      /** @type {any} */ (
+        reads({
+          data: {
+            threshold_category: 3,
+            guidance_links: [{ label: 'League', url: 'https://example.org/heat' }],
+          },
+          error: null,
+        })
+      )
+    );
+    const { result, rerender } = renderHook(() => useOrgHeatSettings());
+    await waitFor(() => expect(result.current.source).toBe('configured'));
+    vi.mocked(useOrganization).mockReturnValue(/** @type {any} */ ({ currentOrganization: null }));
+    rerender();
+    await waitFor(() => expect(result.current.source).toBe('default'));
+    expect(result.current).toMatchObject({ thresholdCategory: 1, guidanceLinks: [] });
+  });
 });

@@ -70,3 +70,6 @@ dist.old/
 # Local ESLint output dump. One was committed from a developer machine with an
 # absolute home-directory path in it and went stale; keep it out of the repo.
 frontend/lint_results.txt
+
+# Python bytecode (scripts/heat reference generator)
+__pycache__/

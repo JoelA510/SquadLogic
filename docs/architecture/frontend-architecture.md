@@ -38,6 +38,7 @@ This document describes the implemented frontend architecture for SquadLogic. Th
 | `/scheduling/blackouts` | `BlackoutsPage`            | Field blackout windows review grid                              |
 | `/exports`              | `ExportsPage`              | Output generation (CSVs, emails)                                |
 | `/admin/members`        | `MembersPage`              | Invites & membership                                            |
+| `/schedule/heat`        | `HeatForecastPage`         | Field WBGT forecast (admin, `heat_forecast` feature; NWS API)   |
 
 ## State Management
 

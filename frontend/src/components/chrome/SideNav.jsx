@@ -6,6 +6,7 @@ import { NAV, ROLE_NAV } from '../../constants/navigation.js';
 import { usePermission } from '../../hooks/usePermission.js';
 import { useAuth } from '../../contexts/AuthContext.jsx';
 import { useNavBadges } from '../../hooks/useNavBadges.js';
+import { useFeatures } from '../../hooks/useFeatures.js';
 import { IS_MOCK_MODE } from '../../config.js';
 
 function NavItem({ item, collapsed = false, badge = null, onNavigate = undefined }) {
@@ -46,6 +47,7 @@ export default function SideNav({
   const { can, role } = usePermission();
   const { user, isImpersonating } = useAuth();
   const badges = useNavBadges();
+  const { isEnabled } = useFeatures();
   const location = useLocation();
 
   // Under role preview (impersonation) the nav scopes to the previewed role.
@@ -80,7 +82,8 @@ export default function SideNav({
     effectiveRole !== 'coach' && effectiveRole !== 'parent' && effectiveRole !== 'player';
   const flatItems = isAdminNav ? null : ROLE_NAV[effectiveRole] || ROLE_NAV.parent;
 
-  const visible = (item) => !item.permission || can(item.permission);
+  const visible = (item) =>
+    (!item.permission || can(item.permission)) && (!item.feature || isEnabled(item.feature));
 
   return (
     <>

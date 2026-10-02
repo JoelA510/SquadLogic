@@ -1,13 +1,15 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { Globe, User, Calendar } from 'lucide-react';
+import { Globe, User, Calendar, ThermometerSun } from 'lucide-react';
 import SeasonModule from './modules/SeasonModule.jsx';
 import AccountModule from './modules/AccountModule.jsx';
+import HeatSafetyModule from './modules/HeatSafetyModule.jsx';
 import { useTheme } from '../../contexts/ThemeContext.jsx';
 
 const SUB_TABS = [
   { id: 'identity', label: 'League Identity', icon: Globe },
   { id: 'account', label: 'Account & Security', icon: User },
   { id: 'season', label: 'Season & Calendar', icon: Calendar },
+  { id: 'heat', label: 'Heat Safety', icon: ThermometerSun },
 ];
 
 export default function GeneralSettings() {
@@ -86,6 +88,8 @@ export default function GeneralSettings() {
         return <AccountModule />;
       case 'season':
         return <SeasonModule />;
+      case 'heat':
+        return <HeatSafetyModule />;
       default:
         return null;
     }

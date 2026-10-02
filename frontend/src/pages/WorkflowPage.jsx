@@ -7,8 +7,6 @@ import { useImport } from '../contexts/ImportContext.jsx';
 import { useTheme } from '../contexts/ThemeContext.jsx';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { Building2, Calendar, Users, Trophy, ArrowRight, Sparkles } from 'lucide-react';
-import { FeatureGuard } from '../components/ui/FeatureGuard.jsx';
-import { FEATURE_FLAGS } from '../constants/featureFlags.js';
 import { IngestionOverlay } from '../components/ui/IngestionOverlay.jsx';
 import Button from '../components/ui/Button.jsx';
 import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
@@ -290,20 +288,20 @@ export default function WorkflowPage() {
                 />
               </div>
 
-              {/* Org Context */}
-              <FeatureGuard flag={FEATURE_FLAGS.MULTI_TENANCY}>
-                <div className="pt-6 border-t border-border-subtle">
-                  <div className="flex items-center gap-3 text-text-muted">
-                    <Building2 size={16} />
-                    <span className="text-xs uppercase tracking-wider font-semibold">
-                      Organization
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm font-medium text-text-primary">
-                    {currentOrganization?.name || 'Local Environment'}
-                  </p>
+              {/* Org context. This sat behind a FeatureGuard on a MULTI_TENANCY flag,
+                  a key the flag registry never defined, so it never rendered. Every
+                  tenant is multi-tenant; there is nothing to toggle. */}
+              <div className="pt-6 border-t border-border-subtle">
+                <div className="flex items-center gap-3 text-text-muted">
+                  <Building2 size={16} />
+                  <span className="text-xs uppercase tracking-wider font-semibold">
+                    Organization
+                  </span>
                 </div>
-              </FeatureGuard>
+                <p className="mt-1 text-sm font-medium text-text-primary">
+                  {currentOrganization?.name || 'Local Environment'}
+                </p>
+              </div>
             </div>
           </div>
         </div>

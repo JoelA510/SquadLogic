@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { Clock, History, ShieldCheck, Star, UserRoundCheck, Users } from 'lucide-react';
+import {
+  Clock,
+  History,
+  ShieldCheck,
+  Star,
+  ThermometerSun,
+  UserRoundCheck,
+  Users,
+} from 'lucide-react';
 
 /**
  * Centralized registry of organization-level feature flags.
@@ -33,6 +41,9 @@ export const FEATURE_FLAGS = {
   COACHING_INTEREST: 'coaching_interest',
   MEDICAL_FORMS: 'medical_forms',
   WAITLIST: 'waitlist',
+
+  // Field heat-stress (WBGT) forecast; off unless an admin turns it on.
+  HEAT_FORECAST: 'heat_forecast',
 };
 
 /** String-valued org setting stored alongside the boolean flags. */
@@ -103,6 +114,14 @@ export const FEATURE_CATALOG = [
     label: 'Waitlist',
     description: 'Flag and manage waitlisted registrants separately from active players.',
     icon: Clock,
+    column: false,
+  },
+  {
+    key: FEATURE_FLAGS.HEAT_FORECAST,
+    label: 'Heat Forecast',
+    description:
+      'Forecast field WBGT per venue and kickoff from the NWS forecast, banded by U.S. Soccer heat guidelines. Decision support; on-site readings govern.',
+    icon: ThermometerSun,
     column: false,
   },
 ];

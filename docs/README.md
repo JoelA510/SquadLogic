@@ -35,6 +35,7 @@
 - [Game Schedule Grid (ADR)](architecture/game-schedule-grid.md) — Component architecture for the drag-and-drop game-schedule grid (Fields × Time Slots layout, droppable-key design, optimistic UI).
 - [Evaluation Pipeline](architecture/evaluation-pipeline.md) — Scoring engine, metrics, findings, and `evaluation_runs` persistence.
 - [Output Generation](architecture/output-generation.md) — Exports, ICS calendar feeds, and downstream deliverables.
+- [Heat Forecast](architecture/heat-forecast.md) — Field heat-stress (WBGT) forecast from the NWS API: the Liljegren model port and its parity with the Python reference, the one documented substitution (Linke turbidity table) and its measured effect, NWS client behaviour, org settings, provenance, and what is out of scope.
 
 ## Operations
 

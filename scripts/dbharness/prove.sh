@@ -59,6 +59,9 @@ R20="$REPO/docs/sql/20261004000000_revert.sql"
 # 8.6 3b PR 12d: RSVP follows the applied practice calendar, and its revert.
 M21="$REPO/supabase/migrations/20261005000000_rsvp_applied_practice_calendar.sql"
 R21="$REPO/docs/sql/20261005000000_revert.sql"
+# Heat forecast: org heat settings and their revert.
+M22="$REPO/supabase/migrations/20261006000000_org_heat_settings.sql"
+R22="$REPO/docs/sql/20261006000000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
@@ -3324,6 +3327,58 @@ plant "R21 the revert leaves the 12d body in place" "$R21" \
   "CREATE OR REPLACE FUNCTION public.upsert_team_event_rsvp_unused(" \
   "FAIL revert 20261005000000"
 
+# **Heat forecast: org heat settings.** One plant per claim the smoke's
+# evidence prints. The RPC anchors sit in the only definition of
+# admin_set_org_heat_settings; the CHECKs and the policy are table DDL. The
+# RPC guards and the CHECKs are planted separately because each is the only
+# thing standing between its own write path -- the RPC, or a write that
+# bypasses it -- and a bad value.
+plant "M22 the heat settings RPC stops checking the caller is an org admin" "$M22" \
+  "    IF NOT public.is_org_admin(p_organization_id) THEN" \
+  "    IF false THEN" \
+  "FAIL smoke 20261006000000"
+
+plant "M22 the heat settings RPC stops refusing an out-of-range category" "$M22" \
+  "    IF p_threshold_category IS NULL OR p_threshold_category NOT BETWEEN 1 AND 3 THEN" \
+  "    IF p_threshold_category IS NULL THEN" \
+  "FAIL smoke 20261006000000"
+
+plant "M22 the heat settings RPC accepts an http link" "$M22" \
+  "        IF char_length(v_url) > 500 OR v_url !~ '^https://" \
+  "        IF char_length(v_url) > 500 OR v_url !~ '^https?://" \
+  "FAIL smoke 20261006000000"
+
+plant "M22 the heat settings RPC accepts more than 10 links" "$M22" \
+  "    IF jsonb_array_length(p_guidance_links) > 10 THEN" \
+  "    IF jsonb_array_length(p_guidance_links) > 1000 THEN" \
+  "FAIL smoke 20261006000000"
+
+plant "M22 the category CHECK is dropped" "$M22" \
+  "        CHECK (threshold_category BETWEEN 1 AND 3)," \
+  "        CHECK (true)," \
+  "FAIL smoke 20261006000000"
+
+plant "M22 the heat settings RPC stops auditing" "$M22" \
+  "    PERFORM public.record_audit_event(
+        p_organization_id,
+        'settings.heat_updated'," \
+  "    PERFORM jsonb_build_array(
+        p_organization_id,
+        'settings.heat_updated'," \
+  "FAIL smoke 20261006000000"
+
+plant "M22 the read policy lets every member read every organisation's settings" "$M22" \
+  "    USING (public.is_org_member(organization_id));" \
+  "    USING (auth.uid() IS NOT NULL);" \
+  "FAIL smoke 20261006000000"
+
+# Its revert destroys every organisation's settings, so the warning is the
+# claim. The seed plants 3 rows, 2 with links, 3 links in all.
+plant "R22 the heat settings warning counts every row as having links" "$R22" \
+  "           count(*) FILTER (WHERE jsonb_array_length(guidance_links) > 0)," \
+  "           count(*)," \
+  "revert 20261006000000: planted 3 organisations' heat settings (2 with links, 3 links) and the revert did not warn with those figures"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -3438,6 +3493,13 @@ declare -A CLAIM_PROVER=(
   ["(checked) an RSVP stored on a date that became TIME TBD or moved is neither deleted nor rewritten"]="M21 the RSVP write deletes stored RSVPs inside a live window"
   ["(checked) a parent member reads the same practice_exceptions rows as an admin, and a non-member reads none"]="M15 the practice_exceptions select policy admits admins only"
   ["(checked) the RSVP revert restores the 20260504070000 upsert_team_event_rsvp body byte for byte, SECURITY DEFINER with search_path=public"]="R21 the revert leaves the 12d body in place"
+  ["(checked) only an admin of the organisation sets its heat settings: a coach and another organisation's admin are refused"]="M22 the heat settings RPC stops checking the caller is an org admin"
+  ["(checked) the heat settings RPC refuses a threshold category outside 1-3 (22023)"]="M22 the heat settings RPC stops refusing an out-of-range category"
+  ["(checked) the heat settings RPC refuses a malformed, non-https or oversized guidance link list (22023)"]="M22 the heat settings RPC accepts an http link|M22 the heat settings RPC accepts more than 10 links"
+  ["(checked) the category and links CHECKs refuse a heat settings write that bypasses the RPC"]="M22 the category CHECK is dropped"
+  ["(checked) every accepted heat settings write, a clear included, leaves a settings.heat_updated audit row with its before and after"]="M22 the heat settings RPC stops auditing"
+  ["(checked) a member reads only their own organisation's heat settings"]="M22 the read policy lets every member read every organisation's settings"
+  ["(checked) the revert counted the heat settings it was about to destroy, the organisations with links, and the links"]="R22 the heat settings warning counts every row as having links"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"
   ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M14 the reconcile skips dropping the broad policy"
   ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M14 the reconcile skips creating the missing read policies"

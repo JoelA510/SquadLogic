@@ -1,6 +1,6 @@
 /**
  * The Python reference's own unit tests, ported (`scripts/heat/reference/
- * test_cvsc_wbgt.py`), plus the edge cases the brief names: sun on the horizon
+ * test_wbgt_reference.py`), plus the edge cases the brief names: sun on the horizon
  * in dead calm, dewpoint above air, unknown units, sub-hour durations, missing
  * forecast hours, band boundaries, and the rounding rule banding now follows.
  */
@@ -101,7 +101,7 @@ describe('Parsing (ported)', () => {
 describe('Gridpoint response validation', () => {
   it('parses the fixture with its metadata', () => {
     const g = parseGridpoint(loadGridpointJson());
-    expect(g.meta).toMatchObject({ gridId: 'MTR', gridX: 97, gridY: 99, elevationM: 121 });
+    expect(g.meta).toMatchObject({ gridId: 'MTR', gridX: 11, gridY: 22, elevationM: 121 });
     expect(g.meta.updateTime).toBe('2026-10-02T08:31:00+00:00');
     expect(g.layers.temperature.size).toBe(24);
     expect(g.layers.nwsWbgt).toBeNull();

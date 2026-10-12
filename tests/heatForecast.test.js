@@ -66,19 +66,19 @@ describe('rows come from the estate and the game run', () => {
   it('games: one row per venue x surface x window; same-window games collapse and list their fields', () => {
     const { venues, fields } = referenceEstate();
     fields.push({
-      id: 'field-canyon-2',
-      name: 'Canyon MS Field 2',
-      locationId: 'loc-canyon',
+      id: 'field-site-a-2',
+      name: 'Site A Field 2',
+      locationId: 'loc-site-a',
       surfaceType: 'turf',
     });
     const games = [
-      { id: 'g1', fieldId: 'field-canyon', start: at('08:00'), end: at('09:00') },
-      { id: 'g2', fieldId: 'field-canyon-2', start: at('08:00'), end: at('09:00') },
-      { id: 'g3', fieldId: 'field-vannoy', start: at('14:00'), end: at('15:00') },
+      { id: 'g1', fieldId: 'field-site-a', start: at('08:00'), end: at('09:00') },
+      { id: 'g2', fieldId: 'field-site-a-2', start: at('08:00'), end: at('09:00') },
+      { id: 'g3', fieldId: 'field-site-b', start: at('14:00'), end: at('15:00') },
       // Another day: not on this screen.
       {
         id: 'g4',
-        fieldId: 'field-vannoy',
+        fieldId: 'field-site-b',
         start: '2026-10-04T14:00:00-07:00',
         end: '2026-10-04T15:00:00-07:00',
       },
@@ -86,14 +86,14 @@ describe('rows come from the estate and the game run', () => {
     const { plan, rows } = run({ games, venues, fields });
     expect(plan.mode).toBe('games');
     expect(rows).toHaveLength(2);
-    const canyon = rows.find((r) => r.venueId === 'loc-canyon');
-    expect(canyon.gameIds).toEqual(['g1', 'g2']);
-    expect(canyon.fieldNames).toEqual(['Canyon MS Field 1', 'Canyon MS Field 2']);
-    expect(canyon.window).toMatchObject({ kind: 'game', startLabel: '08:00', endLabel: '09:00' });
+    const siteA = rows.find((r) => r.venueId === 'loc-site-a');
+    expect(siteA.gameIds).toEqual(['g1', 'g2']);
+    expect(siteA.fieldNames).toEqual(['Site A Field 1', 'Site A Field 2']);
+    expect(siteA.window).toMatchObject({ kind: 'game', startLabel: '08:00', endLabel: '09:00' });
   });
 
   it('a game late in the local day belongs to that day, not the next UTC day', () => {
-    const games = [{ id: 'late', fieldId: 'field-vannoy', start: at('18:00'), end: at('19:00') }];
+    const games = [{ id: 'late', fieldId: 'field-site-b', start: at('18:00'), end: at('19:00') }];
     // 18:00 PDT is 01:00 UTC on Oct 4.
     const { rows } = run({ games });
     expect(rows).toHaveLength(1);
@@ -103,7 +103,7 @@ describe('rows come from the estate and the game run', () => {
 
 describe('game windows: the hottest overlapped hour (approved rule)', () => {
   it('a game across 13:00 and 14:00 takes the 13:00 values, the hotter hour', () => {
-    const games = [{ id: 'g', fieldId: 'field-canyon', start: at('13:30'), end: at('15:00') }];
+    const games = [{ id: 'g', fieldId: 'field-site-a', start: at('13:30'), end: at('15:00') }];
     const { rows } = run({ games });
     const [row] = rows;
     expect(row.status).toBe('computed');
@@ -115,19 +115,19 @@ describe('game windows: the hottest overlapped hour (approved rule)', () => {
   });
 
   it('the used hour is the hottest even when it is not the kickoff hour', () => {
-    const games = [{ id: 'g', fieldId: 'field-canyon', start: at('11:00'), end: at('13:30') }];
+    const games = [{ id: 'g', fieldId: 'field-site-a', start: at('11:00'), end: at('13:30') }];
     const [row] = run({ games }).rows;
     expect(row.hourly.map((h) => h.localHour)).toEqual([11, 12, 13]);
     expect(row.usedHour).toBe(13);
   });
 
   it('a game ending exactly on the hour does not judge the next hour', () => {
-    const games = [{ id: 'g', fieldId: 'field-vannoy', start: at('09:00'), end: at('10:00') }];
+    const games = [{ id: 'g', fieldId: 'field-site-b', start: at('09:00'), end: at('10:00') }];
     expect(run({ games }).rows[0].hourly.map((h) => h.localHour)).toEqual([9]);
   });
 
   it('no end time: kickoff hour only, with a note', () => {
-    const games = [{ id: 'g', fieldId: 'field-vannoy', start: at('16:20'), end: null }];
+    const games = [{ id: 'g', fieldId: 'field-site-b', start: at('16:20'), end: null }];
     const [row] = run({ games }).rows;
     expect(row.status).toBe('computed');
     expect(row.hourly.map((h) => h.localHour)).toEqual([16]);
@@ -135,7 +135,7 @@ describe('game windows: the hottest overlapped hour (approved rule)', () => {
   });
 
   it('a game ending before it starts is refused, not guessed', () => {
-    const games = [{ id: 'g', fieldId: 'field-vannoy', start: at('16:00'), end: at('15:00') }];
+    const games = [{ id: 'g', fieldId: 'field-site-b', start: at('16:00'), end: at('15:00') }];
     const [row] = run({ games }).rows;
     expect(row.status).toBe('refused');
     expect(row.reason.code).toBe(HEAT_REASON.GAME_TIME_UNREADABLE);
@@ -151,7 +151,7 @@ describe('game windows: the hottest overlapped hour (approved rule)', () => {
   });
 
   it('an unreadable kickoff is listed on the date but does not replace the hourly view', () => {
-    const games = [{ id: 'bad', fieldId: 'field-vannoy', start: 'not a time', end: null }];
+    const games = [{ id: 'bad', fieldId: 'field-site-b', start: 'not a time', end: null }];
     const baseline = run().rows;
     const { plan, rows } = run({ games });
     expect(plan.mode).toBe('hours');
@@ -166,7 +166,7 @@ describe('game windows: the hottest overlapped hour (approved rule)', () => {
 
   it('a game running past midnight is judged on its in-day hours, with a note', () => {
     const games = [
-      { id: 'g', fieldId: 'field-vannoy', start: at('23:30'), end: '2026-10-04T01:00:00-07:00' },
+      { id: 'g', fieldId: 'field-site-b', start: at('23:30'), end: '2026-10-04T01:00:00-07:00' },
     ];
     const [row] = run({ games }).rows;
     expect(row.notes.map((n) => n.code)).toEqual([HEAT_REASON.GAME_EXTENDS_PAST_DAY]);
@@ -188,11 +188,11 @@ describe('refusals are rows, never drops', () => {
 
   it('a game overlapping one forecast hour and one missing hour is refused as a whole', () => {
     const forecasts = referenceForecasts();
-    const gp = forecasts['loc-vannoy'].gridpoint;
+    const gp = forecasts['loc-site-b'].gridpoint;
     const trimmed = structuredClone(gp);
     trimmed.layers.temperature.delete(Date.parse('2026-10-03T22:00:00Z')); // 15:00 PDT
-    forecasts['loc-vannoy'] = { ...forecasts['loc-vannoy'], gridpoint: trimmed };
-    const games = [{ id: 'g', fieldId: 'field-vannoy', start: at('14:00'), end: at('16:00') }];
+    forecasts['loc-site-b'] = { ...forecasts['loc-site-b'], gridpoint: trimmed };
+    const games = [{ id: 'g', fieldId: 'field-site-b', start: at('14:00'), end: at('16:00') }];
     const [row] = run({ games, forecasts }).rows;
     expect(row.status).toBe('refused');
     expect(row.reason.code).toBe(HEAT_REASON.FORECAST_GAP);
@@ -205,16 +205,16 @@ describe('refusals are rows, never drops', () => {
     venues[0] = { ...venues[0], latitude: null, longitude: null };
     venues[1] = { ...venues[1], latitude: 13.4, longitude: 144.8 };
     const forecasts = referenceForecasts();
-    forecasts['loc-independent'] = {
+    forecasts['loc-site-c'] = {
       error: { message: 'NWS 404: Data Unavailable For Requested Point' },
     };
     const { rows } = run({ venues, fields, forecasts });
     const code = (id) => rows.find((r) => r.venueId === id).reason?.code ?? null;
-    expect(code('loc-canyon')).toBe(HEAT_REASON.COORDINATES_MISSING);
-    expect(code('loc-vannoy')).toBe(HEAT_REASON.TURBIDITY_OUT_OF_COVERAGE);
-    expect(code('loc-independent')).toBe(HEAT_REASON.FORECAST_UNAVAILABLE);
-    expect(rows.find((r) => r.venueId === 'loc-independent').reason.message).toMatch(/404/);
-    expect(code('loc-fivecanyons')).toBeNull();
+    expect(code('loc-site-a')).toBe(HEAT_REASON.COORDINATES_MISSING);
+    expect(code('loc-site-b')).toBe(HEAT_REASON.TURBIDITY_OUT_OF_COVERAGE);
+    expect(code('loc-site-c')).toBe(HEAT_REASON.FORECAST_UNAVAILABLE);
+    expect(rows.find((r) => r.venueId === 'loc-site-c').reason.message).toMatch(/404/);
+    expect(code('loc-site-d')).toBeNull();
     expect(rows).toHaveLength(40);
   });
 
@@ -234,7 +234,7 @@ describe('refusals are rows, never drops', () => {
       ])
     );
     // The venue with no fields still appears, once.
-    expect(rows.filter((r) => r.venueId === 'loc-fivecanyons')).toHaveLength(1);
+    expect(rows.filter((r) => r.venueId === 'loc-site-d')).toHaveLength(1);
   });
 
   it('a game with no field assigned is a refused row on its date, not dropped', () => {
@@ -297,10 +297,10 @@ describe('provenance on every computed row', () => {
     const { rows } = run({ category: 2 });
     for (const row of rows) {
       expect(row.provenance.forecast).toMatchObject({
-        gridpointUrl: 'https://api.weather.gov/gridpoints/MTR/97,99',
+        gridpointUrl: 'https://api.weather.gov/gridpoints/MTR/11,22',
         gridId: 'MTR',
-        gridX: 97,
-        gridY: 99,
+        gridX: 11,
+        gridY: 22,
         updateTime: '2026-10-02T08:31:00+00:00',
         retrievedAt: '2026-10-02T16:00:00.000Z',
       });

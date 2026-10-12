@@ -63,10 +63,10 @@ function forecastFixture({ stale = false, refuseVenue = null } = {}) {
     error: null,
     grids: [
       {
-        gridpointUrl: 'https://api.weather.gov/gridpoints/MTR/97,99',
+        gridpointUrl: 'https://api.weather.gov/gridpoints/MTR/11,22',
         gridId: 'MTR',
-        gridX: 97,
-        gridY: 99,
+        gridX: 11,
+        gridY: 22,
         updateTime: '2026-10-02T08:31:00+00:00',
         retrievedAt: stale ? '2026-10-02T21:00:00.000Z' : '2026-10-02T16:00:00.000Z',
         ageHours: stale ? 12.48 : 7.48,
@@ -119,19 +119,19 @@ describe('HeatForecastPage', () => {
     renderPage();
     const rows = screen.getAllByTestId('heat-row');
     expect(rows).toHaveLength(40);
-    const canyon11 = rows.find(
-      (r) => within(r).queryByText('Canyon MS') && within(r).queryByText('11:00')
+    const siteA11 = rows.find(
+      (r) => within(r).queryByText('Site A') && within(r).queryByText('11:00')
     );
-    expect(within(canyon11).getByTestId('heat-wbgt')).toHaveTextContent('77.3');
-    expect(within(canyon11).getByTestId('heat-band')).toHaveTextContent('Yellow');
-    expect(within(canyon11).getByTestId('heat-red-trigger')).toHaveTextContent('93.9');
-    expect(within(canyon11).getByTestId('heat-black-trigger')).toHaveTextContent('98.0');
+    expect(within(siteA11).getByTestId('heat-wbgt')).toHaveTextContent('77.3');
+    expect(within(siteA11).getByTestId('heat-band')).toHaveTextContent('Yellow');
+    expect(within(siteA11).getByTestId('heat-red-trigger')).toHaveTextContent('93.9');
+    expect(within(siteA11).getByTestId('heat-black-trigger')).toHaveTextContent('98.0');
   });
 
   it('shows the NWS update and retrieval times, and no stale warning when fresh', () => {
     renderPage();
     expect(screen.getByTestId('heat-forecast-times')).toHaveTextContent(
-      /MTR 97,99: updated .*retrieved/
+      /MTR 11,22: updated .*retrieved/
     );
     expect(screen.queryByTestId('heat-stale-warning')).not.toBeInTheDocument();
   });
@@ -143,7 +143,7 @@ describe('HeatForecastPage', () => {
   });
 
   it('keeps a refused row in place, with the reason', () => {
-    state.forecast = forecastFixture({ refuseVenue: 'loc-vannoy' });
+    state.forecast = forecastFixture({ refuseVenue: 'loc-site-b' });
     renderPage();
     const refused = screen.getAllByTestId('heat-refusal');
     expect(refused).toHaveLength(10);

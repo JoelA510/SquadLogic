@@ -1,7 +1,7 @@
 /**
  * useHeatForecast end to end over mocked I/O: the estate and game run from a
  * mocked Supabase, the NWS client returning the reference fixture, the real
- * turbidity table, and the real core model. The golden Canyon 11:00 value is
+ * turbidity table, and the real core model. The golden Site A 11:00 value is
  * the proof the wiring passes the right inputs through.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -33,38 +33,39 @@ vi.mock('../frontend/src/lib/turbidityTable.js', () => ({
 }));
 vi.mock('../frontend/src/lib/logger.js', () => ({ logger: { error: vi.fn() } }));
 
-const canyon = REFERENCE_SITES[0];
-const vannoy = REFERENCE_SITES[1];
+const siteA = REFERENCE_SITES[0];
+const siteB = REFERENCE_SITES[1];
+const siteC = REFERENCE_SITES[2];
 
 const LOCATIONS = [
   {
     id: 'loc-c',
-    name: canyon.name,
-    latitude: canyon.latitude,
-    longitude: canyon.longitude,
+    name: siteA.name,
+    latitude: siteA.latitude,
+    longitude: siteA.longitude,
     effective_to: null,
   },
   // Numeric columns may arrive as strings; the hook converts.
   {
     id: 'loc-v',
-    name: vannoy.name,
-    latitude: String(vannoy.latitude),
-    longitude: String(vannoy.longitude),
+    name: siteB.name,
+    latitude: String(siteB.latitude),
+    longitude: String(siteB.longitude),
     effective_to: null,
   },
   // Retired before the date: not on screen.
   {
     id: 'loc-old',
     name: 'Old Park',
-    latitude: 37.7,
-    longitude: -122.1,
+    latitude: siteC.latitude,
+    longitude: siteC.longitude,
     effective_to: '2026-09-01',
   },
 ];
 const FIELDS = [
   {
     id: 'f-c',
-    name: 'Canyon Turf',
+    name: 'Site A Turf',
     location_id: 'loc-c',
     surface_type: 'Turf',
     active: true,
@@ -72,7 +73,7 @@ const FIELDS = [
   },
   {
     id: 'f-v',
-    name: 'Vannoy Grass',
+    name: 'Site B Grass',
     location_id: 'loc-v',
     surface_type: 'Grass',
     active: true,
@@ -118,7 +119,7 @@ const fixtureForecast = (venues) =>
         json: loadGridpointJson(),
         source: {
           pointsUrl: `https://api.weather.gov/points/${v.latitude.toFixed(4)},${v.longitude.toFixed(4)}`,
-          gridpointUrl: 'https://api.weather.gov/gridpoints/MTR/97,99',
+          gridpointUrl: 'https://api.weather.gov/gridpoints/MTR/11,22',
           retrievedAt: '2026-10-02T16:00:00.000Z',
         },
       },
@@ -157,7 +158,7 @@ describe('useHeatForecast', () => {
     expect(result.current.category).toBe(1);
     expect(result.current.categorySource).toBe('default');
     expect(result.current.grids).toEqual([
-      expect.objectContaining({ gridId: 'MTR', gridX: 97, gridY: 99, stale: false }),
+      expect.objectContaining({ gridId: 'MTR', gridX: 11, gridY: 22, stale: false }),
     ]);
     expect(result.current.sources.map((s) => s.id)).toContain('liljegren2008');
   });

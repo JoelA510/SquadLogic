@@ -19,3 +19,4 @@ export {
   referenceEstate,
   referenceForecasts,
 } from './heatFixtures.js';
+export { REGION_SAMPLE_POINTS, SYNTHETIC_HEAT_SITES } from './heatSyntheticSites.js';

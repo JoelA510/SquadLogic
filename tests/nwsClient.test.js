@@ -20,9 +20,9 @@ import { loadGridpointJson } from './helpers/heatFixtures.js';
 const POINTS = {
   properties: {
     gridId: 'MTR',
-    gridX: 97,
-    gridY: 99,
-    forecastGridData: 'https://api.weather.gov/gridpoints/MTR/97,99',
+    gridX: 11,
+    gridY: 22,
+    forecastGridData: 'https://api.weather.gov/gridpoints/MTR/11,22',
   },
 };
 
@@ -76,21 +76,21 @@ const makeClient = (script, extra = {}) => {
 describe('request shape', () => {
   it('sends only Accept (no Feature-Flags, no User-Agent): a CORS-simple GET', async () => {
     const { client, calls } = makeClient({ '/points/': [json(200, POINTS)] });
-    await client.getPoint(37.7046, -122.0524);
-    expect(calls[0].url).toBe('https://api.weather.gov/points/37.7046,-122.0524');
+    await client.getPoint(37.3, -121.65);
+    expect(calls[0].url).toBe('https://api.weather.gov/points/37.3000,-121.6500');
     expect(calls[0].init.headers).toEqual({ Accept: 'application/geo+json' });
     expect(calls[0].init.method).toBe('GET');
   });
 
   it('formats coordinates to four decimals and refuses impossible ones', () => {
-    expect(pointsUrlFor(37.7, -122.05)).toBe('https://api.weather.gov/points/37.7000,-122.0500');
+    expect(pointsUrlFor(37.3, -121.65)).toBe('https://api.weather.gov/points/37.3000,-121.6500');
     expect(() => pointsUrlFor(NaN, 0)).toThrow(NwsError);
     expect(() => pointsUrlFor(91, 0)).toThrow(NwsError);
   });
 
   it('fetches gridpoints with cache: no-store and stamps the retrieval time', async () => {
     const { client, calls } = makeClient({ '/gridpoints/': [json(200, loadGridpointJson())] });
-    const g = await client.getGridpoint('https://api.weather.gov/gridpoints/MTR/97,99');
+    const g = await client.getGridpoint('https://api.weather.gov/gridpoints/MTR/11,22');
     expect(calls[0].init.cache).toBe('no-store');
     expect(g.retrievedAt).toBe('2026-10-02T16:00:00.000Z');
     expect(g.json.properties.gridId).toBe('MTR');
@@ -101,32 +101,32 @@ describe('points cache', () => {
   it('serves the mapping from memory, then from storage, until 24 h pass', async () => {
     const storage = memoryStorage();
     const first = makeClient({ '/points/': [json(200, POINTS)] }, { storage });
-    await first.client.getPoint(37.7, -122.05);
-    expect((await first.client.getPoint(37.7, -122.05)).fromCache).toBe(true);
+    await first.client.getPoint(37.3, -121.65);
+    expect((await first.client.getPoint(37.3, -121.65)).fromCache).toBe(true);
     expect(first.calls).toHaveLength(1);
 
     // A new client (a reload) reads the stored entry.
     const second = makeClient({ '/points/': [json(200, POINTS)] }, { storage });
-    expect((await second.client.getPoint(37.7, -122.05)).fromCache).toBe(true);
+    expect((await second.client.getPoint(37.3, -121.65)).fromCache).toBe(true);
     expect(second.calls).toHaveLength(0);
 
     second.advance(POINTS_CACHE_TTL_MS + 1);
-    expect((await second.client.getPoint(37.7, -122.05)).fromCache).toBe(false);
+    expect((await second.client.getPoint(37.3, -121.65)).fromCache).toBe(false);
     expect(second.calls).toHaveLength(1);
   });
 
   it('ignores a stored entry that points anywhere but api.weather.gov', async () => {
     const storage = memoryStorage();
     storage.setItem(
-      'sl-nws-points:37.7000,-122.0500',
+      'sl-nws-points:37.3000,-121.6500',
       JSON.stringify({
         gridpointUrl: 'https://evil.example/x',
         cachedAt: Date.parse('2026-10-02T15:00:00Z'),
       })
     );
     const { client, calls } = makeClient({ '/points/': [json(200, POINTS)] }, { storage });
-    const p = await client.getPoint(37.7, -122.05);
-    expect(p.gridpointUrl).toBe('https://api.weather.gov/gridpoints/MTR/97,99');
+    const p = await client.getPoint(37.3, -121.65);
+    expect(p.gridpointUrl).toBe('https://api.weather.gov/gridpoints/MTR/11,22');
     expect(calls).toHaveLength(1);
   });
 
@@ -135,7 +135,7 @@ describe('points cache', () => {
       properties: { forecastGridData: 'https://elsewhere.example/gridpoints/MTR/1,2' },
     };
     const { client } = makeClient({ '/points/': [json(200, bad)] });
-    await expect(client.getPoint(37.7, -122.05)).rejects.toMatchObject({ kind: 'shape' });
+    await expect(client.getPoint(37.3, -121.65)).rejects.toMatchObject({ kind: 'shape' });
   });
 });
 
@@ -144,7 +144,7 @@ describe('retry policy', () => {
     const { client, calls, sleeps } = makeClient({
       '/points/': [json(503, { title: 'Service Unavailable' }), json(502, {}), json(200, POINTS)],
     });
-    await client.getPoint(37.7, -122.05);
+    await client.getPoint(37.3, -121.65);
     expect(calls).toHaveLength(3);
     expect(sleeps).toEqual([...SERVER_RETRY_DELAYS_MS]);
   });
@@ -153,7 +153,7 @@ describe('retry policy', () => {
     const { client, calls } = makeClient({
       '/points/': [json(500, { detail: 'upstream timeout' })],
     });
-    await expect(client.getPoint(37.7, -122.05)).rejects.toThrow(
+    await expect(client.getPoint(37.3, -121.65)).rejects.toThrow(
       /NWS 500 after 3 attempts: upstream timeout/
     );
     expect(calls).toHaveLength(3);
@@ -163,7 +163,7 @@ describe('retry policy', () => {
     const { client, calls } = makeClient({
       '/points/': [new TypeError('Failed to fetch'), json(200, POINTS)],
     });
-    await client.getPoint(37.7, -122.05);
+    await client.getPoint(37.3, -121.65);
     expect(calls).toHaveLength(2);
   });
 
@@ -190,7 +190,7 @@ describe('retry policy', () => {
     const { client, calls, sleeps } = makeClient({
       '/points/': [json(429, {}), json(200, POINTS)],
     });
-    await client.getPoint(37.7, -122.05);
+    await client.getPoint(37.3, -121.65);
     expect(calls).toHaveLength(2);
     expect(sleeps).toEqual([RATE_LIMIT_RETRY_MS]);
     expect(RATE_LIMIT_RETRY_MS).toBe(6000);
@@ -200,7 +200,7 @@ describe('retry policy', () => {
     const { client, calls } = makeClient({
       '/points/': [json(429, { title: 'Too Many Requests' })],
     });
-    await expect(client.getPoint(37.7, -122.05)).rejects.toMatchObject({
+    await expect(client.getPoint(37.3, -121.65)).rejects.toMatchObject({
       kind: 'rate-limit',
       status: 429,
     });
@@ -209,7 +209,7 @@ describe('retry policy', () => {
 });
 
 describe('gridpoint reuse', () => {
-  const URL = 'https://api.weather.gov/gridpoints/MTR/97,99';
+  const URL = 'https://api.weather.gov/gridpoints/MTR/11,22';
 
   it('reuses a gridpoint within the reuse window, keeping its original retrieval time', async () => {
     const { client, calls, advance } = makeClient({
@@ -251,26 +251,26 @@ describe('getForecasts', () => {
       properties: {
         gridId: 'MTR',
         gridX: x,
-        gridY: 99,
-        forecastGridData: `https://api.weather.gov/gridpoints/MTR/${x},99`,
+        gridY: 22,
+        forecastGridData: `https://api.weather.gov/gridpoints/MTR/${x},22`,
       },
     });
     const { client, calls } = makeClient({
-      '/points/37.7000,-122.0500': [json(200, pointsFor(97))],
-      '/points/37.7100,-122.0600': [json(200, pointsFor(97))],
+      '/points/37.3000,-121.6500': [json(200, pointsFor(11))],
+      '/points/37.3100,-121.6600': [json(200, pointsFor(11))],
       '/points/10.0000,10.0000': [
         json(404, { detail: 'Unable to provide data for requested point 10,10' }),
       ],
-      '/gridpoints/MTR/97,99': [json(200, loadGridpointJson())],
+      '/gridpoints/MTR/11,22': [json(200, loadGridpointJson())],
     });
     const out = await client.getForecasts([
-      { id: 'a', latitude: 37.7, longitude: -122.05 },
-      { id: 'b', latitude: 37.71, longitude: -122.06 },
+      { id: 'a', latitude: 37.3, longitude: -121.65 },
+      { id: 'b', latitude: 37.31, longitude: -121.66 },
       { id: 'c', latitude: 10, longitude: 10 },
     ]);
     expect(calls.filter((c) => c.url.includes('/gridpoints/'))).toHaveLength(1);
-    expect(out.a.source.gridpointUrl).toBe('https://api.weather.gov/gridpoints/MTR/97,99');
-    expect(out.b.source.pointsUrl).toBe('https://api.weather.gov/points/37.7100,-122.0600');
+    expect(out.a.source.gridpointUrl).toBe('https://api.weather.gov/gridpoints/MTR/11,22');
+    expect(out.b.source.pointsUrl).toBe('https://api.weather.gov/points/37.3100,-121.6600');
     expect(out.c.error.message).toMatch(/404/);
     expect(out.a.json).toBe(out.b.json);
   });
@@ -283,8 +283,8 @@ describe('getPoint in-flight sharing', () => {
       '/gridpoints/': [json(200, { properties: {} })],
     });
     const out = await client.getForecasts([
-      { id: 'a', latitude: 37.7046, longitude: -122.0524 },
-      { id: 'b', latitude: 37.7046, longitude: -122.0524 },
+      { id: 'a', latitude: 37.3, longitude: -121.65 },
+      { id: 'b', latitude: 37.3, longitude: -121.65 },
     ]);
     expect(calls.filter((c) => c.url.includes('/points/'))).toHaveLength(1);
     expect(out.a.source.gridpointUrl).toBe(out.b.source.gridpointUrl);
@@ -296,8 +296,8 @@ describe('getPoint in-flight sharing', () => {
       '/gridpoints/': [json(200, { properties: {} })],
     });
     await client.getForecasts([
-      { id: 'a', latitude: 37.7046, longitude: -122.0524 },
-      { id: 'b', latitude: 37.71, longitude: -122.06 },
+      { id: 'a', latitude: 37.3, longitude: -121.65 },
+      { id: 'b', latitude: 37.31, longitude: -121.66 },
     ]);
     expect(calls.filter((c) => c.url.includes('/points/'))).toHaveLength(2);
   });

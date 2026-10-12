@@ -78,7 +78,7 @@ function produce() {
   for (const c of rowCodes({ venues: v, fields: f })) seen.add(c);
   const forecasts = referenceForecasts();
   // A surface refusal precedes the forecast, so the NWS failure needs its own estate.
-  forecasts['loc-fivecanyons'] = { error: { message: 'NWS 500 after 3 attempts' } };
+  forecasts['loc-site-d'] = { error: { message: 'NWS 500 after 3 attempts' } };
   for (const c of rowCodes({ venues, fields, forecasts })) seen.add(c);
   const f2 = structuredClone(fields);
   f2[0].surfaceType = 'Clay';
@@ -94,9 +94,9 @@ function produce() {
     fields,
     games: [
       { id: 'g1', fieldId: 'field-gone', start: at('10:00'), end: at('11:00') },
-      { id: 'g2', fieldId: 'field-vannoy', start: at('16:00'), end: at('15:00') },
-      { id: 'g3', fieldId: 'field-vannoy', start: at('09:20'), end: null },
-      { id: 'g4', fieldId: 'field-canyon', start: at('23:30'), end: '2026-10-04T01:00:00-07:00' },
+      { id: 'g2', fieldId: 'field-site-b', start: at('16:00'), end: at('15:00') },
+      { id: 'g3', fieldId: 'field-site-b', start: at('09:20'), end: null },
+      { id: 'g4', fieldId: 'field-site-a', start: at('23:30'), end: '2026-10-04T01:00:00-07:00' },
     ],
   })) {
     seen.add(c);

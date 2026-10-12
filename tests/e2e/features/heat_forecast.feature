@@ -15,11 +15,11 @@ Feature: Field heat-stress (WBGT) forecast
     When I open the Heat Forecast page
     Then the on-site WBGT disclaimer is shown
     And the game day picker shows "2026-10-03"
-    And "Canyon MS" at "11:00" reads WBGT "77.3" in band "Yellow"
-    And "Canyon MS" at "14:00" reads WBGT "80.9" in band "Yellow"
-    And "Vannoy ES" at "08:00" reads WBGT "62.0" in band "Green"
-    And "Vannoy ES" at "14:00" reads WBGT "80.0" in band "Yellow"
-    And "Canyon MS" at "13:00" has a Black trigger of "94.6"
+    And "Site A" at "11:00" reads WBGT "77.3" in band "Yellow"
+    And "Site A" at "14:00" reads WBGT "80.8" in band "Yellow"
+    And "Site B" at "08:00" reads WBGT "62.1" in band "Green"
+    And "Site B" at "14:00" reads WBGT "80.0" in band "Yellow"
+    And "Site A" at "13:00" has a Black trigger of "94.6"
     And the NWS forecast update and retrieval times are shown
     And no stale-forecast warning is shown
     And "Parking Lot Pitch" is listed as not computed because it has no coordinates
@@ -37,11 +37,11 @@ Feature: Field heat-stress (WBGT) forecast
     Given I am logged into SquadLogic as an "admin"
     And the heat forecast is enabled with the reference venues seeded
     And the NWS API is stubbed with the reference forecast
-    And the NWS API refuses the point for "Vannoy ES" with a 404
+    And the NWS API refuses the point for "Site B" with a 404
     And the browser clock reads "2026-10-02T16:00:00Z"
     When I open the Heat Forecast page
-    Then every "Vannoy ES" row is not computed, citing NWS 404
-    And "Canyon MS" at "11:00" reads WBGT "77.3" in band "Yellow"
+    Then every "Site B" row is not computed, citing NWS 404
+    And "Site A" at "11:00" reads WBGT "77.3" in band "Yellow"
 
   Scenario: The heat forecast stays out of the way until an admin turns it on
     Given I am logged into SquadLogic as an "admin"

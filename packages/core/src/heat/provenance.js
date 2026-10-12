@@ -20,7 +20,7 @@ import { TURBIDITY_TABLE } from './turbidity.js';
 export const HEAT_MODEL = Object.freeze({
   id: 'squadlogic-heat-wbgt',
   version: '1.0.0',
-  reference: 'cvsc_wbgt.py (Python reference, scripts/heat/reference/)',
+  reference: 'wbgt_reference.py (Python reference, scripts/heat/reference/)',
   wbgt: 'Liljegren et al. 2008, natural wet bulb + 2-inch globe, 10 m -> 2 m wind by stability class',
   solarPosition:
     'NREL SPA (Reda & Andreas 2004), pvlib spa_python defaults (delta_t 67 s, 12 C refraction)',

@@ -3,7 +3,7 @@
  * intervals expanded to hourly UTC, and unit conversion to F / mph / %.
  *
  * Field names are the ones a live `GET /gridpoints/{wfo}/{x},{y}` returns
- * (confirmed against MTR/97,99 on 2026-10-02): `properties.updateTime`,
+ * (confirmed against a live MTR gridpoint on 2026-10-02): `properties.updateTime`,
  * `gridId`, `gridX`, `gridY`, `elevation {unitCode, value}`, and per layer
  * `{uom, values: [{validTime: '<start>/<duration>', value}]}`.
  *

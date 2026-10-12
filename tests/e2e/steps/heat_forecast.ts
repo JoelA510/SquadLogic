@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { SYNTHETIC_HEAT_SITES } from '../../helpers/heatSyntheticSites.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -13,25 +14,27 @@ const { Given, When, Then } = createBdd();
  * values. The seed is the only place the mock database is touched, through
  * `window.__saveMockDB__`, always with `organization_id`.
  *
- * Venue coordinates are the reference's own public sites (school and park
- * grounds); the third venue is synthetic and has none.
+ * Venue coordinates are the reference's SYNTHETIC sites (made-up points, from
+ * `tests/helpers/heatSyntheticSites.js`); the third venue has none.
  */
+
+const [SITE_A, SITE_B] = SYNTHETIC_HEAT_SITES;
 
 const VENUES = [
   {
-    id: 'loc-heat-canyon',
-    name: 'Canyon MS',
-    lat: 37.7046,
-    lon: -122.0524,
-    field: 'Canyon Turf',
+    id: 'loc-heat-site-a',
+    name: SITE_A.name,
+    lat: SITE_A.latitude,
+    lon: SITE_A.longitude,
+    field: 'Site A Turf',
     surface: 'Turf',
   },
   {
-    id: 'loc-heat-vannoy',
-    name: 'Vannoy ES',
-    lat: 37.7069,
-    lon: -122.0587,
-    field: 'Vannoy Grass',
+    id: 'loc-heat-site-b',
+    name: SITE_B.name,
+    lat: SITE_B.latitude,
+    lon: SITE_B.longitude,
+    field: 'Site B Grass',
     surface: 'Grass',
   },
   {
@@ -116,9 +119,9 @@ Given('the NWS API is stubbed with the reference forecast', async ({ page }) => 
       body: JSON.stringify({
         properties: {
           gridId: 'MTR',
-          gridX: 97,
-          gridY: 99,
-          forecastGridData: 'https://api.weather.gov/gridpoints/MTR/97,99',
+          gridX: 11,
+          gridY: 22,
+          forecastGridData: 'https://api.weather.gov/gridpoints/MTR/11,22',
         },
       }),
     });
@@ -176,7 +179,7 @@ Then(
 
 Then('the NWS forecast update and retrieval times are shown', async ({ page }) => {
   await expect(page.getByTestId('heat-forecast-times')).toContainText(
-    /MTR 97,99: updated Oct 2, 2026, 1:31 AM PDT; retrieved Oct 2, 2026, 9:00 AM PDT/
+    /MTR 11,22: updated Oct 2, 2026, 1:31 AM PDT; retrieved Oct 2, 2026, 9:00 AM PDT/
   );
 });
 

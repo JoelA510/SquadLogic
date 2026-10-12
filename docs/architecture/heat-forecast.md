@@ -14,7 +14,7 @@ each venue for each kickoff, with:
 - the regional air temperatures that would push each field into Red and into Black;
 - a sources panel rendered from each row's provenance.
 
-The model is a port of a Python reference (`scripts/heat/reference/cvsc_wbgt.py`,
+The model is a port of a Python reference (`scripts/heat/reference/wbgt_reference.py`,
 with its tests). It is held to that reference by `tests/heatParity.test.js`.
 
 ## 1. Pieces and where they live
@@ -188,13 +188,13 @@ are outside it.
 | CONUS p99                    | 0.38                           |
 | CONUS worst cell (mountains) | 1.7                            |
 
-How WBGT responds to TL, at the reference site:
+How WBGT responds to TL, at the first (synthetic) reference site:
 
-| TL           | Canyon 08:00 | 11:00 | 14:00 | 13:00 Black trigger |
+| TL           | Site A 08:00 | 11:00 | 14:00 | 13:00 Black trigger |
 | ------------ | ------------ | ----- | ----- | ------------------- |
-| 3.0          | 62.1         | 77.4  | 80.9  | 94.4                |
-| 3.26 (pvlib) | 61.7         | 77.3  | 80.9  | 94.6                |
-| 3.5          | 61.3         | 77.2  | 80.8  | 94.7                |
+| 3.0          | 62.4         | 77.5  | 80.9  | 94.3                |
+| 3.39 (pvlib) | 61.8         | 77.3  | 80.9  | 94.6                |
+| 3.5          | 61.6         | 77.3  | 80.8  | 94.6                |
 
 - That is roughly 0.8 °F per unit of TL at low sun, and 0.1–0.2 °F at midday.
 - So the p95 table error costs ≤0.15 °F at low sun. At the worst mountain cells it is up to
@@ -311,13 +311,16 @@ it decides the same cases.
 
 | Site           | Hour  | Value                     |
 | -------------- | ----- | ------------------------- |
-| Canyon (turf)  | 11:00 | WBGT 77.3                 |
-| Canyon (turf)  | 14:00 | WBGT 80.9                 |
-| Canyon (turf)  | 13:00 | Black trigger 94.6 °F air |
-| Vannoy (grass) | 08:00 | WBGT 62.0                 |
-| Vannoy (grass) | 14:00 | WBGT 80.0                 |
+| Site A (turf)  | 11:00 | WBGT 77.3                 |
+| Site A (turf)  | 14:00 | WBGT 80.9                 |
+| Site A (turf)  | 13:00 | Black trigger 94.6 °F air |
+| Site B (grass) | 08:00 | WBGT 62.1                 |
+| Site B (grass) | 14:00 | WBGT 80.0                 |
 
-The brief quoted 94.5 for the Black trigger; the reference prints 94.6, inside ±0.6.
+The reference sites are synthetic points (`tests/helpers/heatSyntheticSites.js`, mirrored by the
+Python reference), not real venues; `tests/heatSyntheticCoordinates.test.js` holds every
+coordinate in the heat data to that set. These are the reference's printed values (pvlib native
+turbidity); the app, on the shipped 0.5-degree table, shows 80.8 for Site A at 14:00.
 
 ## 9. Limits
 

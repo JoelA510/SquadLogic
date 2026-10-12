@@ -1,6 +1,6 @@
 /**
  * The JS heat model held to the Python reference (`scripts/heat/reference/
- * cvsc_wbgt.py`), on the reference's own offline fixture: NWS MTR forecast for
+ * wbgt_reference.py`), on the reference's own offline fixture: NWS MTR forecast for
  * 2026-10-03, issued 2026-10-02 01:31 PDT.
  *
  * Three layers, so a failure says where the drift is:
@@ -110,14 +110,16 @@ function assertFullCoverage(reference, compare) {
 describe('heat parity: the meta-assertion can fail', () => {
   it('throws when a golden row is missing', () => {
     const doctored = structuredClone(ref);
-    doctored.unrounded.vannoy.rows = doctored.unrounded.vannoy.rows.filter((r) => r.hour !== 13);
-    expect(() => assertFullCoverage(doctored, () => {})).toThrow(/vannoy 13:00/);
+    doctored.unrounded['site-b'].rows = doctored.unrounded['site-b'].rows.filter(
+      (r) => r.hour !== 13
+    );
+    expect(() => assertFullCoverage(doctored, () => {})).toThrow(/site-b 13:00/);
   });
 
   it('throws when a whole site is missing', () => {
     const doctored = structuredClone(ref);
-    delete doctored.unrounded.fivecanyons;
-    expect(() => assertFullCoverage(doctored, () => {})).toThrow(/fivecanyons/);
+    delete doctored.unrounded['site-d'];
+    expect(() => assertFullCoverage(doctored, () => {})).toThrow(/site-d/);
   });
 
   it('the reference was produced by the generator this repo carries', () => {
@@ -156,19 +158,19 @@ describe('heat parity: stated goldens, end to end', () => {
   });
 
   it.each([
-    ['canyon', 11, 'wbgtF', 77.3],
-    ['canyon', 14, 'wbgtF', 80.9],
-    ['canyon', 13, 'blackTriggerF', 94.5],
-    ['vannoy', 8, 'wbgtF', 62.0],
-    ['vannoy', 14, 'wbgtF', 80.0],
+    ['site-a', 11, 'wbgtF', 77.3],
+    ['site-a', 14, 'wbgtF', 80.9],
+    ['site-a', 13, 'blackTriggerF', 94.6],
+    ['site-b', 8, 'wbgtF', 62.1],
+    ['site-b', 14, 'wbgtF', 80.0],
   ])('%s %s:00 %s = %s +/- 0.6', (key, hour, field, value) => {
     const row = at(key, hour);
     expect(row.status).toBe('computed');
     expect(Math.abs(row[field] - value)).toBeLessThanOrEqual(0.6);
   });
 
-  it('Canyon 08:00 is Green (the reference test, carried over)', () => {
-    expect(at('canyon', 8).band).toBe('Green');
+  it('Site A 08:00 is Green (the reference test, carried over)', () => {
+    expect(at('site-a', 8).band).toBe('Green');
   });
 
   it('every displayed value equals the Python reference as printed', () => {

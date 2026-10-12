@@ -1,7 +1,7 @@
 /**
  * Wet Bulb Globe Temperature: the Liljegren et al. (2008) model and the turf /
  * grass surface treatment, ported from the Python reference
- * (`scripts/heat/reference/cvsc_wbgt.py`).
+ * (`scripts/heat/reference/wbgt_reference.py`).
  *
  * Constants and control flow are the reference's, verbatim, including the
  * reference code's low-sun zenith clamps and its GHI cap. Do not "improve" a

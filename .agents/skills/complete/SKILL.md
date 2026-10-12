@@ -1,0 +1,57 @@
+---
+name: complete
+description: "Use when someone asks by name to bring existing code to production grade; it audits and then changes the repo, so don't start it unasked. Runs prompts/existing-project.md — baseline, thirteen-area audit, a remediation plan that accounts for every finding, and milestone 1."
+metadata:
+  invocation: explicit
+  argument-hint: "<repo, current state, hosting, constraints, what complete means, known issues, repo visibility and GitHub plan>"
+---
+
+Run the existing-project audit-and-completion process, exactly as written in
+`prompts/existing-project.md`. Read that file in full first — it is the authoritative
+instruction set; this skill only wires it up. Then:
+
+1. **Assemble the project inputs.** Parse whatever was given with the request, and map what you
+   can onto the prompt's input fields (repo path/URL, current state, hosting, hard constraints,
+   what "complete" means in user terms, known issues already reported, and repository
+   visibility and GitHub plan). Visibility and plan never block: read them from the host, and
+   assume private on GitHub Free for whatever can't be read, as the prompt's inputs say.
+   `[COMPLETE_MEANS]`
+   is the highest-leverage field — everything downstream is ordered against it — so if it's
+   missing, derive it from the README, product docs, or spec and state it as an assumption.
+   Ask, in one question, only when the repository gives nothing to derive it from.
+2. **Honor the ground rules throughout:** the existing stack and conventions override this
+   template and every reference; minimal diffs; flag refactors before making them; label
+   every finding statically reviewed / executed / fully validated; never claim a test ran
+   when it didn't.
+3. **Execute the phases in order.** Phase 0 (reference verification) first — verify only
+   the references relevant to this codebase's stack and list the skipped ones. Read the
+   codebase before writing a word of the audit.
+4. **Use the skeletons for the required artifacts.** They're in the skeletons directory:
+   `<repo>/prompts/skeletons/` after `process:apply`, `<template>/templates/project/` in the template repo
+   itself. The audit skeleton (baseline gate table, thirteen areas, file-path evidence, severity,
+   verification labels, refuted findings, coverage limits) and the remediation-plan skeleton
+   (item fields, fixed ordering, small independently shippable milestones, or the single-PR
+   form for a small project) are copied into a dated folder, `docs/audits/YYYY-MM-<slug>/`, or a
+   dated folder wherever the repo already keeps its plans and audits: its convention wins, as the
+   prompt says. Before reporting, run
+   `LC_ALL=C grep -nE '[^]A-Za-z0-9_]\[[A-Z][^]]*\]([^([]|$)|^\[[A-Z][^]]*\]([^(:[]|$)|<!-- GUIDANCE'` on every artifact you produced; it must print
+   nothing. From the template checkout, also run `node scripts/check-placeholders.mjs` on
+   them; it catches a half-deleted guidance comment the grep can't see. Where the target lacks
+   CLAUDE.md, CONTRIBUTING.md, ADRs, or a typed env module, the remediation plan may draw on the other
+   skeletons — as remediation items, not as wholesale replacements for what exists. Where it
+   already has its own (or an AGENTS.md, Cursor rules, …), merge from the skeleton rather
+   than adding a parallel file. Merged rules name this repo's real paths: rule 3's env module
+   and rule 7's ADR folder and template point where this repo keeps them, and a rule whose file
+   doesn't exist yet waits for the remediation item that adds it. For §12, run the template's
+   `check:instructions` script from a template checkout
+   (`node scripts/check-instructions.mjs --root <target>`) and record what it reports.
+5. **Execute milestone 1** unless the constraints say plan-only. Within a milestone, don't
+   stop for confirmation between agreed items; new issues discovered go into the plan
+   explicitly rather than silently expanding scope.
+6. **Log the run.** Add a row to `prompts/run-log.md` when the run starts, and fill in its
+   outcome columns when it finishes, so an abandoned run still leaves a record. If the run
+   exposed a gap in the prompt itself, note it in the same row. In the template repo, fix the
+   prompt there. In a repo that got the prompts through `process:apply`, report the gap to the
+   template instead and leave the delivered copy unedited: a re-apply only updates files you
+   haven't edited (`prompts/README.md`, "Keeping the prompts current").
+7. **Report** using the prompt's "Output of this prompt" contract.

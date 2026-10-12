@@ -1,0 +1,54 @@
+---
+name: bootstrap
+description: "Use when someone asks by name to bootstrap a new or empty repo; it writes many files, so don't start it unasked. Runs prompts/new-project.md end to end — reference verification, stack ADR, guardrail files, typed env, and a phased plan ending in a deployable walking skeleton."
+metadata:
+  invocation: explicit
+  argument-hint: "<project name, what it does and for whom, platform targets, constraints, repo visibility and GitHub plan>"
+---
+
+Run the new-project bootstrap process, exactly as written in `prompts/new-project.md`. Read
+that file in full first — it is the authoritative instruction set; this skill only wires it
+up. Then:
+
+1. **Assemble the project inputs.** Parse whatever was given with the request, and map what you
+   can onto the prompt's input fields (project name, description and target users, platform
+   targets, constraints, stack preferences, repository visibility and GitHub plan). Visibility
+   and plan never block: read them from the host, and assume private on GitHub Free for
+   whatever can't be read, as the prompt's inputs say. Ask, in one question, only for what
+   neither the request, the host, nor a safe default supplies — vague inputs produce vague
+   plans, and the prompt permits at most one blocking question thereafter.
+2. **Execute the phases in order.** Phase 0 (reference verification) is mandatory and comes
+   first; if you cannot reach the network, say verification was skipped and mark every
+   borrowed pattern provisional, as the prompt directs.
+3. **Use the skeletons for every artifact the prompt requires.** They're in the skeletons
+   directory: `<repo>/prompts/skeletons/` after `process:apply`,
+   `<template>/templates/project/` in the template repo itself. `AGENTS.skeleton.md` becomes
+   `AGENTS.md`, `CLAUDE.skeleton.md` becomes `CLAUDE.md` (and the prompt gives the one-line
+   `<repo>/.gemini/settings.json` that points Gemini CLI at AGENTS.md); CONTRIBUTING.md,
+   SECURITY.md, `.env.example`, and the docs/ set keep their paths: reference-verification,
+   the ADR index and the stack ADR, the ADR template (0000-template, copied unchanged:
+   operating rule 7 points every agent at it), product, dev-plan, dependency-policy (the release
+   runbook comes with milestone 1's deploy pipeline), and the GitHub ruleset (kept even where the
+   plan can't enforce it) and, once more than one person merges, CODEOWNERS, both under .github/.
+   Copy each to its real path, fill every `[BRACKETED]` placeholder, and delete the guidance
+   comments; the ADR template alone stays unfilled, and is left out of the check below. The env-validation skeleton is different: it's
+   the guide for Phase 2.6's env module, so build the module from it and don't keep a copy. A
+   finished artifact contains neither placeholders nor guidance — prove it:
+   `LC_ALL=C grep -nE '[^]A-Za-z0-9_]\[[A-Z][^]]*\]([^([]|$)|^\[[A-Z][^]]*\]([^(:[]|$)|<!-- GUIDANCE' <each artifact>`
+   must print nothing. With Node and a template checkout at hand, also run
+   `node <template checkout>/scripts/check-placeholders.mjs <each artifact>`, which catches a
+   half-deleted guidance comment the grep can't see. If the repo already has agent rules
+   (Cursor rules, a Copilot instructions file, …), fold them into AGENTS.md rather than keep
+   two sets, as the prompt's Phase 2.1 says; CLAUDE.md imports AGENTS.md.
+4. **If the new project should also use the template's interface foundation** (it's a fork of
+   the template repo), follow the rebrand workflow in the template's `AGENTS.md` (init script →
+   palette swap → tokens rebuild → contrast re-check) before building features on top.
+5. **Log the run.** Add a row to `prompts/run-log.md` when the run starts, and fill in its
+   outcome columns (outputs, whether references were verified) when it finishes, so an
+   abandoned run still leaves a record. If the run exposed a gap in the prompt itself, note
+   it in the same row. In the template repo, fix the prompt there. In a repo that got the
+   prompts through `process:apply`, report the gap to the template instead and leave the
+   delivered copy unedited: a re-apply only updates files you haven't edited
+   (`prompts/README.md`, "Keeping the prompts current").
+6. **Report** using the prompt's "Output of this prompt" contract, labeling every claim
+   statically reviewed / executed / fully validated.

@@ -672,6 +672,24 @@ Given('the automated schedule has been generated', async ({ page }) => {
     db.scheduler_runs = [];
     db.practice_assignments = [];
 
+    // The grid's read is a SEASON read (org + season through teams ->
+    // divisions), so Team A's division belongs to the active season, as in
+    // 'a practice schedule has been generated'.
+    const storedSeason = localStorage.getItem('squadlogic-current-season') || 'Fall 2026';
+    const activeSeason = (db.season_settings || []).find(
+      (s: Record<string, unknown>) =>
+        s.organization_id === orgId && (s.id === storedSeason || s.name === storedSeason)
+    );
+    db.divisions = [
+      ...(db.divisions || []).filter((d: Record<string, unknown>) => d.id !== 'div-1'),
+      {
+        id: 'div-1',
+        name: 'U10',
+        organization_id: orgId,
+        season_settings_id: activeSeason?.id || 'season-1',
+      },
+    ];
+
     // CRITICAL FIX: Add organization_id so the hooks don't filter these out
     db.teams = [{ id: 'team-a', name: 'Team A', division_id: 'div-1', organization_id: orgId }];
     db.practice_slots = [

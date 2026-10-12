@@ -145,9 +145,14 @@ vi.mock('../frontend/src/components/PracticeAssignmentList.jsx', async (importOr
 });
 vi.mock('../frontend/src/components/PracticeOverridePanel.jsx', () => ({
   default: ({ onStageAssignment }) => (
-    <button type="button" onClick={() => onStageAssignment('team-d', 'slot-fri')}>
-      Stage Team D
-    </button>
+    <>
+      <button type="button" onClick={() => onStageAssignment('team-d', 'slot-fri')}>
+        Stage Team D
+      </button>
+      <button type="button" onClick={() => onStageAssignment('team-a', 'slot-fri')}>
+        Stage Team A
+      </button>
+    </>
   ),
 }));
 const stub = (name) => ({ default: () => <div data-testid={`stub-${name}`} /> });
@@ -408,6 +413,25 @@ describe('the scheduling grid reads the current practice schedule, not the lates
         rendered.filter((t) => t.includes(day) && t.includes(r.effective_date_range))
       ).toHaveLength(1);
     }
+  });
+
+  it('a re-home enact: overriding the re-homed team stages ONE row for it, not two', async () => {
+    const list = await renderGrid(ENACT);
+    fireEvent.click(await screen.findByRole('button', { name: /enter manual override/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stage Team A' }));
+    await waitFor(() => expect(shownIds(list)).toContain('staged-team-a-slot-fri'));
+    const ids = shownIds(list);
+    // Meta: Team A held two rows in the seed, so a per-row replace would double it.
+    expect(ENACT.filter((r) => r.team_id === 'team-a')).toHaveLength(2);
+    expect(ids.filter((id) => id === 'staged-team-a-slot-fri')).toHaveLength(1);
+    expect(new Set(ids).size).toBe(ids.length);
+    // The other teams' rows are untouched; Team A's two series are replaced.
+    expect(ids).toEqual(
+      [
+        ...ENACT.filter((r) => r.team_id !== 'team-a').map((r) => r.id),
+        'staged-team-a-slot-fri',
+      ].sort()
+    );
   });
 
   it('a save that omitted B and C: the grid shows their retained manual rows', async () => {

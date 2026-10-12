@@ -1046,10 +1046,18 @@ export default function PracticeSchedulingPage() {
       const replaced = localAssignments.some(
         (assignment) => String(getAssignmentTeamId(assignment)) === String(teamId)
       );
+      // A team can hold several rows (two weekdays, or a closed series and its
+      // successor). Each became the same staged object -- one id, one key, sent
+      // twice -- so the first is replaced and the rest dropped: the same set of
+      // keys reaches the writer, once each.
+      let stagedOnce = false;
       const staged = replaced
-        ? localAssignments.map((assignment) =>
-            String(getAssignmentTeamId(assignment)) === String(teamId) ? nextAssignment : assignment
-          )
+        ? localAssignments.flatMap((assignment) => {
+            if (String(getAssignmentTeamId(assignment)) !== String(teamId)) return [assignment];
+            if (stagedOnce) return [];
+            stagedOnce = true;
+            return [nextAssignment];
+          })
         : [...localAssignments, nextAssignment];
 
       setReviewAssignments(staged);

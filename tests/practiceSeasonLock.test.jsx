@@ -160,14 +160,17 @@ function dashboardData() {
     team: {
       teams: ['team-a', 'team-b', 'team-c'].map((id) => ({ id, name: id, division: 'U10' })),
     },
-    // The grid's rows, deliberately ONLY the latest run's: the season holds
-    // more, and the lock must come from its own season read, never from these.
+    // The grid's rows as production hands them over: the season's current
+    // rows (`useCurrentPracticeSchedule`). The lock still comes from the page's
+    // own season read, which these cases judge against the Edge's.
     practice: {
       summary: null,
       snapshot: null,
       generatedAt: null,
       runId: 'run-2',
-      scheduleAssignments: state.rows.filter((r) => r.run_id === 'run-2'),
+      scheduleAssignments: state.rows.filter(
+        (r) => r.teams?.divisions?.season_settings_id === SEASON
+      ),
     },
     game: { summary: null, snapshot: null, warnings: [], generatedAt: null, runId: null },
   };

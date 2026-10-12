@@ -32,11 +32,18 @@ import {
 
 type Row = Record<string, unknown>;
 
-/** Applies only the `kind` filter, so the loader's own live filter is what runs. */
+/**
+ * Applies only the `kind` filter, so the loader's own live filter is what runs.
+ * Order is modelled as in the Vitest arm: `order('id', ascending)` sorts by
+ * id; without it each request rotates the rows one more place, so offset
+ * paging skips and repeats rows.
+ */
 function fakeClient(relocated: Row[]): LockReader {
+  let requests = 0;
   return {
     from(table: string) {
       const filters: Array<[string, unknown]> = [];
+      let orderedById = false;
       const q = {
         select: () => q,
         eq(col: string, val: unknown) {
@@ -44,15 +51,24 @@ function fakeClient(relocated: Row[]): LockReader {
           return q;
         },
         is: () => q,
-        order: () => q,
+        order(col: string, options?: { ascending?: boolean }) {
+          if (col === 'id' && (options?.ascending ?? true)) orderedById = true;
+          return q;
+        },
         range(from: number, to: number): PromiseLike<QueryResult> {
+          requests += 1;
           const kind = filters.find(([col]) => col === 'kind')?.[1];
-          const rows: Row[] =
+          let rows: Row[] =
             table === 'practice_assignments'
               ? [...RELOCATED_DB_ASSIGNMENTS]
               : kind === 'relocated'
-                ? relocated
+                ? [...relocated]
                 : [];
+          if (orderedById) rows.sort((a, b) => (String(a.id) < String(b.id) ? -1 : 1));
+          else if (rows.length > 0) {
+            const shift = requests % rows.length;
+            rows = [...rows.slice(shift), ...rows.slice(0, shift)];
+          }
           return Promise.resolve({ data: rows.slice(from, to + 1), error: null });
         },
       };
@@ -82,6 +98,30 @@ async function loadSeed() {
 function lockedOf(lock: Awaited<ReturnType<typeof loadSeed>>) {
   return lock.rows.map((r) => ({ assignmentId: r.id, teamId: r.teamId, slotId: r.slotId }));
 }
+
+Deno.test(
+  'relocated lock - paging one row at a time loads every live relocation once',
+  async () => {
+    const lock = await loadSeasonPracticeLock(fakeClient([...RELOCATED_DB_EXCEPTIONS]), {
+      organizationId: 'org',
+      seasonSettingsId: 'season',
+      pageSize: 1,
+    });
+    if (!lock.ok) throw new Error(lock.message);
+    const live = [...RELOCATED_EXPECT.liveInRun, ...RELOCATED_EXPECT.outsideRun];
+    assert(live.length >= 2, 'fewer than two relocations: paging proves nothing');
+    assertEquals(
+      lock.relocations.map((r) => r.exceptionId).sort(),
+      [...live].sort(),
+      'paging skipped or repeated a relocation'
+    );
+    assertEquals(
+      lock.rows.map((r) => r.id).sort(),
+      RELOCATED_DB_ASSIGNMENTS.map((r: Row) => String(r.id)).sort(),
+      'paging skipped or repeated a locked row'
+    );
+  }
+);
 
 Deno.test(
   'relocated lock - control: without the hold, the run takes every relocated slot',

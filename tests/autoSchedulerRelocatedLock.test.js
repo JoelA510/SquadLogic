@@ -38,7 +38,15 @@ import {
 // A fake user-scoped client. It records every filter and applies NONE of
 // them except `kind`, so the loader's own live filter is what is tested
 // ("whatever the caller selected", plan §2.1 rule 1).
+//
+// Order is modelled, not ignored: a read that asks for `order('id',
+// ascending)` gets its rows sorted by id; one that does not gets them in no
+// stable order -- each request rotates the rows by one more place, as a heap
+// read between pages may -- so offset paging without an order skips and
+// repeats rows, the way PostgREST can.
 // ---------------------------------------------------------------------------
+
+const byId = (a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
 
 function fakeClient({
   assignments,
@@ -48,10 +56,11 @@ function fakeClient({
   cap = Infinity,
 }) {
   const calls = [];
+  let requests = 0;
   return {
     calls,
     from(table) {
-      const call = { table, filters: [], select: null };
+      const call = { table, filters: [], select: null, orders: [] };
       calls.push(call);
       const q = {
         select(cols) {
@@ -66,10 +75,12 @@ function fakeClient({
           call.filters.push(['is', col, val]);
           return q;
         },
-        order() {
+        order(col, options) {
+          call.orders.push([col, options?.ascending ?? true]);
           return q;
         },
         range(from, to) {
+          requests += 1;
           const kind = call.filters.find(([op, col]) => op === 'eq' && col === 'kind')?.[2];
           let rows;
           if (table === 'practice_assignments') rows = assignments;
@@ -78,6 +89,12 @@ function fakeClient({
           else rows = [...timeTbd, ...relocated];
           if (failRelocated && table === 'practice_exceptions' && kind === 'relocated') {
             return Promise.resolve({ data: null, error: { message: 'boom' } });
+          }
+          if (call.orders.some(([col, asc]) => col === 'id' && asc === true)) {
+            rows = [...rows].sort(byId);
+          } else if (rows.length > 0) {
+            const shift = requests % rows.length;
+            rows = [...rows.slice(shift), ...rows.slice(0, shift)];
           }
           const end = Math.min(to + 1, from + cap);
           return Promise.resolve({ data: rows.slice(from, end), error: null });
@@ -253,6 +270,53 @@ describe('the lock loads live relocated exceptions, as the caller, scoped like t
     }
     for (const column of ['practice_slot_id', 'team_id', 'withdrawn_at', 'assignment_id']) {
       assert.match(call.select, new RegExp(`\\b${column}\\b`), `does not select ${column}`);
+    }
+  });
+
+  it('every lock read is ordered by id, ascending, so offset paging is stable', async () => {
+    const { client } = await loadSeed();
+    const reads = {
+      practice_assignments: (c) => c.table === 'practice_assignments',
+      'practice_exceptions time_tbd': (c) =>
+        c.table === 'practice_exceptions' &&
+        c.filters.some(([, col, v]) => col === 'kind' && v === 'time_tbd'),
+      'practice_exceptions relocated': (c) =>
+        c.table === 'practice_exceptions' &&
+        c.filters.some(([, col, v]) => col === 'kind' && v === 'relocated'),
+    };
+    for (const [name, matches] of Object.entries(reads)) {
+      const pages = client.calls.filter(matches);
+      assert.ok(pages.length >= 1, `${name} was not read`);
+      for (const page of pages) {
+        assert.deepEqual(page.orders, [['id', true]], `${name} is not ordered by id ascending`);
+      }
+    }
+  });
+
+  it('paging one row at a time holds every live relocation (order is what makes it whole)', async () => {
+    const client = fakeClient({
+      assignments: RELOCATED_DB_ASSIGNMENTS,
+      relocated: RELOCATED_DB_EXCEPTIONS,
+    });
+    const lock = /** @type {any} */ (
+      await loadSeasonPracticeLock(client, { ...PARAMS, pageSize: 1 })
+    );
+    assert.equal(lock.ok, true);
+    const live = [...RELOCATED_EXPECT.liveInRun, ...RELOCATED_EXPECT.outsideRun];
+    assert.ok(live.length >= 2, 'fewer than two relocations: paging proves nothing');
+    // Each exactly once: a skipped one leaves its slot free, a repeated one is a stale page.
+    assert.deepEqual(
+      lock.relocations.map((r) => r.exceptionId).sort(),
+      [...live].sort(),
+      'paging skipped or repeated a relocation'
+    );
+    const base = buildLockedOccupancy(lockedOf(lock), teamsById, slotsById, lock.relocations);
+    for (const [slotId, units] of Object.entries(RELOCATED_EXPECT.unitsHeld)) {
+      assert.equal(
+        base.slotCapacity.get(slotId),
+        slotsById.get(slotId).capacity - units,
+        `${slotId} is not held after a paged read`
+      );
     }
   });
 

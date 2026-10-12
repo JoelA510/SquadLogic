@@ -280,7 +280,7 @@ describe('the lock is loaded as the caller, whole, and scoped like the writer', 
     return {
       calls,
       from(table) {
-        const call = { table, filters: [], ranges: [] };
+        const call = { table, filters: [], ranges: [], orders: [] };
         calls.push(call);
         const q = {
           select(cols) {
@@ -295,7 +295,8 @@ describe('the lock is loaded as the caller, whole, and scoped like the writer', 
             call.filters.push(['is', col, val]);
             return q;
           },
-          order() {
+          order(col, options) {
+            call.orders.push([col, options?.ascending ?? true]);
             return q;
           },
           range(from, to) {
@@ -386,6 +387,11 @@ describe('the lock is loaded as the caller, whole, and scoped like the writer', 
         ([op, col, v]) => op === 'is' && col === 'withdrawn_at' && v === null
       )
     );
+    // Offset paging is only whole over a stable order: every page of every
+    // lock read is ordered by id, ascending.
+    for (const call of client.calls) {
+      assert.deepEqual(call.orders, [['id', true]], `${call.table} page is not ordered by id`);
+    }
   });
 
   it('a failed read is a refusal, not an empty lock', async () => {

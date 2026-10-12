@@ -102,8 +102,17 @@ from <D>`, `enact.js:496-498`): ids and a date, no free text, no PII.
 At Apply, before any call, the page computes **`unlockRequired`**: every
 season row (`seasonRows`, the read the lock set already uses) that the staged
 payload would make the writer prune. This is the transcription the #541 test
-already pins (`writerPruneSet`). For a team in the payload, it is each stored
-row whose `(team, slot, canonical range)` key the payload does not carry.
+already pins (`writerPruneSet`), and it has both of the writer's arms
+(`20261002000000:717-773`):
+
+- for a season team in the payload, each stored row whose
+  `(team, slot, canonical range)` key the payload does not carry;
+- for a season team absent from the payload, each of its `auto` rows.
+
+A closed series is re-sent by its key (#541), so it is never in this set. The
+second arm is empty whenever the grid's read is complete, since the grid sends
+every season row. It is computed anyway, so a missed row is caught here and
+not refused late by the writer.
 
 - Empty: Apply behaves exactly as today. No dialog, same call.
 - Non-empty: the dialog opens. Nothing is sent until Confirm.
@@ -111,9 +120,10 @@ row whose `(team, slot, canonical range)` key the payload does not carry.
 **Only what an override replaced is unlockable.** Each row in
 `unlockRequired` must be a current series of a team the admin staged in this
 session. The page records staged team ids in `handleStageManualAssignment`. A
-row outside that set (a team the admin did not touch, an absent team's `auto`
-row, a closed series) makes the dialog refuse with a named reason. It never
-unlocks it. This is the grid's equivalent of the enact's stray check
+row outside that set (a team the admin did not touch, or an absent team's
+`auto` row) makes the dialog refuse with a named reason. It never unlocks it.
+A closed series cannot reach this check (above). Its protection is the
+staging rule, witnessed by W1 and W8c. This is the grid's equivalent of the enact's stray check
 (`enact.js:419-428`).
 
 ### 2.2 What the dialog says
@@ -143,7 +153,8 @@ reason until every box is ticked and a reason is chosen), and Cancel.
   and nothing else;
 - `exceptions`: the daylight exceptions, as today, when the run has any;
 - `closes: []`, `withdrawExceptions: []`;
-- `baseFingerprint`: read when the dialog opens (Q4).
+- `baseFingerprint`: **only if Q4 says yes**, read when the dialog opens.
+  Without it, the call carries no fingerprint, as the grid's saves do today.
 
 Not ticked or cancelled: nothing is sent, and the staged review stays as it
 was. A non-admin never sees the dialog: Apply is already admin-only.
@@ -207,7 +218,8 @@ is declared (§5) and is Q6.
 ### 2.9 Accessibility (WCAG 2.2 AA)
 
 - `Modal` gives `role="dialog"`, `aria-modal`, Escape to close and focus
-  restore (`Modal.jsx:35-70`). Focus goes to the dialog heading on open
+  restore (`Modal.jsx:84-85` for the role, `:35-70` for the focus effect,
+  which saves focus at `:39`, moves it at `:43` and restores it at `:68`). Focus goes to the dialog heading on open
   (`initialFocusRef`, as the enact does), and back to Apply on close.
 - One labelled checkbox per team inside a `fieldset` and `legend`. The reason
   control is a labelled `select` (Q3). If there is free text, it is a labelled

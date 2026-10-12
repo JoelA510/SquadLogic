@@ -325,10 +325,10 @@ async function renderGrid(seed) {
 const shownIds = (list) => [...list.querySelectorAll('li')].map((li) => li.textContent).sort();
 
 /** Enter manual override, stage Team D, Apply; return the rows the save sent. */
-async function stageAndApply(seed) {
+async function stageAndApply(seed, stageButton = 'Stage Team D') {
   await renderGrid(seed);
   fireEvent.click(await screen.findByRole('button', { name: /enter manual override/i }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Stage Team D' }));
+  fireEvent.click(await screen.findByRole('button', { name: stageButton }));
   const apply = await screen.findByRole('button', { name: /apply schedule/i });
   await waitFor(() => expect(apply).toBeEnabled());
   fireEvent.click(apply);
@@ -415,23 +415,61 @@ describe('the scheduling grid reads the current practice schedule, not the lates
     }
   });
 
-  it('a re-home enact: overriding the re-homed team stages ONE row for it, not two', async () => {
-    const list = await renderGrid(ENACT);
-    fireEvent.click(await screen.findByRole('button', { name: /enter manual override/i }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Stage Team A' }));
-    await waitFor(() => expect(shownIds(list)).toContain('staged-team-a-slot-fri'));
-    const ids = shownIds(list);
-    // Meta: Team A held two rows in the seed, so a per-row replace would double it.
-    expect(ENACT.filter((r) => r.team_id === 'team-a')).toHaveLength(2);
-    expect(ids.filter((id) => id === 'staged-team-a-slot-fri')).toHaveLength(1);
-    expect(new Set(ids).size).toBe(ids.length);
-    // The other teams' rows are untouched; Team A's two series are replaced.
-    expect(ids).toEqual(
-      [
-        ...ENACT.filter((r) => r.team_id !== 'team-a').map((r) => r.id),
-        'staged-team-a-slot-fri',
-      ].sort()
-    );
+  // The read is ordered by id, so the two id spellings put the closed series
+  // after (`pa-a-old` > `pa-a-new`) and before (`pa-a-0old`) its successor: a
+  // first-row rule would drop it in one and overwrite it in the other.
+  const ENACT_CLOSED_FIRST = ENACT.map((r) =>
+    r.id === 'pa-a-old' ? { ...r, id: 'pa-a-0old' } : r
+  );
+  for (const { label, seed, closedId } of [
+    { label: 'closed series sorts last', seed: ENACT, closedId: 'pa-a-old' },
+    { label: 'closed series sorts first', seed: ENACT_CLOSED_FIRST, closedId: 'pa-a-0old' },
+  ]) {
+    it(`a re-home enact (${label}): overriding Team A keeps its closed series, replaces only the current one`, async () => {
+      const closed = seed.find((r) => r.id === closedId);
+      const current = seed.find((r) => r.id === 'pa-a-new');
+      // Meta: the seed's ranges make one of them history (ends before the other starts).
+      expect(canonicalRange(closed.effective_date_range).slice(-11, -1)).toBe(
+        canonicalRange(current.effective_date_range).slice(1, 11)
+      );
+      const rows = await stageAndApply(seed, 'Stage Team A');
+      const list = screen.getByRole('list', { name: 'practice rows' });
+      const ids = shownIds(list);
+      expect(ids).toEqual(
+        [
+          ...seed.filter((r) => r.id !== 'pa-a-new').map((r) => r.id),
+          'staged-team-a-slot-fri',
+        ].sort()
+      );
+      // The closed series goes back exactly as stored: same key, same source.
+      const sentClosed = rows.filter((r) => keyOf(r) === keyOf(closed));
+      expect(sentClosed).toHaveLength(1);
+      expect(sentClosed[0].source).toBe(closed.source);
+      // The staged row is sent once, and Team A's current series is not sent.
+      expect(rows.filter((r) => r.team_id === 'team-a')).toHaveLength(2);
+      expect(rows.some((r) => keyOf(r) === keyOf(current))).toBe(false);
+      // What the writer would remove is the replaced current series and
+      // nothing else. Not empty: ruling 2 locks it, and the grid sends no
+      // `unlock`, so this Apply is refused naming pa-a-new -- the row the
+      // operator chose to replace, never the closed history (pgTAP pins both).
+      expect(writerPruneSet(seed, rows)).toEqual(['pa-a-new']);
+    });
+  }
+
+  it('a team with TWO current series (two weekdays): today behaviour, one staged row (pinned)', async () => {
+    const TWO_LIVE = [
+      row('pa-a-mon', 'team-a', 'slot-mon', FULL, RUN2),
+      row('pa-a-wed', 'team-a', 'slot-wed', FULL, RUN2),
+      row('pa-b', 'team-b', 'slot-tue', FULL, RUN2),
+    ];
+    const rows = await stageAndApply(TWO_LIVE, 'Stage Team A');
+    const ids = shownIds(screen.getByRole('list', { name: 'practice rows' }));
+    // Ambiguous which weekday an override replaces, so it is not guessed: the
+    // team's current rows collapse to the one staged row, as the old per-row
+    // replace did (it sent one key for all of them).
+    expect(ids).toEqual(['pa-b', 'staged-team-a-slot-fri']);
+    expect(rows.filter((r) => r.team_id === 'team-a')).toHaveLength(1);
+    expect(writerPruneSet(TWO_LIVE, rows)).toEqual(['pa-a-mon', 'pa-a-wed']);
   });
 
   it('a save that omitted B and C: the grid shows their retained manual rows', async () => {

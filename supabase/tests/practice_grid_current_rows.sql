@@ -24,7 +24,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(27);
+SELECT plan(35);
 
 -- Org A: two fresh seasons, one per shape, four teams each, five slots.
 INSERT INTO public.season_settings (id, organization_id, name)
@@ -89,6 +89,34 @@ RETURNS jsonb LANGUAGE sql STABLE AS $$
       JOIN public.divisions d ON d.id = t.division_id
      WHERE d.season_settings_id = p_season
        AND (p_only_run IS NULL OR pa.run_id = p_only_run)
+$$;
+
+-- The grid's payload for a manual override of `p_team` into `p_slot`: every
+-- other team's current rows, the staged row, and -- with `p_keep_closed` --
+-- the team's CLOSED series (ending before another of its series starts: the
+-- rule `handleStageManualAssignment` applies). Without it this is the shape
+-- the first-row replace sent: the team's every row dropped.
+CREATE FUNCTION pg_temp.grid_override(p_season uuid, p_team uuid, p_slot uuid, p_keep_closed boolean)
+RETURNS jsonb LANGUAGE sql STABLE AS $$
+    SELECT COALESCE(jsonb_agg(jsonb_build_object(
+               'team_id', pa.team_id,
+               'practice_slot_id', pa.practice_slot_id,
+               'effective_date_range',
+                   '[' || lower(pa.effective_date_range) || ',' || (upper(pa.effective_date_range) - 1) || ']',
+               'source', pa.source) ORDER BY pa.id), '[]'::jsonb)
+           || jsonb_build_array(jsonb_build_object(
+               'team_id', p_team, 'practice_slot_id', p_slot,
+               'effective_date_range', '[2026-09-01,2026-11-30]', 'source', 'manual'))
+      FROM public.practice_assignments pa
+      JOIN public.teams t ON t.id = pa.team_id
+      JOIN public.divisions d ON d.id = t.division_id
+     WHERE d.season_settings_id = p_season
+       AND (pa.team_id <> p_team
+            OR (p_keep_closed
+                AND upper(pa.effective_date_range) <= (
+                    SELECT max(lower(x.effective_date_range))
+                      FROM public.practice_assignments x
+                     WHERE x.team_id = p_team)))
 $$;
 
 -- What a save returned, and the rows as they stood before it.
@@ -242,6 +270,99 @@ SELECT is(
         AND metadata->>'run_id' = 'a1111111-1111-1111-1111-0000000077c3'),
     0,
     'enact shape: no unlock or supersede audit for the save');
+
+-- 13a-13h. A manual override of the re-homed Team A (into Friday). It
+-- replaces A's CURRENT series (Thursday) and keeps its CLOSED one (Monday).
+-- Every assigned row is locked (ruling 2), so replacing Thursday needs that
+-- row in `unlock`; the closed series must never need to be.
+INSERT INTO grid_before
+SELECT 'override', pa.id, pa.practice_slot_id, pa.effective_date_range
+  FROM public.practice_assignments pa
+ WHERE pa.team_id = 'a1111111-1111-1111-1111-0000000077e1'
+   AND pa.practice_slot_id = 'a1111111-1111-1111-1111-0000000077a1';
+SELECT throws_ok(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077c4',
+                              'season_settings_id', 'a1111111-1111-1111-1111-0000000077b1'),
+           pg_temp.grid_override('a1111111-1111-1111-1111-0000000077b1',
+                                 'a1111111-1111-1111-1111-0000000077e1',
+                                 'a1111111-1111-1111-1111-0000000077a5', true)) $$,
+    '22023', NULL,
+    'override: with no unlock, replacing the locked current series is refused 22023');
+SELECT throws_like(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077c4',
+                              'season_settings_id', 'a1111111-1111-1111-1111-0000000077b1'),
+           pg_temp.grid_override('a1111111-1111-1111-1111-0000000077b1',
+                                 'a1111111-1111-1111-1111-0000000077e1',
+                                 'a1111111-1111-1111-1111-0000000077a5', true)) $$,
+    '%assignment ' || (SELECT id::text FROM public.practice_assignments
+                        WHERE team_id = 'a1111111-1111-1111-1111-0000000077e1'
+                          AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a4')
+        || ' is locked%',
+    'override: ... and the refusal names the CURRENT series, not the closed one');
+-- The first-row shape (closed series dropped) is refused over the CLOSED
+-- series even with the current one unlocked: the defect, witnessed.
+SELECT throws_ok(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077c4',
+                              'season_settings_id', 'a1111111-1111-1111-1111-0000000077b1'),
+           pg_temp.grid_override('a1111111-1111-1111-1111-0000000077b1',
+                                 'a1111111-1111-1111-1111-0000000077e1',
+                                 'a1111111-1111-1111-1111-0000000077a5', false),
+           unlock => (SELECT jsonb_build_array(jsonb_build_object('assignment_id', id, 'reason', 'override'))
+                        FROM public.practice_assignments
+                       WHERE team_id = 'a1111111-1111-1111-1111-0000000077e1'
+                         AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a4')) $$,
+    '22023', NULL,
+    'override, first-row shape: dropping the closed series is refused 22023');
+SELECT throws_like(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077c4',
+                              'season_settings_id', 'a1111111-1111-1111-1111-0000000077b1'),
+           pg_temp.grid_override('a1111111-1111-1111-1111-0000000077b1',
+                                 'a1111111-1111-1111-1111-0000000077e1',
+                                 'a1111111-1111-1111-1111-0000000077a5', false),
+           unlock => (SELECT jsonb_build_array(jsonb_build_object('assignment_id', id, 'reason', 'override'))
+                        FROM public.practice_assignments
+                       WHERE team_id = 'a1111111-1111-1111-1111-0000000077e1'
+                         AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a4')) $$,
+    '%assignment ' || (SELECT id::text FROM grid_before WHERE label = 'override') || ' is locked%',
+    'override, first-row shape: ... naming the closed series');
+-- The fixed shape, with the current series unlocked, is accepted.
+SELECT lives_ok(
+    $$ INSERT INTO grid_results
+       SELECT 'override', public.persist_practice_schedule(
+           jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077c4',
+                              'season_settings_id', 'a1111111-1111-1111-1111-0000000077b1'),
+           pg_temp.grid_override('a1111111-1111-1111-1111-0000000077b1',
+                                 'a1111111-1111-1111-1111-0000000077e1',
+                                 'a1111111-1111-1111-1111-0000000077a5', true),
+           unlock => (SELECT jsonb_build_array(jsonb_build_object('assignment_id', id, 'reason', 'override'))
+                        FROM public.practice_assignments
+                       WHERE team_id = 'a1111111-1111-1111-1111-0000000077e1'
+                         AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a4')) $$,
+    'override: keeping the closed series and unlocking the current one is accepted');
+SELECT is(
+    (SELECT count(*)::int FROM grid_before b
+       JOIN public.practice_assignments pa
+         ON pa.id = b.id AND pa.practice_slot_id = b.practice_slot_id
+        AND pa.effective_date_range = b.effective_date_range
+        AND pa.source = 'auto'
+      WHERE b.label = 'override'),
+    1,
+    'override: the closed series keeps its id, slot, range and source');
+SELECT is(
+    (SELECT jsonb_agg(s->>'practice_slot_id') FROM grid_results, jsonb_array_elements(r->'superseded') s
+      WHERE label = 'override'),
+    jsonb_build_array('a1111111-1111-1111-1111-0000000077a4'),
+    'override: the only row removed is the replaced current (Thursday) series');
+SELECT is(
+    (SELECT string_agg(practice_slot_id::text, ',' ORDER BY practice_slot_id)
+       FROM public.practice_assignments
+      WHERE team_id = 'a1111111-1111-1111-1111-0000000077e1'),
+    'a1111111-1111-1111-1111-0000000077a1,a1111111-1111-1111-1111-0000000077a5',
+    'override: Team A now holds its closed Monday series and the Friday override');
 
 -- ===========================================================================
 -- Shape 2: a save that left teams out. Run c5 places A (auto), B and C

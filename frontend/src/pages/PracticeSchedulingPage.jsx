@@ -1043,17 +1043,33 @@ export default function PracticeSchedulingPage() {
         slotById,
       });
 
-      const replaced = localAssignments.some(
-        (assignment) => String(getAssignmentTeamId(assignment)) === String(teamId)
-      );
-      // A team can hold several rows (two weekdays, or a closed series and its
-      // successor). Each became the same staged object -- one id, one key, sent
-      // twice -- so the first is replaced and the rest dropped: the same set of
-      // keys reaches the writer, once each.
+      const isTeamRow = (assignment) => String(getAssignmentTeamId(assignment)) === String(teamId);
+      const replaced = localAssignments.some(isTeamRow);
+      // An override replaces the team's CURRENT series only. A CLOSED series --
+      // one whose range ends before another of the team's series starts, as a
+      // re-home's `closes` leaves it -- is history: it stays in the payload as
+      // it is, so the writer keeps it by its key. Ranges are read with core
+      // `practiceRangeBounds`, as `toPersistenceAssignment` reads them; a range
+      // that does not read is treated as current, never as history.
+      const boundsOf = (assignment) =>
+        practiceRangeBounds(assignment.effectiveDateRange ?? assignment.effective_date_range);
+      const latestStart = localAssignments
+        .filter(isTeamRow)
+        .map((assignment) => boundsOf(assignment)?.first)
+        .filter(Boolean)
+        .reduce((latest, first) => (latest && latest > first ? latest : first), null);
+      const isClosed = (assignment) => {
+        const bounds = boundsOf(assignment);
+        return Boolean(bounds && latestStart && bounds.last < latestStart);
+      };
+      // Several CURRENT series (two weekdays) are ambiguous: which day does the
+      // override replace? Not guessed. Today's behaviour is kept: one staged
+      // row, the team's other current rows dropped (the old per-row replace
+      // sent one key for all of them).
       let stagedOnce = false;
       const staged = replaced
         ? localAssignments.flatMap((assignment) => {
-            if (String(getAssignmentTeamId(assignment)) !== String(teamId)) return [assignment];
+            if (!isTeamRow(assignment) || isClosed(assignment)) return [assignment];
             if (stagedOnce) return [];
             stagedOnce = true;
             return [nextAssignment];

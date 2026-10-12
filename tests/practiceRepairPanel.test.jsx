@@ -250,17 +250,21 @@ describe('practice repair panel :: TIME TBD is never hidden', () => {
     }
   });
 
-  it('shows every blackout window refused for saving, with its reason, TBD or not', async () => {
+  // 3b PR 11d-1: the readers apply exceptions, so a blackout window is no
+  // longer refused for lying inside its series; every window is still shown.
+  it('shows every blackout window, TBD or not, with no inside-the-series refusal', async () => {
     await openPanel(BLACKOUT_F1);
-    for (const id of displacedFromSnapshot()) {
+    const subjects = displacedFromSnapshot();
+    expect(subjects.length).toBeGreaterThan(0);
+    for (const id of subjects) {
       const tr = screen
         .getAllByTestId('practice-repair-window')
         .find((el) => el.getAttribute('data-assignment-id') === id);
-      const refused = within(/** @type {HTMLElement} */ (tr)).getAllByTestId(
+      expect(tr, id).toBeTruthy();
+      const refused = within(/** @type {HTMLElement} */ (tr)).queryAllByTestId(
         'practice-repair-save-refused'
       );
-      expect(refused.length).toBeGreaterThan(0);
-      for (const r of refused) expect(r.getAttribute('data-refusal')).toMatch(/window/);
+      for (const r of refused) expect(r.getAttribute('data-refusal')).not.toMatch(/window/);
     }
   });
 });

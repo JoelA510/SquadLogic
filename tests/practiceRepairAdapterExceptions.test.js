@@ -99,12 +99,13 @@ const ex = (n, row, window, kind, extra = {}) => ({
 });
 const WITHDRAWN = { withdrawn_at: '2026-10-01T00:00:00Z' };
 
+/** @param {{ slots?: any[], assignments?: any[], exceptions?: any[], closures?: any[], fields?: any[] }} [seed] */
 const world = ({
   slots = SLOTS,
   assignments = ROWS,
   exceptions = [],
   closures = [],
-  fields,
+  fields = undefined,
 } = {}) => ({
   ...rowsOf({ slots, assignments, fields: fields ?? fieldsWith(null) }),
   fieldClosures: closures,
@@ -568,6 +569,7 @@ describe('11d-1 :: B7, a daylight mid-range TIME TBD is refused before the write
   it('refuses past-sunset and sunset-unknown windows ending before their row, and only those', () => {
     const rows = world();
     const adapted = adapt(rows, blackoutLoss('2026-10-19', '2026-12-31'));
+    /** @type {Set<string>} */
     const daylight = new Set([PRACTICE_TBD_REASON.PAST_SUNSET, PRACTICE_TBD_REASON.SUNSET_UNKNOWN]);
     let refusedN = 0;
     let admittedN = 0;
@@ -611,11 +613,16 @@ describe('11d-1 :: the blackout commit gate reads the FRESH stored row', () => {
       causeId: BLACKOUT_ID,
     });
     const draft = { ...loss, blackout: { ...loss.blackout, id: 'draft' } };
-    for (const [rows, l] of [
-      [world({ closures: [storedOf(loss)] }), draft],
-      [world(), loss],
-      [world({ closures: [{ ...storedOf(loss), source: 'field_availability_profiles' }] }), loss],
-    ]) {
+    /** @type {Array<{ rows: any, l: any }>} */
+    const cases = [
+      { rows: world({ closures: [storedOf(loss)] }), l: draft },
+      { rows: world(), l: loss },
+      {
+        rows: world({ closures: [{ ...storedOf(loss), source: 'field_availability_profiles' }] }),
+        l: loss,
+      },
+    ];
+    for (const { rows, l } of cases) {
       expect(causeCommitOf(rows, l).refusal).toBe(PRACTICE_ENACT_REFUSAL.BLACKOUT_UNCOMMITTED);
     }
   });
@@ -653,6 +660,7 @@ describe('11d-1 :: the blackout write is one exception on S, over its own window
     });
   const loss = blackoutLoss('2026-10-19', '2026-11-08');
 
+  /** @param {{ accepted: boolean, enactKey?: string }} [answer] */
   function enact(answer = { accepted: true, enactKey: ENACT_KEY }) {
     const rows = rowsWith([storedOf(loss)]);
     const adapted = adapt(rows, loss);

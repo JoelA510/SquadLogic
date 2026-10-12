@@ -604,7 +604,8 @@ function shapeRecord(shape) {
  * @param {any} args.adapted - `buildPracticeRepairInput()` of the fresh read
  * @param {any} args.state - the re-based state the recommendation was judged on
  * @param {ReturnType<typeof judgeEnact>} args.judged
- * @param {ReturnType<typeof retirementCommitOf>} args.commit
+ * @param {{ committed: boolean, refusal: string | null, stored: any }} args.commit - the
+ *   gate (`causeCommitOf`) the payload passed
  * @param {ReturnType<typeof buildEnactPayload>} args.enactment
  * @param {{ rows: Array<{ assignment_id: string, assigned_via: string, effect: string,
  *   range_after: string | null }>, published_practices_affected: number, accepted: boolean }} args.prompt -

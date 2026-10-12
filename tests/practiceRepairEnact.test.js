@@ -364,7 +364,7 @@ describe('enact UI :: 12, no blackout write in PR 11', () => {
         rows: s.read.rows,
         loss,
         refusals: [
-          { why: 'window-inside-row', text: 'the window lies inside its practice series' },
+          { why: 'live-exception-overlap', text: 'the window lies inside its practice series' },
         ],
       });
       expect(gate).toMatchObject({ enabled: false, why: ENACT_GATE.BLACKOUT });

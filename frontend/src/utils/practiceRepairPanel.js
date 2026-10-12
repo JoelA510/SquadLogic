@@ -141,6 +141,13 @@ export function daylightPlanFor(locations, timeZone) {
  *   plans no write and passes none)
  */
 export function openPracticeRepair(rows, loss, { timeZone = null, baseFingerprint = null } = {}) {
+  // 3b PR 11d: the snapshot always reads the table. Rows without it were not
+  // read by `loadPracticeRepairSnapshot`; repairing as if none were saved
+  // would drop every overlap, cut and occupancy guard (the enact prompt's
+  // precedent, `enactPromptOf`).
+  if (!Array.isArray(rows.practiceExceptions)) {
+    throw new Error('practice repair: the practice exceptions were not read');
+  }
   const daylightPlan = daylightPlanFor(rows.locations ?? [], timeZone);
   const adapted = buildPracticeRepairInput({
     locations: rows.locations,

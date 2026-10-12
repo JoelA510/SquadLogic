@@ -728,7 +728,10 @@ export function buildPracticeRepairContext(input) {
     const windowUntil = bounded && occupant.until > lossUntil ? lossUntil : occupant.until;
     if (firstWeekdayOnOrAfter(windowFrom, slot.weekday) > windowUntil) continue;
     const held = {
-      assignmentId: occupant.assignmentId,
+      // Keyed by the exception, not its series: a coach overlap the published
+      // plan accepted with the series' ORIGINAL practice does not excuse one
+      // with its moved practice, a different time.
+      assignmentId: occupant.id,
       teamId: occupant.teamId,
       slotId: slot.id,
       surfaceId: slot.surfaceId,

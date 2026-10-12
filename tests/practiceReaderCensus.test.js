@@ -287,9 +287,9 @@ describe('practice-reader census (W16)', () => {
     for (const [file, entry] of entries) {
       const src = readFileSync(path.join(REPO, file), 'utf8');
       expect(entry.class, file).toBe('series-only');
-      expect(/\brows\.practiceExceptions\b/.test(src), `${file} reads practiceExceptions`).toBe(
-        true
-      );
+      // Code, not a doc comment: a JSDoc `@param` line naming the key does not count.
+      const reads = /^(?!\s*(?:\*|\/\/)).*\brows\.practiceExceptions\b/m.test(src);
+      expect(reads, `${file} reads practiceExceptions`).toBe(true);
       expect(IMPORTS_HELPER.test(src), `${file} imports the helper: classify it applies`).toBe(
         false
       );

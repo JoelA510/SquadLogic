@@ -264,7 +264,7 @@ describe('practice repair panel :: TIME TBD is never hidden', () => {
       const refused = within(/** @type {HTMLElement} */ (tr)).queryAllByTestId(
         'practice-repair-save-refused'
       );
-      for (const r of refused) expect(r.getAttribute('data-refusal')).not.toMatch(/window/);
+      expect(refused, id).toHaveLength(0);
     }
   });
 });

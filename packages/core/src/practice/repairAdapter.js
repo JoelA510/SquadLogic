@@ -106,10 +106,9 @@ import { buildAvailabilityCalendar } from '../availability/calendar.js';
 import { buildFacilityGraph, isoDateOfDayNumber, isoDayNumber } from '../facility/index.js';
 import { coachesOfTeamOn } from '../people/assignmentHistory.js';
 import { buildPracticeAssignmentRows } from '../practiceSupabase.js';
-import { practiceRangeBounds } from '../utils/practiceOccurrences.js';
+import { practiceOccurrenceDates, practiceRangeBounds } from '../utils/practiceOccurrences.js';
 import { CoachPreferencePlacementSchema } from './coachPreferences.js';
 import { PRACTICE_TBD_REASON } from './repair.js';
-import { firstWeekdayOnOrAfter } from './slots.js';
 
 /** `practice_exceptions.kind` (20260929000000), pinned to the Edge enum. */
 export const PRACTICE_EXCEPTION_ROW_KIND = Object.freeze({
@@ -599,7 +598,7 @@ function closuresOf(rows, locations, fields, subunits) {
  * THIS blackout (a live window it caused covering the row's share of it).
  */
 function liveExceptionsOf(list, snapshot, slotRows, cause) {
-  /** @type {Map<string, Array<{ id: string, kind: string, from: string, until: string,
+  /** @type {Map<string, Array<{ id: string, from: string, until: string,
    *   slotId: string | null, causeKind: string | null,
    *   causeId: string | null }>>} */
   const liveByRow = new Map();
@@ -678,7 +677,6 @@ function liveExceptionsOf(list, snapshot, slotRows, cause) {
     const windows = liveByRow.get(row.id) ?? [];
     windows.push({
       id: exceptionId,
-      kind: exception.kind,
       from: bounds.first,
       until: bounds.last,
       slotId,
@@ -742,8 +740,8 @@ function liveExceptionsOf(list, snapshot, slotRows, cause) {
 
 /** Every date on `weekday` in the inclusive `[from, until]`, counted. */
 function weekdayCount(weekday, from, until) {
-  const first = firstWeekdayOnOrAfter(from, weekday);
-  return first > until ? 0 : Math.floor((isoDayNumber(until) - isoDayNumber(first)) / 7) + 1;
+  // The readers' own expander (helper rule 5 counts through it), not a second walk.
+  return practiceOccurrenceDates({ range: `[${from},${until}]`, dayOfWeek: weekday }).dates.length;
 }
 
 /** The repair `loss`, and what caused it, from a blackout or a field retirement. */
@@ -870,16 +868,15 @@ export function buildPracticeRepairPayload(adapted, result, { assignedVia = 'rep
 
   /** A retirement that closes `row` at `lastDay` (or replaces it: `null`) cuts its live windows past it. */
   const refuseCutWindows = (row, lastDay) => {
-    const cut = (liveExceptions.get(row.id) ?? []).filter(
-      (w) => lastDay === null || w.until > lastDay
-    );
-    if (cut.length === 0) return;
-    refused.push({
-      assignment_id: row.id,
-      window: `[${cut[0].from},${cut[0].until}]`,
-      why: PRACTICE_REPAIR_PAYLOAD_REFUSAL.CLOSE_CUTS_LIVE_EXCEPTION,
-      exceptionIds: cut.map((w) => w.id),
-    });
+    // One refusal per cut window, each naming its own window.
+    for (const w of liveExceptions.get(row.id) ?? []) {
+      if (lastDay !== null && w.until <= lastDay) continue;
+      refused.push({
+        assignment_id: row.id,
+        window: `[${w.from},${w.until}]`,
+        why: PRACTICE_REPAIR_PAYLOAD_REFUSAL.CLOSE_CUTS_LIVE_EXCEPTION,
+      });
+    }
   };
 
   const entries = [

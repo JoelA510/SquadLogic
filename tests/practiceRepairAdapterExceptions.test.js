@@ -296,6 +296,31 @@ describe('11d-1 :: B2, a live relocated window occupies its slot', () => {
     ]);
   });
 
+  it('clips the window’s START to its row too (Q9): no ground is held before the row exists', () => {
+    // S3's row starts Wednesday 2026-10-21. Its move onto F2 Mon 17:00 over
+    // the week of 2026-10-19 therefore lands on no Monday (helper rule 5:
+    // W ∩ the row's range), so the slot is free for S1 on 2026-10-19.
+    const late = [
+      assignment(601, 301, 501),
+      assignment(602, 302, 502),
+      assignment(603, 303, 506, '[2026-10-21,2026-12-01)'),
+    ];
+    const window = '[2026-10-19,2026-10-25]';
+    const rows = world({
+      assignments: late,
+      exceptions: [ex(824, 603, window, 'relocated', { practice_slot_id: uuid(503) })],
+    });
+    const { adapted, result } = run(rows, loss);
+    // By hand from the seed: the row's share of the window, and its Mondays.
+    const share = { first: max(span(window).first, '2026-10-21'), last: span(window).last };
+    expect(datesOn('mon', share.first, share.last)).toEqual([]);
+    expect(adapted.input.occupants.map((o) => [o.from, o.until])).toEqual([
+      [share.first, share.last],
+    ]);
+    const s1 = result.recommendations.find((r) => r.assignmentId === S1);
+    expect(s1.to).toMatchObject({ surfaceId: F2, weekday: 'MON', startMinutes: 1020 });
+  });
+
   it('an occupant is never displaced and never recommended (B16)', () => {
     const rows = world({ exceptions: SEEDED });
     const { result } = run(rows, loss);

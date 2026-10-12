@@ -33,10 +33,11 @@
  *    recommendation's window, with no unlock, and still needs the prompt's
  *    tick.
  * 4. {@link buildEnactRecord}: the `practice.recommendation_enacted` audit
- *    metadata, validated by the strict {@link PracticeEnactRecordSchema}.
- *    **Retirement-only in 3b PR 11d-1**: the blackout arm of the record lands
- *    with its Edge twin in 11d-2 (`tests/practiceEnactSchemaDrift.test.js`
- *    holds the two key for key), so a blackout record is refused here, loudly.
+ *    metadata, validated by the strict {@link PracticeEnactRecordSchema}: one
+ *    arm per cause kind (3b PR 11d-2), each held key for key against its Edge
+ *    twin by `tests/practiceEnactSchemaDrift.test.js`. A blackout record's
+ *    prompt rows are the ONE exception the write adds, and its `cause.stored`
+ *    is the row the gate read.
  *
  * Every refusal is a `payload: null` with a named `refusal`: the caller sends
  * nothing. A refusal is never a partial write.
@@ -496,48 +497,33 @@ const Counts = z.record(z.string().regex(/^[A-Za-z]+$/), z.number().int().nonneg
 const UnlockReason = z
   .string()
   .regex(/^enact [0-9a-f-]{36}: retirement of field [0-9a-f-]{36} from \d{4}-\d{2}-\d{2}$/);
+/** `field_blackouts.reason`'s CHECK (`20260906000100`): the enum, never the note. */
+const BlackoutReason = z.enum(['maintenance', 'weather', 'event', 'permit', 'closed', 'other']);
+/** Minutes are both or neither, and ordered when present (`field_blackouts`' own CHECKs). */
+const MINUTES_PAIRED = {
+  message: 'start_minutes and end_minutes are both set, with end after start, or both null',
+};
+/** @param {{ start_minutes: number | null, end_minutes: number | null }} value */
+const minutesPaired = (value) =>
+  value.start_minutes === null
+    ? value.end_minutes === null
+    : value.end_minutes !== null && value.end_minutes > value.start_minutes;
+/** Exactly one scope column is set (`field_blackouts_scope_check`). */
+const ONE_SCOPE = { message: 'exactly one of field_id and location_id is set' };
+/** @param {{ field_id: string | null, location_id: string | null }} value */
+const oneScope = (value) => (value.field_id === null) !== (value.location_id === null);
 
-/**
- * The `practice.recommendation_enacted` metadata (plan §5), strict: ids,
- * enums, dates and numbers only; the one free-text field is the generated
- * unlock reason. The Edge holds a strict twin (3b PR 11b).
- */
-export const PracticeEnactRecordSchema = z.strictObject({
+/** The keys both arms share, unchanged from the retirement-only record (3b PR 11b). */
+const RECORD_COMMON = {
   schema_version: z.literal(1),
   enact_key: Uuid,
   run_id: Uuid,
   season_settings_id: Uuid,
-  cause: z.strictObject({
-    kind: z.literal(PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT),
-    id: Uuid,
-    loss: z.strictObject({
-      from: IsoDate,
-      until: z.null(),
-      surface_ids: z.array(Uuid).min(1),
-      start_minutes: z.null(),
-      end_minutes: z.null(),
-      reason: z.literal('retirement'),
-    }),
-    stored_effective_to: IsoDate,
-  }),
   series: z.strictObject({
     assignment_id: Uuid,
     team_id: Uuid,
     from: Shape,
     window: z.strictObject({ from: IsoDate, until: IsoDate }),
-  }),
-  decision: z.strictObject({
-    kind: z.enum(['rehome', 'time_tbd']),
-    to: Shape.nullable(),
-    tier: z.enum(['same-venue', 'cross-venue']).nullable(),
-    origin: z.literal('approved-option').nullable(),
-    tbd_reason: z
-      .string()
-      .regex(/^[a-z-]+$/)
-      .nullable(),
-    objective: z.strictObject({ total: z.number().nonnegative(), counts: Counts }),
-    coach_overlaps: z.array(Uuid),
-    coach_days_worsened: z.number().int().nonnegative(),
   }),
   rejudge: z.strictObject({ stands: z.literal(true), shown_counts: Counts }),
   declined: z.array(z.strictObject({ assignment_id: Uuid, to: Shape })),
@@ -551,6 +537,50 @@ export const PracticeEnactRecordSchema = z.strictObject({
   ),
   local: z.boolean(),
   enacted_before: z.array(Uuid),
+  base_fingerprint: Fingerprint,
+  result_fingerprint: Fingerprint.nullable(),
+  fingerprint_covers: z.literal(PRACTICE_ENACT_FINGERPRINT_COVERS),
+  solver: z.strictObject({
+    strategy: z.enum(['exact', 'greedy']),
+    proven_optimal: z.boolean(),
+    daylight_supplied: z.boolean(),
+    closures_supplied: z.boolean(),
+  }),
+};
+
+/** The decision, by its kind's enum: `rehome` is retirement-only, `relocate` blackout-only. */
+const decisionOf = (kinds) =>
+  z.strictObject({
+    kind: z.enum(kinds),
+    to: Shape.nullable(),
+    tier: z.enum(['same-venue', 'cross-venue']).nullable(),
+    origin: z.literal('approved-option').nullable(),
+    tbd_reason: z
+      .string()
+      .regex(/^[a-z-]+$/)
+      .nullable(),
+    objective: z.strictObject({ total: z.number().nonnegative(), counts: Counts }),
+    coach_overlaps: z.array(Uuid),
+    coach_days_worsened: z.number().int().nonnegative(),
+  });
+
+/** A retirement enact (3b PR 11b): S closed or replaced, under a generated unlock. */
+const RetirementEnactRecordSchema = z.strictObject({
+  ...RECORD_COMMON,
+  cause: z.strictObject({
+    kind: z.literal(PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT),
+    id: Uuid,
+    loss: z.strictObject({
+      from: IsoDate,
+      until: z.null(),
+      surface_ids: z.array(Uuid).min(1),
+      start_minutes: z.null(),
+      end_minutes: z.null(),
+      reason: z.literal('retirement'),
+    }),
+    stored_effective_to: IsoDate,
+  }),
+  decision: decisionOf(['rehome', 'time_tbd']),
   prompt: z.strictObject({
     rows: z.array(
       z.strictObject({
@@ -571,15 +601,83 @@ export const PracticeEnactRecordSchema = z.strictObject({
     ),
     exceptions: z.number().int().nonnegative(),
   }),
-  base_fingerprint: Fingerprint,
-  result_fingerprint: Fingerprint.nullable(),
-  fingerprint_covers: z.literal(PRACTICE_ENACT_FINGERPRINT_COVERS),
-  solver: z.strictObject({
-    strategy: z.enum(['exact', 'greedy']),
-    proven_optimal: z.boolean(),
-    daylight_supplied: z.boolean(),
-    closures_supplied: z.boolean(),
+});
+
+/**
+ * A blackout enact (3b PR 11d-2, plan §2.3): ONE exception on S over its
+ * window, S's range kept, nothing unlocked, closed or created. `cause.stored`
+ * is the `field_blackouts` row as the wrapper's gate read it; `cause.loss`
+ * may carry minutes (Q1).
+ */
+const BlackoutEnactRecordSchema = z.strictObject({
+  ...RECORD_COMMON,
+  cause: z.strictObject({
+    kind: z.literal(PRACTICE_REPAIR_CAUSE_KIND.BLACKOUT),
+    id: Uuid,
+    loss: z
+      .strictObject({
+        from: IsoDate,
+        until: IsoDate,
+        surface_ids: z.array(Uuid).min(1),
+        start_minutes: Minutes.nullable(),
+        end_minutes: Minutes.nullable(),
+        reason: BlackoutReason,
+      })
+      .refine(minutesPaired, MINUTES_PAIRED),
+    stored: z
+      .strictObject({
+        field_id: Uuid.nullable(),
+        location_id: Uuid.nullable(),
+        blackout_from: IsoDate,
+        blackout_until: IsoDate,
+        start_minutes: Minutes.nullable(),
+        end_minutes: Minutes.nullable(),
+        reason: BlackoutReason,
+      })
+      .refine(minutesPaired, MINUTES_PAIRED)
+      .refine(oneScope, ONE_SCOPE),
   }),
+  decision: decisionOf(['relocate', 'time_tbd']),
+  prompt: z.strictObject({
+    rows: z
+      .array(
+        z.strictObject({
+          assignment_id: Uuid,
+          assigned_via: z.enum(['auto', 'manual', 'repair', 'recommendation', 'override']),
+          effect: z.enum(['temporarily moved', 'temporarily TIME TBD']),
+          range_after: z.null(),
+          window: Range,
+        })
+      )
+      .length(1),
+    published_practices_affected: z.number().int().nonnegative(),
+    accepted: z.literal(true),
+  }),
+  unlock: z.array(z.never()),
+  writes: z.strictObject({
+    closes: z.array(z.never()),
+    new_rows: z.array(z.never()),
+    exceptions: z.literal(1),
+  }),
+});
+
+/**
+ * The `practice.recommendation_enacted` metadata (plan §5), strict: ids,
+ * enums, dates and numbers only; the one free-text field is the generated
+ * unlock reason. One arm per `cause.kind` (3b PR 11d-2), with the same
+ * top-level keys, so the wrapper's key-set check is unchanged. The Edge
+ * holds a strict twin (3b PR 11b), held key for key by
+ * `tests/practiceEnactSchemaDrift.test.js`.
+ */
+export const PracticeEnactRecordSchema = z.union([
+  RetirementEnactRecordSchema,
+  BlackoutEnactRecordSchema,
+]);
+
+/** The prompt row's effect for a blackout exception's kind. */
+const BLACKOUT_EFFECT = Object.freeze({
+  relocated: 'temporarily moved',
+  time_tbd: 'temporarily TIME TBD',
 });
 
 /** @param {{ surfaceId: string, weekday: string, startMinutes: number, durationMinutes: number }} shape */
@@ -608,8 +706,9 @@ function shapeRecord(shape) {
  *   gate (`causeCommitOf`) the payload passed
  * @param {ReturnType<typeof buildEnactPayload>} args.enactment
  * @param {{ rows: Array<{ assignment_id: string, assigned_via: string, effect: string,
- *   range_after: string | null }>, published_practices_affected: number, accepted: boolean }} args.prompt -
- *   the override prompt as it was shown and answered
+ *   range_after: string | null, window?: string }>, published_practices_affected: number,
+ *   accepted: boolean }} args.prompt - the override prompt as it was shown and answered (a
+ *   blackout's rows carry the exception's `window`)
  */
 export function buildEnactRecord({
   enactKey,
@@ -624,18 +723,36 @@ export function buildEnactRecord({
   if (enactment.payload === null) {
     throw new Error(`enact: a refused enact (${enactment.refusal}) has no record`);
   }
-  if (adapted.context.cause.kind !== PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT) {
-    throw new Error(
-      'enact: a blackout enact has no record yet: its arm of the record lands with the Edge twin in 3b PR 11d-2'
-    );
-  }
-  const promptIds = prompt.rows.map((row) => row.assignment_id).sort();
-  const requiredIds = enactment.plan.unlockRequired.map((row) => row.assignment_id).sort();
-  if (canonicalJson(promptIds) !== canonicalJson(requiredIds)) {
-    throw new Error('enact: the prompt shown does not list the rows the write unlocks');
+  const { cause, snapshot, slots, baseFingerprint } = adapted.context;
+  const blackout = cause.kind === PRACTICE_REPAIR_CAUSE_KIND.BLACKOUT;
+  if (blackout) {
+    // A blackout unlocks nothing (Q4): the prompt lists the ONE exception
+    // the write adds, over its own window, with its effect.
+    const shown = prompt.rows.map((row) => ({
+      assignment_id: row.assignment_id,
+      window: row.window,
+      effect: row.effect,
+    }));
+    const written = enactment.plan.exceptions.map((exception) => ({
+      assignment_id: exception.assignment_id,
+      window: exception.window,
+      effect: BLACKOUT_EFFECT[exception.kind],
+    }));
+    if (canonicalJson(shown) !== canonicalJson(written)) {
+      throw new Error('enact: the prompt shown does not list the exception the write adds');
+    }
+    // The record carries the row the gate READ; it must be this loss's.
+    if (commit?.causeId !== cause.causeId || !storedIsLoss(commit?.stored ?? null, cause)) {
+      throw new Error('enact: the blackout record needs the gate that judged this loss');
+    }
+  } else {
+    const promptIds = prompt.rows.map((row) => row.assignment_id).sort();
+    const requiredIds = enactment.plan.unlockRequired.map((row) => row.assignment_id).sort();
+    if (canonicalJson(promptIds) !== canonicalJson(requiredIds)) {
+      throw new Error('enact: the prompt shown does not list the rows the write unlocks');
+    }
   }
   const recommendation = judged.fresh;
-  const { cause, snapshot, slots, baseFingerprint } = adapted.context;
   const row = snapshot.find((r) => r.id === recommendation.assignmentId);
   const loss = adapted.input.loss;
   const fresh = repairPracticeLoss(state.input);
@@ -656,19 +773,33 @@ export function buildEnactRecord({
     enact_key: enactKey,
     run_id: enactKey,
     season_settings_id: seasonSettingsId,
-    cause: {
-      kind: cause.kind,
-      id: cause.causeId,
-      loss: {
-        from: loss.from,
-        until: null,
-        surface_ids: [...loss.surfaceIds],
-        start_minutes: null,
-        end_minutes: null,
-        reason: loss.reason,
-      },
-      stored_effective_to: commit.stored,
-    },
+    cause: blackout
+      ? {
+          kind: cause.kind,
+          id: cause.causeId,
+          loss: {
+            from: loss.from,
+            until: loss.until,
+            surface_ids: [...loss.surfaceIds],
+            start_minutes: loss.startMinutes ?? null,
+            end_minutes: loss.endMinutes ?? null,
+            reason: loss.reason,
+          },
+          stored: { ...commit.stored },
+        }
+      : {
+          kind: cause.kind,
+          id: cause.causeId,
+          loss: {
+            from: loss.from,
+            until: null,
+            surface_ids: [...loss.surfaceIds],
+            start_minutes: null,
+            end_minutes: null,
+            reason: loss.reason,
+          },
+          stored_effective_to: commit.stored,
+        },
     series: {
       assignment_id: recommendation.assignmentId,
       team_id: recommendation.teamId,
@@ -679,7 +810,7 @@ export function buildEnactRecord({
       window: { from: recommendation.effectiveFrom, until: recommendation.effectiveUntil },
     },
     decision: {
-      kind: recommendation.to === null ? 'time_tbd' : 'rehome',
+      kind: recommendation.to === null ? 'time_tbd' : blackout ? 'relocate' : 'rehome',
       to: recommendation.to === null ? null : shapeRecord(recommendation.to),
       tier: recommendation.tier,
       origin: recommendation.origin,

@@ -1,13 +1,13 @@
 {
   "properties": {
-    "@id": "https://api.weather.gov/gridpoints/MTR/97,99",
+    "@id": "https://api.weather.gov/gridpoints/MTR/11,22",
     "@type": "wx:Gridpoint",
     "updateTime": "2026-10-02T08:31:00+00:00",
     "validTimes": "2026-10-03T07:00:00+00:00/P1D",
     "forecastOffice": "https://api.weather.gov/offices/MTR",
     "gridId": "MTR",
-    "gridX": 97,
-    "gridY": 99,
+    "gridX": 11,
+    "gridY": 22,
     "elevation": {
       "unitCode": "wmoUnit:m",
       "value": 121.0

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CVSC field WBGT forecaster.
+"""Field WBGT forecaster (the Python reference for the JS heat model).
 
 Pulls the NWS gridpoint forecast (api.weather.gov) for each field, estimates
 clear-sky solar radiation, and runs the Liljegren et al. (2008) WBGT model for
@@ -10,10 +10,10 @@ forecast dewpoint and wind fixed.
 
 Usage:
     pip install pvlib            # pulls numpy + pandas
-    python cvsc_wbgt.py                          # tomorrow, 8 AM-5 PM, Category 1
-    python cvsc_wbgt.py --date 2026-10-03 --hours 8,11,14
-    python cvsc_wbgt.py --category 2 --csv out.csv
-    python cvsc_wbgt.py --offline fixture.json   # run from saved gridpoint JSON
+    python wbgt_reference.py                          # tomorrow, 8 AM-5 PM, Category 1
+    python wbgt_reference.py --date 2026-10-03 --hours 8,11,14
+    python wbgt_reference.py --category 2 --csv out.csv
+    python wbgt_reference.py --offline fixture.json   # run from saved gridpoint JSON
 
 Limits (read before trusting a number):
   * NWS does not forecast solar radiation. GHI is clear-sky (pvlib Ineichen)
@@ -44,7 +44,7 @@ import pvlib
 
 TZ = "America/Los_Angeles"
 # api.weather.gov rejects requests without an identifying User-Agent.
-USER_AGENT = "cvsc-wbgt/1.0 (Castro Valley Soccer Club field heat check)"
+USER_AGENT = "wbgt-reference/1.0 (field heat check; contact: operator@example.com)"
 
 
 @dataclass(frozen=True)
@@ -56,11 +56,17 @@ class Site:
     surface: str  # "grass" | "turf"
 
 
+# SYNTHETIC sites. These are made-up points, not real venues: the repo must not
+# carry any real field's location. They sit in the contiguous US Pacific time
+# zone (so the fixture day's local hours hold) and inside the Linke turbidity
+# table box (15..72 N, 180..60 W). The JS tests mirror these exact values from
+# tests/helpers/heatSyntheticSites.js, and tests/heatSyntheticCoordinates.test.js
+# fails on any coordinate here that is not in that set.
 SITES = [
-    Site("canyon", "Canyon MS", 37.7046, -122.0524, "turf"),
-    Site("vannoy", "Vannoy ES", 37.7069, -122.0587, "grass"),
-    Site("independent", "Independent ES", 37.6990, -122.0509, "grass"),
-    Site("fivecanyons", "Five Canyons Park", 37.6765, -122.0305, "grass"),
+    Site("site-a", "Site A", 37.30, -121.65, "turf"),
+    Site("site-b", "Site B", 37.31, -121.66, "grass"),
+    Site("site-c", "Site C", 37.29, -121.64, "grass"),
+    Site("site-d", "Site D", 37.27, -121.62, "grass"),
 ]
 
 # US Soccer Recognize to Recover alert bands (WBGT, F): upper bound of each band.

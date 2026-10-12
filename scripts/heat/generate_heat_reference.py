@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Regenerate the heat-forecast reference data from pvlib and the Python
-reference implementation (scripts/heat/reference/cvsc_wbgt.py).
+reference implementation (scripts/heat/reference/wbgt_reference.py).
 
 Run it only when the reference itself is meant to change. Nothing here runs in
 CI; the JS port is tested against what this script wrote.
@@ -44,8 +44,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(HERE, 'reference'))
 
-import cvsc_wbgt as ref  # noqa: E402
-from test_cvsc_wbgt import fixture  # noqa: E402
+import wbgt_reference as ref  # noqa: E402
+from test_wbgt_reference import fixture  # noqa: E402
 
 TL_RES = 0.5
 TL_NORTH, TL_SOUTH, TL_WEST, TL_EAST = 72.0, 15.0, -180.0, -60.0
@@ -54,16 +54,18 @@ TL_NORTH, TL_SOUTH, TL_WEST, TL_EAST = 72.0, 15.0, -180.0, -60.0
 # client validates the gridpoint metadata a live response carries (field names
 # confirmed against a live MTR response on 2026-10-02), so the fixture gets the
 # values the fixture's own docstring states: MTR forecast issued 2026-10-02
-# 01:31 PDT (08:31 UTC), grid MTR/97,99.
+# 01:31 PDT (08:31 UTC). The grid cell numbers (MTR/11,22) are SYNTHETIC: a
+# 2.5 km cell is town-level location data, so the fixture names a made-up
+# cell rather than the one the forecast was read from.
 FIXTURE_META = {
-    '@id': 'https://api.weather.gov/gridpoints/MTR/97,99',
+    '@id': 'https://api.weather.gov/gridpoints/MTR/11,22',
     '@type': 'wx:Gridpoint',
     'updateTime': '2026-10-02T08:31:00+00:00',
     'validTimes': '2026-10-03T07:00:00+00:00/P1D',
     'forecastOffice': 'https://api.weather.gov/offices/MTR',
     'gridId': 'MTR',
-    'gridX': 97,
-    'gridY': 99,
+    'gridX': 11,
+    'gridY': 22,
 }
 
 
@@ -253,7 +255,9 @@ def clearsky_samples():
 
 def turbidity_samples(table):
     out = []
-    pts = [(37.70, -122.05), (40.0, -105.0), (25.5, -80.5), (61.2, -149.9), (21.3, -157.8),
+    # The first point is the first (SYNTHETIC) reference site; the rest are
+    # region-level samples at 0.1 degree, not venues.
+    pts = [(ref.SITES[0].lat, ref.SITES[0].lon), (40.0, -105.0), (25.5, -80.5), (61.2, -149.9), (21.3, -157.8),
            (18.4, -66.1), (47.6, -122.3), (33.4, -112.0), (44.0, -71.0), (30.0, -90.0)]
     for lat, lon in pts:
         for ts in ('2026-01-01T12:00:00Z', '2026-01-20T12:00:00Z', '2026-02-29T12:00:00Z'.replace('2026', '2028'),

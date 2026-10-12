@@ -1,6 +1,6 @@
-"""python -m unittest test_cvsc_wbgt.py  (no network needed)
+"""python -m unittest test_wbgt_reference.py  (no network needed)
 
-Fixture = NWS MTR hourly forecast for Castro Valley, 2026-10-03, issued
+Fixture = NWS MTR hourly forecast for one grid cell, 2026-10-03, issued
 2026-10-02 01:31 PDT, re-encoded as api.weather.gov gridpoint JSON
 (degC, km/h, mixed 1 h / 3 h validTime blocks) to exercise unit and
 duration handling.
@@ -11,7 +11,7 @@ import os
 import tempfile
 import unittest
 
-import cvsc_wbgt as m
+import wbgt_reference as m
 
 # local hours 00..23 on 2026-10-03
 T_F = [66, 66, 65, 65, 64, 64, 64, 64, 65, 70, 75, 80, 85, 88, 90, 92, 92, 90, 86, 81, 75, 72, 71, 70]
@@ -43,25 +43,25 @@ def fixture():
 
 class Reproduce(unittest.TestCase):
     def setUp(self):
-        self.canyon = m.SITES[0]
-        self.vannoy = m.SITES[1]
+        self.site_a = m.SITES[0]
+        self.site_b = m.SITES[1]
 
     def run_site(self, site, hours):
         return {r["hour"]: r for r in m.compute_site(site, fixture(), m.date(2026, 10, 3), hours, 1)}
 
     def test_matches_earlier_analysis(self):
-        c = self.run_site(self.canyon, [8, 11, 13, 14])
-        g = self.run_site(self.vannoy, [8, 11, 14])
+        c = self.run_site(self.site_a, [8, 11, 13, 14])
+        g = self.run_site(self.site_b, [8, 11, 14])
         self.assertAlmostEqual(c["14:00"]["wbgt_F"], 80.9, delta=0.6)
         self.assertAlmostEqual(c["11:00"]["wbgt_F"], 77.3, delta=0.6)
         self.assertAlmostEqual(g["14:00"]["wbgt_F"], 80.0, delta=0.6)
-        self.assertAlmostEqual(g["08:00"]["wbgt_F"], 62.0, delta=0.6)
-        self.assertAlmostEqual(c["13:00"]["black_at_air_F"], 94.5, delta=1.0)
+        self.assertAlmostEqual(g["08:00"]["wbgt_F"], 62.1, delta=0.6)
+        self.assertAlmostEqual(c["13:00"]["black_at_air_F"], 94.6, delta=1.0)
         self.assertEqual(c["08:00"]["band"], "Green")
 
     def test_missing_forecast_hour_is_explicit(self):
         with self.assertRaisesRegex(ValueError, "does not cover"):
-            m.compute_site(self.canyon, fixture(), m.date(2026, 10, 5), [14], 1)
+            m.compute_site(self.site_a, fixture(), m.date(2026, 10, 5), [14], 1)
 
     def test_cli_offline_and_csv(self):
         with tempfile.TemporaryDirectory() as d:

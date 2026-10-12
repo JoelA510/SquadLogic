@@ -1,20 +1,23 @@
 /**
- * Every coordinate in the heat-forecast data is SYNTHETIC.
+ * Repo-wide coordinate guard: no real venue location enters the repo.
  *
  * The heat feature first merged with real venue locations in its test
  * fixtures and reference script. They were replaced by the made-up sites in
- * `tests/helpers/heatSyntheticSites.js`; this file keeps them out. It cannot
- * name the values it keeps out (that would commit them again), so the rule is
- * the other way round: every latitude/longitude literal in a heat file must be
- * one of the synthetic sites, or one of the region-level samples listed beside
- * them, and those samples are held to one decimal place (about 11 km), which
- * cannot locate a venue.
+ * `tests/helpers/heatSyntheticSites.js`; this file keeps them, and any other
+ * real location, out of every scanned file, whatever feature it comes through.
+ * It cannot name the values it keeps out (that would commit them again), so
+ * the rule is the other way round: every latitude/longitude literal must be
+ * one of the synthetic sites; one of the region-level samples listed beside
+ * them (held to one decimal place, about 11 km, which cannot locate a venue);
+ * a whole degree; an out-of-range validation value; or an exact test value
+ * another feature uses, allowed only in the files named in
+ * `OTHER_FEATURE_VALUES` with a reason.
  *
- * The files are found by walking directories (the `sourceFilesUnder` contract
- * in `tests/sourceHygiene.test.js`, widened to the data and script extensions
- * the heat feature uses) and keeping paths that mention `heat` or `nws`; the
- * universe is the tree, never the synthetic set. JSON is read structurally,
- * every other file by pattern.
+ * The files are found by walking every tracked content directory (the
+ * `sourceFilesUnder` contract in `tests/sourceHygiene.test.js`, widened to the
+ * data, script and doc extensions) plus the root documents; the universe is
+ * the tree, never the allowed set. JSON is read structurally, every other file
+ * by pattern.
  *
  * Statically out of reach, and so not claimed: distance from the real sites
  * (the guard cannot hold them), and venue names in free text.
@@ -31,12 +34,23 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SELF = fileURLToPath(import.meta.url);
 
 /**
- * Directories walked; a file is scanned when its repo path names the heat
- * feature (heat, NWS, WBGT, turbidity). The CHANGELOG is scanned whole.
+ * Every tracked content directory is walked, and every file in it with a
+ * scanned extension is read: the rule is repo-wide, so a coordinate entering
+ * through any feature (location coordinates, imports, mocks) is seen, not only
+ * one in a heat-named file. Root-level documents and configs are listed.
  */
-const SCAN_ROOTS = ['tests', 'scripts', 'frontend/src', 'packages/core/src', 'docs', 'supabase'];
-const SCAN_PATH = /heat|nws|wbgt|turbidity/i;
-const SCAN_ALWAYS = ['CHANGELOG.md'];
+const SCAN_ROOTS = [
+  'tests',
+  'scripts',
+  'frontend',
+  'packages',
+  'fixtures',
+  'docs',
+  'supabase',
+  'config',
+  'project-hardening',
+];
+const SCAN_ALWAYS = ['CHANGELOG.md', 'README.md', 'CLAUDE.md', 'vercel.json'];
 const SCAN_EXT = new Set([
   '.js',
   '.mjs',
@@ -83,7 +97,7 @@ function scannedFiles() {
     .filter((f) => f !== SELF)
     .filter((f) => SCAN_EXT.has(path.extname(f)))
     .map((f) => path.relative(ROOT, f).split(path.sep).join('/'))
-    .filter((rel) => SCAN_PATH.test(rel) && !(rel in NOT_SCANNED))
+    .filter((rel) => !(rel in NOT_SCANNED))
     .concat(SCAN_ALWAYS)
     .sort();
 }
@@ -172,16 +186,64 @@ const same = (a, b) => Math.abs(a - b) < 1e-9;
 const decimals = (n) => (String(n).split('.')[1] ?? '').length;
 
 /**
- * Whether one extracted literal is allowed. Whole degrees (`15.0`, `-180.0`:
- * the turbidity box edges, the solar latitude grid) are about 111 km and are
- * region-level wherever they appear.
+ * Other features' test values, allowed only in the files named, each entry
+ * with its reason. Exact values (or one stated grid), not a precision rule, so
+ * this cannot widen into a blanket exclusion; an entry a named file no longer
+ * needs fails the stale-entry check below.
  */
-function allowed(hit) {
+const OTHER_FEATURE_VALUES = Object.freeze([
+  {
+    files: [
+      'tests/locationCoordinates.test.js',
+      'tests/locationCoordinatesForm.test.jsx',
+      'supabase/tests/location_coordinates_rpc.sql',
+      'docs/sql/20260930000000_smoke.sql',
+      'tests/autoSchedulerDaylight.test.js',
+      'tests/practiceDaylight.test.js',
+      'tests/practiceRepairDaylight.test.js',
+    ],
+    values: [41.5, -73.5, -76.5, 40.125, -75.125, 40.13, -75.13, 1.01, -1.01],
+    reason:
+      'location-coordinates and daylight fixtures: a half-degree point, a 1/8-degree point and its two-decimal rounding, and a near-origin value, chosen to exercise storage and rounding, not to name a place',
+  },
+  {
+    files: ['supabase/functions/_shared/timing/solar.vectors.json'],
+    grid: 7.5,
+    reason: 'solar timing test vectors: longitudes on a 7.5-degree sweep, no places',
+  },
+]);
+
+/** Whether `v` is one of the other-feature values allowed in file `rel`. */
+function otherFeatureAllows(rel, v) {
+  return OTHER_FEATURE_VALUES.some(
+    (e) =>
+      e.files.includes(rel) &&
+      (e.values
+        ? e.values.some((x) => same(x, v))
+        : Math.abs(v / e.grid - Math.round(v / e.grid)) < 1e-9)
+  );
+}
+
+/** Beyond +/-90 latitude or +/-180 longitude: a validation case, not a location. */
+const outOfRange = (lat, lon) =>
+  (lat !== undefined && Math.abs(lat) > 90) || (lon !== undefined && Math.abs(lon) > 180);
+
+/**
+ * Whether one extracted literal, found in file `rel`, is allowed. Whole
+ * degrees (`15.0`, `-180.0`: the turbidity box edges, the solar latitude grid)
+ * are about 111 km and are region-level wherever they appear; out-of-range
+ * values are not locations.
+ */
+function allowed(hit, rel = '') {
+  const component = (v) => Number.isInteger(v) || otherFeatureAllows(rel, v);
   if (hit.kind === 'pair') {
-    if (Number.isInteger(hit.lat) && Number.isInteger(hit.lon)) return true;
+    if (outOfRange(hit.lat, hit.lon)) return true;
+    if (component(hit.lat) && component(hit.lon)) return true;
     return ALLOWED_PAIRS.some(([la, lo]) => same(la, hit.lat) && same(lo, hit.lon));
   }
   if (Number.isInteger(hit.value)) return true;
+  if (hit.kind === 'lat' ? outOfRange(hit.value) : outOfRange(undefined, hit.value)) return true;
+  if (otherFeatureAllows(rel, hit.value)) return true;
   // Solar samples: latitude on the generator's fixed grid, longitude seeded at two decimals.
   if (hit.solar) {
     return hit.kind === 'lat'
@@ -204,17 +266,16 @@ function scan() {
 }
 
 /*
- * Stated floors. Measured when this guard was written: 45 files scanned and
- * 536 coordinate literals matched (468 of them in heatReference.json). The
- * floors leave a little headroom so merging two heat files does not trip
- * them; a walk or a pattern that broke would still show here first, rather
- * than as a clean scan of nothing, and the per-file checks below catch one
- * source going quiet.
+ * Stated floors. Measured when the guard went repo-wide: 1399 files scanned
+ * and 1269 coordinate literals matched (468 of them in heatReference.json).
+ * The floors leave headroom so ordinary file churn does not trip them; a walk
+ * or a pattern that broke would still show here first, rather than as a clean
+ * scan of nothing, and the per-file checks below catch one source going quiet.
  */
-const MIN_FILES = 40;
-const MIN_LITERALS = 500;
+const MIN_FILES = 1300;
+const MIN_LITERALS = 1200;
 
-describe('heat coordinates :: the scan exercised the data', () => {
+describe('repo coordinates :: the scan exercised the data', () => {
   const { files, byFile } = scan();
   const total = Object.values(byFile).reduce((n, hits) => n + hits.length, 0);
 
@@ -229,6 +290,8 @@ describe('heat coordinates :: the scan exercised the data', () => {
     'scripts/heat/generate_heat_reference.py',
     'tests/nwsClient.test.js',
     'tests/helpers/heatSyntheticSites.js',
+    'tests/locationCoordinates.test.js',
+    'supabase/tests/location_coordinates_rpc.sql',
   ])('reads coordinates out of %s', (rel) => {
     expect(files).toContain(rel);
     expect(byFile[rel].length).toBeGreaterThan(0);
@@ -250,9 +313,9 @@ describe('heat coordinates :: the scan exercised the data', () => {
     const pair = ['getPoint(', '38.1234', ', ', '-120.5678', ')'].join('');
     expect(extractFromText(pair).filter((h) => !allowed(h))).toHaveLength(1);
     const site = SYNTHETIC_HEAT_SITES[0];
-    expect(extractFromText(`getPoint(${site.latitude}, ${site.longitude})`).every(allowed)).toBe(
-      true
-    );
+    expect(
+      extractFromText(`getPoint(${site.latitude}, ${site.longitude})`).every((h) => allowed(h))
+    ).toBe(true);
     const json = extractFromJson({ unrounded: { x: { lat: 38.1234, lon: -120.5678 } } });
     expect(json.filter((h) => !allowed(h))).toHaveLength(2);
     // Longitude first (GeoJSON / WKT), hemisphere letters, JSON strings and positions.
@@ -272,20 +335,41 @@ describe('heat coordinates :: the scan exercised the data', () => {
   });
 });
 
-describe('heat coordinates :: every literal is synthetic or region-level', () => {
+describe('repo coordinates :: every literal is synthetic, region-level or a named test value', () => {
+  const { byFile } = scan();
+
   it('holds every scanned file to the set', () => {
-    const { byFile } = scan();
     const offenders = Object.entries(byFile).flatMap(([rel, hits]) =>
-      hits.filter((h) => !allowed(h)).map((h) => `${rel}: ${h.raw}`)
+      hits.filter((h) => !allowed(h, rel)).map((h) => `${rel}: ${h.raw}`)
     );
     expect(
       offenders,
       `coordinates outside tests/helpers/heatSyntheticSites.js: ${offenders.join('; ')}`
     ).toEqual([]);
   });
+
+  it('every other-feature allow-list entry is still needed by each file it names', () => {
+    for (const entry of OTHER_FEATURE_VALUES) {
+      for (const rel of entry.files) {
+        const values = (byFile[rel] ?? []).flatMap((h) =>
+          h.kind === 'pair' ? [h.lat, h.lon] : [h.value]
+        );
+        expect(
+          values.some((v) => !Number.isInteger(v) && otherFeatureAllows(rel, v)),
+          `${rel} no longer needs its entry (${entry.reason}); remove it`
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('an other-feature value is allowed only in the files its entry names', () => {
+    const hit = { kind: 'pair', lat: 40.125, lon: -75.125, raw: '' };
+    expect(allowed(hit, 'tests/locationCoordinates.test.js')).toBe(true);
+    expect(allowed(hit, 'tests/heatForecast.test.js')).toBe(false);
+  });
 });
 
-describe('heat coordinates :: the allowed set itself', () => {
+describe('repo coordinates :: the synthetic heat set itself', () => {
   it('has four synthetic sites, one turf, at two decimals in the Pacific-time US and the TL box', () => {
     expect(SYNTHETIC_HEAT_SITES).toHaveLength(4);
     expect(SYNTHETIC_HEAT_SITES.filter((s) => s.surface === 'turf')).toHaveLength(1);

@@ -18,7 +18,7 @@ img-src     'self' data: blob: https://vercel.live https://vercel.com;
 font-src    'self' https://vercel.live https://assets.vercel.com;
 connect-src 'self'
             https://mmwupqsjkikqzvmdvuzm.supabase.co wss://mmwupqsjkikqzvmdvuzm.supabase.co
-            https://*.ingest.sentry.io
+            https://*.ingest.sentry.io https://*.ingest.us.sentry.io
             https://vercel.live wss://ws-us3.pusher.com
             https://api.weather.gov;
 frame-src   'self' https://vercel.live;
@@ -47,7 +47,7 @@ National Weather Service gridpoint forecast directly from the browser (see
 | `style-src` | `'self' 'unsafe-inline'` | **Waiver** — Tailwind 4 runtime injects classes via dynamic `<style>` tags and React's `style={{...}}` prop renders inline. Nonce migration requires Tailwind 4.x nonce-propagation (not yet stable) + audit of every inline style site. See §`Follow-ups`. |
 | `img-src` | `'self' data: blob: https://vercel.live https://vercel.com` | `data:` for small icons / placeholder SVGs in-bundle; `blob:` for the `OfflineGuard` Supabase-Storage-loaded brand assets. `vercel.live` + `vercel.com` for the preview feedback widget's avatars. No other third-party image CDNs. |
 | `font-src` | `'self' https://vercel.live https://assets.vercel.com` | All app fonts bundled via Vite (`index.css` imports). The Vercel domains serve the Inter webfont referenced by the preview feedback widget. No Google Fonts / other third-party font CDNs. |
-| `connect-src` | `'self' https://mmwupqsjkikqzvmdvuzm.supabase.co wss://mmwupqsjkikqzvmdvuzm.supabase.co https://*.ingest.sentry.io https://vercel.live wss://ws-us3.pusher.com https://api.weather.gov` | Allows (1) same-origin XHR, (2) the SquadLogic-specific Supabase project over HTTPS + WSS for Realtime, (3) Sentry ingest, (4) Vercel Live + its Pusher realtime channel for the preview feedback widget, (5) the NWS API for the heat forecast (exact host, no wildcard; see §`api.weather.gov`). **Supabase host is pinned** to the specific project ref — an earlier draft used `*.supabase.co`; Gemini PR #175 review correctly flagged the wildcard as an XSS-exfiltration broadening. If the project ref ever changes, update this directive in the same PR that updates the Supabase env vars. **Sentry is wildcard-scoped** to `*.ingest.sentry.io` because the Sentry SDK dispatches to region/org-specific subdomains (`o<id>.ingest.sentry.io`) not known at deploy time; the apex `ingest.sentry.io` is Sentry-operated single-tenant and does not host guest content. |
+| `connect-src` | `'self' https://mmwupqsjkikqzvmdvuzm.supabase.co wss://mmwupqsjkikqzvmdvuzm.supabase.co https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://vercel.live wss://ws-us3.pusher.com https://api.weather.gov` | Allows (1) same-origin XHR, (2) the SquadLogic-specific Supabase project over HTTPS + WSS for Realtime, (3) Sentry ingest, (4) Vercel Live + its Pusher realtime channel for the preview feedback widget, (5) the NWS API for the heat forecast (exact host, no wildcard; see §`api.weather.gov`). **Supabase host is pinned** to the specific project ref — an earlier draft used `*.supabase.co`; Gemini PR #175 review correctly flagged the wildcard as an XSS-exfiltration broadening. If the project ref ever changes, update this directive in the same PR that updates the Supabase env vars. **Sentry is wildcard-scoped** to `*.ingest.sentry.io` because the Sentry SDK dispatches to region/org-specific subdomains (`o<id>.ingest.sentry.io`) not known at deploy time; the apex `ingest.sentry.io` is Sentry-operated single-tenant and does not host guest content. **US-region projects need their own entry**: their DSN host is `o<id>.ingest.us.sentry.io`, and a CSP host wildcard matches only hosts ending in the text after `*.`, so `*.ingest.sentry.io` refuses it. `https://*.ingest.us.sentry.io` admits it; the original entry stays for any non-US project. `tests/cspPolicy.test.js` pins both. |
 | `frame-src` | `'self' https://vercel.live` | The Vercel preview feedback widget mounts its UI inside an iframe that loads from `vercel.live`. Production traffic doesn't render the widget. No other embedded frames are permitted. |
 | `frame-ancestors` | `'none'` | Clickjacking defense. SquadLogic is never embedded. |
 | `object-src` | `'none'` | Legacy `<object>` / Flash blocker — zero legitimate use. |
@@ -140,7 +140,9 @@ curl -sI https://squadlogic.vercel.app/ | awk '/^content-security-policy/i' | tr
 
 # 3. Sentry ingest smoke (see docs/operations/sentry-smoke.md):
 #    Open DevTools, run window.__FORCE_ERROR__(), confirm POST to
-#    *.ingest.sentry.io returns 200/202 with NO CSP console warning.
+#    *.ingest.us.sentry.io (US-region project; *.ingest.sentry.io otherwise)
+#    returns 200/202 with NO connect-src console warning (a Replay blob:
+#    worker refusal is a known, separate item; see sentry-smoke.md).
 ```
 
 If DevTools shows `Refused to connect to '...ingest.sentry.io' because it

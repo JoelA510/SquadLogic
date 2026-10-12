@@ -92,7 +92,9 @@ const REGISTRY = {
   },
   'supabase/functions/_shared/engines/practice-lock.ts': {
     class: 'series-only',
-    why: 'X2: auto-scheduler lock load; already reads live time_tbd exceptions',
+    why:
+      'X2: auto-scheduler lock load; reads live time_tbd exceptions, and (11d-0) live ' +
+      'relocated ones, whose slots it holds season-wide; makes no dates',
   },
 
   // --- SQL: the latest definition of each function or view (plan §1.1 G6).

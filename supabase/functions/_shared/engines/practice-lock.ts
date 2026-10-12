@@ -22,6 +22,14 @@
  * says, so the run never double-books but may under-use a slot that a locked
  * row holds for only part of the season.
  *
+ * **Relocated slots (8.6 3b PR 11d-0, gap G2).** A live `relocated`
+ * `practice_exceptions` row moves a locked practice onto another slot for its
+ * window. That slot is held the same way, season-wide, whatever the window
+ * says -- so its window is not read, and an open or unreadable one holds like
+ * any other (`loadSeasonPracticeLock`, `liveRelocationsOf`). The row's own
+ * slot is not freed over the window either (plan D3, D4). Never a
+ * double-booking; possibly an under-used slot.
+ *
  * Import-free (no Deno std, no esm.sh), so Vitest can execute it directly.
  */
 
@@ -32,6 +40,18 @@ export interface LoadedPracticeRow {
   slotId: string | null;
   effectiveDateRange: string | null;
   assignedVia: string | null;
+}
+
+/**
+ * One live `relocated` exception, as loaded for the lock: the slot its moved
+ * practice lands on, and the team whose coaches are there.
+ */
+export interface LoadedRelocation {
+  exceptionId: string;
+  assignmentId: string | null;
+  teamId: string;
+  /** `null` only if the table's slot-iff-relocated CHECK were broken: held nowhere, reported. */
+  slotId: string | null;
 }
 
 /** One row of the client's `lockedAssignments` cross-check. */
@@ -229,12 +249,49 @@ export async function readAllPages(
 }
 
 export type SeasonPracticeLock =
-  | { ok: true; rows: LoadedPracticeRow[]; timeTbdTeamIds: string[] }
+  | {
+      ok: true;
+      rows: LoadedPracticeRow[];
+      timeTbdTeamIds: string[];
+      relocations: LoadedRelocation[];
+    }
   | { ok: false; message: string };
 
 /**
- * Load the season's current practice assignments and its live TIME TBD
- * series, through `client` -- which must be the USER-scoped client
+ * The live relocations among the rows read, judged here whatever the query
+ * selected -- the contract of `liveExceptionsOf` (core
+ * `practice/repairAdapter.js`) and of `applyPracticeExceptions`, adopted:
+ * live is `withdrawn_at == null`; a withdrawn row holds nothing; a row with no
+ * `withdrawn_at` key can be judged neither way and refuses the read.
+ */
+export function liveRelocationsOf(
+  read: unknown[]
+): { ok: true; relocations: LoadedRelocation[] } | { ok: false; message: string } {
+  const relocations: LoadedRelocation[] = [];
+  for (const raw of read) {
+    const row = raw as Record<string, unknown> | null;
+    if (row === null || typeof row !== 'object' || !('withdrawn_at' in row)) {
+      return {
+        ok: false,
+        message:
+          `practice_exceptions: relocated exception ${String(row?.id ?? null)} carries no ` +
+          'withdrawn_at, so it cannot be judged live or withdrawn',
+      };
+    }
+    if (row.withdrawn_at != null) continue;
+    relocations.push({
+      exceptionId: String(row.id),
+      assignmentId: row.assignment_id == null ? null : String(row.assignment_id),
+      teamId: String(row.team_id),
+      slotId: row.practice_slot_id == null ? null : String(row.practice_slot_id),
+    });
+  }
+  return { ok: true, relocations };
+}
+
+/**
+ * Load the season's current practice assignments, its live TIME TBD series
+ * and its live relocations, through `client` -- which must be the USER-scoped client
  * (`createUserClient`), so RLS decides what the caller may read, not this
  * function.
  *
@@ -282,6 +339,30 @@ export async function loadSeasonPracticeLock(
     return { ok: false, message: `practice_exceptions: ${exceptions.error}` };
   }
 
+  // 11d-0: the slots live relocations moved practices onto. Same scope as the
+  // TIME TBD read; `withdrawn_at` is selected so `liveRelocationsOf` judges
+  // liveness itself rather than trusting the filter.
+  const relocated = await readAllPages(
+    () =>
+      client
+        .from('practice_exceptions')
+        .select(
+          'id, assignment_id, team_id, practice_slot_id, withdrawn_at, ' +
+            'teams!inner(divisions!inner(season_settings_id))'
+        )
+        .eq('organization_id', organizationId)
+        .eq('kind', 'relocated')
+        .is('withdrawn_at', null)
+        .eq('teams.divisions.season_settings_id', seasonSettingsId)
+        .order('id', { ascending: true }),
+    pageSize
+  );
+  if (relocated.error) {
+    return { ok: false, message: `practice_exceptions (relocated): ${relocated.error}` };
+  }
+  const live = liveRelocationsOf(relocated.rows);
+  if (!live.ok) return live;
+
   const rows = (assignments.rows as Array<Record<string, unknown>>).map((row) => ({
     id: String(row.id),
     teamId: String(row.team_id),
@@ -296,5 +377,5 @@ export async function loadSeasonPracticeLock(
   const timeTbdTeamIds = sortedUnique(
     (exceptions.rows as Array<Record<string, unknown>>).map((row) => String(row.team_id))
   );
-  return { ok: true, rows, timeTbdTeamIds };
+  return { ok: true, rows, timeTbdTeamIds, relocations: live.relocations };
 }

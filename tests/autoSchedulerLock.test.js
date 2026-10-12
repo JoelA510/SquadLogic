@@ -303,7 +303,13 @@ describe('the lock is loaded as the caller, whole, and scoped like the writer', 
             if (failOn === table)
               return Promise.resolve({ data: null, error: { message: 'boom' } });
             const end = Math.min(to + 1, from + serverCap);
-            return Promise.resolve({ data: tables[table].slice(from, end), error: null });
+            // 11d-0: the lock also reads `kind = 'relocated'` exceptions; those
+            // are seeded and witnessed in tests/autoSchedulerRelocatedLock.test.js.
+            const relocatedRead = call.filters.some(
+              ([op, col, v]) => op === 'eq' && col === 'kind' && v === 'relocated'
+            );
+            const rows = relocatedRead ? [] : tables[table];
+            return Promise.resolve({ data: rows.slice(from, end), error: null });
           },
         };
         return q;

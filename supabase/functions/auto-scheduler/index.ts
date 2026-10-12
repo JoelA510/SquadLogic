@@ -24,7 +24,8 @@
  * only roster teams with no row -- never a team whose series is TIME TBD
  * (decision 4). It returns only those new placements. Limitation: there is no
  * date model here, so a locked row consumes its slot for the whole season --
- * never a double-booking, possibly an under-used slot. See
+ * never a double-booking, possibly an under-used slot. A live `relocated`
+ * exception's slot is held the same way (8.6 3b PR 11d-0). See
  * `_shared/engines/practice-lock.ts` and `_shared/engines/auto-scheduler-solver.ts`.
  *
  * Coach preferences (8.6 PR 3b PR 8, plan §4 and §5 decision 3): approved
@@ -471,6 +472,9 @@ serve(async (req) => {
         slotId: row.slotId,
         effectiveDateRange: row.effectiveDateRange,
       })),
+      // 11d-0: the slots live relocations moved locked practices onto, held
+      // season-wide like a locked row's own slot.
+      relocated: lock.relocations,
       placeableTeamIds: classification.placeable,
       preferenceGate: preferences.gate,
       daylight: {
@@ -640,6 +644,8 @@ serve(async (req) => {
         placementsProposed: bestAssignments.length,
         timeTbdExcluded: timeTbdExcluded.length,
         lockedOutsideRun: run.lockedOutsideRun.length,
+        relocatedLoaded: lock.relocations.length,
+        relocatedOutsideRun: run.relocatedOutsideRun.length,
         assignedCount: bestAssignments.length,
         unassignedCount: bestUnassigned.length,
         approvedPreferencesLoaded: preferences.preferencesLoaded,
@@ -691,6 +697,10 @@ serve(async (req) => {
           lockedLoaded: lock.rows.length,
           lockedTeams: classification.locked.length,
           lockedOutsideRun: run.lockedOutsideRun.map((row) => row.assignmentId),
+          // 11d-0: live relocations held (each one slot unit, season-wide), and
+          // those whose slot this run holds no time for.
+          relocatedLoaded: lock.relocations.length,
+          relocatedOutsideRun: run.relocatedOutsideRun.map((r) => r.exceptionId),
           timeTbdExcluded,
         },
         // The approved coach preferences this run honoured, as loaded

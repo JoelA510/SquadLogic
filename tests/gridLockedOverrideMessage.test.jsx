@@ -20,6 +20,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -154,7 +155,35 @@ const SEED_ROWS = [
   },
 ];
 
-function seed() {
+// A season team the roster read does not hand the page (so `teamById` has no
+// name for it), holding a saved Wednesday practice.
+const OFF_ROSTER = { id: 'team-c', name: 'Synthetic Larks' };
+const C_ROW = '00000000-0000-4000-8000-0000000000c1';
+const WED = {
+  id: 'slot-wed',
+  day_of_week: 'wednesday',
+  start_time: '16:00:00',
+  end_time: '17:00:00',
+  capacity: 4,
+  valid_from: '2026-09-07',
+  valid_until: '2026-11-30',
+};
+
+function seed({ offRoster = false } = {}) {
+  const teams = offRoster ? [...ROSTER, OFF_ROSTER] : ROSTER;
+  const slots = offRoster ? [...SLOTS, WED] : SLOTS;
+  const rows = offRoster
+    ? [
+        ...SEED_ROWS,
+        {
+          ...SEED_ROWS[0],
+          id: C_ROW,
+          team_id: OFF_ROSTER.id,
+          practice_slot_id: WED.id,
+          slot_id: WED.id,
+        },
+      ]
+    : SEED_ROWS;
   seedMockDb({
     scheduler_runs: [
       {
@@ -168,33 +197,46 @@ function seed() {
       },
     ],
     divisions: [{ id: 'div-now', organization_id: ORG, season_settings_id: SEASON, name: 'U10' }],
-    teams: ROSTER.map((t) => ({
+    teams: teams.map((t) => ({
       id: t.id,
       name: t.name,
       organization_id: ORG,
       division_id: 'div-now',
     })),
     fields: [{ id: 'field-1', name: 'Field 1', organization_id: ORG, location_id: 'loc-1' }],
-    practice_slots: SLOTS.map((s) => ({ ...s, field_id: 'field-1', organization_id: ORG })),
-    practice_assignments: SEED_ROWS,
+    practice_slots: slots.map((s) => ({ ...s, field_id: 'field-1', organization_id: ORG })),
+    practice_assignments: rows,
   });
 }
 
-// The writer's two lock refusals, from the CURRENT writer's source.
-const WRITER = fs.readFileSync(
-  path.join(
-    import.meta.dirname,
-    '..',
-    'supabase/migrations/20261002000000_practice_exceptions_daylight.sql'
-  ),
-  'utf8'
+// The writer's lock refusals, from the CURRENT writer: the latest migration
+// that (re)defines `persist_practice_schedule`, found, never named here.
+const MIGRATIONS = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../supabase/migrations'
 );
+const WRITER_FILE = fs
+  .readdirSync(MIGRATIONS)
+  .filter((name) => name.endsWith('.sql'))
+  .sort()
+  .filter((name) =>
+    /CREATE OR REPLACE FUNCTION public\.persist_practice_schedule\s*\(/.test(
+      fs.readFileSync(path.join(MIGRATIONS, name), 'utf8')
+    )
+  )
+  .at(-1);
+const WRITER = fs.readFileSync(path.join(MIGRATIONS, String(WRITER_FILE)), 'utf8');
 const LOCK_FORMATS = [...WRITER.matchAll(/RAISE EXCEPTION '(assignment % is locked:[^']*)'/g)].map(
   (m) => m[1]
 );
+// The writer's prune reasons (`v_locked_why`), from the same source.
+const PRUNE_WHY = {
+  replaced: 'the payload no longer carries its (team, slot, range) key',
+  absent: 'it is an auto row of a season team absent from the payload',
+};
 /** The writer's message for `id`, as RAISE renders its format. */
-const writerLockMessage = (format, id) =>
-  format.replace('%', id).replace('%', 'the payload no longer carries its (team, slot, range) key');
+const writerLockMessage = (format, id, why = PRUNE_WHY.replaced) =>
+  format.replace('%', id).replace('%', why);
 
 /** What the fetch boundary answers with, per test. */
 let answer = { status: 200, body: {} };
@@ -220,8 +262,8 @@ afterEach(() => {
 });
 
 /** Override Synthetic Hawks onto Friday, Apply, and return the alert the page shows. */
-async function overrideAndApply() {
-  seed();
+async function overrideAndApply(seedOptions = {}) {
+  seed(seedOptions);
   render(
     <MemoryRouter>
       <PracticeSchedulingPage />
@@ -243,30 +285,55 @@ const UNSUPPORTED = "Changing a saved practice from the scheduling grid isn't su
 
 describe("the grid's Apply, refused because a saved practice is locked", () => {
   it('the writer has the lock refusals this file renders (meta, can fail)', () => {
+    // The current writer is a real file, and it is not an older one.
+    expect(WRITER_FILE).toMatch(/^\d{14}_.+\.sql$/);
+    expect(String(WRITER_FILE) >= '20261002000000').toBe(true);
     // Both lock sites: the prune and the same-weekday overlap.
     expect(LOCK_FORMATS).toHaveLength(2);
     for (const format of LOCK_FORMATS) {
-      expect(parsePracticeLockRefusal({ message: writerLockMessage(format, A_ROW) })).toEqual({
-        assignmentId: A_ROW,
-      });
+      expect(parsePracticeLockRefusal({ message: writerLockMessage(format, A_ROW) })).toEqual(
+        expect.objectContaining({ assignmentId: A_ROW })
+      );
     }
+    // The prune reasons this file sends are the writer's own.
+    for (const why of Object.values(PRUNE_WHY)) expect(WRITER).toContain(`'${why}'`);
   });
 
-  for (const [i, label] of ['prune', 'overlap'].entries()) {
-    it(`names the team and its series, never the id (${label} refusal)`, async () => {
+  const HAWKS = "Synthetic Hawks's practice (Monday 17:00–18:30, 2026-09-07 to 2026-11-30)";
+  for (const [i, label, cause] of [
+    [0, 'prune', 'this save would replace it'],
+    [1, 'overlap', 'a new practice for the team overlaps it'],
+  ]) {
+    it(`names the team, its series and the cause, never the id (${label} refusal)`, async () => {
       answer = {
         status: 500,
         body: { status: 'error', message: writerLockMessage(LOCK_FORMATS[i], A_ROW) },
       };
       const alert = await overrideAndApply();
       // From the seed: Hawks' saved row is slot-mon, 17:00-18:30, [2026-09-07,2026-12-01).
-      expect(alert).toHaveTextContent(
-        `Synthetic Hawks's practice (Monday 17:00–18:30, 2026-09-07 to 2026-11-30) is ` +
-          `locked, so nothing was saved. ${UNSUPPORTED}`
+      expect(alert.textContent).toBe(
+        `${HAWKS} is locked, and ${cause}, so nothing was saved. ${UNSUPPORTED}`
       );
       expect(alert.textContent).not.toContain(A_ROW);
     });
   }
+
+  it('a team the roster read does not name is named from the grid row, never by id', async () => {
+    answer = {
+      status: 500,
+      body: {
+        status: 'error',
+        message: writerLockMessage(LOCK_FORMATS[0], C_ROW, PRUNE_WHY.absent),
+      },
+    };
+    const alert = await overrideAndApply({ offRoster: true });
+    expect(alert.textContent).toBe(
+      "Synthetic Larks's practice (Wednesday 16:00–17:00, 2026-09-07 to 2026-11-30) is locked, " +
+        `and this save leaves it out, so nothing was saved. ${UNSUPPORTED}`
+    );
+    expect(alert.textContent).not.toContain(C_ROW);
+    expect(alert.textContent).not.toContain(OFF_ROSTER.id);
+  });
 
   it('resolves the row the writer named, not the team being staged', async () => {
     // The writer names Owls' row: the page reports Owls, from its own rows.
@@ -286,8 +353,9 @@ describe("the grid's Apply, refused because a saved practice is locked", () => {
       body: { status: 'error', message: writerLockMessage(LOCK_FORMATS[0], UNKNOWN_ROW) },
     };
     const alert = await overrideAndApply();
-    expect(alert).toHaveTextContent(
-      `A saved practice in this schedule is locked, so nothing was saved. ${UNSUPPORTED}`
+    expect(alert.textContent).toBe(
+      'A saved practice in this schedule is locked, and this save would replace it, so nothing ' +
+        `was saved. ${UNSUPPORTED}`
     );
     expect(alert.textContent).not.toContain(UNKNOWN_ROW);
   });
@@ -326,24 +394,30 @@ describe('parsePracticeLockRefusal', () => {
     expect(err).toBeInstanceOf(Error);
     expect(err.code).toBe(PRACTICE_ASSIGNMENT_LOCKED);
     expect(err.status).toBe(409);
-    expect(parsePracticeLockRefusal(err)).toEqual({ assignmentId: A_ROW });
+    expect(parsePracticeLockRefusal(err)).toEqual(FOUND);
   });
 
-  it("reads the Edge's repair-save 409 code, and the raw SQLSTATE", () => {
+  const FOUND = { assignmentId: A_ROW, cause: PRUNE_WHY.replaced };
+
+  it("reads the Edge's repair-save 409 code, the raw SQLSTATE and the ordinary 500", () => {
     expect(
       parsePracticeLockRefusal({ code: PRACTICE_ASSIGNMENT_LOCKED, message: message() })
-    ).toEqual({ assignmentId: A_ROW });
-    expect(parsePracticeLockRefusal({ code: '22023', message: message() })).toEqual({
-      assignmentId: A_ROW,
-    });
+    ).toEqual(FOUND);
+    expect(parsePracticeLockRefusal({ code: '22023', message: message() })).toEqual(FOUND);
+    expect(parsePracticeLockRefusal({ code: null, status: 500, message: message() })).toEqual(
+      FOUND
+    );
     // The code is certain even when the text names no row.
     expect(parsePracticeLockRefusal({ code: PRACTICE_ASSIGNMENT_LOCKED, message: '' })).toEqual({
       assignmentId: null,
+      cause: null,
     });
   });
 
-  it('is not fooled by another code or a message that only mentions a lock', () => {
+  it('is not fooled by another code or status, or a message that only mentions a lock', () => {
     expect(parsePracticeLockRefusal({ code: '42501', message: message() })).toBeNull();
+    expect(parsePracticeLockRefusal({ code: null, status: 403, message: message() })).toBeNull();
+    expect(parsePracticeLockRefusal({ code: null, status: 422, message: message() })).toBeNull();
     expect(
       parsePracticeLockRefusal({ code: '22023', message: 'every unlock entry needs a reason' })
     ).toBeNull();

@@ -27,21 +27,37 @@
 /** The Edge's code for the writer's locked refusal on a repair save. */
 export const PRACTICE_ASSIGNMENT_LOCKED = 'PRACTICE_ASSIGNMENT_LOCKED';
 
-const LOCKED_MESSAGE = /^assignment (\S+) is locked:/;
+const LOCKED_MESSAGE = /^assignment (\S+) is locked: (.*?)(?: -- |$)/;
+
+/**
+ * The writer's reasons (`<why>` above), in the operator's words. A reason not
+ * listed here gets no clause rather than a guess.
+ */
+const CAUSE_TEXT = Object.freeze({
+  'the payload no longer carries its (team, slot, range) key': 'this save would replace it',
+  'it is an auto row of a season team absent from the payload': 'this save leaves it out',
+  'closes re-ranges it': 'this save would shorten it',
+  'an exception on it is withdrawn': 'this save withdraws an exception on it',
+  'a new row for its team overlaps it in time': 'a new practice for the team overlaps it',
+});
 
 /**
  * @param {unknown} error - what the persistence client threw
- * @returns {{ assignmentId: string|null } | null} the refused row's id (null
- *   when the refusal is certain but names no row), or null when this is not
- *   the locked refusal
+ * @returns {{ assignmentId: string|null, cause: string|null } | null} the
+ *   refused row's id (null when the refusal is certain but names no row) and
+ *   the writer's reason, or null when this is not the locked refusal
  */
 export function parsePracticeLockRefusal(error) {
-  const err = /** @type {{ code?: unknown, message?: unknown } | null} */ (error);
+  const err = /** @type {{ code?: unknown, message?: unknown, status?: unknown } | null} */ (error);
   const code = err?.code ?? null;
   const match = LOCKED_MESSAGE.exec(String(err?.message ?? ''));
-  if (code === PRACTICE_ASSIGNMENT_LOCKED) return { assignmentId: match?.[1] ?? null };
-  if (match && (code === null || code === '22023')) return { assignmentId: match[1] };
-  return null;
+  const found = { assignmentId: match?.[1] ?? null, cause: match?.[2] ?? null };
+  if (code === PRACTICE_ASSIGNMENT_LOCKED) return found;
+  if (!match) return null;
+  if (code === '22023') return found;
+  // No code: only the ordinary save's 500 (or an error with no HTTP status).
+  const status = err?.status ?? null;
+  return code === null && (status === null || status === 500) ? found : null;
 }
 
 const UNSUPPORTED = "Changing a saved practice from the scheduling grid isn't supported yet.";
@@ -52,9 +68,10 @@ const UNSUPPORTED = "Changing a saved practice from the scheduling grid isn't su
  *
  * @param {{ teamName?: string|null, series?: string|null } | null} locked -
  *   the refused row as the page resolved it, or null when it could not
+ * @param {string|null} [cause] - the writer's reason, from {@link parsePracticeLockRefusal}
  * @returns {string}
  */
-export function describePracticeLockRefusal(locked) {
+export function describePracticeLockRefusal(locked, cause = null) {
   const teamName = locked?.teamName ?? null;
   const series = locked?.series ? ` (${locked.series})` : '';
   const subject = teamName
@@ -62,5 +79,6 @@ export function describePracticeLockRefusal(locked) {
     : series
       ? `A saved practice${series}`
       : 'A saved practice in this schedule';
-  return `${subject} is locked, so nothing was saved. ${UNSUPPORTED}`;
+  const because = CAUSE_TEXT[cause] ? `, and ${CAUSE_TEXT[cause]}` : '';
+  return `${subject} is locked${because}, so nothing was saved. ${UNSUPPORTED}`;
 }

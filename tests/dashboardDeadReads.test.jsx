@@ -582,9 +582,6 @@ vi.mock('../frontend/src/hooks/useTeamSummary.js', () => ({
     progress: 0,
   }),
 }));
-vi.mock('../frontend/src/hooks/usePracticeAssignments.js', () => ({
-  usePracticeAssignments: () => ({ assignments: [], loading: false, error: null }),
-}));
 vi.mock('../frontend/src/hooks/useGameAssignments.js', () => ({
   useGameAssignments: () => ({ assignments: [], loading: false, error: null }),
 }));

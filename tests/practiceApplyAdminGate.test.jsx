@@ -156,7 +156,13 @@ function dashboardData() {
       status: 'idle',
       progress: 0,
     },
-    practice: { summary: null, snapshot: null, generatedAt: null, runId: null, assignments: [] },
+    practice: {
+      summary: null,
+      snapshot: null,
+      generatedAt: null,
+      runId: null,
+      scheduleAssignments: [],
+    },
     game: {
       summary: null,
       snapshot: null,

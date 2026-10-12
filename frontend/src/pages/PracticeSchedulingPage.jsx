@@ -426,7 +426,10 @@ export default function PracticeSchedulingPage() {
     currentSeasonSetting,
   });
 
-  const [assignments, setAssignments] = useState(practice?.assignments ?? []);
+  // The grid's rows: every current row of the season, the exports' read
+  // (`useCurrentPracticeSchedule`). A latest-run read missed rows writer v3
+  // keeps under older runs, and an Apply built on it was refused as locked.
+  const [assignments, setAssignments] = useState(practice?.scheduleAssignments ?? []);
   const [reviewAssignments, setReviewAssignments] = useState(null);
   const [practiceSlotRows, setPracticeSlotRows] = useState([]);
   const { closures: fieldClosures } = useFieldClosures();
@@ -466,12 +469,12 @@ export default function PracticeSchedulingPage() {
   const refetchSeasonPractice = seasonPractice.refetch;
 
   useEffect(() => {
-    if (practice?.assignments) {
-      setAssignments(practice.assignments);
+    if (practice?.scheduleAssignments) {
+      setAssignments(practice.scheduleAssignments);
     }
   }, [
-    practice.assignments,
-    practice?.assignments?.length,
+    practice.scheduleAssignments,
+    practice?.scheduleAssignments?.length,
     // `practice?.snapshot?.lastCalculated` stood here and could never change:
     // the snapshot is `run.results` verbatim and nothing writes that field.
     // `generatedAt` is the run timestamp the mapper really produces.
@@ -1040,13 +1043,37 @@ export default function PracticeSchedulingPage() {
         slotById,
       });
 
-      const replaced = localAssignments.some(
-        (assignment) => String(getAssignmentTeamId(assignment)) === String(teamId)
-      );
+      const isTeamRow = (assignment) => String(getAssignmentTeamId(assignment)) === String(teamId);
+      const replaced = localAssignments.some(isTeamRow);
+      // An override replaces the team's CURRENT series only. A CLOSED series --
+      // one whose range ends before another of the team's series starts, as a
+      // re-home's `closes` leaves it -- is history: it stays in the payload as
+      // it is, so the writer keeps it by its key. Ranges are read with core
+      // `practiceRangeBounds`, as `toPersistenceAssignment` reads them; a range
+      // that does not read is treated as current, never as history.
+      const boundsOf = (assignment) =>
+        practiceRangeBounds(assignment.effectiveDateRange ?? assignment.effective_date_range);
+      const latestStart = localAssignments
+        .filter(isTeamRow)
+        .map((assignment) => boundsOf(assignment)?.first)
+        .filter(Boolean)
+        .reduce((latest, first) => (latest && latest > first ? latest : first), null);
+      const isClosed = (assignment) => {
+        const bounds = boundsOf(assignment);
+        return Boolean(bounds && latestStart && bounds.last < latestStart);
+      };
+      // Several CURRENT series (two weekdays) are ambiguous: which day does the
+      // override replace? Not guessed. Today's behaviour is kept: one staged
+      // row, the team's other current rows dropped (the old per-row replace
+      // sent one key for all of them).
+      let stagedOnce = false;
       const staged = replaced
-        ? localAssignments.map((assignment) =>
-            String(getAssignmentTeamId(assignment)) === String(teamId) ? nextAssignment : assignment
-          )
+        ? localAssignments.flatMap((assignment) => {
+            if (!isTeamRow(assignment) || isClosed(assignment)) return [assignment];
+            if (stagedOnce) return [];
+            stagedOnce = true;
+            return [nextAssignment];
+          })
         : [...localAssignments, nextAssignment];
 
       setReviewAssignments(staged);

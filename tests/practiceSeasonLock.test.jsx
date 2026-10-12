@@ -146,7 +146,7 @@ vi.mock('../frontend/src/hooks/useAutoScheduler.js', async () => {
 });
 
 // A STABLE value per test (built in beforeEach): a fresh object per render
-// would re-fire the page's `practice.assignments` effect forever.
+// would re-fire the page's `practice.scheduleAssignments` effect forever.
 vi.mock('../frontend/src/hooks/useDashboardData.js', () => ({
   useDashboardData: () => state.dashboard,
 }));
@@ -160,13 +160,17 @@ function dashboardData() {
     team: {
       teams: ['team-a', 'team-b', 'team-c'].map((id) => ({ id, name: id, division: 'U10' })),
     },
-    // The run-scoped reader: ONLY the latest run's rows. The season holds more.
+    // The grid's rows as production hands them over: the season's current
+    // rows (`useCurrentPracticeSchedule`). The lock still comes from the page's
+    // own season read, which these cases judge against the Edge's.
     practice: {
       summary: null,
       snapshot: null,
       generatedAt: null,
       runId: 'run-2',
-      assignments: state.rows.filter((r) => r.run_id === 'run-2'),
+      scheduleAssignments: state.rows.filter(
+        (r) => r.teams?.divisions?.season_settings_id === SEASON
+      ),
     },
     game: { summary: null, snapshot: null, warnings: [], generatedAt: null, runId: null },
   };

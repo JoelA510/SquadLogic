@@ -310,10 +310,24 @@ describe("the grid's Apply, refused because a saved practice is locked", () => {
 describe('parsePracticeLockRefusal', () => {
   const message = () => writerLockMessage(LOCK_FORMATS[0], A_ROW);
 
+  it("a repair save's 409 reaches the page with its code (the client keeps it)", async () => {
+    const { persistPracticeRepair } =
+      await import('../frontend/src/utils/practicePersistenceClient.js');
+    answer = {
+      status: 409,
+      body: { status: 'error', code: PRACTICE_ASSIGNMENT_LOCKED, message: message() },
+    };
+    const err = await persistPracticeRepair({ assignments: [], slots: [] }).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.code).toBe(PRACTICE_ASSIGNMENT_LOCKED);
+    expect(err.status).toBe(409);
+    expect(parsePracticeLockRefusal(err)).toEqual({ assignmentId: A_ROW });
+  });
+
   it("reads the Edge's repair-save 409 code, and the raw SQLSTATE", () => {
-    expect(parsePracticeLockRefusal({ code: PRACTICE_ASSIGNMENT_LOCKED, message: message() })).toEqual(
-      { assignmentId: A_ROW }
-    );
+    expect(
+      parsePracticeLockRefusal({ code: PRACTICE_ASSIGNMENT_LOCKED, message: message() })
+    ).toEqual({ assignmentId: A_ROW });
     expect(parsePracticeLockRefusal({ code: '22023', message: message() })).toEqual({
       assignmentId: A_ROW,
     });
@@ -325,8 +339,12 @@ describe('parsePracticeLockRefusal', () => {
 
   it('is not fooled by another code or a message that only mentions a lock', () => {
     expect(parsePracticeLockRefusal({ code: '42501', message: message() })).toBeNull();
-    expect(parsePracticeLockRefusal({ code: '22023', message: 'every unlock entry needs a reason' })).toBeNull();
-    expect(parsePracticeLockRefusal({ message: `note: assignment ${A_ROW} is locked: x` })).toBeNull();
+    expect(
+      parsePracticeLockRefusal({ code: '22023', message: 'every unlock entry needs a reason' })
+    ).toBeNull();
+    expect(
+      parsePracticeLockRefusal({ message: `note: assignment ${A_ROW} is locked: x` })
+    ).toBeNull();
     expect(parsePracticeLockRefusal(new Error('Practice persistence failed: 500'))).toBeNull();
     expect(parsePracticeLockRefusal(null)).toBeNull();
   });

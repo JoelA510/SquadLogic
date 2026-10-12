@@ -33,6 +33,10 @@ import {
 } from '../utils/practicePersistenceClient.js';
 import { buildDaylightExceptions } from '../utils/daylightExceptions.js';
 import {
+  describePracticeLockRefusal,
+  parsePracticeLockRefusal,
+} from '../utils/practiceLockRefusal.js';
+import {
   buildPracticeApplyStatus,
   buildTeamsWithoutPracticeWarnings,
 } from '../utils/practiceApplyStatus.js';
@@ -392,6 +396,35 @@ function toLockedAssignment(assignment) {
   const { id, teamId, slotId, effectiveDateRange, assignedVia } =
     toPersistenceAssignment(assignment);
   return { id, teamId, slotId, effectiveDateRange, assignedVia };
+}
+
+/**
+ * The saved row a locked refusal names, as the operator knows it: its team
+ * and its series (weekday, time, inclusive dates). Read from this page's own
+ * rows; a part it cannot resolve is left out, never replaced by the id.
+ *
+ * @returns {{ teamName: string|null, series: string|null } | null}
+ */
+function lockedRowOf(row, { teamById, slotById }) {
+  if (!row) return null;
+  const teamId = getAssignmentTeamId(row);
+  const slot = slotById.get(getAssignmentSlotId(row));
+  const fallback = row.practiceSlots ?? {};
+  const rawDay = slot?.day ?? fallback.dayOfWeek ?? fallback.day_of_week ?? null;
+  const day = rawDay ? normalizeDay(rawDay) : null;
+  const start = (
+    slot?.startTime ?? normalizeTime(fallback.startTime ?? fallback.start_time)
+  )?.slice(0, 5);
+  const end = (slot?.endTime ?? normalizeTime(fallback.endTime ?? fallback.end_time))?.slice(0, 5);
+  const bounds = practiceRangeBounds(row.effectiveDateRange ?? row.effective_date_range);
+  const when = day && start && end ? `${day} ${start}–${end}` : day;
+  const series = [when, bounds ? `${bounds.first} to ${bounds.last}` : null]
+    .filter(Boolean)
+    .join(', ');
+  return {
+    teamName: teamById.get(teamId)?.name ?? row.teams?.name ?? null,
+    series: series || null,
+  };
 }
 
 export default function PracticeSchedulingPage() {
@@ -970,10 +1003,22 @@ export default function PracticeSchedulingPage() {
         })
       );
     } catch (err) {
-      setApplyError(err.message || 'Practice schedule changes could not be applied.');
+      // Writer v3's lock (ruling 2): the grid sends no `unlock`, so replacing a
+      // saved practice is refused. Say which one in words; the raw text names
+      // it only by id. Every other refusal keeps its own message.
+      const locked = parsePracticeLockRefusal(err);
+      const lockedRow = locked?.assignmentId
+        ? [...assignments, ...seasonRows].find((row) => row?.id === locked.assignmentId)
+        : null;
+      setApplyError(
+        locked
+          ? describePracticeLockRefusal(lockedRowOf(lockedRow, { teamById, slotById }))
+          : err.message || 'Practice schedule changes could not be applied.'
+      );
       setApplyStatus('error');
     }
   }, [
+    assignments,
     autoScheduler.result,
     canApplySchedule,
     canManageSchedule,
@@ -989,6 +1034,7 @@ export default function PracticeSchedulingPage() {
     // unchanged count has to re-create it.
     schedulerTeams,
     schoolDayEnd,
+    seasonRows,
     slotById,
     teamById,
     timezone,

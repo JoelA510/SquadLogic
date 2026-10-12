@@ -227,6 +227,7 @@ function* nodes(value, path = []) {
   }
 }
 
+/** @param {string[]} path @param {(parent: any, key: string) => void} fn @param {any} [base] */
 function mutate(path, fn, base = VALID) {
   const copy = structuredClone(base);
   let parent = copy;

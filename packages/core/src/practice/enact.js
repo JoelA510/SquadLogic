@@ -503,14 +503,14 @@ const BlackoutReason = z.enum(['maintenance', 'weather', 'event', 'permit', 'clo
 const MINUTES_PAIRED = {
   message: 'start_minutes and end_minutes are both set, with end after start, or both null',
 };
-/** @param {{ start_minutes: number | null, end_minutes: number | null }} value */
+/** @param {any} value - `{ start_minutes, end_minutes }` */
 const minutesPaired = (value) =>
   value.start_minutes === null
     ? value.end_minutes === null
     : value.end_minutes !== null && value.end_minutes > value.start_minutes;
 /** Exactly one scope column is set (`field_blackouts_scope_check`). */
 const ONE_SCOPE = { message: 'exactly one of field_id and location_id is set' };
-/** @param {{ field_id: string | null, location_id: string | null }} value */
+/** @param {any} value - `{ field_id, location_id }` */
 const oneScope = (value) => (value.field_id === null) !== (value.location_id === null);
 
 /** The keys both arms share, unchanged from the retirement-only record (3b PR 11b). */
@@ -702,8 +702,8 @@ function shapeRecord(shape) {
  * @param {any} args.adapted - `buildPracticeRepairInput()` of the fresh read
  * @param {any} args.state - the re-based state the recommendation was judged on
  * @param {ReturnType<typeof judgeEnact>} args.judged
- * @param {{ committed: boolean, refusal: string | null, stored: any }} args.commit - the
- *   gate (`causeCommitOf`) the payload passed
+ * @param {{ committed: boolean, refusal: string | null, stored: any, causeId?: string | null }} args.commit -
+ *   the gate (`causeCommitOf`) the payload passed
  * @param {ReturnType<typeof buildEnactPayload>} args.enactment
  * @param {{ rows: Array<{ assignment_id: string, assigned_via: string, effect: string,
  *   range_after: string | null, window?: string }>, published_practices_affected: number,

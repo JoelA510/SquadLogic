@@ -1,6 +1,6 @@
 # Plan: #60b, weigh a spread-refused slot against the TIME TBD it causes
 
-Status: **PLAN, awaiting operator approval.** Docs only; no code changes.
+Status: **APPROVED 2026-10-12.** Docs only; no code changes.
 
 Operator decision (2026-10-12): **option (b).** Before the rule gate refuses a
 slot for `CONFLICT_SPREAD_EXCEEDED`, compare the spread if the game is placed
@@ -570,3 +570,21 @@ placement also carry the per-game warning, or only at an exact tie?**
 _Recommendation (not an answer):_ warn in both. The placement still grows the
 group past what it stood at with the game home, so the operator should see it.
 `tie: false` in the details distinguishes the two.
+
+---
+
+## 14. Operator answers (2026-10-12)
+
+The operator said: "Follow your recommendation on the 60b plan". Every
+question is approved as recommended.
+
+- **Q0 (supervisor), approved:** build (b), at low priority, after 11d.
+- **Q1, approved as recommended:** leave the 4 TIME TBDs as #60 Q1 decided.
+- **Q2, approved as recommended:** the floor also applies in pass 2.
+- **Q3, approved as recommended:** add
+  `RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD`.
+- **Q4, approved as recommended:** each group must clear its own floor.
+- **Q5, approved as recommended:** the options pass uses the floor; no extra
+  cross-venue options.
+- **Q6, approved as recommended:** warn on both a tie and a strict
+  improvement, with `tie` in the details.

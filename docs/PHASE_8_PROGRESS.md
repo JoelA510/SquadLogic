@@ -7627,3 +7627,96 @@ The plan is `docs/PHASE_8_6_PR11_ENACT_PLAN.md`. Operator answers:
   - The mock enact does not re-stamp run ids and writes no `scheduler_runs`
     row, unlike production.
   - Add a behaviour test for the dashboard export path.
+
+## Production deploy, 11d-1, and the heat-fixture history rewrite (2026-10-12)
+
+SHAs below are post-rewrite. The pre-rewrite SHAs of #532, #529, #533 and
+#534 quoted on their GitHub PR pages are no longer reachable from `main`.
+
+### Production caught up (ran on the #529 push)
+
+- The operator added `SUPABASE_DB_PASSWORD` and a one-run
+  `MAX_PENDING_MIGRATIONS`. The main push for #529 then ran Deploy Database
+  Migrations (no skip warning) and Deploy Edge Functions, both green.
+- Catalog-only check of `mmwupqsjkikqzvmdvuzm`: the ledger ends at
+  `20261006000000_org_heat_settings`, so all 10 pending versions
+  (`20260927000000` .. `20261006000000`) are applied.
+  `practice_exceptions`, `practice_lighting_overrides`,
+  `coach_practice_preferences` and `organization_heat_settings` exist with RLS
+  on.
+- Still open (operator): delete the `MAX_PENDING_MIGRATIONS` variable, and
+  decide on dropping
+  `supabase_migrations.schema_migrations_backup_20260928`, which still exists.
+
+### 11d plan answered and 11d-1 merged
+
+- **#529 (`407263f`).** The operator approved every recommendation, Q1-Q11.
+  The plan's §9 records the answers. The wrapper is the 11th migration, not
+  the 10th; with production caught up it will be the only pending one.
+- **#534 (`834b40a`), 11d-1 core.** The repair adapter reads live
+  `practice_exceptions`:
+  - relocated windows become occupants, clipped to their row;
+  - a window this blackout caused that covers the series' whole share of the
+    loss counts as enacted;
+  - new refusals: `LIVE_EXCEPTION_OVERLAP`, `CLOSE_CUTS_LIVE_EXCEPTION`,
+    `DAYLIGHT_MID_RANGE`, `RELOCATION_LOSES_PRACTICES`;
+  - `enact.js` builds the blackout payload behind a stored-row gate.
+
+  The Enact button stays disabled for blackouts until 11d-3.
+- **Supervisor plant on #534: SURVIVED the first head.** I dropped rule 4's
+  coverage test, so any window this blackout caused marked the whole series
+  enacted. All 5042 tests still passed. A partly enacted series would have
+  been left out of the repair silently.
+  - The fix adds witness B3c. A partial window is not an enact: the series is
+    repaired over all its lost dates, and the write is refused as
+    `LIVE_EXCEPTION_OVERLAP`, matching the plan's "refuse, never split".
+  - Planting the neighbouring guards found two more with no witness: the
+    `causeKind` match, and the start-side occupant clip. Both are witnessed
+    now. 5045 tests pass, and the season fixture suite passes (1672 tests).
+- **Carried into later PRs:**
+  - 11d-2: the record union and B15 core.
+  - 11d-3: the "cannot be repaired here" panel row.
+- **Accepted plan reading.** An exception on a row the snapshot did not read
+  is named in `declared.exceptions.outOfSeason` and not applied.
+
+### #532 heat fixtures: synthetic values, then a history rewrite
+
+- **Exposure.** #532 committed real field locations, venue names and the
+  club's name into the heat test fixtures and the Python reference script.
+  The saved NWS fixture also named the real forecast grid cell. The repo is
+  public.
+- **Forward fix, #533.** Synthetic sites, a neutral reference-script name
+  and User-Agent, a synthetic grid cell, and a golden reference regenerated
+  offline with the repo's own generator. Before regenerating, the generator
+  reproduced the old golden values byte for byte.
+- **Supervisor plant on #533: SURVIVED the first head.** I put a coordinate
+  in a non-heat test file, and the guard (heat paths only) passed it. The
+  guard now scans the whole repo: about 1400 files, with a short exact-value
+  allow-list for other features' test values. The plant fails it.
+- **History rewrite (operator-approved).**
+  - Method: #532 was replaced by one commit carrying #532 plus #533
+    (`58cd354`, with #532's author, date and message, plus a note). #529 and
+    #534 were replayed, and #533's own commit was dropped.
+  - `main` was force-pushed with a lease on the old tip.
+- **Gates, all met before the push:**
+  - the new tip's tree is byte-identical to the old tip's;
+  - `3e5d9ac` (#532's parent) and every earlier commit keep their SHAs;
+  - 3 new commits replace 4;
+  - a pickaxe search of the new history finds zero commits for every real
+    coordinate, the old grid cell, the venue names, and the club name and
+    abbreviation. The same search on the old history finds 2 for each, which
+    proves the search can fail.
+- **Not removable by a rewrite.** GitHub keeps PR #532's diff and
+  `refs/pull/532/head`. Purging those needs a GitHub Support request; that is
+  the operator's call.
+- **Every clone must re-sync:**
+  `git fetch origin && git checkout main && git reset --hard origin/main`,
+  or re-clone. `git pull` will not converge.
+- **Main's run on the rewritten tip failed in "Determine change scope"
+  (exit 128).** It diffs against the push's `before` SHA, and the rewrite
+  made that SHA unreachable, so the checkout does not have it. The tree is
+  identical to the old tip, whose run was green. A CI fix that falls back to
+  the full matrix is in its own PR.
+- **Out of scope by operator ruling.** Older real names, from before #532,
+  remain in files #532 did not touch. A working-tree scrub is queued; their
+  history is not rewritten.

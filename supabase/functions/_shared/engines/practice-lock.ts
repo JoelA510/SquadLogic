@@ -267,24 +267,26 @@ export type SeasonPracticeLock =
  * whose `kind` is not `relocated` is not what the read asked for, and refuses
  * it too, rather than being reported as a relocation with no slot.
  */
-export function liveRelocationsOf(
-  read: unknown[]
-): { ok: true; relocations: LoadedRelocation[] } | { ok: false; message: string } {
+export function liveRelocationsOf(read: unknown[]): {
+  relocations: LoadedRelocation[];
+  /** Set when the read is refused; `relocations` is then not to be used. */
+  refusal: string | null;
+} {
   const relocations: LoadedRelocation[] = [];
   for (const raw of read) {
     const row = raw as Record<string, unknown> | null;
     if (row === null || typeof row !== 'object' || !('withdrawn_at' in row)) {
       return {
-        ok: false,
-        message:
+        relocations: [],
+        refusal:
           `practice_exceptions: relocated exception ${String(row?.id ?? null)} carries no ` +
           'withdrawn_at, so it cannot be judged live or withdrawn',
       };
     }
     if (row.kind !== 'relocated') {
       return {
-        ok: false,
-        message:
+        relocations: [],
+        refusal:
           `practice_exceptions: exception ${String(row.id)} of kind ${String(row.kind)} ` +
           'came back from the relocated read',
       };
@@ -297,7 +299,7 @@ export function liveRelocationsOf(
       slotId: row.practice_slot_id == null ? null : String(row.practice_slot_id),
     });
   }
-  return { ok: true, relocations };
+  return { relocations, refusal: null };
 }
 
 /**
@@ -372,7 +374,7 @@ export async function loadSeasonPracticeLock(
     return { ok: false, message: `practice_exceptions (relocated): ${relocated.error}` };
   }
   const live = liveRelocationsOf(relocated.rows);
-  if (!live.ok) return live;
+  if (live.refusal !== null) return { ok: false, message: live.refusal };
 
   const rows = (assignments.rows as Array<Record<string, unknown>>).map((row) => ({
     id: String(row.id),

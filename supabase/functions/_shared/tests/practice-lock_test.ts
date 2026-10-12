@@ -118,10 +118,10 @@ Deno.test(
 Deno.test('relocated lock - a row with no withdrawn_at key refuses the read', () => {
   const { withdrawn_at: _drop, ...unjudged } = RELOCATED_DB_EXCEPTIONS[0] as Row;
   const judged = liveRelocationsOf([unjudged]);
-  assertEquals(judged.ok, false);
+  assert(judged.refusal !== null, 'an unjudgeable relocation was read as live or as withdrawn');
   // A row of another kind is not what the read asked for: refused, never slotless.
   const tbd = { ...(RELOCATED_DB_EXCEPTIONS[0] as Row), kind: 'time_tbd', practice_slot_id: null };
-  assertEquals(liveRelocationsOf([tbd]).ok, false);
+  assert(liveRelocationsOf([tbd]).refusal !== null, 'a time_tbd row was read as a relocation');
 });
 
 Deno.test('relocated lock - each live in-run relocation holds a unit and its coaches', async () => {

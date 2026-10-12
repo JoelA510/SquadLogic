@@ -96,7 +96,8 @@ async function loadSeed(overrides = {}) {
     relocated: RELOCATED_DB_EXCEPTIONS,
     ...overrides,
   });
-  const lock = await loadSeasonPracticeLock(client, PARAMS);
+  // `any`: the tests read both arms of the union, after asserting which one.
+  const lock = /** @type {any} */ (await loadSeasonPracticeLock(client, PARAMS));
   return { client, lock };
 }
 
@@ -122,7 +123,7 @@ async function runSeed(config, { withRelocations = true } = {}) {
   assert.equal(lock.ok, true, lock.ok ? '' : lock.message);
   const run = await runPracticeOptimizer({
     teams,
-    slots: RELOCATED_SLOTS,
+    slots: /** @type {any} */ (RELOCATED_SLOTS),
     locked: lockedOf(lock),
     ...(withRelocations ? { relocated: lock.relocations } : {}),
     placeableTeamIds,

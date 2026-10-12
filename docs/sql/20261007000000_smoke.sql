@@ -550,12 +550,13 @@ BEGIN
     PERFORM dblink_connect(v_conn, format('dbname=%s host=%s port=%s user=%s',
         current_database(), split_part(current_setting('unix_socket_directories'), ',', 1),
         current_setting('port'), current_user));
-    PERFORM dblink_exec(v_conn, format('SELECT set_config(%L, %L, false)', 'request.jwt.claim.sub', v_admin));
+    PERFORM dblink_exec(v_conn, format('SET request.jwt.claim.sub = %L', v_admin));
     PERFORM dblink_exec(v_conn, 'SET lock_timeout = ''1s''');
     BEGIN
-        PERFORM dblink_exec(v_conn, format(
-            'SELECT public.admin_update_field_blackout(%L, %L, %L, %L, 1050, 1170, %L, NULL)',
-            v_org, v_b, '2026-10-20', '2026-10-27', 'maintenance'));
+        -- dblink_exec runs commands only, so the RPC's SELECT goes through dblink().
+        PERFORM * FROM dblink(v_conn, format(
+            'SELECT public.admin_update_field_blackout(%L, %L, %L, %L, 1050, 1170, %L, NULL)::text',
+            v_org, v_b, '2026-10-20', '2026-10-27', 'maintenance')) AS t(result text);
         v_blackout_wait := 'committed';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
@@ -602,11 +603,11 @@ BEGIN
     PERFORM dblink_connect(v_conn, format('dbname=%s host=%s port=%s user=%s',
         current_database(), split_part(current_setting('unix_socket_directories'), ',', 1),
         current_setting('port'), current_user));
-    PERFORM dblink_exec(v_conn, format('SELECT set_config(%L, %L, false)', 'request.jwt.claim.sub', v_admin));
+    PERFORM dblink_exec(v_conn, format('SET request.jwt.claim.sub = %L', v_admin));
     PERFORM dblink_exec(v_conn, 'SET lock_timeout = ''1s''');
-    PERFORM dblink_exec(v_conn, format(
-        'SELECT public.admin_update_field_blackout(%L, %L, %L, %L, 1050, 1170, %L, NULL)',
-        v_org, v_b, '2026-10-20', '2026-10-27', 'maintenance'));
+    PERFORM * FROM dblink(v_conn, format(
+        'SELECT public.admin_update_field_blackout(%L, %L, %L, %L, 1050, 1170, %L, NULL)::text',
+        v_org, v_b, '2026-10-20', '2026-10-27', 'maintenance')) AS t(result text);
     PERFORM dblink_disconnect(v_conn);
     SELECT blackout_until INTO v_until FROM public.field_blackouts WHERE id = v_b;
     IF v_until IS DISTINCT FROM '2026-10-27'::date THEN

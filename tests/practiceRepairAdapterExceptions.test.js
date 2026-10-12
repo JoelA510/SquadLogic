@@ -412,6 +412,29 @@ describe('11d-1 :: B3c, a window covering only PART of the row’s share is not 
     ['[2026-10-26,2026-11-01]', 'covers the end only'],
   ];
 
+  it('a window of another cause KIND with the same id is not this enact either', () => {
+    // Ids are uuids of different tables: the kind is half the identity (the
+    // `practiceEnactCount` sibling contract), never assumed from the id alone.
+    const subjects = ['retirement', 'daylight'];
+    for (const causeKind of subjects) {
+      const other = ex(846, 601, '[2026-10-19,2026-11-01]', 'time_tbd', {
+        cause_kind: causeKind,
+        cause_id: BLACKOUT_ID,
+      });
+      const { adapted, result, written } = run(world({ exceptions: [other] }), loss);
+      expect(adapted.declared.exceptions.enactedWindows, causeKind).toBe(0);
+      expect(
+        result.recommendations.map((r) => r.assignmentId),
+        causeKind
+      ).toContain(S1);
+      expect(
+        written.refused.filter((r) => r.assignment_id === S1).map((r) => r.why),
+        causeKind
+      ).toContain(PRACTICE_REPAIR_PAYLOAD_REFUSAL.LIVE_EXCEPTION_OVERLAP);
+    }
+    expect(requireExamined(subjects.length, 'other cause kind')).toBe(2);
+  });
+
   it('keeps S1 displaced and refuses its write, for a window missing either end', () => {
     const rows = world();
     const share = displacedWindows(rows, '2026-10-19', '2026-11-01').get(S1);

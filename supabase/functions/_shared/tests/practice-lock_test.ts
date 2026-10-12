@@ -119,6 +119,9 @@ Deno.test('relocated lock - a row with no withdrawn_at key refuses the read', ()
   const { withdrawn_at: _drop, ...unjudged } = RELOCATED_DB_EXCEPTIONS[0] as Row;
   const judged = liveRelocationsOf([unjudged]);
   assertEquals(judged.ok, false);
+  // A row of another kind is not what the read asked for: refused, never slotless.
+  const tbd = { ...(RELOCATED_DB_EXCEPTIONS[0] as Row), kind: 'time_tbd', practice_slot_id: null };
+  assertEquals(liveRelocationsOf([tbd]).ok, false);
 });
 
 Deno.test('relocated lock - each live in-run relocation holds a unit and its coaches', async () => {
@@ -126,7 +129,8 @@ Deno.test('relocated lock - each live in-run relocation holds a unit and its coa
   const base = buildLockedOccupancy(lockedOf(lock), teamsById, slotsById, lock.relocations);
   for (const id of RELOCATED_EXPECT.liveInRun) {
     const held = slotsById.get(slotOf(id))!;
-    assertEquals(base.slotCapacity.get(held.id), held.capacity - 1, `${id} holds no unit`);
+    const units: Record<string, number> = RELOCATED_EXPECT.unitsHeld;
+    assertEquals(base.slotCapacity.get(held.id), held.capacity - units[held.id], `${id} units`);
     for (const coachId of teamsById.get(String(seed.get(id)!.team_id))!.coachIds) {
       assert(
         (base.coachAssignments.get(coachId) ?? []).some((w) => w.slotId === held.id),
@@ -159,10 +163,20 @@ Deno.test(
     const used = new Map<string, number>();
     const bump = (id: string) => used.set(id, (used.get(id) ?? 0) + 1);
     for (const r of RELOCATED_DB_ASSIGNMENTS) bump(String(r.practice_slot_id));
-    for (const id of RELOCATED_EXPECT.liveInRun) bump(slotOf(id));
+    const units: Record<string, number> = RELOCATED_EXPECT.unitsHeld;
+    for (const [slotId, n] of Object.entries(units)) for (let i = 0; i < n; i += 1) bump(slotId);
     for (const p of run.placements) bump(p.slotId);
     for (const slot of slots) {
       assert((used.get(slot.id) ?? 0) <= slot.capacity, `${slot.id} is double-booked`);
+      // One unit per (row, slot): the rest of a held slot is offered.
+      const free = slot.capacity - (units[slot.id] ?? 0);
+      if (slot.id in units && free > 0) {
+        assertEquals(
+          run.placements.filter((p) => p.slotId === slot.id).length,
+          free,
+          `${slot.id} does not offer its free unit(s)`
+        );
+      }
     }
     const { team, twinSlot } = RELOCATED_EXPECT.coachWitness;
     const seated = run.placements.find((p) => p.teamId === team);

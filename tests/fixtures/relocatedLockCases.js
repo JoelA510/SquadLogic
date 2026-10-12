@@ -18,7 +18,8 @@
  * a slot an ordinary run would otherwise fill first (the slot order below is
  * the greedy seed's order). The windows are a bounded one, an open one and an
  * unreadable one: the hold is season-wide, so none of them is read, and each
- * must hold its slot all the same. One more relocation is withdrawn, one names
+ * must hold its slot all the same. Two disjoint windows of one row land on one
+ * capacity-2 slot and hold one unit. One more relocation is withdrawn, one names
  * a slot outside the run, and one carries no slot at all (the table's CHECK
  * forbids that; it is defended, not reachable).
  *
@@ -46,6 +47,8 @@ export const RELOCATED_SLOTS = Object.freeze([
   slot('s-target', '2026-09-08', 17, 1),
   slot('s-open', '2026-09-09', 17, 1),
   slot('s-garbled', '2026-09-10', 17, 1),
+  // Two disjoint windows of one row land here: they hold one unit, not two.
+  slot('s-double', '2026-09-09', 19, 2),
   // Same instant as `s-target`: free of capacity, but `moved`'s coach is there.
   slot('s-twin', '2026-09-08', 17, 1),
   slot('s-freed', '2026-09-11', 17, 1),
@@ -93,6 +96,8 @@ export const RELOCATED_DB_EXCEPTIONS = Object.freeze([
   dbException('x-live', 'a-moved', 'moved', 's-target', '[2026-09-08,2026-09-08]', null),
   dbException('x-open', 'a-moved-b', 'moved-b', 's-open', '[2026-10-07,)', null),
   dbException('x-garbled', 'a-moved-c', 'moved-c', 's-garbled', 'garbled', null),
+  dbException('x-double-1', 'a-moved-c', 'moved-c', 's-double', '[2026-09-16,2026-09-16]', null),
+  dbException('x-double-2', 'a-moved-c', 'moved-c', 's-double', '[2026-09-23,2026-09-23]', null),
   dbException(
     'x-withdrawn',
     'a-moved',
@@ -123,7 +128,12 @@ function dbException(id, assignmentId, teamId, slotId, window, withdrawnAt) {
  */
 export const RELOCATED_EXPECT = Object.freeze({
   /** Live, on a slot of the run: each must hold its slot. */
-  liveInRun: Object.freeze(['x-live', 'x-open', 'x-garbled']),
+  liveInRun: Object.freeze(['x-live', 'x-open', 'x-garbled', 'x-double-1', 'x-double-2']),
+  /**
+   * The units the live in-run relocations hold, per slot: one per (row, slot),
+   * so `x-double-1` and `x-double-2` (one row, disjoint windows) hold one.
+   */
+  unitsHeld: Object.freeze({ 's-target': 1, 's-open': 1, 's-garbled': 1, 's-double': 1 }),
   /** Withdrawn: must hold nothing. */
   withdrawn: Object.freeze(['x-withdrawn']),
   /** Live, but the run holds no time for the slot: reported, never dropped. */

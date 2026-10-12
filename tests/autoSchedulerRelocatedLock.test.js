@@ -138,7 +138,9 @@ function overfilledSlots(run) {
   const used = new Map();
   const bump = (slotId) => used.set(slotId, (used.get(slotId) ?? 0) + 1);
   for (const row of RELOCATED_DB_ASSIGNMENTS) bump(row.practice_slot_id);
-  for (const id of RELOCATED_EXPECT.liveInRun) bump(seedException.get(id).practice_slot_id);
+  for (const [slotId, units] of Object.entries(RELOCATED_EXPECT.unitsHeld)) {
+    for (let i = 0; i < units; i += 1) bump(slotId);
+  }
   for (const p of run.placements) bump(p.slotId);
   let examined = 0;
   const over = [];
@@ -175,6 +177,20 @@ describe('the seed exercises every case (meta-assertions)', () => {
       const x = seedException.get(id);
       assert.equal(x.withdrawn_at, null, `${id} is labelled live`);
       assert.ok(slotsById.has(x.practice_slot_id), `${id} is labelled in-run`);
+      assert.ok(RELOCATED_EXPECT.unitsHeld[x.practice_slot_id] >= 1, `${id}'s slot holds no unit`);
+    }
+    // One row moved onto one slot twice: the (row, slot) dedup is exercised,
+    // and its slot has room left, so a second unit held would show.
+    const perRowSlot = new Map();
+    for (const id of RELOCATED_EXPECT.liveInRun) {
+      const x = seedException.get(id);
+      const k = `${x.assignment_id}|${x.practice_slot_id}`;
+      perRowSlot.set(k, (perRowSlot.get(k) ?? 0) + 1);
+    }
+    const twice = [...perRowSlot].filter(([, n]) => n >= 2).map(([k]) => k.split('|')[1]);
+    assert.ok(twice.length >= 1, 'no row is moved onto one slot twice');
+    for (const slotId of twice) {
+      assert.ok(slotsById.get(slotId).capacity > RELOCATED_EXPECT.unitsHeld[slotId], slotId);
     }
     for (const id of RELOCATED_EXPECT.withdrawn) {
       assert.notEqual(seedException.get(id).withdrawn_at, null, `${id} is labelled withdrawn`);
@@ -265,6 +281,17 @@ describe('the lock loads live relocated exceptions, as the caller, scoped like t
     assert.match(lock.message, /withdrawn_at/);
   });
 
+  it('a row of another kind back from the relocated read refuses it, never reads as slotless', async () => {
+    const { lock } = await loadSeed({
+      relocated: [
+        ...RELOCATED_DB_EXCEPTIONS,
+        { ...RELOCATED_DB_EXCEPTIONS[0], id: 'x-tbd', kind: 'time_tbd', practice_slot_id: null },
+      ],
+    });
+    assert.equal(lock.ok, false, 'a time_tbd row was loaded as a relocation');
+    assert.match(lock.message, /x-tbd/);
+  });
+
   it('a failed relocated read is a refusal, not an empty hold', async () => {
     const { lock } = await loadSeed({ failRelocated: true });
     assert.equal(lock.ok, false);
@@ -299,7 +326,11 @@ describe('a live relocated slot is held season-wide (the locked-row contract)', 
     for (const id of RELOCATED_EXPECT.liveInRun) {
       const x = seedException.get(id);
       const capacity = slotsById.get(x.practice_slot_id).capacity;
-      assert.equal(base.slotCapacity.get(x.practice_slot_id), capacity - 1, `${id} holds no unit`);
+      assert.equal(
+        base.slotCapacity.get(x.practice_slot_id),
+        capacity - RELOCATED_EXPECT.unitsHeld[x.practice_slot_id],
+        `${id}: ${x.practice_slot_id} does not hold exactly its units`
+      );
       const held = slotsById.get(x.practice_slot_id);
       for (const coachId of teamsById.get(x.team_id).coachIds) {
         assert.ok(
@@ -346,6 +377,19 @@ describe('a live relocated slot is held season-wide (the locked-row contract)', 
       assert.ok(
         run.placements.some((p) => p.slotId === slotId),
         `withdrawn ${id} still holds ${slotId}`
+      );
+    }
+  });
+
+  it('two windows of one row on one slot hold one unit, and the other is seated', async () => {
+    const { run } = await runSeed(GREEDY_ONLY);
+    for (const [slotId, units] of Object.entries(RELOCATED_EXPECT.unitsHeld)) {
+      const free = slotsById.get(slotId).capacity - units;
+      if (free <= 0) continue;
+      assert.equal(
+        run.placements.filter((p) => p.slotId === slotId).length,
+        free,
+        `${slotId} does not offer its ${free} free unit(s)`
       );
     }
   });

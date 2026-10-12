@@ -191,12 +191,19 @@ export function buildLockedOccupancy(
     inRun.push(row);
     hold(row.teamId, slot);
   }
+  // One unit per (row, slot): a row has at most one live window at a time
+  // (the table's EXCLUDE constraint), so two windows of one row moved onto
+  // one slot never meet on a date and hold one unit between them, not two.
+  const heldForRow = new Set<string>();
   for (const relocation of relocated) {
     const slot = relocation.slotId ? slotsById.get(relocation.slotId) : undefined;
     if (!slot) {
       relocatedOutsideRun.push(relocation);
       continue;
     }
+    const key = `${relocation.assignmentId ?? relocation.exceptionId}|${slot.id}`;
+    if (heldForRow.has(key)) continue;
+    heldForRow.add(key);
     hold(relocation.teamId, slot);
   }
   return { slotCapacity, coachAssignments, inRun, outsideRun, relocatedOutsideRun };

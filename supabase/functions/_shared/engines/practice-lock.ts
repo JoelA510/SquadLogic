@@ -48,6 +48,7 @@ export interface LoadedPracticeRow {
  */
 export interface LoadedRelocation {
   exceptionId: string;
+  /** The row moved. Two live windows of one row onto one slot hold one unit (the solver). */
   assignmentId: string | null;
   teamId: string;
   /** `null` only if the table's slot-iff-relocated CHECK were broken: held nowhere, reported. */
@@ -262,7 +263,9 @@ export type SeasonPracticeLock =
  * selected -- the contract of `liveExceptionsOf` (core
  * `practice/repairAdapter.js`) and of `applyPracticeExceptions`, adopted:
  * live is `withdrawn_at == null`; a withdrawn row holds nothing; a row with no
- * `withdrawn_at` key can be judged neither way and refuses the read.
+ * `withdrawn_at` key can be judged neither way and refuses the read. A row
+ * whose `kind` is not `relocated` is not what the read asked for, and refuses
+ * it too, rather than being reported as a relocation with no slot.
  */
 export function liveRelocationsOf(
   read: unknown[]
@@ -276,6 +279,14 @@ export function liveRelocationsOf(
         message:
           `practice_exceptions: relocated exception ${String(row?.id ?? null)} carries no ` +
           'withdrawn_at, so it cannot be judged live or withdrawn',
+      };
+    }
+    if (row.kind !== 'relocated') {
+      return {
+        ok: false,
+        message:
+          `practice_exceptions: exception ${String(row.id)} of kind ${String(row.kind)} ` +
+          'came back from the relocated read',
       };
     }
     if (row.withdrawn_at != null) continue;
@@ -347,7 +358,7 @@ export async function loadSeasonPracticeLock(
       client
         .from('practice_exceptions')
         .select(
-          'id, assignment_id, team_id, practice_slot_id, withdrawn_at, ' +
+          'id, assignment_id, team_id, practice_slot_id, kind, withdrawn_at, ' +
             'teams!inner(divisions!inner(season_settings_id))'
         )
         .eq('organization_id', organizationId)

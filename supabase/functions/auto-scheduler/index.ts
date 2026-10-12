@@ -240,8 +240,9 @@ serve(async (req) => {
       return jsonResponse(
         {
           error:
-            "The season's current practice assignments could not be read, so the run was " +
-            'refused rather than scheduled over practices that are locked.',
+            "The season's current practice assignments, or their saved temporary changes, " +
+            'could not be read, so the run was refused rather than scheduled over practices ' +
+            `that are locked (${lock.message}).`,
           code: 'PRACTICE_LOCK_UNREADABLE',
         },
         503
@@ -434,6 +435,7 @@ serve(async (req) => {
       teamCount: input.teams.length,
       slotCount: input.slots.length,
       lockedLoaded: lock.rows.length,
+      relocatedLoaded: lock.relocations.length,
       placeableTeams: classification.placeable.length,
       maxIterations: input.config.maxIterations,
       timeBudgetMs: input.config.timeBudgetMs,
@@ -446,6 +448,7 @@ serve(async (req) => {
         teamCount: input.teams.length,
         slotCount: input.slots.length,
         lockedLoaded: lock.rows.length,
+        relocatedLoaded: lock.relocations.length,
         placeableTeams: classification.placeable.length,
         timeTbdExcluded: classification.timeTbd.length,
         approvedPreferencesLoaded: preferences.preferencesLoaded,

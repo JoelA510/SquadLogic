@@ -78,6 +78,8 @@ export function rowsOf({ slots, assignments, coaches = [], fields = fieldsWith()
     practiceAssignments: assignments,
     teamCoachAssignments: coaches,
     fieldClosures: [],
+    // The loader always reads the table (3b PR 11d: the panel refuses rows without it).
+    practiceExceptions: [],
   };
 }
 

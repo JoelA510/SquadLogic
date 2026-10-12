@@ -9,8 +9,8 @@
  *
  * **Read-only.** Nothing here writes. `buildPracticeRepairPayload` is called
  * only to say, per window, whether a save of the current recommendations
- * would be refused and why (3b PR 9: every blackout window is refused until
- * PR 12). The payload itself is dropped on the floor: enacting is PR 11.
+ * would be refused and why. The payload itself is dropped on the floor:
+ * enacting is `practiceRepairEnact.js`.
  *
  * **Daylight.** The adapter takes a sunset table and the venues'
  * coordinates. No sunset table is stored, so the table passed is empty and
@@ -62,10 +62,14 @@ export const TBD_REASON_TEXT = Object.freeze({
 
 /** Plain words for every reason a save of a window would be refused. */
 export const SAVE_REFUSAL_TEXT = Object.freeze({
-  [PRACTICE_REPAIR_PAYLOAD_REFUSAL.MID_RANGE_WINDOW]:
-    'the window ends before its practice series does, and schedules cannot show a temporary change yet',
-  [PRACTICE_REPAIR_PAYLOAD_REFUSAL.WINDOW_INSIDE_ROW]:
-    'the window lies inside its practice series, and schedules cannot show a temporary change yet',
+  [PRACTICE_REPAIR_PAYLOAD_REFUSAL.LIVE_EXCEPTION_OVERLAP]:
+    'the window overlaps a temporary change already saved on this series, and two changes cannot overlap',
+  [PRACTICE_REPAIR_PAYLOAD_REFUSAL.CLOSE_CUTS_LIVE_EXCEPTION]:
+    'ending the series would cut a temporary change already saved on it, and withdrawing a saved change is not available yet',
+  [PRACTICE_REPAIR_PAYLOAD_REFUSAL.DAYLIGHT_MID_RANGE]:
+    'a sunset TIME TBD must reach the end of its practice series, and this window ends before it',
+  [PRACTICE_REPAIR_PAYLOAD_REFUSAL.RELOCATION_LOSES_PRACTICES]:
+    'the new day falls fewer times in the window than the old one, so practices would be lost',
   [PRACTICE_REPAIR_PAYLOAD_REFUSAL.NO_SLOT_FOR_SHAPE]:
     'no practice slot of that ground, day and time is valid over the whole window',
   [PRACTICE_REPAIR_PAYLOAD_REFUSAL.ROW_NOT_CLOSABLE]:
@@ -137,6 +141,13 @@ export function daylightPlanFor(locations, timeZone) {
  *   plans no write and passes none)
  */
 export function openPracticeRepair(rows, loss, { timeZone = null, baseFingerprint = null } = {}) {
+  // 3b PR 11d: the snapshot always reads the table. Rows without it were not
+  // read by `loadPracticeRepairSnapshot`; repairing as if none were saved
+  // would drop every overlap, cut and occupancy guard (the enact prompt's
+  // precedent, `enactPromptOf`).
+  if (!Array.isArray(rows.practiceExceptions)) {
+    throw new Error('practice repair: the practice exceptions were not read');
+  }
   const daylightPlan = daylightPlanFor(rows.locations ?? [], timeZone);
   const adapted = buildPracticeRepairInput({
     locations: rows.locations,
@@ -147,6 +158,8 @@ export function openPracticeRepair(rows, loss, { timeZone = null, baseFingerprin
     teamCoachAssignments: rows.teamCoachAssignments,
     coachPreferences: rows.coachPreferences,
     fieldClosures: rows.fieldClosures,
+    // 3b PR 11d: saved temporary changes occupy ground and refuse overlaps.
+    practiceExceptions: rows.practiceExceptions,
     loss,
     ...(daylightPlan.daylight ? { daylight: daylightPlan.daylight } : {}),
     ...(baseFingerprint ? { baseFingerprint } : {}),

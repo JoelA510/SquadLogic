@@ -7,10 +7,12 @@
  * state onto it (`practice/recommendations.js`), and then asks this module,
  * in order:
  *
- * 1. {@link retirementCommitOf}: is the retirement COMMITTED? Operator answer
- *    Q3: enact only once `fields.effective_to` is stored, and equal to the
- *    loss's date. It reads the FRESH field row, never the `loss` prop, which
- *    the dry-run preview builds from its own unsaved date.
+ * 1. {@link causeCommitOf}: is the cause COMMITTED? For a retirement
+ *    ({@link retirementCommitOf}, operator answer Q3): enact only once
+ *    `fields.effective_to` is stored, and equal to the loss's date. For a
+ *    blackout (3b PR 11d, Q5): only a stored `field_blackouts` row, equal to
+ *    the loss in scope, dates, minutes and reason. Each reads the FRESH row,
+ *    never the `loss` prop, which a preview builds from its unsaved draft.
  * 2. {@link judgeEnact}: does the one recommendation still stand, exactly as
  *    it was shown? Its series is still displaced and not enacted, its `to` is
  *    still one of its candidates, not declined, within the change budget
@@ -27,10 +29,14 @@
  *    and is written as the move). The new row is
  *    `assigned_via = 'recommendation'`. `unlock` comes only from the prompt's
  *    accepted answer, with a GENERATED reason: ids and a date, no free text
- *    (Q4). A blackout is refused with a null payload (Q1: retirement-only
- *    until 3b PR 11d).
+ *    (Q4). A blackout (3b PR 11d) is one exception on S's row over the fresh
+ *    recommendation's window, with no unlock, and still needs the prompt's
+ *    tick.
  * 4. {@link buildEnactRecord}: the `practice.recommendation_enacted` audit
  *    metadata, validated by the strict {@link PracticeEnactRecordSchema}.
+ *    **Retirement-only in 3b PR 11d-1**: the blackout arm of the record lands
+ *    with its Edge twin in 11d-2 (`tests/practiceEnactSchemaDrift.test.js`
+ *    holds the two key for key), so a blackout record is refused here, loudly.
  *
  * Every refusal is a `payload: null` with a named `refusal`: the caller sends
  * nothing. A refusal is never a partial write.
@@ -67,8 +73,15 @@ export const PRACTICE_ENACT_REFUSAL = Object.freeze({
   RETIREMENT_UNCOMMITTED: 'retirement-uncommitted',
   /** The stored `effective_to` differs from the loss's date. */
   RETIREMENT_CHANGED: 'retirement-changed',
-  /** Blackout enact is 3b PR 11d, after PR 12 (operator answer Q1). */
-  BLACKOUT_NOT_ENACTABLE: 'blackout-not-enactable',
+  /** The fresh read holds no stored blackout of the loss's id (a draft): 3b PR 11d, Q5. */
+  BLACKOUT_UNCOMMITTED: 'blackout-uncommitted',
+  /** The stored blackout's scope, dates, minutes or reason differ from the loss's. */
+  BLACKOUT_CHANGED: 'blackout-changed',
+  /**
+   * A blackout write unlocks nothing, but moves published practices of a
+   * locked series: the prompt's tick is still required (3b PR 11d, Q4).
+   */
+  PROMPT_NOT_ACCEPTED: 'prompt-not-accepted',
   /** The fresh re-judge differs from what the admin was shown. */
   STALE: 'stale',
   /** The adapter refused the write (its `refused` list says why). */
@@ -126,13 +139,10 @@ function id(value) {
  */
 export function retirementCommitOf(freshRows, loss) {
   if (loss?.kind !== PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT) {
-    return {
-      committed: false,
-      refusal: PRACTICE_ENACT_REFUSAL.BLACKOUT_NOT_ENACTABLE,
-      fieldId: null,
-      stored: null,
-      claimed: null,
-    };
+    // The retirement arm of `causeCommitOf`: a blackout has its own gate.
+    throw new TypeError(
+      `enact: retirementCommitOf judges a retirement, not ${JSON.stringify(loss?.kind)}; use causeCommitOf`
+    );
   }
   const fieldId = id(loss.field?.id);
   const claimed = loss.field?.effective_to ?? null;
@@ -158,6 +168,99 @@ export function retirementCommitOf(freshRows, loss) {
     };
   }
   return { committed: true, refusal: null, fieldId, stored, claimed };
+}
+
+/** A blackout's scope, dates, minutes and reason, in `field_blackouts`' own columns. */
+function blackoutRecordOf(row) {
+  const lower = (value) => (value == null ? null : id(value));
+  return {
+    field_id: lower(row.field_id),
+    location_id: lower(row.location_id),
+    blackout_from: row.blackout_from ?? null,
+    blackout_until: row.blackout_until ?? null,
+    start_minutes: row.start_minutes ?? null,
+    end_minutes: row.end_minutes ?? null,
+    reason: row.reason ?? null,
+  };
+}
+
+/**
+ * The blackout commit gate (3b PR 11d, plan §2.6, Q5), on FRESH rows: enact
+ * only a SAVED blackout, and only as it is saved. It reads the fresh
+ * `field_closures` row (`source = 'field_blackouts'`, the loss's id), never
+ * the `loss` prop, which the editor builds from its unsaved draft (id
+ * `'draft'`). The view names the scope `closes_field_id` /
+ * `closes_location_id`; it is mapped back to the table's columns.
+ *
+ * @param {{ fieldClosures?: Array<Record<string, any>> }} freshRows
+ * @param {{ kind: string, blackout?: Record<string, any> }} loss
+ * @returns {{ committed: boolean, refusal: string | null, causeId: string | null,
+ *   stored: ReturnType<typeof blackoutRecordOf> | null, claimed: ReturnType<typeof blackoutRecordOf> }}
+ */
+function blackoutCommitOf(freshRows, loss) {
+  const claimed = blackoutRecordOf(loss?.blackout ?? {});
+  const causeId = loss?.blackout?.id == null ? null : id(loss.blackout.id);
+  const row =
+    causeId === null || causeId === 'draft'
+      ? null
+      : ((freshRows?.fieldClosures ?? []).find(
+          (closure) => closure.source === 'field_blackouts' && id(closure.id) === causeId
+        ) ?? null);
+  if (row === null) {
+    return {
+      committed: false,
+      refusal: PRACTICE_ENACT_REFUSAL.BLACKOUT_UNCOMMITTED,
+      causeId,
+      stored: null,
+      claimed,
+    };
+  }
+  const stored = blackoutRecordOf({
+    ...row,
+    field_id: row.closes_field_id,
+    location_id: row.closes_location_id,
+  });
+  if (canonicalJson(stored) !== canonicalJson(claimed)) {
+    return {
+      committed: false,
+      refusal: PRACTICE_ENACT_REFUSAL.BLACKOUT_CHANGED,
+      causeId,
+      stored,
+      claimed,
+    };
+  }
+  return { committed: true, refusal: null, causeId, stored, claimed };
+}
+
+/**
+ * The commit gate for the loss's own kind (3b PR 11d): one gate per kind.
+ * A retirement is {@link retirementCommitOf}, unchanged; a blackout is the
+ * blackout gate above.
+ *
+ * @param {Record<string, any>} freshRows
+ * @param {{ kind: string, field?: any, blackout?: any }} loss
+ */
+export function causeCommitOf(freshRows, loss) {
+  if (loss?.kind === PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT) {
+    return retirementCommitOf(freshRows, loss);
+  }
+  if (loss?.kind === PRACTICE_REPAIR_CAUSE_KIND.BLACKOUT) return blackoutCommitOf(freshRows, loss);
+  throw new TypeError(`enact: unknown loss kind ${JSON.stringify(loss?.kind)}`);
+}
+
+/** Whether a blackout gate's STORED row is exactly the adapted loss (scope, dates, minutes, reason). */
+function storedIsLoss(stored, cause) {
+  const { loss, scope } = cause;
+  return (
+    stored !== null &&
+    stored.field_id === scope.fieldId &&
+    stored.location_id === scope.locationId &&
+    stored.blackout_from === loss.from &&
+    stored.blackout_until === loss.until &&
+    stored.start_minutes === (loss.startMinutes ?? null) &&
+    stored.end_minutes === (loss.endMinutes ?? null) &&
+    stored.reason === loss.reason
+  );
 }
 
 /**
@@ -255,22 +358,32 @@ function unlockReasonOf(enactKey, fieldId, lossDate) {
  * @param {any} adapted - `buildPracticeRepairInput()` of the fresh read
  * @param {ReturnType<typeof judgeEnact>} judged
  * @param {{ accepted?: boolean, enactKey?: string } | null | undefined} answer - the prompt's answer
- * @param {ReturnType<typeof retirementCommitOf>} commit - the gate on the same fresh read
+ * @param {{ committed: boolean, refusal: string | null, fieldId?: string | null,
+ *   causeId?: string | null, stored: any, claimed: any } | null | undefined} commit - the
+ *   gate (`causeCommitOf`) on the same fresh read
  */
 export function buildEnactPayload(adapted, judged, answer, commit) {
   const refuse = (refusal, extra = {}) =>
     Object.freeze({ refusal, payload: null, plan: null, refused: [], unlock: [], ...extra });
   const { cause, baseFingerprint } = adapted.context;
-  if (cause.kind !== PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT) {
-    return refuse(PRACTICE_ENACT_REFUSAL.BLACKOUT_NOT_ENACTABLE);
-  }
+  const blackout = cause.kind === PRACTICE_REPAIR_CAUSE_KIND.BLACKOUT;
   const lossDate = adapted.input.loss.from;
-  if (!commit?.committed) {
-    return refuse(commit?.refusal ?? PRACTICE_ENACT_REFUSAL.RETIREMENT_UNCOMMITTED);
-  }
-  // The gate must have judged THIS loss: its field, and D-1 stored.
-  if (commit.fieldId !== cause.causeId || commit.stored !== shiftDate(lossDate, -1)) {
-    return refuse(PRACTICE_ENACT_REFUSAL.RETIREMENT_CHANGED);
+  if (blackout) {
+    if (!commit?.committed) {
+      return refuse(commit?.refusal ?? PRACTICE_ENACT_REFUSAL.BLACKOUT_UNCOMMITTED);
+    }
+    // The gate must have judged THIS loss: its row, stored exactly as adapted.
+    if (commit.causeId !== cause.causeId || !storedIsLoss(commit.stored, cause)) {
+      return refuse(PRACTICE_ENACT_REFUSAL.BLACKOUT_CHANGED);
+    }
+  } else {
+    if (!commit?.committed) {
+      return refuse(commit?.refusal ?? PRACTICE_ENACT_REFUSAL.RETIREMENT_UNCOMMITTED);
+    }
+    // The gate must have judged THIS loss: its field, and D-1 stored.
+    if (commit.fieldId !== cause.causeId || commit.stored !== shiftDate(lossDate, -1)) {
+      return refuse(PRACTICE_ENACT_REFUSAL.RETIREMENT_CHANGED);
+    }
   }
   if (judged.basis !== adapted.input.plan) {
     throw new Error('enact: the recommendation was judged on another read than the one adapted');
@@ -282,11 +395,21 @@ export function buildEnactPayload(adapted, judged, answer, commit) {
 
   // Built from the FRESH recommendation, so a tier-2 move is written as the move.
   const recommendation = judged.fresh;
-  const entry = { assignmentId: recommendation.assignmentId, window: null };
+  // A blackout never splits: one exception on S's row over the FRESH
+  // recommendation's own window (S ∩ the loss), never the loss's.
+  if (blackout && !recommendation.window) {
+    throw new Error(
+      `enact: the blackout recommendation for ${recommendation.assignmentId} has no window`
+    );
+  }
+  const entry = {
+    assignmentId: recommendation.assignmentId,
+    window: blackout ? { ...recommendation.window } : null,
+  };
   const built = buildPracticeRepairPayload(
     adapted,
     {
-      representation: 'split',
+      representation: blackout ? 'override' : 'split',
       lossDate,
       rehomed: recommendation.to === null ? [] : [{ ...entry, to: recommendation.to }],
       timeTbd: recommendation.to === null ? [{ ...entry, reason: recommendation.reason }] : [],
@@ -311,6 +434,24 @@ export function buildEnactPayload(adapted, judged, answer, commit) {
   }
   const unlockRequired = built.plan.unlockRequired;
   const accepted = answer?.accepted === true;
+  if (blackout) {
+    // An exception on a locked row re-ranges nothing: no unlock is sent, and
+    // sending one would audit a lock break that never happened (Q4).
+    if (unlockRequired.length > 0) {
+      throw new Error(`enact: a blackout write for ${s} asks to unlock a row`);
+    }
+    if (!accepted) return refuse(PRACTICE_ENACT_REFUSAL.PROMPT_NOT_ACCEPTED, { plan: built.plan });
+    return Object.freeze({
+      refusal: null,
+      plan: built.plan,
+      refused: [],
+      unlock: [],
+      payload: {
+        assignmentRows: built.payload.assignmentRows,
+        repair: { ...built.payload.repair, unlock: [] },
+      },
+    });
+  }
   if (unlockRequired.length > 0 && !accepted) {
     return refuse(PRACTICE_ENACT_REFUSAL.UNLOCK_NOT_ACCEPTED, { plan: built.plan });
   }
@@ -463,7 +604,8 @@ function shapeRecord(shape) {
  * @param {any} args.adapted - `buildPracticeRepairInput()` of the fresh read
  * @param {any} args.state - the re-based state the recommendation was judged on
  * @param {ReturnType<typeof judgeEnact>} args.judged
- * @param {ReturnType<typeof retirementCommitOf>} args.commit
+ * @param {{ committed: boolean, refusal: string | null, stored: any }} args.commit - the
+ *   gate (`causeCommitOf`) the payload passed
  * @param {ReturnType<typeof buildEnactPayload>} args.enactment
  * @param {{ rows: Array<{ assignment_id: string, assigned_via: string, effect: string,
  *   range_after: string | null }>, published_practices_affected: number, accepted: boolean }} args.prompt -
@@ -481,6 +623,11 @@ export function buildEnactRecord({
 }) {
   if (enactment.payload === null) {
     throw new Error(`enact: a refused enact (${enactment.refusal}) has no record`);
+  }
+  if (adapted.context.cause.kind !== PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT) {
+    throw new Error(
+      'enact: a blackout enact has no record yet: its arm of the record lands with the Edge twin in 3b PR 11d-2'
+    );
   }
   const promptIds = prompt.rows.map((row) => row.assignment_id).sort();
   const requiredIds = enactment.plan.unlockRequired.map((row) => row.assignment_id).sort();

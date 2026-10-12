@@ -706,6 +706,65 @@ export function buildPracticeRepairContext(input) {
   const displacedIds = new Set(displaced.map((series) => series.assignmentId));
   const frozen = active.filter((series) => !displacedIds.has(series.assignmentId));
 
+  /* -- occupants: saved temporary moves (8.6 3b PR 11d) ------------------- */
+  // A live relocated exception holds its relocated slot over its clipped
+  // window. Held to the loss window like a series, it is frozen ground: never
+  // displaced, never recommended. One on the lost ground cannot be repaired
+  // here (moving it again needs a withdrawal, 3b decision 6): reported, never
+  // dropped. `null` when none were supplied, so the result is main's.
+  const occupantMeta =
+    parsed.occupants === undefined
+      ? null
+      : { supplied: parsed.occupants.length, held: 0, lost: /** @type {any[]} */ ([]) };
+  for (const occupant of parsed.occupants ?? []) {
+    const slot = slotById.get(occupant.slotId);
+    if (!slot) {
+      throw new TypeError(
+        `repair: occupant ${occupant.id} names slot "${occupant.slotId}", which the plan does not hold`
+      );
+    }
+    if (occupant.until < lossDate || (bounded && occupant.from > lossUntil)) continue;
+    const windowFrom = occupant.from < lossDate ? lossDate : occupant.from;
+    const windowUntil = bounded && occupant.until > lossUntil ? lossUntil : occupant.until;
+    if (firstWeekdayOnOrAfter(windowFrom, slot.weekday) > windowUntil) continue;
+    const held = {
+      // Keyed by the exception, not its series: a coach overlap the published
+      // plan accepted with the series' ORIGINAL practice does not excuse one
+      // with its moved practice, a different time.
+      assignmentId: occupant.id,
+      teamId: occupant.teamId,
+      slotId: slot.id,
+      surfaceId: slot.surfaceId,
+      weekday: slot.weekday,
+      startMinutes: slot.startMinutes,
+      durationMinutes: slot.durationMinutes,
+      from: windowFrom,
+      until: windowUntil,
+    };
+    frozen.push(held);
+    /** @type {any} */ (occupantMeta).held += 1;
+    if (lostSurfaceIds.has(slot.surfaceId) && hitsLossMinutes(slot)) {
+      /** @type {any} */ (occupantMeta).lost.push({
+        id: occupant.id,
+        assignmentId: occupant.assignmentId,
+        teamId: occupant.teamId,
+        slotId: slot.id,
+        from: windowFrom,
+        until: windowUntil,
+      });
+    }
+  }
+  if (occupantMeta !== null && occupantMeta.lost.length > 0) {
+    occupantMeta.lost.sort((a, b) => a.id.localeCompare(b.id));
+    findings.push(
+      makePracticeFinding(
+        PRACTICE_REASON.REPAIR_RELOCATED_TARGET_LOST,
+        `${occupantMeta.lost.length} saved temporary move(s) land on the lost ground, so they cannot be repaired here: withdrawing a saved change is not available yet. They are neither moved nor reported TIME TBD.`,
+        { occupants: occupantMeta.lost.map((o) => ({ ...o })) }
+      )
+    );
+  }
+
   /* -- coaches ------------------------------------------------------------ */
   const coachesOf = (teamId) => coachesByTeam[teamId] ?? [];
   /** Days each coach practised on, from the loss date, in the published plan. */
@@ -1223,6 +1282,7 @@ export function buildPracticeRepairContext(input) {
     jointSearch,
     daylight,
     closureMeta,
+    occupantMeta,
   };
 }
 
@@ -1328,6 +1388,7 @@ export function repairPracticeLoss(input) {
     jointSearch,
     daylight,
     closureMeta,
+    occupantMeta,
   } = context;
 
   // Tier 1: the exact same-venue search (plan §2), unchanged.
@@ -1722,6 +1783,10 @@ export function repairPracticeLoss(input) {
     ...(closureMeta === null
       ? {}
       : { closures: { ...closureMeta, refused: [...closureMeta.refused] } }),
+    // Only when occupants were supplied (8.6 3b PR 11d), as for closures.
+    ...(occupantMeta === null
+      ? {}
+      : { occupants: { ...occupantMeta, lost: occupantMeta.lost.map((o) => ({ ...o })) } }),
   };
 }
 

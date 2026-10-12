@@ -270,7 +270,9 @@ describe('enact panel :: stale, double click, and the enacted row', () => {
 });
 
 describe('enact panel :: blackout enact is disabled (Q1)', () => {
-  it('disables every blackout recommendation with the save refusal as its reason', async () => {
+  // 3b PR 11d-1: a mid-range window is no longer a save refusal, so the gate
+  // itself is the reason; enact stays off until 11d-3.
+  it('disables every blackout recommendation, saying enact is not available yet', async () => {
     serve(world(fieldsWith(null)));
     const loss = {
       kind: 'blackout',
@@ -294,8 +296,8 @@ describe('enact panel :: blackout enact is disabled (Q1)', () => {
       expect(within(row).getByTestId('practice-repair-enact')).toBeDisabled();
       const why = within(row).getByTestId('practice-repair-enact-why');
       expect(why).toHaveAttribute('data-enact-gate', 'blackout');
-      const refusal = within(row).getAllByTestId('practice-repair-save-refused')[0];
-      expect(why.textContent).toContain(refusal.textContent.replace(/^Refused\s*/, '').trim());
+      expect(why.textContent).toContain('Enacting a blackout recommendation is not available yet');
+      expect(within(row).queryAllByTestId('practice-repair-save-refused')).toHaveLength(0);
     }
     expect(requireExamined(subjects.length, 'series-window')).toBe(2);
     expect(sends).not.toHaveBeenCalled();

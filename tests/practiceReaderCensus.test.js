@@ -130,6 +130,21 @@ const REGISTRY = {
   },
 };
 
+/**
+ * 8.6 3b PR 11d (plan D11): pure modules that read `practice_exceptions`
+ * rows handed to them, and so select no table: not subjects of the scan
+ * below, declared here instead, and the declaration is checked (it reads the
+ * rows, makes no dates, and selects nothing).
+ *
+ * @type {Record<string, { class: 'series-only', why: string }>}
+ */
+const DECLARED_EXCEPTION_READERS = {
+  'packages/core/src/practice/repairAdapter.js': {
+    class: 'series-only',
+    why: '11d: reads live exceptions as repair occupancy and enacted windows; makes no dates',
+  },
+};
+
 // ------------------------------------------------------------- the scanners
 
 const toPosix = (p) => p.split(path.sep).join('/');
@@ -264,6 +279,22 @@ describe('practice-reader census (W16)', () => {
   it('every reader of practice_assignments is classified', () => {
     const unclassified = SUBJECTS.filter((s) => !(s in REGISTRY));
     expect(unclassified).toEqual([]);
+  });
+
+  it('a declared exception reader reads the rows, makes no dates, and selects nothing (D11)', () => {
+    const entries = Object.entries(DECLARED_EXCEPTION_READERS);
+    expect(entries.length).toBeGreaterThan(0);
+    for (const [file, entry] of entries) {
+      const src = readFileSync(path.join(REPO, file), 'utf8');
+      expect(entry.class, file).toBe('series-only');
+      // Code, not a doc comment: a JSDoc `@param` line naming the key does not count.
+      const reads = /^(?!\s*(?:\*|\/\/)).*\brows\.practiceExceptions\b/m.test(src);
+      expect(reads, `${file} reads practiceExceptions`).toBe(true);
+      expect(IMPORTS_HELPER.test(src), `${file} imports the helper: classify it applies`).toBe(
+        false
+      );
+      expect(SUBJECTS, `${file} selects a table: register it above`).not.toContain(file);
+    }
   });
 
   it('every registry entry still reads the table (no stale entries)', () => {

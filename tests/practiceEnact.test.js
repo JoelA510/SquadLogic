@@ -27,6 +27,7 @@ import {
   buildEnactRecord,
   buildPracticeRepairInput,
   buildPracticeRepairPayload,
+  causeCommitOf,
   createRecommendationState,
   declineRecommendation,
   judgeEnact,
@@ -295,7 +296,8 @@ describe('enact :: the write covers S alone, marked and moved', () => {
     ]);
   });
 
-  it('refuses a blackout, with a null payload, for every displaced series-window (Q1)', () => {
+  // 3b PR 11d: a blackout has its own commit gate; an unsaved one is refused.
+  it('refuses an unsaved blackout, with a null payload, for every displaced series-window', () => {
     const loss = {
       kind: 'blackout',
       blackout: {
@@ -313,12 +315,19 @@ describe('enact :: the write covers S alone, marked and moved', () => {
     const adapted = adapt(rows, loss);
     const state = createRecommendationState(adapted.input);
     const subjects = displacedFromRows(rows, F1, '2026-10-15');
+    // The retirement gate never judges a blackout.
+    expect(() => retirementCommitOf(rows, loss)).toThrow('use causeCommitOf');
     for (const id of subjects) {
-      const commit = retirementCommitOf(rows, loss);
-      expect(commit.refusal).toBe(PRACTICE_ENACT_REFUSAL.BLACKOUT_NOT_ENACTABLE);
+      // The rows hold no stored blackout: the gate refuses it as unsaved.
+      const commit = causeCommitOf(rows, loss);
+      expect(commit.refusal).toBe(PRACTICE_ENACT_REFUSAL.BLACKOUT_UNCOMMITTED);
       const judged = judgeEnact(state, id, recOf(state, id));
       expect(judged.stands).toBe(true);
-      // Even with a forged committed gate, the payload is refused.
+      expect(buildEnactPayload(adapted, judged, ACCEPT, commit)).toMatchObject({
+        refusal: PRACTICE_ENACT_REFUSAL.BLACKOUT_UNCOMMITTED,
+        payload: null,
+      });
+      // A forged retirement-shaped gate names no blackout: refused as changed.
       const forged = {
         committed: true,
         refusal: null,
@@ -326,11 +335,10 @@ describe('enact :: the write covers S alone, marked and moved', () => {
         stored: '2026-10-14',
         claimed: '2026-10-14',
       };
-      for (const gate of [commit, forged]) {
-        const out = buildEnactPayload(adapted, judged, ACCEPT, gate);
-        expect(out.refusal).toBe(PRACTICE_ENACT_REFUSAL.BLACKOUT_NOT_ENACTABLE);
-        expect(out.payload).toBeNull();
-      }
+      expect(buildEnactPayload(adapted, judged, ACCEPT, forged)).toMatchObject({
+        refusal: PRACTICE_ENACT_REFUSAL.BLACKOUT_CHANGED,
+        payload: null,
+      });
     }
     expect(requireExamined(subjects.length, 'series-window')).toBe(2);
   });

@@ -30,9 +30,11 @@ Feature: Practice repair recommendations (read-only)
     When I undo the decline for "Repair Team A"
     Then the recommendation for "Repair Team A" should be placed
 
-  Scenario: A blackout draft shows each window, and why saving it would be refused
+  # 8.6 3b PR 11d-1: a mid-range window is no longer refused (the readers
+  # apply exceptions); blackout enact stays off until 11d-3.
+  Scenario: A blackout draft shows each window, and that enacting it is not available yet
     Given I am on the "Blackout Dates" page
     When I draft an all-day blackout on "Repair Pitch 1" from "2026-10-05" to "2026-10-11"
     And I open the practice repair recommendations
     Then the practice repair panel should list 2 displaced series-windows
-    And every practice repair window should show why saving it is refused
+    And every Enact button should be disabled because blackout enact is not available yet

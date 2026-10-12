@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 552 codes, of
- * which 540 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 553 codes, of
+ * which 541 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -6447,6 +6447,30 @@ harvest(
 harvest(
   'repairPracticeLoss(a loss naming ground the graph does not hold)',
   repairInput({ series: [], inventory: [], loss: 'nowhere/field-9' })
+);
+
+// 8.6 3b PR 11d: a saved temporary move (an occupant) on the lost ground.
+harvest(
+  'repairPracticeLoss(a saved temporary move lands on the lost ground)',
+  repairInput({
+    series: [
+      { teamId: 'RO1', surface: 'field-3-a', weekday: 'TUE', startMinutes: 1020 },
+      { teamId: 'RO2', surface: 'field-2-a', weekday: 'THU', startMinutes: 1020 },
+    ],
+    inventory: [],
+    extra: {
+      occupants: [
+        {
+          id: 'rpo-1',
+          assignmentId: 'rpa-0',
+          teamId: 'RO1',
+          slotId: 'rp-1',
+          from: '2026-10-05',
+          until: '2026-10-20',
+        },
+      ],
+    },
+  })
 );
 
 /* -------------------------------------------------------------------------- */

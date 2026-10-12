@@ -61,13 +61,14 @@ export async function loadPracticeRepairSnapshot(client, { organizationId, seaso
     ],
     // 8.6 3b PR 12c (plan R8, W17): the saved exceptions, so the enact prompt
     // counts only practices still published as their series. Every row, live
-    // or withdrawn: `applyPracticeExceptions` filters withdrawn rows itself.
-    // Only the columns it reads; the relocated slot is not needed to know a
-    // date is no longer a series date.
+    // or withdrawn: `applyPracticeExceptions` and the repair adapter filter
+    // withdrawn rows themselves. 3b PR 11d: the adapter also reads the
+    // relocated slot (an occupant) and the cause (a window enacted for THIS
+    // blackout is not displaced again).
     [
       'practiceExceptions',
       'practice_exceptions',
-      'id, assignment_id, window, kind, tbd_reason, withdrawn_at',
+      'id, assignment_id, window, kind, tbd_reason, practice_slot_id, cause_kind, cause_id, withdrawn_at',
     ],
   ];
   const print = await client.rpc('practice_schedule_fingerprint', {

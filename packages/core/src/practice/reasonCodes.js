@@ -218,6 +218,13 @@ export const PRACTICE_REASON = Object.freeze({
    * proven optimal. One per decline or undo.
    */
   REPAIR_RECOMMENDATION_LOCAL: 'PRACTICE_REPAIR_RECOMMENDATION_LOCAL',
+  /**
+   * A saved temporary move (a live `relocated` exception, a repair
+   * `occupant`) lands on the lost ground. It cannot be repaired here: moving
+   * it again needs a withdrawal (3b decision 6). Reported, never dropped
+   * (8.6 3b PR 11d, plan Q8). One per repair with any.
+   */
+  REPAIR_RELOCATED_TARGET_LOST: 'PRACTICE_REPAIR_RELOCATED_TARGET_LOST',
   /*
    * -- the daylight gate (8.9 PR 7, `repair.js`) --------------------------
    * Enforced in the module; shown to admins by the 8.6 3b PR 10 panel.
@@ -284,6 +291,8 @@ export const PRACTICE_REASON_SEVERITY = Object.freeze({
   [PRACTICE_REASON.REPAIR_COACH_OVERLAP_CARRIED]: PRACTICE_SEVERITY.COMPROMISE,
   [PRACTICE_REASON.REPAIR_MINIMALITY_UNPROVEN]: PRACTICE_SEVERITY.COMPROMISE,
   [PRACTICE_REASON.REPAIR_SERIES_UNDATED]: PRACTICE_SEVERITY.COMPROMISE,
+  // The sibling of SERIES_UNDATED: practices the repair can neither move nor TBD.
+  [PRACTICE_REASON.REPAIR_RELOCATED_TARGET_LOST]: PRACTICE_SEVERITY.COMPROMISE,
   [PRACTICE_REASON.REPAIR_LOSS_UNKNOWN_SURFACE]: PRACTICE_SEVERITY.BLOCKING,
   [PRACTICE_REASON.REPAIR_NOTHING_DISPLACED]: PRACTICE_SEVERITY.INFO,
   // The sibling contract: RESOLVE_OBJECTIVE_WEIGHTS_OVERRIDDEN is info, and a

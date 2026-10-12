@@ -46,6 +46,22 @@
  *   location refuses the input (a partial read); an import closure naming no
  *   ground at all is not applied and is named in `unattributable`, never
  *   dropped silently. No `fieldClosures` supplied is declared, not assumed.
+ * - **Live practice exceptions** (8.6 3b PR 11d, plan §2.1). The rules of
+ *   `utils/practiceExceptions.js`, adopted, not restated: live is
+ *   `withdrawn_at == null`, filtered HERE whatever the caller selected, and a
+ *   row with no `withdrawn_at` key refuses the input; windows are read by
+ *   `practiceRangeBounds`, and an open or unreadable live window refuses the
+ *   input (the readers show its dates TIME TBD; the repair cannot price
+ *   them). Only exceptions on a snapshot row apply: the loader reads the
+ *   organization, so one on another season's row is named in
+ *   `declared.exceptions.outOfSeason`, never applied. A live `relocated`
+ *   window is a repair `occupant` of its relocated slot over the window
+ *   clipped to its row's range; a live `time_tbd` window occupies no ground
+ *   and frees none (declared, D3). A live window caused by THIS blackout that
+ *   covers the series' whole share of the loss means the series is enacted
+ *   for it: it is left out of the repair's plan (it holds no ground inside
+ *   the window, and nothing outside the loss window is ever a candidate's).
+ *   No `practiceExceptions` supplied is declared, not assumed.
  *
  * ## Result -> payload ({@link buildPracticeRepairPayload})
  *
@@ -62,15 +78,21 @@
  * the feed cannot show it, the writer cannot key it, and the repair would
  * otherwise read it through its slot's validity instead.
  *
- * **Refused until 3b PR 12.** Readers expand only an assignment's own range
- * and do not apply exceptions yet, so any exception whose window still lies
- * inside its row's range after this save would leave that window's practices
- * shown. The writer refuses the daylight case (22023); this adapter refuses
- * every such window first -- a mid-range one (ending before its series does)
- * and a blackout window that reaches the series' end but lies inside its
- * unclosed row alike. A refusal names the window and keeps the exception it
- * would have written (in `plan`), and `payload` is then `null`: the whole
- * save is refused, nothing is dropped.
+ * **Refusals.** The readers apply exceptions (3b PR 12), so a mid-range
+ * window is admitted (3b PR 11d). What is refused, each named with its
+ * window, the exception it would have written kept in `plan`, and `payload`
+ * then `null` (the whole save is refused, nothing is dropped):
+ * - a planned window meeting a live window on the same row
+ *   (`LIVE_EXCEPTION_OVERLAP`: the table's EXCLUDE would raise 23P01);
+ * - a retirement close, or replacement, that cuts a live window reaching past
+ *   the row's new last day (`CLOSE_CUTS_LIVE_EXCEPTION`: trimming it is a
+ *   withdrawal, 3b decision 6);
+ * - a daylight-reason TIME TBD window ending before its row does
+ *   (`DAYLIGHT_MID_RANGE`: the writer's own 22023, adopted here so it never
+ *   reaches it);
+ * - a blackout relocation onto a weekday with fewer dates in the window than
+ *   the series' own (`RELOCATION_LOSES_PRACTICES`, gap G1: the readers would
+ *   show the loss faithfully, and nothing would report it).
  *
  * `unlockRequired` lists the locked rows the save re-ranges or replaces. The
  * unlock itself is the admin's answer to the override prompt (PR 11), never
@@ -86,6 +108,8 @@ import { coachesOfTeamOn } from '../people/assignmentHistory.js';
 import { buildPracticeAssignmentRows } from '../practiceSupabase.js';
 import { practiceRangeBounds } from '../utils/practiceOccurrences.js';
 import { CoachPreferencePlacementSchema } from './coachPreferences.js';
+import { PRACTICE_TBD_REASON } from './repair.js';
+import { firstWeekdayOnOrAfter } from './slots.js';
 
 /** `practice_exceptions.kind` (20260929000000), pinned to the Edge enum. */
 export const PRACTICE_EXCEPTION_ROW_KIND = Object.freeze({
@@ -105,10 +129,14 @@ export const PRACTICE_REPAIR_CAUSE_KIND = Object.freeze({
 
 /** Why a planned write is refused. */
 export const PRACTICE_REPAIR_PAYLOAD_REFUSAL = Object.freeze({
-  /** The window ends before its series' range does (3b plan, notes from 8.9 PR 6b). */
-  MID_RANGE_WINDOW: 'mid-range-window',
-  /** The window reaches the series' end but lies inside its unclosed row. */
-  WINDOW_INSIDE_ROW: 'window-inside-row',
+  /** The planned window meets a live window on the same row (3b PR 11d, Q2: refuse, never split). */
+  LIVE_EXCEPTION_OVERLAP: 'live-exception-overlap',
+  /** A retirement close or replacement would cut a live window past the row's new last day. */
+  CLOSE_CUTS_LIVE_EXCEPTION: 'close-cuts-live-exception',
+  /** A `past-sunset`/`sunset-unknown` TIME TBD window ends before its row does (Q3). */
+  DAYLIGHT_MID_RANGE: 'daylight-mid-range',
+  /** The relocated weekday has fewer dates in the window than the series' own (G1, Q6). */
+  RELOCATION_LOSES_PRACTICES: 'relocation-loses-practices',
   /** No practice slot of the re-home's shape is valid over its window. */
   NO_SLOT_FOR_SHAPE: 'no-slot-for-shape',
   /**
@@ -123,6 +151,11 @@ const ASSIGNED_VIA = new Set(['repair', 'recommendation']);
 const WEEKDAYS = new Set(['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']);
 const SEARCH_OPTIONS = new Set(['weights', 'changeBudget', 'searchNodeLimit', 'strategy']);
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** The writer's daylight reasons (`20261002000000:1115`), refused mid-range. */
+const DAYLIGHT_REASONS = new Set([
+  PRACTICE_TBD_REASON.PAST_SUNSET,
+  PRACTICE_TBD_REASON.SUNSET_UNKNOWN,
+]);
 /** What `coachPreferences.js` accepts as a location id: its contract, not a copy. */
 const LocationIdSchema = CoachPreferencePlacementSchema.shape.locationId;
 
@@ -164,6 +197,9 @@ function timeToMinutes(value, what) {
  * @param {Array<Object>} [rows.teamCoachAssignments] - `team_coach_assignments` rows
  * @param {Array<Object>} [rows.coachPreferences] - `coach_practice_preferences` rows
  * @param {Array<Object>} [rows.fieldClosures] - `field_closures` rows: the org's blackouts
+ * @param {Array<Object>} [rows.practiceExceptions] - `practice_exceptions` rows, live and
+ *   withdrawn (3b PR 11d): `id, assignment_id, window, kind, tbd_reason, practice_slot_id,
+ *   cause_kind, cause_id, withdrawn_at`
  * @param {{timeZone: string, sunsets?: Array<Object>}} [rows.daylight]
  * @param {Array<{slotId: string, from: string, until: string}>} [rows.lightingOverrides]
  * @param {Object} [rows.options] - `weights`, `changeBudget`, `searchNodeLimit`, `strategy`
@@ -276,16 +312,23 @@ export function buildPracticeRepairInput(rows) {
       `repair adapter: ${unreadable.length} snapshot row(s) have no readable effective_date_range (${unreadable.join(', ')}): the feed cannot show them and the writer cannot key them, so no repair is planned over them`
     );
   }
-  const assignments = snapshot.map((row) => ({
-    id: row.id,
-    slotId: row.slotId,
-    teamId: row.teamId,
-    effectiveFrom: row.range?.from ?? null,
-    effectiveUntil: row.range?.until ?? null,
-  }));
-
   /* -- the loss ------------------------------------------------------------ */
   const cause = lossOf(rows.loss, fields);
+
+  /* -- live practice exceptions (3b PR 11d, plan §2.1) --------------------- */
+  const exceptionsRead = liveExceptionsOf(rows.practiceExceptions, snapshot, slotRows, cause);
+
+  // A series enacted for this blackout holds no ground inside its window, and
+  // nothing outside the loss window is ever a candidate's: left out (rule 4).
+  const assignments = snapshot
+    .filter((row) => !exceptionsRead.enacted.has(row.id))
+    .map((row) => ({
+      id: row.id,
+      slotId: row.slotId,
+      teamId: row.teamId,
+      effectiveFrom: row.range?.from ?? null,
+      effectiveUntil: row.range?.until ?? null,
+    }));
 
   /* -- ground already closed ---------------------------------------------- */
   const closed = closuresOf(rows, locations, fields, subunits);
@@ -350,6 +393,7 @@ export function buildPracticeRepairInput(rows) {
     ...(calendar ? { calendar } : {}),
     ...(lightingOverrides.length > 0 ? { lightingOverrides } : {}),
     ...(closed.closures.length > 0 ? { closures: closed.closures } : {}),
+    ...(exceptionsRead.occupants.length > 0 ? { occupants: exceptionsRead.occupants } : {}),
     // Only the search's own knobs: nothing the adapter derived can be replaced.
     ...searchOptionsOf(rows.options ?? {}),
   };
@@ -360,6 +404,8 @@ export function buildPracticeRepairInput(rows) {
       snapshot,
       slots: slotRows,
       baseFingerprint: rows.baseFingerprint ?? null,
+      // Each snapshot row's live windows: what a planned write must not meet.
+      liveExceptions: exceptionsRead.liveByRow,
     },
     declared: {
       daylight: calendar
@@ -375,6 +421,7 @@ export function buildPracticeRepairInput(rows) {
             },
       coachPreferences: { rowsRead: preferenceRows.length, approved: coachPreferences.length },
       closures: closed.declared,
+      exceptions: exceptionsRead.declared,
       coaches:
         coachRows.length > 0
           ? { supplied: true, rowsRead: coachRows.length }
@@ -544,6 +591,161 @@ function closuresOf(rows, locations, fields, subunits) {
   };
 }
 
+/**
+ * The live practice exceptions of the snapshot (3b PR 11d, plan §2.1), read
+ * by the rules of `utils/practiceExceptions.js` (adopted, not restated): what
+ * each row's planned write must not meet, the repair's `occupants` (live
+ * relocated windows, clipped to their row's range), and the rows enacted for
+ * THIS blackout (a live window it caused covering the row's share of it).
+ */
+function liveExceptionsOf(list, snapshot, slotRows, cause) {
+  /** @type {Map<string, Array<{ id: string, kind: string, from: string, until: string,
+   *   slotId: string | null, causeKind: string | null,
+   *   causeId: string | null }>>} */
+  const liveByRow = new Map();
+  const occupants = [];
+  const enacted = new Set();
+  if (list === undefined) {
+    return {
+      liveByRow,
+      occupants,
+      enacted,
+      declared: {
+        supplied: false,
+        rowsRead: 0,
+        live: 0,
+        withdrawn: 0,
+        applied: 0,
+        occupants: 0,
+        enactedWindows: 0,
+        outOfSeason: [],
+        relocatedSlotUnread: [],
+        note: 'no practice_exceptions rows supplied: no saved temporary change is honoured, as an occupant or as an enacted window',
+      },
+    };
+  }
+  if (!Array.isArray(list)) {
+    throw new TypeError('repair adapter: practiceExceptions must be the rows read, an array');
+  }
+  const rowById = new Map(snapshot.map((row) => [row.id, row]));
+  let withdrawn = 0;
+  let live = 0;
+  const outOfSeason = [];
+  const unplaced = [];
+  for (const exception of list) {
+    const exceptionId = id(exception?.id);
+    // Rule 1: live is `withdrawn_at == null`, judged here whatever the caller
+    // selected; a row with no `withdrawn_at` key can be judged neither way.
+    if (exception === null || typeof exception !== 'object' || !('withdrawn_at' in exception)) {
+      throw new TypeError(
+        `repair adapter: exception ${exceptionId} carries no withdrawn_at, so it cannot be judged live or withdrawn`
+      );
+    }
+    if (exception.withdrawn_at != null) {
+      withdrawn += 1;
+      continue;
+    }
+    live += 1;
+    if (exception.assignment_id == null) {
+      throw new TypeError(`repair adapter: exception ${exceptionId} names no assignment`);
+    }
+    // Rule 2: the loader reads the organization; another season's row is named.
+    const row = rowById.get(id(exception.assignment_id));
+    if (!row) {
+      outOfSeason.push(exceptionId);
+      continue;
+    }
+    // Rule 3: the one parser. An open or unreadable window cannot be priced.
+    const bounds = practiceRangeBounds(exception.window);
+    if (bounds === null) {
+      throw new TypeError(
+        `repair adapter: exception ${exceptionId} window "${exception.window}" is open or unreadable: readers show its dates TIME TBD, and the repair cannot price them`
+      );
+    }
+    // The helper's rule 5 and 6b, adopted: a relocation whose slot does not
+    // read (missing, or not one the snapshot holds), or an unreadable kind,
+    // shows its dates TIME TBD, so it occupies no ground. It is still a live
+    // window: no planned write may meet it.
+    const slotId =
+      exception.kind === PRACTICE_EXCEPTION_ROW_KIND.RELOCATED &&
+      exception.practice_slot_id != null &&
+      slotRows.has(id(exception.practice_slot_id))
+        ? id(exception.practice_slot_id)
+        : null;
+    if (exception.kind === PRACTICE_EXCEPTION_ROW_KIND.RELOCATED && slotId === null) {
+      unplaced.push(exceptionId);
+    }
+    const windows = liveByRow.get(row.id) ?? [];
+    windows.push({
+      id: exceptionId,
+      kind: exception.kind,
+      from: bounds.first,
+      until: bounds.last,
+      slotId,
+      causeKind: exception.cause_kind ?? null,
+      causeId: exception.cause_id == null ? null : id(exception.cause_id),
+    });
+    liveByRow.set(row.id, windows);
+  }
+
+  let enactedWindows = 0;
+  const blackout = cause.kind === PRACTICE_REPAIR_CAUSE_KIND.BLACKOUT;
+  for (const [rowId, windows] of liveByRow) {
+    const row = /** @type {any} */ (rowById.get(rowId));
+    windows.sort((a, b) => a.from.localeCompare(b.from) || a.id.localeCompare(b.id));
+    for (const window of windows) {
+      // Rule 5: a relocated window holds its slot over W ∩ the row's range (Q9 clip).
+      if (window.slotId !== null) {
+        const from = window.from > row.range.from ? window.from : row.range.from;
+        const until = window.until < row.range.until ? window.until : row.range.until;
+        if (from <= until) {
+          occupants.push({
+            id: window.id,
+            assignmentId: row.id,
+            teamId: row.teamId,
+            slotId: /** @type {string} */ (window.slotId),
+            from,
+            until,
+          });
+        }
+      }
+      // Rule 4: caused by this blackout, covering the row's whole share of it.
+      if (blackout && window.causeKind === cause.kind && window.causeId === cause.causeId) {
+        const from = row.range.from > cause.loss.from ? row.range.from : cause.loss.from;
+        const until = row.range.until < cause.loss.until ? row.range.until : cause.loss.until;
+        if (from <= until && window.from <= from && window.until >= until) {
+          enacted.add(rowId);
+          enactedWindows += 1;
+        }
+      }
+    }
+  }
+  occupants.sort((a, b) => a.id.localeCompare(b.id));
+  return {
+    liveByRow,
+    occupants,
+    enacted,
+    declared: {
+      supplied: true,
+      rowsRead: list.length,
+      live,
+      withdrawn,
+      applied: live - outOfSeason.length,
+      occupants: occupants.length,
+      enactedWindows,
+      outOfSeason: outOfSeason.sort(),
+      // Relocations whose slot does not read: shown TIME TBD, so no occupant.
+      relocatedSlotUnread: unplaced.sort(),
+    },
+  };
+}
+
+/** Every date on `weekday` in the inclusive `[from, until]`, counted. */
+function weekdayCount(weekday, from, until) {
+  const first = firstWeekdayOnOrAfter(from, weekday);
+  return first > until ? 0 : Math.floor((isoDayNumber(until) - isoDayNumber(first)) / 7) + 1;
+}
+
 /** The repair `loss`, and what caused it, from a blackout or a field retirement. */
 function lossOf(loss, fields) {
   if (loss?.kind === 'blackout') {
@@ -557,6 +759,11 @@ function lossOf(loss, fields) {
     return {
       kind: PRACTICE_REPAIR_CAUSE_KIND.BLACKOUT,
       causeId: id(row.id),
+      // The blackout's own scope, as stored: what the enact commit gate compares.
+      scope: {
+        fieldId: row.field_id == null ? null : id(row.field_id),
+        locationId: row.location_id == null ? null : id(row.location_id),
+      },
       loss: {
         surfaceIds,
         from: row.blackout_from,
@@ -604,6 +811,7 @@ export function buildPracticeRepairPayload(adapted, result, { assignedVia = 'rep
     throw new TypeError(`repair adapter: assigned_via ${JSON.stringify(assignedVia)}`);
   }
   const { cause, snapshot, slots, baseFingerprint } = adapted.context;
+  const liveExceptions = adapted.context.liveExceptions ?? new Map();
   const expected = cause.kind === PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT ? 'split' : 'override';
   if (result.representation !== expected) {
     throw new Error(
@@ -632,27 +840,45 @@ export function buildPracticeRepairPayload(adapted, result, { assignedVia = 'rep
       .map((slot) => slot.id)
       .sort()[0] ?? null;
 
+  /** The live windows on `row` that `[from, until]` meets (3b PR 11d). */
+  const liveMet = (row, from, until) =>
+    (liveExceptions.get(row.id) ?? []).filter((w) => w.from <= until && from <= w.until);
+
   /**
    * Plan one exception on `row`, whose range after this save ends on
-   * `rowLastDay`. Until readers apply exceptions (3b PR 12), one whose window
-   * still meets that range would leave its practices shown: refused, and
-   * kept in `plan` so the refusal names exactly what it withholds.
+   * `rowLastDay`. Refused (and kept in `plan`, so the refusal names exactly
+   * what it withholds) for each of `whys`, when it meets a live window on the
+   * row (the EXCLUDE constraint's 23P01, refused first), and when it is a
+   * daylight TIME TBD ending before its row does (the writer's 22023).
    */
-  // For a blackout the window always lies inside the unclosed row, so every
-  // blackout exception is refused until then; only a closed split row's
-  // TIME TBD window lies after its row.
-  const planException = (row, from, until, rowLastDay, exception, why = null) => {
+  const planException = (row, from, until, rowLastDay, exception, whys = []) => {
     exceptions.push(exception);
-    if (from > rowLastDay) return;
+    const refuse = (why) =>
+      refused.push({ assignment_id: row.id, window: exception.window, why, exception });
+    for (const why of whys) refuse(why);
+    if (liveMet(row, from, until).length > 0) {
+      refuse(PRACTICE_REPAIR_PAYLOAD_REFUSAL.LIVE_EXCEPTION_OVERLAP);
+    }
+    if (
+      exception.kind === PRACTICE_EXCEPTION_ROW_KIND.TIME_TBD &&
+      DAYLIGHT_REASONS.has(exception.tbd_reason) &&
+      until < rowLastDay
+    ) {
+      refuse(PRACTICE_REPAIR_PAYLOAD_REFUSAL.DAYLIGHT_MID_RANGE);
+    }
+  };
+
+  /** A retirement that closes `row` at `lastDay` (or replaces it: `null`) cuts its live windows past it. */
+  const refuseCutWindows = (row, lastDay) => {
+    const cut = (liveExceptions.get(row.id) ?? []).filter(
+      (w) => lastDay === null || w.until > lastDay
+    );
+    if (cut.length === 0) return;
     refused.push({
       assignment_id: row.id,
-      window: exception.window,
-      why:
-        why ??
-        (until < row.range.until
-          ? PRACTICE_REPAIR_PAYLOAD_REFUSAL.MID_RANGE_WINDOW
-          : PRACTICE_REPAIR_PAYLOAD_REFUSAL.WINDOW_INSIDE_ROW),
-      exception,
+      window: `[${cut[0].from},${cut[0].until}]`,
+      why: PRACTICE_REPAIR_PAYLOAD_REFUSAL.CLOSE_CUTS_LIVE_EXCEPTION,
+      exceptionIds: cut.map((w) => w.id),
     });
   };
 
@@ -693,12 +919,15 @@ export function buildPracticeRepairPayload(adapted, result, { assignedVia = 'rep
       if (closable) {
         closes.push({ assignment_id: row.id, last_day: shiftDate(from, -1) });
         unlockRequired.push({ assignment_id: row.id, why: 'closes re-ranges it' });
+        refuseCutWindows(row, shiftDate(from, -1));
       } else if (placed) {
         replaced.add(row.id);
         unlockRequired.push({
           assignment_id: row.id,
           why: 'the payload no longer carries its key',
         });
+        // Pruned with its key: every live window on it would go too.
+        refuseCutWindows(row, null);
       }
       if (placed) {
         const slot = /** @type {any} */ (slots.get(/** @type {string} */ (slotId)));
@@ -743,13 +972,19 @@ export function buildPracticeRepairPayload(adapted, result, { assignedVia = 'rep
             tbd_reason: entry.reason,
             ...causeFields,
           },
-          closable ? null : PRACTICE_REPAIR_PAYLOAD_REFUSAL.ROW_NOT_CLOSABLE
+          closable ? [] : [PRACTICE_REPAIR_PAYLOAD_REFUSAL.ROW_NOT_CLOSABLE]
         );
       }
       continue;
     }
 
-    // A blackout: an exception on the unclosed row, over its window.
+    // A blackout: an exception on the unclosed row, over its window. A move
+    // to a weekday with fewer dates in the window than the series' own would
+    // remove practices nothing re-adds (G1): refused (Q6).
+    const series = /** @type {any} */ (slots.get(row.slotId));
+    const loses =
+      placed &&
+      weekdayCount(entry.to.weekday, from, until) < weekdayCount(series.weekday, from, until);
     planException(
       row,
       from,
@@ -769,7 +1004,8 @@ export function buildPracticeRepairPayload(adapted, result, { assignedVia = 'rep
             kind: PRACTICE_EXCEPTION_ROW_KIND.TIME_TBD,
             tbd_reason: entry.reason,
             ...causeFields,
-          }
+          },
+      loses ? [PRACTICE_REPAIR_PAYLOAD_REFUSAL.RELOCATION_LOSES_PRACTICES] : []
     );
   }
 

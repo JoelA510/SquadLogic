@@ -529,32 +529,24 @@ describe('blackout (override)', () => {
     assert.equal(written.plan.closes.length, 0, 'a blackout must not split');
   });
 
-  it('refuses every mid-range window loudly, keeping each in the plan', () => {
+  // 3b PR 11d: the readers apply exceptions (PR 12), so a mid-range window is
+  // admitted; it was refused (MID_RANGE_WINDOW) until then.
+  it('admits every mid-range window, writing each planned exception', () => {
     const { written } = run(blackout('2026-10-15', '2026-10-28'));
-    assert.equal(written.payload, null);
-    assert.deepEqual(
-      written.refused.map((r) => [r.assignment_id, r.why]),
-      [
-        [A1, PRACTICE_REPAIR_PAYLOAD_REFUSAL.MID_RANGE_WINDOW],
-        [A2, PRACTICE_REPAIR_PAYLOAD_REFUSAL.MID_RANGE_WINDOW],
-      ]
-    );
-    assert.deepEqual(
-      written.refused.map((r) => r.exception),
-      written.plan.exceptions
-    );
-    // Both kinds are refused: a relocation and a TIME TBD.
+    assert.deepEqual(written.refused, []);
+    assert.notEqual(written.payload, null);
+    assert.deepEqual(written.payload.repair.exceptions, written.plan.exceptions);
+    // Both kinds are written: a relocation and a TIME TBD.
     assert.deepEqual(written.plan.exceptions.map((e) => e.kind).sort(), ['relocated', 'time_tbd']);
   });
 
-  it('refuses a window reaching the series end while it lies inside the unclosed row', () => {
+  it('admits a window reaching the series end inside the unclosed row', () => {
     const { written } = run(blackout('2026-10-15', '2026-12-31'));
-    assert.equal(written.payload, null);
-    assert.deepEqual(
-      [...new Set(written.refused.map((r) => r.why))],
-      [PRACTICE_REPAIR_PAYLOAD_REFUSAL.WINDOW_INSIDE_ROW]
+    assert.deepEqual(written.refused, []);
+    assert.equal(
+      written.payload.repair.exceptions.length,
+      displacedWindows('2026-10-15', '2026-12-31').size
     );
-    assert.equal(written.refused.length, displacedWindows('2026-10-15', '2026-12-31').size);
   });
 });
 
@@ -717,14 +709,15 @@ describe('snapshot rows', () => {
 
   // The reader rule's boundary: a window starting ON the row's last day still
   // overlaps it by one day; one starting the day after does not.
-  it('refuses a blackout window that starts on the row last day (one-day overlap)', () => {
+  // 3b PR 11d: admitted now (it was WINDOW_INSIDE_ROW until the readers applied it).
+  it('writes a blackout window that starts on the row last day (one-day overlap)', () => {
     // 2026-11-30 is a Monday and A1's last day; A2 (Wednesday) has no date in it.
     const { written } = run(blackout('2026-11-30', '2026-12-31'));
+    assert.deepEqual(written.refused, []);
     assert.deepEqual(
-      written.refused.map((r) => [r.assignment_id, r.window, r.why]),
-      [[A1, '[2026-11-30,2026-11-30]', PRACTICE_REPAIR_PAYLOAD_REFUSAL.WINDOW_INSIDE_ROW]]
+      written.payload.repair.exceptions.map((e) => [e.assignment_id, e.window]),
+      [[A1, '[2026-11-30,2026-11-30]']]
     );
-    assert.equal(written.payload, null);
   });
 
   it('refuses a non-closable retirement TIME TBD that starts on the row last day', () => {

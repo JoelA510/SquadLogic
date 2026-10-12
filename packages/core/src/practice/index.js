@@ -147,6 +147,7 @@ export {
   PracticeEnactRecordSchema,
   buildEnactPayload,
   buildEnactRecord,
+  causeCommitOf,
   judgeEnact,
   retirementCommitOf,
 } from './enact.js';

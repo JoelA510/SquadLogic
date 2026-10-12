@@ -407,12 +407,15 @@ const LAYERS = Object.freeze([
       // the repair builds its result through the one validating builder.
       'packages/core/src/practice/metricsInput.js',
       'packages/core/src/practice/repair.js',
+      // 8.6 3b PR 11d: the adapter counts a relocation's dates on the same walk (G1).
+      'packages/core/src/practice/repairAdapter.js',
     ]),
     consumers: Object.freeze([
       'packages/core/src/practice/durationPhases.js',
       'packages/core/src/practice/materialise.js',
       'packages/core/src/practice/metricsInput.js',
       'packages/core/src/practice/repair.js',
+      'packages/core/src/practice/repairAdapter.js',
       'tests/practiceDaylight.test.js',
       'tests/practiceDurationPhases.test.js',
       'tests/practiceSlotModel.test.js',
@@ -423,6 +426,7 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/materialise.js',
       'packages/core/src/practice/metricsInput.js',
       'packages/core/src/practice/repair.js',
+      'packages/core/src/practice/repairAdapter.js',
     ]),
     expectedExternalProductionConsumers: Object.freeze([]),
   }),
@@ -481,6 +485,9 @@ const LAYERS = Object.freeze([
       // 8.6 PR 5: the decline chain starts from the repair and re-offers
       // through its own `marginal()`. The layer using itself, not a caller.
       'packages/core/src/practice/recommendations.js',
+      // 8.6 3b PR 11d: the adapter reads the repair's TIME TBD reasons (the
+      // writer's daylight refusal); it calls nothing.
+      'packages/core/src/practice/repairAdapter.js',
     ]),
     consumers: Object.freeze([
       'frontend/src/utils/practiceRepairPanel.js',

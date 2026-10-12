@@ -404,6 +404,32 @@ export const PracticeRepairInputSchema = z
      * Nothing on it is displaced: it is not the loss.
      */
     closures: z.array(PracticeLossSchema).optional(),
+    /**
+     * Ground a saved temporary move ALREADY holds (8.6 3b PR 11d, plan §2.1
+     * rule 5): a live `relocated` practice exception occupies its relocated
+     * slot over `[from, until]` (its window clipped to its row's range). An
+     * occupant is frozen ground, never displaced and never recommended; one on
+     * the lost ground is reported, never dropped
+     * (`PRACTICE_REPAIR_RELOCATED_TARGET_LOST`).
+     */
+    occupants: z
+      .array(
+        z
+          .object({
+            id: IdSchema,
+            assignmentId: IdSchema,
+            teamId: IdSchema,
+            slotId: IdSchema,
+            from: IsoDateSchema,
+            until: IsoDateSchema,
+          })
+          .strict()
+          .refine((occupant) => occupant.until >= occupant.from, {
+            message: 'an occupant `until` must not precede its `from`',
+            path: ['until'],
+          })
+      )
+      .optional(),
   })
   .strict()
   // Preferences with no rows would bind no coach to any team, so every one of

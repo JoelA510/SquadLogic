@@ -53,13 +53,26 @@ export const ENACT_GATE = Object.freeze({
 export const ENACT_PREVIEW_TEXT =
   'Save the retirement first: enacting moves practices, and the retirement date is not saved yet.';
 
+/**
+ * The client's own refusal of a blackout enact until 3b PR 11d-3 enables it:
+ * core can now build the write (11d-1), but the wrapper RPC and the Edge
+ * record still refuse it until 11d-2, so nothing is sent from here even with
+ * the button forced enabled (PR 11 witness 12).
+ */
+export const ENACT_BLACKOUT_NOT_ENABLED = 'blackout-not-enabled';
+
 /** Plain words for every refusal the enact chain can return. */
 export const ENACT_REFUSAL_TEXT = Object.freeze({
   [PRACTICE_ENACT_REFUSAL.RETIREMENT_UNCOMMITTED]: ENACT_PREVIEW_TEXT,
   [PRACTICE_ENACT_REFUSAL.RETIREMENT_CHANGED]:
     'The retirement is now saved with a different date. Close this panel and open it again from the field card.',
-  [PRACTICE_ENACT_REFUSAL.BLACKOUT_NOT_ENACTABLE]:
-    'Enacting a blackout recommendation is not available yet.',
+  [ENACT_BLACKOUT_NOT_ENABLED]: 'Enacting a blackout recommendation is not available yet.',
+  [PRACTICE_ENACT_REFUSAL.BLACKOUT_UNCOMMITTED]:
+    'Save the blackout first: enacting moves practices, and this blackout is not saved yet.',
+  [PRACTICE_ENACT_REFUSAL.BLACKOUT_CHANGED]:
+    'The blackout is now saved differently. Close this panel and open it again from the saved blackout.',
+  [PRACTICE_ENACT_REFUSAL.PROMPT_NOT_ACCEPTED]:
+    'The change was not confirmed, so nothing was sent.',
   [PRACTICE_ENACT_REFUSAL.STALE]: 'The season changed since this was shown.',
   [PRACTICE_ENACT_REFUSAL.PAYLOAD_REFUSED]: 'This practice cannot be saved as recommended.',
   [PRACTICE_ENACT_REFUSAL.UNLOCK_NOT_ACCEPTED]:
@@ -284,6 +297,10 @@ export async function enactPracticeRecommendation({
 }) {
   const reading = { client, organizationId, seasonSettingsId, loss, timeZone, shown };
   let sent = false;
+  if (loss?.kind !== PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT) {
+    // Until 3b PR 11d-3: nothing is read, and nothing is sent.
+    return { status: 'refused', refusal: ENACT_BLACKOUT_NOT_ENABLED, view: null };
+  }
   try {
     const j = await judgeOnFreshRead({ ...reading, state });
     if (!j.ok) return { status: 'error', message: j.message, sent };

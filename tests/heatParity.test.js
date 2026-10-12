@@ -160,8 +160,8 @@ describe('heat parity: stated goldens, end to end', () => {
   it.each([
     ['site-a', 11, 'wbgtF', 77.3],
     ['site-a', 14, 'wbgtF', 80.9],
-    ['site-a', 13, 'blackTriggerF', 94.6],
-    ['site-b', 8, 'wbgtF', 62.1],
+    ['site-a', 13, 'blackTriggerF', 94.5],
+    ['site-b', 8, 'wbgtF', 62.0],
     ['site-b', 14, 'wbgtF', 80.0],
   ])('%s %s:00 %s = %s +/- 0.6', (key, hour, field, value) => {
     const row = at(key, hour);

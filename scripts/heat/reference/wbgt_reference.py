@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 import sys
 import time
@@ -44,7 +45,8 @@ import pvlib
 
 TZ = "America/Los_Angeles"
 # api.weather.gov rejects requests without an identifying User-Agent.
-USER_AGENT = "wbgt-reference/1.0 (field heat check; contact: operator@example.com)"
+# NWS asks for a reachable contact; set NWS_CONTACT (an email or URL) for live runs.
+USER_AGENT = f"wbgt-reference/1.0 (field heat check; {os.environ.get('NWS_CONTACT', 'contact unset')})"
 
 
 @dataclass(frozen=True)

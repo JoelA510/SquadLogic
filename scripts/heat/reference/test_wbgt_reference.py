@@ -55,8 +55,8 @@ class Reproduce(unittest.TestCase):
         self.assertAlmostEqual(c["14:00"]["wbgt_F"], 80.9, delta=0.6)
         self.assertAlmostEqual(c["11:00"]["wbgt_F"], 77.3, delta=0.6)
         self.assertAlmostEqual(g["14:00"]["wbgt_F"], 80.0, delta=0.6)
-        self.assertAlmostEqual(g["08:00"]["wbgt_F"], 62.1, delta=0.6)
-        self.assertAlmostEqual(c["13:00"]["black_at_air_F"], 94.6, delta=1.0)
+        self.assertAlmostEqual(g["08:00"]["wbgt_F"], 62.0, delta=0.6)
+        self.assertAlmostEqual(c["13:00"]["black_at_air_F"], 94.5, delta=1.0)
         self.assertEqual(c["08:00"]["band"], "Green")
 
     def test_missing_forecast_hour_is_explicit(self):

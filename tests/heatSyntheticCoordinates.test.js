@@ -30,10 +30,30 @@ import { REGION_SAMPLE_POINTS, SYNTHETIC_HEAT_SITES } from './helpers/heatSynthe
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SELF = fileURLToPath(import.meta.url);
 
-/** Directories walked; a file is scanned when its repo path mentions heat or NWS. */
+/**
+ * Directories walked; a file is scanned when its repo path names the heat
+ * feature (heat, NWS, WBGT, turbidity). The CHANGELOG is scanned whole.
+ */
 const SCAN_ROOTS = ['tests', 'scripts', 'frontend/src', 'packages/core/src', 'docs', 'supabase'];
-const SCAN_PATH = /heat|nws/i;
-const SCAN_EXT = new Set(['.js', '.jsx', '.ts', '.json', '.py', '.feature', '.md', '.sql']);
+const SCAN_PATH = /heat|nws|wbgt|turbidity/i;
+const SCAN_ALWAYS = ['CHANGELOG.md'];
+const SCAN_EXT = new Set([
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.jsx',
+  '.ts',
+  '.tsx',
+  '.json',
+  '.py',
+  '.feature',
+  '.md',
+  '.sql',
+  '.csv',
+  '.txt',
+  '.yml',
+  '.yaml',
+]);
 
 /**
  * Files deliberately not scanned, each with its reason.
@@ -64,11 +84,16 @@ function scannedFiles() {
     .filter((f) => SCAN_EXT.has(path.extname(f)))
     .map((f) => path.relative(ROOT, f).split(path.sep).join('/'))
     .filter((rel) => SCAN_PATH.test(rel) && !(rel in NOT_SCANNED))
+    .concat(SCAN_ALWAYS)
     .sort();
 }
 
 /** A latitude, a comma, a western-hemisphere longitude: tuples, call args, `/points/` URLs. */
 const PAIR_RE = /(?<![\w.])(-?\d{1,2}\.\d+)\s*,\s*(-\d{2,3}\.\d+)(?![\w.])/g;
+/** GeoJSON / WKT order: a western-hemisphere longitude, then a northern latitude. */
+const LONLAT_RE = /(?<![\w.])(-\d{2,3}\.\d+)\s*[, ]\s*(\d{1,2}\.\d+)(?![\w.])/g;
+/** Hemisphere letters: `37.12 N, 121.34 W`, degree sign optional. */
+const NSEW_RE = /(\d{1,2}\.\d+)\s*°?\s*N\b[,\s]*(\d{2,3}\.\d+)\s*°?\s*W\b/g;
 /** A lat/lon-named key or argument with a decimal literal. */
 const KEY_RE = /\b(lat|latitude|lon|lng|longitude)\b["']?\s*[:=]\s*(-?\d+\.\d+)/gi;
 
@@ -83,6 +108,12 @@ function extractFromText(text) {
   for (const m of text.matchAll(PAIR_RE)) {
     found.push({ kind: 'pair', lat: Number(m[1]), lon: Number(m[2]), raw: m[0] });
   }
+  for (const m of text.matchAll(LONLAT_RE)) {
+    found.push({ kind: 'pair', lat: Number(m[2]), lon: Number(m[1]), raw: m[0] });
+  }
+  for (const m of text.matchAll(NSEW_RE)) {
+    found.push({ kind: 'pair', lat: Number(m[1]), lon: -Number(m[2]), raw: m[0] });
+  }
   for (const m of text.matchAll(KEY_RE)) {
     const kind = m[1].toLowerCase().startsWith('lat') ? 'lat' : 'lon';
     found.push({ kind, value: Number(m[2]), raw: m[0] });
@@ -94,13 +125,25 @@ const LAT_KEYS = new Set(['lat', 'latitude']);
 const LON_KEYS = new Set(['lon', 'lng', 'longitude']);
 
 /**
- * Coordinate values in parsed JSON: every lat/lon-named key, wherever it sits.
- * The generator's solar-position samples are tagged, because they are a plain
- * latitude grid with seeded-random longitudes rather than places.
+ * Coordinate values in parsed JSON: every lat/lon-named key wherever it sits,
+ * every string (URLs, labels) by the text patterns, and every GeoJSON
+ * `coordinates` position. The generator's solar-position samples are tagged,
+ * because they are a plain latitude grid with seeded-random longitudes rather
+ * than places.
  */
 function extractFromJson(value, trail = []) {
   const found = [];
-  if (Array.isArray(value)) {
+  if (typeof value === 'string') {
+    for (const hit of extractFromText(value))
+      found.push({ ...hit, raw: `${trail.join('.')}: ${hit.raw}` });
+  } else if (
+    Array.isArray(value) &&
+    trail.includes('coordinates') &&
+    value.length >= 2 &&
+    value.every((v) => typeof v === 'number')
+  ) {
+    found.push({ kind: 'pair', lat: value[1], lon: value[0], raw: `${trail.join('.')}=${value}` });
+  } else if (Array.isArray(value)) {
     value.forEach((v, i) => found.push(...extractFromJson(v, [...trail, i])));
   } else if (value && typeof value === 'object') {
     for (const [k, v] of Object.entries(value)) {
@@ -123,6 +166,8 @@ const ALLOWED_PAIRS = [
   ...SYNTHETIC_HEAT_SITES.map((s) => [s.latitude, s.longitude]),
   ...REGION_SAMPLE_POINTS,
 ];
+/** `solar_samples()` in scripts/heat/generate_heat_reference.py: a plain latitude grid, no places. */
+const SOLAR_LATITUDE_GRID = [-45.0, -15.0, 0.0, 15.0, 30.0, 37.5, 45.0, 60.0, 70.0];
 const same = (a, b) => Math.abs(a - b) < 1e-9;
 const decimals = (n) => (String(n).split('.')[1] ?? '').length;
 
@@ -137,7 +182,12 @@ function allowed(hit) {
     return ALLOWED_PAIRS.some(([la, lo]) => same(la, hit.lat) && same(lo, hit.lon));
   }
   if (Number.isInteger(hit.value)) return true;
-  if (hit.solar) return hit.kind === 'lon' || decimals(hit.value) <= 1;
+  // Solar samples: latitude on the generator's fixed grid, longitude seeded at two decimals.
+  if (hit.solar) {
+    return hit.kind === 'lat'
+      ? SOLAR_LATITUDE_GRID.some((g) => same(g, hit.value))
+      : decimals(hit.value) <= 2;
+  }
   const idx = hit.kind === 'lat' ? 0 : 1;
   return ALLOWED_PAIRS.some((p) => same(p[idx], hit.value));
 }
@@ -154,12 +204,14 @@ function scan() {
 }
 
 /*
- * Stated floors. Measured when this guard was written: 43 files scanned and
- * 535 coordinate literals matched (468 of them in heatReference.json). A walk
- * or a pattern that broke would show here first, rather than as a clean scan
- * of nothing; the per-file checks below catch one source going quiet.
+ * Stated floors. Measured when this guard was written: 45 files scanned and
+ * 536 coordinate literals matched (468 of them in heatReference.json). The
+ * floors leave a little headroom so merging two heat files does not trip
+ * them; a walk or a pattern that broke would still show here first, rather
+ * than as a clean scan of nothing, and the per-file checks below catch one
+ * source going quiet.
  */
-const MIN_FILES = 43;
+const MIN_FILES = 40;
 const MIN_LITERALS = 500;
 
 describe('heat coordinates :: the scan exercised the data', () => {
@@ -203,6 +255,20 @@ describe('heat coordinates :: the scan exercised the data', () => {
     );
     const json = extractFromJson({ unrounded: { x: { lat: 38.1234, lon: -120.5678 } } });
     expect(json.filter((h) => !allowed(h))).toHaveLength(2);
+    // Longitude first (GeoJSON / WKT), hemisphere letters, JSON strings and positions.
+    const lonFirst = ['[', '-120.5678', ', ', '38.1234', ']'].join('');
+    expect(extractFromText(lonFirst).filter((h) => !allowed(h))).toHaveLength(1);
+    const nsew = ['38.1234', ' N, ', '120.5678', ' W'].join('');
+    expect(extractFromText(nsew).filter((h) => !allowed(h))).toHaveLength(1);
+    const url = ['https://api.weather.gov/points/', '38.1234', ',', '-120.5678'].join('');
+    expect(extractFromJson({ source: { pointsUrl: url } }).filter((h) => !allowed(h))).toHaveLength(
+      1
+    );
+    const geo = { geometry: { coordinates: [[[-120.5678, 38.1234]]] } };
+    expect(extractFromJson(geo).filter((h) => !allowed(h))).toHaveLength(1);
+    // A solar sample off the generator's latitude grid is not waved through.
+    const solar = extractFromJson({ solar: [{ lat: 38.1, lon: -120.57 }] });
+    expect(solar.filter((h) => !allowed(h))).toHaveLength(1);
   });
 });
 

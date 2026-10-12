@@ -29,8 +29,7 @@ export const HEAT_TURBIDITY_PATH = path.join(
 /**
  * The reference sites, declared in `./heatSyntheticSites.js` rather than read
  * from the golden file, so a golden file that lost a site fails the coverage
- * assertion instead of
- * shrinking the universe it is checked against.
+ * assertion instead of shrinking the universe it is checked against.
  */
 export const REFERENCE_SITES = SYNTHETIC_HEAT_SITES;
 

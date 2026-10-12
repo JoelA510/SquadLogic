@@ -320,7 +320,9 @@ it decides the same cases.
 The reference sites are synthetic points (`tests/helpers/heatSyntheticSites.js`, mirrored by the
 Python reference), not real venues; `tests/heatSyntheticCoordinates.test.js` holds every
 coordinate in the heat data to that set. These are the reference's printed values (pvlib native
-turbidity); the app, on the shipped 0.5-degree table, shows 80.8 for Site A at 14:00.
+turbidity); the app, on the shipped 0.5-degree table, shows 80.8 for Site A at 14:00. The tests'
+stated goldens stay the brief's independent values (77.3, 80.9, 94.5, 62.0, 80.0), not the
+generator's output; every one is within ±0.6 of the table above.
 
 ## 9. Limits
 

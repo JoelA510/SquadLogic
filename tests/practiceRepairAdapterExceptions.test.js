@@ -804,13 +804,22 @@ describe('11d-1 :: the blackout write is one exception on S, over its own window
     );
   });
 
-  it('still needs the prompt’s tick, and has no record until 11d-2', () => {
+  it('still needs the prompt’s tick, and its record is the blackout arm (11d-2)', () => {
     expect(enact({ accepted: false }).out).toMatchObject({
       refusal: PRACTICE_ENACT_REFUSAL.PROMPT_NOT_ACCEPTED,
       payload: null,
     });
     const { adapted, state, judged, commit, out } = enact();
-    expect(() =>
+    const [written] = out.payload.repair.exceptions;
+    const effect = written.kind === 'relocated' ? 'temporarily moved' : 'temporarily TIME TBD';
+    const row = {
+      assignment_id: S1,
+      assigned_via: 'auto',
+      effect,
+      range_after: null,
+      window: written.window,
+    };
+    const recordOf = (rows) =>
       buildEnactRecord({
         enactKey: ENACT_KEY,
         seasonSettingsId: uuid(900),
@@ -819,9 +828,56 @@ describe('11d-1 :: the blackout write is one exception on S, over its own window
         judged,
         commit,
         enactment: out,
-        prompt: { rows: [], published_practices_affected: 1, accepted: true },
+        prompt: { rows, published_practices_affected: 1, accepted: true },
+      });
+    const record = recordOf([row]);
+    expect(record.cause).toEqual({
+      kind: 'blackout',
+      id: BLACKOUT_ID,
+      loss: {
+        from: '2026-10-19',
+        until: '2026-11-08',
+        surface_ids: adapted.input.loss.surfaceIds,
+        start_minutes: null,
+        end_minutes: null,
+        reason: loss.blackout.reason,
+      },
+      stored: commit.stored,
+    });
+    expect(record.decision.kind).toBe(written.kind === 'relocated' ? 'relocate' : 'time_tbd');
+    expect(record.series.window).toEqual({ from: '2026-10-19', until: '2026-10-25' });
+    expect(record.unlock).toEqual([]);
+    expect(record.writes).toEqual({ closes: [], new_rows: [], exceptions: 1 });
+    // A prompt that does not list exactly the exception written is refused.
+    const wrong = [
+      [],
+      [{ ...row, window: '[2026-10-19,2026-11-08]' }],
+      [
+        {
+          ...row,
+          effect: effect === 'temporarily moved' ? 'temporarily TIME TBD' : 'temporarily moved',
+        },
+      ],
+      [row, { ...row, assignment_id: uuid(602) }],
+    ];
+    for (const rows of wrong) {
+      expect(() => recordOf(rows), JSON.stringify(rows)).toThrow('the exception the write adds');
+    }
+    expect(requireExamined(wrong.length, 'mis-listed prompt')).toBe(4);
+    // A gate for another blackout cannot be recorded against this one.
+    const other = blackoutLoss('2026-10-19', '2026-11-01');
+    expect(() =>
+      buildEnactRecord({
+        enactKey: ENACT_KEY,
+        seasonSettingsId: uuid(900),
+        adapted,
+        state,
+        judged,
+        commit: causeCommitOf(rowsWith([storedOf(other)]), other),
+        enactment: out,
+        prompt: { rows: [row], published_practices_affected: 1, accepted: true },
       })
-    ).toThrow('3b PR 11d-2');
+    ).toThrow('the gate that judged this loss');
   });
 
   it('refuses a gate judged for another blackout, or for this one stored otherwise', () => {

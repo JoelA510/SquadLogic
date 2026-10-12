@@ -941,11 +941,15 @@ const byTeam = (list) => new Map(list.map((x) => [x.teamId, x]));
 
 describe('no overrides: the post-pass is byte-identical to main', () => {
   it('an empty approved read reproduces main exactly, and adds only five zero counters', async () => {
-    const r = await run({ overrides: [] });
+    const full = await run({ overrides: [] });
+    // 8.6 3b PR 11d-0 added one result key, empty when no relocation is held;
+    // everything else is still main's bytes, hash unchanged.
+    const { relocatedOutsideRun, ...r } = full;
+    assert.deepEqual(relocatedOutsideRun, []);
     assert.equal(sha256(withoutOverrideKeys(r)), MAIN_POST_PASS_SHA256);
     for (const key of OVERRIDE_KEYS) assert.equal(r.daylight.meta[key], 0, key);
     // No context key at all (a caller that loaded nothing) is the same result.
-    assert.equal(bytes(await run()), bytes(r));
+    assert.equal(bytes(await run()), bytes(full));
   });
 });
 

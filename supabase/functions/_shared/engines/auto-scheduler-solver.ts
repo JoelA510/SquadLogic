@@ -147,9 +147,11 @@ export interface BaseOccupancy {
    * silently treated as free or as clashing.
    */
   outsideRun: LockedOccupant[];
-  /** Live relocations holding a slot of this run (11d-0). Occupancy only, never scored. */
-  relocatedInRun: LoadedRelocation[];
-  /** Live relocations whose slot is not among this run's (or reads no slot): reported, as `outsideRun`. */
+  /**
+   * Live relocations (11d-0) whose slot is not among this run's, or reads no
+   * slot: reported, as `outsideRun` is. Those in the run are occupancy only
+   * (capacity and coach windows above), never scored.
+   */
   relocatedOutsideRun: LoadedRelocation[];
 }
 
@@ -168,7 +170,6 @@ export function buildLockedOccupancy(
   const coachAssignments = new Map<string, TimeWindow[]>();
   const inRun: LockedOccupant[] = [];
   const outsideRun: LockedOccupant[] = [];
-  const relocatedInRun: LoadedRelocation[] = [];
   const relocatedOutsideRun: LoadedRelocation[] = [];
   // One unit of the slot, and the team's coaches at its time.
   const hold = (teamId: string, slot: SchedulerSlot) => {
@@ -196,10 +197,9 @@ export function buildLockedOccupancy(
       relocatedOutsideRun.push(relocation);
       continue;
     }
-    relocatedInRun.push(relocation);
     hold(relocation.teamId, slot);
   }
-  return { slotCapacity, coachAssignments, inRun, outsideRun, relocatedInRun, relocatedOutsideRun };
+  return { slotCapacity, coachAssignments, inRun, outsideRun, relocatedOutsideRun };
 }
 
 // ---------------------------------------------------------------------------

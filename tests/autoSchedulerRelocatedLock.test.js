@@ -40,7 +40,13 @@ import {
 // ("whatever the caller selected", plan §2.1 rule 1).
 // ---------------------------------------------------------------------------
 
-function fakeClient({ assignments, relocated, timeTbd = [], failRelocated = false, cap = Infinity }) {
+function fakeClient({
+  assignments,
+  relocated,
+  timeTbd = [],
+  failRelocated = false,
+  cap = Infinity,
+}) {
   const calls = [];
   return {
     calls,
@@ -180,9 +186,18 @@ describe('the seed exercises every case (meta-assertions)', () => {
     }
     // The hold is season-wide: a bounded, an open and an unreadable window all hold.
     const windows = RELOCATED_EXPECT.liveInRun.map((id) => seedException.get(id).window);
-    assert.ok(windows.some((w) => /^\[\d{4}-\d\d-\d\d,\d{4}-\d\d-\d\d\]$/.test(w)), 'no bounded window');
-    assert.ok(windows.some((w) => /,\)$/.test(w)), 'no open window');
-    assert.ok(windows.some((w) => !/^\[/.test(w)), 'no unreadable window');
+    assert.ok(
+      windows.some((w) => /^\[\d{4}-\d\d-\d\d,\d{4}-\d\d-\d\d\]$/.test(w)),
+      'no bounded window'
+    );
+    assert.ok(
+      windows.some((w) => /,\)$/.test(w)),
+      'no open window'
+    );
+    assert.ok(
+      windows.some((w) => !/^\[/.test(w)),
+      'no unreadable window'
+    );
   });
 
   it('without the hold, an ordinary run takes every relocated slot (the control)', async () => {
@@ -227,7 +242,8 @@ describe('the lock loads live relocated exceptions, as the caller, scoped like t
   it('a withdrawn relocation is filtered by the loader itself, whatever was selected', async () => {
     const { lock } = await loadSeed();
     const loaded = new Set(lock.relocations.map((r) => r.exceptionId));
-    for (const id of RELOCATED_EXPECT.withdrawn) assert.ok(!loaded.has(id), `${id} was loaded live`);
+    for (const id of RELOCATED_EXPECT.withdrawn)
+      assert.ok(!loaded.has(id), `${id} was loaded live`);
     for (const id of [...RELOCATED_EXPECT.liveInRun, ...RELOCATED_EXPECT.outsideRun]) {
       assert.ok(loaded.has(id), `live ${id} was not loaded`);
     }
@@ -307,8 +323,8 @@ describe('a live relocated slot is held season-wide (the locked-row contract)', 
       assert.equal(base.slotCapacity.get(row.practice_slot_id), 0, `${row.id} no longer holds`);
     }
     assert.deepEqual(
-      base.relocatedInRun.map((r) => r.exceptionId).sort(),
-      [...RELOCATED_EXPECT.liveInRun].sort()
+      base.relocatedOutsideRun.map((r) => r.exceptionId).sort(),
+      [...RELOCATED_EXPECT.outsideRun].sort()
     );
   });
 

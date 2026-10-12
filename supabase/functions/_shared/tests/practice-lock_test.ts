@@ -83,14 +83,37 @@ function lockedOf(lock: Awaited<ReturnType<typeof loadSeed>>) {
   return lock.rows.map((r) => ({ assignmentId: r.id, teamId: r.teamId, slotId: r.slotId }));
 }
 
-Deno.test('relocated lock - the loader drops withdrawn rows itself and keeps every live one', async () => {
-  const lock = await loadSeed();
-  const loaded = new Set(lock.relocations.map((r) => r.exceptionId));
-  for (const id of RELOCATED_EXPECT.withdrawn) assert(!loaded.has(id), `${id} was loaded live`);
-  for (const id of [...RELOCATED_EXPECT.liveInRun, ...RELOCATED_EXPECT.outsideRun]) {
-    assert(loaded.has(id), `live ${id} was not loaded`);
+Deno.test(
+  'relocated lock - control: without the hold, the run takes every relocated slot',
+  async () => {
+    // The seed must tempt the run onto each held slot, or the hold witnesses
+    // below would pass with no hold at all.
+    const lock = await loadSeed();
+    const run = await runPracticeOptimizer({
+      teams,
+      slots,
+      locked: lockedOf(lock),
+      placeableTeamIds: placeable,
+      config: { ...GREEDY_ONLY },
+    });
+    const taken = new Set(run.placements.map((p) => p.slotId));
+    for (const id of RELOCATED_EXPECT.liveInRun) {
+      assert(taken.has(slotOf(id)), `the control left ${slotOf(id)} (${id}) empty`);
+    }
   }
-});
+);
+
+Deno.test(
+  'relocated lock - the loader drops withdrawn rows itself and keeps every live one',
+  async () => {
+    const lock = await loadSeed();
+    const loaded = new Set(lock.relocations.map((r) => r.exceptionId));
+    for (const id of RELOCATED_EXPECT.withdrawn) assert(!loaded.has(id), `${id} was loaded live`);
+    for (const id of [...RELOCATED_EXPECT.liveInRun, ...RELOCATED_EXPECT.outsideRun]) {
+      assert(loaded.has(id), `live ${id} was not loaded`);
+    }
+  }
+);
 
 Deno.test('relocated lock - a row with no withdrawn_at key refuses the read', () => {
   const { withdrawn_at: _drop, ...unjudged } = RELOCATED_DB_EXCEPTIONS[0] as Row;
@@ -121,35 +144,38 @@ Deno.test('relocated lock - each live in-run relocation holds a unit and its coa
   );
 });
 
-Deno.test('relocated lock - the greedy seed double-books no slot and frees the withdrawn one', async () => {
-  const lock = await loadSeed();
-  const run = await runPracticeOptimizer({
-    teams,
-    slots,
-    locked: lockedOf(lock),
-    relocated: lock.relocations,
-    placeableTeamIds: placeable,
-    config: { ...GREEDY_ONLY },
-  });
-  const used = new Map<string, number>();
-  const bump = (id: string) => used.set(id, (used.get(id) ?? 0) + 1);
-  for (const r of RELOCATED_DB_ASSIGNMENTS) bump(String(r.practice_slot_id));
-  for (const id of RELOCATED_EXPECT.liveInRun) bump(slotOf(id));
-  for (const p of run.placements) bump(p.slotId);
-  for (const slot of slots) {
-    assert((used.get(slot.id) ?? 0) <= slot.capacity, `${slot.id} is double-booked`);
-  }
-  const { team, twinSlot } = RELOCATED_EXPECT.coachWitness;
-  const seated = run.placements.find((p) => p.teamId === team);
-  assert(seated && seated.slotId !== twinSlot, `${team} was booked against the moved practice`);
-  for (const id of RELOCATED_EXPECT.withdrawn) {
-    assert(
-      run.placements.some((p) => p.slotId === slotOf(id)),
-      `withdrawn ${id} still holds its slot`
+Deno.test(
+  'relocated lock - the greedy seed double-books no slot and frees the withdrawn one',
+  async () => {
+    const lock = await loadSeed();
+    const run = await runPracticeOptimizer({
+      teams,
+      slots,
+      locked: lockedOf(lock),
+      relocated: lock.relocations,
+      placeableTeamIds: placeable,
+      config: { ...GREEDY_ONLY },
+    });
+    const used = new Map<string, number>();
+    const bump = (id: string) => used.set(id, (used.get(id) ?? 0) + 1);
+    for (const r of RELOCATED_DB_ASSIGNMENTS) bump(String(r.practice_slot_id));
+    for (const id of RELOCATED_EXPECT.liveInRun) bump(slotOf(id));
+    for (const p of run.placements) bump(p.slotId);
+    for (const slot of slots) {
+      assert((used.get(slot.id) ?? 0) <= slot.capacity, `${slot.id} is double-booked`);
+    }
+    const { team, twinSlot } = RELOCATED_EXPECT.coachWitness;
+    const seated = run.placements.find((p) => p.teamId === team);
+    assert(seated && seated.slotId !== twinSlot, `${team} was booked against the moved practice`);
+    for (const id of RELOCATED_EXPECT.withdrawn) {
+      assert(
+        run.placements.some((p) => p.slotId === slotOf(id)),
+        `withdrawn ${id} still holds its slot`
+      );
+    }
+    assertEquals(
+      run.relocatedOutsideRun.map((r) => r.exceptionId).sort(),
+      [...RELOCATED_EXPECT.outsideRun].sort()
     );
   }
-  assertEquals(
-    run.relocatedOutsideRun.map((r) => r.exceptionId).sort(),
-    [...RELOCATED_EXPECT.outsideRun].sort()
-  );
-});
+);

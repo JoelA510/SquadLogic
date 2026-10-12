@@ -335,13 +335,20 @@ describe('blackout freeze :: who may write each table is a checked list', () => 
     // rather than reporting a reassuring zero. Its smoke is NOT here: it goes
     // through the create RPC rather than writing the table, which is the shape
     // this PR's own rule asks of a test.
+    //
+    // 8.6 3b PR 11d-2 adds two test writers, neither a producer: the blackout
+    // enact smoke seeds the saved blackout and rewrites each of its stored
+    // columns in turn for witness B8 (the scope cannot change through the
+    // update RPC), and its pgTAP suite seeds one inside its ROLLBACK.
     expect(writersOf('field_blackouts')).toEqual([
       'docs/sql/20260906000100_smoke.sql',
+      'docs/sql/20261007000000_smoke.sql',
       'frontend/src/lib/mockSupabaseClient.js',
       'scripts/dbharness/run.sh',
       'supabase/migrations/20260906000100_field_blackouts.sql',
       'supabase/migrations/20260910000000_admin_update_field_blackout.sql',
       'supabase/tests/admin_update_field_blackout.sql',
+      'supabase/tests/enact_blackout.sql',
       'supabase/tests/rls_field_blackouts.sql',
     ]);
   });

@@ -317,7 +317,12 @@ describe('parsePracticeLockRefusal', () => {
       status: 409,
       body: { status: 'error', code: PRACTICE_ASSIGNMENT_LOCKED, message: message() },
     };
-    const err = await persistPracticeRepair({ assignments: [], slots: [] }).catch((e) => e);
+    const err = await persistPracticeRepair({
+      assignments: [],
+      slots: [],
+      runId: undefined,
+      baseFingerprint: undefined,
+    }).catch((e) => e);
     expect(err).toBeInstanceOf(Error);
     expect(err.code).toBe(PRACTICE_ASSIGNMENT_LOCKED);
     expect(err.status).toBe(409);

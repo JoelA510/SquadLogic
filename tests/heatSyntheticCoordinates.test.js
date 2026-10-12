@@ -76,7 +76,7 @@ const KEY_RE = /\b(lat|latitude|lon|lng|longitude)\b["']?\s*[:=]\s*(-?\d+\.\d+)/
  * Coordinate literals in one file's text.
  *
  * @param {string} text
- * @returns {{ kind: 'pair' | 'lat' | 'lon', lat?: number, lon?: number, value?: number, raw: string }[]}
+ * @returns {{ kind: string, lat?: number, lon?: number, value?: number, raw: string }[]}
  */
 function extractFromText(text) {
   const found = [];

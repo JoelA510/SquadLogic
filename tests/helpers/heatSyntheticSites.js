@@ -20,6 +20,12 @@
  * Dependency-free on purpose, so the Playwright steps can import it too.
  */
 
+/**
+ * @typedef {{ key: string, name: string, latitude: number, longitude: number,
+ *   surface: string }} SyntheticHeatSite
+ */
+
+/** @type {ReadonlyArray<Readonly<SyntheticHeatSite>>} */
 export const SYNTHETIC_HEAT_SITES = Object.freeze([
   Object.freeze({
     key: 'site-a',

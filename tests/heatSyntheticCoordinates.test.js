@@ -23,51 +23,24 @@
  * (the guard cannot hold them), and venue names in free text.
  */
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 
 import { REGION_SAMPLE_POINTS, SYNTHETIC_HEAT_SITES } from './helpers/heatSyntheticSites.js';
+import { REPO_ROOT as ROOT, scannedFiles as repoScannedFiles } from './helpers/repoScanFiles.js';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SELF = fileURLToPath(import.meta.url);
 
-/**
+/*
  * Every tracked content directory is walked, and every file in it with a
  * scanned extension is read: the rule is repo-wide, so a coordinate entering
  * through any feature (location coordinates, imports, mocks) is seen, not only
- * one in a heat-named file. Root-level documents and configs are listed.
+ * one in a heat-named file. Root-level documents and configs are listed. The
+ * roots, extensions and walk are `tests/helpers/repoScanFiles.js`, shared with
+ * `tests/realNameDenylist.test.js`.
  */
-const SCAN_ROOTS = [
-  'tests',
-  'scripts',
-  'frontend',
-  'packages',
-  'fixtures',
-  'docs',
-  'supabase',
-  'config',
-  'project-hardening',
-];
-const SCAN_ALWAYS = ['CHANGELOG.md', 'README.md', 'CLAUDE.md', 'vercel.json'];
-const SCAN_EXT = new Set([
-  '.js',
-  '.mjs',
-  '.cjs',
-  '.jsx',
-  '.ts',
-  '.tsx',
-  '.json',
-  '.py',
-  '.feature',
-  '.md',
-  '.sql',
-  '.csv',
-  '.txt',
-  '.yml',
-  '.yaml',
-]);
 
 /**
  * Files deliberately not scanned, each with its reason.
@@ -79,28 +52,7 @@ const NOT_SCANNED = Object.freeze({
     'generated NREL SPA coefficient table: rows of [A, B, C] periodic terms, no coordinates',
 });
 
-/** Every file under `dir`, recursively, skipping dependency and build trees. */
-function filesUnder(dir) {
-  /** @type {string[]} */
-  const files = [];
-  for (const entry of readdirSync(dir)) {
-    if (entry === 'node_modules' || entry === '.features-gen' || entry.startsWith('.')) continue;
-    const full = path.join(dir, entry);
-    if (statSync(full).isDirectory()) files.push(...filesUnder(full));
-    else files.push(full);
-  }
-  return files;
-}
-
-function scannedFiles() {
-  return SCAN_ROOTS.flatMap((r) => filesUnder(path.join(ROOT, r)))
-    .filter((f) => f !== SELF)
-    .filter((f) => SCAN_EXT.has(path.extname(f)))
-    .map((f) => path.relative(ROOT, f).split(path.sep).join('/'))
-    .filter((rel) => !(rel in NOT_SCANNED))
-    .concat(SCAN_ALWAYS)
-    .sort();
-}
+const scannedFiles = () => repoScannedFiles({ exclude: [SELF], notScanned: NOT_SCANNED });
 
 /** A latitude, a comma, a western-hemisphere longitude: tuples, call args, `/points/` URLs. */
 const PAIR_RE = /(?<![\w.])(-?\d{1,2}\.\d+)\s*,\s*(-\d{2,3}\.\d+)(?![\w.])/g;

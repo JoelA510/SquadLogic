@@ -66,7 +66,7 @@ describe('FieldManagementPage seasonal availability panel', () => {
         {
           id: 'ap-1',
           season_label: 'Fall 2026',
-          location: 'Canyon',
+          location: 'Venue J',
           field_name: 'Turf 11v11 Pods',
           record_status: 'potential',
           approval_status: 'pending',
@@ -76,7 +76,7 @@ describe('FieldManagementPage seasonal availability panel', () => {
           teams_per_hour: 2,
           aggregate_teams_per_hour: 8,
           day_constraints: 'Sat/Sun',
-          move_to_location: 'Vannoy',
+          move_to_location: 'Venue C',
           lighted: true,
           restroom: false,
           potty: true,
@@ -266,7 +266,7 @@ describe('FieldManagementPage: the two new estate depths', () => {
   /** Venue and sub-surface state the page has to render controls for. */
   const ESTATE = {
     locations: [
-      { id: 'loc-1', name: 'Canyon Park', effective_to: null },
+      { id: 'loc-1', name: 'Venue J Park', effective_to: null },
       { id: 'loc-2', name: 'Closed Site', effective_to: '2026-08-31' },
     ],
     subunits: [
@@ -351,7 +351,7 @@ describe('FieldManagementPage: the two new estate depths', () => {
     });
 
     render(<FieldManagementPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'Retire Canyon Park' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retire Venue J Park' }));
     // The dialog is the VENUE one: its date label names the depth.
     expect(await screen.findByLabelText(/Last day this venue is usable/)).toBeInTheDocument();
     fireEvent.click(screen.getByText('Check and retire'));

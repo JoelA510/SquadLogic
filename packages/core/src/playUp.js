@@ -1,7 +1,7 @@
 /**
  * Play-up / play-down eligibility for SquadLogic teaming.
  *
- * Pilot rule (Castro Valley Soccer Club):
+ * Pilot rule (the pilot club):
  *   - A player MAY play up a division (into an older band) ONLY when sanctioned:
  *       (A) their parent is coaching that older division (coach-child), or
  *       (B) they are buddied with a player who legitimately belongs to that

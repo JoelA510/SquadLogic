@@ -286,7 +286,7 @@ describe('ImportPanel', () => {
         data: [
           {
             season_label: 'Fall 2026',
-            location: 'San Lorenzo',
+            location: 'Venue G',
             name: 'Main Field',
             primary_format: '11v11',
             available_from: '2026-08-01',

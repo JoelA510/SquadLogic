@@ -17,7 +17,8 @@ function resolve(rawFields, type = 'players') {
   return { kept, mappings, missing };
 }
 
-// Real CVSC "PlayerRegistrations" GotSport export header row (comma CSV).
+// The pilot club's "PlayerRegistrations" GotSport export header row (comma CSV), club name
+// replaced with a synthetic one.
 const GOTSPORT_HEADERS = [
   'Registration ID',
   'Created',
@@ -66,7 +67,7 @@ const GOTSPORT_HEADERS = [
   "Can you coach for this player's team?",
   'Are you coaching so this player can play up a division?',
   'Concussion Waiver: I agree that if I think my child or teen may have a concussion I will remove them from play and keep them out until cleared by a health care provider.',
-  'How did you hear about CVSC and our recreational program?',
+  'How did you hear about Example Club and our recreational program?',
 ];
 
 describe('importHeaders', () => {

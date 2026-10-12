@@ -32,5 +32,5 @@ where c.relname = 'uq_field_availability_one_active_per_group';
 --    confirming the function compiles and the permission check is wired before
 --    any row is touched.
 select public.admin_select_field_availability_scenario(
-  gen_random_uuid(), 'Fall 2026', 'canyon', gen_random_uuid()
+  gen_random_uuid(), 'Fall 2026', 'venue_j', gen_random_uuid()
 );

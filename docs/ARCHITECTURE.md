@@ -1500,8 +1500,8 @@ migrations, an import path, and UI pages. **No scheduler or evaluator reads any 
 whose permit window ends at 6 PM will happily receive an 8 PM game if a `game_slots` row exists.
 
 The one documented fixture for this feature is season-specific and club-specific:
-`docs/fixtures/fall-2026-field-availability.md`, which names actual venues ("Five Canyons
-Upper/Lower", "Bret Harte", "San Lorenzo", "Creekside", "Proctor", "Canyon") and hard-codes Fall
+`docs/fixtures/fall-2026-field-availability.md`, which named actual venues (since replaced by
+synthetic `Venue A` .. `Venue J` and guarded by `tests/realNameDenylist.test.js`) and hard-codes Fall
 2026 dates. **Inferred:** that fixture came from one club's real availability spreadsheet and was
 transcribed rather than generalized.
 

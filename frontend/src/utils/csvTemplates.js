@@ -96,7 +96,7 @@ export const CSV_TEMPLATES = {
     example: [
       'Fall 2026',
       'active',
-      'San Lorenzo',
+      'Example Park',
       'Main Field',
       'grass',
       '7v7',

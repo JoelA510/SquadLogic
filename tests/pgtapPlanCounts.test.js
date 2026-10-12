@@ -64,6 +64,8 @@ const ASSERTIONS = [
   'isnt',
   'ok',
   'throws_ok',
+  // pgTAP's message-pinned refusal (3b PR 11d-2's enact_blackout.sql).
+  'throws_like',
   'lives_ok',
   'pass',
   'fail',

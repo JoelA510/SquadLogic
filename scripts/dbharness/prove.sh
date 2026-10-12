@@ -3392,10 +3392,26 @@ plant "R22 the heat settings warning counts every row as having links" "$R22" \
 # live definition of its function (anchor_liveness: LIVE).
 # B8 Plant A: drop the blackout gate, so the record's claim is believed.
 plant "M23 Plant A: the blackout enact drops its commit gate (step 2a)" "$M23" \
-  "        IF v_bo_stored IS NULL THEN
-            RAISE EXCEPTION 'blackout % is not saved" \
-  "        IF false THEN
-            RAISE EXCEPTION 'blackout % is not saved" \
+  "        IF v_bo_stored IS DISTINCT FROM enact->'cause'->'stored'
+           OR v_bo_loss IS DISTINCT FROM (enact->'cause'->'loss') - 'surface_ids' THEN" \
+  "        IF false THEN" \
+  "FAIL smoke 20261007000000"
+
+# The lock helper's answer is the only "not saved" producer for a blackout.
+plant "M23 the wrapper ignores the lock helper's answer" "$M23" \
+  "    IF NOT public.enact_lock_cause_row(v_org_id, v_kind, v_field) THEN" \
+  "    IF NOT public.enact_lock_cause_row(v_org_id, v_kind, v_field) AND false THEN" \
+  "FAIL smoke 20261007000000"
+
+# The review's window case: the record consistent with itself, outside the blackout.
+plant "M23 the blackout enact accepts a window outside the blackout" "$M23" \
+  "            OR NOT (v_window <@ (v_bo_range * v_s_range))) THEN" \
+  "            OR false) THEN" \
+  "FAIL smoke 20261007000000"
+
+plant "M23 the blackout enact accepts a series off the blackout's ground" "$M23" \
+  "            OR NOT (v_s_field::text = ANY (v_bo_surfaces))" \
+  "            OR false" \
   "FAIL smoke 20261007000000"
 
 # B8 Plant B, the SQL arm: the stored row compared to the record's own claim.
@@ -3580,7 +3596,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) every accepted heat settings write, a clear included, leaves a settings.heat_updated audit row with its before and after"]="M22 the heat settings RPC stops auditing"
   ["(checked) a member reads only their own organisation's heat settings"]="M22 the read policy lets every member read every organisation's settings"
   ["(checked) the revert counted the heat settings it was about to destroy, the organisations with links, and the links"]="R22 the heat settings warning counts every row as having links"
-  ["(checked) only a saved blackout, exactly as saved, is enacted: an unsaved blackout, any stored column changed, another stored claim or other surface_ids is refused, and writes nothing"]="M23 Plant A: the blackout enact drops its commit gate (step 2a)|M23 the blackout gate compares the record's stored row to itself"
+  ["(checked) only a saved blackout, exactly as saved, is enacted, on its own ground and dates: an unsaved blackout, any stored column changed, another stored claim, other surface_ids, a window outside it or a series off its ground is refused, and writes nothing"]="M23 Plant A: the blackout enact drops its commit gate (step 2a)|M23 the blackout gate compares the record's stored row to itself|M23 the wrapper ignores the lock helper's answer|M23 the blackout enact accepts a window outside the blackout|M23 the blackout enact accepts a series off the blackout's ground"
   ["(checked) a blackout enact that unlocks S, changes any row, creates a row, or records anything but the one declared exception on S is refused (22023) and rolled back"]="M23 the blackout enact accepts exceptions_recorded >= 1|M23 the blackout enact accepts an unlock of S|M23 the blackout enact accepts an exception of another window"
   ["(checked) the blackout enact audit row is written in the enact's own transaction: an audit failure fails the enact and its exception"]="M20 the enact audit failure is swallowed"
   ["(checked) a blackout enact writes exactly one exception, on its series, over its window, and changes no row, its own included"]="M23 the blackout enact stops checking S itself is unchanged"

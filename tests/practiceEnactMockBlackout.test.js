@@ -363,3 +363,49 @@ describe('the mock writer enacts a saved blackout as one exception on S (11d-2)'
     ]);
   });
 });
+
+describe('the mock reads a window as the SQL does, and holds S to the blackout', () => {
+  it('accepts the half-open spelling of the same window, as a daterange would', () => {
+    const db = world();
+    const out = call(
+      db,
+      params(db, (p) => {
+        p.exceptions = [{ ...EXCEPTION, window: '[2026-10-20,2026-10-27)' }];
+        return p;
+      })
+    );
+    expect(out.error).toBeNull();
+    expect(db.practice_exceptions).toHaveLength(1);
+  });
+
+  it('refuses a window outside the blackout, and a series on ground it does not close', () => {
+    const outside = world();
+    const before = snapshot(outside);
+    const window = { from: '2026-11-03', until: '2026-11-09' };
+    const late = call(
+      outside,
+      params(outside, (p) => {
+        p.exceptions = [{ ...EXCEPTION, window: '[2026-11-03,2026-11-09]' }];
+        p.enact.series = { ...p.enact.series, window };
+        return p;
+      })
+    );
+    expect(late.error?.message).toContain('is outside blackout');
+    expect(snapshot(outside)).toBe(before);
+    const offGround = world();
+    offGround.practice_assignments[1].practice_slot_id = THU2;
+    const other = call(
+      offGround,
+      params(offGround, (p) => {
+        p.exceptions = [{ ...EXCEPTION, assignment_id: O, practice_slot_id: TUE1 }];
+        p.enact.series = { ...p.enact.series, assignment_id: O, team_id: U(22) };
+        p.enact.decision = {
+          ...p.enact.decision,
+          to: { surface_id: F1, weekday: 'TUE', start_minutes: 1080, duration_minutes: 90 },
+        };
+        return p;
+      })
+    );
+    expect(other.error?.message).toContain('is outside blackout');
+  });
+});

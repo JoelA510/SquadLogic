@@ -58,6 +58,8 @@
  * @module lib/mockPracticeEnact
  */
 
+import { canonicalJson } from '@squadlogic/core/scenario/inputs.js';
+
 const lower = (value) => String(value ?? '').toLowerCase();
 
 /** Four FNV-1a passes with different seeds: 32 hex characters, deterministic. */
@@ -118,16 +120,15 @@ function shiftIso(iso, days) {
 
 const refuse = (code, message) => ({ data: null, error: { code, message } });
 
-/** Keys sorted at every depth, so two objects compare by content. */
-function canonical(value) {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (value !== null && typeof value === 'object') {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value ?? null);
+/**
+ * A window's inclusive `{ from, until }`, from `[a,b]` or `[a,b)` (the form a
+ * daterange round-trips to), or null when unreadable: the SQL compares the
+ * window as a daterange, so both spellings of one window are one window.
+ */
+function windowBounds(text) {
+  const m = /^\[(\d{4}-\d{2}-\d{2}),(\d{4}-\d{2}-\d{2})([\])])$/.exec(String(text ?? ''));
+  if (!m) return null;
+  return { from: m[1], until: m[3] === ']' ? m[2] : shiftIso(m[2], -1) };
 }
 
 /** `HH:MM[:SS]` as minutes past midnight. */
@@ -172,10 +173,12 @@ function blackoutGate(db, orgId, enact) {
   };
   const { surface_ids: claimedSurfaces = [], ...claimedLoss } = enact.cause?.loss || {};
   if (
-    canonical(stored) !== canonical(enact.cause?.stored) ||
-    canonical(asLoss) !== canonical(claimedLoss)
+    canonicalJson(stored) !== canonicalJson(enact.cause?.stored) ||
+    canonicalJson(asLoss) !== canonicalJson(claimedLoss)
   ) {
-    return { refusal: refuse('22023', `blackout ${causeId} changed: stored ${canonical(stored)}`) };
+    return {
+      refusal: refuse('22023', `blackout ${causeId} changed: stored ${canonicalJson(stored)}`),
+    };
   }
   const surfaces =
     stored.field_id !== null
@@ -188,7 +191,7 @@ function blackoutGate(db, orgId, enact) {
           )
           .map((f) => lower(f.id))
           .sort();
-  if (canonical(surfaces) !== canonical([...claimedSurfaces].map(lower).sort())) {
+  if (canonicalJson(surfaces) !== canonicalJson([...claimedSurfaces].map(lower).sort())) {
     return {
       refusal: refuse(
         '22023',
@@ -196,7 +199,38 @@ function blackoutGate(db, orgId, enact) {
       ),
     };
   }
-  return { stored };
+  return { stored, surfaces };
+}
+
+/**
+ * Whether S is on the blackout's ground and `series.window` lies inside the
+ * blackout's dates and S's range (20261007000000, after the S row check).
+ * A range the mock cannot read is not narrowed here; the SQL reads it as a
+ * daterange.
+ */
+function isInsideBlackout(db, row, stored, surfaces, window) {
+  const slot = (db.practice_slots || []).find(
+    (ps) => lower(ps.id) === lower(row.practice_slot_id ?? row.slot_id)
+  );
+  const subunit = (db.field_subunits || []).find(
+    (fs) => lower(fs.id) === lower(slot?.field_subunit_id)
+  );
+  const field = slot ? (slot.field_id ?? subunit?.field_id ?? null) : null;
+  const range = windowBounds(row.effective_date_range) ?? {
+    from: '0000-01-01',
+    until: '9999-12-31',
+  };
+  const from = [stored.blackout_from, range.from].sort()[1];
+  const until = [stored.blackout_until, range.until].sort()[0];
+  return (
+    field !== null &&
+    surfaces.includes(lower(field)) &&
+    typeof window?.from === 'string' &&
+    typeof window?.until === 'string' &&
+    window.from <= window.until &&
+    window.from >= from &&
+    window.until <= until
+  );
 }
 
 /** Whether the one blackout exception is the one the record declares (step 7). */
@@ -206,7 +240,8 @@ function isDeclaredBlackoutException(db, orgId, enact, s, exception) {
     lower(exception.assignment_id ?? s) !== s ||
     exception.cause_kind !== 'blackout' ||
     lower(exception.cause_id) !== lower(enact.cause?.id) ||
-    exception.window !== `[${window.from},${window.until}]`
+    canonicalJson(windowBounds(exception.window)) !==
+      canonicalJson({ from: window.from, until: window.until })
   ) {
     return false;
   }
@@ -282,10 +317,13 @@ export function handlePracticeEnactRpc(db, name, params, ctx) {
   // 2a. The commit gate (a blackout's, then the retirement's).
   /** @type {any} */
   let blackoutStored = null;
+  /** @type {string[]} */
+  let blackoutSurfaces = [];
   if (kind === 'blackout') {
     const gate = blackoutGate(db, orgId, enact);
     if (gate.refusal) return gate.refusal;
     blackoutStored = gate.stored;
+    blackoutSurfaces = gate.surfaces;
   }
   const fieldId = lower(enact.cause.id);
   const field = (db.fields || []).find(
@@ -363,9 +401,16 @@ export function handlePracticeEnactRpc(db, name, params, ctx) {
   if (strays.length > 0 || newRows.some((a) => lower(a.team_id) !== team)) {
     return refuse('22023', `enact of series ${s} touched more than it: ${strays.join(', ')}`);
   }
-  // A blackout keeps S's range: one exception, nothing closed, unlocked or
-  // created, and the exception the record declares.
+  // A blackout's S is on its ground, inside its dates; it keeps S's range:
+  // one exception, nothing closed, unlocked or created, and the exception
+  // the record declares.
   if (kind === 'blackout') {
+    if (!isInsideBlackout(db, row, blackoutStored, blackoutSurfaces, enact.series?.window)) {
+      return refuse(
+        '22023',
+        `blackout enact of series ${s} is outside blackout ${lower(enact.cause.id)}`
+      );
+    }
     if (unlock.length > 0 || closes.length > 0 || newRows.length > 0) {
       return refuse(
         '22023',

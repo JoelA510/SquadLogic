@@ -28,7 +28,12 @@
 --       dates, minutes or reason differing from `cause.stored` or from
 --       `cause.loss`, or `loss.surface_ids` other than `{field_id}` or every
 --       field of `location_id` (the adapter's `fieldsOfLocation`), refuses
---       "blackout X changed" (22023 both);
+--       "blackout X changed" (22023 both). A lock that finds no row refuses
+--       the same way, so the helper's answer is read, not discarded;
+--   S.  S is a row on the blackout's ground (its slot's field is one of the
+--       surfaces), and `series.window` lies inside the blackout's dates and
+--       S's range (22023), so the record cannot place a "blackout" exception
+--       outside the blackout it names;
 --   7.  only S, and only one exception on it: `closed`, `unlocked` and
 --       `superseded` are empty, EVERY pre-enact row of the organisation, S
 --       included, is unchanged in team, slot, range, source and
@@ -57,6 +62,18 @@
 -- pgTAP file both record the premise (an invoker `FOR SHARE` reads 0 rows).
 --
 -- ## What this does NOT do
+--
+-- Declared, not enforced here:
+--   - the commit gate runs before the idempotency lookup, as in 11b: a repeat
+--     of a committed blackout enact whose blackout has since been edited or
+--     deleted (D7 allows both) is refused 22023 rather than answered
+--     idempotent. The client re-reads, and the adapter finds S enacted for
+--     that window (plan §2.1 rule 4), so nothing is sent twice;
+--   - a location blackout's surface set is READ from `fields`, not locked: a
+--     field added to or moved off the location between the gate and the
+--     commit is not seen. Only the `field_blackouts` row is held (D8);
+--   - partial-day minutes are compared with the stored row, not with S's own
+--     slot time: the repair decides displacement by minutes (plan §2.2).
 --
 -- The writer's mid-range daylight refusal stays (Q3; the adapter adopts it).
 -- `field_blackouts` is still not in the fingerprint (D8): the lock covers the
@@ -147,6 +164,9 @@ DECLARE
     v_bo_loss jsonb;
     v_bo_surfaces text[];
     v_window daterange;
+    v_bo_range daterange;
+    v_s_range daterange;
+    v_s_field uuid;
     v_exc jsonb;
     v_run_data jsonb;
     v_before uuid[];
@@ -265,7 +285,14 @@ BEGIN
     -- 2a. The commit gate (Q3, Q5), immediately after the lock: the STORED
     -- row decides, never the record's claim. The row is locked FOR SHARE
     -- first (Q10; the helper, see the header), then read as the caller.
-    PERFORM public.enact_lock_cause_row(v_org_id, v_kind, v_field);
+    IF NOT public.enact_lock_cause_row(v_org_id, v_kind, v_field) THEN
+        IF v_kind = 'retirement' THEN
+            RAISE EXCEPTION 'retirement of field % is not committed: no field of this organisation has that id', v_field
+                USING ERRCODE = '22023';
+        END IF;
+        RAISE EXCEPTION 'blackout % is not saved: no field_blackouts row of this organisation has that id; save the blackout first', v_field
+            USING ERRCODE = '22023';
+    END IF;
     IF v_kind = 'retirement' THEN
         SELECT f.effective_to INTO v_stored
           FROM public.fields f
@@ -301,15 +328,14 @@ BEGIN
                     ELSE COALESCE((SELECT array_agg(f.id::text ORDER BY f.id::text COLLATE "C")
                                      FROM public.fields f
                                     WHERE f.location_id = fb.location_id
-                                      AND f.organization_id = v_org_id), '{}'::text[]) END
-          INTO v_bo_stored, v_bo_loss, v_bo_surfaces
+                                      AND f.organization_id = v_org_id), '{}'::text[]) END,
+               daterange(fb.blackout_from, fb.blackout_until, '[]')
+          INTO v_bo_stored, v_bo_loss, v_bo_surfaces, v_bo_range
           FROM public.field_blackouts fb
          WHERE fb.id = v_field
            AND fb.organization_id = v_org_id;
-        IF v_bo_stored IS NULL THEN
-            RAISE EXCEPTION 'blackout % is not saved: no field_blackouts row of this organisation has that id; save the blackout first', v_field
-                USING ERRCODE = '22023';
-        END IF;
+        -- (No row is refused above, by the lock; a row the lock found but the
+        -- caller cannot read is NULL here, and refused as changed.)
         IF v_bo_stored IS DISTINCT FROM enact->'cause'->'stored'
            OR v_bo_loss IS DISTINCT FROM (enact->'cause'->'loss') - 'surface_ids' THEN
             RAISE EXCEPTION 'blackout % changed: stored %, the record claims stored % and loss %', v_field, v_bo_stored, enact->'cause'->'stored', (enact->'cause'->'loss') - 'surface_ids'
@@ -345,15 +371,28 @@ BEGIN
     END IF;
 
     -- S must be a row of this season, of the team the record names.
-    SELECT pa.team_id INTO v_team
+    SELECT pa.team_id, pa.effective_date_range,
+           COALESCE(ps.field_id, (SELECT fs.field_id FROM public.field_subunits fs WHERE fs.id = ps.field_subunit_id))
+      INTO v_team, v_s_range, v_s_field
       FROM public.practice_assignments pa
       JOIN public.teams t ON t.id = pa.team_id
       JOIN public.divisions d ON d.id = t.division_id
+      LEFT JOIN public.practice_slots ps ON ps.id = pa.practice_slot_id
      WHERE pa.id = v_series
        AND pa.organization_id = v_org_id
        AND d.season_settings_id = v_season_id;
     IF v_team IS NULL OR v_team::text <> enact->'series'->>'team_id' THEN
         RAISE EXCEPTION 'enact series % is not a row of season % held by team %', v_series, v_season_id, enact->'series'->>'team_id'
+            USING ERRCODE = '22023';
+    END IF;
+    -- A blackout's S is on its ground, and its window is the blackout's and
+    -- S's: the STORED dates decide, never the record's window alone.
+    IF v_kind = 'blackout'
+       AND (v_s_field IS NULL
+            OR NOT (v_s_field::text = ANY (v_bo_surfaces))
+            OR NOT (v_window <@ (v_bo_range * v_s_range))) THEN
+        RAISE EXCEPTION 'blackout enact of series % is outside blackout %: S on field %, window %, the blackout closes % over %, S runs %',
+            v_series, v_field, v_s_field, v_window, v_bo_surfaces, v_bo_range, v_s_range
             USING ERRCODE = '22023';
     END IF;
 

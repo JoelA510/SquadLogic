@@ -347,6 +347,17 @@ describe('the enact record schemas agree (witness 22)', () => {
       expect(edge.safeParse(record).success, name).toBe(false);
       expect(edgeV3.safeParse(record).success, `${name} (zod v3)`).toBe(false);
     }
+    // The predicates' own boundaries, which the mutation product never
+    // builds: equal minutes are refused, one minute apart admitted.
+    const boundary = (start, end) =>
+      swap(VALID_BLACKOUT, (r) => {
+        Object.assign(r.cause.loss, { start_minutes: start, end_minutes: end });
+        Object.assign(r.cause.stored, { start_minutes: start, end_minutes: end });
+      });
+    for (const schema of [PracticeEnactRecordSchema, edge, edgeV3]) {
+      expect(schema.safeParse(boundary(1050, 1050)).success).toBe(false);
+      expect(schema.safeParse(boundary(1050, 1051)).success).toBe(true);
+    }
     // The all-day and the location-scoped blackout are admitted by all three.
     const allDay = swap(VALID_BLACKOUT, (r) => {
       Object.assign(r.cause.loss, { start_minutes: null, end_minutes: null });

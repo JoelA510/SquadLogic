@@ -890,8 +890,8 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
     # after commit and the grant posture RAISE in the same smoke and print as
     # NOTICEs above; they carry no plant, so they are not claims.)
     if [ "$id" = "20261007000000" ]; then
-      if grep -qF "blackout commit gate: an unsaved blackout, each of its 7 stored columns changed, a record claiming another stored row, and surface_ids other than its ground were each refused 22023, 10 of 10; 0 rows, 0 exceptions and 0 audit rows changed" $SCRATCH/harness_smoke; then
-        echo "  | (checked) only a saved blackout, exactly as saved, is enacted: an unsaved blackout, any stored column changed, another stored claim or other surface_ids is refused, and writes nothing"
+      if grep -qF "blackout commit gate: an unsaved blackout, each of its 7 stored columns changed, a record claiming another stored row, surface_ids other than its ground, a window outside its dates and a series on other ground were each refused 22023, 12 of 12; 0 rows, 0 exceptions and 0 audit rows changed" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only a saved blackout, exactly as saved, is enacted, on its own ground and dates: an unsaved blackout, any stored column changed, another stored claim, other surface_ids, a window outside it or a series off its ground is refused, and writes nothing"
       else
         echo "FAIL smoke ${id}: it passed without proving the blackout commit gate reads the stored field_blackouts row"; STATUS=1
       fi

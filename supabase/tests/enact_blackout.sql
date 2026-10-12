@@ -123,29 +123,31 @@ SELECT is(
     0,
     'premise: a FOR SHARE read as the admin locks no blackout row, so the wrapper locks through its definer helper');
 
--- B8: only a saved blackout, as saved.
-SELECT throws_ok(
+-- B8: only a saved blackout, as saved. Each refusal is pinned to its own
+-- check's message (every one of them is raised 22023), so another check's
+-- refusal cannot pass for it.
+SELECT throws_like(
     $$ SELECT pg_temp.bo_enact('a1111111-1111-1111-1111-0000000d2c01',
            jsonb_set((SELECT rec FROM bo_case), '{cause,id}', '"a1111111-1111-1111-1111-0000000d2bff"'),
            (SELECT exc FROM bo_case), (SELECT assign FROM bo_case)) $$,
-    '22023', NULL,
-    'B8: a blackout id with no saved row is refused 22023');
-SELECT throws_ok(
+    '%is not saved%',
+    'B8: a blackout id with no saved row is refused, by its own check');
+SELECT throws_like(
     $$ SELECT pg_temp.bo_enact('a1111111-1111-1111-1111-0000000d2c02',
            jsonb_set((SELECT rec FROM bo_case), '{cause,stored,reason}', '"weather"'),
            (SELECT exc FROM bo_case), (SELECT assign FROM bo_case)) $$,
-    '22023', NULL,
-    'B8: a record claiming another stored row is refused 22023');
-SELECT throws_ok(
+    '%blackout % changed%',
+    'B8: a record claiming another stored row is refused, by its own check');
+SELECT throws_like(
     $$ SELECT pg_temp.bo_enact('a1111111-1111-1111-1111-0000000d2c03',
            jsonb_set((SELECT rec FROM bo_case), '{cause,loss,surface_ids}',
                      '["a1111111-1111-1111-1111-0000000d2f02"]'),
            (SELECT exc FROM bo_case), (SELECT assign FROM bo_case)) $$,
-    '22023', NULL,
-    'B8: loss.surface_ids other than the blackout''s ground is refused 22023');
+    '%loss.surface_ids%',
+    'B8: loss.surface_ids other than the blackout''s ground is refused, by its own check');
 
 -- B9: one exception on S, and nothing else.
-SELECT throws_ok(
+SELECT throws_like(
     $$ SELECT pg_temp.bo_enact('a1111111-1111-1111-1111-0000000d2c04',
            jsonb_set((SELECT rec FROM bo_case), '{writes,exceptions}', '2'),
            (SELECT exc || jsonb_build_array(jsonb_build_object(
@@ -153,9 +155,9 @@ SELECT throws_ok(
                 'kind', 'time_tbd', 'tbd_reason', 'contended', 'cause_kind', 'blackout',
                 'cause_id', 'a1111111-1111-1111-1111-0000000d2b01')) FROM bo_case),
            (SELECT assign FROM bo_case)) $$,
-    '22023', NULL,
-    'B9: a blackout enact recording two exceptions is refused 22023');
-SELECT throws_ok(
+    '%recorded 2 exception(s)%',
+    'B9: a blackout enact recording two exceptions is refused, by its own check');
+SELECT throws_like(
     $$ SELECT pg_temp.bo_enact('a1111111-1111-1111-1111-0000000d2c05', (SELECT rec FROM bo_case),
            (SELECT exc FROM bo_case),
            (SELECT assign || jsonb_build_array(jsonb_build_object(
@@ -163,8 +165,8 @@ SELECT throws_ok(
                 'practice_slot_id', 'a1111111-1111-1111-1111-0000000d2a02',
                 'effective_date_range', '[2026-10-20,2026-10-26]', 'source', 'auto',
                 'assigned_via', 'recommendation')) FROM bo_case)) $$,
-    '22023', NULL,
-    'B9: a blackout enact creating a row is refused 22023');
+    '%created 1 row(s)%',
+    'B9: a blackout enact creating a row is refused, by its own check');
 SELECT is(
     (SELECT count(*)::int FROM public.practice_exceptions
       WHERE assignment_id = 'a1111111-1111-1111-1111-0000000d2e01'),

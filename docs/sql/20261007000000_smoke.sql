@@ -9,9 +9,9 @@
 -- docs/PHASE_8_6_PR11D_BLACKOUT_ENACT_PLAN.md §5, the witnesses assigned to
 -- 11d-2 (the SQL arms):
 --   B8   only a saved blackout, as saved: no row, each of its 7 stored
---        columns changed, a record claiming another stored row, and
---        surface_ids other than its ground, each refused 22023 with nothing
---        written
+--        columns changed, a record claiming another stored row, surface_ids
+--        other than its ground, a window outside its dates, and a series on
+--        ground it does not close, each refused 22023 with nothing written
 --   B9   one exception on S and nothing else: S unlocked, S re-sent changed,
 --        a new row, two exceptions, and an exception of another window,
 --        cause, slot or kind, each refused 22023 and rolled back; the
@@ -185,7 +185,7 @@ DECLARE
     c_k1 constant uuid := 'e1200000-0000-4000-8000-00000000e001';
     c_ka constant uuid := 'e1200000-0000-4000-8000-00000000e00a';
     v_admin uuid; v_org uuid; v_loc uuid; v_f1 uuid; v_f2 uuid; v_f3 uuid; v_s uuid;
-    v_t1 uuid; v_tue1 uuid; v_wed1 uuid; v_thu2 uuid; v_sa uuid; v_b uuid;
+    v_t1 uuid; v_t3 uuid; v_tue1 uuid; v_wed1 uuid; v_thu2 uuid; v_sa uuid; v_ra uuid; v_b uuid;
     v_fp text; v_run jsonb; v_cause jsonb; v_series jsonb; v_decision jsonb; v_rows jsonb;
     v_writes jsonb; v_exc jsonb; v_rec jsonb; v_out jsonb; v_assign jsonb;
     v_digest text; v_n int; v_case record; v_pre jsonb; v_audit jsonb; v_state text;
@@ -203,6 +203,8 @@ BEGIN
     SELECT id INTO v_wed1 FROM e12_ids WHERE name = 'wed1';
     SELECT id INTO v_thu2 FROM e12_ids WHERE name = 'thu2';
     SELECT id INTO v_sa FROM e12_ids WHERE name = 's';
+    SELECT id INTO v_t3 FROM e12_ids WHERE name = 't3';
+    SELECT id INTO v_ra FROM e12_ids WHERE name = 'r';
     SELECT id INTO v_b FROM e12_ids WHERE name = 'b';
 
     -- ---- the premise of the helper ----------------------------------------
@@ -295,10 +297,21 @@ BEGIN
     v_out := pg_temp.e12_enact(v_admin, v_run, v_assign, '[]'::jsonb, '[]'::jsonb, v_exc, v_fp,
         jsonb_set(v_rec, '{cause,loss,surface_ids}', jsonb_build_array(v_f2)));
     IF v_out->>'state' = '22023' AND v_out->>'msg' LIKE '%loss.surface_ids%' THEN v_n := v_n + 1; END IF;
-    IF v_n <> 10 OR pg_temp.e12_digest(v_org) <> v_digest THEN
-        RAISE EXCEPTION 'expected an unsaved blackout, each of its 7 stored columns changed, a record claiming another stored row and surface_ids other than its ground each refused 22023, writing nothing; got % of 10 (last: %)', v_n, v_out;
+    -- The record consistent with itself, its window outside the blackout's dates.
+    v_out := pg_temp.e12_enact(v_admin, v_run, v_assign, '[]'::jsonb, '[]'::jsonb,
+        jsonb_set(v_exc, '{0,window}', '"[2026-11-03,2026-11-09]"'::jsonb), v_fp,
+        jsonb_set(v_rec, '{series,window}', jsonb_build_object('from', '2026-11-03', 'until', '2026-11-09')));
+    IF v_out->>'state' = '22023' AND v_out->>'msg' LIKE '%is outside blackout%' THEN v_n := v_n + 1; END IF;
+    -- A series on ground the blackout does not close: R, on F3.
+    v_out := pg_temp.e12_enact(v_admin, v_run, v_assign, '[]'::jsonb, '[]'::jsonb,
+        jsonb_set(v_exc, '{0,assignment_id}', to_jsonb(v_ra::text)), v_fp,
+        jsonb_set(jsonb_set(v_rec, '{series,assignment_id}', to_jsonb(v_ra::text)),
+                  '{series,team_id}', to_jsonb(v_t3::text)));
+    IF v_out->>'state' = '22023' AND v_out->>'msg' LIKE '%is outside blackout%' THEN v_n := v_n + 1; END IF;
+    IF v_n <> 12 OR pg_temp.e12_digest(v_org) <> v_digest THEN
+        RAISE EXCEPTION 'expected an unsaved blackout, each of its 7 stored columns changed, a record claiming another stored row, surface_ids other than its ground, a window outside its dates and a series on other ground each refused 22023, writing nothing; got % of 12 (last: %)', v_n, v_out;
     END IF;
-    RAISE NOTICE 'blackout commit gate: an unsaved blackout, each of its 7 stored columns changed, a record claiming another stored row, and surface_ids other than its ground were each refused 22023, 10 of 10; 0 rows, 0 exceptions and 0 audit rows changed';
+    RAISE NOTICE 'blackout commit gate: an unsaved blackout, each of its 7 stored columns changed, a record claiming another stored row, surface_ids other than its ground, a window outside its dates and a series on other ground were each refused 22023, 12 of 12; 0 rows, 0 exceptions and 0 audit rows changed';
 
     -- ---- B9. one exception on S, and nothing else ---------------------------
     v_n := 0;

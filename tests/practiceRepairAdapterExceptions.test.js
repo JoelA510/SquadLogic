@@ -877,7 +877,20 @@ describe('11d-1 :: the blackout write is one exception on S, over its own window
         enactment: out,
         prompt: { rows: [row], published_practices_affected: 1, accepted: true },
       })
-    ).toThrow('the gate that judged this loss');
+    ).toThrow('committed gate that judged this loss');
+    // Nor a gate whose verdict was not committed, though its row matches.
+    expect(() =>
+      buildEnactRecord({
+        enactKey: ENACT_KEY,
+        seasonSettingsId: uuid(900),
+        adapted,
+        state,
+        judged,
+        commit: { ...commit, committed: false },
+        enactment: out,
+        prompt: { rows: [row], published_practices_affected: 1, accepted: true },
+      })
+    ).toThrow('committed gate that judged this loss');
   });
 
   it('refuses a gate judged for another blackout, or for this one stored otherwise', () => {

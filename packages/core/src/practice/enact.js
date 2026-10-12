@@ -742,8 +742,12 @@ export function buildEnactRecord({
       throw new Error('enact: the prompt shown does not list the exception the write adds');
     }
     // The record carries the row the gate READ; it must be this loss's.
-    if (commit?.causeId !== cause.causeId || !storedIsLoss(commit?.stored ?? null, cause)) {
-      throw new Error('enact: the blackout record needs the gate that judged this loss');
+    if (
+      !commit?.committed ||
+      commit.causeId !== cause.causeId ||
+      !storedIsLoss(commit.stored ?? null, cause)
+    ) {
+      throw new Error('enact: the blackout record needs the committed gate that judged this loss');
     }
   } else {
     const promptIds = prompt.rows.map((row) => row.assignment_id).sort();

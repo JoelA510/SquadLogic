@@ -498,6 +498,7 @@ const LAYERS = Object.freeze([
       'tests/practiceRepair.test.js',
       // 8.6 3b PR 9: the adapter's witnesses run the repair on its output.
       'tests/practiceRepairAdapter.test.js',
+      'tests/practiceRepairAdapterExceptions.test.js',
       'tests/practiceRepairDaylight.test.js',
       'tests/practiceRepairPreferences.test.js',
       'tests/reasonCodeReachability.test.js',
@@ -532,6 +533,8 @@ const LAYERS = Object.freeze([
       'packages/core/src/practice/enact.js',
       'tests/practiceEnact.test.js',
       'tests/practiceRepairAdapter.test.js',
+      // 8.6 3b PR 11d-1: the live-exception and blackout-enact witnesses.
+      'tests/practiceRepairAdapterExceptions.test.js',
     ]),
     expectedProductionConsumers: Object.freeze([
       'frontend/src/utils/practiceRepairEnact.js',
@@ -569,6 +572,8 @@ const LAYERS = Object.freeze([
       'tests/practiceRecommendations.test.js',
       // Existing closures: a decline never re-offers closed ground.
       'tests/practiceRepairAdapter.test.js',
+      // 8.6 3b PR 11d-1 (B3): a re-opened blackout re-bases past its enact.
+      'tests/practiceRepairAdapterExceptions.test.js',
       'tests/practiceRepairDaylight.test.js',
       'tests/reasonCodeReachability.test.js',
     ]),
@@ -590,6 +595,8 @@ const LAYERS = Object.freeze([
     functions: Object.freeze([
       'buildEnactPayload',
       'buildEnactRecord',
+      // 8.6 3b PR 11d-1: one commit gate per loss kind.
+      'causeCommitOf',
       'judgeEnact',
       'retirementCommitOf',
     ]),
@@ -597,6 +604,8 @@ const LAYERS = Object.freeze([
     consumers: Object.freeze([
       'frontend/src/utils/practiceRepairEnact.js',
       'tests/practiceEnact.test.js',
+      'tests/practiceRepairAdapterExceptions.test.js',
+      'tests/practiceRepairEnact.test.js',
     ]),
     expectedProductionConsumers: Object.freeze(['frontend/src/utils/practiceRepairEnact.js']),
     expectedExternalProductionConsumers: Object.freeze([

@@ -237,11 +237,19 @@ When('I undo the decline for {string}', async ({ page }, team: string) => {
     .click();
 });
 
-Then('every practice repair window should show why saving it is refused', async ({ page }) => {
-  const rows = page.getByTestId('practice-repair-window');
-  const count = await rows.count();
-  expect(count).toBeGreaterThan(0);
-  for (let i = 0; i < count; i += 1) {
-    await expect(rows.nth(i).getByTestId('practice-repair-save-refused').first()).toBeVisible();
+// 8.6 3b PR 11d-1: the gate, not a save refusal, is what keeps a blackout off.
+Then(
+  'every Enact button should be disabled because blackout enact is not available yet',
+  async ({ page }) => {
+    const rows = page.getByTestId('practice-repair-window');
+    await expect(rows.first()).toBeVisible();
+    const count = await rows.count();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < count; i += 1) {
+      await expect(rows.nth(i).getByTestId('practice-repair-enact')).toBeDisabled();
+      await expect(rows.nth(i).getByTestId('practice-repair-enact-why')).toContainText(
+        'Enacting a blackout recommendation is not available yet'
+      );
+    }
   }
-});
+);

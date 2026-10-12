@@ -19,8 +19,10 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
 }));
 
 import {
+  ENACT_BLACKOUT_NOT_ENABLED,
   ENACT_GATE,
   ENACT_PREVIEW_TEXT,
+  ENACT_REFUSAL_TEXT,
   enactGateOf,
   enactPlanOf,
   enactPracticeRecommendation,
@@ -33,6 +35,7 @@ import {
   persistPracticeEnact,
 } from '../frontend/src/utils/practicePersistenceClient.js';
 import { mockPracticeFingerprint } from '../frontend/src/lib/mockPracticeEnact.js';
+import { causeCommitOf } from '../packages/core/src/practice/index.js';
 import {
   D,
   F1,
@@ -366,6 +369,51 @@ describe('enact UI :: 12, no blackout write in PR 11', () => {
       });
       expect(gate).toMatchObject({ enabled: false, why: ENACT_GATE.BLACKOUT });
       expect(gate.text).toContain('the window lies inside its practice series');
+    }
+    expect(requireExamined(subjects.length, 'series-window')).toBe(2);
+  });
+
+  // 3b PR 11d-1: core can now build a blackout write and its gate commits a
+  // SAVED blackout, so the client itself refuses until 11d-3 enables it.
+  it('a SAVED blackout still sends nothing, and reads nothing, until 11d-3 (11d-1)', async () => {
+    const blackout = {
+      id: uuid(701),
+      field_id: F1,
+      location_id: null,
+      blackout_from: D,
+      blackout_until: '2026-10-31',
+      start_minutes: null,
+      end_minutes: null,
+      reason: 'maintenance',
+    };
+    const loss = { kind: 'blackout', blackout };
+    const rows = main({ fields: fieldsWith(null) });
+    rows.fieldClosures = [
+      {
+        id: blackout.id,
+        source: 'field_blackouts',
+        closes_location_id: null,
+        closes_field_id: F1,
+        blackout_from: blackout.blackout_from,
+        blackout_until: blackout.blackout_until,
+        start_minutes: null,
+        end_minutes: null,
+        reason: blackout.reason,
+      },
+    ];
+    const db = enactDbOf(rows);
+    const s = await session(db, loss);
+    // The saved blackout commits in core: only the client's own refusal stands.
+    expect(causeCommitOf(s.read.rows, loss).committed).toBe(true);
+    const subjects = displacedFromRows(main(), F1, D);
+    for (const id of subjects) {
+      const send = vi.fn();
+      const reads = s.log.length;
+      const out = await s.enact(id, send, { shownPrompt: { record: null } });
+      expect(out).toMatchObject({ status: 'refused', refusal: ENACT_BLACKOUT_NOT_ENABLED });
+      expect(ENACT_REFUSAL_TEXT[out.refusal]).toMatch(/not available yet/);
+      expect(send).not.toHaveBeenCalled();
+      expect(s.log.length).toBe(reads);
     }
     expect(requireExamined(subjects.length, 'series-window')).toBe(2);
   });

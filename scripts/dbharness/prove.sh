@@ -3177,7 +3177,7 @@ plant "R19 the lighting override warning stops counting slots distinctly" "$R19"
 plant "M20 the enact wrapper stops checking the caller is an org admin" "$M23" \
   "    IF auth.uid() IS NULL OR v_org_id IS NULL OR NOT public.is_org_admin(v_org_id) THEN" \
   "    IF auth.uid() IS NULL OR v_org_id IS NULL THEN" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 # Plant A (witness 24): drop step 2a, so the wrapper believes the record's
 # claimed date instead of reading fields.effective_to.
@@ -3195,24 +3195,24 @@ plant "M20 Plant A: the enact wrapper drops the commit gate (step 2a)" "$M23" \
                 USING ERRCODE = '22023';
         END IF;" \
   "        v_stored := (enact->'cause'->>'stored_effective_to')::date;" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 plant "M20 the enact wrapper accepts a NULL base_fingerprint" "$M23" \
   "    IF base_fingerprint IS NULL THEN
         RAISE EXCEPTION 'an enact is never blind" \
   "    IF false THEN
         RAISE EXCEPTION 'an enact is never blind" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 plant "M20 the enact wrapper drops the only-S check" "$M23" \
   "     WHERE t.id IS DISTINCT FROM v_series::text;" \
   "     WHERE false;" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 plant "M20 the enact wrapper stops checking the other rows are unchanged" "$M23" \
   "              AND pa.source::text IS NOT DISTINCT FROM b.value->>'source'" \
   "              AND true" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 # The review's cross-season case: a new-row check scoped to the season misses
 # a row the org-scoped writer inserts for another season's team.
@@ -3223,24 +3223,24 @@ plant "M20 the enact new-row check looks at the season only" "$M23" \
        AND pa.team_id IN (SELECT t.id FROM public.teams t JOIN public.divisions d ON d.id = t.division_id
                            WHERE d.season_settings_id = v_season_id)
        AND NOT (pa.id = ANY (v_before));" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 plant "M20 the enact wrapper accepts new rows its record does not declare" "$M23" \
   "    IF v_new_undeclared > 0 THEN" \
   "    IF false THEN" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 plant "M20 the enact wrapper accepts a new row not marked recommendation" "$M23" \
   "count(*) FILTER (WHERE pa.team_id <> v_team OR pa.assigned_via <> 'recommendation')" \
   "count(*) FILTER (WHERE pa.team_id <> v_team)" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 # Witness 5's SQL arm: the wrapper hands the writer no base, so a stale one
 # is never compared (the "retry without base_fingerprint" defect).
 plant "M20 the enact wrapper passes the writer no base_fingerprint" "$M23" \
   "v_run_data, assignments, false, unlock, closes, exceptions, '[]'::jsonb, base_fingerprint);" \
   "v_run_data, assignments, false, unlock, closes, exceptions, '[]'::jsonb, NULL);" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 # Witness 14: an audit that can fail without failing the enact is not atomic
 # with it (the "audit after the RPC" defect, inside the database).
@@ -3262,17 +3262,17 @@ plant "M20 the enact audit failure is swallowed" "$M23" \
     );
     EXCEPTION WHEN OTHERS THEN NULL;
     END;" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 plant "M20 the enact audit leaves result_fingerprint unfilled" "$M23" \
   "    v_meta := v_meta || jsonb_build_object('result_fingerprint', v_result->'fingerprint');" \
   "    v_meta := v_meta || jsonb_build_object('result_fingerprint', NULL);" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 plant "M20 the enact wrapper drops the idempotency lookup" "$M23" \
   "                  AND al.metadata->>'enact_key' = v_key::text) THEN" \
   "                  AND al.metadata->>'enact_key' = v_key::text AND false) THEN" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 plant "R20 the revert does not drop the enact wrapper" "$R20" \
   "DROP FUNCTION IF EXISTS public.enact_practice_recommendation(jsonb, jsonb, jsonb, jsonb, jsonb, text, jsonb);" \
@@ -3395,30 +3395,30 @@ plant "M23 Plant A: the blackout enact drops its commit gate (step 2a)" "$M23" \
   "        IF v_bo_stored IS DISTINCT FROM enact->'cause'->'stored'
            OR v_bo_loss IS DISTINCT FROM (enact->'cause'->'loss') - 'surface_ids' THEN" \
   "        IF false THEN" \
-  "FAIL smoke 20261007000000"
+  "smoke 20261007000000"
 
 # The lock helper's answer is the only "not saved" producer for a blackout.
 plant "M23 the wrapper ignores the lock helper's answer" "$M23" \
   "    IF NOT public.enact_lock_cause_row(v_org_id, v_kind, v_field) THEN" \
   "    IF NOT public.enact_lock_cause_row(v_org_id, v_kind, v_field) AND false THEN" \
-  "FAIL smoke 20261007000000"
+  "smoke 20261007000000"
 
 # The review's window case: the record consistent with itself, outside the blackout.
 plant "M23 the blackout enact accepts a window outside the blackout" "$M23" \
   "            OR NOT (v_window <@ (v_bo_range * v_s_range))) THEN" \
   "            OR false) THEN" \
-  "FAIL smoke 20261007000000"
+  "smoke 20261007000000"
 
 plant "M23 the blackout enact accepts a series off the blackout's ground" "$M23" \
   "            OR NOT (v_s_field::text = ANY (v_bo_surfaces))" \
   "            OR false" \
-  "FAIL smoke 20261007000000"
+  "smoke 20261007000000"
 
 # B8 Plant B, the SQL arm: the stored row compared to the record's own claim.
 plant "M23 the blackout gate compares the record's stored row to itself" "$M23" \
   "        IF v_bo_stored IS DISTINCT FROM enact->'cause'->'stored'" \
   "        IF enact->'cause'->'stored' IS DISTINCT FROM enact->'cause'->'stored'" \
-  "FAIL smoke 20261007000000"
+  "smoke 20261007000000"
 
 # B9's plan plant: accept more than one recorded exception.
 plant "M23 the blackout enact accepts exceptions_recorded >= 1" "$M23" \
@@ -3426,22 +3426,22 @@ plant "M23 the blackout enact accepts exceptions_recorded >= 1" "$M23" \
            AND (v_new_count <> 0 OR jsonb_array_length(v_result->'exceptions_recorded') <> 1)) THEN" \
   "       OR (v_kind = 'blackout'
            AND (v_new_count <> 0 OR jsonb_array_length(v_result->'exceptions_recorded') < 1)) THEN" \
-  "FAIL smoke 20261007000000"
+  "smoke 20261007000000"
 
 plant "M23 the blackout enact stops checking S itself is unchanged" "$M23" \
   "     WHERE ((b.value->>'id')::uuid <> v_series OR v_kind = 'blackout')" \
   "     WHERE ((b.value->>'id')::uuid <> v_series)" \
-  "FAIL smoke 20261007000000"
+  "smoke 20261007000000"
 
 plant "M23 the blackout enact accepts an unlock of S" "$M23" \
   "            OR jsonb_array_length(COALESCE(v_result->'unlocked', '[]'::jsonb)) <> 0" \
   "            OR false" \
-  "FAIL smoke 20261007000000"
+  "smoke 20261007000000"
 
 plant "M23 the blackout enact accepts an exception of another window" "$M23" \
   "           OR (v_exc->>'window')::daterange IS DISTINCT FROM v_window" \
   "           OR false" \
-  "FAIL smoke 20261007000000"
+  "smoke 20261007000000"
 
 # B10: the audit failure swallowed (the 11b plant above also turns this red;
 # this one is aimed at the blackout arm's own audit path only).
@@ -3449,31 +3449,31 @@ plant "M23 the blackout enact audit is skipped" "$M23" \
   "        v_meta := jsonb_set(enact, '{cause,stored}', v_bo_stored);" \
   "        v_meta := jsonb_set(enact, '{cause,stored}', v_bo_stored);
         RETURN v_result || jsonb_build_object('enact_audited', true, 'idempotent', false);" \
-  "FAIL smoke 20261007000000"
+  "smoke 20261007000000"
 
 plant "M23 the blackout enact audits the record's stored claim, not the row read" "$M23" \
   "        v_meta := jsonb_set(enact, '{cause,stored}', v_bo_stored);" \
   "        v_meta := jsonb_set(enact, '{cause,stored}', jsonb_build_object('claimed', true));" \
-  "FAIL smoke 20261007000000"
+  "smoke 20261007000000"
 
 # B11's plan plant: drop FOR SHARE, so an edit commits mid-enact.
 plant "M23 the blackout row is not locked FOR SHARE" "$M23" \
   "           AND fb.organization_id = p_organization_id
            FOR SHARE;" \
   "           AND fb.organization_id = p_organization_id;" \
-  "FAIL smoke 20261007000000"
+  "smoke 20261007000000"
 
 # Q10's declared departure from 11b, the retirement arm.
 plant "M23 the retired field is not locked FOR SHARE" "$M23" \
   "           AND f.organization_id = p_organization_id
            FOR SHARE;" \
   "           AND f.organization_id = p_organization_id;" \
-  "FAIL smoke 20261007000000"
+  "smoke 20261007000000"
 
 plant "R23 the revert leaves the lock helper in place" "$R23" \
   "DROP FUNCTION IF EXISTS public.enact_lock_cause_row(uuid, text, uuid);" \
   "DROP FUNCTION IF EXISTS public.enact_lock_cause_row(uuid);" \
-  "FAIL revert 20261007000000"
+  "revert 20261007000000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

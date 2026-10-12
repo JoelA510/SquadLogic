@@ -1,7 +1,7 @@
 # 8.6 PR 3b, PR 11d: enacting a blackout recommendation (admin-only): plan
 
-Status: **DRAFT, awaiting operator answers (§8).** No code is changed by this
-plan. CLAUDE.md §3 requires a plan and approval before any solver, domain or
+Status: **APPROVED 2026-10-12.** The operator answered Q1-Q11; see §9. No
+code is changed by this plan. CLAUDE.md §3 requires a plan and approval before any solver, domain or
 persistence change, and 11d touches all three.
 
 It refines row 11d of the approved PR 11 plan
@@ -34,7 +34,7 @@ GitHub API.
 - **Nothing on the enact path reads live exceptions as occupancy.** The
   snapshot loader reads them, but only for the dialog's count, and without
   the relocated slot or the cause (§1.2).
-- **A 10th pending production migration is needed.** The wrapper
+- **An 11th pending production migration is needed.** The wrapper
   `enact_practice_recommendation` is retirement-only in four places, so it
   needs a `CREATE OR REPLACE`. The writer is unchanged (§2.4).
 - **The PR 12 readers handle both mid-range cases** (§3). Four gaps sit next
@@ -226,12 +226,15 @@ ends up wrong.
 - Lifting W2 is **not** 11d's job (PR 12 answer Q8). See Q3.
 
 **The wrapper needs a new migration**, `CREATE OR REPLACE FUNCTION
-public.enact_practice_recommendation`, with the same signature. It would be
-version `20261006000000` or later: above `20261005000000` (#527), as
+public.enact_practice_recommendation`, with the same signature. Its version
+must be greater than `20261006000000`: above `20261006000000_org_heat_settings`
+(#532, merged after this plan was first written), as
 `scripts/ci/migrationVersions.mjs` requires.
 
-**This is the 10th pending production migration.** #527 was the 9th
-(`docs/PHASE_8_PROGRESS.md:7393`, `:7401`; #527's body). `deploy-migrations`
+**This is the 11th pending production migration.** #527 was the 9th
+(`docs/PHASE_8_PROGRESS.md:7393`, `:7401`; #527's body), and #532's
+`20261006000000_org_heat_settings` is the 10th, so 10 are already pending
+(`20260927000000`..`20261006000000`). `deploy-migrations`
 allows at most `MAX_PENDING_MIGRATIONS` (default 5, `scripts/ci/migrationGuard.mjs:28`),
 so the operator must work down the queue or raise the limit for one run
 (Q9).
@@ -490,7 +493,7 @@ commit gate, G1 or G2.
   retirement path, and production holds no exception rows today
   (PR 12 plan `:557-560`).
 - 11d-3 turns the button on. It must not merge before 11d-0 and 11d-2 have
-  merged **and** the 10th migration has deployed. Otherwise the button
+  merged **and** the 11th migration has deployed. Otherwise the button
   reaches a wrapper that refuses at `:167`, which is loud but broken.
 
 ## 7. Declared, not enforced
@@ -558,7 +561,7 @@ and shown in the panel.
   refused in the panel and never reaches a 22023.
 - 12b-12d have merged and Q6 is answered, so that migration may now be
   planned. Folding it in would make 11d-2 carry two function replacements,
-  and would add an 11th pending migration if it were split out.
+  and would add a 12th pending migration if it were split out.
 
 **Q4. Does the blackout enact need its own confirmation wording?**
 
@@ -607,7 +610,11 @@ is enabled.**
   with Enact disabled.
 - Never drop it.
 
-**Q9. The 10th pending production migration.**
+**Q9. The 11th pending production migration.**
+
+(10 are already pending, `20260927000000`..`20261006000000`, since #532
+merged `20261006000000_org_heat_settings`. The wrapper's version must be
+greater than `20261006000000`.)
 
 *Recommendation (not an answer):* **accept it.**
 
@@ -628,3 +635,42 @@ delete confirmations?**
 
 *Recommendation (not an answer):* **yes, as a count only** (the un-retire
 precedent). Withdrawing is decision 6's prompt, which is not in 11d.
+
+## 9. Operator answers (2026-10-12)
+
+The operator took every recommendation in §8, as written ("Follow your
+recommendation for the 11d plan"):
+
+- **Q1.** Approved as recommended: partial-day (minutes) blackouts are
+  enacted in 11d. No column is added; the record carries the minutes.
+- **Q2.** Approved as recommended: two live windows on one row are refused
+  (`LIVE_EXCEPTION_OVERLAP`), loud and shown in the panel. A split is a
+  follow-up with its own plan.
+- **Q3.** Approved as recommended: lifting the writer's mid-range daylight
+  refusal is not in scope. The adapter adopts it as `DAYLIGHT_MID_RANGE`.
+- **Q4.** Approved as recommended: the same dialog and ruling-2 shape, with
+  blackout wording, the count and the per-team tick. No `unlock` is sent.
+- **Q5.** Approved as recommended: the blackout commit gate (§2.6). Enact only
+  a saved blackout, as saved; the editor's launcher is always a preview; a
+  new launcher sits on the stored row.
+- **Q6.** Approved as recommended, in two parts:
+  - in 11d, the adapter refuses `RELOCATION_LOSES_PRACTICES` when the new
+    weekday has fewer dates in W ∩ range than the old one, and the dialog
+    states both counts when they differ upward;
+  - a follow-up solver PR (with the fixture suite) filters such candidates in
+    the repair, so it stops recommending them.
+- **Q7.** Approved as recommended: G2 is fixed as 11d-0, and 11d-0 is merged
+  before the button is enabled (11d-3).
+- **Q8.** Approved as recommended: a live relocated target on the lost ground
+  is an occupant and its own panel row, "cannot be repaired here", with
+  Enact disabled. It is never dropped.
+- **Q9.** Approved as recommended: accept the 11th pending production
+  migration (one `CREATE OR REPLACE` of the wrapper, version greater than
+  `20261006000000`). Deploy it after the queue is worked down, or with
+  `MAX_PENDING_MIGRATIONS` raised for one run. 11d-3 does not merge before it
+  is deployed.
+- **Q10.** Approved as recommended: `FOR SHARE` on the blackout row, and, as a
+  declared departure from 11b, on the retirement arm's `fields` read in the
+  same `CREATE OR REPLACE`.
+- **Q11.** Approved as recommended: "N series enacted off this blackout" on
+  the blackout edit and delete confirmations, as a count only.

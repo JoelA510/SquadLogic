@@ -20,17 +20,24 @@
  * The files are the `tests/helpers/repoScanFiles.js` universe, the one
  * `tests/heatSyntheticCoordinates.test.js` scans.
  *
- * Statically out of reach, and so not claimed: misspellings, names split
- * across more than three words, names inside unscanned extensions, and real
- * names never put on the denylist. The digests are unsalted hashes of short
- * words: they keep the names out of clear text, not out of reach of a
- * dictionary attack, and the names remain in git history by operator ruling.
+ * Statically out of reach, and so not claimed: misspellings; names split
+ * across more than three words; names run together in one lower-case word
+ * (a domain, an email address, a slug); non-ASCII spellings; anything outside
+ * the helper's universe (its header lists the gaps); real names never put on
+ * the denylist; and whether each digest was computed from the right text --
+ * that was checked once, outside the repo, against the pre-scrub tree, and
+ * nothing here re-checks it, so a digest added later must be checked the same
+ * way.
+ *
+ * This is a regression check, not a privacy control: the names remain in git
+ * history by operator ruling, and the digests are unsalted hashes of short
+ * words, recoverable by a dictionary attack.
  */
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 
 import { REPO_ROOT, scannedFiles } from './helpers/repoScanFiles.js';
 
@@ -155,7 +162,16 @@ const MIN_FILES = 1300;
 const MIN_GRAMS = 6_000_000;
 const MIN_DISTINCT = 1_300_000;
 
-const result = scan();
+/**
+ * The whole-tree scan, run once before the tests rather than at collection,
+ * so a filtered run elsewhere does not pay for it. About 7 s on a laptop; the
+ * hook's timeout leaves room for a slow CI runner.
+ */
+let scanned;
+beforeAll(() => {
+  scanned = scan();
+}, 60_000);
+const result = () => scanned;
 
 describe('real names :: the denylist and the scan exercised the data', () => {
   it(`holds ${DENIED_COUNT} well-formed SHA-256 digests`, () => {
@@ -164,9 +180,10 @@ describe('real names :: the denylist and the scan exercised the data', () => {
   });
 
   it(`scans at least ${MIN_FILES} files, ${MIN_GRAMS} n-grams, ${MIN_DISTINCT} distinct`, () => {
-    expect(result.files.length).toBeGreaterThanOrEqual(MIN_FILES);
-    expect(result.grams).toBeGreaterThanOrEqual(MIN_GRAMS);
-    expect(result.distinct).toBeGreaterThanOrEqual(MIN_DISTINCT);
+    const { files, grams, distinct } = result();
+    expect(files.length).toBeGreaterThanOrEqual(MIN_FILES);
+    expect(grams).toBeGreaterThanOrEqual(MIN_GRAMS);
+    expect(distinct).toBeGreaterThanOrEqual(MIN_DISTINCT);
   });
 
   it.each([
@@ -177,7 +194,7 @@ describe('real names :: the denylist and the scan exercised the data', () => {
     'docs/fixtures/fall-2026-field-availability.md',
     'CHANGELOG.md',
   ])('scans %s', (rel) => {
-    expect(result.files).toContain(rel);
+    expect(result().files).toContain(rel);
   });
 
   it('flags a denied n-gram however it is cased, spaced or joined (positive control)', () => {
@@ -212,7 +229,7 @@ describe('real names :: the denylist and the scan exercised the data', () => {
 
 describe('real names :: no scanned file carries one', () => {
   it('holds every scanned file to the denylist', () => {
-    const { offenders } = result;
+    const { offenders } = result();
     expect(offenders, `denied real name at: ${offenders.join('; ')}`).toEqual([]);
   });
 });

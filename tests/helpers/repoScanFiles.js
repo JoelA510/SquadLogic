@@ -7,6 +7,12 @@
  *
  * Each caller passes its own `NOT_SCANNED` map (path -> reason) and the files
  * it excludes as itself; the universe is the tree, never an allowed set.
+ *
+ * Not in the universe, so no guard over it claims them: dot-directories
+ * (`.github/`, `.agents/`, ...), root files other than `SCAN_ALWAYS` (the
+ * package and tool configs), and extensions outside `SCAN_EXT` (`.html`,
+ * `.css`, `.sh`, `.toml`, ...). The walk reads the disk, not the git index, so
+ * an untracked file under a scanned root is scanned locally and not in CI.
  */
 
 import { readdirSync, statSync } from 'node:fs';
@@ -71,7 +77,7 @@ export function scannedFiles({ exclude = [], notScanned = {} } = {}) {
     .filter((f) => !exclude.includes(f))
     .filter((f) => SCAN_EXT.has(path.extname(f)))
     .map((f) => path.relative(REPO_ROOT, f).split(path.sep).join('/'))
-    .filter((rel) => !(rel in notScanned))
     .concat(SCAN_ALWAYS)
+    .filter((rel) => !(rel in notScanned))
     .sort();
 }

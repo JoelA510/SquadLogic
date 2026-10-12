@@ -400,6 +400,56 @@ describe('11d-1 :: B3, an enacted window is not displaced again', () => {
 
 /* -- B4: overlap is refused, never written ---------------------------------- */
 
+describe('11d-1 :: B3c, a window covering only PART of the row’s share is not an enact', () => {
+  // The blackout spans two Mondays (2026-10-19, 2026-10-26). A window this
+  // blackout caused over one week only leaves S1's other lost date unrepaired:
+  // S1 stays in the repair (displaced), and its write over its whole share is
+  // refused as meeting a live window (plan §2.1 rule 4 needs "covers all of
+  // S ∩ loss"; §4 refuses overlaps). Never dropped.
+  const loss = blackoutLoss('2026-10-19', '2026-11-01');
+  const PARTIAL = [
+    ['[2026-10-19,2026-10-25]', 'covers the start only'],
+    ['[2026-10-26,2026-11-01]', 'covers the end only'],
+  ];
+
+  it('keeps S1 displaced and refuses its write, for a window missing either end', () => {
+    const rows = world();
+    const share = displacedWindows(rows, '2026-10-19', '2026-11-01').get(S1);
+    expect(share).toEqual({ first: '2026-10-19', last: '2026-11-01' });
+    expect(datesOn('mon', share.first, share.last)).toHaveLength(2);
+    let examined = 0;
+    for (const [window, what] of PARTIAL) {
+      const w = span(window);
+      // From the seed: the window misses at least one of S1's lost dates.
+      const missed = datesOn('mon', share.first, share.last).filter(
+        (d) => d < w.first || d > w.last
+      );
+      expect(missed.length, what).toBeGreaterThan(0);
+      examined += 1;
+      const partial = ex(845, 601, window, 'relocated', {
+        practice_slot_id: uuid(503),
+        cause_id: BLACKOUT_ID,
+      });
+      const { adapted, result, written } = run(world({ exceptions: [partial] }), loss);
+      expect(adapted.declared.exceptions.enactedWindows, what).toBe(0);
+      expect(
+        adapted.input.plan.assignments.map((a) => a.id),
+        what
+      ).toContain(S1);
+      expect(
+        result.recommendations.map((r) => r.assignmentId),
+        what
+      ).toContain(S1);
+      expect(
+        written.refused.filter((r) => r.assignment_id === S1).map((r) => r.why),
+        what
+      ).toContain(PRACTICE_REPAIR_PAYLOAD_REFUSAL.LIVE_EXCEPTION_OVERLAP);
+      expect(written.payload, what).toBeNull();
+    }
+    expect(requireExamined(examined, 'partial window')).toBe(2);
+  });
+});
+
 describe('11d-1 :: B4, a planned window meeting a live one is refused', () => {
   const loss = blackoutLoss('2026-10-19', '2026-10-25');
   // Live windows from another cause: one meets S2's share, one is after S1's.

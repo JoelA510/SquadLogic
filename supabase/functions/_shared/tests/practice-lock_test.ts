@@ -35,11 +35,11 @@ type Row = Record<string, unknown>;
 /**
  * Applies only the `kind` filter, so the loader's own live filter is what runs.
  * Order is modelled as in the Vitest arm: `order('id', ascending)` sorts by
- * id; without it each request rotates the rows one more place, so offset
- * paging skips and repeats rows.
+ * id; without it the first page comes back in insertion order and every
+ * later page in reverse (an order that changed between pages), so offset
+ * paging repeats the first row and skips the last, for any two or more rows.
  */
 function fakeClient(relocated: Row[]): LockReader {
-  let requests = 0;
   return {
     from(table: string) {
       const filters: Array<[string, unknown]> = [];
@@ -56,19 +56,15 @@ function fakeClient(relocated: Row[]): LockReader {
           return q;
         },
         range(from: number, to: number): PromiseLike<QueryResult> {
-          requests += 1;
           const kind = filters.find(([col]) => col === 'kind')?.[1];
-          let rows: Row[] =
+          const rows: Row[] =
             table === 'practice_assignments'
               ? [...RELOCATED_DB_ASSIGNMENTS]
               : kind === 'relocated'
                 ? [...relocated]
                 : [];
           if (orderedById) rows.sort((a, b) => (String(a.id) < String(b.id) ? -1 : 1));
-          else if (rows.length > 0) {
-            const shift = requests % rows.length;
-            rows = [...rows.slice(shift), ...rows.slice(0, shift)];
-          }
+          else if (from > 0) rows.reverse();
           return Promise.resolve({ data: rows.slice(from, to + 1), error: null });
         },
       };

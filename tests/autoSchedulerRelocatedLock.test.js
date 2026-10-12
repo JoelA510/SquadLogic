@@ -41,9 +41,10 @@ import {
 //
 // Order is modelled, not ignored: a read that asks for `order('id',
 // ascending)` gets its rows sorted by id; one that does not gets them in no
-// stable order -- each request rotates the rows by one more place, as a heap
-// read between pages may -- so offset paging without an order skips and
-// repeats rows, the way PostgREST can.
+// stable order -- the first page in insertion order, every later page in
+// reverse, an order that changed between pages -- so offset paging without
+// an order repeats the first row and skips the last (for any two or more
+// rows), the way PostgREST can.
 // ---------------------------------------------------------------------------
 
 const byId = (a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
@@ -56,7 +57,6 @@ function fakeClient({
   cap = Infinity,
 }) {
   const calls = [];
-  let requests = 0;
   return {
     calls,
     from(table) {
@@ -80,7 +80,6 @@ function fakeClient({
           return q;
         },
         range(from, to) {
-          requests += 1;
           const kind = call.filters.find(([op, col]) => op === 'eq' && col === 'kind')?.[2];
           let rows;
           if (table === 'practice_assignments') rows = assignments;
@@ -92,9 +91,8 @@ function fakeClient({
           }
           if (call.orders.some(([col, asc]) => col === 'id' && asc === true)) {
             rows = [...rows].sort(byId);
-          } else if (rows.length > 0) {
-            const shift = requests % rows.length;
-            rows = [...rows.slice(shift), ...rows.slice(0, shift)];
+          } else if (from > 0) {
+            rows = [...rows].reverse();
           }
           const end = Math.min(to + 1, from + cap);
           return Promise.resolve({ data: rows.slice(from, end), error: null });

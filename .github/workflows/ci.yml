@@ -86,6 +86,13 @@ jobs:
           if [ "${EVENT_NAME}" = "pull_request" ]; then
             git diff --name-only "${BASE_SHA}...${HEAD_SHA}" > changed-files.txt
           elif [ -n "${BEFORE_SHA}" ] && [ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]; then
+            if ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+              # A force-push or history rewrite leaves github.event.before unreachable.
+              # Never fall back to docs-only on an unknown base: force the full matrix.
+              echo "docs_only=false" >> "$GITHUB_OUTPUT"
+              echo "Before SHA ${BEFORE_SHA} is unknown in this checkout (force-push or history rewrite); running full matrix."
+              exit 0
+            fi
             git diff --name-only "${BEFORE_SHA}" "${CURRENT_SHA}" > changed-files.txt
           else
             git show --name-only --format= "${CURRENT_SHA}" > changed-files.txt
@@ -123,7 +130,14 @@ jobs:
           if [ "${EVENT_NAME}" = "pull_request" ]; then
             git diff --check "${BASE_SHA}...${HEAD_SHA}"
           elif [ -n "${BEFORE_SHA}" ] && [ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]; then
-            git diff --check "${BEFORE_SHA}" "${CURRENT_SHA}"
+            if ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+              # Unreachable while "Determine change scope" forces the full matrix for
+              # an unknown before SHA; guarded the same way so it can never exit 128.
+              echo "Before SHA ${BEFORE_SHA} is unknown in this checkout (force-push or history rewrite); checking ${CURRENT_SHA} only."
+              git show --check --format= "${CURRENT_SHA}"
+            else
+              git diff --check "${BEFORE_SHA}" "${CURRENT_SHA}"
+            fi
           else
             git show --check --format= "${CURRENT_SHA}"
           fi

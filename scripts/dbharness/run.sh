@@ -883,6 +883,49 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
         echo "FAIL smoke ${id}: it passed without proving heat settings reads are scoped to the member's organisation"; STATUS=1
       fi
     fi
+    # **8.6 3b PR 11d-2: enacting a blackout recommendation (plan §5, B8-B11,
+    # and the Q10 retirement lock).** One claim per plant in prove.sh. The
+    # smoke RAISEs on each; these fail if its evidence stops. (The FOR SHARE
+    # premise, the TIME TBD blackout enact, the idempotent repeat, the edit
+    # after commit and the grant posture RAISE in the same smoke and print as
+    # NOTICEs above; they carry no plant, so they are not claims.)
+    if [ "$id" = "20261007000000" ]; then
+      if grep -qF "blackout commit gate: an unsaved blackout, each of its 7 stored columns changed, a record claiming another stored row, and surface_ids other than its ground were each refused 22023, 10 of 10; 0 rows, 0 exceptions and 0 audit rows changed" $SCRATCH/harness_smoke; then
+        echo "  | (checked) only a saved blackout, exactly as saved, is enacted: an unsaved blackout, any stored column changed, another stored claim or other surface_ids is refused, and writes nothing"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the blackout commit gate reads the stored field_blackouts row"; STATUS=1
+      fi
+      if grep -qF "one exception on S: an unlock of S, S re-sent changed, a new row, two exceptions, and one exception of another window, cause, slot or kind were each refused 22023, 8 of 8, and rolled back; 0 rows, 0 exceptions and 0 audit rows changed" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a blackout enact that unlocks S, changes any row, creates a row, or records anything but the one declared exception on S is refused (22023) and rolled back"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a blackout enact writes only its one declared exception"; STATUS=1
+      fi
+      if grep -qF "blackout audit atomicity: with its practice.recommendation_enacted insert failing, the blackout enact itself failed 23503 at its audit row, and 0 exceptions were written" $SCRATCH/harness_smoke; then
+        echo "  | (checked) the blackout enact audit row is written in the enact's own transaction: an audit failure fails the enact and its exception"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the blackout enact audit is atomic with its exception"; STATUS=1
+      fi
+      if grep -qF "blackout only S: of 3 pre-enact rows all 3, S included, are unchanged in team, slot, range, source and assigned_via; 0 new rows; exactly 1 exception, on S, relocated to the Thursday slot over [2026-10-20,2026-10-26], cause blackout" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a blackout enact writes exactly one exception, on its series, over its window, and changes no row, its own included"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a blackout enact changes no row and writes one exception"; STATUS=1
+      fi
+      if grep -qF "blackout enact audit: 1 practice.recommendation_enacted row on S by the admin, its 19 keys, cause.stored as the gate read it, result_fingerprint equal to the writer's; 0 practice.unlock_accepted rows" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a blackout enact leaves one practice.recommendation_enacted row on its series, with cause.stored as the gate read it, and no unlock audit"
+      else
+        echo "FAIL smoke ${id}: it passed without proving the blackout enact audit row carries what the gate read"; STATUS=1
+      fi
+      if grep -qF "blackout race: while a blackout enact was open, a second session's admin_update_field_blackout of its blackout timed out 55P03 on the FOR SHARE lock; the same session wrote an unheld row at once" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a blackout edit from a second session waits for an open blackout enact: the enact holds its blackout row FOR SHARE until it commits"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a blackout edit waits for an open blackout enact"; STATUS=1
+      fi
+      if grep -qF "retirement race: while a retirement enact was open, a second session's write of the retired field timed out 55P03 on the FOR SHARE lock" $SCRATCH/harness_smoke; then
+        echo "  | (checked) a write of the retired field from a second session waits for an open retirement enact: the enact holds its field row FOR SHARE until it commits"
+      else
+        echo "FAIL smoke ${id}: it passed without proving a retired field write waits for an open retirement enact"; STATUS=1
+      fi
+    fi
     # **The production RLS drift replay** is the only evidence that the
     # reconcile fixes production rather than a repo chain where it has nothing
     # to do, so each half of it is a claim. The smoke RAISEs on any failed
@@ -1198,7 +1241,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2091,6 +2134,26 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the enact wrapper survived its own revert, or the writer did not"
         dump 10 $SCRATCH/harness_enact; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261007000000" ]; then
+      # The wrapper body read back from the catalogue, not from the revert's
+      # own NOTICE: md5 of the 20261004000000 dollar-quoted text, SECURITY
+      # INVOKER, and the helper gone. `missing` fires when the lookup finds no
+      # wrapper, so a broken query cannot read as restored.
+      if psql_cmd "SELECT 'BLACKOUT-ENACT-VERDICT:' || CASE
+               WHEN to_regprocedure('public.enact_practice_recommendation(jsonb, jsonb, jsonb, jsonb, jsonb, text, jsonb)') IS NULL THEN 'missing'
+               WHEN to_regprocedure('public.enact_lock_cause_row(uuid, text, uuid)') IS NOT NULL THEN 'helper-present'
+               WHEN (SELECT md5(p.prosrc) = '67175ed38f1c3852813e7eda745920a5' AND NOT p.prosecdef
+                       FROM pg_proc p
+                      WHERE p.oid = 'public.enact_practice_recommendation(jsonb, jsonb, jsonb, jsonb, jsonb, text, jsonb)'::regprocedure)
+                 THEN 'restored'
+               ELSE 'wrong' END;" \
+         >$SCRATCH/harness_enact_bo 2>&1 && grep -q 'BLACKOUT-ENACT-VERDICT:restored' $SCRATCH/harness_enact_bo; then
+        echo "  | (checked) the blackout enact revert restores the 20261004000000 enact_practice_recommendation body byte for byte, SECURITY INVOKER, and drops enact_lock_cause_row"
+      else
+        echo "FAIL revert ${id}: the blackout enact revert did not restore the retirement-only wrapper body, or left enact_lock_cause_row behind"
+        dump 10 $SCRATCH/harness_enact_bo; STATUS=1
       fi
     fi
     if [ "$id" = "20261005000000" ]; then

@@ -3,7 +3,7 @@ import { renderHook } from '@testing-library/react';
 import { useDashboardData } from '../frontend/src/hooks/useDashboardData.js';
 import { useTeamSummary } from '../frontend/src/hooks/useTeamSummary.js';
 import { usePracticeSummary } from '../frontend/src/hooks/usePracticeSummary.js';
-import { usePracticeAssignments } from '../frontend/src/hooks/usePracticeAssignments.js';
+import { useCurrentPracticeSchedule } from '../frontend/src/hooks/useCurrentPracticeSchedule.js';
 import { useGameSummary } from '../frontend/src/hooks/useGameSummary.js';
 import { useGameAssignments } from '../frontend/src/hooks/useGameAssignments.js';
 import { makePracticeAssignment, makeTeam } from './factories/index.js';
@@ -13,7 +13,7 @@ const idOnly = (entity) => ({ id: entity.id });
 // Mock all internal hooks
 vi.mock('../frontend/src/hooks/useTeamSummary.js');
 vi.mock('../frontend/src/hooks/usePracticeSummary.js');
-vi.mock('../frontend/src/hooks/usePracticeAssignments.js');
+vi.mock('../frontend/src/hooks/useCurrentPracticeSchedule.js');
 vi.mock('../frontend/src/hooks/useGameSummary.js');
 vi.mock('../frontend/src/hooks/useGameAssignments.js');
 
@@ -34,7 +34,7 @@ describe('useDashboardData', () => {
       loading: false,
       runId: 'practice-run-123',
     });
-    /** @type {any} */ (usePracticeAssignments).mockReturnValue({
+    /** @type {any} */ (useCurrentPracticeSchedule).mockReturnValue({
       assignments: [idOnly(makePracticeAssignment({ id: 'pa1' }))],
     });
     /** @type {any} */ (useGameSummary).mockReturnValue({
@@ -55,7 +55,9 @@ describe('useDashboardData', () => {
     expect(result.current.loading.game).toBe(true);
     expect(result.current.team.totals.teams).toBe(10);
     expect(result.current.practice.runId).toBe('practice-run-123');
-    expect(result.current.practice.assignments).toEqual([{ id: 'pa1' }]);
+    expect(result.current.practice.scheduleAssignments).toEqual([{ id: 'pa1' }]);
+    // The latest-run read is gone: the grid and the exports share the season read.
+    expect(result.current.practice).not.toHaveProperty('assignments');
     expect(result.current.game.runId).toBe('game-run-456');
     expect(result.current.game.snapshot).toBe('partial');
     expect(result.current.roadmap.stats.completed).toBeDefined();

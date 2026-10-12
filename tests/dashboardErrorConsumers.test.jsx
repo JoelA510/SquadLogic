@@ -172,7 +172,7 @@ function dashboardData(error) {
       snapshot: null,
       generatedAt: null,
       runId: null,
-      assignments: undefined,
+      scheduleAssignments: undefined,
     },
     game: {
       summary: null,

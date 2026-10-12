@@ -50,7 +50,6 @@ const reads = vi.hoisted(() => ({
   errors: {
     team: null,
     practiceSummary: null,
-    practiceAssignments: null,
     practiceSchedule: null,
     gameSummary: null,
     gameAssignments: null,
@@ -108,14 +107,7 @@ vi.mock('../frontend/src/hooks/usePracticeSummary.js', () => ({
     runId: 'practice-run-1',
   }),
 }));
-vi.mock('../frontend/src/hooks/usePracticeAssignments.js', () => ({
-  usePracticeAssignments: () => ({
-    assignments: reads.errors.practiceAssignments ? [] : fixtures.PRACTICES,
-    loading: false,
-    error: reads.errors.practiceAssignments,
-  }),
-}));
-// The exports' own practice rows: the season's current schedule.
+// The practice rows (the exports' and the grid's): the season's current schedule.
 vi.mock('../frontend/src/hooks/useCurrentPracticeSchedule.js', () => ({
   useCurrentPracticeSchedule: () => ({
     assignments: reads.errors.practiceSchedule ? [] : fixtures.PRACTICES,
@@ -194,7 +186,6 @@ beforeEach(() => {
   reads.errors = {
     team: null,
     practiceSummary: null,
-    practiceAssignments: null,
     practiceSchedule: null,
     gameSummary: null,
     gameAssignments: null,
@@ -219,29 +210,21 @@ describe('useDashboardData reports its reads one by one', () => {
     expect(result.current.errors.practice).toBeNull();
   });
 
-  it('surfaces a refused assignments read, which nothing surfaced before', () => {
-    // The purest form of the defect this PR is about: `usePracticeAssignments`
-    // holds an error, the hook destructured only its `assignments`, and on a
+  it('surfaces a refused practice rows read on the practice arm and the aggregate', () => {
+    // The purest form of the defect this PR is about: the rows read holds an
+    // error, the hook used to destructure only its `assignments`, and on a
     // refusal those stay `[]`. No banner anywhere, and those are the rows the
-    // CSV is made of.
-    reads.errors.practiceAssignments = new Error(REFUSED);
+    // CSV and the scheduling grid are made of.
+    reads.errors.practiceSchedule = new Error(REFUSED);
     const { result } = renderHook(() => useDashboardData());
 
     expect(result.current.errors.practice).toBe(REFUSED);
     expect(result.current.error).toBe(REFUSED);
     // Meta-assertion: the empty list the operator would otherwise have
     // exported really is what the page receives.
-    expect(result.current.practice.assignments).toEqual([]);
-  });
-
-  it("surfaces a refused read of the exports' season schedule on the practice arm", () => {
-    reads.errors.practiceSchedule = new Error(REFUSED);
-    const { result } = renderHook(() => useDashboardData());
-
-    expect(result.current.errors.practice).toBe(REFUSED);
-    // Meta-assertion: the export's rows really are empty, not the run's.
     expect(result.current.practice.scheduleAssignments).toEqual([]);
-    expect(result.current.practice.assignments).toEqual(PRACTICES);
+    // There is no second, latest-run practice list left to disagree with it.
+    expect(result.current.practice).not.toHaveProperty('assignments');
   });
 
   it('keeps the aggregate a string, and equal to one of the three arms', () => {
@@ -263,7 +246,7 @@ describe('useDashboardData reports its reads one by one', () => {
     // Meta-assertion: the reads really did return their rows, so the nulls
     // above are a clean load rather than a hook that ran on nothing.
     expect(result.current.team.teams).toHaveLength(2);
-    expect(result.current.practice.assignments).toHaveLength(1);
+    expect(result.current.practice.scheduleAssignments).toHaveLength(1);
   });
 });
 
@@ -520,7 +503,7 @@ describe('every call site of the panel hands it the distinction', () => {
   it('ExportsPage gates the export on the read that actually failed', async () => {
     // The real page, the real hook, the real panel: only the five fetches are
     // stubbed, and one of them is refused.
-    reads.errors.practiceAssignments = new Error(REFUSED);
+    reads.errors.practiceSchedule = new Error(REFUSED);
     render(
       <MemoryRouter>
         <ExportsPage />

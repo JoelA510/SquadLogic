@@ -11,23 +11,29 @@
  *  - RETAINED: after a save whose payload omitted teams, their `manual` rows
  *    are kept under their old run id.
  *
- * The grid's rows come from `useDashboardData().practice.assignments`, which
- * is `usePracticeAssignments(latestRunId)`. A manual override is staged on top
- * of those rows and Apply sends the whole staged list. So the questions are
- * (1) does the grid show every current row, and (2) does the save built from
- * the grid's read ask the writer to remove a row nobody touched?
+ * The grid's rows used to come from `usePracticeAssignments(latestRunId)`; now
+ * they come from `practice.scheduleAssignments` (`useCurrentPracticeSchedule`,
+ * the `loadSeasonPracticeRows` contract the exports use). A manual override is
+ * staged on top of those rows, and Apply sends the whole staged list. So the
+ * questions are:
+ * (1) does the grid show every current row, dated so that a closed series and
+ *     its successor are not read as a clash?
+ * (2) does the save built from the grid's read ask the writer to remove a row
+ *     nobody touched?
  *
  * Driven through the real path: the real page -> the real `useDashboardData`
  * -> the real scheduler-run and practice reads -> the real mock client ->
- * the real Apply -> the real `persistPracticeScheduleReview` -> `fetch`. Only
- * presentational children are stubbed. Every expected row is enumerated from
- * the SEED, never from what the page rendered or sent.
+ * the real grid list -> the real Apply -> the real
+ * `persistPracticeScheduleReview` -> `fetch`. Only the override panel and
+ * panels this file does not test are stubbed. Every expected row is enumerated
+ * from the SEED, never from what the page rendered or sent.
  *
- * The writer is SQL with no JS twin, so (2) is judged by `writerPruneSet`
- * below: a transcription of the v3 prune rule
+ * The writer is SQL and has no JS twin, so (2) is judged here by
+ * `writerPruneSet`, a transcription of the v3 prune rule
  * (20261002000000_practice_exceptions_daylight.sql:717-773). Every row in that
  * set that the save does not `unlock` makes the writer refuse the whole save
- * with 22023 "assignment X is locked" (:775-798).
+ * with 22023 "assignment X is locked" (:775-798). The real writer is checked
+ * against the same two shapes in `supabase/tests/practice_grid_current_rows.sql`.
  */
 
 import React from 'react';
@@ -119,17 +125,24 @@ vi.mock('../frontend/src/hooks/useFieldClosures.js', () => ({
 vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), log: vi.fn(), info: vi.fn() },
 }));
-// Presentational children only: the list prints the ids it is handed, and the
-// override panel stages one fixed (team, slot) through the page's own handler.
-vi.mock('../frontend/src/components/PracticeAssignmentList.jsx', () => ({
-  default: ({ assignments }) => (
-    <ul aria-label="practice rows">
-      {assignments.map((a) => (
-        <li key={a.id}>{a.id}</li>
-      ))}
-    </ul>
-  ),
-}));
+// The REAL grid list renders, with an id list beside it so a test can name
+// the rows it was handed. The override panel is stubbed: it stages one fixed
+// (team, slot) through the page's own handler.
+vi.mock('../frontend/src/components/PracticeAssignmentList.jsx', async (importOriginal) => {
+  const { default: RealList } = /** @type {any} */ (await importOriginal());
+  return {
+    default: (props) => (
+      <>
+        <ul aria-label="practice rows">
+          {props.assignments.map((a) => (
+            <li key={a.id}>{a.id}</li>
+          ))}
+        </ul>
+        <RealList {...props} />
+      </>
+    ),
+  };
+});
 vi.mock('../frontend/src/components/PracticeOverridePanel.jsx', () => ({
   default: ({ onStageAssignment }) => (
     <button type="button" onClick={() => onStageAssignment('team-d', 'slot-fri')}>
@@ -370,6 +383,31 @@ describe('the scheduling grid reads the current practice schedule, not the lates
   it('a re-home enact: the grid shows the closed series', async () => {
     const list = await renderGrid(ENACT);
     expect(shownIds(list)).toEqual(ENACT.map((r) => r.id).sort());
+  });
+
+  it('a re-home enact: the closed and the new series read as two dated rows, not a clash', async () => {
+    await renderGrid(ENACT);
+    // From the seed: Team A's rows, each with its weekday and stored range.
+    const seedRows = ENACT.filter((r) => r.team_id === 'team-a');
+    expect(seedRows).toHaveLength(2);
+    // Not a double booking: the two ranges do not overlap (canonical `[)`).
+    const [first, second] = seedRows
+      .map((r) => canonicalRange(r.effective_date_range).slice(1, -1).split(','))
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    expect(first[1] <= second[0]).toBe(true);
+    // The real grid list renders one row per series, each with its own weekday
+    // and its own date range, so the ended series is told apart by its range.
+    const rendered = screen
+      .getAllByRole('row')
+      .filter((tr) => tr.textContent.includes('Team A'))
+      .map((tr) => tr.textContent);
+    expect(rendered).toHaveLength(seedRows.length);
+    for (const r of seedRows) {
+      const day = SLOTS.find((s) => s.id === r.practice_slot_id).day_of_week;
+      expect(
+        rendered.filter((t) => t.includes(day) && t.includes(r.effective_date_range))
+      ).toHaveLength(1);
+    }
   });
 
   it('a save that omitted B and C: the grid shows their retained manual rows', async () => {

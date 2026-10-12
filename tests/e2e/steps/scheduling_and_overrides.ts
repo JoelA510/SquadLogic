@@ -721,9 +721,16 @@ Given('the automated schedule has been generated', async ({ page }) => {
 
     db.practice_assignments.push({
       id: 'assign-team-a',
+      // CLAUDE.md §8 rule 1, and the columns a real persisted row carries: the
+      // grid reads the season's current rows (org + season through teams ->
+      // divisions), not the latest run's, so a row without them is not shown.
+      organization_id: orgId,
       run_id: 'active-practice-run-id',
       team_id: 'team-a',
       slot_id: 'slot-1',
+      practice_slot_id: 'slot-1',
+      effective_date_range: '[2025-01-01,2026-01-01)',
+      assigned_via: 'auto',
       source: 'auto',
       teams: { name: 'Team A', divisions: { name: 'U10' } },
       practiceSlots: {

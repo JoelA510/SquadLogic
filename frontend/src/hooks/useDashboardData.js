@@ -1,7 +1,6 @@
 import { useMemo } from 'react';
 import { useTeamSummary } from './useTeamSummary.js';
 import { usePracticeSummary } from './usePracticeSummary.js';
-import { usePracticeAssignments } from './usePracticeAssignments.js';
 import { useCurrentPracticeSchedule } from './useCurrentPracticeSchedule.js';
 import { useGameSummary } from './useGameSummary.js';
 import { useGameAssignments } from './useGameAssignments.js';
@@ -56,15 +55,9 @@ export function useDashboardData() {
     runId: practiceRunId,
   } = usePracticeSummary();
 
-  const {
-    assignments: practiceAssignments,
-    loading: practiceAssignmentsLoading,
-    error: practiceAssignmentsError,
-  } = usePracticeAssignments(practiceRunId);
-
-  // The exports' rows: the season's current schedule, not the latest run's
-  // rows (`useCurrentPracticeSchedule` says why). `practiceAssignments` above
-  // still feeds the scheduling page's grid, which this does not change.
+  // The season's current schedule, not the latest run's rows
+  // (`useCurrentPracticeSchedule` says why). The exports and the scheduling
+  // page's grid both read it; there is no latest-run practice read any more.
   const {
     assignments: practiceScheduleAssignments,
     loading: practiceScheduleLoading,
@@ -97,8 +90,9 @@ export function useDashboardData() {
    * computed a second time, so the aggregate and the parts cannot disagree.
    *
    * **The assignments reads are in here, and they were in nothing before.**
-   * `usePracticeAssignments` and `useGameAssignments` each hold an `error`
-   * and this hook destructured only their `assignments`. On a refused read
+   * The practice and game rows reads (now `useCurrentPracticeSchedule` and
+   * `useGameAssignments`) each hold an `error`, and this hook used to
+   * destructure only their `assignments`. On a refused read
    * those stay `[]` -- so a refused `practice_assignments` read produced the
    * exact empty-looking-but-unread state the banner exists to prevent, with
    * no banner anywhere, and those are the rows the CSV export is built from.
@@ -114,17 +108,10 @@ export function useDashboardData() {
   const errors = useMemo(
     () => ({
       team: firstErrorMessage([teamError]),
-      practice: firstErrorMessage([practiceError, practiceAssignmentsError, practiceScheduleError]),
+      practice: firstErrorMessage([practiceError, practiceScheduleError]),
       game: firstErrorMessage([gameError, gameAssignmentsError]),
     }),
-    [
-      teamError,
-      practiceError,
-      practiceAssignmentsError,
-      practiceScheduleError,
-      gameError,
-      gameAssignmentsError,
-    ]
+    [teamError, practiceError, practiceScheduleError, gameError, gameAssignmentsError]
   );
 
   const error = useMemo(
@@ -154,8 +141,7 @@ export function useDashboardData() {
     snapshot: practiceReadinessSnapshot,
     generatedAt: practiceGeneratedAt,
     runId: practiceRunId,
-    assignments: practiceAssignments,
-    // What the exports list: every current row of the season.
+    // What the exports and the scheduling grid list: every current row of the season.
     scheduleAssignments: practiceScheduleAssignments,
   };
 
@@ -175,7 +161,7 @@ export function useDashboardData() {
       // errors are: a source whose rows have not arrived is not a source that
       // returned none, and `practice` means the run and its rows to every
       // reader of it.
-      practice: practiceLoading || practiceAssignmentsLoading || practiceScheduleLoading,
+      practice: practiceLoading || practiceScheduleLoading,
       game: gameLoading || gameAssignmentsLoading,
     },
     error,

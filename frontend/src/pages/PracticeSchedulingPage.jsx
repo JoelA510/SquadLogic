@@ -426,7 +426,10 @@ export default function PracticeSchedulingPage() {
     currentSeasonSetting,
   });
 
-  const [assignments, setAssignments] = useState(practice?.assignments ?? []);
+  // The grid's rows: every current row of the season, the exports' read
+  // (`useCurrentPracticeSchedule`). A latest-run read missed rows writer v3
+  // keeps under older runs, and an Apply built on it was refused as locked.
+  const [assignments, setAssignments] = useState(practice?.scheduleAssignments ?? []);
   const [reviewAssignments, setReviewAssignments] = useState(null);
   const [practiceSlotRows, setPracticeSlotRows] = useState([]);
   const { closures: fieldClosures } = useFieldClosures();
@@ -466,12 +469,12 @@ export default function PracticeSchedulingPage() {
   const refetchSeasonPractice = seasonPractice.refetch;
 
   useEffect(() => {
-    if (practice?.assignments) {
-      setAssignments(practice.assignments);
+    if (practice?.scheduleAssignments) {
+      setAssignments(practice.scheduleAssignments);
     }
   }, [
-    practice.assignments,
-    practice?.assignments?.length,
+    practice.scheduleAssignments,
+    practice?.scheduleAssignments?.length,
     // `practice?.snapshot?.lastCalculated` stood here and could never change:
     // the snapshot is `run.results` verbatim and nothing writes that field.
     // `generatedAt` is the run timestamp the mapper really produces.

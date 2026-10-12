@@ -68,10 +68,6 @@ const REGISTRY = {
     class: 'applies',
     why: 'R4/R5: the calendar feed reads rows and exceptions; buildFeedEvents runs the twin',
   },
-  'frontend/src/hooks/usePracticeAssignments.js': {
-    class: 'series-only',
-    why: "the scheduling page's grid (latest run); R9 now reads the season via practiceSupabase.js",
-  },
   'frontend/src/pages/PlayerRecordPage.jsx': {
     class: 'series-only',
     why: 'R10: the player record lists weekday and time only (Q6, D4)',
@@ -87,8 +83,8 @@ const REGISTRY = {
   'packages/core/src/practiceSupabase.js': {
     class: 'series-only',
     why:
-      "X1: the lock's and the writer's series cross-check; R9: the exports' season read " +
-      '(useCurrentPracticeSchedule), series-level (Q6, D4); makes no dates',
+      "X1: the lock's and the writer's series cross-check; R9: the exports' and the scheduling " +
+      "grid's season read (useCurrentPracticeSchedule), series-level (Q6, D4); makes no dates",
   },
   'supabase/functions/_shared/engines/practice-lock.ts': {
     class: 'series-only',

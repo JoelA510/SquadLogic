@@ -19,7 +19,7 @@ import {
   unshownPracticeChangesOf,
 } from '../frontend/src/utils/practiceExportChanges.js';
 
-// Camel-cased, as `usePracticeAssignments` hands them to the export.
+// Camel-cased, as `useCurrentPracticeSchedule` hands them to the export.
 const ASSIGNMENTS = [
   {
     id: 'pa-1',

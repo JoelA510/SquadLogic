@@ -64,6 +64,7 @@ const ASSERTIONS = [
   'isnt',
   'ok',
   'throws_ok',
+  'throws_like',
   'lives_ok',
   'pass',
   'fail',

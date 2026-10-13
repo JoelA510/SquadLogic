@@ -352,6 +352,23 @@ and smoke-tested
 ## Milestone 2 — Data integrity & security
 
 > **M2.1. Eight high advisories, no waiver, no audit gate** (audit finding 8.1, high)
+> - **Status (2026-10-13): in #559 (open).** #332's in-range refresh (`npm update` within the
+>   current majors, taken under M2.3's 3-day release wait) cleared every vulnerable package `npm
+>   audit` reported (15: 8 high, carrying 18 high advisories; 6 moderate; 1 low); floors raised for the direct ones (`react-router-dom`
+>   `^7.18.4`, `vite` `^7.3.7`, `postcss` `^8.5.29`). No major upgrade and no waiver needed (D6).
+>   The `esbuild` override (`^0.25.0`) is removed, which is what still applied of #331 (its Vite
+>   8 major does not). #332's actions half lands too, at today's majors (`checkout`,
+>   `setup-node`, `upload-artifact` v7; `setup-cli` v2), and its `eslint-plugin-react-hooks`
+>   7.0.1 pin and Playwright `Page` type. Gate: the template's `check-audit.mjs` as
+>   `npm run check:audit`, in its own `audit.yml` (every PR, pushes to `main`, Mondays 06:00 UTC)
+>   rather than a step in `ci.yml`; `docs/security/audit-waivers.json` (empty) and
+>   `dependency-policy.md` replace `dependabot-waivers.md`. Not a required check: recommended to
+>   the owner. Test gate *executed*: the gate on `main`'s own lockfile report exits 1 (18
+>   unwaived high in 8 packages); the same report with every advisory waived passes until the
+>   waivers expire, then exits 1; `tests/checkAudit.test.js` (43 cases, two planted mutations of
+>   the gate each caught); scorecard `node.audit-gate` fail -> pass (fails again with `audit.yml`
+>   removed); `core.audit-waivers` is `n/a` with an empty register, and was shown failing on an
+>   expired waiver and passing on a current one.
 > - **Fix approach:** take PR #332's in-range refresh (rebased), then `npm audit fix` within
 >   current majors; adopt the dependency-policy skeleton
 >   (`prompts/skeletons/docs/dependency-policy.md`) with a JSON waiver register (reason, owner,
@@ -417,6 +434,19 @@ and smoke-tested
 > 8.4 — resolved by M2.2 (no whole-object read; the test password leaves the `VITE_` prefix).
 
 > **M2.3. Dependency updates and install guards** (audit finding 8.2, medium)
+> - **Status (2026-10-13): in #559 (open), with M2.1.** `.github/dependabot.yml` (npm and
+>   Actions, weekly, grouped, 3-day cooldown; holds `@types/node` below 25,
+>   `eslint-plugin-react-hooks` below 7.1 and `@tanstack/react-virtual` below 3.14, each with its
+>   reason); `.npmrc` with
+>   `min-release-age=3`, `allow-git=none`, `allow-remote=none`; `packageManager` `npm@11.19.0`.
+>   `@types/node` `^25` -> `^24` (PR 1-B's finding). `engine-strict` deliberately not set:
+>   Dependabot runs npm on its own Node, and with it every update would fail on `engines`.
+>   #331 triaged under M2.1 and closed. Test gate *executed*: `core.dependency-updates`,
+>   `core.dependency-cooldown` and `node.install-guards` fail on `main` (cooldown `n/a`) and pass
+>   here; each fails with its file removed (and cooldown with 1 day, install-guards without
+>   `packageManager`). npm *executed* with the guards: a git and a tarball-URL dependency are
+>   refused, and `typescript@next` resolves to 7.0.2 instead of that day's nightly. Dependabot
+>   opening update PRs is visible only after merge.
 > - **Fix approach:** `.github/dependabot.yml` for npm and GitHub Actions, weekly, grouped, with
 >   a cooldown; `.npmrc` with `min-release-age=3`, `allow-git=none`, `allow-remote=none`;
 >   `packageManager` pinned to the npm in use; triage open Dependabot PR #331.
@@ -1071,6 +1101,30 @@ smoke-tested
     log).
   - `packages/core/package.json` names `src/index.js` as its entry, which does not exist (knip's
     configuration hint). For M6.1. *Executed.*
+
+- 2026-10-13, found by PR 2-A (#559; M2.1, M2.3):
+  - The `esbuild` override (`^0.25.0`, added March 2026 for an esbuild advisory) was forcing
+    0.25.12 under Vite 7.3.2, whose own range is `^0.27.0`: an override that outlived its reason
+    and pinned a dependency below its declared range. Removed; *executed* (`npm ls esbuild`).
+  - zod 4.6 types `ZodTypeAny`'s parse output as `unknown`, so the in-range refresh broke
+    typecheck in `packages/core/src/fieldAdmin/serialise.js`; its schema map is now typed
+    `ZodType<Record<string, unknown>>` (JSDoc only, no behaviour). zod moved 4.3.6 -> 4.6.5; the
+    Edge Functions' zod is separate (Deno, `deno.land/x/zod@v3.22.4` in `import_map.json`) and
+    unchanged. *Executed* (typecheck; Deno Mirror Tests green on #559).
+  - Prettier 3.8+ formats some code differently from 3.7.4 (`for (...; cond; )` among others),
+    and `prettier/prettier` then fails lint on files formatted the old way, in-flight PRs'
+    included. **Deferred:** Prettier is pinned at 3.7.4 and held in Dependabot; upgrading it is
+    its own PR, which reformats what it must in one go. *Executed* (lint, on 3.9.10).
+  - Vercel installs with `npm install` (PR M5's finding, left for M2.3): `vercel.json` now sets
+    `installCommand: npm ci`, so Vercel builds the lockfile as CI does. *Executed* (#559's
+    Vercel preview build).
+  - The in-range refresh took `@tanstack/virtual-core` 3.13.23 -> 3.18.0, which grows the lazy
+    `virtual-vendor` chunk from 5.04 to 7.91 KB gzip, past its 7,000 B cap; `check:bundle`
+    failed. No advisory touches it, so it is pinned at 3.13.23 and Dependabot holds it below
+    3.14; whether the bytes are worth a budget bump is a separate call
+    (`docs/operations/bundle-budget.md`). *Executed* (`check:bundle` fail, then pass).
+  - npm 11 warns that `esbuild`'s postinstall is not covered by `allowScripts`; the template
+    records each install script's review there. Not done (no plan item). *Executed* (`npm ci`).
 
 - 2026-10-13, found by #558 (M2.2):
   - The bundle-budget gate measures a build without `VITE_SENTRY_DSN` (CI has none), where

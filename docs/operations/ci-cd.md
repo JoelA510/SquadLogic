@@ -70,10 +70,35 @@ The weekly keep-alive job validates `VITE_SUPABASE_URL` and
 or API failures fail the scheduled run; the workflow must not silently hide a
 paused or unreachable project.
 
+The weekly dependency audit (Mondays 06:00 UTC) is described under
+[Dependency audit](#dependency-audit).
+
 Raw import retention is handled by
 [`.github/workflows/cleanup-raw-imports.yml`](../../.github/workflows/cleanup-raw-imports.yml).
 It requires `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, validates
 `dry_run`, and fails fast when either secret is missing.
+
+## Dependency audit
+
+[`.github/workflows/audit.yml`](../../.github/workflows/audit.yml) runs
+`npm run check:audit` (`scripts/check-audit.mjs`) on every pull request to
+`main`, on pushes to `main`, weekly (Mondays 06:00 UTC) and on manual
+dispatch. It fails on any high or critical advisory that
+`docs/security/audit-waivers.json` does not waive, on an expired or stale
+waiver, and on an audit report it cannot read or reconcile. It reads the
+lockfile only (no install), on the npm `package.json` pins. A failed scheduled
+run opens one issue, "Dependency audit is failing on main". Policy, waivers and
+how to fix an advisory: [`dependency-policy.md`](../security/dependency-policy.md).
+
+**Not a required check yet.** The job reports as
+`npm audit (high and critical block)`. Until the owner adds that context to the
+`main` ruleset (and to `.github/rulesets/main.json` in the same change, teaching
+`tests/rulesetRequiredChecks.test.js`, which looks only in `ci.yml`, to find
+it in `audit.yml`), a red
+audit is visible on the pull request but does not block the merge. It can be
+required safely: the workflow has no `paths` filter and the job no `if`, so it
+reports on every pull request, docs-only ones included.
+`tests/checkAudit.test.js` fails if that changes.
 
 ## Edge Functions (`deno-mirror-tests`)
 
@@ -164,7 +189,7 @@ migration was renamed, edited or removed. It needs no secrets.
 
 ### Supabase CLI version
 
-Both deploy jobs install the CLI with `supabase/setup-cli@v1` and
+Both deploy jobs install the CLI with `supabase/setup-cli@v2` and
 `version: ${{ env.SUPABASE_CLI_VERSION }}`. The version is set once, in the
 workflow-level `env:` block of `ci.yml`: **`2.118.0`**.
 

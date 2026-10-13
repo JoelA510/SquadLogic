@@ -1,0 +1,83 @@
+name: Dependency audit
+
+# Plan item M2.1 (audit finding 8.1). High and critical npm advisories block,
+# unless docs/security/audit-waivers.json waives them with a reason and an
+# expiry; expired and stale waivers fail too. Policy:
+# docs/security/dependency-policy.md. Adopted from agent-ready-template 1.0.0's
+# audit.yml. tests/checkAudit.test.js fails if this workflow stops running the
+# gate on pull requests or on the schedule, or lets it fail without failing
+# the run.
+#
+# Not a required check in the main ruleset (yet): that is an owner settings
+# change, see docs/operations/ci-cd.md ("Dependency audit").
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Advisories are published against code that has already merged. Without a
+  # schedule, a quiet repository never finds out. Mondays, 06:00 UTC.
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch: {}
+
+# Nothing by default; the job asks for what it uses.
+permissions: {}
+
+# Per event as well as ref, so a push to main never cancels the scheduled run
+# (whose failure is what opens the issue below).
+concurrency:
+  group: audit-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: npm audit (high and critical block)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          # No cache: the audit reads the lockfile and installs nothing.
+          package-manager-cache: false
+
+      # The npm package.json pins (packageManager), so the report format the
+      # gate reconciles against is the one it was tested with.
+      - name: Use the pinned npm
+        run: v=$(node -p "require('./package.json').packageManager.split('@')[1].split('+')[0]") && npx -y "npm@$v" install -g "npm@$v"
+
+      # `npm audit` reads package-lock.json; no install needed.
+      - name: Audit dependencies
+        run: npm run check:audit
+
+  # A red scheduled run notifies only whoever last edited the cron line, so on a
+  # schedule a failure also opens (once) an issue the repo can see. Its own job,
+  # so the token that can write issues exists only on a failed scheduled run,
+  # never beside the npm code the audit job downloads.
+  report-scheduled-failure:
+    name: Report a failing scheduled audit
+    needs: [audit]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open an issue (once)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Dependency audit is failing on main"
+          if [ -z "$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[].number')" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+              --body "The scheduled \`npm run check:audit\` run failed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Fix or waive per docs/security/dependency-policy.md, then close this issue."
+          fi

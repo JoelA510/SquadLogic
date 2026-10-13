@@ -24,7 +24,13 @@ the Vercel API, `nodeVersion: "24.x"`, 2026-10-13). Vercel also reads
 Node.js Version setting, so `engines` is what pins the Vercel build. To move to
 another major, change `.nvmrc` and `engines` together in one PR; the
 dashboard setting then only needs to match. CI ran Node 20 (end of life) until
-2026-10 (audit finding 7.2, plan item M1.4).
+2026-10 (audit finding 7.2, plan item M1.4). `@types/node` follows the same
+major (`^24`, held there in `.github/dependabot.yml`), so typecheck refuses an
+API only a newer Node has; move it with `.nvmrc`. `engine-strict` is not set:
+`npm ci` on another Node warns (`EBADENGINE`) rather than failing, because
+Dependabot runs npm on its own Node and would fail every update
+(`docs/security/dependency-policy.md`, M2.3). `package.json` also pins the npm
+in use (`packageManager`), which the install guards in `.npmrc` need.
 
 | Variable | Required | Secret | Purpose | Source |
 |---|---|---|---|---|

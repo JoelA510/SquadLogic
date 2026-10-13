@@ -85,7 +85,7 @@ const REQUIRED_ZONES = [
  * run under Deno 2.9.6 (CI's pinned version), the twin differed from these
  * Node-generated values on 4 of 316 vectors, by one to two ulps (~3e-13 of a
  * minute) -- the engines' transcendental functions round differently in the
- * last place. The table is also read by CI's Node 20 and a developer's Node 22.
+ * last place. The table is also read by CI's Node (the `.nvmrc` pin, 24) and a developer's.
  * So `minutes` carries this tolerance, four orders of magnitude above the
  * observed noise and six below the smallest coefficient change (a one-digit
  * change in the last NOAA coefficient moves a sunset by ~1e-3 minute).

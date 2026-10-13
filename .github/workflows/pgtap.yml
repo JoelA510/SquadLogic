@@ -12,6 +12,7 @@ on:
       - 'supabase/tests/**'
       - 'supabase/config.toml'
       - 'package.json'
+      - '.nvmrc'
       - '.github/workflows/pgtap.yml'
   workflow_dispatch: {}
 

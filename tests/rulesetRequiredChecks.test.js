@@ -58,6 +58,11 @@ function pullRequestFilters(workflow) {
   const on = topLevelBlock(workflow.split('\n'), 'on');
   const at = on.findIndex((l) => /^\s*pull_request:/.test(l));
   if (at === -1) return null;
+  const inline = /^\s*pull_request:\s*(\S.*)?$/.exec(on[at])?.[1];
+  if (inline !== undefined && !inline.startsWith('#')) {
+    // `pull_request: { paths: [...] }` and the like: a form this reader does not parse.
+    return { '(inline)': inline };
+  }
   const triggerIndent = indentOf(on[at]);
   /** @type {Record<string, string>} */
   const filters = {};
@@ -109,8 +114,15 @@ function reportingProblems(workflow, context) {
     for (const key of Object.keys(filters)) {
       if (key !== 'branches') problems.push(`pull_request has a "${key}" filter`);
     }
-    if ('branches' in filters && !/\bmain\b/.test(filters.branches)) {
-      problems.push(`pull_request branches (${filters.branches}) leave out main`);
+    if ('branches' in filters) {
+      // Only the one-line list form, every entry a plain branch name (no glob, no `!`).
+      const list = /^\[(.*)\]$/.exec(filters.branches.trim());
+      const entries = list ? list[1].split(',').map(unquote) : [];
+      if (!list || entries.some((b) => !/^[\w./-]+$/.test(b)) || !entries.includes('main')) {
+        problems.push(
+          `pull_request branches (${filters.branches}) are not a plain list naming main`
+        );
+      }
     }
   }
   const matches = workflowJobs(workflow).filter((job) => job.name === context);
@@ -216,6 +228,28 @@ describe('the detectors catch what they guard against (planted workflows)', () =
     );
     expect(reportingProblems(chained, 'Deno Mirror Tests')).toEqual([
       'job deno-mirror-tests needs [build-and-test]',
+    ]);
+  });
+
+  it('a branches list that excludes main, or names it only inside a pattern', () => {
+    for (const branches of ["['**', '!main']", '[main-*]', '[release]']) {
+      const narrowed = plant(
+        '  pull_request:\n    branches: [main]\n',
+        `  pull_request:\n    branches: ${branches}\n`
+      );
+      expect(reportingProblems(narrowed, 'Build & Test')).toEqual([
+        `pull_request branches (${branches}) are not a plain list naming main`,
+      ]);
+    }
+  });
+
+  it('an inline pull_request mapping it cannot read', () => {
+    const inline = plant(
+      '  pull_request:\n    branches: [main]\n',
+      "  pull_request: { branches: [main], paths: ['docs/**'] }\n"
+    );
+    expect(reportingProblems(inline, 'Build & Test')).toEqual([
+      'pull_request has a "(inline)" filter',
     ]);
   });
 

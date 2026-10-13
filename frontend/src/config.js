@@ -40,7 +40,7 @@ export const IS_MOCK_MODE = !SUPABASE_URL || !SUPABASE_ANON_KEY || USE_MOCK_SUPA
  */
 const IS_PRODUCTION_BUILD = import.meta.env?.PROD === true;
 
-if (IS_PRODUCTION_BUILD && IS_MOCK_MODE && !USE_MOCK_SUPABASE) {
+if (IS_PRODUCTION_BUILD && !USE_MOCK_SUPABASE && (!SUPABASE_URL || !SUPABASE_ANON_KEY)) {
   const errorRoot = typeof document !== 'undefined' ? document.getElementById('root') : null;
   if (errorRoot) {
     errorRoot.innerHTML = `

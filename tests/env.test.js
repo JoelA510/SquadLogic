@@ -27,6 +27,8 @@ import {
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = path.join(ROOT, 'frontend/src');
+// Bundled into the frontend too (`@squadlogic/core`), so held to the same rule.
+const CORE = path.join(ROOT, 'packages/core/src');
 const ENV_MODULE = path.join(SRC, 'env.js');
 
 const URL_OK = 'https://project-ref.supabase.co';
@@ -377,10 +379,17 @@ describe('env.js is the only reader of import.meta.env, by name', () => {
     expect(envReads('// import.meta.env.VITE_X\nconst s = "import.meta.env";')).toEqual([]);
   });
 
-  it('no other frontend module reads import.meta.env', () => {
-    const files = listSources(SRC);
-    // Meta: the walk found the tree, and env.js itself is found reading.
-    expect(files.length).toBeGreaterThan(100);
+  it('no other frontend or core module reads import.meta.env', () => {
+    // A whole-object read anywhere in the bundle makes Vite inline every VITE_
+    // variable there: on `main` (config.js's `import.meta.env[key]`) the
+    // production bundle carried all of Vercel's VITE_VERCEL_* system variables,
+    // the last commit's message and author among them.
+    const frontend = listSources(SRC);
+    const core = listSources(CORE);
+    // Meta: both walks found their trees, and env.js itself is found reading.
+    expect(frontend.length).toBeGreaterThan(100);
+    expect(core.length).toBeGreaterThan(100);
+    const files = [...frontend, ...core];
     expect(envReads(readFileSync(ENV_MODULE, 'utf8')).length).toBeGreaterThan(0);
     const offenders = files
       .filter((file) => file !== ENV_MODULE)

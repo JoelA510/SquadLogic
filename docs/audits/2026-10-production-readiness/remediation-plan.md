@@ -712,7 +712,7 @@ smoke-tested
 ## Milestone 5 — Agent rules, docs and operability
 
 > **M5.1. One AGENTS.md for every agent, without contradictions** (audit finding 12.1, high)
-> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open).** Root `AGENTS.md` (23,540 bytes) holds every rule, its
+> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open).** Root `AGENTS.md` (23,589 bytes) holds every rule, its
 >   sections numbered as CLAUDE.md's were; `CLAUDE.md` is `@AGENTS.md` plus Claude Code's notes.
 >   The contradictions and how each was resolved are listed in the PR. `project-hardening/` is
 >   deleted after its durable rules were merged (one task per PR, merge only on the owner's say,

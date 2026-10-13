@@ -167,6 +167,29 @@ describe('dbharness claim census', () => {
     expect(output).toContain('names a prover no plant call declares');
     expect(status).not.toBe(0);
   });
+
+  it.each([
+    ['substring', 'FAIL FAIL smoke 20261006000000'],
+    ['whole-line', '^FAIL FAIL smoke 20261006000000'],
+  ])('refuses a %s expect that still names FAIL once its own prefix is stripped', (_, bad) => {
+    // plant() matches "FAIL <expect>", so 66 entries spelled "FAIL smoke ..."
+    // searched for "FAIL FAIL smoke ..." and scored a real catch MISATTRIBUTED.
+    // One leading FAIL is now normalised away; a second can never match and is
+    // refused before anything is planted. Inserted as a real plant CALL ahead
+    // of the first one, so census-only mode reaches it before its own verdict.
+    const dir = sandbox();
+    const prove = fs.readFileSync(proveSh(dir), 'utf8');
+    const first = 'plant "M3 retire deactivates a FUTURE retirement" "$M3" \\';
+    expect(prove.split('\n').filter((l) => l === first)).toHaveLength(1);
+    const doubled = `plant "a doubled FAIL prefix" "$M3" "old" "new" "${bad}"\n`;
+    fs.writeFileSync(proveSh(dir), prove.replace(`${first}\n`, `${doubled}${first}\n`));
+
+    const { status, output } = census(dir);
+    expect(output).toContain(
+      'REFUSING TO PLANT "a doubled FAIL prefix": its expect still starts with "FAIL " once normalised'
+    );
+    expect(status).not.toBe(0);
+  });
 });
 
 /**

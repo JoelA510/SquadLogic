@@ -191,8 +191,14 @@ async function sendPracticeSnapshot({
   const result = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(
-      result.message || result.error || `Practice persistence failed: ${response.status}`
+    // The Edge's `code` and the HTTP status ride along, as `persistPracticeEnact`
+    // throws them: a repair save's 409 `PRACTICE_ASSIGNMENT_LOCKED` is then
+    // told apart from a crash by its code, not only by its text.
+    throw Object.assign(
+      new Error(
+        result.message || result.error || `Practice persistence failed: ${response.status}`
+      ),
+      { code: result.code ?? null, status: response.status }
     );
   }
 

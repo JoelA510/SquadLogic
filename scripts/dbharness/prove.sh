@@ -62,8 +62,15 @@ R21="$REPO/docs/sql/20261005000000_revert.sql"
 # Heat forecast: org heat settings and their revert.
 M22="$REPO/supabase/migrations/20261006000000_org_heat_settings.sql"
 R22="$REPO/docs/sql/20261006000000_revert.sql"
+# 8.6 3b PR 11d-2: the enact wrapper's blackout arm (it replaces the 11b
+# wrapper, so the M20 plants are aimed here), and its revert.
+M23="$REPO/supabase/migrations/20261007000000_enact_practice_recommendation_blackout.sql"
+R23="$REPO/docs/sql/20261007000000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
+# Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
+# the normalisation in `plant()`. Counted so the anchors-only pass says so.
+EXPECT_NORMALISED=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
 # occur exactly once -- but it does so at PLANT time, one full harness run into
 # a sweep that takes 5.4 hours, so the signal exists and nothing surfaces it.
@@ -598,6 +605,27 @@ plant() { # label file old new [expected-failing-check] [check-that-must-stay-gr
     echo "  directory to PLANT_DIRS." >&2
     exit 5
   fi
+  # **`expect` names the check, and `plant()` adds the `FAIL ` itself.** Both
+  # matchers below search for "FAIL $expect_line", so an entry written as the
+  # whole line -- "FAIL smoke 20261006000000", as 66 entries were -- searched
+  # for "FAIL FAIL smoke ...", which no run.sh line can print. A plant that
+  # really turned its smoke red then scored MISATTRIBUTED, and a sweep could
+  # not tell a hollow check from a doubled prefix. One leading `FAIL ` (after
+  # the optional `^`) is stripped here, so both spellings mean the same check;
+  # what is left may not start with `FAIL ` again, because that is an expect
+  # no transcript can satisfy, and it is refused the way a duplicate label is.
+  case "$expect" in
+    'FAIL '*)  expect="${expect#FAIL }";    EXPECT_NORMALISED=$((EXPECT_NORMALISED+1)) ;;
+    '^FAIL '*) expect="^${expect#^FAIL }";  EXPECT_NORMALISED=$((EXPECT_NORMALISED+1)) ;;
+  esac
+  case "${expect#^}" in
+    'FAIL '*)
+      echo "REFUSING TO PLANT \"$label\": its expect still starts with \"FAIL \" once normalised" >&2
+      echo "  plant() matches \"FAIL <expect>\", so this expect can never be found and" >&2
+      echo "  a real catch would score MISATTRIBUTED. Name the check once." >&2
+      exit 5
+      ;;
+  esac
   # **Census-only mode stops here, having still paid for the two checks
   # above.** It resolves no anchor and opens no file: its subject is the
   # REGISTRY at the bottom, and the only thing it needs from the plants is
@@ -3164,80 +3192,83 @@ plant "R19 the lighting override warning stops counting slots distinctly" "$R19"
   "revert 20261003000000: planted 3 lighting override rows across 2 slots, 1 approved, and the revert did not warn with those figures"
 
 # **8.6 3b PR 11b: enacting one recommendation (plan §6, the 11b
-# witnesses).** One plant per claim the smoke's evidence prints. Every anchor
-# sits in the only definition of enact_practice_recommendation
-# (anchor_liveness: LIVE).
-plant "M20 the enact wrapper stops checking the caller is an org admin" "$M20" \
+# witnesses).** One plant per claim the smoke's evidence prints. (Re-aimed at
+# $M23 by 3b PR 11d-2, which replaces enact_practice_recommendation whole:
+# 20261004000000's body is superseded and a plant there is dead. Every anchor
+# sits in the only live definition, anchor_liveness: LIVE. The retirement
+# arm is that body unchanged but for the Q10 lock, so each 11b plant still
+# reaches the claim it was written for.)
+plant "M20 the enact wrapper stops checking the caller is an org admin" "$M23" \
   "    IF auth.uid() IS NULL OR v_org_id IS NULL OR NOT public.is_org_admin(v_org_id) THEN" \
   "    IF auth.uid() IS NULL OR v_org_id IS NULL THEN" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 # Plant A (witness 24): drop step 2a, so the wrapper believes the record's
 # claimed date instead of reading fields.effective_to.
-plant "M20 Plant A: the enact wrapper drops the commit gate (step 2a)" "$M20" \
-  "    SELECT f.effective_to INTO v_stored
-      FROM public.fields f
-     WHERE f.id = v_field
-       AND f.organization_id = v_org_id;
-    IF v_stored IS NULL THEN
-        RAISE EXCEPTION 'retirement of field % is not committed: no effective_to is stored; save the retirement first', v_field
-            USING ERRCODE = '22023';
-    END IF;
-    IF v_stored <> v_loss_from - 1 THEN
-        RAISE EXCEPTION 'retirement of field % is committed with a different date: % stored, % expected (the day before %)', v_field, v_stored, v_loss_from - 1, v_loss_from
-            USING ERRCODE = '22023';
-    END IF;" \
-  "    v_stored := (enact->'cause'->>'stored_effective_to')::date;" \
-  "FAIL smoke 20261004000000"
+plant "M20 Plant A: the enact wrapper drops the commit gate (step 2a)" "$M23" \
+  "        SELECT f.effective_to INTO v_stored
+          FROM public.fields f
+         WHERE f.id = v_field
+           AND f.organization_id = v_org_id;
+        IF v_stored IS NULL THEN
+            RAISE EXCEPTION 'retirement of field % is not committed: no effective_to is stored; save the retirement first', v_field
+                USING ERRCODE = '22023';
+        END IF;
+        IF v_stored <> v_loss_from - 1 THEN
+            RAISE EXCEPTION 'retirement of field % is committed with a different date: % stored, % expected (the day before %)', v_field, v_stored, v_loss_from - 1, v_loss_from
+                USING ERRCODE = '22023';
+        END IF;" \
+  "        v_stored := (enact->'cause'->>'stored_effective_to')::date;" \
+  "smoke 20261004000000"
 
-plant "M20 the enact wrapper accepts a NULL base_fingerprint" "$M20" \
+plant "M20 the enact wrapper accepts a NULL base_fingerprint" "$M23" \
   "    IF base_fingerprint IS NULL THEN
         RAISE EXCEPTION 'an enact is never blind" \
   "    IF false THEN
         RAISE EXCEPTION 'an enact is never blind" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
-plant "M20 the enact wrapper drops the only-S check" "$M20" \
+plant "M20 the enact wrapper drops the only-S check" "$M23" \
   "     WHERE t.id IS DISTINCT FROM v_series::text;" \
   "     WHERE false;" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
-plant "M20 the enact wrapper stops checking the other rows are unchanged" "$M20" \
+plant "M20 the enact wrapper stops checking the other rows are unchanged" "$M23" \
   "              AND pa.source::text IS NOT DISTINCT FROM b.value->>'source'" \
   "              AND true" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 # The review's cross-season case: a new-row check scoped to the season misses
 # a row the org-scoped writer inserts for another season's team.
-plant "M20 the enact new-row check looks at the season only" "$M20" \
+plant "M20 the enact new-row check looks at the season only" "$M23" \
   "     WHERE pa.organization_id = v_org_id
        AND NOT (pa.id = ANY (v_before));" \
   "     WHERE pa.organization_id = v_org_id
        AND pa.team_id IN (SELECT t.id FROM public.teams t JOIN public.divisions d ON d.id = t.division_id
                            WHERE d.season_settings_id = v_season_id)
        AND NOT (pa.id = ANY (v_before));" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
-plant "M20 the enact wrapper accepts new rows its record does not declare" "$M20" \
+plant "M20 the enact wrapper accepts new rows its record does not declare" "$M23" \
   "    IF v_new_undeclared > 0 THEN" \
   "    IF false THEN" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
-plant "M20 the enact wrapper accepts a new row not marked recommendation" "$M20" \
+plant "M20 the enact wrapper accepts a new row not marked recommendation" "$M23" \
   "count(*) FILTER (WHERE pa.team_id <> v_team OR pa.assigned_via <> 'recommendation')" \
   "count(*) FILTER (WHERE pa.team_id <> v_team)" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 # Witness 5's SQL arm: the wrapper hands the writer no base, so a stale one
 # is never compared (the "retry without base_fingerprint" defect).
-plant "M20 the enact wrapper passes the writer no base_fingerprint" "$M20" \
+plant "M20 the enact wrapper passes the writer no base_fingerprint" "$M23" \
   "v_run_data, assignments, false, unlock, closes, exceptions, '[]'::jsonb, base_fingerprint);" \
   "v_run_data, assignments, false, unlock, closes, exceptions, '[]'::jsonb, NULL);" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 # Witness 14: an audit that can fail without failing the enact is not atomic
 # with it (the "audit after the RPC" defect, inside the database).
-plant "M20 the enact audit failure is swallowed" "$M20" \
+plant "M20 the enact audit failure is swallowed" "$M23" \
   "    PERFORM public.record_audit_event(
         v_org_id,
         'practice.recommendation_enacted',
@@ -3255,17 +3286,17 @@ plant "M20 the enact audit failure is swallowed" "$M20" \
     );
     EXCEPTION WHEN OTHERS THEN NULL;
     END;" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
-plant "M20 the enact audit leaves result_fingerprint unfilled" "$M20" \
-  "              || jsonb_build_object('result_fingerprint', v_result->'fingerprint');" \
-  "              || jsonb_build_object('result_fingerprint', NULL);" \
-  "FAIL smoke 20261004000000"
+plant "M20 the enact audit leaves result_fingerprint unfilled" "$M23" \
+  "    v_meta := v_meta || jsonb_build_object('result_fingerprint', v_result->'fingerprint');" \
+  "    v_meta := v_meta || jsonb_build_object('result_fingerprint', NULL);" \
+  "smoke 20261004000000"
 
-plant "M20 the enact wrapper drops the idempotency lookup" "$M20" \
+plant "M20 the enact wrapper drops the idempotency lookup" "$M23" \
   "                  AND al.metadata->>'enact_key' = v_key::text) THEN" \
   "                  AND al.metadata->>'enact_key' = v_key::text AND false) THEN" \
-  "FAIL smoke 20261004000000"
+  "smoke 20261004000000"
 
 plant "R20 the revert does not drop the enact wrapper" "$R20" \
   "DROP FUNCTION IF EXISTS public.enact_practice_recommendation(jsonb, jsonb, jsonb, jsonb, jsonb, text, jsonb);" \
@@ -3378,6 +3409,95 @@ plant "R22 the heat settings warning counts every row as having links" "$R22" \
   "           count(*) FILTER (WHERE jsonb_array_length(guidance_links) > 0)," \
   "           count(*)," \
   "revert 20261006000000: planted 3 organisations' heat settings (2 with links, 3 links) and the revert did not warn with those figures"
+
+# **8.6 3b PR 11d-2: the enact wrapper's blackout arm (plan §5, B8-B11, and
+# the Q10 retirement lock).** One plant per claim the 20261007000000 smoke's
+# evidence prints, and one for the revert. Every M23 anchor sits in the only
+# live definition of its function (anchor_liveness: LIVE).
+# B8 Plant A: drop the blackout gate, so the record's claim is believed.
+plant "M23 Plant A: the blackout enact drops its commit gate (step 2a)" "$M23" \
+  "        IF v_bo_stored IS DISTINCT FROM enact->'cause'->'stored'
+           OR v_bo_loss IS DISTINCT FROM (enact->'cause'->'loss') - 'surface_ids' THEN" \
+  "        IF false THEN" \
+  "smoke 20261007000000"
+
+# The lock helper's answer is the only "not saved" producer for a blackout.
+plant "M23 the wrapper ignores the lock helper's answer" "$M23" \
+  "    IF NOT public.enact_lock_cause_row(v_org_id, v_kind, v_field) THEN" \
+  "    IF NOT public.enact_lock_cause_row(v_org_id, v_kind, v_field) AND false THEN" \
+  "smoke 20261007000000"
+
+# The review's window case: the record consistent with itself, outside the blackout.
+plant "M23 the blackout enact accepts a window outside the blackout" "$M23" \
+  "            OR NOT (v_window <@ (v_bo_range * v_s_range))) THEN" \
+  "            OR false) THEN" \
+  "smoke 20261007000000"
+
+plant "M23 the blackout enact accepts a series off the blackout's ground" "$M23" \
+  "            OR NOT (v_s_field::text = ANY (v_bo_surfaces))" \
+  "            OR false" \
+  "smoke 20261007000000"
+
+# B8 Plant B, the SQL arm: the stored row compared to the record's own claim.
+plant "M23 the blackout gate compares the record's stored row to itself" "$M23" \
+  "        IF v_bo_stored IS DISTINCT FROM enact->'cause'->'stored'" \
+  "        IF enact->'cause'->'stored' IS DISTINCT FROM enact->'cause'->'stored'" \
+  "smoke 20261007000000"
+
+# B9's plan plant: accept more than one recorded exception.
+plant "M23 the blackout enact accepts exceptions_recorded >= 1" "$M23" \
+  "       OR (v_kind = 'blackout'
+           AND (v_new_count <> 0 OR jsonb_array_length(v_result->'exceptions_recorded') <> 1)) THEN" \
+  "       OR (v_kind = 'blackout'
+           AND (v_new_count <> 0 OR jsonb_array_length(v_result->'exceptions_recorded') < 1)) THEN" \
+  "smoke 20261007000000"
+
+plant "M23 the blackout enact stops checking S itself is unchanged" "$M23" \
+  "     WHERE ((b.value->>'id')::uuid <> v_series OR v_kind = 'blackout')" \
+  "     WHERE ((b.value->>'id')::uuid <> v_series)" \
+  "smoke 20261007000000"
+
+plant "M23 the blackout enact accepts an unlock of S" "$M23" \
+  "            OR jsonb_array_length(COALESCE(v_result->'unlocked', '[]'::jsonb)) <> 0" \
+  "            OR false" \
+  "smoke 20261007000000"
+
+plant "M23 the blackout enact accepts an exception of another window" "$M23" \
+  "           OR (v_exc->>'window')::daterange IS DISTINCT FROM v_window" \
+  "           OR false" \
+  "smoke 20261007000000"
+
+# B10: the audit failure swallowed (the 11b plant above also turns this red;
+# this one is aimed at the blackout arm's own audit path only).
+plant "M23 the blackout enact audit is skipped" "$M23" \
+  "        v_meta := jsonb_set(enact, '{cause,stored}', v_bo_stored);" \
+  "        v_meta := jsonb_set(enact, '{cause,stored}', v_bo_stored);
+        RETURN v_result || jsonb_build_object('enact_audited', true, 'idempotent', false);" \
+  "smoke 20261007000000"
+
+plant "M23 the blackout enact audits the record's stored claim, not the row read" "$M23" \
+  "        v_meta := jsonb_set(enact, '{cause,stored}', v_bo_stored);" \
+  "        v_meta := jsonb_set(enact, '{cause,stored}', jsonb_build_object('claimed', true));" \
+  "smoke 20261007000000"
+
+# B11's plan plant: drop FOR SHARE, so an edit commits mid-enact.
+plant "M23 the blackout row is not locked FOR SHARE" "$M23" \
+  "           AND fb.organization_id = p_organization_id
+           FOR SHARE;" \
+  "           AND fb.organization_id = p_organization_id;" \
+  "smoke 20261007000000"
+
+# Q10's declared departure from 11b, the retirement arm.
+plant "M23 the retired field is not locked FOR SHARE" "$M23" \
+  "           AND f.organization_id = p_organization_id
+           FOR SHARE;" \
+  "           AND f.organization_id = p_organization_id;" \
+  "smoke 20261007000000"
+
+plant "R23 the revert leaves the lock helper in place" "$R23" \
+  "DROP FUNCTION IF EXISTS public.enact_lock_cause_row(uuid, text, uuid);" \
+  "DROP FUNCTION IF EXISTS public.enact_lock_cause_row(uuid);" \
+  "revert 20261007000000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
@@ -3500,6 +3620,14 @@ declare -A CLAIM_PROVER=(
   ["(checked) every accepted heat settings write, a clear included, leaves a settings.heat_updated audit row with its before and after"]="M22 the heat settings RPC stops auditing"
   ["(checked) a member reads only their own organisation's heat settings"]="M22 the read policy lets every member read every organisation's settings"
   ["(checked) the revert counted the heat settings it was about to destroy, the organisations with links, and the links"]="R22 the heat settings warning counts every row as having links"
+  ["(checked) only a saved blackout, exactly as saved, is enacted, on its own ground and dates: an unsaved blackout, any stored column changed, another stored claim, other surface_ids, a window outside it or a series off its ground is refused, and writes nothing"]="M23 Plant A: the blackout enact drops its commit gate (step 2a)|M23 the blackout gate compares the record's stored row to itself|M23 the wrapper ignores the lock helper's answer|M23 the blackout enact accepts a window outside the blackout|M23 the blackout enact accepts a series off the blackout's ground"
+  ["(checked) a blackout enact that unlocks S, changes any row, creates a row, or records anything but the one declared exception on S is refused (22023) and rolled back"]="M23 the blackout enact accepts exceptions_recorded >= 1|M23 the blackout enact accepts an unlock of S|M23 the blackout enact accepts an exception of another window"
+  ["(checked) the blackout enact audit row is written in the enact's own transaction: an audit failure fails the enact and its exception"]="M20 the enact audit failure is swallowed"
+  ["(checked) a blackout enact writes exactly one exception, on its series, over its window, and changes no row, its own included"]="M23 the blackout enact stops checking S itself is unchanged"
+  ["(checked) a blackout enact leaves one practice.recommendation_enacted row on its series, with cause.stored as the gate read it, and no unlock audit"]="M23 the blackout enact audits the record's stored claim, not the row read|M23 the blackout enact audit is skipped"
+  ["(checked) a blackout edit from a second session waits for an open blackout enact: the enact holds its blackout row FOR SHARE until it commits"]="M23 the blackout row is not locked FOR SHARE"
+  ["(checked) a write of the retired field from a second session waits for an open retirement enact: the enact holds its field row FOR SHARE until it commits"]="M23 the retired field is not locked FOR SHARE"
+  ["(checked) the blackout enact revert restores the 20261004000000 enact_practice_recommendation body byte for byte, SECURITY INVOKER, and drops enact_lock_cause_row"]="R23 the revert leaves the lock helper in place"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"
   ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M14 the reconcile skips dropping the broad policy"
   ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M14 the reconcile skips creating the missing read policies"
@@ -3767,6 +3895,7 @@ if [ -n "$ANCHORS_ONLY" ]; then
     exit 9
   fi
   echo "anchor pre-flight: $ANCHOR_OK of $ATTEMPTED plant anchors resolve exactly once in their target file"
+  echo "expect normalisation: $EXPECT_NORMALISED of $ATTEMPTED plant expects carried the FAIL prefix plant() adds"
   exit 0
 fi
 

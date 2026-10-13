@@ -1,0 +1,7 @@
+# Process files delivered by agent-ready-template's `process:apply`. A re-apply
+# updates only files the repository hasn't edited, so `npm run format` must not
+# rewrite them (it would reformat 30 of them). Gaps go to the template instead.
+# Prettier still reads .gitignore as well as this file.
+prompts/
+.agents/skills/
+.claude/skills/

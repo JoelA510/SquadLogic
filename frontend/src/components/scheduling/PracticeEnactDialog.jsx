@@ -7,11 +7,14 @@ import Button from '../ui/Button.jsx';
  * The enact confirmation, which IS the ruling-2 override prompt for one
  * assignment (8.6 3b PR 11c; `docs/PHASE_8_6_PR11_ENACT_PLAN.md` §2).
  *
- * - The heading names the field and its STORED retirement date (Q3): the
- *   dialog opens only once the retirement is committed.
+ * - The `heading` names the cause as STORED (Q3): the field and its saved
+ *   retirement date, or (3b PR 11d-3, Q4) the saved blackout's ground, dates
+ *   and times. The dialog opens only once the cause is committed.
  * - It lists every row the write re-ranges or replaces, with its
  *   `assigned_via` and exactly what happens to it, then what replaces it,
- *   then how many published practices could change.
+ *   then how many published practices could change. A blackout's one row
+ *   keeps its range (its `detail` says which practices change), `moves`
+ *   states the relocation's counts (G1), and no unlock is sent.
  * - **One checkbox per team.** Confirm stays disabled, with a visible
  *   reason, until every box is ticked. An unticked box sends nothing.
  * - The click-to-commit latency is declared (Q5): the schedule fingerprint
@@ -19,22 +22,24 @@ import Button from '../ui/Button.jsx';
  * - Focus goes to the heading on open and back to the row's Enact button on
  *   close (`Modal` restores it).
  *
- * @param {{ open: boolean, fieldName: string, storedDate: string, team: string,
+ * @param {{ open: boolean, heading: string, lead: string, stored: string, intro?: string,
  *   teams: Array<{ id: string, name: string }>,
  *   rows: Array<{ assignmentId: string, now: string, range: string, assignedVia: string,
- *     effect: string, rangeAfter: string | null }>,
- *   replacement: string, affected: number, busy: boolean,
+ *     effect: string, rangeAfter: string | null, detail?: string }>,
+ *   replacement: string, moves?: string | null, affected: number, busy: boolean,
  *   notice: { tone: 'alert' | 'status', text: string } | null,
  *   blocked: string | null, onConfirm: () => void, onClose: () => void }} props
  */
 export default function PracticeEnactDialog({
   open,
-  fieldName,
-  storedDate,
-  team,
+  heading,
+  lead,
+  stored,
+  intro = 'This overrides a saved practice. Each row below is locked, and enacting changes it:',
   teams,
   rows,
   replacement,
+  moves = null,
   affected,
   busy,
   notice,
@@ -66,7 +71,7 @@ export default function PracticeEnactDialog({
     <Modal
       open={open}
       onClose={close}
-      title={`Enact: ${fieldName} retires after ${storedDate}`}
+      title={heading}
       initialFocusRef={headingRef}
       wide
       footer={
@@ -95,15 +100,11 @@ export default function PracticeEnactDialog({
         tabIndex={-1}
         className="text-sm"
         data-testid="practice-enact-heading"
-        data-stored-date={storedDate}
+        data-stored={stored}
       >
-        <strong>
-          Move {team}&rsquo;s practice off {fieldName}, retired after {storedDate}
-        </strong>
+        <strong>{lead}</strong>
       </h3>
-      <p className="text-sm mt-2">
-        This overrides a saved practice. Each row below is locked, and enacting changes it:
-      </p>
+      <p className="text-sm mt-2">{intro}</p>
       <ul className="text-sm" data-testid="practice-enact-rows">
         {rows.map((row) => (
           <li
@@ -113,13 +114,19 @@ export default function PracticeEnactDialog({
             data-effect={row.effect}
           >
             {row.now}, {row.range} (assigned via {row.assignedVia}): <strong>{row.effect}</strong>
-            {row.rangeAfter ? `, now ${row.rangeAfter}` : ', from the retirement on'}
+            {row.detail ??
+              (row.rangeAfter ? `, now ${row.rangeAfter}` : ', from the retirement on')}
           </li>
         ))}
       </ul>
       <p className="text-sm mt-2" data-testid="practice-enact-replacement">
         Replaced by: {replacement}
       </p>
+      {moves && (
+        <p className="text-sm" data-testid="practice-enact-moves">
+          {moves}
+        </p>
+      )}
       <p className="text-sm" data-testid="practice-enact-affected" data-count={affected}>
         <strong>{affected}</strong> published practice{affected === 1 ? '' : 's'} could change.
       </p>
@@ -169,9 +176,11 @@ export default function PracticeEnactDialog({
 
 PracticeEnactDialog.propTypes = {
   open: PropTypes.bool.isRequired,
-  fieldName: PropTypes.string.isRequired,
-  storedDate: PropTypes.string.isRequired,
-  team: PropTypes.string.isRequired,
+  heading: PropTypes.string.isRequired,
+  lead: PropTypes.string.isRequired,
+  stored: PropTypes.string.isRequired,
+  intro: PropTypes.string,
+  moves: PropTypes.string,
   teams: PropTypes.arrayOf(
     PropTypes.shape({ id: PropTypes.string.isRequired, name: PropTypes.string.isRequired })
   ).isRequired,

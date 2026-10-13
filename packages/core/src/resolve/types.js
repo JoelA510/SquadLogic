@@ -350,6 +350,8 @@
  * @property {number} ruleGateSurfacePairsExamined - same-surface pairs the placer's gate read (#59)
  * @property {number} ruleGateGroupsExamined - age groups the placer's spread check judged, summed over candidates (#60)
  * @property {number} conflictSpreadsCarried - age groups whose coach-conflict spread the result grew past the published one (#60)
+ * @property {number} spreadShelvedFloorsMeasured - `chooseSlot()` calls that measured the spread with the game shelved, for a game absent from the schedule (#60b)
+ * @property {number} spreadAdmittedByShelvedFloor - placements the shelved floor admitted, each named by `RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD` (#60b)
  * @property {number} candidatesScored - survived legality and went to the objective
  * @property {number} conflictsExamined
  * @property {number} gamesDislodged

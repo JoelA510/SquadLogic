@@ -1,14 +1,16 @@
 /**
  * Enacting ONE practice repair recommendation, the client half (8.6 3b PR 11c;
- * `docs/PHASE_8_6_PR11_ENACT_PLAN.md` §1, §2, §4). Retirements only (operator
- * answer Q1); blackout enact is 3b PR 11d.
+ * `docs/PHASE_8_6_PR11_ENACT_PLAN.md` §1, §2, §4). A blackout enact is 3b PR
+ * 11d-3 (`docs/PHASE_8_6_PR11D_BLACKOUT_ENACT_PLAN.md` §2.5-§2.7): one
+ * temporary exception on the series, its range kept, nothing unlocked.
  *
  * The chain is core's, reused and never restated (`practice/enact.js`,
  * `practice/recommendations.js`, `practice/repairAdapter.js`):
  *
  * 1. **Fresh read, fingerprint first** (`loadPracticeRepairSnapshot`).
- * 2. **The commit gate on the fresh rows** (`retirementCommitOf`, Q3): the
- *    field's STORED `effective_to` decides, never the `loss` prop.
+ * 2. **The commit gate on the fresh rows** (`causeCommitOf`, Q3 and 11d Q5):
+ *    the field's STORED `effective_to`, or the STORED blackout row, decides,
+ *    never the `loss` prop.
  * 3. Adapt, **re-base** the session state (`rebaseRecommendationState`) and
  *    **re-judge** the one recommendation against what the admin was shown
  *    (`judgeEnact`). Stale: nothing is sent.
@@ -25,14 +27,15 @@
  */
 
 import {
+  PRACTICE_ENACT_BLACKOUT_EFFECT,
   PRACTICE_ENACT_REFUSAL,
   PRACTICE_REPAIR_CAUSE_KIND,
   buildEnactPayload,
   buildEnactRecord,
   buildPracticeRepairPayload,
+  causeCommitOf,
   judgeEnact,
   rebaseRecommendationState,
-  retirementCommitOf,
 } from '@squadlogic/core/practice/index.js';
 import { practiceRangeBounds } from '@squadlogic/core/utils/practiceOccurrences.js';
 import { applyPracticeExceptions } from '@squadlogic/core/utils/practiceExceptions.js';
@@ -43,10 +46,12 @@ import { openPracticeRepair } from './practiceRepairPanel.js';
 /** Why an Enact button is disabled. */
 export const ENACT_GATE = Object.freeze({
   NOT_ADMIN: 'not-admin',
-  BLACKOUT: 'blackout',
   PREVIEW: 'preview',
   RETIREMENT_CHANGED: 'retirement-changed',
+  BLACKOUT_CHANGED: 'blackout-changed',
   REFUSED: 'refused',
+  /** A saved temporary move on the lost ground (11d Q8): never enactable here. */
+  CANNOT_REPAIR: 'cannot-repair',
 });
 
 /** The preview's visible reason (plan §1, "The commit gate"). */
@@ -54,21 +59,27 @@ export const ENACT_PREVIEW_TEXT =
   'Save the retirement first: enacting moves practices, and the retirement date is not saved yet.';
 
 /**
- * The client's own refusal of a blackout enact until 3b PR 11d-3 enables it:
- * core can now build the write (11d-1), but the wrapper RPC and the Edge
- * record still refuse it until 11d-2, so nothing is sent from here even with
- * the button forced enabled (PR 11 witness 12).
+ * The blackout editor's visible reason: its launcher is always a preview
+ * (11d Q5), whether the dialog adds a blackout or edits a saved one, so it
+ * names where a saved blackout IS enacted.
  */
-export const ENACT_BLACKOUT_NOT_ENABLED = 'blackout-not-enabled';
+export const ENACT_BLACKOUT_PREVIEW_TEXT =
+  'Save the blackout first, then enact from its row on Blackout Dates: enacting moves practices, and this editor shows an unsaved draft.';
+
+/** A blackout the fresh read does not hold as saved (11d Q5, the plan's wording). */
+export const ENACT_BLACKOUT_UNSAVED_TEXT =
+  'Save the blackout first: enacting moves practices, and this blackout is not saved yet.';
+
+/** Why a saved temporary move on the lost ground has no Enact (11d Q8). */
+export const ENACT_TARGET_LOST_TEXT =
+  'Cannot be repaired here: its temporary move lands on the closed ground; withdrawing a saved change is not available yet.';
 
 /** Plain words for every refusal the enact chain can return. */
 export const ENACT_REFUSAL_TEXT = Object.freeze({
   [PRACTICE_ENACT_REFUSAL.RETIREMENT_UNCOMMITTED]: ENACT_PREVIEW_TEXT,
   [PRACTICE_ENACT_REFUSAL.RETIREMENT_CHANGED]:
     'The retirement is now saved with a different date. Close this panel and open it again from the field card.',
-  [ENACT_BLACKOUT_NOT_ENABLED]: 'Enacting a blackout recommendation is not available yet.',
-  [PRACTICE_ENACT_REFUSAL.BLACKOUT_UNCOMMITTED]:
-    'Save the blackout first: enacting moves practices, and this blackout is not saved yet.',
+  [PRACTICE_ENACT_REFUSAL.BLACKOUT_UNCOMMITTED]: ENACT_BLACKOUT_UNSAVED_TEXT,
   [PRACTICE_ENACT_REFUSAL.BLACKOUT_CHANGED]:
     'The blackout is now saved differently. Close this panel and open it again from the saved blackout.',
   [PRACTICE_ENACT_REFUSAL.PROMPT_NOT_ACCEPTED]:
@@ -93,21 +104,21 @@ export const ENACT_REFUSAL_TEXT = Object.freeze({
 export function enactGateOf({ isAdmin, preview, rows, loss, refusals }) {
   const off = (why, text) => ({ enabled: false, why, text });
   if (!isAdmin) return off(ENACT_GATE.NOT_ADMIN, 'Only an organization admin can enact.');
-  if (loss?.kind !== PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT) {
-    // Q1: the refusal the panel already computes is the reason.
-    const why = refusals.map((r) => r.text).join('; ');
-    return off(
-      ENACT_GATE.BLACKOUT,
-      `Enacting a blackout recommendation is not available yet${why ? `: ${why}` : ''}.`
-    );
+  const blackout = loss?.kind === PRACTICE_REPAIR_CAUSE_KIND.BLACKOUT;
+  // Q3, and 11d Q5: never from a dry-run preview (the retirement dialog, the
+  // blackout editor's draft), and never before the cause is stored as shown.
+  if (preview) {
+    return off(ENACT_GATE.PREVIEW, blackout ? ENACT_BLACKOUT_PREVIEW_TEXT : ENACT_PREVIEW_TEXT);
   }
-  // Q3: never from the dry-run preview, and never before the date is stored.
-  if (preview) return off(ENACT_GATE.PREVIEW, ENACT_PREVIEW_TEXT);
-  const commit = retirementCommitOf(rows, loss);
+  const commit = causeCommitOf(rows, loss);
   if (!commit.committed) {
-    return commit.refusal === PRACTICE_ENACT_REFUSAL.RETIREMENT_CHANGED
-      ? off(ENACT_GATE.RETIREMENT_CHANGED, ENACT_REFUSAL_TEXT[commit.refusal])
-      : off(ENACT_GATE.PREVIEW, ENACT_PREVIEW_TEXT);
+    if (commit.refusal === PRACTICE_ENACT_REFUSAL.RETIREMENT_CHANGED) {
+      return off(ENACT_GATE.RETIREMENT_CHANGED, ENACT_REFUSAL_TEXT[commit.refusal]);
+    }
+    if (commit.refusal === PRACTICE_ENACT_REFUSAL.BLACKOUT_CHANGED) {
+      return off(ENACT_GATE.BLACKOUT_CHANGED, ENACT_REFUSAL_TEXT[commit.refusal]);
+    }
+    return off(ENACT_GATE.PREVIEW, blackout ? ENACT_BLACKOUT_UNSAVED_TEXT : ENACT_PREVIEW_TEXT);
   }
   if (refusals.length > 0) {
     return off(
@@ -119,6 +130,17 @@ export function enactGateOf({ isAdmin, preview, rows, loss, refusals }) {
 }
 
 /**
+ * The cause as the rows STORE it, by the commit gate's own read
+ * (`causeCommitOf`): what the dialog's heading names (11d plan §2.5: built
+ * from the stored row, never the draft).
+ *
+ * @param {Record<string, any[]>} rows @param {any} loss
+ */
+export function storedCauseOf(rows, loss) {
+  return causeCommitOf(rows, loss);
+}
+
+/**
  * The one-entry write plan the prompt describes, from the adapter's own
  * builder (the entry `buildEnactPayload` builds). Used to SHOW the prompt
  * before Confirm; at Confirm the prompt is rebuilt from the enact's own plan
@@ -127,11 +149,22 @@ export function enactGateOf({ isAdmin, preview, rows, loss, refusals }) {
  * @param {any} adapted @param {any} recommendation
  */
 export function enactPlanOf(adapted, recommendation) {
-  const entry = { assignmentId: recommendation.assignmentId, window: null };
+  // As `buildEnactPayload` builds it: a blackout is one exception on S over
+  // the recommendation's own window, never a split.
+  const blackout = adapted.context.cause.kind === PRACTICE_REPAIR_CAUSE_KIND.BLACKOUT;
+  if (blackout && !recommendation.window) {
+    throw new Error(
+      `enact prompt: the blackout recommendation for ${recommendation.assignmentId} has no window`
+    );
+  }
+  const entry = {
+    assignmentId: recommendation.assignmentId,
+    window: blackout ? { ...recommendation.window } : null,
+  };
   return buildPracticeRepairPayload(
     adapted,
     {
-      representation: 'split',
+      representation: blackout ? 'override' : 'split',
       lossDate: adapted.input.loss.from,
       rehomed: recommendation.to === null ? [] : [{ ...entry, to: recommendation.to }],
       timeTbd: recommendation.to === null ? [{ ...entry, reason: recommendation.reason }] : [],
@@ -152,6 +185,10 @@ export function enactPlanOf(adapted, recommendation) {
  * the helper already shows as TIME TBD or relocated is not a published
  * practice the enact could change, so it is not counted; neither is a date an
  * open or unreadable window suppresses.
+ *
+ * A blackout (3b PR 11d-3) unlocks nothing: its prompt lists the one
+ * exception the write adds, and counts inside that exception's own window
+ * (`blackoutPromptOf`). `relocation` is shown, never recorded.
  *
  * @param {any} adapted - the adapter output the plan was built from
  * @param {Record<string, any[]>} rows - the same read's rows (`assigned_via`, slot days,
@@ -176,30 +213,43 @@ export function enactPromptOf(adapted, rows, plan) {
     const id = lower(e?.assignment_id);
     exceptionsByRow.set(id, [...(exceptionsByRow.get(id) ?? []), e]);
   }
-  let affected = 0;
-  const promptRows = plan.unlockRequired.map((required) => {
-    const row = rowById.get(required.assignment_id);
-    const read = readById.get(required.assignment_id);
-    const assignedVia = read?.assigned_via ?? null;
+  /** A snapshot row and its read `assigned_via`, or a throw: never a guessed row. */
+  const readRow = (assignmentId) => {
+    const row = rowById.get(assignmentId);
+    const assignedVia = readById.get(assignmentId)?.assigned_via ?? null;
     if (!row || typeof assignedVia !== 'string') {
-      throw new Error(`enact prompt: ${required.assignment_id} was not read with its assigned_via`);
+      throw new Error(`enact prompt: ${assignmentId} was not read with its assigned_via`);
     }
-    const close = plan.closes.find((c) => c.assignment_id === required.assignment_id) ?? null;
-    const from = row.range.from > lossDate ? row.range.from : lossDate;
-    const applied = applyPracticeExceptions({
+    return { row, assignedVia };
+  };
+  /** The row's dates as the readers show them, its saved exceptions (and `planned`) applied. */
+  const occurrencesOf = (assignmentId, row, planned = []) =>
+    applyPracticeExceptions({
       rows: [
         {
-          id: required.assignment_id,
+          id: assignmentId,
           effective_date_range: `[${row.range.from},${row.range.until}]`,
           slot: { day_of_week: dayBySlot.get(row.slotId) },
         },
       ],
-      exceptions: (exceptionsByRow.get(required.assignment_id) ?? []).map((e) => ({
+      exceptions: [...(exceptionsByRow.get(assignmentId) ?? []), ...planned].map((e) => ({
         ...e,
-        assignment_id: required.assignment_id,
+        assignment_id: assignmentId,
       })),
-    });
-    affected += applied.occurrences.filter((o) => o.kind === 'series' && o.date >= from).length;
+    }).occurrences;
+
+  if (adapted.context.cause.kind === PRACTICE_REPAIR_CAUSE_KIND.BLACKOUT) {
+    return blackoutPromptOf(plan, { readRow, occurrencesOf, dayBySlot, lossDate });
+  }
+
+  let affected = 0;
+  const promptRows = plan.unlockRequired.map((required) => {
+    const { row, assignedVia } = readRow(required.assignment_id);
+    const close = plan.closes.find((c) => c.assignment_id === required.assignment_id) ?? null;
+    const from = row.range.from > lossDate ? row.range.from : lossDate;
+    affected += occurrencesOf(required.assignment_id, row).filter(
+      (o) => o.kind === 'series' && o.date >= from
+    ).length;
     return {
       assignment_id: required.assignment_id,
       assigned_via: assignedVia,
@@ -210,6 +260,79 @@ export function enactPromptOf(adapted, rows, plan) {
   return {
     lossDate,
     record: { rows: promptRows, published_practices_affected: affected },
+    relocation: null,
+  };
+}
+
+/** The id the prompt gives the exception it plans, so its own dates can be told apart. */
+const PLANNED_EXCEPTION_ID = 'planned-by-this-enact';
+
+/**
+ * The blackout arm of {@link enactPromptOf} (11d plan §2.5, §2.7, Q4): the
+ * prompt lists the ONE exception the write adds, not the rows it unlocks (it
+ * unlocks none). The count is S's **published** practices inside the
+ * exception's own window, `[w.from, w.until]`, never the retirement's
+ * `[D, until]`: its series dates with the saved exceptions applied, by the
+ * helper the readers run. With `LIVE_EXCEPTION_OVERLAP` refusing, no date in
+ * the window is already changed; the helper still runs (it defends the case
+ * and is not claimed as coverage). For a relocation, `relocation` also says
+ * how many practices the readers will show on the new weekday in the window
+ * (G1, Q6), from the same helper with the planned exception applied.
+ */
+function blackoutPromptOf(plan, { readRow, occurrencesOf, dayBySlot, lossDate }) {
+  if (plan.unlockRequired.length > 0) {
+    throw new Error('enact prompt: a blackout write asks to unlock a row');
+  }
+  if (plan.exceptions.length !== 1) {
+    throw new Error(
+      `enact prompt: a blackout write adds ${plan.exceptions.length} exceptions, not 1`
+    );
+  }
+  const [exception] = plan.exceptions;
+  // Core's own map: `buildEnactRecord` checks the prompt rows against it.
+  const effect = PRACTICE_ENACT_BLACKOUT_EFFECT[exception.kind];
+  const bounds = practiceRangeBounds(exception.window);
+  if (!effect || bounds === null) {
+    throw new Error(`enact prompt: the planned exception ${exception.window} does not read`);
+  }
+  const { row, assignedVia } = readRow(exception.assignment_id);
+  const inWindow = (o) => o.date >= bounds.first && o.date <= bounds.last;
+  const affected = occurrencesOf(exception.assignment_id, row).filter(
+    (o) => o.kind === 'series' && inWindow(o)
+  ).length;
+  let relocation = null;
+  if (exception.kind === 'relocated') {
+    const toDay = dayBySlot.get(String(exception.practice_slot_id).toLowerCase());
+    const moved = occurrencesOf(exception.assignment_id, row, [
+      {
+        id: PLANNED_EXCEPTION_ID,
+        window: exception.window,
+        kind: 'relocated',
+        practice_slot_id: exception.practice_slot_id,
+        slot: { day_of_week: toDay },
+        withdrawn_at: null,
+      },
+    ]).filter((o) => o.kind === 'relocated' && o.exceptionId === PLANNED_EXCEPTION_ID);
+    relocation = {
+      from: { weekday: dayBySlot.get(row.slotId) ?? null, count: affected },
+      to: { weekday: toDay ?? null, count: moved.length },
+    };
+  }
+  return {
+    lossDate,
+    record: {
+      rows: [
+        {
+          assignment_id: exception.assignment_id,
+          assigned_via: assignedVia,
+          effect,
+          range_after: null,
+          window: exception.window,
+        },
+      ],
+      published_practices_affected: affected,
+    },
+    relocation,
   };
 }
 
@@ -235,7 +358,7 @@ async function judgeOnFreshRead({
   if (fresh.ok !== true) {
     return { ok: false, message: 'message' in fresh ? fresh.message : 'unreadable' };
   }
-  const commit = retirementCommitOf(fresh.rows, loss);
+  const commit = causeCommitOf(fresh.rows, loss);
   const opened = openPracticeRepair(fresh.rows, loss, {
     timeZone,
     baseFingerprint: fresh.fingerprint,
@@ -297,10 +420,6 @@ export async function enactPracticeRecommendation({
 }) {
   const reading = { client, organizationId, seasonSettingsId, loss, timeZone, shown };
   let sent = false;
-  if (loss?.kind !== PRACTICE_REPAIR_CAUSE_KIND.RETIREMENT) {
-    // Until 3b PR 11d-3: nothing is read, and nothing is sent.
-    return { status: 'refused', refusal: ENACT_BLACKOUT_NOT_ENABLED, view: null };
-  }
   try {
     const j = await judgeOnFreshRead({ ...reading, state });
     if (!j.ok) return { status: 'error', message: j.message, sent };
@@ -374,11 +493,14 @@ export async function enactPracticeRecommendation({
     // After success: read fresh again and re-base with S enacted (step 12).
     const after = await loadPracticeRepairSnapshot(client, { organizationId, seasonSettingsId });
     const written = record.writes;
+    // The record's own cause, as written: the panel finds a blackout's exception by it.
+    const cause = { kind: record.cause.kind, id: record.cause.id };
     if (after.ok !== true) {
       return {
         status: 'enacted-unread',
         message: 'message' in after ? after.message : 'unreadable',
         written,
+        cause,
       };
     }
     const opened = openPracticeRepair(after.rows, loss, {
@@ -392,6 +514,7 @@ export async function enactPracticeRecommendation({
       status: 'enacted',
       result,
       written,
+      cause,
       view: { rows: after.rows, opened, state: next },
     };
   } catch (err) {
@@ -408,15 +531,46 @@ export async function enactPracticeRecommendation({
  * canonicalised, so the bounds are compared, not the text). A row the enact
  * wrote that the read does not hold is `missing`: shown, never hidden.
  *
+ * A blackout enact (3b PR 11d-3) writes no row: its `temporary` is the live
+ * exception the read holds on S with this blackout as its cause (`null` for
+ * a retirement), and one the record says it wrote that the read does not
+ * hold is `missing` too.
+ *
  * @param {Record<string, any[]>} rows
- * @param {Array<{ assignmentId: string, teamId: string, written: any }>} log
+ * @param {Array<{ assignmentId: string, teamId: string, written: any,
+ *   cause?: { kind: string, id: string } }>} log
  * @param {{ team: (id: string) => string }} names
  */
 export function enactedRowsOf(rows, log, names) {
   const lower = (v) => String(v).toLowerCase();
   const bounds = (range) => JSON.stringify(practiceRangeBounds(range));
   const assignments = rows.practiceAssignments ?? [];
-  return log.map(({ assignmentId, teamId, written }) => {
+  return log.map(({ assignmentId, teamId, written, cause = null }) => {
+    if (cause?.kind === PRACTICE_REPAIR_CAUSE_KIND.BLACKOUT) {
+      const temporary = (rows.practiceExceptions ?? [])
+        .filter(
+          (e) =>
+            lower(e.assignment_id) === assignmentId &&
+            e.withdrawn_at == null &&
+            e.cause_kind === cause.kind &&
+            lower(e.cause_id) === lower(cause.id)
+        )
+        .map((e) => ({
+          id: lower(e.id),
+          window: e.window,
+          kind: e.kind,
+          slotId: e.practice_slot_id == null ? null : lower(e.practice_slot_id),
+        }));
+      return {
+        assignmentId,
+        team: names.team(teamId),
+        closedRange: null,
+        timeTbd: false,
+        locked: [],
+        temporary,
+        missing: Math.max(0, written.exceptions - temporary.length),
+      };
+    }
     const original = assignments.find((a) => lower(a.id) === assignmentId) ?? null;
     const found = [];
     const missing = [];
@@ -442,6 +596,7 @@ export function enactedRowsOf(rows, log, names) {
       closedRange: original?.effective_date_range ?? null,
       timeTbd: written.new_rows.length === 0,
       locked: found,
+      temporary: null,
       missing: missing.length,
     };
   });

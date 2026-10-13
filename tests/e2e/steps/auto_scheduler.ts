@@ -442,7 +442,8 @@ Then(
   async ({ page }, _teamId: string, source: string) => {
     // The locked badge should be visible in the assignment list
     if (source === 'manual') {
-      const lockButton = page.locator('button[title*="Unlock slot"]').first();
+      // A manual row's toggle offers to mark it automatic (plan Q1).
+      const lockButton = page.locator('button[title="Mark as automatic"]').first();
       await expect(lockButton)
         .toBeVisible({ timeout: 5000 })
         .catch(() => {

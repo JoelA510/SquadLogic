@@ -36,6 +36,27 @@ const hostOf = (source) => /^[a-z]+:\/\/([^/:]+)/i.exec(source)?.[1]?.toLowerCas
 const isWeatherGov = (source) =>
   hostOf(source) === 'weather.gov' || hostOf(source).endsWith('.weather.gov');
 
+/**
+ * Does a CSP host-source admit this URL? Implements the subset of the CSP3
+ * rule this policy uses: `scheme://host` matches that exact host, and
+ * `scheme://*.host` matches any host ending in `.host` (never the bare apex).
+ * Keywords (`'self'`) and other forms admit nothing here.
+ */
+function sourceAllows(source, url) {
+  const m = /^([a-z][a-z0-9+.-]*):\/\/(\*\.)?([^/:*]+)$/i.exec(source);
+  if (!m) return false;
+  const target = new URL(url);
+  if (target.protocol !== `${m[1].toLowerCase()}:`) return false;
+  const host = target.hostname.toLowerCase();
+  const base = m[3].toLowerCase();
+  return m[2] ? host.endsWith(`.${base}`) : host === base;
+}
+const allows = (sources, url) => sources.some((s) => sourceAllows(s, url));
+
+// Placeholder org and project ids, never a real DSN.
+const SENTRY_US_ENVELOPE = 'https://o0.ingest.us.sentry.io/api/0/envelope/';
+const SENTRY_DEFAULT_ENVELOPE = 'https://o0.ingest.sentry.io/api/0/envelope/';
+
 function documentedPolicy() {
   const doc = readFileSync(path.join(ROOT, 'docs/security/csp.md'), 'utf8');
   const section = doc.slice(doc.indexOf('## Current policy'));
@@ -58,6 +79,33 @@ describe('Content-Security-Policy', () => {
     // Compared on the parsed host, not a substring: every weather.gov source in
     // connect-src must be exactly the API host (no wildcard, no sibling site).
     expect(connect.filter(isWeatherGov)).toEqual(['https://api.weather.gov']);
+  });
+
+  it('admits Sentry ingest for US-region and default-region projects', () => {
+    const connect = directive(headerPolicy(), 'connect-src');
+    expect(allows(connect, SENTRY_US_ENVELOPE)).toBe(true);
+    expect(allows(connect, SENTRY_DEFAULT_ENVELOPE)).toBe(true);
+  });
+
+  it('the old policy, without the US entry, refuses the US ingest host', () => {
+    const connect = directive(headerPolicy(), 'connect-src');
+    const old = connect.filter((s) => s !== 'https://*.ingest.us.sentry.io');
+    expect(old).toHaveLength(connect.length - 1);
+    expect(old).toContain('https://*.ingest.sentry.io');
+    expect(allows(old, SENTRY_US_ENVELOPE)).toBe(false);
+    expect(allows(old, SENTRY_DEFAULT_ENVELOPE)).toBe(true);
+  });
+
+  it('the matcher follows the CSP wildcard rule', () => {
+    const us = 'https://*.ingest.us.sentry.io';
+    expect(sourceAllows(us, SENTRY_US_ENVELOPE)).toBe(true);
+    expect(sourceAllows('https://*.ingest.sentry.io', SENTRY_US_ENVELOPE)).toBe(false);
+    expect(sourceAllows(us, 'https://ingest.us.sentry.io/')).toBe(false);
+    expect(sourceAllows(us, 'https://o0.ingest.us.sentry.io.evil.example/')).toBe(false);
+    expect(sourceAllows(us, 'http://o0.ingest.us.sentry.io/')).toBe(false);
+    expect(sourceAllows("'self'", SENTRY_US_ENVELOPE)).toBe(false);
+    expect(sourceAllows('https://api.weather.gov', 'https://api.weather.gov/points')).toBe(true);
+    expect(sourceAllows('https://api.weather.gov', 'https://x.api.weather.gov/')).toBe(false);
   });
 
   it('never allows a bare wildcard', () => {

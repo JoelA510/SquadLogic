@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useDashboardData } from '../hooks/useDashboardData.js';
 import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import PracticeAssignmentList from '../components/PracticeAssignmentList.jsx';
@@ -28,10 +28,26 @@ import { useAutoScheduler } from '../hooks/useAutoScheduler.js';
 import { useSeasonPracticeAssignments } from '../hooks/useSeasonPracticeAssignments.js';
 import { useAutoRunOnNavigate } from '../hooks/useAutoRunOnNavigate.js';
 import {
+  PRACTICE_SCHEDULE_STALE,
   persistPracticeRepair,
   persistPracticeScheduleReview,
 } from '../utils/practicePersistenceClient.js';
+import { loadSeasonPracticeAssignments } from '@squadlogic/core/practiceSupabase.js';
+import GridOverrideDialog from '../components/scheduling/GridOverrideDialog.jsx';
+import {
+  gridOverrideCloses,
+  gridOverrideCutWindows,
+  gridOverridePlan,
+  gridOverrideReason,
+  gridOverrideUndatable,
+  gridOverrideUnlock,
+  samePruneSet,
+} from '../utils/gridOverridePrompt.js';
 import { buildDaylightExceptions } from '../utils/daylightExceptions.js';
+import {
+  describePracticeLockRefusal,
+  parsePracticeLockRefusal,
+} from '../utils/practiceLockRefusal.js';
 import {
   buildPracticeApplyStatus,
   buildTeamsWithoutPracticeWarnings,
@@ -394,6 +410,58 @@ function toLockedAssignment(assignment) {
   return { id, teamId, slotId, effectiveDateRange, assignedVia };
 }
 
+/**
+ * The saved row a locked refusal names, as the operator knows it: its team
+ * and its series (weekday, time, inclusive dates). Read from this page's own
+ * rows; a part it cannot resolve is left out, never replaced by the id.
+ *
+ * `rows` are the page's copies of that one row, the season read's first: it
+ * carries the stored range, and a grid row may carry display placeholders.
+ * The slot comes from every slot row the page read (`practiceSlotRows`), not
+ * only the placeable ones. A display placeholder ("Unknown Team", or the
+ * `Team <id>` fallback) is not a name.
+ *
+ * `field` is the slot's field name, for the override prompt's lines; the
+ * refusal message does not use it.
+ *
+ * @returns {{ teamName: string|null, series: string|null, field: string|null } | null}
+ */
+function lockedRowOf(rows, { teamById, slotRows }) {
+  const row = rows.find(Boolean);
+  if (!row) return null;
+  const teamId = getAssignmentTeamId(row);
+  const slotId = getAssignmentSlotId(row);
+  const slotRow = slotRows.find((slot) => slot?.id === slotId);
+  const shown = rows.map((r) => r?.practiceSlots).find(Boolean) ?? {};
+  const rawDay = slotRow?.day_of_week ?? shown.dayOfWeek ?? shown.day_of_week ?? null;
+  const day = rawDay ? normalizeDay(rawDay) : null;
+  const clock = (value) => normalizeTime(value)?.slice(0, 5) ?? null;
+  const start = clock(slotRow?.start_time ?? shown.startTime ?? shown.start_time);
+  const end = clock(slotRow?.end_time ?? shown.endTime ?? shown.end_time);
+  const range = rows.map((r) => r?.effective_date_range ?? r?.effectiveDateRange).find(Boolean);
+  const bounds = practiceRangeBounds(range);
+  const when = day && start && end ? `${day} ${start}–${end}` : day;
+  const series = [when, bounds ? `${bounds.first} to ${bounds.last}` : null]
+    .filter(Boolean)
+    .join(', ');
+  const isName = (name) =>
+    typeof name === 'string' &&
+    name.trim() !== '' &&
+    name !== 'Unknown Team' &&
+    !name.includes(String(teamId));
+  const teamName =
+    [teamById.get(teamId)?.name, ...rows.map((r) => r?.teams?.name)].find(isName) ?? null;
+  const field = slotRow?.fields?.name ?? shown.fields?.name ?? null;
+  return { teamName, series: series || null, field };
+}
+
+/** One line of the override prompt: the series, and its field when known. */
+function seriesLineOf(rows, lookups) {
+  const row = lockedRowOf(rows, lookups);
+  const line = row?.series ?? 'a practice whose series could not be read';
+  return row?.field && row.field !== 'Unknown Field' ? `${line} · ${row.field}` : line;
+}
+
 export default function PracticeSchedulingPage() {
   // `error` too. The page's own scheduler errors (`autoScheduler.error`,
   // `applyError`) are about a run the operator just started; this one is about
@@ -439,6 +507,11 @@ export default function PracticeSchedulingPage() {
   const [statusMessage, setStatusMessage] = useState(null);
   const [applyStatus, setApplyStatus] = useState('idle');
   const [applyError, setApplyError] = useState(null);
+  // The ruling-2 override prompt (docs/PLAN_GRID_OVERRIDE_PROMPT.md §2): null
+  // while closed; else the plan it shows, the fingerprint read when it opened,
+  // why it cannot confirm (if so), its notice, and a key that remounts the
+  // dialog whenever the list changes.
+  const [overridePrompt, setOverridePrompt] = useState(null);
   // #64: one warning per season team the last save left with no practice.
   const [teamWarnings, setTeamWarnings] = useState([]);
   const [reviewedSchedulerRunId, setReviewedSchedulerRunId] = useState(null);
@@ -663,6 +736,52 @@ export default function PracticeSchedulingPage() {
 
   const localAssignments = reviewAssignments ?? assignments;
   const isColdStart = !schedulerTeams.length;
+
+  // What the fairness panel evaluates: the shown assignments against the same
+  // teams and slots the auto-scheduler is sent. It used to get `assignments`
+  // alone, so `fairness-scoring` scored an empty roster and reported zero coach
+  // conflicts for every schedule (audit 13.1, #364). Only the fields the Edge's
+  // `ScoringInputSchema` reads are sent: each row's ids through the page's own
+  // resolvers (a stored row may carry `practice_slot_id` alone), the teams'
+  // head and assistant coaches, and the slots' instants on the season's clock.
+  // `null` while a read is still landing or after one failed (the page reports
+  // those failures itself), so the panel never scores a partial list as the
+  // season's. Memoized so the panel's debounced request isn't restarted by
+  // every render.
+  const evaluationReadsPending = [
+    dashboardLoading.team,
+    dashboardLoading.practice,
+    practiceSlotsLoading,
+    seasonClockLoading,
+    errors.team,
+    errors.practice,
+    practiceSlotsError,
+  ].some(Boolean);
+  const evaluationPracticeData = useMemo(
+    () =>
+      evaluationReadsPending
+        ? null
+        : {
+            assignments: localAssignments.map((assignment) => ({
+              teamId: getAssignmentTeamId(assignment),
+              slotId: getAssignmentSlotId(assignment),
+            })),
+            teams: schedulerTeams.map(({ id, division, coachId, assistantCoachIds }) => ({
+              id,
+              division,
+              coachId,
+              assistantCoachIds,
+            })),
+            slots: schedulerSlots.map(({ id, day, capacity, start, end }) => ({
+              id,
+              day,
+              capacity,
+              start,
+              end,
+            })),
+          },
+    [evaluationReadsPending, localAssignments, schedulerTeams, schedulerSlots]
+  );
   const schoolDayEnd =
     currentSeasonSetting?.school_day_end ?? currentSeasonSetting?.schoolDayEnd ?? undefined;
 
@@ -843,8 +962,79 @@ export default function PracticeSchedulingPage() {
     setStatusMessage(null);
   }, [autoScheduler]);
 
+  /**
+   * The schedule fingerprint (Q4), read BEFORE the rows a prompt shows (as
+   * `loadPracticeRepairSnapshot` reads it), so any change after that read is
+   * refused by the writer as stale instead of unlocking a row nobody was
+   * shown. Unreadable blocks Confirm: the override is never blind.
+   */
+  const readOverrideFingerprint = useCallback(async () => {
+    try {
+      const print = await supabase.rpc('practice_schedule_fingerprint', {
+        p_season_settings_id: currentSeasonSetting?.id,
+      });
+      if (print?.error || typeof print?.data !== 'string' || print.data === '') {
+        throw new Error(print?.error?.message ?? 'unreadable');
+      }
+      return { baseFingerprint: print.data, blocked: null };
+    } catch {
+      return {
+        baseFingerprint: null,
+        blocked:
+          "The schedule's fingerprint could not be read, so a change made elsewhere while " +
+          'this is open could not be detected. Close this and Apply again.',
+      };
+    }
+  }, [currentSeasonSetting?.id]);
+
+  /** The season's current rows, read now: the prompt never works from a cache. */
+  const readSeasonRows = useCallback(
+    () =>
+      loadSeasonPracticeAssignments(supabase, {
+        organizationId: currentOrganization?.id,
+        seasonSettingsId: currentSeasonSetting?.id,
+      }).catch((err) => ({ ok: false, message: err?.message ?? 'unreadable', rows: [] })),
+    [currentOrganization?.id, currentSeasonSetting?.id]
+  );
+
+  /** Open (or reopen) the override prompt on `plan`, with the print read before it. */
+  const openOverridePrompt = useCallback((plan, notice, print) => {
+    setOverridePrompt((previous) => ({
+      plan,
+      baseFingerprint: print.baseFingerprint,
+      blocked: print.blocked,
+      notice,
+      busy: false,
+      key: (previous?.key ?? 0) + 1,
+    }));
+  }, []);
+
+  /**
+   * What the override prompt's Confirm accepted, handed to the next Apply and
+   * consumed by it: null for the Apply button. (A ref, not a parameter, so
+   * the Apply callback's signature -- and the rest of it -- stays as it was.)
+   *
+   * @type {React.MutableRefObject<{ prune: Array<Record<string, any>>,
+   *   today: string|null, reasonCode: string, baseFingerprint: string|null } | null>}
+   */
+  const overrideConfirmation = useRef(null);
+
   const handleApplySchedule = useCallback(async () => {
+    const confirmation = overrideConfirmation.current;
+    overrideConfirmation.current = null;
     if (!canManageSchedule || !canApplySchedule || !reviewAssignments?.length) return;
+    // A refusal while the override prompt is open is shown in it, not behind
+    // its overlay (plan §2.9).
+    const refuse = (text) => {
+      if (confirmation) {
+        setOverridePrompt(
+          (prompt) => prompt && { ...prompt, busy: false, notice: { tone: 'alert', text } }
+        );
+        return;
+      }
+      setApplyError(text);
+      setApplyStatus('error');
+    };
 
     const persistenceAssignments = reviewAssignments.map(toPersistenceAssignment);
     const missingSlot = persistenceAssignments.find(
@@ -852,10 +1042,7 @@ export default function PracticeSchedulingPage() {
     );
 
     if (missingSlot) {
-      setApplyError(
-        'One or more staged assignments references a practice slot that no longer exists.'
-      );
-      setApplyStatus('error');
+      refuse('One or more staged assignments references a practice slot that no longer exists.');
       return;
     }
 
@@ -869,19 +1056,160 @@ export default function PracticeSchedulingPage() {
       slots: schedulerSlots,
     });
     if (daylightTbd.unmatched.length > 0) {
-      setApplyError(
+      refuse(
         `The daylight check made ${daylightTbd.unmatched
           .map((entry) => teamById.get(entry.teamId)?.name ?? entry.teamId)
           .join(', ')} ` +
           'TIME TBD from a date past sunset, and the staged schedule no longer holds that ' +
           'placement, so it cannot be recorded. Run the auto-scheduler again.'
       );
-      setApplyStatus('error');
       return;
     }
 
     const runId = autoScheduler.result?.runId ?? practice?.runId ?? undefined;
     const now = new Date().toISOString();
+
+    // Operator ruling 2 (plan §2.1): every saved row this save would make the
+    // writer remove is locked. The admin is asked first; nothing is sent
+    // until they accept, and then exactly those rows go in `unlock`. The
+    // auto-scheduler's review places only teams with no row, so it computes
+    // an empty set and saves as before (§2.6).
+    const stagedTeamIds = reviewAssignments
+      .filter((assignment) => assignment.stagedOverride === true)
+      .map(getAssignmentTeamId);
+    // The plan keeps the read it was built from, so the prompt's "kept"
+    // history is that read's too. The replaced series that started before
+    // today are closed on yesterday, never deleted (operator decision, #546).
+    const seasonToday = seasonCalendarDate(Date.now(), timezone);
+    const planOf = (rows) => {
+      const plan = gridOverridePlan({
+        seasonRows: rows,
+        assignments: persistenceAssignments,
+        slotById,
+        stagedTeamIds,
+      });
+      const closes = seasonToday ? gridOverrideCloses(plan.prune, seasonToday) : [];
+      const undatable = seasonToday ? gridOverrideUndatable(plan.prune, seasonToday) : [];
+      return { ...plan, closes, undatable, cuts: [], today: seasonToday, rows };
+    };
+    // The live exception windows the override would cut (the enact's
+    // CLOSE_CUTS_LIVE_EXCEPTION contract), read for the replaced rows only.
+    // Unreadable refuses: the override is never blind.
+    const withCuts = async (plan) => {
+      if (plan.prune.length === 0) return plan;
+      const { data, error } = await supabase
+        .from('practice_exceptions')
+        .select('id, assignment_id, window, withdrawn_at')
+        .in(
+          'assignment_id',
+          plan.prune.map((row) => row.id)
+        );
+      if (error) return null;
+      return { ...plan, cuts: gridOverrideCutWindows(plan.prune, plan.closes, data ?? []) };
+    };
+    let unlock = [];
+    let closes = [];
+    let baseFingerprint = null;
+    // Every judgement below is on a FRESH read, never the cached `seasonRows`
+    // (empty while a refetch is in flight), with the fingerprint read first.
+    if (confirmation) {
+      setOverridePrompt((prompt) => prompt && { ...prompt, busy: true, notice: null });
+    }
+    const print = await readOverrideFingerprint();
+    const fresh = await readSeasonRows();
+    if (fresh.ok !== true) {
+      refuse(
+        "This season's current practices could not be read, so the save cannot tell which " +
+          `saved practices it would replace. Nothing was saved (${fresh.message}).`
+      );
+      return;
+    }
+    const plan = await withCuts(planOf(fresh.rows));
+    if (!plan) {
+      refuse(
+        "The replaced practices' saved exceptions could not be read, so the save cannot tell " +
+          'whether ending them cuts one. Nothing was saved.'
+      );
+      return;
+    }
+    if (plan.prune.length > 0 && !seasonToday) {
+      refuse(
+        "Today's date on the season's clock is unknown, so the replaced practice cannot be " +
+          'ended on yesterday. Nothing was saved.'
+      );
+      return;
+    }
+    // #546: a staged row dated before today (the date rolled over since it
+    // was staged) would claim a past day. Never re-dated silently.
+    if (
+      reviewAssignments.some(
+        (assignment) =>
+          assignment.stagedOverride === true &&
+          (practiceRangeBounds(assignment.effectiveDateRange)?.first ?? seasonToday) < seasonToday
+      )
+    ) {
+      refuse(
+        `The date has changed (today is ${seasonToday}) since the override was staged, so it ` +
+          'would claim a day already past. Discard the review and stage it again.'
+      );
+      return;
+    }
+    if (!confirmation) {
+      if (plan.prune.length > 0) {
+        openOverridePrompt(plan, null, print);
+        return;
+      }
+      if (plan.overlaps.length > 0) {
+        refuse(
+          'A staged practice double-books a saved practice of the same team on the same ' +
+            'weekday and time, which cannot be saved. Choose another slot.'
+        );
+        return;
+      }
+    } else {
+      // Recompute, not what the prompt opened with: a row added, removed or
+      // re-ranged since then must be shown before it is unlocked (the
+      // enact's `prompt-changed` rule).
+      if (
+        plan.strays.length > 0 ||
+        !samePruneSet(plan.prune, confirmation.prune) ||
+        plan.today !== confirmation.today
+      ) {
+        refetchSeasonPractice();
+        if (plan.prune.length === 0) {
+          setOverridePrompt(null);
+          setStatusMessage(
+            'The saved schedule changed while the override prompt was open, and nothing ' +
+              'staged needs unlocking now. Nothing was saved; Apply again to save.'
+          );
+          return;
+        }
+        openOverridePrompt(
+          plan,
+          {
+            tone: 'alert',
+            text:
+              'The saved schedule changed while this prompt was open, so nothing was saved. ' +
+              'Check the practices below and confirm again.',
+          },
+          print
+        );
+        return;
+      }
+      if (plan.overlaps.length > 0 || plan.undatable.length > 0 || plan.cuts.length > 0) {
+        refuse(
+          'This override cannot be saved as shown: it would double-book a kept practice, ' +
+            'remove a practice whose dates cannot be read, or cut a saved exception.'
+        );
+        return;
+      }
+      unlock = gridOverrideUnlock(
+        plan.prune,
+        gridOverrideReason({ runId, code: confirmation.reasonCode })
+      );
+      closes = plan.closes;
+      baseFingerprint = confirmation.baseFingerprint;
+    }
 
     setApplyStatus('applying');
     setApplyError(null);
@@ -910,11 +1238,20 @@ export default function PracticeSchedulingPage() {
     });
 
     try {
-      // Only a save with daylight exceptions carries a repair body: without
-      // one the Edge sends the v2 argument set (#461).
+      // Only a save with daylight exceptions or an accepted override carries
+      // a repair body: without one the Edge sends the v2 argument set (#461).
+      // The assignments are the staged payload either way; an override's
+      // replaced series are ended on yesterday through `closes`.
       const persist =
-        daylightTbd.exceptions.length > 0
-          ? (request) => persistPracticeRepair({ ...request, exceptions: daylightTbd.exceptions })
+        daylightTbd.exceptions.length > 0 || unlock.length > 0
+          ? (request) =>
+              persistPracticeRepair({
+                ...request,
+                exceptions: daylightTbd.exceptions,
+                unlock,
+                closes,
+                ...(baseFingerprint ? { baseFingerprint } : {}),
+              })
           : persistPracticeScheduleReview;
       const result = await persist({
         assignments: persistenceAssignments,
@@ -943,9 +1280,12 @@ export default function PracticeSchedulingPage() {
           ...assignment,
           runId: appliedRunId,
           source: normalizeAssignmentSource(assignment.source),
+          // Saved: no longer an override staged in THIS session (plan §2.1).
+          stagedOverride: false,
         }))
       );
       setReviewAssignments(null);
+      setOverridePrompt(null);
       setApplyStatus('applied');
       // The save created rows the page knows only by review ids. Re-read the
       // season so the next run's cross-check names them by their real ids.
@@ -970,17 +1310,72 @@ export default function PracticeSchedulingPage() {
         })
       );
     } catch (err) {
-      setApplyError(err.message || 'Practice schedule changes could not be applied.');
+      // Writer v3's lock (ruling 2): a save that would replace a saved
+      // practice it does not unlock is refused. Say which one in words; the
+      // raw text names it only by id. Every other refusal keeps its message.
+      const locked = parsePracticeLockRefusal(err);
+      const isLockedRow = (row) =>
+        Boolean(locked?.assignmentId) &&
+        String(row?.id ?? '').toLowerCase() === locked.assignmentId.toLowerCase();
+      const lockedRows = [seasonRows.find(isLockedRow), assignments.find(isLockedRow)];
+      const message = locked
+        ? describePracticeLockRefusal(
+            lockedRowOf(lockedRows, { teamById, slotRows: practiceSlotRows }),
+            locked.cause
+          )
+        : err.message || 'Practice schedule changes could not be applied.';
+      if (confirmation) {
+        // A refusal of an accepted override is shown in the prompt, which
+        // keeps focus (plan §2.9). The staged review is left as it was.
+        setApplyStatus('review');
+        if (err?.code === PRACTICE_SCHEDULE_STALE) {
+          // Q4: the schedule changed since the prompt opened. Re-read and
+          // reopen on the fresh read; never resend on the old one.
+          refetchSeasonPractice();
+          const stalePrint = await readOverrideFingerprint();
+          const reread = await readSeasonRows();
+          const notice = {
+            tone: 'alert',
+            text:
+              'The saved schedule changed since this prompt opened, so nothing was saved. ' +
+              'It has been re-read: check the practices below and confirm again.',
+          };
+          if (reread.ok === true) {
+            openOverridePrompt(
+              (await withCuts(planOf(reread.rows))) ?? planOf(reread.rows),
+              notice,
+              stalePrint
+            );
+          } else {
+            setOverridePrompt((prompt) => prompt && { ...prompt, busy: false, notice });
+          }
+          return;
+        }
+        // The writer's own admin-with-a-uid gate (plan §2.8).
+        const text = String(err?.message ?? '').startsWith('unlock requires an org admin')
+          ? 'Only an organization admin can replace a saved practice.'
+          : message;
+        setOverridePrompt(
+          (prompt) => prompt && { ...prompt, busy: false, notice: { tone: 'alert', text } }
+        );
+        return;
+      }
+      setApplyError(message);
       setApplyStatus('error');
     }
   }, [
+    assignments,
     autoScheduler.result,
     canApplySchedule,
     canManageSchedule,
     currentOrganization?.id,
     currentSeasonSetting?.id,
     lockedAssignments.length,
+    openOverridePrompt,
     practice?.runId,
+    practiceSlotRows,
+    readOverrideFingerprint,
+    readSeasonRows,
     refetchSeasonPractice,
     reviewAssignments,
     schedulerSlots,
@@ -989,6 +1384,7 @@ export default function PracticeSchedulingPage() {
     // unchanged count has to re-create it.
     schedulerTeams,
     schoolDayEnd,
+    seasonRows,
     slotById,
     teamById,
     timezone,
@@ -1007,7 +1403,7 @@ export default function PracticeSchedulingPage() {
       setReviewAssignments(staged);
       setApplyStatus('review');
       setApplyError(null);
-      setStatusMessage('Lock change staged. Apply the schedule to persist it.');
+      setStatusMessage('Manual-choice mark staged. Apply the schedule to persist it.');
     },
     [canManageSchedule, localAssignments]
   );
@@ -1030,12 +1426,35 @@ export default function PracticeSchedulingPage() {
     (teamId, slotId) => {
       if (!canManageSchedule) return;
 
+      // Operator decision on #546: an override never rewrites history. The
+      // staged row starts TODAY on the season's clock (`newPlacementRange`,
+      // as a run's new placement does) -- for every staged team, so a
+      // re-stage or a team with no practice never claims weeks already past
+      // -- and a replaced series is closed on yesterday at Apply.
+      const seasonToday = seasonCalendarDate(Date.now(), timezone);
+      const stagedSlot = slotById.get(slotId);
+      const todayRange =
+        stagedSlot && seasonToday ? newPlacementRange(stagedSlot, seasonToday) : null;
+      if (!practiceRangeBounds(todayRange)) {
+        setApplyError(
+          !seasonToday
+            ? "Today's date on the season's clock is unknown, so the override cannot be dated."
+            : `That practice slot's dates end before today (${seasonToday}), so nothing was staged.`
+        );
+        return;
+      }
+
       const nextAssignment = buildDisplayAssignment({
         assignment: {
           id: `staged-${teamId}-${slotId}`,
           teamId,
           slotId,
           source: 'manual',
+          // The override prompt may unlock only a team staged here (plan
+          // §2.1): the review row itself records it, so a review replaced by
+          // a run or discarded carries no stale staged set.
+          stagedOverride: true,
+          effectiveDateRange: todayRange,
         },
         index: localAssignments.length,
         runId: autoScheduler.result?.runId ?? practice?.runId ?? null,
@@ -1045,22 +1464,19 @@ export default function PracticeSchedulingPage() {
 
       const isTeamRow = (assignment) => String(getAssignmentTeamId(assignment)) === String(teamId);
       const replaced = localAssignments.some(isTeamRow);
-      // An override replaces the team's CURRENT series only. A CLOSED series --
-      // one whose range ends before another of the team's series starts, as a
-      // re-home's `closes` leaves it -- is history: it stays in the payload as
-      // it is, so the writer keeps it by its key. Ranges are read with core
+      // An override replaces the team's CURRENT series only. A series that
+      // ended before today -- as a re-home's `closes` leaves it -- is history:
+      // it stays in the payload as it is, so the writer keeps it by its key.
+      // #546: decided by DATE, not by "ends before another series starts"
+      // (#541's first rule): a series running through today is current, and
+      // is closed on yesterday at Apply. Ranges are read with core
       // `practiceRangeBounds`, as `toPersistenceAssignment` reads them; a range
       // that does not read is treated as current, never as history.
       const boundsOf = (assignment) =>
         practiceRangeBounds(assignment.effectiveDateRange ?? assignment.effective_date_range);
-      const latestStart = localAssignments
-        .filter(isTeamRow)
-        .map((assignment) => boundsOf(assignment)?.first)
-        .filter(Boolean)
-        .reduce((latest, first) => (latest && latest > first ? latest : first), null);
       const isClosed = (assignment) => {
         const bounds = boundsOf(assignment);
-        return Boolean(bounds && latestStart && bounds.last < latestStart);
+        return Boolean(bounds && bounds.last < seasonToday);
       };
       // Several CURRENT series (two weekdays) are ambiguous: which day does the
       // override replace? Not guessed. Today's behaviour is kept: one staged
@@ -1075,6 +1491,9 @@ export default function PracticeSchedulingPage() {
             return [nextAssignment];
           })
         : [...localAssignments, nextAssignment];
+      // Every row of the team was history (closed, or ended before today):
+      // nothing current to replace, so the override is an addition.
+      if (replaced && !stagedOnce) staged.push(nextAssignment);
 
       setReviewAssignments(staged);
       setApplyStatus('review');
@@ -1088,7 +1507,96 @@ export default function PracticeSchedulingPage() {
       practice?.runId,
       slotById,
       teamById,
+      timezone,
     ]
+  );
+
+  /**
+   * What the override prompt shows (plan §2.2), from its plan and the staged
+   * review: per team the series replaced, the staged rows replacing them,
+   * and the history kept; then the rows it cannot unlock, by name.
+   */
+  const overrideView = useMemo(() => {
+    if (!overridePrompt) return null;
+    const { plan } = overridePrompt;
+    const lookups = { teamById, slotRows: practiceSlotRows };
+    const lower = (value) => String(value ?? '').toLowerCase();
+    const strayIds = new Set(plan.strays.map((row) => lower(row.id)));
+    const pruneIds = new Set(plan.prune.map((row) => lower(row.id)));
+    const nameOf = (rows) => lockedRowOf(rows, lookups)?.teamName ?? null;
+    const teams = [];
+    for (const row of plan.prune) {
+      if (strayIds.has(lower(row.id))) continue;
+      const teamId = String(getAssignmentTeamId(row));
+      let team = teams.find((entry) => entry.teamId === teamId);
+      if (!team) {
+        const isTeam = (r) => lower(getAssignmentTeamId(r)) === lower(teamId);
+        team = {
+          teamId,
+          teamName: nameOf([row]) ?? 'This team',
+          past: null,
+          replacing: [],
+          replacement: (reviewAssignments ?? [])
+            .filter((r) => r.stagedOverride === true && isTeam(r))
+            .map((r) => seriesLineOf([r], lookups)),
+          kept: plan.rows
+            .filter((r) => isTeam(r) && !pruneIds.has(lower(r.id)))
+            .map((r) => seriesLineOf([r], lookups)),
+        };
+        teams.push(team);
+      }
+      // #546: a series that started before today is ended on yesterday, its
+      // past kept; one that has not started yet is replaced whole.
+      const close = plan.closes.find((c) => lower(c.assignment_id) === lower(row.id));
+      team.replacing.push(
+        `${seriesLineOf([row], lookups)} (${
+          close ? `ends on ${close.last_day}` : 'not started yet, so replaced whole'
+        })`
+      );
+      if (close) {
+        team.past =
+          `Practices up to ${close.last_day} are kept; from ${plan.today} ${team.teamName} ` +
+          `practises ${team.replacement.join(' and ') || 'nothing'}.`;
+      }
+    }
+    const strays = plan.strays.map(
+      (row) =>
+        `${nameOf([row]) ?? 'A team'}’s practice (${seriesLineOf([row], lookups)}) would be removed`
+    );
+    // The writer's double-booking refusal (:920-956), told before Confirm.
+    const overlap = plan.overlaps[0];
+    const undatable = plan.undatable[0];
+    const cut = plan.cuts[0];
+    const cutRow = cut && plan.prune.find((r) => lower(r.id) === lower(cut.assignment_id));
+    const blocked = overlap
+      ? `The new practice for ${nameOf([overlap]) ?? 'this team'} overlaps its kept series ` +
+        `(${seriesLineOf([overlap], lookups)}) on the same weekday and time, which cannot be ` +
+        'saved. Cancel and choose another slot.'
+      : undatable
+        ? `${nameOf([undatable]) ?? 'A team'}’s practice (${seriesLineOf([undatable], lookups)}) ` +
+          'is not current or its dates cannot be read, so the override cannot end it on ' +
+          'yesterday. Nothing can be saved here.'
+        : cut
+          ? `${nameOf([cutRow]) ?? 'A team'}’s practice has a saved exception (${cut.window}) ` +
+            'after the day it would end, and the grid does not withdraw exceptions. Withdraw ' +
+            'it first, then Apply again.'
+          : overridePrompt.blocked;
+    return { teams, strays, blocked };
+  }, [overridePrompt, practiceSlotRows, reviewAssignments, teamById]);
+
+  const closeOverridePrompt = useCallback(() => setOverridePrompt(null), []);
+  const confirmOverride = useCallback(
+    (reasonCode) => {
+      if (!overridePrompt) return;
+      overrideConfirmation.current = {
+        prune: overridePrompt.plan.prune,
+        today: overridePrompt.plan.today,
+        reasonCode,
+        baseFingerprint: overridePrompt.baseFingerprint,
+      };
+      handleApplySchedule();
+    },
+    [handleApplySchedule, overridePrompt]
   );
 
   /**
@@ -1309,11 +1817,7 @@ export default function PracticeSchedulingPage() {
             </div>
           )}
 
-          <EvaluationPanel
-            practiceData={{
-              assignments: localAssignments,
-            }}
-          />
+          <EvaluationPanel practiceData={evaluationPracticeData} />
 
           <div className="bg-bg-glass border border-border-subtle rounded-xl overflow-hidden shadow-md mt-8">
             {statusMessage && (
@@ -1349,6 +1853,19 @@ export default function PracticeSchedulingPage() {
           />
         </div>
       </div>
+      {overridePrompt && overrideView && (
+        <GridOverrideDialog
+          key={overridePrompt.key}
+          open
+          teams={overrideView.teams}
+          strays={overrideView.strays}
+          blocked={overrideView.blocked}
+          busy={overridePrompt.busy}
+          notice={overridePrompt.notice}
+          onConfirm={confirmOverride}
+          onClose={closeOverridePrompt}
+        />
+      )}
     </div>
   );
 }

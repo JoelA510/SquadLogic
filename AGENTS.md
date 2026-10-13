@@ -312,15 +312,14 @@ For a "UI/UX pass", "visual polish", or any frontend view work:
 - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` — the Supabase project URL and publishable
   (anon) key: `.env.local` (from `.env.example`) and Vercel.
 - `VITE_USE_MOCK_SUPABASE` — force the mock client (`true`): `.env.local` or CI.
-- `VITE_SUPABASE_PERSISTENCE_URL` — the Edge Function base URL, optional in `.env.local`;
-  derived from `VITE_SUPABASE_URL` at build when unset.
-- `VITE_SENTRY_DSN` — the frontend Sentry DSN: Vercel.
+- `VITE_SUPABASE_PERSISTENCE_URL` — the Edge Function base URL, optional.
+- `VITE_SENTRY_DSN` — the frontend Sentry DSN, optional: Vercel.
 - `TEST_ADMIN_EMAIL`, `TEST_COACH_EMAIL`, `TEST_PARENT_EMAIL`, `TEST_PASSWORD` — E2E test
   accounts: `.env.test`.
 
-**Never commit** `.env`, `.env.local`, or `.env.test` — they are gitignored. Use the `.example`
-templates. The full reference, including what the Vercel project sets, is
-`docs/operations/ENVIRONMENT.md`.
+Only `frontend/src/env.js` reads `import.meta.env`, by name; a production build fails on a missing
+or malformed variable. **Never commit** `.env`, `.env.local`, or `.env.test`. The full reference
+is `docs/operations/ENVIRONMENT.md`.
 
 ## 11. CI Pipeline
 

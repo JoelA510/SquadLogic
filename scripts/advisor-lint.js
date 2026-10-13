@@ -183,16 +183,12 @@ function lintEnvExamples() {
       if (!m) continue;
       const key = m[1];
       // Allow-list of known-public Vite env keys that intentionally have secret-shaped names.
-      // VITE_TEST_PASSWORD is documented as an example-only credential; see
-      // .env.test.example for the explicit warning comment.
+      // The test credentials left the VITE_ prefix in M2.2 (TEST_*, read at the Node layer).
       if (
         key === 'VITE_SUPABASE_ANON_KEY' ||
         key === 'VITE_SUPABASE_URL' ||
         key === 'VITE_SENTRY_DSN' ||
-        key === 'VITE_APP_VERSION' ||
-        key === 'VITE_TEST_PASSWORD' ||
-        key === 'VITE_TEST_ADMIN_EMAIL' ||
-        key === 'VITE_TEST_COACH_EMAIL'
+        key === 'VITE_APP_VERSION'
       )
         continue;
       if (/SECRET|PRIVATE|TOKEN|KEY|PASSWORD/.test(key)) {

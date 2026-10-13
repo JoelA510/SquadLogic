@@ -2,8 +2,9 @@
 /**
  * Sentry release tag and privacy options. docs/operations/sentry-smoke.md
  * expects every event tagged with package.json's version, so the chain is
- * pinned link by link: vite.config.js defines the version, main.jsx passes it
- * as `release`, and sentryInitOptions puts it on the options it returns.
+ * pinned link by link: vite.config.js defines the version, env.js (the only
+ * reader of import.meta.env, M2.2) exports it as APP_VERSION, main.jsx passes
+ * that as `release`, and sentryInitOptions puts it on the options it returns.
  * The environment is pinned the same way: Vercel's VERCEL_ENV, defined by
  * name, so a preview deploy's events read `preview`, not `production`.
  */
@@ -36,9 +37,12 @@ describe('Sentry release', () => {
     expect(define['import.meta.env.VITE_APP_VERSION']).toBe(JSON.stringify(VERSION));
   });
 
-  it('main.jsx passes VITE_APP_VERSION as the release, behind the DSN gate', () => {
+  it('main.jsx passes VITE_APP_VERSION (via env.js) as the release, behind the DSN gate', () => {
+    const env = readFileSync(path.join(ROOT, 'frontend/src/env.js'), 'utf8');
+    expect(env).toContain('export const APP_VERSION = import.meta.env.VITE_APP_VERSION;');
     const main = readFileSync(path.join(ROOT, 'frontend/src/main.jsx'), 'utf8');
-    expect(main).toContain('release: import.meta.env.VITE_APP_VERSION');
+    expect(main).toMatch(/^import \{[^}]*\bAPP_VERSION\b[^}]*\} from '\.\/env\.js';$/m);
+    expect(main).toContain('release: APP_VERSION,');
     const gate = main.indexOf('if (SENTRY_DSN) {');
     expect(gate).toBeGreaterThan(-1);
     // Calls, not the header comment that mentions Sentry.init().
@@ -113,8 +117,11 @@ describe('Sentry environment', () => {
     expect(config.match(/process\.env\b(?!\.VERCEL_ENV\b)/g) ?? []).toEqual([]);
   });
 
-  it('main.jsx passes VITE_VERCEL_ENV as the deploy environment', () => {
+  it('main.jsx passes VITE_VERCEL_ENV (via env.js) as the deploy environment', () => {
+    const env = readFileSync(path.join(ROOT, 'frontend/src/env.js'), 'utf8');
+    expect(env).toContain('export const DEPLOY_ENV = import.meta.env.VITE_VERCEL_ENV;');
     const main = readFileSync(path.join(ROOT, 'frontend/src/main.jsx'), 'utf8');
-    expect(main).toContain('deployEnv: import.meta.env.VITE_VERCEL_ENV');
+    expect(main).toMatch(/^import \{[^}]*\bDEPLOY_ENV\b[^}]*\} from '\.\/env\.js';$/m);
+    expect(main).toContain('deployEnv: DEPLOY_ENV,');
   });
 });

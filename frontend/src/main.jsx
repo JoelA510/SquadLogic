@@ -5,24 +5,25 @@ import App from './App.jsx';
 import { supabaseReady } from './lib/supabaseClient.js';
 import { logger } from './lib/logger.js';
 import { sentryInitOptions } from './lib/sentryOptions.js';
+import { APP_VERSION, DEPLOY_ENV, IS_DEV, SENTRY_DSN } from './env.js';
 import './index.css';
 
 // ---------------------------------------------------------------------------
 // Sentry initialization — Phase 9 Production Hardening
 //
-// Gated behind VITE_SENTRY_DSN. When the env var is absent or empty,
-// Sentry.init() is skipped entirely and the SDK tree-shakes to near-zero
-// in the production bundle (Vite dead-code elimination).
+// Gated behind VITE_SENTRY_DSN, validated in env.js (a malformed DSN fails the
+// build). When the env var is absent or empty, Sentry.init() is skipped
+// entirely and the SDK tree-shakes to near-zero in the production bundle
+// (Vite dead-code elimination).
 // ---------------------------------------------------------------------------
-const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN;
 
 if (SENTRY_DSN) {
   Sentry.init(
     sentryInitOptions({
       dsn: SENTRY_DSN,
-      dev: import.meta.env.DEV,
-      release: import.meta.env.VITE_APP_VERSION,
-      deployEnv: import.meta.env.VITE_VERCEL_ENV,
+      dev: IS_DEV,
+      release: APP_VERSION,
+      deployEnv: DEPLOY_ENV,
       integrations: [Sentry.browserTracingIntegration(), Sentry.replayIntegration()],
     })
   );

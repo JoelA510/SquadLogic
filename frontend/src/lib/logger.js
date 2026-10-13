@@ -18,6 +18,7 @@
  */
 
 import * as Sentry from '@sentry/react';
+import { IS_PRODUCTION_BUILD } from '../env.js';
 
 // ---------------------------------------------------------------------------
 // Logger API
@@ -25,17 +26,17 @@ import * as Sentry from '@sentry/react';
 
 export const logger = {
   log: (...args) => {
-    if (!import.meta.env.PROD) console.log(...args);
+    if (!IS_PRODUCTION_BUILD) console.log(...args);
   },
 
   // `info` is an alias for `log` — matches the standard console API so call
   // sites like `logger.info('event', payload)` don't silently crash.
   info: (...args) => {
-    if (!import.meta.env.PROD) console.info(...args);
+    if (!IS_PRODUCTION_BUILD) console.info(...args);
   },
 
   warn: (...args) => {
-    if (!import.meta.env.PROD) console.warn(...args);
+    if (!IS_PRODUCTION_BUILD) console.warn(...args);
   },
 
   error: (...args) => {

@@ -26,6 +26,14 @@ npm run check:bundle
 npm run check:advisors
 ```
 
+`npm run frontend:build` is a production build, so it fails, naming the
+variable, without `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (plan item
+M2.2). CI's step sets well-formed stand-ins; to build what CI builds (and
+measures), run
+`VITE_SUPABASE_URL=https://ci-build.invalid VITE_SUPABASE_ANON_KEY=sb_publishable_ci-build-stand-in npm run frontend:build`.
+`VITE_USE_MOCK_SUPABASE=true` also builds, but with the mock chunk, which is
+not what CI measures. See [`ENVIRONMENT.md`](./ENVIRONMENT.md#production-safety).
+
 `npm run check:bundle` must run after `npm run frontend:build` because it
 reads `dist/assets`. If the build artifact is missing, the bundle gate fails
 loudly and tells the operator to build first.

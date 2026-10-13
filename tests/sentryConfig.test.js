@@ -4,13 +4,15 @@
  * expects every event tagged with package.json's version, so the chain is
  * pinned link by link: vite.config.js defines the version, main.jsx passes it
  * as `release`, and sentryInitOptions puts it on the options it returns.
+ * The environment is pinned the same way: Vercel's VERCEL_ENV, defined by
+ * name, so a preview deploy's events read `preview`, not `production`.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import viteConfig from '../vite.config.js';
-import { sentryInitOptions } from '../frontend/src/lib/sentryOptions.js';
+import { sentryEnvironment, sentryInitOptions } from '../frontend/src/lib/sentryOptions.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -76,5 +78,43 @@ describe('Sentry privacy and sampling', () => {
     const crumb = { category: 'console' };
     expect(options({ dev: true }).beforeBreadcrumb(crumb)).toBeNull();
     expect(options().beforeBreadcrumb(crumb)).toBe(crumb);
+  });
+});
+
+describe('Sentry environment', () => {
+  it('a Vercel preview build reports preview, never production', () => {
+    expect(options({ deployEnv: 'preview' }).environment).toBe('preview');
+    expect(options({ deployEnv: 'production' }).environment).toBe('production');
+  });
+
+  it('a dev server is development whatever Vercel says', () => {
+    expect(sentryEnvironment({ dev: true, deployEnv: 'preview' })).toBe('development');
+    expect(sentryEnvironment({ dev: true, deployEnv: 'production' })).toBe('development');
+  });
+
+  it('a build outside Vercel, or with a value Vercel does not use, keeps production', () => {
+    expect(sentryEnvironment({ dev: false, deployEnv: '' })).toBe('production');
+    expect(sentryEnvironment({ dev: false, deployEnv: undefined })).toBe('production');
+    expect(sentryEnvironment({ dev: false, deployEnv: 'staging-ish' })).toBe('production');
+  });
+
+  it('vite.config.js defines exactly VERCEL_ENV, by name, and no other process.env', () => {
+    const define = /** @type {Record<string, string>} */ (viteConfig.define);
+    expect(define['import.meta.env.VITE_VERCEL_ENV']).toBe(
+      JSON.stringify(process.env.VERCEL_ENV ?? '')
+    );
+    // Only the two keys this file pins, and nothing that exposes process.env
+    // as a whole (a `define` of `process.env` would inline every build secret).
+    expect(Object.keys(define).sort()).toEqual([
+      'import.meta.env.VITE_APP_VERSION',
+      'import.meta.env.VITE_VERCEL_ENV',
+    ]);
+    const config = readFileSync(path.join(ROOT, 'vite.config.js'), 'utf8');
+    expect(config.match(/process\.env\b(?!\.VERCEL_ENV\b)/g) ?? []).toEqual([]);
+  });
+
+  it('main.jsx passes VITE_VERCEL_ENV as the deploy environment', () => {
+    const main = readFileSync(path.join(ROOT, 'frontend/src/main.jsx'), 'utf8');
+    expect(main).toContain('deployEnv: import.meta.env.VITE_VERCEL_ENV');
   });
 });

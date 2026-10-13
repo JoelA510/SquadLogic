@@ -9,13 +9,16 @@
  * @param {string | undefined} input.release The build's version. main.jsx passes
  *   `import.meta.env.VITE_APP_VERSION`, which vite.config.js defines from
  *   package.json's `version` at build time.
+ * @param {string | undefined} [input.deployEnv] Vercel's `VERCEL_ENV` for the
+ *   build. main.jsx passes `import.meta.env.VITE_VERCEL_ENV`, which
+ *   vite.config.js defines from exactly that one variable at build time.
  * @param {import('@sentry/react').BrowserOptions['integrations']} input.integrations
  * @returns {import('@sentry/react').BrowserOptions}
  */
-export function sentryInitOptions({ dsn, dev, release, integrations }) {
+export function sentryInitOptions({ dsn, dev, release, deployEnv, integrations }) {
   return {
     dsn,
-    environment: dev ? 'development' : 'production',
+    environment: sentryEnvironment({ dev, deployEnv }),
     release,
 
     // Data minimisation, stated rather than defaulted: the SDK does not attach
@@ -38,4 +41,21 @@ export function sentryInitOptions({ dsn, dev, release, integrations }) {
       return breadcrumb;
     },
   };
+}
+
+/** The Vercel environments an event may be tagged with, as `VERCEL_ENV` names them. */
+const VERCEL_ENVIRONMENTS = ['production', 'preview', 'development'];
+
+/**
+ * The Sentry `environment` for a build. A dev server is always `development`.
+ * A Vercel build takes Vercel's own name for the deploy, so a preview's events
+ * read `preview` and are never mistaken for production's. Any other build (no
+ * `VERCEL_ENV`, or a value Vercel does not use) keeps the previous default,
+ * `production`.
+ * @param {{ dev: boolean, deployEnv?: string }} input
+ * @returns {string}
+ */
+export function sentryEnvironment({ dev, deployEnv }) {
+  if (dev) return 'development';
+  return VERCEL_ENVIRONMENTS.includes(deployEnv ?? '') ? String(deployEnv) : 'production';
 }

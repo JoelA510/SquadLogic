@@ -119,6 +119,8 @@ In-memory per-user sliding-window rate limiter (Phase 3.2, finding M-4). Default
 
 BetterStack (Logtail) structured logger. Gated behind `BETTERSTACK_SOURCE_TOKEN` env var; when absent, logs are `console`-only. Exported as `edgeLogger` with `.info`, `.warn`, `.error`, and `.flush()` methods. Used by `auto-scheduler` for the progress stream.
 
+Every function serves its request handler through `withFailureLogging('<function-name>', handler)` (M1.5): each request gets a generated request ID, the handler records the organization ID once it has verified it, and an error that escapes the handler is logged (function name, request ID, organization ID or null, the error's name and code, and its message and stack with quoted values and email addresses redacted; never PostgREST `details`/`hint` or the request body) and rethrown, so the response is unchanged. A handler that catches its own failure and answers 500 calls `logFailure` with the same context. Not covered: the stand-in handler `game-`, `team-` and `practice-persistence` serve when their Supabase variables are missing (it answers 500 and the boot logs the cause once, to the console), and the other `edgeLogger` / `console.error` calls inside handlers, which still carry no request ID. `tests/edgeFailureLogging.test.js` enumerates the functions by directory and pins the wiring.
+
 ### 3.4 `_shared/schemas/scoring.ts`
 
 Zod schemas shared by `fairness-scoring` and `auto-scheduler`: `TeamSchema`, `SlotSchema`, `PracticeAssignmentSchema`, `GameAssignmentSchema`, and the top-level `ScoringInputSchema`. Uses `.passthrough()` to tolerate additional fields without schema drift blocking the caller.

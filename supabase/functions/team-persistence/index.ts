@@ -15,6 +15,7 @@ import {
   jsonResponse,
 } from '../_shared/auth.ts';
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
+import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
 
 // ── Inlined constants & config ──────────────────────────────────────────────
 const DEFAULT_ALLOWED_ROLES = ['authenticated', 'service_role', 'admin', 'scheduler'];
@@ -274,7 +275,7 @@ if (!supabaseUrl || !serviceRoleKey) {
     auth: { persistSession: false },
   });
 
-  handler = async (req: Request) => {
+  handler = withFailureLogging('team-persistence', async (req: Request, logCtx) => {
     // CORS preflight
     if (req.method === 'OPTIONS') {
       return new Response('ok', { headers: corsHeaders });
@@ -348,6 +349,7 @@ if (!supabaseUrl || !serviceRoleKey) {
         403
       );
     }
+    logCtx.organizationId = targetOrg.organizationId;
 
     const isOrgAdmin = await verifyOrgAdmin(serviceClient, user.id, targetOrg.organizationId);
     if (!isOrgAdmin) {
@@ -394,7 +396,7 @@ if (!supabaseUrl || !serviceRoleKey) {
       const response = jsonResponse(result, 200);
       return response;
     } catch (error) {
-      console.error('Team persistence error:', error);
+      await logFailure(logCtx, 'Team persistence failed', error);
       return jsonResponse(
         {
           status: 'error',
@@ -403,7 +405,7 @@ if (!supabaseUrl || !serviceRoleKey) {
         500
       );
     }
-  };
+  });
 }
 
 serve(handler);

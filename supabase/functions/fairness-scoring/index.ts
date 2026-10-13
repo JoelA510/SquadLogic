@@ -16,8 +16,9 @@ import {
   recordAudit,
 } from '../_shared/auth.ts';
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
+import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
 
-serve(async (req) => {
+const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
   // 1. CORS Preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -58,6 +59,7 @@ serve(async (req) => {
     if (!isMember) {
       return jsonResponse({ error: 'Not authorized for this organization' }, 403);
     }
+    logCtx.organizationId = organizationId;
 
     const parseResult = ScoringInputSchema.safeParse(body);
     if (!parseResult.success) {
@@ -283,7 +285,7 @@ serve(async (req) => {
       },
     });
   } catch (err) {
-    console.error('Scoring error:', err);
+    await logFailure(logCtx, 'Scoring failed', err);
     return jsonResponse(
       {
         error: 'Engine failure',
@@ -293,3 +295,5 @@ serve(async (req) => {
     );
   }
 });
+
+serve(handler);

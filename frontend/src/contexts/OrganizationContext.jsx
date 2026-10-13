@@ -29,6 +29,17 @@ import { FeatureFlagSchema } from '../constants/featureFlags.js';
  * @property {string[]} [permissions]
  */
 
+/**
+ * Tag future error reports with the active organization (M1.5): the user's ID,
+ * the organization's ID and the role held in it. IDs only; `logger.setUser`
+ * drops anything else.
+ * @param {string} userId
+ * @param {{ organization_id: string, role?: string }} member
+ */
+function reportActiveOrganization(userId, member) {
+  logger.setUser({ id: userId, organization_id: member.organization_id, role: member.role });
+}
+
 /** @type {React.Context<OrganizationContextValue>} React context for sharing organization and season state. */
 const OrganizationContext = createContext({});
 
@@ -157,11 +168,13 @@ export const OrganizationProvider = ({ children }) => {
           if (matchedMember) {
             setCurrentOrganization(matchedMember.organizations);
             setOrgMember({ role: matchedMember.role, ...matchedMember });
+            reportActiveOrganization(user.id, matchedMember);
             await fetchSeasonsForOrg(matchedMember.organization_id, isCancelled);
           } else {
             const first = data[0];
             setCurrentOrganization(first.organizations);
             setOrgMember({ role: first.role, ...first });
+            reportActiveOrganization(user.id, first);
             localStorage.setItem('squadlogic_active_org', first.organization_id);
             await fetchSeasonsForOrg(first.organization_id, isCancelled);
           }
@@ -188,11 +201,12 @@ export const OrganizationProvider = ({ children }) => {
       if (match) {
         setCurrentOrganization(match.organizations);
         setOrgMember({ role: match.role, ...match });
+        if (user?.id) reportActiveOrganization(user.id, match);
         localStorage.setItem('squadlogic_active_org', orgId);
         await fetchSeasonsForOrg(orgId);
       }
     },
-    [organizations, fetchSeasonsForOrg]
+    [organizations, fetchSeasonsForOrg, user?.id]
   );
 
   const switchSeason = useCallback((seasonSetting) => {

@@ -4,8 +4,8 @@ Repo: **JoelA510/SquadLogic** · Plan drawn up: 2026-10-12 · Source audit: [`au
 
 **Status:** IN PROGRESS as of 2026-10-13 — approved by the owner on 2026-10-13 "as recommended":
 D1-D8 at their defaults, and finding 5.1 moved into Milestone 1 (PR 1-B, as M1.7). Milestone 1 is
-in progress: PR 1-A merged as #551 (`73d98d0`); PR 1-B (M1.3, M1.4, M1.7) is open as #552;
-M1.6 was resolved on `main` by #545.
+in progress: PR 1-A merged as #551 (`73d98d0`); PR 1-B (M1.3, M1.4, M1.7) merged as #552
+(`33e68ab`); PR 1-C (M1.5) is open as #553; M1.6 was resolved on `main` by #545.
 
 End state: every audit area at "no blocker/high findings", E2E coverage of critical
 journeys, staging deploy smoke-tested, docs current — measured against: an organization's
@@ -167,6 +167,8 @@ it), so it carries no ID.
 >   **Remaining:** the acceptance criteria (a pull request with a failing `Build & Test` shows
 >   "Merging is blocked"; a direct push is refused) and `check:settings`, which needs a token
 >   with Administration: read (not available to the agent; it got 401).
+>   **Owner decision 2026-10-13:** that remaining acceptance (the "Merging is blocked"
+>   demonstration and `check:settings`) is waived; the ruleset is considered done.
 > - **Fix approach:** add `.github/rulesets/main.json` from the skeleton
 >   (`prompts/skeletons/.github/rulesets/main.json`), requiring pull requests, the checks
 >   `Build & Test` and `Deno Mirror Tests` (D5), and no force pushes or deletions on `main`; the
@@ -267,6 +269,23 @@ it), so it carries no ID.
 **PR 1-C — `fix/error-reports-carry-ids`**
 
 > **M1.5. No error report says which user or organization it came from** (audit finding 9.1, high)
+> - **Status: in review, PR 1-C (#553); not merged.** `logger.setUser` passes only `id`,
+>   `organization_id` and `role` to Sentry (plus an `organization_id` tag); `AuthContext` calls
+>   it on sign-in and with null on sign-out, `OrganizationContext` on choosing and switching the
+>   active organization. Every Edge Function serves through `withFailureLogging`
+>   (`_shared/logtail.ts`): function name, a generated request ID and the verified organization
+>   ID on every failure, messages redacted. Also in #553: the Sentry `environment` from Vercel's
+>   `VERCEL_ENV` (previews report `preview`) and CSP `worker-src 'self' blob:` for Replay's
+>   worker; the release tag stays `package.json`'s version (pinned by `tests/sentryConfig.test.js`
+>   and `sentry-smoke.md`). Test gate met: `tests/loggerUserContext.test.jsx`, *executed*, 8 of 8
+>   pass, and 5 fail with the `AuthContext` calls removed. `VITE_SENTRY_DSN` is set: the live
+>   bundle carries the DSN (confirmed by the other session), so the owner question is closed.
+>   Acceptance, *executed* on #553's preview, signed out: an induced error arrived with
+>   `environment: preview` and `release: 1.0.1` (Sentry event `83c8fad3…`, SQUADLOGIC-2, then
+>   resolved), the envelope POST returned 200 and the page logged no CSP refusal. **What
+>   remains (owner):** the signed-in leg (an event tagged with user and organization IDs; it
+>   needs a real account) and an Edge Function error in BetterStack with the organization ID
+>   (after the merge deploys the functions).
 > - **Fix approach:** call `logger.setUser({ id, organization_id, role })` from `AuthContext`
 >   on sign-in and from `OrganizationContext` on organization switch, and `setUser(null)` on
 >   sign-out (IDs only, never names or emails); route each Edge Function's top-level error path
@@ -904,6 +923,20 @@ smoke-tested
     same project `squadlogic.vercel.app` uses (and the only one `vercel.json`'s CSP names), so
     previews of unmerged branches share production's database. For the owner (M4.1 and the
     staging question). *Executed* (each page's requests on load, read-only).
+    **Owner decision 2026-10-13:** accepted as-is; previews keep sharing production's Supabase
+    project, with no preview database.
+
+- 2026-10-13, found by PR 1-C (#553):
+  - `__FORCE_ERROR__` is a flag, not a function: `window.__FORCE_ERROR__()` (the step in
+    `sentry-smoke.md` and in this plan's Manual QA script, step 2) throws a TypeError at the
+    console and never reaches the error boundary. `DashboardPage` and `WorkflowPage` throw while
+    `localStorage.__FORCE_ERROR__` is `'true'`, and both need a sign-in. `sentry-smoke.md` is
+    corrected in #553; the Manual QA step is left for the plan's owner. *Statically reviewed.*
+  - Not done in #553 and still open: auto-scheduler's other `edgeLogger.error` refusals and
+    fairness-scoring's two season-read `console.error`s carry no request ID; the stand-in
+    handler the persistence functions serve when their Supabase variables are missing is not
+    wrapped; `flush()` is awaited before a failing response (BetterStack latency adds to it).
+    *Statically reviewed.*
 
 ## Deferred with reason
 

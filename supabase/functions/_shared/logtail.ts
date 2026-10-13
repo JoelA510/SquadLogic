@@ -29,13 +29,18 @@ const FUNCTION_NAME = Deno.env.get('FUNCTION_NAME') ?? 'unknown';
 /** Buffered log entries waiting to be flushed. */
 const buffer: LogEntry[] = [];
 
-function log(level: LogLevel, message: string, context: Record<string, unknown> = {}) {
+function log(
+  level: LogLevel,
+  message: string,
+  context: Record<string, unknown> = {},
+  functionName: string = FUNCTION_NAME
+) {
   const entry: LogEntry = {
     dt: new Date().toISOString(),
     level,
     message,
     context,
-    function_name: FUNCTION_NAME,
+    function_name: functionName,
   };
 
   // Always emit to console (visible in Supabase Dashboard logs)
@@ -80,3 +85,118 @@ export const edgeLogger = {
   error: (msg: string, ctx?: Record<string, unknown>) => log('error', msg, ctx),
   flush,
 };
+
+// ---------------------------------------------------------------------------
+// Top-level failure logging (M1.5)
+//
+// Supabase does not set FUNCTION_NAME, so every entry above used to read
+// `function_name: "unknown"`, and a failure carried neither the organization
+// it happened in nor anything to tell two concurrent failures apart. Each
+// function now wraps its handler in `withFailureLogging`, which gives the
+// request an ID and logs any error that escapes the handler -- then rethrows
+// it, so the response `serve` builds for an uncaught error is unchanged. A
+// handler that catches its own failure and answers 500 calls `logFailure`
+// with the same context, so both paths carry the same three fields.
+// ---------------------------------------------------------------------------
+
+/** What a failure entry says about the request, beyond the error itself. */
+export interface FailureContext {
+  /** The function's directory name under `supabase/functions/`. */
+  readonly functionName: string;
+  /** Generated per request; not read from the request, so a caller cannot set it. */
+  readonly requestId: string;
+  /** Set by the handler as soon as it knows which organization the request is for. */
+  organizationId?: string;
+}
+
+/** A request handler that is handed its failure context. */
+export type FailureLoggedHandler = (
+  req: Request,
+  ctx: FailureContext
+) => Response | Promise<Response>;
+
+/**
+ * Strip the values an error message can quote. Postgres quotes the offending
+ * value (`invalid input syntax for type date: "<value>"`), RAISE EXCEPTION
+ * messages can interpolate one, and either can be a person's name or email
+ * from an imported row. Quoted spans and anything email-shaped are replaced;
+ * the message's shape, which is what a diagnosis needs, is kept.
+ */
+export function redactMessage(text: string): string {
+  return text
+    .replace(/"[^"]*"/g, '"[redacted]"')
+    .replace(/'[^']*'/g, "'[redacted]'")
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[redacted-email]');
+}
+
+/**
+ * The parts of an error that are safe to log: its name, its message and stack
+ * with quoted values redacted (`redactMessage`), and a Postgres/PostgREST
+ * `code` when there is one. Never `details`, `hint`, the request body or the
+ * error object as a whole: those can carry the row values (names, emails) a
+ * write was given.
+ */
+export function describeError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    const code = (error as { code?: unknown }).code;
+    return {
+      name: error.name,
+      message: redactMessage(error.message),
+      ...(typeof code === 'string' ? { code } : {}),
+      ...(typeof error.stack === 'string' ? { stack: redactMessage(error.stack) } : {}),
+    };
+  }
+  if (error && typeof error === 'object') {
+    const { message, code } = error as { message?: unknown; code?: unknown };
+    return {
+      name: 'NonError',
+      ...(typeof message === 'string' ? { message: redactMessage(message) } : {}),
+      ...(typeof code === 'string' ? { code } : {}),
+    };
+  }
+  return { name: 'NonError', message: redactMessage(String(error)) };
+}
+
+/**
+ * Log a function's failure with its function name, request ID and the
+ * organization ID (null when it was not yet known), then flush. Logging never
+ * throws: `flush` swallows its own transport failure.
+ */
+export async function logFailure(
+  ctx: FailureContext,
+  message: string,
+  error: unknown
+): Promise<void> {
+  log(
+    'error',
+    `${ctx.functionName}: ${message}`,
+    {
+      function_name: ctx.functionName,
+      request_id: ctx.requestId,
+      organization_id: ctx.organizationId ?? null,
+      error: describeError(error),
+    },
+    ctx.functionName
+  );
+  await flush();
+}
+
+/**
+ * Wrap a function's handler so every request gets a failure context and any
+ * error that escapes the handler is logged through BetterStack before it is
+ * rethrown to `serve`, which answers it exactly as it did before.
+ */
+export function withFailureLogging(
+  functionName: string,
+  handler: FailureLoggedHandler
+): (req: Request) => Promise<Response> {
+  return async (req: Request) => {
+    const ctx: FailureContext = { functionName, requestId: crypto.randomUUID() };
+    try {
+      return await handler(req, ctx);
+    } catch (error) {
+      await logFailure(ctx, 'unhandled error', error);
+      throw error;
+    }
+  };
+}

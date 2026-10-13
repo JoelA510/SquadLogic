@@ -6,7 +6,7 @@ import { makeOrganization, makeOrganizationMember, makeUser } from './factories/
 // ---------- Mocks ----------
 
 vi.mock('../frontend/src/lib/logger', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), setUser: vi.fn() },
 }));
 
 vi.mock('../frontend/src/lib/supabaseClient', () => ({

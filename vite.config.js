@@ -11,8 +11,15 @@ export default defineConfig({
   envDir: '..', // Look for .env in the project root
   // Sentry release tag (frontend/src/main.jsx): derived from the committed
   // package.json at build time, so no operator-set env var can drift from it.
+  //
+  // Sentry environment (frontend/src/lib/sentryOptions.js): Vercel's
+  // VERCEL_ENV (production / preview / development), so preview events are not
+  // reported as production. Exactly that one variable is exposed, by name;
+  // never define the whole environment object, which would bundle every build secret.
+  // Empty outside Vercel, where the options fall back to their old default.
   define: {
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
+    'import.meta.env.VITE_VERCEL_ENV': JSON.stringify(process.env.VERCEL_ENV ?? ''),
   },
   resolve: {
     alias: {

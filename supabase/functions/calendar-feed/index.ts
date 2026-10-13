@@ -59,8 +59,9 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.87.1';
 import { composeTeamFeed, type TeamFeedClient } from '../_shared/calendar/teamFeed.ts';
+import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
 
-serve(async (req) => {
+const handler = withFailureLogging('calendar-feed', async (req, logCtx) => {
   try {
     const url = new URL(req.url);
     const token = url.searchParams.get('token');
@@ -96,6 +97,8 @@ serve(async (req) => {
     if (teamErr || !team) {
       return new Response('Invalid calendar token or team not found.', { status: 404 });
     }
+    // Never the token or the URL that carries it: the token is the feed's credential.
+    logCtx.organizationId = team.organization_id;
 
     // Phase 2.3 (H-2): Check token expiry
     if (team.calendar_token_expires_at) {
@@ -130,7 +133,9 @@ serve(async (req) => {
       status: 200,
     });
   } catch (err) {
-    console.error('Calendar Feed Error:', err);
+    await logFailure(logCtx, 'Calendar feed failed', err);
     return new Response('Internal Server Error', { status: 500 });
   }
 });
+
+serve(handler);

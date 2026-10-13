@@ -130,17 +130,19 @@ describe('practice-persistence routes an enact to the wrapper (source pin)', () 
   });
 
   it('maps errors only for a repair call; an ordinary save keeps the 500 (witness 21)', () => {
-    const catchAt = SOURCE.indexOf("console.error('Practice persistence error:', error);");
+    const catchAt = SOURCE.indexOf("// 8.6 3b PR 11b (plan §4): a repair call's refusals");
     expect(catchAt).toBeGreaterThan(0);
     const handler = SOURCE.slice(catchAt);
+    // M1.5: a mapped refusal is logged only when it maps to a 5xx.
     const guarded = handler.match(
-      /if \(body\.repair\) \{\s*const mapped = repairErrorResponse\(error\);\s*return jsonResponse\(mapped\.body, mapped\.status\);\s*\}/
+      /if \(body\.repair\) \{\s*const mapped = repairErrorResponse\(error\);\s*(?:if \(mapped\.status >= 500\) await logFailure\([^;]*\);\s*)?return jsonResponse\(mapped\.body, mapped\.status\);\s*\}/
     );
     expect(guarded, 'the mapping is not behind `if (body.repair)`').toBeTruthy();
-    // After the guarded block, the ordinary path's response is today's 500.
+    // After the guarded block (and the failure log), the ordinary path's
+    // response is today's 500.
     const rest = handler.slice(handler.indexOf(guarded[0]) + guarded[0].length);
     expect(rest).toMatch(
-      /^\s*return jsonResponse\(\s*\{\s*status: 'error',[\s\S]*?\},\s*500\s*\);/
+      /^\s*(?:await logFailure\([^;]*\);\s*)?return jsonResponse\(\s*\{\s*status: 'error',[\s\S]*?\},\s*500\s*\);/
     );
     // repairErrorResponse is called nowhere else.
     expect(SOURCE.match(/repairErrorResponse\(/g)).toHaveLength(1);

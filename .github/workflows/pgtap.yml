@@ -46,7 +46,7 @@ jobs:
           package-manager-cache: false
 
       - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v2
+        uses: supabase/setup-cli@v3
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
 

@@ -144,7 +144,7 @@ const SLOTS = ['mon', 'tue', 'wed', 'thu', 'fri'].map((day) => ({
 }));
 
 const FULL = '[2026-09-07,2026-12-01)';
-function row(id, team, slot) {
+function row(id, team, slot, extra = {}) {
   return {
     id,
     team_id: team,
@@ -155,6 +155,7 @@ function row(id, team, slot) {
     source: 'auto',
     assigned_via: 'auto',
     organization_id: ORG,
+    ...extra,
   };
 }
 
@@ -162,7 +163,9 @@ function row(id, team, slot) {
 const ROWS = [
   row('pa-a', 'team-a', 'slot-mon'),
   row('pa-b', 'team-b', 'slot-mon'),
-  row('pa-c', 'team-c', 'slot-tue'),
+  // Stored with `practice_slot_id` alone, as an older writer left it: the page
+  // must resolve the slot the way its grid does, or the Edge refuses the request.
+  row('pa-c', 'team-c', 'slot-tue', { slot_id: null }),
 ];
 
 function dbOf({ roster, slots, rows }) {
@@ -237,6 +240,9 @@ let scoringRequests = [];
 /** What the stand-in Edge answered, so a test can tell a refusal from a score. */
 /** @type {any[]} */
 let scoringResponses = [];
+/** Set by a test to make the stand-in Edge refuse every request. */
+let edgeRefuses = false;
+const REFUSAL_REASON = 'practice.slots[2]: the time does not exist on the season clock';
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -247,13 +253,24 @@ beforeEach(() => {
   edgeFunctionCache.clear();
   scoringRequests = [];
   scoringResponses = [];
+  edgeRefuses = false;
   const realInvoke = mockSupabase.functions.invoke;
   vi.spyOn(mockSupabase.functions, 'invoke').mockImplementation(async (name, options) => {
     if (name !== 'fairness-scoring') return realInvoke(name, options);
     // A deep copy: the body is what went over the wire, not a live reference.
     const body = JSON.parse(JSON.stringify(/** @type {any} */ (options)?.body ?? null));
     scoringRequests.push(body);
-    const response = fairnessScoringEdge(body);
+    // A refusal as supabase-js reports one: a generic message, and the
+    // function's own reason in the response body on `context`.
+    const response = edgeRefuses
+      ? {
+          data: null,
+          error: {
+            message: 'Edge Function returned a non-2xx status code',
+            context: new Response(JSON.stringify({ error: REFUSAL_REASON }), { status: 422 }),
+          },
+        }
+      : fairnessScoringEdge(body);
     scoringResponses.push(response);
     return response;
   });
@@ -277,7 +294,7 @@ function teamRead(teams) {
 async function renderPage({ roster = ROSTER, slots = SLOTS, rows = ROWS } = {}) {
   TEAM_READ.value = teamRead(roster);
   seedMockDb(dbOf({ roster, slots, rows }));
-  render(
+  return render(
     <MemoryRouter>
       <PracticeSchedulingPage />
     </MemoryRouter>
@@ -303,7 +320,8 @@ describe('the practice page evaluates its real schedule (13.1)', () => {
     const coachesOf = (t) => [t.coach_id, ...(t.assistant_coach_ids ?? [])].filter(Boolean);
     const teamsOfCoach = ROSTER.filter((t) => coachesOf(t).includes(DOUBLE_BOOKED_COACH));
     expect(teamsOfCoach.map((t) => t.id)).toEqual(['team-a', 'team-b']);
-    const slotsOf = (teamId) => ROWS.filter((r) => r.team_id === teamId).map((r) => r.slot_id);
+    const slotsOf = (teamId) =>
+      ROWS.filter((r) => r.team_id === teamId).map((r) => r.practice_slot_id);
     expect(slotsOf('team-a')).toEqual(slotsOf('team-b'));
     // Only an assistant link makes it, so a request without assistants misses it.
     expect(ROSTER.find((t) => t.id === 'team-b').coach_id).not.toBe(DOUBLE_BOOKED_COACH);
@@ -320,7 +338,7 @@ describe('the practice page evaluates its real schedule (13.1)', () => {
     expect(body.practice.teams.map((t) => t.id).sort()).toEqual(ROSTER.map((t) => t.id).sort());
     expect(body.practice.slots.map((s) => s.id).sort()).toEqual(SLOTS.map((s) => s.id).sort());
     expect(body.practice.assignments.map((a) => `${a.teamId}@${a.slotId}`).sort()).toEqual(
-      ROWS.map((r) => `${r.team_id}@${r.slot_id}`).sort()
+      ROWS.map((r) => `${r.team_id}@${r.practice_slot_id}`).sort()
     );
     // The scheduler's team shape: assistants carried, which the conflict needs.
     expect(body.practice.teams.find((t) => t.id === 'team-b').assistantCoachIds).toEqual([
@@ -349,10 +367,46 @@ describe('the practice page evaluates its real schedule (13.1)', () => {
     // And the page says so.
     const panel = await screen.findByRole('region', { name: 'Fairness Scoring Engine' });
     await waitFor(() => expect(panel).toHaveTextContent(`Teams evaluated: ${ROSTER.length}`));
+    expect(panel).toHaveTextContent(`With a practice: ${new Set(ROWS.map((r) => r.team_id)).size}`);
     expect(panel).toHaveTextContent('Coach conflicts: 1');
     expect(
       await screen.findByText(new RegExp(`Coach ${DOUBLE_BOOKED_COACH} has overlapping practices`))
     ).toBeInTheDocument();
+  });
+
+  it("a failed evaluation says so, in the function's words, with no score", async () => {
+    edgeRefuses = true;
+    await renderPage();
+    await settledRequest();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      `The evaluation failed, so nothing was checked: ${REFUSAL_REASON}`
+    );
+    expect(screen.queryByText(/Fairness Index/)).not.toBeInTheDocument();
+  });
+
+  it('a failure after a score clears the score, which no longer describes the schedule', async () => {
+    const view = await renderPage();
+    await settledRequest();
+    await screen.findByText(/Fairness Index/);
+    const scored = scoringRequests.length;
+
+    // The roster changes (one team leaves), and the next evaluation fails.
+    edgeRefuses = true;
+    TEAM_READ.value = teamRead(ROSTER.slice(0, 3));
+    view.rerender(
+      <MemoryRouter>
+        <PracticeSchedulingPage />
+      </MemoryRouter>
+    );
+    // Meta: a new request really went out, for the changed roster.
+    await waitFor(() => expect(scoringRequests.length).toBeGreaterThan(scored), {
+      timeout: 4000,
+    });
+    expect(scoringRequests.at(-1).practice.teams).toHaveLength(3);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The evaluation failed');
+    expect(screen.queryByText(/Fairness Index/)).not.toBeInTheDocument();
   });
 
   it('with no teams, says there is nothing to evaluate and never calls fairness-scoring', async () => {

@@ -17,6 +17,9 @@
  * dropped rows, and every coach conflict by identity (the two placements and
  * the coaches they share). `fairnessScore` is Edge-only and is a function of
  * the conflict count and `assignmentRate`.
+ * On this real plan no row is dropped and every slot holds one team, so those
+ * two comparisons only guard a future extract; the drift test's vectors cover
+ * drops, duplicates and overbooking.
  *
  * Needs `--allow-read` for the sibling-file assertion; the extract arrives as a
  * JSON module import and needs no permission.

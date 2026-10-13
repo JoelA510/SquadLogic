@@ -37,6 +37,16 @@
  * Edge's `fairnessScore` is Edge-only and is a function of the conflict count
  * and `assignmentRate`, both compared here.
  *
+ * **What this extract can and cannot catch.** It is a real plan, so it is
+ * clean: no row is dropped (`droppedRows` is 0) and every slot holds the one
+ * team its grid row names. Those two comparisons only guard a future extract.
+ * Dropped, duplicate and unknown rows, overbooking and the empty roster are
+ * exercised by the hand-written vectors in `scoringEngineDrift.test.js`. What
+ * this extract adds is scale and shape: 54 teams on two slots, 82 with
+ * assistants, back-to-back practices, and one real coach conflict, which a
+ * planted `>` for `>=` in either arm's overlap rule turns into more (that plant
+ * passes the drift test).
+ *
  * ## Pseudonyms only
  *
  * The extract replaces the corpus's person keys with opaque `coach-NNN` ids;

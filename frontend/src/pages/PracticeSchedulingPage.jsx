@@ -740,12 +740,47 @@ export default function PracticeSchedulingPage() {
   // What the fairness panel evaluates: the shown assignments against the same
   // teams and slots the auto-scheduler is sent. It used to get `assignments`
   // alone, so `fairness-scoring` scored an empty roster and reported zero coach
-  // conflicts for every schedule (audit 13.1, #364). `schedulerTeams` carries
-  // `assistantCoachIds`; `schedulerSlots` carries instants on the season's clock.
-  // Memoized so the panel's debounced request isn't restarted by every render.
+  // conflicts for every schedule (audit 13.1, #364). Only the fields the Edge's
+  // `ScoringInputSchema` reads are sent: each row's ids through the page's own
+  // resolvers (a stored row may carry `practice_slot_id` alone), the teams'
+  // head and assistant coaches, and the slots' instants on the season's clock.
+  // `null` while a read is still landing or after one failed (the page reports
+  // those failures itself), so the panel never scores a partial list as the
+  // season's. Memoized so the panel's debounced request isn't restarted by
+  // every render.
+  const evaluationReadsPending = [
+    dashboardLoading.team,
+    dashboardLoading.practice,
+    practiceSlotsLoading,
+    seasonClockLoading,
+    errors.team,
+    errors.practice,
+    practiceSlotsError,
+  ].some(Boolean);
   const evaluationPracticeData = useMemo(
-    () => ({ assignments: localAssignments, teams: schedulerTeams, slots: schedulerSlots }),
-    [localAssignments, schedulerTeams, schedulerSlots]
+    () =>
+      evaluationReadsPending
+        ? null
+        : {
+            assignments: localAssignments.map((assignment) => ({
+              teamId: getAssignmentTeamId(assignment),
+              slotId: getAssignmentSlotId(assignment),
+            })),
+            teams: schedulerTeams.map(({ id, division, coachId, assistantCoachIds }) => ({
+              id,
+              division,
+              coachId,
+              assistantCoachIds,
+            })),
+            slots: schedulerSlots.map(({ id, day, capacity, start, end }) => ({
+              id,
+              day,
+              capacity,
+              start,
+              end,
+            })),
+          },
+    [evaluationReadsPending, localAssignments, schedulerTeams, schedulerSlots]
   );
   const schoolDayEnd =
     currentSeasonSetting?.school_day_end ?? currentSeasonSetting?.schoolDayEnd ?? undefined;

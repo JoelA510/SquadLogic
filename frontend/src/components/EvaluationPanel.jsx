@@ -28,6 +28,40 @@ function practiceRosterOf(practiceData) {
 
 const countOf = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
+/** The panel's title over one notice: used when there is no score to show. */
+function PanelNotice({ titleId, children }) {
+  return (
+    <section
+      className="glass-panel p-6 rounded-xl border border-border-subtle"
+      aria-labelledby={titleId}
+    >
+      <h2 id={titleId} className="text-xl font-display font-bold text-text-primary tracking-tight">
+        Fairness Scoring Engine
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * Why a `fairness-scoring` call failed, in the function's own words when it
+ * gave any. supabase-js puts the response on `context`; its body carries the
+ * Edge's `error` (a validation or clock refusal), which says more than the
+ * client's "non-2xx" line.
+ */
+async function describeFailure(err) {
+  const fallback = err?.message || 'unknown error';
+  if (typeof err?.context?.json !== 'function') return fallback;
+  try {
+    const body = await err.context.json();
+    return body?.error || body?.message || fallback;
+  } catch {
+    // Best effort: a body that is absent, consumed or not JSON leaves the
+    // client's own message, which is still shown.
+    return fallback;
+  }
+}
+
 /**
  * EvaluationPanel - Enterprise Glass component for real-time fairness scoring.
  * Refined for Phase 7 with composite Deno-based engine support.
@@ -46,6 +80,13 @@ export default function EvaluationPanel({
   const [loading, setLoading] = useState(false);
   const [persisting, setPersisting] = useState(false);
   const [message, setMessage] = useState('');
+  // Why the last evaluation failed, and for which inputs: a failure clears the
+  // previous result, so a stale score is never shown as the current
+  // schedule's, and it is shown only while those inputs are still the ones on
+  // the page.
+  const [failure, setFailure] = useState(
+    /** @type {{ reason: string, practiceData: any, gameData: any } | null} */ (null)
+  );
   const titleId = useId();
   const practiceRoster = practiceRosterOf(practiceData);
   const nothingToEvaluate = Boolean(practiceData) && !gameData && !practiceRoster.evaluable;
@@ -60,6 +101,7 @@ export default function EvaluationPanel({
       const evaluablePractice = practiceData && practiceRosterOf(practiceData).evaluable;
       if (!evaluablePractice && !gameData) {
         setEvaluation(null);
+        setFailure(null);
         setLoading(false);
         return;
       }
@@ -98,11 +140,17 @@ export default function EvaluationPanel({
         });
 
         if (error) throw error;
-        if (active) setEvaluation(data);
+        if (active) {
+          setEvaluation(data);
+          setFailure(null);
+        }
       } catch (err) {
         logger.error('Edge Function Evaluation failed:', err);
+        // Nothing retries: said as it is, with no score beside it.
+        const reason = await describeFailure(err);
         if (active) {
-          setMessage('Engine connectivity issue. Retrying...');
+          setEvaluation(null);
+          setFailure({ reason, practiceData, gameData });
         }
       } finally {
         if (active) setLoading(false);
@@ -155,27 +203,25 @@ export default function EvaluationPanel({
     }
   };
 
+  // No inputs (the page is still reading, or a read failed): nothing is shown,
+  // and a score from earlier inputs is not left on screen while the debounced
+  // effect catches up.
+  if (!practiceData && !gameData) {
+    return null;
+  }
+
   if (nothingToEvaluate) {
     return (
-      <section
-        className="glass-panel p-6 rounded-xl border border-border-subtle"
-        aria-labelledby={titleId}
-      >
-        <h2
-          id={titleId}
-          className="text-xl font-display font-bold text-text-primary tracking-tight"
-        >
-          Fairness Scoring Engine
-        </h2>
+      <PanelNotice titleId={titleId}>
         <p role="status" className="text-sm text-text-primary mt-1.5 font-medium">
           Nothing to evaluate: {countOf(practiceRoster.teams, 'team')} /{' '}
           {countOf(practiceRoster.slots, 'slot')}
         </p>
         <p className="text-sm text-text-muted mt-1">
-          Fairness and coach conflicts are checked once the season has both teams and practice
-          slots, so no score is shown.
+          Fairness and coach conflicts need at least one team and one practice slot that can be
+          placed on the season&apos;s clock, so no score is shown.
         </p>
-      </section>
+      </PanelNotice>
     );
   }
 
@@ -202,6 +248,18 @@ export default function EvaluationPanel({
           <div className="h-10 w-32 bg-bg-glass rounded-lg" />
         </div>
       </div>
+    );
+  }
+
+  const failedForTheseInputs =
+    failure && failure.practiceData === practiceData && failure.gameData === gameData;
+  if (failedForTheseInputs && !evaluation && !loading) {
+    return (
+      <PanelNotice titleId={titleId}>
+        <p role="alert" className="text-sm text-status-error mt-1.5 font-medium">
+          The evaluation failed, so nothing was checked: {failure.reason}
+        </p>
+      </PanelNotice>
     );
   }
 
@@ -303,9 +361,18 @@ export default function EvaluationPanel({
                   </span>
                   <span className="w-1 h-1 rounded-full bg-bg-surface-hover" />
                   <span>
+                    With a practice:{' '}
+                    <span className="text-text-primary font-mono font-bold">
+                      {practiceSummary.assignedTeams}
+                    </span>
+                  </span>
+                  <span className="w-1 h-1 rounded-full bg-bg-surface-hover" />
+                  <span>
                     Coach conflicts:{' '}
                     <span
-                      className={coachConflictCount > 0 ? 'text-amber-400' : 'text-emerald-400'}
+                      className={
+                        coachConflictCount > 0 ? 'text-status-warning' : 'text-status-success'
+                      }
                     >
                       {coachConflictCount}
                     </span>

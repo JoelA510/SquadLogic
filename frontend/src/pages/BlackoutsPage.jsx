@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarOff, Pencil, Plus, Trash2 } from 'lucide-react';
+import { CalendarOff, Pencil, Plus, Trash2, Wrench } from 'lucide-react';
 import {
   CLOSURE_SOURCE,
   findBlackoutConflicts,
@@ -19,7 +19,57 @@ import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { logger } from '../lib/logger.js';
 import { toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
 import { todayIso } from '../utils/today.js';
+import { countSeriesEnactedOffBlackout } from '../utils/practiceEnactCount.js';
+import { usePermission } from '../hooks/usePermission.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import LoadingScreen from '../components/LoadingScreen.jsx';
+
+// Lazy, as `PracticeRepairLauncher` loads it: the repair is heavy, and only an
+// admin who asks for it pays for it.
+const PracticeRepairPanel = lazy(() => import('../components/scheduling/PracticeRepairPanel.jsx'));
+
+/**
+ * A STORED blackout as the repair adapter's loss (3b PR 11d-3, plan §2.6,
+ * Q5): built from the saved row this page read, never from a draft, so the
+ * enact commit gate can find it as saved.
+ *
+ * @param {Record<string, any>} closure - a `useFieldClosures` row (`source` field_blackouts)
+ */
+export function storedBlackoutLossOf(closure) {
+  return {
+    kind: 'blackout',
+    blackout: {
+      id: closure.id,
+      field_id: closure.closesFieldId,
+      location_id: closure.closesLocationId,
+      blackout_from: closure.blackoutFrom,
+      blackout_until: closure.blackoutUntil,
+      start_minutes: closure.startMinutes,
+      end_minutes: closure.endMinutes,
+      reason: closure.reason,
+    },
+  };
+}
+
+/** Everything that tells one grid row from another: ground, both dates and the hours. */
+const labelOf = (row) => `${row.ground}, ${row.from} to ${row.until}, ${row.hours}`;
+
+/**
+ * The Q11 sentence (3b PR 11d-3): how many practice series were enacted off
+ * this blackout, and that changing it moves none of them back. An unread
+ * count is said to be unread, never "none".
+ *
+ * @param {{ ok: true, count: number } | { ok: false, message: string }} counted
+ * @param {'Saving this change' | 'Removing it'} action
+ */
+export function enactedOffBlackoutText(counted, action) {
+  if (counted.ok !== true) {
+    return `How many practice series were enacted off this blackout could not be read (${'message' in counted ? counted.message : 'unreadable'}). Any that were stay where they were moved, locked.`;
+  }
+  const n = counted.count;
+  if (n === 0) return 'No practice series was enacted off this blackout.';
+  return `${n} practice series ${n === 1 ? 'was' : 'were'} enacted off this blackout. ${action} moves none of them back: ${n === 1 ? 'its temporary change stays' : 'their temporary changes stay'} saved and locked.`;
+}
 
 /**
  * Blackout Dates — every closure over the club's ground, and the place an
@@ -58,6 +108,14 @@ export default function BlackoutsPage() {
   const [editing, setEditing] = useState(/** @type {any|null} */ (null));
   const [actionError, setActionError] = useState(/** @type {string|null} */ (null));
   const [bookings, setBookings] = useState({ dated: [], recurring: [], unreadable: [] });
+  const { can } = usePermission();
+  const isAdmin = can(PERMISSIONS.MANAGE_ORGANIZATION);
+  // 3b PR 11d-3: the stored row whose practice repair is open, and the button that opened it.
+  const [repairingId, setRepairingId] = useState(/** @type {string|null} */ (null));
+  const repairTrigger = useRef(/** @type {HTMLElement|null} */ (null));
+  const repairHeading = useRef(/** @type {HTMLHeadingElement|null} */ (null));
+  // Q11: the count shown in the edit dialog, read when it opens.
+  const [editEnacted, setEditEnacted] = useState(/** @type {any} */ (null));
 
   const loadBookings = useCallback(async () => {
     if (!currentOrganization?.id) {
@@ -159,9 +217,42 @@ export default function BlackoutsPage() {
     [closures, nameOfField, nameOfLocation, conflictsByClosure]
   );
 
+  const organizationId = currentOrganization?.id ?? null;
+
+  useEffect(() => {
+    if (!editing) {
+      setEditEnacted(null);
+      return undefined;
+    }
+    let live = true;
+    setEditEnacted(null);
+    countSeriesEnactedOffBlackout(supabase, { organizationId, blackoutId: editing.id }).then(
+      (counted) => {
+        if (live) setEditEnacted(counted);
+      }
+    );
+    return () => {
+      live = false;
+    };
+  }, [editing, organizationId]);
+
   const onRemove = useCallback(
-    async (closure) => {
+    async (closure, label) => {
       setActionError(null);
+      // Q11: removing it withdraws nothing. Asked only when something was
+      // enacted off it, or the count could not be read (never "none" unread).
+      const counted = await countSeriesEnactedOffBlackout(supabase, {
+        organizationId,
+        blackoutId: closure.id,
+      });
+      if (
+        (counted.ok !== true || counted.count > 0) &&
+        !window.confirm(
+          `Remove the blackout on ${label}?\n\n${enactedOffBlackoutText(counted, 'Removing it')}`
+        )
+      ) {
+        return;
+      }
       try {
         await removeBlackout(closure);
         await loadBookings();
@@ -173,8 +264,26 @@ export default function BlackoutsPage() {
     // is too. That is deliberate: memoising it against a stale `[]` would have
     // frozen the organisation it closes over at whatever it was on the first
     // render -- which is null while the org context is still loading.
-    [removeBlackout, loadBookings]
+    [removeBlackout, loadBookings, organizationId]
   );
+
+  const repairClosure =
+    repairingId === null ? null : (closures.find((c) => c.id === repairingId) ?? null);
+  const repairRow = repairClosure ? (rows.find((r) => r.id === repairClosure.id) ?? null) : null;
+  const repairLabel = repairRow ? labelOf(repairRow) : null;
+  const repairLoss = useMemo(
+    () => (repairClosure ? storedBlackoutLossOf(repairClosure) : null),
+    [repairClosure]
+  );
+
+  useEffect(() => {
+    if (repairingId !== null) repairHeading.current?.focus();
+  }, [repairingId]);
+
+  const closeRepair = () => {
+    setRepairingId(null);
+    repairTrigger.current?.focus();
+  };
 
   const onCreate = async (draft) => {
     setActionError(null);
@@ -226,7 +335,7 @@ export default function BlackoutsPage() {
         {
           key: 'actions',
           label: 'Actions',
-          width: 200,
+          width: 340,
           render: (row) =>
             row.source === CLOSURE_SOURCE.ADMIN ? (
               <>
@@ -254,11 +363,31 @@ export default function BlackoutsPage() {
                 >
                   Edit
                 </Button>{' '}
+                {/*
+                  3b PR 11d-3 (Q5): the post-commit entry point. The panel's
+                  loss is THIS stored row, so Enact can pass the commit gate;
+                  the editor's own launcher is always a preview.
+                */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={Wrench}
+                  disabled={!isAdmin}
+                  aria-expanded={repairingId === row.id}
+                  aria-controls={repairingId === row.id ? 'blackout-practice-repair' : undefined}
+                  onClick={(event) => {
+                    repairTrigger.current = event.currentTarget;
+                    setRepairingId((open) => (open === row.id ? null : row.id));
+                  }}
+                  aria-label={`Repair practices for the blackout on ${labelOf(row)}`}
+                >
+                  Repair practices
+                </Button>{' '}
                 <Button
                   variant="ghost-danger"
                   size="sm"
                   icon={Trash2}
-                  onClick={() => onRemove(row.closure)}
+                  onClick={() => onRemove(row.closure, labelOf(row))}
                   aria-label={`Remove the blackout on ${row.ground}, ${row.from} to ${row.until}, ${row.hours}`}
                 >
                   Remove
@@ -274,7 +403,7 @@ export default function BlackoutsPage() {
             ),
         },
       ]),
-    [onRemove]
+    [onRemove, isAdmin, repairingId]
   );
 
   // **Only on the FIRST load.** `useFieldClosures.refresh` sets `loading` on
@@ -347,6 +476,40 @@ export default function BlackoutsPage() {
         searchKeys={['ground', 'reason', 'from', 'until', 'source']}
         emptyText="No closures on file — add one, or import field availability"
       />
+      {isAdmin && repairClosure && repairLoss && (
+        <section
+          id="blackout-practice-repair"
+          aria-labelledby="blackout-practice-repair-title"
+          className="card"
+          style={{ margin: 12 }}
+          data-testid="blackout-practice-repair"
+        >
+          <h2
+            id="blackout-practice-repair-title"
+            ref={repairHeading}
+            tabIndex={-1}
+            className="text-sm"
+          >
+            <strong>Practice repair for the saved blackout on {repairLabel}</strong>
+          </h2>
+          <Button variant="secondary" size="sm" onClick={closeRepair}>
+            Close practice repair
+          </Button>
+          <Suspense
+            fallback={
+              <p className="text-sm" role="status">
+                Loading the practice repair…
+              </p>
+            }
+          >
+            <PracticeRepairPanel
+              loss={repairLoss}
+              subject={`the blackout on ${repairLabel}`}
+              isAdmin={isAdmin}
+            />
+          </Suspense>
+        </section>
+      )}
       {/*
         **One dialog, two operations, and it is MOUNTED per operation.** The
         editor reads its initial form state once, at mount, so switching
@@ -365,6 +528,9 @@ export default function BlackoutsPage() {
           onCreate={onCreate}
           onUpdate={onUpdate}
           editing={editing}
+          enactedText={
+            editEnacted ? enactedOffBlackoutText(editEnacted, 'Saving this change') : null
+          }
           locations={locations || []}
           fields={fields || []}
           dated={bookings.dated}

@@ -36,6 +36,7 @@
  */
 
 import {
+  PRACTICE_REASON,
   PRACTICE_REPAIR_PAYLOAD_REFUSAL,
   PRACTICE_TBD_REASON,
   buildPracticeRepairInput,
@@ -87,7 +88,7 @@ const WEEKDAY_TEXT = Object.freeze({
 });
 
 /** @param {number} minutes */
-function clock(minutes) {
+export function clock(minutes) {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
@@ -250,6 +251,41 @@ export function namesOf(rows) {
 /** A shape in words: weekday, time, ground. */
 export function describeShape(shape, names) {
   return `${WEEKDAY_TEXT[shape.weekday] ?? shape.weekday} ${clock(shape.startMinutes)} · ${names.surface(shape.surfaceId)}`;
+}
+
+/**
+ * One view row per saved temporary move that lands on the lost ground
+ * (3b PR 11d, plan §2.3 and §4, operator answer Q8). The repair holds it as
+ * an occupant, so no other series lands on it, and reports it in its
+ * `PRACTICE_REPAIR_RELOCATED_TARGET_LOST` finding; it is neither moved nor
+ * TIME TBD, so it is in no recommendation. The panel lists each one as its
+ * own row, "cannot be repaired here", never only as a finding, and never
+ * drops one: a finding whose occupants do not read throws.
+ *
+ * @param {{ findings: Array<{ code: string, details?: any }> }} result - the repair's result
+ * @param {{ context: { slots: Map<string, any> } }} adapted
+ * @param {ReturnType<typeof namesOf>} names
+ */
+export function targetLostRowsOf(result, adapted, names) {
+  const lost = result.findings.filter(
+    (f) => f.code === PRACTICE_REASON.REPAIR_RELOCATED_TARGET_LOST
+  );
+  return lost.flatMap((finding) => {
+    const occupants = finding.details?.occupants;
+    if (!Array.isArray(occupants) || occupants.length === 0) {
+      throw new Error('practice repair: a saved move on the lost ground names no practice');
+    }
+    return occupants.map((o) => {
+      const slot = adapted.context.slots.get(o.slotId);
+      return {
+        exceptionId: o.id,
+        assignmentId: o.assignmentId,
+        team: names.team(o.teamId),
+        movedTo: slot ? describeShape(slot, names) : o.slotId,
+        window: `${o.from} to ${o.until}`,
+      };
+    });
+  });
 }
 
 /**

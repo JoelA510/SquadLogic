@@ -67,7 +67,7 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -144,7 +144,7 @@ jobs:
 
       - name: Setup Node.js
         if: steps.changes.outputs.docs_only != 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: 'npm'
@@ -218,7 +218,7 @@ jobs:
 
       - name: Upload Playwright HTML report
         if: always() && steps.changes.outputs.docs_only != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: playwright-report/
@@ -227,7 +227,7 @@ jobs:
 
       - name: Upload Playwright failure artifacts
         if: always() && steps.changes.outputs.docs_only != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-test-results
           path: test-results/
@@ -236,7 +236,7 @@ jobs:
 
       - name: Upload bundle-budget report
         if: always() && steps.changes.outputs.docs_only != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bundle-budget-report
           path: bundle-budget-report.txt
@@ -245,7 +245,7 @@ jobs:
 
       - name: Upload coverage report if present
         if: always() && steps.changes.outputs.docs_only != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage/
@@ -272,7 +272,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Deno
         uses: denoland/setup-deno@v2
@@ -325,7 +325,7 @@ jobs:
       MAX_PENDING_MIGRATIONS: ${{ vars.MAX_PENDING_MIGRATIONS }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Check deploy secrets
         id: secrets
@@ -340,14 +340,17 @@ jobs:
 
       - name: Setup Node.js
         if: steps.secrets.outputs.configured == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
+          # setup-node v5+ caches npm on its own once package.json names a
+          # packageManager; this job installs nothing, so nothing to cache.
+          package-manager-cache: false
 
       # Pinned (workflow env): the guard parses this version's JSON output.
       - name: Setup Supabase CLI
         if: steps.secrets.outputs.configured == 'true'
-        uses: supabase/setup-cli@v1
+        uses: supabase/setup-cli@v2
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
 
@@ -414,7 +417,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Check deploy secrets
         id: secrets
@@ -433,7 +436,7 @@ jobs:
       # API rate limit on runs 1156 and 1174.
       - name: Setup Supabase CLI
         if: steps.secrets.outputs.configured == 'true'
-        uses: supabase/setup-cli@v1
+        uses: supabase/setup-cli@v2
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
 

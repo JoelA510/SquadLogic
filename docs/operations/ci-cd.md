@@ -84,7 +84,9 @@ how to fix an advisory: [`dependency-policy.md`](../security/dependency-policy.m
 
 **Not a required check yet.** The job reports as
 `npm audit (high and critical block)`. Until the owner adds that context to the
-`main` ruleset (and to `.github/rulesets/main.json` in the same change), a red
+`main` ruleset (and to `.github/rulesets/main.json` in the same change, teaching
+`tests/rulesetRequiredChecks.test.js`, which looks only in `ci.yml`, to find
+it in `audit.yml`), a red
 audit is visible on the pull request but does not block the merge. It can be
 required safely: the workflow has no `paths` filter and the job no `if`, so it
 reports on every pull request, docs-only ones included.

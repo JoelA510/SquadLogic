@@ -93,6 +93,33 @@ real visitors (audit finding 5.1, plan item M1.7, which made the guard refuse on
 every host). That guard ran before `Sentry.init`, so such a deploy went READY
 and reported nothing; M2.2 moved the failure to the build.
 
+### What the Vercel project sets
+
+Read on 2026-10-13 (plan item M5.4). Names only; no value is recorded here. The Vercel API
+refused to list the project's variables to the token used (403), so the Production list is
+read from what the build embedded: the bundle of production deployment
+`dpl_4sSoS5yHuf5TkxPXTUK94m69HhUg` (commit `64bd751`), checked for each name with a non-empty
+value (*executed*).
+
+| Environment | Set in Vercel | Not set |
+|---|---|---|
+| Production | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_SENTRY_DSN` | `VITE_USE_MOCK_SUPABASE`; `VITE_SUPABASE_PERSISTENCE_URL` (the build derives it from `VITE_SUPABASE_URL`: its log says "Derived VITE_SUPABASE_PERSISTENCE_URL") |
+| Preview | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (previews load production's Supabase project; see the remediation plan, "Discovered during execution", PR 1-B), `VITE_SENTRY_DSN` (#558's preview: a with-DSN main entry and a Sentry request on load) | `VITE_USE_MOCK_SUPABASE` (the preview runs the real client) |
+
+- **Vercel's system variables reach the bundle.** For a Vite project Vercel also exposes its
+  system variables with a `VITE_` prefix (`VITE_VERCEL_ENV`, `VITE_VERCEL_GIT_COMMIT_SHA`,
+  `VITE_VERCEL_GIT_COMMIT_MESSAGE`, `VITE_VERCEL_GIT_COMMIT_AUTHOR_LOGIN`,
+  `VITE_VERCEL_GIT_COMMIT_AUTHOR_NAME`, `VITE_VERCEL_URL`, and the rest). Because
+  `frontend/src/config.js` read `import.meta.env` as a whole (audit finding 8.4), all of them
+  were in the production bundle until M2.2, the last commit's message and its author's name
+  among them. None is a secret. Since M2.2 `frontend/src/env.js` reads each variable by name, so
+  none of them is bundled (a build with canary values embeds them on the old code and not on
+  the new; `tests/env.test.js` fails on any whole-object read).
+- **Variables without the `VITE_` prefix** that the Vercel project may hold cannot be listed
+  without the API's permission; the build reads none of them except `VERCEL_ENV`.
+- **To see the exact list:** Vercel → the `squadlogic` project → Settings → Environment
+  Variables, or `vercel env ls` with a token that can read them.
+
 ---
 
 ## Supabase Edge Functions

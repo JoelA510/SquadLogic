@@ -181,6 +181,11 @@ jobs:
         if: steps.changes.outputs.docs_only != 'true'
         run: npm run lint
 
+      # knip: unused files, exports and dependencies (knip.jsonc; plan M5.5).
+      - name: Unused-code check
+        if: steps.changes.outputs.docs_only != 'true'
+        run: npm run check:unused
+
       - name: Unit & Integration Tests
         if: steps.changes.outputs.docs_only != 'true'
         run: npm run test

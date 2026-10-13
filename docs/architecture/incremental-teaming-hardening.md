@@ -8,6 +8,10 @@
 > is the consolidated `changePolicy` reference, and §4's fresh-path invariants remain guaranteed by
 > the characterization suite. The fresh allocator's behavior is unchanged whenever no snapshot is
 > supplied. (§5–§6 retain the original forward-looking plan/target shapes for historical context.)
+>
+> Code comments cite these phases as "project-hardening PR 01"–"PR 09". The prompt bundle that
+> drove them (`project-hardening/`) was removed in 2026-10 (remediation plan item M5.1); this page
+> is the record: §5 names the phase each PR delivered, and §6a–§6g describe PRs 02–08 as shipped.
 
 The current allocator (`packages/core/src/teamGeneration.js`) is a **fresh allocator**: every
 run treats all players as unassigned and builds teams from scratch. That is correct for the

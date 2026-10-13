@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit",
     "check:bundle": "node scripts/check-bundle-size.js",
     "check:advisors": "node scripts/advisor-lint.js",
+    "check:unused": "knip",
     "test:e2e": "bddgen && playwright test",
     "test:e2e:ui": "bddgen && playwright test --ui",
     "test:e2e:codegen": "playwright codegen http://localhost:5173",
@@ -54,6 +55,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "^4.1.14",
     "@testing-library/dom": "^10.4.1",
@@ -69,7 +71,9 @@
     "eslint-plugin-prettier": "^5.5.4",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
+    "globals": "^14.0.0",
     "jsdom": "^27.3.0",
+    "knip": "~6.27.0",
     "playwright-bdd": "^9.0.0",
     "postcss": "^8.5.13",
     "prettier": "^3.7.4",
@@ -81,7 +85,6 @@
   },
   "private": true,
   "workspaces": [
-    "frontend",
     "packages/*"
   ],
   "overrides": {

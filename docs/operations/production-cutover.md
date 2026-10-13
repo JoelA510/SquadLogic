@@ -86,20 +86,32 @@ Intensive Edge Functions like the `auto-scheduler` are guarded by a sliding-wind
 
 ## Rollback procedure
 
-If a critical issue is discovered post-launch, the app can be rolled back to mock mode in under 5 minutes — no database changes required.
+If a critical issue is discovered post-launch, the app can be switched to mock mode in a few
+minutes (one rebuild, about a minute) — no database changes required. To roll back a bad
+frontend release without mock mode, use Instant Rollback instead
+([ci-cd.md](./ci-cd.md#frontend)).
 
 **To roll back to mock mode:**
 
 1. Go to Vercel dashboard → squadlogic project → Settings → Environment Variables.
 2. Add: `VITE_USE_MOCK_SUPABASE` = `true` (Production environment only).
-3. Go to Deployments → click the last known-good deployment → "Promote to Production" (instant, no rebuild).
+3. Go to Deployments → the current production deployment → ⋮ → **Redeploy**, and wait for it to
+   finish. A rebuild is required: `VITE_` variables are fixed when the bundle is built, so
+   "Promote to Production" or Instant Rollback of an existing deployment (no rebuild) would keep
+   serving the live backend.
+4. Check the production URL shows the mock's seed data.
 
-Users will see the mock client with seed data. No real data is lost. The Supabase project remains untouched.
+Users will see the mock client with seed data. Changes they make in mock mode live only in
+their browser session and are lost. No real data is lost. The Supabase project remains
+untouched.
 
 **To re-enable the live backend:**
 
 1. Remove the `VITE_USE_MOCK_SUPABASE` env var from Vercel.
 2. Trigger a new deployment (push any trivial commit, or use Vercel's "Redeploy" button).
+
+Until 2026-10 step 3 said to promote the last known-good deployment "instant, no rebuild",
+which cannot pick up a build-time variable (found by PR 1-B, #552; fixed by plan item M5.4).
 
 ---
 

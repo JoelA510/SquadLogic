@@ -241,6 +241,20 @@ function acceptedRulesFor(context, gameId, slot) {
  * floor raised, with the record before it, so the placer can say which
  * placement it admitted and why.
  *
+ * Declared, not enforced, beside it:
+ *
+ * - **A slot that adds no coach overlap always ties shelving.** The rule counts
+ *   overlaps only, so for a game that stands nowhere the placer no longer
+ *   refuses spread growth without an overlap; that refusal now holds for a
+ *   standing game alone.
+ * - **An option offered under the floor goes stale on approval.** The options
+ *   pass judges a `time-tbd` game with the floor; approving the option re-judges
+ *   it in `change-request-apply`, where the game stands on its published slot
+ *   and has none, so it is refused as `RESOLVE_OPTION_STALE`. Parity at approval
+ *   would give a standing game the floor, which this contract excludes.
+ * - **Both sides are measured in one state**, with every other pending game also
+ *   unplaced, so the comparison is local to the placement order (plan §7).
+ *
  * The sibling contract, {@link acceptedRulesFor}'s "refuse growth over what the
  * baseline accepted", adapted to an instance that names a group rather than a
  * game. A pair-keyed instance is the moving game's own; a group's excess is
@@ -253,7 +267,7 @@ function acceptedRulesFor(context, gameId, slot) {
  * @param {Object} context
  * @param {import('./types.js').ResolveState} state
  * @param {string} gameId
- * @returns {{ accepted: Record<string, number>, shelvedRaised: Record<string, { acceptedExcess: number, shelvedExcess: number }>|null }}
+ * @returns {{ accepted: Record<string, number>, shelvedRaised: Record<string, { groupLabel: string, acceptedExcess: number, shelvedExcess: number }>|null }}
  *   `shelvedRaised` is `null` when the floor was not taken (the game stands)
  */
 function acceptedSpreadFor(context, state, gameId) {
@@ -273,14 +287,19 @@ function acceptedSpreadFor(context, state, gameId) {
     accepted[key] = Math.max(accepted[key] ?? 0, excess);
   }
   if (state.games[gameId] !== undefined) return { accepted, shelvedRaised: null };
-  /** @type {Record<string, { acceptedExcess: number, shelvedExcess: number }>} */
+  /** @type {Record<string, { groupLabel: string, acceptedExcess: number, shelvedExcess: number }>} */
   const shelvedRaised = {};
-  const shelved = conflictSpreadInstances(context, state, groups).instances;
-  for (const [key, excess] of Object.entries(shelved)) {
-    const before = accepted[key] ?? 0;
+  const shelved = conflictSpreadInstances(context, state, groups);
+  for (const subject of shelved.subjects) {
+    const excess = shelved.instances[subject.key];
+    const before = accepted[subject.key] ?? 0;
     if (excess <= before) continue;
-    shelvedRaised[key] = { acceptedExcess: before, shelvedExcess: excess };
-    accepted[key] = excess;
+    shelvedRaised[subject.key] = {
+      groupLabel: subject.groupLabel,
+      acceptedExcess: before,
+      shelvedExcess: excess,
+    };
+    accepted[subject.key] = excess;
   }
   return { accepted, shelvedRaised };
 }
@@ -292,8 +311,8 @@ function acceptedSpreadFor(context, state, gameId) {
  * are a pure function of the candidate.
  *
  * @param {Record<string, number>} instances - the candidate's gated instances
- * @param {Record<string, { acceptedExcess: number, shelvedExcess: number }>|null} shelvedRaised
- * @returns {Array<{ key: string, placedExcess: number, shelvedExcess: number, acceptedExcess: number }>}
+ * @param {Record<string, { groupLabel: string, acceptedExcess: number, shelvedExcess: number }>|null} shelvedRaised
+ * @returns {Array<{ groupLabel: string, placedExcess: number, shelvedExcess: number, acceptedExcess: number }>}
  */
 function admittedByShelvedFloor(instances, shelvedRaised) {
   if (shelvedRaised === null) return [];
@@ -301,7 +320,7 @@ function admittedByShelvedFloor(instances, shelvedRaised) {
     .sort()
     .filter((key) => (instances[key] ?? 0) > shelvedRaised[key].acceptedExcess)
     .map((key) => ({
-      key,
+      groupLabel: shelvedRaised[key].groupLabel,
       placedExcess: instances[key],
       shelvedExcess: shelvedRaised[key].shelvedExcess,
       acceptedExcess: shelvedRaised[key].acceptedExcess,
@@ -964,22 +983,17 @@ function placePending(state, context, gameId, stageId) {
     // a tie and on a strict improvement alike (Q6). The group warning
     // (`RESOLVE_CONFLICT_SPREAD_CARRIED`) names no game; this says which
     // placement the floor let through, from what `chooseSlot()` carried on
-    // the chosen candidate rather than re-derived.
+    // the chosen candidate rather than re-derived. Both sides are measured in
+    // the state the placer judged, other pending games unplaced too, so the
+    // message claims no more than that comparison (order sensitivity, plan §7).
     if (chosen.spreadAdmitted.length > 0) {
       next.ledger.meta.spreadAdmittedByShelvedFloor += 1;
-      const groups = chosen.spreadAdmitted.map(
-        ({ key, placedExcess, shelvedExcess, acceptedExcess }) => ({
-          groupLabel: key.slice(key.indexOf('|') + 1),
-          placedExcess,
-          shelvedExcess,
-          acceptedExcess,
-        })
-      );
+      const groups = chosen.spreadAdmitted.map((group) => ({ ...group }));
       const tie = groups.every((group) => group.placedExcess === group.shelvedExcess);
       next.ledger.findings.push(
         makeResolveFinding(
           RESOLVE_REASON.RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD,
-          `game "${gameId}" was placed on ${slotKey(candidate)} although it pushes ${groups.map((group) => `age group "${group.groupLabel}" to excess ${group.placedExcess} over the permitted coach-conflict spread (accepted ${group.acceptedExcess})`).join('; ')}: shelving it as TIME TBD would leave ${tie ? 'the same' : 'a larger'} excess (${groups.map((group) => `${group.groupLabel} ${group.shelvedExcess}`).join(', ')}), so the kickoff costs the bound nothing a TIME TBD would save (#60b). Allowed with a warning`,
+          `game "${gameId}" was placed on ${slotKey(candidate)} although it pushes ${groups.map((group) => `age group "${group.groupLabel}" to excess ${group.placedExcess} over the permitted coach-conflict spread, past the ${group.acceptedExcess} accepted, where shelving it as TIME TBD would leave ${group.shelvedExcess}`).join('; ')} — measured as the schedule stood when it was placed. A slot no worse for the spread than TIME TBD is not refused for it (#60b); allowed with a warning`,
           { gameId, stageId, slot: slotKey(candidate), groups, tie }
         )
       );

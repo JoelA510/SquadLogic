@@ -982,7 +982,7 @@ function placePending(state, context, gameId, stageId) {
     // **Admitted by the shelved floor (#60b), named per game** (ruling Q3), on
     // a tie and on a strict improvement alike (Q6). The group warning
     // (`RESOLVE_CONFLICT_SPREAD_CARRIED`) names no game; this says which
-    // placement the floor let through, from what `chooseSlot()` carried on
+    // placement the floor let through, from what the slot chooser carried on
     // the chosen candidate rather than re-derived. Both sides are measured in
     // the state the placer judged, other pending games unplaced too, so the
     // message claims no more than that comparison (order sensitivity, plan §7).

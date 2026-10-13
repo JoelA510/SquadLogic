@@ -703,6 +703,14 @@ smoke-tested
 ## Milestone 5 — Agent rules, docs and operability
 
 > **M5.1. One AGENTS.md for every agent, without contradictions** (audit finding 12.1, high)
+> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open).** Root `AGENTS.md` (23,540 bytes) holds every rule, its
+>   sections numbered as CLAUDE.md's were; `CLAUDE.md` is `@AGENTS.md` plus Claude Code's notes.
+>   The contradictions and how each was resolved are listed in the PR. `project-hardening/` is
+>   deleted after its durable rules were merged (one task per PR, merge only on the owner's say,
+>   review-bot comments, call-site sweeps, backward compatibility, the incremental-teaming
+>   invariants); its merge authority and model choice were not carried. The committed
+>   `.features-gen/` spec is deleted. *Executed:* `core.agent-rules` and `check:instructions`
+>   pass, and fail with `AGENTS.md` removed or a dead path planted.
 > - **Fix approach:** per D1, move CLAUDE.md's shared rules into a root `AGENTS.md` (merging from
 >   `prompts/skeletons/AGENTS.skeleton.md`, naming this repo's real paths), leave `CLAUDE.md` as
 >   `@AGENTS.md` plus Claude-only notes; resolve the contradictions in 12.3 there ("Refactor
@@ -726,6 +734,11 @@ smoke-tested
 > 12.3 — resolved by M5.1. 12.4 — resolved by M5.1.
 
 > **M5.2. The three repository skills can't be loaded** (audit finding 12.2, medium)
+> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open).** Frontmatter on all three, their facts corrected
+>   against the code (the evaluator registry is `EVALUATOR_REGISTRY` in
+>   `packages/core/src/evaluators/index.js`, scores are 0-100; `ALL_FLAGS` is derived; the audit
+>   rows carry `action` and `metadata.old`/`new`), and Claude Code copies in `.claude/skills/`.
+>   *Executed:* `check:instructions` passes, and fails on a missing frontmatter or a drifted copy.
 > - **Fix approach:** add `name` and `description` frontmatter to each `squadlogic-*` skill and
 >   check its paths (for example the evaluator registry's location).
 > - **Files touched:** `.agents/skills/squadlogic-*/SKILL.md`.
@@ -739,6 +752,10 @@ smoke-tested
 > - **Verification label:** executed (current state).
 
 > **M5.3. The July plan was never closed** (audit finding 12.5, medium)
+> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open).** The July plan is marked superseded, with a disposition
+>   for each of its 37 items: 13 closed (with the PR), 11 open under an October finding, 13 open
+>   and not carried by this audit (listed below, under "Discovered during execution").
+>   *Statically reviewed.*
 > - **Fix approach:** add a status line to the July plan marking it superseded by this one, with
 >   a table mapping each July item to "closed in <PR>" or to this audit's ID.
 > - **Files touched:** `docs/audits/2026-07-production-readiness/remediation-plan.md`.
@@ -752,6 +769,15 @@ smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M5.4. Vercel's settings and the frontend rollback aren't written down** (audit finding 7.3, medium)
+> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open), except the test gate.** `vercel.json` sets `framework`,
+>   `buildCommand` (`npm run frontend:build`) and `outputDirectory`, held by
+>   `tests/vercelBuildSettings.test.js`; `ENVIRONMENT.md` lists what the Vercel project sets, by
+>   name; `ci-cd.md` has the Vercel settings and a frontend rollback; the cutover runbook's mock
+>   rollback now redeploys instead of promoting. **Gate partly met:** the PR's preview builds from
+>   `vercel.json`, which takes precedence over the dashboard; the dashboard's own build-command
+>   override (today's production build runs `npm run frontend:build`, not the preset's default) is
+>   then redundant. Clearing it is the owner's call after the merge (until then `main`'s deploys
+>   need it); the first deploy after that completes the gate.
 > - **Fix approach:** put `buildCommand`, `outputDirectory` and `framework` in `vercel.json`
 >   (Node comes from `engines`, M1.4), list the Vercel environment variables by name in
 >   `docs/operations/ENVIRONMENT.md`, and add a frontend rollback section (Instant Rollback to
@@ -770,6 +796,13 @@ smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M5.5. No unused-code check** (audit finding 1.2, low)
+> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open).** knip `~6.27.0` (later versions need zod `^4.4.3`, which
+>   would move the app's zod) in CI's Build & Test as `npm run check:unused`; the core package's
+>   exports count as public API, its files do not; `knip.jsonc` keeps a dated, reasoned baseline
+>   (2 unused files; 12 files whose unused exports, one unused type and one duplicate export are
+>   waived); three unused files deleted; the dead `frontend` workspace removed. *Executed:*
+>   `node.unused-code` passes; knip fails on a planted unused file (frontend and core), export and
+>   dependency.
 > - **Fix approach:** knip in CI with the core package's exports as public API; remove the dead
 >   `frontend` workspace entry.
 > - **Files touched:** `knip.json`, `package.json`, `.github/workflows/ci.yml`.
@@ -937,6 +970,28 @@ smoke-tested
     handler the persistence functions serve when their Supabase variables are missing is not
     wrapped; `flush()` is awaited before a failing response (BetterStack latency adds to it).
     *Statically reviewed.*
+
+- 2026-10-13, found by PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`):
+  - `.gitignore`'s CRLF blank lines made `git check-ignore` report every path with a trailing
+    slash as ignored, so `check:instructions` passed every code-span path in the instruction files
+    without checking it. PR M5 renormalizes `.gitignore` to LF (one of M6.2's files); the other 12
+    CRLF or mixed files stay with M6.2. *Executed.*
+  - Audit finding 4.1 says every migration since 2026-05-30 has a revert and a smoke script; four
+    do not: `20260602010000`, `20260603190000`, `20260612000000` and `20260612000001` (July
+    DS-1). *Executed* (a search of `docs/sql/` for each version).
+  - Thirteen July items are still open and no October finding carries them: DS-4 (CSV formula
+    injection), DS-5 (`submit_registration` throttle), DS-9 (impersonation failures swallowed),
+    DS-14 (`dashboardCache` unused), DS-15 (serial dashboard queries), DD-1 to DD-5, DD-7, DD-9
+    (docs drift) and TG-3 (three E2E journeys). For the owner to place; the July plan's table
+    has the detail. *Statically reviewed.*
+  - The production bundle embeds every `VITE_VERCEL_*` system variable Vercel exposes, the last
+    commit's message and author among them, because `config.js` reads `import.meta.env` whole
+    (8.4, M2.2). *Executed* (names checked in the deployed bundle, values not recorded).
+  - Vercel installs with `npm install`, not `npm ci`, so its builds don't hold to the lockfile the
+    way CI's do. Setting `installCommand` is a one-line change, left for M2.3. *Executed* (build
+    log).
+  - `packages/core/package.json` names `src/index.js` as its entry, which does not exist (knip's
+    configuration hint). For M6.1. *Executed.*
 
 ## Deferred with reason
 

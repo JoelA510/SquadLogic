@@ -122,10 +122,13 @@ update it tries. `npm ci` on another Node warns (`EBADENGINE`) instead.
 
 [`.github/dependabot.yml`](../../.github/dependabot.yml): npm and GitHub Actions,
 weekly, with a 3-day cooldown. Minor and patch npm bumps arrive as one grouped
-pull request, the actions as another, and each major as its own. Two are held
-back, each with its reason beside it: `@types/node` 25 (moves with `.nvmrc`)
-and `eslint-plugin-react-hooks` 7.1 (new lint rules flag 63 existing patterns;
-pinned at 7.0.1 in `package.json`). Security updates (Settings -> Advanced
+pull request, the actions as another, and each major as its own. Three are
+held back, each with its reason beside it: `@types/node` 25 (moves with
+`.nvmrc`), `eslint-plugin-react-hooks` 7.1 (new lint rules flag 63 existing
+patterns; pinned at 7.0.1 in `package.json`), and `@tanstack/react-virtual`
+3.14 (its chunk outgrows its bundle budget; locked at 3.13.23). A held-back
+package in the minor-and-patch group would otherwise fail a gate and hold the
+whole batch with it. Security updates (Settings -> Advanced
 Security) ignore the cooldown and arrive at once.
 
 ## When it runs, and what makes it bind

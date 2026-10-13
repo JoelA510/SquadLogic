@@ -27,6 +27,12 @@ updates:
       # back every other minor and patch update with it.
       - dependency-name: eslint-plugin-react-hooks
         versions: ['>= 7.1.0']
+      # 3.14+ (virtual-core 3.18) grows the lazy virtual-vendor chunk from
+      # 5.0 to 7.9 KB gzip, past its 7,000 B cap in config/bundle-budget.json.
+      # Raising that cap is its own decision (docs/operations/bundle-budget.md);
+      # until then this bump would fail check:bundle and hold back the group.
+      - dependency-name: '@tanstack/react-virtual'
+        versions: ['>= 3.14.0']
     groups:
       # Non-major bumps are almost always safe; batch them into one PR.
       # Majors arrive one per PR (none is planned: remediation plan D6).

@@ -352,7 +352,7 @@ and smoke-tested
 ## Milestone 2 — Data integrity & security
 
 > **M2.1. Eight high advisories, no waiver, no audit gate** (audit finding 8.1, high)
-> - **Status (2026-10-13): in PR 2-A (open).** #332's in-range refresh (`npm update` within the
+> - **Status (2026-10-13): in #559 (open).** #332's in-range refresh (`npm update` within the
 >   current majors, taken under M2.3's 3-day release wait) cleared every vulnerable package `npm
 >   audit` reported (15: 8 high, carrying 18 high advisories; 6 moderate; 1 low); floors raised for the direct ones (`react-router-dom`
 >   `^7.18.4`, `vite` `^7.3.7`, `postcss` `^8.5.29`). No major upgrade and no waiver needed (D6).
@@ -418,7 +418,7 @@ and smoke-tested
 > 8.4 — resolved by M2.2 (no whole-object read; the test password leaves the `VITE_` prefix).
 
 > **M2.3. Dependency updates and install guards** (audit finding 8.2, medium)
-> - **Status (2026-10-13): in PR 2-A (open), with M2.1.** `.github/dependabot.yml` (npm and
+> - **Status (2026-10-13): in #559 (open), with M2.1.** `.github/dependabot.yml` (npm and
 >   Actions, weekly, grouped, 3-day cooldown; holds `@types/node` below 25,
 >   `eslint-plugin-react-hooks` below 7.1 and `@tanstack/react-virtual` below 3.14, each with its
 >   reason); `.npmrc` with
@@ -989,7 +989,7 @@ smoke-tested
   - Production holds no `practice_slots`, `practice_assignments` or `practice_exceptions` rows
     (*executed*, one read-only `SELECT` through the Supabase MCP), so M4.7 needs no backfill.
 
-- 2026-10-13, found by PR 2-A (M2.1, M2.3):
+- 2026-10-13, found by PR 2-A (#559; M2.1, M2.3):
   - The `esbuild` override (`^0.25.0`, added March 2026 for an esbuild advisory) was forcing
     0.25.12 under Vite 7.3.2, whose own range is `^0.27.0`: an override that outlived its reason
     and pinned a dependency below its declared range. Removed; *executed* (`npm ls esbuild`).

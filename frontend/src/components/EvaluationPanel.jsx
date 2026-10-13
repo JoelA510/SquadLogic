@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useId } from 'react';
 import { logger } from '../lib/logger.js';
 import { Loader2, AlertCircle, Save, Activity, ShieldCheck, Zap } from 'lucide-react';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
@@ -12,6 +12,21 @@ import { cachedInvoke, edgeFunctionCache } from '../lib/cache.js';
 // duplicate call we want to collapse (e.g., brief re-mount, tab switch, or
 // double-render in StrictMode).
 const FAIRNESS_SCORING_TTL_MS = 60_000;
+
+/**
+ * Teams and slots a practice evaluation has to work with. Both are needed: the
+ * engine resolves every assignment against them, so with either list empty it
+ * drops every row and reports a clean schedule after examining nothing (audit
+ * 13.1). Such a request is never sent; the panel says there is nothing to
+ * evaluate instead.
+ */
+function practiceRosterOf(practiceData) {
+  const teams = practiceData?.teams?.length ?? 0;
+  const slots = practiceData?.slots?.length ?? 0;
+  return { teams, slots, evaluable: teams > 0 && slots > 0 };
+}
+
+const countOf = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
 /**
  * EvaluationPanel - Enterprise Glass component for real-time fairness scoring.
@@ -31,15 +46,21 @@ export default function EvaluationPanel({
   const [loading, setLoading] = useState(false);
   const [persisting, setPersisting] = useState(false);
   const [message, setMessage] = useState('');
+  const titleId = useId();
+  const practiceRoster = practiceRosterOf(practiceData);
+  const nothingToEvaluate = Boolean(practiceData) && !gameData && !practiceRoster.evaluable;
 
   // Trigger server-side evaluation when inputs change
   useEffect(() => {
     let active = true;
 
     const triggerEvaluation = async () => {
-      // Logic requirement: Require at least one data source
-      if (!practiceData && !gameData) {
+      // Logic requirement: Require at least one data source. A practice
+      // schedule without teams or slots is not one (see `practiceRosterOf`).
+      const evaluablePractice = practiceData && practiceRosterOf(practiceData).evaluable;
+      if (!evaluablePractice && !gameData) {
         setEvaluation(null);
+        setLoading(false);
         return;
       }
 
@@ -53,7 +74,7 @@ export default function EvaluationPanel({
           // remains in the request body for Edge Function compatibility.
           organization_id: currentOrganization?.id,
           organizationId: currentOrganization?.id,
-          practice: practiceData
+          practice: evaluablePractice
             ? {
                 assignments: practiceData.assignments || [],
                 teams: practiceData.teams || [],
@@ -134,6 +155,30 @@ export default function EvaluationPanel({
     }
   };
 
+  if (nothingToEvaluate) {
+    return (
+      <section
+        className="glass-panel p-6 rounded-xl border border-border-subtle"
+        aria-labelledby={titleId}
+      >
+        <h2
+          id={titleId}
+          className="text-xl font-display font-bold text-text-primary tracking-tight"
+        >
+          Fairness Scoring Engine
+        </h2>
+        <p role="status" className="text-sm text-text-primary mt-1.5 font-medium">
+          Nothing to evaluate: {countOf(practiceRoster.teams, 'team')} /{' '}
+          {countOf(practiceRoster.slots, 'slot')}
+        </p>
+        <p className="text-sm text-text-muted mt-1">
+          Fairness and coach conflicts are checked once the season has both teams and practice
+          slots, so no score is shown.
+        </p>
+      </section>
+    );
+  }
+
   // Enterprise Glass Loading Skeleton
   if (loading && !evaluation) {
     return (
@@ -193,11 +238,16 @@ export default function EvaluationPanel({
 
   const currentStatus = statusConfig[evaluation?.status] || statusConfig.ok;
   const score = evaluation?.metrics?.combinedScore * 100 || 0;
+  // What the engine examined, shown so a clean result can be told apart from
+  // an empty one. Present only when the response carries a practice result.
+  const practiceSummary = evaluation?.practice?.summary ?? null;
+  const coachConflictCount = evaluation?.practice?.coachConflicts?.length ?? 0;
 
   return (
-    <div
+    <section
       className="glass-panel p-6 rounded-xl border border-border-subtle relative overflow-hidden transition-all duration-300 hover:shadow-md hover:shadow-indigo-500/10"
       aria-live="polite"
+      aria-labelledby={titleId}
     >
       {/* Background Micro-Gradient */}
       <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 via-transparent to-blue-500/5 pointer-events-none" />
@@ -216,7 +266,10 @@ export default function EvaluationPanel({
           </div>
           <div>
             <div className="flex items-center gap-3">
-              <h2 className="text-xl font-display font-bold text-text-primary tracking-tight">
+              <h2
+                id={titleId}
+                className="text-xl font-display font-bold text-text-primary tracking-tight"
+              >
                 Fairness Scoring Engine
               </h2>
               <span
@@ -239,6 +292,26 @@ export default function EvaluationPanel({
                   {evaluation?.issues?.length || 0}
                 </span>
               </span>
+              {practiceSummary && (
+                <>
+                  <span className="w-1 h-1 rounded-full bg-bg-surface-hover" />
+                  <span>
+                    Teams evaluated:{' '}
+                    <span className="text-text-primary font-mono font-bold">
+                      {practiceSummary.totalTeams}
+                    </span>
+                  </span>
+                  <span className="w-1 h-1 rounded-full bg-bg-surface-hover" />
+                  <span>
+                    Coach conflicts:{' '}
+                    <span
+                      className={coachConflictCount > 0 ? 'text-amber-400' : 'text-emerald-400'}
+                    >
+                      {coachConflictCount}
+                    </span>
+                  </span>
+                </>
+              )}
               {evaluation?.metrics?.executionTimeMs && (
                 <>
                   <span className="w-1 h-1 rounded-full bg-bg-surface-hover" />
@@ -308,7 +381,10 @@ export default function EvaluationPanel({
                     <span className="font-bold uppercase tracking-[0.15em] text-[9px] opacity-50">
                       {issue.category.replace('_', ' ')}
                     </span>
-                    {issue.details && (
+                    {/* The engine's `details` is an object (coach-conflict, utilization)
+                        that React cannot render; the message already names it. Only a
+                        text detail is shown. */}
+                    {typeof issue.details === 'string' && issue.details && (
                       <span className="text-[10px] opacity-40 font-mono tracking-tighter italic">
                         {issue.details}
                       </span>
@@ -321,6 +397,6 @@ export default function EvaluationPanel({
           </ul>
         </section>
       )}
-    </div>
+    </section>
   );
 }

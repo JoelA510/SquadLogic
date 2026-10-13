@@ -736,6 +736,17 @@ export default function PracticeSchedulingPage() {
 
   const localAssignments = reviewAssignments ?? assignments;
   const isColdStart = !schedulerTeams.length;
+
+  // What the fairness panel evaluates: the shown assignments against the same
+  // teams and slots the auto-scheduler is sent. It used to get `assignments`
+  // alone, so `fairness-scoring` scored an empty roster and reported zero coach
+  // conflicts for every schedule (audit 13.1, #364). `schedulerTeams` carries
+  // `assistantCoachIds`; `schedulerSlots` carries instants on the season's clock.
+  // Memoized so the panel's debounced request isn't restarted by every render.
+  const evaluationPracticeData = useMemo(
+    () => ({ assignments: localAssignments, teams: schedulerTeams, slots: schedulerSlots }),
+    [localAssignments, schedulerTeams, schedulerSlots]
+  );
   const schoolDayEnd =
     currentSeasonSetting?.school_day_end ?? currentSeasonSetting?.schoolDayEnd ?? undefined;
 
@@ -1771,11 +1782,7 @@ export default function PracticeSchedulingPage() {
             </div>
           )}
 
-          <EvaluationPanel
-            practiceData={{
-              assignments: localAssignments,
-            }}
-          />
+          <EvaluationPanel practiceData={evaluationPracticeData} />
 
           <div className="bg-bg-glass border border-border-subtle rounded-xl overflow-hidden shadow-md mt-8">
             {statusMessage && (

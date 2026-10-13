@@ -72,6 +72,12 @@ function scratch() {
   return dir;
 }
 
+/**
+ * @param {unknown} auditReport a report object, or raw text
+ * @param {unknown[] | string} [waivers] waiver entries, or raw register text
+ * @param {string[]} [extra] more arguments
+ * @param {Record<string, string>} [env] environment overrides
+ */
 function run(auditReport, waivers = [], extra = [], env = {}) {
   const dir = scratch();
   writeFileSync(

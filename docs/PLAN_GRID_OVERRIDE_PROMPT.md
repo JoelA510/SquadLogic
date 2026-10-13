@@ -1,6 +1,6 @@
 # Plan: the scheduling grid's override prompt (operator ruling 2)
 
-Status: **PROPOSED.** Docs only; no code changes. Follows #542
+Status: **APPROVED 2026-10-12.** Docs only; no code changes. Follows #542
 (`fix/grid-locked-override-message`), which made the grid's locked refusal
 readable and changed nothing about what the grid saves. `lockedRowOf` below is
 from #542.
@@ -351,3 +351,24 @@ none fails loudly.
    _Recommendation (not an answer):_ refuse. A row the admin did not stage is
    not an override they chose, and ruling 2 asks for a prompt about the change
    being made.
+
+---
+
+## 7. Operator answers (2026-10-12)
+
+The operator: "Follow your recommendations on the 543 plan".
+
+1. Approved as recommended: relabel the lock toggle as provenance ("manual
+   choice" / "automatic"); do not remove it now.
+2. Approved as recommended: replace both live weekdays, stated plainly in the
+   dialog; a per-weekday pick can follow as its own PR.
+3. Approved as recommended: a short picklist rendered into a generated reason,
+   `grid override <runId>: <code>`, with no free text.
+4. Approved as recommended: send `baseFingerprint`, read from
+   `practice_schedule_fingerprint` when the dialog opens.
+5. Approved as recommended: a new `GridOverrideDialog` on the same `Modal` and
+   pattern; do not generalise `PracticeEnactDialog` yet.
+6. Approved as recommended: no prompt-as-shown audit event in this PR;
+   `practice.unlock_accepted` is the record.
+7. Approved as recommended: the stray check refuses; it never widens the
+   dialog to unlock a row the admin did not stage.

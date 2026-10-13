@@ -373,7 +373,7 @@ and smoke-tested
 > - **Verification label:** executed (the current audit); the fix statically reviewed.
 
 > **M2.2. A typed env module, and production decided by the build, not the hostname** (audit finding 2.2, medium)
-> - **Status (2026-10-13): in PR m2b (open).** `frontend/src/env.js` is the only reader of
+> - **Status (2026-10-13): in #558 (open).** `frontend/src/env.js` is the only reader of
 >   `import.meta.env` (by name); the Zod rules are in `frontend/src/envRules.js`, run by a
 >   `vite.config.js` plugin when a production build starts and again by `env.js` in the browser;
 >   M1.7's guard moved into `env.js` unchanged. A production build without `VITE_SUPABASE_URL` /
@@ -975,7 +975,7 @@ smoke-tested
   - Production holds no `practice_slots`, `practice_assignments` or `practice_exceptions` rows
     (*executed*, one read-only `SELECT` through the Supabase MCP), so M4.7 needs no backfill.
 
-- 2026-10-13, found by PR m2b (M2.2):
+- 2026-10-13, found by #558 (M2.2):
   - The bundle-budget gate measures a build without `VITE_SENTRY_DSN` (CI has none), where
     `main.jsx`'s `if (SENTRY_DSN)` folds away and `Sentry.init` with its tracing and replay
     integrations is not bundled. A build with a DSN, as production's error reporting needs (M1.5),

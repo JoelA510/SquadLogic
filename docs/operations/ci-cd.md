@@ -245,8 +245,9 @@ What it enforces on the default branch:
   default). Turning conversation resolution on is the owner's call; until
   then, an unresolved review thread does not block a merge.
 
-There is no CodeQL workflow, and the Vercel deployment check and pgTAP are not
-required. pgTAP runs only on pull requests that touch its `paths`, so as a
+Not required: CodeQL (it runs through GitHub's code scanning default setup,
+reported as the `Analyze (...)` checks, not through a workflow in this
+repository), the Vercel deployment check, and pgTAP. pgTAP runs only on pull requests that touch its `paths`, so as a
 required check it would never report on the rest and would block them forever;
 it joins once it runs on every pull request (plan item M3.2, decision D5).
 

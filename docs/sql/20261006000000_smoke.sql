@@ -33,7 +33,7 @@ BEGIN
       FROM pg_constraint
      WHERE conrelid = 'public.organization_heat_settings'::regclass AND contype = 'c'
        AND conname IN ('organization_heat_settings_category_range', 'organization_heat_settings_links_shape');
-    IF v_checks <> 2 THEN
+    IF v_checks <> 3 THEN
         RAISE EXCEPTION 'expected the category and links CHECKs on organization_heat_settings; found % of 2', v_checks;
     END IF;
 

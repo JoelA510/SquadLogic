@@ -19,7 +19,10 @@ type GamePersistencePage = Page & {
 type PracticePersistencePage = Page & {
   __practicePersistenceBodies?: Array<{
     snapshot?: { payload?: { assignmentRows?: Array<Record<string, unknown>> } };
-    repair?: { unlock?: Array<{ assignment_id: string; reason: string }> };
+    repair?: {
+      unlock?: Array<{ assignment_id: string; reason: string }>;
+      closes?: Array<{ assignment_id: string; last_day: string }>;
+    };
   }>;
 };
 
@@ -1172,6 +1175,9 @@ Then('the lock state should be persisted to the database', async ({ page }) => {
 Given(
   "the roster's {string} has a saved practice and a second slot is available",
   async ({ page }, teamName: string) => {
+    // "Today" is fixed (noon in New York on 2026-10-20), so the override's
+    // close-on-yesterday and start-today dates are known (#546).
+    await page.clock.setFixedTime(new Date('2026-10-20T16:00:00Z'));
     await page.evaluate((name) => {
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
       const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
@@ -1190,7 +1196,7 @@ Given(
           team_id: 't1',
           slot_id: 'slot-1',
           practice_slot_id: 'slot-1',
-          effective_date_range: '[2025-01-01,2026-01-01)',
+          effective_date_range: '[2026-09-07,2026-12-01)',
           assigned_via: 'auto',
           source: 'auto',
         },
@@ -1202,6 +1208,8 @@ Given(
           day_of_week: 'wed',
           start_time: '18:00',
           end_time: '19:00',
+          valid_from: '2026-09-07',
+          valid_until: '2026-11-30',
           field_id: 'field-1',
           organization_id: orgId,
         },
@@ -1245,6 +1253,10 @@ Then(
     ).toBeFocused();
     await expect(dialog.getByTestId('grid-override-replacing')).toContainText('Monday');
     await expect(dialog.getByTestId('grid-override-replacement')).toContainText('Wednesday');
+    // The past stays (#546).
+    await expect(dialog.getByTestId('grid-override-past')).toContainText(
+      'Practices up to 2026-10-19 are kept; from 2026-10-20'
+    );
   }
 );
 
@@ -1275,6 +1287,15 @@ Then(
     const unlock = bodies[0].repair?.unlock ?? [];
     expect(unlock.map((u) => u.assignment_id)).toEqual(['assign-roster-team-a']);
     expect(unlock[0].reason).toMatch(new RegExp(`^grid override( \\S+)?: ${code}$`));
+    // #546: the replaced series is ended on yesterday, not deleted, and the
+    // new row starts today.
+    expect(bodies[0].repair?.closes).toEqual([
+      { assignment_id: 'assign-roster-team-a', last_day: '2026-10-19' },
+    ]);
+    const staged = (bodies[0].snapshot?.payload?.assignmentRows ?? []).filter(
+      (r) => r.team_id === 't1' && r.practice_slot_id === 'slot-2'
+    );
+    expect(staged.map((r) => r.effective_date_range)).toEqual(['[2026-10-20,2026-11-30]']);
   }
 );
 

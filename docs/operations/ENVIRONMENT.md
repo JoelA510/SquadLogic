@@ -33,7 +33,7 @@ dashboard setting then only needs to match. CI ran Node 20 (end of life) until
 | `VITE_SENTRY_DSN` | Recommended | No | Sentry DSN for frontend error tracking & performance monitoring. Unset: Sentry is off. Malformed (not `https://<public key>@<host>/<project id>`): the build fails. | Sentry → Create Project → Browser JavaScript → DSN |
 | `VERCEL_ENV` | No (set by Vercel) | No | Vercel's own system variable (`production` / `preview` / `development`). `vite.config.js` exposes exactly this one, by name, as `import.meta.env.VITE_VERCEL_ENV` (read in `frontend/src/env.js` as `DEPLOY_ENV`), and it becomes the Sentry event `environment`, so preview events are not reported as production. Outside Vercel it is empty and the environment stays `production`. Not set by hand. | Vercel system environment variable |
 | `VITE_USE_MOCK_SUPABASE` | No | No | `true` forces the mock Supabase client, and is the only way a production build ships the mock (see Production Safety). `true`, `false` or unset; anything else fails the build. **Must be unset or `false` in production.** | Manual — development/E2E only |
-| `VITE_SUPABASE_PERSISTENCE_URL` | No | No | Override base URL for the persistence Edge Functions. Defaults to `VITE_SUPABASE_URL` + `/functions/v1`, or to `http://localhost:54321/functions/v1` (the local stack) when that is unset. Must be an `http(s)` URL. | Supabase Dashboard → Settings → API → Edge Functions URL |
+| `VITE_SUPABASE_PERSISTENCE_URL` | No | No | Override base URL for the persistence Edge Functions. In a production build of the real client it defaults to `VITE_SUPABASE_URL` + `/functions/v1` (the `frontend:build` wrapper also derives it); in mock mode and on the dev server, to `http://localhost:54321/functions/v1` (the local stack), so a mock session never posts to the real project. Must be an `http(s)` URL. | Supabase Dashboard → Settings → API → Edge Functions URL |
 
 ### How the frontend reads its environment
 
@@ -52,8 +52,11 @@ The same rules run twice:
   a missing or malformed variable fails the build, with one line per variable
   naming it. Nothing is written, so a deploy missing its variables fails on
   Vercel instead of going READY.
-- **In the browser**, on the values the build inlined. On the dev server a
-  malformed value stops the app with the same message.
+- **In the browser**, on the values the build inlined. A production bundle
+  with a malformed value stops. On the dev server (and in Vitest) a malformed
+  value is ignored, as if unset, with a console warning naming it, so a `.env`
+  copied from the old example (`your_supabase_project_url`) still runs the
+  mock.
 
 Every `VITE_` variable is public. A secret never gets a `VITE_` name.
 

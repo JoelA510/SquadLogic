@@ -299,6 +299,9 @@ npm run check:advisors
 npm run check:bundle
 ```
 
+`frontend:build` fails without `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`; to build what CI
+builds, set the stand-ins CI's step sets (`.github/workflows/ci.yml`, `docs/operations/ci-cd.md`).
+
 ---
 
 ## 9. UI/UX & Accessibility Guidelines

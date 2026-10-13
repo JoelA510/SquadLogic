@@ -99,13 +99,15 @@ if (problems.some((problem) => problem.kind === 'missing')) {
   );
 }
 
-// A malformed value (a production build cannot have one: the build fails
-// first). On the dev server this stops the app with the variable named,
-// rather than letting a bad URL or DSN fail somewhere later.
+// A malformed value. In a production bundle it stops the app (a build with
+// one fails first, in vite.config.js, so this is the second line). On the dev
+// server and in Vitest it is left out, as if unset, with a warning naming it:
+// a .env copied from the old example (`your_supabase_project_url`) still runs
+// the mock, as it did before these rules.
 if (problems.length > 0) {
-  throw new Error(
-    `[SquadLogic] Invalid environment (docs/operations/ENVIRONMENT.md):\n${formatEnvProblems(problems)}`
-  );
+  const message = `[SquadLogic] Invalid environment (docs/operations/ENVIRONMENT.md):\n${formatEnvProblems(problems)}`;
+  if (IS_PRODUCTION_BUILD) throw new Error(message);
+  console.warn(`${message}\nOn the dev server each is ignored, as if unset.`);
 }
 
 export const SUPABASE_URL = env.supabaseUrl;

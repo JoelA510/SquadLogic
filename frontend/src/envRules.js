@@ -128,7 +128,8 @@ const schema = z.object({
 
 /**
  * Validates the raw values against the rules. Never throws: the caller
- * decides what a problem stops (the build, or the app's start).
+ * decides what a problem stops (the build, or the app's start). A rejected
+ * value is left out of `env`, as if unset.
  *
  * In a production build (`vite build`, `import.meta.env.PROD`) the Supabase
  * URL and key are required unless `VITE_USE_MOCK_SUPABASE=true`, the one way
@@ -176,16 +177,26 @@ export function validateClientEnv(raw, { production }) {
     }
   }
 
+  const isMockMode = useMockSupabase || !supabaseUrl || !supabaseAnonKey;
+
+  // The persistence base: the explicit value; else, in a production build of
+  // the real client, the project's own Functions URL (what the
+  // `frontend:build` wrapper, scripts/configurePersistenceEndpoint.js, derives
+  // too, so a bare `vite build` cannot fall back to localhost); else the local
+  // stack, as before. Never derived in mock mode or on the dev server: a mock
+  // session must not post to the real project's Edge Functions.
   const persistenceUrl =
     values.VITE_SUPABASE_PERSISTENCE_URL ??
-    (supabaseUrl ? `${supabaseUrl.replace(/\/+$/, '')}/functions/v1` : LOCAL_FUNCTIONS_URL);
+    (production && !isMockMode && supabaseUrl
+      ? `${supabaseUrl.replace(/\/+$/, '')}/functions/v1`
+      : LOCAL_FUNCTIONS_URL);
 
   return {
     env: {
       supabaseUrl,
       supabaseAnonKey,
       useMockSupabase,
-      isMockMode: useMockSupabase || !supabaseUrl || !supabaseAnonKey,
+      isMockMode,
       apiBaseUrl: persistenceUrl.replace(/\/+$/, ''),
       sentryDsn: values.VITE_SENTRY_DSN,
     },

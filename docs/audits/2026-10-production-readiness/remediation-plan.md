@@ -379,11 +379,15 @@ and smoke-tested
 >   M1.7's guard moved into `env.js` unchanged. A production build without `VITE_SUPABASE_URL` /
 >   `VITE_SUPABASE_ANON_KEY` (no opt-in) fails naming each, so it no longer emits the mock chunk or
 >   goes READY behind a runtime Configuration Error. Also refused: a malformed URL, DSN or opt-in
->   value, and a Supabase secret key in `VITE_SUPABASE_ANON_KEY`. The mock's password is a fixed
+>   value, and a Supabase secret key in `VITE_SUPABASE_ANON_KEY` (on the dev server a malformed
+>   value is ignored with a warning, so an old `.env` copy still runs the mock). The persistence
+>   base is derived from the Supabase URL only in a production build of the real client (mock
+>   sessions keep `localhost:54321`, as before). The mock's password is a fixed
 >   demo value; the `VITE_TEST_*` names are gone (`TEST_*` at the Node layer). CI's
 >   `frontend:build` sets well-formed stand-ins, not the opt-in, so `check:bundle` measures
 >   production's shape. Test gate *executed*: `tests/env.test.js` (34 cases), 8 red with `main`'s
->   `frontend/src` and `vite.config.js` restored; template `check-env` 0 findings (3 on `main`).
+>   `frontend/src` and `vite.config.js` restored; template `check-env` 0 findings (3 on `main`);
+>   E2E (mock, one worker) 92 of 94 with 2 load flakes that pass on rerun (8 of 8).
 >   Vercel preview: see the PR.
 > - **Fix approach:** `frontend/src/env.js` reads each variable by name and validates with Zod:
 >   Supabase URL and key required in a production build unless `VITE_USE_MOCK_SUPABASE=true`

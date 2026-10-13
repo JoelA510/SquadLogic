@@ -163,7 +163,7 @@ describe('envRules: accepted values', () => {
     expect(result.env.sentryDsn).toBe(DSN_OK);
   });
 
-  it('the persistence base: explicit, else derived from the Supabase URL, else the local stack', () => {
+  it('the persistence base: explicit, else the project in a production build, else the local stack', () => {
     const explicit = validateClientEnv(
       { ...PROD_OK, VITE_SUPABASE_PERSISTENCE_URL: 'https://edge.example.org/functions/v1/' },
       { production: true }
@@ -175,6 +175,22 @@ describe('envRules: accepted values', () => {
     );
     expect(derived.env.apiBaseUrl).toBe(`${URL_OK}/functions/v1`);
     expect(validateClientEnv({}, { production: false }).env.apiBaseUrl).toBe(LOCAL_FUNCTIONS_URL);
+  });
+
+  it('a mock session or the dev server never derives the real project for persistence', () => {
+    // Mock mode with a real URL present (.env.local.example sets the opt-in):
+    // persistence must not post mock data to the real project's Functions.
+    for (const production of [true, false]) {
+      const mock = validateClientEnv(
+        { ...PROD_OK, VITE_USE_MOCK_SUPABASE: 'true' },
+        { production }
+      );
+      expect(mock.env.isMockMode).toBe(true);
+      expect(mock.env.apiBaseUrl).toBe(LOCAL_FUNCTIONS_URL);
+    }
+    const dev = validateClientEnv(PROD_OK, { production: false });
+    expect(dev.env.isMockMode).toBe(false);
+    expect(dev.env.apiBaseUrl).toBe(LOCAL_FUNCTIONS_URL);
   });
 });
 
@@ -197,10 +213,29 @@ describe('env.js: what the app sees', () => {
     vi.unstubAllEnvs();
   });
 
-  it('a malformed Sentry DSN stops the app, naming the variable', async () => {
+  it('a production bundle with a malformed value stops, naming the variable', async () => {
     await expect(
-      loadEnvModule({ prod: false, vars: { VITE_SENTRY_DSN: 'not-a-dsn' } })
+      loadEnvModule({ prod: true, vars: { ...PROD_OK, VITE_SENTRY_DSN: 'not-a-dsn' } })
     ).rejects.toThrow(/VITE_SENTRY_DSN must be a Sentry DSN/);
+  });
+
+  it('the dev server ignores a malformed value, as if unset, and warns naming it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // The old .env.example's placeholder: before M2.2 this ran the mock.
+      const env = await loadEnvModule({
+        prod: false,
+        vars: { VITE_SUPABASE_URL: 'your_supabase_project_url', VITE_SENTRY_DSN: 'not-a-dsn' },
+      });
+      expect(env.IS_MOCK_MODE).toBe(true);
+      expect(env.SUPABASE_URL).toBeUndefined();
+      expect(env.SENTRY_DSN).toBeUndefined();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toMatch(/VITE_SUPABASE_URL must be an http\(s\) URL/);
+      expect(String(warn.mock.calls[0][0])).toMatch(/VITE_SENTRY_DSN must be a Sentry DSN/);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('Sentry is off when the DSN is unset, and on with a well-formed one', async () => {
@@ -306,18 +341,25 @@ function envReads(code) {
   /** @type {(string | null)[]} */
   const reads = [];
   const visit = (/** @type {ts.Node} */ node) => {
-    if (
-      ts.isPropertyAccessExpression(node) &&
-      node.name.text === 'env' &&
-      ts.isMetaProperty(node.expression) &&
-      node.expression.name.text === 'meta'
-    ) {
+    // Every `import.meta` in the code. `import.meta.url` and the like are not
+    // env reads; `import.meta.env.NAME` is a named read; anything else that
+    // reaches `env` (`import.meta.env` whole, `import.meta['env']`,
+    // `const { env } = import.meta`, `import.meta` passed along) counts as a
+    // whole-object read, which Vite fills with every VITE_ variable.
+    if (ts.isMetaProperty(node) && node.name.text === 'meta') {
       const parent = node.parent;
-      reads.push(
-        ts.isPropertyAccessExpression(parent) && parent.expression === node
-          ? parent.name.text
-          : null
-      );
+      if (ts.isPropertyAccessExpression(parent) && parent.expression === node) {
+        if (parent.name.text === 'env') {
+          const grand = parent.parent;
+          reads.push(
+            ts.isPropertyAccessExpression(grand) && grand.expression === parent
+              ? grand.name.text
+              : null
+          );
+        }
+      } else {
+        reads.push(null);
+      }
     }
     ts.forEachChild(node, visit);
   };
@@ -329,6 +371,9 @@ describe('env.js is the only reader of import.meta.env, by name', () => {
   it('the detector sees named reads, whole-object reads, and skips comments', () => {
     expect(envReads('const a = import.meta.env.VITE_X;')).toEqual(['VITE_X']);
     expect(envReads('const e = import.meta.env; f(import.meta.env[k]);')).toEqual([null, null]);
+    expect(envReads("const v = import.meta['env'].VITE_X;")).toEqual([null]);
+    expect(envReads('const { env } = import.meta; f(env[k]);')).toEqual([null]);
+    expect(envReads('const u = new URL("./a.svg", import.meta.url);')).toEqual([]);
     expect(envReads('// import.meta.env.VITE_X\nconst s = "import.meta.env";')).toEqual([]);
   });
 

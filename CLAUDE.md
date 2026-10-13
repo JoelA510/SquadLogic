@@ -380,6 +380,13 @@ fix (executed on production 2026-09-28) is in
 
 Plus a **weekly keepalive** cron job (Monday noon UTC) that pings the Supabase REST API to prevent free-tier project pausing.
 
+A separate **Dependency audit** workflow (`.github/workflows/audit.yml`) runs
+`npm run check:audit` on every PR, on pushes to `main` and weekly (Monday 06:00
+UTC): high and critical advisories fail unless `docs/security/audit-waivers.json`
+waives them with a reason and an expiry at most 90 days out. It is not yet a
+required check. Policy, waivers, the `.npmrc` install guards and Dependabot:
+`docs/security/dependency-policy.md`.
+
 ---
 
 ## 12. Common Commands
@@ -399,6 +406,7 @@ Plus a **weekly keepalive** cron job (Monday noon UTC) that pings the Supabase R
 | `npm run format`         | Prettier format all files                 |
 | `npm run check:bundle`   | Bundle-budget gate                        |
 | `npm run check:advisors` | Advisor-lint static gate                  |
+| `npm run check:audit`    | Dependency audit gate (high/critical)     |
 
 ---
 
@@ -416,7 +424,7 @@ Plus a **weekly keepalive** cron job (Monday noon UTC) that pings the Supabase R
 | Lessons Learned         | `docs/LESSONS_LEARNED.md`                        |
 | RLS policies            | `docs/security/rls-policies.md`                  |
 | CSP policy              | `docs/security/csp.md`                           |
-| Dependabot waivers      | `docs/security/dependabot-waivers.md`            |
+| Dependency policy       | `docs/security/dependency-policy.md`             |
 | Advisor lint            | `docs/operations/advisor-lint.md`                |
 | Bundle budget           | `docs/operations/bundle-budget.md`               |
 | Production cutover      | `docs/operations/production-cutover.md`          |

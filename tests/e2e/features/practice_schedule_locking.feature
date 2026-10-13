@@ -22,7 +22,8 @@ Feature: Practice Schedule Locking
     And other unlocked assignments should be updated by the engine
 
   Scenario: Overriding a saved practice asks for confirmation first
-    Given a second practice slot is available
+    Given the automated schedule has been generated
+    And the roster's "Team A" has a saved practice and a second slot is available
     And I am on the Practice Scheduling page
     When I override "Team A" onto the second practice slot and apply
     Then a dialog asks to replace the saved practice of "Team A"

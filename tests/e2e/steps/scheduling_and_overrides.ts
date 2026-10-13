@@ -1166,24 +1166,50 @@ Then('the lock state should be persisted to the database', async ({ page }) => {
 });
 
 // ── The override prompt (docs/PLAN_GRID_OVERRIDE_PROMPT.md, ruling 2) ──────
-Given('a second practice slot is available', async ({ page }) => {
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    db.practice_slots = [
-      ...(db.practice_slots || []).filter((s: Record<string, unknown>) => s.id !== 'slot-2'),
-      {
-        id: 'slot-2',
-        day_of_week: 'wed',
-        start_time: '18:00',
-        end_time: '19:00',
-        field_id: 'field-1',
-        organization_id: orgId,
-      },
-    ];
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
-});
+// The override panel's roster is the mock's team run (`t1` is its "Team A"),
+// so the saved practice the override replaces belongs to that team, in the
+// active season's division (the grid's season read goes teams -> divisions).
+Given(
+  "the roster's {string} has a saved practice and a second slot is available",
+  async ({ page }, teamName: string) => {
+    await page.evaluate((name) => {
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+      db.teams = [
+        ...(db.teams || []).filter((t: Record<string, unknown>) => t.id !== 't1'),
+        { id: 't1', name, division_id: 'div-1', organization_id: orgId },
+      ];
+      db.practice_assignments = [
+        ...(db.practice_assignments || []).filter(
+          (a: Record<string, unknown>) => a.id !== 'assign-roster-team-a'
+        ),
+        {
+          id: 'assign-roster-team-a',
+          organization_id: orgId,
+          run_id: 'active-practice-run-id',
+          team_id: 't1',
+          slot_id: 'slot-1',
+          practice_slot_id: 'slot-1',
+          effective_date_range: '[2025-01-01,2026-01-01)',
+          assigned_via: 'auto',
+          source: 'auto',
+        },
+      ];
+      db.practice_slots = [
+        ...(db.practice_slots || []).filter((s: Record<string, unknown>) => s.id !== 'slot-2'),
+        {
+          id: 'slot-2',
+          day_of_week: 'wed',
+          start_time: '18:00',
+          end_time: '19:00',
+          field_id: 'field-1',
+          organization_id: orgId,
+        },
+      ];
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    }, teamName);
+  }
+);
 
 When(
   'I override {string} onto the second practice slot and apply',
@@ -1192,7 +1218,13 @@ When(
       .getByRole('button', { name: /Enter Manual Override/i })
       .first()
       .click();
-    await page.getByTestId('team-select').selectOption({ label: teamName });
+    // The option label carries the division and coach too: match by name.
+    const teamSelect = page.getByTestId('team-select');
+    const teamValue = await teamSelect
+      .locator('option', { hasText: teamName })
+      .first()
+      .getAttribute('value');
+    await teamSelect.selectOption(String(teamValue));
     await page.getByTestId('slot-select').selectOption('slot-2');
     await page.getByTestId('assign-slot-button').click();
     const apply = page.getByRole('button', { name: /apply schedule/i });
@@ -1236,9 +1268,10 @@ Then(
   async ({ page }, _teamName: string, code: string) => {
     const bodies = (page as PracticePersistencePage).__practicePersistenceBodies ?? [];
     expect(bodies).toHaveLength(1);
-    // From the seed: Team A's one saved row is `assign-team-a`.
+    // From the seed: the roster's Team A (`t1`) has one saved row; the other
+    // team's row (`assign-team-a`, a different team named alike) is not touched.
     const unlock = bodies[0].repair?.unlock ?? [];
-    expect(unlock.map((u) => u.assignment_id)).toEqual(['assign-team-a']);
+    expect(unlock.map((u) => u.assignment_id)).toEqual(['assign-roster-team-a']);
     expect(unlock[0].reason).toMatch(new RegExp(`^grid override( \\S+)?: ${code}$`));
   }
 );

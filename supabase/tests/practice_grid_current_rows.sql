@@ -24,7 +24,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(47);
+SELECT plan(49);
 
 -- Org A: two fresh seasons, one per shape, four teams each, five slots.
 INSERT INTO public.season_settings (id, organization_id, name)
@@ -134,6 +134,21 @@ RETURNS jsonb LANGUAGE sql STABLE AS $$
                     SELECT max(lower(x.effective_date_range))
                       FROM public.practice_assignments x
                      WHERE x.team_id = p_team)))
+$$;
+
+-- The grid's override payload since #546 (operator decision): as
+-- `grid_override`, but the staged row starts on `p_today` -- the page's
+-- `newPlacementRange` -- because the replaced series is closed on yesterday
+-- through `closes`, never deleted. The writer has no clock, so "today" is the
+-- page's, passed in.
+CREATE FUNCTION pg_temp.grid_override_today(p_season uuid, p_team uuid, p_slot uuid, p_today date)
+RETURNS jsonb LANGUAGE sql STABLE AS $$
+    SELECT COALESCE(jsonb_agg(r) FILTER (WHERE r->>'team_id' <> p_team::text
+                                            OR r->>'practice_slot_id' <> p_slot::text), '[]'::jsonb)
+           || jsonb_build_array(jsonb_build_object(
+               'team_id', p_team, 'practice_slot_id', p_slot,
+               'effective_date_range', '[' || p_today || ',2026-11-30]', 'source', 'manual'))
+      FROM jsonb_array_elements(pg_temp.grid_override(p_season, p_team, p_slot, true)) r
 $$;
 
 -- What a save returned, and the rows as they stood before it.
@@ -551,13 +566,15 @@ SELECT public.persist_practice_schedule(
 
 -- 28. The shape is real (meta): H holds a closed Thursday and a current
 -- Friday series, G two current series, I one.
+-- Ordered by the series' start date: `day_of_week` is an enum whose order is
+-- the week's, not the text's, so it cannot order this string (CI #546).
 SELECT is(
-    (SELECT string_agg(ps.day_of_week || ':' || pa.effective_date_range::text, ','
-                       ORDER BY ps.day_of_week)
+    (SELECT string_agg(ps.day_of_week::text || ':' || pa.effective_date_range::text, ','
+                       ORDER BY lower(pa.effective_date_range), ps.day_of_week::text)
        FROM public.practice_assignments pa
        JOIN public.practice_slots ps ON ps.id = pa.practice_slot_id
       WHERE pa.team_id = 'a1111111-1111-1111-1111-000000007782'),
-    'fri:[2026-10-12,2026-12-01),thu:[2026-09-01,2026-10-12)',
+    'thu:[2026-09-01,2026-10-12),fri:[2026-10-12,2026-12-01)',
     'override shape: H holds a closed Thursday and a current Friday series');
 
 -- The closed series ('prompt') and the current one the override replaces
@@ -569,24 +586,35 @@ SELECT CASE WHEN pa.practice_slot_id = 'a1111111-1111-1111-1111-0000000077a4'
   FROM public.practice_assignments pa
  WHERE pa.team_id = 'a1111111-1111-1111-1111-000000007782';
 
--- 29-30. W8b: without `unlock`, replacing H's current series is refused,
+-- From here the grid's "today" is 2026-10-20: H's current Friday series
+-- (from 2026-10-12) is closed on 2026-10-19 and the Tuesday override starts
+-- 2026-10-20 (#546).
+-- 29-30. W8b: without `unlock`, closing H's current series is refused,
 -- naming the current (Friday) series.
 SELECT throws_ok(
     $$ SELECT public.persist_practice_schedule(
            jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077cb',
                               'season_settings_id', 'a1111111-1111-1111-1111-0000000077b3'),
-           pg_temp.grid_override('a1111111-1111-1111-1111-0000000077b3',
-                                 'a1111111-1111-1111-1111-000000007782',
-                                 'a1111111-1111-1111-1111-0000000077a2', true)) $$,
+           pg_temp.grid_override_today('a1111111-1111-1111-1111-0000000077b3',
+                                       'a1111111-1111-1111-1111-000000007782',
+                                       'a1111111-1111-1111-1111-0000000077a2', '2026-10-20'),
+           closes => (SELECT jsonb_build_array(jsonb_build_object('assignment_id', id, 'last_day', '2026-10-19'))
+                        FROM public.practice_assignments
+                       WHERE team_id = 'a1111111-1111-1111-1111-000000007782'
+                         AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a5')) $$,
     '22023', NULL,
-    'prompt W8b: replacing H''s current series without unlock is refused 22023');
+    'prompt W8b: closing H''s current series without unlock is refused 22023');
 SELECT throws_like(
     $$ SELECT public.persist_practice_schedule(
            jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077cb',
                               'season_settings_id', 'a1111111-1111-1111-1111-0000000077b3'),
-           pg_temp.grid_override('a1111111-1111-1111-1111-0000000077b3',
-                                 'a1111111-1111-1111-1111-000000007782',
-                                 'a1111111-1111-1111-1111-0000000077a2', true)) $$,
+           pg_temp.grid_override_today('a1111111-1111-1111-1111-0000000077b3',
+                                       'a1111111-1111-1111-1111-000000007782',
+                                       'a1111111-1111-1111-1111-0000000077a2', '2026-10-20'),
+           closes => (SELECT jsonb_build_array(jsonb_build_object('assignment_id', id, 'last_day', '2026-10-19'))
+                        FROM public.practice_assignments
+                       WHERE team_id = 'a1111111-1111-1111-1111-000000007782'
+                         AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a5')) $$,
     '%assignment ' || (SELECT id::text FROM public.practice_assignments
                         WHERE team_id = 'a1111111-1111-1111-1111-000000007782'
                           AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a5')
@@ -602,12 +630,16 @@ SELECT throws_like(
     $$ SELECT public.persist_practice_schedule(
            jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077cb',
                               'season_settings_id', 'a1111111-1111-1111-1111-0000000077b3'),
-           pg_temp.grid_override('a1111111-1111-1111-1111-0000000077b3',
-                                 'a1111111-1111-1111-1111-000000007782',
-                                 'a1111111-1111-1111-1111-0000000077a2', true),
+           pg_temp.grid_override_today('a1111111-1111-1111-1111-0000000077b3',
+                                       'a1111111-1111-1111-1111-000000007782',
+                                       'a1111111-1111-1111-1111-0000000077a2', '2026-10-20'),
            unlock => (SELECT jsonb_build_array(jsonb_build_object(
                           'assignment_id', id,
                           'reason', 'grid override a1111111-1111-1111-1111-0000000077cb: field-change'))
+                        FROM public.practice_assignments
+                       WHERE team_id = 'a1111111-1111-1111-1111-000000007782'
+                         AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a5'),
+           closes => (SELECT jsonb_build_array(jsonb_build_object('assignment_id', id, 'last_day', '2026-10-19'))
                         FROM public.practice_assignments
                        WHERE team_id = 'a1111111-1111-1111-1111-000000007782'
                          AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a5')) $$,
@@ -615,23 +647,27 @@ SELECT throws_like(
     'prompt W8f: a non-admin member''s unlock is refused by the unlock gate');
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 
--- 32. W8a: with `unlock` naming exactly the replaced current series, the
--- admin's save is accepted.
+-- 32. W8a: with `unlock` and `closes` naming exactly the replaced current
+-- series, the admin's save is accepted.
 SELECT lives_ok(
     $$ INSERT INTO grid_results
        SELECT 'prompt', public.persist_practice_schedule(
            jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077cb',
                               'season_settings_id', 'a1111111-1111-1111-1111-0000000077b3'),
-           pg_temp.grid_override('a1111111-1111-1111-1111-0000000077b3',
-                                 'a1111111-1111-1111-1111-000000007782',
-                                 'a1111111-1111-1111-1111-0000000077a2', true),
+           pg_temp.grid_override_today('a1111111-1111-1111-1111-0000000077b3',
+                                       'a1111111-1111-1111-1111-000000007782',
+                                       'a1111111-1111-1111-1111-0000000077a2', '2026-10-20'),
            unlock => (SELECT jsonb_build_array(jsonb_build_object(
                           'assignment_id', id,
                           'reason', 'grid override a1111111-1111-1111-1111-0000000077cb: field-change'))
                         FROM public.practice_assignments
                        WHERE team_id = 'a1111111-1111-1111-1111-000000007782'
+                         AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a5'),
+           closes => (SELECT jsonb_build_array(jsonb_build_object('assignment_id', id, 'last_day', '2026-10-19'))
+                        FROM public.practice_assignments
+                       WHERE team_id = 'a1111111-1111-1111-1111-000000007782'
                          AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a5')) $$,
-    'prompt W8a: the override, with the replaced current series unlocked, is accepted');
+    'prompt W8a: the override, with the replaced current series unlocked and closed, is accepted');
 
 -- 33. W8c: the closed series is untouched: same id, slot, range and source.
 SELECT is(
@@ -643,16 +679,30 @@ SELECT is(
       WHERE b.label = 'prompt'),
     1,
     'prompt W8c: H''s closed Thursday series keeps its id, slot, range and source');
--- 34. ... and H now holds that history and the Tuesday override, nothing else.
+-- 34. #546: the replaced Friday series keeps its id; its range now ends on
+-- yesterday (2026-10-19, so `[...,2026-10-20)`), its past kept.
 SELECT is(
-    (SELECT string_agg(practice_slot_id::text, ',' ORDER BY practice_slot_id)
-       FROM public.practice_assignments
-      WHERE team_id = 'a1111111-1111-1111-1111-000000007782'),
-    'a1111111-1111-1111-1111-0000000077a2,a1111111-1111-1111-1111-0000000077a4',
-    'prompt W8a: H holds its closed Thursday series and the Tuesday override');
+    (SELECT pa.effective_date_range::text FROM public.practice_assignments pa
+       JOIN grid_before b ON b.id = pa.id AND b.label = 'prompt-current'
+      WHERE pa.practice_slot_id = b.practice_slot_id),
+    '[2026-10-12,2026-10-20)',
+    'prompt W8a: the replaced series keeps its id, ended on yesterday');
+-- 35. ... and H's whole schedule: every date before today as it was, the
+-- Tuesday override from today, nothing else.
+SELECT is(
+    (SELECT string_agg(ps.day_of_week::text || ':' || pa.effective_date_range::text, ','
+                       ORDER BY lower(pa.effective_date_range), ps.day_of_week::text)
+       FROM public.practice_assignments pa
+       JOIN public.practice_slots ps ON ps.id = pa.practice_slot_id
+      WHERE pa.team_id = 'a1111111-1111-1111-1111-000000007782'),
+    'thu:[2026-09-01,2026-10-12),fri:[2026-10-12,2026-10-20),tue:[2026-10-20,2026-12-01)',
+    'prompt W8a: H''s past dates are unchanged and the override starts today');
 
--- 35-36. W8d: exactly one practice.unlock_accepted row for the save, for the
+-- 36-37. W8d: exactly one practice.unlock_accepted row for the save, for the
 -- unlocked row, carrying the sent reason; none for the closed series (P1).
+-- Both are scoped to the override's own run (cb): the setup's re-home (ca)
+-- legitimately unlocked the Thursday series when it closed it, and that audit
+-- row is not the override's (CI #546 counted it).
 SELECT is(
     (SELECT jsonb_agg(jsonb_build_object('id', resource_id, 'reason', metadata->>'reason'))
        FROM public.audit_log
@@ -665,25 +715,30 @@ SELECT is(
 SELECT is(
     (SELECT count(*)::int FROM public.audit_log a
        JOIN grid_before b ON b.id = a.resource_id AND b.label = 'prompt'
-      WHERE a.action = 'practice.unlock_accepted'),
+      WHERE a.action = 'practice.unlock_accepted'
+        AND a.metadata->>'run_id' = 'a1111111-1111-1111-1111-0000000077cb'),
     0,
-    'prompt W8d: no unlock_accepted row names the closed series');
+    'prompt W8d: the override wrote no unlock_accepted row for the closed series');
 
--- 37-39. W8e: G's two live weekdays. Unlocking only one is refused naming the
--- other; unlocking both is accepted, and both are audited.
+-- 38-41. W8e: G's two live weekdays, both closed on yesterday (Q2). Unlocking
+-- only one is refused naming the other; unlocking both is accepted, both are
+-- audited, and both keep their past.
 SELECT throws_like(
     $$ SELECT public.persist_practice_schedule(
            jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077cc',
                               'season_settings_id', 'a1111111-1111-1111-1111-0000000077b3'),
-           pg_temp.grid_override('a1111111-1111-1111-1111-0000000077b3',
-                                 'a1111111-1111-1111-1111-000000007781',
-                                 'a1111111-1111-1111-1111-0000000077a5', true),
+           pg_temp.grid_override_today('a1111111-1111-1111-1111-0000000077b3',
+                                       'a1111111-1111-1111-1111-000000007781',
+                                       'a1111111-1111-1111-1111-0000000077a5', '2026-10-20'),
            unlock => (SELECT jsonb_build_array(jsonb_build_object(
                           'assignment_id', id,
                           'reason', 'grid override a1111111-1111-1111-1111-0000000077cc: conflict-fix'))
                         FROM public.practice_assignments
                        WHERE team_id = 'a1111111-1111-1111-1111-000000007781'
-                         AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a1')) $$,
+                         AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a1'),
+           closes => (SELECT jsonb_agg(jsonb_build_object('assignment_id', id, 'last_day', '2026-10-19'))
+                        FROM public.practice_assignments
+                       WHERE team_id = 'a1111111-1111-1111-1111-000000007781')) $$,
     '%assignment ' || (SELECT id::text FROM public.practice_assignments
                         WHERE team_id = 'a1111111-1111-1111-1111-000000007781'
                           AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a3')
@@ -693,15 +748,18 @@ SELECT lives_ok(
     $$ SELECT public.persist_practice_schedule(
            jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077cc',
                               'season_settings_id', 'a1111111-1111-1111-1111-0000000077b3'),
-           pg_temp.grid_override('a1111111-1111-1111-1111-0000000077b3',
-                                 'a1111111-1111-1111-1111-000000007781',
-                                 'a1111111-1111-1111-1111-0000000077a5', true),
+           pg_temp.grid_override_today('a1111111-1111-1111-1111-0000000077b3',
+                                       'a1111111-1111-1111-1111-000000007781',
+                                       'a1111111-1111-1111-1111-0000000077a5', '2026-10-20'),
            unlock => (SELECT jsonb_agg(jsonb_build_object(
                           'assignment_id', id,
                           'reason', 'grid override a1111111-1111-1111-1111-0000000077cc: conflict-fix'))
                         FROM public.practice_assignments
+                       WHERE team_id = 'a1111111-1111-1111-1111-000000007781'),
+           closes => (SELECT jsonb_agg(jsonb_build_object('assignment_id', id, 'last_day', '2026-10-19'))
+                        FROM public.practice_assignments
                        WHERE team_id = 'a1111111-1111-1111-1111-000000007781')) $$,
-    'prompt W8e: unlocking both weekdays is accepted');
+    'prompt W8e: unlocking and closing both weekdays is accepted');
 SELECT is(
     (SELECT count(*)::int FROM public.audit_log
       WHERE action = 'practice.unlock_accepted'
@@ -709,6 +767,14 @@ SELECT is(
         AND metadata->>'reason' = 'grid override a1111111-1111-1111-1111-0000000077cc: conflict-fix'),
     2,
     'prompt W8e: both weekdays are audited, each with the sent reason');
+SELECT is(
+    (SELECT string_agg(ps.day_of_week::text || ':' || pa.effective_date_range::text, ','
+                       ORDER BY lower(pa.effective_date_range), ps.day_of_week::text)
+       FROM public.practice_assignments pa
+       JOIN public.practice_slots ps ON ps.id = pa.practice_slot_id
+      WHERE pa.team_id = 'a1111111-1111-1111-1111-000000007781'),
+    'mon:[2026-09-01,2026-10-20),wed:[2026-09-01,2026-10-20),fri:[2026-10-20,2026-12-01)',
+    'prompt W8e: both weekdays keep their past, ended on yesterday; Friday starts today');
 
 SELECT * FROM finish();
 ROLLBACK;

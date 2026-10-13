@@ -89,7 +89,8 @@ DECLARE
     v_refused int;
     v_row public.organization_heat_settings%ROWTYPE;
     v_n int;
-    v_audit public.audit_log%ROWTYPE;
+    v_created int;
+    v_updated int;
     v_bad jsonb;
     v_bad_cases jsonb[] := ARRAY[
         '{"links": "not an array"}'::jsonb,
@@ -217,24 +218,25 @@ BEGIN
     IF v_row.threshold_category <> 1 OR v_row.guidance_links <> '[]'::jsonb THEN
         RAISE EXCEPTION 'the clear stored %/%', v_row.threshold_category, v_row.guidance_links;
     END IF;
-    SELECT count(*) INTO v_n FROM public.audit_log
+    -- Each row is matched by what it records, never by position. Both writes
+    -- run in this one transaction, so their created_at (now()) ties and an
+    -- ORDER BY created_at, id falls through to a random uuid.
+    SELECT count(*),
+           count(*) FILTER (WHERE metadata ->> 'operation' = 'created'
+                              AND metadata -> 'before' = 'null'::jsonb
+                              AND (metadata #>> '{after,threshold_category}')::int = 2),
+           count(*) FILTER (WHERE metadata ->> 'operation' = 'updated'
+                              AND (metadata #>> '{before,threshold_category}')::int = 2
+                              AND (metadata #>> '{after,threshold_category}')::int = 1
+                              AND metadata #> '{after,guidance_links}' = '[]'::jsonb)
+      INTO v_n, v_created, v_updated
+      FROM public.audit_log
      WHERE organization_id = v_org AND action = 'settings.heat_updated';
-    SELECT * INTO v_audit FROM public.audit_log
-     WHERE organization_id = v_org AND action = 'settings.heat_updated'
-     ORDER BY created_at, id LIMIT 1;
-    IF v_n <> 2
-       OR v_audit.metadata ->> 'operation' <> 'created'
-       OR v_audit.metadata -> 'before' <> 'null'::jsonb
-       OR (v_audit.metadata #>> '{after,threshold_category}')::int <> 2 THEN
-        RAISE EXCEPTION 'expected 2 settings.heat_updated audit rows, the first created/before null/after category 2; found % (%)', v_n, v_audit.metadata;
+    IF v_n <> 2 OR v_created <> 1 THEN
+        RAISE EXCEPTION 'expected 2 settings.heat_updated audit rows, one of them created/before null/after category 2; found % rows, % such', v_n, v_created;
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM public.audit_log
-                    WHERE organization_id = v_org AND action = 'settings.heat_updated'
-                      AND metadata ->> 'operation' = 'updated'
-                      AND (metadata #>> '{before,threshold_category}')::int = 2
-                      AND (metadata #>> '{after,threshold_category}')::int = 1
-                      AND metadata #> '{after,guidance_links}' = '[]'::jsonb) THEN
-        RAISE EXCEPTION 'the clear left no updated audit row with before category 2 and after category 1, no links';
+    IF v_updated <> 1 THEN
+        RAISE EXCEPTION 'the clear left % updated audit rows with before category 2 and after category 1, no links; expected 1', v_updated;
     END IF;
     RAISE NOTICE 'every accepted heat settings write audited -- 2 of 2, the first created with before null and after category 2, the clear updated from category 2 to 1 with no links';
 

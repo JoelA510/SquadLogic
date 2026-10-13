@@ -10,8 +10,9 @@
 // waiver covers nothing, and a waiver for an advisory/package the audit no longer reports fails
 // (a stale entry would otherwise pre-approve the advisory if it ever came back).
 //
-// And the gate is held to the bar it enforces: if the report can't be read, or what it parsed
-// doesn't reconcile with npm's own totals, it fails — "couldn't check" is never "clean".
+// And the gate is held to the bar it enforces: if the report can't be read, says it audited no
+// dependencies, or what it parsed doesn't reconcile with npm's own totals, it fails — "couldn't
+// check" is never "clean".
 //
 // Run: node scripts/check-audit.mjs                              (npm run check:audit)
 //      node scripts/check-audit.mjs --input audit.json --waivers w.json --today 2026-01-01
@@ -156,16 +157,14 @@ function advisories(report) {
       'The audit report has no metadata.vulnerabilities totals to reconcile against.'
     );
   }
-  {
-    const counted = Object.fromEntries(SEVERITIES.map((s) => [s, 0]));
-    for (const v of Object.values(vulns)) if (v?.severity in counted) counted[v.severity]++;
-    const mismatch = SEVERITIES.filter((s) => (totals[s] ?? 0) !== counted[s]);
-    if (mismatch.length) {
-      throw new CheckError(
-        `Parsed package counts don't match npm's totals for ${mismatch.join(', ')} ` +
-          `(${mismatch.map((s) => `${counted[s]} vs ${totals[s]}`).join(', ')}). Not trusting a partial read.`
-      );
-    }
+  const counted = Object.fromEntries(SEVERITIES.map((s) => [s, 0]));
+  for (const v of Object.values(vulns)) if (v?.severity in counted) counted[v.severity]++;
+  const mismatch = SEVERITIES.filter((s) => (totals[s] ?? 0) !== counted[s]);
+  if (mismatch.length) {
+    throw new CheckError(
+      `Parsed package counts don't match npm's totals for ${mismatch.join(', ')} ` +
+        `(${mismatch.map((s) => `${counted[s]} vs ${totals[s]}`).join(', ')}). Not trusting a partial read.`
+    );
   }
   return [...byId.values()];
 }

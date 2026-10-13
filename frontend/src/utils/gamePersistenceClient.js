@@ -1,5 +1,6 @@
 import { prepareGamePersistenceSnapshot } from '@squadlogic/core/gamePersistenceSnapshot.js';
 import { GAME_PERSISTENCE_URL } from '../config.js';
+import { postPersistenceRequest } from '../lib/persistenceRequest.js';
 import { supabase } from '../lib/supabaseClient.js';
 
 /**
@@ -30,20 +31,11 @@ export async function persistGameScheduleReview({
     runMetadata,
   });
 
-  const response = await fetch(GAME_PERSISTENCE_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      snapshot,
-      overrides,
-      runMetadata,
-    }),
+  const { response, result } = await postPersistenceRequest(GAME_PERSISTENCE_URL, {
+    token,
+    body: { snapshot, overrides, runMetadata },
+    label: 'The game schedule save',
   });
-
-  const result = await response.json().catch(() => ({}));
 
   if (!response.ok) {
     throw new Error(

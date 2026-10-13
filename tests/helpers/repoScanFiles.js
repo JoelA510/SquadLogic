@@ -30,9 +30,14 @@ export const SCAN_ROOTS = Object.freeze([
   'docs',
   'supabase',
   'config',
-  'project-hardening',
 ]);
-export const SCAN_ALWAYS = Object.freeze(['CHANGELOG.md', 'README.md', 'CLAUDE.md', 'vercel.json']);
+export const SCAN_ALWAYS = Object.freeze([
+  'AGENTS.md',
+  'CHANGELOG.md',
+  'README.md',
+  'CLAUDE.md',
+  'vercel.json',
+]);
 export const SCAN_EXT = new Set([
   '.js',
   '.mjs',

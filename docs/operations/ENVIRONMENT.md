@@ -67,6 +67,31 @@ its variables served the mock and its sign-in page to real visitors (audit
 finding 5.1, plan item M1.7). Plan item M2.2 turns the same rule into a build
 failure.
 
+### What the Vercel project sets
+
+Read on 2026-10-13 (plan item M5.4). Names only; no value is recorded here. The Vercel API
+refused to list the project's variables to the token used (403), so the Production list is
+read from what the build embedded: the bundle of production deployment
+`dpl_4sSoS5yHuf5TkxPXTUK94m69HhUg` (commit `64bd751`), checked for each name with a non-empty
+value (*executed*).
+
+| Environment | Set in Vercel | Not set |
+|---|---|---|
+| Production | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_SENTRY_DSN` | `VITE_USE_MOCK_SUPABASE`; `VITE_SUPABASE_PERSISTENCE_URL` (the build derives it from `VITE_SUPABASE_URL`: its log says "Derived VITE_SUPABASE_PERSISTENCE_URL") |
+| Preview | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (previews load production's Supabase project; see the remediation plan, "Discovered during execution", PR 1-B) | `VITE_SENTRY_DSN`: unverified |
+
+- **Vercel's system variables reach the bundle.** For a Vite project Vercel also exposes its
+  system variables with a `VITE_` prefix (`VITE_VERCEL_ENV`, `VITE_VERCEL_GIT_COMMIT_SHA`,
+  `VITE_VERCEL_GIT_COMMIT_MESSAGE`, `VITE_VERCEL_GIT_COMMIT_AUTHOR_LOGIN`,
+  `VITE_VERCEL_GIT_COMMIT_AUTHOR_NAME`, `VITE_VERCEL_URL`, and the rest). Because
+  `frontend/src/config.js` reads `import.meta.env` as a whole (audit finding 8.4, plan item
+  M2.2), all of them are in the production bundle today, the last commit's message and its
+  author's name among them. None is a secret; M2.2's named reads end it.
+- **Variables without the `VITE_` prefix** that the Vercel project may hold cannot be listed
+  without the API's permission; the build reads none of them except `VERCEL_ENV`.
+- **To see the exact list:** Vercel → the `squadlogic` project → Settings → Environment
+  Variables, or `vercel env ls` with a token that can read them.
+
 ---
 
 ## Supabase Edge Functions

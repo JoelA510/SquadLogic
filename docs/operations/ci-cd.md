@@ -317,7 +317,58 @@ agent-ready-template's `check:settings` (`core.settings-branch-protected`).
 **Rollback:** set the ruleset's enforcement to Disabled (one toggle). The file
 stays.
 
+## Frontend deploys (Vercel)
+
+Vercel builds and deploys the frontend on its own, not from GitHub Actions: every push to
+`main` becomes a production deployment (`squadlogic.vercel.app`, `squadlogic.secureyour.tech`),
+and every pull request gets a preview. A deploy does not wait for CI; the ruleset gates the
+merge, not the deploy.
+
+Project `squadlogic` (team SecureYourTech), read through the Vercel API and the production
+build log on 2026-10-13:
+
+| Setting | Value | Where it is set |
+| --- | --- | --- |
+| Framework | Vite | `vercel.json` `framework` |
+| Build command | `npm run frontend:build` | `vercel.json` `buildCommand` (the Vite preset's default, `npm run build`, is not a build: plan item M6.1) |
+| Output directory | `dist` | `vercel.json` `outputDirectory` (where `vite.config.js` builds: `root` plus `build.outDir`) |
+| Install command | `npm install` | Vercel's default for npm; not set anywhere |
+| Node.js | 24.x | `package.json` `engines` ([ENVIRONMENT.md](./ENVIRONMENT.md#node-runtime)) |
+| Region | `iad1` | Vercel's default |
+| Deployment protection | Vercel Authentication on every deployment except custom domains | Dashboard |
+| Environment variables | By name in [ENVIRONMENT.md](./ENVIRONMENT.md#what-the-vercel-project-sets) | Dashboard |
+
+`vercel.json` overrides the dashboard's build settings, so a project imported from the
+repository builds the same way with only its environment variables set.
+`tests/vercelBuildSettings.test.js` holds the three `vercel.json` values to `package.json` and
+`vite.config.js`.
+
 ## Rollback
+
+### Frontend
+
+`VITE_` variables are read when the bundle is built (see
+[ENVIRONMENT.md](./ENVIRONMENT.md#production-safety)). Instant Rollback and "Promote to
+Production" of an existing production deployment serve that deployment as it was built, with the
+values it was built with: neither picks up a variable changed since.
+
+- **A bad frontend release, environment unchanged:** Instant Rollback. Vercel → the project →
+  Deployments → the last good production deployment → ⋮ → Instant Rollback (or the API:
+  `POST /v1/projects/{projectId}/rollback/{deploymentId}`). It is instant and needs no rebuild.
+  Afterwards Vercel stops assigning the production domains to new deployments, so pushes to
+  `main` build but do not go live until the rollback is undone ("Undo Rollback" on the
+  production deployment, or promoting a deployment). On the Hobby plan only the immediately
+  previous production deployment can be rolled back to; on Pro, any earlier one.
+- **A change to an environment variable** (a wrong Supabase URL, turning on mock mode): change
+  it in Settings → Environment Variables, then **Redeploy** the deployment that should be live
+  (Deployments → ⋮ → Redeploy). The redeploy rebuilds with the current variables; a promote or
+  an Instant Rollback would not.
+- Then fix forward in a pull request, and undo the rollback once it is merged and deployed.
+- Frontend and database roll back separately: an Instant Rollback serves an older bundle against
+  the current schema. A migration the older bundle cannot work with is reverted by hand (next
+  section).
+
+### Workflows and migrations
 
 Workflow changes are rolled back by reverting the pull request that introduced
 them. Reverting a workflow change does not undo migrations that

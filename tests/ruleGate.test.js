@@ -49,14 +49,22 @@ import {
   buildSlotInventory,
   createResolveLedger,
   conflictSpreadInstances,
+  createPlacementProbe,
   createResolveState,
+  evaluateCandidate,
   indexCommitments,
   indexTeams,
   projectCommitment,
+  recordBaselineAcceptance,
+  resolveObjectiveWeights,
   ruleGateInstances,
   violationInstanceKey,
 } from '@squadlogic/core/resolve/index.js';
+import { gameOnSlot } from '@squadlogic/core/resolve/ruleGate.js';
+import { recordBaselineSpread } from '@squadlogic/core/resolve/stages.js';
+import { resolveContextDefaults } from '@squadlogic/core/resolve/state.js';
 import { FREEZE_DISPOSITION, freezeAllExcept } from '@squadlogic/core/freeze/index.js';
+import { season2026RelocationPolicy } from '@squadlogic/core/scenario/index.js';
 import { buildConstraintRegistry } from '@squadlogic/core/constraints/index.js';
 
 /* -------------------------------------------------------------------------- */
@@ -908,17 +916,23 @@ describe('#60 W5/W6: a requested move that grows the spread is allowed, and warn
   });
 });
 
-describe('#60: pass 1 refuses spread growth that adds no overlap', () => {
-  // #564 carries 08GJunior01's one published conflict: coach oakley ulmer is
-  // also at #548 (06BMicro03, one registered coach, so it counts nothing).
-  // In SYN = {14BSelect01 at 2 synthetic conflicts, 08GJunior01 at 1} the
-  // spread is 1. Displaced, #564 finds a clean slot on the season as
-  // published; there it overlaps nobody, 08GJunior01 drops to 0 and the spread
-  // grows to 2 — growth no overlap refusal can see.
-  const X = 'combined_schedule.csv#564';
-  const MIN_TEAM = '08GJunior01';
-  const withRoster = spreadSchedule(2, SPREAD_TEAM, [SPREAD_TEAM, MIN_TEAM]);
-  const sched = { ...withRoster, teams: withRoster.teams.filter((t) => t.id !== ROSTER_ONLY) };
+// #564 carries 08GJunior01's one published conflict: coach oakley ulmer is
+// also at #548 (06BMicro03, one registered coach, so it counts nothing).
+// In SYN = {14BSelect01 at 2 synthetic conflicts, 08GJunior01 at 1} the
+// spread is 1. Displaced, #564 finds a clean slot on the season as
+// published; there it overlaps nobody, 08GJunior01 drops to 0 and the spread
+// grows to 2 — growth no overlap refusal can see. Shelving #564 drops the same
+// conflict, so TIME TBD leaves SYN at spread 2 as well: the #60b case.
+const X = 'combined_schedule.csv#564';
+const MIN_TEAM = '08GJunior01';
+const withRoster = spreadSchedule(2, SPREAD_TEAM, [SPREAD_TEAM, MIN_TEAM]);
+const sched564 = { ...withRoster, teams: withRoster.teams.filter((t) => t.id !== ROSTER_ONLY) };
+/** The per-game #60b warnings a run carries. */
+const admittedOf = (run) =>
+  run.findings.filter((f) => f.code === 'RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD');
+
+describe('#60: pass 1 refuses spread growth that adds no overlap — unless TIME TBD is no better (#60b)', () => {
+  const sched = sched564;
   const clean = /** @type {any} */ (whereIs(displaceOn(schedule, X), X));
   const run = displaceOn(sched, X);
 
@@ -932,22 +946,187 @@ describe('#60: pass 1 refuses spread growth that adds no overlap', () => {
     expect(ruled.instances[`CONFLICT_SPREAD_EXCEEDED|${SPREAD_GROUP}`]).toBe(1);
   });
 
-  it('is refused on that slot in pass 1, and shelved as TIME TBD naming the spread', () => {
-    // Measured: both facility-admitted candidates grow SYN without an overlap,
-    // so pass 2's pool is empty and #564 is shelved. Shelving it also removes
-    // 08GJunior01's conflict, so the group ends at spread 2 all the same, and
-    // that is surfaced by the warning rather than hidden (declared, not fixed:
-    // the gate does not weigh a slot against the TIME TBD outcome).
-    expect(whereIs(run, X)).toBeNull();
+  it('W-b1/M-b1: is placed on a clean slot rather than shelved, and the floor says so per game', () => {
+    // Before #60b both facility-admitted candidates were refused in pass 1
+    // and #564 was shelved, leaving SYN at spread 2 all the same. Shelving is
+    // no better, so the slot is admitted: the kickoff, not the bound, changes.
+    const placed = /** @type {any} */ (whereIs(run, X));
+    expect(placed).not.toBeNull();
+    expect(run.unplaced.find((entry) => entry.gameId === X)).toBeUndefined();
     expect(run.meta.overlapFallbackEntered).toBe(0);
-    expect(run.unplaced.find((entry) => entry.gameId === X)?.reason).toMatch(
-      /\d+ for CONFLICT_SPREAD_EXCEEDED/
-    );
+    // No candidate was refused by the rule gate: the spread refusals are gone.
+    expect(run.meta.candidatesRefusedByRules).toBe(0);
+    expect(run.meta.ruleGateGroupsExamined).toBeGreaterThan(0);
+    // The group warning still names SYN, at the spread TIME TBD would leave.
+    const carried = run.findings.filter((f) => f.code === 'RESOLVE_CONFLICT_SPREAD_CARRIED');
+    expect(carried.map((f) => [f.details.groupLabel, f.details.spread])).toEqual([
+      [SPREAD_GROUP, 2],
+    ]);
+    expect(carried[0].message).toMatch(/RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD/);
+    // W-b7 / W-b8: a tie, measured with the game absent (not at home).
+    const admitted = admittedOf(run);
+    expect(admitted).toHaveLength(1);
+    expect(admitted[0].severity).toBe('compromise');
+    expect(admitted[0].details).toEqual({
+      gameId: X,
+      stageId: 'initial-assignment',
+      slot: `${placed.date}|${placed.surfaceId}|${placed.startMinutes}`,
+      groups: [{ groupLabel: SPREAD_GROUP, placedExcess: 1, shelvedExcess: 1, acceptedExcess: 0 }],
+      tie: true,
+    });
+    // M-b1: the floor was measured, and admitted exactly this placement.
+    expect(run.meta.spreadShelvedFloorsMeasured).toBeGreaterThanOrEqual(1);
+    expect(run.meta.spreadAdmittedByShelvedFloor).toBe(1);
+  });
+
+  it('W-b2: verify reports the same SYN breach as the shelved run did — the kickoff changes, not the verdict', () => {
+    expect(whereIs(run, X)).not.toBeNull();
+    // The literal is main's shelved run (#564 TIME TBD), measured before #60b.
     expect(
-      run.findings
-        .filter((f) => f.code === 'RESOLVE_CONFLICT_SPREAD_CARRIED')
-        .map((f) => f.details.groupLabel)
-    ).toEqual([SPREAD_GROUP]);
+      spreadViolations(run).map((v) => [
+        violationInstanceKey(v),
+        v.details.spread - v.details.maxSpread,
+      ])
+    ).toEqual([['conflict-fairness|CONFLICT_SPREAD_EXCEEDED|conflict-fairness::SYN|', 1]]);
+  });
+
+  it('W-b11: is deterministic — the same input gives the same schedule, unplaced and findings', () => {
+    const again = displaceOn(sched, X);
+    expect(again.schedule).toEqual(run.schedule);
+    expect(again.unplaced).toEqual(run.unplaced);
+    expect(again.findings).toEqual(run.findings);
+  });
+});
+
+describe('#60b W-b3: the options pass reads the same floor for a game that stands nowhere', () => {
+  // The options pass judges a `time-tbd` game's slots through
+  // `evaluateCandidate()` on the finished state, where the game is absent.
+  // The context is built as `createPlacementProbe()` builds it.
+  const context = {
+    ...resolveContextDefaults(),
+    engines,
+    weights: resolveObjectiveWeights(undefined),
+    commitmentIndex: indexCommitments(sched564.commitments),
+    teamIndex: indexTeams(sched564.teams),
+  };
+  recordBaselineSpread(context, state);
+  for (const gameId of state.gameIds) recordBaselineAcceptance(context, state, gameId);
+  // The clean slot #564 takes on the season as published (the case above),
+  // judged in W-b1's finished schedule — the requested game on #564's
+  // published slot — with #564 absent, or standing on that slot.
+  const slot = slotOf(/** @type {any} */ (whereIs(displaceOn(schedule, X), X)));
+  const home = slotOf(/** @type {any} */ (byId.get(X)));
+  const finished = displaceOn(sched564, X);
+  const finishedState = (withX) =>
+    /** @type {any} */ ({
+      ...state,
+      games: Object.fromEntries([
+        ...finished.schedule.games.filter((game) => game.id !== X).map((game) => [game.id, game]),
+        ...(withX ? [[X, gameOnSlot(state, X, slot)]] : []),
+      ]),
+    });
+
+  it('clears the slot that ties shelving, adding no spread over the floor', () => {
+    const judged = evaluateCandidate(context, finishedState(false), X, slot, home);
+    expect(judged.blockingGrown).toEqual([]);
+    expect(judged.ruleGrown).toEqual([]);
+    expect(judged.spreadAdded).toBe(0);
+    expect(judged.cleared).toBe(true);
+  });
+
+  it('meta: the same slot grows SYN by one when the game stands there — no floor', () => {
+    const judged = evaluateCandidate(context, finishedState(true), X, slot, home);
+    expect(judged.ruleGrown).toEqual(['CONFLICT_SPREAD_EXCEEDED']);
+    expect(judged.spreadAdded).toBe(1);
+    expect(judged.cleared).toBe(false);
+  });
+});
+
+describe('#60b W-b4: a tie that also double-books a coach goes to pass 2 (ruling Q2)', () => {
+  // W-b1's SYN, with #564's home coach (08GJunior08's) committed elsewhere —
+  // no game, a team in no group — through the morning on either side of the
+  // published kickoff, so both clean-for-spread slots also double-book him.
+  // 08GJunior08 is taken out of every group, so the overlap moves no spread.
+  const x = /** @type {any} */ (byId.get(X));
+  const coach = /** @type {any} */ (
+    schedule.commitments.find((c) => c.gameId === X && c.teamId === x.homeTeamId)
+  );
+  const windows = [
+    [420, x.startMinutes - 5],
+    [x.endMinutes + 10, 900],
+  ].map(([startMinutes, endMinutes], i) => ({
+    id: `syn-home-coach-window-${i}`,
+    gameId: null,
+    personId: coach.personId,
+    date: x.date,
+    startMinutes,
+    endMinutes,
+    venueId: x.venueId,
+    surfaceId: x.surfaceId,
+    teamId: '16BSelect02',
+  }));
+  const sched = {
+    ...sched564,
+    teams: sched564.teams.map((t) => (t.id === x.homeTeamId ? { ...t, groupLabel: null } : t)),
+    commitments: [...sched564.commitments, ...windows],
+  };
+  const run = displaceOn(sched, X);
+
+  it('is placed through pass 2, carrying the overlap and the per-game spread warning', () => {
+    expect(whereIs(run, X)).not.toBeNull();
+    expect(run.meta.overlapFallbackEntered).toBe(1);
+    expect(warningsOf(run).map((w) => [w.details.gameId, w.details.personId])).toEqual([
+      [X, coach.personId],
+    ]);
+    expect(admittedOf(run).map((f) => [f.details.gameId, f.details.tie])).toEqual([[X, true]]);
+    expect(run.meta.spreadAdmittedByShelvedFloor).toBe(1);
+  });
+});
+
+describe('#60b W-b5: shelving strictly better for the spread — still TIME TBD', () => {
+  // #51, one of the 679-run sweep's four TIME TBDs (#519): every free slot
+  // double-books a coach, and the overlap grows U06/U08 from excess 0 to 1,
+  // where shelving leaves 0. Ruling Q1 stands; #60b refuses these too.
+  const { run } = displace('combined_schedule.csv#51');
+
+  it('stays TIME TBD naming both refusals, with no per-game spread warning', () => {
+    expect(whereIs(run, 'combined_schedule.csv#51')).toBeNull();
+    expect(
+      run.unplaced.find((entry) => entry.gameId === 'combined_schedule.csv#51')?.reason
+    ).toMatch(/2 for CONFLICT_SPREAD_EXCEEDED, 2 for TRAVEL_COMMITMENTS_OVERLAP/);
+    expect(admittedOf(run)).toEqual([]);
+    // The meta-assertion: the floor was measured for #51 and admitted nothing.
+    expect(run.meta.spreadShelvedFloorsMeasured).toBeGreaterThanOrEqual(1);
+    expect(run.meta.spreadAdmittedByShelvedFloor).toBe(0);
+  });
+});
+
+describe('#60b W-b6: a standing game gets no floor', () => {
+  // The proposer's probe: every game stands. #564 held on its clean slot (the
+  // case above) already pushes SYN to excess 1, so a floor measured where it
+  // stands would admit the other clean slot (measured: the second of the two
+  // the facility admits); with none, that slot is refused as growth.
+  const probe = createPlacementProbe({ schedule: sched564, engines });
+  const held = slotOf(/** @type {any} */ (whereIs(displaceOn(schedule, X), X)));
+  const other = /** @type {any} */ ({
+    date: held.date,
+    surfaceId: 'maplewood-back/field-5',
+    startMinutes: 670,
+  });
+
+  it('meta: the other slot is clean for overlaps and grows SYN — the input reaches the spread arm', () => {
+    expect(other).not.toEqual(held);
+    const judged = probe.evaluate(X, other);
+    expect(judged.blockingGrown).toEqual([]);
+    expect(judged.overlapsAdded).toBe(0);
+    expect(judged.spreadAdded).toBe(1);
+  });
+
+  it('refuses that slot with #564 standing on its clean slot', () => {
+    probe.hold(X, held);
+    const judged = probe.evaluate(X, other);
+    expect(judged.ruleGrown).toEqual(['CONFLICT_SPREAD_EXCEEDED']);
+    expect(judged.cleared).toBe(false);
   });
 });
 
@@ -964,5 +1143,273 @@ describe('#60: the spread gate refuses to report a group it never examined', () 
     expect(() => conflictSpreadInstances(context, state, ['U10', 'U99'])).toThrow(
       /asked about 2 age group\(s\) and the fairness rule examined 1/
     );
+  });
+});
+
+describe('#60b W-b10: the shelved floor raises the accepted record, never replaces it', () => {
+  // SYN = {08GJunior01 at 1 synthetic conflict plus the one #564 carries,
+  // the roster-only team at nought}: published spread 2, excess 1. Shelving
+  // #564 drops its conflict, so TIME TBD would leave excess 0 — *better* than
+  // the record. A synthetic window for #564's coach on either side of its
+  // published kickoff makes every clean slot overlap him once, keeping
+  // 08GJunior01 at 2: placed there, SYN stays at the published excess 1,
+  // which the record accepts. A floor that replaced the record with the
+  // shelved 0 would refuse it.
+  const x = /** @type {any} */ (byId.get(X));
+  const sched = (() => {
+    const base = spreadSchedule(1, MIN_TEAM, [MIN_TEAM]);
+    const coach = /** @type {any} */ (
+      base.commitments.find((c) => c.gameId === X && c.personId === 'oakley ulmer')
+    );
+    const windows = [
+      [420, x.startMinutes - 5],
+      [x.endMinutes + 10, 900],
+    ].map(([startMinutes, endMinutes], i) => ({
+      ...coach,
+      id: `syn-coach-window-${i}`,
+      gameId: null,
+      startMinutes,
+      endMinutes,
+      teamId: '16BSelect02',
+    }));
+    return { ...base, commitments: [...base.commitments, ...windows] };
+  })();
+  const run = displaceOn(sched, X);
+
+  it('meta: published over the bound by 1, and the coach’s overlap with #548 is what puts it there', () => {
+    expect(publishedExcess(sched)).toBe(1);
+    expect(publishedExcess(spreadSchedule(1, MIN_TEAM, [MIN_TEAM]))).toBe(1);
+    expect(
+      sched.commitments.some(
+        (c) => c.personId === 'oakley ulmer' && c.gameId === 'combined_schedule.csv#548'
+      )
+    ).toBe(true);
+  });
+
+  it('places #564 (through pass 2, for the overlap), at the published excess, with no #60b warning', () => {
+    expect(whereIs(run, X)).not.toBeNull();
+    expect(run.meta.overlapFallbackEntered).toBe(1);
+    expect(run.meta.spreadShelvedFloorsMeasured).toBeGreaterThanOrEqual(1);
+    expect(admittedOf(run)).toEqual([]);
+    expect(spreadViolations(run).map((v) => v.details.spread)).toEqual([2]);
+    expect(run.findings.filter((f) => f.code === 'RESOLVE_CONFLICT_SPREAD_CARRIED')).toEqual([]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* #60b: strict improvement, two groups, and an option offered under the floor */
+/* -------------------------------------------------------------------------- */
+
+const x564 = /** @type {any} */ (byId.get(X));
+/** #564's coach for its home team, 08GJunior08 — taken out of every group below. */
+const HOME_COACH = /** @type {any} */ (
+  schedule.commitments.find((c) => c.gameId === X && c.teamId === x564.homeTeamId)
+).personId;
+/** A synthetic team with two registered coaches, so its conflicts count. */
+const WINDOWS_TEAM = 'SYN-WINDOWS';
+
+/** Gameless windows for #564's home coach on its date: `[start, end, teamId]`. */
+const homeCoachWindows = (tag, spans) =>
+  spans.map(([startMinutes, endMinutes, teamId], i) => ({
+    id: `syn-${tag}-${i}`,
+    gameId: null,
+    personId: HOME_COACH,
+    date: x564.date,
+    startMinutes,
+    endMinutes,
+    venueId: x564.venueId,
+    surfaceId: x564.surfaceId,
+    teamId,
+  }));
+
+/** `windows` published conflicts for `team`, as `spreadSchedule()` gives them. */
+const conflictWindowsFor = (team, windows, tag) => {
+  const template = /** @type {any} */ (
+    schedule.commitments.find((c) => c.teamId === team && typeof c.gameId === 'string')
+  );
+  return Array.from({ length: windows }, (_, i) =>
+    ['own', 'other'].map((side) => ({
+      id: `syn-${tag}-${i}-${side}`,
+      gameId: null,
+      personId: template.personId,
+      date: `2026-10-${String(3 + 7 * i).padStart(2, '0')}`,
+      startMinutes: 600,
+      endMinutes: 660,
+      venueId: template.venueId,
+      surfaceId: template.surfaceId,
+      teamId: side === 'own' ? team : '16BSelect02',
+    }))
+  ).flat();
+};
+
+/**
+ * SYN = {14BSelect01 at 3 synthetic conflicts, SYN-WINDOWS}. #564's home
+ * coach is committed for SYN-WINDOWS twice inside #564's published kickoff,
+ * so SYN-WINDOWS carries 2 conflicts there (one per window: the rule counts
+ * per team and commitment) and SYN sits at spread 1. Shelved, it drops to 0
+ * (spread 3, excess 2). A third window for SYN-WINDOWS overlaps the clean slot
+ * at 540 and a fourth, for a team in no group, the one at 670, so both slots
+ * double-book the coach once: at 540 SYN-WINDOWS keeps 1 (excess 1 — better
+ * than shelving), at 670 none (excess 2 — a tie).
+ */
+const strictSchedule = (() => {
+  const base = spreadSchedule(3, SPREAD_TEAM, [SPREAD_TEAM]);
+  return {
+    ...base,
+    teams: [
+      ...base.teams
+        .filter((t) => t.id !== ROSTER_ONLY)
+        .map((t) => (t.id === x564.homeTeamId ? { ...t, groupLabel: null } : t)),
+      {
+        id: WINDOWS_TEAM,
+        divisionLabel: null,
+        groupLabel: SPREAD_GROUP,
+        personIds: ['syn-coach-1', 'syn-coach-2'],
+      },
+    ],
+    commitments: [
+      ...base.commitments,
+      ...homeCoachWindows('strict', [
+        [x564.startMinutes + 5, x564.endMinutes - 10, WINDOWS_TEAM],
+        [x564.startMinutes + 10, x564.endMinutes - 5, WINDOWS_TEAM],
+        [545, 580, WINDOWS_TEAM],
+        [675, 710, '16BSelect02'],
+      ]),
+    ],
+  };
+})();
+
+describe('#60b Q6: a strict improvement on shelving is admitted and warned, tie false', () => {
+  const run = displaceOn(strictSchedule, X);
+
+  it('meta: SYN is published within the bound; shelving #564 would push it to excess 2', () => {
+    expect(publishedExcess(strictSchedule)).toBe(0);
+  });
+
+  it('places #564 at excess 1 where TIME TBD leaves 2, and warns per game and per group', () => {
+    const placed = /** @type {any} */ (whereIs(run, X));
+    expect(placed).not.toBeNull();
+    expect(placed.startMinutes).toBe(540);
+    expect(run.meta.overlapFallbackEntered).toBe(1);
+    expect(admittedOf(run).map((f) => f.details)).toEqual([
+      {
+        gameId: X,
+        stageId: 'initial-assignment',
+        slot: `${placed.date}|${placed.surfaceId}|${placed.startMinutes}`,
+        groups: [
+          { groupLabel: SPREAD_GROUP, placedExcess: 1, shelvedExcess: 2, acceptedExcess: 0 },
+        ],
+        tie: false,
+      },
+    ]);
+    expect(
+      run.findings
+        .filter((f) => f.code === 'RESOLVE_CONFLICT_SPREAD_CARRIED')
+        .map((f) => [f.details.groupLabel, f.details.spread])
+    ).toEqual([[SPREAD_GROUP, 2]]);
+  });
+});
+
+describe('#60b Q6: two groups on one placement — one ties, one improves — is not a tie', () => {
+  // `strictSchedule`, plus SYNB = {07BJunior13 at 2 synthetic conflicts,
+  // 08GJunior01}: 08GJunior01's one conflict is #564's (coach oakley ulmer at
+  // #548), so SYNB is published at spread 1 and both a clean slot and TIME TBD
+  // leave it at 2 — the W-b1 tie, on the same placement.
+  const SYNB = 'SYNB';
+  const sched = {
+    ...strictSchedule,
+    teams: strictSchedule.teams.map((t) =>
+      ['07BJunior13', MIN_TEAM].includes(t.id) ? { ...t, groupLabel: SYNB } : t
+    ),
+    commitments: [...strictSchedule.commitments, ...conflictWindowsFor('07BJunior13', 2, 'synb')],
+  };
+  const run = displaceOn(sched, X);
+
+  it('admits both groups through the floor and reports tie false', () => {
+    const placed = /** @type {any} */ (whereIs(run, X));
+    expect(placed).not.toBeNull();
+    const [admitted, ...rest] = admittedOf(run);
+    expect(rest).toEqual([]);
+    expect(admitted.details.groups).toEqual([
+      { groupLabel: SPREAD_GROUP, placedExcess: 1, shelvedExcess: 2, acceptedExcess: 0 },
+      { groupLabel: SYNB, placedExcess: 1, shelvedExcess: 1, acceptedExcess: 0 },
+    ]);
+    expect(admitted.details.tie).toBe(false);
+  });
+});
+
+describe('#60b declared: an option offered under the floor goes stale on approval', () => {
+  // W-b1's SYN, with #564's home coach committed for 14BSelect01 (SYN's top
+  // team) across both same-venue clean slots: there 14BSelect01 rises to 3 —
+  // worse than shelving — so #564 is shelved. Away from 540 and 670 the coach
+  // is free, so a cross-venue slot leaves SYN where TIME TBD does: the options
+  // pass clears it under the floor. Approved, it is re-judged in
+  // change-request-apply with #564 standing on its published slot, gets no
+  // floor, and is refused as stale.
+  const sched = {
+    ...sched564,
+    teams: sched564.teams.map((t) => (t.id === x564.homeTeamId ? { ...t, groupLabel: null } : t)),
+    commitments: [
+      ...sched564.commitments,
+      ...homeCoachWindows('stale', [
+        [540, 585, SPREAD_TEAM],
+        [670, 715, SPREAD_TEAM],
+      ]),
+    ],
+  };
+  const policies = {
+    [x564.format]: season2026RelocationPolicy({
+      graph,
+      table: timingTable,
+      format: x564.format,
+      excludeVenueIds: [],
+      games: schedule.games,
+    }),
+  };
+  const requested = /** @type {any} */ (
+    schedule.games.find(
+      (game) =>
+        game.id !== X &&
+        game.date === x564.date &&
+        game.venueId === x564.venueId &&
+        game.format === x564.format &&
+        game.startMinutes !== x564.startMinutes
+    )
+  );
+  const runWith = (extra, search) =>
+    /** @type {any} */ (
+      applyChangeRequest({
+        schedule: sched,
+        changes: [{ gameId: requested.id, ...slotOf(x564), reason: 'displace' }, ...extra],
+        engines,
+        freeze: freezeAllExcept([{ date: x564.date }]),
+        holdChanges: true,
+        verify: false,
+        onUnsatisfiable: 'report',
+        ...(search === null ? {} : { relocationSearch: search }),
+      })
+    );
+  const offered = runWith([], { policies });
+  const entry = offered.relocationOptions.find((e) => e.gameId === X);
+
+  it('shelves #564 and offers it options the rule gate clears only under the floor', () => {
+    expect(whereIs(offered, X)).toBeNull();
+    expect(entry.trigger).toBe('time-tbd');
+    expect(entry.options.length).toBeGreaterThan(0);
+    for (const option of entry.options) expect(option.clearsRuleGate).toBe(true);
+    // The floor is what clears it: the same slot, judged with #564 standing.
+    const probe = createPlacementProbe({ schedule: sched, engines });
+    probe.hold(requested.id, slotOf(x564));
+    expect(probe.evaluate(X, entry.options[0].to).ruleGrown).toEqual(['CONFLICT_SPREAD_EXCEEDED']);
+  });
+
+  it('approving the first option is refused as stale, and #564 is not moved there', () => {
+    const option = entry.options[0];
+    const approved = runWith([option.applyAs], null);
+    const codes = approved.findings.filter((f) => f.details?.gameId === X).map((f) => f.code);
+    expect(codes).toContain('RESOLVE_OPTION_STALE');
+    expect(codes).not.toContain('RESOLVE_CHANGE_APPLIED');
+    const where = whereIs(approved, X);
+    expect(where === null ? null : slotOf(where)).not.toEqual(option.to);
   });
 });

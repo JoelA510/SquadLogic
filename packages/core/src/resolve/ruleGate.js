@@ -17,7 +17,9 @@
  * - `CONFLICT_SPREAD_EXCEEDED` (#60) — an age group's coach conflicts shared
  *   out more unevenly than `conflict-fairness` permits. Blocking under that
  *   record (HARD, `waivable: false`). Refused in **both** passes, as turnover
- *   is (operator ruling Q1). The instance is the **group**, not a pair of
+ *   is (operator ruling Q1) — except, for a game that stands nowhere, growth
+ *   no worse than shelving it as TIME TBD (#60b: the placer's accepted record,
+ *   `acceptedSpreadFor()` in `stages.js`). The instance is the **group**, not a pair of
  *   games — `CONFLICT_SPREAD_EXCEEDED|<groupLabel>`, valued at the group's
  *   excess over the bound — because the violation is an aggregate that names
  *   no game.
@@ -66,7 +68,9 @@
  * - **The carried-spread warning reads the same instances** (`stages.js`,
  *   `RESOLVE_CONFLICT_SPREAD_CARRIED`), so a requested move whose growth a
  *   waiver covers does not warn, and with `verify` off nothing then reports
- *   the waiver. Unreachable under the season's record (ruling Q3).
+ *   the waiver. Unreachable under the season's record (ruling Q3). The same
+ *   holds for the per-game `RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD` (#60b),
+ *   whose shelved floor reads these instances too.
  * - **The #53 `travelCodes` are read before the ledger**, so an option can list
  *   a travel-gap code `verify` would report waived (incident 9's shape).
  * - **The applier's contract is adopted, not audited.** It lets a waiver on

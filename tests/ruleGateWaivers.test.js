@@ -461,3 +461,72 @@ describe('W15: a waiver naming the travel constraint does not admit an overlap',
     expect(found[0].waived).toBeFalsy();
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* W-b9 (#60b): the shelved floor reads the spread through the ledger           */
+/* -------------------------------------------------------------------------- */
+
+// The #60b case (tests/ruleGate.test.js W-b1): #564 carries 08GJunior01's one
+// conflict, so in SYN = {14BSelect01 at 2 synthetic conflicts, 08GJunior01}
+// both a clean slot and TIME TBD leave the spread at 2. With
+// `conflict-fairness` retyped waivable and a waiver covering SYN, the placed
+// and the shelved side both read excess 0: the slot is admitted without the
+// floor, and no per-game #60b warning is raised.
+const SHELVED = 'combined_schedule.csv#564';
+const shelvedSchedule = (() => {
+  const template = /** @type {any} */ (
+    schedule.commitments.find((c) => c.teamId === SPREAD_TEAM && typeof c.gameId === 'string')
+  );
+  const synthetic = [0, 1].flatMap((i) =>
+    ['own', 'other'].map((side) => ({
+      id: `syn-window-${i}-${side}`,
+      gameId: null,
+      personId: template.personId,
+      date: `2026-10-${String(3 + 7 * i).padStart(2, '0')}`,
+      startMinutes: 600,
+      endMinutes: 660,
+      venueId: template.venueId,
+      surfaceId: template.surfaceId,
+      teamId: side === 'own' ? SPREAD_TEAM : '16BSelect02',
+    }))
+  );
+  return {
+    ...schedule,
+    teams: schedule.teams.map((t) =>
+      [SPREAD_TEAM, '08GJunior01'].includes(t.id) ? { ...t, groupLabel: SPREAD_GROUP } : t
+    ),
+    commitments: [...schedule.commitments, ...synthetic],
+  };
+})();
+const admittedOf = (run) =>
+  run.findings.filter((f) => f.code === 'RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD');
+
+describe('W-b9 (#60b): the shelved floor goes through the ledger', () => {
+  const fairnessLedger = ledgerOf(FAIRNESS, { teamId: SPREAD_TEAM });
+  const waived = displace(
+    SHELVED,
+    { ...engines, registry: retypedWaivable([FAIRNESS]), waiverLedger: fairnessLedger },
+    shelvedSchedule
+  );
+  const seasonRecord = displace(
+    SHELVED,
+    { ...engines, waiverLedger: fairnessLedger },
+    shelvedSchedule
+  );
+
+  it('meta: under the season record the floor admits #564 and says so — the ledger changes nothing', () => {
+    expect(whereIs(seasonRecord, SHELVED)).not.toBeNull();
+    expect(admittedOf(seasonRecord).map((f) => f.details.tie)).toEqual([true]);
+    expect(spreadViolations(seasonRecord).map((v) => v.severity)).toEqual(['blocking']);
+  });
+
+  it('with the waiver covering SYN, #564 is placed with no per-game warning, and verify waives SYN', () => {
+    expect(whereIs(waived, SHELVED)).not.toBeNull();
+    expect(waived.meta.spreadShelvedFloorsMeasured).toBeGreaterThanOrEqual(1);
+    expect(admittedOf(waived)).toEqual([]);
+    expect(waived.meta.spreadAdmittedByShelvedFloor).toBe(0);
+    const [violation, ...rest] = spreadViolations(waived);
+    expect(rest).toEqual([]);
+    expect(violation.details).toMatchObject({ waived: true, waiverId: 'syn-waiver' });
+  });
+});

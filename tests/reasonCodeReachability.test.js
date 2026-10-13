@@ -1,8 +1,8 @@
 /**
  * Repo-wide reachability audit for every frozen reason-code table in
  * `packages/core/src` — the generalisation of the per-module audit
- * `tests/attribution.test.js` already carries. 22 vocabularies, 553 codes, of
- * which 541 are shown to be producible and 12 are named as holes.
+ * `tests/attribution.test.js` already carries. 22 vocabularies, 554 codes, of
+ * which 542 are shown to be producible and 12 are named as holes.
  *
  * **The defect this exists to catch.** Four times now, in four unrelated
  * modules, a reason code has been declared, given a severity, documented, and
@@ -2634,6 +2634,70 @@ harvest(
     );
     return applyChangeRequest({
       schedule,
+      changes: [
+        {
+          gameId: requested.id,
+          date: displaced.date,
+          surfaceId: displaced.surfaceId,
+          startMinutes: displaced.startMinutes,
+          reason: 'displace',
+        },
+      ],
+      engines,
+      holdChanges: true,
+      freeze: freezeAllExcept([{ date: displaced.date }]),
+      verify: false,
+      onUnsatisfiable: 'report',
+    });
+  })()
+);
+harvest(
+  'applyChangeRequest(a displaced game whose every slot grows a spread TIME TBD would grow as much, verify off)',
+  (() => {
+    // #60b (tests/ruleGate.test.js W-b1): #564 carries its away team's one
+    // coach conflict. In a synthetic group with a team at two synthetic
+    // conflicts, a clean slot and TIME TBD both leave the spread at 2, so the
+    // placer admits the slot and names it per game.
+    const displaced = /** @type {any} */ (
+      schedule.games.find((game) => game.id === 'combined_schedule.csv#564')
+    );
+    const template = /** @type {any} */ (
+      schedule.commitments.find((c) => c.teamId === '14BSelect01' && typeof c.gameId === 'string')
+    );
+    const windows = [0, 1].flatMap((i) =>
+      ['own', 'other'].map((side) => ({
+        id: `reach-60b-window-${i}-${side}`,
+        gameId: null,
+        personId: template.personId,
+        date: `2026-10-${String(3 + 7 * i).padStart(2, '0')}`,
+        startMinutes: 600,
+        endMinutes: 660,
+        venueId: template.venueId,
+        surfaceId: template.surfaceId,
+        teamId: side === 'own' ? '14BSelect01' : '16BSelect02',
+      }))
+    );
+    const grouped = {
+      ...schedule,
+      teams: schedule.teams.map((team) =>
+        ['14BSelect01', displaced.awayTeamId].includes(team.id)
+          ? { ...team, groupLabel: 'REACH-60B' }
+          : team
+      ),
+      commitments: [...schedule.commitments, ...windows],
+    };
+    const requested = /** @type {any} */ (
+      schedule.games.find(
+        (game) =>
+          game.id !== displaced.id &&
+          game.date === displaced.date &&
+          game.venueId === displaced.venueId &&
+          game.format === displaced.format &&
+          game.startMinutes !== displaced.startMinutes
+      )
+    );
+    return applyChangeRequest({
+      schedule: grouped,
       changes: [
         {
           gameId: requested.id,

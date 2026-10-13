@@ -924,7 +924,6 @@ describe('#60 W5/W6: a requested move that grows the spread is allowed, and warn
 // conflict, so TIME TBD leaves SYN at spread 2 as well: the #60b case.
 const X = 'combined_schedule.csv#564';
 const MIN_TEAM = '08GJunior01';
-const SYN_KEY = `CONFLICT_SPREAD_EXCEEDED|${SPREAD_GROUP}`;
 const withRoster = spreadSchedule(2, SPREAD_TEAM, [SPREAD_TEAM, MIN_TEAM]);
 const sched564 = { ...withRoster, teams: withRoster.teams.filter((t) => t.id !== ROSTER_ONLY) };
 /** The per-game #60b warnings a run carries. */
@@ -1005,7 +1004,7 @@ describe('#60b W-b3: the options pass reads the same floor for a game that stand
   const context = {
     ...resolveContextDefaults(),
     engines,
-    weights: resolveObjectiveWeights(),
+    weights: resolveObjectiveWeights(undefined),
     commitmentIndex: indexCommitments(sched564.commitments),
     teamIndex: indexTeams(sched564.teams),
   };

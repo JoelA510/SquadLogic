@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useId } from 'react';
 import { logger } from '../lib/logger.js';
 import { Loader2, AlertCircle, Save, Activity, ShieldCheck, Zap } from 'lucide-react';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
@@ -12,6 +12,55 @@ import { cachedInvoke, edgeFunctionCache } from '../lib/cache.js';
 // duplicate call we want to collapse (e.g., brief re-mount, tab switch, or
 // double-render in StrictMode).
 const FAIRNESS_SCORING_TTL_MS = 60_000;
+
+/**
+ * Teams and slots a practice evaluation has to work with. Both are needed: the
+ * engine resolves every assignment against them, so with either list empty it
+ * drops every row and reports a clean schedule after examining nothing (audit
+ * 13.1). Such a request is never sent; the panel says there is nothing to
+ * evaluate instead.
+ */
+function practiceRosterOf(practiceData) {
+  const teams = practiceData?.teams?.length ?? 0;
+  const slots = practiceData?.slots?.length ?? 0;
+  return { teams, slots, evaluable: teams > 0 && slots > 0 };
+}
+
+const countOf = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+
+/** The panel's title over one notice: used when there is no score to show. */
+function PanelNotice({ titleId, children }) {
+  return (
+    <section
+      className="glass-panel p-6 rounded-xl border border-border-subtle"
+      aria-labelledby={titleId}
+    >
+      <h2 id={titleId} className="text-xl font-display font-bold text-text-primary tracking-tight">
+        Fairness Scoring Engine
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * Why a `fairness-scoring` call failed, in the function's own words when it
+ * gave any. supabase-js puts the response on `context`; its body carries the
+ * Edge's `error` (a validation or clock refusal), which says more than the
+ * client's "non-2xx" line.
+ */
+async function describeFailure(err) {
+  const fallback = err?.message || 'unknown error';
+  if (typeof err?.context?.json !== 'function') return fallback;
+  try {
+    const body = await err.context.json();
+    return body?.error || body?.message || fallback;
+  } catch {
+    // Best effort: a body that is absent, consumed or not JSON leaves the
+    // client's own message, which is still shown.
+    return fallback;
+  }
+}
 
 /**
  * EvaluationPanel - Enterprise Glass component for real-time fairness scoring.
@@ -31,15 +80,29 @@ export default function EvaluationPanel({
   const [loading, setLoading] = useState(false);
   const [persisting, setPersisting] = useState(false);
   const [message, setMessage] = useState('');
+  // Why the last evaluation failed, and for which inputs: a failure clears the
+  // previous result, so a stale score is never shown as the current
+  // schedule's, and it is shown only while those inputs are still the ones on
+  // the page.
+  const [failure, setFailure] = useState(
+    /** @type {{ reason: string, practiceData: any, gameData: any } | null} */ (null)
+  );
+  const titleId = useId();
+  const practiceRoster = practiceRosterOf(practiceData);
+  const nothingToEvaluate = Boolean(practiceData) && !gameData && !practiceRoster.evaluable;
 
   // Trigger server-side evaluation when inputs change
   useEffect(() => {
     let active = true;
 
     const triggerEvaluation = async () => {
-      // Logic requirement: Require at least one data source
-      if (!practiceData && !gameData) {
+      // Logic requirement: Require at least one data source. A practice
+      // schedule without teams or slots is not one (see `practiceRosterOf`).
+      const evaluablePractice = practiceData && practiceRosterOf(practiceData).evaluable;
+      if (!evaluablePractice && !gameData) {
         setEvaluation(null);
+        setFailure(null);
+        setLoading(false);
         return;
       }
 
@@ -53,7 +116,7 @@ export default function EvaluationPanel({
           // remains in the request body for Edge Function compatibility.
           organization_id: currentOrganization?.id,
           organizationId: currentOrganization?.id,
-          practice: practiceData
+          practice: evaluablePractice
             ? {
                 assignments: practiceData.assignments || [],
                 teams: practiceData.teams || [],
@@ -77,11 +140,17 @@ export default function EvaluationPanel({
         });
 
         if (error) throw error;
-        if (active) setEvaluation(data);
+        if (active) {
+          setEvaluation(data);
+          setFailure(null);
+        }
       } catch (err) {
         logger.error('Edge Function Evaluation failed:', err);
+        // Nothing retries: said as it is, with no score beside it.
+        const reason = await describeFailure(err);
         if (active) {
-          setMessage('Engine connectivity issue. Retrying...');
+          setEvaluation(null);
+          setFailure({ reason, practiceData, gameData });
         }
       } finally {
         if (active) setLoading(false);
@@ -134,6 +203,28 @@ export default function EvaluationPanel({
     }
   };
 
+  // No inputs (the page is still reading, or a read failed): nothing is shown,
+  // and a score from earlier inputs is not left on screen while the debounced
+  // effect catches up.
+  if (!practiceData && !gameData) {
+    return null;
+  }
+
+  if (nothingToEvaluate) {
+    return (
+      <PanelNotice titleId={titleId}>
+        <p role="status" className="text-sm text-text-primary mt-1.5 font-medium">
+          Nothing to evaluate: {countOf(practiceRoster.teams, 'team')} /{' '}
+          {countOf(practiceRoster.slots, 'slot')}
+        </p>
+        <p className="text-sm text-text-muted mt-1">
+          Fairness and coach conflicts need at least one team and one practice slot that can be
+          placed on the season&apos;s clock, so no score is shown.
+        </p>
+      </PanelNotice>
+    );
+  }
+
   // Enterprise Glass Loading Skeleton
   if (loading && !evaluation) {
     return (
@@ -157,6 +248,18 @@ export default function EvaluationPanel({
           <div className="h-10 w-32 bg-bg-glass rounded-lg" />
         </div>
       </div>
+    );
+  }
+
+  const failedForTheseInputs =
+    failure && failure.practiceData === practiceData && failure.gameData === gameData;
+  if (failedForTheseInputs && !evaluation && !loading) {
+    return (
+      <PanelNotice titleId={titleId}>
+        <p role="alert" className="text-sm text-status-error mt-1.5 font-medium">
+          The evaluation failed, so nothing was checked: {failure.reason}
+        </p>
+      </PanelNotice>
     );
   }
 
@@ -193,11 +296,16 @@ export default function EvaluationPanel({
 
   const currentStatus = statusConfig[evaluation?.status] || statusConfig.ok;
   const score = evaluation?.metrics?.combinedScore * 100 || 0;
+  // What the engine examined, shown so a clean result can be told apart from
+  // an empty one. Present only when the response carries a practice result.
+  const practiceSummary = evaluation?.practice?.summary ?? null;
+  const coachConflictCount = evaluation?.practice?.coachConflicts?.length ?? 0;
 
   return (
-    <div
+    <section
       className="glass-panel p-6 rounded-xl border border-border-subtle relative overflow-hidden transition-all duration-300 hover:shadow-md hover:shadow-indigo-500/10"
       aria-live="polite"
+      aria-labelledby={titleId}
     >
       {/* Background Micro-Gradient */}
       <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 via-transparent to-blue-500/5 pointer-events-none" />
@@ -216,7 +324,10 @@ export default function EvaluationPanel({
           </div>
           <div>
             <div className="flex items-center gap-3">
-              <h2 className="text-xl font-display font-bold text-text-primary tracking-tight">
+              <h2
+                id={titleId}
+                className="text-xl font-display font-bold text-text-primary tracking-tight"
+              >
                 Fairness Scoring Engine
               </h2>
               <span
@@ -239,6 +350,35 @@ export default function EvaluationPanel({
                   {evaluation?.issues?.length || 0}
                 </span>
               </span>
+              {practiceSummary && (
+                <>
+                  <span className="w-1 h-1 rounded-full bg-bg-surface-hover" />
+                  <span>
+                    Teams evaluated:{' '}
+                    <span className="text-text-primary font-mono font-bold">
+                      {practiceSummary.totalTeams}
+                    </span>
+                  </span>
+                  <span className="w-1 h-1 rounded-full bg-bg-surface-hover" />
+                  <span>
+                    With a practice:{' '}
+                    <span className="text-text-primary font-mono font-bold">
+                      {practiceSummary.assignedTeams}
+                    </span>
+                  </span>
+                  <span className="w-1 h-1 rounded-full bg-bg-surface-hover" />
+                  <span>
+                    Coach conflicts:{' '}
+                    <span
+                      className={
+                        coachConflictCount > 0 ? 'text-status-warning' : 'text-status-success'
+                      }
+                    >
+                      {coachConflictCount}
+                    </span>
+                  </span>
+                </>
+              )}
               {evaluation?.metrics?.executionTimeMs && (
                 <>
                   <span className="w-1 h-1 rounded-full bg-bg-surface-hover" />
@@ -308,7 +448,10 @@ export default function EvaluationPanel({
                     <span className="font-bold uppercase tracking-[0.15em] text-[9px] opacity-50">
                       {issue.category.replace('_', ' ')}
                     </span>
-                    {issue.details && (
+                    {/* The engine's `details` is an object (coach-conflict, utilization)
+                        that React cannot render; the message already names it. Only a
+                        text detail is shown. */}
+                    {typeof issue.details === 'string' && issue.details && (
                       <span className="text-[10px] opacity-40 font-mono tracking-tighter italic">
                         {issue.details}
                       </span>
@@ -321,6 +464,6 @@ export default function EvaluationPanel({
           </ul>
         </section>
       )}
-    </div>
+    </section>
   );
 }

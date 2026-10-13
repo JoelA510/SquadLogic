@@ -1,0 +1,59 @@
+# Version updates (plan item M2.3, audit finding 8.2). Weekly, grouped so a
+# routine bump is one pull request to review, not dozens. Security updates are
+# separate (Settings -> Advanced Security) and ignore the cooldown.
+# https://docs.github.com/code-security/dependabot
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    # A release is 3 days old before an update takes it, the same wait .npmrc
+    # gives `npm install` (min-release-age=3): long enough for a compromised
+    # version to be caught and pulled.
+    cooldown:
+      default-days: 3
+    # Held back on purpose. Remove an entry when its reason is gone.
+    ignore:
+      # Types for the Node the app runs on: .nvmrc pins 24, so @types/node
+      # stays on 24.x and typecheck refuses Node 25-only APIs. Move both
+      # together.
+      - dependency-name: '@types/node'
+        versions: ['>= 25']
+      # 7.1 turns on rules (set-state-in-effect, preserve-manual-memoization)
+      # that flag 63 existing patterns (PR #332). Adopting them is its own
+      # refactor; until then this bump would fail lint and, grouped, hold
+      # back every other minor and patch update with it.
+      - dependency-name: eslint-plugin-react-hooks
+        versions: ['>= 7.1.0']
+      # 3.14+ (virtual-core 3.18) grows the lazy virtual-vendor chunk from
+      # 5.0 to 7.9 KB gzip, past its 7,000 B cap in config/bundle-budget.json.
+      # Raising that cap is its own decision (docs/operations/bundle-budget.md);
+      # until then this bump would fail check:bundle and hold back the group.
+      - dependency-name: '@tanstack/react-virtual'
+        versions: ['>= 3.14.0']
+      # 2026-10-13: Prettier 3.8+ formats some code differently from 3.7.4
+      # (e.g. `for (...; cond; )`), and the prettier/prettier lint rule fails
+      # on every file formatted the old way. Upgrading it is its own PR, so
+      # in-flight PRs don't churn; pinned at 3.7.4 in package.json.
+      - dependency-name: prettier
+        versions: ['> 3.7.4']
+    groups:
+      # Non-major bumps are almost always safe; batch them into one PR.
+      # Majors arrive one per PR (none is planned: remediation plan D6).
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      actions:
+        patterns:
+          - '*'

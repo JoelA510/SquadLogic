@@ -56,7 +56,7 @@
 
 - [RLS Policies](security/rls-policies.md) — Row-Level Security policy catalogue.
 - [Content-Security-Policy](security/csp.md) — CSP header policy, waivers, and `connect-src` decisions.
-- [Dependabot Waivers](security/dependabot-waivers.md) — Documented waivers for npm-audit / Dependabot alerts.
+- [Dependency Policy](security/dependency-policy.md) — The `check:audit` gate, the waiver register (`audit-waivers.json`), the `.npmrc` install guards, and Dependabot updates.
 
 ## Testing
 

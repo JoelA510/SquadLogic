@@ -20,3 +20,13 @@ Feature: Practice Schedule Locking
     When I click the "Auto-Generate" button
     Then the assignment for "Team A" should remain unchanged
     And other unlocked assignments should be updated by the engine
+
+  Scenario: Overriding a saved practice asks for confirmation first
+    Given the automated schedule has been generated
+    And the roster's "Team A" has a saved practice and a second slot is available
+    And I am on the Practice Scheduling page
+    When I override "Team A" onto the second practice slot and apply
+    Then a dialog asks to replace the saved practice of "Team A"
+    And no practice schedule has been saved
+    When I accept the override for "Team A" with the reason "Field change"
+    Then the save unlocks only the saved practice of "Team A", with reason "field-change"

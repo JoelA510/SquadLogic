@@ -8,9 +8,11 @@
  *
  *   assignment <id> is locked: <why> -- ...
  *
- * The scheduling grid never sends `unlock`, so an override of a team that
- * already has a saved practice reaches this refusal. The raw text names the
- * row only by its id, which tells an operator nothing.
+ * The scheduling grid sends `unlock` only for the rows its override prompt
+ * listed and the admin accepted (`gridOverridePrompt.js`). It reaches this
+ * refusal when the saved schedule holds a row its read did not, or a new row
+ * overlaps one it keeps. The raw text names the row only by its id, which
+ * tells an operator nothing.
  *
  * What reaches the page depends on the Edge's route (`practice-persistence`):
  *
@@ -60,7 +62,9 @@ export function parsePracticeLockRefusal(error) {
   return code === null && (status === null || status === 500) ? found : null;
 }
 
-const UNSUPPORTED = "Changing a saved practice from the scheduling grid isn't supported yet.";
+// The grid now asks before it replaces a saved practice, so a refusal here
+// means its read of the schedule was not the writer's: re-read, then retry.
+const RECOVERY = 'Reload the page to read the current schedule, then Apply again.';
 
 /**
  * The operator's sentence for a locked refusal. Never the row id: a row the
@@ -80,5 +84,10 @@ export function describePracticeLockRefusal(locked, cause = null) {
       ? `A saved practice${series}`
       : 'A saved practice in this schedule';
   const because = CAUSE_TEXT[cause] ? `, and ${CAUSE_TEXT[cause]}` : '';
-  return `${subject} is locked${because}, so nothing was saved. ${UNSUPPORTED}`;
+  // A double-booking is not fixed by re-reading: the staged slot must change.
+  const recovery =
+    cause === 'a new row for its team overlaps it in time'
+      ? 'Choose a slot that does not overlap it.'
+      : RECOVERY;
+  return `${subject} is locked${because}, so nothing was saved. ${recovery}`;
 }

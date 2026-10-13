@@ -30,11 +30,12 @@ describe('PracticeAssignmentList', () => {
     render(<PracticeAssignmentList assignments={[assignment]} onToggleLock={onToggleLock} />);
 
     const lockButton = screen.getByRole('button', {
-      name: 'Lock practice slot for Blue Tigers',
+      name: 'Manual choice: Blue Tigers',
     });
     expect(lockButton).toHaveAttribute('type', 'button');
     expect(lockButton).toHaveAttribute('aria-pressed', 'false');
-    expect(lockButton).toHaveAttribute('title', 'Lock slot (preserve manual choice)');
+    // Provenance, not a lock (ruling 2, plan Q1): no title promises an unlock.
+    expect(lockButton).toHaveAttribute('title', 'Mark as manual choice');
     expect(lockButton.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
 
     fireEvent.click(lockButton);
@@ -51,10 +52,11 @@ describe('PracticeAssignmentList', () => {
     render(<PracticeAssignmentList assignments={[lockedAssignment]} onToggleLock={onToggleLock} />);
 
     const unlockButton = screen.getByRole('button', {
-      name: 'Lock practice slot for Blue Tigers',
+      name: 'Manual choice: Blue Tigers',
     });
     expect(unlockButton).toHaveAttribute('aria-pressed', 'true');
-    expect(unlockButton).toHaveAttribute('title', 'Unlock slot (allow algorithm to change)');
+    expect(unlockButton).toHaveAttribute('title', 'Mark as automatic');
+    expect(document.body.textContent).not.toMatch(/allow algorithm to change|unlock slot/i);
 
     fireEvent.click(unlockButton);
     expect(onToggleLock).toHaveBeenCalledWith('practice-assignment-1', 'auto');
@@ -64,12 +66,12 @@ describe('PracticeAssignmentList', () => {
     render(<PracticeAssignmentList assignments={[assignment]} />);
 
     const disabledButton = screen.getByRole('button', {
-      name: 'Practice lock status for Blue Tigers requires schedule edit permission',
+      name: 'Manual choice mark for Blue Tigers requires schedule edit permission',
     });
     expect(disabledButton).toBeDisabled();
     expect(disabledButton).toHaveAttribute(
       'title',
-      'Lock status changes require schedule edit permission'
+      'Changing the manual-choice mark requires schedule edit permission'
     );
   });
 });

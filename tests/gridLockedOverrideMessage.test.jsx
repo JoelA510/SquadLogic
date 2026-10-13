@@ -1,10 +1,13 @@
 /**
  * The scheduling grid's Apply, refused by writer v3's lock, says so in words.
  *
- * Operator ruling 2 locks every saved practice row. The grid never sends
- * `unlock`, so a manual override of a team that already has a saved practice
- * is refused by the writer with 22023 "assignment <id> is locked: ...". The
- * page used to show that text as it came, naming the row only by its UUID.
+ * Operator ruling 2 locks every saved practice row. The grid asks before it
+ * replaces one (the override prompt, `gridOverridePrompt.test.jsx`), but the
+ * writer can still refuse an ordinary save with 22023 "assignment <id> is
+ * locked: ..." when the saved schedule holds a row the page's read did not.
+ * The page used to show that text as it came, naming the row only by its
+ * UUID. Here the staged team (Wrens) has no saved practice, so the page asks
+ * nothing and sends an ordinary save, which the writer refuses.
  *
  * Driven through the real path, as `gridCurrentPracticeRows.test.jsx` is: the
  * real page -> the real practice reads -> the real mock client -> the real
@@ -38,6 +41,8 @@ const UNKNOWN_ROW = '00000000-0000-4000-8000-0000000000ff';
 const ROSTER = vi.hoisted(() => [
   { id: 'team-a', name: 'Synthetic Hawks', division: 'U10' },
   { id: 'team-b', name: 'Synthetic Owls', division: 'U10' },
+  // No saved practice: staging it replaces nothing, so no prompt opens.
+  { id: 'team-d', name: 'Synthetic Wrens', division: 'U10' },
 ]);
 
 vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
@@ -109,8 +114,8 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
 // page's own handler. The grid list is the real one.
 vi.mock('../frontend/src/components/PracticeOverridePanel.jsx', () => ({
   default: ({ onStageAssignment }) => (
-    <button type="button" onClick={() => onStageAssignment('team-a', 'slot-fri')}>
-      Stage Hawks
+    <button type="button" onClick={() => onStageAssignment('team-d', 'slot-fri')}>
+      Stage Wrens
     </button>
   ),
 }));
@@ -268,7 +273,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Override Synthetic Hawks onto Friday, Apply, and return the alert the page shows. */
+/** Stage Synthetic Wrens onto Friday, Apply, and return the alert the page shows. */
 async function overrideAndApply(seedOptions = {}) {
   seed(seedOptions);
   render(
@@ -278,17 +283,18 @@ async function overrideAndApply(seedOptions = {}) {
   );
   await waitFor(() => expect(screen.getAllByText('Synthetic Hawks').length).toBeGreaterThan(0));
   fireEvent.click(await screen.findByRole('button', { name: /enter manual override/i }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Stage Hawks' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Stage Wrens' }));
   const apply = await screen.findByRole('button', { name: /apply schedule/i });
   await waitFor(() => expect(apply).toBeEnabled());
   fireEvent.click(apply);
   await waitFor(() => expect(sent).toHaveLength(1));
-  // The save itself is unchanged: an ordinary save, no unlock, no closes.
+  // Nothing staged replaces a saved row: no prompt, an ordinary save.
+  expect(screen.queryByRole('dialog')).toBeNull();
   expect(sent[0].repair).toBeUndefined();
   return screen.findByRole('alert');
 }
 
-const UNSUPPORTED = "Changing a saved practice from the scheduling grid isn't supported yet.";
+const UNSUPPORTED = 'Reload the page to read the current schedule, then Apply again.';
 
 describe("the grid's Apply, refused because a saved practice is locked", () => {
   it('the writer has the lock refusals this file renders (meta, can fail)', () => {
@@ -315,9 +321,15 @@ describe("the grid's Apply, refused because a saved practice is locked", () => {
   });
 
   const HAWKS = "Synthetic Hawks's practice (Monday 17:00–18:30, 2026-09-07 to 2026-11-30)";
-  for (const [i, label, cause] of [
-    [0, 'prune', 'this save would replace it'],
-    [1, 'overlap', 'a new practice for the team overlaps it'],
+  for (const [i, label, cause, recovery] of [
+    [0, 'prune', 'this save would replace it', UNSUPPORTED],
+    // Re-reading cannot fix a double-booking: the slot must change.
+    [
+      1,
+      'overlap',
+      'a new practice for the team overlaps it',
+      'Choose a slot that does not overlap it.',
+    ],
   ]) {
     it(`names the team, its series and the cause, never the id (${label} refusal)`, async () => {
       answer = {
@@ -327,7 +339,7 @@ describe("the grid's Apply, refused because a saved practice is locked", () => {
       const alert = await overrideAndApply();
       // From the seed: Hawks' saved row is slot-mon, 17:00-18:30, [2026-09-07,2026-12-01).
       expect(alert.textContent).toBe(
-        `${HAWKS} is locked, and ${cause}, so nothing was saved. ${UNSUPPORTED}`
+        `${HAWKS} is locked, and ${cause}, so nothing was saved. ${recovery}`
       );
       expect(alert.textContent).not.toContain(A_ROW);
     });

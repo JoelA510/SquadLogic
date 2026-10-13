@@ -15,6 +15,17 @@ type GamePersistencePage = Page & {
   };
 };
 
+// Every practice-persistence request body, in order (the override prompt).
+type PracticePersistencePage = Page & {
+  __practicePersistenceBodies?: Array<{
+    snapshot?: { payload?: { assignmentRows?: Array<Record<string, unknown>> } };
+    repair?: {
+      unlock?: Array<{ assignment_id: string; reason: string }>;
+      closes?: Array<{ assignment_id: string; last_day: string }>;
+    };
+  }>;
+};
+
 async function mockPracticeSchedulerRoutes(page: Page) {
   await page.route('**/functions/v1/auto-scheduler', async (route) => {
     const requestBody = JSON.parse(route.request().postData() || '{}');
@@ -48,6 +59,8 @@ async function mockPracticeSchedulerRoutes(page: Page) {
   });
 
   await page.route('**/functions/v1/practice-persistence', async (route) => {
+    const bodies = ((page as PracticePersistencePage).__practicePersistenceBodies ??= []);
+    bodies.push(JSON.parse(route.request().postData() || '{}'));
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -1154,6 +1167,137 @@ Then('the lock state should be persisted to the database', async ({ page }) => {
   const row = page.locator('tr').filter({ hasText: 'Team A' }).first();
   await expect(row.locator('button.text-amber-500').first()).toBeVisible();
 });
+
+// ── The override prompt (docs/PLAN_GRID_OVERRIDE_PROMPT.md, ruling 2) ──────
+// The override panel's roster is the mock's team run (`t1` is its "Team A"),
+// so the saved practice the override replaces belongs to that team, in the
+// active season's division (the grid's season read goes teams -> divisions).
+Given(
+  "the roster's {string} has a saved practice and a second slot is available",
+  async ({ page }, teamName: string) => {
+    // "Today" is fixed (noon in New York on 2026-10-20), so the override's
+    // close-on-yesterday and start-today dates are known (#546).
+    await page.clock.setFixedTime(new Date('2026-10-20T16:00:00Z'));
+    await page.evaluate((name) => {
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+      db.teams = [
+        ...(db.teams || []).filter((t: Record<string, unknown>) => t.id !== 't1'),
+        { id: 't1', name, division_id: 'div-1', organization_id: orgId },
+      ];
+      db.practice_assignments = [
+        ...(db.practice_assignments || []).filter(
+          (a: Record<string, unknown>) => a.id !== 'assign-roster-team-a'
+        ),
+        {
+          id: 'assign-roster-team-a',
+          organization_id: orgId,
+          run_id: 'active-practice-run-id',
+          team_id: 't1',
+          slot_id: 'slot-1',
+          practice_slot_id: 'slot-1',
+          effective_date_range: '[2026-09-07,2026-12-01)',
+          assigned_via: 'auto',
+          source: 'auto',
+        },
+      ];
+      db.practice_slots = [
+        ...(db.practice_slots || []).filter((s: Record<string, unknown>) => s.id !== 'slot-2'),
+        {
+          id: 'slot-2',
+          day_of_week: 'wed',
+          start_time: '18:00',
+          end_time: '19:00',
+          valid_from: '2026-09-07',
+          valid_until: '2026-11-30',
+          field_id: 'field-1',
+          organization_id: orgId,
+        },
+      ];
+      // The sanctioned producer (tests/mockDeleteTombstones.test.js), not a
+      // direct sessionStorage write.
+      window.__saveMockDB__(db);
+    }, teamName);
+  }
+);
+
+When(
+  'I override {string} onto the second practice slot and apply',
+  async ({ page }, teamName: string) => {
+    await page
+      .getByRole('button', { name: /Enter Manual Override/i })
+      .first()
+      .click();
+    // The option label carries the division and coach too: match by name.
+    const teamSelect = page.getByTestId('team-select');
+    const teamValue = await teamSelect
+      .locator('option', { hasText: teamName })
+      .first()
+      .getAttribute('value');
+    await teamSelect.selectOption(String(teamValue));
+    await page.getByTestId('slot-select').selectOption('slot-2');
+    await page.getByTestId('assign-slot-button').click();
+    const apply = page.getByRole('button', { name: /apply schedule/i });
+    await expect(apply).toBeEnabled({ timeout: 10000 });
+    await apply.click();
+  }
+);
+
+Then(
+  'a dialog asks to replace the saved practice of {string}',
+  async ({ page }, teamName: string) => {
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible({ timeout: 10000 });
+    await expect(
+      dialog.getByRole('heading', { name: `Replace ${teamName}’s saved practice` })
+    ).toBeFocused();
+    await expect(dialog.getByTestId('grid-override-replacing')).toContainText('Monday');
+    await expect(dialog.getByTestId('grid-override-replacement')).toContainText('Wednesday');
+    // The past stays (#546).
+    await expect(dialog.getByTestId('grid-override-past')).toContainText(
+      'Practices up to 2026-10-19 are kept; from 2026-10-20'
+    );
+  }
+);
+
+Then('no practice schedule has been saved', async ({ page }) => {
+  expect((page as PracticePersistencePage).__practicePersistenceBodies ?? []).toHaveLength(0);
+});
+
+When(
+  'I accept the override for {string} with the reason {string}',
+  async ({ page }, teamName: string, reason: string) => {
+    const dialog = page.getByRole('dialog');
+    await dialog
+      .getByRole('checkbox', { name: `Replace and lock ${teamName}’s practice as shown` })
+      .check();
+    await dialog.getByLabel('Reason for the override').selectOption({ label: reason });
+    await dialog.getByRole('button', { name: 'Confirm and save' }).click();
+    await expect(dialog).toBeHidden({ timeout: 10000 });
+  }
+);
+
+Then(
+  'the save unlocks only the saved practice of {string}, with reason {string}',
+  async ({ page }, _teamName: string, code: string) => {
+    const bodies = (page as PracticePersistencePage).__practicePersistenceBodies ?? [];
+    expect(bodies).toHaveLength(1);
+    // From the seed: the roster's Team A (`t1`) has one saved row; the other
+    // team's row (`assign-team-a`, a different team named alike) is not touched.
+    const unlock = bodies[0].repair?.unlock ?? [];
+    expect(unlock.map((u) => u.assignment_id)).toEqual(['assign-roster-team-a']);
+    expect(unlock[0].reason).toMatch(new RegExp(`^grid override( \\S+)?: ${code}$`));
+    // #546: the replaced series is ended on yesterday, not deleted, and the
+    // new row starts today.
+    expect(bodies[0].repair?.closes).toEqual([
+      { assignment_id: 'assign-roster-team-a', last_day: '2026-10-19' },
+    ]);
+    const staged = (bodies[0].snapshot?.payload?.assignmentRows ?? []).filter(
+      (r) => r.team_id === 't1' && r.practice_slot_id === 'slot-2'
+    );
+    expect(staged.map((r) => r.effective_date_range)).toEqual(['[2026-10-20,2026-11-30]']);
+  }
+);
 
 Given('{string} has a locked practice assignment', async ({ page }, teamName: string) => {
   // Ensure we are on the page for the second scenario

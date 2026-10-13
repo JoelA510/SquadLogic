@@ -3,22 +3,27 @@
 // finding of Supabase's own database advisors that docs/security/supabase-advisor-waivers.json
 // does not waive with a reason.
 //
-// The pgTAP job runs `supabase db advisors --local --type all --level warn --fail-on none
+// The pgTAP job runs `supabase db advisors --local --type all --level info --fail-on none
 // --output-format json` after `supabase start` has applied every migration, saves stdout, and
-// passes it here. The CLI's own `--fail-on warn` cannot be used: it has no waivers, and the schema
-// carries findings that are accepted by design (every SECURITY DEFINER RPC is executable by
-// `authenticated`, because RPCs are how this app writes) or recorded as debt.
+// passes it here. INFO is requested so that an empty report means "examined nothing" (see
+// readFindings); INFO findings never block. The CLI's own `--fail-on warn` cannot be used: it has
+// no waivers, and the schema carries findings that are accepted by design or recorded as debt.
+//
+// A waiver names findings, not objects: each entry lists the advisor's own `cacheKey` for every
+// finding it covers (per policy for an RLS lint, per table, role and action for
+// multiple_permissive_policies, per function body for a search_path lint). So a NEW policy on a
+// waived table, or a changed function body, is a new finding and blocks until it is triaged.
 //
 // The register is held to the bar it enforces:
-//   - a waiver names one lint and the objects (`schema.name`, or `project` for a finding that names
-//     no database object) it covers, and says why;
+//   - a waiver names one lint, the findings it covers, and why;
 //   - `expires` is null (accepted by design) or a date at most MAX_DEBT_DAYS out (debt); an expired
-//     waiver covers nothing;
-//   - a waived object the advisors no longer report fails (a stale entry would otherwise
-//     pre-approve the finding if it ever came back), and so does a waiver for an INFO lint, which
-//     this gate never reads.
-// And "couldn't check" is never "clean": unreadable output, a CLI error object, or a finding
-// without a lint name, level or object exits 2.
+//     waiver covers nothing, and one expiring within WARN_DAYS is announced on every run;
+//   - an invalid waiver covers nothing;
+//   - a waived finding the advisors no longer report fails (a stale entry would otherwise
+//     pre-approve it if it ever came back), and so does a waiver for a finding reported only at
+//     INFO, which never blocks.
+// And "couldn't check" is never "clean": unreadable output, a CLI error object, an empty report,
+// or a finding without a lint name, level or cacheKey exits 2.
 //
 // Run: node scripts/ci/supabaseAdvisors.mjs --input advisors.json
 //      [--waivers docs/security/supabase-advisor-waivers.json] [--today 2026-10-13]
@@ -33,9 +38,9 @@ const DEFAULT_WAIVERS = 'docs/security/supabase-advisor-waivers.json';
 const BLOCKING = new Set(['WARN', 'ERROR']);
 const LEVELS = new Set(['INFO', 'WARN', 'ERROR']);
 const MAX_DEBT_DAYS = 180;
+const WARN_DAYS = 30;
 const MIN_REASON = 40;
-/** The object key of a finding that names no schema or object (a project-level setting). */
-const PROJECT = 'project';
+const DAY_MS = 86_400_000;
 
 export class CheckError extends Error {} // couldn't check: exit 2
 
@@ -72,13 +77,16 @@ function readJson(path, what) {
   }
 }
 
+/** The map key of one finding: its lint and its cacheKey. */
+const keyOf = (/** @type {string} */ lint, /** @type {string} */ cacheKey) =>
+  JSON.stringify([lint, cacheKey]);
+
 /**
- * Every finding of a `supabase db advisors --output-format json` report, INFO included, each with
- * the `schema.name` key waivers use. Throws CheckError when the report is not one, or is empty:
- * this schema always has INFO findings (unindexed foreign keys among them), so a report with none
- * at all examined nothing.
+ * Every finding of a `supabase db advisors --output-format json` report, INFO included. Throws
+ * CheckError when the report is not one, or is empty: this schema always has INFO findings
+ * (unindexed foreign keys among them), so a report with none at all examined nothing.
  * @param {unknown} report
- * @returns {{ lint: string, level: string, object: string, detail: string }[]}
+ * @returns {{ lint: string, level: string, cacheKey: string, detail: string }[]}
  */
 export function readFindings(report) {
   if (report === null || typeof report !== 'object' || Array.isArray(report)) {
@@ -104,118 +112,134 @@ export function readFindings(report) {
   return r.results.map((finding, i) => {
     const lint = finding?.name;
     const level = finding?.level;
-    const schema = finding?.metadata?.schema;
-    const name = finding?.metadata?.name;
+    const cacheKey = finding?.cacheKey;
     if (typeof lint !== 'string' || !lint || !LEVELS.has(level)) {
       throw new CheckError(`results[${i}] has no lint name or a level outside INFO/WARN/ERROR.`);
     }
-    const detail = String(finding.detail ?? '');
-    // A project-level finding (an Auth setting, say) names no database object at all.
-    if (schema === undefined && name === undefined) return { lint, level, object: PROJECT, detail };
-    if (typeof schema !== 'string' || typeof name !== 'string' || !schema || !name) {
-      throw new CheckError(`results[${i}] (${lint}) names no object (metadata.schema/name).`);
+    if (typeof cacheKey !== 'string' || !cacheKey) {
+      throw new CheckError(`results[${i}] (${lint}) has no cacheKey, so it cannot be matched.`);
     }
-    return { lint, level, object: `${schema}.${name}`, detail };
+    return { lint, level, cacheKey, detail: String(finding.detail ?? '') };
   });
 }
 
 /**
  * The register's waivers, validated. Problems are returned, not thrown: a bad register fails
- * the gate (exit 1) but the findings are still reported.
+ * the gate (exit 1) but the findings are still reported. A waiver with a problem other than
+ * expiry covers nothing.
  * @param {unknown} register
  * @param {Date} today
  */
 export function readWaivers(register, today) {
+  /** @type {string[]} */
   const problems = [];
-  /** @type {Map<string, { index: number, expired: boolean }>} key `lint object` */
+  /** @type {string[]} */
+  const notices = [];
+  /** @type {Map<string, { index: number, lint: string, cacheKey: string, expired: boolean }>} */
   const covers = new Map();
   const list = /** @type {any} */ (register)?.waivers;
   if (!Array.isArray(list))
     throw new CheckError('The waiver register is not { "waivers": [...] }.');
-  const latest = new Date(today.getTime() + MAX_DEBT_DAYS * 86_400_000);
+  const latest = new Date(today.getTime() + MAX_DEBT_DAYS * DAY_MS);
+  const soon = new Date(today.getTime() + WARN_DAYS * DAY_MS);
   list.forEach((w, index) => {
     const where = `waivers[${index}]`;
     if (w === null || typeof w !== 'object' || Array.isArray(w)) {
       problems.push(`${where}: must be an object.`);
       return;
     }
+    const own = [];
     if (typeof w.lint !== 'string' || !/^[a-z0-9_]+$/.test(w.lint)) {
-      problems.push(
-        `${where}: "lint" must be the advisor's lint name (for example auth_rls_initplan).`
-      );
+      own.push(`${where}: "lint" must be the advisor's lint name (for example auth_rls_initplan).`);
     }
     if (typeof w.reason !== 'string' || w.reason.trim().length < MIN_REASON) {
-      problems.push(
+      own.push(
         `${where}: "reason" must say why this is acceptable here (at least ${MIN_REASON} characters).`
       );
     }
     let expired = false;
     if (!('expires' in w)) {
-      problems.push(
+      own.push(
         `${where}: "expires" is required: null (accepted by design) or a YYYY-MM-DD date (debt).`
       );
     } else if (w.expires !== null) {
       const date = parseDate(w.expires);
-      if (!date) problems.push(`${where}: "expires" must be null or a real YYYY-MM-DD date.`);
+      if (!date) own.push(`${where}: "expires" must be null or a real YYYY-MM-DD date.`);
       else if (date > latest) {
-        problems.push(`${where}: "expires" ${w.expires} is more than ${MAX_DEBT_DAYS} days out.`);
+        own.push(`${where}: "expires" ${w.expires} is more than ${MAX_DEBT_DAYS} days out.`);
       } else if (date < today) {
         expired = true;
         problems.push(
           `${where} (${w.lint}) expired on ${w.expires}: fix the findings or renew it with a new reason.`
         );
+      } else if (date <= soon) {
+        notices.push(
+          `${where} (${w.lint}) expires on ${w.expires}; after that its findings block every pull request.`
+        );
       }
     }
-    if (!Array.isArray(w.objects) || w.objects.length === 0) {
-      problems.push(`${where}: "objects" must list the schema.name objects it covers.`);
+    const keys = Array.isArray(w.findings) ? w.findings : [];
+    if (keys.length === 0) own.push(`${where}: "findings" must list the cacheKeys it covers.`);
+    if (keys.some((k) => typeof k !== 'string' || !k)) {
+      own.push(`${where}: every entry of "findings" must be a non-empty cacheKey string.`);
+    }
+    if (own.length > 0) {
+      problems.push(...own); // and it covers nothing
       return;
     }
-    for (const object of w.objects) {
-      if (typeof object !== 'string' || !(object === PROJECT || /^[\w$]+\.[\w$]+$/.test(object))) {
-        problems.push(
-          `${where}: object ${JSON.stringify(object)} is not schema.name (or ${PROJECT}).`
-        );
+    for (const cacheKey of keys) {
+      const key = keyOf(w.lint, cacheKey);
+      const prior = covers.get(key);
+      if (prior) {
+        problems.push(`${where}: ${cacheKey} is already waived by waivers[${prior.index}].`);
         continue;
       }
-      const key = `${w.lint} ${object}`;
-      if (covers.has(key)) {
-        problems.push(
-          `${where}: ${w.lint} on ${object} is already waived by waivers[${covers.get(key)?.index}].`
-        );
-        continue;
-      }
-      covers.set(key, { index, expired });
+      covers.set(key, { index, lint: w.lint, cacheKey, expired });
     }
   });
-  return { covers, problems };
+  return { covers, problems, notices };
 }
 
 /**
- * The verdict over the WARN and ERROR findings (INFO is never read): what blocks, and the
+ * The verdict over the WARN and ERROR findings (INFO never blocks): what blocks, and the
  * register's problems, stale and expired entries included.
  * @param {ReturnType<typeof readFindings>} all
  * @param {ReturnType<typeof readWaivers>} waivers
  */
 export function evaluate(all, { covers, problems }) {
   const findings = all.filter((f) => BLOCKING.has(f.level));
+  const infoKeys = new Set(
+    all.filter((f) => !BLOCKING.has(f.level)).map((f) => keyOf(f.lint, f.cacheKey))
+  );
   const unwaived = [];
   const used = new Set();
   for (const f of findings) {
-    const key = `${f.lint} ${f.object}`;
+    const key = keyOf(f.lint, f.cacheKey);
     const waiver = covers.get(key);
     if (waiver) used.add(key);
     if (!waiver || waiver.expired) unwaived.push(f);
   }
-  /** @type {Map<number, string[]>} waiver index -> objects it waives that nothing reported */
-  const staleByWaiver = new Map();
-  for (const [key, { index }] of covers) {
+  /** @type {Map<number, { lint: string, gone: string[], info: string[] }>} */
+  const byWaiver = new Map();
+  for (const [key, { index, lint, cacheKey }] of covers) {
     if (used.has(key)) continue;
-    staleByWaiver.set(index, [...(staleByWaiver.get(index) ?? []), key.split(' ')[1]]);
+    const entry = byWaiver.get(index) ?? { lint, gone: [], info: [] };
+    (infoKeys.has(key) ? entry.info : entry.gone).push(cacheKey);
+    byWaiver.set(index, entry);
   }
-  const stale = [...staleByWaiver].map(([index, objects]) => {
-    const lint = [...covers].find(([, w]) => w.index === index)?.[0].split(' ')[0];
-    return `waivers[${index}] (${lint}): the advisors no longer report ${objects.join(', ')}; remove them from the register.`;
-  });
+  const stale = [];
+  for (const [index, { lint, gone, info }] of byWaiver) {
+    if (gone.length) {
+      stale.push(
+        `waivers[${index}] (${lint}): the advisors no longer report ${gone.join(', ')}; remove them from the register.`
+      );
+    }
+    if (info.length) {
+      stale.push(
+        `waivers[${index}] (${lint}): ${info.join(', ')} is reported at INFO, which never blocks; remove it from the register.`
+      );
+    }
+  }
   return { blocking: findings.length, unwaived, problems: [...problems, ...stale] };
 }
 
@@ -233,15 +257,16 @@ function main() {
   console.log(
     `Supabase advisors: ${findings.length} finding(s), ${blocking} at WARN or ERROR: ` +
       `${blocking - unwaived.length} waived, ${unwaived.length} not. ` +
-      `${waivers.covers.size} waived object(s) in the register.`
+      `${waivers.covers.size} waived finding(s) in the register.`
   );
+  for (const n of waivers.notices) console.log(`::warning::${n}`);
   for (const f of unwaived)
-    console.log(`::error::${f.level} ${f.lint} on ${f.object}: ${f.detail}`);
+    console.log(`::error::${f.level} ${f.lint} (${f.cacheKey}): ${f.detail}`);
   for (const p of problems) console.log(`::error::${p}`);
   if (unwaived.length || problems.length) {
     console.log(
-      'Fix the finding in a migration (with docs/sql revert and smoke scripts), or waive it with a ' +
-        `reason in ${DEFAULT_WAIVERS}. See docs/operations/ci-cd.md ("Supabase advisors").`
+      'Fix the finding in a migration (with docs/sql revert and smoke scripts), or waive its ' +
+        `cacheKey with a reason in ${DEFAULT_WAIVERS}. See docs/operations/ci-cd.md ("Supabase advisors").`
     );
     return 1;
   }

@@ -55,9 +55,10 @@ jobs:
         run: sudo useradd --create-home --shell /bin/bash pgrunner
 
       # run.sh exits non-zero on any FAIL; the verdict line is checked as well,
-      # so a run that stopped without one is never read as a pass.
+      # so a run that stopped without one is never read as a pass. (Not the
+      # last line: the exit trap may print a note after the verdict.)
       - name: Run the harness
         run: |
           set -euo pipefail
           sudo bash scripts/dbharness/run.sh 2>&1 | tee harness.log
-          tail -n 1 harness.log | grep -qx 'HARNESS OK' || { echo "::error::the harness did not end with HARNESS OK"; exit 1; }
+          grep -qx 'HARNESS OK' harness.log || { echo "::error::the harness printed no HARNESS OK verdict"; exit 1; }

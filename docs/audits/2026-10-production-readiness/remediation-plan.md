@@ -599,8 +599,8 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Status (2026-10-13): done in PR m3b (branch `claude/vibrant-allen-hr7y7s-m3b`; open).**
 >   `supabase db advisors --local --type all --level info --fail-on none --output-format json`
 >   (flags confirmed with `--help` on 2.118.0), read by `scripts/ci/supabaseAdvisors.mjs`
->   against `docs/security/supabase-advisor-waivers.json`: unwaived WARN/ERROR, stale or expired
->   waivers fail; unreadable or empty output exits 2. Triage of 176 findings (33 WARN): `min`
+>   against `docs/security/supabase-advisor-waivers.json` (a waiver names each finding by its
+>   `cacheKey`): unwaived WARN/ERROR, stale, expired or invalid waivers fail; unreadable or empty output exits 2. Triage of 176 findings (33 WARN): `min`
 >   and `set_updated_at` search_path accepted; `auth_rls_initplan` (11 policies) and
 >   `multiple_permissive_policies` (20 tables) waived as debt to 2027-01-11, not fixed (an RLS
 >   rewrite is its own reviewed change). No migration. Test gate: a throwaway table without RLS
@@ -625,7 +625,7 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Status (2026-10-13): done in PR m3b (branch `claude/vibrant-allen-hr7y7s-m3b`; open).**
 >   `dbharness.yml` (job `Migration harness (PostgreSQL 16)`, ubuntu-24.04) runs on PRs touching
 >   `supabase/`, `docs/sql/`, `scripts/dbharness/` or itself, creates `pgrunner`, runs the
->   harness as root and fails unless it ends `HARNESS OK`. Not required (path-filtered).
+>   harness as root and fails unless it exits 0 with `HARNESS OK`. Not required (path-filtered).
 >   `ci-cd.md` has "Running the database harness" (`HARNESS_PGUSER`, `pgrunner`, `pgrunner2`);
 >   `run.sh`'s header is corrected. Baseline here: HARNESS OK, 128 migrations, 145 s
 >   (*executed*, `HARNESS_PGUSER=postgres`). Test gate: a smoke assertion planted in

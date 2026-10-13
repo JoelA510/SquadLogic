@@ -293,14 +293,16 @@ Security and Performance Advisors use) over the migrated local database:
 
 - any WARN or ERROR finding that
   [`docs/security/supabase-advisor-waivers.json`](../security/supabase-advisor-waivers.json)
-  does not waive. A waiver names one lint, the `schema.name` objects it covers
-  (`project` for a finding that names no database object), a reason, and
-  `expires`: `null` for a finding accepted by design, or a date at most 180
-  days out for debt. INFO findings (unindexed foreign keys, unused indexes) are
-  reported, never blocking;
-- an expired waiver (it covers nothing), and a stale one: a waived object the
-  advisors no longer report must be removed, or it would pre-approve the finding
-  if it came back;
+  does not waive. A waiver names one lint, the findings it covers by the
+  advisor's own `cacheKey` (one per policy, per table, role and action, or per
+  function body, so a new policy on a waived table or a changed function body
+  is a new finding and blocks), a reason, and `expires`: `null` for a finding
+  accepted by design, or a date at most 180 days out for debt (announced as a
+  warning in its last 30 days). INFO findings (unindexed foreign keys, unused
+  indexes) are reported, never blocking;
+- an expired or invalid waiver (it covers nothing), and a stale one: a waived
+  finding the advisors no longer report must be removed, or it would
+  pre-approve the finding if it came back;
 - advisors output it cannot read, a CLI error, or a report with no findings at
   all (this schema always has INFO findings, so an empty report examined
   nothing). These exit 2: "couldn't check" is never "clean".
@@ -339,7 +341,7 @@ job **Migration harness (PostgreSQL 16)**, runs it on pull requests that touch
 and on manual dispatch. It is path-filtered, so it is not a required check (a
 required check with a `paths` filter would block every other pull request). It
 creates the `pgrunner` user, runs the harness as root, and fails unless the run
-ends `HARNESS OK`. About three minutes.
+exits 0 and prints `HARNESS OK`. About three minutes.
 
 **Locally.** The harness needs:
 

@@ -1,6 +1,9 @@
 /**
- * The mock-mode guard in frontend/src/config.js fails closed (plan item M1.7,
- * audit finding 5.1).
+ * The mock-mode guard fails closed (plan item M1.7, audit finding 5.1). It was
+ * in frontend/src/config.js; M2.2 moved it unchanged into frontend/src/env.js,
+ * which config.js re-exports, so these cases still load config.js. Since M2.2
+ * a production build without the variables fails at build time
+ * (tests/env.test.js); this guard is the second line.
  *
  * The guard used to exempt `localhost`, `127.0.0.1` and every `*.vercel.app`
  * host. The production host is `squadlogic.vercel.app`, so a production build
@@ -16,31 +19,27 @@
  * exactly as it does when the browser evaluates the bundle.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CLIENT_ENV_NAMES } from '../frontend/src/envRules.js';
 
 const PRODUCTION_HOST = 'squadlogic.vercel.app';
 const PREVIEW_HOST = 'squadlogic-git-some-branch-joela510.vercel.app';
 const HOSTS = [PRODUCTION_HOST, PREVIEW_HOST, 'localhost', '127.0.0.1', 'app.example.org'];
 
-/** Every name config.js reads a Supabase URL or key from (VITE_ and bare). */
-const SUPABASE_VARS = [
-  'VITE_SUPABASE_URL',
-  'VITE_SUPABASE_ANON_KEY',
-  'SUPABASE_URL',
-  'SUPABASE_ANON_KEY',
-];
+/** Every variable env.js reads and validates (frontend/src/envRules.js). */
+const ENV_VARS = CLIENT_ENV_NAMES;
 
 /**
  * Loads config.js as a build with these flags would evaluate it, on `host`.
- * `vars` sets variables; every Supabase variable not named is unset (stubbed
- * to '', which config.js treats as missing), so the shell running the tests
- * cannot leak real values into a case.
+ * `vars` sets variables; every variable env.js reads that is not named is
+ * unset (stubbed to '', which env.js treats as missing), so the shell or a
+ * developer's .env cannot leak real values into a case.
  * @param {{ prod: boolean, host: string, vars?: Record<string, string> }} options
  */
 async function loadConfig({ prod, host, vars = {} }) {
   vi.resetModules();
   vi.stubEnv('PROD', prod);
   vi.stubEnv('DEV', !prod);
-  for (const name of [...SUPABASE_VARS, 'VITE_USE_MOCK_SUPABASE']) {
+  for (const name of ENV_VARS) {
     vi.stubEnv(name, vars[name] ?? '');
   }
   setHost(host);

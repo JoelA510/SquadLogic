@@ -390,6 +390,22 @@ and smoke-tested
 > - **Verification label:** executed (the current audit); the fix statically reviewed.
 
 > **M2.2. A typed env module, and production decided by the build, not the hostname** (audit finding 2.2, medium)
+> - **Status (2026-10-13): in #558 (open).** `frontend/src/env.js` is the only reader of
+>   `import.meta.env` (by name); the Zod rules are in `frontend/src/envRules.js`, run by a
+>   `vite.config.js` plugin when a production build starts and again by `env.js` in the browser;
+>   M1.7's guard moved into `env.js` unchanged. A production build without `VITE_SUPABASE_URL` /
+>   `VITE_SUPABASE_ANON_KEY` (no opt-in) fails naming each, so it no longer emits the mock chunk or
+>   goes READY behind a runtime Configuration Error. Also refused: a malformed URL, DSN or opt-in
+>   value, and a Supabase secret key in `VITE_SUPABASE_ANON_KEY` (on the dev server a malformed
+>   value is ignored with a warning, so an old `.env` copy still runs the mock). The persistence
+>   base is derived from the Supabase URL only in a production build of the real client (mock
+>   sessions keep `localhost:54321`, as before). The mock's password is a fixed
+>   demo value; the `VITE_TEST_*` names are gone (`TEST_*` at the Node layer). CI's
+>   `frontend:build` sets well-formed stand-ins, not the opt-in, so `check:bundle` measures
+>   production's shape. Test gate *executed*: `tests/env.test.js` (34 cases), 8 red with `main`'s
+>   `frontend/src` and `vite.config.js` restored; template `check-env` 0 findings (3 on `main`);
+>   E2E (mock, one worker) 92 of 94 with 2 load flakes that pass on rerun (8 of 8).
+>   Vercel preview: see the PR.
 > - **Fix approach:** `frontend/src/env.js` reads each variable by name and validates with Zod:
 >   Supabase URL and key required in a production build unless `VITE_USE_MOCK_SUPABASE=true`
 >   (previews, E2E; M1.7's opt-in, so no second flag); Sentry DSN optional, off when unset,
@@ -1153,6 +1169,31 @@ smoke-tested
   - npm 11 warns that `esbuild`'s postinstall is not covered by `allowScripts`; the template
     records each install script's review there. Not done (no plan item). *Executed* (`npm ci`).
 
+- 2026-10-13, found by #558 (M2.2):
+  - The bundle-budget gate measures a build without `VITE_SENTRY_DSN` (CI has none), where
+    `main.jsx`'s `if (SENTRY_DSN)` folds away and `Sentry.init` with its tracing and replay
+    integrations is not bundled. A build with a DSN, as production's error reporting needs (M1.5),
+    has a main entry of 195.0 KB gzip against the 140,450 B cap (118.9 KB without). So the gate
+    passes a shape production does not ship. Not fixed here (budget policy, and the replay
+    integration could be lazy-loaded). *Executed* (local builds, same tree, with and without a
+    well-formed DSN; `main` measures 194.4 vs 118.3).
+  - `scripts/runViteWithPersistenceEndpoint.js` (behind `frontend:build`/`frontend:preview`)
+    writes the derived persistence URL to `frontend/.env.local` on every run, but Vite's
+    `envDir` is the repository root, so nothing reads that file; the value reaches the build
+    through the child's environment. Harmless, not fixed; `env.js` now derives the same URL
+    itself. *Executed* (the file appears after a build).
+  - `process.env.NODE_ENV` is still read in `FeatureGuard.jsx` and `featureFlags.js` (dev-only
+    warnings). Not `import.meta.env`, so outside M2.2's rule, and moving it to `IS_DEV` would turn
+    the warnings on in Vitest (which sets `NODE_ENV=test` but `DEV=true`). Left. *Statically
+    reviewed.*
+  - `main`'s production bundle carries every `VITE_VERCEL_*` system variable Vercel exposes to a
+    Vite build (19 names, the last commit's message and author among them), because
+    `config.js` read `import.meta.env[key]`, which Vite fills with the whole `VITE_` object.
+    #558's preview bundle carries none of them; `tests/env.test.js` now holds `packages/core/src`
+    to the same single-reader rule. Fixed by M2.2. *Executed* (a local build with canary
+    `VITE_VERCEL_GIT_COMMIT_*` values embeds them on `main` and not on #558; the deployed
+    production bundle and #558's preview bundle, fetched and searched for the names). The same
+    finding as PR M5's entry above.
 - 2026-10-13, found by the M4.7 build:
   - The practice page builds its auto-scheduler review once per run id: a result that arrives
     before the page's slots are read is staged with the display fallback range `Full Season`

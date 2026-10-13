@@ -1,4 +1,3 @@
-/// <reference types="vite/client" />
 /**
  * Supabase Client — Environment-Aware Switcher
  *
@@ -23,22 +22,14 @@
  */
 import { createClient } from '@supabase/supabase-js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, IS_MOCK_MODE } from '../config.js';
+// Build-time: false in a production build without the opt-in, so Rollup drops
+// the dynamic import below and the mock chunk is not emitted (see env.js).
+// In a browser `IS_MOCK_MODE` cannot be `true` while this is `false` (a
+// production build without credentials fails to build, and env.js refuses one
+// built some other way); if the two ever disagree, `supabaseReady` rejects
+// rather than letting the app run without a client.
+import { MOCK_CAPABLE_BUILD } from '../env.js';
 import { logger } from './logger.js';
-
-/**
- * Build-time check: can this build ever run the mock? Vite replaces each
- * `import.meta.env.*` below with a literal. In a production build with both
- * credentials and without `VITE_USE_MOCK_SUPABASE=true`, this is `false`, and
- * Rollup drops the dynamic import, so the mock chunk is not emitted at all.
- * `config.js` reads the same variables, so in a browser `IS_MOCK_MODE` cannot
- * be `true` while this is `false`; if the two ever disagree, `supabaseReady`
- * rejects rather than letting the app run without a client.
- */
-const MOCK_CAPABLE_BUILD =
-  !import.meta.env.PROD ||
-  import.meta.env.VITE_USE_MOCK_SUPABASE === 'true' ||
-  !import.meta.env.VITE_SUPABASE_URL ||
-  !import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (IS_MOCK_MODE) {
   logger.log('[Supabase] Initializing MOCK client');

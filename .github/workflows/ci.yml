@@ -193,6 +193,16 @@ jobs:
       - name: Build Frontend
         if: steps.changes.outputs.docs_only != 'true'
         run: npm run frontend:build
+        # A production build fails without the Supabase variables (plan item
+        # M2.2, vite.config.js). These are well-formed stand-ins, not
+        # credentials: `.invalid` never resolves, and this build is never
+        # served. Stand-ins rather than VITE_USE_MOCK_SUPABASE=true because the
+        # next step measures this build against the bundle budget, and it
+        # should be the shape production ships: the real client, no mock chunk.
+        # The E2E step runs the dev server with the opt-in.
+        env:
+          VITE_SUPABASE_URL: 'https://ci-build.invalid'
+          VITE_SUPABASE_ANON_KEY: 'sb_publishable_ci-build-stand-in'
 
       - name: Bundle-budget gate (Wave 6a)
         if: steps.changes.outputs.docs_only != 'true'

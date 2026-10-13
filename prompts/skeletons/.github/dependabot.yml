@@ -1,0 +1,32 @@
+# [ADAPT, THEN DELETE THIS LINE: one `updates` entry per package ecosystem this repository has, each with its cooldown, plus github-actions]
+#
+# Dependency updates arrive on their own (new-project Phase 2.5; existing-project audit §8;
+# standards core.dependency-updates and core.dependency-cooldown): weekly, grouped, so a routine
+# bump is one pull request to review. The github-actions entry moves the commit pins in
+# .github/workflows/ with the tags beside them. Dependabot version and security updates work on
+# private repositories too. https://docs.github.com/code-security/dependabot
+version: 2
+updates:
+  # For a Node project; another stack names its own ecosystem (pip, cargo, gomod, …).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    # A release is a week old before an update takes it: long enough for a compromised version to
+    # be caught and pulled. Security updates ignore this and arrive at once.
+    cooldown:
+      default-days: 7
+    groups:
+      # Non-major bumps are almost always safe; batch them into a single pull request.
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

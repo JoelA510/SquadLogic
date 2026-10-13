@@ -1,0 +1,16 @@
+# Code owners: who is asked to review a pull request that touches each path.
+#
+# [GUIDANCE — DELETE THIS BLOCK ONCE THE OWNERS ARE FILLED IN]
+# (A bracketed marker, so check-placeholders reports this block until it's gone: CODEOWNERS
+# can't hold the HTML guidance comments other skeletons use.) A later line wins over an earlier
+# one, so the catch-all goes first. Owners are GitHub users or teams (@org/team) with write access; GitHub
+# ignores any other entry and flags it when you view this file. Review is only *required* when
+# the branch ruleset requires code-owner review (.github/rulesets/main.json); without that, this
+# file just requests reviewers. With one maintainer, leave that requirement off: nobody can
+# approve their own pull request, so it would block every merge.
+
+* [DEFAULT OWNER]
+
+# Paths where a mistake is costly get a narrower owner, e.g. CI, auth, and the database schema.
+/.github/workflows/ [CI OWNER]
+[SENSITIVE PATH] [SENSITIVE PATH OWNER]

@@ -29,6 +29,7 @@ import { assert, assertEquals } from 'https://deno.land/std@0.203.0/assert/mod.t
 import { evaluatePracticeSchedule } from '../engines/scoring-engine.ts';
 import type { PracticeAssignment, Slot, Team } from '../schemas/scoring.ts';
 import extract from './fixtures/scoring-parity.season-2026.json' with { type: 'json' };
+import dated from './fixtures/scoring-parity-dated.season-2026.json' with { type: 'json' };
 
 interface Agreed {
   summary: {
@@ -142,3 +143,120 @@ Deno.test(
     );
   }
 );
+
+// ---- M4.7: the dated extract (docs/PLAN_SCORING_DATE_MODEL.md §2.3, §3.4) ----
+//
+// The plan's corpus cases C1 and C4, dated as the practice page dates them;
+// core's answer is recorded in the extract and checked against the corpus and
+// core by `tests/scoringParity.test.js`. This asks the deployed runtime for it.
+
+/** Literals, the same ones the Vitest arm declares and checks for here. */
+const DATED_EXPECTED = {
+  c1Slots: 170,
+  c1Assignments: 170,
+  c1ClosedRows: 28,
+  c1Conflicts: 1,
+  c1UndatedConflicts: 11,
+  c1SharedDates: 7,
+  c4Slots: 142,
+  c4Conflicts: 1,
+  c4UndatedConflicts: 0,
+  c4SharedDates: 10,
+};
+const DATED_EXTRACT_PATH =
+  'supabase/functions/_shared/tests/fixtures/scoring-parity-dated.season-2026.json';
+
+type DatedCase = {
+  slots: Slot[];
+  assignments: PracticeAssignment[];
+  expected: Agreed & {
+    dateModel: string;
+    slotUtilization: Array<{
+      slotId: string;
+      assignedCount: number;
+      assignmentRows: number;
+      capacity: number;
+    }>;
+  };
+};
+const datedCases = dated.cases as unknown as Record<'C1' | 'C4', DatedCase>;
+const datedTeams = dated.teams as unknown as Team[];
+
+function runEdgeDated(c: DatedCase) {
+  const result = evaluatePracticeSchedule({
+    teams: datedTeams,
+    slots: c.slots,
+    assignments: c.assignments,
+  });
+  return {
+    summary: {
+      totalTeams: result.summary.totalTeams,
+      assignedTeams: result.summary.assignedTeams,
+      unassignedTeams: result.summary.unassignedTeams,
+      assignmentRate: Number(result.summary.assignmentRate.toFixed(4)),
+    },
+    slotUtilization: result.slotUtilization
+      .map((s) => ({
+        slotId: s.slotId,
+        assignedCount: s.assignedCount,
+        assignmentRows: (s as { assignmentRows?: number }).assignmentRows as number,
+        capacity: s.capacity,
+      }))
+      .sort((a, b) => a.slotId.localeCompare(b.slotId)),
+    coachConflicts: result.coachConflicts
+      .map((c) => `${conflictKey(c)} @ ${c.firstDate} x${c.sharedDates}`)
+      .sort(),
+    droppedRows: result.issues.filter((i) => i.category === 'data-quality').length,
+    dateModel: result.summary.dateModel,
+  };
+}
+
+Deno.test('scoring parity dated - the cases hold what the plan measured', () => {
+  const { C1, C4 } = datedCases;
+  assertEquals(C1.slots.length, DATED_EXPECTED.c1Slots);
+  assertEquals(C1.assignments.length, DATED_EXPECTED.c1Assignments);
+  assertEquals(
+    C1.assignments.filter((a) => String(a.effectiveDateRange).endsWith(',2026-10-05)')).length,
+    DATED_EXPECTED.c1ClosedRows
+  );
+  assertEquals(C4.slots.length, DATED_EXPECTED.c4Slots);
+  assertEquals(C1.expected.coachConflicts.length, DATED_EXPECTED.c1Conflicts);
+  assertEquals(C4.expected.coachConflicts.length, DATED_EXPECTED.c4Conflicts);
+  assert(C1.expected.coachConflicts[0].endsWith(` x${DATED_EXPECTED.c1SharedDates}`));
+  assert(C4.expected.coachConflicts[0].endsWith(` @ 2026-09-18 x${DATED_EXPECTED.c4SharedDates}`));
+  // The same inputs undated: the defect this extract exists to keep fixed.
+  const undated = (c: DatedCase) =>
+    evaluatePracticeSchedule({
+      teams: datedTeams,
+      slots: c.slots.map(({ id, day, capacity, start, end }) => ({
+        id,
+        day,
+        capacity,
+        start,
+        end,
+      })),
+      assignments: c.assignments.map(({ teamId, slotId }) => ({ teamId, slotId })),
+    }).coachConflicts.length;
+  assertEquals(undated(C1), DATED_EXPECTED.c1UndatedConflicts);
+  assertEquals(undated(C4), DATED_EXPECTED.c4UndatedConflicts);
+});
+
+Deno.test("scoring parity dated - the Edge engine gives core's recorded answer", () => {
+  for (const name of ['C1', 'C4'] as const) {
+    const edge = runEdgeDated(datedCases[name]);
+    const { expected } = datedCases[name];
+    assertEquals(edge.dateModel, 'dated', name);
+    assertEquals(edge.summary, expected.summary, name);
+    assertEquals(edge.slotUtilization, expected.slotUtilization, name);
+    assertEquals(edge.coachConflicts, expected.coachConflicts, name);
+    assertEquals(edge.droppedRows, expected.droppedRows, name);
+  }
+});
+
+Deno.test('scoring parity dated - the generator writes the extract this file reads', () => {
+  const generator = Deno.readTextFileSync(GENERATOR);
+  assert(
+    generator.includes(`'${DATED_EXTRACT_PATH}'`),
+    `${GENERATOR} no longer writes ${DATED_EXTRACT_PATH}`
+  );
+});

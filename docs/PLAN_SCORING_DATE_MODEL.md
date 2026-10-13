@@ -1,6 +1,8 @@
 # Plan: M4.7, a date model for the practice scoring engines
 
 Status: **APPROVED by the owner, 2026-10-13: Q1-Q9 as recommended** (§10).
+**Built** in branch `claude/vibrant-allen-hr7y7s-m47` (in review); where the build
+differs from the text below, §11 says how and why.
 Remediation plan item M4.7
 (`docs/audits/2026-10-production-readiness/remediation-plan.md`). Built by the
 implementing PR `fix/practice-scoring-date-model`; exceptions follow in their own
@@ -486,3 +488,39 @@ dated in the same PR?**
 **Answer (owner, 2026-10-13): as recommended.** _Recommendation:_ yes. It is the same core function with the same
 inputs on the same page; leaving it undated would persist a different answer
 from the one the panel showed.
+
+---
+
+## 11. As built (the implementing PR)
+
+The design above is built as written, with these four differences, each
+smaller than a question for the owner:
+
+- **What dates a slot.** §3.3 says every slot carries `firstDate`, `lastDate`,
+  `startTime` and `endTime` or none does. Built: `firstDate`/`lastDate` date a
+  slot; a dated slot must also carry the wall window, ending after it starts.
+  `startTime`/`endTime` alone do not date one, because the page's scheduler
+  slots already carry them for other readers (the auto-scheduler body,
+  persistence, `buildPracticeRunResults`), and reading them as half a date
+  model would have refused every undated caller. A mix of dated and undated
+  slots still refuses in both engines.
+- **The Edge's range reader.** `_shared/engines/practice-live-dates.ts` imports
+  `practiceRangeBounds`/`practiceRangeLowerBound` from
+  `_shared/calendar/practiceExceptions.ts`, of which `icsFeed.ts`'s
+  `dateRangeBounds` is an alias: the same reader, without importing the feed.
+  Its day arithmetic is exported from that file rather than copied a third time.
+- **The 422.** `fairness-scoring` calls `datedSlotsIssue` (`schemas/scoring.ts`)
+  after parsing and answers 422 `PRACTICE_SLOT_DATES_INCOMPLETE`; a schema
+  refinement would have been a 400, the handler's code for a parse failure.
+- **The solver's undated call** strips each slot to the fields the undated
+  comparison reads (`id`, `day`, `start`, `end`, `capacity`) in `scoreSchedule`,
+  so a page that one day sends dates to the auto-scheduler cannot switch its
+  objective (§8). `tests/autoSchedulerLock.test.js` pins it.
+
+Also built, beyond the text: undated reports gain only `summary.dateModel`;
+`assignmentRows`, `firstDate` and `sharedDates` appear in dated reports only,
+so the undated parity extract and the solver's outputs stay byte-identical. The
+dated extract is `scoring-parity-dated.season-2026.json` (one roster, cases C1
+and C4), and the witnesses are one hand-written table,
+`_shared/tests/fixtures/scoring-dated-vectors.json`, which core, the drift test
+and Deno all read.

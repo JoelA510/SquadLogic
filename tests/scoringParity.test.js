@@ -59,11 +59,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { loadSeason2026 } from '@squadlogic/core/fixtures/index.js';
+import { evaluatePracticeSchedule } from '@squadlogic/core/practiceMetrics.js';
 import { evaluatePracticeSchedule as edgeEvaluate } from '../supabase/functions/_shared/engines/scoring-engine.js';
 import {
+  SCORING_PARITY_DATED_EXTRACT,
   SCORING_PARITY_EXTRACT,
   agreedFields,
   coreAgreedFields,
+  coreDatedAgreedFields,
+  datedAgreedFields,
+  deriveDatedParityInputs,
   deriveScoringParityInputs,
 } from '../scripts/generate-scoring-parity.mjs';
 
@@ -143,6 +148,104 @@ describe('core vs Edge scoring parity on the season-2026 corpus', () => {
     expect(deno).toContain(SCORING_PARITY_EXTRACT);
     // The same literals, so neither arm can quietly accept a smaller extract.
     for (const [name, value] of Object.entries(EXPECTED)) {
+      expect(deno, name).toMatch(new RegExp(`\\b${name}: ${value},`));
+    }
+  });
+});
+
+// ---- M4.7: the dated extract (docs/PLAN_SCORING_DATE_MODEL.md §2.3, §3.4) ----
+//
+// The plan's corpus cases C1 (a closed revision kept beside its successor) and
+// C4 (one slot re-created valid from a later date), dated as the practice page
+// dates them. The undated extract above is unchanged: on the corpus's undated
+// plan the date model is neutral (C0), which is why it was not regenerated.
+
+/** Literals, as above; the Deno arm declares the same. */
+const DATED_EXPECTED = {
+  c1Slots: 170,
+  c1Assignments: 170,
+  c1ClosedRows: 28,
+  c1Conflicts: 1,
+  c1UndatedConflicts: 11,
+  c1SharedDates: 7,
+  c4Slots: 142,
+  c4Conflicts: 1,
+  c4UndatedConflicts: 0,
+  c4SharedDates: 10,
+};
+const DENO_DATED_ARM = 'supabase/functions/_shared/tests/scoring-parity_test.ts';
+
+const dated = JSON.parse(readFileSync(path.join(REPO_ROOT, SCORING_PARITY_DATED_EXTRACT), 'utf8'));
+const datedInputsOf = (name) => ({
+  teams: dated.teams,
+  slots: dated.cases[name].slots,
+  assignments: dated.cases[name].assignments,
+});
+const undatedOf = ({ teams, slots, assignments }) => ({
+  teams,
+  slots: slots.map(({ id, day, capacity, start, end }) => ({ id, day, capacity, start, end })),
+  assignments: assignments.map(({ teamId, slotId }) => ({ teamId, slotId })),
+});
+
+describe('core vs Edge scoring parity, dated (M4.7)', () => {
+  it('the dated extract is what the corpus derives today', () => {
+    const derived = deriveDatedParityInputs();
+    for (const name of ['C1', 'C4']) {
+      expect(datedInputsOf(name), name).toEqual(derived[name]);
+    }
+    expect(Object.keys(dated.cases).sort()).toEqual(['C1', 'C4']);
+  });
+
+  it('the cases are the plan cases, and the undated comparison gets both wrong (meta, can fail)', () => {
+    const c1 = datedInputsOf('C1');
+    const c4 = datedInputsOf('C4');
+    expect(c1.slots).toHaveLength(DATED_EXPECTED.c1Slots);
+    expect(c1.assignments).toHaveLength(DATED_EXPECTED.c1Assignments);
+    // The closed series: rows whose range ends before the revision.
+    expect(
+      c1.assignments.filter((a) => a.effectiveDateRange.endsWith(',2026-10-05)'))
+    ).toHaveLength(DATED_EXPECTED.c1ClosedRows);
+    expect(c4.slots).toHaveLength(DATED_EXPECTED.c4Slots);
+    // Every slot and row dated, so neither arm can fall back to undated.
+    for (const { slots, assignments } of [c1, c4]) {
+      expect(slots.every((s) => s.firstDate && s.lastDate && s.startTime && s.endTime)).toBe(true);
+      expect(assignments.every((a) => typeof a.effectiveDateRange === 'string')).toBe(true);
+    }
+    // The defect, executed on these inputs: eleven conflicts where one is real
+    // (C1), and the real one missed (C4).
+    const undated = (inputs) =>
+      evaluatePracticeSchedule({ ...undatedOf(inputs), schoolDayEnd: undefined, timezone: 'UTC' })
+        .coachConflicts.length;
+    expect(undated(c1)).toBe(DATED_EXPECTED.c1UndatedConflicts);
+    expect(undated(c4)).toBe(DATED_EXPECTED.c4UndatedConflicts);
+    // And the recorded answer is the truth, not merely core's word.
+    expect(dated.cases.C1.expected.coachConflicts).toHaveLength(DATED_EXPECTED.c1Conflicts);
+    expect(dated.cases.C4.expected.coachConflicts).toHaveLength(DATED_EXPECTED.c4Conflicts);
+    expect(dated.cases.C1.expected.coachConflicts[0]).toMatch(
+      new RegExp(` x${DATED_EXPECTED.c1SharedDates}$`)
+    );
+    expect(dated.cases.C4.expected.coachConflicts[0]).toMatch(
+      new RegExp(` @ 2026-09-18 x${DATED_EXPECTED.c4SharedDates}$`)
+    );
+    expect(dated.cases.C1.expected.dateModel).toBe('dated');
+  });
+
+  it.each(['C1', 'C4'])('core gives the recorded dated answer: %s', (name) => {
+    expect(coreDatedAgreedFields(datedInputsOf(name))).toEqual(dated.cases[name].expected);
+  });
+
+  it.each(['C1', 'C4'])('the Edge engine gives the same dated answer: %s', (name) => {
+    const result = edgeEvaluate(datedInputsOf(name));
+    expect(
+      datedAgreedFields(result, result.issues.filter((i) => i.category === 'data-quality').length)
+    ).toEqual(dated.cases[name].expected);
+  });
+
+  it('the Deno arm reads the dated extract with the same literals', () => {
+    const deno = readFileSync(path.join(REPO_ROOT, DENO_DATED_ARM), 'utf8');
+    expect(deno).toContain('./fixtures/scoring-parity-dated.season-2026.json');
+    expect(deno).toContain(SCORING_PARITY_DATED_EXTRACT);
+    for (const [name, value] of Object.entries(DATED_EXPECTED)) {
       expect(deno, name).toMatch(new RegExp(`\\b${name}: ${value},`));
     }
   });

@@ -234,9 +234,16 @@ const PRUNE_WHY = {
   replaced: 'the payload no longer carries its (team, slot, range) key',
   absent: 'it is an auto row of a season team absent from the payload',
 };
-/** The writer's message for `id`, as RAISE renders its format. */
-const writerLockMessage = (format, id, why = PRUNE_WHY.replaced) =>
-  format.replace('%', id).replace('%', why);
+/**
+ * The writer's message for `id`, as RAISE renders its format: each `%` takes
+ * the next argument, in order. A `%` with no argument left stays a `%`, so an
+ * unfilled placeholder shows up (the meta test asserts none does).
+ */
+const writerLockMessage = (format, id, why = PRUNE_WHY.replaced) => {
+  const args = [id, why];
+  let i = 0;
+  return format.replace(/%/g, () => String(args[i++] ?? '%'));
+};
 
 /** What the fetch boundary answers with, per test. */
 let answer = { status: 200, body: {} };
@@ -290,6 +297,14 @@ describe("the grid's Apply, refused because a saved practice is locked", () => {
     expect(String(WRITER_FILE) >= '20261002000000').toBe(true);
     // Both lock sites: the prune and the same-weekday overlap.
     expect(LOCK_FORMATS).toHaveLength(2);
+    // Placeholders per site, as RAISE counts them: the prune passes id and
+    // reason, the overlap passes id. No `%%` literal to unescape.
+    expect(LOCK_FORMATS.map((format) => format.split('%').length - 1)).toEqual([2, 1]);
+    for (const format of LOCK_FORMATS) {
+      expect(format).not.toContain('%%');
+      // Every placeholder is filled: nothing of the format's `%` is left.
+      expect(writerLockMessage(format, A_ROW)).not.toContain('%');
+    }
     for (const format of LOCK_FORMATS) {
       expect(parsePracticeLockRefusal({ message: writerLockMessage(format, A_ROW) })).toEqual(
         expect.objectContaining({ assignmentId: A_ROW })

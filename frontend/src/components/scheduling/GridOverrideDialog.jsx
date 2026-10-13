@@ -39,6 +39,12 @@ export default function GridOverrideDialog({
   onClose,
 }) {
   const headingRef = useRef(/** @type {HTMLHeadingElement|null} */ (null));
+  // Confirm disables every control while saving, which drops focus to the
+  // page; a refusal then pulls it back to the notice, inside the dialog.
+  const noticeRef = useRef(/** @type {HTMLParagraphElement|null} */ (null));
+  useEffect(() => {
+    if (notice && !busy) noticeRef.current?.focus();
+  }, [notice, busy]);
   // `Modal` re-runs its focus effect whenever `onClose` changes identity, so
   // it gets one stable callback: ticking a box must never move focus.
   const latest = useRef({ busy, onClose });
@@ -190,6 +196,8 @@ export default function GridOverrideDialog({
         <p
           className={`badge ${notice.tone === 'alert' ? 'danger' : 'success'} mt-2`}
           role={notice.tone}
+          ref={noticeRef}
+          tabIndex={-1}
           data-testid="grid-override-notice"
         >
           {notice.text}

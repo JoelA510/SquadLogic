@@ -95,9 +95,14 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
 }));
 vi.mock('../frontend/src/components/PracticeOverridePanel.jsx', () => ({
   default: ({ onStageAssignment }) => (
-    <button type="button" onClick={() => onStageAssignment('team-a', 'slot-fri')}>
-      Stage Hawks
-    </button>
+    <>
+      <button type="button" onClick={() => onStageAssignment('team-a', 'slot-fri')}>
+        Stage Hawks
+      </button>
+      <button type="button" onClick={() => onStageAssignment('team-a', 'slot-mon')}>
+        Stage Hawks Monday
+      </button>
+    </>
   ),
 }));
 const stub = (name) => ({ default: () => <div data-testid={`stub-${name}`} /> });
@@ -197,7 +202,7 @@ afterEach(() => {
 });
 
 /** Stage Hawks onto Friday and click Apply; return the open dialog. */
-async function openPrompt(rows = SEED, { seeded = false } = {}) {
+async function openPrompt(rows = SEED, { seeded = false, stage = 'Stage Hawks' } = {}) {
   if (!seeded) seed(rows);
   render(
     <MemoryRouter>
@@ -206,7 +211,7 @@ async function openPrompt(rows = SEED, { seeded = false } = {}) {
   );
   await waitFor(() => expect(screen.getAllByText('Synthetic Hawks').length).toBeGreaterThan(0));
   fireEvent.click(await screen.findByRole('button', { name: /enter manual override/i }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Stage Hawks' }));
+  fireEvent.click(await screen.findByRole('button', { name: stage }));
   const apply = await screen.findByRole('button', { name: /apply schedule/i });
   await waitFor(() => expect(apply).toBeEnabled());
   apply.focus();
@@ -389,7 +394,7 @@ describe('W5: the auto-scheduler review computes an empty set', () => {
       }),
     ];
     const plan = gridOverridePlan({ seasonRows, assignments: review, slotById, stagedTeamIds: [] });
-    expect(plan).toEqual({ prune: [], strays: [] });
+    expect(plan).toEqual({ prune: [], strays: [], overlaps: [] });
     // Meta (it can fail): the same rule finds both writer arms. Owls left
     // out entirely -- the absent-team arm, their `auto` row -- and Hawks'
     // current row re-ranged -- the payload arm. Neither team was staged, so
@@ -462,6 +467,24 @@ describe('W7: a change between open and Confirm reopens the prompt and sends not
     expect(sent).toHaveLength(0);
   });
 
+  it('a series re-ranged in place (same id) before Confirm: reopens with its new dates', async () => {
+    await openPrompt();
+    const { error } = await mockSupabase
+      .from('practice_assignments')
+      .update({ effective_date_range: '[2026-10-12,2026-11-16)' })
+      .eq('id', 'pa-a-new');
+    expect(error).toBeFalsy();
+    tickAll();
+    chooseReason();
+    await waitFor(() => expect(confirmButton()).toBeEnabled());
+    fireEvent.click(confirmButton());
+    await screen.findByRole('alert');
+    expect(screen.getByTestId('grid-override-replacing').textContent).toBe(
+      'Replacing: Wednesday 16:00–17:00, 2026-10-12 to 2026-11-15'
+    );
+    expect(sent).toHaveLength(0);
+  });
+
   it('the rule compares the rows, not their order', () => {
     expect(samePruneSet([{ id: 'A' }, { id: 'b' }], [{ id: 'B' }, { id: 'a' }])).toBe(true);
     expect(samePruneSet([{ id: 'a' }], [{ id: 'a' }, { id: 'b' }])).toBe(false);
@@ -487,6 +510,23 @@ describe('refusals after Confirm stay in the prompt (plan §2.8, §2.9, Q4)', ()
     });
     expect(alert.textContent).toBe('Only an organization admin can replace a saved practice.');
     expect(screen.getByRole('dialog').contains(alert)).toBe(true);
+    // Focus came back into the dialog, to the refusal (plan §2.9).
+    await waitFor(() => expect(document.activeElement).toBe(alert));
+  });
+
+  it("a double-booking of the team's kept history is refused before Confirm", async () => {
+    // Hawks onto Monday 17:00 again: the staged row spans the slot window,
+    // which overlaps the kept closed Monday series (the writer's :920-956).
+    await openPrompt(SEED, { stage: 'Stage Hawks Monday' });
+    tickAll();
+    chooseReason();
+    expect(confirmButton()).toBeDisabled();
+    expect(screen.getByTestId('grid-override-why').textContent).toBe(
+      'The new practice for Synthetic Hawks overlaps its kept series (Monday 17:00–18:30, ' +
+        '2026-09-07 to 2026-10-11) on the same weekday and time, which cannot be saved. Cancel ' +
+        'and choose another slot.'
+    );
+    expect(sent).toHaveLength(0);
   });
 
   it('a stale fingerprint reopens the prompt on a fresh read, and does not resend', async () => {

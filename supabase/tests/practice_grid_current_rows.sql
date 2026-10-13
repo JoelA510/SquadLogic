@@ -593,9 +593,12 @@ SELECT throws_like(
         || ' is locked%',
     'prompt W8b: ... naming H''s current Friday series');
 
--- 31. W8f: a member who is not an org admin cannot unlock, even with a reason.
+-- 31. W8f: a member who is not an org admin cannot unlock, even with a reason,
+-- and it is the unlock gate (:280-284) that refuses: the writer's general
+-- admin check raises 42501 too, with another message, so the message is what
+-- tells the two apart.
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
-SELECT throws_ok(
+SELECT throws_like(
     $$ SELECT public.persist_practice_schedule(
            jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077cb',
                               'season_settings_id', 'a1111111-1111-1111-1111-0000000077b3'),
@@ -608,8 +611,8 @@ SELECT throws_ok(
                         FROM public.practice_assignments
                        WHERE team_id = 'a1111111-1111-1111-1111-000000007782'
                          AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a5')) $$,
-    '42501', NULL,
-    'prompt W8f: a non-admin member''s unlock is refused 42501');
+    'unlock requires an org admin with a uid to audit%',
+    'prompt W8f: a non-admin member''s unlock is refused by the unlock gate');
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 
 -- 32. W8a: with `unlock` naming exactly the replaced current series, the

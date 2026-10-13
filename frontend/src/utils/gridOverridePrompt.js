@@ -47,12 +47,18 @@ function payloadKey(assignment, slotById) {
  * session, or its team is absent from the payload. A stray is never unlocked:
  * the prompt refuses instead (plan §2.1, Q7).
  *
+ * An **overlap** is a stored row the save keeps that a NEW payload row
+ * double-books: same team, same weekday, overlapping minutes and dates. The
+ * writer refuses that save whatever is unlocked (:920-956), so the prompt
+ * refuses it first. Judged only where both slots were read.
+ *
  * @param {{ seasonRows: Array<Record<string, any>>,
  *   assignments: Array<{ teamId: any, slotId: any, effectiveFrom?: string, effectiveUntil?: string }>,
- *   slotById: Map<any, { effectiveFrom: string, effectiveUntil: string }>,
+ *   slotById: Map<any, { effectiveFrom: string, effectiveUntil: string,
+ *     day?: string, startTime?: string, endTime?: string }>,
  *   stagedTeamIds: Iterable<any> }} input
- * @returns {{ prune: Array<Record<string, any>>, strays: Array<Record<string, any>> }}
- *   both in the writer's order (by id)
+ * @returns {{ prune: Array<Record<string, any>>, strays: Array<Record<string, any>>,
+ *   overlaps: Array<Record<string, any>> }} each in the writer's order (by id)
  */
 export function gridOverridePlan({ seasonRows, assignments, slotById, stagedTeamIds }) {
   const payloadTeams = new Set(assignments.map((assignment) => lower(assignment.teamId)));
@@ -62,25 +68,58 @@ export function gridOverridePlan({ seasonRows, assignments, slotById, stagedTeam
   const staged = new Set([...stagedTeamIds].map(lower));
   const prune = [];
   const strays = [];
-  for (const row of [...seasonRows].sort((a, b) => lower(a.id).localeCompare(lower(b.id)))) {
+  const kept = [];
+  const sorted = [...seasonRows].sort((a, b) => lower(a.id).localeCompare(lower(b.id)));
+  for (const row of sorted) {
     const team = lower(row.teamId ?? row.team_id);
     const inPayload = payloadTeams.has(team);
     const pruned = inPayload ? !payloadKeys.has(storedKey(row)) : lower(row.source) === 'auto';
-    if (!pruned) continue;
+    if (!pruned) {
+      kept.push(row);
+      continue;
+    }
     prune.push(row);
     if (!inPayload || !staged.has(team)) strays.push(row);
   }
-  return { prune, strays };
+  const storedKeys = new Set(sorted.map(storedKey).filter(Boolean));
+  const added = assignments.filter((assignment) => {
+    const key = payloadKey(assignment, slotById);
+    return key !== null && !storedKeys.has(key);
+  });
+  const overlaps = kept.filter((row) => {
+    const rowSlot = slotById.get(row.slotId ?? row.practice_slot_id ?? row.slot_id);
+    const rowRange = practiceRangeBounds(row.effectiveDateRange ?? row.effective_date_range);
+    if (!rowSlot?.day || !rowRange) return false;
+    return added.some((assignment) => {
+      if (lower(assignment.teamId) !== lower(row.teamId ?? row.team_id)) return false;
+      const slot = slotById.get(assignment.slotId);
+      const from = assignment.effectiveFrom ?? slot?.effectiveFrom;
+      const until = assignment.effectiveUntil ?? slot?.effectiveUntil;
+      return (
+        Boolean(slot?.day && from && until) &&
+        slot.day === rowSlot.day &&
+        slot.startTime < rowSlot.endTime &&
+        rowSlot.startTime < slot.endTime &&
+        from <= rowRange.last &&
+        rowRange.first <= until
+      );
+    });
+  });
+  return { prune, strays, overlaps };
 }
 
-/** Whether two prompts name the same rows (the enact's `prompt-changed` rule). */
+/**
+ * Whether two prompts name the same rows, as they stood: id, slot and dates
+ * (the enact's `prompt-changed` rule). A row re-ranged in place keeps its id,
+ * and must not pass as the row the admin was shown.
+ */
 export function samePruneSet(a, b) {
-  const ids = (rows) =>
-    rows
-      .map((row) => lower(row.id))
+  const rows = (list) =>
+    list
+      .map((row) => `${lower(row.id)}|${storedKey(row)}`)
       .sort()
       .join(',');
-  return ids(a) === ids(b);
+  return rows(a) === rows(b);
 }
 
 /**

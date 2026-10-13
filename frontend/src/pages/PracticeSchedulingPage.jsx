@@ -914,39 +914,51 @@ export default function PracticeSchedulingPage() {
   }, [autoScheduler]);
 
   /**
-   * Open (or reopen) the override prompt on `plan`. The schedule fingerprint
-   * is read now (Q4) and sent with the save, so a save built on a stale read
-   * is refused by the writer instead of unlocking a row nobody was shown. An
-   * unreadable fingerprint blocks Confirm: the override is never blind.
+   * The schedule fingerprint (Q4), read BEFORE the rows a prompt shows (as
+   * `loadPracticeRepairSnapshot` reads it), so any change after that read is
+   * refused by the writer as stale instead of unlocking a row nobody was
+   * shown. Unreadable blocks Confirm: the override is never blind.
    */
-  const openOverridePrompt = useCallback(
-    async (plan, notice = null) => {
-      let baseFingerprint = null;
-      let blocked = null;
-      try {
-        const print = await supabase.rpc('practice_schedule_fingerprint', {
-          p_season_settings_id: currentSeasonSetting?.id,
-        });
-        if (print?.error || typeof print?.data !== 'string' || print.data === '') {
-          throw new Error(print?.error?.message ?? 'unreadable');
-        }
-        baseFingerprint = print.data;
-      } catch {
-        blocked =
-          "The schedule's fingerprint could not be read, so a change made elsewhere while " +
-          'this is open could not be detected. Close this and Apply again.';
+  const readOverrideFingerprint = useCallback(async () => {
+    try {
+      const print = await supabase.rpc('practice_schedule_fingerprint', {
+        p_season_settings_id: currentSeasonSetting?.id,
+      });
+      if (print?.error || typeof print?.data !== 'string' || print.data === '') {
+        throw new Error(print?.error?.message ?? 'unreadable');
       }
-      setOverridePrompt((previous) => ({
-        plan,
-        baseFingerprint,
-        blocked,
-        notice,
-        busy: false,
-        key: (previous?.key ?? 0) + 1,
-      }));
-    },
-    [currentSeasonSetting?.id]
+      return { baseFingerprint: print.data, blocked: null };
+    } catch {
+      return {
+        baseFingerprint: null,
+        blocked:
+          "The schedule's fingerprint could not be read, so a change made elsewhere while " +
+          'this is open could not be detected. Close this and Apply again.',
+      };
+    }
+  }, [currentSeasonSetting?.id]);
+
+  /** The season's current rows, read now: the prompt never works from a cache. */
+  const readSeasonRows = useCallback(
+    () =>
+      loadSeasonPracticeAssignments(supabase, {
+        organizationId: currentOrganization?.id,
+        seasonSettingsId: currentSeasonSetting?.id,
+      }).catch((err) => ({ ok: false, message: err?.message ?? 'unreadable', rows: [] })),
+    [currentOrganization?.id, currentSeasonSetting?.id]
   );
+
+  /** Open (or reopen) the override prompt on `plan`, with the print read before it. */
+  const openOverridePrompt = useCallback((plan, notice, print) => {
+    setOverridePrompt((previous) => ({
+      plan,
+      baseFingerprint: print.baseFingerprint,
+      blocked: print.blocked,
+      notice,
+      busy: false,
+      key: (previous?.key ?? 0) + 1,
+    }));
+  }, []);
 
   /**
    * What the override prompt's Confirm accepted, handed to the next Apply and
@@ -962,6 +974,18 @@ export default function PracticeSchedulingPage() {
     const confirmation = overrideConfirmation.current;
     overrideConfirmation.current = null;
     if (!canManageSchedule || !canApplySchedule || !reviewAssignments?.length) return;
+    // A refusal while the override prompt is open is shown in it, not behind
+    // its overlay (plan §2.9).
+    const refuse = (text) => {
+      if (confirmation) {
+        setOverridePrompt(
+          (prompt) => prompt && { ...prompt, busy: false, notice: { tone: 'alert', text } }
+        );
+        return;
+      }
+      setApplyError(text);
+      setApplyStatus('error');
+    };
 
     const persistenceAssignments = reviewAssignments.map(toPersistenceAssignment);
     const missingSlot = persistenceAssignments.find(
@@ -969,10 +993,7 @@ export default function PracticeSchedulingPage() {
     );
 
     if (missingSlot) {
-      setApplyError(
-        'One or more staged assignments references a practice slot that no longer exists.'
-      );
-      setApplyStatus('error');
+      refuse('One or more staged assignments references a practice slot that no longer exists.');
       return;
     }
 
@@ -986,14 +1007,13 @@ export default function PracticeSchedulingPage() {
       slots: schedulerSlots,
     });
     if (daylightTbd.unmatched.length > 0) {
-      setApplyError(
+      refuse(
         `The daylight check made ${daylightTbd.unmatched
           .map((entry) => teamById.get(entry.teamId)?.name ?? entry.teamId)
           .join(', ')} ` +
           'TIME TBD from a date past sunset, and the staged schedule no longer holds that ' +
           'placement, so it cannot be recorded. Run the auto-scheduler again.'
       );
-      setApplyStatus('error');
       return;
     }
 
@@ -1021,36 +1041,37 @@ export default function PracticeSchedulingPage() {
     });
     let unlock = [];
     let baseFingerprint = null;
+    // Every judgement below is on a FRESH read, never the cached `seasonRows`
+    // (empty while a refetch is in flight), with the fingerprint read first.
+    if (confirmation) {
+      setOverridePrompt((prompt) => prompt && { ...prompt, busy: true, notice: null });
+    }
+    const print = await readOverrideFingerprint();
+    const fresh = await readSeasonRows();
+    if (fresh.ok !== true) {
+      refuse(
+        "This season's current practices could not be read, so the save cannot tell which " +
+          `saved practices it would replace. Nothing was saved (${fresh.message}).`
+      );
+      return;
+    }
+    const plan = planOf(fresh.rows);
     if (!confirmation) {
-      const plan = planOf(seasonRows);
       if (plan.prune.length > 0) {
-        await openOverridePrompt(plan);
+        openOverridePrompt(plan, null, print);
         return;
       }
-    } else {
-      // Recompute on a fresh read, not on what the prompt opened with: a row
-      // added or removed since then must be shown before it is unlocked (the
-      // enact's `prompt-changed` rule).
-      setOverridePrompt((prompt) => prompt && { ...prompt, busy: true, notice: null });
-      const fresh = await loadSeasonPracticeAssignments(supabase, {
-        organizationId: currentOrganization?.id,
-        seasonSettingsId: currentSeasonSetting?.id,
-      }).catch((err) => ({ ok: false, message: err?.message ?? 'unreadable', rows: [] }));
-      if (fresh.ok !== true) {
-        setOverridePrompt(
-          (prompt) =>
-            prompt && {
-              ...prompt,
-              busy: false,
-              notice: {
-                tone: 'alert',
-                text: `This season's practices could not be re-read, so nothing was saved (${fresh.message}).`,
-              },
-            }
+      if (plan.overlaps.length > 0) {
+        refuse(
+          'A staged practice double-books a saved practice of the same team on the same ' +
+            'weekday and time, which cannot be saved. Choose another slot.'
         );
         return;
       }
-      const plan = planOf(fresh.rows);
+    } else {
+      // Recompute, not what the prompt opened with: a row added, removed or
+      // re-ranged since then must be shown before it is unlocked (the
+      // enact's `prompt-changed` rule).
       if (plan.strays.length > 0 || !samePruneSet(plan.prune, confirmation.prune)) {
         refetchSeasonPractice();
         if (plan.prune.length === 0) {
@@ -1061,12 +1082,20 @@ export default function PracticeSchedulingPage() {
           );
           return;
         }
-        await openOverridePrompt(plan, {
-          tone: 'alert',
-          text:
-            'The saved schedule changed while this prompt was open, so nothing was saved. ' +
-            'Check the practices below and confirm again.',
-        });
+        openOverridePrompt(
+          plan,
+          {
+            tone: 'alert',
+            text:
+              'The saved schedule changed while this prompt was open, so nothing was saved. ' +
+              'Check the practices below and confirm again.',
+          },
+          print
+        );
+        return;
+      }
+      if (plan.overlaps.length > 0) {
+        refuse('A staged practice double-books a saved practice this save keeps.');
         return;
       }
       unlock = gridOverrideUnlock(
@@ -1143,6 +1172,8 @@ export default function PracticeSchedulingPage() {
           ...assignment,
           runId: appliedRunId,
           source: normalizeAssignmentSource(assignment.source),
+          // Saved: no longer an override staged in THIS session (plan §2.1).
+          stagedOverride: false,
         }))
       );
       setReviewAssignments(null);
@@ -1193,18 +1224,16 @@ export default function PracticeSchedulingPage() {
           // Q4: the schedule changed since the prompt opened. Re-read and
           // reopen on the fresh read; never resend on the old one.
           refetchSeasonPractice();
-          const fresh = await loadSeasonPracticeAssignments(supabase, {
-            organizationId: currentOrganization?.id,
-            seasonSettingsId: currentSeasonSetting?.id,
-          }).catch(() => ({ ok: false, rows: [] }));
+          const stalePrint = await readOverrideFingerprint();
+          const reread = await readSeasonRows();
           const notice = {
             tone: 'alert',
             text:
               'The saved schedule changed since this prompt opened, so nothing was saved. ' +
               'It has been re-read: check the practices below and confirm again.',
           };
-          if (fresh.ok === true) {
-            await openOverridePrompt(planOf(fresh.rows), notice);
+          if (reread.ok === true) {
+            openOverridePrompt(planOf(reread.rows), notice, stalePrint);
           } else {
             setOverridePrompt((prompt) => prompt && { ...prompt, busy: false, notice });
           }
@@ -1233,6 +1262,8 @@ export default function PracticeSchedulingPage() {
     openOverridePrompt,
     practice?.runId,
     practiceSlotRows,
+    readOverrideFingerprint,
+    readSeasonRows,
     refetchSeasonPractice,
     reviewAssignments,
     schedulerSlots,
@@ -1260,7 +1291,7 @@ export default function PracticeSchedulingPage() {
       setReviewAssignments(staged);
       setApplyStatus('review');
       setApplyError(null);
-      setStatusMessage('Lock change staged. Apply the schedule to persist it.');
+      setStatusMessage('Manual-choice mark staged. Apply the schedule to persist it.');
     },
     [canManageSchedule, localAssignments]
   );
@@ -1387,7 +1418,14 @@ export default function PracticeSchedulingPage() {
       (row) =>
         `${nameOf([row]) ?? 'A team'}’s practice (${seriesLineOf([row], lookups)}) would be removed`
     );
-    return { teams, strays };
+    // The writer's double-booking refusal (:920-956), told before Confirm.
+    const overlap = plan.overlaps[0];
+    const blocked = overlap
+      ? `The new practice for ${nameOf([overlap]) ?? 'this team'} overlaps its kept series ` +
+        `(${seriesLineOf([overlap], lookups)}) on the same weekday and time, which cannot be ` +
+        'saved. Cancel and choose another slot.'
+      : overridePrompt.blocked;
+    return { teams, strays, blocked };
   }, [overridePrompt, practiceSlotRows, reviewAssignments, teamById]);
 
   const closeOverridePrompt = useCallback(() => setOverridePrompt(null), []);
@@ -1668,7 +1706,7 @@ export default function PracticeSchedulingPage() {
           open
           teams={overrideView.teams}
           strays={overrideView.strays}
-          blocked={overridePrompt.blocked}
+          blocked={overrideView.blocked}
           busy={overridePrompt.busy}
           notice={overridePrompt.notice}
           onConfirm={confirmOverride}

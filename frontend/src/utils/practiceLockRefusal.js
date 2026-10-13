@@ -84,5 +84,10 @@ export function describePracticeLockRefusal(locked, cause = null) {
       ? `A saved practice${series}`
       : 'A saved practice in this schedule';
   const because = CAUSE_TEXT[cause] ? `, and ${CAUSE_TEXT[cause]}` : '';
-  return `${subject} is locked${because}, so nothing was saved. ${RECOVERY}`;
+  // A double-booking is not fixed by re-reading: the staged slot must change.
+  const recovery =
+    cause === 'a new row for its team overlaps it in time'
+      ? 'Choose a slot that does not overlap it.'
+      : RECOVERY;
+  return `${subject} is locked${because}, so nothing was saved. ${recovery}`;
 }

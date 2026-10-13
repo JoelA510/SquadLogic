@@ -321,9 +321,15 @@ describe("the grid's Apply, refused because a saved practice is locked", () => {
   });
 
   const HAWKS = "Synthetic Hawks's practice (Monday 17:00–18:30, 2026-09-07 to 2026-11-30)";
-  for (const [i, label, cause] of [
-    [0, 'prune', 'this save would replace it'],
-    [1, 'overlap', 'a new practice for the team overlaps it'],
+  for (const [i, label, cause, recovery] of [
+    [0, 'prune', 'this save would replace it', UNSUPPORTED],
+    // Re-reading cannot fix a double-booking: the slot must change.
+    [
+      1,
+      'overlap',
+      'a new practice for the team overlaps it',
+      'Choose a slot that does not overlap it.',
+    ],
   ]) {
     it(`names the team, its series and the cause, never the id (${label} refusal)`, async () => {
       answer = {
@@ -333,7 +339,7 @@ describe("the grid's Apply, refused because a saved practice is locked", () => {
       const alert = await overrideAndApply();
       // From the seed: Hawks' saved row is slot-mon, 17:00-18:30, [2026-09-07,2026-12-01).
       expect(alert.textContent).toBe(
-        `${HAWKS} is locked, and ${cause}, so nothing was saved. ${UNSUPPORTED}`
+        `${HAWKS} is locked, and ${cause}, so nothing was saved. ${recovery}`
       );
       expect(alert.textContent).not.toContain(A_ROW);
     });

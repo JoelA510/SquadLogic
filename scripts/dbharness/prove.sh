@@ -68,6 +68,9 @@ M23="$REPO/supabase/migrations/20261007000000_enact_practice_recommendation_blac
 R23="$REPO/docs/sql/20261007000000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
+# Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
+# the normalisation in `plant()`. Counted so the anchors-only pass says so.
+EXPECT_NORMALISED=0
 # **Anchor-resolution mode.** `plant()` already refuses an anchor that does not
 # occur exactly once -- but it does so at PLANT time, one full harness run into
 # a sweep that takes 5.4 hours, so the signal exists and nothing surfaces it.
@@ -602,6 +605,27 @@ plant() { # label file old new [expected-failing-check] [check-that-must-stay-gr
     echo "  directory to PLANT_DIRS." >&2
     exit 5
   fi
+  # **`expect` names the check, and `plant()` adds the `FAIL ` itself.** Both
+  # matchers below search for "FAIL $expect_line", so an entry written as the
+  # whole line -- "FAIL smoke 20261006000000", as 66 entries were -- searched
+  # for "FAIL FAIL smoke ...", which no run.sh line can print. A plant that
+  # really turned its smoke red then scored MISATTRIBUTED, and a sweep could
+  # not tell a hollow check from a doubled prefix. One leading `FAIL ` (after
+  # the optional `^`) is stripped here, so both spellings mean the same check;
+  # what is left may not start with `FAIL ` again, because that is an expect
+  # no transcript can satisfy, and it is refused the way a duplicate label is.
+  case "$expect" in
+    'FAIL '*)  expect="${expect#FAIL }";    EXPECT_NORMALISED=$((EXPECT_NORMALISED+1)) ;;
+    '^FAIL '*) expect="^${expect#^FAIL }";  EXPECT_NORMALISED=$((EXPECT_NORMALISED+1)) ;;
+  esac
+  case "${expect#^}" in
+    'FAIL '*)
+      echo "REFUSING TO PLANT \"$label\": its expect still starts with \"FAIL \" once normalised" >&2
+      echo "  plant() matches \"FAIL <expect>\", so this expect can never be found and" >&2
+      echo "  a real catch would score MISATTRIBUTED. Name the check once." >&2
+      exit 5
+      ;;
+  esac
   # **Census-only mode stops here, having still paid for the two checks
   # above.** It resolves no anchor and opens no file: its subject is the
   # REGISTRY at the bottom, and the only thing it needs from the plants is
@@ -3871,6 +3895,7 @@ if [ -n "$ANCHORS_ONLY" ]; then
     exit 9
   fi
   echo "anchor pre-flight: $ANCHOR_OK of $ATTEMPTED plant anchors resolve exactly once in their target file"
+  echo "expect normalisation: $EXPECT_NORMALISED of $ATTEMPTED plant expects carried the FAIL prefix plant() adds"
   exit 0
 fi
 

@@ -635,6 +635,15 @@ standards these items name · [ ] deployed and smoke-tested
 > 6.4 — resolved by M4.1.
 
 > **M4.7. Both scoring engines judge a weekly slot by its first occurrence and ignore assignment date ranges** (not an audit finding: found by PR 1-A, #551; medium) — **plan first: needs the owner's approval before any code**
+> - **Status (2026-10-13): planned and approved; the owner answered Q1-Q9 as recommended.** The
+>   plan is [`docs/PLAN_SCORING_DATE_MODEL.md`](../../PLAN_SCORING_DATE_MODEL.md) (#555).
+>   Practice exceptions follow in their own PR (Q1); the solver is a separate plan-first item,
+>   M4.8 (Q2).
+>   Measured (*executed*, scratch witness through the page's own slot builder and both engines):
+>   the two arms agree, so the defect is shared, not drift; modelling the corpus's "Select OLD"
+>   revision as closed series gives 11 reported coach conflicts where 1 is real (Edge fairness
+>   score 0.68 -> 0), and re-creating one slot valid from a later date hides the plan's one real
+>   conflict.
 > - **Why here:** it decides whether the fairness evaluation, a core flow (D3), is right about
 >   real schedules, which is what this milestone measures; and it is a domain-model change, so
 >   it cannot ride in a fix-only milestone. It is the same gap as the other session's backlog
@@ -966,6 +975,18 @@ smoke-tested
     handler the persistence functions serve when their Supabase variables are missing is not
     wrapped; `flush()` is awaited before a failing response (BetterStack latency adds to it).
     *Statically reviewed.*
+
+- 2026-10-13, found by the M4.7 plan (`docs/PLAN_SCORING_DATE_MODEL.md`):
+  - The auto-scheduler's hard constraint (`checkHardConstraints`,
+    `_shared/engines/practice-coaches.ts`) compares the same first-occurrence instants, so it
+    can place one coach on two teams at the same weekday and time when the two slots'
+    `valid_from` differ. It is the solver, which this plan freezes, so it is not in M4.7; the
+    plan's Q2 proposes its own plan-first item. *Statically reviewed* (the evaluator's version
+    of the shape *executed*).
+  - Apply-time metrics (`buildPracticeRunResults`, persisted with the run) share M4.7's gap;
+    the plan covers them (Q9). *Statically reviewed.*
+  - Production holds no `practice_slots`, `practice_assignments` or `practice_exceptions` rows
+    (*executed*, one read-only `SELECT` through the Supabase MCP), so M4.7 needs no backfill.
 
 - 2026-10-13, found by PR 2-C (M2.4-M2.6):
   - Two other Edge calls have no deadline: `EvaluationPanel`'s Save (`functions.invoke`

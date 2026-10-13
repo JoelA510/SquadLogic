@@ -267,6 +267,9 @@ $ node scripts/check-instructions.mjs --root <clean clone>
 
 ## Scorecard accuracy
 
+On rc.3 (`00de8ae`). On `fa39ab3` both mismatches are fixed, 29 of 29 match: see "Rerun on
+fa39ab3" below.
+
 Each verdict the scorecard gave on `565e980` was checked against the files it names.
 
 | Status | Standards | Matches | Mismatches |
@@ -371,9 +374,163 @@ call valid; (c) `process:apply` losing or overwriting a target's edit.
 | F9 §13 lacks the shared-environment skip rule | template | No, though a literal reading could lead a run toward production | open, low |
 | F10 no test-gate form for unautomatable items | template | No | open, low |
 
-**Verdict:** rc.3 does not meet the release bar on this trial: two findings are of a
+**Verdict (on rc.3; superseded by "Rerun on fa39ab3"):** rc.3 does not meet the release bar on this trial: two findings are of a
 never-acceptable kind (F1 and F2, both kind (b)), and eight others are open. None is kind (a)
 (the run, followed literally, completed and wrote no wrong or unsafe artifact) or kind (c)
 (`process:apply` lost no edit). Classifying F1 as (b) is a judgment: the "docs" in question are
 the delivery's printed instructions and the `complete` skill, which call a merged CLAUDE.md the
 existing-project shape.
+
+## Rerun on fa39ab3
+
+CONTRIBUTING.md §8 step 5 asks for a rerun of the steps a trial's fixes changed. F1 to F10 were
+fixed in the template in #22 (`c7632f0`) and #23 (`fa39ab3`); this section reruns those steps on
+`fa39ab37420cbda4b9ab085ee5c6b1bb09268641` (`origin/main` on 2026-10-13, "Existing-repo trial fixes:
+bundle-budget and pin probes, ignored deliveries, evidence text (#23)"), from a fresh worktree of
+the template with the same dependencies. The constraints are unchanged: plan-only, no shared or
+production environment, no personal data. The audit and the plan are not rewritten here; what the
+new text would change in them is noted under "The plan under the new text".
+
+### What was run (*executed* unless marked)
+
+```text
+$ npm run process:apply -- --target /home/user/SquadLogic --pack node --pack vite-spa --pack supabase
+Copied:  + prompts/skeletons/.github/dependabot.yml
+Updated in place (template changed; target copy untouched): 20 files (2 skills x 2 copies,
+  3 prompts, 7 skeletons, 5 standards)
+Up to date: 74 file(s).
+The target already has agent instructions: CLAUDE.md.
+Don't add a second set of rules. Agent rules belong in one AGENTS.md at the root, which every agent
+reads (the standard core.agent-rules fails rules kept only in CLAUDE.md): create it from
+prompts/skeletons/AGENTS.skeleton.md, and move the shared rules from CLAUDE.md into it. Then make
+Claude Code read it: `@AGENTS.md` as the first line of CLAUDE.md, keeping only what's specific to
+Claude Code there.
+Next steps, in the target repo:
+  1. Commit the updated files with prompts/.apply-manifest.json, as their own commit.
+# `git status` showed only delivered paths. Every manifest hash matches the file on disk except
+# prompts/run-log.md, the target's own record, which apply leaves alone by design.
+# Committed as a8af3c8 (22 files); the two changed .claude/skills files needed `git add -f`
+# (plain `git add .claude/skills` is refused: ".claude" is ignored).
+
+$ node scripts/apply-process.mjs --target /home/user/SquadLogic --check
+✓ Current with this template.   (exit 0)
+
+$ node scripts/check-conformance.mjs --root <clean clone of 565e980> --visibility public
+17 fail, 9 pass, 3 n/a, 8 audit. Template 1.0.0-rc.3 (fa39ab37420c)   (exit 1)
+$ node scripts/check-conformance.mjs --root <clean clone of a8af3c8> --visibility public
+16 fail, 10 pass, 3 n/a, 8 audit   (exit 1; only core.process-delivered differs)
+
+$ GITHUB_TOKEN=$(gh auth token) NODE_USE_ENV_PROXY=1 node scripts/check-settings.mjs --repo JoelA510/SquadLogic
+1 fail, 2 skipped, 2 pass   (the same verdicts as on rc.3)
+
+$ node scripts/check-instructions.mjs --root /home/user/SquadLogic
+✗ 3 finding(s) in 22 file(s) (the repository's own three squadlogic-* skills, as on rc.3)
+```
+
+Verdicts on `565e980`, rc.3 (`00de8ae`) against `fa39ab3`, compared from both runs' `--json`
+output: exactly two verdicts changed (`vite-spa.bundle-budget` fail to pass, `node.ci-uses-pin`
+pass to fail), and the evidence of exactly three changed (`core.audit-waivers`,
+`node.install-guards`, `node.ci-runs-gate`). Nothing else moved.
+
+### Each finding
+
+| Finding | Now | Evidence |
+| --- | --- | --- |
+| F1 delivery says merge rules into CLAUDE.md | **fixed** | The apply message (above) now says AGENTS.md at the root with `@AGENTS.md` in CLAUDE.md; so do the `complete` skill's step 4 and §12 ("Rules kept only in a tool-specific form other agents can't read (a lone CLAUDE.md, …) are a finding (standard core.agent-rules, high)"). Followed literally in a scratch clone of `a8af3c8` (CLAUDE.md moved to AGENTS.md, CLAUDE.md reduced to `@AGENTS.md` and one Claude-only line): `core.agent-rules` **pass**; `core.instructions-resolve` reports only the three pre-existing skill findings. |
+| F2 `vite-spa.bundle-budget` false fail | **fixed** | Pass on `565e980`: `"node scripts/check-bundle-size.js" in .github/workflows/ci.yml (job build-and-test) step "Bundle-budget gate (Wave 6a)" -> script "check:bundle": scripts/check-bundle-size.js reads a budget and exits non-zero`. Shown able to fail on planted defects (scratch commits over `565e980`): the step without `shell: bash` and `set -o pipefail` (so `tee` swallows the exit) **fails**; the script with every `process.exit` made 0 is **skipped** ("never exits non-zero, so this check can't tell…"). Removing only `set -o pipefail` still passes, correctly: an explicit `shell: bash` runs with `-eo pipefail` on GitHub. See observation O1 for one case it can't see. |
+| F3 `node.ci-uses-pin` passes with no pin | **fixed** | Fail on `565e980`: `.github/workflows/ci.yml (job build-and-test): 20, exactly the engines floor, but no setup-node step reads a pin (there's none: node.runtime-pinned), so the floor is the only Node CI runs` (and the same for `deploy-migrations`). With `.nvmrc` = 24 and the `deploy-migrations` step reading it, `build-and-test` left on 20: **pass**, with `node.runtime-pinned` passing too, so the floor exemption still works beside a pin. |
+| F4 `--check` "Current" with ignored skills uncommitted | **fixed** | The trial's case rebuilt: a clone of `565e980`, applied, committed with `git add -A` (0 files under `.claude/` tracked). `--check` on it and on a fresh clone of it (no `.claude/` at all): `! 9 delivered file(s) are ignored by the target's .gitignore and not committed, so a clone doesn't have them: …` and `✗ Drifted` (exit 1). After `git add -f .claude/skills` and a commit: `✓ Current` (exit 0). The fleet report flags the clone too (Process column "0 to update, 1 left over", not "current"), though its wording misnames the cause (N1). |
+| F5 next steps need config edits | **fixed** | First-delivery output in the scratch clone: step 1 now separates a formatter that runs on commit (before the delivery commit) from one run by hand (can wait for the first change where a config edit is in scope, run only on the project's own paths until then); the ignored-files warning offers `git add -f` beside the `.gitignore` exception; `prompts/README.md` says both. |
+| F6 LF fix edits applied migrations | **fixed** | The six CRLF migrations marked `-text` by name in `.gitattributes` (scratch commit): `7 of 1454 tracked files have CRLF or mixed line endings` and `6 kept as committed by a -text attribute in .gitattributes: …`. "Meeting it" now says to mark such files by name before renormalizing. |
+| F7 evidence overstates what was read | **fixed** | (a) `core.audit-waivers`: `no advisory is waived in what this check reads: osv-scanner.toml, docs/security/audit-waivers.json, deny.toml, .cargo/audit.toml, and audit commands in workflows; a register in another form (a Markdown list, say) is not read`. (b) `node.install-guards`: `there's no .npmrc, so npm's default lets a dependency bring in a git dependency of its own (allow-git=all; …)`. (c) `node.ci-runs-gate`: the "may live below the root (frontend)" hint is gone (`frontend/` has no `package.json`; `packages/*` is a glob, which the hint now skips). (d) `check:settings`: `…the template's is .github/rulesets/main.json in a repository built from it, prompts/skeletons/.github/rulesets/main.json where process:apply delivered it…`. |
+| F8 pre-delivery finding has no home | **fixed** (*statically reviewed*) | Phase 1 now says to put it under "Resolved before the plan" with the delivery commit; the plan skeleton has that section and the traceability rule names it. |
+| F9 §13 lacks the shared-environment rule | **fixed** (*statically reviewed*) | §13 and the audit skeleton's §13 guidance now say a configuration only a shared or production environment can exercise is not exercised unless the constraints allow it, recorded with the reason, and a finding when no test covers it. |
+| F10 no gate form for unautomatable items | **fixed** (*statically reviewed*) | The plan skeleton: "No automatable gate:" followed by what is checked, by whom, and where the result is recorded, and the prompt's item rule says the same. |
+
+### The plan under the new text (*statically reviewed*; not rewritten)
+
+Read against the changed sections, the trial's documents would change in five places, none of
+them a finding or a priority:
+
+- **12.8 (`core.process-delivered`)** sits under "Deferred with reason" as "resolved by … `a63a9f8`".
+  The new skeleton puts it under a "Resolved before the plan" section instead, naming the
+  delivery commit.
+- **M5.3 and M6.4** say "none automatable; reviewed in the PR" and "none automatable (manual check
+  in the PR)". The new form also names who checks and where the result is recorded.
+- **M6.2** already marks the six migrations `-text` and renormalizes the rest, as the standard
+  now says. Its test gate asks for "a recorded waiver for the six". It no longer needs one: the
+  check lists `-text` files as kept, and the gate is the check passing.
+- **No item covers the formatter.** `npm run format` is `prettier --write .`, and there's no
+  `.prettierignore`. Prettier 3.7.4, with the repository's `.prettierrc`, would rewrite 30 of the
+  delivered files (`prettier --list-different prompts .agents/skills .claude/skills`, exit 1).
+  The new text lets this wait for the first change where a config edit is in scope, as long as the
+  formatter runs only on the project's own paths until then. The plan should therefore add
+  `.prettierignore` to Milestone 1's first PR and say not to run `npm run format` across the
+  repository before that.
+- **The audit's baseline row and §12/§13** stay as written. Its two refuted verdicts
+  (`vite-spa.bundle-budget`, `node.ci-uses-pin`) are now what the scorecard itself reports.
+  D1's default (AGENTS.md plus an `@AGENTS.md` import) is the shape the delivery now recommends.
+  The 13.2 "not exercised" row matches the new §13 rule word for word in substance.
+
+### Scorecard accuracy on fa39ab3
+
+The totals on `565e980` are unchanged (17 fail, 9 pass, 3 n/a, 8 audit), but the two mismatches
+are now matches: `vite-spa.bundle-budget` passes and `node.ci-uses-pin` fails. The other 27
+verdicts are the same as on rc.3, and the evidence of the three that carried overstated text is
+fixed (F7). **29 of 29 scored verdicts match; 0 mismatch.** `check:settings`: 3 scored, 3
+match, 2 skipped (unchanged).
+
+### New template findings from the rerun
+
+**N1. The fleet report and `--check` misname the ignored-files case** (low).
+- **Where:** `scripts/fleet-report.mjs` (`processCell`, the "process:" detail line);
+  `scripts/apply-process.mjs` `--check` closing line.
+- **What happened:** *executed.* The clone with the nine skills ignored and uncommitted is
+  flagged, correctly. The fleet report's cell reads "0 to update, 1 left over", and its detail
+  reads "a `process:apply` re-run would change 0 file(s), and 1 parked file(s) or conflict
+  marker(s) are left over". All nine ignored files count as one "left over", called a parked file
+  or a conflict marker. `--check` lists them correctly, then closes with "✗ Drifted: re-run
+  process:apply, merge what it parks, and commit", which doesn't fix this case.
+- **Cause:** template (the ignored-files case is pushed into the `leftovers` list).
+- **Impact:** low. Nothing is hidden, but someone reading the fleet table goes looking for a
+  `.template` file that doesn't exist.
+- **Never-acceptable kind?** No: the check examines the files and fails, as it should.
+
+**N2. Sub-check evidence on a delivered repository drops the sub-check's summary line** (low;
+already present in rc.3).
+- **Where:** `scripts/check-conformance.mjs` `clientEnv()` (and `core.instructions-resolve`),
+  which keep only the last stderr line (`run.err.slice(-1)`).
+- **What happened:** *executed.* On `a8af3c8`, `vite-spa.client-env` and
+  `core.instructions-resolve` end with "Left out as skeletons (marked by AGENTS.skeleton.md):
+  prompts/skeletons/". On `565e980` they end with "✗ 3 finding(s) in 22 variable name(s) from 3 env
+  file(s) and source (82 read(s))". So the count of what was examined is lost exactly when the
+  process is delivered. rc.3 on `a63a9f8` does the same, so this was missed in the trial, not
+  introduced by the fixes.
+- **Cause:** template.
+- **Impact:** low. Every finding is still listed. Only the receipt of how much was read goes
+  missing.
+- **Never-acceptable kind?** No.
+
+**Observation O1 (not a finding): the bundle-budget probe can't tell which exit is the
+over-budget one.** With only the violation branch changed to `process.exit(0)`, the script still
+exits 2 when it can't read the budget or the build. The probe still passes it ("reads a budget and
+exits non-zero"). This is the heuristic the standard's "The check" documents ("counts when its
+source names a budget and exits non-zero"): a static read can't follow branches. Recorded so the
+limit is known. The check does examine the step and the script.
+
+### Skipped in the rerun
+
+- Phase 3 and everything the original trial skipped for the environment or the constraints
+  (pgTAP, Deno, staging, the deployed site, the two admin-read settings).
+- The full baseline (typecheck, lint, tests, build, E2E, harness). No fix touched it, and this
+  run changed no application file.
+- Re-running `/complete` from the start. Only the steps the fixes changed were rerun, as §8
+  step 5 asks.
+
+### Against the release bar, after the rerun
+
+F1 to F10 are fixed. F1 to F7 were *executed* against this repository or a scratch copy of it.
+F8 to F10 are prompt and skeleton text, *statically reviewed* against what this run's plan did.
+No never-acceptable finding remains from this trial. N1 and N2 are new, low, template-caused and
+open: under step 5 each needs a fix or an acceptance with a reason before the release. Neither is
+a never-acceptable kind.

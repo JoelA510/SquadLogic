@@ -2,8 +2,9 @@
 
 Repo: **JoelA510/SquadLogic** · Plan drawn up: 2026-10-12 · Source audit: [`audit.md`](./audit.md) (commit `565e980`)
 
-**Status:** NOT STARTED as of 2026-10-12 — waiting on the owner's decisions below and approval of
-Milestone 1; this run was plan-only.
+**Status:** IN PROGRESS as of 2026-10-13 — approved by the owner on 2026-10-13 "as recommended":
+D1-D8 at their defaults, and finding 5.1 moved into Milestone 1 (PR 1-B, as M1.7). Milestone 1 is
+in progress, starting with PR 1-A.
 
 End state: every audit area at "no blocker/high findings", E2E coverage of critical
 journeys, staging deploy smoke-tested, docs current — measured against: an organization's
@@ -14,37 +15,43 @@ with every state change audited; coaches and parents see and do only what their 
 
 ## Open decisions for the owner
 
-Each has a default: if the owner says nothing, the plan proceeds on it.
+Each has a default: if the owner says nothing, the plan proceeds on it. **All eight were decided
+at their defaults by the owner on 2026-10-13**; each alternative is kept as the record of what was
+declined.
 
-- **D1. Where the agent rules live (12.1, 12.3, 12.4).** Default: move the rules from
-  `CLAUDE.md` into a new root `AGENTS.md` and reduce `CLAUDE.md` to `@AGENTS.md` plus the
-  Claude-specific notes, because other agents already work here (`.agents/skills/`, the Codex
-  and Gemini review bots). Alternative: keep `CLAUDE.md` alone and waive `core.agent-rules` with
-  a reason, accepting that Codex, Cursor, Copilot and Antigravity never see the rules.
-- **D2. Type strictness (2.1).** Default: record `node.strict-types` in a conformance baseline
-  (`docs/standards/conformance.json`), keep CLAUDE.md's `strict: false`, and schedule nothing;
-  raising strictness is a flagged refactor the owner can request later, starting with the 29
-  TypeScript E2E files. Alternative: plan that refactor now as its own milestone.
-- **D3. Is the practice page's fairness evaluation a core flow (13.1)?** Default: yes. README
-  lists fairness metrics and conflict detection under "Core platform (v1.0)", so the false
-  all-clear is a blocker in Milestone 1. Alternative: hide the panel until it is fixed (also
-  Milestone 1, smaller).
-- **D4. The duplicated engines (1.1).** Default: keep the JavaScript core and the Deno ports, and
-  add a parity test over real inputs (Milestone 1, because 13.1's fix widens it). Moving the Edge
-  Functions onto the core package is a flagged refactor, not planned.
-- **D5. Which checks the ruleset requires (7.1, 6.3).** Default: `Build & Test` and `Deno Mirror
-  Tests` in Milestone 1; pgTAP joins once it runs on every pull request (Milestone 3). The
-  repository is public, so standard-runner Actions minutes cost nothing; the `pgtap.yml`
-  comment's minute budget applies to private repositories.
-- **D6. Vulnerable dependencies (8.1).** Default: take the in-range refresh PR #332 already
-  carries, upgrade what remains within the current majors, and waive with a reason and an expiry
-  only what needs a major (for example a `react-router` advisory scoped to RSC mode, which this
-  app doesn't use, if one remains). No major upgrades in this plan.
-- **D7. Licence (12.6).** Default: add the ISC licence text the README and `package.json`
-  already claim, with the owner as copyright holder. A legal choice, so the owner confirms.
-- **D8. `project-hardening/` (12.4).** Default: merge any rule still worth keeping into AGENTS.md
-  and delete the folder, as its own controller says it should never have been committed.
-  Alternative: move it under `docs/archive/` with a note that it is history, not instructions.
+- **D1. Where the agent rules live (12.1, 12.3, 12.4).** *Decided 2026-10-13: the default.* Default:
+  move the rules from `CLAUDE.md` into a new root `AGENTS.md` and reduce `CLAUDE.md` to `@AGENTS.md`
+  plus the Claude-specific notes, because other agents already work here (`.agents/skills/`, the
+  Codex and Gemini review bots). Alternative: keep `CLAUDE.md` alone and waive `core.agent-rules`
+  with a reason, accepting that Codex, Cursor, Copilot and Antigravity never see the rules.
+- **D2. Type strictness (2.1).** *Decided 2026-10-13: the default.* Default: record
+  `node.strict-types` in a conformance baseline (`docs/standards/conformance.json`), keep
+  CLAUDE.md's `strict: false`, and schedule nothing; raising strictness is a flagged refactor the
+  owner can request later, starting with the 29 TypeScript E2E files. Alternative: plan that
+  refactor now as its own milestone.
+- **D3. Is the practice page's fairness evaluation a core flow (13.1)?** *Decided 2026-10-13: the
+  default.* Default: yes. README lists fairness metrics and conflict detection under "Core platform
+  (v1.0)", so the false all-clear is a blocker in Milestone 1. Alternative: hide the panel until it
+  is fixed (also Milestone 1, smaller).
+- **D4. The duplicated engines (1.1).** *Decided 2026-10-13: the default.* Default: keep the
+  JavaScript core and the Deno ports, and add a parity test over real inputs (Milestone 1, because
+  13.1's fix widens it). Moving the Edge Functions onto the core package is a flagged refactor, not
+  planned.
+- **D5. Which checks the ruleset requires (7.1, 6.3).** *Decided 2026-10-13: the default.* Default:
+  `Build & Test` and `Deno Mirror Tests` in Milestone 1; pgTAP joins once it runs on every pull
+  request (Milestone 3). The repository is public, so standard-runner Actions minutes cost nothing;
+  the `pgtap.yml` comment's minute budget applies to private repositories.
+- **D6. Vulnerable dependencies (8.1).** *Decided 2026-10-13: the default.* Default: take the
+  in-range refresh PR #332 already carries, upgrade what remains within the current majors, and
+  waive with a reason and an expiry only what needs a major (for example a `react-router` advisory
+  scoped to RSC mode, which this app doesn't use, if one remains). No major upgrades in this plan.
+- **D7. Licence (12.6).** *Decided 2026-10-13: the default.* Default: add the ISC licence text the
+  README and `package.json` already claim, with the owner as copyright holder. A legal choice, so
+  the owner confirms.
+- **D8. `project-hardening/` (12.4).** *Decided 2026-10-13: the default.* Default: merge any rule
+  still worth keeping into AGENTS.md and delete the folder, as its own controller says it should
+  never have been committed. Alternative: move it under `docs/archive/` with a note that it is
+  history, not instructions.
 
 ## Rules for this plan
 
@@ -78,10 +85,22 @@ the item counts as done.
 
 ## Milestone 1 — Stop the bleeding
 
-Three PRs: 1-A (the blocker and what it widens), 1-B (merge enforcement and the runtime it
-makes binding), 1-C (error reporting).
+Three PRs: 1-A (the blocker and what it widens), 1-B (merge enforcement, the runtime it makes
+binding, and the mock-mode guard that fails open on the production host, moved in at approval),
+1-C (error reporting).
 
 **PR 1-A — `fix/practice-fairness-evaluates-real-roster`**
+
+Also in this PR, as its first commit: a root `.prettierignore` listing `prompts/`,
+`.agents/skills/` and `.claude/skills/`. Reason: `npm run format` is `prettier --write .` and there
+is no ignore file, so a repository-wide format would rewrite 30 files that `process:apply`
+delivered (the template trial's rerun on `fa39ab3`:
+`prettier --list-different prompts .agents/skills .claude/skills`, exit 1), and a later re-apply
+would then treat them as locally edited and stop updating them. Until it lands, run Prettier only
+on the paths a change touches, never `npm run format` across the repository. Acceptance:
+`prettier --list-different .` names no file under those three folders (today it names 30), and
+lists the same project files as before. Not tied to an audit finding (the trial's rerun found
+it), so it carries no ID.
 
 > **M1.1. The practice page's fairness evaluation reports a clean result after examining nothing** (audit finding 13.1, blocker)
 > - **Fix approach:** pass the page's scheduler teams (the `normalizeTeam` output, which carries
@@ -173,6 +192,38 @@ makes binding), 1-C (error reporting).
 > - **Diff class:** minimal diff.
 > - **Verification label:** executed (the current state); the fix statically reviewed.
 
+> **M1.7. A production build without Supabase configuration serves the mock on the production host** (audit finding 5.1, high; moved from M2.2 into Milestone 1 by the owner at approval, 2026-10-13; numbered after M1.6 so existing references stay valid)
+> - **Fix approach:** fail closed. In a production build (`import.meta.env.PROD`), a missing
+>   `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY` never selects the mock: the guard in
+>   `frontend/src/config.js` shows its "Configuration Error" and throws on every host, with no
+>   `localhost` or `*.vercel.app` exemption. The only way a production build runs the mock is the
+>   existing explicit opt-in, `VITE_USE_MOCK_SUPABASE=true` (what Playwright and CI already set),
+>   so no new variable is added. Development (the Vite dev server) keeps falling back to the mock
+>   as today. `supabaseClient.js`'s `MOCK_CAPABLE_BUILD` and `loadMockClient` stay as they are;
+>   M2.2 later turns the same rule into a build failure.
+> - **Files touched:** `frontend/src/config.js`, `docs/operations/ENVIRONMENT.md` (the opt-in,
+>   and what a preview without Supabase variables now shows), new `tests/mockModeGuard.test.js`.
+> - **Depends on:** none.
+> - **Widens:** none (a Vercel preview built without Supabase variables now shows the
+>   Configuration Error unless it sets `VITE_USE_MOCK_SUPABASE=true`; that is the intended change
+>   and is listed in the PR).
+> - **Effort:** S
+> - **Acceptance criteria:** the audit's reproduction, rerun locally (a `frontend:build` without
+>   Supabase variables, served on 127.0.0.1 and opened in Chromium with `squadlogic.vercel.app`
+>   mapped to it), shows the Configuration Error and never the sign-in page; the same build with
+>   `VITE_USE_MOCK_SUPABASE=true` still loads the mock; the E2E suite (dev server, opt-in set)
+>   passes unchanged. Production itself is not touched.
+> - **Test gate:** `tests/mockModeGuard.test.js` evaluates the guard as a production build would
+>   (`PROD` true, Supabase variables unset, no opt-in) under `squadlogic.vercel.app`, a preview
+>   `*.vercel.app` host, `localhost` and a custom domain, and asserts it throws on each; a second
+>   case asserts the opt-in still selects the mock; a third that development still falls back.
+>   Shown failing first: with today's `config.js` the `*.vercel.app` and `localhost` cases don't
+>   throw.
+> - **Rollback:** revert the PR; the guard returns to its host-based exemption, no data changes.
+> - **Diff class:** minimal diff.
+> - **Verification label:** executed (the defect, reproduced locally by the audit); the fix
+>   statically reviewed.
+
 **PR 1-C — `fix/error-reports-carry-ids`**
 
 > **M1.5. No error report says which user or organization it came from** (audit finding 9.1, high)
@@ -214,8 +265,10 @@ makes binding), 1-C (error reporting).
 > - **Verification label:** statically reviewed.
 
 **Milestone exit:** [ ] CI is a required check and blocks merge on the gate (M1.3; the owner
-imports the ruleset) · [ ] error reporting receives an induced error, tagged with user and
-organization IDs (M1.5, M1.6) · [ ] zero open blockers (M1.1) · [ ] deployed and smoke-tested
+imports the ruleset) · [ ] a production build without Supabase configuration refuses to start on
+every host, the production host included (M1.7) · [ ] error reporting receives an induced error,
+tagged with user and organization IDs (M1.5, M1.6) · [ ] zero open blockers (M1.1) · [ ] deployed
+and smoke-tested
 
 ---
 
@@ -244,22 +297,22 @@ organization IDs (M1.5, M1.6) · [ ] zero open blockers (M1.1) · [ ] deployed a
 
 > **M2.2. A typed env module, and production decided by the build, not the hostname** (audit finding 2.2, medium)
 > - **Fix approach:** `frontend/src/env.js` reads each variable by name and validates with Zod:
->   Supabase URL and key required in a production build unless `VITE_ALLOW_MOCK=true` (previews,
->   E2E); Sentry DSN optional, off when unset, rejected when malformed. `config.js` re-exports
->   from it; the mock guard keys on `import.meta.env.PROD && !VITE_ALLOW_MOCK`, not
->   `*.vercel.app`. The mock's test password is read from a non-`VITE_` variable at the Node
->   layer, as `.env.test.example`'s comment plans.
+>   Supabase URL and key required in a production build unless `VITE_USE_MOCK_SUPABASE=true`
+>   (previews, E2E; M1.7's opt-in, so no second flag); Sentry DSN optional, off when unset,
+>   rejected when malformed. `config.js` re-exports from it; M1.7's runtime guard moves into it
+>   unchanged, and the build now fails before that guard could run. The mock's test password is
+>   read from a non-`VITE_` variable at the Node layer, as `.env.test.example`'s comment plans.
 > - **Files touched:** new `frontend/src/env.js`, `frontend/src/config.js`,
 >   `frontend/src/lib/mockSupabaseClient.js` (password source), `.env.example`,
->   `.env.test.example`, `playwright.config.ts` (`VITE_ALLOW_MOCK`), `.github/workflows/ci.yml`
+>   `.env.test.example`, `.github/workflows/ci.yml`
 >   env, `docs/operations/ENVIRONMENT.md`, tests `tests/env.test.js`.
-> - **Depends on:** none.
-> - **Widens:** none (Vercel preview builds without Supabase variables will now fail unless they
->   set `VITE_ALLOW_MOCK`; that is the intended change and is listed in the PR).
+> - **Depends on:** M1.7.
+> - **Widens:** none (Vercel preview builds without Supabase variables will now fail to build
+>   unless they set `VITE_USE_MOCK_SUPABASE=true`; after M1.7 they already refuse to start, so
+>   only the point of failure moves; listed in the PR).
 > - **Effort:** M
 > - **Acceptance criteria:** a production build with the Supabase variables unset fails with a
->   message naming them; served on a `*.vercel.app` host, a mock build without `VITE_ALLOW_MOCK`
->   refuses to start; `check:env` reports nothing.
+>   message naming them; `check:env` reports nothing.
 > - **Test gate:** `tests/env.test.js` (missing required → throws; optional unset → off;
 >   malformed DSN → throws) and the scorecard's `vite-spa.client-env`; both fail with the old
 >   `config.js` restored.
@@ -268,7 +321,6 @@ organization IDs (M1.5, M1.6) · [ ] zero open blockers (M1.1) · [ ] deployed a
 >   but every env read moves).
 > - **Verification label:** statically reviewed.
 >
-> 5.1 — resolved by M2.2 (the hostname exemption is removed and missing variables fail the build).
 > 8.4 — resolved by M2.2 (no whole-object read; the test password leaves the `VITE_` prefix).
 
 > **M2.3. Dependency updates and install guards** (audit finding 8.2, medium)
@@ -683,12 +735,17 @@ smoke-tested
 3. Open a PR with a planted lint error — expect: "Merging is blocked" (M1.3).
 4. On the game grid, move a game using only the keyboard — expect: possible after M4.3; today it
    isn't.
-5. Build for production with `VITE_SUPABASE_URL` unset — expect: the build fails naming the
-   variable (M2.2); today it succeeds and serves the mock.
+5. Build for production with `VITE_SUPABASE_URL` unset and serve it under a `*.vercel.app` name
+   — expect: the Configuration Error, never the sign-in page (M1.7); after M2.2 the build itself
+   fails naming the variable. Today it succeeds and serves the mock.
 
 ## Discovered during execution
 
-- (none yet; this run was plan-only)
+- 2026-10-13: `main` moved from `565e980` to `28f1b98` after the audit. One of the new commits,
+  #545 (`7fa6b1b`, "admit US-region ingest in CSP"), adds `https://*.ingest.us.sentry.io` to
+  `connect-src` with a test (`tests/cspPolicy.test.js`), so it may resolve 9.2 (M1.6) in part;
+  *statically reviewed* from the commit only. Re-check M1.6 against it, and against the
+  production DSN's host, before PR 1-C.
 
 ## Deferred with reason
 

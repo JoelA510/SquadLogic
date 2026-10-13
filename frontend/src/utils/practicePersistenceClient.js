@@ -1,5 +1,6 @@
 import { preparePracticePersistenceSnapshot } from '@squadlogic/core/practicePersistenceSnapshot.js';
 import { IS_MOCK_MODE, PRACTICE_PERSISTENCE_URL } from '../config.js';
+import { postPersistenceRequest } from '../lib/persistenceRequest.js';
 import { supabase } from '../lib/supabaseClient.js';
 
 export async function persistPracticeScheduleReview({
@@ -84,21 +85,19 @@ export async function persistPracticeEnact({ payload, enact, runMetadata }, opti
   if (!token) {
     throw new Error('Authentication required to enact a practice recommendation.');
   }
-  const response = await fetch(PRACTICE_PERSISTENCE_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
+  const { response, result } = await postPersistenceRequest(PRACTICE_PERSISTENCE_URL, {
+    token,
+    body: {
       snapshot: { payload: { assignmentRows: payload.assignmentRows }, runId: runMetadata.runId },
       overrides: [],
       runMetadata,
       repair: payload.repair,
       enact,
-    }),
+    },
+    // The panel frames the clause: "It is not known whether the practice was enacted: ...".
+    label: 'the enact request',
+    bareMessages: true,
   });
-  const result = await response.json().catch(() => ({}));
   if (response.status === 409 && result.code === PRACTICE_SCHEDULE_STALE) {
     return { status: 'stale', code: PRACTICE_SCHEDULE_STALE, message: result.message ?? '' };
   }
@@ -174,21 +173,16 @@ async function sendPracticeSnapshot({
     practiceOverrides: [],
   });
 
-  const response = await fetch(PRACTICE_PERSISTENCE_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
+  const { response, result } = await postPersistenceRequest(PRACTICE_PERSISTENCE_URL, {
+    token,
+    body: {
       snapshot,
       overrides: [],
       runMetadata,
       ...(repair ? { repair } : {}),
-    }),
+    },
+    label: 'The practice schedule save',
   });
-
-  const result = await response.json().catch(() => ({}));
 
   if (!response.ok) {
     // The Edge's `code` and the HTTP status ride along, as `persistPracticeEnact`

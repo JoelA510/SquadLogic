@@ -28,6 +28,7 @@ export {
   filesUnder,
   scannedFiles,
 } from './repoScanFiles.js';
+export { settleWithin } from './settleWithin.js';
 export {
   DATED_VECTORS,
   DATED_VECTORS_PATH,

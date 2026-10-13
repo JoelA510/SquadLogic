@@ -1,0 +1,87 @@
+// Unused-code check (`npm run check:unused`, run by CI's Build & Test job).
+// Remediation plan item M5.5 (audit finding 1.2). Every exception below says
+// why it is here; a baselined entry is dated and is to be removed, not
+// extended. Knip fails on an issue it reports, so a new unused file, export,
+// dependency or binary fails CI.
+//
+// knip is held at ~6.27.0 in package.json: 6.28 and later require zod
+// ^4.4.3, which would move the app's own zod (the Edge and client schemas)
+// to satisfy a dev tool. Raise it only together with a deliberate zod upgrade.
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // An export its own file uses is over-exported, not dead code.
+  "ignoreExportsUsedInFile": true,
+  // Baseline 2026-10-13: exports nothing imports, as found on the day
+  // the check was added. Each is to be un-exported or used; the list
+  // only shrinks.
+  "ignoreIssues": {
+    "frontend/src/contexts/AnalyticsContext.jsx": ["exports"],
+    "frontend/src/hooks/useAutoRunOnNavigate.js": ["exports", "duplicates"],
+    "frontend/src/lib/inviteStorage.js": ["exports"],
+    "frontend/src/lib/turbidityTable.js": ["exports"],
+    "frontend/src/pages/GameSchedulingPage.jsx": ["exports"],
+    "frontend/src/utils/caseConverters.js": ["exports"],
+    "frontend/src/utils/formatters.js": ["exports"],
+    "supabase/functions/_shared/calendar/icsFeed.ts": ["exports"],
+    "supabase/functions/_shared/engines/coach-preference-load.ts": ["exports"],
+    "supabase/functions/_shared/timing/seasonClock.ts": ["exports"],
+    "supabase/functions/_shared/schemas/scoring.ts": ["types"],
+    "tests/fixtures/incrementalTeamingFixtures.js": ["exports"],
+    // Not a baseline: the core package is a library that the frontend and the
+    // tests import by module path (`@squadlogic/core/<module>.js`), so its
+    // exports are its public API (plan item M5.5).
+    "packages/core/src/**": ["exports", "types", "nsExports", "nsTypes", "duplicates"],
+  },
+  "workspaces": {
+    ".": {
+      "entry": [
+        // Edge Functions: Supabase deploys each directory's index.ts.
+        "supabase/functions/*/index.ts",
+        // Deno mirror tests, run by scripts/deno-mirror-tests.sh.
+        "supabase/functions/_shared/tests/*_test.ts",
+        // playwright-bdd step files, loaded by the glob in playwright.config.ts.
+        "tests/e2e/steps/**/*.ts",
+        // The test barrels: CLAUDE.md says to import factories and helpers
+        // through them, so what they re-export is their public surface.
+        "tests/factories/index.js",
+        "tests/helpers/index.js",
+        // Node scripts run by package.json, CI or an operator by hand.
+        "scripts/**/*.{js,mjs}",
+        "frontend/scripts/*.js",
+      ],
+      "project": [
+        "frontend/**/*.{js,jsx,ts,tsx}",
+        "scripts/**/*.{js,mjs}",
+        "supabase/functions/**/*.ts",
+        "tests/**/*.{js,jsx,ts,tsx}",
+        "*.{js,ts}",
+      ],
+      // The Supabase CLI comes from supabase/setup-cli in CI (or a local
+      // install), not from npm.
+      "ignoreBinaries": ["supabase"],
+      "ignoreDependencies": [
+        // Imported from frontend/src/index.css (`@import 'tailwindcss'`);
+        // knip does not follow CSS imports.
+        "tailwindcss",
+        // Baseline 2026-10-13: imported by no file (Vite brings its own).
+        // Whether to drop the direct declaration is a dependency change for
+        // plan item M2.1, not this check.
+        "postcss",
+      ],
+      // Baseline 2026-10-13: files nothing imports, kept because docs still
+      // describe them. Delete each together with the doc that names it.
+      "ignoreFiles": [
+        // Routed nowhere; docs/architecture/frontend-architecture.md lists it
+        // as the /reporting page (July audit DD-1, still open).
+        "frontend/src/pages/AdminReportingDashboard.jsx",
+        // Listed in frontend-architecture.md's hook table and ARCHITECTURE.md.
+        "frontend/src/hooks/useGameSlots.js",
+      ],
+    },
+    // The core package: its files are analysed, so a module nothing imports
+    // is reported; its exports are public API (see ignoreIssues above).
+    "packages/core": {
+      "project": ["src/**/*.js"],
+    },
+  },
+}

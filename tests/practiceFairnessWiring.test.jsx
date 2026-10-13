@@ -33,6 +33,7 @@ import { seedMockDb } from './helpers/seedMockDb.js';
 import {
   ScoringInputSchema,
   datedSlotsIssue,
+  refuseEmptyPracticeRoster,
 } from '../supabase/functions/_shared/schemas/scoring.ts';
 import { anchorWallTimes } from '../supabase/functions/_shared/timing/anchorWallTimes.ts';
 import { evaluatePracticeSchedule as edgeEvaluate } from '../supabase/functions/_shared/engines/scoring-engine.js';
@@ -208,7 +209,8 @@ function dbOf({ roster, slots, rows }) {
 
 /**
  * `fairness-scoring/index.ts` for a practice-only request, minus auth, rate
- * limiting and persistence: validate, anchor, score, aggregate.
+ * limiting and persistence: validate, refuse an empty roster, anchor, score,
+ * aggregate.
  */
 function fairnessScoringEdge(body) {
   const parsed = ScoringInputSchema.safeParse(body);
@@ -216,7 +218,9 @@ function fairnessScoringEdge(body) {
     return { data: null, error: { message: 'Validation failed', details: parsed.error.format() } };
   }
   const { practice } = parsed.data;
-  // The handler's 3a: a half-dated slot list is a 422 (M4.7, plan Q8).
+  const emptyRoster = refuseEmptyPracticeRoster(practice);
+  if (emptyRoster) return { data: null, error: { message: emptyRoster.error } };
+  // The handler's 3a': a half-dated slot list is a 422 (M4.7, plan Q8).
   const datedIssue = practice ? datedSlotsIssue(practice.slots) : null;
   if (datedIssue !== null) return { data: null, error: { message: datedIssue } };
   // `any`: the handler makes the same two calls; only Node's zod typings differ from Deno's.

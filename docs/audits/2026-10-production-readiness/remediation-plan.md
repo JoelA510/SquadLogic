@@ -418,6 +418,13 @@ and smoke-tested
 > 8.3 — resolved by M2.3.
 
 > **M2.4. Security policy and licence files** (audit finding 8.5, medium)
+> - **Status: in review, PR 2-C (`claude/vibrant-allen-hr7y7s-m2c`); not merged.** `SECURITY.md` names GitHub private
+>   vulnerability reporting (the public API reports `enabled: true`, *executed* 2026-10-13), with
+>   best-effort targets (acknowledge within 7 days; the owner confirms them), scope and supported
+>   versions. `LICENSE` is choosealicense.com's ISC text verbatim, "Copyright (c) 2025-2026 Joel
+>   Abraham" (D7; the owner confirms the holder and years). Test gate met, *executed*: scorecard
+>   `core.security-policy` and `core.license` pass, and both fail with the two files removed.
+>   GitHub's licence detection and the Security tab's policy link are checked after merge.
 > - **Fix approach:** `SECURITY.md` from the skeleton, pointing at GitHub private vulnerability
 >   reporting (already on) with response expectations; `LICENSE` with the ISC text (D7).
 > - **Files touched:** `SECURITY.md`, `LICENSE`.
@@ -434,6 +441,19 @@ and smoke-tested
 > 12.6 — resolved by M2.4.
 
 > **M2.5. Game and practice persistence calls can hang forever** (audit finding 5.2, medium)
+> - **Status: in review, PR 2-C (`claude/vibrant-allen-hr7y7s-m2c`); not merged.** New `frontend/src/lib/persistenceRequest.js`
+>   gives every request the game and practice clients send (game save, practice save, repair save,
+>   enact) the team panel's contract: an `AbortController` aborted at a deadline, and an error
+>   with `code: 'PERSISTENCE_TIMEOUT'` whose message says the outcome is unknown. The deadline is
+>   160 s, past Supabase's 150 s Edge request idle timeout (which answers 504), so it never calls
+>   a slow save that is still committing a failure; it fires only for a lost connection or a
+>   stalled body. A 2xx whose body is not a JSON object throws `PERSISTENCE_UNREADABLE_RESPONSE`;
+>   a non-2xx keeps its `HTTP <status>` message. Test gate met, *executed*: never-resolving and
+>   stalled-body cases in `tests/gamePersistenceClient.test.js` and the new
+>   `tests/practicePersistenceClient.test.js` (fake timers; the sender list is checked against
+>   the module's exports, and neither client may call `fetch` directly), red with the old
+>   clients restored and with the timer removed. Apply
+>   re-enabling after the error is the pages' existing catch path, *statically reviewed*.
 > - **Fix approach:** reuse the team-persistence client's timeout (`AbortController`) in the game
 >   and practice clients; treat an unparsable success body as an error.
 > - **Files touched:** `frontend/src/utils/gamePersistenceClient.js`,
@@ -451,6 +471,15 @@ and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M2.6. `fairness-scoring` records a 0-conflict run for an empty roster** (not an audit finding: found by PR 1-A, #551; medium; placed here by the supervisor, the owner may move it)
+> - **Status: in review, PR 2-C (`claude/vibrant-allen-hr7y7s-m2c`); not merged.** `refuseEmptyPracticeRoster`
+>   (`_shared/schemas/scoring.ts`) answers 422 `EMPTY_PRACTICE_ROSTER`, naming the counts, for a
+>   practice block with no teams or no slots; the handler calls it right after parsing, before the
+>   season read, the engine and `persist_evaluation_run`, whatever `persist` says. Test gate met,
+>   *executed*: `_shared/tests/fairness-empty-roster_test.ts` (the refusal with `persist` both
+>   ways, and a source pin on the handler's order, since the handler module calls `serve()` on
+>   import), red with the call removed, with the call moved after persistence and with the
+>   refusal neutered; the mirror job's floor rises to 13. "Writes no `evaluation_runs` row" rests
+>   on that order, *statically reviewed*; it is checkable on production after merge.
 > - **Fix approach:** refuse at the Edge, before evaluating or persisting: a request whose
 >   `practice` block has no teams or no slots gets a 422 with a named code (for example
 >   `EMPTY_PRACTICE_ROSTER`), whether or not `persist` is set. #551 stopped the page sending one;
@@ -755,6 +784,14 @@ smoke-tested
 ## Milestone 5 — Agent rules, docs and operability
 
 > **M5.1. One AGENTS.md for every agent, without contradictions** (audit finding 12.1, high)
+> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open).** Root `AGENTS.md` (23,589 bytes) holds every rule, its
+>   sections numbered as CLAUDE.md's were; `CLAUDE.md` is `@AGENTS.md` plus Claude Code's notes.
+>   The contradictions and how each was resolved are listed in the PR. `project-hardening/` is
+>   deleted after its durable rules were merged (one task per PR, merge only on the owner's say,
+>   review-bot comments, call-site sweeps, backward compatibility, the incremental-teaming
+>   invariants); its merge authority and model choice were not carried. The committed
+>   `.features-gen/` spec is deleted. *Executed:* `core.agent-rules` and `check:instructions`
+>   pass, and fail with `AGENTS.md` removed or a dead path planted.
 > - **Fix approach:** per D1, move CLAUDE.md's shared rules into a root `AGENTS.md` (merging from
 >   `prompts/skeletons/AGENTS.skeleton.md`, naming this repo's real paths), leave `CLAUDE.md` as
 >   `@AGENTS.md` plus Claude-only notes; resolve the contradictions in 12.3 there ("Refactor
@@ -778,6 +815,11 @@ smoke-tested
 > 12.3 — resolved by M5.1. 12.4 — resolved by M5.1.
 
 > **M5.2. The three repository skills can't be loaded** (audit finding 12.2, medium)
+> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open).** Frontmatter on all three, their facts corrected
+>   against the code (the evaluator registry is `EVALUATOR_REGISTRY` in
+>   `packages/core/src/evaluators/index.js`, scores are 0-100; `ALL_FLAGS` is derived; the audit
+>   rows carry `action` and `metadata.old`/`new`), and Claude Code copies in `.claude/skills/`.
+>   *Executed:* `check:instructions` passes, and fails on a missing frontmatter or a drifted copy.
 > - **Fix approach:** add `name` and `description` frontmatter to each `squadlogic-*` skill and
 >   check its paths (for example the evaluator registry's location).
 > - **Files touched:** `.agents/skills/squadlogic-*/SKILL.md`.
@@ -791,6 +833,10 @@ smoke-tested
 > - **Verification label:** executed (current state).
 
 > **M5.3. The July plan was never closed** (audit finding 12.5, medium)
+> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open).** The July plan is marked superseded, with a disposition
+>   for each of its 37 items: 13 closed (with the PR), 11 open under an October finding, 13 open
+>   and not carried by this audit (listed below, under "Discovered during execution").
+>   *Statically reviewed.*
 > - **Fix approach:** add a status line to the July plan marking it superseded by this one, with
 >   a table mapping each July item to "closed in <PR>" or to this audit's ID.
 > - **Files touched:** `docs/audits/2026-07-production-readiness/remediation-plan.md`.
@@ -804,6 +850,15 @@ smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M5.4. Vercel's settings and the frontend rollback aren't written down** (audit finding 7.3, medium)
+> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open), except the test gate.** `vercel.json` sets `framework`,
+>   `buildCommand` (`npm run frontend:build`) and `outputDirectory`, held by
+>   `tests/vercelBuildSettings.test.js`; `ENVIRONMENT.md` lists what the Vercel project sets, by
+>   name; `ci-cd.md` has the Vercel settings and a frontend rollback; the cutover runbook's mock
+>   rollback now redeploys instead of promoting. **Gate partly met:** the PR's preview builds from
+>   `vercel.json`, which takes precedence over the dashboard; the dashboard's own build-command
+>   override (today's production build runs `npm run frontend:build`, not the preset's default) is
+>   then redundant. Clearing it is the owner's call after the merge (until then `main`'s deploys
+>   need it); the first deploy after that completes the gate.
 > - **Fix approach:** put `buildCommand`, `outputDirectory` and `framework` in `vercel.json`
 >   (Node comes from `engines`, M1.4), list the Vercel environment variables by name in
 >   `docs/operations/ENVIRONMENT.md`, and add a frontend rollback section (Instant Rollback to
@@ -822,6 +877,13 @@ smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M5.5. No unused-code check** (audit finding 1.2, low)
+> - **Status (2026-10-13): done in PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`; open).** knip `~6.27.0` (later versions need zod `^4.4.3`, which
+>   would move the app's zod) in CI's Build & Test as `npm run check:unused`; the core package's
+>   exports count as public API, its files do not; `knip.jsonc` keeps a dated, reasoned baseline
+>   (2 unused files; 12 files whose unused exports, one unused type and one duplicate export are
+>   waived); three unused files deleted; the dead `frontend` workspace removed. *Executed:*
+>   `node.unused-code` passes; knip fails on a planted unused file (frontend and core), export and
+>   dependency.
 > - **Fix approach:** knip in CI with the core package's exports as public API; remove the dead
 >   `frontend` workspace entry.
 > - **Files touched:** `knip.json`, `package.json`, `.github/workflows/ci.yml`.
@@ -1002,6 +1064,41 @@ smoke-tested
   - Production holds no `practice_slots`, `practice_assignments` or `practice_exceptions` rows
     (*executed*, one read-only `SELECT` through the Supabase MCP), so M4.7 needs no backfill.
 
+- 2026-10-13, found by PR 2-C (M2.4-M2.6):
+  - Two other Edge calls have no deadline: `EvaluationPanel`'s Save (`functions.invoke`
+    `fairness-scoring` with `persist: true`, so "Hardening results..." can spin forever) and
+    `useAutoScheduler`'s `auto-scheduler` fetch (only a user abort). Not in M2.5's files; the
+    first wants `invoke`'s `timeout` option and a message that does not say "Failed to send"
+    for a request that was sent. *Statically reviewed.*
+  - `EvaluationPanel`'s Save sends `practiceData` as it is, while its read sends `null` for a
+    practice block with no teams or slots; with games alongside, the Save would now get M2.6's
+    422. No page passes `gameData` today, so unreachable. *Statically reviewed.*
+  - The Edge game evaluator scores a `games` block whose `teams` list is empty as clean (every
+    game dropped as an unknown team, coverage 100), the M2.6 shape for games. Not refused.
+    *Statically reviewed.*
+
+- 2026-10-13, found by PR M5 (branch `claude/vibrant-allen-hr7y7s-m5`):
+  - `.gitignore`'s CRLF blank lines made `git check-ignore` report every path with a trailing
+    slash as ignored, so `check:instructions` passed every code-span path in the instruction files
+    without checking it. PR M5 renormalizes `.gitignore` to LF (one of M6.2's files); the other 12
+    CRLF or mixed files stay with M6.2. *Executed.*
+  - Audit finding 4.1 says every migration since 2026-05-30 has a revert and a smoke script; four
+    do not: `20260602010000`, `20260603190000`, `20260612000000` and `20260612000001` (July
+    DS-1). *Executed* (a search of `docs/sql/` for each version).
+  - Thirteen July items are still open and no October finding carries them: DS-4 (CSV formula
+    injection), DS-5 (`submit_registration` throttle), DS-9 (impersonation failures swallowed),
+    DS-14 (`dashboardCache` unused), DS-15 (serial dashboard queries), DD-1 to DD-5, DD-7, DD-9
+    (docs drift) and TG-3 (three E2E journeys). For the owner to place; the July plan's table
+    has the detail. *Statically reviewed.*
+  - The production bundle embeds every `VITE_VERCEL_*` system variable Vercel exposes, the last
+    commit's message and author among them, because `config.js` reads `import.meta.env` whole
+    (8.4, M2.2). *Executed* (names checked in the deployed bundle, values not recorded).
+  - Vercel installs with `npm install`, not `npm ci`, so its builds don't hold to the lockfile the
+    way CI's do. Setting `installCommand` is a one-line change, left for M2.3. *Executed* (build
+    log).
+  - `packages/core/package.json` names `src/index.js` as its entry, which does not exist (knip's
+    configuration hint). For M6.1. *Executed.*
+
 - 2026-10-13, found by the M4.7 build:
   - The practice page builds its auto-scheduler review once per run id: a result that arrives
     before the page's slots are read is staged with the display fallback range `Full Season`
@@ -1009,10 +1106,10 @@ smoke-tested
     disabled until the slots are read), and since M4.7 the engines drop such a row as an
     unreadable range and report it rather than score it season-long. Not fixed.
     *Executed* (a test that set the result before the slots loaded saw it).
-  - Both engines still refuse a second row for the same `team::slot` as a duplicate, even when
-    the two rows' ranges are disjoint (a series closed and later restarted on the same slot).
-    Kept as it was: changing what a duplicate is would change the conflict identity M4.7
-    promised to keep (Q7). *Statically reviewed.*
+  - Both engines refused a second row for the same `team::slot` as a duplicate even when the
+    two rows' ranges are disjoint, although the table's own key is (team, slot, range). Fixed in
+    M4.7 for dated runs (its review round): a duplicate is the same range or one sharing a live
+    date; undated runs keep the old rule. *Executed* (witnesses "two-series" and "duplicate").
 
 ## Deferred with reason
 

@@ -197,6 +197,47 @@ export const ScoringInputSchema = z.object({
   metadata: z.record(z.string(), z.any()).optional(),
 });
 
+/** The `code` of `fairness-scoring`'s 422 for a practice block with no teams or no slots. */
+export const EMPTY_PRACTICE_ROSTER = 'EMPTY_PRACTICE_ROSTER';
+
+export type EmptyPracticeRosterRefusal = {
+  error: string;
+  code: typeof EMPTY_PRACTICE_ROSTER;
+  teamCount: number;
+  slotCount: number;
+};
+
+/**
+ * Refuse a practice block that has no teams or no slots (remediation M2.6).
+ *
+ * The engine resolves every assignment against `teams` and `slots`, so with
+ * either list empty it drops every row and reports a clean schedule after
+ * examining nothing; with `persist: true` that clean result was recorded as an
+ * evaluation run. `EvaluationPanel` stopped sending such a request in #551
+ * (`practiceRosterOf`, the same rule: both lists non-empty); this is the
+ * server's own refusal, because validation is server-side.
+ *
+ * `null` practice (a games-only request) is not refused here.
+ */
+export function refuseEmptyPracticeRoster(
+  practice: { teams: unknown[]; slots: unknown[] } | null | undefined
+): EmptyPracticeRosterRefusal | null {
+  if (!practice) return null;
+  const teamCount = practice.teams.length;
+  const slotCount = practice.slots.length;
+  if (teamCount > 0 && slotCount > 0) return null;
+  const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+  return {
+    error:
+      'A practice evaluation needs at least one team and one practice slot; this request has ' +
+      `${plural(teamCount, 'team')} and ${plural(slotCount, 'slot')}, so nothing would be ` +
+      'examined. Nothing was evaluated or saved.',
+    code: EMPTY_PRACTICE_ROSTER,
+    teamCount,
+    slotCount,
+  };
+}
+
 export type Team = z.infer<typeof TeamSchema>;
 export type Slot = z.infer<typeof SlotSchema>;
 export type PracticeAssignment = z.infer<typeof PracticeAssignmentSchema>;

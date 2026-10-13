@@ -4,6 +4,58 @@
 **Repo:** `D:\SquadLogic\SquadLogic`, main branch, HEAD `1dccab7` (PR #330, 2026-06-12)
 **Scope:** Gap analysis and remediation sequencing only. No rewrite, no TypeScript conversion, no ORM/auth/framework swap, no monorepo retooling. No item in this plan proposes payments/billing collection, CMS/public-site hosting, sensitive-document file uploads, e-commerce, sponsor CRM, or an AI assistant/chatbot — the CLAUDE.md §2 hard exclusions are not touched anywhere below.
 
+**Status:** SUPERSEDED on 2026-10-13 by the October plan,
+[`../2026-10-production-readiness/remediation-plan.md`](../2026-10-production-readiness/remediation-plan.md).
+This plan was never closed item by item; the table below gives every item its disposition as of
+`main` at `64bd751` (2026-10-13), each checked against the code then (*statically reviewed*
+unless a cell says otherwise; the PB-1 to PB-4 fixes were also applied and smoke-tested by the
+migration harness, per the October audit). "Oct x.y" is the October audit's finding; an item
+still open there is tracked by that finding's plan item. The 37 items cover the July audit's 38
+findings (DS-12 also closes the `sentry-smoke.md` release-tag finding).
+
+| Item | Disposition |
+| --- | --- |
+| PB-1 | Closed in #333 (`20260726000000_drop_stale_broad_write_policies.sql`) |
+| PB-2 | Closed in #333 (`20260726000100_fix_organizations_write_policy.sql`) |
+| PB-3 | Closed in #333 (`20260726000200_record_audit_event_authz.sql`) |
+| PB-4 | Closed in #333 (`20260726000300_finalize_import_reimport_coalesce.sql`) |
+| DS-1 | Open: Oct 4.1 (deferred, with reason). Four of the ten were added after the revert/smoke convention began and still have no scripts; see the October plan's "Discovered during execution" |
+| DS-2 | Open: Oct 2.3 (M4.4) |
+| DS-3 | Open: Oct 8.1 (M2.1) |
+| DS-4 | Open, not carried by the October audit: `escapeCsvValue` still quotes only `"`, `,`, CR and LF |
+| DS-5 | Open, not carried by the October audit: `submit_registration` has no throttle |
+| DS-6 | Closed in #551 (a failed evaluation now renders "The evaluation failed, so nothing was checked") |
+| DS-7 | Open: Oct 5.2 (M2.5) |
+| DS-8 | Closed in #553 for failures: every Edge Function is wrapped in `withFailureLogging` (BetterStack); the residual gaps are in the October plan (PR 1-C) |
+| DS-9 | Open, not carried by the October audit: `TopBar` still swallows `impersonateUser` failures and `AdminComplianceDashboard` leaves them unhandled |
+| DS-10 | Closed in #553 (`logger.setUser` from `AuthContext` and `OrganizationContext`) |
+| DS-11 | Closed in #553 with DS-8 (function, request and organization IDs on every failure log) |
+| DS-12 | Closed in #545 (`release` from `VITE_APP_VERSION`, defined in `vite.config.js`) |
+| DS-13 | Closed in #553 (the failure log carries the request and organization IDs) |
+| DS-14 | Open, not carried by the October audit: `dashboardCache` is still used only by its own test |
+| DS-15 | Open, not carried by the October audit: both dashboards still await their queries in sequence |
+| DS-16 | Closed in #488 (the mock client left the main bundle) |
+| DS-17 | Open: Oct 11.1 (M4.2) |
+| DS-18 | Open: Oct 11.2 (M4.3) |
+| DD-1 | Open, not carried by the October audit: `frontend-architecture.md` still lists `/compliance`, `/reporting` and `/registration/:formId`; `AdminReportingDashboard.jsx` is still unrouted (baselined in `knip.jsonc`) |
+| DD-2 | Open, not carried by the October audit: `03_ROADMAP.md` still lists division team-size configuration as backlog |
+| DD-3 | Open, not carried by the October audit: `data-modeling.md` and `team-generation.md` unchanged |
+| DD-4 | Open, not carried by the October audit: `persistence-rpc-layer.md` still lacks the `20260613*` RPCs |
+| DD-5 | Open, not carried by the October audit: `v1.1-planning.md` still quotes the old M2.2 wording |
+| DD-6 | Closed by M5.1 (Oct 12.3): `AGENTS.md` §10 names `VITE_SUPABASE_PERSISTENCE_URL` |
+| DD-7 | Open, not carried by the October audit: `ENVIRONMENT.md` still omits the `VITE_TEST_*` variables |
+| DD-8 | Closed in #553 (`sentry-smoke.md` sets the flag instead of calling it) |
+| DD-9 | Open, not carried by the October audit: `playwright.config.ts` still loads only `.env` |
+| TG-1 | Open: Oct 6.1 (M3.1) |
+| TG-2 | Open: Oct 6.6 and 13.3 (M4.6) |
+| TG-3 | Open, not carried by the October audit: no scenario for DST-boundary splitting, rainout acknowledgement or a late registrant on a locked roster |
+| TG-4 | Open within Oct 6.1 (M3.1): the 20,000 ms coverage-mode budget is unchanged; M3.1's coverage run passed on `565e980` |
+| TG-5 | Open: Oct 6.4 (M4.1) |
+| TG-6 | Open: Oct 6.4 (M4.1) |
+
+The items marked "not carried" are listed in the October plan's "Discovered during execution"
+for the owner to place.
+
 ## How to read this plan
 
 Every remediation item lists: **Gap**, **Fix approach**, **Files touched**, **Effort** (S/M/L), the **exact verification command(s)** that prove the fix, and whether it is a **minimal-diff fix** (small, low-blast-radius, reviewable in the normal PR flow) or a **flagged refactor** (larger blast radius — call it out for separate design sign-off before starting). Items are numbered `<section-prefix>-<n>` and referenced by that ID from the Milestones table at the end.

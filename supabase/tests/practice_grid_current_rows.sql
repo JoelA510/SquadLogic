@@ -24,7 +24,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(49);
+SELECT plan(51);
 
 -- Org A: two fresh seasons, one per shape, four teams each, five slots.
 INSERT INTO public.season_settings (id, organization_id, name)
@@ -775,6 +775,35 @@ SELECT is(
       WHERE pa.team_id = 'a1111111-1111-1111-1111-000000007781'),
     'mon:[2026-09-01,2026-10-20),wed:[2026-09-01,2026-10-20),fri:[2026-10-20,2026-12-01)',
     'prompt W8e: both weekdays keep their past, ended on yesterday; Friday starts today');
+
+-- 42-43. W8g: a series that starts today or later has no past, so the grid
+-- replaces it whole: `unlock` only, no `closes`. H's Tuesday override starts
+-- 2026-10-20 (today); overriding H again, to Wednesday, removes it and keeps
+-- every earlier date. (The helper's kept-history rule, "ends before the
+-- team's latest start", agrees here with the page's date rule: Thursday and
+-- the closed Friday both end before today.)
+SELECT lives_ok(
+    $$ SELECT public.persist_practice_schedule(
+           jsonb_build_object('id', 'a1111111-1111-1111-1111-0000000077cd',
+                              'season_settings_id', 'a1111111-1111-1111-1111-0000000077b3'),
+           pg_temp.grid_override_today('a1111111-1111-1111-1111-0000000077b3',
+                                       'a1111111-1111-1111-1111-000000007782',
+                                       'a1111111-1111-1111-1111-0000000077a3', '2026-10-20'),
+           unlock => (SELECT jsonb_build_array(jsonb_build_object(
+                          'assignment_id', id,
+                          'reason', 'grid override a1111111-1111-1111-1111-0000000077cd: other'))
+                        FROM public.practice_assignments
+                       WHERE team_id = 'a1111111-1111-1111-1111-000000007782'
+                         AND practice_slot_id = 'a1111111-1111-1111-1111-0000000077a2')) $$,
+    'prompt W8g: a series starting today is replaced whole with unlock alone');
+SELECT is(
+    (SELECT string_agg(ps.day_of_week::text || ':' || pa.effective_date_range::text, ','
+                       ORDER BY lower(pa.effective_date_range), ps.day_of_week::text)
+       FROM public.practice_assignments pa
+       JOIN public.practice_slots ps ON ps.id = pa.practice_slot_id
+      WHERE pa.team_id = 'a1111111-1111-1111-1111-000000007782'),
+    'thu:[2026-09-01,2026-10-12),fri:[2026-10-12,2026-10-20),wed:[2026-10-20,2026-12-01)',
+    'prompt W8g: the not-started series is gone; every earlier date is unchanged');
 
 SELECT * FROM finish();
 ROLLBACK;

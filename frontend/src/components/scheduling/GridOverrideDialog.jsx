@@ -105,9 +105,9 @@ export default function GridOverrideDialog({
         </strong>
       </h3>
       <p className="text-sm mt-2">
-        Saved practices are locked. Confirming unlocks exactly the series listed as replaced, ends
-        each one on yesterday so its past practices stay as they were, and saves the rest of the
-        schedule as staged.
+        Saved practices are locked. Confirming unlocks exactly the series listed as replaced. Each
+        one that has started ends on yesterday, so its past practices stay as they were; one that
+        has not started yet is replaced whole. The rest of the schedule is saved as staged.
       </p>
       {teams.map((t) => (
         <section

@@ -112,8 +112,14 @@ vi.mock('../frontend/src/components/EvaluationPanel.jsx', () => stub('evaluation
 const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
 const { default: PracticeSchedulingPage, toPersistenceAssignment } =
   await import('../frontend/src/pages/PracticeSchedulingPage.jsx');
-const { gridOverridePlan, gridOverrideReason, gridOverrideUnlock, samePruneSet } =
-  await import('../frontend/src/utils/gridOverridePrompt.js');
+const {
+  gridOverrideCutWindows,
+  gridOverridePlan,
+  gridOverrideReason,
+  gridOverrideUndatable,
+  gridOverrideUnlock,
+  samePruneSet,
+} = await import('../frontend/src/utils/gridOverridePrompt.js');
 
 const SLOTS = [
   { id: 'slot-mon', day_of_week: 'monday', start_time: '17:00:00', end_time: '18:30:00' },
@@ -586,25 +592,114 @@ describe('refusals after Confirm stay in the prompt (plan §2.8, §2.9, Q4)', ()
     await waitFor(() => expect(document.activeElement).toBe(alert));
   });
 
-  it("a double-booking of the team's kept history is refused before Confirm", async () => {
-    // Hawks' Monday series ends 2026-10-24, before their Wednesday series
-    // starts, so staging keeps it as history (#541's rule). A new Monday
-    // 17:00 row from today overlaps it (the writer's :920-956).
-    const kept = [
+  it('history is decided by date: a series running through today is closed, not kept', async () => {
+    // Monday ends 2026-10-24, before Wednesday starts, but runs through
+    // today (2026-10-20): it is current, so it is closed on yesterday; the
+    // not-yet-started Wednesday is replaced whole. No silent double schedule.
+    const rows = [
       row('pa-a-mon', 'team-a', 'slot-mon', '[2026-09-07,2026-10-25)'),
       row('pa-a-wed', 'team-a', 'slot-wed', '[2026-10-25,2026-12-01)'),
       row('pa-b', 'team-b', 'slot-tue', '[2026-09-07,2026-12-01)'),
     ];
-    await openPrompt(kept, { stage: 'Stage Hawks Monday' });
+    await openPrompt(rows, { stage: 'Stage Hawks Monday' });
+    tickAll();
+    chooseReason();
+    await waitFor(() => expect(confirmButton()).toBeEnabled());
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0].repair.unlock.map((u) => u.assignment_id)).toEqual(['pa-a-mon', 'pa-a-wed']);
+    expect(sent[0].repair.closes).toEqual([{ assignment_id: 'pa-a-mon', last_day: YESTERDAY }]);
+  });
+
+  it('a live exception the close would cut blocks Confirm (the enact contract)', async () => {
+    seed();
+    seedMockDb({
+      practice_exceptions: [
+        {
+          id: 'pe-1',
+          organization_id: ORG,
+          season_settings_id: SEASON,
+          assignment_id: 'pa-a-new',
+          window: '[2026-10-26,2026-11-03)',
+          kind: 'time_tbd',
+          withdrawn_at: null,
+        },
+      ],
+    });
+    await openPrompt(SEED, { seeded: true });
     tickAll();
     chooseReason();
     expect(confirmButton()).toBeDisabled();
     expect(screen.getByTestId('grid-override-why').textContent).toBe(
-      'The new practice for Synthetic Hawks overlaps its kept series (Monday 17:00–18:30, ' +
-        '2026-09-07 to 2026-10-24) on the same weekday and time, which cannot be saved. Cancel ' +
-        'and choose another slot.'
+      'Synthetic Hawks’s practice has a saved exception ([2026-10-26,2026-11-03)) after the day ' +
+        'it would end, and the grid does not withdraw exceptions. Withdraw it first, then Apply ' +
+        'again.'
     );
     expect(sent).toHaveLength(0);
+  });
+
+  it('the pure rules: overlap, undatable, cut windows (each can fail)', () => {
+    const slotById = new Map([
+      [
+        'slot-mon',
+        {
+          effectiveFrom: '2026-09-07',
+          effectiveUntil: '2026-11-30',
+          day: 'Monday',
+          startTime: '17:00:00',
+          endTime: '18:30:00',
+        },
+      ],
+    ]);
+    const kept = {
+      id: 'k',
+      teamId: 'team-a',
+      slotId: 'slot-mon',
+      effectiveDateRange: '[2026-09-07,2026-10-25)',
+      source: 'auto',
+    };
+    const overlapping = gridOverridePlan({
+      seasonRows: [kept],
+      assignments: [
+        {
+          teamId: 'team-a',
+          slotId: 'slot-mon',
+          effectiveFrom: '2026-09-07',
+          effectiveUntil: '2026-10-24',
+        },
+        {
+          teamId: 'team-a',
+          slotId: 'slot-mon',
+          effectiveFrom: TODAY,
+          effectiveUntil: '2026-11-30',
+        },
+      ],
+      slotById,
+      stagedTeamIds: ['team-a'],
+    });
+    expect(overlapping.overlaps.map((r) => r.id)).toEqual(['k']);
+    expect(
+      gridOverrideUndatable([{ id: 'x', effectiveDateRange: 'nonsense' }], TODAY)
+    ).toHaveLength(1);
+    expect(
+      gridOverrideUndatable([{ id: 'y', effectiveDateRange: '[2026-09-07,2026-10-13)' }], TODAY)
+    ).toHaveLength(1);
+    expect(
+      gridOverrideUndatable([{ id: 'z', effectiveDateRange: '[2026-09-07,2026-12-01)' }], TODAY)
+    ).toHaveLength(0);
+    const prune = [{ id: 'a' }, { id: 'b' }];
+    const closes = [{ assignment_id: 'a', last_day: YESTERDAY }];
+    const cuts = gridOverrideCutWindows(prune, closes, [
+      { assignment_id: 'a', window: '[2026-10-01,2026-10-19]', withdrawn_at: null }, // before: kept
+      { assignment_id: 'a', window: '[2026-10-01,2026-10-25]', withdrawn_at: null }, // cut
+      { assignment_id: 'a', window: '[2026-10-01,2026-10-25]', withdrawn_at: '2026-10-02' }, // withdrawn
+      { assignment_id: 'b', window: '[2026-09-01,2026-09-02]', withdrawn_at: null }, // b replaced whole
+      { assignment_id: 'c', window: '[2026-10-01,2026-10-25]', withdrawn_at: null }, // not replaced
+    ]);
+    expect(cuts.map((c) => `${c.assignment_id}${c.window}`)).toEqual([
+      'a[2026-10-01,2026-10-25]',
+      'b[2026-09-01,2026-09-02]',
+    ]);
   });
 
   it('a stale fingerprint reopens the prompt on a fresh read, and does not resend', async () => {

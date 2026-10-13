@@ -396,6 +396,9 @@ function expectUnlocksPruneSet(seed, { rows, unlock, closes }) {
     .filter((r) => canonicalRange(r.effective_date_range).slice(1, 11) < TODAY)
     .map((r) => r.id)
     .sort();
+  // Meta: every seed asserted here replaces a series with a past to keep, so
+  // an empty `closes` cannot pass as "nothing to close".
+  expect(startedBeforeToday.length).toBeGreaterThan(0);
   expect(closes.map((c) => c.assignment_id).sort()).toEqual(startedBeforeToday);
   for (const c of closes) expect(c.last_day).toBe('2026-10-19');
   // The staged row starts today: nothing before today is newly claimed.

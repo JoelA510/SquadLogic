@@ -139,6 +139,47 @@ export function gridOverrideCloses(prune, seasonToday) {
 }
 
 /**
+ * Replaced rows the override cannot date: a range that does not read, or a
+ * series that ended before today (not current, so never the override's to
+ * remove). The prompt refuses them by name rather than delete a past.
+ *
+ * @param {Array<Record<string, any>>} prune
+ * @param {string} seasonToday
+ */
+export function gridOverrideUndatable(prune, seasonToday) {
+  return prune.filter((row) => {
+    const bounds = practiceRangeBounds(row.effectiveDateRange ?? row.effective_date_range);
+    return !bounds || bounds.last < seasonToday;
+  });
+}
+
+/**
+ * Live exception windows the override would cut (the retirement enact's
+ * `CLOSE_CUTS_LIVE_EXCEPTION` contract, `repairAdapter.js` `refuseCutWindows`):
+ * a window on a closed row reaching past its new last day, or any window on a
+ * row replaced whole. Trimming a window is a withdrawal, which the grid does
+ * not make, so the prompt refuses instead. A window that does not read is
+ * treated as cut, never as safe.
+ *
+ * @param {Array<Record<string, any>>} prune
+ * @param {Array<{ assignment_id: string, last_day: string }>} closes
+ * @param {Array<{ assignment_id: string, window: string, withdrawn_at?: string|null }>} exceptions
+ * @returns {Array<{ assignment_id: string, window: string }>}
+ */
+export function gridOverrideCutWindows(prune, closes, exceptions) {
+  const lastDayOf = new Map(closes.map((c) => [lower(c.assignment_id), c.last_day]));
+  const pruned = new Set(prune.map((row) => lower(row.id)));
+  return exceptions
+    .filter((e) => !e.withdrawn_at && pruned.has(lower(e.assignment_id)))
+    .filter((e) => {
+      const lastDay = lastDayOf.get(lower(e.assignment_id)) ?? null;
+      const bounds = practiceRangeBounds(e.window);
+      return lastDay === null || !bounds || bounds.last > lastDay;
+    })
+    .map((e) => ({ assignment_id: e.assignment_id, window: e.window }));
+}
+
+/**
  * Whether two prompts name the same rows, as they stood: id, slot and dates
  * (the enact's `prompt-changed` rule). A row re-ranged in place keeps its id,
  * and must not pass as the row the admin was shown.

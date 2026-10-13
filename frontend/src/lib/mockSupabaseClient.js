@@ -2322,14 +2322,12 @@ export const mockSupabase = {
                     if (home && away) {
                       const sh = Number(updates.score_home);
                       const sa = Number(updates.score_away);
-                      if (
-                        !(
-                          isNaN(sh) ||
-                          isNaN(sa) ||
-                          updates.score_home === null ||
-                          updates.score_away === null
-                        )
-                      ) {
+                      if (!(
+                        isNaN(sh) ||
+                        isNaN(sa) ||
+                        updates.score_home === null ||
+                        updates.score_away === null
+                      )) {
                         if (sh > sa) {
                           home.wins++;
                           away.losses++;

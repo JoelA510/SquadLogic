@@ -147,6 +147,10 @@ export function deriveDatedParityInputs() {
   const practice = loadSeason2026Practice({ season });
   const rowsOf = (sheet) => practice.practiceSlots.filter((r) => r.sourceSheet === sheet);
 
+  /**
+   * @param {any} r - a grid row
+   * @param {string} [validFrom] - the slot's validity start
+   */
   const datedSlot = (r, validFrom = DATED_SEASON.start) => {
     const code = WEEKDAY_CODE[r.day];
     if (!code) throw new Error(`grid row ${r.id} has an unknown day ${r.day}`);

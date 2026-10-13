@@ -254,6 +254,7 @@ test('optional collections default safely when omitted', () => {
     assignmentsCounted: 0,
     assignmentRate: 1,
     manualFollowUpRate: 0,
+    dateModel: 'undated',
   });
   assert.deepEqual(result.practice.unassignedByReason, []);
   assert.deepEqual(result.games.summary.unscheduledByReason, {});

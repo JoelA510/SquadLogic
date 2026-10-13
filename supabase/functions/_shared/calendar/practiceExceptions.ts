@@ -83,8 +83,11 @@ export interface PracticeExceptionsResult {
   };
 }
 
-/** Days since 1970-01-01 of a `YYYY-MM-DD` (core `facility/eligibility.js` `isoDayNumber`). */
-function isoDayNumber(iso: string): number {
+/**
+ * Days since 1970-01-01 of a `YYYY-MM-DD` (core `facility/eligibility.js` `isoDayNumber`).
+ * Exported for `_shared/engines/practice-live-dates.ts` (M4.7), so the Edge has one copy.
+ */
+export function isoDayNumber(iso: string): number {
   const year = Number(iso.slice(0, 4));
   const month = Number(iso.slice(5, 7));
   const day = Number(iso.slice(8, 10));
@@ -97,8 +100,8 @@ function isoDayNumber(iso: string): number {
   return era * 146097 + dayOfEra - 719468;
 }
 
-/** The inverse (core `isoDateOfDayNumber`). */
-function isoDateOfDayNumber(dayNumber: number): string {
+/** The inverse (core `isoDateOfDayNumber`). Exported with {@link isoDayNumber}. */
+export function isoDateOfDayNumber(dayNumber: number): string {
   const shifted = dayNumber + 719468;
   const era = Math.floor(shifted / 146097);
   const dayOfEra = shifted - era * 146097;

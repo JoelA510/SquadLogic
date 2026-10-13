@@ -1,6 +1,14 @@
 import { assertCountsLabelled, buildCountUnitRegistry } from './counts.js';
 import { SlotSchema, TeamSchema } from './schemas/index.js';
 import { listTeamCoachIds, resolveSchoolDayEndFilter } from './practiceScheduling.js';
+import {
+  LIVE_SPAN_STATUS,
+  assignmentLiveSpan,
+  calendarDayNumber,
+  peakLiveCount,
+  sharedLiveDates,
+  wallSeconds,
+} from './utils/practiceLiveDates.js';
 
 /**
  * What every number this module publishes is a number **of**.
@@ -30,8 +38,11 @@ export const PRACTICE_METRICS_COUNT_UNITS = buildCountUnitRegistry({
   'summary.assignmentRate': 'SHARE_OF_ONE',
   'summary.manualFollowUpRate': 'SHARE_OF_ONE',
   // Within one slot an assignment and a team are the same thing: the report
-  // refuses a duplicate `team::slot` pair, so `assignedCount` is both.
+  // refuses a duplicate `team::slot` pair, so `assignedCount` is both. In a
+  // dated run (M4.7) it is the teams holding the slot on its busiest date, and
+  // the rows naming the slot over the season are `assignmentRows`.
   'slotUtilization.[].assignedCount': 'TEAM_SLOT_UNIT',
+  'slotUtilization.[].assignmentRows': 'PRACTICE_ASSIGNMENT',
   'slotUtilization.[].capacity': 'TEAM_SLOT_UNIT',
   'slotUtilization.[].utilization': 'SHARE_OF_ONE',
   // A base slot aggregates several slots, so a team practising twice under one
@@ -55,6 +66,8 @@ export const PRACTICE_METRICS_COUNT_UNITS = buildCountUnitRegistry({
   'dayConcentrationAlerts.[].totalAssignments': 'PRACTICE_ASSIGNMENT',
   'coachLoad.*.assignedTeams': 'PRACTICE_ASSIGNMENT',
   'coachLoad.*.distinctDays': 'DAY',
+  // Dated runs only: the calendar dates on which the pair clashes.
+  'coachConflicts.[].sharedDates': 'DAY',
   'fairnessConcerns.[].dominantShare': 'SHARE_OF_ONE',
   'fairnessConcerns.[].totalAssigned': 'PRACTICE_ASSIGNMENT',
   'fairnessConcerns.[].totalCapacity': 'TEAM_SLOT_UNIT',
@@ -112,10 +125,12 @@ export function conflictPairKey(a, b) {
  *     assignmentsRead: number,
  *     assignmentsCounted: number,
  *     assignmentRate: number,
+ *     dateModel: 'dated' | 'undated',
  *   },
  *   slotUtilization: Array<{
  *     slotId: string,
  *     assignedCount: number,
+ *     assignmentRows?: number,
  *     capacity: number,
  *     utilization: number | null,
  *     overbooked: boolean,
@@ -147,6 +162,8 @@ export function conflictPairKey(a, b) {
  *     coachIds: Array<string>,
  *     teams: Array<{ teamId: string, slotId: string }>,
  *     reason: string,
+ *     firstDate?: string,
+ *     sharedDates?: number,
  *   }>,
  *   dataQualityWarnings: Array<string>,
  * }}
@@ -232,11 +249,68 @@ function calculateFairnessConcerns(baseSlotDistribution, assignmentsByDivision) 
   return fairnessConcerns;
 }
 
+/** A slot carries a date model when it names either end of its dating. */
+const isDatedSlot = (slot) =>
+  (slot?.firstDate !== undefined && slot?.firstDate !== null) ||
+  (slot?.lastDate !== undefined && slot?.lastDate !== null);
+
+/**
+ * Whether this call is dated (M4.7, plan §3.3, Q8): every slot carries
+ * `firstDate`, `lastDate`, `startTime` and `endTime`, or none carries a date.
+ * A mix refuses, so half a calendar is never scored as a whole one. The Edge
+ * twin (`scoring-engine.ts` `resolveDateModel`) and the `fairness-scoring`
+ * schema refuse the same inputs.
+ *
+ * `startTime`/`endTime` alone do not date a slot: the practice page's slots
+ * carry them for other readers (the auto-scheduler, persistence), and an
+ * undated caller sending them is not a mixed one.
+ *
+ * @param {Array<Object>} slots
+ * @returns {'dated' | 'undated'}
+ * @throws {TypeError} for a mix, or a dated slot whose four fields do not read
+ */
+function resolveDateModel(slots) {
+  const dated = slots.filter(isDatedSlot).length;
+  if (dated === 0) return 'undated';
+  if (dated !== slots.length) {
+    throw new TypeError(
+      `practice slots must all carry firstDate and lastDate, or none: ${dated} of ${slots.length} do`
+    );
+  }
+  for (const slot of slots) {
+    const firstDay = calendarDayNumber(slot.firstDate);
+    const lastDay = calendarDayNumber(slot.lastDate);
+    const startSec = wallSeconds(slot.startTime);
+    const endSec = wallSeconds(slot.endTime);
+    if (firstDay === null || lastDay === null || startSec === null || endSec === null) {
+      throw new TypeError(
+        `dated slot ${slot.id} needs firstDate and lastDate (YYYY-MM-DD) and startTime and endTime (HH:MM[:SS])`
+      );
+    }
+    if (startSec >= endSec) {
+      throw new TypeError(`dated slot ${slot.id} must end after it starts`);
+    }
+  }
+  return 'dated';
+}
+
 /**
  * Measure an applied or proposed practice schedule.
  *
+ * **Dated or undated (M4.7, `docs/PLAN_SCORING_DATE_MODEL.md`).** When every
+ * slot carries `firstDate`, `lastDate`, `startTime` and `endTime`, the report
+ * compares dated occurrences: an assignment is live on its slot's weekly dates
+ * inside its `effectiveDateRange` and the slot's validity; two assignments
+ * clash only when they share a coach, a live date and overlapping wall
+ * windows; and `slotUtilization[].assignedCount` is the slot's busiest date,
+ * with the row count as `assignmentRows`. With none of them, the comparison is
+ * the old one (first-occurrence instants, every row counted), unchanged.
+ * `summary.dateModel` says which ran. Coverage, `coachLoad` and the base-slot
+ * and division distributions are season-level in both (plan Q6).
+ *
  * @param {Object} params
- * @param {Array<{ teamId: string, slotId: string }>} params.assignments
+ * @param {Array<{ teamId: string, slotId: string, effectiveDateRange?: string | null }>} params.assignments
+ *   `effectiveDateRange` (a `daterange` literal) is read in a dated run only.
  * @param {Array<{ teamId: string, reason?: unknown }>} [params.unassigned] -
  *   `reason` is deliberately untyped: `normalizeManualFollowUpReasonInput`
  *   takes whatever a persisted run put there, and a test pins a number and an
@@ -293,6 +367,7 @@ export function evaluatePracticeSchedule({
   if (!Array.isArray(slots)) {
     throw new TypeError('slots must be an array');
   }
+  const dateModel = resolveDateModel(slots);
 
   const teamsById = new Map();
   for (const team of teams) {
@@ -323,6 +398,16 @@ export function evaluatePracticeSchedule({
       start: startDate,
       end: endDate,
       day: slot.day ?? null,
+      // Validated by `resolveDateModel` above; read in a dated run only.
+      dating:
+        dateModel === 'dated'
+          ? {
+              firstDay: calendarDayNumber(slot.firstDate),
+              lastDay: calendarDayNumber(slot.lastDate),
+              startSec: wallSeconds(slot.startTime),
+              endSec: wallSeconds(slot.endTime),
+            }
+          : null,
     });
 
     const existingMeta = baseSlotMetadata.get(baseSlotId) ?? {
@@ -447,6 +532,26 @@ export function evaluatePracticeSchedule({
       continue;
     }
 
+    // Dated runs: the dates this row is live on. An unreadable range is
+    // dropped and reported, the contract for a row naming an unknown slot; a
+    // readable one with no date in the slot's validity is kept (it is
+    // assigned) but holds no date, and is reported so it is never silently
+    // free (plan §3.1).
+    let span = null;
+    if (slot.dating) {
+      span = assignmentLiveSpan({
+        firstDay: slot.dating.firstDay,
+        lastDay: slot.dating.lastDay,
+        range: assignment.effectiveDateRange,
+      });
+      if (span.status === LIVE_SPAN_STATUS.UNREADABLE) {
+        dataQualityWarnings.push(
+          `assignment for team ${assignment.teamId} to slot ${assignment.slotId} has an unreadable date range ${String(assignment.effectiveDateRange)}`
+        );
+        continue;
+      }
+    }
+
     const key = `${assignment.teamId}::${assignment.slotId}`;
     if (seenAssignments.has(key)) {
       dataQualityWarnings.push(
@@ -456,9 +561,15 @@ export function evaluatePracticeSchedule({
     }
     seenAssignments.add(key);
     assignedTeamIds.add(team.id);
+    if (span?.status === LIVE_SPAN_STATUS.NONE) {
+      dataQualityWarnings.push(
+        `assignment for team ${assignment.teamId} has no date inside slot ${assignment.slotId}'s validity`
+      );
+    }
+    const liveSpan = span?.status === LIVE_SPAN_STATUS.LIVE ? span : null;
 
     const slotAssignments = assignmentsBySlot.get(slot.id) ?? [];
-    slotAssignments.push({ teamId: assignment.teamId, team });
+    slotAssignments.push({ teamId: assignment.teamId, team, span: liveSpan });
     assignmentsBySlot.set(slot.id, slotAssignments);
 
     const divisionAssignments = assignmentsByDivision.get(team.division) ?? [];
@@ -467,7 +578,7 @@ export function evaluatePracticeSchedule({
 
     for (const coachId of team.coachIds) {
       const coachAssignments = assignmentsByCoach.get(coachId) ?? [];
-      coachAssignments.push({ teamId: team.id, slot });
+      coachAssignments.push({ teamId: team.id, slot, span: liveSpan });
       assignmentsByCoach.set(coachId, coachAssignments);
     }
 
@@ -531,18 +642,25 @@ export function evaluatePracticeSchedule({
 
   const slotUtilization = [];
   for (const slot of slotsById.values()) {
-    const assignedCount = assignmentsBySlot.get(slot.id)?.length ?? 0;
+    const slotRows = assignmentsBySlot.get(slot.id) ?? [];
+    const assignmentRows = slotRows.length;
+    // Dated: the busiest date's load (plan Q4), so a closed series and its
+    // successor never count against each other. Undated: every row.
+    const assignedCount = slot.dating
+      ? peakLiveCount(slotRows.flatMap((row) => (row.span ? [row.span] : [])))
+      : assignmentRows;
     const capacity = slot.capacity;
     const utilization = capacity === 0 ? null : assignedCount / capacity;
     const overbooked = capacity !== 0 && assignedCount > capacity;
-    if (capacity === 0 && assignedCount > 0) {
+    if (capacity === 0 && assignmentRows > 0) {
       dataQualityWarnings.push(
-        `slot ${slot.id} has zero capacity but ${assignedCount} assignment(s)`
+        `slot ${slot.id} has zero capacity but ${assignmentRows} assignment(s)`
       );
     }
     slotUtilization.push({
       slotId: slot.id,
       assignedCount,
+      ...(slot.dating ? { assignmentRows } : {}),
       capacity,
       utilization,
       overbooked,
@@ -683,12 +801,14 @@ export function evaluatePracticeSchedule({
   const conflictsByPair = new Map();
   for (const [coachId, coachAssignments] of assignmentsByCoach.entries()) {
     const sortedAssignments = coachAssignments
-      .map(({ teamId, slot }) => ({
+      .map(({ teamId, slot, span }) => ({
         teamId,
         slotId: slot.id,
         start: slot.start,
         end: slot.end,
         day: slot.day ?? 'unknown',
+        dating: slot.dating,
+        span,
       }))
       .sort((a, b) => a.start - b.start || a.slotId.localeCompare(b.slotId));
 
@@ -702,7 +822,19 @@ export function evaluatePracticeSchedule({
       const current = sortedAssignments[i];
       for (let j = i + 1; j < sortedAssignments.length; j += 1) {
         const candidate = sortedAssignments[j];
-        if (candidate.start >= current.end) {
+        let shared = null;
+        if (dateModel === 'dated') {
+          // Every pair is visited: first-occurrence order says nothing about
+          // which dates two series share. A clash needs a shared live date
+          // and overlapping wall windows on it; back-to-back is not one.
+          if (!current.span || !candidate.span) continue;
+          const windowsOverlap =
+            current.dating.startSec < candidate.dating.endSec &&
+            candidate.dating.startSec < current.dating.endSec;
+          if (!windowsOverlap) continue;
+          shared = sharedLiveDates(current.span, candidate.span);
+          if (shared.count === 0) continue;
+        } else if (candidate.start >= current.end) {
           break;
         }
         const pairKey = conflictPairKey(current, candidate);
@@ -718,7 +850,14 @@ export function evaluatePracticeSchedule({
             { teamId: current.teamId, slotId: current.slotId },
             { teamId: candidate.teamId, slotId: candidate.slotId },
           ],
-          reason: 'overlapping slots',
+          // Dated runs name when the clash starts and how often (plan Q7).
+          ...(shared
+            ? {
+                reason: `overlapping slots on ${shared.count} date(s) from ${shared.firstDate}`,
+                firstDate: shared.firstDate,
+                sharedDates: shared.count,
+              }
+            : { reason: 'overlapping slots' }),
         });
       }
     }
@@ -798,6 +937,9 @@ export function evaluatePracticeSchedule({
       assignmentsCounted: seenAssignments.size,
       assignmentRate,
       manualFollowUpRate,
+      // Which comparison ran (plan Q8): a caller that dropped the date fields
+      // is visible here rather than scored silently as a whole season.
+      dateModel,
     },
     slotUtilization: slotUtilization.sort((a, b) => a.slotId.localeCompare(b.slotId)),
     baseSlotDistribution,

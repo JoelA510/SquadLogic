@@ -235,11 +235,22 @@ function scoreSchedule(
     })),
     ...placements,
   ];
+  // **Always undated** (M4.7, plan Q2 and §8): the solver's search must not
+  // change while it has no date model of its own (M4.8). Only the fields the
+  // undated comparison reads are passed, so a page that one day sends slot
+  // dates here cannot switch the objective by accident; the evaluation says
+  // `dateModel: 'undated'`. `tests/autoSchedulerLock.test.js` pins it.
   const evaluation = evaluatePracticeSchedule({
     assignments,
     unassigned,
     teams: teams as unknown as Parameters<typeof evaluatePracticeSchedule>[0]['teams'],
-    slots: slots as unknown as Parameters<typeof evaluatePracticeSchedule>[0]['slots'],
+    slots: slots.map(({ id, day, start, end, capacity }) => ({
+      id,
+      day,
+      start,
+      end,
+      capacity,
+    })) as unknown as Parameters<typeof evaluatePracticeSchedule>[0]['slots'],
   });
 
   // Compute fitness from scoring-engine metrics

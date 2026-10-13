@@ -23,7 +23,7 @@ import { GRID_OVERRIDE_REASONS } from '../../utils/gridOverridePrompt.js';
  *
  * @param {{ open: boolean,
  *   teams: Array<{ teamId: string, teamName: string, replacing: string[],
- *     replacement: string[], kept: string[] }>,
+ *     replacement: string[], kept: string[], past?: string | null }>,
  *   strays: string[], blocked: string | null, busy: boolean,
  *   notice: { tone: 'alert' | 'status', text: string } | null,
  *   onConfirm: (reasonCode: string) => void, onClose: () => void }} props
@@ -105,8 +105,9 @@ export default function GridOverrideDialog({
         </strong>
       </h3>
       <p className="text-sm mt-2">
-        Saved practices are locked. Confirming unlocks exactly the series listed as replaced, and
-        saves the rest of the schedule as staged.
+        Saved practices are locked. Confirming unlocks exactly the series listed as replaced, ends
+        each one on yesterday so its past practices stay as they were, and saves the rest of the
+        schedule as staged.
       </p>
       {teams.map((t) => (
         <section
@@ -124,6 +125,7 @@ export default function GridOverrideDialog({
             <li data-testid="grid-override-replacement">
               With: {t.replacement.length > 0 ? t.replacement.join(' and ') : 'no practice'}
             </li>
+            {t.past && <li data-testid="grid-override-past">{t.past}</li>}
             {t.kept.length > 0 && (
               <li data-testid="grid-override-kept">
                 Kept (history, unchanged): {t.kept.join(' and ')}
@@ -216,6 +218,7 @@ GridOverrideDialog.propTypes = {
       replacing: PropTypes.arrayOf(PropTypes.string).isRequired,
       replacement: PropTypes.arrayOf(PropTypes.string).isRequired,
       kept: PropTypes.arrayOf(PropTypes.string).isRequired,
+      past: PropTypes.string,
     })
   ).isRequired,
   strays: PropTypes.arrayOf(PropTypes.string).isRequired,

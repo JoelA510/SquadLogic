@@ -292,7 +292,11 @@ const olderRunRows = (seed) => seed.filter((r) => SEASON_TEAMS.has(r.team_id) &&
 /** @type {any[]} */
 let sent = [];
 
+// Today on the season's clock is 2026-10-20 (only `Date` is faked).
+const TODAY = '2026-10-20';
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-20T16:00:00Z'));
   sessionStorage.clear();
   // The mock client keeps its last-saved DB on `window` (an RPC such as the
   // prompt's fingerprint read saves it) and merges it into every read.
@@ -312,6 +316,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 async function renderGrid(seed) {
@@ -361,24 +366,44 @@ async function stageAndApply(seed, stageButton = 'Stage Team D') {
   const body = sent[0];
   const rows = body?.snapshot?.payload?.assignmentRows;
   expect(Array.isArray(rows)).toBe(true);
-  // The grid never closes. It unlocks only after the prompt.
-  expect(body.repair?.closes ?? []).toEqual([]);
+  // The grid unlocks and closes only after the prompt.
   const unlock = body.repair?.unlock ?? [];
-  if (!prompted) expect(unlock).toEqual([]);
-  return { rows, unlock, prompted };
+  const closes = body.repair?.closes ?? [];
+  if (!prompted) {
+    expect(unlock).toEqual([]);
+    expect(closes).toEqual([]);
+  }
+  return { rows, unlock, closes, prompted };
 }
 
 /**
  * W1 + W4 (docs/PLAN_GRID_OVERRIDE_PROMPT.md §4): the save unlocks exactly
  * the writer's prune set of what it sent -- so the writer has nothing left to
  * refuse -- each with the reason chosen. Never the closed series.
+ *
+ * #546: no history is rewritten. Each of those rows that started before
+ * today is closed on yesterday (`closes`, from the seed's own ranges); the
+ * staged row starts today.
  */
-function expectUnlocksPruneSet(seed, { rows, unlock }) {
+function expectUnlocksPruneSet(seed, { rows, unlock, closes }) {
   const pruned = writerPruneSet(seed, rows);
   // Meta: a seed this is asserted on must prune something.
   expect(pruned.length).toBeGreaterThan(0);
   expect(unlock.map((u) => u.assignment_id).sort()).toEqual(pruned);
   for (const u of unlock) expect(u.reason).toMatch(/^grid override( \S+)?: conflict-fix$/);
+  const startedBeforeToday = seed
+    .filter((r) => pruned.includes(r.id))
+    .filter((r) => canonicalRange(r.effective_date_range).slice(1, 11) < TODAY)
+    .map((r) => r.id)
+    .sort();
+  expect(closes.map((c) => c.assignment_id).sort()).toEqual(startedBeforeToday);
+  for (const c of closes) expect(c.last_day).toBe('2026-10-19');
+  // The staged row starts today: nothing before today is newly claimed.
+  const stagedRows = rows.filter(
+    (r) => r.source === 'manual' && !seed.some((s) => keyOf(s) === keyOf(r))
+  );
+  expect(stagedRows.length).toBeGreaterThan(0);
+  for (const r of stagedRows) expect(String(r.effective_date_range).slice(1, 11)).toBe(TODAY);
 }
 
 describe('the scheduling grid reads the current practice schedule, not the latest run', () => {

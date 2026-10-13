@@ -179,7 +179,14 @@ let answer = { status: 200, body: { runId: 'run-applied', teamsWithoutPractice: 
 /** @type {any[]} */
 let sent = [];
 
+// "Today" on the season's clock (America/New_York) is 2026-10-20, so yesterday
+// is 2026-10-19. Only `Date` is faked: timers stay real for `waitFor`.
+const TODAY = '2026-10-20';
+const YESTERDAY = '2026-10-19';
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-20T16:00:00Z'));
   sessionStorage.clear();
   // The mock client keeps its last-saved DB on `window` and merges it into
   // every read; the prompt's fingerprint read saves it.
@@ -199,6 +206,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 /** Stage Hawks onto Friday and click Apply; return the open dialog. */
@@ -238,7 +246,9 @@ async function insertElsewhere(newRow) {
 // field name; the page appends " · <field>" when the read has one.
 const HAWKS_WED = 'Wednesday 16:00–17:00, 2026-10-12 to 2026-11-30';
 const HAWKS_MON = 'Monday 17:00–18:30, 2026-09-07 to 2026-10-11';
-const HAWKS_FRI = 'Friday 17:00–18:00, 2026-09-07 to 2026-11-30';
+// The new row starts today, not at the slot's start (#546).
+const HAWKS_FRI = `Friday 17:00–18:00, ${TODAY} to 2026-11-30`;
+const ENDS = `(ends on ${YESTERDAY})`;
 
 describe('W2: the prompt names the team, the series replaced, the new slot and the history', () => {
   it('Hawks: Wednesday replaced by Friday, Monday kept as history', async () => {
@@ -250,10 +260,14 @@ describe('W2: the prompt names the team, the series replaced, the new slot and t
     expect(team).toHaveAttribute('data-team-id', 'team-a');
     expect(within(team).getByRole('heading', { name: 'Synthetic Hawks' })).toBeInTheDocument();
     expect(within(team).getByTestId('grid-override-replacing').textContent).toBe(
-      `Replacing: ${HAWKS_WED}`
+      `Replacing: ${HAWKS_WED} ${ENDS}`
     );
     expect(within(team).getByTestId('grid-override-replacement').textContent).toBe(
       `With: ${HAWKS_FRI}`
+    );
+    // The past stays, in words.
+    expect(within(team).getByTestId('grid-override-past').textContent).toBe(
+      `Practices up to ${YESTERDAY} are kept; from ${TODAY} Synthetic Hawks practises ${HAWKS_FRI}.`
     );
     expect(within(team).getByTestId('grid-override-kept').textContent).toBe(
       `Kept (history, unchanged): ${HAWKS_MON}`
@@ -275,8 +289,8 @@ describe('W2: the prompt names the team, the series replaced, the new slot and t
     ];
     const { dialog } = await openPrompt(twoLive);
     expect(within(dialog).getByTestId('grid-override-replacing').textContent).toBe(
-      'Replacing: Monday 17:00–18:30, 2026-09-07 to 2026-11-30 and ' +
-        'Wednesday 16:00–17:00, 2026-09-07 to 2026-11-30'
+      `Replacing: Monday 17:00–18:30, 2026-09-07 to 2026-11-30 ${ENDS} and ` +
+        `Wednesday 16:00–17:00, 2026-09-07 to 2026-11-30 ${ENDS}`
     );
     expect(within(dialog).queryByTestId('grid-override-kept')).toBeNull();
   });
@@ -347,13 +361,16 @@ describe('W4: Confirm sends exactly those rows, with the reason and the fingerpr
     expect(body.repair.unlock).toEqual([
       { assignment_id: 'pa-a-new', reason: `grid override ${RUN1}: coach-request` },
     ]);
-    expect(body.repair.closes).toEqual([]);
+    // #546: the replaced series started before today, so it is ended on
+    // yesterday (and is in `unlock`, as the writer requires), never deleted.
+    expect(body.repair.closes).toEqual([{ assignment_id: 'pa-a-new', last_day: YESTERDAY }]);
     expect(body.repair.withdrawExceptions).toEqual([]);
     expect(body.repair.exceptions).toEqual([]);
     expect(typeof before.data).toBe('string');
     expect(body.repair.baseFingerprint).toBe(before.data);
     // The payload: every stored row but the replaced one, by its stored key
-    // and source, plus the staged Friday row.
+    // and source -- nothing before today changes -- plus the staged Friday
+    // row, which starts today.
     const keys = body.snapshot.payload.assignmentRows
       .map((r) => `${r.team_id}|${r.practice_slot_id}|${r.effective_date_range}|${r.source}`)
       .sort();
@@ -361,11 +378,66 @@ describe('W4: Confirm sends exactly those rows, with the reason and the fingerpr
       [
         'team-a|slot-mon|[2026-09-07,2026-10-11]|auto',
         'team-b|slot-tue|[2026-09-07,2026-11-30]|auto',
-        'team-a|slot-fri|[2026-09-07,2026-11-30]|manual',
+        `team-a|slot-fri|[${TODAY},2026-11-30]|manual`,
       ].sort()
     );
+    // No sent row starts before today except the stored rows re-sent as is.
+    const stored = new Set(SEED.map((r) => `${r.team_id}|${r.practice_slot_id}`));
+    for (const r of body.snapshot.payload.assignmentRows) {
+      if (!stored.has(`${r.team_id}|${r.practice_slot_id}`)) {
+        expect(r.effective_date_range.slice(1, 11) >= TODAY).toBe(true);
+      }
+    }
     // Saved: the dialog closes and the page reports the save.
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('a series that starts today or later has no past: replaced whole, no close', async () => {
+    const future = [
+      row('pa-a-next', 'team-a', 'slot-wed', '[2026-10-26,2026-12-01)'),
+      row('pa-b', 'team-b', 'slot-tue', '[2026-09-07,2026-12-01)'),
+    ];
+    const { dialog } = await openPrompt(future);
+    expect(within(dialog).getByTestId('grid-override-replacing').textContent).toBe(
+      'Replacing: Wednesday 16:00–17:00, 2026-10-26 to 2026-11-30 (not started yet, so ' +
+        'replaced whole)'
+    );
+    expect(within(dialog).queryByTestId('grid-override-past')).toBeNull();
+    tickAll();
+    chooseReason();
+    await waitFor(() => expect(confirmButton()).toBeEnabled());
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0].repair.unlock.map((u) => u.assignment_id)).toEqual(['pa-a-next']);
+    expect(sent[0].repair.closes).toEqual([]);
+  });
+
+  it('a series that ended before today is not current: left untouched, nothing asked', async () => {
+    const ended = [
+      row('pa-a-ended', 'team-a', 'slot-wed', '[2026-09-07,2026-10-13)'),
+      row('pa-b', 'team-b', 'slot-tue', '[2026-09-07,2026-12-01)'),
+    ];
+    seed(ended);
+    render(
+      <MemoryRouter>
+        <PracticeSchedulingPage />
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(screen.getAllByText('Synthetic Hawks').length).toBeGreaterThan(0));
+    fireEvent.click(await screen.findByRole('button', { name: /enter manual override/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stage Hawks' }));
+    const apply = await screen.findByRole('button', { name: /apply schedule/i });
+    await waitFor(() => expect(apply).toBeEnabled());
+    fireEvent.click(apply);
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(sent[0].repair).toBeUndefined();
+    const keys = sent[0].snapshot.payload.assignmentRows.map(
+      (r) => `${r.team_id}|${r.practice_slot_id}|${r.effective_date_range}`
+    );
+    // The ended series goes back exactly as stored; the new row starts today.
+    expect(keys).toContain('team-a|slot-wed|[2026-09-07,2026-10-12]');
+    expect(keys).toContain(`team-a|slot-fri|[${TODAY},2026-11-30]`);
   });
 });
 
@@ -460,7 +532,7 @@ describe('W7: a change between open and Confirm reopens the prompt and sends not
     expect(screen.getByRole('dialog').contains(notice)).toBe(true);
     expect(screen.getByTestId('grid-override-replacing').textContent).toBe(
       // In the writer's order (by id): pa-a-new, then pa-a-tue.
-      `Replacing: ${HAWKS_WED} and Tuesday 18:00–19:00, 2026-10-12 to 2026-11-30`
+      `Replacing: ${HAWKS_WED} ${ENDS} and Tuesday 18:00–19:00, 2026-10-12 to 2026-11-30 ${ENDS}`
     );
     // The ticks did not carry over to the new list.
     for (const box of screen.getAllByRole('checkbox')) expect(box).not.toBeChecked();
@@ -480,7 +552,7 @@ describe('W7: a change between open and Confirm reopens the prompt and sends not
     fireEvent.click(confirmButton());
     await screen.findByRole('alert');
     expect(screen.getByTestId('grid-override-replacing').textContent).toBe(
-      'Replacing: Wednesday 16:00–17:00, 2026-10-12 to 2026-11-15'
+      `Replacing: Wednesday 16:00–17:00, 2026-10-12 to 2026-11-15 ${ENDS}`
     );
     expect(sent).toHaveLength(0);
   });
@@ -515,15 +587,21 @@ describe('refusals after Confirm stay in the prompt (plan §2.8, §2.9, Q4)', ()
   });
 
   it("a double-booking of the team's kept history is refused before Confirm", async () => {
-    // Hawks onto Monday 17:00 again: the staged row spans the slot window,
-    // which overlaps the kept closed Monday series (the writer's :920-956).
-    await openPrompt(SEED, { stage: 'Stage Hawks Monday' });
+    // Hawks' Monday series ends 2026-10-24, before their Wednesday series
+    // starts, so staging keeps it as history (#541's rule). A new Monday
+    // 17:00 row from today overlaps it (the writer's :920-956).
+    const kept = [
+      row('pa-a-mon', 'team-a', 'slot-mon', '[2026-09-07,2026-10-25)'),
+      row('pa-a-wed', 'team-a', 'slot-wed', '[2026-10-25,2026-12-01)'),
+      row('pa-b', 'team-b', 'slot-tue', '[2026-09-07,2026-12-01)'),
+    ];
+    await openPrompt(kept, { stage: 'Stage Hawks Monday' });
     tickAll();
     chooseReason();
     expect(confirmButton()).toBeDisabled();
     expect(screen.getByTestId('grid-override-why').textContent).toBe(
       'The new practice for Synthetic Hawks overlaps its kept series (Monday 17:00–18:30, ' +
-        '2026-09-07 to 2026-10-11) on the same weekday and time, which cannot be saved. Cancel ' +
+        '2026-09-07 to 2026-10-24) on the same weekday and time, which cannot be saved. Cancel ' +
         'and choose another slot.'
     );
     expect(sent).toHaveLength(0);

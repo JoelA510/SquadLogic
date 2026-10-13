@@ -35,6 +35,7 @@ import {
 import { loadSeasonPracticeAssignments } from '@squadlogic/core/practiceSupabase.js';
 import GridOverrideDialog from '../components/scheduling/GridOverrideDialog.jsx';
 import {
+  gridOverrideCloses,
   gridOverridePlan,
   gridOverrideReason,
   gridOverrideUnlock,
@@ -966,7 +967,7 @@ export default function PracticeSchedulingPage() {
    * the Apply callback's signature -- and the rest of it -- stays as it was.)
    *
    * @type {React.MutableRefObject<{ prune: Array<Record<string, any>>,
-   *   reasonCode: string, baseFingerprint: string|null } | null>}
+   *   today: string|null, reasonCode: string, baseFingerprint: string|null } | null>}
    */
   const overrideConfirmation = useRef(null);
 
@@ -1029,17 +1030,21 @@ export default function PracticeSchedulingPage() {
       .filter((assignment) => assignment.stagedOverride === true)
       .map(getAssignmentTeamId);
     // The plan keeps the read it was built from, so the prompt's "kept"
-    // history is that read's too.
-    const planOf = (rows) => ({
-      ...gridOverridePlan({
+    // history is that read's too. The replaced series that started before
+    // today are closed on yesterday, never deleted (operator decision, #546).
+    const seasonToday = seasonCalendarDate(Date.now(), timezone);
+    const planOf = (rows) => {
+      const plan = gridOverridePlan({
         seasonRows: rows,
         assignments: persistenceAssignments,
         slotById,
         stagedTeamIds,
-      }),
-      rows,
-    });
+      });
+      const closes = seasonToday ? gridOverrideCloses(plan.prune, seasonToday) : [];
+      return { ...plan, closes, today: seasonToday, rows };
+    };
     let unlock = [];
+    let closes = [];
     let baseFingerprint = null;
     // Every judgement below is on a FRESH read, never the cached `seasonRows`
     // (empty while a refetch is in flight), with the fingerprint read first.
@@ -1056,6 +1061,13 @@ export default function PracticeSchedulingPage() {
       return;
     }
     const plan = planOf(fresh.rows);
+    if (plan.prune.length > 0 && !seasonToday) {
+      refuse(
+        "Today's date on the season's clock is unknown, so the replaced practice cannot be " +
+          'ended on yesterday. Nothing was saved.'
+      );
+      return;
+    }
     if (!confirmation) {
       if (plan.prune.length > 0) {
         openOverridePrompt(plan, null, print);
@@ -1072,7 +1084,11 @@ export default function PracticeSchedulingPage() {
       // Recompute, not what the prompt opened with: a row added, removed or
       // re-ranged since then must be shown before it is unlocked (the
       // enact's `prompt-changed` rule).
-      if (plan.strays.length > 0 || !samePruneSet(plan.prune, confirmation.prune)) {
+      if (
+        plan.strays.length > 0 ||
+        !samePruneSet(plan.prune, confirmation.prune) ||
+        plan.today !== confirmation.today
+      ) {
         refetchSeasonPractice();
         if (plan.prune.length === 0) {
           setOverridePrompt(null);
@@ -1102,6 +1118,7 @@ export default function PracticeSchedulingPage() {
         plan.prune,
         gridOverrideReason({ runId, code: confirmation.reasonCode })
       );
+      closes = plan.closes;
       baseFingerprint = confirmation.baseFingerprint;
     }
 
@@ -1134,7 +1151,8 @@ export default function PracticeSchedulingPage() {
     try {
       // Only a save with daylight exceptions or an accepted override carries
       // a repair body: without one the Edge sends the v2 argument set (#461).
-      // The assignments are the staged payload either way, unchanged.
+      // The assignments are the staged payload either way; an override's
+      // replaced series are ended on yesterday through `closes`.
       const persist =
         daylightTbd.exceptions.length > 0 || unlock.length > 0
           ? (request) =>
@@ -1142,6 +1160,7 @@ export default function PracticeSchedulingPage() {
                 ...request,
                 exceptions: daylightTbd.exceptions,
                 unlock,
+                closes,
                 ...(baseFingerprint ? { baseFingerprint } : {}),
               })
           : persistPracticeScheduleReview;
@@ -1314,6 +1333,30 @@ export default function PracticeSchedulingPage() {
     (teamId, slotId) => {
       if (!canManageSchedule) return;
 
+      // Operator decision on #546: an override never rewrites history. When
+      // the team already has a saved practice, the new row starts TODAY on
+      // the season's clock (`newPlacementRange`, as a run's new placement
+      // does), and the replaced series is closed on yesterday at Apply.
+      const seasonToday = seasonCalendarDate(Date.now(), timezone);
+      const hasSavedRow = localAssignments.some(
+        (assignment) =>
+          String(getAssignmentTeamId(assignment)) === String(teamId) && !assignment.stagedOverride
+      );
+      let todayRange = null;
+      if (hasSavedRow) {
+        const slot = slotById.get(slotId);
+        todayRange = slot && seasonToday ? newPlacementRange(slot, seasonToday) : null;
+        const bounds = practiceRangeBounds(todayRange);
+        if (!bounds) {
+          setApplyError(
+            !seasonToday
+              ? "Today's date on the season's clock is unknown, so the override cannot be dated."
+              : `That practice slot's dates end before today (${seasonToday}), so nothing was staged.`
+          );
+          return;
+        }
+      }
+
       const nextAssignment = buildDisplayAssignment({
         assignment: {
           id: `staged-${teamId}-${slotId}`,
@@ -1324,6 +1367,7 @@ export default function PracticeSchedulingPage() {
           // §2.1): the review row itself records it, so a review replaced by
           // a run or discarded carries no stale staged set.
           stagedOverride: true,
+          ...(todayRange ? { effectiveDateRange: todayRange } : {}),
         },
         index: localAssignments.length,
         runId: autoScheduler.result?.runId ?? practice?.runId ?? null,
@@ -1346,9 +1390,14 @@ export default function PracticeSchedulingPage() {
         .map((assignment) => boundsOf(assignment)?.first)
         .filter(Boolean)
         .reduce((latest, first) => (latest && latest > first ? latest : first), null);
+      // A series that ended before today is history too: it is not current,
+      // so the override leaves it as it is (#546).
       const isClosed = (assignment) => {
         const bounds = boundsOf(assignment);
-        return Boolean(bounds && latestStart && bounds.last < latestStart);
+        return Boolean(
+          bounds &&
+          ((latestStart && bounds.last < latestStart) || (seasonToday && bounds.last < seasonToday))
+        );
       };
       // Several CURRENT series (two weekdays) are ambiguous: which day does the
       // override replace? Not guessed. Today's behaviour is kept: one staged
@@ -1363,6 +1412,9 @@ export default function PracticeSchedulingPage() {
             return [nextAssignment];
           })
         : [...localAssignments, nextAssignment];
+      // Every row of the team was history (closed, or ended before today):
+      // nothing current to replace, so the override is an addition.
+      if (replaced && !stagedOnce) staged.push(nextAssignment);
 
       setReviewAssignments(staged);
       setApplyStatus('review');
@@ -1376,6 +1428,7 @@ export default function PracticeSchedulingPage() {
       practice?.runId,
       slotById,
       teamById,
+      timezone,
     ]
   );
 
@@ -1402,6 +1455,7 @@ export default function PracticeSchedulingPage() {
         team = {
           teamId,
           teamName: nameOf([row]) ?? 'This team',
+          past: null,
           replacing: [],
           replacement: (reviewAssignments ?? [])
             .filter((r) => r.stagedOverride === true && isTeam(r))
@@ -1412,7 +1466,19 @@ export default function PracticeSchedulingPage() {
         };
         teams.push(team);
       }
-      team.replacing.push(seriesLineOf([row], lookups));
+      // #546: a series that started before today is ended on yesterday, its
+      // past kept; one that has not started yet is replaced whole.
+      const close = plan.closes.find((c) => lower(c.assignment_id) === lower(row.id));
+      team.replacing.push(
+        `${seriesLineOf([row], lookups)} (${
+          close ? `ends on ${close.last_day}` : 'not started yet, so replaced whole'
+        })`
+      );
+      if (close) {
+        team.past =
+          `Practices up to ${close.last_day} are kept; from ${plan.today} ${team.teamName} ` +
+          `practises ${team.replacement.join(' and ') || 'nothing'}.`;
+      }
     }
     const strays = plan.strays.map(
       (row) =>
@@ -1434,6 +1500,7 @@ export default function PracticeSchedulingPage() {
       if (!overridePrompt) return;
       overrideConfirmation.current = {
         prune: overridePrompt.plan.prune,
+        today: overridePrompt.plan.today,
         reasonCode,
         baseFingerprint: overridePrompt.baseFingerprint,
       };

@@ -108,6 +108,36 @@ export function gridOverridePlan({ seasonRows, assignments, slotById, stagedTeam
   return { prune, strays, overlaps };
 }
 
+/** The ISO date the day before `iso`. */
+export function previousDay(iso) {
+  const [year, month, day] = String(iso).split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day - 1)).toISOString().slice(0, 10);
+}
+
+/**
+ * The writer's `closes` argument for an override that must not rewrite
+ * history (operator decision on #546): each replaced series that started
+ * before today is ended in place on yesterday, keeping its id and its past
+ * dates. A series that starts today or later has no past to keep, so it is
+ * replaced whole (no entry). Decided by date, never guessed: a range that
+ * does not read gets no entry, and the writer then removes the row only
+ * because it is listed in `unlock`, which the prompt showed.
+ *
+ * Each row closed here is re-ranged, so it is in `unlock` too (it is in
+ * `prune`): the writer's lock covers `closes` (:783-791).
+ *
+ * @param {Array<Record<string, any>>} prune - from {@link gridOverridePlan}
+ * @param {string} seasonToday - `YYYY-MM-DD` on the season's clock
+ * @returns {Array<{ assignment_id: string, last_day: string }>}
+ */
+export function gridOverrideCloses(prune, seasonToday) {
+  return prune.flatMap((row) => {
+    const bounds = practiceRangeBounds(row.effectiveDateRange ?? row.effective_date_range);
+    if (!bounds || !(bounds.first < seasonToday && seasonToday <= bounds.last)) return [];
+    return [{ assignment_id: row.id, last_day: previousDay(seasonToday) }];
+  });
+}
+
 /**
  * Whether two prompts name the same rows, as they stood: id, slot and dates
  * (the enact's `prompt-changed` rule). A row re-ranged in place keeps its id,

@@ -60,6 +60,7 @@ import {
   ruleGateInstances,
   violationInstanceKey,
 } from '@squadlogic/core/resolve/index.js';
+import { gameOnSlot } from '@squadlogic/core/resolve/ruleGate.js';
 import { recordBaselineSpread } from '@squadlogic/core/resolve/stages.js';
 import { resolveContextDefaults } from '@squadlogic/core/resolve/state.js';
 import { FREEZE_DISPOSITION, freezeAllExcept } from '@squadlogic/core/freeze/index.js';
@@ -1010,18 +1011,19 @@ describe('#60b W-b3: the options pass reads the same floor for a game that stand
   };
   recordBaselineSpread(context, state);
   for (const gameId of state.gameIds) recordBaselineAcceptance(context, state, gameId);
-  // W-b1's finished schedule: the requested game on #564's published slot.
-  const finished = displaceOn(sched564, X);
-  const slot = slotOf(/** @type {any} */ (whereIs(finished, X)));
+  // The clean slot #564 takes on the season as published (the case above),
+  // judged in W-b1's finished schedule — the requested game on #564's
+  // published slot — with #564 absent, or standing on that slot.
+  const slot = slotOf(/** @type {any} */ (whereIs(displaceOn(schedule, X), X)));
   const home = slotOf(/** @type {any} */ (byId.get(X)));
+  const finished = displaceOn(sched564, X);
   const finishedState = (withX) =>
     /** @type {any} */ ({
       ...state,
-      games: Object.fromEntries(
-        finished.schedule.games
-          .filter((game) => withX || game.id !== X)
-          .map((game) => [game.id, game])
-      ),
+      games: Object.fromEntries([
+        ...finished.schedule.games.filter((game) => game.id !== X).map((game) => [game.id, game]),
+        ...(withX ? [[X, gameOnSlot(state, X, slot)]] : []),
+      ]),
     });
 
   it('clears the slot that ties shelving, adding no spread over the floor', () => {
@@ -1100,11 +1102,12 @@ describe('#60b W-b5: shelving strictly better for the spread — still TIME TBD'
 });
 
 describe('#60b W-b6: a standing game gets no floor', () => {
-  // The proposer's probe: every game stands. #564 held on W-b1's slot already
-  // pushes SYN to excess 1, so a floor measured where it stands would admit
-  // the other clean slot; with none, that slot is refused as growth.
+  // The proposer's probe: every game stands. #564 held on its clean slot (the
+  // case above) already pushes SYN to excess 1, so a floor measured where it
+  // stands would admit the other clean slot (measured: the second of the two
+  // the facility admits); with none, that slot is refused as growth.
   const probe = createPlacementProbe({ schedule: sched564, engines });
-  const held = slotOf(/** @type {any} */ (whereIs(displaceOn(sched564, X), X)));
+  const held = slotOf(/** @type {any} */ (whereIs(displaceOn(schedule, X), X)));
   const other = /** @type {any} */ ({
     date: held.date,
     surfaceId: 'maplewood-back/field-5',

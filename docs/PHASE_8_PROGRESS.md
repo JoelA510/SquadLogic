@@ -7720,3 +7720,131 @@ SHAs below are post-rewrite. The pre-rewrite SHAs of #532, #529, #533 and
 - **Out of scope by operator ruling.** Older real names, from before #532,
   remain in files #532 did not touch. A working-tree scrub is queued; their
   history is not rewritten.
+
+## 11d complete, #60(b), grid override prompt, Sentry, harness fixes (2026-10-12 to 2026-10-13)
+
+Supervised PRs #536-#550, in merge order by topic. Each PR got one supervisor
+plant, run in a separate scratch worktree; "caught" means the plant turned a
+test, smoke or census red.
+
+### CI and repo hygiene
+
+- **#536 (`55c6b16`).** "Determine change scope" now checks the push's
+  `before` SHA with `git cat-file -e`. An unknown SHA (as after the #532
+  rewrite) forces the full matrix instead of exiting 128. Plant caught; main's
+  full run is green.
+- **#538 (`3c88933`).** The older real club and venue names that #532's
+  rewrite left out of scope are replaced with synthetic ones in the working
+  tree. A repo-wide guard, `tests/realNameDenylist.test.js`, holds digests
+  only, never the names. Plant caught. History for these names is not
+  rewritten, by operator ruling.
+- **#547 (`468a3e1`).** The `20261006000000` heat smoke picked its audit row
+  by `ORDER BY created_at, id LIMIT 1`. Rows with a tied `created_at` came back
+  in random uuid order, which made it flaky. It now matches rows by content
+  with `count(*) FILTER`. Plant (the RPC labels a create as `updated`) caught.
+- **#550 (`6b80975`).** 66 of 236 `prove.sh` plants carried a `FAIL ` prefix
+  that `plant()` adds itself. They searched for `FAIL FAIL ...`, so a real
+  catch scored MISATTRIBUTED. `plant()` now strips one leading `FAIL `, and
+  refuses (exit 5) an expect that still starts with it. The anchors-only pass
+  reports the count.
+  - A 3-plant harness proof scored MISATTRIBUTED x3 before the fix and CAUGHT
+    x3 after it.
+  - Supervisor plant (the strip disabled) caught: 8 census tests red, and the
+    static census exited 5.
+  - Not covered: the `green` argument (`PASS <green>`) could double its prefix
+    the same way. No entry does today.
+
+### 8.6 3b PR 11d: blackout enact, now complete
+
+- **#540 (`f586952`), 11d-0.** The auto-scheduler holds live relocated slots
+  season-wide.
+- **#539 (`943fd91`), 11d-2 persistence.**
+  - Migration `20261007000000`: the enact wrapper's blackout arm, the record
+    union, and the mock mirror.
+  - The operator approved the SECURITY DEFINER helper `enact_lock_cause_row`,
+    on condition that pgTAP confirmed its premise. It did, so the helper
+    stays.
+  - Harness green: 128 migrations, 47/47 smokes, both reverts.
+  - All 26 plants the PR adds or re-aims were caught, after one survivor was
+    fixed with a stronger lock probe. Supervisor plant (narrowing the
+    window-inside check) caught.
+  - Deployed by the main push. Production's ledger now ends at
+    `20261007000000`, and EXECUTE on the helper is not granted to `anon`.
+- **#548 (`28f1b98`), 11d-3 UI.**
+  - The blackout enact button gets its gate, the prompt, the stored-row
+    launcher, the Q8 row and the Q11 counts. All 13 of the agent's plants were
+    caught.
+  - The supervisor plant on the prompt's no-unlock guard survived. That guard
+    is defence in depth only: Q4 is pinned on the payload (`repair.unlock` is
+    `[]` in two tests, and no `practice.unlock_accepted` audit row is written).
+    Accepted.
+
+### Scheduling grid
+
+- **#541 (`565e980`).** The grid reads the season's current practice rows, not
+  the latest run's (the #530 follow-up). A supervisor finding was fixed before
+  merge: an override dropped the closed series. pgTAP is green in CI.
+- **#542 (`0519a6f`).** A refused Apply names the locked practice, never its
+  UUID.
+- **#543 (`49d4862`).** The plan for the grid override prompt, with the
+  operator's Q1-Q7 answers recorded.
+- **#546 (`71be4c0`).** The ruling-2 override prompt on Apply:
+  - An override closes the replaced current series at yesterday.
+  - The new row starts today, and a series starting today or later is
+    replaced whole (operator decision: "close old, start from today").
+  - Both supervisor plants were caught: dropping `baseFingerprint`, and a
+    close dated today.
+- **Still open:** the grid's per-slot count has no date model.
+
+### #60(b): a spread-refused slot weighed against TIME TBD
+
+- **#537 (`bfbf66f`).** The plan, with the operator's Q0-Q6 answers. Its
+  measured finding: on the 679-run season sweep, 0 of the 52
+  spread-refused candidates change verdict.
+- **#549 (`e1adbb2`).** For a game that stands nowhere (pending in the placer,
+  or a `time-tbd` game in the options pass), `acceptedSpreadFor()` judges each
+  group as `placed <= max(baseline, home, shelved)`.
+  - A placement admitted by the shelved term emits
+    `RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD` with per-group excesses and
+    `tie`. Two `ledger.meta` counters are added.
+  - **Sweep (verified by the supervisor):** all 679 runs keep the same
+    schedule, unplaced set, finding-code sequence, and findings with the
+    `RESOLVE_CONFLICT_SPREAD_CARRIED` message nulled. Only that message's
+    planned text differs, in 24 runs. The same 4 games are TIME TBD (#51,
+    #57, #649, #652). Neither the rule-engine digest nor the no-op resolve
+    digest moved.
+  - **Supervisor plant: SURVIVED the first head.** Changing the `tie` test
+    from `every` to `some` passed all 96 tests, because every `tie` assertion
+    expected `true` on one group. Three witnesses were added:
+    - a strict improvement on one group (`tie: false`, Q6);
+    - two groups, one tied and one improved (this one catches the plant);
+    - an end-to-end case for the declared staleness below.
+
+    On the new head the plant is caught.
+  - **Declared, not enforced, and pinned by test:** an option the options pass
+    offers only under the shelved floor is refused as `RESOLVE_OPTION_STALE`
+    on approval, because `change-request-apply` judges the game standing,
+    with no floor. This needs an operator ruling: give the approval the floor,
+    or drop the floor from the options pass.
+  - **Also declared:** for a game that stands nowhere, a slot that adds no
+    coach overlap always ties shelving.
+
+### Sentry
+
+- **#545 (`7fa6b1b`).**
+  - The CSP admits US-region ingest (`*.ingest.us.sentry.io`).
+  - Events carry the release from `VITE_APP_VERSION`.
+  - `sendDefaultPii: false` is explicit.
+  - Plant caught. A server-side ingestion smoke landed one event; the browser
+    leg is the operator's.
+- **Follow-ups**, as recorded by a parallel session:
+  - `worker-src` for Replay: done.
+  - Preview events reported as production: done.
+  - The static release tag: kept as designed.
+  - The unused `*.ingest.sentry.io` CSP entry: untouched.
+
+### Process change on `main`
+
+`main` now has a ruleset: pull requests only; Build & Test and Deno Mirror
+Tests required on an up-to-date branch; no force pushes or deletion. A
+history rewrite like #532's now needs the ruleset lifted first.

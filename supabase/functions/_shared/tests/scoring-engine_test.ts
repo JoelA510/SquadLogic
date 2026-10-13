@@ -1,6 +1,11 @@
-import { assertEquals, assertStringIncludes } from 'https://deno.land/std@0.203.0/assert/mod.ts';
+import {
+  assertEquals,
+  assertStringIncludes,
+  assertThrows,
+} from 'https://deno.land/std@0.203.0/assert/mod.ts';
 import { evaluatePracticeSchedule } from '../engines/scoring-engine.ts';
 import { Team, Slot, PracticeAssignment } from '../schemas/scoring.ts';
+import dated from './fixtures/scoring-dated-vectors.json' with { type: 'json' };
 
 Deno.test('evaluatePracticeSchedule - basic assignment calculation', () => {
   const teams: Team[] = [
@@ -64,4 +69,98 @@ Deno.test('evaluatePracticeSchedule - manual follow up categorization', () => {
   const result = evaluatePracticeSchedule({ teams, slots, assignments, unassigned });
 
   assertEquals(result.manualFollowUpResults[0].category, 'capacity');
+});
+
+// ---- M4.7: the dated model, in the runtime the engine ships to -------------
+//
+// The hand-written witnesses `tests/practiceMetrics.test.js` and
+// `tests/scoringEngineDrift.test.js` hold core and this engine to under Node
+// (docs/PLAN_SCORING_DATE_MODEL.md §2.2, §4). Each `expected` is the truth
+// worked out from the dates, never an engine answer.
+
+interface DatedVector {
+  name: string;
+  witness: string;
+  teams: Team[];
+  slots: Slot[];
+  assignments: PracticeAssignment[];
+  expected: {
+    conflicts: Array<{ key: string; firstDate: string; sharedDates: number }>;
+    slotLoad: Record<string, [number, number]>;
+    dataQuality: number;
+    assignedTeams: number;
+  };
+  undated: { conflicts: number; overbooked: string[] };
+}
+
+const DATED = dated.vectors as unknown as DatedVector[];
+
+type Report = ReturnType<typeof evaluatePracticeSchedule>;
+
+/** The vectors' `expected` shape (`tests/helpers/datedScoringVectors.js` `datedProjection`). */
+function projection(report: Report) {
+  return {
+    conflicts: report.coachConflicts
+      .map((c) => ({
+        key: `${c.teams
+          .map((t) => `${t.teamId}@${t.slotId}`)
+          .sort()
+          .join(' + ')} :: ${[...c.coachIds].sort().join(',')}`,
+        firstDate: c.firstDate,
+        sharedDates: c.sharedDates,
+      }))
+      .sort((a, b) => a.key.localeCompare(b.key)),
+    slotLoad: Object.fromEntries(
+      report.slotUtilization.map((s) => [
+        s.slotId,
+        [s.assignedCount, (s as { assignmentRows?: number }).assignmentRows],
+      ])
+    ),
+    dataQuality: report.issues.filter((i) => i.category === 'data-quality').length,
+    assignedTeams: report.summary.assignedTeams,
+  };
+}
+
+Deno.test('evaluatePracticeSchedule dated - the witness table is populated (meta)', () => {
+  assertEquals(DATED.length >= 14, true);
+  const witnesses = new Set(DATED.map((v) => v.witness));
+  for (const w of ['W1', 'W2', 'W2b', 'W3', 'W4', 'W5', 'overlap', 'open', 'unreadable', 'dst']) {
+    assertEquals(witnesses.has(w), true, w);
+  }
+});
+
+for (const vector of DATED) {
+  Deno.test(`evaluatePracticeSchedule dated - ${vector.witness}: ${vector.name}`, () => {
+    const report = evaluatePracticeSchedule(vector);
+    assertEquals(report.summary.dateModel, 'dated');
+    assertEquals(projection(report), vector.expected);
+  });
+}
+
+Deno.test('evaluatePracticeSchedule dated - the undated comparison is the old one', () => {
+  for (const vector of DATED) {
+    const report = evaluatePracticeSchedule({
+      teams: vector.teams,
+      slots: vector.slots.map(({ id, day, capacity, start, end }) => ({
+        id,
+        day,
+        capacity,
+        start,
+        end,
+      })),
+      assignments: vector.assignments.map(({ teamId, slotId }) => ({ teamId, slotId })),
+    });
+    assertEquals(report.summary.dateModel, 'undated');
+    assertEquals(report.coachConflicts.length, vector.undated.conflicts, vector.name);
+  }
+});
+
+Deno.test('evaluatePracticeSchedule dated - a mix of dated and undated slots refuses', () => {
+  const vector = DATED.find((v) => v.witness === 'W4')!;
+  const { firstDate: _f, lastDate: _l, ...undatedSlot } = vector.slots[1];
+  assertThrows(
+    () => evaluatePracticeSchedule({ ...vector, slots: [vector.slots[0], undatedSlot as Slot] }),
+    TypeError,
+    'must all carry firstDate and lastDate, or none: 1 of 2 do'
+  );
 });

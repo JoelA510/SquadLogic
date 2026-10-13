@@ -28,3 +28,10 @@ export {
   filesUnder,
   scannedFiles,
 } from './repoScanFiles.js';
+export {
+  DATED_VECTORS,
+  DATED_VECTORS_PATH,
+  datedProjection,
+  overbookedOf,
+  undatedInputs,
+} from './datedScoringVectors.js';

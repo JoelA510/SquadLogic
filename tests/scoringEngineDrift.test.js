@@ -53,6 +53,9 @@
 import { describe, expect, it } from 'vitest';
 import { evaluatePracticeSchedule as coreEvaluate } from '@squadlogic/core/practiceMetrics.js';
 import { evaluatePracticeSchedule as edgeEvaluate } from '../supabase/functions/_shared/engines/scoring-engine.js';
+import { DATED_VECTORS, datedProjection, undatedInputs } from './helpers/datedScoringVectors.js';
+import * as coreLive from '@squadlogic/core/utils/practiceLiveDates.js';
+import * as edgeLive from '../supabase/functions/_shared/engines/practice-live-dates.ts';
 
 /** Summary fields both arms publish under the same name, which must agree. */
 const AGREED_SUMMARY_COUNTS = ['totalTeams', 'assignedTeams', 'unassignedTeams'];
@@ -412,6 +415,137 @@ describe('scoring-engine cross-arm drift', () => {
       expect(edge.summary, `edge.summary.${key}`).toHaveProperty(key);
       expect(typeof edge.summary[key]).toBe('number');
       expect(typeof core.summary[key]).toBe('number');
+    }
+  });
+});
+
+// ---- M4.7: the dated model, both arms (docs/PLAN_SCORING_DATE_MODEL.md §3.4) --
+//
+// The undated table above is unchanged and its arms still agree; this one is
+// the plan's witnesses W1-W5 plus the disjoint / touching / overlapping triple,
+// open-ended, unreadable, dateless, controls and DST. Each vector's truth is a
+// hand-written literal, so both arms are held to it, not merely to each other.
+
+const runBothDated = (vector) => {
+  const core = coreEvaluate({
+    teams: vector.teams,
+    slots: vector.slots,
+    assignments: vector.assignments,
+    schoolDayEnd: undefined,
+    timezone: DATED_VECTORS.timeZone,
+  });
+  const edge = edgeEvaluate({
+    teams: vector.teams,
+    slots: vector.slots,
+    assignments: vector.assignments,
+  });
+  return {
+    core,
+    edge,
+    coreProjection: datedProjection(core, core.dataQualityWarnings.length),
+    edgeProjection: datedProjection(
+      edge,
+      edge.issues.filter((i) => i.category === 'data-quality').length
+    ),
+  };
+};
+
+describe('scoring-engine cross-arm drift: dated (M4.7)', () => {
+  it('the dated table holds the plan witnesses (meta, can fail)', () => {
+    expect(DATED_VECTORS.vectors.length).toBeGreaterThanOrEqual(14);
+    const witnesses = new Set(DATED_VECTORS.vectors.map((v) => v.witness));
+    for (const w of ['W1', 'W2', 'W2b', 'W3', 'W4', 'W5', 'overlap', 'dst']) {
+      expect(witnesses.has(w), w).toBe(true);
+    }
+  });
+
+  it.each(DATED_VECTORS.vectors.map((v) => [v.name, v]))(
+    'both arms give the truth, dated: %s',
+    (_name, vector) => {
+      const { core, edge, coreProjection, edgeProjection } = runBothDated(vector);
+      expect(core.summary.dateModel).toBe('dated');
+      expect(edge.summary.dateModel).toBe('dated');
+      expect(coreProjection).toEqual(vector.expected);
+      expect(edgeProjection).toEqual(vector.expected);
+      for (const key of AGREED_SUMMARY_COUNTS) {
+        expect(edge.summary[key], `summary.${key}`).toBe(core.summary[key]);
+      }
+      const overbooked = (r) =>
+        Object.fromEntries(r.slotUtilization.map((s) => [s.slotId, s.overbooked]));
+      expect(overbooked(edge)).toEqual(overbooked(core));
+    }
+  );
+
+  it.each(DATED_VECTORS.vectors.map((v) => [v.name, v]))(
+    'undated, both arms agree on the old answer: %s',
+    (_name, vector) => {
+      const inputs = undatedInputs(vector);
+      const core = coreEvaluate({ ...inputs, schoolDayEnd: undefined, timezone: 'UTC' });
+      const edge = edgeEvaluate(inputs);
+      expect(edge.summary.dateModel).toBe('undated');
+      expect(core.summary.dateModel).toBe('undated');
+      expect(edge.coachConflicts.length).toBe(vector.undated.conflicts);
+      expect(core.coachConflicts.length).toBe(vector.undated.conflicts);
+    }
+  );
+
+  it('a mix of dated and undated slots refuses in both arms', () => {
+    const vector = DATED_VECTORS.vectors.find((v) => v.witness === 'W4');
+    const { firstDate: _f, lastDate: _l, ...undatedSlot } = vector.slots[1];
+    const inputs = { ...vector, slots: [vector.slots[0], undatedSlot] };
+    const message = /must all carry firstDate and lastDate, or none: 1 of 2 do/;
+    expect(() => coreEvaluate({ ...inputs, schoolDayEnd: undefined, timezone: 'UTC' })).toThrow(
+      message
+    );
+    expect(() => edgeEvaluate(inputs)).toThrow(message);
+  });
+
+  it('the two live-date modules agree on an enumerated product of ranges', () => {
+    // Every range shape the readers distinguish, against two slot validities,
+    // with and without a floor: the twin and core return the same spans.
+    const ranges = [
+      undefined,
+      null,
+      '[2026-09-01,2026-10-01]',
+      '[2026-09-01,2026-10-01)',
+      '(2026-09-01,2026-10-01]',
+      '[2026-10-05,)',
+      '[2026-10-05,infinity)',
+      '[2026-12-01,2026-12-31]',
+      '[2026-10-01,2026-09-01]',
+      'empty',
+      'Full Season',
+      '[2026-9-1,2026-10-01]',
+    ];
+    const validities = [
+      { firstDate: '2026-08-11', lastDate: '2026-11-20' },
+      { firstDate: '2026-09-29', lastDate: '2026-10-06' },
+    ];
+    let compared = 0;
+    for (const range of ranges) {
+      for (const v of validities) {
+        for (const notBefore of [null, '2026-10-02']) {
+          const input = {
+            firstDay: coreLive.calendarDayNumber(v.firstDate),
+            lastDay: coreLive.calendarDayNumber(v.lastDate),
+            range,
+            notBefore,
+          };
+          expect(edgeLive.assignmentLiveSpan(input), String(range)).toEqual(
+            coreLive.assignmentLiveSpan(input)
+          );
+          compared += 1;
+        }
+      }
+    }
+    expect(compared).toBe(ranges.length * validities.length * 2);
+    const a = { first: 20311, last: 20402 };
+    for (const shift of [-14, -7, -3, 0, 1, 7, 70, 91, 98]) {
+      const b = { first: a.first + shift, last: a.last + shift };
+      expect(edgeLive.sharedLiveDates(a, b)).toEqual(coreLive.sharedLiveDates(a, b));
+    }
+    for (const value of ['16:00', '16:00:30', '24:00', '9:00', '', null, '23:59:59']) {
+      expect(edgeLive.wallSeconds(value)).toBe(coreLive.wallSeconds(value));
     }
   });
 });

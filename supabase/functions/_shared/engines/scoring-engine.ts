@@ -2,6 +2,7 @@ import type { Team, Slot, PracticeAssignment, GameAssignment } from '../schemas/
 import { datedSlotsIssue } from '../schemas/scoring.ts';
 import { conflictPairKey, listTeamCoachIds } from './practice-coaches.ts';
 import {
+  LIVE_SPAN_STATUS,
   assignmentLiveSpan,
   calendarDayNumber,
   peakLiveCount,
@@ -205,7 +206,7 @@ export function evaluatePracticeSchedule(params: {
           range: a.effectiveDateRange,
         })
       : null;
-    if (span?.status === 'unreadable') {
+    if (span?.status === LIVE_SPAN_STATUS.UNREADABLE) {
       dataQualityMessages.push(
         `assignment for team ${a.teamId} to slot ${a.slotId} has an unreadable date range ${String(a.effectiveDateRange)}`
       );
@@ -219,7 +220,7 @@ export function evaluatePracticeSchedule(params: {
         (series) =>
           series.range === range ||
           (series.span !== null &&
-            span.status === 'live' &&
+            span.status === LIVE_SPAN_STATUS.LIVE &&
             sharedLiveDates(series.span, span).count > 0)
       );
       if (duplicate) {
@@ -228,7 +229,7 @@ export function evaluatePracticeSchedule(params: {
       }
       kept.push({
         range,
-        span: span.status === 'live' ? { first: span.first, last: span.last } : null,
+        span: span.status === LIVE_SPAN_STATUS.LIVE ? { first: span.first, last: span.last } : null,
       });
       seriesByKey.set(key, kept);
     } else {
@@ -238,7 +239,7 @@ export function evaluatePracticeSchedule(params: {
       }
       seenAssignments.add(key);
     }
-    if (span?.status === 'none') {
+    if (span?.status === LIVE_SPAN_STATUS.NONE) {
       dataQualityMessages.push(
         `assignment for team ${a.teamId} has no date inside slot ${a.slotId}'s validity`
       );
@@ -248,7 +249,7 @@ export function evaluatePracticeSchedule(params: {
       slotId: a.slotId,
       team,
       slot,
-      span: span?.status === 'live' ? { first: span.first, last: span.last } : null,
+      span: span?.status === LIVE_SPAN_STATUS.LIVE ? { first: span.first, last: span.last } : null,
       row: resolvedAssignments.length,
     });
   }

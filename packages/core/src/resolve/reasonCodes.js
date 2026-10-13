@@ -246,12 +246,28 @@ export const RESOLVE_REASON = Object.freeze({
    *
    * `compromise`: the operator allows it with a warning when a requested move
    * causes it (ruling Q2); the placer's own placements refuse it in both
-   * passes (Q1), so this names a move the gate does not judge. Emitted from the
-   * finished schedule and **independent of `verify`**, like
+   * passes (Q1) unless shelving the game as TIME TBD would leave the group no
+   * better (#60b), so this names a move the gate does not judge or a placement
+   * {@link RESOLVE_REASON.RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD} names.
+   * Emitted from the finished schedule and **independent of `verify`**, like
    * `RESOLVE_COACH_OVERLAP_CARRIED`. The details name the group, its teams from
    * the roster, the spread and the bound.
    */
   RESOLVE_CONFLICT_SPREAD_CARRIED: 'RESOLVE_CONFLICT_SPREAD_CARRIED',
+  /**
+   * The placer put a game on a slot that pushes an age group's coach-conflict
+   * spread past what the record accepted, because shelving the game as TIME
+   * TBD would leave that group no better (#60b, option (b)). Per game, beside
+   * the group-level `RESOLVE_CONFLICT_SPREAD_CARRIED`, which names no game.
+   *
+   * `compromise`: a kickoff in place of a TIME TBD that would not have
+   * protected the bound. Not a waiver — `verify` still reports the group's
+   * `CONFLICT_SPREAD_EXCEEDED`. Emitted on a tie and on a strict improvement
+   * alike (ruling Q6). The details name the game, the slot, each admitting
+   * group with its placed, shelved and accepted excess, and `tie` — every
+   * group's placed excess equal to its shelved one.
+   */
+  RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD: 'RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD',
   /**
    * A change whose slot a **machine** chose (`origin: 'proposer'`) would add a
    * blocking facility finding, a coach overlap, a turnover shortfall or a grown
@@ -453,6 +469,7 @@ export const RESOLVE_REASON_SEVERITY = Object.freeze({
   [RESOLVE_REASON.RESOLVE_REPAIR_SCOPE_VACUOUS]: RESOLVE_SEVERITY.BLOCKING,
   [RESOLVE_REASON.RESOLVE_COACH_OVERLAP_CARRIED]: RESOLVE_SEVERITY.COMPROMISE,
   [RESOLVE_REASON.RESOLVE_CONFLICT_SPREAD_CARRIED]: RESOLVE_SEVERITY.COMPROMISE,
+  [RESOLVE_REASON.RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD]: RESOLVE_SEVERITY.COMPROMISE,
   [RESOLVE_REASON.RESOLVE_CHANGE_REFUSED_BY_RULES]: RESOLVE_SEVERITY.COMPROMISE,
   [RESOLVE_REASON.RESOLVE_OPTION_STALE]: RESOLVE_SEVERITY.COMPROMISE,
   [RESOLVE_REASON.RESOLVE_RELOCATION_OPTIONS_OFFERED]: RESOLVE_SEVERITY.INFO,
@@ -534,6 +551,8 @@ export function createResolveMeta() {
     overlapFallbackEntered: 0,
     coachOverlapsCarried: 0,
     conflictSpreadsCarried: 0,
+    spreadShelvedFloorsMeasured: 0,
+    spreadAdmittedByShelvedFloor: 0,
     ruleGateCommitmentsExamined: 0,
     ruleGateSurfacePairsExamined: 0,
     ruleGateGroupsExamined: 0,

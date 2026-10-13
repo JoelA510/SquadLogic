@@ -227,6 +227,20 @@ function acceptedRulesFor(context, gameId, slot) {
  * worse than published; measured with it home, only what other moves did is
  * accepted, and what this placement does is judged.
  *
+ * **A third term, for a game that stands nowhere (#60b): the excess if it is
+ * shelved.** When `gameId` is absent from `state.games` — a pending game in the
+ * placer, or a `time-tbd` game in the options pass — the alternative to any
+ * slot is TIME TBD, and its excess is measured here: the same
+ * `conflictSpreadInstances()` over the same groups with no override, so the
+ * game's commitments project to `null` and drop out. Per group,
+ * `placed <= max(baseline, home, shelved)` admits: a slot no worse for the
+ * spread than shelving the game is not refused for it. Keyed on absence, not on
+ * a stage, so a standing game — `local-search`, `pair-repair`,
+ * `change-request-apply`, the proposer's probe — never gets the floor; its
+ * alternative is staying where it stands. `shelvedRaised` names the groups the
+ * floor raised, with the record before it, so the placer can say which
+ * placement it admitted and why.
+ *
  * The sibling contract, {@link acceptedRulesFor}'s "refuse growth over what the
  * baseline accepted", adapted to an instance that names a group rather than a
  * game. A pair-keyed instance is the moving game's own; a group's excess is
@@ -239,11 +253,13 @@ function acceptedRulesFor(context, gameId, slot) {
  * @param {Object} context
  * @param {import('./types.js').ResolveState} state
  * @param {string} gameId
- * @returns {Record<string, number>}
+ * @returns {{ accepted: Record<string, number>, shelvedRaised: Record<string, { acceptedExcess: number, shelvedExcess: number }>|null }}
+ *   `shelvedRaised` is `null` when the floor was not taken (the game stands)
  */
 function acceptedSpreadFor(context, state, gameId) {
   const published = state.baseline[gameId];
-  const now = conflictSpreadInstances(context, state, spreadGroupsTouchedBy(context, gameId), {
+  const groups = spreadGroupsTouchedBy(context, gameId);
+  const now = conflictSpreadInstances(context, state, groups, {
     gameId,
     slot: {
       date: published.date,
@@ -256,7 +272,40 @@ function acceptedSpreadFor(context, state, gameId) {
   for (const [key, excess] of Object.entries(now)) {
     accepted[key] = Math.max(accepted[key] ?? 0, excess);
   }
-  return accepted;
+  if (state.games[gameId] !== undefined) return { accepted, shelvedRaised: null };
+  /** @type {Record<string, { acceptedExcess: number, shelvedExcess: number }>} */
+  const shelvedRaised = {};
+  const shelved = conflictSpreadInstances(context, state, groups).instances;
+  for (const [key, excess] of Object.entries(shelved)) {
+    const before = accepted[key] ?? 0;
+    if (excess <= before) continue;
+    shelvedRaised[key] = { acceptedExcess: before, shelvedExcess: excess };
+    accepted[key] = excess;
+  }
+  return { accepted, shelvedRaised };
+}
+
+/**
+ * The groups the shelved floor (#60b) admitted `instances` on: each the floor
+ * raised whose excess here is above the record before the floor, so today's
+ * record alone would have refused it. Sorted by key, so the finding's details
+ * are a pure function of the candidate.
+ *
+ * @param {Record<string, number>} instances - the candidate's gated instances
+ * @param {Record<string, { acceptedExcess: number, shelvedExcess: number }>|null} shelvedRaised
+ * @returns {Array<{ key: string, placedExcess: number, shelvedExcess: number, acceptedExcess: number }>}
+ */
+function admittedByShelvedFloor(instances, shelvedRaised) {
+  if (shelvedRaised === null) return [];
+  return Object.keys(shelvedRaised)
+    .sort()
+    .filter((key) => (instances[key] ?? 0) > shelvedRaised[key].acceptedExcess)
+    .map((key) => ({
+      key,
+      placedExcess: instances[key],
+      shelvedExcess: shelvedRaised[key].shelvedExcess,
+      acceptedExcess: shelvedRaised[key].acceptedExcess,
+    }));
 }
 
 /**
@@ -583,20 +632,21 @@ function mayMoveWithinBudget(state, context, gameId, to, stageId) {
  * @param {string} gameId
  * @param {{ anchor: import('./types.js').Slot, excludeSlotKey?: string, allowOverlapFallback?: boolean }} options -
  *   `allowOverlapFallback` enables pass 2 (#61); only the placer passes it
- * @returns {{ slot: import('./types.js').Slot, placement: ReturnType<typeof checkPlacement>, score: number, findingsCarried: number, viaOverlapFallback?: boolean }|null}
+ * @returns {{ slot: import('./types.js').Slot, placement: ReturnType<typeof checkPlacement>, score: number, findingsCarried: number, spreadAdmitted: ReturnType<typeof admittedByShelvedFloor>, viaOverlapFallback?: boolean }|null}
+ *   `spreadAdmitted` names the groups the shelved floor (#60b) admitted the slot on, empty when none
  */
 function chooseSlot(state, context, gameId, options) {
   const { anchor } = options;
-  /** @type {{ slot: import('./types.js').Slot, placement: ReturnType<typeof checkPlacement>, score: number, findingsCarried: number }|null} */
+  /** @type {{ slot: import('./types.js').Slot, placement: ReturnType<typeof checkPlacement>, score: number, findingsCarried: number, spreadAdmitted: ReturnType<typeof admittedByShelvedFloor> }|null} */
   let best = null;
   /**
    * Candidates pass 1 refused for a coach overlap **alone** — facility-legal,
    * turnover-clean — kept for pass 2 with how many overlap instances each adds.
    *
-   * @type {Array<{ slot: import('./types.js').Slot, placement: ReturnType<typeof checkPlacement>, overlapsAdded: number, score: number, findingsCarried: number }>}
+   * @type {Array<{ slot: import('./types.js').Slot, placement: ReturnType<typeof checkPlacement>, overlapsAdded: number, score: number, findingsCarried: number, spreadAdmitted: ReturnType<typeof admittedByShelvedFloor> }>}
    */
   const overlapOnly = [];
-  /** @type {Record<string, number>|null} */
+  /** @type {ReturnType<typeof acceptedSpreadFor>|null} */
   let spreadAccepted = null;
 
   for (const candidate of candidateSlotsFor(state, gameId, anchor, context.weights)) {
@@ -641,10 +691,12 @@ function chooseSlot(state, context, gameId, options) {
       : { instances: {}, meta: null };
     // The spread's accepted record reads `state`, which no candidate changes,
     // so it is measured once per call rather than once per candidate.
-    if (gated && spreadAccepted === null)
+    if (gated && spreadAccepted === null) {
       spreadAccepted = acceptedSpreadFor(context, state, gameId);
+      if (spreadAccepted.shelvedRaised !== null) state.ledger.meta.spreadShelvedFloorsMeasured += 1;
+    }
     const acceptedRules = gated
-      ? { ...acceptedRulesFor(context, gameId, candidate), ...spreadAccepted }
+      ? { ...acceptedRulesFor(context, gameId, candidate), ...spreadAccepted?.accepted }
       : {};
     if (gated) {
       state.ledger.meta.ruleGateCommitmentsExamined += ruled.meta.coachCommitmentsExamined;
@@ -683,6 +735,10 @@ function chooseSlot(state, context, gameId, options) {
       context.weights
     ).total;
     const findingsCarried = placementFindingTotal(placement);
+    const spreadAdmitted = admittedByShelvedFloor(
+      ruled.instances,
+      spreadAccepted?.shelvedRaised ?? null
+    );
     if (ruleGrown.length > 0) {
       state.ledger.meta.candidatesRejected += 1;
       state.ledger.meta.candidatesRefusedByRules += 1;
@@ -690,8 +746,10 @@ function chooseSlot(state, context, gameId, options) {
       for (const code of ruleGrown) refusals[code] = (refusals[code] ?? 0) + 1;
       // **Pass 2's pool: refused for a coach overlap and nothing else.** A
       // turnover below the floor is HARD and refused in both passes (#61), as
-      // is a grown coach-conflict spread (#60, Q1); the branch above already
-      // turned away anything else.
+      // is a grown coach-conflict spread (#60, Q1) — past the shelved floor
+      // (#60b), which the accepted record already holds, so a slot no worse
+      // for the spread than TIME TBD enters here too (ruling Q2); the branch
+      // above already turned away anything else.
       {
         overlapOnly.push({
           slot: candidate,
@@ -702,6 +760,7 @@ function chooseSlot(state, context, gameId, options) {
           ),
           score,
           findingsCarried,
+          spreadAdmitted,
         });
       }
       continue;
@@ -712,7 +771,7 @@ function chooseSlot(state, context, gameId, options) {
       score < best.score ||
       (score === best.score && findingsCarried < best.findingsCarried)
     ) {
-      best = { slot: candidate, placement, score, findingsCarried };
+      best = { slot: candidate, placement, score, findingsCarried, spreadAdmitted };
     }
     if (best.score === 0 && best.findingsCarried === 0) break;
   }
@@ -738,6 +797,7 @@ function chooseSlot(state, context, gameId, options) {
     placement: chosen.placement,
     score: chosen.score,
     findingsCarried: chosen.findingsCarried,
+    spreadAdmitted: chosen.spreadAdmitted,
     viaOverlapFallback: true,
   };
 }
@@ -776,7 +836,9 @@ export function evaluateCandidate(context, state, gameId, slot, reference) {
   const ruled = ruleGateInstances(context, state, gameId, slot, { travelCodes: true });
   const acceptedRules = {
     ...acceptedRulesFor(context, gameId, slot),
-    ...acceptedSpreadFor(context, state, gameId),
+    // With the shelved floor (#60b) for a game absent from `state` — the
+    // options pass's `time-tbd` trigger (ruling Q5) — exactly as the placer.
+    ...acceptedSpreadFor(context, state, gameId).accepted,
   };
   const ruleGrown = newBlockingCodes(ruled.instances, acceptedRules);
   const grownKeys = grownInstances(ruled.instances, acceptedRules);
@@ -895,6 +957,30 @@ function placePending(state, context, gameId, stageId) {
             requestedSlot: context.requestedSlots[gameId],
             placedSlot: slotKey(candidate),
           }
+        )
+      );
+    }
+    // **Admitted by the shelved floor (#60b), named per game** (ruling Q3), on
+    // a tie and on a strict improvement alike (Q6). The group warning
+    // (`RESOLVE_CONFLICT_SPREAD_CARRIED`) names no game; this says which
+    // placement the floor let through, from what `chooseSlot()` carried on
+    // the chosen candidate rather than re-derived.
+    if (chosen.spreadAdmitted.length > 0) {
+      next.ledger.meta.spreadAdmittedByShelvedFloor += 1;
+      const groups = chosen.spreadAdmitted.map(
+        ({ key, placedExcess, shelvedExcess, acceptedExcess }) => ({
+          groupLabel: key.slice(key.indexOf('|') + 1),
+          placedExcess,
+          shelvedExcess,
+          acceptedExcess,
+        })
+      );
+      const tie = groups.every((group) => group.placedExcess === group.shelvedExcess);
+      next.ledger.findings.push(
+        makeResolveFinding(
+          RESOLVE_REASON.RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD,
+          `game "${gameId}" was placed on ${slotKey(candidate)} although it pushes ${groups.map((group) => `age group "${group.groupLabel}" to excess ${group.placedExcess} over the permitted coach-conflict spread (accepted ${group.acceptedExcess})`).join('; ')}: shelving it as TIME TBD would leave ${tie ? 'the same' : 'a larger'} excess (${groups.map((group) => `${group.groupLabel} ${group.shelvedExcess}`).join(', ')}), so the kickoff costs the bound nothing a TIME TBD would save (#60b). Allowed with a warning`,
+          { gameId, stageId, slot: slotKey(candidate), groups, tie }
         )
       );
     }
@@ -1851,7 +1937,7 @@ function reportConflictSpreadCarried(state, context, stageId) {
     state.ledger.findings.push(
       makeResolveFinding(
         RESOLVE_REASON.RESOLVE_CONFLICT_SPREAD_CARRIED,
-        `age group "${subject.groupLabel}" now carries between ${subject.minConflicts} and ${subject.maxConflicts} coach conflicts per team across ${subject.teamIds.join(', ')}; the spread ${subject.spread} exceeds the permitted ${subject.maxSpread} by more than the published schedule did (${baselineExcess}). Allowed with a warning (#60): the placer refuses a placement that pushes a group further than it stands, so this came from a move the gate does not judge — a requested move, or a game lifted off a conflict`,
+        `age group "${subject.groupLabel}" now carries between ${subject.minConflicts} and ${subject.maxConflicts} coach conflicts per team across ${subject.teamIds.join(', ')}; the spread ${subject.spread} exceeds the permitted ${subject.maxSpread} by more than the published schedule did (${baselineExcess}). Allowed with a warning (#60): the placer refuses a placement that pushes a group further than it stands unless shelving the game as TIME TBD would leave the group no better (#60b, named per game by RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD), so this came from such a placement or from a move the gate does not judge — a requested move, or a game lifted off a conflict`,
         {
           stageId,
           groupLabel: subject.groupLabel,

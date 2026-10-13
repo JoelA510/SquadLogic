@@ -1122,7 +1122,7 @@ describe('#60b W-b6: a standing game gets no floor', () => {
     expect(judged.spreadAdded).toBe(1);
   });
 
-  it('refuses that slot with #564 standing on W-b1’s slot', () => {
+  it('refuses that slot with #564 standing on its clean slot', () => {
     probe.hold(X, held);
     const judged = probe.evaluate(X, other);
     expect(judged.ruleGrown).toEqual(['CONFLICT_SPREAD_EXCEEDED']);

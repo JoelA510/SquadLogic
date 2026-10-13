@@ -84,6 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Relocation proposals are judged by `resolve/` in `change-request-apply`, with up to three opt-in cross-venue options per game.
   - `evaluateCoachTravel` judges overlap over every pair of a coach's commitments.
   - A solver placement that would grow a group's coach-conflict spread is refused (`CONFLICT_SPREAD_EXCEEDED`). A requested move that grows it is allowed with `RESOLVE_CONFLICT_SPREAD_CARRIED`.
+  - #60b: for a game with no slot, a placement no worse for the spread than leaving it TIME TBD is admitted, with the per-game warning `RESOLVE_SPREAD_ADMITTED_NO_WORSE_THAN_TBD`. The bound's verdict in `verify` is unchanged.
   - The gate honours the waiver ledger. `conflict-fairness` stays non-waivable.
 - **School-day end** (#420, #425, #438): core practice scheduling and evaluation now refuse a `schoolDayEnd` or timezone they cannot read, instead of passing every slot or reporting no warnings. The auto-scheduler request no longer sends `schoolDayEnd`, which nothing enforced; the schema strips it.
 - **CI gates and deploys** (#363, #457, #485, #486, #524):

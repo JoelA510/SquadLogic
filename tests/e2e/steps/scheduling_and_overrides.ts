@@ -672,6 +672,24 @@ Given('the automated schedule has been generated', async ({ page }) => {
     db.scheduler_runs = [];
     db.practice_assignments = [];
 
+    // The grid's read is a SEASON read (org + season through teams ->
+    // divisions), so Team A's division belongs to the active season, as in
+    // 'a practice schedule has been generated'.
+    const storedSeason = localStorage.getItem('squadlogic-current-season') || 'Fall 2026';
+    const activeSeason = (db.season_settings || []).find(
+      (s: Record<string, unknown>) =>
+        s.organization_id === orgId && (s.id === storedSeason || s.name === storedSeason)
+    );
+    db.divisions = [
+      ...(db.divisions || []).filter((d: Record<string, unknown>) => d.id !== 'div-1'),
+      {
+        id: 'div-1',
+        name: 'U10',
+        organization_id: orgId,
+        season_settings_id: activeSeason?.id || 'season-1',
+      },
+    ];
+
     // CRITICAL FIX: Add organization_id so the hooks don't filter these out
     db.teams = [{ id: 'team-a', name: 'Team A', division_id: 'div-1', organization_id: orgId }];
     db.practice_slots = [
@@ -721,9 +739,16 @@ Given('the automated schedule has been generated', async ({ page }) => {
 
     db.practice_assignments.push({
       id: 'assign-team-a',
+      // CLAUDE.md §8 rule 1, and the columns a real persisted row carries: the
+      // grid reads the season's current rows (org + season through teams ->
+      // divisions), not the latest run's, so a row without them is not shown.
+      organization_id: orgId,
       run_id: 'active-practice-run-id',
       team_id: 'team-a',
       slot_id: 'slot-1',
+      practice_slot_id: 'slot-1',
+      effective_date_range: '[2025-01-01,2026-01-01)',
+      assigned_via: 'auto',
       source: 'auto',
       teams: { name: 'Team A', divisions: { name: 'U10' } },
       practiceSlots: {

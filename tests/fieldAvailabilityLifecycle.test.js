@@ -103,7 +103,7 @@ describe('field availability lifecycle', () => {
       p_import_type: 'field_availability',
       p_file_name: 'fa.csv',
     });
-    await seedFacilityFor([{ location: 'San Lorenzo', field_name: 'Main' }]);
+    await seedFacilityFor([{ location: 'Venue G', field_name: 'Main' }]);
     await supabase.from('staging_import_rows').insert({
       id: 'row1',
       import_job_id: job.id,
@@ -112,7 +112,7 @@ describe('field availability lifecycle', () => {
       raw_payload: {},
       normalized_payload: {
         season_label: 'Fall 2026',
-        location: 'San Lorenzo',
+        location: 'Venue G',
         field_name: 'Main',
         available_from: '2026-08-01',
         available_until: '2026-10-31',
@@ -122,8 +122,8 @@ describe('field availability lifecycle', () => {
         blackout_months: 'Sept',
         goal_equipment: 'sturdy goals',
         goal_status: 'needs purchase',
-        scenario_name: 'Canyon A',
-        scenario_group: 'canyon',
+        scenario_name: 'Venue J A',
+        scenario_group: 'venue_j',
       },
       validation_errors: [],
     });
@@ -173,7 +173,7 @@ describe('field availability lifecycle', () => {
       raw_payload: {},
       normalized_payload: {
         season_label: 'Fall 2026',
-        location: 'Five Canyons',
+        location: 'Venue E',
         field_name: 'Upper',
         available_from: '2026-09-01',
         available_until: '2026-11-30',
@@ -200,7 +200,7 @@ describe('field availability lifecycle', () => {
       p_import_type: 'field_availability',
       p_file_name: 'months.csv',
     });
-    await seedFacilityFor([{ location: 'San Lorenzo', field_name: 'Main' }]);
+    await seedFacilityFor([{ location: 'Venue G', field_name: 'Main' }]);
     await supabase.from('staging_import_rows').insert({
       id: 'row-months',
       import_job_id: job.id,
@@ -209,7 +209,7 @@ describe('field availability lifecycle', () => {
       raw_payload: {},
       normalized_payload: {
         season_label: 'Fall 2026',
-        location: 'San Lorenzo',
+        location: 'Venue G',
         field_name: 'Main',
         available_from: '2026-08-01',
         available_until: '2026-11-30',
@@ -234,7 +234,7 @@ describe('field availability lifecycle', () => {
   it('Fall 2026 fixture regression pack preserves counts and edge-cases', async () => {
     const rows = [
       {
-        location: 'Stanton Elementary',
+        location: 'Venue A Elementary',
         field_name: 'Main',
         available_from: '2026-08-01',
         available_until: '2026-11-30',
@@ -246,7 +246,7 @@ describe('field availability lifecycle', () => {
         restroom_potty: 'true',
       },
       {
-        location: 'Jensen Ranch',
+        location: 'Venue B',
         field_name: 'Main',
         available_from: '2026-08-01',
         available_until: '2026-11-30',
@@ -258,7 +258,7 @@ describe('field availability lifecycle', () => {
         restroom_potty: 'true',
       },
       {
-        location: 'Vannoy Back Field 7',
+        location: 'Venue C Back Field 7',
         field_name: 'Field 7',
         available_from: '2026-08-01',
         available_until: '2026-11-30',
@@ -269,7 +269,7 @@ describe('field availability lifecycle', () => {
         goal_status: 'available',
       },
       {
-        location: 'Vannoy Front Field 1',
+        location: 'Venue C Front Field 1',
         field_name: 'Field 1',
         available_from: '2026-08-01',
         available_until: '2026-11-30',
@@ -280,7 +280,7 @@ describe('field availability lifecycle', () => {
         restroom_potty: 'true',
       },
       {
-        location: 'Independent Field 6',
+        location: 'Venue D Field 6',
         field_name: 'Field 6',
         available_from: '2026-08-01',
         available_until: '2026-11-30',
@@ -288,12 +288,12 @@ describe('field availability lifecycle', () => {
         teams_per_hour: '2',
         use_context: 'Boys & Girls',
         day_constraints: 'Sat/Sun',
-        move_to_location: 'Vannoy',
+        move_to_location: 'Venue C',
         goal_equipment: 'PUGG or sturdy goals',
         goal_status: 'recommended',
       },
       {
-        location: 'Five Canyons Upper',
+        location: 'Venue E Upper',
         field_name: 'Upper',
         available_from: '2026-09-01',
         available_until: '2026-11-30',
@@ -303,7 +303,7 @@ describe('field availability lifecycle', () => {
         blackout_months: 'Aug',
       },
       {
-        location: 'Five Canyons Lower',
+        location: 'Venue E Lower',
         field_name: 'Lower',
         available_from: '2026-09-01',
         available_until: '2026-11-30',
@@ -313,7 +313,7 @@ describe('field availability lifecycle', () => {
         blackout_months: 'Aug',
       },
       {
-        location: 'Bret Harte',
+        location: 'Venue F',
         field_name: 'Main',
         available_from: '2026-09-01',
         available_until: '2026-11-30',
@@ -323,7 +323,7 @@ describe('field availability lifecycle', () => {
         goal_status: 'available',
       },
       {
-        location: 'San Lorenzo',
+        location: 'Venue G',
         field_name: 'Main',
         available_from: '2026-08-01',
         available_until: '2026-10-31',
@@ -332,21 +332,21 @@ describe('field availability lifecycle', () => {
         blackout_months: 'Sep',
       },
       {
-        location: 'Creekside',
+        location: 'Venue H',
         field_name: 'Field 1',
         available_from: '2026-08-01',
         available_until: '2026-11-30',
         record_status: 'excluded',
       },
       {
-        location: 'Proctor',
+        location: 'Venue I',
         field_name: 'Field 1',
         available_from: '2026-08-01',
         available_until: '2026-11-30',
         record_status: 'excluded',
       },
       {
-        location: 'Canyon',
+        location: 'Venue J',
         field_name: 'Turf 11v11 Pods',
         available_from: '2026-08-01',
         available_until: '2026-11-30',
@@ -355,12 +355,12 @@ describe('field availability lifecycle', () => {
         aggregate_teams_per_hour: '8',
         record_status: 'potential',
         approval_status: 'pending',
-        scenario_name: 'Canyon Potential',
-        scenario_group: 'canyon',
+        scenario_name: 'Venue J Potential',
+        scenario_group: 'venue_j',
         goal_status: 'available',
       },
       {
-        location: 'Canyon',
+        location: 'Venue J',
         field_name: 'Turf 9v9 Pods',
         available_from: '2026-08-01',
         available_until: '2026-11-30',
@@ -369,13 +369,13 @@ describe('field availability lifecycle', () => {
         aggregate_teams_per_hour: '8',
         record_status: 'potential',
         approval_status: 'pending',
-        scenario_name: 'Canyon Potential',
-        scenario_group: 'canyon',
+        scenario_name: 'Venue J Potential',
+        scenario_group: 'venue_j',
         goal_equipment: 'sturdy 9v9 goals with wheels/locks',
         goal_status: 'required',
       },
       {
-        location: 'Canyon',
+        location: 'Venue J',
         field_name: 'Turf Mixed Combination',
         available_from: '2026-08-01',
         available_until: '2026-11-30',
@@ -385,13 +385,13 @@ describe('field availability lifecycle', () => {
         aggregate_teams_per_hour: '8',
         record_status: 'potential',
         approval_status: 'pending',
-        scenario_name: 'Canyon Potential',
-        scenario_group: 'canyon',
+        scenario_name: 'Venue J Potential',
+        scenario_group: 'venue_j',
         goal_equipment: 'sturdy 9v9 goals with wheels/locks',
         goal_status: 'required',
       },
       {
-        location: 'Canyon',
+        location: 'Venue J',
         field_name: 'Grass 11v11',
         available_from: '2026-08-01',
         available_until: '2026-11-30',
@@ -400,8 +400,8 @@ describe('field availability lifecycle', () => {
         teams_per_hour: '2',
         record_status: 'potential',
         approval_status: 'pending',
-        scenario_name: 'Canyon Potential',
-        scenario_group: 'canyon',
+        scenario_name: 'Venue J Potential',
+        scenario_group: 'venue_j',
         goal_status: 'available',
       },
     ];
@@ -443,19 +443,19 @@ describe('field availability lifecycle', () => {
     expect(
       getMockData('field_availability_profiles').filter(
         (p) =>
-          ['Five Canyons Upper', 'Five Canyons Lower', 'Bret Harte'].includes(p.location) &&
+          ['Venue E Upper', 'Venue E Lower', 'Venue F'].includes(p.location) &&
           p.available_from === '2026-09-01'
       ).length
     ).toBe(3);
     expect(
       getMockData('field_availability_profiles').filter(
-        (p) => ['Creekside', 'Proctor'].includes(p.location) && p.record_status === 'active'
+        (p) => ['Venue H', 'Venue I'].includes(p.location) && p.record_status === 'active'
       ).length
     ).toBe(0);
     expect(
       getMockData('field_availability_profiles').filter(
         (p) =>
-          p.location === 'Canyon' &&
+          p.location === 'Venue J' &&
           p.record_status === 'potential' &&
           p.approval_status === 'pending'
       ).length

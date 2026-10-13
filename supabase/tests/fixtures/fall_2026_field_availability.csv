@@ -1,16 +1,16 @@
 season_label,location,field_name,available_from,available_until,primary_format,secondary_format,format_quantity,teams_per_hour,aggregate_teams_per_hour,capacity_basis,use_context,day_constraints,move_to_location,goal_equipment,goal_status,restroom_potty,blackout_months,record_status,approval_status,scenario_name,scenario_group,notes
-Fall 2026,Stanton Elementary,Main,2026-08-01,2026-11-30,7v7,9v9,1,2,,per_field,,, ,sturdy goals,needs sturdy goals,true,,active,approved,,,"7v7 game field with 9v9 practice space"
-Fall 2026,Jensen Ranch,Main,2026-08-01,2026-11-30,7v7,9v9,1,2,,per_field,,, ,sturdy goals,not approved,true,,active,approved,,,"7v7 game field with 9v9 practice space"
-Fall 2026,Vannoy Back Field 7,Field 7,2026-08-01,2026-11-30,5v5,,1,4,,per_field,Academy,,,PUGG / Bownets / Forza,available,, ,active,approved,,,"Practice PUGG, games Bownets/Forza"
-Fall 2026,Vannoy Front Field 1,Field 1,2026-08-01,2026-11-30,7v7,,1,1,,per_field,,, ,sturdy goals,needs sturdy goals,true,,active,approved,,,
-Fall 2026,Independent Field 6,Field 6,2026-08-01,2026-11-30,4v4,,1,2,,per_field,"Boys & Girls",Sat/Sun,Vannoy,PUGG or sturdy goals,recommended,, ,active,approved,,,"Move to Vannoy Sunday"
-Fall 2026,Five Canyons Upper,Upper,2026-09-01,2026-11-30,9v9,7v7,1,2,,per_field,,, ,,, ,Aug,active,approved,,,
-Fall 2026,Five Canyons Lower,Lower,2026-09-01,2026-11-30,9v9,7v7,1,2,,per_field,,, ,,, ,Aug,active,approved,,,
-Fall 2026,Bret Harte,Main,2026-09-01,2026-11-30,11v11,,1,2,,per_field,,, ,,available, ,Aug,active,approved,,,"Only field with lights"
-Fall 2026,San Lorenzo,Main,2026-08-01,2026-10-31,11v11,,1,2,,per_field,,, ,,, ,Sep,active,approved,,,
-Fall 2026,Creekside,Field 1,2026-08-01,2026-11-30,7v7,,1,2,,per_field,,, ,,,, ,excluded,approved,,,"No Fall use"
-Fall 2026,Proctor,Field 1,2026-08-01,2026-11-30,7v7,,1,2,,per_field,,, ,,,, ,excluded,approved,,,"No Fall use"
-Fall 2026,Canyon,Turf 11v11 Pods,2026-08-01,2026-11-30,11v11,,4,,8,aggregate,Games,,, ,available,, ,potential,pending,Canyon Potential,canyon,"11v11 turf x4"
-Fall 2026,Canyon,Turf 9v9 Pods,2026-08-01,2026-11-30,9v9,,4,,8,aggregate,Games,,,sturdy 9v9 goals with wheels/locks,required,, ,potential,pending,Canyon Potential,canyon,"9v9 turf x4"
-Fall 2026,Canyon,Turf Mixed Combination,2026-08-01,2026-11-30,11v11,9v9,4,,8,aggregate,Mixed,,,sturdy 9v9 goals with wheels/locks,required,, ,potential,pending,Canyon Potential,canyon,"mixed turf combination"
-Fall 2026,Canyon,Grass 11v11,2026-08-01,2026-11-30,11v11,,1,2,,per_field,Games,,, ,available,, ,potential,pending,Canyon Potential,canyon,"11v11 grass x1"
+Fall 2026,Venue A Elementary,Main,2026-08-01,2026-11-30,7v7,9v9,1,2,,per_field,,, ,sturdy goals,needs sturdy goals,true,,active,approved,,,"7v7 game field with 9v9 practice space"
+Fall 2026,Venue B,Main,2026-08-01,2026-11-30,7v7,9v9,1,2,,per_field,,, ,sturdy goals,not approved,true,,active,approved,,,"7v7 game field with 9v9 practice space"
+Fall 2026,Venue C Back Field 7,Field 7,2026-08-01,2026-11-30,5v5,,1,4,,per_field,Academy,,,PUGG / Bownets / Forza,available,, ,active,approved,,,"Practice PUGG, games Bownets/Forza"
+Fall 2026,Venue C Front Field 1,Field 1,2026-08-01,2026-11-30,7v7,,1,1,,per_field,,, ,sturdy goals,needs sturdy goals,true,,active,approved,,,
+Fall 2026,Venue D Field 6,Field 6,2026-08-01,2026-11-30,4v4,,1,2,,per_field,"Boys & Girls",Sat/Sun,Venue C,PUGG or sturdy goals,recommended,, ,active,approved,,,"Move to Venue C Sunday"
+Fall 2026,Venue E Upper,Upper,2026-09-01,2026-11-30,9v9,7v7,1,2,,per_field,,, ,,, ,Aug,active,approved,,,
+Fall 2026,Venue E Lower,Lower,2026-09-01,2026-11-30,9v9,7v7,1,2,,per_field,,, ,,, ,Aug,active,approved,,,
+Fall 2026,Venue F,Main,2026-09-01,2026-11-30,11v11,,1,2,,per_field,,, ,,available, ,Aug,active,approved,,,"Only field with lights"
+Fall 2026,Venue G,Main,2026-08-01,2026-10-31,11v11,,1,2,,per_field,,, ,,, ,Sep,active,approved,,,
+Fall 2026,Venue H,Field 1,2026-08-01,2026-11-30,7v7,,1,2,,per_field,,, ,,,, ,excluded,approved,,,"No Fall use"
+Fall 2026,Venue I,Field 1,2026-08-01,2026-11-30,7v7,,1,2,,per_field,,, ,,,, ,excluded,approved,,,"No Fall use"
+Fall 2026,Venue J,Turf 11v11 Pods,2026-08-01,2026-11-30,11v11,,4,,8,aggregate,Games,,, ,available,, ,potential,pending,Venue J Potential,venue_j,"11v11 turf x4"
+Fall 2026,Venue J,Turf 9v9 Pods,2026-08-01,2026-11-30,9v9,,4,,8,aggregate,Games,,,sturdy 9v9 goals with wheels/locks,required,, ,potential,pending,Venue J Potential,venue_j,"9v9 turf x4"
+Fall 2026,Venue J,Turf Mixed Combination,2026-08-01,2026-11-30,11v11,9v9,4,,8,aggregate,Mixed,,,sturdy 9v9 goals with wheels/locks,required,, ,potential,pending,Venue J Potential,venue_j,"mixed turf combination"
+Fall 2026,Venue J,Grass 11v11,2026-08-01,2026-11-30,11v11,,1,2,,per_field,Games,,, ,available,, ,potential,pending,Venue J Potential,venue_j,"11v11 grass x1"

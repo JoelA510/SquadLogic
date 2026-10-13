@@ -30,7 +30,6 @@ const REQUIRED_HINT = 'practice_slot_id';
  * change of quoting style.
  */
 const KNOWN_SITES = [
-  'frontend/src/hooks/usePracticeAssignments.js',
   'frontend/src/hooks/useTeamPortal.js',
   'frontend/src/pages/PlayerRecordPage.jsx',
   // The calendar feed's reads, moved out of calendar-feed/index.ts in 8.6 3b PR 12b.

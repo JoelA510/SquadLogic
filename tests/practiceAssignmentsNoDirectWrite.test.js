@@ -135,7 +135,6 @@ describe('practice_assignments has no direct table writer', () => {
     // that finds nothing fails here instead of passing on an empty set.
     expect(files.length).toBeGreaterThan(100);
     for (const known of [
-      'frontend/src/hooks/usePracticeAssignments.js',
       'frontend/src/hooks/useTeamPortal.js',
       'packages/core/src/practiceSupabase.js',
     ]) {

@@ -4,6 +4,7 @@ import * as Sentry from '@sentry/react';
 import App from './App.jsx';
 import { supabaseReady } from './lib/supabaseClient.js';
 import { logger } from './lib/logger.js';
+import { sentryInitOptions } from './lib/sentryOptions.js';
 import './index.css';
 
 // ---------------------------------------------------------------------------
@@ -16,24 +17,14 @@ import './index.css';
 const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN;
 
 if (SENTRY_DSN) {
-  Sentry.init({
-    dsn: SENTRY_DSN,
-    environment: import.meta.env.DEV ? 'development' : 'production',
-
-    // React-specific integrations
-    integrations: [Sentry.browserTracingIntegration(), Sentry.replayIntegration()],
-
-    // Free tier budget: 10k errors + 10k perf txns / month
-    tracesSampleRate: import.meta.env.DEV ? 1.0 : 0.1,
-    replaysSessionSampleRate: 0,
-    replaysOnErrorSampleRate: import.meta.env.DEV ? 1.0 : 0.5,
-
-    // Filter noisy console breadcrumbs in dev
-    beforeBreadcrumb(breadcrumb) {
-      if (import.meta.env.DEV && breadcrumb.category === 'console') return null;
-      return breadcrumb;
-    },
-  });
+  Sentry.init(
+    sentryInitOptions({
+      dsn: SENTRY_DSN,
+      dev: import.meta.env.DEV,
+      release: import.meta.env.VITE_APP_VERSION,
+      integrations: [Sentry.browserTracingIntegration(), Sentry.replayIntegration()],
+    })
+  );
 }
 
 // ---------------------------------------------------------------------------

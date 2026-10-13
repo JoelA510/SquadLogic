@@ -19,6 +19,11 @@
  * Limitation (plan §3): no date model. A locked row occupies its slot for the
  * whole season, so the run never double-books but may under-use a slot.
  *
+ * Relocated slots (8.6 3b PR 11d-0, gap G2): a live `relocated` exception
+ * holds the slot its practice moved onto by the same contract -- one unit of
+ * capacity and its team's coaches at that slot's time, season-wide. It is
+ * occupancy only: not scored and not judged by the daylight pass (declared).
+ *
  * Daylight (8.9 PR 6): given a `daylight` context, the search's placements go
  * through `practice-daylight.ts`'s post-pass -- truncated at the first date
  * past sunset on unlit ground, the remainder TIME TBD. The search itself is
@@ -33,6 +38,7 @@ import {
   type DaylightContext,
   type DaylightReport,
 } from './practice-daylight.ts';
+import type { LoadedRelocation } from './practice-lock.ts';
 
 export type SchedulerTeam = PreparedTeam & { division: string };
 
@@ -141,21 +147,41 @@ export interface BaseOccupancy {
    * silently treated as free or as clashing.
    */
   outsideRun: LockedOccupant[];
+  /**
+   * Live relocations (11d-0) whose slot is not among this run's, or reads no
+   * slot: reported, as `outsideRun` is. Those in the run are occupancy only
+   * (capacity and coach windows above), never scored.
+   */
+  relocatedOutsideRun: LoadedRelocation[];
 }
 
 /**
  * Every locked row, one at a time. Iterating the list -- not a team-keyed
- * collection -- is what keeps a two-row team's both slots occupied.
+ * collection -- is what keeps a two-row team's both slots occupied. Then every
+ * live relocation, by the same contract (11d-0).
  */
 export function buildLockedOccupancy(
   locked: LockedOccupant[],
   teamsById: Map<string, SchedulerTeam>,
-  slotsById: Map<string, SchedulerSlot>
+  slotsById: Map<string, SchedulerSlot>,
+  relocated: LoadedRelocation[] = []
 ): BaseOccupancy {
   const slotCapacity = new Map([...slotsById.values()].map((s) => [s.id, s.capacity]));
   const coachAssignments = new Map<string, TimeWindow[]>();
   const inRun: LockedOccupant[] = [];
   const outsideRun: LockedOccupant[] = [];
+  const relocatedOutsideRun: LoadedRelocation[] = [];
+  // One unit of the slot, and the team's coaches at its time.
+  const hold = (teamId: string, slot: SchedulerSlot) => {
+    slotCapacity.set(slot.id, (slotCapacity.get(slot.id) ?? 0) - 1);
+    const team = teamsById.get(teamId);
+    if (!team) return;
+    for (const coachId of team.coachIds) {
+      const existing = coachAssignments.get(coachId) ?? [];
+      existing.push({ teamId, slotId: slot.id, start: slot.start, end: slot.end });
+      coachAssignments.set(coachId, existing);
+    }
+  };
   for (const row of locked) {
     const slot = row.slotId ? slotsById.get(row.slotId) : undefined;
     if (!slot) {
@@ -163,16 +189,24 @@ export function buildLockedOccupancy(
       continue;
     }
     inRun.push(row);
-    slotCapacity.set(slot.id, (slotCapacity.get(slot.id) ?? 0) - 1);
-    const team = teamsById.get(row.teamId);
-    if (!team) continue;
-    for (const coachId of team.coachIds) {
-      const existing = coachAssignments.get(coachId) ?? [];
-      existing.push({ teamId: row.teamId, slotId: slot.id, start: slot.start, end: slot.end });
-      coachAssignments.set(coachId, existing);
-    }
+    hold(row.teamId, slot);
   }
-  return { slotCapacity, coachAssignments, inRun, outsideRun };
+  // One unit per (row, slot): a row has at most one live window at a time
+  // (the table's EXCLUDE constraint), so two windows of one row moved onto
+  // one slot never meet on a date and hold one unit between them, not two.
+  const heldForRow = new Set<string>();
+  for (const relocation of relocated) {
+    const slot = relocation.slotId ? slotsById.get(relocation.slotId) : undefined;
+    if (!slot) {
+      relocatedOutsideRun.push(relocation);
+      continue;
+    }
+    const key = `${relocation.assignmentId ?? relocation.exceptionId}|${slot.id}`;
+    if (heldForRow.has(key)) continue;
+    heldForRow.add(key);
+    hold(relocation.teamId, slot);
+  }
+  return { slotCapacity, coachAssignments, inRun, outsideRun, relocatedOutsideRun };
 }
 
 // ---------------------------------------------------------------------------
@@ -521,6 +555,8 @@ export interface OptimizerResult {
   preferKeepBreaches: number;
   /** Locked rows whose slot is not in this run (still locked). */
   lockedOutsideRun: LockedOccupant[];
+  /** Live relocations whose slot is not in this run (11d-0): still held, nothing here to hold. */
+  relocatedOutsideRun: LoadedRelocation[];
   /** The daylight post-pass's report; `null` when the run was given no daylight context. */
   daylight: DaylightReport | null;
   evaluation: ReturnType<typeof evaluatePracticeSchedule>;
@@ -544,6 +580,11 @@ export async function runPracticeOptimizer(params: {
   teams: SchedulerTeam[];
   slots: SchedulerSlot[];
   locked: LockedOccupant[];
+  /**
+   * Live `relocated` exceptions (`loadSeasonPracticeLock`, 11d-0): each holds
+   * its slot season-wide, as a locked row does. Absent means none were read.
+   */
+  relocated?: LoadedRelocation[];
   placeableTeamIds: string[];
   /**
    * Approved coach preferences, as verdicts per (placeable team, slot). Loaded
@@ -570,7 +611,7 @@ export async function runPracticeOptimizer(params: {
   const startTime = Date.now();
   const teamsById = new Map(teams.map((t) => [t.id, t]));
   const slotsById = new Map(slots.map((s) => [s.id, s]));
-  const base = buildLockedOccupancy(locked, teamsById, slotsById);
+  const base = buildLockedOccupancy(locked, teamsById, slotsById, params.relocated ?? []);
   const rand = createPRNG(cfg.seed);
 
   const seed = generateGreedySeed(base, teams, placeableTeamIds, slots, gate);
@@ -736,6 +777,7 @@ export async function runPracticeOptimizer(params: {
     unassigned,
     preferKeepBreaches,
     lockedOutsideRun: base.outsideRun,
+    relocatedOutsideRun: base.relocatedOutsideRun,
     daylight,
     evaluation,
     seedScore: seedScoring.score,

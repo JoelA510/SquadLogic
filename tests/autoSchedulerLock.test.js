@@ -280,7 +280,7 @@ describe('the lock is loaded as the caller, whole, and scoped like the writer', 
     return {
       calls,
       from(table) {
-        const call = { table, filters: [], ranges: [] };
+        const call = { table, filters: [], ranges: [], orders: [] };
         calls.push(call);
         const q = {
           select(cols) {
@@ -295,7 +295,8 @@ describe('the lock is loaded as the caller, whole, and scoped like the writer', 
             call.filters.push(['is', col, val]);
             return q;
           },
-          order() {
+          order(col, options) {
+            call.orders.push([col, options?.ascending ?? true]);
             return q;
           },
           range(from, to) {
@@ -303,7 +304,13 @@ describe('the lock is loaded as the caller, whole, and scoped like the writer', 
             if (failOn === table)
               return Promise.resolve({ data: null, error: { message: 'boom' } });
             const end = Math.min(to + 1, from + serverCap);
-            return Promise.resolve({ data: tables[table].slice(from, end), error: null });
+            // 11d-0: the lock also reads `kind = 'relocated'` exceptions; those
+            // are seeded and witnessed in tests/autoSchedulerRelocatedLock.test.js.
+            const relocatedRead = call.filters.some(
+              ([op, col, v]) => op === 'eq' && col === 'kind' && v === 'relocated'
+            );
+            const rows = relocatedRead ? [] : tables[table];
+            return Promise.resolve({ data: rows.slice(from, end), error: null });
           },
         };
         return q;
@@ -380,6 +387,11 @@ describe('the lock is loaded as the caller, whole, and scoped like the writer', 
         ([op, col, v]) => op === 'is' && col === 'withdrawn_at' && v === null
       )
     );
+    // Offset paging is only whole over a stable order: every page of every
+    // lock read is ordered by id, ascending.
+    for (const call of client.calls) {
+      assert.deepEqual(call.orders, [['id', true]], `${call.table} page is not ordered by id`);
+    }
   });
 
   it('a failed read is a refusal, not an empty lock', async () => {

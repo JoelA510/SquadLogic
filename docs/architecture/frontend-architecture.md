@@ -60,7 +60,7 @@ State is managed entirely through **React Context** — no external state librar
 | `useTeamAnalysis`        | Player grouping by age/gender with season-aware age calculations |
 | `useTeamPersistence`     | Snapshot packaging and Supabase persistence triggers             |
 | `usePracticeSummary`     | Practice scheduling run data                                     |
-| `usePracticeAssignments` | Practice slot assignment data                                    |
+| `useCurrentPracticeSchedule` | The season's current practice rows (grid and exports)        |
 | `useGameSummary`         | Game scheduling run data                                         |
 | `useGameAssignments`     | Game assignment data by run ID                                   |
 | `useGameSlots`           | Available game time slots                                        |

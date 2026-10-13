@@ -20,3 +20,11 @@ export {
   referenceForecasts,
 } from './heatFixtures.js';
 export { REGION_SAMPLE_POINTS, SYNTHETIC_HEAT_SITES } from './heatSyntheticSites.js';
+export {
+  REPO_ROOT,
+  SCAN_ALWAYS,
+  SCAN_EXT,
+  SCAN_ROOTS,
+  filesUnder,
+  scannedFiles,
+} from './repoScanFiles.js';

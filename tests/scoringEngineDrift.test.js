@@ -510,6 +510,11 @@ describe('scoring-engine cross-arm drift: dated (M4.7)', () => {
       { name: 'undated', slots: undatedInputs(vector).slots, refused: false },
       { name: 'mixed', slots: [a, undatedB], refused: true },
       { name: 'not a calendar date', slots: [a, { ...b, lastDate: '2026-02-30' }], refused: true },
+      {
+        name: 'a first date that is not one',
+        slots: [a, { ...b, firstDate: '2026-9-1' }],
+        refused: true,
+      },
       { name: 'no wall window', slots: [a, { ...b, endTime: null }], refused: true },
       { name: 'ends before it starts', slots: [a, { ...b, endTime: '15:59' }], refused: true },
       { name: 'an hour that is not one', slots: [a, { ...b, startTime: '24:00' }], refused: true },

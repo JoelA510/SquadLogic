@@ -1206,7 +1206,9 @@ Given(
           organization_id: orgId,
         },
       ];
-      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+      // The sanctioned producer (tests/mockDeleteTombstones.test.js), not a
+      // direct sessionStorage write.
+      window.__saveMockDB__(db);
     }, teamName);
   }
 );

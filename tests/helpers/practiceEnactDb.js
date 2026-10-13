@@ -42,6 +42,9 @@ export function enactDbOf(rows, { role = 'admin' } = {}) {
     team_coach_assignments: tag(rows.teamCoachAssignments),
     coach_practice_preferences: [],
     field_closures: tag(rows.fieldClosures),
+    // The saved blackouts the mock wrapper's gate reads (3b PR 11d-3): seeded
+    // with the fixture, as the 11d-2 mock test seeds them, never written.
+    field_blackouts: tag(rows.fieldBlackouts),
     practice_assignments: tag(rows.practiceAssignments).map((a) => ({
       assigned_via: 'auto',
       ...a,

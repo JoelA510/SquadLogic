@@ -5,21 +5,27 @@ import { usePracticeRepairSnapshot } from '../../hooks/usePracticeRepairSnapshot
 import { supabase } from '../../lib/supabaseClient.js';
 import {
   TBD_REASON_TEXT,
+  WEEKDAY_TEXT,
+  clock,
   declineIn,
   describeShape,
   namesOf,
   openPracticeRepair,
   panelRowsOf,
+  targetLostRowsOf,
   undoIn,
 } from '../../utils/practiceRepairPanel.js';
 import {
+  ENACT_GATE,
   ENACT_REFUSAL_TEXT,
+  ENACT_TARGET_LOST_TEXT,
   enactGateOf,
   enactPlanOf,
   enactPracticeRecommendation,
   enactPromptOf,
   enactedRowsOf,
   mintEnactKey,
+  storedCauseOf,
 } from '../../utils/practiceRepairEnact.js';
 import { persistPracticeEnact } from '../../utils/practicePersistenceClient.js';
 import Button from '../ui/Button.jsx';
@@ -42,14 +48,15 @@ const LOCAL_CODE = PRACTICE_REASON.REPAIR_RECOMMENDATION_LOCAL;
  *   memory (decisions are not persisted, 3b decision 10). After any, the
  *   panel carries `PRACTICE_REPAIR_RECOMMENDATION_LOCAL`: locally repaired,
  *   not proven optimal.
- * - Each window shows whether a save would be refused and why (every
- *   blackout window is, until 3b PR 12), never hiding one.
- * - **Enact** (3b PR 11c, retirements only): one button per recommendation,
- *   admin-only, enabled only once the retirement is COMMITTED (operator
- *   answer Q3). In the retirement dialog's dry-run preview (`preview`) every
- *   button is disabled with the reason; for a blackout it is disabled with
- *   the save refusal (Q1). Its confirmation is the ruling-2 override prompt
- *   (`PracticeEnactDialog`); the flow is `utils/practiceRepairEnact.js`,
+ * - Each window shows whether a save would be refused and why, never hiding
+ *   one.
+ * - **Enact** (3b PR 11c; blackouts 3b PR 11d-3): one button per
+ *   recommendation, admin-only, enabled only once the cause is COMMITTED as
+ *   shown (operator answer Q3; 11d Q5: a saved blackout, as saved). In a
+ *   dry-run preview (`preview`: the retirement dialog, and always the
+ *   blackout editor's draft) every button is disabled with the reason. Its
+ *   confirmation is the ruling-2 override prompt (`PracticeEnactDialog`),
+ *   worded for the cause (11d Q4); the flow is `utils/practiceRepairEnact.js`,
  *   which re-reads, re-judges and sends ONE write, never a retry. Nothing
  *   else writes: declines and undos stay on screen only.
  * - **A failed or partial read shows no recommendations**, only the error,
@@ -113,7 +120,7 @@ export default function PracticeRepairPanel({ loss, subject, isAdmin = false, pr
         Declining only re-offers a slot on this screen and is never saved.{' '}
         {loss?.kind === 'retirement'
           ? 'Enact saves one recommendation and locks it: admin-only, and only once the retirement is saved.'
-          : 'Enacting a blackout recommendation is not available yet.'}
+          : 'Enact saves one recommendation as a temporary change to its practices in the window, and locks it: admin-only, and only once the blackout is saved.'}
       </p>
       {body}
     </section>
@@ -181,7 +188,12 @@ function Recommendations({
   const view = useMemo(() => {
     if (!opened.ok || !state) return null;
     try {
-      return { ok: true, rows: panelRowsOf(opened.value, state, names) };
+      return {
+        ok: true,
+        rows: panelRowsOf(opened.value, state, names),
+        // 11d Q8: saved moves on the lost ground, each its own row, never dropped.
+        lost: targetLostRowsOf(opened.value.result, opened.value.adapted, names),
+      };
     } catch (err) {
       return { ok: false, message: err?.message ?? String(err) };
     }
@@ -199,6 +211,7 @@ function Recommendations({
 
   const { result, adapted, daylightPlan } = opened.value;
   const windows = view.rows;
+  const lost = view.lost;
 
   const act = (next, message) => {
     try {
@@ -256,6 +269,8 @@ function Recommendations({
             assignmentId: current.shown.assignmentId,
             teamId: current.shown.teamId,
             written: outcome.written,
+            // The record's own cause, as the write stored it.
+            cause: outcome.cause,
           },
         ]);
       }
@@ -272,7 +287,9 @@ function Recommendations({
         adoptView(outcome.view);
         setDialog(null);
         setAnnounce(
-          `Enacted the recommendation for ${current.team}. Its practice is saved and locked.`
+          loss.kind === 'blackout'
+            ? `Enacted the recommendation for ${current.team}. Its temporary change is saved and locked.`
+            : `Enacted the recommendation for ${current.team}. Its practice is saved and locked.`
         );
         headingRef.current?.focus();
         return;
@@ -357,6 +374,13 @@ function Recommendations({
       <p ref={headingRef} tabIndex={-1} className="text-sm" data-testid="practice-repair-count">
         <strong>{windows.length}</strong> practice series-window{windows.length === 1 ? '' : 's'}{' '}
         {windows.length === 1 ? 'is' : 'are'} displaced by <strong>{subject}</strong>.
+        {lost.length > 0 && (
+          <span data-testid="practice-repair-target-lost-count">
+            {' '}
+            <strong>{lost.length}</strong> saved temporary move{lost.length === 1 ? '' : 's'}{' '}
+            {lost.length === 1 ? 'lands' : 'land'} on the closed ground and cannot be repaired here.
+          </span>
+        )}
       </p>
       <p className="sr-only" aria-live="polite" data-testid="practice-repair-announce">
         {announce}
@@ -378,7 +402,7 @@ function Recommendations({
         </p>
       )}
 
-      {windows.length === 0 ? (
+      {windows.length === 0 && lost.length === 0 ? (
         <p className="text-sm" data-testid="practice-repair-none">
           No practice series is displaced. This is the repair&rsquo;s answer over the whole season,
           not an empty panel.
@@ -478,6 +502,38 @@ function Recommendations({
                   </td>
                 </tr>
               ))}
+              {lost.map((row) => (
+                <tr
+                  key={`lost-${row.exceptionId}`}
+                  data-testid="practice-repair-target-lost"
+                  data-assignment-id={row.assignmentId}
+                  data-exception-id={row.exceptionId}
+                >
+                  <td>{row.team}</td>
+                  <td>Temporarily moved to {row.movedTo}</td>
+                  <td>{row.window}</td>
+                  <td>
+                    <span className="badge danger">Cannot be repaired here</span> its temporary move
+                    lands on the closed ground
+                  </td>
+                  <td>
+                    <span className="text-sm">Withdrawing a saved change is not available yet</span>
+                  </td>
+                  <td>
+                    <EnactControl
+                      // Its own accessible name: the team may also hold a displaced series.
+                      row={{ team: `${row.team}'s saved temporary move, ${row.window}` }}
+                      gate={{
+                        enabled: false,
+                        why: ENACT_GATE.CANNOT_REPAIR,
+                        text: ENACT_TARGET_LOST_TEXT,
+                      }}
+                      busy={busy || halted}
+                      onEnact={() => {}}
+                    />
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -497,9 +553,25 @@ function Recommendations({
                 data-assignment-id={e.assignmentId}
               >
                 {e.team}:{' '}
-                {e.closedRange ? `its series now ends ${e.closedRange}` : 'its series was replaced'}
+                {e.temporary
+                  ? 'its series keeps its range'
+                  : e.closedRange
+                    ? `its series now ends ${e.closedRange}`
+                    : 'its series was replaced'}
                 {e.timeTbd ? ', TIME TBD after it' : ''}
                 {e.missing > 0 ? `; ${e.missing} written row(s) not found on the fresh read` : ''}
+                {(e.temporary ?? []).map((t) => {
+                  const slot = t.slotId ? adapted.context.slots.get(t.slotId) : null;
+                  return (
+                    <span key={t.id} data-testid="practice-repair-enacted-temporary">
+                      ; its practices in {t.window} are temporarily{' '}
+                      {t.kind === 'relocated'
+                        ? `moved to ${slot ? describeShape(slot, names) : t.slotId}`
+                        : 'TIME TBD'}{' '}
+                      <span className="badge warning">Locked</span>
+                    </span>
+                  );
+                })}
                 {e.locked.map((l) => {
                   const slot = adapted.context.slots.get(l.slotId);
                   return (
@@ -518,12 +590,14 @@ function Recommendations({
       {dialog && (
         <PracticeEnactDialog
           open
-          fieldName={dialog.fieldName}
-          storedDate={dialog.storedDate}
-          team={dialog.team}
+          heading={dialog.heading}
+          lead={dialog.lead}
+          stored={dialog.stored}
+          intro={dialog.intro}
           teams={dialog.teams}
           rows={dialog.rows}
           replacement={dialog.replacement}
+          moves={dialog.moves}
           affected={dialog.affected}
           busy={busy}
           notice={dialog.notice}
@@ -543,6 +617,10 @@ function Recommendations({
           {adapted.declared.closures.applied} applied, {result.closures?.candidatesRefused ?? 0}{' '}
           candidate slot(s) refused). Not read: a field switched off without a retirement date.
         </li>
+        <ExceptionsDeclared
+          declared={adapted.declared.exceptions}
+          blackout={loss.kind === 'blackout'}
+        />
         {adapted.declared.closures.unattributable.length > 0 && (
           <li data-testid="practice-repair-closures-unattributable">
             {adapted.declared.closures.unattributable.length} imported blackout(s) name no field, so
@@ -592,18 +670,24 @@ Recommendations.propTypes = {
 function dialogFor(shown, adapted, rows, names, loss, subject) {
   const prompt = enactPromptOf(adapted, rows, enactPlanOf(adapted, shown));
   const snapshotRow = adapted.context.snapshot.find((r) => r.id === shown.assignmentId);
+  const team = names.team(shown.teamId);
+  if (loss.kind === 'blackout') {
+    return blackoutDialogFor({ shown, rows, names, loss, prompt, snapshotRow, team });
+  }
   const field = (rows.fields ?? []).find(
     (f) => String(f.id).toLowerCase() === String(loss.field?.id).toLowerCase()
   );
-  const team = names.team(shown.teamId);
+  const fieldName = field?.name ?? subject;
+  // The STORED date: the gate enabled the button only when it is set.
+  const storedDate = field?.effective_to ?? '';
   return {
     shown,
     prompt,
     team,
     teams: [{ id: shown.teamId, name: team }],
-    fieldName: field?.name ?? subject,
-    // The STORED date: the gate enabled the button only when it is set.
-    storedDate: field?.effective_to ?? '',
+    heading: `Enact: ${fieldName} retires after ${storedDate}`,
+    lead: `Move ${team}’s practice off ${fieldName}, retired after ${storedDate}`,
+    stored: storedDate,
     rows: prompt.record.rows.map((r) => ({
       assignmentId: r.assignment_id,
       now: describeShape(shown.from, names),
@@ -619,6 +703,110 @@ function dialogFor(shown, adapted, rows, names, loss, subject) {
     blocked: null,
   };
 }
+
+/** `tue` -> `Tue`: a slot's stored weekday in the panel's words. */
+const dayText = (day) => WEEKDAY_TEXT[String(day).toUpperCase()] ?? '?';
+
+/**
+ * The blackout arm of `dialogFor` (11d plan §2.5, Q4): the same dialog and
+ * ruling-2 shape, headed by the STORED blackout row (the commit gate's read
+ * of the same rows, never the draft), one row that keeps its range, the
+ * count in the window, the relocation's counts (G1, Q6), and the per-team
+ * tick. No unlock is sent: the intro says so.
+ */
+function blackoutDialogFor({ shown, rows, names, loss, prompt, snapshotRow, team }) {
+  const commit = storedCauseOf(rows, loss);
+  if (!commit.committed || commit.stored === null) {
+    throw new Error(
+      ENACT_REFUSAL_TEXT[commit.refusal] ??
+        'The blackout is not saved as shown, so it cannot be enacted.'
+    );
+  }
+  // The blackout arm's `stored`: the `field_blackouts` row as the gate read it.
+  const stored = /** @type {any} */ (commit.stored);
+  const lower = (v) => String(v).toLowerCase();
+  const fieldName = (id) => (rows.fields ?? []).find((f) => lower(f.id) === id)?.name ?? id;
+  const venueName = (id) => (rows.locations ?? []).find((l) => lower(l.id) === id)?.name ?? id;
+  const ground =
+    stored.field_id !== null
+      ? fieldName(stored.field_id)
+      : `${venueName(stored.location_id)} (whole venue)`;
+  const hours =
+    stored.start_minutes === null
+      ? ''
+      : `, ${clock(stored.start_minutes)}-${clock(/** @type {number} */ (stored.end_minutes))}`;
+  const closed = `closed ${stored.blackout_from} to ${stored.blackout_until}${hours}`;
+  const w = shown.window;
+  const because = TBD_REASON_TEXT[shown.reason] ?? shown.reason;
+  const moved = prompt.relocation;
+  return {
+    shown,
+    prompt,
+    team,
+    teams: [{ id: shown.teamId, name: team }],
+    heading: `Enact: ${ground} ${closed}`,
+    lead: `Change ${team}’s practices while ${ground} is ${closed}`,
+    stored: `${stored.blackout_from}/${stored.blackout_until}${hours}`,
+    intro:
+      'This changes a saved practice for a while. Its row below is locked; it keeps its range and stays locked, nothing is unlocked, and only its practices in the window change:',
+    rows: prompt.record.rows.map((r) => ({
+      assignmentId: r.assignment_id,
+      now: describeShape(shown.from, names),
+      range: snapshotRow ? `${snapshotRow.range.from} to ${snapshotRow.range.until}` : '',
+      assignedVia: r.assigned_via,
+      effect: r.effect,
+      rangeAfter: null,
+      detail: shown.to
+        ? `: it keeps its range; its practices from ${w.from} to ${w.until} are temporarily moved to ${describeShape(shown.to, names)}`
+        : `: it keeps its range; its practices from ${w.from} to ${w.until} are temporarily TIME TBD, because ${because}`,
+    })),
+    replacement: shown.to
+      ? `${describeShape(shown.to, names)}, from ${w.from} to ${w.until} only`
+      : `TIME TBD from ${w.from} to ${w.until} only, because ${because}`,
+    moves: moved
+      ? `${moved.from.count} practice${moved.from.count === 1 ? '' : 's'} on ${dayText(moved.from.weekday)} move to ${moved.to.count} on ${dayText(moved.to.weekday)}.`
+      : null,
+    affected: prompt.record.published_practices_affected,
+    blocked: null,
+  };
+}
+
+/**
+ * What the adapter read of the saved temporary changes (`declared.exceptions`,
+ * 11d plan §2.1), printed beside the closures it honoured. Nothing here is
+ * enforced by the panel: it says what the repair took into account.
+ *
+ * `enactedWindows` is judged for a blackout only (the adapter's rule 4), so
+ * it is not printed for a retirement, where it would always read 0.
+ *
+ * @param {{ declared: any, blackout: boolean }} props
+ */
+function ExceptionsDeclared({ declared, blackout }) {
+  if (!declared?.supplied) {
+    return (
+      <li data-testid="practice-repair-exceptions-declared" data-supplied="false">
+        {declared?.note ?? 'No saved temporary change was read.'}
+      </li>
+    );
+  }
+  return (
+    <li data-testid="practice-repair-exceptions-declared" data-supplied="true">
+      Saved temporary changes read: {declared.rowsRead} ({declared.live} live, {declared.withdrawn}{' '}
+      withdrawn); {declared.applied} applied to this season&rsquo;s practices, {declared.occupants}{' '}
+      holding ground as a moved practice
+      {blackout ? `, ${declared.enactedWindows} already enacted for this blackout` : ''}
+      {declared.outOfSeason.length > 0
+        ? `; ${declared.outOfSeason.length} on another season’s practices, not applied`
+        : ''}
+      {declared.relocatedSlotUnread.length > 0
+        ? `; ${declared.relocatedSlotUnread.length} moved practice(s) whose slot does not read, shown TIME TBD and holding no ground`
+        : ''}
+      . Declared: a TIME TBD change does not free its slot for other teams.
+    </li>
+  );
+}
+
+ExceptionsDeclared.propTypes = { declared: PropTypes.object, blackout: PropTypes.bool.isRequired };
 
 /**
  * One row's Enact button, and its visible reason when it is disabled.

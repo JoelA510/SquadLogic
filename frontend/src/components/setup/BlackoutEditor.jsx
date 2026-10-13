@@ -53,6 +53,8 @@ import { BlackoutDraftSchema } from '../../hooks/useFieldClosures.js';
  * @param {(draft: any) => Promise<any>} props.onCreate
  * @param {(draft: any) => Promise<any>} [props.onUpdate] - required when `editing` is set
  * @param {Record<string, any>|null} [props.editing] - the closure being edited, or null to add
+ * @param {string|null} [props.enactedText] - on an edit, how many practice series were enacted
+ *   off this blackout (3b PR 11d-3, Q11): a count only, nothing is withdrawn
  * @param {Array<{id: string, name: string}>} props.locations
  * @param {Array<{id: string, name: string, location_id: string}>} props.fields
  * @param {Array<Record<string, any>>} props.dated - dated bookings for the preview
@@ -65,6 +67,7 @@ export default function BlackoutEditor({
   onCreate,
   onUpdate,
   editing,
+  enactedText = null,
   locations,
   fields,
   dated,
@@ -243,6 +246,12 @@ export default function BlackoutEditor({
         <p className="badge danger" role="alert" data-testid="blackout-unrepresentable">
           This window ends at 24:00, which the time boxes below cannot hold. Remove it and add the
           replacement instead — editing it here would change a time you did not choose.
+        </p>
+      )}
+
+      {editing && (
+        <p className="text-sm" role="status" data-testid="blackout-enacted-count">
+          {enactedText ?? 'Reading how many practice series were enacted off this blackout…'}
         </p>
       )}
 
@@ -460,8 +469,14 @@ export default function BlackoutEditor({
                 </li>
               ))}
             </ul>
+            {/*
+              8.6 3b PR 11d-3 (Q5): ALWAYS a preview. The loss is this
+              dialog's draft, unsaved even when it equals the stored window,
+              so every Enact here is disabled with its reason; a saved
+              blackout is enacted from its row on Blackout Dates.
+            */}
             {repairLoss && (
-              <PracticeRepairLauncher subject="this blackout window" loss={repairLoss} />
+              <PracticeRepairLauncher subject="this blackout window" loss={repairLoss} preview />
             )}
           </div>
         )}
@@ -476,6 +491,7 @@ BlackoutEditor.propTypes = {
   onCreate: PropTypes.func.isRequired,
   onUpdate: PropTypes.func,
   editing: PropTypes.object,
+  enactedText: PropTypes.string,
   locations: PropTypes.array.isRequired,
   fields: PropTypes.array.isRequired,
   dated: PropTypes.array.isRequired,

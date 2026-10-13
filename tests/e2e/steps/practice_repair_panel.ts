@@ -237,9 +237,9 @@ When('I undo the decline for {string}', async ({ page }, team: string) => {
     .click();
 });
 
-// 8.6 3b PR 11d-1: the gate, not a save refusal, is what keeps a blackout off.
+// 8.6 3b PR 11d-3 (Q5): the editor's launcher is a preview, whatever the draft.
 Then(
-  'every Enact button should be disabled because blackout enact is not available yet',
+  'every Enact button should be disabled because the blackout is not saved',
   async ({ page }) => {
     const rows = page.getByTestId('practice-repair-window');
     await expect(rows.first()).toBeVisible();
@@ -248,7 +248,7 @@ Then(
     for (let i = 0; i < count; i += 1) {
       await expect(rows.nth(i).getByTestId('practice-repair-enact')).toBeDisabled();
       await expect(rows.nth(i).getByTestId('practice-repair-enact-why')).toContainText(
-        'Enacting a blackout recommendation is not available yet'
+        'Save the blackout first'
       );
     }
   }

@@ -470,6 +470,9 @@ export function handlePracticeEnactRpc(db, name, params, ctx) {
       id: ctx.newId(),
       organization_id: orgId,
       season_settings_id: seasonId,
+      // `practice_exceptions.team_id` is NOT NULL (20260929000000): the
+      // portal and the feed read exceptions by team (3b PR 11d-3, B12).
+      team_id: row.team_id,
       assignment_id: s,
       window: exception.window,
       kind: exception.kind,

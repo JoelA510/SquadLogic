@@ -31,10 +31,11 @@ Feature: Practice repair recommendations (read-only)
     Then the recommendation for "Repair Team A" should be placed
 
   # 8.6 3b PR 11d-1: a mid-range window is no longer refused (the readers
-  # apply exceptions); blackout enact stays off until 11d-3.
-  Scenario: A blackout draft shows each window, and that enacting it is not available yet
+  # apply exceptions). 8.6 3b PR 11d-3 (Q5): the editor's launcher is always
+  # a preview, so a draft's Enact waits for the blackout to be saved.
+  Scenario: A blackout draft shows each window, and that enacting waits until it is saved
     Given I am on the "Blackout Dates" page
     When I draft an all-day blackout on "Repair Pitch 1" from "2026-10-05" to "2026-10-11"
     And I open the practice repair recommendations
     Then the practice repair panel should list 2 displaced series-windows
-    And every Enact button should be disabled because blackout enact is not available yet
+    And every Enact button should be disabled because the blackout is not saved

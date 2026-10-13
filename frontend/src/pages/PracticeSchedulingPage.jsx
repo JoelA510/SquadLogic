@@ -33,6 +33,10 @@ import {
 } from '../utils/practicePersistenceClient.js';
 import { buildDaylightExceptions } from '../utils/daylightExceptions.js';
 import {
+  describePracticeLockRefusal,
+  parsePracticeLockRefusal,
+} from '../utils/practiceLockRefusal.js';
+import {
   buildPracticeApplyStatus,
   buildTeamsWithoutPracticeWarnings,
 } from '../utils/practiceApplyStatus.js';
@@ -392,6 +396,47 @@ function toLockedAssignment(assignment) {
   const { id, teamId, slotId, effectiveDateRange, assignedVia } =
     toPersistenceAssignment(assignment);
   return { id, teamId, slotId, effectiveDateRange, assignedVia };
+}
+
+/**
+ * The saved row a locked refusal names, as the operator knows it: its team
+ * and its series (weekday, time, inclusive dates). Read from this page's own
+ * rows; a part it cannot resolve is left out, never replaced by the id.
+ *
+ * `rows` are the page's copies of that one row, the season read's first: it
+ * carries the stored range, and a grid row may carry display placeholders.
+ * The slot comes from every slot row the page read (`practiceSlotRows`), not
+ * only the placeable ones. A display placeholder ("Unknown Team", or the
+ * `Team <id>` fallback) is not a name.
+ *
+ * @returns {{ teamName: string|null, series: string|null } | null}
+ */
+function lockedRowOf(rows, { teamById, slotRows }) {
+  const row = rows.find(Boolean);
+  if (!row) return null;
+  const teamId = getAssignmentTeamId(row);
+  const slotId = getAssignmentSlotId(row);
+  const slotRow = slotRows.find((slot) => slot?.id === slotId);
+  const shown = rows.map((r) => r?.practiceSlots).find(Boolean) ?? {};
+  const rawDay = slotRow?.day_of_week ?? shown.dayOfWeek ?? shown.day_of_week ?? null;
+  const day = rawDay ? normalizeDay(rawDay) : null;
+  const clock = (value) => normalizeTime(value)?.slice(0, 5) ?? null;
+  const start = clock(slotRow?.start_time ?? shown.startTime ?? shown.start_time);
+  const end = clock(slotRow?.end_time ?? shown.endTime ?? shown.end_time);
+  const range = rows.map((r) => r?.effective_date_range ?? r?.effectiveDateRange).find(Boolean);
+  const bounds = practiceRangeBounds(range);
+  const when = day && start && end ? `${day} ${start}–${end}` : day;
+  const series = [when, bounds ? `${bounds.first} to ${bounds.last}` : null]
+    .filter(Boolean)
+    .join(', ');
+  const isName = (name) =>
+    typeof name === 'string' &&
+    name.trim() !== '' &&
+    name !== 'Unknown Team' &&
+    !name.includes(String(teamId));
+  const teamName =
+    [teamById.get(teamId)?.name, ...rows.map((r) => r?.teams?.name)].find(isName) ?? null;
+  return { teamName, series: series || null };
 }
 
 export default function PracticeSchedulingPage() {
@@ -970,10 +1015,26 @@ export default function PracticeSchedulingPage() {
         })
       );
     } catch (err) {
-      setApplyError(err.message || 'Practice schedule changes could not be applied.');
+      // Writer v3's lock (ruling 2): the grid sends no `unlock`, so replacing a
+      // saved practice is refused. Say which one in words; the raw text names
+      // it only by id. Every other refusal keeps its own message.
+      const locked = parsePracticeLockRefusal(err);
+      const isLockedRow = (row) =>
+        Boolean(locked?.assignmentId) &&
+        String(row?.id ?? '').toLowerCase() === locked.assignmentId.toLowerCase();
+      const lockedRows = [seasonRows.find(isLockedRow), assignments.find(isLockedRow)];
+      setApplyError(
+        locked
+          ? describePracticeLockRefusal(
+              lockedRowOf(lockedRows, { teamById, slotRows: practiceSlotRows }),
+              locked.cause
+            )
+          : err.message || 'Practice schedule changes could not be applied.'
+      );
       setApplyStatus('error');
     }
   }, [
+    assignments,
     autoScheduler.result,
     canApplySchedule,
     canManageSchedule,
@@ -981,6 +1042,7 @@ export default function PracticeSchedulingPage() {
     currentSeasonSetting?.id,
     lockedAssignments.length,
     practice?.runId,
+    practiceSlotRows,
     refetchSeasonPractice,
     reviewAssignments,
     schedulerSlots,
@@ -989,6 +1051,7 @@ export default function PracticeSchedulingPage() {
     // unchanged count has to re-create it.
     schedulerTeams,
     schoolDayEnd,
+    seasonRows,
     slotById,
     teamById,
     timezone,

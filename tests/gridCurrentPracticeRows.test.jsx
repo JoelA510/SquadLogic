@@ -152,6 +152,9 @@ vi.mock('../frontend/src/components/PracticeOverridePanel.jsx', () => ({
       <button type="button" onClick={() => onStageAssignment('team-a', 'slot-fri')}>
         Stage Team A
       </button>
+      <button type="button" onClick={() => onStageAssignment('team-b', 'slot-fri')}>
+        Stage Team B
+      </button>
     </>
   ),
 }));
@@ -291,6 +294,9 @@ let sent = [];
 
 beforeEach(() => {
   sessionStorage.clear();
+  // The mock client keeps its last-saved DB on `window` (an RPC such as the
+  // prompt's fingerprint read saves it) and merges it into every read.
+  delete (/** @type {any} */ (window).__MOCK_DB__);
   sent = [];
   vi.spyOn(mockSupabase.auth, 'getSession').mockResolvedValue(
     /** @type {any} */ ({ data: { session: { access_token: 'token-pgrid' } }, error: null })
@@ -324,7 +330,11 @@ async function renderGrid(seed) {
 
 const shownIds = (list) => [...list.querySelectorAll('li')].map((li) => li.textContent).sort();
 
-/** Enter manual override, stage Team D, Apply; return the rows the save sent. */
+/**
+ * Enter manual override, stage a team, Apply. When the save would replace a
+ * saved row, the override prompt opens (ruling 2): accept it for every team,
+ * with one reason. Return the rows the save sent and its `unlock`.
+ */
 async function stageAndApply(seed, stageButton = 'Stage Team D') {
   await renderGrid(seed);
   fireEvent.click(await screen.findByRole('button', { name: /enter manual override/i }));
@@ -332,15 +342,43 @@ async function stageAndApply(seed, stageButton = 'Stage Team D') {
   const apply = await screen.findByRole('button', { name: /apply schedule/i });
   await waitFor(() => expect(apply).toBeEnabled());
   fireEvent.click(apply);
-  await waitFor(() => expect(sent).toHaveLength(1));
+  await waitFor(() =>
+    expect(sent.length === 1 || screen.queryByRole('dialog') !== null).toBe(true)
+  );
+  const prompted = screen.queryByRole('dialog') !== null;
+  if (prompted) {
+    // Nothing is sent before the admin accepts.
+    expect(sent).toHaveLength(0);
+    for (const box of screen.getAllByRole('checkbox')) fireEvent.click(box);
+    fireEvent.change(screen.getByLabelText('Reason for the override'), {
+      target: { value: 'conflict-fix' },
+    });
+    const confirm = screen.getByRole('button', { name: 'Confirm and save' });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
+    await waitFor(() => expect(sent).toHaveLength(1));
+  }
   const body = sent[0];
   const rows = body?.snapshot?.payload?.assignmentRows;
   expect(Array.isArray(rows)).toBe(true);
-  // The grid never unlocks or closes: whatever the prune set holds, the
-  // writer refuses the save over it rather than deleting it (:775-798).
-  expect(body.repair?.unlock ?? []).toEqual([]);
+  // The grid never closes. It unlocks only after the prompt.
   expect(body.repair?.closes ?? []).toEqual([]);
-  return rows;
+  const unlock = body.repair?.unlock ?? [];
+  if (!prompted) expect(unlock).toEqual([]);
+  return { rows, unlock, prompted };
+}
+
+/**
+ * W1 + W4 (docs/PLAN_GRID_OVERRIDE_PROMPT.md §4): the save unlocks exactly
+ * the writer's prune set of what it sent -- so the writer has nothing left to
+ * refuse -- each with the reason chosen. Never the closed series.
+ */
+function expectUnlocksPruneSet(seed, { rows, unlock }) {
+  const pruned = writerPruneSet(seed, rows);
+  // Meta: a seed this is asserted on must prune something.
+  expect(pruned.length).toBeGreaterThan(0);
+  expect(unlock.map((u) => u.assignment_id).sort()).toEqual(pruned);
+  for (const u of unlock) expect(u.reason).toMatch(/^grid override( \S+)?: conflict-fix$/);
 }
 
 describe('the scheduling grid reads the current practice schedule, not the latest run', () => {
@@ -432,7 +470,9 @@ describe('the scheduling grid reads the current practice schedule, not the lates
       expect(canonicalRange(closed.effective_date_range).slice(-11, -1)).toBe(
         canonicalRange(current.effective_date_range).slice(1, 11)
       );
-      const rows = await stageAndApply(seed, 'Stage Team A');
+      const saved = await stageAndApply(seed, 'Stage Team A');
+      const { rows } = saved;
+      expect(saved.prompted).toBe(true);
       const list = screen.getByRole('list', { name: 'practice rows' });
       const ids = shownIds(list);
       expect(ids).toEqual(
@@ -449,10 +489,11 @@ describe('the scheduling grid reads the current practice schedule, not the lates
       expect(rows.filter((r) => r.team_id === 'team-a')).toHaveLength(2);
       expect(rows.some((r) => keyOf(r) === keyOf(current))).toBe(false);
       // What the writer would remove is the replaced current series and
-      // nothing else. Not empty: ruling 2 locks it, and the grid sends no
-      // `unlock`, so this Apply is refused naming pa-a-new -- the row the
-      // operator chose to replace, never the closed history (pgTAP pins both).
+      // nothing else, never the closed history (pgTAP pins both). Ruling 2
+      // locks it, so the prompt asked, and the save unlocks exactly it.
       expect(writerPruneSet(seed, rows)).toEqual(['pa-a-new']);
+      expectUnlocksPruneSet(seed, saved);
+      expect(saved.unlock.some((u) => u.assignment_id === closedId)).toBe(false);
     });
   }
 
@@ -462,7 +503,8 @@ describe('the scheduling grid reads the current practice schedule, not the lates
       row('pa-a-wed', 'team-a', 'slot-wed', FULL, RUN2),
       row('pa-b', 'team-b', 'slot-tue', FULL, RUN2),
     ];
-    const rows = await stageAndApply(TWO_LIVE, 'Stage Team A');
+    const saved = await stageAndApply(TWO_LIVE, 'Stage Team A');
+    const { rows } = saved;
     const ids = shownIds(screen.getByRole('list', { name: 'practice rows' }));
     // Ambiguous which weekday an override replaces, so it is not guessed: the
     // team's current rows collapse to the one staged row, as the old per-row
@@ -470,6 +512,8 @@ describe('the scheduling grid reads the current practice schedule, not the lates
     expect(ids).toEqual(['pa-b', 'staged-team-a-slot-fri']);
     expect(rows.filter((r) => r.team_id === 'team-a')).toHaveLength(1);
     expect(writerPruneSet(TWO_LIVE, rows)).toEqual(['pa-a-mon', 'pa-a-wed']);
+    // Q2: both weekdays are replaced together, and both are unlocked.
+    expectUnlocksPruneSet(TWO_LIVE, saved);
   });
 
   it('a save that omitted B and C: the grid shows their retained manual rows', async () => {
@@ -478,14 +522,24 @@ describe('the scheduling grid reads the current practice schedule, not the lates
   });
 
   it('a re-home enact: a manual override for another team removes no stored row', async () => {
-    const rows = await stageAndApply(ENACT);
+    const { rows, prompted } = await stageAndApply(ENACT);
     expect(rows.some((r) => r.team_id === STAGED_TEAM)).toBe(true);
     expect(writerPruneSet(ENACT, rows)).toEqual([]);
+    // Nothing to unlock, so nothing is asked: the save is today's.
+    expect(prompted).toBe(false);
   });
 
   it('a save that omitted B and C: a manual override removes no stored row', async () => {
-    const rows = await stageAndApply(RETAINED);
+    const { rows, prompted } = await stageAndApply(RETAINED);
     expect(rows.some((r) => r.team_id === STAGED_TEAM)).toBe(true);
     expect(writerPruneSet(RETAINED, rows)).toEqual([]);
+    expect(prompted).toBe(false);
+  });
+
+  it('a save that omitted B and C: overriding B (manual) unlocks exactly its retained row', async () => {
+    const saved = await stageAndApply(RETAINED, 'Stage Team B');
+    expect(saved.prompted).toBe(true);
+    expect(writerPruneSet(RETAINED, saved.rows)).toEqual(['pa-b']);
+    expectUnlocksPruneSet(RETAINED, saved);
   });
 });

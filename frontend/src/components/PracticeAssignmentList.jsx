@@ -39,7 +39,7 @@ export default function PracticeAssignmentList({
                 Range
               </th>
               <th className="p-4 text-xs font-semibold text-text-muted uppercase tracking-wider text-right">
-                {onCancelAssignment ? 'Actions' : 'Lock Status'}
+                {onCancelAssignment ? 'Actions' : 'Manual Choice'}
               </th>
             </tr>
           </thead>
@@ -51,14 +51,17 @@ export default function PracticeAssignmentList({
               const division = team.divisions || {};
               const slot = assignment.practiceSlots || {};
               const field = slot.fields || {};
+              // Provenance, not a lock (operator ruling 2, plan Q1): every
+              // saved practice is locked whatever this says; it records
+              // whether the slot was a manual choice (`source`).
               const lockTitle = !onToggleLock
-                ? 'Lock status changes require schedule edit permission'
+                ? 'Changing the manual-choice mark requires schedule edit permission'
                 : isLocked
-                  ? 'Unlock slot (allow algorithm to change)'
-                  : 'Lock slot (preserve manual choice)';
+                  ? 'Mark as automatic'
+                  : 'Mark as manual choice';
               const lockActionLabel = !onToggleLock
-                ? `Practice lock status for ${teamName} requires schedule edit permission`
-                : `Lock practice slot for ${teamName}`;
+                ? `Manual choice mark for ${teamName} requires schedule edit permission`
+                : `Manual choice: ${teamName}`;
 
               return (
                 <tr key={assignment.id} className="hover:bg-bg-glass transition-colors group">

@@ -30,7 +30,10 @@ import { MemoryRouter } from 'react-router-dom';
 import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedMockDb } from './helpers/seedMockDb.js';
-import { ScoringInputSchema } from '../supabase/functions/_shared/schemas/scoring.ts';
+import {
+  ScoringInputSchema,
+  refuseEmptyPracticeRoster,
+} from '../supabase/functions/_shared/schemas/scoring.ts';
 import { anchorWallTimes } from '../supabase/functions/_shared/timing/anchorWallTimes.ts';
 import { evaluatePracticeSchedule as edgeEvaluate } from '../supabase/functions/_shared/engines/scoring-engine.js';
 
@@ -196,7 +199,8 @@ function dbOf({ roster, slots, rows }) {
 
 /**
  * `fairness-scoring/index.ts` for a practice-only request, minus auth, rate
- * limiting and persistence: validate, anchor, score, aggregate.
+ * limiting and persistence: validate, refuse an empty roster, anchor, score,
+ * aggregate.
  */
 function fairnessScoringEdge(body) {
   const parsed = ScoringInputSchema.safeParse(body);
@@ -204,6 +208,8 @@ function fairnessScoringEdge(body) {
     return { data: null, error: { message: 'Validation failed', details: parsed.error.format() } };
   }
   const { practice } = parsed.data;
+  const emptyRoster = refuseEmptyPracticeRoster(practice);
+  if (emptyRoster) return { data: null, error: { message: emptyRoster.error } };
   // `any`: the handler makes the same two calls; only Node's zod typings differ from Deno's.
   const anchored = anchorWallTimes(
     /** @type {any} */ (practice?.slots ?? []),

@@ -418,6 +418,13 @@ and smoke-tested
 > 8.3 — resolved by M2.3.
 
 > **M2.4. Security policy and licence files** (audit finding 8.5, medium)
+> - **Status: in review, PR 2-C (`claude/vibrant-allen-hr7y7s-m2c`); not merged.** `SECURITY.md` names GitHub private
+>   vulnerability reporting (the public API reports `enabled: true`, *executed* 2026-10-13), with
+>   best-effort targets (acknowledge within 7 days; the owner confirms them), scope and supported
+>   versions. `LICENSE` is choosealicense.com's ISC text verbatim, "Copyright (c) 2025-2026 Joel
+>   Abraham" (D7; the owner confirms the holder and years). Test gate met, *executed*: scorecard
+>   `core.security-policy` and `core.license` pass, and both fail with the two files removed.
+>   GitHub's licence detection and the Security tab's policy link are checked after merge.
 > - **Fix approach:** `SECURITY.md` from the skeleton, pointing at GitHub private vulnerability
 >   reporting (already on) with response expectations; `LICENSE` with the ISC text (D7).
 > - **Files touched:** `SECURITY.md`, `LICENSE`.
@@ -434,6 +441,19 @@ and smoke-tested
 > 12.6 — resolved by M2.4.
 
 > **M2.5. Game and practice persistence calls can hang forever** (audit finding 5.2, medium)
+> - **Status: in review, PR 2-C (`claude/vibrant-allen-hr7y7s-m2c`); not merged.** New `frontend/src/lib/persistenceRequest.js`
+>   gives every request the game and practice clients send (game save, practice save, repair save,
+>   enact) the team panel's contract: an `AbortController` aborted at a deadline, and an error
+>   with `code: 'PERSISTENCE_TIMEOUT'` whose message says the outcome is unknown. The deadline is
+>   160 s, past Supabase's 150 s Edge request idle timeout (which answers 504), so it never calls
+>   a slow save that is still committing a failure; it fires only for a lost connection or a
+>   stalled body. A 2xx whose body is not a JSON object throws `PERSISTENCE_UNREADABLE_RESPONSE`;
+>   a non-2xx keeps its `HTTP <status>` message. Test gate met, *executed*: never-resolving and
+>   stalled-body cases in `tests/gamePersistenceClient.test.js` and the new
+>   `tests/practicePersistenceClient.test.js` (fake timers; the sender list is checked against
+>   the module's exports, and neither client may call `fetch` directly), red with the old
+>   clients restored and with the timer removed. Apply
+>   re-enabling after the error is the pages' existing catch path, *statically reviewed*.
 > - **Fix approach:** reuse the team-persistence client's timeout (`AbortController`) in the game
 >   and practice clients; treat an unparsable success body as an error.
 > - **Files touched:** `frontend/src/utils/gamePersistenceClient.js`,
@@ -451,6 +471,15 @@ and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M2.6. `fairness-scoring` records a 0-conflict run for an empty roster** (not an audit finding: found by PR 1-A, #551; medium; placed here by the supervisor, the owner may move it)
+> - **Status: in review, PR 2-C (`claude/vibrant-allen-hr7y7s-m2c`); not merged.** `refuseEmptyPracticeRoster`
+>   (`_shared/schemas/scoring.ts`) answers 422 `EMPTY_PRACTICE_ROSTER`, naming the counts, for a
+>   practice block with no teams or no slots; the handler calls it right after parsing, before the
+>   season read, the engine and `persist_evaluation_run`, whatever `persist` says. Test gate met,
+>   *executed*: `_shared/tests/fairness-empty-roster_test.ts` (the refusal with `persist` both
+>   ways, and a source pin on the handler's order, since the handler module calls `serve()` on
+>   import), red with the call removed, with the call moved after persistence and with the
+>   refusal neutered; the mirror job's floor rises to 13. "Writes no `evaluation_runs` row" rests
+>   on that order, *statically reviewed*; it is checkable on production after merge.
 > - **Fix approach:** refuse at the Edge, before evaluating or persisting: a request whose
 >   `practice` block has no teams or no slots gets a 422 with a named code (for example
 >   `EMPTY_PRACTICE_ROSTER`), whether or not `persist` is set. #551 stopped the page sending one;
@@ -936,6 +965,19 @@ smoke-tested
     fairness-scoring's two season-read `console.error`s carry no request ID; the stand-in
     handler the persistence functions serve when their Supabase variables are missing is not
     wrapped; `flush()` is awaited before a failing response (BetterStack latency adds to it).
+    *Statically reviewed.*
+
+- 2026-10-13, found by PR 2-C (M2.4-M2.6):
+  - Two other Edge calls have no deadline: `EvaluationPanel`'s Save (`functions.invoke`
+    `fairness-scoring` with `persist: true`, so "Hardening results..." can spin forever) and
+    `useAutoScheduler`'s `auto-scheduler` fetch (only a user abort). Not in M2.5's files; the
+    first wants `invoke`'s `timeout` option and a message that does not say "Failed to send"
+    for a request that was sent. *Statically reviewed.*
+  - `EvaluationPanel`'s Save sends `practiceData` as it is, while its read sends `null` for a
+    practice block with no teams or slots; with games alongside, the Save would now get M2.6's
+    422. No page passes `gameData` today, so unreachable. *Statically reviewed.*
+  - The Edge game evaluator scores a `games` block whose `teams` list is empty as clean (every
+    game dropped as an unknown team, coverage 100), the M2.6 shape for games. Not refused.
     *Statically reviewed.*
 
 ## Deferred with reason

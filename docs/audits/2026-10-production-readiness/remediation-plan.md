@@ -4,7 +4,7 @@ Repo: **JoelA510/SquadLogic** · Plan drawn up: 2026-10-12 · Source audit: [`au
 
 **Status:** IN PROGRESS as of 2026-10-13 — approved by the owner on 2026-10-13 "as recommended":
 D1-D8 at their defaults, and finding 5.1 moved into Milestone 1 (PR 1-B, as M1.7). Milestone 1 is
-in progress, starting with PR 1-A.
+in progress: PR 1-A is open as #551 (not merged); M1.6 was resolved on `main` by #545.
 
 End state: every audit area at "no blocker/high findings", E2E coverage of critical
 journeys, staging deploy smoke-tested, docs current — measured against: an organization's
@@ -98,8 +98,9 @@ delivered (the template trial's rerun on `fa39ab3`:
 `prettier --list-different prompts .agents/skills .claude/skills`, exit 1), and a later re-apply
 would then treat them as locally edited and stop updating them. Until it lands, run Prettier only
 on the paths a change touches, never `npm run format` across the repository. Acceptance:
-`prettier --list-different .` names no file under those three folders (today it names 30), and
-lists the same project files as before. Not tied to an audit finding (the trial's rerun found
+`prettier --list-different .` names no file under those three folders (on the delivered tree it
+names 30 today; on `main` the folders arrive with this plan's delivery commits), and lists the same
+project files as before. Not tied to an audit finding (the trial's rerun found
 it), so it carries no ID.
 
 > **M1.1. The practice page's fairness evaluation reports a clean result after examining nothing** (audit finding 13.1, blocker)
@@ -235,7 +236,11 @@ it), so it carries no ID.
 > - **Files touched:** `frontend/src/contexts/AuthContext.jsx`,
 >   `frontend/src/contexts/OrganizationContext.jsx`, `supabase/functions/*/index.ts` (error
 >   paths), tests `tests/loggerUserContext.test.jsx`.
-> - **Depends on:** M1.6 (or the induced error never arrives).
+> - **Depends on:** M1.6 (or the induced error never arrives); met by #545, see M1.6's status.
+>   #545 also set Sentry's `release` from `package.json` and an explicit
+>   `sendDefaultPii: false`, which does not limit an explicit `setUser`; neither is the user or
+>   organization context this item adds. At `28f1b98` nothing calls `logger.setUser` (its only
+>   occurrences are its definition in `frontend/src/lib/logger.js`), so 9.1 stands unchanged.
 > - **Widens:** none.
 > - **Effort:** M
 > - **Acceptance criteria:** the `sentry-smoke.md` procedure, run against a preview deploy, shows
@@ -249,6 +254,19 @@ it), so it carries no ID.
 > - **Verification label:** statically reviewed.
 
 > **M1.6. The CSP may refuse Sentry's regional ingest host** (audit finding 9.2, medium; in Milestone 1 because M1.5's acceptance depends on it)
+> - **Status: resolved by #545** (`7fa6b1b`, merged to `main` 2026-10-13, after the audit and
+>   outside this plan). `vercel.json`'s `connect-src` now carries `https://*.ingest.us.sentry.io`
+>   beside the kept `https://*.ingest.sentry.io`; `docs/security/csp.md` lists it;
+>   `docs/operations/sentry-smoke.md` records that the Sentry organization is in the US region
+>   (DSN host `o<org-id>.ingest.us.sentry.io`). A wildcard rather than the exact host the fix
+>   approach below asked for, so the owner no longer has to supply the DSN host for this item.
+>   The test gate is met by `tests/cspPolicy.test.js`: *executed* at `28f1b98`, 8 of 8 pass, and
+>   with the US entry removed from `vercel.json` 3 fail ("admits Sentry ingest for US-region…",
+>   "the old policy… refuses the US ingest host", and the vercel.json/csp.md agreement check).
+>   **What remains:** only the acceptance criterion (the envelope POST returning 200 with no CSP
+>   warning), which needs a deploy; it is checked in M1.5's `sentry-smoke.md` run, which already
+>   does that step. No PR of this plan carries M1.6 any more. The original item text stays below
+>   as the record.
 > - **Fix approach:** read the production DSN's host (owner), and add that exact host (for
 >   example `https://o<id>.ingest.us.sentry.io`) to `connect-src` in `vercel.json` and
 >   `docs/security/csp.md`, keeping the existing entry.
@@ -267,7 +285,8 @@ it), so it carries no ID.
 **Milestone exit:** [ ] CI is a required check and blocks merge on the gate (M1.3; the owner
 imports the ruleset) · [ ] a production build without Supabase configuration refuses to start on
 every host, the production host included (M1.7) · [ ] error reporting receives an induced error,
-tagged with user and organization IDs (M1.5, M1.6) · [ ] zero open blockers (M1.1) · [ ] deployed
+tagged with user and organization IDs (M1.5; the CSP half, M1.6, is in `main` through #545) ·
+[ ] zero open blockers (M1.1) · [ ] deployed
 and smoke-tested
 
 ---
@@ -741,11 +760,34 @@ smoke-tested
 
 ## Discovered during execution
 
-- 2026-10-13: `main` moved from `565e980` to `28f1b98` after the audit. One of the new commits,
-  #545 (`7fa6b1b`, "admit US-region ingest in CSP"), adds `https://*.ingest.us.sentry.io` to
-  `connect-src` with a test (`tests/cspPolicy.test.js`), so it may resolve 9.2 (M1.6) in part;
-  *statically reviewed* from the commit only. Re-check M1.6 against it, and against the
-  production DSN's host, before PR 1-C.
+- 2026-10-13: `main` moved from the audited `565e980` to `28f1b98` (seven merges: #539, #542,
+  #543, #545, #546, #547, #548). Each was read against the files every item touches
+  (*statically reviewed*, from `git show` of each merge):
+  - **#545 resolves 9.2 (M1.6)**; evidence, *executed*, is in M1.6's status. It touches M1.5's
+    area (Sentry options, release tag) without resolving 9.1; recorded under M1.5.
+  - **#542** changes `frontend/src/utils/practicePersistenceClient.js` (the thrown error keeps
+    the Edge's `code` and HTTP status). It adds no timeout, so 5.2 (M2.5) stands.
+  - **#546 and #542** change `frontend/src/pages/PracticeSchedulingPage.jsx`; the
+    `EvaluationPanel` call still passes only `assignments`, so 13.1 (M1.1) stands (reproduced on
+    `28f1b98` by PR 1-A's test, see that PR). #546 also edits
+    `tests/e2e/steps/scheduling_and_overrides.ts`, but not the forged steps "I trigger the team
+    generation algorithm" and "the scheduler runs", so 13.3 (M4.6) stands.
+  - **#539** adds smoke claims to `scripts/dbharness/run.sh`; no CI job runs it and its user
+    still comes from `HARNESS_PGUSER` (default `pgrunner`), so 4.2 (M3.4) stands.
+  - #543, #547 and #548 touch no file any item names. `main` then moved again (#549, #550, to
+    `e1adbb2`) before PR 1-A was pushed; neither touches a file any item names.
+- 2026-10-13, found by PR 1-A (#551):
+  - `EvaluationPanel` rendered `issue.details` as a React child, but the engine's details are
+    objects, so the first real coach conflict would have crashed the panel. Hidden while the panel
+    evaluated an empty roster; fixed in #551 as part of M1.1 (*executed*: the new test goes red
+    with the guard removed).
+  - Both scoring engines compare each weekly slot by its first occurrence's instant and ignore an
+    assignment's date range, so coach conflicts between series that start on different dates can
+    be missed or reported falsely. Not fixed: a domain-model change, to be planned (and approved)
+    before it is built. *Statically reviewed.*
+  - `fairness-scoring` accepts practice assignments with no teams or slots and, with
+    `persist: true`, would record a 0-conflict run; #551 guards only the client. Candidate for a
+    follow-up item (an Edge 422). *Statically reviewed.*
 
 ## Deferred with reason
 

@@ -1,0 +1,12 @@
+# zizmor's configuration (plan item M3.5, audit finding 7.4). zizmor reads it
+# from here when it runs over the repository (.github/workflows/workflow-audit.yml).
+# Every entry loosens a default, so each says why.
+rules:
+  # zizmor wants Dependabot to wait at least 7 days for a release to age. This
+  # repository waits 3, the same as .npmrc's `min-release-age=3` for
+  # `npm install` (plan item M2.3): one wait for every way a dependency arrives,
+  # long enough for a compromised release to be caught and pulled. Security
+  # updates ignore the cooldown either way. Raising it means raising both.
+  dependabot-cooldown:
+    config:
+      days: 3

@@ -67,8 +67,9 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Determine change scope
@@ -144,7 +145,7 @@ jobs:
 
       - name: Setup Node.js
         if: steps.changes.outputs.docs_only != 'true'
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: 'npm'
@@ -233,7 +234,7 @@ jobs:
 
       - name: Upload Playwright HTML report
         if: always() && steps.changes.outputs.docs_only != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-report
           path: playwright-report/
@@ -242,7 +243,7 @@ jobs:
 
       - name: Upload Playwright failure artifacts
         if: always() && steps.changes.outputs.docs_only != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-test-results
           path: test-results/
@@ -251,7 +252,7 @@ jobs:
 
       - name: Upload bundle-budget report
         if: always() && steps.changes.outputs.docs_only != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bundle-budget-report
           path: bundle-budget-report.txt
@@ -260,7 +261,7 @@ jobs:
 
       - name: Upload coverage report if present
         if: always() && steps.changes.outputs.docs_only != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-report
           path: coverage/
@@ -287,10 +288,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Deno
-        uses: denoland/setup-deno@v2
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: '2.9.6'
 
@@ -340,7 +343,9 @@ jobs:
       MAX_PENDING_MIGRATIONS: ${{ vars.MAX_PENDING_MIGRATIONS }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check deploy secrets
         id: secrets
@@ -355,7 +360,7 @@ jobs:
 
       - name: Setup Node.js
         if: steps.secrets.outputs.configured == 'true'
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           # setup-node v5+ caches npm on its own once package.json names a
@@ -365,7 +370,7 @@ jobs:
       # Pinned (workflow env): the guard parses this version's JSON output.
       - name: Setup Supabase CLI
         if: steps.secrets.outputs.configured == 'true'
-        uses: supabase/setup-cli@v2
+        uses: supabase/setup-cli@afb1b15109756ea5cf9d8985a359d9095235ca2b # v2.1.2
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
 
@@ -432,7 +437,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check deploy secrets
         id: secrets
@@ -451,7 +458,7 @@ jobs:
       # API rate limit on runs 1156 and 1174.
       - name: Setup Supabase CLI
         if: steps.secrets.outputs.configured == 'true'
-        uses: supabase/setup-cli@v2
+        uses: supabase/setup-cli@afb1b15109756ea5cf9d8985a359d9095235ca2b # v2.1.2
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
 

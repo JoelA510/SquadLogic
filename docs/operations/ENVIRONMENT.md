@@ -14,10 +14,17 @@
 
 These variables are set in **Vercel → Project Settings → Environment Variables**. Variables prefixed with `VITE_` are bundled into the client-side JavaScript at build time.
 
-As of the 2026-05-02 release-prep check, Vercel reports the `squadlogic`
-project runtime as Node `24.x`. CI intentionally remains on Node 20 as the
-minimum supported runtime until a separate parity PR changes that setting with
-full verification.
+### Node runtime
+
+One Node version, pinned once: `.nvmrc` holds `24`, and `package.json`
+`engines.node` is `^24.0.0`. CI reads `.nvmrc` in every `setup-node` step
+(`ci.yml`, `pgtap.yml`). The Vercel project builds on Node `24.x` (read from
+the Vercel API, `nodeVersion: "24.x"`, 2026-10-13). Vercel also reads
+`engines.node`: when `package.json` names a major, it overrides the dashboard's
+Node.js Version setting, so `engines` is what pins the Vercel build. To move to
+another major, change `.nvmrc` and `engines` together in one PR; the
+dashboard setting then only needs to match. CI ran Node 20 (end of life) until
+2026-10 (audit finding 7.2, plan item M1.4).
 
 | Variable | Required | Secret | Purpose | Source |
 |---|---|---|---|---|
@@ -25,12 +32,34 @@ full verification.
 | `VITE_SUPABASE_ANON_KEY` | **Yes** | No | Supabase publishable (anon) key — enforces RLS | Supabase Dashboard → Settings → API → `anon` `public` key |
 | `VITE_SENTRY_DSN` | Recommended | No | Sentry DSN for frontend error tracking & performance monitoring | Sentry → Create Project → Browser JavaScript → DSN |
 | `VERCEL_ENV` | No (set by Vercel) | No | Vercel's own system variable (`production` / `preview` / `development`). `vite.config.js` exposes exactly this one, by name, as `import.meta.env.VITE_VERCEL_ENV`, and it becomes the Sentry event `environment`, so preview events are not reported as production. Outside Vercel it is empty and the environment stays `production`. Not set by hand. | Vercel system environment variable |
-| `VITE_USE_MOCK_SUPABASE` | No | No | Force mock Supabase client (`true`). **Must be unset or `false` in production.** | Manual — development/CI only |
+| `VITE_USE_MOCK_SUPABASE` | No | No | Force mock Supabase client (`true`). The only way a production build runs the mock (see Production Safety). **Must be unset or `false` in production.** | Manual — development/CI only |
 | `VITE_SUPABASE_PERSISTENCE_URL` | No | No | Override base URL for Edge Function persistence endpoints. Defaults to `http://localhost:54321/functions/v1` | Supabase Dashboard → Settings → API → Edge Functions URL |
 
 ### Production Safety
 
-If `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are missing on a production domain (i.e. not `localhost` and not `*.vercel.app`), the application will refuse to start and display a **Configuration Error** screen. This guard is implemented in `frontend/src/config.js`.
+A production build (`vite build`, so `import.meta.env.PROD`) made without
+`VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY` refuses to start and shows a
+**Configuration Error** screen, on every host: the production host,
+`*.vercel.app` previews, `localhost` and a custom domain alike. It never falls
+back to the mock. The guard is in `frontend/src/config.js` and
+`tests/mockModeGuard.test.js` holds it.
+
+- **The opt-in.** A production build runs the mock only when it was built with
+  `VITE_USE_MOCK_SUPABASE=true`. Playwright and CI set it; nothing else should.
+  `VITE_` variables are read at build time, so setting or removing it takes a
+  rebuild (a redeploy of an existing build does not pick it up).
+- **Development** (the Vite dev server, `npm run frontend:dev`) still falls
+  back to the mock when the Supabase variables are missing.
+- **Vercel previews.** A preview built without the Supabase variables now shows
+  the Configuration Error instead of the mock. Give the Preview environment the
+  Supabase variables (a non-production project), or `VITE_USE_MOCK_SUPABASE=true`
+  if previews should run the mock.
+
+Before 2026-10 the guard exempted `localhost` and every `*.vercel.app` host.
+The production host is `squadlogic.vercel.app`, so a production build missing
+its variables served the mock and its sign-in page to real visitors (audit
+finding 5.1, plan item M1.7). Plan item M2.2 turns the same rule into a build
+failure.
 
 ---
 

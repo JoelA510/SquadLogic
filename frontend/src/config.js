@@ -27,19 +27,23 @@ export const USE_MOCK_SUPABASE = getEnvVar('VITE_USE_MOCK_SUPABASE') === 'true';
 export const IS_MOCK_MODE = !SUPABASE_URL || !SUPABASE_ANON_KEY || USE_MOCK_SUPABASE;
 
 /**
- * Production Safety Guard
- * Prevents the application from running in mock mode on production domains.
- * This ensures that a misconfigured deployment can never serve mock data to real users.
+ * Production Safety Guard (fails closed).
+ * A production build (`import.meta.env.PROD`) without `VITE_SUPABASE_URL` and
+ * `VITE_SUPABASE_ANON_KEY` refuses to start on every host: it never falls back
+ * to the mock. The host plays no part. It once exempted `localhost` and every
+ * `*.vercel.app` host, and the production host is `squadlogic.vercel.app`, so a
+ * build missing its variables served the mock there (audit finding 5.1).
+ * The only way a production build runs the mock is the explicit opt-in,
+ * `VITE_USE_MOCK_SUPABASE=true` at build time (Playwright and CI set it).
+ * Development (the Vite dev server) still falls back to the mock.
+ * `tests/mockModeGuard.test.js` holds this rule.
  */
-if (typeof window !== 'undefined' && IS_MOCK_MODE) {
-  const hostname = window.location.hostname;
-  const isLocalDev = hostname === 'localhost' || hostname === '127.0.0.1';
-  const isPreviewDeploy = hostname.endsWith('.vercel.app');
+const IS_PRODUCTION_BUILD = import.meta.env?.PROD === true;
 
-  if (!isLocalDev && !isPreviewDeploy) {
-    const errorRoot = document.getElementById('root');
-    if (errorRoot) {
-      errorRoot.innerHTML = `
+if (IS_PRODUCTION_BUILD && !USE_MOCK_SUPABASE && (!SUPABASE_URL || !SUPABASE_ANON_KEY)) {
+  const errorRoot = typeof document !== 'undefined' ? document.getElementById('root') : null;
+  if (errorRoot) {
+    errorRoot.innerHTML = `
         <div style="
           display: flex; align-items: center; justify-content: center;
           min-height: 100vh; background: #0f172a; color: #f1f5f9;
@@ -56,10 +60,12 @@ if (typeof window !== 'undefined' && IS_MOCK_MODE) {
               Configuration Error
             </h1>
             <p style="color: #94a3b8; line-height: 1.6; margin-bottom: 1.5rem;">
-              SquadLogic cannot start in mock mode on a production domain.
-              Please verify that <code style="color: #fbbf24; background: rgba(251,191,36,0.1); padding: 0.125rem 0.375rem; border-radius: 0.25rem;">VITE_SUPABASE_URL</code> and
+              This production build of SquadLogic has no Supabase configuration, so it will not start.
+              Set <code style="color: #fbbf24; background: rgba(251,191,36,0.1); padding: 0.125rem 0.375rem; border-radius: 0.25rem;">VITE_SUPABASE_URL</code> and
               <code style="color: #fbbf24; background: rgba(251,191,36,0.1); padding: 0.125rem 0.375rem; border-radius: 0.25rem;">VITE_SUPABASE_ANON_KEY</code>
-              are set in your deployment environment.
+              in the deployment environment and rebuild, or build with
+              <code style="color: #fbbf24; background: rgba(251,191,36,0.1); padding: 0.125rem 0.375rem; border-radius: 0.25rem;">VITE_USE_MOCK_SUPABASE=true</code>
+              to run the mock on purpose.
             </p>
             <p style="color: #64748b; font-size: 0.875rem;">
               See <strong>docs/operations/ENVIRONMENT.md</strong> for setup instructions.
@@ -67,11 +73,10 @@ if (typeof window !== 'undefined' && IS_MOCK_MODE) {
           </div>
         </div>
       `;
-    }
-    throw new Error(
-      '[SquadLogic] FATAL: Mock mode is active on a production domain (' +
-        hostname +
-        '). Aborting initialization. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'
-    );
   }
+  throw new Error(
+    '[SquadLogic] FATAL: this production build has no Supabase configuration ' +
+      '(VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY), and was not built with ' +
+      'VITE_USE_MOCK_SUPABASE=true. Aborting initialization.'
+  );
 }

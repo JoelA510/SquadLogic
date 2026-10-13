@@ -19,7 +19,7 @@ export async function settleWithin(promise, limitMs) {
     () => (settled = true),
     () => (settled = true)
   );
-  for (let waited = 0; !settled && waited < limitMs; ) {
+  for (let waited = 0; !settled && waited < limitMs;) {
     const step = Math.min(1000, limitMs - waited);
     await vi.advanceTimersByTimeAsync(step);
     waited += step;

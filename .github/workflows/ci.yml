@@ -187,9 +187,12 @@ jobs:
         if: steps.changes.outputs.docs_only != 'true'
         run: npm run check:unused
 
+      # With coverage, so the thresholds in vitest.config.js fail the job
+      # (plan item M3.1, audit finding 6.1): `npm run test` never measured
+      # them. The report is uploaded below (coverage-report).
       - name: Unit & Integration Tests
         if: steps.changes.outputs.docs_only != 'true'
-        run: npm run test
+        run: npm run test:coverage
 
       - name: Build Frontend
         if: steps.changes.outputs.docs_only != 'true'

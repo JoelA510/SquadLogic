@@ -26,7 +26,9 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],
       include: ['packages/core/src/**', 'frontend/src/hooks/**'],
-      exclude: ['**/node_modules/**', 'tests/**'],
+      // heat/data's `.bin` lookup tables are data, not code: v8 cannot parse them
+      // and logged a PARSE_ERROR on every coverage run.
+      exclude: ['**/node_modules/**', 'tests/**', '**/*.bin'],
       thresholds: {
         statements: 60,
         branches: 50,

@@ -20,7 +20,7 @@ baseline is:
 npm ci
 npm run typecheck
 npm run lint
-npm run test
+npm run test:coverage
 npm run frontend:build
 npm run check:bundle
 npm run check:advisors
@@ -37,6 +37,12 @@ not what CI measures. See [`ENVIRONMENT.md`](./ENVIRONMENT.md#production-safety)
 `npm run check:bundle` must run after `npm run frontend:build` because it
 reads `dist/assets`. If the build artifact is missing, the bundle gate fails
 loudly and tells the operator to build first.
+
+`npm run test:coverage` is `npm run test` with v8 coverage, and it fails when
+coverage of `packages/core/src/**` and `frontend/src/hooks/**` drops below the
+thresholds in `vitest.config.js` (plan item M3.1). Build & Test's
+"Unit & Integration Tests" step runs it; `tests/workflowPins.test.js` fails if
+the step goes back to `npm run test` or is made unable to fail.
 
 ## Pull Request Scope
 
@@ -99,6 +105,38 @@ audit is visible on the pull request but does not block the merge. It can be
 required safely: the workflow has no `paths` filter and the job no `if`, so it
 reports on every pull request, docs-only ones included.
 `tests/checkAudit.test.js` fails if that changes.
+
+## Workflow audit
+
+[`.github/workflows/workflow-audit.yml`](../../.github/workflows/workflow-audit.yml)
+runs [zizmor](https://docs.zizmor.sh/) (pinned, 1.30.1) over every workflow and
+`.github/dependabot.yml` on pull requests to `main`, pushes to `main` and manual
+dispatch (plan item M3.5). Any finding fails the job: an action pinned by tag,
+a checkout that keeps the job's token in `.git/config`, an expression
+interpolated into a `run:` script, a `pull_request_target` checkout of the pull
+request's code, and the rest of zizmor's default audits. With the job's token
+it also checks online that each pinned SHA is a commit of the action it names.
+
+- **Pins.** Every `uses:` names a full commit SHA with its release in a comment
+  (`actions/checkout@3d3c42e… # v7.0.1`). Dependabot's weekly `github-actions`
+  updates (`.github/dependabot.yml`) rewrite both together. To pin a new action
+  by hand, resolve the release tag to its commit
+  (`git ls-remote --tags https://github.com/<owner>/<action>.git`; for an
+  annotated tag take the `^{}` line) and never copy a SHA from memory.
+  `tests/workflowPins.test.js` holds the pin shape offline in `npm run test`.
+- **Exceptions.** zizmor's configuration is `.github/zizmor.yml`, each loosened
+  default with its reason (today one: Dependabot's 3-day cooldown, which
+  matches `.npmrc`'s `min-release-age=3`). A one-off is an inline
+  `# zizmor: ignore[<audit>] -- <reason>` on the line it excuses.
+- **Locally:** `uvx --from 'zizmor==1.30.1' zizmor --offline .` (or `pipx run`),
+  from the repository root.
+- **Bumping zizmor:** new audits arrive in minor releases and can fail the job
+  on workflows nobody changed, so bump the pinned version by hand, in a pull
+  request that fixes or configures what the new release reports.
+
+**Not a required check yet.** The job reports as `Workflow audit (zizmor)`; it
+has no `paths` filter and no `if`, so it reports on every pull request and can
+be required the same way as the dependency audit above.
 
 ## Edge Functions (`deno-mirror-tests`)
 

@@ -569,6 +569,17 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M3.2. pgTAP runs only on some PRs, so it can't be required** (audit finding 6.3, medium)
+> - **Status (2026-10-13): done in PR m3b (branch `claude/vibrant-allen-hr7y7s-m3b`; open);
+>   the live ruleset is the owner's step after merge.** `pgtap.yml` has no `paths` filter and
+>   pins CLI `2.118.0`, the deploy jobs' version (kept over 2.95.4 because `migrationGuard.mjs`
+>   parses 2.118.0's JSON; `supabaseCliPin.test.js` now holds every workflow to one version).
+>   `supabase start` skips the services no suite uses, after an edge-runtime 502 failed a run.
+>   `main.json` requires `Run pgTAP against local Supabase` and, with the owner's approval,
+>   `npm audit (high and critical block)`; `rulesetRequiredChecks.test.js` reads every workflow.
+>   Green on 2.118.0: 53 files, 662 assertions (*fully validated*, dispatch run 38484268374).
+>   Test gate: a throwaway migration adding a permissive `USING (true)` SELECT policy on `teams`
+>   failed `rls_cross_org_isolation.sql` tests 1 and 3 (*fully validated*, dispatch run
+>   38484483751 on a throwaway branch, no PR). Merge blocking awaits the live ruleset.
 > - **Fix approach:** drop the `paths` filter from `pgtap.yml` (D5), use the one
 >   `SUPABASE_CLI_VERSION`, and add it to the ruleset's required checks.
 > - **Files touched:** `.github/workflows/pgtap.yml`, `.github/rulesets/main.json`.
@@ -585,6 +596,16 @@ standards these items name · [ ] deployed and smoke-tested
 > 3.1 — resolved by M3.2.
 
 > **M3.3. Supabase's own advisors never run** (audit finding 8.6, medium)
+> - **Status (2026-10-13): done in PR m3b (branch `claude/vibrant-allen-hr7y7s-m3b`; open).**
+>   `supabase db advisors --local --type all --level info --fail-on none --output-format json`
+>   (flags confirmed with `--help` on 2.118.0), read by `scripts/ci/supabaseAdvisors.mjs`
+>   against `docs/security/supabase-advisor-waivers.json`: unwaived WARN/ERROR, stale or expired
+>   waivers fail; unreadable or empty output exits 2. Triage of 176 findings (33 WARN): `min`
+>   and `set_updated_at` search_path accepted; `auth_rls_initplan` (11 policies) and
+>   `multiple_permissive_policies` (20 tables) waived as debt to 2027-01-11, not fixed (an RLS
+>   rewrite is its own reviewed change). No migration. Test gate: a throwaway table without RLS
+>   failed the step (`ERROR rls_disabled_in_public`), as did the planted policy
+>   (`multiple_permissive_policies` on `teams`) (*fully validated*, run 38484483751).
 > - **Fix approach:** in the pgTAP job, after `supabase start`, run `supabase db advisors
 >   --fail-on warn` (confirm the flag with `--help` on the pinned CLI); triage what it reports,
 >   waiving with reasons in the job.
@@ -601,6 +622,15 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M3.4. The migration harness runs nowhere in CI, and needs an undocumented OS user** (audit finding 4.2, medium)
+> - **Status (2026-10-13): done in PR m3b (branch `claude/vibrant-allen-hr7y7s-m3b`; open).**
+>   `dbharness.yml` (job `Migration harness (PostgreSQL 16)`, ubuntu-24.04) runs on PRs touching
+>   `supabase/`, `docs/sql/`, `scripts/dbharness/` or itself, creates `pgrunner`, runs the
+>   harness as root and fails unless it ends `HARNESS OK`. Not required (path-filtered).
+>   `ci-cd.md` has "Running the database harness" (`HARNESS_PGUSER`, `pgrunner`, `pgrunner2`);
+>   `run.sh`'s header is corrected. Baseline here: HARNESS OK, 128 migrations, 145 s
+>   (*executed*, `HARNESS_PGUSER=postgres`). Test gate: a smoke assertion planted in
+>   `20261006000000_smoke.sql` gave `FAIL smoke 20261006000000`, HARNESS FAILED, exit 1
+>   (*executed* here; CI: throwaway draft PR #572).
 > - **Fix approach:** a CI job that runs `scripts/dbharness/run.sh` on PRs touching
 >   `supabase/` or `docs/sql/`, creating the harness user (or setting `HARNESS_PGUSER`); a
 >   "Running the database harness" section in `docs/operations/ci-cd.md`; the stale header
@@ -1151,6 +1181,31 @@ smoke-tested
     `VITE_VERCEL_GIT_COMMIT_*` values embeds them on `main` and not on #558; the deployed
     production bundle and #558's preview bundle, fetched and searched for the names). The same
     finding as PR M5's entry above.
+
+- 2026-10-13, found by PR m3b (M3.2-M3.4):
+  - `supabase start` failed at least one of the last 100 pgTAP runs on the edge runtime's
+    health check (`Error status 502`, run 38462349853), a service no suite uses; as a required
+    check that would block a merge. `pgtap.yml` now excludes it and the other unused services.
+    *Executed* (run log).
+  - CLI 2.118.0's advisors are a subset of the hosted ones: they lack lints 0028/0029
+    (`SECURITY DEFINER` callable by `anon`/`authenticated`) and Auth's leaked-password
+    protection. The hosted project reports 89 `authenticated` and 1 `anon` (`submit_registration`,
+    intended) definer findings, and leaked-password protection off. The CI gate cannot see
+    these; turning leaked-password protection on is an Auth setting for the owner. *Executed*
+    (Supabase MCP `get_advisors`, read-only; CLI binary searched for the lint names).
+  - `public.set_updated_at()` exists on a from-scratch build (`20251217000000`) but not in
+    production: schema drift between what CI builds and what production has. Harmless here
+    (waived); not investigated further. *Executed* (one read-only `pg_proc` SELECT through the
+    Supabase MCP).
+  - The `auth_rls_initplan` and `multiple_permissive_policies` waivers expire on 2027-01-11, after
+    which pgTAP, a required check, fails every PR until the policies are rewritten or the waivers
+    renewed. Wants a plan item (RLS policy rewrite, plan first). *Statically reviewed.*
+  - pgTAP run 38338431910 (branch `feat/grid-override-prompt`) failed
+    `practice_grid_current_rows.sql` test 36 with the two series in the other order
+    (`have: thu,fri`, `want: fri,thu`): if that assertion depends on row order, it is a flake that
+    now blocks merges. Not reproduced; *unverified*.
+  - `supabase stop` on 2.118.0 warns that `config.toml`'s `[inbucket]` section is deprecated
+    (`[local_smtp]`). Not changed. *Executed* (run log).
 
 ## Deferred with reason
 

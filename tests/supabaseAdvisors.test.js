@@ -130,16 +130,17 @@ describe('the register is held to the bar it enforces', () => {
   });
 
   it.each([
-    ['no expires key', { expires: undefined }, '"expires" is required'],
+    ['no expires key', {}, '"expires" is required'],
     ['an impossible date', { expires: '2026-02-31' }, 'must be null or a real YYYY-MM-DD date'],
     ['a date too far out', { expires: '2027-06-01' }, 'more than 180 days out'],
     ['a short reason', { reason: 'fine' }, '"reason" must say why'],
     ['a malformed lint', { lint: 'Auth RLS' }, '"lint" must be the advisor'],
     ['no objects', { objects: [] }, '"objects" must list'],
     ['an object that is not schema.name', { objects: ['profiles'] }, 'is not schema.name'],
-  ])('rejects %s', (_label, patch, message) => {
+  ])('rejects %s', (label, patch, message) => {
+    /** @type {Record<string, unknown>} */
     const w = waiver('auth_rls_initplan', ['public.profiles'], patch);
-    if (patch.expires === undefined && 'expires' in patch) delete w.expires;
+    if (label === 'no expires key') delete w.expires;
     const { problems } = readWaivers({ waivers: [w] }, TODAY);
     expect(problems.join('\n')).toContain(message);
   });

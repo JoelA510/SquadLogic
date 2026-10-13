@@ -139,8 +139,24 @@ function advisories(report) {
         `The npm audit report format may have changed; the gate can't vouch for this tree.`
     );
   }
+  // A report that audited nothing is not a clean report (SquadLogic CLAUDE.md: a check that
+  // matches zero records is a loud failure). npm counts the dependencies it audited in
+  // `metadata.dependencies.total`, and its per-severity totals in `metadata.vulnerabilities`;
+  // both are required, so a format change that drops them cannot read as "clean".
+  const audited = report.metadata?.dependencies?.total;
+  if (!Number.isInteger(audited) || audited <= 0) {
+    throw new CheckError(
+      `The audit report says it examined ${JSON.stringify(audited ?? null)} dependencies ` +
+        '(metadata.dependencies.total). An audit of nothing is not a pass.'
+    );
+  }
   const totals = report.metadata?.vulnerabilities;
-  if (totals) {
+  if (totals === null || typeof totals !== 'object') {
+    throw new CheckError(
+      'The audit report has no metadata.vulnerabilities totals to reconcile against.'
+    );
+  }
+  {
     const counted = Object.fromEntries(SEVERITIES.map((s) => [s, 0]));
     for (const v of Object.values(vulns)) if (v?.severity in counted) counted[v.severity]++;
     const mismatch = SEVERITIES.filter((s) => (totals[s] ?? 0) !== counted[s]);
@@ -201,7 +217,13 @@ function loadWaivers(args, today) {
   });
   if (problems.length)
     throw new CheckError(`Invalid waiver register ${path}:\n  ${problems.join('\n  ')}`);
-  return register.waivers;
+  // Matching uses the trimmed values validation checked, so a stray space in the register can't
+  // make a valid waiver silently cover nothing.
+  return register.waivers.map((w) => ({
+    ...w,
+    advisory: w.advisory.trim(),
+    package: w.package.trim(),
+  }));
 }
 
 // --- Run ----------------------------------------------------------------------------------------

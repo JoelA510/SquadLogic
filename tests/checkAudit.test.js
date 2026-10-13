@@ -50,7 +50,10 @@ function report(vulns, metadataOverride) {
   return {
     auditReportVersion: 2,
     vulnerabilities: vulns,
-    metadata: { vulnerabilities: metadataOverride ?? counts },
+    metadata: {
+      vulnerabilities: metadataOverride ?? counts,
+      dependencies: { prod: 80, dev: 500, optional: 0, peer: 0, peerOptional: 0, total: 580 },
+    },
   };
 }
 
@@ -176,6 +179,27 @@ describe('check-audit: refuses to read a report it cannot account for', () => {
     expect(status).toBe(2);
   });
 
+  it('fails a report that audited no dependencies (a check that examined nothing)', () => {
+    const clean = report({});
+    expect(run(clean).status).toBe(0);
+    const empty = { ...clean, metadata: { ...clean.metadata, dependencies: { total: 0 } } };
+    const { status, out } = run(empty);
+    expect(out).toContain('examined 0 dependencies');
+    expect(status).toBe(2);
+    const noCount = { ...clean, metadata: { vulnerabilities: clean.metadata.vulnerabilities } };
+    expect(run(noCount).out).toContain('examined null dependencies');
+    expect(run(noCount).status).toBe(2);
+  });
+
+  it('fails a report with no severity totals to reconcile against', () => {
+    const clean = report({});
+    const noTotals = { ...clean, metadata: { dependencies: clean.metadata.dependencies } };
+    const { status, out } = run(noTotals);
+    expect(out).toContain('no metadata.vulnerabilities totals');
+    expect(status).toBe(2);
+    expect(run({ ...clean, metadata: undefined }).status).toBe(2);
+  });
+
   it('reports invalid JSON as exit 2 with the reason, not a stack trace', () => {
     const { status, out } = run('{"vulnerabilities": {', []);
     expect(out).toContain('--input report is not valid JSON');
@@ -207,6 +231,14 @@ describe('check-audit: waivers', () => {
     expect(out).toContain('Expired waiver: GHSA-aaaa-bbbb-cccc');
     expect(out).not.toContain('waived until');
     expect(status).toBe(1);
+  });
+
+  it('matches a waiver whose package or advisory has stray whitespace, as validated', () => {
+    const padded = waiver({ package: ' brace-expansion ', advisory: 'GHSA-aaaa-bbbb-cccc ' });
+    const { status, out } = run(HIGH, [padded]);
+    expect(out).not.toContain('Unwaived');
+    expect(out).not.toContain('Stale waiver');
+    expect(status).toBe(0);
   });
 
   it('still honours a waiver on its expiry day', () => {
@@ -296,7 +328,9 @@ describe('check-audit: waivers', () => {
     );
     const result = spawnSync(
       process.execPath,
-      [SCRIPT, '--input', join(dir, 'audit.json'), '--today', TODAY],
+      // No --today: the register is checked against the real date, as CI checks it, so a
+      // waiver added later with a valid expiry is not judged against a frozen date.
+      [SCRIPT, '--input', join(dir, 'audit.json')],
       { encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '' } }
     );
     const out = result.stdout + result.stderr;
@@ -434,9 +468,23 @@ function workflowProblems(workflow) {
     if (/^\s*if:/.test(lines[i])) problems.push('the audit step has an if');
     if (/^\s*- /.test(lines[i])) break;
   }
+  // The job that runs the gate: from its `name:` line back to its key, then on to the next job.
   const jobs = topLevelBlock(lines, 'jobs') ?? [];
-  if (jobs.some((l) => code(l) && indentOf(l) === 4 && /^\s*if:/.test(l))) {
-    problems.push('the job has an if');
+  const nameAt = jobs.findIndex((l) =>
+    /^ {4}name: npm audit \(high and critical block\)\s*$/.test(l)
+  );
+  if (nameAt === -1) problems.push('no job named "npm audit (high and critical block)"');
+  else {
+    let start = nameAt;
+    while (start > 0 && !/^ {2}[A-Za-z0-9_-]+:\s*$/.test(jobs[start])) start -= 1;
+    let end = start + 1;
+    while (end < jobs.length && !/^ {2}[A-Za-z0-9_-]+:\s*$/.test(jobs[end])) end += 1;
+    const job = jobs.slice(start, end);
+    if (job.some((l) => code(l) && /^ {4}if:/.test(l))) problems.push('the job has an if');
+    if (job.some((l) => code(l) && /^ {4}needs:/.test(l))) problems.push('the job has needs');
+    if (!job.some((l) => /^\s*run: npm run check:audit\s*$/.test(l))) {
+      problems.push('the audit job does not run npm run check:audit');
+    }
   }
   return problems;
 }
@@ -497,6 +545,20 @@ describe('audit.yml', () => {
           "    if: github.event_name == 'schedule'\n    runs-on: ubuntu-latest"
         ),
       'the job has an if',
+    ],
+    [
+      'needs on the job',
+      (w) =>
+        w.replace(
+          '    name: npm audit (high and critical block)\n',
+          '    name: npm audit (high and critical block)\n    needs: [other]\n'
+        ),
+      'the job has needs',
+    ],
+    [
+      'the job renamed',
+      (w) => w.replace('name: npm audit (high and critical block)', 'name: npm audit'),
+      'no job named',
     ],
   ])('catches a planted workflow with %s', (_label, plant, problem) => {
     const planted = plant(workflow);

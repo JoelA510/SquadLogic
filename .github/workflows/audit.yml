@@ -24,8 +24,10 @@ on:
 # Nothing by default; the job asks for what it uses.
 permissions: {}
 
+# Per event as well as ref, so a push to main never cancels the scheduled run
+# (whose failure is what opens the issue below).
 concurrency:
-  group: audit-${{ github.ref }}
+  group: audit-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -35,7 +37,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      issues: write # only used by the scheduled-failure step below
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -46,22 +47,32 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
-          # Nothing restored from a cache into a job whose token can write.
+          # No cache: the audit reads the lockfile and installs nothing.
           package-manager-cache: false
 
       # The npm package.json pins (packageManager), so the report format the
       # gate reconciles against is the one it was tested with.
       - name: Use the pinned npm
-        run: v=$(node -p "require('./package.json').packageManager.split('@')[1]") && npx -y "npm@$v" install -g "npm@$v"
+        run: v=$(node -p "require('./package.json').packageManager.split('@')[1].split('+')[0]") && npx -y "npm@$v" install -g "npm@$v"
 
       # `npm audit` reads package-lock.json; no install needed.
       - name: Audit dependencies
         run: npm run check:audit
 
-      # A red scheduled run notifies only whoever last edited the cron line, so
-      # on a schedule a failure also opens (once) an issue the repo can see.
-      - name: Open an issue when the scheduled audit fails
-        if: failure() && github.event_name == 'schedule'
+  # A red scheduled run notifies only whoever last edited the cron line, so on a
+  # schedule a failure also opens (once) an issue the repo can see. Its own job,
+  # so the token that can write issues exists only on a failed scheduled run,
+  # never beside the npm code the audit job downloads.
+  report-scheduled-failure:
+    name: Report a failing scheduled audit
+    needs: [audit]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open an issue (once)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

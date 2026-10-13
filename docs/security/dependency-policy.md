@@ -106,6 +106,15 @@ them):
   anywhere in the tree, ours or a dependency's. Everything comes from the
   registry.
 
+**Declared, not enforced.** An npm older than 11.15 ignores all three settings
+without an error, and nothing in the repository stops one: `packageManager` is
+read only by Corepack (not enabled here) and by the audit job, which installs
+that npm before it runs. Node 24.21 bundles npm 11.19; on an older Node 24,
+check `npm -v` before adding or updating a dependency, or run
+`npx npm@11.19.0 install <pkg>`. `devEngines` or `engine-strict` could make it
+an error, but Dependabot runs its own npm and Node, and either would fail every
+update it tries.
+
 None of them changes what `npm ci` installs: CI and Vercel install
 `package-lock.json` as it is. To take an urgent fix younger than the wait, once
 the owner approves it: `npm install <pkg>@<version> --min-release-age=0`, and
@@ -126,7 +135,8 @@ pull request, the actions as another, and each major as its own. Three are
 held back, each with its reason beside it: `@types/node` 25 (moves with
 `.nvmrc`), `eslint-plugin-react-hooks` 7.1 (new lint rules flag 63 existing
 patterns; pinned at 7.0.1 in `package.json`), and `@tanstack/react-virtual`
-3.14 (its chunk outgrows its bundle budget; locked at 3.13.23). A held-back
+3.14 (its chunk outgrows its bundle budget; pinned at 3.13.23 in
+`package.json`). A held-back
 package in the minor-and-patch group would otherwise fail a gate and hold the
 whole batch with it. Security updates (Settings -> Advanced
 Security) ignore the cooldown and arrive at once.

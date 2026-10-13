@@ -21,6 +21,7 @@ import {
   isSeasonClockLoading,
 } from '../utils/seasonClockSlots.js';
 import { describeDaylightReport } from '../utils/daylightReport.js';
+import { overrideSlotLoad } from '../utils/overrideSlotLoad.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
@@ -204,6 +205,27 @@ function normalizePracticeSlot(row, seasonSetting, timezone) {
     fieldId: row.field_id ?? row.fieldId ?? null,
     fieldSubunitId: row.field_subunit_id ?? row.fieldSubunitId ?? null,
     fieldName: row.fields?.name ?? row.fieldName ?? null,
+  };
+}
+
+/**
+ * A placed slot's dating, as the scoring engines read it (M4.7,
+ * `docs/PLAN_SCORING_DATE_MODEL.md` §3.5): its first occurrence (the date its
+ * `start` was composed on), the end of its validity, inclusive, and its wall
+ * window. Sent with every slot, so the engines compare dated occurrences
+ * rather than first-occurrence instants; a slot without them would make the
+ * whole call undated, and a mix is refused.
+ *
+ * @param {{ effectiveFrom: string, effectiveUntil: string, day: string, startTime: string, endTime: string }} slot
+ *   a `partitionPracticeSlots` scheduler slot
+ * @returns {{ firstDate: string, lastDate: string, startTime: string, endTime: string }}
+ */
+export function slotDating(slot) {
+  return {
+    firstDate: getSlotDateForDay(slot.effectiveFrom, slot.day),
+    lastDate: slot.effectiveUntil,
+    startTime: slot.startTime,
+    endTime: slot.endTime,
   };
 }
 
@@ -744,6 +766,10 @@ export default function PracticeSchedulingPage() {
   // `ScoringInputSchema` reads are sent: each row's ids through the page's own
   // resolvers (a stored row may carry `practice_slot_id` alone), the teams'
   // head and assistant coaches, and the slots' instants on the season's clock.
+  // Dated (M4.7): each slot also carries its dating (`slotDating`) and each row
+  // its range -- the stored `effectiveDateRange`, or a staged placement's
+  // `newPlacementRange` -- so a closed series and its successor are judged on
+  // the dates each is live, not as one weekly instant.
   // `null` while a read is still landing or after one failed (the page reports
   // those failures itself), so the panel never scores a partial list as the
   // season's. Memoized so the panel's debounced request isn't restarted by
@@ -765,6 +791,8 @@ export default function PracticeSchedulingPage() {
             assignments: localAssignments.map((assignment) => ({
               teamId: getAssignmentTeamId(assignment),
               slotId: getAssignmentSlotId(assignment),
+              effectiveDateRange:
+                assignment.effectiveDateRange ?? assignment.effective_date_range ?? null,
             })),
             teams: schedulerTeams.map(({ id, division, coachId, assistantCoachIds }) => ({
               id,
@@ -772,12 +800,13 @@ export default function PracticeSchedulingPage() {
               coachId,
               assistantCoachIds,
             })),
-            slots: schedulerSlots.map(({ id, day, capacity, start, end }) => ({
-              id,
-              day,
-              capacity,
-              start,
-              end,
+            slots: schedulerSlots.map((slot) => ({
+              id: slot.id,
+              day: slot.day,
+              capacity: slot.capacity,
+              start: slot.start,
+              end: slot.end,
+              ...slotDating(slot),
             })),
           },
     [evaluationReadsPending, localAssignments, schedulerTeams, schedulerSlots]
@@ -791,22 +820,33 @@ export default function PracticeSchedulingPage() {
   // is the season read, never the latest run's rows or the staged review.
   const lockedAssignments = useMemo(() => seasonRows.map(toLockedAssignment), [seasonRows]);
 
+  // Each slot's load on its busiest date from the season's today on (M4.7,
+  // plan Q5): an override starts today, so a series that has already ended
+  // does not take a place, and a past week's load is not this choice's.
+  // Read on every render and passed as a dependency, so a page left open past
+  // midnight recounts on its next render rather than clipping at yesterday.
+  const overrideSeasonToday = seasonCalendarDate(Date.now(), timezone);
   const overrideBaseSlots = useMemo(() => {
-    const assignedBySlot = new Map();
-    for (const assignment of localAssignments) {
-      const slotId = getAssignmentSlotId(assignment);
-      if (!slotId) continue;
-      assignedBySlot.set(slotId, (assignedBySlot.get(slotId) ?? 0) + 1);
-    }
+    const load = overrideSlotLoad({
+      slots: schedulerSlots.map((slot) => ({ id: slot.id, ...slotDating(slot) })),
+      assignments: localAssignments.map((assignment) => ({
+        slotId: getAssignmentSlotId(assignment),
+        effectiveDateRange:
+          assignment.effectiveDateRange ?? assignment.effective_date_range ?? null,
+      })),
+      seasonToday: overrideSeasonToday,
+    });
 
     return schedulerSlots.map((slot) => ({
       baseSlotId: slot.id,
       day: slot.day,
       startLabel: slot.startTime.slice(0, 5),
       totalCapacity: slot.capacity,
-      totalAssigned: assignedBySlot.get(slot.id) ?? 0,
+      // A slot with no date left from today has no place to offer: shown full,
+      // as the stage handler refuses it.
+      totalAssigned: load.get(slot.id) ?? slot.capacity,
     }));
-  }, [localAssignments, schedulerSlots]);
+  }, [localAssignments, schedulerSlots, overrideSeasonToday]);
 
   // **Unplaceable slots no longer disable the scheduler by themselves.** They
   // used to (`Boolean(slotShapeError)`), back when one unreadable row emptied
@@ -1226,11 +1266,13 @@ export default function PracticeSchedulingPage() {
     // Built before the call rather than inline so the outcome can be read
     // back below: a run it could not measure has to reach the operator, not
     // just the JSON column.
+    // Dated, as the panel is (M4.7, plan Q9): the persisted report must be
+    // the answer the panel showed, not a first-occurrence one.
     const results = buildPracticeRunResults({
       assignments: persistenceAssignments,
       unassigned: autoScheduler.result?.unassigned ?? [],
       teams: schedulerTeams,
-      slots: schedulerSlots,
+      slots: schedulerSlots.map((slot) => ({ ...slot, ...slotDating(slot) })),
       schoolDayEnd,
       timezone,
       edgeEvaluation: autoScheduler.result?.evaluation ?? null,

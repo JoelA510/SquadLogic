@@ -1,0 +1,1089 @@
+{
+  "description": "Dated scoring witnesses (M4.7, docs/PLAN_SCORING_DATE_MODEL.md \u00a72.2 and \u00a74). Hand-written: every expected value is the truth worked out from the dates, not an engine answer. Read by tests/practiceMetrics.test.js and tests/scoringEngineDrift.test.js (Vitest) and _shared/tests/scoring-engine_test.ts (Deno). `slotLoad` is slot id -> [assignedCount (busiest date), assignmentRows]; `undated` is what the first-occurrence comparison reports on the same inputs with the dates removed.",
+  "timeZone": "America/New_York",
+  "vectors": [
+    {
+      "name": "W1 one team moved to another field, same Tuesday 16:00: old series to 10-04, new from 10-05",
+      "witness": "W1",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-10-04]"
+        },
+        {
+          "teamId": "T1",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-10-05,2026-11-20]"
+        }
+      ],
+      "expected": {
+        "conflicts": [],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 1
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "W2 two teams sharing a coach, Tuesday 16:00 and 16:30, ranges to 09-28 and from 09-29 (disjoint)",
+      "witness": "W2",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": ["C1"]
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:30:00-04:00",
+          "end": "2026-08-11T17:30:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:30:00",
+          "endTime": "17:30:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-09-28]"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-09-29,2026-11-20]"
+        }
+      ],
+      "expected": {
+        "conflicts": [],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "W2b as W2 but touching on Tuesday 09-29, the first range spelled as Postgres stores it",
+      "witness": "W2b",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": ["C1"]
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:30:00-04:00",
+          "end": "2026-08-11T17:30:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:30:00",
+          "endTime": "17:30:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-09-30)"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-09-29,2026-11-20]"
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-09-29",
+            "sharedDates": 1
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "overlapping by a week: two shared Tuesdays, 09-29 and 10-06",
+      "witness": "overlap",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": ["C1"]
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:30:00-04:00",
+          "end": "2026-08-11T17:30:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:30:00",
+          "endTime": "17:30:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-10-07)"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-09-29,2026-11-21)"
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-09-29",
+            "sharedDates": 2
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "W3 a closed series and its successor on one Wednesday slot of capacity 1",
+      "witness": "W3",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Wednesday",
+          "capacity": 1,
+          "start": "2026-08-12T17:00:00-04:00",
+          "end": "2026-08-12T18:00:00-04:00",
+          "firstDate": "2026-08-12",
+          "lastDate": "2026-11-20",
+          "startTime": "17:00:00",
+          "endTime": "18:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-10-04]"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-10-05,2026-11-20]"
+        }
+      ],
+      "expected": {
+        "conflicts": [],
+        "slotLoad": {
+          "S1": [1, 2]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2
+      },
+      "undated": {
+        "conflicts": 0,
+        "overbooked": ["S1"]
+      }
+    },
+    {
+      "name": "the peak, not the rows: capacity 2, and only Wednesday 10-14 holds three",
+      "witness": "peak",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T3",
+          "division": "U12",
+          "coachId": "C3",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T4",
+          "division": "U12",
+          "coachId": "C4",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Wednesday",
+          "capacity": 2,
+          "start": "2026-08-12T17:00:00-04:00",
+          "end": "2026-08-12T18:00:00-04:00",
+          "firstDate": "2026-08-12",
+          "lastDate": "2026-11-20",
+          "startTime": "17:00:00",
+          "endTime": "18:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-10-04]"
+        },
+        {
+          "teamId": "T3",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-10-05,2026-11-20]"
+        },
+        {
+          "teamId": "T4",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-10-14,2026-10-14]"
+        }
+      ],
+      "expected": {
+        "conflicts": [],
+        "slotLoad": {
+          "S1": [3, 4]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 4
+      },
+      "undated": {
+        "conflicts": 0,
+        "overbooked": ["S1"]
+      }
+    },
+    {
+      "name": "W4 two Tuesday 16:00 slots, one valid from 09-01; one coach on both, season-long",
+      "witness": "W4",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-09-01T16:00:00-04:00",
+          "end": "2026-09-01T17:00:00-04:00",
+          "firstDate": "2026-09-01",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-20]"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-09-01,2026-11-20]"
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-09-01",
+            "sharedDates": 12
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2
+      },
+      "undated": {
+        "conflicts": 0,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "W5 two Thursday 16:00 slots on the season fallback, no range sent; one coach",
+      "witness": "W5",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Thursday",
+          "capacity": 1,
+          "start": "2026-08-13T16:00:00-04:00",
+          "end": "2026-08-13T17:00:00-04:00",
+          "firstDate": "2026-08-13",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Thursday",
+          "capacity": 1,
+          "start": "2026-08-13T16:00:00-04:00",
+          "end": "2026-08-13T17:00:00-04:00",
+          "firstDate": "2026-08-13",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S2"
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-08-13",
+            "sharedDates": 15
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "an open-ended range reads to the slot validity end (Q3)",
+      "witness": "open",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-10-05,)"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-11-10,2026-11-20]"
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-11-10",
+            "sharedDates": 2
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "an unreadable range is dropped and reported, not read as season-long",
+      "witness": "unreadable",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "Full Season"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-08-10,2026-11-20]"
+        }
+      ],
+      "expected": {
+        "conflicts": [],
+        "slotLoad": {
+          "S1": [0, 0],
+          "S2": [1, 1]
+        },
+        "dataQuality": 1,
+        "assignedTeams": 1
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "a series with no date inside its slot validity is kept, holds no date, and is reported",
+      "witness": "no-live-date",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-09-30",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-10-05,2026-11-20]"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-08-10,2026-11-20]"
+        }
+      ],
+      "expected": {
+        "conflicts": [],
+        "slotLoad": {
+          "S1": [0, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 1,
+        "assignedTeams": 2
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "back to back on one Tuesday is not a clash (control)",
+      "witness": "back-to-back",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T17:00:00-04:00",
+          "end": "2026-08-11T18:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "17:00:00",
+          "endTime": "18:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S2"
+        }
+      ],
+      "expected": {
+        "conflicts": [],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2
+      },
+      "undated": {
+        "conflicts": 0,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "the same window on different weekdays is not a clash (control)",
+      "witness": "weekday",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Wednesday",
+          "capacity": 1,
+          "start": "2026-08-12T16:00:00-04:00",
+          "end": "2026-08-12T17:00:00-04:00",
+          "firstDate": "2026-08-12",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S2"
+        }
+      ],
+      "expected": {
+        "conflicts": [],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2
+      },
+      "undated": {
+        "conflicts": 0,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "P7: one coach on two Tuesday 18:00 slots either side of the 2026-11-01 DST change",
+      "witness": "dst",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-10-27T18:00:00-04:00",
+          "end": "2026-10-27T19:00:00-04:00",
+          "firstDate": "2026-10-27",
+          "lastDate": "2026-11-20",
+          "startTime": "18:00:00",
+          "endTime": "19:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-11-03T18:00:00-05:00",
+          "end": "2026-11-03T19:00:00-05:00",
+          "firstDate": "2026-11-03",
+          "lastDate": "2026-11-20",
+          "startTime": "18:00:00",
+          "endTime": "19:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S2"
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-11-03",
+            "sharedDates": 3
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2
+      },
+      "undated": {
+        "conflicts": 0,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "a team holding one slot in two series (closed, then restarted) is two practices, not a duplicate",
+      "witness": "two-series",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": ["C1"]
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-09-28]"
+        },
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-10-20,2026-11-20]"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S2"
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-08-11",
+            "sharedDates": 12
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 2],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "one series spelled two ways (inclusive and as Postgres stores it) is a duplicate",
+      "witness": "duplicate",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-20]"
+        },
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        }
+      ],
+      "expected": {
+        "conflicts": [],
+        "slotLoad": {
+          "S1": [1, 1]
+        },
+        "dataQuality": 1,
+        "assignedTeams": 1
+      },
+      "undated": {
+        "conflicts": 0,
+        "overbooked": []
+      }
+    }
+  ]
+}

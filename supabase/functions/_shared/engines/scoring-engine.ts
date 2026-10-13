@@ -1,5 +1,14 @@
 import type { Team, Slot, PracticeAssignment, GameAssignment } from '../schemas/scoring.ts';
+import { datedSlotsIssue } from '../schemas/scoring.ts';
 import { conflictPairKey, listTeamCoachIds } from './practice-coaches.ts';
+import {
+  LIVE_SPAN_STATUS,
+  assignmentLiveSpan,
+  calendarDayNumber,
+  peakLiveCount,
+  sharedLiveDates,
+  wallSeconds,
+} from './practice-live-dates.ts';
 
 export type Severity = 'info' | 'warning' | 'error';
 
@@ -65,8 +74,51 @@ function categorizeManualFollowUpReason(rawReason: string) {
   return MANUAL_FOLLOW_UP_CATEGORIES.UNKNOWN;
 }
 
+/** One slot's dating, validated (M4.7). */
+interface SlotDating {
+  firstDay: number;
+  lastDay: number;
+  startSec: number;
+  endSec: number;
+}
+
+const isDatedSlot = (slot: Slot) =>
+  (slot.firstDate !== undefined && slot.firstDate !== null) ||
+  (slot.lastDate !== undefined && slot.lastDate !== null);
+
+/**
+ * Core `resolveDateModel` (`practiceMetrics.js`): every slot carries
+ * `firstDate`, `lastDate`, `startTime` and `endTime`, or none carries a date;
+ * a mix throws. The rule is `datedSlotsIssue` (`schemas/scoring.ts`), which
+ * `fairness-scoring` answers with a 422 first, so a throw here is a caller bug.
+ */
+function resolveDateModel(slots: Slot[]): Map<string, SlotDating> | null {
+  const issue = datedSlotsIssue(slots);
+  if (issue !== null) throw new TypeError(issue);
+  if (!slots.some(isDatedSlot)) return null;
+  const datings = new Map<string, SlotDating>();
+  for (const slot of slots) {
+    // Two entries sharing an id are one slot, the last one standing, as `slotsById` reads them.
+    datings.set(slot.id, {
+      firstDay: calendarDayNumber(slot.firstDate) as number,
+      lastDay: calendarDayNumber(slot.lastDate) as number,
+      startSec: wallSeconds(slot.startTime) as number,
+      endSec: wallSeconds(slot.endTime) as number,
+    });
+  }
+  return datings;
+}
+
 /**
  * Core Logic for evaluating Practice Schedules
+ *
+ * **Dated or undated (M4.7, `docs/PLAN_SCORING_DATE_MODEL.md`)**, exactly as
+ * core's `evaluatePracticeSchedule`: with every slot dated, two assignments
+ * clash only on a shared live date with overlapping wall windows, and a slot's
+ * `assignedCount` is its busiest date (rows as `assignmentRows`); with none,
+ * first-occurrence instants and row counts, unchanged. `summary.dateModel`
+ * says which ran. The auto-scheduler's own scoring is always undated
+ * (`auto-scheduler-solver.ts` `scoreSchedule`, plan Q2).
  */
 export function evaluatePracticeSchedule(params: {
   assignments: PracticeAssignment[];
@@ -78,6 +130,8 @@ export function evaluatePracticeSchedule(params: {
 
   const teamsById = new Map<string, Team>(teams.map((t) => [t.id, t]));
   const slotsById = new Map<string, Slot>(slots.map((s) => [s.id, s]));
+  const datings = resolveDateModel(slots);
+  const dateModel: 'dated' | 'undated' = datings ? 'dated' : 'undated';
 
   // **One resolution pass, which is core's contract rather than a fourth one.**
   // This function used to decide what an assignment row was worth in three
@@ -116,8 +170,20 @@ export function evaluatePracticeSchedule(params: {
   // Filtering without reporting would trade one silent wrong number for a
   // silent missing one -- before this pass, a row naming an unknown slot at
   // least inflated `slotUtilization` visibly.
-  const resolvedAssignments: Array<{ teamId: string; slotId: string; team: Team; slot: Slot }> = [];
+  type Span = { first: number; last: number };
+  const resolvedAssignments: Array<{
+    teamId: string;
+    slotId: string;
+    team: Team;
+    slot: Slot;
+    span: Span | null;
+    row: number;
+  }> = [];
   const seenAssignments = new Set<string>();
+  // Core's dated duplicate rule: a team may hold one slot in two series
+  // (the table's key is team, slot, range); a duplicate is the same range or
+  // one sharing a live date with a kept series.
+  const seriesByKey = new Map<string, Array<{ range: string; span: Span | null }>>();
   const dataQualityMessages: string[] = [];
   for (const a of assignments) {
     const team = teamsById.get(a.teamId);
@@ -130,13 +196,62 @@ export function evaluatePracticeSchedule(params: {
       dataQualityMessages.push(`assignment references unknown slot ${a.slotId}`);
       continue;
     }
-    const key = `${a.teamId}::${a.slotId}`;
-    if (seenAssignments.has(key)) {
-      dataQualityMessages.push(`duplicate assignment for team ${a.teamId} to slot ${a.slotId}`);
+    // Core's order: an unreadable range is dropped and reported before the
+    // duplicate check; a readable one with no live date is kept and reported.
+    const dating = datings?.get(slot.id) ?? null;
+    const span = dating
+      ? assignmentLiveSpan({
+          firstDay: dating.firstDay,
+          lastDay: dating.lastDay,
+          range: a.effectiveDateRange,
+        })
+      : null;
+    if (span?.status === LIVE_SPAN_STATUS.UNREADABLE) {
+      dataQualityMessages.push(
+        `assignment for team ${a.teamId} to slot ${a.slotId} has an unreadable date range ${String(a.effectiveDateRange)}`
+      );
       continue;
     }
-    seenAssignments.add(key);
-    resolvedAssignments.push({ teamId: a.teamId, slotId: a.slotId, team, slot });
+    const key = `${a.teamId}::${a.slotId}`;
+    if (span) {
+      const range = String(a.effectiveDateRange ?? '');
+      const kept = seriesByKey.get(key) ?? [];
+      const duplicate = kept.some(
+        (series) =>
+          series.range === range ||
+          (series.span !== null &&
+            span.status === LIVE_SPAN_STATUS.LIVE &&
+            sharedLiveDates(series.span, span).count > 0)
+      );
+      if (duplicate) {
+        dataQualityMessages.push(`duplicate assignment for team ${a.teamId} to slot ${a.slotId}`);
+        continue;
+      }
+      kept.push({
+        range,
+        span: span.status === LIVE_SPAN_STATUS.LIVE ? { first: span.first, last: span.last } : null,
+      });
+      seriesByKey.set(key, kept);
+    } else {
+      if (seenAssignments.has(key)) {
+        dataQualityMessages.push(`duplicate assignment for team ${a.teamId} to slot ${a.slotId}`);
+        continue;
+      }
+      seenAssignments.add(key);
+    }
+    if (span?.status === LIVE_SPAN_STATUS.NONE) {
+      dataQualityMessages.push(
+        `assignment for team ${a.teamId} has no date inside slot ${a.slotId}'s validity`
+      );
+    }
+    resolvedAssignments.push({
+      teamId: a.teamId,
+      slotId: a.slotId,
+      team,
+      slot,
+      span: span?.status === LIVE_SPAN_STATUS.LIVE ? { first: span.first, last: span.last } : null,
+      row: resolvedAssignments.length,
+    });
   }
 
   const totalTeams = teams.length;
@@ -183,17 +298,25 @@ export function evaluatePracticeSchedule(params: {
   // two disagreed on how many slots exist before they could disagree on any
   // number in them.
   const slotUtilization = [...slotsById.values()].map((slot) => {
-    const assignedInSlot = resolvedAssignments.filter((a) => a.slotId === slot.id).length;
+    const rowsInSlot = resolvedAssignments.filter((a) => a.slotId === slot.id);
+    const assignmentRows = rowsInSlot.length;
+    // Dated: the busiest date's load (plan Q4). Undated: every row.
+    const assignedInSlot = datings
+      ? peakLiveCount(rowsInSlot.flatMap((a) => (a.span ? [a.span] : [])))
+      : assignmentRows;
     const utilization = slot.capacity > 0 ? assignedInSlot / slot.capacity : null;
 
     if (utilization && utilization > 1.0) {
       issues.push({
         category: 'utilization',
         severity: 'error',
-        message: `Slot ${slot.id} is overbooked (${assignedInSlot}/${slot.capacity})`,
+        message: datings
+          ? `Slot ${slot.id} is overbooked on its busiest date (${assignedInSlot}/${slot.capacity})`
+          : `Slot ${slot.id} is overbooked (${assignedInSlot}/${slot.capacity})`,
         details: {
           slotId: slot.id,
           assignedCount: assignedInSlot,
+          ...(datings ? { assignmentRows } : {}),
           capacity: slot.capacity,
         } as Record<string, unknown>,
       });
@@ -202,6 +325,7 @@ export function evaluatePracticeSchedule(params: {
     return {
       slotId: slot.id,
       assignedCount: assignedInSlot,
+      ...(datings ? { assignmentRows } : {}),
       capacity: slot.capacity,
       utilization,
       overbooked: assignedInSlot > slot.capacity,
@@ -218,14 +342,27 @@ export function evaluatePracticeSchedule(params: {
     teams: Array<{ teamId: string; slotId: string }>;
     reason: string;
     day: string;
+    firstDate?: string;
+    sharedDates?: number;
   }> = [];
   const conflictsByPair = new Map<string, (typeof coachConflicts)[number]>();
   const coachSchedules = new Map<
     string,
-    Array<{ teamId: string; slotId: string; start: Date; end: Date; day: string }>
+    Array<{
+      teamId: string;
+      slotId: string;
+      start: Date;
+      end: Date;
+      day: string;
+      dating: SlotDating | null;
+      span: Span | null;
+      row: number;
+    }>
   >();
+  // Core's dated merge: the dates each pair of ROWS shares, summed per placement pair.
+  const datesByPair = new Map<string, Map<string, { count: number; firstDate: string | null }>>();
 
-  resolvedAssignments.forEach(({ team, slot, ...a }) => {
+  resolvedAssignments.forEach(({ team, slot, span, row, ...a }) => {
     const start = new Date(slot.start);
     const end = new Date(slot.end);
     // `slot.day ?? 'unknown'`, which is what `practiceMetrics.js:582` does.
@@ -249,7 +386,16 @@ export function evaluatePracticeSchedule(params: {
     // would otherwise pass through the schema and override the conflict set.
     for (const coachId of listTeamCoachIds(team)) {
       if (!coachSchedules.has(coachId)) coachSchedules.set(coachId, []);
-      coachSchedules.get(coachId)!.push({ teamId: a.teamId, slotId: a.slotId, start, end, day });
+      coachSchedules.get(coachId)!.push({
+        teamId: a.teamId,
+        slotId: a.slotId,
+        start,
+        end,
+        day,
+        dating: datings?.get(slot.id) ?? null,
+        span,
+        row,
+      });
     }
   });
 
@@ -261,11 +407,31 @@ export function evaluatePracticeSchedule(params: {
       const current = sorted[i];
       for (let j = i + 1; j < sorted.length; j += 1) {
         const candidate = sorted[j];
-        if (candidate.start >= current.end) break;
+        let shared: { count: number; firstDate: string | null } | null = null;
+        if (datings) {
+          // Core's dated rule: every pair, a shared live date, overlapping wall windows.
+          if (!current.span || !candidate.span || !current.dating || !candidate.dating) continue;
+          const windowsOverlap =
+            current.dating.startSec < candidate.dating.endSec &&
+            candidate.dating.startSec < current.dating.endSec;
+          if (!windowsOverlap) continue;
+          shared = sharedLiveDates(current.span, candidate.span);
+          if (shared.count === 0) continue;
+        } else if (candidate.start >= current.end) {
+          break;
+        }
         const pairKey = conflictPairKey(current, candidate);
+        if (shared) {
+          const rows = datesByPair.get(pairKey) ?? new Map();
+          rows.set(
+            `${Math.min(current.row, candidate.row)}|${Math.max(current.row, candidate.row)}`,
+            shared
+          );
+          datesByPair.set(pairKey, rows);
+        }
         const existing = conflictsByPair.get(pairKey);
         if (existing) {
-          existing.coachIds.push(coachId);
+          if (!shared || !existing.coachIds.includes(coachId)) existing.coachIds.push(coachId);
           continue;
         }
         const entry = {
@@ -277,11 +443,19 @@ export function evaluatePracticeSchedule(params: {
           ],
           reason: '', // finalised below, once every coach the pair shares is known
           day: current.day,
+          ...(shared ? { firstDate: shared.firstDate as string, sharedDates: shared.count } : {}),
         };
         conflictsByPair.set(pairKey, entry);
         coachConflicts.push(entry);
       }
     }
+  }
+
+  for (const [pairKey, rows] of datesByPair) {
+    const conflict = conflictsByPair.get(pairKey)!;
+    const all = [...rows.values()];
+    conflict.firstDate = all.map((d) => d.firstDate as string).sort()[0];
+    conflict.sharedDates = all.reduce((sum, d) => sum + d.count, 0);
   }
 
   // Reason and issue are built once the pair is fully merged, so each names every coach it shares.
@@ -290,7 +464,11 @@ export function evaluatePracticeSchedule(params: {
       conflict.coachIds.length > 1
         ? `Coaches ${conflict.coachIds.join(', ')} have`
         : `Coach ${conflict.coachIds[0]} has`;
-    conflict.reason = `${label} overlapping practices on ${conflict.day}`;
+    // Dated runs name the first clashing date and how many there are (plan Q7).
+    conflict.reason =
+      conflict.firstDate !== undefined
+        ? `${label} overlapping practices on ${conflict.day}, from ${conflict.firstDate} (${conflict.sharedDates} date(s))`
+        : `${label} overlapping practices on ${conflict.day}`;
     issues.push({
       category: 'coach-conflict',
       severity: 'error',
@@ -299,6 +477,9 @@ export function evaluatePracticeSchedule(params: {
         coachId: conflict.coachId,
         coachIds: conflict.coachIds,
         day: conflict.day,
+        ...(conflict.firstDate !== undefined
+          ? { firstDate: conflict.firstDate, sharedDates: conflict.sharedDates }
+          : {}),
       } as Record<string, unknown>,
     });
   }
@@ -318,7 +499,7 @@ export function evaluatePracticeSchedule(params: {
   return {
     status,
     issues,
-    summary: { ...summary, fairnessScore },
+    summary: { ...summary, fairnessScore, dateModel },
     slotUtilization,
     coachConflicts,
     manualFollowUpResults: (unassigned || []).map((u) => ({

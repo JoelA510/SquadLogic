@@ -1,6 +1,10 @@
 import { serve } from 'https://deno.land/std@0.223.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
-import { ScoringInputSchema, refuseEmptyPracticeRoster } from '../_shared/schemas/scoring.ts';
+import {
+  ScoringInputSchema,
+  datedSlotsIssue,
+  refuseEmptyPracticeRoster,
+} from '../_shared/schemas/scoring.ts';
 import {
   evaluatePracticeSchedule,
   evaluateGameSchedule,
@@ -81,6 +85,14 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
     const emptyRoster = refuseEmptyPracticeRoster(practice);
     if (emptyRoster) {
       return jsonResponse(emptyRoster, 422);
+    }
+
+    // 3a'. Dated or undated, never half of each (M4.7, plan Q8): a slot list
+    //     where only some slots carry `firstDate`/`lastDate`, or a dated slot
+    //     missing its wall window, is refused rather than scored.
+    const datedIssue = practice ? datedSlotsIssue(practice.slots) : null;
+    if (datedIssue !== null) {
+      return jsonResponse({ error: datedIssue, code: 'PRACTICE_SLOT_DATES_INCOMPLETE' }, 422);
     }
 
     // 3b. Place every wall reading on the SEASON's clock before the engine

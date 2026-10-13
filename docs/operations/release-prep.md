@@ -83,11 +83,10 @@ security, database, or observability settings that were not directly verified.
 - **Performance budget tightening:** current bundle budgets remain the active
   gate. Chart-vendor splitting, asset optimization, and tighter earned budgets
   are deferred to the performance polish task.
-- **Vercel/CI Node parity:** Vercel currently reports Node `24.x`, while CI runs
-  Node 20 and `package.json` declares `>=20`. The release-prep decision is to
-  keep CI on Node 20 as the minimum supported runtime for now and treat Vercel
-  Node 24 as a documented deployment setting. Changing either side requires a
-  separate PR with the full build/test/E2E verification suite.
+- **Vercel/CI Node parity:** resolved 2026-10 (remediation plan item M1.4):
+  `.nvmrc` pins `24`, `engines.node` is `^24.0.0`, CI reads `.nvmrc`, and
+  Vercel builds on `24.x`. At this check Vercel reported Node `24.x` while CI
+  ran Node 20 and `package.json` declared `>=20`.
 - **Production Supabase migration reconciliation:** exact linked migration
   listing requires `SUPABASE_DB_PASSWORD` in this environment after
   `supabase/.temp/` became local-only. Operators must run

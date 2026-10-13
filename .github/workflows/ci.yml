@@ -146,7 +146,7 @@ jobs:
         if: steps.changes.outputs.docs_only != 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: 'npm'
           cache-dependency-path: package-lock.json
 
@@ -342,7 +342,7 @@ jobs:
         if: steps.secrets.outputs.configured == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
 
       # Pinned (workflow env): the guard parses this version's JSON output.
       - name: Setup Supabase CLI

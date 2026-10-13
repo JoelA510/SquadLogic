@@ -14,7 +14,7 @@
 > **Deployment**: https://squadlogic.vercel.app/
 
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](https://opensource.org/licenses/ISC)
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-green)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-24-green)](https://nodejs.org/)
 [![Vite](https://img.shields.io/badge/Vite-7.x-646cff)](https://vitejs.dev/)
 
 ---
@@ -81,7 +81,8 @@ The application is structured around the following workflows (see `frontend/src/
 
 ### Prerequisites
 
-- Node.js (v20 or higher)
+- Node.js 24 (the version `.nvmrc` pins; `package.json` `engines` requires `^24.0.0`, and CI and
+  the Vercel build run on it). With nvm: `nvm use`.
 - npm (v10 or higher)
 - A Supabase Project (for database and auth) — or run in mock mode (below) with no backend at all
 

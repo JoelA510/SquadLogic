@@ -342,7 +342,7 @@ When asked to perform a "UI/UX pass", "visual polish", or work on frontend views
 
 GitHub Actions (`.github/workflows/ci.yml`):
 
-1. Checkout → Node 20 setup → `npm install`
+1. Checkout → Node setup (the version `.nvmrc` pins, 24) → `npm ci`
 2. `npm run typecheck`
 3. `npm run lint`
 4. `npm run test`

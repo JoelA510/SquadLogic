@@ -1,0 +1,63 @@
+name: Migration harness
+
+# Plan item M3.4 (audit finding 4.2). scripts/dbharness/run.sh is the only
+# thing that applies every migration to an empty PostgreSQL 16, runs every
+# smoke under docs/sql/ and checks each revert after its forward migration.
+# pgTAP's `supabase start` applies the migrations too, but runs no smoke and
+# no revert. Runbook: docs/operations/ci-cd.md ("Running the database
+# harness").
+#
+# Path-filtered on purpose: it is not a required check (a required check with
+# a paths filter would block every other pull request forever), so it runs
+# only where a migration, a smoke or revert script, or the harness changed.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/**'
+      - 'docs/sql/**'
+      - 'scripts/dbharness/**'
+      - '.github/workflows/dbharness.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dbharness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harness:
+    name: Migration harness (PostgreSQL 16)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # The harness runs the server binaries from this fixed path. The
+      # ubuntu-24.04 image ships PostgreSQL 16 there, stopped; say so plainly
+      # if an image update ever moves it, rather than failing somewhere inside.
+      - name: Check PostgreSQL 16 and Python
+        run: |
+          set -euo pipefail
+          test -x /usr/lib/postgresql/16/bin/pg_ctl || { echo "::error::PostgreSQL 16 is not at /usr/lib/postgresql/16/bin on this runner image"; exit 1; }
+          /usr/lib/postgresql/16/bin/postgres --version
+          python3 --version
+
+      # The harness runs as root (it installs stub extensions into the server's
+      # share directory) and owns its cluster as an unprivileged OS user,
+      # HARNESS_PGUSER, default `pgrunner`. The runner has no such user.
+      - name: Create the harness user
+        run: sudo useradd --create-home --shell /bin/bash pgrunner
+
+      # run.sh exits non-zero on any FAIL; the verdict line is checked as well,
+      # so a run that stopped without one is never read as a pass.
+      - name: Run the harness
+        run: |
+          set -euo pipefail
+          sudo bash scripts/dbharness/run.sh 2>&1 | tee harness.log
+          tail -n 1 harness.log | grep -qx 'HARNESS OK' || { echo "::error::the harness did not end with HARNESS OK"; exit 1; }

@@ -10,7 +10,8 @@
 // `authenticated`, because RPCs are how this app writes) or recorded as debt.
 //
 // The register is held to the bar it enforces:
-//   - a waiver names one lint and the objects (`schema.name`) it covers, and says why;
+//   - a waiver names one lint and the objects (`schema.name`, or `project` for a finding that names
+//     no database object) it covers, and says why;
 //   - `expires` is null (accepted by design) or a date at most MAX_DEBT_DAYS out (debt); an expired
 //     waiver covers nothing;
 //   - a waived object the advisors no longer report fails (a stale entry would otherwise
@@ -33,6 +34,8 @@ const BLOCKING = new Set(['WARN', 'ERROR']);
 const LEVELS = new Set(['INFO', 'WARN', 'ERROR']);
 const MAX_DEBT_DAYS = 180;
 const MIN_REASON = 40;
+/** The object key of a finding that names no schema or object (a project-level setting). */
+const PROJECT = 'project';
 
 export class CheckError extends Error {} // couldn't check: exit 2
 
@@ -106,10 +109,13 @@ export function readFindings(report) {
     if (typeof lint !== 'string' || !lint || !LEVELS.has(level)) {
       throw new CheckError(`results[${i}] has no lint name or a level outside INFO/WARN/ERROR.`);
     }
+    const detail = String(finding.detail ?? '');
+    // A project-level finding (an Auth setting, say) names no database object at all.
+    if (schema === undefined && name === undefined) return { lint, level, object: PROJECT, detail };
     if (typeof schema !== 'string' || typeof name !== 'string' || !schema || !name) {
       throw new CheckError(`results[${i}] (${lint}) names no object (metadata.schema/name).`);
     }
-    return { lint, level, object: `${schema}.${name}`, detail: String(finding.detail ?? '') };
+    return { lint, level, object: `${schema}.${name}`, detail };
   });
 }
 
@@ -165,8 +171,10 @@ export function readWaivers(register, today) {
       return;
     }
     for (const object of w.objects) {
-      if (typeof object !== 'string' || !/^[\w$]+\.[\w$]+$/.test(object)) {
-        problems.push(`${where}: object ${JSON.stringify(object)} is not schema.name.`);
+      if (typeof object !== 'string' || !(object === PROJECT || /^[\w$]+\.[\w$]+$/.test(object))) {
+        problems.push(
+          `${where}: object ${JSON.stringify(object)} is not schema.name (or ${PROJECT}).`
+        );
         continue;
       }
       const key = `${w.lint} ${object}`;

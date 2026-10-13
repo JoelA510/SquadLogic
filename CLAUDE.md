@@ -322,17 +322,24 @@ When asked to perform a "UI/UX pass", "visual polish", or work on frontend views
 
 ## 10. Environment Variables
 
-| Variable                    | Purpose                             | Committed?        |
-| --------------------------- | ----------------------------------- | ----------------- |
-| `VITE_SUPABASE_URL`         | Supabase project URL                | `.env` (yes)      |
-| `VITE_SUPABASE_ANON_KEY`    | Supabase publishable (anon) key     | `.env.local` (no) |
-| `VITE_USE_MOCK_SUPABASE`    | Force mock Supabase client (`true`) | `.env.local` / CI |
-| `VITE_PERSISTENCE_ENDPOINT` | Custom persistence API endpoint     | `.env.local` (no) |
-| `VITE_SENTRY_DSN`           | Frontend Sentry DSN                 | Vercel env (no)   |
-| `TEST_ADMIN_EMAIL`          | E2E admin test email                | `.env.test` (no)  |
-| `TEST_COACH_EMAIL`          | E2E coach test email                | `.env.test` (no)  |
-| `TEST_PARENT_EMAIL`         | E2E parent test email               | `.env.test` (no)  |
-| `TEST_PASSWORD`             | E2E test password                   | `.env.test` (no)  |
+| Variable                        | Purpose                                         | Committed?        |
+| ------------------------------- | ----------------------------------------------- | ----------------- |
+| `VITE_SUPABASE_URL`             | Supabase project URL                            | `.env` (yes)      |
+| `VITE_SUPABASE_ANON_KEY`        | Supabase publishable (anon) key                 | `.env.local` (no) |
+| `VITE_USE_MOCK_SUPABASE`        | Force mock Supabase client (`true`)             | `.env.local` / CI |
+| `VITE_SUPABASE_PERSISTENCE_URL` | Persistence Edge Functions base (optional)      | `.env.local` (no) |
+| `VITE_SENTRY_DSN`               | Frontend Sentry DSN (optional; unset = off)     | Vercel env (no)   |
+| `TEST_ADMIN_EMAIL`              | E2E admin test email (Node layer, real backend) | `.env.test` (no)  |
+| `TEST_COACH_EMAIL`              | E2E coach test email                            | `.env.test` (no)  |
+| `TEST_PARENT_EMAIL`             | E2E parent test email                           | `.env.test` (no)  |
+| `TEST_PASSWORD`                 | E2E test password                               | `.env.test` (no)  |
+
+`frontend/src/env.js` is the only module that reads `import.meta.env`, each variable by name, and
+validates them (Zod rules in `frontend/src/envRules.js`); everything else imports from it or from
+`config.js`. A production build missing `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY` fails,
+naming the variable, unless `VITE_USE_MOCK_SUPABASE=true`; a malformed value fails it too.
+Every `VITE_` variable ships to the browser: never give a secret that prefix. Reference:
+`docs/operations/ENVIRONMENT.md`.
 
 **Never commit** `.env`, `.env.local`, or `.env.test` — they are gitignored. Use the `.example` templates.
 

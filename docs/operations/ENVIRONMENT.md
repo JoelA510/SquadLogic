@@ -28,38 +28,67 @@ dashboard setting then only needs to match. CI ran Node 20 (end of life) until
 
 | Variable | Required | Secret | Purpose | Source |
 |---|---|---|---|---|
-| `VITE_SUPABASE_URL` | **Yes** | No | Supabase project REST API URL | Supabase Dashboard → Settings → API → Project URL |
-| `VITE_SUPABASE_ANON_KEY` | **Yes** | No | Supabase publishable (anon) key — enforces RLS | Supabase Dashboard → Settings → API → `anon` `public` key |
-| `VITE_SENTRY_DSN` | Recommended | No | Sentry DSN for frontend error tracking & performance monitoring | Sentry → Create Project → Browser JavaScript → DSN |
-| `VERCEL_ENV` | No (set by Vercel) | No | Vercel's own system variable (`production` / `preview` / `development`). `vite.config.js` exposes exactly this one, by name, as `import.meta.env.VITE_VERCEL_ENV`, and it becomes the Sentry event `environment`, so preview events are not reported as production. Outside Vercel it is empty and the environment stays `production`. Not set by hand. | Vercel system environment variable |
-| `VITE_USE_MOCK_SUPABASE` | No | No | Force mock Supabase client (`true`). The only way a production build runs the mock (see Production Safety). **Must be unset or `false` in production.** | Manual — development/CI only |
-| `VITE_SUPABASE_PERSISTENCE_URL` | No | No | Override base URL for Edge Function persistence endpoints. Defaults to `http://localhost:54321/functions/v1` | Supabase Dashboard → Settings → API → Edge Functions URL |
+| `VITE_SUPABASE_URL` | **Yes** (production build) | No | Supabase project REST API URL. Must be an `http(s)` URL. | Supabase Dashboard → Settings → API → Project URL |
+| `VITE_SUPABASE_ANON_KEY` | **Yes** (production build) | No | Supabase publishable (anon) key — enforces RLS. A secret key (`sb_secret_…`, or a JWT whose `role` is `service_role`) is refused: everything here ships to the browser. | Supabase Dashboard → Settings → API → publishable / `anon` `public` key |
+| `VITE_SENTRY_DSN` | Recommended | No | Sentry DSN for frontend error tracking & performance monitoring. Unset: Sentry is off. Malformed (not `https://<public key>@<host>/<project id>`): the build fails. | Sentry → Create Project → Browser JavaScript → DSN |
+| `VERCEL_ENV` | No (set by Vercel) | No | Vercel's own system variable (`production` / `preview` / `development`). `vite.config.js` exposes exactly this one, by name, as `import.meta.env.VITE_VERCEL_ENV` (read in `frontend/src/env.js` as `DEPLOY_ENV`), and it becomes the Sentry event `environment`, so preview events are not reported as production. Outside Vercel it is empty and the environment stays `production`. Not set by hand. | Vercel system environment variable |
+| `VITE_USE_MOCK_SUPABASE` | No | No | `true` forces the mock Supabase client, and is the only way a production build ships the mock (see Production Safety). `true`, `false` or unset; anything else fails the build. **Must be unset or `false` in production.** | Manual — development/E2E only |
+| `VITE_SUPABASE_PERSISTENCE_URL` | No | No | Override base URL for the persistence Edge Functions. Defaults to `VITE_SUPABASE_URL` + `/functions/v1`, or to `http://localhost:54321/functions/v1` (the local stack) when that is unset. Must be an `http(s)` URL. | Supabase Dashboard → Settings → API → Edge Functions URL |
+
+### How the frontend reads its environment
+
+`frontend/src/env.js` is the only module that reads `import.meta.env`, and it
+reads each variable by name (`import.meta.env.VITE_SUPABASE_URL`), never the
+object as a whole: Vite replaces a whole-object read with every `VITE_`
+variable present at build time, so the next secret given a `VITE_` name would
+ship to every visitor (audit finding 8.4). It validates the values with the
+Zod rules in `frontend/src/envRules.js`; `config.js` re-exports what the app
+reads. A test (`tests/env.test.js`) fails if any other frontend module reads
+`import.meta.env`.
+
+The same rules run twice:
+
+- **When a production build starts** (`vite build`, through `vite.config.js`):
+  a missing or malformed variable fails the build, with one line per variable
+  naming it. Nothing is written, so a deploy missing its variables fails on
+  Vercel instead of going READY.
+- **In the browser**, on the values the build inlined. On the dev server a
+  malformed value stops the app with the same message.
+
+Every `VITE_` variable is public. A secret never gets a `VITE_` name.
 
 ### Production Safety
 
 A production build (`vite build`, so `import.meta.env.PROD`) made without
-`VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY` refuses to start and shows a
-**Configuration Error** screen, on every host: the production host,
-`*.vercel.app` previews, `localhost` and a custom domain alike. It never falls
-back to the mock. The guard is in `frontend/src/config.js` and
-`tests/mockModeGuard.test.js` holds it.
+`VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY` **fails to build**, naming the
+missing variable (plan item M2.2), unless it sets the opt-in below. It never
+falls back to the mock.
 
 - **The opt-in.** A production build runs the mock only when it was built with
-  `VITE_USE_MOCK_SUPABASE=true`. Playwright and CI set it; nothing else should.
+  `VITE_USE_MOCK_SUPABASE=true`. Playwright's dev server and CI's E2E step set
+  it; nothing deployed should.
   `VITE_` variables are read at build time, so setting or removing it takes a
   rebuild (a redeploy of an existing build does not pick it up).
 - **Development** (the Vite dev server, `npm run frontend:dev`) still falls
   back to the mock when the Supabase variables are missing.
-- **Vercel previews.** A preview built without the Supabase variables now shows
-  the Configuration Error instead of the mock. Give the Preview environment the
-  Supabase variables (a non-production project), or `VITE_USE_MOCK_SUPABASE=true`
-  if previews should run the mock.
+- **CI's `frontend:build` step** sets well-formed stand-ins
+  (`https://ci-build.invalid` and an `sb_publishable_` placeholder), not the
+  opt-in: the bundle-budget gate measures that build, and it should be the
+  shape production ships (the real client, no mock chunk). It is never served.
+- **Vercel.** Production and Preview both need the Supabase variables (they
+  share the production project; owner decision 2026-10-13). A deploy without
+  them now fails at build time, and Vercel keeps serving the previous
+  deployment.
+- **The runtime guard stays as a second line.** `frontend/src/env.js` still
+  shows a **Configuration Error** screen and throws on every host if a bundle
+  built some other way lacks the variables (`tests/mockModeGuard.test.js`).
 
-Before 2026-10 the guard exempted `localhost` and every `*.vercel.app` host.
-The production host is `squadlogic.vercel.app`, so a production build missing
-its variables served the mock and its sign-in page to real visitors (audit
-finding 5.1, plan item M1.7). Plan item M2.2 turns the same rule into a build
-failure.
+History: before 2026-10 the runtime guard exempted `localhost` and every
+`*.vercel.app` host. The production host is `squadlogic.vercel.app`, so a
+production build missing its variables served the mock and its sign-in page to
+real visitors (audit finding 5.1, plan item M1.7, which made the guard refuse on
+every host). That guard ran before `Sentry.init`, so such a deploy went READY
+and reported nothing; M2.2 moved the failure to the build.
 
 ---
 
@@ -123,9 +152,15 @@ gate:
 
 1. Copy `.env.example` → `.env` (safe to commit — contains no secrets).
 2. Copy `.env.local.example` → `.env.local` (gitignored — contains secrets).
-3. Optionally copy `.env.test.example` → `.env.test` for E2E test credentials.
+3. Optionally copy `.env.test.example` → `.env.test` for E2E credentials
+   against a real backend (`TEST_ADMIN_EMAIL`, `TEST_COACH_EMAIL`,
+   `TEST_PARENT_EMAIL`, `TEST_PASSWORD`). They are read at the Node layer by
+   the Playwright steps (`tests/e2e/steps/auth_setup.ts`), never by the app,
+   and carry no `VITE_` prefix, so they never reach the bundle. The mock
+   client needs none of them: it accepts one fixed demo password,
+   `test-password-123`.
 
-To run fully offline with mock data, set `VITE_USE_MOCK_SUPABASE=true` in `.env.local`. No Supabase credentials are required in this mode.
+To run fully offline with mock data, set `VITE_USE_MOCK_SUPABASE=true` in `.env.local` (or leave the Supabase variables empty and use the dev server). No Supabase credentials are required in this mode.
 
 ---
 
@@ -135,4 +170,5 @@ To run fully offline with mock data, set `VITE_USE_MOCK_SUPABASE=true` in `.env.
 - [ ] `VITE_USE_MOCK_SUPABASE` is **unset** or `false` in the Vercel production environment.
 - [ ] `BETTERSTACK_SOURCE_TOKEN` is stored as a Supabase Edge Function secret, not in the repo.
 - [ ] `VITE_SENTRY_DSN` is set in Vercel for production error visibility.
+- [ ] No variable holding a secret has a `VITE_` name (the build refuses a Supabase secret key in `VITE_SUPABASE_ANON_KEY`; `npm run check:advisors` flags a secret-shaped `VITE_` name in the `.env*.example` files; agent-ready-template's `scripts/check-env.mjs --root <repo>` checks names, reads and `define`s across the repo, run by hand or by the conformance scorecard, not by CI).
 - [ ] `.env`, `.env.local`, and `.env.test` are listed in `.gitignore`.

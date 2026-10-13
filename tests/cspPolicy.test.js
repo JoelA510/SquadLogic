@@ -57,6 +57,21 @@ const allows = (sources, url) => sources.some((s) => sourceAllows(s, url));
 const SENTRY_US_ENVELOPE = 'https://o0.ingest.us.sentry.io/api/0/envelope/';
 const SENTRY_DEFAULT_ENVELOPE = 'https://o0.ingest.sentry.io/api/0/envelope/';
 
+/**
+ * The sources that govern a Web Worker, per CSP3's fallback list:
+ * worker-src, else child-src, else script-src, else default-src.
+ * @param {string} policy
+ */
+function workerSources(policy) {
+  for (const name of ['worker-src', 'child-src', 'script-src', 'default-src']) {
+    const values = directive(policy, name);
+    if (values) return values;
+  }
+  return [];
+}
+/** Would this policy let Replay start its worker from a `blob:` URL? */
+const workerAllowsBlob = (policy) => workerSources(policy).includes('blob:');
+
 function documentedPolicy() {
   const doc = readFileSync(path.join(ROOT, 'docs/security/csp.md'), 'utf8');
   const section = doc.slice(doc.indexOf('## Current policy'));
@@ -108,8 +123,33 @@ describe('Content-Security-Policy', () => {
     expect(sourceAllows('https://api.weather.gov', 'https://x.api.weather.gov/')).toBe(false);
   });
 
+  it('worker-src in vercel.json and docs/security/csp.md name the same sources', () => {
+    const header = directive(headerPolicy(), 'worker-src');
+    const documented = directive(documentedPolicy(), 'worker-src');
+    expect(header).not.toBeNull();
+    expect(new Set(documented)).toEqual(new Set(header));
+  });
+
+  it("admits Sentry Replay's blob: compression worker, and nothing broader", () => {
+    const policy = headerPolicy();
+    expect(workerSources(policy)).toEqual(["'self'", 'blob:']);
+    expect(workerAllowsBlob(policy)).toBe(true);
+    // blob: is admitted for workers only, never as a page script source.
+    expect(directive(policy, 'script-src')).not.toContain('blob:');
+  });
+
+  it('the old policy, without worker-src, refuses a blob: worker (script-src fallback)', () => {
+    const old = headerPolicy()
+      .split(';')
+      .filter((p) => !p.trim().startsWith('worker-src '))
+      .join(';');
+    expect(directive(old, 'worker-src')).toBeNull();
+    expect(workerSources(old)).toEqual(directive(old, 'script-src'));
+    expect(workerAllowsBlob(old)).toBe(false);
+  });
+
   it('never allows a bare wildcard', () => {
-    for (const name of ['default-src', 'connect-src', 'script-src', 'img-src']) {
+    for (const name of ['default-src', 'connect-src', 'script-src', 'img-src', 'worker-src']) {
       const values = directive(headerPolicy(), name) ?? [];
       expect(values, name).not.toContain('*');
       expect(values, name).not.toContain('https:');

@@ -47,14 +47,33 @@
 
 ## Smoke test (run once after each DSN change)
 
-1. **Force a client-side error** via the `__FORCE_ERROR__` E2E hook:
-   - Open https://squadlogic.vercel.app/ in an incognito window.
-   - DevTools → Console → run: `window.__FORCE_ERROR__()`.
-   - Expected: the React `ErrorBoundary` renders its glass-panel fallback.
+1. **Force a client-side error**. Against a preview, run it on the PR's preview
+   URL instead of production; the event's `environment` tells them apart (step 2).
+   - **Signed in** (the leg that shows the user and organization IDs): sign in,
+     then DevTools → Console → `localStorage.setItem('__FORCE_ERROR__', 'true')`
+     and load `/`. `__FORCE_ERROR__` is a flag, not a function: `DashboardPage`
+     and `WorkflowPage` throw `E2E forced error for resilience testing.` while
+     it is `'true'` (or `window.__FORCE_ERROR__ === true`). Expected: the React
+     `ErrorBoundary` renders its fallback. Afterwards run
+     `localStorage.removeItem('__FORCE_ERROR__')`.
+   - **Signed out** (environment, release and CSP only): DevTools → Console →
+     `setTimeout(() => { throw new Error('Sentry smoke') })`. Sentry's global
+     error handler reports it; no page renders differently.
 2. **Check Sentry** — within 60 seconds:
    - Sentry dashboard → Issues → most recent event.
-   - Expected: a `TypeError` (or whatever `__FORCE_ERROR__` throws) with
-     `React.Component stack` populated (via the Sentry React integration).
+   - Expected (signed-in leg): `Error: E2E forced error for resilience testing.`
+     with `React.Component stack` populated (via the Sentry React integration).
+   - Expected: `environment` is `preview` on a preview deploy and `production`
+     on production. `vite.config.js` exposes Vercel's `VERCEL_ENV`, by name,
+     as `import.meta.env.VITE_VERCEL_ENV`; `sentryEnvironment()` in
+     `frontend/src/lib/sentryOptions.js` maps it (a dev server is always
+     `development`; a build outside Vercel stays `production`).
+   - Expected (signed-in leg): the event's user is `{ id, organization_id, role }`
+     (IDs and the role only: no email, no name) and it carries an
+     `organization_id` tag. `AuthContext` sets it on sign-in,
+     `OrganizationContext` when the active organization is chosen or switched,
+     and sign-out clears it (`logger.setUser` in `frontend/src/lib/logger.js`
+     drops every other field; `tests/loggerUserContext.test.jsx` pins it).
    - Expected: the event's `release` tag equals the current `package.json`
      `version`. `vite.config.js` defines `import.meta.env.VITE_APP_VERSION` from
      `package.json` at build time and `frontend/src/main.jsx` passes it to
@@ -67,11 +86,11 @@
      `https://*.ingest.sentry.io` entry does not match it: a CSP host wildcard
      matches only hosts ending in `.ingest.sentry.io`. Both entries are in
      `vercel.json` (see [`docs/security/csp.md`](../security/csp.md)).
-   - **Known, separate warning (not an ingest failure)**: after an error,
-     Session Replay may log `Refused to create a worker from 'blob:...'`. The
-     CSP has no `worker-src`, so workers fall back to `script-src`, which does
-     not admit `blob:`; Replay then sends uncompressed. Allowing it is a CSP
-     change of its own, not part of the ingest fix.
+   - Expected: no `Refused to create a worker from 'blob:...'` either. Session
+     Replay starts its compression worker from a `blob:` URL; the CSP's
+     `worker-src 'self' blob:` admits it (before it, workers fell back to
+     `script-src`, which refuses `blob:`, and Replay sent uncompressed). See
+     [`docs/security/csp.md`](../security/csp.md).
 
 ## Failure modes
 

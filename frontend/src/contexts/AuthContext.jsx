@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
+import { logger } from '../lib/logger.js';
 
 /**
  * @typedef {Object} AuthContextValue
@@ -45,6 +46,21 @@ export const AuthProvider = ({ children }) => {
     // setState only fires when myVersion === currentVersion.
     let currentVersion = 0;
 
+    // The user ID error reports are currently tagged with (M1.5). Sentry is
+    // told on sign-in and sign-out only: a token refresh re-runs applySession
+    // for the same user, and re-sending the profile's organization then would
+    // overwrite the active one OrganizationContext set after it.
+    let reportedUserId = null;
+    const reportUser = (sessionUser, profile) => {
+      if (sessionUser.id === reportedUserId) return;
+      reportedUserId = sessionUser.id;
+      logger.setUser({
+        id: sessionUser.id,
+        organization_id: profile?.organization_id ?? null,
+        role: profile?.role ?? null,
+      });
+    };
+
     // Safety net: if nothing has resolved auth within 5 s, stop blocking the
     // UI so the user sees either the app or the sign-in screen instead of a
     // permanent loading spinner. Intentionally NOT cleared inside the auth
@@ -79,6 +95,7 @@ export const AuthProvider = ({ children }) => {
             if (error) throw error;
             if (cancelled || myVersion !== currentVersion) return;
             setUser({ ...session.user, profile: profile || null });
+            reportUser(session.user, profile);
           } catch (err) {
             // Profile fetch can fail on network blips, brief RLS gaps during
             // migrations, or missing profiles row. Fall back to the bare
@@ -87,10 +104,15 @@ export const AuthProvider = ({ children }) => {
             console.warn('[Auth] Profile fetch failed; using session user only', err);
             if (cancelled || myVersion !== currentVersion) return;
             setUser({ ...session.user, profile: null });
+            reportUser(session.user, null);
           }
         } else {
           if (myVersion !== currentVersion) return;
           setUser(null);
+          if (reportedUserId !== null) {
+            reportedUserId = null;
+            logger.setUser(null);
+          }
         }
       } finally {
         if (!cancelled && myVersion === currentVersion) {

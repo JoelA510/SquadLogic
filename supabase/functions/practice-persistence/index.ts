@@ -16,6 +16,7 @@ import {
   jsonResponse,
 } from '../_shared/auth.ts';
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
+import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
 import { buildPracticeEnactRecordSchema } from '../_shared/practice-enact-record.ts';
 import { enactBodyRefusal, repairErrorResponse } from '../_shared/practice-repair-errors.ts';
 
@@ -342,7 +343,7 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
     auth: { persistSession: false },
   });
 
-  handler = async (req: Request) => {
+  handler = withFailureLogging('practice-persistence', async (req: Request, logCtx) => {
     // CORS preflight
     if (req.method === 'OPTIONS') {
       return new Response('ok', { headers: corsHeaders });
@@ -435,6 +436,7 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
         403
       );
     }
+    logCtx.organizationId = seasonOrgId;
 
     // #64: a save now DELETES the season's superseded rows. The RPC requires an
     // org admin of any caller with a uid, but this function calls it with the
@@ -503,14 +505,16 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
 
       return jsonResponse(result, 200);
     } catch (error) {
-      console.error('Practice persistence error:', error);
       // 8.6 3b PR 11b (plan §4): a repair call's refusals are told apart --
       // a stale fingerprint is a 409 the client re-judges, not a crash. An
-      // ordinary save keeps the 500 below, unchanged.
+      // ordinary save keeps the 500 below, unchanged. Only a failure is
+      // logged as one: a mapped refusal (4xx) is an answer, not an error.
       if (body.repair) {
         const mapped = repairErrorResponse(error);
+        if (mapped.status >= 500) await logFailure(logCtx, 'Practice repair failed', error);
         return jsonResponse(mapped.body, mapped.status);
       }
+      await logFailure(logCtx, 'Practice persistence failed', error);
       return jsonResponse(
         {
           status: 'error',
@@ -519,7 +523,7 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
         500
       );
     }
-  };
+  });
 }
 
 serve(handler);

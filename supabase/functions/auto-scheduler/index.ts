@@ -88,13 +88,13 @@ import {
   recordAuditNow,
 } from '../_shared/auth.ts';
 import { checkRateLimit } from '../_shared/rateLimit.ts';
-import { edgeLogger } from '../_shared/logtail.ts';
+import { edgeLogger, logFailure, withFailureLogging } from '../_shared/logtail.ts';
 
 // ---------------------------------------------------------------------------
 // HTTP handler
 // ---------------------------------------------------------------------------
 
-serve(async (req) => {
+const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
   // 1. CORS Preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -146,6 +146,7 @@ serve(async (req) => {
     if (!isMember) {
       return jsonResponse({ error: 'Not authorized for this organization' }, 403);
     }
+    logCtx.organizationId = input.organizationId;
 
     // 5a. The lock is scoped by season (the writer's scope: teams whose
     //     division belongs to it). Without a season id this function cannot
@@ -747,11 +748,7 @@ serve(async (req) => {
       200
     );
   } catch (error) {
-    edgeLogger.error('Auto-scheduler failed', {
-      error: (error as Error).message,
-      stack: (error as Error).stack,
-    });
-    await edgeLogger.flush();
+    await logFailure(logCtx, 'Auto-scheduler failed', error);
 
     // Attempt to audit the failure
     try {
@@ -773,3 +770,5 @@ serve(async (req) => {
     return jsonResponse({ error: 'Internal server error', message: (error as Error).message }, 500);
   }
 });
+
+serve(handler);

@@ -15,6 +15,7 @@ import {
   jsonResponse,
 } from '../_shared/auth.ts';
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
+import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
 
 // ── Inlined constants & config ──────────────────────────────────────────────
 const DEFAULT_ALLOWED_ROLES = ['authenticated', 'service_role', 'admin', 'scheduler'];
@@ -194,7 +195,7 @@ if (!supabaseUrl || !serviceRoleKey) {
     auth: { persistSession: false },
   });
 
-  handler = async (req: Request) => {
+  handler = withFailureLogging('game-persistence', async (req: Request, logCtx) => {
     // CORS preflight
     if (req.method === 'OPTIONS') {
       return new Response('ok', { headers: corsHeaders });
@@ -337,6 +338,7 @@ if (!supabaseUrl || !serviceRoleKey) {
         403
       );
     }
+    logCtx.organizationId = targetOrgId;
 
     const effectiveRunMetadata = {
       ...runMetadataRecord,
@@ -376,7 +378,7 @@ if (!supabaseUrl || !serviceRoleKey) {
 
       return jsonResponse(result, 200);
     } catch (error) {
-      console.error('Game persistence error:', error);
+      await logFailure(logCtx, 'Game persistence failed', error);
       return jsonResponse(
         {
           status: 'error',
@@ -385,7 +387,7 @@ if (!supabaseUrl || !serviceRoleKey) {
         500
       );
     }
-  };
+  });
 }
 
 serve(handler);

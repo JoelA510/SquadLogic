@@ -24,6 +24,7 @@ full verification.
 | `VITE_SUPABASE_URL` | **Yes** | No | Supabase project REST API URL | Supabase Dashboard → Settings → API → Project URL |
 | `VITE_SUPABASE_ANON_KEY` | **Yes** | No | Supabase publishable (anon) key — enforces RLS | Supabase Dashboard → Settings → API → `anon` `public` key |
 | `VITE_SENTRY_DSN` | Recommended | No | Sentry DSN for frontend error tracking & performance monitoring | Sentry → Create Project → Browser JavaScript → DSN |
+| `VERCEL_ENV` | No (set by Vercel) | No | Vercel's own system variable (`production` / `preview` / `development`). `vite.config.js` exposes exactly this one, by name, as `import.meta.env.VITE_VERCEL_ENV`, and it becomes the Sentry event `environment`, so preview events are not reported as production. Outside Vercel it is empty and the environment stays `production`. Not set by hand. | Vercel system environment variable |
 | `VITE_USE_MOCK_SUPABASE` | No | No | Force mock Supabase client (`true`). **Must be unset or `false` in production.** | Manual — development/CI only |
 | `VITE_SUPABASE_PERSISTENCE_URL` | No | No | Override base URL for Edge Function persistence endpoints. Defaults to `http://localhost:54321/functions/v1` | Supabase Dashboard → Settings → API → Edge Functions URL |
 
@@ -43,7 +44,7 @@ These variables are set in **Supabase Dashboard → Edge Functions → Manage Se
 | `SUPABASE_ANON_KEY` | **Yes** | No | Auto-injected by Supabase. Publishable key. | Automatic |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Yes** | **Yes** | Service-role key — bypasses RLS for server-side operations. **Never expose in client-side code.** | Supabase Dashboard → Settings → API → `service_role` `secret` key |
 | `BETTERSTACK_SOURCE_TOKEN` | Recommended | **Yes** | BetterStack (Logtail) source token for structured JSON logging from Edge Functions. When absent, logs fall back to `console.*`. | BetterStack → Logs → Sources → Create Source (HTTP) → Token |
-| `FUNCTION_NAME` | No | No | Override function name tag in BetterStack logs. Defaults to `'unknown'`. | Manual |
+| `FUNCTION_NAME` | No | No | Function name tag on `edgeLogger.info/warn/error` entries; defaults to `'unknown'` (Supabase does not set it). Failure entries from `withFailureLogging` / `logFailure` name the function themselves, with the request ID and organization ID. | Manual |
 | `GAME_PERSISTENCE_ALLOWED_ROLES` | No | No | Comma-separated list of roles allowed to persist game schedules. Defaults to `admin`. | Manual |
 | `TEAM_PERSISTENCE_ALLOWED_ROLES` | No | No | Comma-separated list of roles allowed to persist team rosters. Defaults to `admin`. | Manual |
 | `PRACTICE_PERSISTENCE_ALLOWED_ROLES` | No | No | Comma-separated list of roles allowed to persist practice schedules. Defaults to `admin`. | Manual |

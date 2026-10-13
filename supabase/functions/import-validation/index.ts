@@ -22,6 +22,7 @@ import {
   jsonResponse,
 } from '../_shared/auth.ts';
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
+import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
 
 // --- Constants ---
 const MAX_ROWS = 5000;
@@ -470,7 +471,7 @@ const ImportValidationPayload = z.object({
 });
 
 // --- Handler ---
-serve(async (req: Request) => {
+const handler = withFailureLogging('import-validation', async (req: Request, logCtx) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -537,6 +538,7 @@ serve(async (req: Request) => {
       403
     );
   }
+  logCtx.organizationId = body.organization_id;
 
   if (body.import_job_id) {
     const { data: job, error: jobError } = await serviceClient
@@ -547,7 +549,7 @@ serve(async (req: Request) => {
       .maybeSingle();
 
     if (jobError) {
-      console.error('Import job lookup failed:', jobError.message);
+      await logFailure(logCtx, 'Import job lookup failed', jobError);
       return jsonResponse({ status: 'error', message: 'Import job lookup failed' }, 500);
     }
 
@@ -640,7 +642,7 @@ serve(async (req: Request) => {
       .in('source_row_number', sourceRowNumbers);
 
     if (deleteError) {
-      console.error('Failed to replace staged import rows:', deleteError.message);
+      await logFailure(logCtx, 'Failed to replace staged import rows', deleteError);
       return jsonResponse(
         { status: 'error', message: 'Failed to replace staged import rows' },
         500
@@ -649,7 +651,7 @@ serve(async (req: Request) => {
 
     const { error: stageError } = await serviceClient.from('staging_players').insert(stagedRows);
     if (stageError) {
-      console.error('Failed to stage import rows:', stageError.message);
+      await logFailure(logCtx, 'Failed to stage import rows', stageError);
       return jsonResponse({ status: 'error', message: 'Failed to stage import rows' }, 500);
     }
   }
@@ -663,7 +665,7 @@ serve(async (req: Request) => {
       .in('source_row_number', sourceRowNumbers);
 
     if (deleteError) {
-      console.error('Failed to replace staged non-player import rows:', deleteError.message);
+      await logFailure(logCtx, 'Failed to replace staged non-player import rows', deleteError);
       return jsonResponse(
         { status: 'error', message: 'Failed to replace staged import rows' },
         500
@@ -674,7 +676,7 @@ serve(async (req: Request) => {
       .from('staging_import_rows')
       .insert(stagedImportRows);
     if (stageError) {
-      console.error('Failed to stage non-player import rows:', stageError.message);
+      await logFailure(logCtx, 'Failed to stage non-player import rows', stageError);
       return jsonResponse({ status: 'error', message: 'Failed to stage import rows' }, 500);
     }
   }
@@ -706,3 +708,5 @@ serve(async (req: Request) => {
     validation_errors: allErrors,
   });
 });
+
+serve(handler);

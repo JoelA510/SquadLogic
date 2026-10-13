@@ -22,6 +22,7 @@ if (SENTRY_DSN) {
       dsn: SENTRY_DSN,
       dev: import.meta.env.DEV,
       release: import.meta.env.VITE_APP_VERSION,
+      deployEnv: import.meta.env.VITE_VERCEL_ENV,
       integrations: [Sentry.browserTracingIntegration(), Sentry.replayIntegration()],
     })
   );

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useDashboardData } from '../hooks/useDashboardData.js';
 import DataErrorBanner from '../components/ui/DataErrorBanner.jsx';
 import PracticeAssignmentList from '../components/PracticeAssignmentList.jsx';
@@ -949,13 +949,18 @@ export default function PracticeSchedulingPage() {
   );
 
   /**
-   * Apply the staged schedule. Called with no argument by the Apply button;
-   * called by the override prompt's Confirm with what the admin accepted.
+   * What the override prompt's Confirm accepted, handed to the next Apply and
+   * consumed by it: null for the Apply button. (A ref, not a parameter, so
+   * the Apply callback's signature -- and the rest of it -- stays as it was.)
    *
-   * @param {{ prune: Array<Record<string, any>>, reasonCode: string,
-   *   baseFingerprint: string|null } | null} [confirmation]
+   * @type {React.MutableRefObject<{ prune: Array<Record<string, any>>,
+   *   reasonCode: string, baseFingerprint: string|null } | null>}
    */
-  const handleApplySchedule = useCallback(async (confirmation = null) => {
+  const overrideConfirmation = useRef(null);
+
+  const handleApplySchedule = useCallback(async () => {
+    const confirmation = overrideConfirmation.current;
+    overrideConfirmation.current = null;
     if (!canManageSchedule || !canApplySchedule || !reviewAssignments?.length) return;
 
     const persistenceAssignments = reviewAssignments.map(toPersistenceAssignment);
@@ -1016,7 +1021,7 @@ export default function PracticeSchedulingPage() {
     });
     let unlock = [];
     let baseFingerprint = null;
-    if (confirmation === null) {
+    if (!confirmation) {
       const plan = planOf(seasonRows);
       if (plan.prune.length > 0) {
         await openOverridePrompt(plan);
@@ -1030,7 +1035,7 @@ export default function PracticeSchedulingPage() {
       const fresh = await loadSeasonPracticeAssignments(supabase, {
         organizationId: currentOrganization?.id,
         seasonSettingsId: currentSeasonSetting?.id,
-      }).catch((err) => ({ ok: false, message: err?.message ?? 'unreadable' }));
+      }).catch((err) => ({ ok: false, message: err?.message ?? 'unreadable', rows: [] }));
       if (fresh.ok !== true) {
         setOverridePrompt(
           (prompt) =>
@@ -1180,7 +1185,7 @@ export default function PracticeSchedulingPage() {
             locked.cause
           )
         : err.message || 'Practice schedule changes could not be applied.';
-      if (confirmation !== null) {
+      if (confirmation) {
         // A refusal of an accepted override is shown in the prompt, which
         // keeps focus (plan §2.9). The staged review is left as it was.
         setApplyStatus('review');
@@ -1191,7 +1196,7 @@ export default function PracticeSchedulingPage() {
           const fresh = await loadSeasonPracticeAssignments(supabase, {
             organizationId: currentOrganization?.id,
             seasonSettingsId: currentSeasonSetting?.id,
-          }).catch(() => ({ ok: false }));
+          }).catch(() => ({ ok: false, rows: [] }));
           const notice = {
             tone: 'alert',
             text:
@@ -1389,11 +1394,12 @@ export default function PracticeSchedulingPage() {
   const confirmOverride = useCallback(
     (reasonCode) => {
       if (!overridePrompt) return;
-      handleApplySchedule({
+      overrideConfirmation.current = {
         prune: overridePrompt.plan.prune,
         reasonCode,
         baseFingerprint: overridePrompt.baseFingerprint,
-      });
+      };
+      handleApplySchedule();
     },
     [handleApplySchedule, overridePrompt]
   );
@@ -1537,7 +1543,7 @@ export default function PracticeSchedulingPage() {
                     <Button
                       variant="primary"
                       size="sm"
-                      onClick={() => handleApplySchedule()}
+                      onClick={handleApplySchedule}
                       loading={applyStatus === 'applying'}
                       disabled={applyStatus === 'applying' || !canApplySchedule}
                       aria-describedby={canApplySchedule ? undefined : 'practice-apply-admin-only'}

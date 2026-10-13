@@ -112,7 +112,7 @@ export function gridOverrideReason({ runId = null, code }) {
  * The writer's `unlock` argument: exactly the pruned rows, each with the one
  * reason the admin chose.
  *
- * @param {Array<{ id: string }>} prune
+ * @param {Array<Record<string, any>>} prune - rows carrying their `id`
  * @param {string} reason
  */
 export function gridOverrideUnlock(prune, reason) {

@@ -94,7 +94,9 @@ export default function GridOverrideDialog({
       }
     >
       <h3 ref={headingRef} tabIndex={-1} className="text-sm" data-testid="grid-override-heading">
-        <strong>{strays.length > 0 && teams.length === 0 ? 'This save cannot unlock' : heading}</strong>
+        <strong>
+          {strays.length > 0 && teams.length === 0 ? 'This save cannot unlock' : heading}
+        </strong>
       </h3>
       <p className="text-sm mt-2">
         Saved practices are locked. Confirming unlocks exactly the series listed as replaced, and
@@ -112,9 +114,7 @@ export default function GridOverrideDialog({
             <strong>{t.teamName}</strong>
           </h4>
           <ul className="text-sm">
-            <li data-testid="grid-override-replacing">
-              Replacing: {t.replacing.join(' and ')}
-            </li>
+            <li data-testid="grid-override-replacing">Replacing: {t.replacing.join(' and ')}</li>
             <li data-testid="grid-override-replacement">
               With: {t.replacement.length > 0 ? t.replacement.join(' and ') : 'no practice'}
             </li>

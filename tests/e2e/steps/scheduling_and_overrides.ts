@@ -15,6 +15,14 @@ type GamePersistencePage = Page & {
   };
 };
 
+// Every practice-persistence request body, in order (the override prompt).
+type PracticePersistencePage = Page & {
+  __practicePersistenceBodies?: Array<{
+    snapshot?: { payload?: { assignmentRows?: Array<Record<string, unknown>> } };
+    repair?: { unlock?: Array<{ assignment_id: string; reason: string }> };
+  }>;
+};
+
 async function mockPracticeSchedulerRoutes(page: Page) {
   await page.route('**/functions/v1/auto-scheduler', async (route) => {
     const requestBody = JSON.parse(route.request().postData() || '{}');
@@ -48,6 +56,8 @@ async function mockPracticeSchedulerRoutes(page: Page) {
   });
 
   await page.route('**/functions/v1/practice-persistence', async (route) => {
+    const bodies = ((page as PracticePersistencePage).__practicePersistenceBodies ??= []);
+    bodies.push(JSON.parse(route.request().postData() || '{}'));
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -1154,6 +1164,84 @@ Then('the lock state should be persisted to the database', async ({ page }) => {
   const row = page.locator('tr').filter({ hasText: 'Team A' }).first();
   await expect(row.locator('button.text-amber-500').first()).toBeVisible();
 });
+
+// ── The override prompt (docs/PLAN_GRID_OVERRIDE_PROMPT.md, ruling 2) ──────
+Given('a second practice slot is available', async ({ page }) => {
+  await page.evaluate(() => {
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+    db.practice_slots = [
+      ...(db.practice_slots || []).filter((s: Record<string, unknown>) => s.id !== 'slot-2'),
+      {
+        id: 'slot-2',
+        day_of_week: 'wed',
+        start_time: '18:00',
+        end_time: '19:00',
+        field_id: 'field-1',
+        organization_id: orgId,
+      },
+    ];
+    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+  });
+});
+
+When(
+  'I override {string} onto the second practice slot and apply',
+  async ({ page }, teamName: string) => {
+    await page
+      .getByRole('button', { name: /Enter Manual Override/i })
+      .first()
+      .click();
+    await page.getByTestId('team-select').selectOption({ label: teamName });
+    await page.getByTestId('slot-select').selectOption('slot-2');
+    await page.getByTestId('assign-slot-button').click();
+    const apply = page.getByRole('button', { name: /apply schedule/i });
+    await expect(apply).toBeEnabled({ timeout: 10000 });
+    await apply.click();
+  }
+);
+
+Then(
+  'a dialog asks to replace the saved practice of {string}',
+  async ({ page }, teamName: string) => {
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible({ timeout: 10000 });
+    await expect(
+      dialog.getByRole('heading', { name: `Replace ${teamName}’s saved practice` })
+    ).toBeFocused();
+    await expect(dialog.getByTestId('grid-override-replacing')).toContainText('Monday');
+    await expect(dialog.getByTestId('grid-override-replacement')).toContainText('Wednesday');
+  }
+);
+
+Then('no practice schedule has been saved', async ({ page }) => {
+  expect((page as PracticePersistencePage).__practicePersistenceBodies ?? []).toHaveLength(0);
+});
+
+When(
+  'I accept the override for {string} with the reason {string}',
+  async ({ page }, teamName: string, reason: string) => {
+    const dialog = page.getByRole('dialog');
+    await dialog
+      .getByRole('checkbox', { name: `Replace and lock ${teamName}’s practice as shown` })
+      .check();
+    await dialog.getByLabel('Reason for the override').selectOption({ label: reason });
+    await dialog.getByRole('button', { name: 'Confirm and save' }).click();
+    await expect(dialog).toBeHidden({ timeout: 10000 });
+  }
+);
+
+Then(
+  'the save unlocks only the saved practice of {string}, with reason {string}',
+  async ({ page }, _teamName: string, code: string) => {
+    const bodies = (page as PracticePersistencePage).__practicePersistenceBodies ?? [];
+    expect(bodies).toHaveLength(1);
+    // From the seed: Team A's one saved row is `assign-team-a`.
+    const unlock = bodies[0].repair?.unlock ?? [];
+    expect(unlock.map((u) => u.assignment_id)).toEqual(['assign-team-a']);
+    expect(unlock[0].reason).toMatch(new RegExp(`^grid override( \\S+)?: ${code}$`));
+  }
+);
 
 Given('{string} has a locked practice assignment', async ({ page }, teamName: string) => {
   // Ensure we are on the page for the second scenario

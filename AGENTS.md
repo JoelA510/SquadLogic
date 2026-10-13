@@ -310,21 +310,16 @@ For a "UI/UX pass", "visual polish", or any frontend view work:
 ## 10. Environment Variables
 
 - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` — the Supabase project URL and publishable
-  (anon) key: `.env.local` (from `.env.example`) and Vercel; a production build requires both.
+  (anon) key: `.env.local` (from `.env.example`) and Vercel.
 - `VITE_USE_MOCK_SUPABASE` — force the mock client (`true`): `.env.local` or CI.
-- `VITE_SUPABASE_PERSISTENCE_URL` — the Edge Function base URL, optional; production derives it
-  from `VITE_SUPABASE_URL`, the mock and dev server use the local stack.
-- `VITE_SENTRY_DSN` — the frontend Sentry DSN, optional (unset = off): Vercel.
-- `TEST_ADMIN_EMAIL`, `TEST_COACH_EMAIL`, `TEST_PARENT_EMAIL`, `TEST_PASSWORD` — real-backend E2E
-  accounts, read by the Playwright steps (Node, never `VITE_`): `.env.test`.
+- `VITE_SUPABASE_PERSISTENCE_URL` — the Edge Function base URL, optional.
+- `VITE_SENTRY_DSN` — the frontend Sentry DSN, optional: Vercel.
+- `TEST_ADMIN_EMAIL`, `TEST_COACH_EMAIL`, `TEST_PARENT_EMAIL`, `TEST_PASSWORD` — E2E test
+  accounts: `.env.test`.
 
-`frontend/src/env.js` alone reads `import.meta.env` (by name, Zod-validated). `frontend:build`
-fails on a missing or malformed variable; CI sets stand-ins (`docs/operations/ci-cd.md`). Every
-`VITE_` variable ships to the browser: no secrets.
-
-**Never commit** `.env`, `.env.local`, or `.env.test` — they are gitignored. Use the `.example`
-templates. The full reference, including what the Vercel project sets, is
-`docs/operations/ENVIRONMENT.md`.
+Only `frontend/src/env.js` reads `import.meta.env`, by name; a production build fails on a missing
+or malformed variable. **Never commit** `.env`, `.env.local`, or `.env.test`. The full reference
+is `docs/operations/ENVIRONMENT.md`.
 
 ## 11. CI Pipeline
 

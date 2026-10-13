@@ -720,7 +720,8 @@ function blackoutDialogFor({ shown, rows, names, loss, prompt, snapshotRow, team
         'The blackout is not saved as shown, so it cannot be enacted.'
     );
   }
-  const stored = commit.stored;
+  // The blackout arm's `stored`: the `field_blackouts` row as the gate read it.
+  const stored = /** @type {any} */ (commit.stored);
   const lower = (v) => String(v).toLowerCase();
   const fieldName = (id) => (rows.fields ?? []).find((f) => lower(f.id) === id)?.name ?? id;
   const venueName = (id) => (rows.locations ?? []).find((l) => lower(l.id) === id)?.name ?? id;

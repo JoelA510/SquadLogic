@@ -39,7 +39,10 @@ vi.mock('../frontend/src/utils/practicePersistenceClient.js', () => ({
 
 import PracticeRepairPanel from '../frontend/src/components/scheduling/PracticeRepairPanel.jsx';
 import RetireEstateNodeDialog from '../frontend/src/components/setup/RetireEstateNodeDialog.jsx';
-import { ENACT_PREVIEW_TEXT } from '../frontend/src/utils/practiceRepairEnact.js';
+import {
+  ENACT_BLACKOUT_PREVIEW_TEXT,
+  ENACT_PREVIEW_TEXT,
+} from '../frontend/src/utils/practiceRepairEnact.js';
 import {
   D,
   F1,
@@ -166,7 +169,7 @@ describe('enact panel :: the confirm gate, the stored date, and witness 23', () 
       fireEvent.click(enactButton(id));
       const dialog = await screen.findByRole('dialog');
       const heading = within(dialog).getByTestId('practice-enact-heading');
-      expect(heading).toHaveAttribute('data-stored-date', RETIRED_AFTER);
+      expect(heading).toHaveAttribute('data-stored', RETIRED_AFTER);
       expect(dialog).toHaveAccessibleName(`Enact: Field 1 retires after ${RETIRED_AFTER}`);
       expect(document.activeElement).toBe(heading);
       const confirm = within(dialog).getByTestId('practice-enact-confirm');
@@ -269,10 +272,10 @@ describe('enact panel :: stale, double click, and the enacted row', () => {
   });
 });
 
-describe('enact panel :: blackout enact is disabled (Q1)', () => {
-  // 3b PR 11d-1: a mid-range window is no longer a save refusal, so the gate
-  // itself is the reason; enact stays off until 11d-3.
-  it('disables every blackout recommendation, saying enact is not available yet', async () => {
+describe('enact panel :: an unsaved blackout is never enacted (11d Q5)', () => {
+  // 3b PR 11d-3: blackout enact is enabled, behind the blackout commit gate:
+  // a blackout the season's closures do not hold as saved is not enactable.
+  it('disables every recommendation of an unsaved blackout, saying to save it first', async () => {
     serve(world(fieldsWith(null)));
     const loss = {
       kind: 'blackout',
@@ -295,8 +298,8 @@ describe('enact panel :: blackout enact is disabled (Q1)', () => {
         .find((r) => r.getAttribute('data-assignment-id') === id);
       expect(within(row).getByTestId('practice-repair-enact')).toBeDisabled();
       const why = within(row).getByTestId('practice-repair-enact-why');
-      expect(why).toHaveAttribute('data-enact-gate', 'blackout');
-      expect(why.textContent).toContain('Enacting a blackout recommendation is not available yet');
+      expect(why).toHaveAttribute('data-enact-gate', 'preview');
+      expect(why).toHaveTextContent(ENACT_BLACKOUT_PREVIEW_TEXT);
       expect(within(row).queryAllByTestId('practice-repair-save-refused')).toHaveLength(0);
     }
     expect(requireExamined(subjects.length, 'series-window')).toBe(2);

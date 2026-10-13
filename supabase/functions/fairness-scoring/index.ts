@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.223.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
-import { ScoringInputSchema } from '../_shared/schemas/scoring.ts';
+import { ScoringInputSchema, refuseEmptyPracticeRoster } from '../_shared/schemas/scoring.ts';
 import {
   evaluatePracticeSchedule,
   evaluateGameSchedule,
@@ -73,6 +73,15 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
     }
 
     const { practice, games, persist = false, metadata = {} } = parseResult.data;
+
+    // 3a. A practice block with no teams or no slots would score nothing and
+    //     report it clean, and with `persist` record that as a run (M2.6).
+    //     Refused before the season read, the engine and persistence, whether
+    //     or not `persist` is set.
+    const emptyRoster = refuseEmptyPracticeRoster(practice);
+    if (emptyRoster) {
+      return jsonResponse(emptyRoster, 422);
+    }
 
     // 3b. Place every wall reading on the SEASON's clock before the engine
     //     calls `new Date()` on it (LIVE-7).

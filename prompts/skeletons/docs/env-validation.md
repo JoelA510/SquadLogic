@@ -32,18 +32,30 @@ Adapt, don't paste — names and framework prefix depend on your stack:
 // src/env.ts — the only file allowed to read process.env
 import { z } from 'zod'
 
+// Refuses what an example file holds: a URL check alone accepts
+// `https://<your-key>@o0.ingest.sentry.io/0`, the shape vendors document a DSN in. In a URL,
+// `your-` counts in the user or host, not the path (`/your-account` can be a real page).
+const PLACEHOLDER = /<\w[^>]*>|^your[-_]|change[-_]?me|replace[-_]?me/i
+const vendorSlot = (v: string) => {
+  if (!URL.canParse(v)) return false
+  const { username, hostname } = new URL(v)
+  return /^your[-_]/i.test(username) || /(^|\.)your[-_]/i.test(hostname)
+}
+const real = (schema: z.ZodString) =>
+  schema.refine((v) => !PLACEHOLDER.test(v) && !vendorSlot(v), 'still a placeholder')
+
 const server = z.object({
-  DATABASE_URL: z.string().url(),
-  AUTH_SECRET: z.string().min(32),
-  SERVICE_API_KEY: z.string().min(1),
+  DATABASE_URL: real(z.string().url()),
+  AUTH_SECRET: real(z.string().min(32)),
+  SERVICE_API_KEY: real(z.string().min(1)),
   NODE_ENV: z.enum(['development', 'test', 'production']),
 })
 
 const client = z.object({
   // Only variables safe to ship to a browser, marked by your framework's public prefix.
-  PUBLIC_APP_URL: z.string().url(),
-  // An optional integration: unset turns it off; a malformed value still fails.
-  PUBLIC_ERROR_REPORTER_DSN: z.string().url().optional(),
+  PUBLIC_APP_URL: real(z.string().url()),
+  // An optional integration: unset turns it off; a placeholder or malformed value still fails.
+  PUBLIC_ERROR_REPORTER_DSN: real(z.string().url()).optional(),
 })
 
 // Public variables are listed one by one, in the literal form the bundler inlines: a bundler
@@ -67,11 +79,14 @@ The illustration validates both halves in one place, which suits a server entry 
 client bundle, only the explicitly listed public variables exist; if client code imports this
 module, split the client schema into its own file so it never touches the server half.
 
-Three refinements the illustration leaves out, all from real incidents:
+Three refinements, all from real incidents:
 
 - **Reject placeholder values, not just empty ones.** A copied `.env.example` passes
-  `z.string().min(1)` with `your-api-key` in it, and ships. Refuse the shapes your example file
-  uses (`your-…`, `<…>`, `changeme`).
+  `z.string().min(1)` with `your-api-key` in it, and ships; `z.string().url()` passes
+  `https://<your-key>@o0.ingest.sentry.io/0`. Refuse the shapes your example file uses
+  (`your-…`, `<…>`, `changeme`), inside a URL too, as `real()` above does, optional
+  variables included, and test it with a placeholder that is otherwise well formed: one the
+  schema refuses as malformed anyway proves nothing about the placeholder rule.
 - **Fail the build, not the first request.** Where the platform builds on a remote service
   (EAS, a CI job), the validation runs there too, so a value missing from that environment stops
   the build instead of shipping.

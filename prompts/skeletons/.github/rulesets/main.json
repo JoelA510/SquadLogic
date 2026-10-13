@@ -26,7 +26,8 @@
       "parameters": {
         "strict_required_status_checks_policy": true,
         "required_status_checks": [
-          { "context": "[CI JOB NAME]", "integration_id": 15368 },
+          { "context": "Typecheck, lint, test, build", "integration_id": 15368 },
+          { "context": "End-to-end", "integration_id": 15368, "[OPTIONAL: DELETE THIS KEY, OR THE WHOLE ENTRY WITH CI'S END-TO-END JOB]": true },
           { "context": "[AUDIT JOB NAME]", "integration_id": 15368 }
         ]
       }

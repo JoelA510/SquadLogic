@@ -93,8 +93,8 @@ target is overwritten or shadowed. `--list` previews without writing.
 The `core` standards always come along. `--pack <name>` (`node`, `supabase`, and the rest of the
 catalog's packs) adds a stack's standards, and the manifest remembers it for later runs;
 `--drop-pack <name>` stops delivering one. `--check` writes nothing and exits 1 when the target
-has drifted: a re-apply would change a file, or a parked `.template` or a conflict marker is
-still there. A CI job in the target, or a fleet report, can ask it.
+has drifted: a re-apply would change a file, a parked `.template` or a conflict marker is still
+there, or a delivered file is ignored by the target's git and not committed. A CI job in the target, or a fleet report, can ask it.
 
 `process:apply` and `scripts/check-placeholders.mjs` need no install. `check:instructions` and
 `check:env` need the template's dependencies (`yaml` and `typescript`); for process-only use,
@@ -104,10 +104,16 @@ scripts, which would otherwise set up the template's own git hooks in that check
 Then, in the target:
 
 - **Keep formatters off the delivered files** (`prompts/`, `.agents/skills/`,
-  `.claude/skills/`), for example in `.prettierignore`, before the first commit: a pre-commit
-  formatter would otherwise rewrite them as they're committed. A reformat makes every one of
-  them look edited, and a re-apply then parks the template's updates beside them instead of
-  applying them.
+  `.claude/skills/`), for example in `.prettierignore`. A formatter that runs on commit (a
+  pre-commit hook, lint-staged) needs this before the first commit, or it rewrites them as
+  they're committed. One run only by hand can wait for the project's first change, where a config
+  edit is in scope (an audit run that may not touch config, say), as long as it's run only on the
+  project's own paths until then. A reformat makes every delivered file look edited, and a
+  re-apply then parks the template's updates beside them instead of applying them.
+- **Commit the delivered files even where `.gitignore` covers them** (an ignored `.claude/`, for
+  instance): add exceptions (`.claude/*`, then `!.claude/skills/`), or, where `.gitignore` isn't to
+  be edited, force-add them (`git add -f`); git keeps tracking a force-added file. Otherwise no
+  clone has them. `process:apply` names them, and `--check` fails until they're committed.
 - **Then commit the delivery, unmodified, manifest included**, before any prompt run: the
   run's own diff stays reviewable, and the manifest travels with the repo so a later re-apply
   can tell your edits from old deliveries.

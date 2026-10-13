@@ -22,5 +22,9 @@ and `bundlewatch` meet it too.
 
 **The check:** looks for `size-limit`, `bundlesize`, `bundlewatch`, or `check-bundle-size.mjs` in
 what `pull_request` workflows run, traced through scripts as `node.ci-runs-gate` does, counted
-only where it can fail the run. `andresz1/size-limit-action` alone is `skipped`: it reports on the
-pull request, and this check can't tell whether it fails the run.
+only where it can fail the run. A repository's own script run with `node`, named for a bundle, a
+size or a budget, counts when its source names a budget and exits non-zero
+(`process.exit(1)`, `process.exitCode = 1`); one that doesn't, or isn't in the repository, is
+`skipped` with its path. A budget file nothing in CI runs is no budget. `andresz1/size-limit-action`
+alone is `skipped`: it reports on the pull request, and this check can't tell whether it fails the
+run.

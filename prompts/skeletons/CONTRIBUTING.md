@@ -48,6 +48,7 @@ deferred — testing, error handling, accessibility — are the reason this list
 them belongs in a "later hardening" milestone, because by then the code that needed them is
 load-bearing and the deferral is permanent.
 
+<!-- prettier-ignore-start -->
 <!-- definition-of-done:start -->
 
 - **Types are strict and honest.** The project's agreed strictness (strict mode, or `checkJs`
@@ -88,6 +89,7 @@ load-bearing and the deferral is permanent.
   (the deployed page, bundle, or build), not the config that produced it. Not "should work."
 
 <!-- definition-of-done:end -->
+<!-- prettier-ignore-end -->
 
 ## 5. Review
 

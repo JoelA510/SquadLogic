@@ -39,8 +39,11 @@ instruction set; this skill only wires it up. Then:
    them; it catches a half-deleted guidance comment the grep can't see. Where the target lacks
    CLAUDE.md, CONTRIBUTING.md, ADRs, or a typed env module, the remediation plan may draw on the other
    skeletons — as remediation items, not as wholesale replacements for what exists. Where it
-   already has its own (or an AGENTS.md, Cursor rules, …), merge from the skeleton rather
-   than adding a parallel file. Merged rules name this repo's real paths: rule 3's env module
+   already has its own, merge from the skeleton rather than adding a parallel file. Agent rules
+   land in one AGENTS.md at the root, the shape the standard core.agent-rules passes: merge the
+   AGENTS skeleton into an existing AGENTS.md; rules kept only in CLAUDE.md, Cursor rules, or
+   another tool's format move into a new AGENTS.md, and CLAUDE.md keeps an `@AGENTS.md` import
+   and only what's specific to Claude Code. Merged rules name this repo's real paths: rule 3's env module
    and rule 7's ADR folder and template point where this repo keeps them, and a rule whose file
    doesn't exist yet waits for the remediation item that adds it. For §12, run the template's
    `check:instructions` script from a template checkout

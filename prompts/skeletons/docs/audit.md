@@ -253,9 +253,12 @@ Runtime: [VERSIONS — local, CI, and production, e.g. Node 22 / 20 / 24]
      pass every gate and still ship a flow nobody can finish. List each flow the README, the
      spec, or "Complete means" promises, and exercise it end to end, by running the app or
      driving it through its real entry point in a test, in the configurations the docs offer,
-     not only the default one. A flow that doesn't work is a blocker; one that works but no test
-     proves is a finding here as well as in §6. Keep the table even when every flow works: it's
-     what the next audit compares against. -->
+     not only the default one. One that only a shared or production environment can exercise
+     (a hosted database, staging, a live provider) isn't exercised unless the run's constraints
+     allow it: record it as not exercised with the reason, and as a finding when no test covers
+     it. A flow that doesn't work is a blocker; one that works but no test proves is a finding
+     here as well as in §6. Keep the table even when every flow works: it's what the next audit
+     compares against. -->
 
 | Flow (as promised, with where) | How exercised | Result | Test that proves it |
 | --- | --- | --- | --- |

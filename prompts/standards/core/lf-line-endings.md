@@ -15,5 +15,14 @@ frontmatter parsers, exact-match checks) misread it.
 **Meeting it:** add `* text=auto eol=lf` to `.gitattributes` (with binary types marked `binary`),
 then `git add --renormalize .` and commit.
 
+A file that must stay byte for byte as shipped isn't renormalized: an applied database migration
+(the migration tool never re-runs it, and a check on its history or checksum rejects the edit), a
+vendored or signed file. Mark each one `-text` in `.gitattributes` first, by name
+(`supabase/migrations/20260101000000_init.sql -text`), so the renormalize leaves it alone. A rule
+for the whole folder also exempts every migration still to be written, which can then be committed
+with CRLF. Review the renormalize's diff for any such file before committing it.
+
 **The check:** `git ls-files --eol` reports what's in the index: an entry marked `i/crlf` or
-`i/mixed` fails. `skipped` outside a git work tree, `n/a` with nothing committed.
+`i/mixed` fails, unless its attributes say `-text` (or `binary`), which keeps it as committed on
+purpose; those are listed in the evidence. A catch-all rule that makes every path `-text` excuses
+none of them. `skipped` outside a git work tree, `n/a` with nothing committed.

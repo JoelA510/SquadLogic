@@ -25,7 +25,8 @@ journeys, staging deploy smoke-tested, docs current — measured against: [COMPL
 ## Rules for this plan
 
 - **Traceability.** Every audit finding ID appears exactly once below: as an item, under
-  "Deferred with reason", or as "[FINDING ID] — resolved by [ITEM ID]" when one fix closes two.
+  "Deferred with reason", as "[FINDING ID] — resolved by [ITEM ID]" when one fix closes two, or
+  under "Resolved before the plan" when a commit already made closed it.
 - **Severity** uses the audit's definitions. If an item is graded differently from its audit
   finding, the item says so and why.
 - **Milestone size.** From Milestone 2 on, a milestone with more than about five items is two
@@ -39,7 +40,10 @@ journeys, staging deploy smoke-tested, docs current — measured against: [COMPL
 
 Every item carries all of these fields. The **test gate** is the load-bearing one. A fix
 without a check that would fail if the fix regressed isn't done, it's done *for now*. The gate
-has to be shown failing with the fix reverted, not assumed to.
+has to be shown failing with the fix reverted, not assumed to. Where no automated check can
+cover the item (a documentation change, a setting changed by hand), the gate says so and names
+the manual check that replaces it: "No automatable gate: [WHAT IS CHECKED], by [WHO], result
+recorded in [WHERE]" (a step in the manual QA script below, a settings check's output, the PR).
 
 > **[ITEM ID]. [GAP]** (audit finding [FINDING ID], [SEVERITY])
 > - **Fix approach:** [FILL IN]
@@ -48,7 +52,7 @@ has to be shown failing with the fix reverted, not assumed to.
 > - **Widens:** [FINDING IDS THIS FIX MAKES MORE FREQUENT OR REACHABLE, EACH MOVED INTO THIS MILESTONE, OR NONE]
 > - **Effort:** [S / M / L]
 > - **Acceptance criteria:** [WHAT A USER OR REVIEWER CAN OBSERVE WHEN IT'S FIXED]
-> - **Test gate:** [THE CHECK THAT FAILS IF THIS REGRESSES — for a finding with a standard ID, the conformance scorecard passing it, and the waiver or baseline entry removed]
+> - **Test gate:** [THE CHECK THAT FAILS IF THIS REGRESSES — for a finding with a standard ID, the conformance scorecard passing it, and the waiver or baseline entry removed; where nothing automated can, "No automatable gate:" and the manual check, as above]
 > - **Rollback:** [HOW TO UNDO IT IF IT MISBEHAVES IN PRODUCTION]
 > - **Diff class:** [MINIMAL DIFF / FLAGGED REFACTOR]
 > - **Verification label:** [VERIFICATION LABEL — statically reviewed / executed / fully validated]
@@ -123,6 +127,14 @@ reporting receives an induced error · [ ] zero open blockers · [ ] deployed an
      defects too: re-check what the last round changed before calling a milestone done. -->
 
 - [DATE] — [ISSUE] ([SEVERITY]) — slotted into milestone [N]
+
+## Resolved before the plan
+
+<!-- GUIDANCE: A finding a commit already made closed before this plan, named with the commit.
+     Scored on the commit before the process delivery, core.process-delivered always fails, and
+     the delivery commit resolves it: it goes here, not under an item or a deferral. -->
+
+- [FINDING ID] — resolved by [COMMIT] ([WHAT IT DID])
 
 ## Deferred with reason
 

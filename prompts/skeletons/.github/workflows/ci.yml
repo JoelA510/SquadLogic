@@ -2,8 +2,10 @@
 #
 # The gate on every pull request (new-project Phase 2.5; existing-project audit §7), for a Node
 # project. Another stack keeps the shape (no token permissions, actions pinned by commit, the
-# runtime read from its one pin file, one step per gate) and swaps the commands. The dependency
-# audit is its own workflow (docs/dependency-policy.md).
+# workflow audit, the runtime read from its one pin file, one step per gate) and swaps the
+# commands; the steps marked "node pack" are the node standards'. The dependency audit is its own
+# workflow (docs/dependency-policy.md), and Dependabot (.github/dependabot.yml) keeps the pins
+# and the dependencies current.
 name: CI
 
 on:
@@ -37,6 +39,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # Every stack keeps this step (standard core.workflows-audited): zizmor finds unpinned
+      # actions, a checkout that keeps the token, and expressions run as shell. With the token it
+      # also checks each pin is a real commit of its action. A finding fails the run.
+      - name: Audit the workflows (zizmor)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pipx run --spec 'zizmor==1.30.1' zizmor --format=github . # zizmor: ignore[adhoc-packages] -- pinned to one version
+
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -52,6 +62,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Node pack (standard node.unused-code): files, exports, and dependencies nothing uses. Needs
+      # knip as a dev dependency and a `check:unused` script that runs it.
+      - name: Unused code (knip)
+        run: npm run check:unused
+
       - name: Test
         run: npm test
 
@@ -59,7 +74,8 @@ jobs:
         run: npm run build
 
   # An end-to-end suite gets its own job (and its own required check), so a slow or flaky
-  # browser run is visible as itself. Delete this job if the repository has none.
+  # browser run is visible as itself. Delete this job if the repository has none, and its
+  # required check in .github/rulesets/main.json with it.
   e2e:
     name: End-to-end
     runs-on: ubuntu-latest

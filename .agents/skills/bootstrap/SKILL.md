@@ -3,7 +3,7 @@ name: bootstrap
 description: "Use when someone asks by name to bootstrap a new or empty repo; it writes many files, so don't start it unasked. Runs prompts/new-project.md end to end — reference verification, stack ADR, guardrail files, typed env, and a phased plan ending in a deployable walking skeleton."
 metadata:
   invocation: explicit
-  argument-hint: "<project name, what it does and for whom, platform targets, constraints, repo visibility and GitHub plan>"
+  argument-hint: "<project name, what it does and for whom, platform targets, constraints, repo visibility and GitHub plan, security contact if private>"
 ---
 
 Run the new-project bootstrap process, exactly as written in `prompts/new-project.md`. Read
@@ -12,9 +12,10 @@ up. Then:
 
 1. **Assemble the project inputs.** Parse whatever was given with the request, and map what you
    can onto the prompt's input fields (project name, description and target users, platform
-   targets, constraints, stack preferences, repository visibility and GitHub plan). Visibility
-   and plan never block: read them from the host, and assume private on GitHub Free for
-   whatever can't be read, as the prompt's inputs say. Ask, in one question, only for what
+   targets, constraints, stack preferences, repository visibility and GitHub plan, and a private
+   repository's security contact). Visibility and plan never block: read them from the host, and
+   assume private on GitHub Free for whatever can't be read, as the prompt's inputs say. Nor does
+   the security contact: without one, follow the prompt's fallback rather than guess. Ask, in one question, only for what
    neither the request, the host, nor a safe default supplies — vague inputs produce vague
    plans, and the prompt permits at most one blocking question thereafter.
 2. **Execute the phases in order.** Phase 0 (reference verification) is mandatory and comes
@@ -28,8 +29,10 @@ up. Then:
    SECURITY.md, `.env.example`, and the docs/ set keep their paths: reference-verification,
    the ADR index and the stack ADR, the ADR template (0000-template, copied unchanged:
    operating rule 7 points every agent at it), product, dev-plan, dependency-policy (the release
-   runbook comes with milestone 1's deploy pipeline), and the GitHub ruleset (kept even where the
-   plan can't enforce it) and, once more than one person merges, CODEOWNERS, both under .github/.
+   runbook comes with milestone 1's deploy pipeline), and, under .github/, the CI workflow
+   (workflows/ci.yml), the Dependabot configuration (dependabot.yml), the ruleset
+   (rulesets/main.json, kept even where the plan can't enforce it; its required checks are the
+   CI workflow's job names), and, once more than one person merges, CODEOWNERS.
    Copy each to its real path, fill every `[BRACKETED]` placeholder, and delete the guidance
    comments; the ADR template alone stays unfilled, and is left out of the check below. The env-validation skeleton is different: it's
    the guide for Phase 2.6's env module, so build the module from it and don't keep a copy. A

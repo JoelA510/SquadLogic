@@ -40,6 +40,12 @@ can't see.
   session's repository tools); whatever can't be read, assume private on
   GitHub Free and say so: the most restrictive case, and the one the
   fallbacks below cover. Don't stop to ask for it.
+- Security contact, for a private repository (a public one uses GitHub's
+  private vulnerability reporting): [SECURITY CONTACT - an address that
+  reaches a person, or a named maintainer and how to reach them privately].
+  If it isn't given, don't guess one: SECURITY.md names the repository's
+  owner as the contact, says the private channel is still to be set up,
+  and the output lists it as an open item. Don't stop to ask for it.
 
 ## Phase 0 - Reference verification (mandatory, do first)
 
@@ -225,7 +231,14 @@ Create, as actual files in the repo:
 5. Tooling config - typecheck (strict), lint, format, pre-commit hooks, and CI
    (typecheck + lint + test + build on every PR), modeled on
    ixartz/Next-js-Boilerplate (skeleton for a Node project:
-   .github/workflows/ci.yml). CI must fail the build on any of these, and
+   .github/workflows/ci.yml). CI also audits its own workflows with zizmor,
+   and a Node project runs knip for unused code (add it as a dev dependency
+   with a `check:unused` script): the CI skeleton has both steps, and
+   milestone 1's scorecard fails without them (core.workflows-audited,
+   node.unused-code). Dependency updates arrive on their own, each ecosystem
+   and the workflows' actions with a cooldown (skeleton:
+   .github/dependabot.yml; core.dependency-updates and
+   core.dependency-cooldown). CI must fail the build on any of these, and
    be a required status check on the default branch (branch protection or a
    ruleset; skeleton: .github/rulesets/main.json, imported in the repo's
    settings): CI that only reports can't block a merge. On GitHub Free,
@@ -235,14 +248,16 @@ Create, as actual files in the repo:
    it), make "merge only when CI is green" an operating rule, and don't claim
    enforcement. Keep the ruleset file anyway, filled in, so going public or
    paid is one import; CONTRIBUTING.md says it isn't active. Its required
-   checks are the CI job names: hold them equal with a test (the template's
-   scripts/__tests__/repo-hygiene.test.ts has one to adapt), or at least a
-   comment beside each job name saying to rename both together. Add a
+   checks are the CI job names (the skeleton names the CI skeleton's two
+   jobs; delete End-to-end with its job) and the audit's: hold them equal
+   with a test (the template's scripts/__tests__/repo-hygiene.test.ts has
+   one to adapt), or at least a comment beside each job name saying to
+   rename both together. Add a
    SECURITY.md that says where to report a vulnerability privately (skeleton:
    SECURITY.md). GitHub's private vulnerability reporting exists only for
-   public repositories, so a private one names another channel, and says it
-   in the product too: only collaborators can read a private repository's
-   SECURITY.md. Once more than one person merges, add a CODEOWNERS (skeleton:
+   public repositories, so a private one names another channel (the security
+   contact input), and says it in the product too: only collaborators can
+   read a private repository's SECURITY.md. Once more than one person merges, add a CODEOWNERS (skeleton:
    .github/CODEOWNERS). Add a dependency audit that blocks on high/critical
    advisories, runs weekly as well as per PR, and honors only expiring,
    reasoned waivers (skeleton: docs/dependency-policy.md). Build and deploy
@@ -255,7 +270,10 @@ Create, as actual files in the repo:
    formatter, exclude the delivered process files from it (`prompts/`,
    `.agents/skills/`, `.claude/skills/`): a reformat makes every one of them
    look edited, and later re-applies then park the template's updates
-   instead of applying them.
+   instead of applying them. The AGENTS and CONTRIBUTING skeletons wrap their
+   word-for-word blocks in `prettier-ignore-start`/`-end` comments; keep them
+   (another formatter: exclude those blocks its own way), or a reformat
+   rewrites the rules' emphasis and the blocks no longer match.
 6. Env validation module (T3 Env pattern or platform equivalent) - build-time
    validation, typed access, placeholder values rejected, .env.example kept
    current. No secret behind a client-exposed prefix, and public variables

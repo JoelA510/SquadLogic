@@ -28,5 +28,6 @@ line's `--ignore-vuln` carry neither.
 `.cargo/audit.toml` (any ignore is a finding: it can hold neither), and what workflows run
 (`pip-audit --ignore-vuln`, `uv audit --ignore` or `--ignore-until-fixed`, `safety check --ignore` or `-i`, `cargo audit --ignore`,
 and `pypa/gh-action-pip-audit`'s `ignore-vulns`: neither). A register that doesn't parse is a
-finding. `n/a` when nothing is waived anywhere. A pass says how many waivers are in `deny.toml`,
+finding. `n/a` when nothing it reads waives anything: a register in another form (a Markdown list,
+an `.nsprc`) isn't read, so an audit reads that by hand. A pass says how many waivers are in `deny.toml`,
 which can't expire: review those by hand.

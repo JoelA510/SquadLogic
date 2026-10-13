@@ -13,8 +13,9 @@ the CI job's status check.
 it holds only as long as everyone remembers it, including the agent that merges at the end of a
 long session.
 
-**Meeting it:** import the ruleset the template ships (`.github/rulesets/main.json`, its required
-checks named after the CI jobs) in Settings -> Rules -> Rulesets.
+**Meeting it:** import the ruleset the template ships in Settings -> Rules -> Rulesets, with its
+required checks named after the CI jobs: `.github/rulesets/main.json` in a repository built from
+the template, `prompts/skeletons/.github/rulesets/main.json` where `process:apply` delivered it.
 
 **The check:** `GET /repos/{owner}/{repo}/rules/branches/{default branch}` for an active
 `required_status_checks` rule, then classic protection. On a private repository under GitHub Free,

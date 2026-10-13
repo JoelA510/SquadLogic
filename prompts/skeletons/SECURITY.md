@@ -9,7 +9,9 @@
      enable it in Settings → Advanced Security, and reporters use the Security tab → "Report a
      vulnerability". GitHub offers it only on public repositories, so a private one names
      another channel: a security@ address that reaches a person, or a named maintainer and how
-     to reach them privately. In a private repository only collaborators can read this file,
+     to reach them privately (new-project's security contact input). If none was given, don't
+     guess an address: name the repository's owner, say the private channel is still to be set
+     up, and list it as an open item. In a private repository only collaborators can read this file,
      and the people likeliest to find a problem are the product's users, so the product itself
      says where to report one too (a "report a problem" link or a support address). -->
 

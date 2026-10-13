@@ -73,6 +73,7 @@ it on its own), `template-update` to take a template release. [WHERE THE SKILLS 
 
 ## Operating rules
 
+<!-- prettier-ignore-start -->
 <!-- operating-rules:start -->
 
 1. **Match existing conventions over generic best practice.** Read a neighboring file before
@@ -125,6 +126,7 @@ it on its own), `template-update` to take a template release. [WHERE THE SKILLS 
     workaround when the fix ships.
 
 <!-- operating-rules:end -->
+<!-- prettier-ignore-end -->
 
 ## Project-specific rules
 

@@ -198,6 +198,49 @@ describe('an ordinary run places only teams with no row, and returns only those'
   });
 });
 
+describe('the solver scores undated, whatever the page sends (M4.7, plan Q2 and §8)', () => {
+  // The page sends its whole slot objects to the auto-scheduler. If they ever
+  // carry the scoring engine's date fields, the solver's objective must not
+  // switch to the dated model: its search is frozen until M4.8.
+  const dated = SLOTS.map((s) => ({
+    ...s,
+    firstDate: s.start.toISOString().slice(0, 10),
+    lastDate: '2026-11-30',
+    startTime: s.start.toISOString().slice(11, 19),
+    endTime: s.end.toISOString().slice(11, 19),
+  }));
+  const runWith = (slots) => {
+    const teams = ROSTER.map((t) => prepareTeam(t));
+    const classification = classifyTeamsForRun(
+      ROSTER.map((t) => t.id),
+      ROWS,
+      TIME_TBD_TEAMS
+    );
+    return runPracticeOptimizer({
+      teams,
+      slots,
+      locked: ROWS.map((r) => ({ assignmentId: r.id, teamId: r.teamId, slotId: r.slotId })),
+      placeableTeamIds: classification.placeable,
+      config: { timeBudgetMs: 20000, maxIterations: 300, seed: 42 },
+    });
+  };
+
+  it('slots carrying dates give the same run, scored undated', async () => {
+    const plain = await runWith(SLOTS);
+    const withDates = await runWith(dated);
+    // Meta: the dated slots really carry every field that would date a call.
+    assert.ok(dated.every((s) => s.firstDate && s.lastDate && s.startTime && s.endTime));
+    assert.ok(plain.placements.length > 0, 'the fixture placed nothing');
+    assert.equal(withDates.evaluation.summary.dateModel, 'undated');
+    assert.equal(plain.evaluation.summary.dateModel, 'undated');
+    assert.deepEqual(withDates.placements, plain.placements);
+    assert.deepEqual(withDates.unassigned, plain.unassigned);
+    assert.deepEqual(withDates.evaluation, plain.evaluation);
+    assert.equal(withDates.seedScore, plain.seedScore);
+    assert.equal(withDates.bestScore, plain.bestScore);
+  });
+});
+
 describe('a TIME TBD series is excluded from ordinary runs (decision 4)', () => {
   it('is classified TIME TBD, never placed, never reported as unplaced', async () => {
     const { classification, run } = await runFixture();

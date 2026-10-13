@@ -27,10 +27,13 @@
 
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedMockDb } from './helpers/seedMockDb.js';
-import { ScoringInputSchema } from '../supabase/functions/_shared/schemas/scoring.ts';
+import {
+  ScoringInputSchema,
+  datedSlotsIssue,
+} from '../supabase/functions/_shared/schemas/scoring.ts';
 import { anchorWallTimes } from '../supabase/functions/_shared/timing/anchorWallTimes.ts';
 import { evaluatePracticeSchedule as edgeEvaluate } from '../supabase/functions/_shared/engines/scoring-engine.js';
 
@@ -45,6 +48,10 @@ const TZ = 'America/New_York';
  * per test: a fresh one per render would re-run the page's roster memos.
  */
 const TEAM_READ = vi.hoisted(() => ({ value: /** @type {any} */ (null) }));
+/** The auto-scheduler hook's state, swapped by the review-path test (M4.7). */
+const AUTO = vi.hoisted(() => ({ value: /** @type {any} */ (null) }));
+/** The props the override panel was last rendered with (M4.7, its per-slot count). */
+const OVERRIDE_PROPS = vi.hoisted(() => ({ value: /** @type {any} */ (null) }));
 
 /**
  * The planted double-booking: `coach-dup` is Team A's head coach and Team B's
@@ -101,18 +108,18 @@ vi.mock('../frontend/src/hooks/useGameSummary.js', () => ({
 vi.mock('../frontend/src/hooks/useGameAssignments.js', () => ({
   useGameAssignments: () => ({ assignments: [], loading: false, error: null }),
 }));
-vi.mock('../frontend/src/hooks/useAutoScheduler.js', () => {
-  const idle = {
-    status: 'idle',
-    result: null,
-    progress: null,
-    error: null,
-    trigger: async () => {},
-    cancel: () => {},
-    reset: () => {},
-  };
-  return { useAutoScheduler: () => idle };
-});
+vi.mock('../frontend/src/hooks/useAutoScheduler.js', () => ({
+  useAutoScheduler: () => AUTO.value,
+}));
+const AUTO_IDLE = {
+  status: 'idle',
+  result: null,
+  progress: null,
+  error: null,
+  trigger: async () => {},
+  cancel: () => {},
+  reset: () => {},
+};
 vi.mock('../frontend/src/hooks/useAutoRunOnNavigate.js', () => ({
   useAutoRunOnNavigate: () => {},
 }));
@@ -125,7 +132,12 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
 // Panels this file does not test. `EvaluationPanel` is deliberately NOT here.
 const stub = (name) => ({ default: () => <div data-testid={`stub-${name}`} /> });
 vi.mock('../frontend/src/components/PracticeReadinessPanel.jsx', () => stub('readiness'));
-vi.mock('../frontend/src/components/PracticeOverridePanel.jsx', () => stub('override'));
+vi.mock('../frontend/src/components/PracticeOverridePanel.jsx', () => ({
+  default: (props) => {
+    OVERRIDE_PROPS.value = props;
+    return <div data-testid="stub-override" />;
+  },
+}));
 
 const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
 const { edgeFunctionCache } = await import('../frontend/src/lib/cache.js');
@@ -204,6 +216,9 @@ function fairnessScoringEdge(body) {
     return { data: null, error: { message: 'Validation failed', details: parsed.error.format() } };
   }
   const { practice } = parsed.data;
+  // The handler's 3a: a half-dated slot list is a 422 (M4.7, plan Q8).
+  const datedIssue = practice ? datedSlotsIssue(practice.slots) : null;
+  if (datedIssue !== null) return { data: null, error: { message: datedIssue } };
   // `any`: the handler makes the same two calls; only Node's zod typings differ from Deno's.
   const anchored = anchorWallTimes(
     /** @type {any} */ (practice?.slots ?? []),
@@ -254,6 +269,7 @@ beforeEach(() => {
   scoringRequests = [];
   scoringResponses = [];
   edgeRefuses = false;
+  AUTO.value = AUTO_IDLE;
   const realInvoke = mockSupabase.functions.invoke;
   vi.spyOn(mockSupabase.functions, 'invoke').mockImplementation(async (name, options) => {
     if (name !== 'fairness-scoring') return realInvoke(name, options);
@@ -430,5 +446,117 @@ describe('the practice page evaluates its real schedule (13.1)', () => {
     await new Promise((resolve) => setTimeout(resolve, 1500));
     expect(scoringRequests).toHaveLength(0);
     expect(screen.queryByText(/Fairness Index/)).not.toBeInTheDocument();
+  });
+});
+
+// ---- M4.7: the page scores dated occurrences (docs/PLAN_SCORING_DATE_MODEL.md §3.5) ----
+
+/** `valid_from` 2026-09-07 is a Monday: each seeded slot's first occurrence. */
+const FIRST_DATE = {
+  'slot-mon': '2026-09-07',
+  'slot-tue': '2026-09-08',
+  'slot-wed': '2026-09-09',
+  'slot-thu': '2026-09-10',
+  'slot-fri': '2026-09-11',
+};
+
+describe('the practice page sends its dates and is scored dated (M4.7)', () => {
+  it('every slot carries its dating, every row its stored range, and the Edge runs dated', async () => {
+    await renderPage();
+    const body = await settledRequest();
+
+    // Enumerated from the seed: one entry per seeded slot and row.
+    expect(Object.keys(FIRST_DATE).sort()).toEqual(SLOTS.map((s) => s.id).sort());
+    expect(body.practice.slots).toHaveLength(SLOTS.length);
+    for (const seeded of SLOTS) {
+      const sent = body.practice.slots.find((s) => s.id === seeded.id);
+      expect(sent, seeded.id).toMatchObject({
+        firstDate: FIRST_DATE[seeded.id],
+        lastDate: seeded.valid_until,
+        startTime: seeded.start_time,
+        endTime: seeded.end_time,
+      });
+    }
+    expect(body.practice.assignments).toHaveLength(ROWS.length);
+    for (const seeded of ROWS) {
+      const sent = body.practice.assignments.find((a) => a.teamId === seeded.team_id);
+      expect(sent.effectiveDateRange, seeded.id).toBe(seeded.effective_date_range);
+    }
+    // P5's witness: a page that stopped sending the dates would read 'undated' here.
+    expect(scoringResponses.at(-1).data.practice.summary.dateModel).toBe('dated');
+  });
+
+  it('a closed series and its successor sharing a coach are not a conflict', async () => {
+    // W2's shape on the page: team A's Monday series ends 10-04 and team B's
+    // starts 10-05; they share coach-dup and never meet.
+    const rows = [
+      row('pa-a', 'team-a', 'slot-mon', { effective_date_range: '[2026-09-07,2026-10-05)' }),
+      row('pa-b', 'team-b', 'slot-mon', { effective_date_range: '[2026-10-05,2026-12-01)' }),
+      row('pa-c', 'team-c', 'slot-tue', { slot_id: null }),
+    ];
+    await renderPage({ rows });
+    await settledRequest();
+
+    const scored = scoringResponses.at(-1).data.practice;
+    expect(scored.summary.dateModel).toBe('dated');
+    // Meta: both rows were scored (so "no conflict" is not "nothing read").
+    expect(scored.summary.assignedTeams).toBe(3);
+    expect(scored.coachConflicts).toEqual([]);
+    const panel = await screen.findByRole('region', { name: 'Fairness Scoring Engine' });
+    await waitFor(() => expect(panel).toHaveTextContent('Coach conflicts: 0'));
+
+    // The override panel's count (Q5): from today (2026-10-20) on, team A's
+    // series has ended, so slot-mon holds one team, not two.
+    fireEvent.click(screen.getByRole('button', { name: /Enter Manual Override/ }));
+    await waitFor(() => expect(OVERRIDE_PROPS.value?.baseSlots?.length).toBe(SLOTS.length));
+    const mon = OVERRIDE_PROPS.value.baseSlots.find((b) => b.baseSlotId === 'slot-mon');
+    expect(mon.totalAssigned).toBe(1);
+    expect(rows.filter((r) => r.practice_slot_id === 'slot-mon')).toHaveLength(2);
+  });
+
+  it('the planted conflict names its first date', async () => {
+    await renderPage();
+    await settledRequest();
+    const [conflict] = scoringResponses.at(-1).data.practice.coachConflicts;
+    expect(conflict.firstDate).toBe('2026-09-07');
+    expect(
+      await screen.findByText(
+        /Coach coach-dup has overlapping practices on Monday, from 2026-09-07/
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("the auto-scheduler review sends a staged placement's range from today", async () => {
+    // The run completes after the page has its slots, as a real run does (the
+    // scheduler is only enabled once they are read).
+    const view = await renderPage();
+    await settledRequest();
+    AUTO.value = {
+      ...AUTO_IDLE,
+      status: 'completed',
+      result: {
+        runId: 'run-review',
+        assignments: [{ teamId: 'team-d', slotId: 'slot-wed', source: 'auto' }],
+        unassigned: [],
+      },
+    };
+    view.rerender(
+      <MemoryRouter>
+        <PracticeSchedulingPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(
+      () => {
+        const last = scoringRequests.at(-1);
+        expect(last?.practice?.assignments?.some((a) => a.teamId === 'team-d')).toBe(true);
+      },
+      { timeout: 4000 }
+    );
+    const staged = scoringRequests.at(-1).practice.assignments.find((a) => a.teamId === 'team-d');
+    // The page's `newPlacementRange`: today on the season's clock (the fake
+    // clock is 2026-10-20 12:00 in New York) to the slot's validity end.
+    expect(staged.effectiveDateRange).toBe('[2026-10-20,2026-11-30]');
+    expect(scoringResponses.at(-1).data.practice.summary.dateModel).toBe('dated');
   });
 });

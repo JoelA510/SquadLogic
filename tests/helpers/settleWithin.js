@@ -1,7 +1,7 @@
 import { vi } from 'vitest';
 
 /**
- * Advance fake time in 1 s steps until `promise` settles, for at most
+ * Advance fake time in steps of at most 1 s until `promise` settles, for at most
  * `limitMs`. Resolves `true` when it settled, `false` when it is still
  * pending: a call that hangs fails the caller's assertion instead of hanging
  * the test. Needs `vi.useFakeTimers()`.
@@ -19,8 +19,10 @@ export async function settleWithin(promise, limitMs) {
     () => (settled = true),
     () => (settled = true)
   );
-  for (let waited = 0; !settled && waited < limitMs; waited += 1000) {
-    await vi.advanceTimersByTimeAsync(1000);
+  for (let waited = 0; !settled && waited < limitMs; ) {
+    const step = Math.min(1000, limitMs - waited);
+    await vi.advanceTimersByTimeAsync(step);
+    waited += step;
   }
   return settled;
 }

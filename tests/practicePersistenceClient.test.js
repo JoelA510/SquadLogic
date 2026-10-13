@@ -2,10 +2,12 @@
 // sends -- the ordinary save, the repair save and the enact -- has a deadline,
 // and a 2xx whose body cannot be read is an error, not an empty success.
 //
-// The three senders are enumerated from the module's exports here, not from
-// the calls a page happens to make: a new sender that skips the deadline has
-// to be added below or the coverage assertion at the end fails.
+// The three senders are checked against the module's exports, not the calls a
+// page happens to make: a new exported function has to be added below or the
+// coverage assertion fails, and a direct `fetch(` in either client fails the
+// source check.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, it, vi } from 'vitest';
 
 import {
@@ -99,7 +101,10 @@ describe('practice persistence client :: deadline', () => {
       assert.equal(ok, false);
       assert.equal(err.code, PERSISTENCE_TIMEOUT);
       assert.match(err.message, LABELS[name]);
-      assert.match(err.message, /did not answer within 30 seconds/);
+      assert.match(
+        err.message,
+        new RegExp(`did not answer within ${PERSISTENCE_TIMEOUT_MS / 1000} seconds`)
+      );
       // One request, never a retry (the enact's rule, and no save retries either).
       assert.equal(signals.length, 1);
       assert.equal(signals[0]?.aborted, true, 'the request was not aborted');
@@ -137,7 +142,10 @@ describe('practice persistence client :: deadline', () => {
     );
     assert.equal(await settleWithin(outcome, PERSISTENCE_TIMEOUT_MS + 5000), true);
     // PracticeRepairPanel: `It is not known whether the practice was enacted: ${message}. Close ...`
-    assert.equal((await outcome)?.message, 'the enact request did not answer within 30 seconds');
+    assert.equal(
+      (await outcome)?.message,
+      `the enact request did not answer within ${PERSISTENCE_TIMEOUT_MS / 1000} seconds`
+    );
   });
 
   it('a save refusal keeps its code and HTTP status', async () => {
@@ -156,12 +164,29 @@ describe('practice persistence client :: deadline', () => {
     });
   });
 
-  it('covers every exported sender (enumerated from the module, not from this file)', () => {
+  it('covers every exported function (enumerated from the module, not from this file)', () => {
+    // Every function the module exports is a sender today; a new export of any
+    // name must be added to SENDERS (and so to the deadline cases above).
     const exported = Object.entries(practiceClient)
-      .filter(([name, value]) => typeof value === 'function' && /^persist/.test(name))
+      .filter(([, value]) => typeof value === 'function')
       .map(([name]) => name)
       .sort();
-    assert.ok(exported.length > 0, 'no persist* export found: the enumeration examined nothing');
+    assert.ok(exported.length > 0, 'no function export found: the enumeration examined nothing');
     assert.deepEqual(exported, Object.keys(SENDERS).sort());
+  });
+
+  it('neither persistence client calls fetch directly (every request goes through the deadline)', () => {
+    for (const file of [
+      'frontend/src/utils/practicePersistenceClient.js',
+      'frontend/src/utils/gamePersistenceClient.js',
+    ]) {
+      const source = readFileSync(file, 'utf8');
+      assert.match(
+        source,
+        /postPersistenceRequest\(/,
+        `${file} no longer sends through the deadline`
+      );
+      assert.doesNotMatch(source, /\bfetch\(/, `${file} calls fetch directly`);
+    }
   });
 });

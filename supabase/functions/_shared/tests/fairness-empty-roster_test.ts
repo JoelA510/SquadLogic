@@ -19,7 +19,12 @@
  *      for a refused request. (The same pin style as
  *      `tests/fairnessScoringRateLimit.test.js`.)
  */
-import { assert, assertEquals, assertMatch } from 'https://deno.land/std@0.203.0/assert/mod.ts';
+import {
+  assert,
+  assertEquals,
+  assertMatch,
+  assertStringIncludes,
+} from 'https://deno.land/std@0.203.0/assert/mod.ts';
 import { evaluatePracticeSchedule } from '../engines/scoring-engine.ts';
 import {
   EMPTY_PRACTICE_ROSTER,
@@ -64,10 +69,10 @@ Deno.test('the defect: with no teams the engine scores a perfect schedule (meta,
 });
 
 for (const persist of [true, false]) {
-  for (const [label, teams, slots, teamCount, slotCount] of [
-    ['no teams', [], [SLOT], 0, 1],
-    ['no slots', [TEAM], [], 1, 0],
-    ['no teams and no slots', [], [], 0, 0],
+  for (const [label, teams, slots, teamCount, slotCount, counts] of [
+    ['no teams', [], [SLOT], 0, 1, 'has 0 teams and 1 slot,'],
+    ['no slots', [TEAM], [], 1, 0, 'has 1 team and 0 slots,'],
+    ['no teams and no slots', [], [], 0, 0, 'has 0 teams and 0 slots,'],
   ] as const) {
     Deno.test(`refuses a practice block with ${label} (persist: ${persist})`, () => {
       const refusal = refuseEmptyPracticeRoster(parsedPractice([...teams], [...slots], persist));
@@ -77,7 +82,7 @@ for (const persist of [true, false]) {
       assertEquals(refusal.teamCount, teamCount);
       assertEquals(refusal.slotCount, slotCount);
       assertMatch(refusal.error, /at least one team and one practice slot/);
-      assertMatch(refusal.error, new RegExp(`has ${teamCount} teams? and ${slotCount} slots?`));
+      assertStringIncludes(refusal.error, counts);
     });
   }
 }

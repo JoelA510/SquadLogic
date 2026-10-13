@@ -20,3 +20,10 @@ it('reports a promise still pending at the limit, and advances no further', asyn
   expect(await settleWithin(late, 3000)).toBe(false);
   expect(Date.now() - start).toBe(3000);
 });
+
+it('never advances past a limit that is not a whole second', async () => {
+  const start = Date.now();
+  const late = new Promise((resolve) => setTimeout(resolve, 2800));
+  expect(await settleWithin(late, 2500)).toBe(false);
+  expect(Date.now() - start).toBe(2500);
+});

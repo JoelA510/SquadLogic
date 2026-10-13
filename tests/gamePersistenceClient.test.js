@@ -202,7 +202,12 @@ test('a request that never answers is aborted at the deadline with a timeout err
     assert.equal(ok, false);
     assert.equal(err.code, PERSISTENCE_TIMEOUT);
     assert.equal(err.status, null);
-    assert.match(err.message, /The game schedule save did not answer within 30 seconds/);
+    assert.ok(
+      err.message.startsWith(
+        `The game schedule save did not answer within ${PERSISTENCE_TIMEOUT_MS / 1000} seconds`
+      ),
+      err.message
+    );
     assert.match(err.message, /not known whether the changes were saved/);
     assert.equal(sentSignal?.aborted, true, 'the request was not aborted');
   } finally {
@@ -307,6 +312,18 @@ test('a 2xx whose body is JSON but not an object is an error too', async () => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => ({ ok: true, status: 200, json: async () => null }))
+  );
+  await assert.rejects(
+    () => persistGameScheduleReview({ assignments: [STAGED_GAME] }),
+    (err) => /** @type {any} */ (err).code === PERSISTENCE_UNREADABLE_RESPONSE
+  );
+});
+
+test('a 2xx whose body is a JSON array is an error too', async () => {
+  signIn();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok: true, status: 200, json: async () => [] }))
   );
   await assert.rejects(
     () => persistGameScheduleReview({ assignments: [STAGED_GAME] }),

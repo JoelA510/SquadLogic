@@ -8,9 +8,14 @@
  *
  * - The deadline lives here, in the client, so every caller of the game and
  *   practice clients gets it; the team client takes its signal from the panel.
- * - 30 s, not the team panel's 10 s: a practice save carries the whole season
- *   and runs the writer RPC under the season lock. 30 s is the deadline the
- *   organization create and invite-redeem RPCs already use (`withTimeout`).
+ * - 160 s, not the team panel's 10 s. Supabase answers an Edge Function that
+ *   sends nothing for 150 s with a 504 (its request idle timeout), which the
+ *   callers already report as an HTTP failure. A shorter deadline would call a
+ *   slow save that is still committing a failure, and invite a second Apply;
+ *   this one fires only when no answer, not even the platform's, can come: a
+ *   lost connection or a stalled body.
+ * - Its own race rather than `withTimeout`: that one cannot abort the request,
+ *   and its error carries no `code` for a caller to tell a timeout apart by.
  *
  * An aborted request has still reached the server, which may have committed
  * it, so the timeout's message says the outcome is not known rather than
@@ -21,7 +26,8 @@
  * with `result: {}`, so each caller's own `HTTP <status>` message stands.
  */
 
-export const PERSISTENCE_TIMEOUT_MS = 30_000;
+/** Supabase's Edge request idle timeout (150 s, docs: functions/limits) plus 10 s. */
+export const PERSISTENCE_TIMEOUT_MS = 160_000;
 
 /** `code` of the error thrown when the deadline passes. */
 export const PERSISTENCE_TIMEOUT = 'PERSISTENCE_TIMEOUT';
@@ -93,7 +99,8 @@ export async function postPersistenceRequest(
       if (controller.signal.aborted) throw err;
       readable = false;
     }
-    const isObject = readable && parsed !== null && typeof parsed === 'object';
+    const isObject =
+      readable && parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
     if (response.ok && !isObject) {
       throw persistenceError(
         `${label} returned a response that could not be read (HTTP ${response.status})` +

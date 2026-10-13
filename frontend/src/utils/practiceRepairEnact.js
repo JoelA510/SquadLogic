@@ -27,6 +27,7 @@
  */
 
 import {
+  PRACTICE_ENACT_BLACKOUT_EFFECT,
   PRACTICE_ENACT_REFUSAL,
   PRACTICE_REPAIR_CAUSE_KIND,
   buildEnactPayload,
@@ -57,8 +58,16 @@ export const ENACT_GATE = Object.freeze({
 export const ENACT_PREVIEW_TEXT =
   'Save the retirement first: enacting moves practices, and the retirement date is not saved yet.';
 
-/** The blackout editor's visible reason: its launcher is always a preview (11d Q5). */
+/**
+ * The blackout editor's visible reason: its launcher is always a preview
+ * (11d Q5), whether the dialog adds a blackout or edits a saved one, so it
+ * names where a saved blackout IS enacted.
+ */
 export const ENACT_BLACKOUT_PREVIEW_TEXT =
+  'Save the blackout first, then enact from its row on Blackout Dates: enacting moves practices, and this editor shows an unsaved draft.';
+
+/** A blackout the fresh read does not hold as saved (11d Q5, the plan's wording). */
+export const ENACT_BLACKOUT_UNSAVED_TEXT =
   'Save the blackout first: enacting moves practices, and this blackout is not saved yet.';
 
 /** Why a saved temporary move on the lost ground has no Enact (11d Q8). */
@@ -70,7 +79,7 @@ export const ENACT_REFUSAL_TEXT = Object.freeze({
   [PRACTICE_ENACT_REFUSAL.RETIREMENT_UNCOMMITTED]: ENACT_PREVIEW_TEXT,
   [PRACTICE_ENACT_REFUSAL.RETIREMENT_CHANGED]:
     'The retirement is now saved with a different date. Close this panel and open it again from the field card.',
-  [PRACTICE_ENACT_REFUSAL.BLACKOUT_UNCOMMITTED]: ENACT_BLACKOUT_PREVIEW_TEXT,
+  [PRACTICE_ENACT_REFUSAL.BLACKOUT_UNCOMMITTED]: ENACT_BLACKOUT_UNSAVED_TEXT,
   [PRACTICE_ENACT_REFUSAL.BLACKOUT_CHANGED]:
     'The blackout is now saved differently. Close this panel and open it again from the saved blackout.',
   [PRACTICE_ENACT_REFUSAL.PROMPT_NOT_ACCEPTED]:
@@ -96,10 +105,11 @@ export function enactGateOf({ isAdmin, preview, rows, loss, refusals }) {
   const off = (why, text) => ({ enabled: false, why, text });
   if (!isAdmin) return off(ENACT_GATE.NOT_ADMIN, 'Only an organization admin can enact.');
   const blackout = loss?.kind === PRACTICE_REPAIR_CAUSE_KIND.BLACKOUT;
-  const previewText = blackout ? ENACT_BLACKOUT_PREVIEW_TEXT : ENACT_PREVIEW_TEXT;
   // Q3, and 11d Q5: never from a dry-run preview (the retirement dialog, the
   // blackout editor's draft), and never before the cause is stored as shown.
-  if (preview) return off(ENACT_GATE.PREVIEW, previewText);
+  if (preview) {
+    return off(ENACT_GATE.PREVIEW, blackout ? ENACT_BLACKOUT_PREVIEW_TEXT : ENACT_PREVIEW_TEXT);
+  }
   const commit = causeCommitOf(rows, loss);
   if (!commit.committed) {
     if (commit.refusal === PRACTICE_ENACT_REFUSAL.RETIREMENT_CHANGED) {
@@ -108,7 +118,7 @@ export function enactGateOf({ isAdmin, preview, rows, loss, refusals }) {
     if (commit.refusal === PRACTICE_ENACT_REFUSAL.BLACKOUT_CHANGED) {
       return off(ENACT_GATE.BLACKOUT_CHANGED, ENACT_REFUSAL_TEXT[commit.refusal]);
     }
-    return off(ENACT_GATE.PREVIEW, previewText);
+    return off(ENACT_GATE.PREVIEW, blackout ? ENACT_BLACKOUT_UNSAVED_TEXT : ENACT_PREVIEW_TEXT);
   }
   if (refusals.length > 0) {
     return off(
@@ -117,6 +127,17 @@ export function enactGateOf({ isAdmin, preview, rows, loss, refusals }) {
     );
   }
   return { enabled: true, why: null, text: null };
+}
+
+/**
+ * The cause as the rows STORE it, by the commit gate's own read
+ * (`causeCommitOf`): what the dialog's heading names (11d plan §2.5: built
+ * from the stored row, never the draft).
+ *
+ * @param {Record<string, any[]>} rows @param {any} loss
+ */
+export function storedCauseOf(rows, loss) {
+  return causeCommitOf(rows, loss);
 }
 
 /**
@@ -243,12 +264,6 @@ export function enactPromptOf(adapted, rows, plan) {
   };
 }
 
-/** The prompt row's effect for a blackout exception's kind (core's record enum). */
-const BLACKOUT_PROMPT_EFFECT = Object.freeze({
-  relocated: 'temporarily moved',
-  time_tbd: 'temporarily TIME TBD',
-});
-
 /** The id the prompt gives the exception it plans, so its own dates can be told apart. */
 const PLANNED_EXCEPTION_ID = 'planned-by-this-enact';
 
@@ -274,7 +289,8 @@ function blackoutPromptOf(plan, { readRow, occurrencesOf, dayBySlot, lossDate })
     );
   }
   const [exception] = plan.exceptions;
-  const effect = BLACKOUT_PROMPT_EFFECT[exception.kind];
+  // Core's own map: `buildEnactRecord` checks the prompt rows against it.
+  const effect = PRACTICE_ENACT_BLACKOUT_EFFECT[exception.kind];
   const bounds = practiceRangeBounds(exception.window);
   if (!effect || bounds === null) {
     throw new Error(`enact prompt: the planned exception ${exception.window} does not read`);
@@ -477,11 +493,14 @@ export async function enactPracticeRecommendation({
     // After success: read fresh again and re-base with S enacted (step 12).
     const after = await loadPracticeRepairSnapshot(client, { organizationId, seasonSettingsId });
     const written = record.writes;
+    // The record's own cause, as written: the panel finds a blackout's exception by it.
+    const cause = { kind: record.cause.kind, id: record.cause.id };
     if (after.ok !== true) {
       return {
         status: 'enacted-unread',
         message: 'message' in after ? after.message : 'unreadable',
         written,
+        cause,
       };
     }
     const opened = openPracticeRepair(after.rows, loss, {
@@ -495,6 +514,7 @@ export async function enactPracticeRecommendation({
       status: 'enacted',
       result,
       written,
+      cause,
       view: { rows: after.rows, opened, state: next },
     };
   } catch (err) {

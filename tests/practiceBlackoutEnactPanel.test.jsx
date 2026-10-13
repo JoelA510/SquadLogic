@@ -141,8 +141,8 @@ function serve({ exceptions = [], audit = [] } = {}) {
       reason: STORED.reason,
     },
   ];
+  rows.fieldBlackouts = [{ ...STORED }];
   db = enactDbOf(rows);
-  db.field_blackouts = [{ ...STORED, organization_id: ORG }];
   db.practice_exceptions = exceptions.map((e) => ({ ...e, organization_id: ORG }));
   db.audit_log = audit;
   h.client = fakeClientOf(db, []);
@@ -388,5 +388,63 @@ describe('blackout enact panel :: Q11, the count on the edit and delete confirma
     );
     await waitFor(() => expect(removeBlackout).toHaveBeenCalledTimes(1));
     expect(confirm).not.toHaveBeenCalled();
+  });
+});
+
+describe('blackout enact panel :: review fixes', () => {
+  it(
+    'reads the season again when the stored row is edited while the panel is open',
+    { timeout: 30000 },
+    async () => {
+      // A fresh element each time: React skips a re-render of the same one.
+      const page = () => (
+        <MemoryRouter>
+          <BlackoutsPage />
+        </MemoryRouter>
+      );
+      const { rerender } = render(page());
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: `Repair practices for the blackout on ${ROW_LABEL}`,
+        })
+      );
+      await screen.findByTestId('practice-repair-rows', {}, { timeout: 5000 });
+      // The admin saves an edit: the table, the view, and the page's read all change.
+      const until = '2026-10-31';
+      db.field_closures[0].blackout_until = until;
+      db.field_blackouts[0].blackout_until = until;
+      h.closures = { ...h.closures, closures: [{ ...CLOSURE, blackoutUntil: until }] };
+      rerender(page());
+      await waitFor(
+        () =>
+          expect(screen.getByTestId('blackout-practice-repair')).toHaveTextContent(
+            `2026-10-19 to ${until}`
+          ),
+        { timeout: 5000 }
+      );
+      await screen.findByTestId('practice-repair-rows', {}, { timeout: 5000 });
+      for (const id of SUBJECTS) {
+        await waitFor(() =>
+          expect(within(windowRow(id)).getByTestId('practice-repair-enact')).toBeEnabled()
+        );
+      }
+      expect(requireExamined(SUBJECTS.length, 'series-window')).toBe(2);
+    }
+  );
+
+  it('removes once however often Remove is clicked while the count is read', async () => {
+    render(
+      <MemoryRouter>
+        <BlackoutsPage />
+      </MemoryRouter>
+    );
+    const remove = await screen.findByRole('button', {
+      name: `Remove the blackout on ${ROW_LABEL}`,
+    });
+    fireEvent.click(remove);
+    fireEvent.click(remove);
+    await waitFor(() => expect(removeBlackout).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(removeBlackout).toHaveBeenCalledTimes(1);
   });
 });

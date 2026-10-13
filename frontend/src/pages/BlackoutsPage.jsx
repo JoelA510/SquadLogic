@@ -114,6 +114,8 @@ export default function BlackoutsPage() {
   const [repairingId, setRepairingId] = useState(/** @type {string|null} */ (null));
   const repairTrigger = useRef(/** @type {HTMLElement|null} */ (null));
   const repairHeading = useRef(/** @type {HTMLHeadingElement|null} */ (null));
+  // The rows whose removal is in flight (the Q11 count is read first).
+  const removing = useRef(new Set());
   // Q11: the count shown in the edit dialog, read when it opens.
   const [editEnacted, setEditEnacted] = useState(/** @type {any} */ (null));
 
@@ -238,26 +240,32 @@ export default function BlackoutsPage() {
 
   const onRemove = useCallback(
     async (closure, label) => {
+      // The count read below is awaited before anything is removed: one
+      // removal per row at a time, whatever a second click does meanwhile.
+      if (removing.current.has(closure.id)) return;
+      removing.current.add(closure.id);
       setActionError(null);
-      // Q11: removing it withdraws nothing. Asked only when something was
-      // enacted off it, or the count could not be read (never "none" unread).
-      const counted = await countSeriesEnactedOffBlackout(supabase, {
-        organizationId,
-        blackoutId: closure.id,
-      });
-      if (
-        (counted.ok !== true || counted.count > 0) &&
-        !window.confirm(
-          `Remove the blackout on ${label}?\n\n${enactedOffBlackoutText(counted, 'Removing it')}`
-        )
-      ) {
-        return;
-      }
       try {
+        // Q11: removing it withdraws nothing. Asked only when something was
+        // enacted off it, or the count could not be read (never "none" unread).
+        const counted = await countSeriesEnactedOffBlackout(supabase, {
+          organizationId,
+          blackoutId: closure.id,
+        });
+        if (
+          (counted.ok !== true || counted.count > 0) &&
+          !window.confirm(
+            `Remove the blackout on ${label}?\n\n${enactedOffBlackoutText(counted, 'Removing it')}`
+          )
+        ) {
+          return;
+        }
         await removeBlackout(closure);
         await loadBookings();
       } catch (err) {
         setActionError(err?.message || 'The blackout could not be removed.');
+      } finally {
+        removing.current.delete(closure.id);
       }
     },
     // `removeBlackout` is rebuilt on every render of the hook, so this callback
@@ -480,8 +488,7 @@ export default function BlackoutsPage() {
         <section
           id="blackout-practice-repair"
           aria-labelledby="blackout-practice-repair-title"
-          className="card"
-          style={{ margin: 12 }}
+          className="card m-3 p-3"
           data-testid="blackout-practice-repair"
         >
           <h2
@@ -503,6 +510,10 @@ export default function BlackoutsPage() {
             }
           >
             <PracticeRepairPanel
+              // Remounted when the stored row changes (an edit while it is
+              // open), so the panel reads the season again rather than judging
+              // the new window against the read it opened with.
+              key={JSON.stringify(repairLoss)}
               loss={repairLoss}
               subject={`the blackout on ${repairLabel}`}
               isAdmin={isAdmin}

@@ -674,8 +674,11 @@ export const PracticeEnactRecordSchema = z.union([
   BlackoutEnactRecordSchema,
 ]);
 
-/** The prompt row's effect for a blackout exception's kind. */
-const BLACKOUT_EFFECT = Object.freeze({
+/**
+ * The prompt row's effect for a blackout exception's kind. Exported (3b PR
+ * 11d-3) so the client's prompt reads the one map the record is checked against.
+ */
+export const PRACTICE_ENACT_BLACKOUT_EFFECT = Object.freeze({
   relocated: 'temporarily moved',
   time_tbd: 'temporarily TIME TBD',
 });
@@ -736,7 +739,7 @@ export function buildEnactRecord({
     const written = enactment.plan.exceptions.map((exception) => ({
       assignment_id: exception.assignment_id,
       window: exception.window,
-      effect: BLACKOUT_EFFECT[exception.kind],
+      effect: PRACTICE_ENACT_BLACKOUT_EFFECT[exception.kind],
     }));
     if (canonicalJson(shown) !== canonicalJson(written)) {
       throw new Error('enact: the prompt shown does not list the exception the write adds');

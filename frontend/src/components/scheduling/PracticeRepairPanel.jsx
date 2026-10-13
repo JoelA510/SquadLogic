@@ -5,6 +5,7 @@ import { usePracticeRepairSnapshot } from '../../hooks/usePracticeRepairSnapshot
 import { supabase } from '../../lib/supabaseClient.js';
 import {
   TBD_REASON_TEXT,
+  WEEKDAY_TEXT,
   clock,
   declineIn,
   describeShape,
@@ -24,11 +25,12 @@ import {
   enactPromptOf,
   enactedRowsOf,
   mintEnactKey,
+  storedCauseOf,
 } from '../../utils/practiceRepairEnact.js';
 import { persistPracticeEnact } from '../../utils/practicePersistenceClient.js';
 import Button from '../ui/Button.jsx';
 import PracticeEnactDialog from './PracticeEnactDialog.jsx';
-import { PRACTICE_REASON, causeCommitOf } from '@squadlogic/core/practice/index.js';
+import { PRACTICE_REASON } from '@squadlogic/core/practice/index.js';
 
 /** The finding a decline or undo stamps (`practice/recommendations.js`). */
 const LOCAL_CODE = PRACTICE_REASON.REPAIR_RECOMMENDATION_LOCAL;
@@ -267,10 +269,8 @@ function Recommendations({
             assignmentId: current.shown.assignmentId,
             teamId: current.shown.teamId,
             written: outcome.written,
-            cause:
-              loss.kind === 'blackout'
-                ? { kind: loss.kind, id: String(loss.blackout?.id).toLowerCase() }
-                : null,
+            // The record's own cause, as the write stored it.
+            cause: outcome.cause,
           },
         ]);
       }
@@ -617,7 +617,10 @@ function Recommendations({
           {adapted.declared.closures.applied} applied, {result.closures?.candidatesRefused ?? 0}{' '}
           candidate slot(s) refused). Not read: a field switched off without a retirement date.
         </li>
-        <ExceptionsDeclared declared={adapted.declared.exceptions} />
+        <ExceptionsDeclared
+          declared={adapted.declared.exceptions}
+          blackout={loss.kind === 'blackout'}
+        />
         {adapted.declared.closures.unattributable.length > 0 && (
           <li data-testid="practice-repair-closures-unattributable">
             {adapted.declared.closures.unattributable.length} imported blackout(s) name no field, so
@@ -702,18 +705,17 @@ function dialogFor(shown, adapted, rows, names, loss, subject) {
 }
 
 /** `tue` -> `Tue`: a slot's stored weekday in the panel's words. */
-const dayText = (day) =>
-  typeof day === 'string' && day.length >= 3 ? `${day[0].toUpperCase()}${day.slice(1, 3)}` : '?';
+const dayText = (day) => WEEKDAY_TEXT[String(day).toUpperCase()] ?? '?';
 
 /**
  * The blackout arm of `dialogFor` (11d plan §2.5, Q4): the same dialog and
- * ruling-2 shape, headed by the STORED blackout row (`causeCommitOf` on the
- * same rows, never the draft), one row that keeps its range, the count in
- * the window, the relocation's counts (G1, Q6), and the per-team tick. No
- * unlock is sent: the intro says so.
+ * ruling-2 shape, headed by the STORED blackout row (the commit gate's read
+ * of the same rows, never the draft), one row that keeps its range, the
+ * count in the window, the relocation's counts (G1, Q6), and the per-team
+ * tick. No unlock is sent: the intro says so.
  */
 function blackoutDialogFor({ shown, rows, names, loss, prompt, snapshotRow, team }) {
-  const commit = causeCommitOf(rows, loss);
+  const commit = storedCauseOf(rows, loss);
   if (!commit.committed || commit.stored === null) {
     throw new Error(
       ENACT_REFUSAL_TEXT[commit.refusal] ??
@@ -774,9 +776,12 @@ function blackoutDialogFor({ shown, rows, names, loss, prompt, snapshotRow, team
  * 11d plan §2.1), printed beside the closures it honoured. Nothing here is
  * enforced by the panel: it says what the repair took into account.
  *
- * @param {{ declared: any }} props
+ * `enactedWindows` is judged for a blackout only (the adapter's rule 4), so
+ * it is not printed for a retirement, where it would always read 0.
+ *
+ * @param {{ declared: any, blackout: boolean }} props
  */
-function ExceptionsDeclared({ declared }) {
+function ExceptionsDeclared({ declared, blackout }) {
   if (!declared?.supplied) {
     return (
       <li data-testid="practice-repair-exceptions-declared" data-supplied="false">
@@ -788,7 +793,8 @@ function ExceptionsDeclared({ declared }) {
     <li data-testid="practice-repair-exceptions-declared" data-supplied="true">
       Saved temporary changes read: {declared.rowsRead} ({declared.live} live, {declared.withdrawn}{' '}
       withdrawn); {declared.applied} applied to this season&rsquo;s practices, {declared.occupants}{' '}
-      holding ground as a moved practice, {declared.enactedWindows} already enacted for this loss
+      holding ground as a moved practice
+      {blackout ? `, ${declared.enactedWindows} already enacted for this blackout` : ''}
       {declared.outOfSeason.length > 0
         ? `; ${declared.outOfSeason.length} on another season’s practices, not applied`
         : ''}
@@ -800,7 +806,7 @@ function ExceptionsDeclared({ declared }) {
   );
 }
 
-ExceptionsDeclared.propTypes = { declared: PropTypes.object };
+ExceptionsDeclared.propTypes = { declared: PropTypes.object, blackout: PropTypes.bool.isRequired };
 
 /**
  * One row's Enact button, and its visible reason when it is disabled.

@@ -40,7 +40,7 @@ vi.mock('../frontend/src/utils/practicePersistenceClient.js', () => ({
 import PracticeRepairPanel from '../frontend/src/components/scheduling/PracticeRepairPanel.jsx';
 import RetireEstateNodeDialog from '../frontend/src/components/setup/RetireEstateNodeDialog.jsx';
 import {
-  ENACT_BLACKOUT_PREVIEW_TEXT,
+  ENACT_BLACKOUT_UNSAVED_TEXT,
   ENACT_PREVIEW_TEXT,
 } from '../frontend/src/utils/practiceRepairEnact.js';
 import {
@@ -299,7 +299,7 @@ describe('enact panel :: an unsaved blackout is never enacted (11d Q5)', () => {
       expect(within(row).getByTestId('practice-repair-enact')).toBeDisabled();
       const why = within(row).getByTestId('practice-repair-enact-why');
       expect(why).toHaveAttribute('data-enact-gate', 'preview');
-      expect(why).toHaveTextContent(ENACT_BLACKOUT_PREVIEW_TEXT);
+      expect(why).toHaveTextContent(ENACT_BLACKOUT_UNSAVED_TEXT);
       expect(within(row).queryAllByTestId('practice-repair-save-refused')).toHaveLength(0);
     }
     expect(requireExamined(subjects.length, 'series-window')).toBe(2);

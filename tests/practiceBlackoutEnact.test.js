@@ -21,6 +21,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
 
 import {
   ENACT_BLACKOUT_PREVIEW_TEXT,
+  ENACT_BLACKOUT_UNSAVED_TEXT,
   ENACT_GATE,
   ENACT_REFUSAL_TEXT,
   enactGateOf,
@@ -100,8 +101,8 @@ function viewRowOf(stored) {
 function seeded(stored = STORED) {
   const rows = rowsOf({ slots: SLOTS, assignments: ROWS, fields: fieldsWith(null) });
   rows.fieldClosures = stored ? [viewRowOf(stored)] : [];
+  rows.fieldBlackouts = stored ? [{ ...stored }] : [];
   const db = enactDbOf(rows);
-  db.field_blackouts = stored ? [{ ...stored, organization_id: ORG }] : [];
   return { rows, db };
 }
 
@@ -194,10 +195,14 @@ describe('blackout enact UI :: B8 (client), only a saved blackout, as saved, is 
     expect(gateOf(saved.read.rows, draft)).toMatchObject({
       enabled: false,
       why: ENACT_GATE.PREVIEW,
-      text: ENACT_BLACKOUT_PREVIEW_TEXT,
+      text: ENACT_BLACKOUT_UNSAVED_TEXT,
     });
     const unsaved = await session(seeded(null).db);
-    expect(gateOf(unsaved.read.rows)).toMatchObject({ enabled: false, why: ENACT_GATE.PREVIEW });
+    expect(gateOf(unsaved.read.rows)).toEqual({
+      enabled: false,
+      why: ENACT_GATE.PREVIEW,
+      text: ENACT_BLACKOUT_UNSAVED_TEXT,
+    });
   });
 
   // Every stored column, enumerated from the stored row itself (not from the gate).

@@ -77,7 +77,7 @@ export const SAVE_REFUSAL_TEXT = Object.freeze({
     'the series starts on or after the retirement, so it cannot be closed before it',
 });
 
-const WEEKDAY_TEXT = Object.freeze({
+export const WEEKDAY_TEXT = Object.freeze({
   MON: 'Mon',
   TUE: 'Tue',
   WED: 'Wed',

@@ -19,7 +19,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
 }));
 
 import {
-  ENACT_BLACKOUT_PREVIEW_TEXT,
+  ENACT_BLACKOUT_UNSAVED_TEXT,
   ENACT_GATE,
   ENACT_PREVIEW_TEXT,
   enactGateOf,
@@ -374,7 +374,7 @@ describe('enact UI :: 12, an unsaved blackout is never written', () => {
       expect(gate).toEqual({
         enabled: false,
         why: ENACT_GATE.PREVIEW,
-        text: ENACT_BLACKOUT_PREVIEW_TEXT,
+        text: ENACT_BLACKOUT_UNSAVED_TEXT,
       });
     }
     expect(requireExamined(subjects.length, 'series-window')).toBe(2);
@@ -407,8 +407,8 @@ describe('enact UI :: 12, an unsaved blackout is never written', () => {
         reason: blackout.reason,
       },
     ];
+    rows.fieldBlackouts = [{ ...blackout }];
     const db = enactDbOf(rows);
-    db.field_blackouts = [{ ...blackout, organization_id: ORG }];
     const s = await session(db, loss);
     expect(causeCommitOf(s.read.rows, loss).committed).toBe(true);
     const subjects = displacedFromRows(main(), F1, D);

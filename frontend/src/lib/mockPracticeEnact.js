@@ -1,16 +1,24 @@
 /**
  * The mock client's twins of `practice_schedule_fingerprint` (20260929000000)
- * and `enact_practice_recommendation` (20261004000000, 8.6 3b PR 11b), for
- * the enact UI's E2E (3b PR 11c). Behind the DEV/mock guard in
- * `mockSupabaseClient.js`, like the other late arms.
+ * and `enact_practice_recommendation` (20261004000000, 8.6 3b PR 11b; its
+ * blackout arm 20261007000000, 3b PR 11d-2), for the enact UI's E2E (3b PR
+ * 11c). Behind the DEV/mock guard in `mockSupabaseClient.js`, like the other
+ * late arms.
  *
  * **Mirrored**, in the SQL's order:
  * - the admin check (42501), and a NULL base fingerprint (22023, "an enact is
  *   never blind");
- * - `run_data.id = enact.enact_key = enact.run_id`, a retirement cause only;
+ * - `run_data.id = enact.enact_key = enact.run_id`, a retirement or a
+ *   blackout cause, and each kind's own `decision.kind` (`rehome` is
+ *   retirement-only, `relocate` blackout-only); a blackout needs the
+ *   prompt's tick;
  * - the commit gate: the cause field's STORED `effective_to` must be set
  *   (22023 "not committed"), equal `cause.loss.from - 1` (22023 "a different
- *   date"), and equal the record's `cause.stored_effective_to`;
+ *   date"), and equal the record's `cause.stored_effective_to`. For a
+ *   blackout: a `field_blackouts` row of the id in the organisation (22023
+ *   "not saved"), equal in scope, dates, minutes and reason to both
+ *   `cause.stored` and `cause.loss`, with `loss.surface_ids` its field or
+ *   every field of its location (22023 "changed");
  * - idempotency on the enact's own audit row (`metadata.enact_key`): a
  *   second call returns `{ idempotent: true }` and writes nothing;
  * - stale: a base fingerprint that is not the season's current one is
@@ -20,10 +28,15 @@
  *   (`assigned_via = 'recommendation'`) is that team's (22023);
  * - the lock: S is closed or replaced only when `unlock` names it (22023
  *   "... is locked");
+ * - a blackout closes, unlocks and creates nothing, and sends exactly one
+ *   exception: on S, `cause_kind = 'blackout'`, `cause_id = cause.id`, over
+ *   `series.window`, `relocated` on a slot of `decision.to`'s shape or
+ *   `time_tbd` with `decision.tbd_reason` (22023);
  * - the write: S closed at `last_day` or removed, the recommendation rows
  *   inserted, the exceptions recorded, one `practice.unlock_accepted` row per
  *   unlock and the `practice.recommendation_enacted` row, whose metadata is
- *   the record with `stored_effective_to` and `result_fingerprint` filled.
+ *   the record with `stored_effective_to` (a blackout: `stored`) and
+ *   `result_fingerprint` filled.
  *
  * **NOT mirrored** (the SQL and the DB harness are the witnesses for these):
  * - the writer's whole-season key matching and its prune of superseded rows
@@ -36,14 +49,16 @@
  *   daylight checks;
  * - the `scheduler_runs` row, "run id already names another run", and the
  *   `practice.saved` audit row;
- * - advisory locks and transactional rollback (the mock applies nothing
- *   until every check has passed);
+ * - advisory locks, the cause row's FOR SHARE lock, and transactional
+ *   rollback (the mock applies nothing until every check has passed);
  * - md5: the fingerprint is a deterministic 32-hex digest of the same fields
  *   (id, team, slot, range, source, `assigned_via`, and each exception's id
  *   and `withdrawn_at`), not the SQL's md5, so it only equals itself.
  *
  * @module lib/mockPracticeEnact
  */
+
+import { canonicalJson } from '@squadlogic/core/scenario/inputs.js';
 
 const lower = (value) => String(value ?? '').toLowerCase();
 
@@ -106,6 +121,151 @@ function shiftIso(iso, days) {
 const refuse = (code, message) => ({ data: null, error: { code, message } });
 
 /**
+ * A window's inclusive `{ from, until }`, from `[a,b]` or `[a,b)` (the form a
+ * daterange round-trips to), or null when unreadable: the SQL compares the
+ * window as a daterange, so both spellings of one window are one window.
+ */
+function windowBounds(text) {
+  const m = /^\[(\d{4}-\d{2}-\d{2}),(\d{4}-\d{2}-\d{2})([\])])$/.exec(String(text ?? ''));
+  if (!m) return null;
+  return { from: m[1], until: m[3] === ']' ? m[2] : shiftIso(m[2], -1) };
+}
+
+/** `HH:MM[:SS]` as minutes past midnight. */
+function minutesOf(time) {
+  const [h, m] = String(time ?? '').split(':');
+  return Number(h) * 60 + Number(m);
+}
+
+/**
+ * The blackout commit gate (20261007000000 step 2a): the stored row, in the
+ * record's `cause.stored` shape, or a refusal.
+ */
+function blackoutGate(db, orgId, enact) {
+  const causeId = lower(enact.cause?.id);
+  const row = (db.field_blackouts || []).find(
+    (b) => lower(b.id) === causeId && String(b.organization_id) === String(orgId)
+  );
+  if (!row) {
+    return {
+      refusal: refuse(
+        '22023',
+        `blackout ${causeId} is not saved: no field_blackouts row of this organisation has that id; save the blackout first`
+      ),
+    };
+  }
+  const nullable = (value) => (value == null ? null : value);
+  const stored = {
+    field_id: row.field_id == null ? null : lower(row.field_id),
+    location_id: row.location_id == null ? null : lower(row.location_id),
+    blackout_from: row.blackout_from,
+    blackout_until: row.blackout_until,
+    start_minutes: nullable(row.start_minutes),
+    end_minutes: nullable(row.end_minutes),
+    reason: row.reason,
+  };
+  const asLoss = {
+    from: row.blackout_from,
+    until: row.blackout_until,
+    start_minutes: stored.start_minutes,
+    end_minutes: stored.end_minutes,
+    reason: row.reason,
+  };
+  const { surface_ids: claimedSurfaces = [], ...claimedLoss } = enact.cause?.loss || {};
+  if (
+    canonicalJson(stored) !== canonicalJson(enact.cause?.stored) ||
+    canonicalJson(asLoss) !== canonicalJson(claimedLoss)
+  ) {
+    return {
+      refusal: refuse('22023', `blackout ${causeId} changed: stored ${canonicalJson(stored)}`),
+    };
+  }
+  const surfaces =
+    stored.field_id !== null
+      ? [stored.field_id]
+      : (db.fields || [])
+          .filter(
+            (f) =>
+              lower(f.location_id) === stored.location_id &&
+              String(f.organization_id) === String(orgId)
+          )
+          .map((f) => lower(f.id))
+          .sort();
+  if (canonicalJson(surfaces) !== canonicalJson([...claimedSurfaces].map(lower).sort())) {
+    return {
+      refusal: refuse(
+        '22023',
+        `blackout ${causeId} changed: it closes ${surfaces.join(', ')}, the record's loss.surface_ids are ${claimedSurfaces.join(', ')}`
+      ),
+    };
+  }
+  return { stored, surfaces };
+}
+
+/**
+ * Whether S is on the blackout's ground and `series.window` lies inside the
+ * blackout's dates and S's range (20261007000000, after the S row check).
+ * A range the mock cannot read is not narrowed here; the SQL reads it as a
+ * daterange.
+ */
+function isInsideBlackout(db, row, stored, surfaces, window) {
+  const slot = (db.practice_slots || []).find(
+    (ps) => lower(ps.id) === lower(row.practice_slot_id ?? row.slot_id)
+  );
+  const subunit = (db.field_subunits || []).find(
+    (fs) => lower(fs.id) === lower(slot?.field_subunit_id)
+  );
+  const field = slot ? (slot.field_id ?? subunit?.field_id ?? null) : null;
+  const range = windowBounds(row.effective_date_range) ?? {
+    from: '0000-01-01',
+    until: '9999-12-31',
+  };
+  const from = [stored.blackout_from, range.from].sort()[1];
+  const until = [stored.blackout_until, range.until].sort()[0];
+  return (
+    field !== null &&
+    surfaces.includes(lower(field)) &&
+    typeof window?.from === 'string' &&
+    typeof window?.until === 'string' &&
+    window.from <= window.until &&
+    window.from >= from &&
+    window.until <= until
+  );
+}
+
+/** Whether the one blackout exception is the one the record declares (step 7). */
+function isDeclaredBlackoutException(db, orgId, enact, s, exception) {
+  const window = enact.series?.window ?? {};
+  if (
+    lower(exception.assignment_id ?? s) !== s ||
+    exception.cause_kind !== 'blackout' ||
+    lower(exception.cause_id) !== lower(enact.cause?.id) ||
+    canonicalJson(windowBounds(exception.window)) !==
+      canonicalJson({ from: window.from, until: window.until })
+  ) {
+    return false;
+  }
+  const decision = enact.decision ?? {};
+  if (decision.kind === 'time_tbd') {
+    return exception.kind === 'time_tbd' && exception.tbd_reason === decision.tbd_reason;
+  }
+  const to = decision.to ?? {};
+  const slot = (db.practice_slots || []).find(
+    (ps) =>
+      lower(ps.id) === lower(exception.practice_slot_id) &&
+      String(ps.organization_id) === String(orgId)
+  );
+  return (
+    exception.kind === 'relocated' &&
+    slot !== undefined &&
+    lower(slot.field_subunit_id ?? slot.field_id) === lower(to.surface_id) &&
+    String(slot.day_of_week).toUpperCase() === to.weekday &&
+    minutesOf(slot.start_time) === to.start_minutes &&
+    minutesOf(slot.end_time) - minutesOf(slot.start_time) === to.duration_minutes
+  );
+}
+
+/**
  * @param {any} db - the mock DB (mutated on success; the caller saves it)
  * @param {string} name
  * @param {any} params
@@ -135,13 +295,18 @@ export function handlePracticeEnactRpc(db, name, params, ctx) {
   if (!p.base_fingerprint) {
     return refuse('22023', 'an enact is never blind: base_fingerprint is required');
   }
-  // 3. The record describes this run, and a retirement.
+  // 3. The record describes this run, and a retirement or a blackout of its
+  // own shape.
   const key = lower(enact.enact_key);
+  const kind = enact.cause?.kind;
+  const decisionKinds = kind === 'blackout' ? ['relocate', 'time_tbd'] : ['rehome', 'time_tbd'];
   if (
     !key ||
     lower(enact.run_id) !== key ||
     lower(runData.id) !== key ||
-    enact.cause?.kind !== 'retirement' ||
+    (kind !== 'retirement' && kind !== 'blackout') ||
+    !decisionKinds.includes(enact.decision?.kind) ||
+    (kind === 'blackout' && enact.prompt?.accepted !== true) ||
     enact.base_fingerprint !== p.base_fingerprint
   ) {
     return refuse(
@@ -149,30 +314,42 @@ export function handlePracticeEnactRpc(db, name, params, ctx) {
       'enact record is malformed or does not describe the write sent (run id, season, base fingerprint)'
     );
   }
-  // 2a. The commit gate.
+  // 2a. The commit gate (a blackout's, then the retirement's).
+  /** @type {any} */
+  let blackoutStored = null;
+  /** @type {string[]} */
+  let blackoutSurfaces = [];
+  if (kind === 'blackout') {
+    const gate = blackoutGate(db, orgId, enact);
+    if (gate.refusal) return gate.refusal;
+    blackoutStored = gate.stored;
+    blackoutSurfaces = gate.surfaces;
+  }
   const fieldId = lower(enact.cause.id);
   const field = (db.fields || []).find(
     (f) => lower(f.id) === fieldId && String(f.organization_id) === String(orgId)
   );
   const stored = field?.effective_to ?? null;
   const lossFrom = enact.cause.loss?.from;
-  if (stored === null) {
-    return refuse(
-      '22023',
-      `retirement of field ${fieldId} is not committed: no effective_to is stored; save the retirement first`
-    );
-  }
-  if (String(stored) !== shiftIso(lossFrom, -1)) {
-    return refuse(
-      '22023',
-      `retirement of field ${fieldId} is committed with a different date: ${stored} stored, ${shiftIso(lossFrom, -1)} expected (the day before ${lossFrom})`
-    );
-  }
-  if (enact.cause.stored_effective_to !== String(stored)) {
-    return refuse(
-      '22023',
-      `enact record claims stored_effective_to ${enact.cause.stored_effective_to}, but ${stored} is stored`
-    );
+  if (kind === 'retirement') {
+    if (stored === null) {
+      return refuse(
+        '22023',
+        `retirement of field ${fieldId} is not committed: no effective_to is stored; save the retirement first`
+      );
+    }
+    if (String(stored) !== shiftIso(lossFrom, -1)) {
+      return refuse(
+        '22023',
+        `retirement of field ${fieldId} is committed with a different date: ${stored} stored, ${shiftIso(lossFrom, -1)} expected (the day before ${lossFrom})`
+      );
+    }
+    if (enact.cause.stored_effective_to !== String(stored)) {
+      return refuse(
+        '22023',
+        `enact record claims stored_effective_to ${enact.cause.stored_effective_to}, but ${stored} is stored`
+      );
+    }
   }
   // 5. Idempotency, on the enact's own audit row.
   const already = (db.audit_log || []).some(
@@ -224,13 +401,39 @@ export function handlePracticeEnactRpc(db, name, params, ctx) {
   if (strays.length > 0 || newRows.some((a) => lower(a.team_id) !== team)) {
     return refuse('22023', `enact of series ${s} touched more than it: ${strays.join(', ')}`);
   }
+  // A blackout's S is on its ground, inside its dates; it keeps S's range:
+  // one exception, nothing closed, unlocked or created, and the exception
+  // the record declares.
+  if (kind === 'blackout') {
+    if (!isInsideBlackout(db, row, blackoutStored, blackoutSurfaces, enact.series?.window)) {
+      return refuse(
+        '22023',
+        `blackout enact of series ${s} is outside blackout ${lower(enact.cause.id)}`
+      );
+    }
+    if (unlock.length > 0 || closes.length > 0 || newRows.length > 0) {
+      return refuse(
+        '22023',
+        `blackout enact of series ${s} closed, unlocked or replaced a row: a blackout only adds an exception`
+      );
+    }
+    if (
+      exceptions.length !== 1 ||
+      !isDeclaredBlackoutException(db, orgId, enact, s, exceptions[0])
+    ) {
+      return refuse(
+        '22023',
+        `blackout enact of series ${s} recorded an exception that is not the one its record declares`
+      );
+    }
+  }
   // The lock: S is re-ranged or replaced only under an unlock naming it.
   const close = closes.find((c) => lower(c.assignment_id) === s) ?? null;
   const replaced = !close && newRows.length > 0;
   if ((close || replaced) && !unlock.some((u) => lower(u.assignment_id) === s)) {
     return refuse('22023', `practice assignment ${s} is locked: name it in unlock to change it`);
   }
-  if (!close && !replaced) {
+  if (kind !== 'blackout' && !close && !replaced) {
     return refuse(
       '22023',
       `enact of series ${s} neither closed nor replaced it: nothing was enacted`
@@ -243,7 +446,8 @@ export function handlePracticeEnactRpc(db, name, params, ctx) {
   if (close) {
     const from = String(row.effective_date_range).slice(1).split(',')[0];
     row.effective_date_range = `[${from},${close.last_day}]`;
-  } else {
+  } else if (replaced) {
+    // (A blackout neither closes nor replaces S: it keeps its row.)
     db.practice_assignments = (db.practice_assignments || []).filter((a) => a !== row);
   }
   for (const added of newRows) {
@@ -269,6 +473,7 @@ export function handlePracticeEnactRpc(db, name, params, ctx) {
       assignment_id: s,
       window: exception.window,
       kind: exception.kind,
+      practice_slot_id: exception.practice_slot_id ?? null,
       tbd_reason: exception.tbd_reason ?? null,
       cause_kind: exception.cause_kind ?? null,
       cause_id: exception.cause_id ?? null,
@@ -294,7 +499,10 @@ export function handlePracticeEnactRpc(db, name, params, ctx) {
   }
   audit('practice.recommendation_enacted', {
     ...enact,
-    cause: { ...enact.cause, stored_effective_to: String(stored) },
+    cause:
+      kind === 'blackout'
+        ? { ...enact.cause, stored: blackoutStored }
+        : { ...enact.cause, stored_effective_to: String(stored) },
     result_fingerprint: fingerprint,
   });
   return {

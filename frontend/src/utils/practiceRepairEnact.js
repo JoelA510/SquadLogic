@@ -55,9 +55,10 @@ export const ENACT_PREVIEW_TEXT =
 
 /**
  * The client's own refusal of a blackout enact until 3b PR 11d-3 enables it:
- * core can now build the write (11d-1), but the wrapper RPC and the Edge
- * record still refuse it until 11d-2, so nothing is sent from here even with
- * the button forced enabled (PR 11 witness 12).
+ * core builds the write (11d-1) and the record (11d-2), and the wrapper RPC
+ * and the Edge accept it from 11d-2's migration on, but 11d-3 must not merge
+ * before that migration deploys, so nothing is sent from here even with the
+ * button forced enabled (PR 11 witness 12).
  */
 export const ENACT_BLACKOUT_NOT_ENABLED = 'blackout-not-enabled';
 

@@ -33,6 +33,12 @@ updates:
       # until then this bump would fail check:bundle and hold back the group.
       - dependency-name: '@tanstack/react-virtual'
         versions: ['>= 3.14.0']
+      # 2026-10-13: Prettier 3.8+ formats some code differently from 3.7.4
+      # (e.g. `for (...; cond; )`), and the prettier/prettier lint rule fails
+      # on every file formatted the old way. Upgrading it is its own PR, so
+      # in-flight PRs don't churn; pinned at 3.7.4 in package.json.
+      - dependency-name: prettier
+        versions: ['> 3.7.4']
     groups:
       # Non-major bumps are almost always safe; batch them into one PR.
       # Majors arrive one per PR (none is planned: remediation plan D6).

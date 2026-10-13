@@ -11,7 +11,7 @@
 
 > **2026-04-17 reconciliation note:** Smoke checks on 2026-04-17 surfaced that prod was ~10 days behind disk — the three 2026-04-16 migrations (`security_hardening`, `initialize_new_tenant`, `data_retention_cron`) were pending, `rotate_calendar_token(uuid)` was missing (prod had a stale `refresh_calendar_token` body against a non-existent `integrations` table), and the `auto-scheduler` + `fairness-scoring` Edge Functions were undeployed. All five gaps were closed during that session via MCP Open advisor items at that time (1 ERROR: `public.import_efficiency_metrics` as `SECURITY DEFINER` view; 4 WARN categories) were subsequently closed by the 2026-04-21 hardening migrations (`security_invoker` on the view, private `raw-imports` bucket, `search_path` locks on definer functions). `VITE_SENTRY_DSN` is still not set in Vercel prod — production errors are not flowing to Sentry until that's wired and a redeploy is triggered.
 >
-> **2026-05-02 release-prep note:** Vercel reports the `squadlogic` project as framework `vite`, Node `24.x`, and latest production deployment `READY` for `main` commit `30f9aa7e9728008b7038228d9b74b46cc7c2141a` (PR #212). CI currently verifies on Node 20. Keep that runtime split documented until a separate parity PR changes either side with full verification. The repo now contains 49 migration files; production migration/advisor state still needs operator verification before final release sign-off.
+> **2026-05-02 release-prep note:** Vercel reports the `squadlogic` project as framework `vite`, Node `24.x`, and latest production deployment `READY` for `main` commit `30f9aa7e9728008b7038228d9b74b46cc7c2141a` (PR #212). CI verified on Node 20 then; since 2026-10 both run Node 24, pinned by `.nvmrc` and `engines` (see `ENVIRONMENT.md`, "Node runtime"). The repo now contains 49 migration files; production migration/advisor state still needs operator verification before final release sign-off.
 
 ---
 
@@ -20,7 +20,7 @@
 | System              | Expected state                                                                                 | How to verify                                       |
 | ------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | Vercel deployment   | Latest `main` production deployment is `READY`                                                  | Vercel dashboard or connector deployment list       |
-| Vercel Node runtime | Project currently reports Node `24.x`; CI baseline remains Node 20                              | Vercel project settings and `.github/workflows/ci.yml` |
+| Vercel Node runtime | Project reports Node `24.x`; CI runs the `.nvmrc` pin (24); `engines` is `^24.0.0`             | Vercel project settings, `.nvmrc`, `package.json`   |
 | Vercel env vars     | `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` set, `VITE_USE_MOCK_SUPABASE` absent            | Vercel dashboard → Settings → Environment Variables |
 | Supabase project    | `ACTIVE_HEALTHY`                                                                                | Supabase dashboard or MCP `get_project`             |
 | Database migrations | Production has all repo-required migrations applied; local repo currently has 49 migration files | Supabase dashboard → Database → Migrations          |

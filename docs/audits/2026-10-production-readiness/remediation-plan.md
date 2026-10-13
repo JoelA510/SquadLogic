@@ -4,7 +4,8 @@ Repo: **JoelA510/SquadLogic** · Plan drawn up: 2026-10-12 · Source audit: [`au
 
 **Status:** IN PROGRESS as of 2026-10-13 — approved by the owner on 2026-10-13 "as recommended":
 D1-D8 at their defaults, and finding 5.1 moved into Milestone 1 (PR 1-B, as M1.7). Milestone 1 is
-in progress: PR 1-A is open as #551 (not merged); M1.6 was resolved on `main` by #545.
+in progress: PR 1-A merged as #551 (`73d98d0`); PR 1-B (M1.3, M1.4, M1.7) is open as #552;
+M1.6 was resolved on `main` by #545.
 
 End state: every audit area at "no blocker/high findings", E2E coverage of critical
 journeys, staging deploy smoke-tested, docs current — measured against: an organization's
@@ -151,6 +152,21 @@ it), so it carries no ID.
 **PR 1-B — `chore/require-ci-on-main`**
 
 > **M1.3. Nothing requires CI before a merge, and a push to `main` migrates production** (audit finding 7.1, high)
+> - **Status (2026-10-13): live; the record is in #552 (open).** The owner imported ruleset
+>   `25015698` ("main: pull requests with green CI") from `.github/rulesets/main.json`: pull
+>   requests only (0 approvals), `Build & Test` and `Deno Mirror Tests` required on an
+>   up-to-date branch, no force pushes, no deletion. The live rules, read back through
+>   `GET /repos/JoelA510/SquadLogic/rules/branches/main`, match the file (*executed*). The first
+>   ruleset, `25014911`, required agent-ready-template's own job names and was deleted (see
+>   "Discovered during execution"). Both checks report on every pull request, docs-only ones
+>   included: `tests/rulesetRequiredChecks.test.js` reads `ci.yml` and fails on a context that
+>   names no job, a trigger filter, a job condition, `needs` or a matrix (*executed*: shown failing
+>   on a renamed context, a `paths-ignore` filter and a push-only `if`, each planted in the real
+>   files). `docs/operations/ci-cd.md` corrected. Resolving review conversations is not required
+>   (`required_review_thread_resolution: false`): the owner decided 2026-10-13 to keep it off.
+>   **Remaining:** the acceptance criteria (a pull request with a failing `Build & Test` shows
+>   "Merging is blocked"; a direct push is refused) and `check:settings`, which needs a token
+>   with Administration: read (not available to the agent; it got 401).
 > - **Fix approach:** add `.github/rulesets/main.json` from the skeleton
 >   (`prompts/skeletons/.github/rulesets/main.json`), requiring pull requests, the checks
 >   `Build & Test` and `Deno Mirror Tests` (D5), and no force pushes or deletions on `main`; the
@@ -174,6 +190,16 @@ it), so it carries no ID.
 >   reviewed.
 
 > **M1.4. CI runs an end-of-life Node that production doesn't use, and nothing pins one** (audit finding 7.2, high)
+> - **Status (2026-10-13): in #552 (open).** `.nvmrc` `24`, `engines.node` `^24.0.0`, and every
+>   `setup-node` step reads `node-version-file: .nvmrc` (`ci.yml`'s two; `pgtap.yml` had none and
+>   ran npm on the runner image's Node, so it gained one). #332's runtime half, credited; its
+>   actions and dependency refresh stay with M2.1. Vercel builds on `24.x` (API), and `engines`
+>   overrides the dashboard setting there; recorded in `ENVIRONMENT.md`. Test gate *executed*
+>   with agent-ready-template 1.0.0's `check-conformance.mjs`: `node.runtime-pinned` fail -> pass,
+>   `node.ci-uses-pin` pass; with `.nvmrc` removed both fail. `node.ci-uses-pin` also passed
+>   before, because Node 20 was exactly the old `engines` floor (`>=20`). Acceptance *executed*:
+>   #552's `Build & Test` log shows "Resolved .nvmrc as 24" and `node: v24.21.0`; pgTAP passed
+>   on the pinned Node too.
 > - **Fix approach:** land PR #332's runtime half (rebased): `.nvmrc` with `24`, `engines.node`
 >   `^24.0.0` (or the floor the owner wants to support), `node-version-file: .nvmrc` in every
 >   `setup-node` step in `ci.yml` and `pgtap.yml`, and Vercel's Node version set to 24 in the
@@ -194,6 +220,19 @@ it), so it carries no ID.
 > - **Verification label:** executed (the current state); the fix statically reviewed.
 
 > **M1.7. A production build without Supabase configuration serves the mock on the production host** (audit finding 5.1, high; moved from M2.2 into Milestone 1 by the owner at approval, 2026-10-13; numbered after M1.6 so existing references stay valid)
+> - **Status (2026-10-13): in #552 (open).** `config.js` refuses on every host; the host plays no
+>   part, so the opt-in now also runs the mock on a custom domain, where the old guard refused it
+>   (listed in the PR). Test gate *executed*: `tests/mockModeGuard.test.js`, 19 cases; against the
+>   old `config.js` 9 fail, the `*.vercel.app`, `localhost` and `127.0.0.1` cases because the
+>   import resolves instead of throwing. Acceptance *executed* locally: a build without the
+>   variables, served on 127.0.0.1 with `squadlogic.vercel.app` (and a preview name, `localhost`,
+>   a custom domain) mapped to it in Chromium, shows the Configuration Error and never fetches
+>   the mock (the same reproduction on `main`'s build shows the sign-in page); the build with
+>   `VITE_USE_MOCK_SUPABASE=true` loads the mock chunk and its sign-in page; the E2E suite passes
+>   unchanged (94 of 94, mock mode, one worker). CI's `frontend:build` step has no Supabase
+>   variables and still succeeds (the guard is runtime only). #552's Vercel preview has the
+>   Supabase variables (real client, no mock chunk), so previews are unaffected; the owner
+>   confirmed it on the preview, 2026-10-13.
 > - **Fix approach:** fail closed. In a production build (`import.meta.env.PROD`), a missing
 >   `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY` never selects the mock: the guard in
 >   `frontend/src/config.js` shows its "Configuration Error" and throws on every host, with no
@@ -392,6 +431,25 @@ and smoke-tested
 > - **Diff class:** minimal diff.
 > - **Verification label:** statically reviewed.
 
+> **M2.6. `fairness-scoring` records a 0-conflict run for an empty roster** (not an audit finding: found by PR 1-A, #551; medium; placed here by the supervisor, the owner may move it)
+> - **Fix approach:** refuse at the Edge, before evaluating or persisting: a request whose
+>   `practice` block has no teams or no slots gets a 422 with a named code (for example
+>   `EMPTY_PRACTICE_ROSTER`), whether or not `persist` is set. #551 stopped the page sending one;
+>   the server must not rely on that (validation and authorization are server-side).
+> - **Files touched:** `supabase/functions/_shared/schemas/scoring.ts` (or the handler in
+>   `supabase/functions/fairness-scoring/index.ts`), a test under
+>   `supabase/functions/_shared/tests/`.
+> - **Depends on:** none (M1.1 merged).
+> - **Widens:** none.
+> - **Effort:** S
+> - **Acceptance criteria:** a request with `practice.teams: []` or `practice.slots: []`, with
+>   `persist: true`, returns 422 and writes no `evaluation_runs` row.
+> - **Test gate:** the new Deno test of the refusal, shown failing with the check removed; the
+>   discovery-based `deno-mirror-tests` job runs it.
+> - **Rollback:** revert the PR.
+> - **Diff class:** minimal diff (input validation; no schema or persistence change).
+> - **Verification label:** statically reviewed (the defect, read in #551's review).
+
 **Milestone exit:** [ ] no unwaived high/critical advisory and the audit gate runs on PRs and
 weekly · [ ] a production build without Supabase variables fails · [ ] scorecard passes the
 standards these items name · [ ] deployed and smoke-tested
@@ -527,6 +585,34 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Verification label:** statically reviewed.
 >
 > 6.4 — resolved by M4.1.
+
+> **M4.7. Both scoring engines judge a weekly slot by its first occurrence and ignore assignment date ranges** (not an audit finding: found by PR 1-A, #551; medium) — **plan first: needs the owner's approval before any code**
+> - **Why here:** it decides whether the fairness evaluation, a core flow (D3), is right about
+>   real schedules, which is what this milestone measures; and it is a domain-model change, so
+>   it cannot ride in a fix-only milestone. It is the same gap as the other session's backlog
+>   entry from #541: the override panel's per-slot count and `EvaluationPanel` have no date
+>   model, so a closed series still counts against its slot.
+> - **Fix approach (to be planned, not built):** give the evaluators a date model: compare two
+>   assignments only where their date ranges (`validFrom`/`validUntil`, or the stored row's
+>   range) overlap, and compare slot occurrences on the dates both are live rather than the
+>   first occurrence's instant. Same change in `packages/core/src/practiceMetrics.js` (the
+>   coach-conflict sweep) and `supabase/functions/_shared/engines/scoring-engine.ts`, held
+>   together by M1.2's parity test, and in the per-slot counts that share the gap. The plan names
+>   which inputs carry ranges today and what an open-ended range means.
+> - **Files touched:** the two engines, the panel and override counts that read slot usage,
+>   their tests, the parity fixture; the plan says which.
+> - **Depends on:** M1.2 (parity test) and the owner's approval of the plan (CLAUDE.md: a
+>   change to the domain model is planned and approved first).
+> - **Widens:** the season-2026 fixture suite must be run (domain types change).
+> - **Effort:** M
+> - **Acceptance criteria:** two series on the same weekday slot whose date ranges do not
+>   overlap report no coach conflict and do not count against each other's capacity; two that
+>   overlap by one week report it; both engines agree.
+> - **Test gate:** cases for disjoint, touching and overlapping ranges in core and Deno, shown
+>   failing on today's engines; the parity test over the same inputs.
+> - **Rollback:** revert the PR (no data changes).
+> - **Diff class:** flagged change to the domain model (plan first).
+> - **Verification label:** statically reviewed.
 
 ## Milestone 4b — Completeness: accessibility and validation
 
@@ -788,6 +874,36 @@ smoke-tested
   - `fairness-scoring` accepts practice assignments with no teams or slots and, with
     `persist: true`, would record a 0-conflict run; #551 guards only the client. Candidate for a
     follow-up item (an Edge 422). *Statically reviewed.*
+  - Both now items: the Edge refusal as **M2.6**, and the first-occurrence defect as **M4.7**
+    (plan first, owner approval before code), placed by PR 1-B (#552).
+- 2026-10-13, found by PR 1-B (#552):
+  - The first live ruleset, `25014911` (created 16:46 UTC), required agent-ready-template's own
+    CI job names ("Build, lint, typecheck, test", "Tests on the oldest supported Node", "Stories
+    in a real browser", "npm audit (high and critical block)"), which no SquadLogic workflow
+    reports, so no pull request could merge. The owner deleted it and imported `25015698` from
+    `.github/rulesets/main.json`. GitHub never reads that file, so nothing compares it with the
+    live ruleset; `ci-cd.md` says to re-read the live rules after changing either. *Executed*
+    (public rules API).
+  - CodeQL does run on pull requests, through code scanning default setup (the `Analyze (...)`
+    checks), not a workflow file; M1.3's "there is no CodeQL workflow" is right about the files
+    only. Not required. *Executed* (#552's check runs).
+  - `pgtap.yml` had no `setup-node` step, so `npm run test:db` ran on the runner image's Node;
+    fixed in #552 (M1.4).
+  - `supabaseClient.js`'s `MOCK_CAPABLE_BUILD` still counts a build without credentials as
+    mock-capable, so that build still emits the now unreachable mock chunk; and the
+    Configuration Error is a runtime throw that happens before `Sentry.init`, so a production
+    deploy missing its variables goes READY and reports nothing. Both end with M2.2's build
+    failure. *Statically reviewed* (the chunk: *executed*, a local build lists it).
+  - `@types/node` is `^25` while the runtime is pinned to 24, and there is no `engine-strict`, so
+    typecheck admits Node 25-only APIs and `npm ci` on another Node only warns. For M2.1/M2.3.
+    *Statically reviewed.*
+  - `docs/operations/production-cutover.md`'s rollback adds `VITE_USE_MOCK_SUPABASE` and then
+    promotes an existing deployment "instant, no rebuild"; `VITE_` variables are build-time, so
+    a promote without a rebuild does not pick it up. Not fixed. *Statically reviewed.*
+  - #552's Vercel preview runs the real client against `mmwupqsjkikqzvmdvuzm.supabase.co`, the
+    same project `squadlogic.vercel.app` uses (and the only one `vercel.json`'s CSP names), so
+    previews of unmerged branches share production's database. For the owner (M4.1 and the
+    staging question). *Executed* (each page's requests on load, read-only).
 
 ## Deferred with reason
 

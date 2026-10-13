@@ -12,6 +12,7 @@ on:
       - 'supabase/tests/**'
       - 'supabase/config.toml'
       - 'package.json'
+      - '.nvmrc'
       - '.github/workflows/pgtap.yml'
   workflow_dispatch: {}
 
@@ -33,6 +34,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # `npm run test:db` runs under Node; take the version the repo pins
+      # (.nvmrc) rather than whatever the runner image ships.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1

@@ -11,8 +11,10 @@ Supabase keep-alive schedules, and manual dispatch.
 
 ## Reproducibility
 
-CI installs dependencies with `npm ci` from `package-lock.json`. The local
-fresh-checkout baseline is:
+CI installs dependencies with `npm ci` from `package-lock.json`, on the Node
+version `.nvmrc` pins (every `setup-node` step reads it; see
+[`ENVIRONMENT.md`](./ENVIRONMENT.md#node-runtime)). The local fresh-checkout
+baseline is:
 
 ```bash
 npm ci
@@ -221,10 +223,74 @@ apply-time version, and the next push would try to run the file again.
 
 ## Branch Protection
 
-`main` must be protected before release work can merge. Required checks should
-include the primary CI workflow, CodeQL, the Vercel deployment check, and the
-pgTAP workflow for database-affecting pull requests. Conversation resolution
-and pull-request review should remain required.
+`main` is protected by one repository ruleset, "main: pull requests with green
+CI" (id `25015698`), imported on 2026-10-13 from
+[`.github/rulesets/main.json`](../../.github/rulesets/main.json), which is its
+record. GitHub does not read that file: the owner changes the live ruleset in
+Settings (an agent cannot), and an edit to the file changes nothing until the
+live ruleset is changed to match. Keep exactly one such ruleset: GitHub applies every active
+ruleset, so a second one imported beside it adds its required checks to this
+one's.
+
+What it enforces on the default branch:
+
+- **Pull requests only.** A direct push to `main` is refused. No approving
+  review is required (the owner is the only maintainer).
+- **Required checks, on an up-to-date branch:** `Build & Test` and
+  `Deno Mirror Tests`, both jobs of `ci.yml`, reported by GitHub Actions. The
+  branch must contain the latest `main` before it can merge ("strict").
+- **No force pushes and no deletion of `main`.**
+- **Not required:** an approving review, or resolving review conversations
+  (`required_review_thread_resolution: false`, the template skeleton's
+  default). Turning conversation resolution on is the owner's call; until
+  then, an unresolved review thread does not block a merge.
+
+Not required: CodeQL (it runs through GitHub's code scanning default setup,
+reported as the `Analyze (...)` checks, not through a workflow in this
+repository), the Vercel deployment check, and pgTAP. pgTAP runs only on pull requests that touch its `paths`, so as a
+required check it would never report on the rest and would block them forever;
+it joins once it runs on every pull request (plan item M3.2, decision D5).
+
+**Why these two checks can be required.** A required check that never reports
+blocks the pull request forever, so each must report on every pull request to
+`main`, including docs-only ones. `ci.yml` has no `paths` or `paths-ignore`
+filter on `pull_request`, and both jobs' only `if` is
+`github.event_name != 'schedule'`. `Build & Test` runs on a docs-only pull
+request too: its docs-only path skips the build steps inside the job, and the
+job itself still reports. `tests/rulesetRequiredChecks.test.js` fails if a
+required context stops matching a job's `name`, or if the trigger or a job's
+condition changes in a way that could stop it reporting.
+
+**Changing or restoring it (owner):** Settings -> Rules -> Rulesets -> "main:
+pull requests with green CI" -> edit, then save, and change `main.json` to
+match in a pull request. To restore it from the file (for example after it was
+deleted), delete any ruleset left on `main` first, then New ruleset -> Import a
+ruleset -> choose `.github/rulesets/main.json` -> Create; never import the
+file beside a live one. Check afterwards with
+`gh api repos/JoelA510/SquadLogic/rules/branches/main` (public, lists the
+active rules and the ruleset each comes from), or with the
+agent-ready-template's `check:settings` (`core.settings-branch-protected`).
+
+**What changes once it is active:**
+
+- Every merge needs both checks green on a branch that is up to date with
+  `main`; when `main` moves, "Update branch" re-runs CI (about 15-20 minutes)
+  before the merge is allowed.
+- Force pushes to `main` are refused. This repository's history has been
+  rewritten by force push before; a future rewrite needs the ruleset disabled
+  first (Settings -> Rules -> Rulesets -> the ruleset -> Enforcement status:
+  Disabled), and enabled again afterwards.
+- A check renamed in `ci.yml` must be renamed in `main.json` in the same
+  change (the test fails otherwise) and in the live ruleset when it merges;
+  otherwise every pull request waits on a check that no longer exists. The
+  test reads only the file: nothing compares the file with the live ruleset,
+  so check the live rules after any change to either. The first ruleset
+  (id `25014911`, 2026-10-13) required agent-ready-template's own CI job
+  names, which no SquadLogic workflow reports, and blocked every merge until
+  it was deleted and `25015698` imported from this file.
+
+**Rollback:** set the ruleset's enforcement to Disabled (one toggle). The file
+stays.
 
 ## Rollback
 

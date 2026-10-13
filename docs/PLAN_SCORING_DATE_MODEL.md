@@ -1,10 +1,10 @@
 # Plan: M4.7, a date model for the practice scoring engines
 
-Status: **AWAITING THE OWNER'S APPROVAL (2026-10-13).** Docs only; no code
-changes. Remediation plan item M4.7
-(`docs/audits/2026-10-production-readiness/remediation-plan.md`). CLAUDE.md
-requires a plan the owner approves before any change to the domain model, so
-nothing below is built until §10's questions are answered.
+Status: **APPROVED by the owner, 2026-10-13: Q1-Q9 as recommended** (§10).
+Remediation plan item M4.7
+(`docs/audits/2026-10-production-readiness/remediation-plan.md`). Built by the
+implementing PR `fix/practice-scoring-date-model`; exceptions follow in their own
+PR (Q1); the solver is its own plan-first item, M4.8 (Q2).
 
 Evidence labels, per CLAUDE.md: _read_ (statically reviewed), _executed_ (run,
 output quoted), _test-verified_ (a committed test asserts it). Everything in §1
@@ -433,7 +433,7 @@ migration. Fairness runs persisted in between keep their dated numbers in
 
 **Q1. Scope: ranges and slot validity in one PR, and exceptions (`relocated`,
 `time_tbd`) in a follow-up?**
-_Recommendation (not an answer):_ yes, split. Ranges and validity are the
+**Answer (owner, 2026-10-13): as recommended.** _Recommendation:_ yes, split. Ranges and validity are the
 measured defect (§2) and need no new read on the page. Exceptions need the page
 to read and send them and the evaluator to consume `applyPracticeExceptions`'
 occurrences; they arise only from daylight, enact and repair saves, and the
@@ -441,48 +441,48 @@ twins that expand them are already pinned. One PR each keeps each reviewable.
 
 **Q2. The auto-scheduler: keep the solver undated here, and open a separate
 plan-first item for it?**
-_Recommendation (not an answer):_ yes. The remediation plan forbids a change to
+**Answer (owner, 2026-10-13): as recommended.** _Recommendation:_ yes. The remediation plan forbids a change to
 the solver's behaviour, and a dated score or hard constraint changes the search.
 But the solver can place one coach on two teams in W4's shape, which is a real
 defect, so it should be its own item (proposed M4.8, plan first, with the season
 sweep) rather than forgotten.
 
 **Q3. An open-ended assignment range (`[D,)`): read to the slot's validity end?**
-_Recommendation (not an answer):_ yes. It is what the slot allows, it never
+**Answer (owner, 2026-10-13): as recommended.** _Recommendation:_ yes. It is what the slot allows, it never
 invents a date the slot does not have, and the writer refuses to store one from
 this app. The alternative, dropping the row as unreadable, would hide a practice
 that exists.
 
 **Q4. `slotUtilization[].assignedCount`: the peak per date, with the row count
 kept as `assignmentRows`?**
-_Recommendation (not an answer):_ yes. "Is this slot overbooked" is a per-date
+**Answer (owner, 2026-10-13): as recommended.** _Recommendation:_ yes. "Is this slot overbooked" is a per-date
 question; the peak answers it. Keeping the row count under its own label loses
 nothing and keeps the count-unit registry honest.
 
 **Q5. The override panel's "N free": from the season's today on, or across the
 whole season?**
-_Recommendation (not an answer):_ from today on. An override starts today
+**Answer (owner, 2026-10-13): as recommended.** _Recommendation:_ from today on. An override starts today
 (#546), so a closed series must not consume the slot, and a past week's load is
 irrelevant to the choice.
 
 **Q6. Coverage: keep `assignedTeams` season-level (any readable row)?**
-_Recommendation (not an answer):_ yes, in this item. "Which teams have no
+**Answer (owner, 2026-10-13): as recommended.** _Recommendation:_ yes, in this item. "Which teams have no
 practice from today on" is a different question; #64's team warnings already
 answer part of it at Apply. Declared in §6.
 
 **Q7. Add `firstDate` and `sharedDates` to each conflict, and name the first
 date in its message?**
-_Recommendation (not an answer):_ yes. "Overlapping practices on Friday" no
+**Answer (owner, 2026-10-13): as recommended.** _Recommendation:_ yes. "Overlapping practices on Friday" no
 longer says when; an operator fixing a clash that starts in three weeks needs the
 date. The conflict's identity, which parity compares, is unchanged.
 
 **Q8. Undated mode: all-or-nothing date fields, mixed refuses, and
 `summary.dateModel` reported?**
-_Recommendation (not an answer):_ yes. It is what lets the solver and the
+**Answer (owner, 2026-10-13): as recommended.** _Recommendation:_ yes. It is what lets the solver and the
 undated parity extract stay byte-identical, and it makes a dropped field loud.
 
 **Q9. Apply-time metrics (`buildPracticeRunResults`, persisted with the run):
 dated in the same PR?**
-_Recommendation (not an answer):_ yes. It is the same core function with the same
+**Answer (owner, 2026-10-13): as recommended.** _Recommendation:_ yes. It is the same core function with the same
 inputs on the same page; leaving it undated would persist a different answer
 from the one the panel showed.

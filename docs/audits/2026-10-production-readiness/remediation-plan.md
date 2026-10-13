@@ -606,14 +606,15 @@ standards these items name · [ ] deployed and smoke-tested
 > 6.4 — resolved by M4.1.
 
 > **M4.7. Both scoring engines judge a weekly slot by its first occurrence and ignore assignment date ranges** (not an audit finding: found by PR 1-A, #551; medium) — **plan first: needs the owner's approval before any code**
-> - **Status (2026-10-13): planned, awaiting the owner's approval.** The plan is
->   [`docs/PLAN_SCORING_DATE_MODEL.md`](../../PLAN_SCORING_DATE_MODEL.md) (docs-only PR from
->   `claude/vibrant-allen-hr7y7s-m47plan`), with questions Q1-Q9 and a recommendation for each.
+> - **Status (2026-10-13): planned and approved; the owner answered Q1-Q9 as recommended.** The
+>   plan is [`docs/PLAN_SCORING_DATE_MODEL.md`](../../PLAN_SCORING_DATE_MODEL.md) (#555).
+>   Practice exceptions follow in their own PR (Q1); the solver is a separate plan-first item,
+>   M4.8 (Q2).
 >   Measured (*executed*, scratch witness through the page's own slot builder and both engines):
 >   the two arms agree, so the defect is shared, not drift; modelling the corpus's "Select OLD"
 >   revision as closed series gives 11 reported coach conflicts where 1 is real (Edge fairness
 >   score 0.68 -> 0), and re-creating one slot valid from a later date hides the plan's one real
->   conflict. No code until the owner answers.
+>   conflict.
 > - **Why here:** it decides whether the fairness evaluation, a core flow (D3), is right about
 >   real schedules, which is what this milestone measures; and it is a domain-model change, so
 >   it cannot ride in a fix-only milestone. It is the same gap as the other session's backlog

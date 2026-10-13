@@ -65,7 +65,10 @@ dist.old/
 # and unignored, it sat one `git add -A` away from being committed. The same
 # belt-and-braces reasoning as the `*.orig` entry above: the harness cleans
 # these up, and this stops a survivor being committed when it does not.
-.claude/
+# `.claude/skills/` is the exception: Claude Code's copies of the workflow
+# skills are committed (AGENTS.md §3).
+.claude/*
+!.claude/skills/
 
 # Local ESLint output dump. One was committed from a developer machine with an
 # absolute home-directory path in it and went stale; keep it out of the repo.

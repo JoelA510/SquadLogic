@@ -7,6 +7,7 @@
  * the Supabase JS client API surface used by SquadLogic's hooks and pages.
  */
 import { logger } from './logger.js';
+import { MOCK_CAPABLE_BUILD } from '../env.js';
 import { HEADER_ALIASES, RESERVED_KEYS } from '../utils/telemetryUtils.js';
 import { selectLatestTeamRunsPerDivision } from '../utils/schedulerRunFilters.js';
 import { handleCoachPreferenceRpc } from './mockCoachPreferences.js';
@@ -74,7 +75,7 @@ const initialMockData = {
       first_name: 'Mock',
       last_name: 'Admin',
       full_name: 'Mock Admin',
-      email: import.meta.env.VITE_TEST_ADMIN_EMAIL || 'admin@example.com',
+      email: 'admin@example.com',
       role: 'admin',
       organization_id: 'org-1',
     },
@@ -83,7 +84,7 @@ const initialMockData = {
       first_name: 'Mock',
       last_name: 'Coach',
       full_name: 'Mock Coach',
-      email: import.meta.env.VITE_TEST_COACH_EMAIL || 'coach@example.com',
+      email: 'coach@example.com',
       role: 'coach',
       organization_id: 'org-1',
     },
@@ -238,7 +239,7 @@ const initialMockData = {
       profile_id: 'mock-coach-id',
       user_id: 'mock-coach-id',
       full_name: 'Mock Coach',
-      email: import.meta.env.VITE_TEST_COACH_EMAIL || 'coach@example.com',
+      email: 'coach@example.com',
       phone: '555-0101',
       status: 'active',
       import_source: 'coach_import',
@@ -2036,12 +2037,21 @@ const createMockQuery = (table, data = null) => {
 
 // ── Mock Supabase Client ────────────────────────────────────────────────────
 
+/**
+ * The one password the mock accepts, for every demo account. A fixed value,
+ * not a credential: it unlocks only this in-memory mock, and E2E's
+ * `tests/e2e/steps/auth_setup.ts` types the same default. It was read from
+ * `VITE_TEST_PASSWORD`, which put a password-named variable into the client
+ * bundle (audit finding 8.4); real-backend test credentials stay at the Node
+ * layer (`TEST_PASSWORD` and `TEST_*_EMAIL`, read by the E2E steps).
+ */
+const MOCK_PASSWORD = 'test-password-123';
+
 /** @type {any} */
 export const mockSupabase = {
   auth: {
     signInWithPassword: async ({ email, password }) => {
-      const testPassword = import.meta.env.VITE_TEST_PASSWORD || 'test-password-123';
-      if (password === testPassword) {
+      if (password === MOCK_PASSWORD) {
         const role = email.split('@')[0];
         const userId = `mock-${role}-id`;
         const session = {
@@ -2509,7 +2519,7 @@ export const mockSupabase = {
       return adminWrite;
     }
 
-    if (import.meta.env.DEV || import.meta.env.VITE_USE_MOCK_SUPABASE === 'true') {
+    if (MOCK_CAPABLE_BUILD) {
       // Coach practice preferences (migration 20260927000000): the three RPCs,
       // refusals included. Behind the DEV/mock guard like the other late arms,
       // so a production build eliminates the call and the module with it.
@@ -2842,10 +2852,7 @@ export const mockSupabase = {
       return { data: inviteId, error: null };
     }
 
-    if (
-      (import.meta.env.DEV || import.meta.env.VITE_USE_MOCK_SUPABASE === 'true') &&
-      name === 'admin_upsert_organization_schema'
-    ) {
+    if (MOCK_CAPABLE_BUILD && name === 'admin_upsert_organization_schema') {
       const p = params || {};
       const entityType = String(p.p_entity_type || '')
         .trim()
@@ -2937,10 +2944,7 @@ export const mockSupabase = {
       return { data: { ...row, changed }, error: null };
     }
 
-    if (
-      (import.meta.env.DEV || import.meta.env.VITE_USE_MOCK_SUPABASE === 'true') &&
-      ['upsert_team_event_rsvp', 'create_team_message'].includes(name)
-    ) {
+    if (MOCK_CAPABLE_BUILD && ['upsert_team_event_rsvp', 'create_team_message'].includes(name)) {
       const p = params || {};
       const session =
         typeof window !== 'undefined'
@@ -3167,10 +3171,7 @@ export const mockSupabase = {
       return { data: { message }, error: null };
     }
 
-    if (
-      (import.meta.env.DEV || import.meta.env.VITE_USE_MOCK_SUPABASE === 'true') &&
-      name === 'admin_publish_schedule_baseline'
-    ) {
+    if (MOCK_CAPABLE_BUILD && name === 'admin_publish_schedule_baseline') {
       // Mirrors `admin_publish_schedule_baseline` in
       // `20260920000000_publication_baselines.sql` -- **including the
       // refusals**, not just the happy path (LESSONS_LEARNED #13). A mock
@@ -3400,10 +3401,7 @@ export const mockSupabase = {
     // refusals keep the real codes and order: 23502, P0002, 42501, then the
     // half pair and the range (22023, judged before rounding), then the
     // 2-decimal round and the location.coordinates_set audit row.
-    if (
-      (import.meta.env.DEV || import.meta.env.VITE_USE_MOCK_SUPABASE === 'true') &&
-      name === 'admin_set_location_coordinates'
-    ) {
+    if (MOCK_CAPABLE_BUILD && name === 'admin_set_location_coordinates') {
       const p = params || {};
       if (!p.p_location_id) {
         return { data: null, error: { code: '23502', message: 'p_location_id is required' } };
@@ -3498,7 +3496,7 @@ export const mockSupabase = {
     }
 
     if (
-      (import.meta.env.DEV || import.meta.env.VITE_USE_MOCK_SUPABASE === 'true') &&
+      MOCK_CAPABLE_BUILD &&
       [
         'admin_create_location',
         'admin_create_field',
@@ -4560,10 +4558,7 @@ export const mockSupabase = {
       throw new Error(`mock facility RPC "${name}" is listed but has no arm`);
     }
 
-    if (
-      (import.meta.env.DEV || import.meta.env.VITE_USE_MOCK_SUPABASE === 'true') &&
-      name === 'update_game_score'
-    ) {
+    if (MOCK_CAPABLE_BUILD && name === 'update_game_score') {
       await mockSupabase
         .from('games')
         .update({ score_home: params?.p_score_home, score_away: params?.p_score_away })

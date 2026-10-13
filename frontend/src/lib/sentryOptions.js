@@ -5,12 +5,12 @@
  *
  * @param {object} input
  * @param {string} input.dsn
- * @param {boolean} input.dev `import.meta.env.DEV`.
+ * @param {boolean} input.dev `IS_DEV` from env.js (`import.meta.env.DEV`).
  * @param {string | undefined} input.release The build's version. main.jsx passes
- *   `import.meta.env.VITE_APP_VERSION`, which vite.config.js defines from
- *   package.json's `version` at build time.
+ *   env.js's `APP_VERSION` (`VITE_APP_VERSION`), which vite.config.js defines
+ *   from package.json's `version` at build time.
  * @param {string | undefined} [input.deployEnv] Vercel's `VERCEL_ENV` for the
- *   build. main.jsx passes `import.meta.env.VITE_VERCEL_ENV`, which
+ *   build. main.jsx passes env.js's `DEPLOY_ENV` (`VITE_VERCEL_ENV`), which
  *   vite.config.js defines from exactly that one variable at build time.
  * @param {import('@sentry/react').BrowserOptions['integrations']} input.integrations
  * @returns {import('@sentry/react').BrowserOptions}

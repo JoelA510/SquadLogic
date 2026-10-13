@@ -1,6 +1,9 @@
 /**
- * The mock-mode guard in frontend/src/config.js fails closed (plan item M1.7,
- * audit finding 5.1).
+ * The mock-mode guard fails closed (plan item M1.7, audit finding 5.1). It was
+ * in frontend/src/config.js; M2.2 moved it unchanged into frontend/src/env.js,
+ * which config.js re-exports, so these cases still load config.js. Since M2.2
+ * a production build without the variables fails at build time
+ * (tests/env.test.js); this guard is the second line.
  *
  * The guard used to exempt `localhost`, `127.0.0.1` and every `*.vercel.app`
  * host. The production host is `squadlogic.vercel.app`, so a production build
@@ -21,7 +24,7 @@ const PRODUCTION_HOST = 'squadlogic.vercel.app';
 const PREVIEW_HOST = 'squadlogic-git-some-branch-joela510.vercel.app';
 const HOSTS = [PRODUCTION_HOST, PREVIEW_HOST, 'localhost', '127.0.0.1', 'app.example.org'];
 
-/** Every name config.js reads a Supabase URL or key from (VITE_ and bare). */
+/** The Supabase URL and key names, VITE_ and the bare ones config.js once read. */
 const SUPABASE_VARS = [
   'VITE_SUPABASE_URL',
   'VITE_SUPABASE_ANON_KEY',

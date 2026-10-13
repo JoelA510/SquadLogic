@@ -4,7 +4,7 @@ Status: **AWAITING THE OWNER'S APPROVAL (2026-10-13).** Docs only; no code
 changes. Remediation plan item M4.7
 (`docs/audits/2026-10-production-readiness/remediation-plan.md`). CLAUDE.md
 requires a plan the owner approves before any change to the domain model, so
-nothing below is built until §12's questions are answered.
+nothing below is built until §10's questions are answered.
 
 Evidence labels, per CLAUDE.md: _read_ (statically reviewed), _executed_ (run,
 output quoted), _test-verified_ (a committed test asserts it). Everything in §1
@@ -110,7 +110,7 @@ an assignment as `{ teamId, slotId }`:
 | Apply-time metrics (persisted run results)       | `buildPracticeRunResults` → core `evaluatePracticeSchedule` (`:1229-1238`; `practiceRunResults.js:119`), shown by `PracticeReadinessPanel`                           | Yes                                                           |
 | The override panel's "N free" per slot           | `overrideBaseSlots` counts every local row per slot (`:794-809`; `PracticeOverridePanel.jsx:161`)                                                                    | Yes: the backlog entry from #541 (`PHASE_8_PROGRESS.md:7797`) |
 | The auto-scheduler's own score                   | `scoreSchedule` → `scoring-engine.ts` inside the hill climb (`auto-scheduler-solver.ts:224-253`), persisted as `edgeEvaluation`                                      | Yes, and it steers the search                                 |
-| The auto-scheduler's hard constraints            | `checkHardConstraints` on first-occurrence windows (`practice-coaches.ts:138-152`); locked rows hold a slot season-long (`auto-scheduler-solver.ts:19-20`, declared) | Yes; it is the **solver** (§8, Q2)                            |
+| The auto-scheduler's hard constraints            | `checkHardConstraints` on first-occurrence windows (`practice-coaches.ts:138-152`); locked rows hold a slot season-long (`auto-scheduler-solver.ts:19-20`, declared) | Yes; it is the **solver** (§6, Q2)                            |
 | Core `autoScheduler.js`, `evaluationPipeline.js` | core callers of `evaluatePracticeSchedule`; no frontend or Edge file imports either (_executed_ grep)                                                                | Inputs carry no dates; unaffected                             |
 
 ---
@@ -175,7 +175,7 @@ C1, C2 and C4 add one stated modelling assumption each.
   2026-09-14 to 2026-11-20.
 - C0 and C3 show neutrality: with no range that cuts a series, the oracle and
   both engines agree. That is the property that keeps the existing parity extract
-  valid (§4).
+  valid (§3.4).
 - No case overbooks, because each corpus grid row is its own capacity-1 slot,
   as in the parity extract. W3 is the capacity witness.
 
@@ -220,7 +220,7 @@ assignment range. No weekday label is parsed by either engine.
   `[`/`(` markers are honoured.
 - **Open-ended upper bound** (`[2026-11-02,)`, storable in a `daterange`):
   read to the slot's validity end (Q3). Writer v3 refuses to save one from this
-  app (`toPersistenceAssignment`, `:356-371`), so it can only come from
+  app (`toPersistenceAssignment`, `:369-384`), so it can only come from
   elsewhere.
 - **Unreadable range or empty intersection**: an unreadable range is dropped and
   reported in `dataQualityWarnings` / a `data-quality` issue, the existing
@@ -270,7 +270,7 @@ Both engines report which mode they ran in (`summary.dateModel: 'dated' |
 the persisted run (Q8). Undated mode exists for two callers:
 
 - the auto-scheduler's own scoring, which must not change while the solver is
-  frozen (§8, Q2), and
+  frozen (§6 and §8, Q2), and
 - the corpus parity extract, which has no dates (C0 shows it is neutral).
 
 ### 3.4 Engine lockstep (M1.2)
@@ -305,7 +305,7 @@ the persisted run (Q8). Undated mode exists for two callers:
   a pure helper in `frontend/src/utils/` built on `practiceRangeBounds` (Q5).
 - **`fairness-scoring`:** no handler change beyond the schema; anchoring still
   places `start`/`end`.
-- **Auto-scheduler:** unchanged (undated), declared (§8).
+- **Auto-scheduler:** unchanged (undated), declared (§6).
 
 ---
 

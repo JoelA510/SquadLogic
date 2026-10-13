@@ -331,7 +331,8 @@ templates. The full reference, including what the Vercel project sets, is
 migration above the base branch's latest, and no existing one renamed, edited or removed).
 Job **Deno Mirror Tests**: `scripts/deno-mirror-tests.sh` (the Deno twins of core logic, two host
 time zones) and `scripts/deno-check-edge.sh` (`deno check` on every Edge entrypoint, failing on
-zero found). Both jobs are required to merge.
+zero found). Both jobs are required to merge. `audit.yml` runs `check:audit` on PRs, pushes and weekly
+(not required yet; `docs/security/dependency-policy.md`).
 
 On **push to `main`** only: `deploy-migrations` (environment `production`; `supabase db push`
 behind `scripts/ci/migrationGuard.mjs`; reverts are never automatic), then
@@ -352,6 +353,7 @@ behind `scripts/ci/migrationGuard.mjs`; reverts are never automatic), then
 - `npm run format` — Prettier on every file; prefer `npx prettier --write <your files>` (rule 2).
 - `npm run check:bundle` / `check:advisors` / `check:unused` — bundle budget / advisor lint /
   knip (`knip.jsonc`).
+- `npm run check:audit` — dependency audit gate (high/critical advisories, waivers).
 
 ## 13. Key Documentation Reference
 

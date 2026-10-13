@@ -192,7 +192,7 @@ const NUMBER_COLUMNS = new Set(['startMinutes', 'endMinutes', 'isoWeekday']);
 const BOOLEAN_COLUMNS = new Set(['available', 'uncertain']);
 
 /** The schema per subject kind, for validation in both directions. */
-/** @type {Array<[string, import('zod').ZodTypeAny]>} */
+/** @type {Array<[string, import('zod').ZodType<Record<string, unknown>>]>} */
 const SCHEMA_ENTRIES = [
   ['blackout', BlackoutWindowSchema],
   ['recurring-window', RecurringWindowSchema],

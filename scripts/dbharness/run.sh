@@ -915,12 +915,12 @@ for smoke in "$SMOKE_DIR"/*_smoke.sql; do
       else
         echo "FAIL smoke ${id}: it passed without proving the blackout enact audit row carries what the gate read"; STATUS=1
       fi
-      if grep -qF "blackout race: while a blackout enact was open, a second session's admin_update_field_blackout of its blackout timed out 55P03 on the FOR SHARE lock; the same session wrote an unheld row at once" $SCRATCH/harness_smoke; then
+      if grep -qF "blackout race: while a blackout enact was open, a second session's admin_update_field_blackout of its blackout timed out 55P03 on the FOR SHARE lock; the same session locked an unheld row at once" $SCRATCH/harness_smoke; then
         echo "  | (checked) a blackout edit from a second session waits for an open blackout enact: the enact holds its blackout row FOR SHARE until it commits"
       else
         echo "FAIL smoke ${id}: it passed without proving a blackout edit waits for an open blackout enact"; STATUS=1
       fi
-      if grep -qF "retirement race: while a retirement enact was open, a second session's write of the retired field timed out 55P03 on the FOR SHARE lock" $SCRATCH/harness_smoke; then
+      if grep -qF "retirement race: while a retirement enact was open, a second session's FOR NO KEY UPDATE NOWAIT of the retired field was refused 55P03 by the FOR SHARE lock; the same lock on an unheld field was granted at once" $SCRATCH/harness_smoke; then
         echo "  | (checked) a write of the retired field from a second session waits for an open retirement enact: the enact holds its field row FOR SHARE until it commits"
       else
         echo "FAIL smoke ${id}: it passed without proving a retired field write waits for an open retirement enact"; STATUS=1

@@ -562,8 +562,14 @@ BEGIN
         GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
         v_blackout_wait := v_state || ' ' || v_msg;
     END;
+    -- The field probe is a row lock, FOR NO KEY UPDATE NOWAIT: it conflicts
+    -- with the enact's FOR SHARE and with nothing weaker (the writer's own
+    -- foreign-key checks hold KEY SHARE), and runs no trigger. Measured: a
+    -- plain UPDATE of the field also waited with the FOR SHARE removed, so it
+    -- could not witness the lock.
     BEGIN
-        PERFORM dblink_exec(v_conn, format('UPDATE public.fields SET name = name WHERE id = %L', v_f3));
+        PERFORM * FROM dblink(v_conn, format(
+            'SELECT 1 FROM public.fields WHERE id = %L FOR NO KEY UPDATE NOWAIT', v_f3)) AS t(one int);
         v_field_wait := 'committed';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
@@ -571,7 +577,8 @@ BEGIN
     END;
     -- The control: a row no enact holds is written at once by the same session.
     BEGIN
-        PERFORM dblink_exec(v_conn, format('UPDATE public.fields SET name = name WHERE id = %L', v_f2));
+        PERFORM * FROM dblink(v_conn, format(
+            'SELECT 1 FROM public.fields WHERE id = %L FOR NO KEY UPDATE NOWAIT', v_f2)) AS t(one int);
         v_control := 'committed';
     EXCEPTION WHEN OTHERS THEN
         GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
@@ -579,16 +586,16 @@ BEGIN
     END;
     PERFORM dblink_disconnect(v_conn);
     IF v_control <> 'committed' THEN
-        RAISE EXCEPTION 'the second session could not write an unheld row, so its timeouts prove nothing: %', v_control;
+        RAISE EXCEPTION 'the second session could not lock an unheld row, so its refusals prove nothing: %', v_control;
     END IF;
     IF v_blackout_wait NOT LIKE '55P03 %' THEN
         RAISE EXCEPTION 'a blackout edit from a second session did not wait for the open blackout enact (expected 55P03 lock timeout): %', v_blackout_wait;
     END IF;
-    RAISE NOTICE 'blackout race: while a blackout enact was open, a second session''s admin_update_field_blackout of its blackout timed out 55P03 on the FOR SHARE lock; the same session wrote an unheld row at once';
+    RAISE NOTICE 'blackout race: while a blackout enact was open, a second session''s admin_update_field_blackout of its blackout timed out 55P03 on the FOR SHARE lock; the same session locked an unheld row at once';
     IF v_field_wait NOT LIKE '55P03 %' THEN
-        RAISE EXCEPTION 'a write of the retired field from a second session did not wait for the open retirement enact (expected 55P03 lock timeout): %', v_field_wait;
+        RAISE EXCEPTION 'a row lock on the retired field from a second session was not refused while the retirement enact was open (expected 55P03): %', v_field_wait;
     END IF;
-    RAISE NOTICE 'retirement race: while a retirement enact was open, a second session''s write of the retired field timed out 55P03 on the FOR SHARE lock';
+    RAISE NOTICE 'retirement race: while a retirement enact was open, a second session''s FOR NO KEY UPDATE NOWAIT of the retired field was refused 55P03 by the FOR SHARE lock; the same lock on an unheld field was granted at once';
 END;
 $$;
 

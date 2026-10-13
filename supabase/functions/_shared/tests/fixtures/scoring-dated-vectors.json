@@ -958,6 +958,132 @@
         "conflicts": 0,
         "overbooked": []
       }
+    },
+    {
+      "name": "a team holding one slot in two series (closed, then restarted) is two practices, not a duplicate",
+      "witness": "two-series",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": ["C1"]
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-09-28]"
+        },
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-10-20,2026-11-20]"
+        },
+        {
+          "teamId": "T2",
+          "slotId": "S2"
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-08-11",
+            "sharedDates": 12
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 2],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "one series spelled two ways (inclusive and as Postgres stores it) is a duplicate",
+      "witness": "duplicate",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-20]"
+        },
+        {
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        }
+      ],
+      "expected": {
+        "conflicts": [],
+        "slotLoad": {
+          "S1": [1, 1]
+        },
+        "dataQuality": 1,
+        "assignedTeams": 1
+      },
+      "undated": {
+        "conflicts": 0,
+        "overbooked": []
+      }
     }
   ]
 }

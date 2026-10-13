@@ -63,6 +63,14 @@ describe('overrideSlotLoad', () => {
     expect(loadOf(rows, TODAY, slots)).toBe(2);
   });
 
+  it('a slot whose validity has ended offers no place: null, not an empty slot', () => {
+    const ended = [{ id: 'S1', firstDate: '2026-08-12', lastDate: '2026-10-01' }];
+    expect(loadOf([], TODAY, ended)).toBeNull();
+    expect(loadOf([{ slotId: 'S1' }], TODAY, ended)).toBeNull();
+    // Control: before the clock is read, the whole validity counts.
+    expect(loadOf([{ slotId: 'S1' }], null, ended)).toBe(1);
+  });
+
   it('every slot is answered, including an empty one; rows for other slots are ignored', () => {
     const load = overrideSlotLoad({
       slots: [SLOT, { id: 'S2', firstDate: '2026-08-13', lastDate: '2026-11-20' }],

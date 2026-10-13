@@ -472,6 +472,14 @@ export function evaluatePracticeSchedule({
 
   const dataQualityWarnings = [];
   const seenAssignments = new Set();
+  // Dated runs: the series kept per `team::slot`. The table's own key is
+  // (team, slot, range) (`practice_assignments_team_practice_slot_range_unique`),
+  // so a team may hold one slot in two series -- closed and later restarted --
+  // and those are two practices, not a duplicate. A duplicate is a row whose
+  // range is spelled the same or shares a live date with a kept one.
+  const seriesByKey = new Map();
+  let assignmentsCounted = 0;
+  let rowIndex = 0;
   const assignedTeamIds = new Set();
   const assignmentsBySlot = new Map();
   const assignmentsByDivision = new Map();
@@ -553,13 +561,36 @@ export function evaluatePracticeSchedule({
     }
 
     const key = `${assignment.teamId}::${assignment.slotId}`;
-    if (seenAssignments.has(key)) {
-      dataQualityWarnings.push(
-        `duplicate assignment for team ${assignment.teamId} to slot ${assignment.slotId}`
+    if (slot.dating) {
+      const range = String(assignment.effectiveDateRange ?? '');
+      const kept = seriesByKey.get(key) ?? [];
+      const duplicate = kept.some(
+        (series) =>
+          series.range === range ||
+          (series.span !== null &&
+            span.status === LIVE_SPAN_STATUS.LIVE &&
+            sharedLiveDates(series.span, span).count > 0)
       );
-      continue;
+      if (duplicate) {
+        dataQualityWarnings.push(
+          `duplicate assignment for team ${assignment.teamId} to slot ${assignment.slotId}`
+        );
+        continue;
+      }
+      kept.push({ range, span: span.status === LIVE_SPAN_STATUS.LIVE ? span : null });
+      seriesByKey.set(key, kept);
+    } else {
+      if (seenAssignments.has(key)) {
+        dataQualityWarnings.push(
+          `duplicate assignment for team ${assignment.teamId} to slot ${assignment.slotId}`
+        );
+        continue;
+      }
+      seenAssignments.add(key);
     }
-    seenAssignments.add(key);
+    assignmentsCounted += 1;
+    const row = rowIndex;
+    rowIndex += 1;
     assignedTeamIds.add(team.id);
     if (span?.status === LIVE_SPAN_STATUS.NONE) {
       dataQualityWarnings.push(
@@ -578,7 +609,7 @@ export function evaluatePracticeSchedule({
 
     for (const coachId of team.coachIds) {
       const coachAssignments = assignmentsByCoach.get(coachId) ?? [];
-      coachAssignments.push({ teamId: team.id, slot, span: liveSpan });
+      coachAssignments.push({ teamId: team.id, slot, span: liveSpan, row });
       assignmentsByCoach.set(coachId, coachAssignments);
     }
 
@@ -799,9 +830,14 @@ export function evaluatePracticeSchedule({
 
   const coachLoad = {};
   const conflictsByPair = new Map();
+  // Dated runs: per placement pair, the dates each pair of ROWS shares. Two
+  // series of one placement can each clash with the same other placement, on
+  // disjoint dates; the conflict sums them, and a second coach on the same
+  // rows adds no dates.
+  const datesByPair = new Map();
   for (const [coachId, coachAssignments] of assignmentsByCoach.entries()) {
     const sortedAssignments = coachAssignments
-      .map(({ teamId, slot, span }) => ({
+      .map(({ teamId, slot, span, row }) => ({
         teamId,
         slotId: slot.id,
         start: slot.start,
@@ -809,6 +845,7 @@ export function evaluatePracticeSchedule({
         day: slot.day ?? 'unknown',
         dating: slot.dating,
         span,
+        row,
       }))
       .sort((a, b) => a.start - b.start || a.slotId.localeCompare(b.slotId));
 
@@ -838,9 +875,17 @@ export function evaluatePracticeSchedule({
           break;
         }
         const pairKey = conflictPairKey(current, candidate);
+        if (shared) {
+          const rows = datesByPair.get(pairKey) ?? new Map();
+          rows.set(
+            `${Math.min(current.row, candidate.row)}|${Math.max(current.row, candidate.row)}`,
+            shared
+          );
+          datesByPair.set(pairKey, rows);
+        }
         const existing = conflictsByPair.get(pairKey);
         if (existing) {
-          existing.coachIds.push(coachId);
+          if (!shared || !existing.coachIds.includes(coachId)) existing.coachIds.push(coachId);
           continue;
         }
         conflictsByPair.set(pairKey, {
@@ -850,17 +895,18 @@ export function evaluatePracticeSchedule({
             { teamId: current.teamId, slotId: current.slotId },
             { teamId: candidate.teamId, slotId: candidate.slotId },
           ],
-          // Dated runs name when the clash starts and how often (plan Q7).
-          ...(shared
-            ? {
-                reason: `overlapping slots on ${shared.count} date(s) from ${shared.firstDate}`,
-                firstDate: shared.firstDate,
-                sharedDates: shared.count,
-              }
-            : { reason: 'overlapping slots' }),
+          reason: 'overlapping slots',
         });
       }
     }
+  }
+  // Dated runs name when the clash starts and how often (plan Q7).
+  for (const [pairKey, rows] of datesByPair) {
+    const conflict = conflictsByPair.get(pairKey);
+    const all = [...rows.values()];
+    conflict.firstDate = all.map((d) => d.firstDate).sort()[0];
+    conflict.sharedDates = all.reduce((sum, d) => sum + d.count, 0);
+    conflict.reason = `overlapping slots on ${conflict.sharedDates} date(s) from ${conflict.firstDate}`;
   }
   const coachConflicts = [...conflictsByPair.values()];
 
@@ -934,7 +980,7 @@ export function evaluatePracticeSchedule({
       // unknown-reference checks. A single "assignments" number would hide the
       // difference, which is the shortfall `dataQualityWarnings` is about.
       assignmentsRead: assignments.length,
-      assignmentsCounted: seenAssignments.size,
+      assignmentsCounted,
       assignmentRate,
       manualFollowUpRate,
       // Which comparison ran (plan Q8): a caller that dropped the date fields

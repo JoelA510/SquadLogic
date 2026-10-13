@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { calendarDayNumber, wallSeconds } from '../engines/practice-live-dates.ts';
 
 /**
  * Reusable Zod schemas for the Scoring Engine (Deno/Edge compatible)
@@ -42,9 +43,6 @@ export const TeamSchema = z
  * decides what a moment means. Both are required; neither alone is the
  * contract.
  */
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const WALL_TIME = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
-
 export const WallTimeOrInstantSchema = z
   .union([z.string(), z.date(), z.number()])
   .refine(
@@ -79,10 +77,10 @@ export const SlotSchema = z
      * first-occurrence instants as it always has (`summary.dateModel:
      * 'undated'`).
      */
-    firstDate: z.string().regex(ISO_DATE).nullable().optional(),
-    lastDate: z.string().regex(ISO_DATE).nullable().optional(),
-    startTime: z.string().regex(WALL_TIME).nullable().optional(),
-    endTime: z.string().regex(WALL_TIME).nullable().optional(),
+    firstDate: z.string().nullable().optional(),
+    lastDate: z.string().nullable().optional(),
+    startTime: z.string().nullable().optional(),
+    endTime: z.string().nullable().optional(),
   })
   .passthrough();
 
@@ -93,8 +91,11 @@ export const SlotSchema = z
  * score half a calendar as a whole one, so `fairness-scoring` refuses it with
  * a 422 rather than guess. `startTime`/`endTime` alone do not date a slot.
  * The engine (`scoring-engine.ts` `resolveDateModel`) and core refuse the same
- * inputs; `fairness-scoring` calls this right after parsing, so the refusal is
- * a 422 naming the reason rather than the engine's throw becoming a 500.
+ * inputs -- the engine by calling this, with the same readers
+ * (`calendarDayNumber`, `wallSeconds` in `practice-live-dates.ts`), so the gate
+ * and the engine cannot disagree on what reads; `fairness-scoring` calls it right
+ * after parsing, so the refusal is a 422 naming the reason rather than the
+ * engine's throw becoming a 500.
  */
 export function datedSlotsIssue(
   slots: Array<{
@@ -114,12 +115,17 @@ export function datedSlotsIssue(
     return `practice slots must all carry firstDate and lastDate, or none: ${dated} of ${slots.length} do`;
   }
   for (const s of slots) {
-    if (!s.firstDate || !s.lastDate || !s.startTime || !s.endTime) {
-      return `dated slot ${s.id} needs firstDate, lastDate, startTime and endTime`;
+    const startSec = wallSeconds(s.startTime);
+    const endSec = wallSeconds(s.endTime);
+    if (
+      calendarDayNumber(s.firstDate) === null ||
+      calendarDayNumber(s.lastDate) === null ||
+      startSec === null ||
+      endSec === null
+    ) {
+      return `dated slot ${s.id} needs firstDate and lastDate (YYYY-MM-DD) and startTime and endTime (HH:MM[:SS])`;
     }
-    if (s.startTime.padEnd(8, ':00') >= s.endTime.padEnd(8, ':00')) {
-      return `dated slot ${s.id} must end after it starts`;
-    }
+    if (startSec >= endSec) return `dated slot ${s.id} must end after it starts`;
   }
   return null;
 }

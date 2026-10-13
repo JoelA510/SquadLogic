@@ -85,7 +85,8 @@ export interface PracticeExceptionsResult {
 
 /**
  * Days since 1970-01-01 of a `YYYY-MM-DD` (core `facility/eligibility.js` `isoDayNumber`).
- * Exported for `_shared/engines/practice-live-dates.ts` (M4.7), so the Edge has one copy.
+ * Exported for `_shared/engines/practice-live-dates.ts` (M4.7) rather than copied
+ * again; `practice-lighting-overrides.ts` still keeps its own pair (not touched here).
  */
 export function isoDayNumber(iso: string): number {
   const year = Number(iso.slice(0, 4));

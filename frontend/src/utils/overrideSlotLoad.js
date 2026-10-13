@@ -28,9 +28,10 @@ import {
  *   seasonToday: string | null,
  * }} input - `seasonToday` is the season's date (`seasonCalendarDate`), or
  *   `null` before the clock is read, which counts the whole validity.
- * @returns {Map<string, number>} slot id -> teams holding it on its busiest
- *   date from `seasonToday` on; a slot whose dates do not read maps to its row
- *   count, as before.
+ * @returns {Map<string, number | null>} slot id -> teams holding it on its
+ *   busiest date from `seasonToday` on; `null` for a slot with no date left
+ *   from `seasonToday` (its validity has ended: nothing can be placed there);
+ *   a slot whose dates do not read maps to its row count, as before.
  */
 export function overrideSlotLoad({ slots, assignments, seasonToday }) {
   const rowsBySlot = new Map();
@@ -50,6 +51,11 @@ export function overrideSlotLoad({ slots, assignments, seasonToday }) {
       load.set(slot.id, rows.length);
       continue;
     }
+    const remaining = assignmentLiveSpan({ firstDay, lastDay, notBefore: seasonToday });
+    if (remaining.status !== LIVE_SPAN_STATUS.LIVE) {
+      load.set(slot.id, null);
+      continue;
+    }
     const spans = [];
     for (const row of rows) {
       const span = assignmentLiveSpan({
@@ -61,8 +67,7 @@ export function overrideSlotLoad({ slots, assignments, seasonToday }) {
       if (span.status === LIVE_SPAN_STATUS.LIVE) {
         spans.push(span);
       } else if (span.status === LIVE_SPAN_STATUS.UNREADABLE) {
-        const whole = assignmentLiveSpan({ firstDay, lastDay, notBefore: seasonToday });
-        if (whole.status === LIVE_SPAN_STATUS.LIVE) spans.push(whole);
+        spans.push(remaining);
       }
     }
     load.set(slot.id, peakLiveCount(spans));

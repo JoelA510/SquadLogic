@@ -56,6 +56,7 @@ import { evaluatePracticeSchedule as edgeEvaluate } from '../supabase/functions/
 import { DATED_VECTORS, datedProjection, undatedInputs } from './helpers/datedScoringVectors.js';
 import * as coreLive from '@squadlogic/core/utils/practiceLiveDates.js';
 import * as edgeLive from '../supabase/functions/_shared/engines/practice-live-dates.ts';
+import { datedSlotsIssue } from '../supabase/functions/_shared/schemas/scoring.ts';
 
 /** Summary fields both arms publish under the same name, which must agree. */
 const AGREED_SUMMARY_COUNTS = ['totalTeams', 'assignedTeams', 'unassignedTeams'];
@@ -498,6 +499,35 @@ describe('scoring-engine cross-arm drift: dated (M4.7)', () => {
       message
     );
     expect(() => edgeEvaluate(inputs)).toThrow(message);
+  });
+
+  it("fairness-scoring's 422 gate refuses exactly what both engines refuse", () => {
+    const vector = DATED_VECTORS.vectors.find((v) => v.witness === 'W4');
+    const [a, b] = vector.slots;
+    const { firstDate: _f, lastDate: _l, ...undatedB } = b;
+    const cases = [
+      { name: 'dated', slots: [a, b], refused: false },
+      { name: 'undated', slots: undatedInputs(vector).slots, refused: false },
+      { name: 'mixed', slots: [a, undatedB], refused: true },
+      { name: 'not a calendar date', slots: [a, { ...b, lastDate: '2026-02-30' }], refused: true },
+      { name: 'no wall window', slots: [a, { ...b, endTime: null }], refused: true },
+      { name: 'ends before it starts', slots: [a, { ...b, endTime: '15:59' }], refused: true },
+      { name: 'an hour that is not one', slots: [a, { ...b, startTime: '24:00' }], refused: true },
+    ];
+    for (const { name, slots, refused } of cases) {
+      const issue = datedSlotsIssue(slots);
+      expect(issue !== null, name).toBe(refused);
+      const inputs = { teams: vector.teams, slots, assignments: [] };
+      if (refused) {
+        expect(() => edgeEvaluate(inputs), name).toThrow(issue);
+        expect(
+          () => coreEvaluate({ ...inputs, schoolDayEnd: undefined, timezone: 'UTC' }),
+          name
+        ).toThrow(issue);
+      } else {
+        expect(() => edgeEvaluate(inputs), name).not.toThrow();
+      }
+    }
   });
 
   it('the two live-date modules agree on an enumerated product of ranges', () => {

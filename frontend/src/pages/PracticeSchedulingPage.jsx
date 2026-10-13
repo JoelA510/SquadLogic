@@ -823,6 +823,9 @@ export default function PracticeSchedulingPage() {
   // Each slot's load on its busiest date from the season's today on (M4.7,
   // plan Q5): an override starts today, so a series that has already ended
   // does not take a place, and a past week's load is not this choice's.
+  // Read on every render and passed as a dependency, so a page left open past
+  // midnight recounts on its next render rather than clipping at yesterday.
+  const overrideSeasonToday = seasonCalendarDate(Date.now(), timezone);
   const overrideBaseSlots = useMemo(() => {
     const load = overrideSlotLoad({
       slots: schedulerSlots.map((slot) => ({ id: slot.id, ...slotDating(slot) })),
@@ -831,7 +834,7 @@ export default function PracticeSchedulingPage() {
         effectiveDateRange:
           assignment.effectiveDateRange ?? assignment.effective_date_range ?? null,
       })),
-      seasonToday: seasonCalendarDate(Date.now(), timezone),
+      seasonToday: overrideSeasonToday,
     });
 
     return schedulerSlots.map((slot) => ({
@@ -839,9 +842,11 @@ export default function PracticeSchedulingPage() {
       day: slot.day,
       startLabel: slot.startTime.slice(0, 5),
       totalCapacity: slot.capacity,
-      totalAssigned: load.get(slot.id) ?? 0,
+      // A slot with no date left from today has no place to offer: shown full,
+      // as the stage handler refuses it.
+      totalAssigned: load.get(slot.id) ?? slot.capacity,
     }));
-  }, [localAssignments, schedulerSlots, timezone]);
+  }, [localAssignments, schedulerSlots, overrideSeasonToday]);
 
   // **Unplaceable slots no longer disable the scheduler by themselves.** They
   // used to (`Boolean(slotShapeError)`), back when one unreadable row emptied

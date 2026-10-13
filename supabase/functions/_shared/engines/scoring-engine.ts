@@ -1,4 +1,5 @@
 import type { Team, Slot, PracticeAssignment, GameAssignment } from '../schemas/scoring.ts';
+import { datedSlotsIssue } from '../schemas/scoring.ts';
 import { conflictPairKey, listTeamCoachIds } from './practice-coaches.ts';
 import {
   assignmentLiveSpan,
@@ -87,31 +88,22 @@ const isDatedSlot = (slot: Slot) =>
 /**
  * Core `resolveDateModel` (`practiceMetrics.js`): every slot carries
  * `firstDate`, `lastDate`, `startTime` and `endTime`, or none carries a date;
- * a mix throws. `fairness-scoring` refuses the same inputs with a 422 first
- * (`datedSlotsIssue` in `schemas/scoring.ts`), so a throw here is a caller bug.
+ * a mix throws. The rule is `datedSlotsIssue` (`schemas/scoring.ts`), which
+ * `fairness-scoring` answers with a 422 first, so a throw here is a caller bug.
  */
 function resolveDateModel(slots: Slot[]): Map<string, SlotDating> | null {
-  const dated = slots.filter(isDatedSlot).length;
-  if (dated === 0) return null;
-  if (dated !== slots.length) {
-    throw new TypeError(
-      `practice slots must all carry firstDate and lastDate, or none: ${dated} of ${slots.length} do`
-    );
-  }
+  const issue = datedSlotsIssue(slots);
+  if (issue !== null) throw new TypeError(issue);
+  if (!slots.some(isDatedSlot)) return null;
   const datings = new Map<string, SlotDating>();
   for (const slot of slots) {
-    const firstDay = calendarDayNumber(slot.firstDate);
-    const lastDay = calendarDayNumber(slot.lastDate);
-    const startSec = wallSeconds(slot.startTime);
-    const endSec = wallSeconds(slot.endTime);
-    if (firstDay === null || lastDay === null || startSec === null || endSec === null) {
-      throw new TypeError(
-        `dated slot ${slot.id} needs firstDate and lastDate (YYYY-MM-DD) and startTime and endTime (HH:MM[:SS])`
-      );
-    }
-    if (startSec >= endSec) throw new TypeError(`dated slot ${slot.id} must end after it starts`);
     // Two entries sharing an id are one slot, the last one standing, as `slotsById` reads them.
-    datings.set(slot.id, { firstDay, lastDay, startSec, endSec });
+    datings.set(slot.id, {
+      firstDay: calendarDayNumber(slot.firstDate) as number,
+      lastDay: calendarDayNumber(slot.lastDate) as number,
+      startSec: wallSeconds(slot.startTime) as number,
+      endSec: wallSeconds(slot.endTime) as number,
+    });
   }
   return datings;
 }
@@ -184,8 +176,13 @@ export function evaluatePracticeSchedule(params: {
     team: Team;
     slot: Slot;
     span: Span | null;
+    row: number;
   }> = [];
   const seenAssignments = new Set<string>();
+  // Core's dated duplicate rule: a team may hold one slot in two series
+  // (the table's key is team, slot, range); a duplicate is the same range or
+  // one sharing a live date with a kept series.
+  const seriesByKey = new Map<string, Array<{ range: string; span: Span | null }>>();
   const dataQualityMessages: string[] = [];
   for (const a of assignments) {
     const team = teamsById.get(a.teamId);
@@ -215,11 +212,32 @@ export function evaluatePracticeSchedule(params: {
       continue;
     }
     const key = `${a.teamId}::${a.slotId}`;
-    if (seenAssignments.has(key)) {
-      dataQualityMessages.push(`duplicate assignment for team ${a.teamId} to slot ${a.slotId}`);
-      continue;
+    if (span) {
+      const range = String(a.effectiveDateRange ?? '');
+      const kept = seriesByKey.get(key) ?? [];
+      const duplicate = kept.some(
+        (series) =>
+          series.range === range ||
+          (series.span !== null &&
+            span.status === 'live' &&
+            sharedLiveDates(series.span, span).count > 0)
+      );
+      if (duplicate) {
+        dataQualityMessages.push(`duplicate assignment for team ${a.teamId} to slot ${a.slotId}`);
+        continue;
+      }
+      kept.push({
+        range,
+        span: span.status === 'live' ? { first: span.first, last: span.last } : null,
+      });
+      seriesByKey.set(key, kept);
+    } else {
+      if (seenAssignments.has(key)) {
+        dataQualityMessages.push(`duplicate assignment for team ${a.teamId} to slot ${a.slotId}`);
+        continue;
+      }
+      seenAssignments.add(key);
     }
-    seenAssignments.add(key);
     if (span?.status === 'none') {
       dataQualityMessages.push(
         `assignment for team ${a.teamId} has no date inside slot ${a.slotId}'s validity`
@@ -231,6 +249,7 @@ export function evaluatePracticeSchedule(params: {
       team,
       slot,
       span: span?.status === 'live' ? { first: span.first, last: span.last } : null,
+      row: resolvedAssignments.length,
     });
   }
 
@@ -336,10 +355,13 @@ export function evaluatePracticeSchedule(params: {
       day: string;
       dating: SlotDating | null;
       span: Span | null;
+      row: number;
     }>
   >();
+  // Core's dated merge: the dates each pair of ROWS shares, summed per placement pair.
+  const datesByPair = new Map<string, Map<string, { count: number; firstDate: string | null }>>();
 
-  resolvedAssignments.forEach(({ team, slot, span, ...a }) => {
+  resolvedAssignments.forEach(({ team, slot, span, row, ...a }) => {
     const start = new Date(slot.start);
     const end = new Date(slot.end);
     // `slot.day ?? 'unknown'`, which is what `practiceMetrics.js:582` does.
@@ -371,6 +393,7 @@ export function evaluatePracticeSchedule(params: {
         day,
         dating: datings?.get(slot.id) ?? null,
         span,
+        row,
       });
     }
   });
@@ -397,9 +420,17 @@ export function evaluatePracticeSchedule(params: {
           break;
         }
         const pairKey = conflictPairKey(current, candidate);
+        if (shared) {
+          const rows = datesByPair.get(pairKey) ?? new Map();
+          rows.set(
+            `${Math.min(current.row, candidate.row)}|${Math.max(current.row, candidate.row)}`,
+            shared
+          );
+          datesByPair.set(pairKey, rows);
+        }
         const existing = conflictsByPair.get(pairKey);
         if (existing) {
-          existing.coachIds.push(coachId);
+          if (!shared || !existing.coachIds.includes(coachId)) existing.coachIds.push(coachId);
           continue;
         }
         const entry = {
@@ -417,6 +448,13 @@ export function evaluatePracticeSchedule(params: {
         coachConflicts.push(entry);
       }
     }
+  }
+
+  for (const [pairKey, rows] of datesByPair) {
+    const conflict = conflictsByPair.get(pairKey)!;
+    const all = [...rows.values()];
+    conflict.firstDate = all.map((d) => d.firstDate as string).sort()[0];
+    conflict.sharedDates = all.reduce((sum, d) => sum + d.count, 0);
   }
 
   // Reason and issue are built once the pair is fully merged, so each names every coach it shares.

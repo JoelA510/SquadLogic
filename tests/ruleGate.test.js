@@ -1145,3 +1145,53 @@ describe('#60: the spread gate refuses to report a group it never examined', () 
     );
   });
 });
+
+describe('#60b W-b10: the shelved floor raises the accepted record, never replaces it', () => {
+  // SYN = {08GJunior01 at 1 synthetic conflict plus the one #564 carries,
+  // the roster-only team at nought}: published spread 2, excess 1. Shelving
+  // #564 drops its conflict, so TIME TBD would leave excess 0 — *better* than
+  // the record. A synthetic window for #564's coach on either side of its
+  // published kickoff makes every clean slot overlap him once, keeping
+  // 08GJunior01 at 2: placed there, SYN stays at the published excess 1,
+  // which the record accepts. A floor that replaced the record with the
+  // shelved 0 would refuse it.
+  const x = /** @type {any} */ (byId.get(X));
+  const sched = (() => {
+    const base = spreadSchedule(1, MIN_TEAM, [MIN_TEAM]);
+    const coach = /** @type {any} */ (
+      base.commitments.find((c) => c.gameId === X && c.personId === 'oakley ulmer')
+    );
+    const windows = [
+      [420, x.startMinutes - 5],
+      [x.endMinutes + 10, 900],
+    ].map(([startMinutes, endMinutes], i) => ({
+      ...coach,
+      id: `syn-coach-window-${i}`,
+      gameId: null,
+      startMinutes,
+      endMinutes,
+      teamId: '16BSelect02',
+    }));
+    return { ...base, commitments: [...base.commitments, ...windows] };
+  })();
+  const run = displaceOn(sched, X);
+
+  it('meta: published over the bound by 1, and the coach’s overlap with #548 is what puts it there', () => {
+    expect(publishedExcess(sched)).toBe(1);
+    expect(publishedExcess(spreadSchedule(1, MIN_TEAM, [MIN_TEAM]))).toBe(1);
+    expect(
+      sched.commitments.some(
+        (c) => c.personId === 'oakley ulmer' && c.gameId === 'combined_schedule.csv#548'
+      )
+    ).toBe(true);
+  });
+
+  it('places #564 (through pass 2, for the overlap), at the published excess, with no #60b warning', () => {
+    expect(whereIs(run, X)).not.toBeNull();
+    expect(run.meta.overlapFallbackEntered).toBe(1);
+    expect(run.meta.spreadShelvedFloorsMeasured).toBeGreaterThanOrEqual(1);
+    expect(admittedOf(run)).toEqual([]);
+    expect(spreadViolations(run).map((v) => v.details.spread)).toEqual([2]);
+    expect(run.findings.filter((f) => f.code === 'RESOLVE_CONFLICT_SPREAD_CARRIED')).toEqual([]);
+  });
+});

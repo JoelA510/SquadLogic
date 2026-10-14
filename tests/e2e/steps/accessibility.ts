@@ -25,15 +25,6 @@ const KNOWN_VIOLATIONS: ReadonlyArray<{
   reason: string;
 }> = [
   {
-    route: '/schedule/game',
-    theme: 'light',
-    rule: 'color-contrast',
-    html: 'Full Schedule',
-    reason:
-      'text-blue-400 on the game page (2.45:1). The M4.3 PR has GameSchedulingPage.jsx open; ' +
-      'whichever of it and M4.2 merges second fixes it and deletes this entry.',
-  },
-  {
     route: '/teams/builder',
     theme: 'light',
     rule: 'color-contrast',

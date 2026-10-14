@@ -332,6 +332,7 @@ Then(
   async ({ page }, tableName: string) => {
     await waitForMockClient(page);
     const rows = await page.evaluate((table) => {
+      // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts a mock table row, not what the page shows.
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
       return db[table] || [];
     }, tableName);
@@ -345,6 +346,7 @@ Then(
     await waitForMockClient(page);
     const match = await page.evaluate(
       ({ t, s }) => {
+        // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts a mock table row, not what the page shows.
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
         const runs = db.scheduler_runs || [];
         return runs.some((r: Record<string, unknown>) => r.run_type === t && r.status === s);

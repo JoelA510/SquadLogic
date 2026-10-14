@@ -70,5 +70,27 @@ export default tseslint.config(
       'no-unused-vars': 'off',
     },
   },
+  // AGENTS.md §8, E2E rule 2: assert on the DOM, never on the mock's store. A
+  // `Then` step that reads `__MOCK_DB__` checks what a step (or the mock)
+  // wrote, not what the page shows -- the Pillar 1 scenarios passed for months
+  // that way while forging the engines' results (plan M4.6, audit 6.6). Given
+  // and When steps may still seed inputs through it.
+  {
+    files: ['tests/e2e/steps/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...[
+          "CallExpression[callee.name='Then'] Literal[value=/__MOCK_DB__/]",
+          "CallExpression[callee.name='Then'] TemplateElement[value.raw=/__MOCK_DB__/]",
+          "CallExpression[callee.name='Then'] Identifier[name='__MOCK_DB__']",
+        ].map((selector) => ({
+          selector,
+          message:
+            'A Then step asserts on the page, not on __MOCK_DB__ (AGENTS.md §8, E2E rule 2).',
+        })),
+      ],
+    },
+  },
   eslintConfigPrettier
 );

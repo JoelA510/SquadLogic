@@ -2,9 +2,9 @@
  * The registration exports the real-backend scenarios import (plan item M4.1).
  *
  * Pseudonymous throughout: invented names, example.test addresses (a reserved
- * TLD). Built here rather than kept as CSV files so the players are always ten
- * in the current season year, as the seeded U10 division expects, whenever
- * the suite runs.
+ * TLD). Built here rather than kept as CSV files so the twenty-four players are
+ * always aged ten in the current year, as the seeded U10 division expects,
+ * whenever the suite runs. The year is UTC's, as the seed's `current_date` is.
  */
 
 /** The administrator tests/e2e/real-backend/seed.sql creates (a local stack only). */
@@ -82,7 +82,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 
 /** Twenty-four U10 registrations, born in the year ten years before this one. */
 export function registrations(now = new Date()): Registration[] {
-  const birthYear = now.getFullYear() - 10;
+  const birthYear = now.getUTCFullYear() - 10;
   return FIRST_NAMES.map((firstName, i) => {
     const lastName = LAST_NAMES[i];
     return {

@@ -9,6 +9,8 @@
  * shows.
  */
 import { createBdd } from 'playwright-bdd';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { expect, type APIResponse, type Page } from '@playwright/test';
 import { SEEDED_ADMIN, registrationCsv, registrations } from './registrations.js';
 
@@ -67,11 +69,17 @@ When('I import the {string} registration export', async ({ page }, shape: string
   if (shape !== 'full' && shape !== 'narrow') throw new Error(`unknown export shape: ${shape}`);
   await page.goto('/import');
   await expect(page.getByRole('heading', { name: 'Data Import' })).toBeVisible({ timeout: 30_000 });
-  // A completed import is remembered across reloads; start a new one.
+  // A completed import is remembered across reloads; start a new one. Wait
+  // for the panel to settle on one state or the other before choosing.
+  const fileInput = page.locator('input[type="file"]');
   const another = page.getByRole('button', { name: 'Upload Another File' });
-  if (await another.isVisible()) await another.click();
+  await expect(fileInput.or(another).first()).toBeAttached({ timeout: 30_000 });
+  if (await another.isVisible()) {
+    await another.click();
+    await expect(fileInput).toBeAttached();
+  }
 
-  await page.locator('input[type="file"]').setInputFiles({
+  await fileInput.setInputFiles({
     name: `registrations-${shape}.csv`,
     mimeType: 'text/csv',
     buffer: Buffer.from(registrationCsv(shape)),
@@ -116,7 +124,7 @@ Then(
 );
 
 /** What a scenario learned from one page and checks on a later one. */
-const scenarioState = new WeakMap<Page, { teams?: number }>();
+const scenarioState = new WeakMap<Page, { teams?: number; teamNames?: string[] }>();
 const stateOf = (page: Page) => {
   const state = scenarioState.get(page) ?? {};
   scenarioState.set(page, state);
@@ -170,7 +178,12 @@ Then('the teams page lists the synced teams after a reload', async ({ page }) =>
   const list = page.getByRole('region', { name: 'Generated Teams' });
   await expect(list).toBeVisible({ timeout: 30_000 });
   // A rename control is offered only for a team with a persisted (uuid) id.
-  await expect(list.getByRole('button', { name: /^Rename team / })).toHaveCount(teams ?? -1);
+  const renames = list.getByRole('button', { name: /^Rename team / });
+  await expect(renames).toHaveCount(teams ?? -1);
+  const labels = await renames.evaluateAll((buttons) =>
+    buttons.map((b) => b.getAttribute('aria-label') ?? '')
+  );
+  stateOf(page).teamNames = labels.map((label) => label.replace(/^Rename team /, ''));
 });
 
 When('I auto-generate the practice schedule and apply it', async ({ page }) => {
@@ -190,53 +203,61 @@ When('I auto-generate the practice schedule and apply it', async ({ page }) => {
   await expect(review.getByRole('alert')).toHaveCount(0);
 });
 
-/** A CSV line's cells, honouring quoted cells (formatCsv quotes commas and quotes). */
-function csvCells(line: string): string[] {
-  const cells: string[] = [];
+/** Rows of a CSV, honouring quoted cells, quotes and newlines inside them (formatCsv's escaping). */
+function csvRows(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
   let cell = '';
   let quoted = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
     if (quoted) {
-      if (ch === '"' && line[i + 1] === '"') {
+      if (ch === '"' && text[i + 1] === '"') {
         cell += '"';
         i += 1;
       } else if (ch === '"') quoted = false;
       else cell += ch;
     } else if (ch === '"') quoted = true;
     else if (ch === ',') {
-      cells.push(cell);
+      row.push(cell);
+      cell = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i += 1;
+      row.push(cell);
+      rows.push(row);
+      row = [];
       cell = '';
     } else cell += ch;
   }
-  cells.push(cell);
-  return cells;
+  if (cell !== '' || row.length > 0) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows;
 }
 
 Then('the master schedule export lists a practice for every synced team', async ({ page }) => {
-  const teams = stateOf(page).teams;
-  expect(teams, 'a previous step synced the teams').toBeGreaterThan(0);
+  const teamNames = stateOf(page).teamNames ?? [];
+  expect(teamNames.length, 'a previous step read the synced teams').toBeGreaterThan(1);
   await page.goto('/exports');
   await page.getByTestId('generate-csvs-btn').click();
   const download = page.getByRole('button', { name: 'Download Master CSV' });
   await expect(download).toBeVisible({ timeout: 30_000 });
   const [file] = await Promise.all([page.waitForEvent('download'), download.click()]);
-  const text = await (await file.createReadStream()).toArray();
-  const lines = Buffer.concat(text).toString('utf8').trim().split('\n');
+  const chunks = await (await file.createReadStream()).toArray();
+  const [header, ...rows] = csvRows(Buffer.concat(chunks).toString('utf8'));
 
-  const header = csvCells(lines[0]);
-  const teamId = header.indexOf('Team ID');
+  const teamName = header.indexOf('Team Name');
   const eventType = header.indexOf('Event Type');
-  expect(teamId, `Team ID column in ${header.join(',')}`).toBeGreaterThanOrEqual(0);
+  expect(teamName, `Team Name column in ${header.join(',')}`).toBeGreaterThanOrEqual(0);
   expect(eventType, `Event Type column in ${header.join(',')}`).toBeGreaterThanOrEqual(0);
-  const practiceTeams = new Set(
-    lines
-      .slice(1)
-      .map(csvCells)
-      .filter((cells) => cells[eventType] === 'Practice')
-      .map((cells) => cells[teamId])
-  );
-  expect(practiceTeams.size).toBe(teams);
+  const practiced = rows
+    .filter((cells) => cells[eventType] === 'Practice')
+    .map((cells) => cells[teamName]);
+  expect(practiced.length, 'practice rows in the master CSV').toBeGreaterThan(0);
+  // The same teams, by name, as the teams page listed after the sync: none
+  // missing, none unnamed, none the page did not show.
+  expect([...new Set(practiced)].sort()).toEqual([...teamNames].sort());
 });
 
 /** The local stack's API, as the job exported it (playwright.config.ts). */
@@ -246,28 +267,90 @@ function stackUrl(): string {
   return url;
 }
 
-const edgeResponses = new WeakMap<object, APIResponse>();
+/**
+ * Every function supabase/config.toml declares, with its verify_jwt flag: the
+ * registry the deploy job reads, so a function added there is covered here
+ * without anyone remembering to list it.
+ */
+function configuredFunctions(): { name: string; verifyJwt: boolean }[] {
+  const toml = readFileSync(path.resolve('supabase/config.toml'), 'utf8');
+  const found: { name: string; verifyJwt: boolean }[] = [];
+  let current: { name: string; verifyJwt: boolean } | null = null;
+  for (const line of toml.split('\n')) {
+    const header = /^\[(.+)\]\s*$/.exec(line.trim());
+    if (header) {
+      const fn = /^functions\.([\w-]+)$/.exec(header[1]);
+      current = fn ? { name: fn[1], verifyJwt: false } : null;
+      if (current) found.push(current);
+      continue;
+    }
+    const flag = /^verify_jwt\s*=\s*(true|false)\s*$/.exec(line.trim());
+    if (current && flag) current.verifyJwt = flag[1] === 'true';
+  }
+  return found;
+}
+
+const edgeFindings = new WeakMap<object, string[]>();
 
 When(
-  'I post to the {string} Edge Function with only the anon key',
-  async ({ request }, name: string) => {
-    const response = await request.post(`${stackUrl()}/functions/v1/${name}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: process.env.E2E_REAL_BACKEND_ANON_KEY ?? '',
-      },
-      data: {},
-      timeout: BACKEND_TIMEOUT,
-    });
-    edgeResponses.set(request, response);
+  'I call, as a caller with no session, every function the Supabase config marks verify_jwt',
+  async ({ request }) => {
+    const gated = configuredFunctions().filter((fn) => fn.verifyJwt);
+    // Enumerated from the config, so an empty list is a parse failure, not a pass.
+    expect(gated.length, 'verify_jwt functions found in supabase/config.toml').toBeGreaterThan(4);
+    const anonKey = process.env.E2E_REAL_BACKEND_ANON_KEY ?? '';
+    const findings: string[] = [];
+    for (const fn of gated) {
+      // What supabase-js sends with no session: the anon key as the bearer.
+      // It passes the gateway's JWT check, so the function itself must boot
+      // and refuse; a gateway 401 alone would pass a function that cannot boot.
+      const response = await request.post(`${stackUrl()}/functions/v1/${fn.name}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+        },
+        data: {},
+        timeout: BACKEND_TIMEOUT,
+      });
+      const text = await response.text();
+      let refusal: unknown;
+      try {
+        const body = JSON.parse(text) as { message?: unknown; error?: unknown };
+        refusal = body.message ?? body.error;
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        refusal = undefined;
+      }
+      if (response.status() !== 401 || refusal !== 'Unauthorized') {
+        findings.push(`${fn.name}: ${response.status()} ${text.slice(0, 200)}`);
+      }
+    }
+    edgeFindings.set(request, findings);
   }
 );
 
-Then('the Edge Function refuses it as unauthenticated', async ({ request }) => {
-  const response = edgeResponses.get(request);
-  expect(response, 'a previous step called the function').toBeDefined();
-  expect(response?.status(), await response?.text()).toBe(401);
+Then('each one refuses it itself, as unauthorized', async ({ request }) => {
+  const findings = edgeFindings.get(request);
+  expect(findings, 'a previous step called the functions').toBeDefined();
+  expect(findings).toEqual([]);
 });
+
+Then(
+  'calendar-feed, which config.toml leaves open, answers an unknown token with a 404',
+  async ({ request }) => {
+    const feed = configuredFunctions().find((fn) => fn.name === 'calendar-feed');
+    expect(feed, 'calendar-feed in supabase/config.toml').toBeDefined();
+    expect(feed?.verifyJwt).toBe(false);
+    const response = await request.get(
+      `${stackUrl()}/functions/v1/calendar-feed?token=e2e-unknown-calendar-token`,
+      { timeout: BACKEND_TIMEOUT }
+    );
+    expect(response.status(), await response.text()).toBe(404);
+  }
+);
+
+const preflights = new WeakMap<object, APIResponse>();
 
 When('I send a CORS preflight to the {string} Edge Function', async ({ request }, name: string) => {
   const response = await request.fetch(`${stackUrl()}/functions/v1/${name}`, {
@@ -279,12 +362,19 @@ When('I send a CORS preflight to the {string} Edge Function', async ({ request }
     },
     timeout: BACKEND_TIMEOUT,
   });
-  edgeResponses.set(request, response);
+  preflights.set(request, response);
 });
 
-Then('the preflight is allowed', async ({ request }) => {
-  const response = edgeResponses.get(request);
+Then('the preflight allows the headers the app sends', async ({ request }) => {
+  const response = preflights.get(request);
   expect(response, 'a previous step sent the preflight').toBeDefined();
   expect(response?.status()).toBeLessThan(300);
-  expect(response?.headers()['access-control-allow-origin']).toBeTruthy();
+  const headers = response?.headers() ?? {};
+  expect(headers['access-control-allow-origin']).toBeTruthy();
+  const allowed = (headers['access-control-allow-headers'] ?? '')
+    .split(',')
+    .map((h) => h.trim().toLowerCase());
+  for (const header of ['authorization', 'apikey', 'content-type']) {
+    expect(allowed, `Access-Control-Allow-Headers: ${allowed.join(', ')}`).toContain(header);
+  }
 });

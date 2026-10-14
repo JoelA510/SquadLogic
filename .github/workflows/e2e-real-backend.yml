@@ -69,7 +69,17 @@ jobs:
       - name: Give the locally served functions their import map
         run: |
           set -euo pipefail
-          fns=$(awk '/^\[functions\./ { fn = substr($1, 12, length($1) - 12) } /^import_map = / { print fn }' supabase/config.toml)
+          # The function each `import_map` line belongs to: the name of the
+          # `[functions.<name>]` table it sits in; a line in any other table fails.
+          fns=$(awk '
+            /^\[/ { fn = "" }
+            /^\[functions\.[A-Za-z0-9_-]+\][[:space:]]*$/ { fn = $1; sub(/^\[functions\./, "", fn); sub(/\]$/, "", fn) }
+            /^import_map[[:space:]]*=/ { if (fn == "") { print "!outside" } else { print fn } }
+          ' supabase/config.toml)
+          if printf '%s\n' "$fns" | grep -qx '!outside'; then
+            echo "::error::an import_map line in supabase/config.toml is outside a [functions.<name>] table."
+            exit 1
+          fi
           if [ -z "$fns" ]; then
             echo "::error::no function in supabase/config.toml names an import_map; this step has nothing to do and should go."
             exit 1
@@ -78,7 +88,7 @@ jobs:
             cp supabase/functions/import_map.json "supabase/functions/$fn/deno.json"
             echo "supabase/functions/$fn/deno.json <- supabase/functions/import_map.json"
           done
-          sed -i '/^import_map = /d' supabase/config.toml
+          sed -i '/^import_map[[:space:]]*=/d' supabase/config.toml
 
       # The database, auth, the API, storage, realtime and the edge runtime,
       # which serves supabase/functions/* (the import and persistence paths

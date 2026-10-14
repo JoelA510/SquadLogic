@@ -447,7 +447,8 @@ other environment.
 - **The scenarios.** The `real-backend` Playwright project
   (`playwright.config.ts`), which exists only when the job exports the stack's
   URL (`E2E_REAL_BACKEND_SUPABASE_URL`, `E2E_REAL_BACKEND_ANON_KEY`), so
-  `npm run test:e2e` and `ci.yml` see the mock project alone. It serves a
+  `npm run test:e2e` and `ci.yml` see the mock project alone, and the job sees
+  this one alone (no mock dev server is started). It serves a
   production build (`vite build` into `.real-backend-dist/`, then `vite
   preview`), the shape that ships. Features and steps
   are under [`tests/e2e/real-backend/`](../../tests/e2e/real-backend/), outside
@@ -456,17 +457,25 @@ other environment.
   through `team-persistence`, practices placed by `auto-scheduler` and applied
   through `practice-persistence`, and the master export built from what the
   database returns; and every `verify_jwt` function refusing a request with
-  only the anon key. One worker, in file order, against one database.
+  only the anon key (read from `supabase/config.toml`, each refusing on its own,
+  not only at the gateway), `calendar-feed` answering without one, and a CORS
+  preflight. One worker, in file order, against one database.
 - **When it fails.** The job log carries each failed scenario's page text,
   browser console errors and HTTP failures, then the edge runtime, auth and
   REST container logs; the trace is in the `e2e-real-backend-test-results`
   artifact.
 
-**Running it locally** needs Docker: `supabase start`, then
+**Running it locally** needs Docker. Do what the job does, in a scratch
+checkout or with the two changes undone afterwards: copy
+`supabase/functions/import_map.json` to `supabase/functions/auto-scheduler/deno.json`
+and `supabase/functions/fairness-scoring/deno.json`, delete the two
+`import_map =` lines from `supabase/config.toml`, then `supabase start`, then
 `psql "$(supabase status -o env | sed -n 's/^DB_URL=//p' | tr -d '"')" -f tests/e2e/real-backend/seed.sql`,
 then export `E2E_REAL_BACKEND_SUPABASE_URL` and `E2E_REAL_BACKEND_ANON_KEY` from
 `supabase status -o env` (`API_URL`, `ANON_KEY`) and run
-`npx bddgen && npx playwright test --project=real-backend --workers=1`.
+`npx bddgen && npx playwright test --project=real-backend --workers=1`. The
+scenarios expect a fresh database (the first import inserts its players), so
+before running them again: `supabase db reset` and the seed again.
 
 **Not required yet.** It can be added to the ruleset once it has proven stable
 over several runs: add its job name to `.github/rulesets/main.json` and

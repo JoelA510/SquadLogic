@@ -13,8 +13,10 @@
 -- sign in, the organization (onboarded, so the app does not divert to the
 -- setup wizard), the active season and one division.
 --
--- Idempotent (ON CONFLICT DO NOTHING throughout), so re-running it against a
--- local stack is harmless.
+-- Idempotent (ON CONFLICT DO NOTHING throughout), so applying it twice is
+-- harmless. The scenarios are not: they import players and expect a first
+-- import to insert them, so a second run needs a fresh database
+-- (`supabase db reset`, then this file again).
 
 BEGIN;
 

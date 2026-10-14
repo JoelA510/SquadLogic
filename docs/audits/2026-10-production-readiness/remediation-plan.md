@@ -554,19 +554,22 @@ standards these items name · [ ] deployed and smoke-tested
 
 > **M3.1. Coverage thresholds are configured but never enforced** (audit finding 6.1, high)
 > - **Status (2026-10-13): done in PR M3-A (branch `claude/vibrant-allen-hr7y7s-m3a`; open).**
->   Build & Test's "Unit & Integration Tests" step runs `npm run test:coverage`. Thresholds raised
->   from 60 / 50 / 55 / 60 to 92 / 83 / 94 / 93, about a point under the 93.05 / 84.28 / 95.19 /
->   94.04 measured on `18ebc0e` with CI's command (*executed*), reason in `vitest.config.js`; the
->   `.bin` lookup table is excluded (v8 logged a PARSE_ERROR on it). `env.test.js`'s
->   whole-tree `import.meta.env` scan runs 4x slower under coverage (1.1 s to 4.5 s alone) and
->   timed out once at 5 s, so it has a measured 25 s timeout (`docs/testing/test-timeouts.md`).
+>   Build & Test's "Unit & Integration Tests" step runs `npm run test:coverage`. Measured with
+>   CI's command on `main` at `9fba821` merged with this branch (*executed*): 93.08 / 84.37 / 95.21
+>   / 94.07 overall, 65.32 / 55.54 / 67.81 / 69.37 for `frontend/src/hooks`. Thresholds raised
+>   from 60 / 50 / 55 / 60 to about 3 points under each, rounded down: 90 / 81 / 92 / 91 overall
+>   and a separate 62 / 52 / 64 / 66 for the hooks, reasons in `vitest.config.js`. The `.bin`
+>   lookup table is excluded (v8 logged a PARSE_ERROR on it). `env.test.js`'s whole-tree
+>   `import.meta.env` scan runs 4x slower under coverage (1.1 s to 4.5 s alone) and timed out once
+>   at 5 s, so it has a measured 25 s timeout (`docs/testing/test-timeouts.md`).
 >   `tests/workflowPins.test.js` fails if the step goes back to `npm run test` or can't fail.
->   **Test gate, as measured:** deleting the 11 hook unit tests (`tests/use*.test.*`) fails
->   `npm run test:coverage` on all four thresholds (91.23 / 82.51 / 93.38 / 92.13; they would pass
->   at 60 / 50 / 55 / 60). Deleting one file does not: the largest, `feasibilityApi.test.js`,
->   moves the totals by 0.08 points, because the suite covers most code several times over. A
->   gate that fails on any single deleted file needs thresholds at the measured values (a
->   ratchet with ~0.05 points of slack); left for the owner. *Executed.*
+>   **Test gate, as measured:** no single test file can drop coverage past any threshold with
+>   room in it: the suite covers most code several times over, and deleting the largest file
+>   (`feasibilityApi.test.js`, 133 tests) moved the overall figures by 0.08 points. Deleting the
+>   11 hook unit tests (`tests/use*.test.*`) is the gate shown instead: overall it moved to 91.27 /
+>   82.61 / 93.40 / 92.17, which the overall thresholds alone pass, and the hooks' own fail it
+>   (41.13 / 33.48 / 46.23 / 43.78 against 62 / 52 / 64 / 66; `npm run test:coverage` exits 1).
+>   *Executed.*
 > - **Fix approach:** run `npm run test:coverage` in CI in place of `npm run test`. Measured on
 >   `565e980` it passes (93.07 / 84.23 / 95.19 / 94.04 against 60 / 50 / 55 / 60), so no test
 >   work is needed first; the July audit's hooks shortfall no longer holds. Optionally raise the
@@ -665,14 +668,16 @@ standards these items name · [ ] deployed and smoke-tested
 >   Every `uses:` is pinned by full commit SHA with a `# vX.Y.Z` comment, each resolved from the
 >   action's tags with `git ls-remote` (the commit its moving major tag named that day, so no
 >   action changed): checkout v7.0.1, setup-node v7.1.0, upload-artifact v7.0.2, setup-deno
->   v2.0.5, setup-cli v2.1.2. New `workflow-audit.yml` runs zizmor 1.30.1 (pinned, `pipx run`,
->   online with the job's token) on pull requests and pushes to `main`. On `18ebc0e` zizmor
+>   v2.0.5, setup-cli v2.1.2 (#573's `dbharness.yml` included). New `workflow-audit.yml` runs
+>   zizmor 1.30.1 (pinned, `pipx run`, online with the job's token) over `.github` (not the
+>   template's skeletons under `prompts/`) on pull requests and pushes to `main`. On `18ebc0e` zizmor
 >   reported 25 findings (18 tag pins, 5 checkouts persisting the token, 2 Dependabot cooldowns
 >   under 7 days; exit 14); now none: pins, `persist-credentials: false`, and the 3-day cooldown
 >   kept to match `.npmrc` and configured with its reason in `.github/zizmor.yml`. A planted
 >   `pull_request_target` checkout fails it (`dangerous-triggers`, exit 14). Scorecard
 >   `core.workflows-audited`: fail before, pass after. `tests/workflowPins.test.js` holds the pin
->   shape and the zizmor step offline, each detector shown catching a plant. Not a required
+>   shape, one release per action, the zizmor run line (an allowlist) and `.github/zizmor.yml`
+>   offline, each detector shown catching a plant. Not a required
 >   check (owner settings). *Executed* (zizmor offline locally; online in the PR's CI).
 > - **Fix approach:** zizmor in CI on PRs; pin every action by commit with a `# vN` comment;
 >   Dependabot (M2.3) keeps the pins current.
@@ -1289,13 +1294,11 @@ smoke-tested
     (`[local_smtp]`). Not changed. *Executed* (run log).
 
 - 2026-10-13, found by PR M3-A (M3.1, M3.5):
-  - The suite covers most code several times over, so the aggregate thresholds cannot see one
+  - The suite covers most code several times over, so a coverage threshold cannot see one
     deleted test file: removing the largest (`feasibilityApi.test.js`, 133 tests) moved
-    statements from 93.05 to 92.97. M3.1's gate holds for larger losses (the 11 hook tests). A
-    per-file or ratcheting floor is the owner's call. *Executed.*
-  - `tests/rulesetRequiredChecks.test.js` looks for required checks only in `ci.yml`, so making
-    `Workflow audit (zizmor)` or `npm audit (high and critical block)` required means teaching it
-    the other workflows (as `ci-cd.md` already says for the audit). *Statically reviewed.*
+    statements from 93.05 to 92.97. And the core outweighs the hooks about 14 to 1, so deleting
+    every hook test left the overall figures above 90 / 81 / 92 / 91; hence the hooks' own
+    thresholds (M3.1). *Executed.*
   - zizmor's `pedantic` persona adds two findings not fixed here: `audit.yml`'s
     `issues: write` has no comment beside it, and ci.yml's `keepalive` job has no `name`.
     *Executed.*

@@ -40,7 +40,9 @@ loudly and tells the operator to build first.
 
 `npm run test:coverage` is `npm run test` with v8 coverage, and it fails when
 coverage of `packages/core/src/**` and `frontend/src/hooks/**` drops below the
-thresholds in `vitest.config.js` (plan item M3.1). Build & Test's
+thresholds in `vitest.config.js` (plan item M3.1): about 3 points under what
+was measured, overall and, separately, for the hooks, which the well-covered
+core would otherwise hide. Build & Test's
 "Unit & Integration Tests" step runs it; `tests/workflowPins.test.js` fails if
 the step goes back to `npm run test` or is made unable to fail.
 
@@ -108,8 +110,8 @@ request red until it is fixed or waived; that is the point.
 ## Workflow audit
 
 [`.github/workflows/workflow-audit.yml`](../../.github/workflows/workflow-audit.yml)
-runs [zizmor](https://docs.zizmor.sh/) (pinned, 1.30.1) over every workflow and
-`.github/dependabot.yml` on pull requests to `main`, pushes to `main` and manual
+runs [zizmor](https://docs.zizmor.sh/) (pinned, 1.30.1) over `.github` (every workflow and
+`.github/dependabot.yml`; not the template's skeletons under `prompts/`) on pull requests to `main`, pushes to `main` and manual
 dispatch (plan item M3.5). Any finding fails the job: an action pinned by tag,
 a checkout that keeps the job's token in `.git/config`, an expression
 interpolated into a `run:` script, a `pull_request_target` checkout of the pull
@@ -127,15 +129,17 @@ it also checks online that each pinned SHA is a commit of the action it names.
   default with its reason (today one: Dependabot's 3-day cooldown, which
   matches `.npmrc`'s `min-release-age=3`). A one-off is an inline
   `# zizmor: ignore[<audit>] -- <reason>` on the line it excuses.
-- **Locally:** `uvx --from 'zizmor==1.30.1' zizmor --offline .` (or `pipx run`),
-  from the repository root.
+- **Locally:** `uvx --from 'zizmor==1.30.1' zizmor --offline .github` (or
+  `pipx run`), from the repository root.
 - **Bumping zizmor:** new audits arrive in minor releases and can fail the job
   on workflows nobody changed, so bump the pinned version by hand, in a pull
   request that fixes or configures what the new release reports.
 
 **Not a required check yet.** The job reports as `Workflow audit (zizmor)`; it
 has no `paths` filter and no `if`, so it reports on every pull request and can
-be required the same way as the dependency audit above.
+be required like the four in [Branch Protection](#branch-protection): add it to
+`.github/rulesets/main.json` and re-import the ruleset (an owner settings
+change).
 
 ## Edge Functions (`deno-mirror-tests`)
 

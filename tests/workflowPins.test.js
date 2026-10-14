@@ -6,12 +6,16 @@
  * 1. Every `uses:` in `.github/workflows/` names a full 40-character commit
  *    SHA with its release in a `# vX.Y.Z` comment. A tag (`@v7`) runs whatever
  *    the tag is moved to; the comment is what Dependabot's github-actions
- *    updates rewrite beside the SHA, and what a reviewer reads. zizmor (below)
- *    checks the same online in CI; this is the offline floor.
+ *    updates rewrite beside the SHA, and what a reviewer reads. Each action is
+ *    on one release across every workflow. Whether a SHA really is the release
+ *    its comment names can only be checked online: zizmor does that in CI.
  * 2. `workflow-audit.yml` runs a pinned zizmor on every pull request to main,
- *    where a finding fails the job: no paths filter, no `if`, no
- *    `continue-on-error`, no `|| true`, no `--no-exit-codes`, no SARIF output
- *    (which exits 0 on findings).
+ *    where a finding fails the job: no paths or branch filter that skips main,
+ *    no `if`, no `continue-on-error`, and the run line exactly the one known
+ *    to fail on findings (an allowlist, not a list of the ways to defeat it:
+ *    `--no-exit-codes`, SARIF output, `--min-severity`, `--offline`, a
+ *    persona, another config, `|| :`). `.github/zizmor.yml` loosens nothing
+ *    but the Dependabot cooldown, and that to the release wait npm uses.
  * 3. Build & Test runs `npm run test:coverage`, and vitest.config.js carries
  *    the thresholds that make it fail.
  *
@@ -29,11 +33,11 @@ const WORKFLOWS_DIR = path.resolve('.github/workflows');
 const AUDIT_WORKFLOW = 'workflow-audit.yml';
 const CI_WORKFLOW = 'ci.yml';
 /**
- * A literal floor, not derived from the files: the `uses:` lines on main when
- * the pins landed (2 in audit.yml, 13 in ci.yml, 3 in pgtap.yml, 1 in
- * workflow-audit.yml). A scan that finds fewer examined less than was there.
+ * A literal floor, not derived from the files: the `uses:` lines when the pins
+ * landed (2 in audit.yml, 13 in ci.yml, 1 in dbharness.yml, 3 in pgtap.yml, 1
+ * in workflow-audit.yml). A scan that finds fewer examined less than was there.
  */
-const MIN_USES = 19;
+const MIN_USES = 20;
 
 const indentOf = (/** @type {string} */ line) => line.length - line.trimStart().length;
 const isCode = (/** @type {string} */ line) =>
@@ -60,6 +64,30 @@ function pinProblems(text) {
     if (!PIN.test(line) && !LOCAL.test(line)) problems.push(`line ${i + 1}: ${line.trim()}`);
   });
   return { scanned, problems };
+}
+
+/**
+ * Actions pinned to more than one SHA or release across the given workflows.
+ * @param {string[]} texts workflow sources
+ */
+function releaseProblems(texts) {
+  /** @type {Map<string, Set<string>>} */
+  const pins = new Map();
+  for (const text of texts) {
+    for (const line of text.split('\n')) {
+      const m = PIN.exec(line);
+      if (!m) continue;
+      const release = /#\s*(v\S+)/.exec(line)?.[1];
+      if (!pins.has(m[1])) pins.set(m[1], new Set());
+      pins.get(m[1])?.add(`${m[2]} ${release}`);
+    }
+  }
+  return {
+    actions: pins.size,
+    problems: [...pins]
+      .filter(([, set]) => set.size > 1)
+      .map(([action, set]) => `${action}: ${[...set].join(' | ')}`),
+  };
 }
 
 const workflowFiles = readdirSync(WORKFLOWS_DIR).filter((f) => /\.ya?ml$/.test(f));
@@ -97,6 +125,21 @@ describe('action pins: the scanner can fail', () => {
     expect(pinProblems(step('./.github/actions/setup')).problems).toEqual([]);
   });
 
+  it('flags an action on two releases, or one SHA under two release comments', () => {
+    const OTHER = '820762786026740c76f36085b0efc47a31fe5020';
+    const two = releaseProblems([
+      step(`actions/checkout@${SHA} # v7.0.1`),
+      step(`actions/checkout@${OTHER} # v7.0.0`),
+    ]);
+    expect(two.problems).toHaveLength(1);
+    const relabelled = releaseProblems([
+      step(`actions/checkout@${SHA} # v7.0.1`),
+      step(`actions/checkout@${SHA} # v6.0.0`),
+    ]);
+    expect(relabelled.problems).toHaveLength(1);
+    expect(releaseProblems([step(`actions/checkout@${SHA} # v7.0.1`)]).problems).toEqual([]);
+  });
+
   it('counts a step in a shape the pattern does not know, and ignores comments', () => {
     const odd = '      - { name: x, uses: actions/checkout@v7 }';
     expect(pinProblems(odd).scanned).toBe(1);
@@ -118,21 +161,11 @@ describe('action pins: the real workflows', () => {
     expect(total).toBeGreaterThanOrEqual(MIN_USES);
   });
 
-  it('keeps one release per action, so each SHA matches its comment everywhere', () => {
-    /** @type {Map<string, Set<string>>} */
-    const seen = new Map();
-    for (const f of workflowFiles) {
-      for (const line of read(f).split('\n')) {
-        const m = PIN.exec(line);
-        if (!m) continue;
-        const key = `${m[1]}@${m[2]}`;
-        if (!seen.has(key)) seen.set(key, new Set());
-        seen.get(key)?.add(line.replace(/^.*#\s*/, '').trim());
-      }
-    }
-    expect(seen.size).toBeGreaterThan(0);
-    for (const [key, comments] of seen)
-      expect([key, [...comments]]).toEqual([key, [...comments].slice(0, 1)]);
+  it('keeps each action on one SHA and one release across every workflow', () => {
+    const { actions, problems } = releaseProblems(workflowFiles.map(read));
+    expect(problems).toEqual([]);
+    // checkout, setup-node, upload-artifact, setup-deno, setup-cli.
+    expect(actions).toBeGreaterThanOrEqual(5);
   });
 
   it('has Dependabot updating the pins (github-actions ecosystem)', () => {
@@ -165,7 +198,7 @@ function pullRequestProblems(/** @type {string[]} */ lines) {
   const problems = [];
   const prIndent = indentOf(on[at]);
   for (let i = at + 1; i < on.length && (!isCode(on[i]) || indentOf(on[i]) > prIndent); i += 1) {
-    if (/^\s*(paths|paths-ignore|types):/.test(on[i])) {
+    if (/^\s*(paths|paths-ignore|branches-ignore|types):/.test(on[i])) {
       problems.push(`pull_request is filtered (${on[i].trim()})`);
     }
     if (/^\s*branches:/.test(on[i]) && !/\bmain\b/.test(on[i])) {
@@ -191,6 +224,35 @@ function stepAround(lines, at) {
 }
 
 /**
+ * The one run line known to fail on any finding: a pinned release, online
+ * (the job's token), every audit at its default severity, persona and
+ * configuration, GitHub annotations (exit 14 on findings, unlike SARIF), over
+ * the live `.github` directory, and nothing after it.
+ */
+const ZIZMOR_RUN =
+  /^\s*run: pipx run --spec 'zizmor==\d+\.\d+\.\d+' zizmor --format=github \.github\s*$/;
+
+/**
+ * Why .github/zizmor.yml loosens more than it should; empty when the only rule
+ * it configures is the Dependabot cooldown, and it disables and ignores nothing.
+ * @param {string} config
+ */
+function zizmorConfigProblems(config) {
+  const lines = config.split('\n').filter(isCode);
+  const problems = [];
+  for (const l of lines.filter((x) => indentOf(x) === 0)) {
+    if (l.trim() !== 'rules:') problems.push(`unexpected top-level key (${l.trim()})`);
+  }
+  for (const l of lines.filter((x) => indentOf(x) === 2)) {
+    if (l.trim() !== 'dependabot-cooldown:') problems.push(`configures ${l.trim()}`);
+  }
+  for (const l of lines) {
+    if (/^\s*(disable|ignore):/.test(l)) problems.push(`turns an audit off (${l.trim()})`);
+  }
+  return problems;
+}
+
+/**
  * Why workflow-audit.yml could not fail a pull request on a zizmor finding;
  * empty when it can.
  * @param {string} workflow
@@ -204,12 +266,9 @@ function zizmorProblems(workflow) {
     .filter(({ l }) => /^\s*run:.*\bzizmor\b/.test(l));
   if (runs.length !== 1) return [...problems, `expected one zizmor run step, found ${runs.length}`];
   const { l: run, i } = runs[0];
-  if (!/zizmor==\d+\.\d+\.\d+['"\s]/.test(run))
-    problems.push('zizmor is not pinned to one release');
-  if (/--no-exit-codes|--format[= ]sarif|\|\||;\s*true|\bexit 0\b/.test(run)) {
-    problems.push(`the zizmor step cannot fail (${run.trim()})`);
+  if (!ZIZMOR_RUN.test(run)) {
+    problems.push(`the zizmor run line is not the one known to fail on findings (${run.trim()})`);
   }
-  if (!/\s\.\s*$/.test(run)) problems.push('zizmor does not audit the whole repository (.)');
   if (stepAround(lines, i).some((l) => isCode(l) && /^\s*if:/.test(l))) {
     problems.push('the zizmor step has an if');
   }
@@ -230,8 +289,9 @@ describe('workflow-audit.yml', () => {
     expect(zizmorProblems(workflow)).toEqual([]);
   });
 
-  it('configures zizmor with the same release wait as npm and Dependabot', () => {
+  it('configures zizmor with the same release wait as npm and Dependabot, and nothing else', () => {
     const config = readFileSync(path.resolve('.github/zizmor.yml'), 'utf8');
+    expect(zizmorConfigProblems(config)).toEqual([]);
     const days = /^\s*days:\s*(\d+)\s*$/m.exec(config)?.[1];
     const npmrc = readFileSync(path.resolve('.npmrc'), 'utf8');
     const npmDays = /^min-release-age=(\d+)\s*$/m.exec(npmrc)?.[1];
@@ -243,7 +303,23 @@ describe('workflow-audit.yml', () => {
     for (const d of cooldowns) expect(Number(d)).toBeGreaterThanOrEqual(Number(days));
   });
 
-  const RUN = "run: pipx run --spec 'zizmor==1.30.1' zizmor --format=github .";
+  it.each([
+    ['a disabled audit', '  unpinned-uses:\n    disable: true\n', 'configures unpinned-uses'],
+    ['an ignored file', '  artipacked:\n    ignore:\n      - ci.yml\n', 'turns an audit off'],
+    [
+      'an ignore on the cooldown rule',
+      '    ignore:\n      - dependabot.yml\n',
+      'turns an audit off',
+    ],
+  ])('catches a planted zizmor.yml with %s', (_label, plant, problem) => {
+    const config = readFileSync(path.resolve('.github/zizmor.yml'), 'utf8');
+    expect(zizmorConfigProblems(`${config}${plant}`).join('\n')).toContain(problem);
+  });
+
+  const RUN = "run: pipx run --spec 'zizmor==1.30.1' zizmor --format=github .github";
+  const runWith =
+    (/** @type {string} */ from, /** @type {string} */ to) => (/** @type {string} */ w) =>
+      w.replace(RUN, RUN.replace(from, to));
 
   it.each([
     [
@@ -261,26 +337,52 @@ describe('workflow-audit.yml', () => {
       'no pull_request trigger',
     ],
     [
-      'zizmor unpinned',
-      (/** @type {string} */ w) => w.replace("--spec 'zizmor==1.30.1' zizmor", 'zizmor'),
-      'not pinned',
+      'branches-ignore: [main]',
+      (/** @type {string} */ w) =>
+        w.replace(
+          '  pull_request:\n    branches: [main]\n',
+          '  pull_request:\n    branches-ignore: [main]\n'
+        ),
+      'pull_request is filtered',
     ],
+    [
+      'zizmor unpinned',
+      runWith("--spec 'zizmor==1.30.1' zizmor", 'zizmor'),
+      'not the one known to fail',
+    ],
+    ['a version range', runWith('zizmor==1.30.1', 'zizmor>=1.30'), 'not the one known to fail'],
     [
       '--no-exit-codes',
-      (/** @type {string} */ w) =>
-        w.replace(RUN, RUN.replace('zizmor --format', 'zizmor --no-exit-codes --format')),
-      'cannot fail',
+      runWith('zizmor --format', 'zizmor --no-exit-codes --format'),
+      'not the one known to fail',
+    ],
+    ['SARIF output', runWith('--format=github', '--format=sarif'), 'not the one known to fail'],
+    [
+      '--min-severity',
+      runWith('--format=github', '--format=github --min-severity=high'),
+      'not the one known to fail',
     ],
     [
-      'SARIF output',
-      (/** @type {string} */ w) => w.replace(RUN, RUN.replace('--format=github', '--format=sarif')),
-      'cannot fail',
+      '--offline',
+      runWith('--format=github', '--format=github --offline'),
+      'not the one known to fail',
     ],
-    ['an `|| true`', (/** @type {string} */ w) => w.replace(RUN, `${RUN} || true`), 'cannot fail'],
     [
-      'one workflow instead of the repository',
-      (/** @type {string} */ w) => w.replace(RUN, RUN.replace(/ \.$/, ' .github/workflows/ci.yml')),
-      'whole repository',
+      'another persona',
+      runWith('--format=github', '--format=github --persona=regular'),
+      'not the one known to fail',
+    ],
+    [
+      'another config',
+      runWith('--format=github', '--format=github --config /dev/null'),
+      'not the one known to fail',
+    ],
+    ['an `|| true`', runWith('.github', '.github || true'), 'not the one known to fail'],
+    ['an `|| :`', runWith('.github', '.github || :'), 'not the one known to fail'],
+    [
+      'one workflow only',
+      runWith(' .github', ' .github/workflows/ci.yml'),
+      'not the one known to fail',
     ],
     [
       'continue-on-error',
@@ -356,8 +458,11 @@ describe('coverage in CI', () => {
     expect(pkg.scripts['test:coverage']).toBe('vitest run --coverage');
     const { default: config } = await import('../vitest.config.js');
     const thresholds = config.test?.coverage?.thresholds ?? {};
+    const hooks = thresholds['frontend/src/hooks/**'] ?? {};
     for (const key of ['statements', 'branches', 'functions', 'lines']) {
       expect(thresholds[key], key).toBeGreaterThan(0);
+      // The hooks' own floor: the core outweighs them in the overall figure.
+      expect(hooks[key], `hooks ${key}`).toBeGreaterThan(0);
     }
   });
 

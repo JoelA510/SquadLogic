@@ -452,7 +452,7 @@ function workflowProblems(workflow) {
   else {
     const prIndent = indentOf(on[at]);
     for (let i = at + 1; i < on.length && (!code(on[i]) || indentOf(on[i]) > prIndent); i += 1) {
-      if (/^\s*(paths|paths-ignore|types):/.test(on[i])) {
+      if (/^\s*(paths|paths-ignore|branches-ignore|types):/.test(on[i])) {
         problems.push(`pull_request is filtered (${on[i].trim()})`);
       }
       if (/^\s*branches:/.test(on[i]) && !/\bmain\b/.test(on[i])) {
@@ -512,6 +512,15 @@ describe('audit.yml', () => {
       'a paths filter',
       (w) =>
         w.replace('    branches: [main]\n  # Adv', '    branches: [main]\n    paths: [x]\n  # Adv'),
+      'pull_request is filtered',
+    ],
+    [
+      'branches-ignore: [main]',
+      (w) =>
+        w.replace(
+          '  pull_request:\n    branches: [main]\n',
+          '  pull_request:\n    branches-ignore: [main]\n'
+        ),
       'pull_request is filtered',
     ],
     [

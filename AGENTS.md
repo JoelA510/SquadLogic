@@ -273,9 +273,9 @@ surface in both themes. New colors go into `index.css` (light **and** dark block
 ## 8. Testing
 
 - **Vitest:** `npm run test` (`vitest.config.js`: jsdom, setup `tests/setup.js`), files
-  `tests/*.test.{js,jsx}`. Coverage thresholds 92/83/94/93 (statements/branches/functions/lines, CI-enforced)
-  over `packages/core/src/**` and `frontend/src/hooks/**`. Import factories and helpers through
-  their barrels: `import { makeOrganization } from '../factories/index.js';`
+  `tests/*.test.{js,jsx}`. Coverage of `packages/core/src/**` and `frontend/src/hooks/**`, enforced
+  in CI: 90/81/92/91 (statements/branches/functions/lines), hooks alone 62/52/64/66. Import
+  factories and helpers through their barrels: `import { makeOrganization } from '../factories/index.js';`
 - **E2E (Playwright-BDD):** `npm run test:e2e` (`bddgen && playwright test`;
   `playwright.config.ts`); features `tests/e2e/features/**/*.feature`, steps
   `tests/e2e/steps/**/*.ts`; generated specs in `.features-gen-local/` (gitignored; never commit

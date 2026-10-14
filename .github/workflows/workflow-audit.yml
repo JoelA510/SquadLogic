@@ -8,7 +8,9 @@ name: Workflow audit
 # online audits, which confirm each pinned SHA is a real commit of the action
 # it names and that the `# vX.Y.Z` comment matches it. Its configuration, and
 # the reason for each loosened default, is .github/zizmor.yml; a one-off
-# exception is an inline `# zizmor: ignore[<audit>] -- <reason>`.
+# exception is an inline `# zizmor: ignore[<audit>] -- <reason>`. It audits
+# `.github` only: prompts/skeletons/.github holds the template's skeletons,
+# which never run here and which this repo does not edit (AGENTS.md, Don't).
 #
 # Every `uses:` is pinned by full commit SHA with its release in a comment;
 # Dependabot's github-actions updates (.github/dependabot.yml) move the SHA
@@ -53,4 +55,4 @@ jobs:
       - name: Audit the workflows (zizmor)
         env:
           GH_TOKEN: ${{ github.token }}
-        run: pipx run --spec 'zizmor==1.30.1' zizmor --format=github .
+        run: pipx run --spec 'zizmor==1.30.1' zizmor --format=github .github

@@ -1084,6 +1084,8 @@ export default function GameSchedulingPage() {
           String(assignment.id) !== String(gameId) && cellOf(assignment) === targetCell
       );
       if (occupant) {
+        // Cleared, or a standing apply error would hide the refusal.
+        setApplyError(null);
         setStatusMessage(
           `${currentAssignment.homeTeamId} vs ${currentAssignment.awayTeamId} was not moved: ` +
             `that slot already has ${occupant.homeTeamId} vs ${occupant.awayTeamId}.`

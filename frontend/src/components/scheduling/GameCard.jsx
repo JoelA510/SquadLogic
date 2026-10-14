@@ -48,6 +48,9 @@ function MoveToControl({ assignment, move }) {
   const chosen = options.some((cell) => cell.id === target) ? target : '';
   const matchup = `${assignment.homeTeamId} vs ${assignment.awayTeamId}`;
   const nothingEmpty = move.emptyCells.every((cell) => cell.id === cellId);
+  // Cleared, not only masked (React's adjust-state-while-rendering pattern):
+  // the cell could empty again and the old choice would come back unchosen.
+  if (armed && target && !chosen) setTarget('');
 
   useEffect(() => {
     if (claimFocus(String(assignment.id))) selectRef.current?.focus();

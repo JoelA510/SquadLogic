@@ -380,8 +380,14 @@ Then(
     // The planted clash: both slots that are free are at the same hour, so
     // placing both teams would put their coach in two places at once.
     await expect(rows.filter({ hasText: /Thursday @ 17:00/ })).toHaveCount(2);
+    // Meta-assertion: both Thursday rows name a seeded team, so the count
+    // below reads team names rather than matching nothing.
+    const seeded = page.getByRole('cell', { name: /^(Hawks|Owls|Bears|Foxes) / });
+    await expect(rows.filter({ hasText: /Thursday @ 17:00/ }).filter({ has: seeded })).toHaveCount(
+      2
+    );
     // Not both: one of them, or neither if the solver filled both places
-    // with other teams. Counted once the two placements above are on screen.
+    // with other teams.
     const teamCell = page.getByRole('cell', { name: new RegExp(`^(${first}|${second}) `) });
     expect(await rows.filter({ has: teamCell }).count()).toBeLessThanOrEqual(1);
   }

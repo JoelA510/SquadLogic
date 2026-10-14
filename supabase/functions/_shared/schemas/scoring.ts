@@ -238,6 +238,51 @@ export function refuseEmptyPracticeRoster(
   };
 }
 
+/** The `code` of `fairness-scoring`'s 422 for a games block with no teams or no games. */
+export const EMPTY_GAME_ROSTER = 'EMPTY_GAME_ROSTER';
+
+export type EmptyGameRosterRefusal = {
+  error: string;
+  code: typeof EMPTY_GAME_ROSTER;
+  teamCount: number;
+  gameCount: number;
+};
+
+/**
+ * Refuse a games block that has no teams or no games: M2.6's refusal, for
+ * games (found by PR 2-C, plan "Discovered during execution").
+ *
+ * `evaluateGameSchedule` (`engines/scoring-engine.ts`) resolves both sides of
+ * every game against `teams` and skips a side it cannot find, without a word.
+ * With `teams` empty it therefore skips every game and answers `status: 'ok'`,
+ * `coveragePercent: 100` and no conflict: a clean report after examining
+ * nothing, and with `persist: true` a recorded run. With `games` empty it
+ * answers `ok` over no game at all. Both are refused here, at the input
+ * boundary, before the season read, the engine and persistence. The engine's
+ * scoring is unchanged: refusing a request is input validation, while
+ * reporting a game's unknown team is a scoring change, which this is not.
+ *
+ * `null` games (a practice-only request) is not refused here.
+ */
+export function refuseEmptyGameRoster(
+  games: { teams: unknown[]; games: unknown[] } | null | undefined
+): EmptyGameRosterRefusal | null {
+  if (!games) return null;
+  const teamCount = games.teams.length;
+  const gameCount = games.games.length;
+  if (teamCount > 0 && gameCount > 0) return null;
+  const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+  return {
+    error:
+      'A game evaluation needs at least one team and one game; this request has ' +
+      `${plural(teamCount, 'team')} and ${plural(gameCount, 'game')}, so nothing would be ` +
+      'examined. Nothing was evaluated or saved.',
+    code: EMPTY_GAME_ROSTER,
+    teamCount,
+    gameCount,
+  };
+}
+
 export type Team = z.infer<typeof TeamSchema>;
 export type Slot = z.infer<typeof SlotSchema>;
 export type PracticeAssignment = z.infer<typeof PracticeAssignmentSchema>;

@@ -74,6 +74,28 @@ jobs:
             supabase start --exclude "$EXCLUDE"
           fi
 
+      # `supabase start` serves the functions without the per-function
+      # `import_map` supabase/config.toml gives auto-scheduler and
+      # fairness-scoring (their bare `zod` import then fails to boot: run
+      # 38500511704). The deploy job does pass it (production lists both with
+      # import_map true), so serve them again here the way they are deployed.
+      # The server keeps running for the rest of the job.
+      - name: Serve the Edge Functions with their import map
+        run: |
+          set -euo pipefail
+          nohup supabase functions serve --import-map supabase/functions/import_map.json \
+            > "$RUNNER_TEMP/functions-serve.log" 2>&1 &
+          for _ in $(seq 1 60); do
+            if grep -q 'Serving functions on' "$RUNNER_TEMP/functions-serve.log"; then
+              cat "$RUNNER_TEMP/functions-serve.log"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/functions-serve.log"
+          echo "::error::supabase functions serve did not start within 120 seconds."
+          exit 1
+
       - name: Seed the scenarios' organization
         run: |
           set -euo pipefail
@@ -100,7 +122,11 @@ jobs:
 
       - name: Edge runtime and auth logs (on failure)
         if: failure()
+        # Best-effort diagnostics: a container that is gone prints nothing.
         run: |
+          echo "::group::supabase functions serve"
+          cat "$RUNNER_TEMP/functions-serve.log" || true
+          echo "::endgroup::"
           for c in $(docker ps -a --format '{{.Names}}' | grep -E 'supabase_(edge_runtime|auth|rest)_'); do
             echo "::group::$c"
             docker logs --tail 200 "$c" 2>&1 || true

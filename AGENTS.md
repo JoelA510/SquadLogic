@@ -1,9 +1,12 @@
 # AGENTS.md — SquadLogic
 
-The rules every coding agent here follows. Codex, Antigravity, Cursor and Copilot read this file
-directly; Claude Code through the `@AGENTS.md` import in `CLAUDE.md`. Keep every rule here, not in
-a per-tool file, and keep the file under 24,000 bytes (Antigravity's limit): put detail in `docs/`
-with a pointer. Older docs cite these sections as "CLAUDE.md §N".
+The rules every coding agent here follows. Claude Code reads this file through the `@AGENTS.md`
+import in `CLAUDE.md` (it loads in full at every session start); Codex, including its pull-request
+review, reads it directly. Keep every rule here, not in a per-tool file. Keep the file short:
+Claude Code's guidance is about 200 lines per instruction file, and Codex reads only the first
+32 KiB. Reference detail goes in [`docs/agents-reference.md`](docs/agents-reference.md) (same
+section numbers) or elsewhere in `docs/`, with a pointer here. Older docs cite these sections as
+"CLAUDE.md §N".
 
 ## 1. What this is
 
@@ -49,7 +52,7 @@ Within any work unit:
 ### Workflows (skills)
 
 Workflow skills live in `.agents/skills/` (Claude Code reads its copies in `.claude/skills/`).
-Invoke one as `/name` (Claude Code, Antigravity), `$name` (Codex), or by name: `discovery`,
+Invoke one as `/name` (Claude Code), `$name` (Codex), or by name: `discovery`,
 `plan-change` (agree a large change first), `root-cause` (a defect of unknown cause),
 `review-change` (adversarial review), `pre-pr`, `verify` (before each commit), `template-update`.
 They and `prompts/` come from https://github.com/JoelA510/agent-ready-template via its
@@ -71,10 +74,9 @@ copy to match): `squadlogic-evaluator-designer` (teaming evaluators),
    state the concrete cost of the status quo and the risk of the change, then wait for the
    call. Never reformat code you aren't changing (run Prettier on the files you touch, not
    `npm run format` across the repo).
-3. **Never embed secrets.** A new frontend environment read goes through
-   `frontend/src/config.js` (not yet typed, validated or the only reader: plan item M2.2), never
-   a new `import.meta.env` or `process.env` read elsewhere. Keep `.env.example` current with
-   every new variable.
+3. **Never embed secrets.** `frontend/src/env.js` is the only reader of `import.meta.env`, by
+   name (§10); a new frontend variable is added there, never as an `import.meta.env` or
+   `process.env` read elsewhere. Keep `.env.example` current with every new variable.
 4. **Report honestly.** Label every claim as *statically reviewed* (you read it), *executed*
    (you ran it), or *fully validated* (you ran it and verified the outcome; older docs say
    "test-verified"). Never claim tests passed without running them.
@@ -193,94 +195,39 @@ recurring shapes:
 
 ## 4. Architecture
 
-### Layout (npm workspaces: `packages/*`)
-
-- `frontend/src/` — the Vite + React 19 SPA (no `package.json` of its own): `components/`
-  (subdirs `chrome/`, `grid/`, `scheduling/`, `setup/`, `teaming/`, `ui/`), `contexts/` (Auth,
-  Import, Organization, Theme), `hooks/`, `layouts/`, `lib/` (`supabaseClient`,
-  `mockSupabaseClient`, `logger`), `pages/`, `constants/`, `utils/`.
-- `packages/core/src/` — `@squadlogic/core`, the shared domain logic (pure JS, NO React imports):
-  scheduling engines, metrics, persistence, validation, team generation.
-- `supabase/` — `functions/` (Edge Functions), `migrations/`, `seed.sql`.
-- `tests/` — Vitest `*.test.{js,jsx}`, `e2e/` (features + steps), `factories/`, `helpers/`.
-- `scripts/` (build and gate scripts), `docs/`, `.github/workflows/`.
-
-> **Vite root is `frontend/`** — `vite.config.js` at project root sets `root: 'frontend'` and `envDir: '..'`. All frontend paths are relative to `frontend/`, but env files live in the project root.
-
-### Key Technologies
-
-React 19, Vite 7, react-router-dom v7; Tailwind CSS 4 (`@tailwindcss/vite`) plus a vanilla CSS
-design system; React Context for state; Supabase (PostgreSQL, Edge Functions, Auth, Storage);
-Vitest + @testing-library/react + jsdom; Playwright-BDD (Gherkin + TS steps); ESLint (flat
-config) + Prettier, knip for unused code; TypeScript checkJs/allowJs, `strict: false`;
-@dnd-kit; Recharts; lucide-react; Vercel (static SPA + rewrites, build settings in `vercel.json`).
-
-### Path Aliases (vite.config.js + tsconfig.json)
-
-`@`, `src` and `@squadlogic/core` all map to `packages/core/src/`. **Always use
-`@squadlogic/core/...` for imports from the core package in frontend code.**
+Workspace layout, technologies and path aliases: [`docs/agents-reference.md` §4](docs/agents-reference.md#4-architecture).
+Two rules: **Vite's root is `frontend/`** (env files live in the project root), and frontend code
+imports the core package as **`@squadlogic/core/...`**.
 
 ## 5. Coding Conventions
 
 - **Prettier** (enforced by ESLint): semicolons, single quotes, trailing commas `es5`, print
   width 100, tab width 2.
-- **Components** are **`.jsx`** (not `.tsx`; the project type-checks with `checkJs`/`allowJs`),
-  functional with hooks only. Pages are lazy-loaded via `React.lazy()` in `App.jsx`; protected
-  routes use `<ProtectedRoute requiredPermission={PERMISSIONS.MANAGE_ORGANIZATION}>`. Provider
-  order (canonical, `App.jsx`): `BrowserRouter` > `AuthProvider` > `OrganizationProvider` >
-  `ImportProvider` > `ThemeProvider` > `ToastHost` > `ErrorBoundary` > `OfflineGuard`.
-- **Where code goes:** domain logic in `packages/core/src/` (pure, framework-agnostic, no React
-  imports); components in `frontend/src/components/` (feature subdirs such as `scheduling/`,
-  `teaming/`, `ui/`); hooks (`use…`) in `frontend/src/hooks/`; pages in `frontend/src/pages/`;
-  contexts in `frontend/src/contexts/`; Edge Functions in `supabase/functions/<name>/index.ts`.
-- **RBAC:** roles `admin`, `coach`, `player`, `parent`, `staff`; permissions in
-  `frontend/src/constants/permissions.js`, enforced by the `usePermission` hook and
-  `<ProtectedRoute>`.
+- **Components** are functional **`.jsx`** (not `.tsx`; the project type-checks with
+  `checkJs`/`allowJs`), hooks only. **Domain logic** lives in `packages/core/src/`: pure,
+  framework-agnostic, no React imports. Where everything else goes, routing, provider order and
+  RBAC: [`docs/agents-reference.md` §5](docs/agents-reference.md#5-coding-conventions).
 
 ## 6. Design System — "Lightning-class" (Light + Dark)
 
-Tokens in `frontend/src/index.css`, component classes in `frontend/src/styles/`. A **cobalt light
-theme (default) and a dark theme**, toggled by `data-theme="dark"` on `<html>` from
-`ThemeContext.themeMode` (stored as `sl-theme`). Self-hosted **Public Sans** (CSP is
-`font-src 'self'`: never load remote fonts).
-
-- **Prototype tokens** (source of truth, on `:root`, overridden by the dark block): `--bg-*`,
-  `--border*`, `--text-*`, `--primary*`, status (`--success*`, `--warning*`, `--danger*`),
-  `--accent-*`, `--ring`, `--shadow-*`, radii `--r-*`, layout metrics (`--topbar-h`, `--nav-w`,
-  `--row-h`). **Legacy aliases** (`--color-*`, `--shadow-soft`, …) point at them, so older
-  components and Tailwind utilities (`bg-bg-surface`, …) re-theme automatically.
-- **Prefer the component classes** in `styles/chrome.css`, `styles/grid.css` and
-  `styles/page.css` (`.btn` variants, `.badge`, `.chip`, `.card`, `.kpi`, form fields, `.empty`)
-  and the primitives in `frontend/src/components/ui/` (`Button`, `Badge`, `Modal`, `Dropdown`,
-  `Toggle`, `Tabs`, `Avatar`, `ToastHost`/`useToast`, `Tooltip`, `ProgressBar`, `FeatureGuard`)
-  over custom styles.
-
-**Do NOT hardcode color values or inline style overrides** — use tokens, and verify every
-surface in both themes. New colors go into `index.css` (light **and** dark blocks).
+Tokens, component classes and primitives: [`docs/agents-reference.md` §6](docs/agents-reference.md#6-design-system--lightning-class-light--dark).
+**Do NOT hardcode color values or inline style overrides** — use tokens (`frontend/src/index.css`),
+prefer the component classes in `frontend/src/styles/` and the primitives in
+`frontend/src/components/ui/`, and verify every surface in both themes. New colors go into
+`index.css`, light **and** dark blocks. Never load remote fonts (CSP `font-src 'self'`).
 
 ## 7. Supabase & Mock Client
 
-- **Real mode**: `@supabase/supabase-js` with credentials from `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`.
-- **Mock mode**: when built with `VITE_USE_MOCK_SUPABASE=true`, or in the dev server when the
-  credentials are missing (a production build without them shows a Configuration Error instead;
-  `docs/operations/ENVIRONMENT.md`). Uses `frontend/src/lib/mockSupabaseClient.js` — a
-  **sessionStorage-backed** in-memory mock that simulates `.from()`, `.select()`, `.insert()`, `.auth`, etc.
-- **All code imports from `frontend/src/lib/supabaseClient.js`** — never import the mock or `@supabase/supabase-js` directly.
-- **Edge Functions** live in `supabase/functions/`, one directory with an `index.ts` each; shared
-  utilities in `supabase/functions/_shared/`. They must respect `config/bundle-budget.json` and
-  the `check:advisors` regex gate.
+**All code imports from `frontend/src/lib/supabaseClient.js`** — never the mock or
+`@supabase/supabase-js` directly. Real and mock modes, and Edge Function layout:
+[`docs/agents-reference.md` §7](docs/agents-reference.md#7-supabase--mock-client).
 
 ## 8. Testing
 
-- **Vitest:** `npm run test` (`vitest.config.js`: jsdom, setup `tests/setup.js`), files
-  `tests/*.test.{js,jsx}`. Coverage of `packages/core/src/**` and `frontend/src/hooks/**`, enforced
-  in CI: 90/81/92/91 (statements/branches/functions/lines), hooks 62/52/64/66. Import
-  factories and helpers through their barrels: `import { makeOrganization } from '../factories/index.js';`
-- **E2E (Playwright-BDD):** `npm run test:e2e` (`bddgen && playwright test`;
-  `playwright.config.ts`); features `tests/e2e/features/**/*.feature`, steps
-  `tests/e2e/steps/**/*.ts`; generated specs in `.features-gen-local/` (gitignored; never commit
-  them). It starts the Vite dev server on port 5173 with `VITE_USE_MOCK_SUPABASE=true`; Chromium
-  only; CI runs `--workers=1` for mock isolation.
+`npm run test` (Vitest; coverage enforced in CI) and `npm run test:e2e` (Playwright-BDD, mock
+mode, Chromium, `--workers=1` in CI). Configuration, locations and thresholds:
+[`docs/agents-reference.md` §8](docs/agents-reference.md#8-testing). Never commit the generated
+specs in `.features-gen-local/`.
 
 ### E2E Rules That Prevent Flaky Tests
 
@@ -309,60 +256,30 @@ For a "UI/UX pass", "visual polish", or any frontend view work:
 
 ## 10. Environment Variables
 
-- `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` — the Supabase project URL and publishable
-  (anon) key: `.env.local` (from `.env.example`) and Vercel.
-- `VITE_USE_MOCK_SUPABASE` — force the mock client (`true`): `.env.local` or CI.
-- `VITE_SUPABASE_PERSISTENCE_URL` — the Edge Function base URL, optional.
-- `VITE_SENTRY_DSN` — the frontend Sentry DSN, optional: Vercel.
-- `TEST_ADMIN_EMAIL`, `TEST_COACH_EMAIL`, `TEST_PARENT_EMAIL`, `TEST_PASSWORD` — E2E test
-  accounts: `.env.test`.
-
 Only `frontend/src/env.js` reads `import.meta.env`, by name; a production build fails on a missing
-or malformed variable. **Never commit** `.env`, `.env.local`, or `.env.test`. The full reference
-is `docs/operations/ENVIRONMENT.md`.
+or malformed variable. **Never commit** `.env`, `.env.local`, or `.env.test`. The variables:
+[`docs/agents-reference.md` §10](docs/agents-reference.md#10-environment-variables); the full
+reference is `docs/operations/ENVIRONMENT.md`.
 
 ## 11. CI Pipeline
 
-`.github/workflows/ci.yml`, job **Build & Test**: `npm ci` on the Node `.nvmrc` pins (24) →
-`typecheck` → `lint` → `check:unused` → `test:coverage`, `test:perf` → `frontend:build` →
-`check:bundle` → `check:advisors` → Playwright Chromium → `test:e2e -- --workers=1`, plus
-`scripts/ci/migrationVersions.mjs` (well-formed, unique migration versions; on a PR, every added
-migration above the base branch's latest, and no existing one renamed, edited or removed).
-Job **Deno Mirror Tests**: `scripts/deno-mirror-tests.sh` (the Deno twins of core logic, two host
-time zones) and `scripts/deno-check-edge.sh` (`deno check` on every Edge entrypoint, failing on
-zero found). Both jobs are required to merge, as are `pgtap.yml`'s pgTAP job (the suites plus
-Supabase's advisors, every PR) and `audit.yml`'s `check:audit` (PRs, pushes, weekly).
-`dbharness.yml` runs the migration harness on PRs touching SQL. `workflow-audit.yml` runs zizmor
-on PRs; every action is pinned by SHA (`docs/operations/ci-cd.md`).
-
-On **push to `main`** only: `deploy-migrations` (environment `production`; `supabase db push`
-behind `scripts/ci/migrationGuard.mjs`; reverts are never automatic), then
-`deploy-edge-functions`. Both skip with a `::warning::` when their secrets are missing.
-**CI is the only writer of migrations:** never apply a repo migration by hand or through MCP
-`apply_migration`. A weekly keep-alive pings Supabase. Vercel deploys the frontend on its own
-(`main` to production, each PR to a preview). Runbook, Vercel settings and rollback:
-`docs/operations/ci-cd.md`; the 2026-09-28 ledger fix:
-`docs/operations/migration-ledger-normalisation.md`.
+Required to merge, on a branch that contains current `main`: `Build & Test`, `Deno Mirror Tests`,
+`Run pgTAP against local Supabase`, `npm audit (high and critical block)`, `Workflow audit
+(zizmor)` and `E2E against local Supabase`. **CI is the only writer of migrations:** never apply a
+repo migration by hand or through MCP `apply_migration`. Free-tier budgets (Vercel's 100
+deployments a day; at most two PRs in flight; push once per PR) are in
+`docs/operations/ci-cd.md`. Jobs and deploys:
+[`docs/agents-reference.md` §11](docs/agents-reference.md#11-ci-pipeline).
 
 ## 12. Common Commands
 
-- `npm ci` — install exactly what `package-lock.json` pins (cloud agents: first).
-- `npm run frontend:dev` / `frontend:build` — Vite dev server (port 5173) / build to `dist/`.
-- `npm run test` / `test:watch` / `test:coverage` — Vitest once / watch / with coverage.
-- `npm run test:e2e` / `test:e2e:ui` — `bddgen` + Playwright / its interactive debug UI.
-- `npm run lint` / `lint:fix` / `typecheck` — ESLint / auto-fix / `tsc --noEmit`.
-- `npm run format` — Prettier on every file; prefer `npx prettier --write <your files>` (rule 2).
-- `npm run check:bundle` / `check:advisors` / `check:unused` — bundle budget / advisor lint /
-  knip (`knip.jsonc`).
-- `npm run check:audit` — dependency audit gate (high/critical advisories, waivers).
+`npm ci` first in a fresh clone; the Definition of Done (§3) lists the gates. The rest:
+[`docs/agents-reference.md` §12](docs/agents-reference.md#12-common-commands).
 
 ## 13. Key Documentation Reference
 
-Index: [`docs/README.md`](docs/README.md). Most used: `docs/LESSONS_LEARNED.md`,
-`docs/architecture/system-overview.md`, `docs/architecture/multi_tenancy.md`,
-`docs/security/rls-policies.md`, `docs/governance/governance-framework.md`,
-`docs/operations/ENVIRONMENT.md`, `docs/operations/ci-cd.md`, `docs/testing/e2e_master_plan.md`,
-`docs/expansion/03_ROADMAP.md`.
+Index: [`docs/README.md`](docs/README.md); the most used docs are listed in
+[`docs/agents-reference.md` §13](docs/agents-reference.md#13-key-documentation-reference).
 
 ## Don't
 

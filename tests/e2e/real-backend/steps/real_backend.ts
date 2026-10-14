@@ -114,3 +114,111 @@ Then(
     }
   }
 );
+
+/** What a scenario learned from one page and checks on a later one. */
+const scenarioState = new WeakMap<Page, { teams?: number }>();
+const stateOf = (page: Page) => {
+  const state = scenarioState.get(page) ?? {};
+  scenarioState.set(page, state);
+  return state;
+};
+
+When('I generate teams from the import and sync them to Supabase', async ({ page }) => {
+  // In-app navigation, as an administrator moves on: the teams page builds
+  // its programs from the import this session just applied.
+  await page
+    .getByRole('navigation')
+    .getByRole('link', { name: /Teams & Rosters/ })
+    .click();
+  const generate = page.getByRole('button', { name: /Generate Teams/ });
+  await expect(generate).toBeEnabled({ timeout: 30_000 });
+  await generate.click();
+  await expect(page.getByText(/Team review staged: \d+ teams?\./)).toBeVisible({
+    timeout: 30_000,
+  });
+
+  await page.getByRole('button', { name: 'Sync to Supabase' }).click();
+  const synced = page.getByText(/Supabase upsert completed for \d+ teams and \d+ players/);
+  await expect(synced).toBeVisible({ timeout: BACKEND_TIMEOUT });
+  const [, teams, players] =
+    /for (\d+) teams and (\d+) players/.exec((await synced.textContent()) ?? '') ?? [];
+  expect(Number(players), 'every imported player is placed on a team').toBe(registrations().length);
+  expect(Number(teams)).toBeGreaterThan(1);
+  stateOf(page).teams = Number(teams);
+});
+
+Then('the teams page lists the synced teams after a reload', async ({ page }) => {
+  const teams = stateOf(page).teams;
+  expect(teams, 'a previous step synced the teams').toBeGreaterThan(0);
+  await page.goto('/teams');
+  const list = page.getByRole('region', { name: 'Generated Teams' });
+  await expect(list).toBeVisible({ timeout: 30_000 });
+  // A rename control is offered only for a team with a persisted (uuid) id.
+  await expect(list.getByRole('button', { name: /^Rename team / })).toHaveCount(teams ?? -1);
+});
+
+When('I auto-generate the practice schedule and apply it', async ({ page }) => {
+  await page.goto('/schedule/practice');
+  const run = page.getByRole('button', { name: 'Run auto-scheduler optimization' });
+  await expect(run).toBeEnabled({ timeout: 60_000 });
+  await run.click();
+
+  const review = page.getByRole('region', { name: 'Practice schedule review' });
+  await expect(review.getByText(/\d+ assignments are staged for persistence\./)).toBeVisible({
+    timeout: BACKEND_TIMEOUT,
+  });
+  await review.getByRole('button', { name: 'Apply Schedule' }).click();
+  await expect(review.getByRole('heading', { name: 'Practice Schedule Applied' })).toBeVisible({
+    timeout: BACKEND_TIMEOUT,
+  });
+  await expect(review.getByRole('alert')).toHaveCount(0);
+});
+
+/** A CSV line's cells, honouring quoted cells (formatCsv quotes commas and quotes). */
+function csvCells(line: string): string[] {
+  const cells: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') {
+        cell += '"';
+        i += 1;
+      } else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') {
+      cells.push(cell);
+      cell = '';
+    } else cell += ch;
+  }
+  cells.push(cell);
+  return cells;
+}
+
+Then('the master schedule export lists a practice for every synced team', async ({ page }) => {
+  const teams = stateOf(page).teams;
+  expect(teams, 'a previous step synced the teams').toBeGreaterThan(0);
+  await page.goto('/exports');
+  await page.getByTestId('generate-csvs-btn').click();
+  const download = page.getByRole('button', { name: 'Download Master CSV' });
+  await expect(download).toBeVisible({ timeout: 30_000 });
+  const [file] = await Promise.all([page.waitForEvent('download'), download.click()]);
+  const text = await (await file.createReadStream()).toArray();
+  const lines = Buffer.concat(text).toString('utf8').trim().split('\n');
+
+  const header = csvCells(lines[0]);
+  const teamId = header.indexOf('Team ID');
+  const eventType = header.indexOf('Event Type');
+  expect(teamId, `Team ID column in ${header.join(',')}`).toBeGreaterThanOrEqual(0);
+  expect(eventType, `Event Type column in ${header.join(',')}`).toBeGreaterThanOrEqual(0);
+  const practiceTeams = new Set(
+    lines
+      .slice(1)
+      .map(csvCells)
+      .filter((cells) => cells[eventType] === 'Practice')
+      .map((cells) => cells[teamId])
+  );
+  expect(practiceTeams.size).toBe(teams);
+});

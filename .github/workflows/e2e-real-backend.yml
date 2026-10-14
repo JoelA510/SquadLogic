@@ -90,7 +90,11 @@ jobs:
           set -euo pipefail
           eval "$(supabase status -o env)"
           export E2E_REAL_BACKEND_SUPABASE_URL="$API_URL"
-          export E2E_REAL_BACKEND_ANON_KEY="$ANON_KEY"
+          export E2E_REAL_BACKEND_ANON_KEY="${ANON_KEY:-${PUBLISHABLE_KEY:-}}"
+          if [ -z "$E2E_REAL_BACKEND_SUPABASE_URL" ] || [ -z "$E2E_REAL_BACKEND_ANON_KEY" ]; then
+            echo "::error::supabase status gave no API URL or anon key."
+            exit 1
+          fi
           npx bddgen
           npx playwright test --project=real-backend --workers=1 --reporter=list,html
 

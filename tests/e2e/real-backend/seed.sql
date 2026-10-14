@@ -21,6 +21,9 @@ BEGIN;
 -- The administrator, as a confirmed email/password user GoTrue can sign in.
 -- GoTrue scans the token columns into Go strings, so they are '' rather than
 -- NULL (a NULL there fails the sign-in with "converting NULL to string").
+-- `password_length` is what check_password_length_on_auth_users()
+-- (20240405180000) reads to refuse a password under 12 characters; the
+-- password below is 23.
 INSERT INTO auth.users (
     instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
     raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
@@ -35,7 +38,7 @@ VALUES (
     extensions.crypt('e2e-local-only-password', extensions.gen_salt('bf')),
     timezone('utc', now()),
     '{"provider": "email", "providers": ["email"]}'::jsonb,
-    '{"full_name": "Robin Example (E2E admin)"}'::jsonb,
+    '{"full_name": "Robin Example (E2E admin)", "password_length": 23}'::jsonb,
     timezone('utc', now()), timezone('utc', now()),
     '', '', '', '', '', '', '', ''
 )

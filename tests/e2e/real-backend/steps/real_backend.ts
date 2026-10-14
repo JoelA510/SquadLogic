@@ -137,14 +137,30 @@ When('I generate teams from the import and sync them to Supabase', async ({ page
     timeout: 30_000,
   });
 
-  await page.getByRole('button', { name: 'Sync to Supabase' }).click();
-  const synced = page.getByText(/Supabase upsert completed for \d+ teams and \d+ players/);
-  await expect(synced).toBeVisible({ timeout: BACKEND_TIMEOUT });
-  const [, teams, players] =
-    /for (\d+) teams and (\d+) players/.exec((await synced.textContent()) ?? '') ?? [];
-  expect(Number(players), 'every imported player is placed on a team').toBe(registrations().length);
-  expect(Number(teams)).toBeGreaterThan(1);
-  stateOf(page).teams = Number(teams);
+  // The page's own success line does not survive the sync: the staged review
+  // is cleared and, until a reload, the page falls back to its generate view
+  // (recorded in the plan, M4.1's discoveries). So the sync is read from the
+  // team-persistence response, and the next step proves it on a reload.
+  const [response] = await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes('/functions/v1/team-persistence') && r.request().method() === 'POST',
+      { timeout: BACKEND_TIMEOUT }
+    ),
+    page.getByRole('button', { name: 'Sync to Supabase' }).click(),
+  ]);
+  const body = (await response.json()) as {
+    status?: string;
+    message?: string;
+    updatedTeams?: number;
+    updatedPlayers?: number;
+  };
+  expect(response.status(), body.message).toBe(200);
+  expect(body.status, body.message).toBe('success');
+  expect(body.updatedPlayers, 'every imported player is placed on a team').toBe(
+    registrations().length
+  );
+  expect(body.updatedTeams).toBeGreaterThan(1);
+  stateOf(page).teams = body.updatedTeams;
 });
 
 Then('the teams page lists the synced teams after a reload', async ({ page }) => {

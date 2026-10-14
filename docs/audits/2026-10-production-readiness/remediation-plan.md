@@ -842,6 +842,21 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Rollback:** revert.
 > - **Diff class:** minimal diff for the tooling; fixes triaged separately.
 > - **Verification label:** statically reviewed.
+> - **Status: in review, PR w3a (`claude/vibrant-allen-hr7y7s-w3a`); not merged.** Lint:
+>   `eslint-plugin-jsx-a11y` recommended on `frontend/src`, plus `control-has-associated-label`
+>   (off in that set, and the only rule that sees a nameless button). Its 26 findings: labels tied
+>   to their controls, a heading button on each workflow step, sort headers as buttons, grid keys
+>   kept off the controls inside it, redundant roles; the rest waived on their line with the
+>   reason. E2E: `accessibility.feature` scans the sign-in page and 29 top-level routes, light
+>   then dark, for serious or critical axe violations (WCAG 2.0-2.2 A/AA). Its first run failed every
+>   route, mostly on `--text-muted` (3.1:1 light, 3.9:1 dark); fixed: that token in both themes,
+>   primary-button and avatar text, status text on status fills, the analytics page's untokenised
+>   colours, the audit log's unnamed filter, pager and scroll region. `tests/accessibilityRoutes.test.js` holds the
+>   scan to `App.jsx`'s routes. Test gate, *executed*: a planted icon button with no name fails
+>   lint (`control-has-associated-label`) and the `/` scenario (`button-name`, critical); reverted,
+>   both green. A planted button whose icon is a React component (`<Sparkles />`) fails the scan
+>   but not lint: the rule assumes a component child may render text. Open: two known
+>   violations, listed in `KNOWN_VIOLATIONS` with their owners (below).
 
 > **M4.3. The game grid is drag-only** (audit finding 11.2, high)
 > - **Fix approach:** the roster manager's `KeyboardSensor` pattern on the game grid's
@@ -1314,6 +1329,30 @@ smoke-tested
     budget printed from inside the worker, before and after).
   - Scorecard `node.ci-runs-gate` fails only because `package.json`'s `build` script never runs
     in CI (M6.1's `build`); the test runner is found through `test:coverage`. *Executed.*
+
+- 2026-10-14, found by PR w3a (M4.2):
+  - `GameSchedulingPage.jsx` (M4.3's file): the "Select Team" `<label>` labels nothing (lint, off
+    for that one rule and file in `eslint.config.js`) and "Full Schedule" is `text-blue-400`
+    (2.45:1, a `KNOWN_VIOLATIONS` entry). The M4.3 PR fixes them; whichever of the two PRs merges
+    second deletes the override and the entry. *Executed* (lint, axe).
+  - Avatar initials on light's `--accent-teal`, `--accent-amber` and `--accent-green` fall below
+    4.5:1 with white text (4.18, 2.99, 4.37), and dark text does no better on teal or green: a
+    decision on the light accent palette (darken the three, or a different avatar treatment).
+    `KNOWN_VIOLATIONS` carries the green one, the only one the mock seed renders. Dark-theme
+    avatars now take `--text-inverse` and pass. *Executed* (axe; ratios computed).
+  - 29 files still use Tailwind's `-400` palette shades for text (`text-blue-400`,
+    `text-green-400`, `text-brand-400`, ...), which fall short of 4.5:1 on light surfaces; this PR
+    moved only the elements the scan rendered. A sweep onto the tokens (now including
+    `text-status-{success,warning,error}-text`) is a follow-up. *Executed* (a search).
+  - The scan sees only what the mock seed renders: record pages (`/players/:id`, `/team/:id`),
+    registration forms, closed overlays and empty-state branches are not scanned. *Statically
+    reviewed* (`tests/accessibilityRoutes.test.js` lists the routes left out and why).
+  - `DataGrid` is one `role="application"` widget whose wrapper takes Tab (`useGridKeyboard`
+    moves the active cell on Tab, so focus cannot leave the grid by keyboard once a cell is
+    active: WCAG 2.1.2). Moving it to `role="grid"` with a focusable cell is its own item.
+    *Statically reviewed.*
+  - Recharts axes and gridlines on the analytics page keep hard-coded slate colours, which do
+    not re-theme. *Statically reviewed.*
 
 ## Deferred with reason
 

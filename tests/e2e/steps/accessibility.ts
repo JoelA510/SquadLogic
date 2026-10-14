@@ -1,6 +1,6 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
-import AxeBuilder from '@axe-core/playwright';
+import { AxeBuilder } from '@axe-core/playwright';
 import { waitForMockClient } from './mockReady.js';
 
 const { Given, When, Then } = createBdd();

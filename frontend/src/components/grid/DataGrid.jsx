@@ -378,7 +378,11 @@ export default function DataGrid({
                     )}
                   </th>
                 ))}
-                {rowActions.length > 0 && <th style={{ width: 56 }} />}
+                {rowActions.length > 0 && (
+                  <th style={{ width: 56 }}>
+                    <span className="sr-only">Actions</span>
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>

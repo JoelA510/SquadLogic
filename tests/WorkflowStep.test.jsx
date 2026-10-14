@@ -98,7 +98,12 @@ describe('WorkflowStep', () => {
 
   it('marks the active step expanded', () => {
     render(
-      <WorkflowStep title="Data Import" description="Upload CSVs." status="active">
+      <WorkflowStep
+        title="Data Import"
+        description="Upload CSVs."
+        status="active"
+        onClick={() => {}}
+      >
         <div>Expanded child</div>
       </WorkflowStep>
     );

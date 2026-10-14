@@ -79,6 +79,21 @@ export default tseslint.config(
         'error',
         { controlComponents: ['Toggle'], depth: 3 },
       ],
+      // Off in the recommended set, and the one rule that catches a button with no name (an
+      // icon-only <button> without aria-label). The plugin's own options, plus `td`: an empty
+      // table cell (a virtualiser's spacer, a loading skeleton) is not a control.
+      'jsx-a11y/control-has-associated-label': [
+        'error',
+        {
+          ...jsxA11y.flatConfigs.recommended.rules['jsx-a11y/control-has-associated-label'][1],
+          ignoreElements: [
+            ...jsxA11y.flatConfigs.recommended.rules['jsx-a11y/control-has-associated-label'][1]
+              .ignoreElements,
+            'td',
+          ],
+          depth: 3,
+        },
+      ],
     },
   },
   {

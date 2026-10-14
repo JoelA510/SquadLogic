@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
@@ -8,10 +8,96 @@ import { useFeatures } from '../../hooks/useFeatures.js';
 import { divisionDisplayName } from '../../utils/divisions.js';
 
 /**
+ * The grid's move target list and its one move handler, provided by
+ * `GameSchedulingPage` around the grid (plan item M4.3).
+ *
+ * - `cells`: every field and time slot the grid renders, as
+ *   `{ id: 'fieldId:slotId', label, gameId }` (`gameId` is the game in it, or
+ *   null). The id is the drop zone's, so a move names its target exactly as a
+ *   drop does.
+ * - `moveGame(gameId, cellId, { focusMoved })`: the page's move handler, the
+ *   same one a drop calls. There is no second write path.
+ * - `claimFocus(gameId)`: true once for the game a "Move to" just moved, so its
+ *   card takes focus where it lands rather than leaving it on the body.
+ *
+ * @type {React.Context<null | {
+ *   cells: Array<{ id: string, label: string, gameId: string | null }>,
+ *   moveGame: (gameId: string, cellId: string, options?: { focusMoved?: boolean }) => void,
+ *   claimFocus: (gameId: string) => boolean,
+ * }>}
+ */
+export const GameMoveContext = createContext(null);
+
+/**
+ * "Move to…": the non-drag alternative to dragging a game (WCAG 2.2, 2.5.7).
+ * Offers the empty cells only: the grid shows one game per cell, so a move onto
+ * an occupied one would hide a game from view.
+ */
+function MoveToControl({ assignment, move }) {
+  const [target, setTarget] = useState('');
+  const selectRef = useRef(null);
+  const { claimFocus } = move;
+  const cellId = `${assignment.fieldId}:${assignment.slotId}`;
+  const here = move.cells.find((cell) => cell.id === cellId);
+  const options = move.cells.filter((cell) => cell.id !== cellId && !cell.gameId);
+  const matchup = `${assignment.homeTeamId} vs ${assignment.awayTeamId}`;
+
+  useEffect(() => {
+    if (claimFocus(String(assignment.id))) selectRef.current?.focus();
+  }, [assignment.id, claimFocus]);
+
+  // A pointer press here is a choice, not the start of a drag of the card.
+  const keepPointer = (event) => event.stopPropagation();
+
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <select
+        ref={selectRef}
+        className="select"
+        aria-label={`Move ${matchup}${here ? `, now at ${here.label},` : ''} to`}
+        value={target}
+        onChange={(event) => setTarget(event.target.value)}
+        onPointerDown={keepPointer}
+        disabled={options.length === 0}
+      >
+        <option value="">{options.length === 0 ? 'No empty slot' : 'Move to…'}</option>
+        {options.map((cell) => (
+          <option key={cell.id} value={cell.id}>
+            {cell.label}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="btn btn-default sm"
+        disabled={!target}
+        onPointerDown={keepPointer}
+        onClick={() => move.moveGame(String(assignment.id), target, { focusMoved: true })}
+      >
+        Move
+      </button>
+    </div>
+  );
+}
+
+MoveToControl.propTypes = {
+  assignment: PropTypes.object.isRequired,
+  move: PropTypes.shape({
+    cells: PropTypes.array.isRequired,
+    moveGame: PropTypes.func.isRequired,
+    claimFocus: PropTypes.func.isRequired,
+  }).isRequired,
+};
+
+/**
  * GameCard — a draggable card representing a single game assignment in the schedule grid.
  *
  * Uses `useDraggable` from @dnd-kit/core (not useSortable, since slots hold 0-1 games).
  * Attaches the full assignment as drag data so handlers can access it.
+ *
+ * A pointer drags the whole card. The keyboard drags from the grip, a button
+ * (the activator node), so a key pressed in the "Move to…" control never
+ * starts a drag; the page's `KeyboardSensor` moves it between cells.
  */
 export default function GameCard({
   assignment,
@@ -19,11 +105,16 @@ export default function GameCard({
   isDragDisabled = false,
   timezone = undefined,
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: assignment.id,
-    data: assignment,
-    disabled: isDragDisabled,
-  });
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, isDragging } =
+    useDraggable({
+      id: assignment.id,
+      data: assignment,
+      disabled: isDragDisabled,
+    });
+  /** @type {{ onKeyDown?: React.KeyboardEventHandler<HTMLButtonElement> } & Record<string, any>} */
+  const { onKeyDown: keyboardListener, ...pointerListeners } = listeners ?? {};
+  const move = useContext(GameMoveContext);
+  const matchup = `${assignment.homeTeamId} vs ${assignment.awayTeamId}`;
   const { genderModel } = useFeatures();
   // Engine identity stays gendered; only the label collapses under co-ed.
   const divisionLabel = divisionDisplayName(assignment.division || '', genderModel) || '—';
@@ -49,15 +140,21 @@ export default function GameCard({
             ? 'border-blue-500/50 shadow-lg'
             : 'border-border-subtle hover:border-border-highlight'
       }`}
-      {...attributes}
-      {...listeners}
+      {...pointerListeners}
     >
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-2">
           {!isDragDisabled && (
-            <div className="text-text-muted hover:text-text-primary transition-colors">
-              <GripVertical size={14} />
-            </div>
+            <button
+              type="button"
+              ref={setActivatorNodeRef}
+              className="rounded text-text-muted hover:text-text-primary transition-colors focus-visible:outline-none focus-visible:shadow-[0_0_0_3px_var(--ring)]"
+              {...attributes}
+              onKeyDown={keyboardListener}
+              aria-label={`Drag ${matchup}`}
+            >
+              <GripVertical size={14} aria-hidden="true" />
+            </button>
           )}
           <span className="font-semibold text-sm text-text-primary">{assignment.homeTeamId}</span>
           <span className="text-xs text-text-muted">vs</span>
@@ -86,6 +183,8 @@ export default function GameCard({
           {divisionLabel}
         </span>
       </div>
+
+      {move && !isDragDisabled && <MoveToControl assignment={assignment} move={move} />}
     </div>
   );
 }

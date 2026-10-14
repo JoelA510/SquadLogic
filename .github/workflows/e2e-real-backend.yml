@@ -58,6 +58,28 @@ jobs:
         with:
           version: ${{ env.SUPABASE_CLI_VERSION }}
 
+      # The local edge runtime does not apply the per-function `import_map`
+      # supabase/config.toml gives auto-scheduler and fairness-scoring, so their
+      # bare `zod` import fails to boot (runs 38500511704 and 38501076266, the
+      # second with `supabase functions serve --import-map` as well). The deploy
+      # job's bundling does apply it (production lists both with import_map
+      # true). Locally the supported form is a deno.json beside the function, so
+      # this job writes the same imports there, in its own checkout only, and
+      # drops the import_map lines from its copy of config.toml.
+      - name: Give the locally served functions their import map
+        run: |
+          set -euo pipefail
+          fns=$(awk '/^\[functions\./ { fn = substr($1, 12, length($1) - 12) } /^import_map = / { print fn }' supabase/config.toml)
+          if [ -z "$fns" ]; then
+            echo "::error::no function in supabase/config.toml names an import_map; this step has nothing to do and should go."
+            exit 1
+          fi
+          for fn in $fns; do
+            cp supabase/functions/import_map.json "supabase/functions/$fn/deno.json"
+            echo "supabase/functions/$fn/deno.json <- supabase/functions/import_map.json"
+          done
+          sed -i '/^import_map = /d' supabase/config.toml
+
       # The database, auth, the API, storage, realtime and the edge runtime,
       # which serves supabase/functions/* (the import and persistence paths
       # call them). Studio, image transformation, the mail catcher and
@@ -73,28 +95,6 @@ jobs:
             supabase stop --no-backup || true
             supabase start --exclude "$EXCLUDE"
           fi
-
-      # `supabase start` serves the functions without the per-function
-      # `import_map` supabase/config.toml gives auto-scheduler and
-      # fairness-scoring (their bare `zod` import then fails to boot: run
-      # 38500511704). The deploy job does pass it (production lists both with
-      # import_map true), so serve them again here the way they are deployed.
-      # The server keeps running for the rest of the job.
-      - name: Serve the Edge Functions with their import map
-        run: |
-          set -euo pipefail
-          nohup supabase functions serve --import-map supabase/functions/import_map.json \
-            > "$RUNNER_TEMP/functions-serve.log" 2>&1 &
-          for _ in $(seq 1 60); do
-            if grep -q 'Serving functions on' "$RUNNER_TEMP/functions-serve.log"; then
-              cat "$RUNNER_TEMP/functions-serve.log"
-              exit 0
-            fi
-            sleep 2
-          done
-          cat "$RUNNER_TEMP/functions-serve.log"
-          echo "::error::supabase functions serve did not start within 120 seconds."
-          exit 1
 
       - name: Seed the scenarios' organization
         run: |
@@ -124,9 +124,6 @@ jobs:
         if: failure()
         # Best-effort diagnostics: a container that is gone prints nothing.
         run: |
-          echo "::group::supabase functions serve"
-          cat "$RUNNER_TEMP/functions-serve.log" || true
-          echo "::endgroup::"
           for c in $(docker ps -a --format '{{.Names}}' | grep -E 'supabase_(edge_runtime|auth|rest)_'); do
             echo "::group::$c"
             docker logs --tail 200 "$c" 2>&1 || true

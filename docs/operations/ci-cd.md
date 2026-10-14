@@ -21,6 +21,7 @@ npm ci
 npm run typecheck
 npm run lint
 npm run test:coverage
+npm run test:perf
 npm run frontend:build
 npm run check:bundle
 npm run check:advisors
@@ -42,7 +43,11 @@ loudly and tells the operator to build first.
 coverage of `packages/core/src/**` and `frontend/src/hooks/**` drops below the
 thresholds in `vitest.config.js` (plan item M3.1): about 3 points under what
 was measured, overall and, separately, for the hooks, which the well-covered
-core would otherwise hide. Build & Test's
+core would otherwise hide. It leaves out `tests/performance.test.js`, the
+team-generation benchmark, which times the engine by the wall clock: v8's
+instrumentation slows that engine about 9x, so under coverage it measured the
+instrumentation (20.0 s in CI against 0.9-2.1 s without). Build & Test runs it
+alone in the next step, `npm run test:perf`, against its 3 s budget. Build & Test's
 "Unit & Integration Tests" step runs it; `tests/workflowPins.test.js` fails if
 the step goes back to `npm run test` or is made unable to fail.
 

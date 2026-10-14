@@ -17,7 +17,8 @@
  *    persona, another config, `|| :`). `.github/zizmor.yml` loosens nothing
  *    but the Dependabot cooldown, and that to the release wait npm uses.
  * 3. Build & Test runs `npm run test:coverage`, and vitest.config.js carries
- *    the thresholds that make it fail.
+ *    the thresholds that make it fail; the wall-clock benchmark is excluded
+ *    from that run (coverage slows it ~9x) and runs alone as `test:perf`.
  *
  * The workflows are read line by line, as the other workflow tests are (no
  * YAML dependency). The pin scan's subject set is every line that mentions
@@ -420,20 +421,27 @@ describe('workflow-audit.yml', () => {
   });
 });
 
-// ── Coverage (M3.1) ─────────────────────────────────────────────────────────
+// ── Coverage (M3.1) and the benchmark it must not time ──────────────────────
 
 const TEST_STEP = 'Unit & Integration Tests';
+const PERF_STEP = 'Performance benchmark';
+const PERF_FILE = 'tests/performance.test.js';
 
-/** Why Build & Test's test step would not fail on coverage below the thresholds. */
-function coverageStepProblems(/** @type {string} */ workflow) {
+/**
+ * Why a Build & Test step would not run `command` able to fail the job.
+ * @param {string} workflow
+ * @param {string} name the step's name
+ * @param {string} command the exact `run:` it must have
+ */
+function stepProblems(workflow, name, command) {
   const lines = workflow.split('\n');
-  const at = lines.findIndex((l) => l.trim() === `- name: ${TEST_STEP}`);
-  if (at === -1) return [`no step named "${TEST_STEP}"`];
+  const at = lines.findIndex((l) => l.trim() === `- name: ${name}`);
+  if (at === -1) return [`no step named "${name}"`];
   const step = stepAround(lines, at);
   const problems = [];
   const run = step.find((l) => /^\s*run:/.test(l));
-  if (!run || !/^\s*run: npm run test:coverage\s*$/.test(beforeComment(run))) {
-    problems.push(`the step does not run exactly "npm run test:coverage" (${run?.trim()})`);
+  if (!run || beforeComment(run).trim() !== `run: ${command}`) {
+    problems.push(`the step does not run exactly "${command}" (${run?.trim()})`);
   }
   if (step.some((l) => isCode(l) && /continue-on-error:\s*true/.test(l))) {
     problems.push('the step sets continue-on-error');
@@ -446,16 +454,26 @@ function coverageStepProblems(/** @type {string} */ workflow) {
   return problems;
 }
 
-describe('coverage in CI', () => {
+describe('coverage and the benchmark in CI', () => {
   const workflow = read(CI_WORKFLOW);
+  const pkg = JSON.parse(readFileSync(path.resolve('package.json'), 'utf8'));
 
   it('Build & Test runs npm run test:coverage, able to fail', () => {
-    expect(coverageStepProblems(workflow)).toEqual([]);
+    expect(stepProblems(workflow, TEST_STEP, 'npm run test:coverage')).toEqual([]);
   });
 
-  it('test:coverage is vitest with coverage, and the config sets every threshold', async () => {
-    const pkg = JSON.parse(readFileSync(path.resolve('package.json'), 'utf8'));
-    expect(pkg.scripts['test:coverage']).toBe('vitest run --coverage');
+  it('Build & Test runs the benchmark alone, without coverage, able to fail', () => {
+    expect(stepProblems(workflow, PERF_STEP, 'npm run test:perf')).toEqual([]);
+    expect(pkg.scripts['test:perf']).toBe(`vitest run ${PERF_FILE}`);
+  });
+
+  it('test:coverage excludes the benchmark, and only that one file', () => {
+    // v8's instrumentation slows the team-generation engine about 9x, so the
+    // benchmark timed under coverage measured the instrumentation.
+    expect(pkg.scripts['test:coverage']).toBe(`vitest run --coverage --exclude ${PERF_FILE}`);
+  });
+
+  it('the config sets every threshold, overall and for the hooks', async () => {
     const { default: config } = await import('../vitest.config.js');
     const thresholds = config.test?.coverage?.thresholds ?? {};
     const hooks = thresholds['frontend/src/hooks/**'] ?? {};
@@ -469,17 +487,23 @@ describe('coverage in CI', () => {
   it.each([
     [
       'the plain test command',
+      TEST_STEP,
+      'npm run test:coverage',
       (/** @type {string} */ w) => w.replace('run: npm run test:coverage', 'run: npm run test'),
       'does not run exactly',
     ],
     [
       'an `|| true`',
+      TEST_STEP,
+      'npm run test:coverage',
       (/** @type {string} */ w) =>
         w.replace('run: npm run test:coverage', 'run: npm run test:coverage || true'),
       'does not run exactly',
     ],
     [
       'continue-on-error',
+      TEST_STEP,
+      'npm run test:coverage',
       (/** @type {string} */ w) =>
         w.replace(
           `      - name: ${TEST_STEP}\n`,
@@ -489,6 +513,8 @@ describe('coverage in CI', () => {
     ],
     [
       'another if',
+      TEST_STEP,
+      'npm run test:coverage',
       (/** @type {string} */ w) =>
         w.replace(
           `      - name: ${TEST_STEP}\n        if: steps.changes.outputs.docs_only != 'true'`,
@@ -498,12 +524,40 @@ describe('coverage in CI', () => {
     ],
     [
       'the step renamed',
+      TEST_STEP,
+      'npm run test:coverage',
       (/** @type {string} */ w) => w.replace(`- name: ${TEST_STEP}`, '- name: Tests'),
       'no step named',
     ],
-  ])('catches a planted ci.yml with %s', (_label, plant, problem) => {
+    [
+      'the benchmark step removed',
+      PERF_STEP,
+      'npm run test:perf',
+      (/** @type {string} */ w) => w.replace(`- name: ${PERF_STEP}`, '- name: Benchmark'),
+      'no step named',
+    ],
+    [
+      'the benchmark made unable to fail',
+      PERF_STEP,
+      'npm run test:perf',
+      (/** @type {string} */ w) =>
+        w.replace('run: npm run test:perf', 'run: npm run test:perf || true'),
+      'does not run exactly',
+    ],
+    [
+      'the benchmark on push only',
+      PERF_STEP,
+      'npm run test:perf',
+      (/** @type {string} */ w) =>
+        w.replace(
+          `      - name: ${PERF_STEP}\n        if: steps.changes.outputs.docs_only != 'true'`,
+          `      - name: ${PERF_STEP}\n        if: github.event_name == 'push'`
+        ),
+      'another if',
+    ],
+  ])('catches a planted ci.yml with %s', (_label, name, command, plant, problem) => {
     const planted = plant(workflow);
     expect(planted).not.toBe(workflow);
-    expect(coverageStepProblems(planted).join('\n')).toContain(problem);
+    expect(stepProblems(planted, name, command).join('\n')).toContain(problem);
   });
 });

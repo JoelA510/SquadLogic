@@ -274,7 +274,7 @@ surface in both themes. New colors go into `index.css` (light **and** dark block
 
 - **Vitest:** `npm run test` (`vitest.config.js`: jsdom, setup `tests/setup.js`), files
   `tests/*.test.{js,jsx}`. Coverage of `packages/core/src/**` and `frontend/src/hooks/**`, enforced
-  in CI: 90/81/92/91 (statements/branches/functions/lines), hooks alone 62/52/64/66. Import
+  in CI: 90/81/92/91 (statements/branches/functions/lines), hooks 62/52/64/66. Import
   factories and helpers through their barrels: `import { makeOrganization } from '../factories/index.js';`
 - **E2E (Playwright-BDD):** `npm run test:e2e` (`bddgen && playwright test`;
   `playwright.config.ts`); features `tests/e2e/features/**/*.feature`, steps
@@ -324,8 +324,8 @@ is `docs/operations/ENVIRONMENT.md`.
 ## 11. CI Pipeline
 
 `.github/workflows/ci.yml`, job **Build & Test**: `npm ci` on the Node `.nvmrc` pins (24) →
-`typecheck` → `lint` → `check:unused` → `test:coverage` → `frontend:build` → `check:bundle` →
-`check:advisors` → Playwright Chromium → `test:e2e -- --workers=1`, plus
+`typecheck` → `lint` → `check:unused` → `test:coverage`, `test:perf` → `frontend:build` →
+`check:bundle` → `check:advisors` → Playwright Chromium → `test:e2e -- --workers=1`, plus
 `scripts/ci/migrationVersions.mjs` (well-formed, unique migration versions; on a PR, every added
 migration above the base branch's latest, and no existing one renamed, edited or removed).
 Job **Deno Mirror Tests**: `scripts/deno-mirror-tests.sh` (the Deno twins of core logic, two host
@@ -333,7 +333,7 @@ time zones) and `scripts/deno-check-edge.sh` (`deno check` on every Edge entrypo
 zero found). Both jobs are required to merge, as are `pgtap.yml`'s pgTAP job (the suites plus
 Supabase's advisors, every PR) and `audit.yml`'s `check:audit` (PRs, pushes, weekly).
 `dbharness.yml` runs the migration harness on PRs touching SQL. `workflow-audit.yml` runs zizmor
-on PRs; every action is pinned by commit SHA (`docs/operations/ci-cd.md`).
+on PRs; every action is pinned by SHA (`docs/operations/ci-cd.md`).
 
 On **push to `main`** only: `deploy-migrations` (environment `production`; `supabase db push`
 behind `scripts/ci/migrationGuard.mjs`; reverts are never automatic), then

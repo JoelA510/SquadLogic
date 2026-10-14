@@ -563,7 +563,10 @@ standards these items name · [ ] deployed and smoke-tested
 >   `import.meta.env` scan runs 4x slower under coverage (1.1 s to 4.5 s alone) and timed out once
 >   at 5 s, so it has a measured 25 s timeout (`docs/testing/test-timeouts.md`).
 >   `tests/workflowPins.test.js` fails if the step goes back to `npm run test` or can't fail.
->   **Test gate, as measured:** no single test file can drop coverage past any threshold with
+>   The wall-clock benchmark (`tests/performance.test.js`) is left out of the coverage run, where
+>   v8 slowed the engine about 9x and it failed #574's first CI run at 20,037 ms against 20 s; it
+>   runs alone in its own step (`npm run test:perf`, 3 s budget, shown failing on a planted 3.5 s
+>   slowdown). **Test gate, as measured:** no single test file can drop coverage past any threshold with
 >   room in it: the suite covers most code several times over, and deleting the largest file
 >   (`feasibilityApi.test.js`, 133 tests) moved the overall figures by 0.08 points. Deleting the
 >   11 hook unit tests (`tests/use*.test.*`) is the gate shown instead: overall it moved to 91.27 /
@@ -1305,6 +1308,10 @@ smoke-tested
   - `docs/operations/ci-cd.md`'s Vercel settings table still says the install command is
     `npm install`, "not set anywhere"; #559 set `installCommand: npm ci` in `vercel.json`.
     *Statically reviewed.*
+  - `tests/performance.test.js`'s strict 3 s "focused run" budget never applied: it looked for the
+    file's name in `process.argv`, but the test runs in a Vitest worker whose argv names the
+    worker, so every run got the 10 s budget. Now keyed on `npm run test:perf`. *Executed* (the
+    budget printed from inside the worker, before and after).
   - Scorecard `node.ci-runs-gate` fails only because `package.json`'s `build` script never runs
     in CI (M6.1's `build`); the test runner is found through `test:coverage`. *Executed.*
 

@@ -194,6 +194,15 @@ jobs:
         if: steps.changes.outputs.docs_only != 'true'
         run: npm run test:coverage
 
+      # The team-generation wall-clock benchmark, alone and without coverage:
+      # v8's instrumentation slows that engine about 9x, so timed inside the
+      # coverage run it measured the instrumentation (20.0 s in CI against
+      # 0.9-2.1 s without). test:coverage excludes it; this is where it runs,
+      # on its focused 3 s budget (tests/performance.test.js).
+      - name: Performance benchmark
+        if: steps.changes.outputs.docs_only != 'true'
+        run: npm run test:perf
+
       - name: Build Frontend
         if: steps.changes.outputs.docs_only != 'true'
         run: npm run frontend:build

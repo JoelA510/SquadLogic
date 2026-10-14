@@ -9,7 +9,7 @@
  * shows.
  */
 import { createBdd } from 'playwright-bdd';
-import { expect, type Page } from '@playwright/test';
+import { expect, type APIResponse, type Page } from '@playwright/test';
 import { SEEDED_ADMIN, registrationCsv, registrations } from './registrations.js';
 
 const { Given, When, Then, Before, After } = createBdd();
@@ -237,4 +237,54 @@ Then('the master schedule export lists a practice for every synced team', async 
       .map((cells) => cells[teamId])
   );
   expect(practiceTeams.size).toBe(teams);
+});
+
+/** The local stack's API, as the job exported it (playwright.config.ts). */
+function stackUrl(): string {
+  const url = process.env.E2E_REAL_BACKEND_SUPABASE_URL?.replace(/\/+$/, '');
+  if (!url) throw new Error('E2E_REAL_BACKEND_SUPABASE_URL is not set');
+  return url;
+}
+
+const edgeResponses = new WeakMap<object, APIResponse>();
+
+When(
+  'I post to the {string} Edge Function with only the anon key',
+  async ({ request }, name: string) => {
+    const response = await request.post(`${stackUrl()}/functions/v1/${name}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: process.env.E2E_REAL_BACKEND_ANON_KEY ?? '',
+      },
+      data: {},
+      timeout: BACKEND_TIMEOUT,
+    });
+    edgeResponses.set(request, response);
+  }
+);
+
+Then('the Edge Function refuses it as unauthenticated', async ({ request }) => {
+  const response = edgeResponses.get(request);
+  expect(response, 'a previous step called the function').toBeDefined();
+  expect(response?.status(), await response?.text()).toBe(401);
+});
+
+When('I send a CORS preflight to the {string} Edge Function', async ({ request }, name: string) => {
+  const response = await request.fetch(`${stackUrl()}/functions/v1/${name}`, {
+    method: 'OPTIONS',
+    headers: {
+      Origin: 'http://localhost:5174',
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'authorization, apikey, content-type',
+    },
+    timeout: BACKEND_TIMEOUT,
+  });
+  edgeResponses.set(request, response);
+});
+
+Then('the preflight is allowed', async ({ request }) => {
+  const response = edgeResponses.get(request);
+  expect(response, 'a previous step sent the preflight').toBeDefined();
+  expect(response?.status()).toBeLessThan(300);
+  expect(response?.headers()['access-control-allow-origin']).toBeTruthy();
 });

@@ -2,10 +2,24 @@
 
 Repo: **JoelA510/SquadLogic** · Plan drawn up: 2026-10-12 · Source audit: [`audit.md`](./audit.md) (commit `565e980`)
 
-**Status:** IN PROGRESS as of 2026-10-13 — approved by the owner on 2026-10-13 "as recommended":
-D1-D8 at their defaults, and finding 5.1 moved into Milestone 1 (PR 1-B, as M1.7). Milestone 1 is
-in progress: PR 1-A merged as #551 (`73d98d0`); PR 1-B (M1.3, M1.4, M1.7) merged as #552
-(`33e68ab`); PR 1-C (M1.5) is open as #553; M1.6 was resolved on `main` by #545.
+**Status:** IN PROGRESS, paused by the owner on 2026-10-14 after Milestone 4. Approved by the owner
+on 2026-10-13 "as recommended": D1-D8 at their defaults, and finding 5.1 moved into Milestone 1
+(PR 1-B, as M1.7). Merged:
+- M1: #551, #552, #553, plus #545 for M1.6.
+- M2: #556 (M2.4-M2.6), #558 (M2.2), #559 (M2.1, M2.3).
+- M3: #573, #574, #575.
+- M4:
+  - M4.1, M4.5: #578.
+  - M4.2: #580.
+  - M4.3, M4.6: #579.
+  - M4.4: #576.
+  - M4.7: plan #555, build #560.
+  - The Edge audit fix found during it: #577.
+  - Free-tier budgets, the AA accent palette, and the real-backend E2E made required: #581.
+- M5: #557.
+
+Open: M4.8 (needs an owner-approved plan before any code), M6, the M1 tails, and the follow-ups in
+"Discovered during execution".
 
 End state: every audit area at "no blocker/high findings", E2E coverage of critical
 journeys, staging deploy smoke-tested, docs current — measured against: an organization's
@@ -269,7 +283,7 @@ it), so it carries no ID.
 **PR 1-C — `fix/error-reports-carry-ids`**
 
 > **M1.5. No error report says which user or organization it came from** (audit finding 9.1, high)
-> - **Status: in review, PR 1-C (#553); not merged.** `logger.setUser` passes only `id`,
+> - **Status: merged as #553 (`fd6cce4`).** `logger.setUser` passes only `id`,
 >   `organization_id` and `role` to Sentry (plus an `organization_id` tag); `AuthContext` calls
 >   it on sign-in and with null on sign-out, `OrganizationContext` on choosing and switching the
 >   active organization. Every Edge Function serves through `withFailureLogging`
@@ -464,7 +478,7 @@ and smoke-tested
 > 8.3 — resolved by M2.3.
 
 > **M2.4. Security policy and licence files** (audit finding 8.5, medium)
-> - **Status: in review, PR 2-C (`claude/vibrant-allen-hr7y7s-m2c`); not merged.** `SECURITY.md` names GitHub private
+> - **Status: merged as #556 (`e1343fa`).** `SECURITY.md` names GitHub private
 >   vulnerability reporting (the public API reports `enabled: true`, *executed* 2026-10-13), with
 >   best-effort targets (acknowledge within 7 days; the owner confirms them), scope and supported
 >   versions. `LICENSE` is choosealicense.com's ISC text verbatim, "Copyright (c) 2025-2026 Joel
@@ -487,7 +501,7 @@ and smoke-tested
 > 12.6 — resolved by M2.4.
 
 > **M2.5. Game and practice persistence calls can hang forever** (audit finding 5.2, medium)
-> - **Status: in review, PR 2-C (`claude/vibrant-allen-hr7y7s-m2c`); not merged.** New `frontend/src/lib/persistenceRequest.js`
+> - **Status: merged as #556 (`e1343fa`).** New `frontend/src/lib/persistenceRequest.js`
 >   gives every request the game and practice clients send (game save, practice save, repair save,
 >   enact) the team panel's contract: an `AbortController` aborted at a deadline, and an error
 >   with `code: 'PERSISTENCE_TIMEOUT'` whose message says the outcome is unknown. The deadline is
@@ -517,7 +531,7 @@ and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M2.6. `fairness-scoring` records a 0-conflict run for an empty roster** (not an audit finding: found by PR 1-A, #551; medium; placed here by the supervisor, the owner may move it)
-> - **Status: in review, PR 2-C (`claude/vibrant-allen-hr7y7s-m2c`); not merged.** `refuseEmptyPracticeRoster`
+> - **Status: merged as #556 (`e1343fa`).** `refuseEmptyPracticeRoster`
 >   (`_shared/schemas/scoring.ts`) answers 422 `EMPTY_PRACTICE_ROSTER`, naming the counts, for a
 >   practice block with no teams or no slots; the handler calls it right after parsing, before the
 >   season read, the engine and `persist_evaluation_run`, whatever `persist` says. Test gate met,
@@ -887,7 +901,7 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Rollback:** revert.
 > - **Diff class:** minimal diff for the tooling; fixes triaged separately.
 > - **Verification label:** statically reviewed.
-> - **Status: in review, PR w3a (`claude/vibrant-allen-hr7y7s-w3a`); not merged.** Lint:
+> - **Status: merged as #580 (`16e63eb`); its last waiver (the light accent palette) removed by #581.** Lint:
 >   `eslint-plugin-jsx-a11y` recommended on `frontend/src`, plus `control-has-associated-label`
 >   (off in that set, and the only rule that sees a nameless button). Its 26 findings: labels tied
 >   to their controls, a heading button on each workflow step, sort headers as buttons, grid keys
@@ -933,7 +947,7 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M4.4. Persistence payloads aren't validated before they leave the client** (audit finding 2.3, medium)
-> - **Status: in review, #576 (`claude/vibrant-allen-hr7y7s-w3c`); not merged.** Each client
+> - **Status: merged as #576 (`2a0425d`).** Each client
 >   checks its body against core's copy of the `PersistencePayloadSchema` its Edge Function parses
 >   it with, before the network call: `PersistencePayloadSchema` (team; it gains the Edge's
 >   `lastRunId`/`runId`), and the new `GamePersistencePayloadSchema` and
@@ -1419,8 +1433,8 @@ smoke-tested
     client, so `auth.uid()` is null and the insert breaks `audit_log.user_id NOT NULL`
     ("Audit log write failed"). Seen on the local stack (import-validation, team-persistence)
     and in production's function logs on 2026-10-13 (*executed*, read-only log query). Fixed
-    by w3e's PR (the RPC called with the user-scoped client); M4.1's import scenario should
-    assert the audit row once that lands.
+    by #577 (the RPC called with the user-scoped client); M4.1's import scenario should
+    assert the audit row (follow-up).
   - The local edge runtime (CLI 2.118.0) does not apply `config.toml`'s per-function
     `import_map`, also with `supabase functions serve --import-map`, so auto-scheduler and
     fairness-scoring fail to boot on their bare `zod` import (runs 38500511704, 38501076266).
@@ -1483,7 +1497,7 @@ smoke-tested
     matches no game still scores clean. Reporting it is a scoring change, so it is not in this
     PR; `EvaluationPanel` has no client guard for games either, unreachable while no page passes
     `gameData`. *Statically reviewed.*
-- 2026-10-14, found by w3d (real-backend E2E), fixed by PR w3e:
+- 2026-10-14, found by w3d (real-backend E2E), fixed by #577:
   - **Every Edge Function audit write failed.** `_shared/auth.ts`'s `recordAudit` /
     `recordAuditNow` called `record_audit_event` through the service-role client; the RPC writes
     `user_id = auth.uid()`, NULL under the service role, so `audit_log.user_id NOT NULL` refused
@@ -1496,10 +1510,13 @@ smoke-tested
     production by a read-only query), so the auto-scheduler's five refusal audits would have
     failed on the foreign key next. Registered by `20261014000000`; `tests/edgeAuditActions.test.js`
     now fails on any Edge audit action no migration registers. *Executed.*
-  - Open for the owner: whether a failed audit write should fail the request (today: logged, the
-    request succeeds; see the PR); `import.started` / `import.failed` metadata stores the
-    uploaded `file_name`, and `scheduler.auto_failed` the raw error message, in the immutable log
-    now that those rows land (data minimisation). *Statically reviewed.*
+  - Decided by the owner on 2026-10-14:
+    - A failed audit write does not fail the request; it is logged and the request succeeds.
+    - The Edge writes no `file_name` in import audit metadata and truncates error text to 200
+      characters (#577).
+    - `scheduler.auto_progress` volume is accepted (about 50 rows per run, 180-day retention).
+    - Still open: the SQL-side `create_import_job` audit (`20260522130000`) stores `file_name`
+      and needs its own migration. *Statically reviewed.*
 
 - 2026-10-14, found by PR w3b (M4.6, M4.3):
   - The mock's organization id is `org-1`, not a UUID, and core's `SlotSchema` refuses an

@@ -79,13 +79,13 @@ import { readSeasonTimezone } from '../_shared/timing/seasonSettings.ts';
 import {
   createUserClient,
   getUserFromRequest,
-  getUserOrgIds,
   verifyOrgAdmin,
   verifyOrgMembership,
   corsHeaders,
   jsonResponse,
   recordAudit,
   recordAuditNow,
+  auditErrorText,
 } from '../_shared/auth.ts';
 import { checkRateLimit } from '../_shared/rateLimit.ts';
 import { edgeLogger, logFailure, withFailureLogging } from '../_shared/logtail.ts';
@@ -105,6 +105,9 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
   // The lock is read AS THE CALLER (RLS decides), never with the service role.
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
   const supabase = createClient(supabaseUrl, serviceKey);
+  // Every audit row is written AS THE CALLER: `record_audit_event` attributes
+  // it to auth.uid(), which the service role does not have.
+  const auditClient = createUserClient(req, supabaseUrl, anonKey);
 
   try {
     // 2. Auth
@@ -210,7 +213,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       // and `recordAudit` is fire-and-forget returning `void`, so awaiting it
       // waits for nothing and the isolate can be frozen before the insert
       // lands. A refusal is the audit row most worth keeping.
-      await recordAuditNow(supabase, {
+      await recordAuditNow(auditClient, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
@@ -262,7 +265,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         differing: lockCheck.differing,
         withoutId: lockCheck.withoutId,
       });
-      await recordAuditNow(supabase, {
+      await recordAuditNow(auditClient, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
@@ -330,11 +333,11 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         code: preferences.code,
         message: preferences.message,
       });
-      await recordAuditNow(supabase, {
+      await recordAuditNow(auditClient, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
-        metadata: { reason: preferences.code, message: preferences.message },
+        metadata: { reason: preferences.code, message: auditErrorText(preferences.message) },
       });
       await edgeLogger.flush();
       return jsonResponse(
@@ -366,11 +369,11 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         seasonSettingsId,
         message: venueDaylight.message,
       });
-      await recordAuditNow(supabase, {
+      await recordAuditNow(auditClient, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
-        metadata: { reason: venueDaylight.code, message: venueDaylight.message },
+        metadata: { reason: venueDaylight.code, message: auditErrorText(venueDaylight.message) },
       });
       await edgeLogger.flush();
       return jsonResponse(
@@ -400,11 +403,14 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         seasonSettingsId,
         message: lightingOverrides.message,
       });
-      await recordAuditNow(supabase, {
+      await recordAuditNow(auditClient, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
-        metadata: { reason: lightingOverrides.code, message: lightingOverrides.message },
+        metadata: {
+          reason: lightingOverrides.code,
+          message: auditErrorText(lightingOverrides.message),
+        },
       });
       await edgeLogger.flush();
       return jsonResponse(
@@ -441,7 +447,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       maxIterations: input.config.maxIterations,
       timeBudgetMs: input.config.timeBudgetMs,
     });
-    await recordAudit(supabase, {
+    await recordAuditNow(auditClient, {
       organizationId: input.organizationId,
       action: 'scheduler.auto_started',
       resourceType: 'practice_schedule',
@@ -498,7 +504,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         // Emit progress audit (fire-and-forget). `recordAudit` returns `void`
         // and swallows its own failures; the `.catch` that used to trail this
         // call was a TypeError on `undefined` at every 100th iteration.
-        recordAudit(supabase, {
+        recordAudit(auditClient, {
           organizationId: input.organizationId,
           action: 'scheduler.auto_progress',
           resourceType: 'practice_schedule',
@@ -631,7 +637,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     }
 
     // 11. Audit: scheduler completed
-    await recordAudit(supabase, {
+    await recordAuditNow(auditClient, {
       organizationId: input.organizationId,
       action: 'scheduler.auto_completed',
       resourceType: 'evaluation_run',
@@ -750,21 +756,19 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
   } catch (error) {
     await logFailure(logCtx, 'Auto-scheduler failed', error);
 
-    // Attempt to audit the failure
-    try {
-      const user = await getUserFromRequest(req, supabase);
-      if (user) {
-        const orgIds = await getUserOrgIds(supabase, user.id);
-        if (orgIds.length > 0) {
-          await recordAudit(supabase, {
-            organizationId: orgIds[0],
-            action: 'scheduler.auto_failed',
-            metadata: { error: (error as Error).message },
-          });
-        }
-      }
-    } catch {
-      // Swallow — best effort audit on failure
+    // Audit the failure in the run's own organisation. `logCtx.organizationId`
+    // is set only once the caller's membership of it was verified (step 5); a
+    // failure before that has no organisation to attribute it to, and is
+    // logged above but not audited. (This used to audit into the caller's
+    // FIRST membership, whichever organisation that was -- harmless only
+    // while every Edge audit write was failing.) `recordAuditNow` never
+    // rejects.
+    if (logCtx.organizationId) {
+      await recordAuditNow(auditClient, {
+        organizationId: logCtx.organizationId,
+        action: 'scheduler.auto_failed',
+        metadata: { error: auditErrorText(error) },
+      });
     }
 
     return jsonResponse({ error: 'Internal server error', message: (error as Error).message }, 500);

@@ -21,6 +21,9 @@ on 2026-10-13 "as recommended": D1-D8 at their defaults, and finding 5.1 moved i
 Open: M4.8 (needs an owner-approved plan before any code), M6, the M1 tails, and the follow-ups in
 "Discovered during execution".
 
+The order to take them in, by dependency, is [`resume-queue.md`](./resume-queue.md). Every agent
+reads [`agent-brief.md`](./agent-brief.md).
+
 End state: every audit area at "no blocker/high findings", E2E coverage of critical
 journeys, staging deploy smoke-tested, docs current — measured against: an organization's
 administrator can import a season's GotSport registrations, generate balanced teams, schedule
@@ -1190,8 +1193,9 @@ smoke-tested
    seeded season, and read the fairness panel — expect: a non-zero team count; with a coach
    double-booked on purpose, a conflict listed (automated by M1.1, and against the real backend
    by M4.1).
-2. Trigger `window.__FORCE_ERROR__()` on the preview — expect: the error boundary renders and a
-   Sentry event appears within a minute, tagged with your user ID and organization ID, and the
+2. Force a render error on the preview as `docs/operations/sentry-smoke.md` describes (signed in,
+   `localStorage.setItem('__FORCE_ERROR__', 'true')`, then load `/`; `__FORCE_ERROR__` is a flag,
+   not a function) — expect: the error boundary renders and a Sentry event appears within a minute, tagged with your user ID and organization ID, and the
    network tab shows no CSP refusal (M1.5, M1.6).
 3. Open a PR with a planted lint error — expect: "Merging is blocked" (M1.3).
 4. On the game grid, move a game using only the keyboard — expect: possible after M4.3; today it
@@ -1404,7 +1408,10 @@ smoke-tested
   - pgTAP run 38338431910 (branch `feat/grid-override-prompt`) failed
     `practice_grid_current_rows.sql` test 36 with the two series in the other order
     (`have: thu,fri`, `want: fri,thu`): if that assertion depends on row order, it is a flake that
-    now blocks merges. Not reproduced; *unverified*.
+    now blocks merges. Not reproduced; *unverified*. **Resolved, 2026-10-14:** that run was on
+    #546's own branch, and #546 added the `ORDER BY lower(effective_date_range), day_of_week`
+    these assertions now carry (the file's comments cite CI #546). The one `string_agg` left
+    without an `ORDER BY` returns a single row. *Statically reviewed.*
   - `supabase stop` on 2.118.0 warns that `config.toml`'s `[inbucket]` section is deprecated
     (`[local_smtp]`). Not changed. *Executed* (run log).
 

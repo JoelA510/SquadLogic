@@ -69,31 +69,23 @@ When('I import the {string} registration export', async ({ page }, shape: string
   if (shape !== 'full' && shape !== 'narrow') throw new Error(`unknown export shape: ${shape}`);
   await page.goto('/import');
   await expect(page.getByRole('heading', { name: 'Data Import' })).toBeVisible({ timeout: 30_000 });
-  // A completed import is remembered across reloads, and the panel can return
-  // to it after it was reset: ImportContext applies any import_jobs UPDATE
-  // that arrives over Realtime while no job is active, so a late event for the
-  // previous job puts "Import Applied" back over the file just chosen (PR run
-  // 38518949814; recorded in the plan). So choose the file, wait for either
-  // the preview or that view, and start again from the latter.
+  // A completed import is remembered across reloads; start a new one. Wait
+  // for the panel to settle on one state or the other before choosing. No
+  // retry: a reset panel that is put back to "Import Applied" is the defect
+  // PR #578 fixed in ImportContext, and this step must fail on it.
   const fileInput = page.locator('input[type="file"]');
   const another = page.getByRole('button', { name: 'Upload Another File' });
-  const start = page.getByRole('button', { name: 'Start Import' });
-  for (let attempt = 1; ; attempt += 1) {
-    await expect(fileInput.or(another).first()).toBeAttached({ timeout: 30_000 });
-    if (await another.isVisible()) {
-      await another.click();
-      await expect(fileInput).toBeAttached();
-    }
-    await fileInput.setInputFiles({
-      name: `registrations-${shape}.csv`,
-      mimeType: 'text/csv',
-      buffer: Buffer.from(registrationCsv(shape)),
-    });
-    await expect(start.or(another).first()).toBeVisible({ timeout: 30_000 });
-    if (await start.isVisible()) break;
-    expect(attempt, 'the import panel kept returning to its remembered result').toBeLessThan(3);
+  await expect(fileInput.or(another).first()).toBeAttached({ timeout: 30_000 });
+  if (await another.isVisible()) {
+    await another.click();
+    await expect(fileInput).toBeAttached();
   }
-  await start.click();
+  await fileInput.setInputFiles({
+    name: `registrations-${shape}.csv`,
+    mimeType: 'text/csv',
+    buffer: Buffer.from(registrationCsv(shape)),
+  });
+  await page.getByRole('button', { name: 'Start Import' }).click({ timeout: 30_000 });
 
   const applied = page.getByRole('heading', { name: /^Import Applied/ });
   const failed = page.getByTestId('import-error-banner');

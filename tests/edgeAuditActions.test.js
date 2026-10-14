@@ -137,8 +137,10 @@ function actionOfParams(args) {
   let depth = 0;
   for (let i = 0; i < body.length; i++) {
     const c = body[i];
-    if (c === "'" || c === '"' || c === '`') i = body.indexOf(c, i + 1);
-    else if ('([{'.includes(c)) depth++;
+    if (c === "'" || c === '"' || c === '`') {
+      i = body.indexOf(c, i + 1);
+      if (i < 0) throw new Error('unterminated string in audit params');
+    } else if ('([{'.includes(c)) depth++;
     else if (')]}'.includes(c)) depth--;
     else if (
       depth === 0 &&

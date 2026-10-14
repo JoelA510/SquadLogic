@@ -1315,6 +1315,24 @@ smoke-tested
   - Scorecard `node.ci-runs-gate` fails only because `package.json`'s `build` script never runs
     in CI (M6.1's `build`); the test runner is found through `test:coverage`. *Executed.*
 
+- 2026-10-14, found by w3d (real-backend E2E), fixed by PR w3e:
+  - **Every Edge Function audit write failed.** `_shared/auth.ts`'s `recordAudit` /
+    `recordAuditNow` called `record_audit_event` through the service-role client; the RPC writes
+    `user_id = auth.uid()`, NULL under the service role, so `audit_log.user_id NOT NULL` refused
+    every row and the error was only console-logged (production function logs, 2026-10-13). Fixed
+    without a schema change: the helpers take a branded `UserClient` (the caller's JWT), every
+    call site passes one, and a service-role client is a `deno check` error. *Executed* (Deno test
+    red on `main`'s `auth.ts`; production confirmation after merge is the supervisor's read-only
+    `audit_log` query).
+  - **`scheduler.auto_refused` was never registered in `audit_actions`** (repository, and
+    production by a read-only query), so the auto-scheduler's five refusal audits would have
+    failed on the foreign key next. Registered by `20261014000000`; `tests/edgeAuditActions.test.js`
+    now fails on any Edge audit action no migration registers. *Executed.*
+  - Open for the owner: whether a failed audit write should fail the request (today: logged, the
+    request succeeds; see the PR); `import.started` / `import.failed` metadata stores the
+    uploaded `file_name`, and `scheduler.auto_failed` the raw error message, in the immutable log
+    now that those rows land (data minimisation). *Statically reviewed.*
+
 ## Deferred with reason
 
 - 2.1 (strict types) — D2's default: the repository's stated rule is `strict: false`; raising it

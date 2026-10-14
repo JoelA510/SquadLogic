@@ -112,4 +112,54 @@ describe('WorkflowStep', () => {
       'true'
     );
   });
+
+  // Review finding: the card's click handler ran for every click inside an open step, so a
+  // "proceed" button there (DashboardWorkflow's step 2 -> 3) was undone by the card re-selecting
+  // its own step.
+  it('does not re-select an open step when a control inside it is clicked', () => {
+    const onClick = vi.fn();
+    const proceed = vi.fn();
+    render(
+      <WorkflowStep
+        title="Data Import"
+        description="Upload CSVs."
+        status="active"
+        onClick={onClick}
+      >
+        <button type="button" onClick={proceed}>
+          Proceed
+        </button>
+      </WorkflowStep>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Proceed' }));
+    expect(proceed).toHaveBeenCalledTimes(1);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('makes a collapsed step inert and an open one not', () => {
+    // aria-expanded="false" on the heading has to be true of the content too: jsdom ignores
+    // inert, so this checks the attribute; the browser keeps inert content out of the tab order.
+    const { rerender } = render(
+      <WorkflowStep
+        title="Data Import"
+        description="Upload CSVs."
+        status="pending"
+        onClick={() => {}}
+      >
+        <button type="button">Hidden action</button>
+      </WorkflowStep>
+    );
+    expect(screen.getByText('Hidden action').closest('[inert]')).not.toBeNull();
+    rerender(
+      <WorkflowStep
+        title="Data Import"
+        description="Upload CSVs."
+        status="active"
+        onClick={() => {}}
+      >
+        <button type="button">Hidden action</button>
+      </WorkflowStep>
+    );
+    expect(screen.getByText('Hidden action').closest('[inert]')).toBeNull();
+  });
 });

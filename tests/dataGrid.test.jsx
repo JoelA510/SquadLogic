@@ -71,6 +71,8 @@ describe('DataGrid', () => {
     expect(sortName.closest('th')).toHaveAttribute('aria-sort', 'ascending');
     // Control: the same keys on the grid itself are still the grid's.
     expect(fireEvent.keyDown(screen.getByRole('application'), { key: 'Enter' })).toBe(false);
+    // ...and an arrow pressed on the sort button still moves the grid's active cell.
+    expect(fireEvent.keyDown(sortName, { key: 'ArrowDown' })).toBe(false);
   });
 
   it('renders a non-sortable column header as plain text', () => {

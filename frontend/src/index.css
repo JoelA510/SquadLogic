@@ -34,6 +34,7 @@
   --color-text-secondary: var(--color-text-secondary);
   --color-text-muted: var(--color-text-muted);
   --color-text-accent: var(--color-text-accent);
+  --color-text-inverse: var(--text-inverse);
 
   --color-brand: var(--color-primary);
   --color-brand-400: var(--color-primary-400);

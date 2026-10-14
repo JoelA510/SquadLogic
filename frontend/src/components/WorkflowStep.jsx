@@ -47,11 +47,14 @@ const WorkflowStep = ({
   };
 
   return (
+    // A collapsed card opens on a click anywhere on it; the keyboard path is the heading's button.
+    // An open card takes no click of its own, so a control inside it (a "proceed" button) isn't
+    // undone by the card re-selecting its step.
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events -- the card's click repeats the heading button, which is the keyboard path
     <div
       data-testid={`workflow-step-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
-      className={`${baseClasses} ${statusStyles[status]} ${!isLocked ? 'cursor-pointer transform hover:scale-[1.01]' : ''}`}
-      onClick={!isLocked ? onClick : undefined}
+      className={`${baseClasses} ${statusStyles[status]} ${!isLocked && !isActive ? 'cursor-pointer transform hover:scale-[1.01]' : ''}`}
+      onClick={!isLocked && !isActive ? onClick : undefined}
     >
       {/* Active Indicator Glow */}
       {isActive && (
@@ -92,7 +95,7 @@ const WorkflowStep = ({
                 isActive
                   ? 'bg-brand/10 text-text-accent border border-brand/20'
                   : isCompleted
-                    ? 'bg-status-success/10 text-status-success border border-status-success/20'
+                    ? 'bg-status-success/10 text-status-success-text border border-status-success/20'
                     : 'bg-bg-surface text-text-muted border border-border-subtle'
               }`}
             >
@@ -108,8 +111,10 @@ const WorkflowStep = ({
         </div>
       </div>
 
-      {/* Expanded Content */}
+      {/* Expanded Content. Collapsed, it is inert: out of the tab order and the accessibility
+          tree, as the heading's aria-expanded="false" says. */}
       <div
+        inert={!isActive}
         className={`grid min-w-0 transition-all duration-500 ease-in-out ${
           isActive
             ? 'grid-rows-[1fr] opacity-100 mt-6 overflow-visible'

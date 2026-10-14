@@ -1338,8 +1338,10 @@ smoke-tested
   - Avatar initials on light's `--accent-teal`, `--accent-amber` and `--accent-green` fall below
     4.5:1 with white text (4.18, 2.99, 4.37), and dark text does no better on teal or green: a
     decision on the light accent palette (darken the three, or a different avatar treatment).
-    `KNOWN_VIOLATIONS` carries the green one, the only one the mock seed renders. Dark-theme
-    avatars now take `--text-inverse` and pass. *Executed* (axe; ratios computed).
+    `KNOWN_VIOLATIONS` carries the green one, the only one the mock seed renders. The same white
+    on `--success` is the setup checklist's done-step number (4.38:1). Dark-theme avatars, step
+    numbers, badges and danger buttons now take `--text-inverse` and pass. *Executed* (axe;
+    ratios computed).
   - 29 files still use Tailwind's `-400` palette shades for text (`text-blue-400`,
     `text-green-400`, `text-brand-400`, ...), which fall short of 4.5:1 on light surfaces; this PR
     moved only the elements the scan rendered. A sweep onto the tokens (now including
@@ -1347,6 +1349,10 @@ smoke-tested
   - The scan sees only what the mock seed renders: record pages (`/players/:id`, `/team/:id`),
     registration forms, closed overlays and empty-state branches are not scanned. *Statically
     reviewed* (`tests/accessibilityRoutes.test.js` lists the routes left out and why).
+  - `WorkflowStep`'s card-wide click ran for every click inside an open step, so its "Confirm
+    Teams & Proceed" button (step 2 to 3) was undone by the card re-selecting step 2 (both state
+    updates batch; the last wins). Fixed here: an open card takes no click of its own, and its
+    collapsed content is `inert`. *Executed* (unit test red before the fix).
   - `DataGrid` is one `role="application"` widget whose wrapper takes Tab (`useGridKeyboard`
     moves the active cell on Tab, so focus cannot leave the grid by keyboard once a cell is
     active: WCAG 2.1.2). Moving it to `role="grid"` with a focusable cell is its own item.

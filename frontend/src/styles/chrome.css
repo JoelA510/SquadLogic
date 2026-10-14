@@ -367,7 +367,7 @@
 }
 .nav-item.active .ni-badge {
   background: var(--primary);
-  color: #fff;
+  color: var(--text-inverse);
 }
 .nav-item .ni-badge.alert {
   background: var(--warning-weak);

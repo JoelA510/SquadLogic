@@ -62,6 +62,17 @@ Given('I am signed out on the sign-in page', async ({ page }) => {
   await page.waitForLoadState('networkidle');
 });
 
+When('I switch the sign-in page to the dark theme', async ({ page }) => {
+  // The sign-in page has no theme toggle, so set the choice the toggle would store. The page has
+  // mounted (its Sign In button is visible), so ThemeProvider reads it on the reload rather than
+  // overwriting it.
+  await page.evaluate(() => localStorage.setItem('sl-theme', 'dark'));
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Sign In' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.waitForLoadState('networkidle');
+});
+
 When(
   'I open {string} and see its {string} heading',
   async ({ page }, route: string, heading: string) => {

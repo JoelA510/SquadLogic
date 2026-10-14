@@ -25,9 +25,12 @@ const NOT_SCANNED = {
   '*': 'the catch-all redirects to /, which is scanned',
 };
 
-/** Every `path="..."` a <Route> declares in `text`. */
+/**
+ * Every `path="..."` in `text`, wherever it sits among a <Route>'s props. A `path` that is not a
+ * string literal can't be read here, so it is returned as-is and fails the coverage check.
+ */
 function declaredRoutes(text) {
-  return [...text.matchAll(/<Route\b[^>]*?\spath="([^"]+)"/gs)].map((m) => m[1]);
+  return [...text.matchAll(/\bpath=(?:"([^"]+)"|(\{[^}]*\}))/g)].map((m) => m[1] ?? m[2]);
 }
 
 /** The first column of the feature's Examples table, plus the sign-in page's own scenario. */
@@ -35,6 +38,11 @@ function scannedRoutes(text) {
   const rows = [...text.matchAll(/^\s*\|\s*(\/[^\s|]*)\s*\|/gm)].map((m) => m[1]);
   const signIn = /violations on "\/login"/.test(text) ? ['/login'] : [];
   return [...rows, ...signIn];
+}
+
+/** Declared routes neither scanned nor listed in NOT_SCANNED. */
+function unscannedRoutes(declared, scanned) {
+  return declared.filter((route) => !scanned.includes(route) && !Object.hasOwn(NOT_SCANNED, route));
 }
 
 describe('accessibility scan coverage', () => {
@@ -50,10 +58,7 @@ describe('accessibility scan coverage', () => {
   });
 
   it('scans every static route App.jsx declares', () => {
-    const unscanned = declared.filter(
-      (route) => !scanned.includes(route) && !Object.hasOwn(NOT_SCANNED, route)
-    );
-    expect(unscanned).toEqual([]);
+    expect(unscannedRoutes(declared, scanned)).toEqual([]);
   });
 
   it('leaves out only parameterised routes and the catch-all, and only ones that exist', () => {
@@ -68,11 +73,16 @@ describe('accessibility scan coverage', () => {
     expect(unknown).toEqual([]);
   });
 
-  it('a route missing from the scan is caught (the check can fail)', () => {
+  it('catches a route dropped from the scan, and one declared out of the usual order', () => {
     const withoutGame = scanned.filter((route) => route !== '/schedule/game');
-    const unscanned = declared.filter(
-      (route) => !withoutGame.includes(route) && !Object.hasOwn(NOT_SCANNED, route)
+    expect(unscannedRoutes(declared, withoutGame)).toEqual(['/schedule/game']);
+
+    // `element` before `path`, with a self-closing child, and a computed path.
+    const reordered = declaredRoutes(
+      '<Route element={<Guard><NewPage /></Guard>} path="/new" />' +
+        '<Route path={NEW_PATH} element={<NewPage />} />'
     );
-    expect(unscanned).toEqual(['/schedule/game']);
+    expect(reordered).toEqual(['/new', '{NEW_PATH}']);
+    expect(unscannedRoutes(reordered, scanned)).toEqual(['/new', '{NEW_PATH}']);
   });
 });

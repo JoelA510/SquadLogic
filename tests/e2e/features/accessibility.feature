@@ -10,9 +10,11 @@ Feature: Every top-level route passes an automated accessibility scan
   Green here is not WCAG 2.2 conformance: axe sees only what each route renders on the mock seed,
   and keyboard operation, focus order and dragging alternatives remain manual review.
 
-  Scenario: The sign-in page passes axe
+  Scenario: The sign-in page passes axe in the light and dark themes
     Given I am signed out on the sign-in page
     Then axe finds no serious or critical violations on "/login" in the "light" theme
+    When I switch the sign-in page to the dark theme
+    Then axe finds no serious or critical violations on "/login" in the "dark" theme
 
   Scenario Outline: <route> passes axe in the light and dark themes
     Given I am logged into SquadLogic as an admin

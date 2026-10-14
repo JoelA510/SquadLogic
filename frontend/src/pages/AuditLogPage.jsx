@@ -72,6 +72,7 @@ export default function AuditLogPage() {
       <pre
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrolling region: focusable so the keyboard can scroll it (WCAG 2.1.1)
         tabIndex={0}
+        role="region"
         aria-label="Event metadata"
         className="text-[10px] bg-bg-glass p-2 rounded max-h-24 overflow-y-auto font-mono text-text-muted"
       >
@@ -287,7 +288,7 @@ export default function AuditLogPage() {
                     onClick={() => setCurrentPage(pageNum)}
                     className={`w-8 h-8 rounded-md text-xs font-medium transition-all ${
                       currentPage === pageNum
-                        ? 'bg-brand text-white shadow-md'
+                        ? 'bg-brand text-text-inverse shadow-md'
                         : 'text-text-muted hover:bg-bg-surface-hover'
                     }`}
                   >

@@ -479,10 +479,9 @@ then export `E2E_REAL_BACKEND_SUPABASE_URL` and `E2E_REAL_BACKEND_ANON_KEY` from
 scenarios expect a fresh database (the first import inserts its players), so
 before running them again: `supabase db reset` and the seed again.
 
-**Not required yet.** It can be added to the ruleset once it has proven stable
-over several runs: add its job name to `.github/rulesets/main.json` and
-`tests/rulesetRequiredChecks.test.js`, then re-import the ruleset (see "Branch
-Protection").
+**Required in `main.json`** since 2026-10-14 (owner decision, after five green
+runs on a throwaway branch and green runs on #578 and the pull requests after
+it); enforced once the owner re-imports the ruleset (see "Branch Protection").
 
 `tests/integration/staging.test.js`, the suite this replaces as the check
 against a real backend, was deleted with plan item M4.5: it targeted
@@ -507,8 +506,9 @@ What it enforces on the default branch:
 - **Required checks, on an up-to-date branch:** `Build & Test` and
   `Deno Mirror Tests` (jobs of `ci.yml`), `Run pgTAP against local Supabase`
   (`pgtap.yml`, since plan item M3.2), `npm audit (high and critical block)`
-  (`audit.yml`) and `Workflow audit (zizmor)` (`workflow-audit.yml`, since
-  M3.5), all reported by GitHub Actions. The branch must contain the
+  (`audit.yml`), `Workflow audit (zizmor)` (`workflow-audit.yml`, since
+  M3.5) and `E2E against local Supabase` (`e2e-real-backend.yml`, since M4.1),
+  all reported by GitHub Actions. The branch must contain the
   latest `main` before it can merge ("strict").
 - **No force pushes and no deletion of `main`.**
 - **Not required:** an approving review, or resolving review conversations
@@ -522,13 +522,13 @@ repository), the Vercel deployment check, and the migration harness
 (`dbharness.yml`, path-filtered: see
 [Running the database harness](#running-the-database-harness-dbharnessyml)).
 
-**Why these five checks can be required.** A required check that never reports
+**Why these six checks can be required.** A required check that never reports
 blocks the pull request forever, so each must report on every pull request to
-`main`, including docs-only ones. `ci.yml`, `pgtap.yml`, `audit.yml` and
-`workflow-audit.yml` have no `paths` or `paths-ignore` filter on
-`pull_request`; the two `ci.yml` jobs' only `if` is
-`github.event_name != 'schedule'`, and the pgTAP, audit and zizmor jobs have
-none. `Build & Test` runs on a docs-only pull request too: its docs-only path
+`main`, including docs-only ones. `ci.yml`, `pgtap.yml`, `audit.yml`,
+`workflow-audit.yml` and `e2e-real-backend.yml` have no `paths` or
+`paths-ignore` filter on `pull_request`; the two `ci.yml` jobs' only `if` is
+`github.event_name != 'schedule'`, and the pgTAP, audit, zizmor and
+real-backend E2E jobs have none. `Build & Test` runs on a docs-only pull request too: its docs-only path
 skips the build steps inside the job, and the job itself still reports.
 `tests/rulesetRequiredChecks.test.js` reads every workflow in
 `.github/workflows/` and fails if a required context matches no job's `name`
@@ -542,7 +542,12 @@ the live ruleset does not change until the owner changes it. Settings -> Rules
 -> Rulesets -> "main: pull requests with green CI" -> Require status checks to
 pass -> Add checks -> add all three (source GitHub Actions) -> Save. Or delete
 the ruleset and import `main.json` as described below. Then confirm with the
-rules API that all five contexts are listed.
+rules API that all five contexts are listed. (Done by the owner 2026-10-14.)
+
+**Adding the real-backend E2E (owner, once the pull request that added it to
+`main.json` has merged).** Same steps: add `E2E against local Supabase`
+(source GitHub Actions), or re-import `main.json`; six contexts are then
+listed.
 
 **Changing or restoring it (owner):** Settings -> Rules -> Rulesets -> "main:
 pull requests with green CI" -> edit, then save, and change `main.json` to
@@ -579,7 +584,8 @@ stays.
 
 Vercel builds and deploys the frontend on its own, not from GitHub Actions: every push to
 `main` becomes a production deployment (`squadlogic.vercel.app`, `squadlogic.secureyour.tech`),
-and every pull request gets a preview. A deploy does not wait for CI; the ruleset gates the
+and a pull request gets a preview unless its branch is one that does not deploy on push (see
+"Which branches deploy" below). A deploy does not wait for CI; the ruleset gates the
 merge, not the deploy.
 
 Project `squadlogic` (team SecureYourTech), read through the Vercel API and the production
@@ -600,6 +606,25 @@ build log on 2026-10-13:
 repository builds the same way with only its environment variables set.
 `tests/vercelBuildSettings.test.js` holds the three `vercel.json` values to `package.json` and
 `vite.config.js`.
+
+**Which branches deploy.** `vercel.json` `git.deploymentEnabled` turns off automatic
+deployments for `claude/**` (agent branches) and `dependabot/**`; every other branch,
+including `main`, deploys on push as before. To preview one of those branches, deploy it on
+request (Vercel dashboard, or `vercel deploy` from a checkout of the branch).
+`tests/vercelBuildSettings.test.js` fails if `main` would stop deploying or if either
+pattern stops matching. Why: see "Free-tier budgets" below.
+
+## Free-tier budgets
+
+The project runs on free plans (GitHub Free with a public repository, Vercel Hobby, Supabase
+Free). The limits that bit, and the levers:
+
+| Budget | What spends it | Lever |
+| --- | --- | --- |
+| Vercel Hobby: 100 deployments a day (error `api-deployments-free-per-day`, 2026-10-14) | Every push to any branch with automatic deployments on | `git.deploymentEnabled` (above); previews on request. On 2026-10-13/14, 100 deployments in 12.8 h: 13 `main`, about 61 agent branches, 14 from a notes branch with no app, 11 Dependabot |
+| GitHub Actions | Each push runs every workflow (about 17 min for `Build & Test`); the strict ruleset makes every merge re-run CI on each open pull request once it is brought up to date | Minutes are free on standard runners for a public repository; the cost is wall time. At most two pull requests in flight; push once per pull request after local gates pass |
+| Dependabot | Each pull request and each rebase is a push | `.github/dependabot.yml`: monthly, minors and patches grouped, majors grouped as one inventory PR (not merged as such), rebasing off, a small open-PR limit |
+| Supabase Free | Hosted project resources; Pro-only features | CI runs pgTAP and the real-backend E2E against a local `supabase start`, never the hosted project. Leaked-password protection is Pro-only (Supabase docs, 2026-10-14): set a minimum length and required character classes instead. Keep the Supabase GitHub integration's "Deploy to production" and "Automatic branching" off (`deploy-migrations` is the only migration writer; branching also redeploys Vercel previews) |
 
 ## Rollback
 

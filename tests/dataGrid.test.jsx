@@ -57,6 +57,35 @@ describe('DataGrid', () => {
     expect(screen.getByText('Name').closest('th')).toHaveAttribute('aria-sort', 'descending');
   });
 
+  // M4.2: the sort lived on a div's onClick, so it could not be reached from the keyboard.
+  it('sorts from a header button, which the grid does not take Enter or Space from', () => {
+    render(<Harness />);
+    const sortName = screen.getByRole('button', { name: 'Name' });
+    expect(sortName.closest('th')).not.toBeNull();
+    // A native button turns Enter and Space into a click unless something cancels the key.
+    // The grid's own key handler used to cancel both (Enter edits a cell, Space selects a row)
+    // for every element inside it; fireEvent returns false when the default was prevented.
+    expect(fireEvent.keyDown(sortName, { key: 'Enter' })).toBe(true);
+    expect(fireEvent.keyDown(sortName, { key: ' ' })).toBe(true);
+    fireEvent.click(sortName);
+    expect(sortName.closest('th')).toHaveAttribute('aria-sort', 'ascending');
+    // Control: the same keys on the grid itself are still the grid's.
+    expect(fireEvent.keyDown(screen.getByRole('application'), { key: 'Enter' })).toBe(false);
+  });
+
+  it('renders a non-sortable column header as plain text', () => {
+    render(
+      <Harness
+        columns={[
+          { key: 'name', label: 'Name', editable: true, sortable: false },
+          ...columns.slice(1),
+        ]}
+      />
+    );
+    expect(screen.queryByRole('button', { name: 'Name' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Age' })).toBeInTheDocument();
+  });
+
   it('filters rows with instant search', () => {
     render(<Harness />);
     fireEvent.change(screen.getByRole('textbox', { name: 'Search table' }), {

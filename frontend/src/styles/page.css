@@ -144,7 +144,8 @@
 }
 .btn-primary {
   background: var(--primary);
-  color: #fff;
+  /* White on light's primary (4.8:1); near-black on dark's lighter primary (5.9:1). */
+  color: var(--text-inverse);
 }
 .btn-primary:hover {
   background: var(--primary-hover);

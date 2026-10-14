@@ -69,7 +69,12 @@ export default function AuditLogPage() {
   const formatMetadata = (metadata) => {
     if (!metadata) return null;
     return (
-      <pre className="text-[10px] bg-bg-glass p-2 rounded max-h-24 overflow-y-auto font-mono text-text-muted">
+      <pre
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrolling region: focusable so the keyboard can scroll it (WCAG 2.1.1)
+        tabIndex={0}
+        aria-label="Event metadata"
+        className="text-[10px] bg-bg-glass p-2 rounded max-h-24 overflow-y-auto font-mono text-text-muted"
+      >
         {JSON.stringify(metadata, null, 2)}
       </pre>
     );
@@ -83,7 +88,7 @@ export default function AuditLogPage() {
             <History className="text-brand-500" />
             Audit Explorer
           </h1>
-          <p className="text-text-muted mt-1 italic opacity-80">
+          <p className="text-text-muted mt-1 italic">
             Immutable system-wide event traceability for compliance.
           </p>
         </div>
@@ -101,6 +106,7 @@ export default function AuditLogPage() {
         <div className="relative">
           <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
           <select
+            aria-label="Filter by action"
             className="w-full bg-bg-surface/50 border border-border-subtle rounded-lg pl-10 pr-4 py-2 text-sm text-text-primary focus:ring-2 focus:ring-brand-500 transition-all outline-none appearance-none cursor-pointer"
             value={actionFilter}
             onChange={(e) => setActionFilter(e.target.value)}
@@ -204,17 +210,17 @@ export default function AuditLogPage() {
                       <td className="px-6 py-4 text-sm text-text-primary whitespace-nowrap">
                         {new Date(log.created_at).toLocaleString()}
                       </td>
-                      <td className="px-6 py-4 text-sm font-mono text-brand-400">
+                      <td className="px-6 py-4 text-sm font-mono text-text-accent">
                         {log.user_id?.slice(0, 8)}...
                       </td>
                       <td className="px-6 py-4">
                         <span
                           className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-tighter ${
                             log.action.includes('error') || log.action.includes('denied')
-                              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                              ? 'bg-status-error-bg text-status-error-text border border-status-error/30'
                               : log.action.includes('started') || log.action.includes('login')
-                                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                                : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                                ? 'bg-status-success-bg text-status-success-text border border-status-success/30'
+                                : 'bg-brand/10 text-text-accent border border-brand/30'
                           }`}
                         >
                           {log.action}
@@ -223,16 +229,16 @@ export default function AuditLogPage() {
                       <td className="px-6 py-4">
                         {isImpersonated ? (
                           <div className="flex flex-col gap-1">
-                            <span className="flex items-center gap-1.5 text-[11px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded shadow-sm">
+                            <span className="flex items-center gap-1.5 text-[11px] font-bold text-status-warning-text bg-status-warning-bg border border-status-warning/20 px-2 py-0.5 rounded shadow-sm">
                               <UserPlus className="w-3 h-3" />
                               IMPERSONATED
                             </span>
-                            <span className="text-[10px] text-text-muted opacity-70 truncate max-w-[120px]">
+                            <span className="text-[10px] text-text-muted truncate max-w-[120px]">
                               by: {log.metadata.admin_email}
                             </span>
                           </div>
                         ) : (
-                          <span className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted opacity-60">
+                          <span className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
                             <ShieldCheck className="w-3 h-3 text-green-500/50" />
                             Direct Session
                           </span>
@@ -264,6 +270,7 @@ export default function AuditLogPage() {
               variant="secondary"
               size="sm"
               disabled={currentPage === 0 || loading}
+              aria-label="Previous page"
               onClick={() => setCurrentPage((prev) => prev - 1)}
               className="px-2"
             >
@@ -295,6 +302,7 @@ export default function AuditLogPage() {
               variant="secondary"
               size="sm"
               disabled={currentPage >= totalPages - 1 || loading}
+              aria-label="Next page"
               onClick={() => setCurrentPage((prev) => prev + 1)}
               className="px-2"
             >

@@ -90,7 +90,7 @@ const WorkflowStep = ({
             <span
               className={`shrink-0 self-start sm:self-auto text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full ${
                 isActive
-                  ? 'bg-brand/10 text-brand border border-brand/20'
+                  ? 'bg-brand/10 text-text-accent border border-brand/20'
                   : isCompleted
                     ? 'bg-status-success/10 text-status-success border border-status-success/20'
                     : 'bg-bg-surface text-text-muted border border-border-subtle'

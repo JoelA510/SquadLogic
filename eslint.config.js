@@ -82,10 +82,9 @@ export default tseslint.config(
     },
   },
   {
-    // A follow-up, not a waiver: the "Select Team" <label> above the game page's team buttons
-    // labels nothing (it wants a group named by aria-labelledby). M4.3 has this file open in a
-    // parallel PR, so the fix is recorded in the plan's "Discovered during execution" for after
-    // that lands. Delete this block with the fix.
+    // Temporary, one rule, one file: the "Select Team" <label> above the game page's team buttons
+    // labels nothing (it wants a group named by aria-labelledby). The M4.3 PR, which has this
+    // file open, fixes it; whichever of that PR and M4.2's merges second deletes this block.
     files: ['frontend/src/pages/GameSchedulingPage.jsx'],
     rules: { 'jsx-a11y/label-has-associated-control': 'off' },
   },

@@ -583,7 +583,7 @@ export default function FieldManagementPage() {
               </div>
             </div>
 
-            <div className="text-xs text-brand-400 font-semibold uppercase mb-1">
+            <div className="text-xs text-text-accent font-semibold uppercase mb-1">
               {getLocationName(field.location_id)}
             </div>
             <h2 className="text-xl font-bold text-text-primary mb-1">{field.name}</h2>

@@ -836,7 +836,7 @@ export default function ImportPanel({ onImport }) {
                   or{' '}
                   <label
                     htmlFor={fileInputId}
-                    className="text-blue-400 hover:text-blue-300 cursor-pointer font-semibold hover:underline transition-colors rounded-sm focus-within:outline-none focus-within:ring-2 focus-within:ring-blue-400/80 focus-within:ring-offset-2 focus-within:ring-offset-bg-surface"
+                    className="text-text-accent cursor-pointer font-semibold hover:underline transition-colors rounded-sm focus-within:outline-none focus-within:ring-2 focus-within:ring-blue-400/80 focus-within:ring-offset-2 focus-within:ring-offset-bg-surface"
                   >
                     browse files
                     <input

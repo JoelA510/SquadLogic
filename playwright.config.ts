@@ -11,7 +11,7 @@ const testDir = defineBddConfig({
   outputDir: '.features-gen-local',
 });
 
-export default defineConfig({
+const config = defineConfig({
   testDir,
   globalTeardown: './tests/e2e/global-teardown.ts',
   reporter: 'html',
@@ -46,3 +46,50 @@ export default defineConfig({
     },
   ],
 });
+
+// The real-backend project (plan item M4.1): a few scenarios against a local
+// Supabase stack (`supabase start`, seeded by tests/e2e/real-backend/seed.sql),
+// run by .github/workflows/e2e-real-backend.yml. It exists only when that
+// stack's API URL is in the environment, so the mock suite (`npm run
+// test:e2e`, ci.yml) sees exactly the configuration above and nothing more.
+// Its features and steps live under tests/e2e/real-backend/, outside the mock
+// project's globs, so neither project loads the other's steps.
+const realBackendUrl = process.env.E2E_REAL_BACKEND_SUPABASE_URL?.replace(/\/+$/, '');
+if (realBackendUrl) {
+  const port = 5174;
+  const mockServers = config.webServer;
+  config.webServer = [
+    ...(Array.isArray(mockServers) ? mockServers : mockServers ? [mockServers] : []),
+    {
+      // The real client against the local stack: no mock opt-in, and the
+      // persistence Edge Functions served by the same stack.
+      command: `npm run frontend:dev -- --port ${port} --strictPort`,
+      url: `http://localhost:${port}`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120 * 1000,
+      env: {
+        VITE_USE_MOCK_SUPABASE: 'false',
+        VITE_SUPABASE_URL: realBackendUrl,
+        VITE_SUPABASE_ANON_KEY: process.env.E2E_REAL_BACKEND_ANON_KEY ?? '',
+        VITE_SUPABASE_PERSISTENCE_URL: `${realBackendUrl}/functions/v1`,
+      },
+    },
+  ];
+  config.projects = [
+    ...(config.projects ?? []),
+    {
+      name: 'real-backend',
+      testDir: defineBddConfig({
+        features: 'tests/e2e/real-backend/features/**/*.feature',
+        steps: 'tests/e2e/real-backend/steps/**/*.ts',
+        outputDir: '.features-gen-real-backend',
+      }),
+      // One shared database, so the scenarios run one at a time, in order.
+      fullyParallel: false,
+      timeout: 180000,
+      use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${port}` },
+    },
+  ];
+}
+
+export default config;

@@ -42,6 +42,7 @@ tmp/
 .features-gen/
 .features-gen-backup/
 .features-gen-local/
+.features-gen-real-backend/
 
 # Backup directories
 test-results-backup/

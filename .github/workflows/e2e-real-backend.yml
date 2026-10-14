@@ -1,0 +1,126 @@
+name: E2E against local Supabase
+
+# Plan item M4.1 (audit findings 13.2 and 6.4): a few end-to-end scenarios
+# through the app's real Supabase client, RPCs and Edge Functions, against a
+# local stack built from this branch's migrations, where the main E2E suite
+# (ci.yml) runs only against the in-browser mock. The scenarios are the
+# `real-backend` Playwright project (playwright.config.ts), which exists only
+# when this job puts the stack's URL in the environment; they live in
+# tests/e2e/real-backend/ and are seeded by tests/e2e/real-backend/seed.sql.
+#
+# Its own job rather than a step in pgtap.yml: it needs the edge runtime,
+# which pgtap.yml leaves out because its health check once failed a pgTAP run
+# that used none of it (run 38462349853), and a required pgTAP check should not
+# carry that risk for scenarios it does not run. On every pull request with no
+# `paths` filter and no job-level `if`, so it can be made a required check
+# (tests/rulesetRequiredChecks.test.js) once it has proven stable; it is not
+# required yet. Runbook: docs/operations/ci-cd.md ("Real-backend E2E").
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-real-backend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The one Supabase CLI version (tests/supabaseCliPin.test.js holds every
+  # workflow to it). Bump procedure: docs/operations/ci-cd.md.
+  SUPABASE_CLI_VERSION: 2.118.0
+
+jobs:
+  e2e-real-backend:
+    name: E2E against local Supabase
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@afb1b15109756ea5cf9d8985a359d9095235ca2b # v2.1.2
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+
+      # The database, auth, the API, storage, realtime and the edge runtime,
+      # which serves supabase/functions/* (the import and persistence paths
+      # call them). Studio, image transformation, the mail catcher and
+      # analytics are left out, as in pgtap.yml. One retry, announced as a
+      # warning, for the edge runtime's health check: a failure on the second
+      # start fails the job.
+      - name: Start local Supabase (applies all migrations)
+        run: |
+          set -uo pipefail
+          EXCLUDE=studio,imgproxy,mailpit,logflare,vector
+          if ! supabase start --exclude "$EXCLUDE"; then
+            echo "::warning::supabase start failed once; stopping and starting again."
+            supabase stop --no-backup || true
+            supabase start --exclude "$EXCLUDE"
+          fi
+
+      - name: Seed the scenarios' organization
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env)"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/e2e/real-backend/seed.sql
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+
+      # The stack's URL and anon key come from `supabase status`; they are the
+      # local stack's own, generated per run, and reach no other environment.
+      - name: Real-backend scenarios
+        run: |
+          set -euo pipefail
+          eval "$(supabase status -o env)"
+          export E2E_REAL_BACKEND_SUPABASE_URL="$API_URL"
+          export E2E_REAL_BACKEND_ANON_KEY="$ANON_KEY"
+          npx bddgen
+          npx playwright test --project=real-backend --workers=1 --reporter=list,html
+
+      - name: Edge runtime and auth logs (on failure)
+        if: failure()
+        run: |
+          for c in $(docker ps -a --format '{{.Names}}' | grep -E 'supabase_(edge_runtime|auth|rest)_'); do
+            echo "::group::$c"
+            docker logs --tail 200 "$c" 2>&1 || true
+            echo "::endgroup::"
+          done
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-real-backend-report
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload Playwright failure artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-real-backend-test-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup

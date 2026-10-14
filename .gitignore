@@ -77,3 +77,4 @@ frontend/lint_results.txt
 
 # Python bytecode (scripts/heat reference generator)
 __pycache__/
+.real-backend-dist/

@@ -61,12 +61,16 @@ if (realBackendUrl) {
   config.webServer = [
     ...(Array.isArray(mockServers) ? mockServers : mockServers ? [mockServers] : []),
     {
-      // The real client against the local stack: no mock opt-in, and the
-      // persistence Edge Functions served by the same stack.
-      command: `npm run frontend:dev -- --port ${port} --strictPort`,
+      // A production build of the real client, served by `vite preview`: the
+      // shape that ships (no mock chunk, no StrictMode double effects), against
+      // the local stack and its Edge Functions. Built into its own directory
+      // (paths are relative to Vite's root, frontend/) so `dist/` is untouched.
+      command:
+        'npx vite build --outDir ../.real-backend-dist --emptyOutDir && ' +
+        `npx vite preview --outDir ../.real-backend-dist --port ${port} --strictPort`,
       url: `http://localhost:${port}`,
       reuseExistingServer: !process.env.CI,
-      timeout: 120 * 1000,
+      timeout: 300 * 1000,
       env: {
         VITE_USE_MOCK_SUPABASE: 'false',
         VITE_SUPABASE_URL: realBackendUrl,

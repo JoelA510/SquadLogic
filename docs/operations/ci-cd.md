@@ -429,7 +429,13 @@ other environment.
   persistence paths call them). A failed start is retried once, with a
   warning, for the edge runtime's health check (the 502 that once failed a
   pgTAP run); that risk is why this is its own job and not a step in the
-  required pgTAP job.
+  required pgTAP job. Before the start, the job copies
+  `supabase/functions/import_map.json` to a `deno.json` beside each function
+  `config.toml` gives an `import_map` (auto-scheduler, fairness-scoring) and
+  drops those lines from its own copy of `config.toml`: the local edge runtime
+  does not apply the per-function import map (their bare `zod` import fails to
+  boot), while the deploy job's bundling does. Nothing is committed; the step
+  fails if no function names an import map any more.
 - **The seed.** [`tests/e2e/real-backend/seed.sql`](../../tests/e2e/real-backend/seed.sql),
   applied with `psql`: one administrator who can sign in, an onboarded
   organization, an active season dated from the day of the run, one division,
@@ -440,7 +446,9 @@ other environment.
 - **The scenarios.** The `real-backend` Playwright project
   (`playwright.config.ts`), which exists only when the job exports the stack's
   URL (`E2E_REAL_BACKEND_SUPABASE_URL`, `E2E_REAL_BACKEND_ANON_KEY`), so
-  `npm run test:e2e` and `ci.yml` see the mock project alone. Features and steps
+  `npm run test:e2e` and `ci.yml` see the mock project alone. It serves a
+  production build (`vite build` into `.real-backend-dist/`, then `vite
+  preview`), the shape that ships. Features and steps
   are under [`tests/e2e/real-backend/`](../../tests/e2e/real-backend/), outside
   the mock project's globs: a narrower re-import that must keep the guardians
   the first import recorded (migration `20260726000300`); import, teams synced

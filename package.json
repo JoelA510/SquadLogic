@@ -47,7 +47,7 @@
     "@sentry/react": "^10.47.0",
     "@supabase/supabase-js": "^2.87.1",
     "@tanstack/react-virtual": "3.13.23",
-    "dotenv": "^17.2.3",
+    "dotenv": "^18.0.7",
     "lucide-react": "^0.556.0",
     "papaparse": "^5.5.3",
     "prop-types": "^15.8.1",

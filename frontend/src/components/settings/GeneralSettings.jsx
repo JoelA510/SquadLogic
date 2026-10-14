@@ -97,6 +97,7 @@ export default function GeneralSettings() {
 
   return (
     <div className="space-y-8">
+      {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- the tablist delegates its tabs' arrow keys; each tab is a focusable button (roving tabindex) */}
       <div
         className="flex gap-2 overflow-x-auto pb-2 -mx-2 px-2 scrollbar-hide"
         role="tablist"

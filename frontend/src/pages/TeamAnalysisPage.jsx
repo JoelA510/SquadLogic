@@ -1387,6 +1387,7 @@ export default function TeamAnalysisPage() {
                             type="text"
                             className="w-full bg-bg-app border border-border-highlight rounded-lg px-2 py-1 text-sm font-semibold text-text-primary outline-none"
                             value={renameValue}
+                            // eslint-disable-next-line jsx-a11y/no-autofocus -- the rename field appears because the user just pressed Rename; focus moves to it
                             autoFocus
                             aria-label={`New name for team ${displayName}`}
                             onChange={(e) => setRenameValue(e.target.value)}

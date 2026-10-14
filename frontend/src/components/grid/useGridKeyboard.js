@@ -40,6 +40,9 @@ export function useGridKeyboard({
 
   const onKeyDown = (event) => {
     if (editing) return;
+    // Only keys pressed on the grid itself: a control inside it (a header's sort button, a
+    // selection checkbox, a row action) keeps its own Enter, Space and Tab.
+    if (event.target !== event.currentTarget) return;
     if (!active) {
       if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(event.key)) {
         event.preventDefault();

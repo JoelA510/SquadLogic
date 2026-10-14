@@ -39,6 +39,7 @@ export default function Tooltip({
   return (
     <span
       className={`relative inline-flex min-w-0 group/tooltip ${className}`}
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- only when the wrapped control is disabled (and so unfocusable): keeps its explanation reachable by keyboard
       tabIndex={disabled ? 0 : undefined}
       aria-disabled={disabled || undefined}
       aria-describedby={disabled ? tooltipId : undefined}

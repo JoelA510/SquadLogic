@@ -81,6 +81,7 @@ const SmartBadge = ({ score, rationale }) => {
 
   return (
     <div
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- focusable so a keyboard user can open the rationale tooltip (WCAG 1.4.13); it is the badge's only way in
       tabIndex={0}
       role="status"
       aria-label={`${matchPercent}% header match confidence`}

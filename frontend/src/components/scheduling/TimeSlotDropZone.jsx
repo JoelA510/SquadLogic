@@ -66,6 +66,7 @@ export default function TimeSlotDropZone({
         <div
           className="absolute top-1 right-1 group rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-error/70 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
           data-testid="invalid-indicator"
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- focusable so a keyboard user can read why the drop is invalid (its tooltip opens on focus, WCAG 1.4.13)
           tabIndex={0}
           aria-label="Invalid drop target"
           aria-describedby={invalidTooltipId}

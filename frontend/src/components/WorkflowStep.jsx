@@ -47,6 +47,7 @@ const WorkflowStep = ({
   };
 
   return (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events -- the card's click repeats the heading button, which is the keyboard path
     <div
       data-testid={`workflow-step-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
       className={`${baseClasses} ${statusStyles[status]} ${!isLocked ? 'cursor-pointer transform hover:scale-[1.01]' : ''}`}
@@ -71,7 +72,20 @@ const WorkflowStep = ({
             <h2
               className={`text-xl font-display font-bold transition-colors min-w-0 ${isActive ? 'text-text-primary' : 'text-text-secondary'}`}
             >
-              {title}
+              {/* The step's keyboard control (Enter or Space). It stops its click here so the
+                  card's own click handler doesn't run the step change twice. */}
+              <button
+                type="button"
+                className="text-left min-w-0 disabled:cursor-not-allowed"
+                aria-expanded={isActive}
+                disabled={isLocked}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onClick?.();
+                }}
+              >
+                {title}
+              </button>
             </h2>
             <span
               className={`shrink-0 self-start sm:self-auto text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full ${

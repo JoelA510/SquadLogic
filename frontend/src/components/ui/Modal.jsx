@@ -72,6 +72,7 @@ export default function Modal({
   if (!open) return null;
 
   return createPortal(
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- a backdrop click closes the dialog; the keyboard path is Escape (handled above) and the close button
     <div
       className="overlay"
       onMouseDown={(event) => {

@@ -1755,7 +1755,6 @@ export default function PracticeSchedulingPage() {
           {applyStatus !== 'idle' && (
             <section
               aria-label="Practice schedule review"
-              role="region"
               className="mt-4 rounded-xl border border-border-subtle bg-bg-glass p-4"
             >
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

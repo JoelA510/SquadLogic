@@ -1,7 +1,7 @@
 import { createBdd, type DataTable } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
-import { routeAutoSchedulerToEdgeSolver } from './edgeAutoSchedulerRoute.js';
+import { routeAutoSchedulerToEdgeSolver, type EdgeSolverPage } from './edgeAutoSchedulerRoute.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -342,6 +342,9 @@ When('I run the auto-scheduler on the Practice Scheduling page', async ({ page }
   await expect(
     page.locator('section[aria-label="Auto-Scheduler"]').getByText('Optimization Complete')
   ).toBeVisible({ timeout: 30000 });
+  // The result on screen came from the solver: a page that stopped calling
+  // the function (a cache, a renamed route) would complete without it.
+  expect((page as EdgeSolverPage).__edgeSolverRuns).toBe(1);
 });
 
 /** The count the Auto-Scheduler panel shows under `label` ("Assigned", "Unassigned"). */
@@ -377,8 +380,10 @@ Then(
     // The planted clash: both slots that are free are at the same hour, so
     // placing both teams would put their coach in two places at once.
     await expect(rows.filter({ hasText: /Thursday @ 17:00/ })).toHaveCount(2);
+    // Not both: one of them, or neither if the solver filled both places
+    // with other teams. Counted once the two placements above are on screen.
     const teamCell = page.getByRole('cell', { name: new RegExp(`^(${first}|${second}) `) });
-    await expect(rows.filter({ has: teamCell })).toHaveCount(1);
+    expect(await rows.filter({ has: teamCell }).count()).toBeLessThanOrEqual(1);
   }
 );
 

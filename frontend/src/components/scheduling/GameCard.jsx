@@ -8,20 +8,21 @@ import { useFeatures } from '../../hooks/useFeatures.js';
 import { divisionDisplayName } from '../../utils/divisions.js';
 
 /**
- * The grid's move target list and its one move handler, provided by
+ * The grid's move targets and its one move handler, provided by
  * `GameSchedulingPage` around the grid (plan item M4.3).
  *
- * - `cells`: every field and time slot the grid renders, as
- *   `{ id: 'fieldId:slotId', label, gameId }` (`gameId` is the game in it, or
- *   null). The id is the drop zone's, so a move names its target exactly as a
- *   drop does.
+ * - `cellLabels`: every cell the grid renders (`'fieldId:slotId'`, the drop
+ *   zone's id, so a move names its target exactly as a drop does) -> its name.
+ * - `emptyCells`: the cells a game can be moved to, `{ id, label }`: each game
+ *   slot on its own field, with no game in it.
  * - `moveGame(gameId, cellId, { focusMoved })`: the page's move handler, the
  *   same one a drop calls. There is no second write path.
  * - `claimFocus(gameId)`: true once for the game a "Move to" just moved, so its
  *   card takes focus where it lands rather than leaving it on the body.
  *
  * @type {React.Context<null | {
- *   cells: Array<{ id: string, label: string, gameId: string | null }>,
+ *   cellLabels: Map<string, string>,
+ *   emptyCells: Array<{ id: string, label: string }>,
  *   moveGame: (gameId: string, cellId: string, options?: { focusMoved?: boolean }) => void,
  *   claimFocus: (gameId: string) => boolean,
  * }>}
@@ -30,17 +31,23 @@ export const GameMoveContext = createContext(null);
 
 /**
  * "Move to…": the non-drag alternative to dragging a game (WCAG 2.2, 2.5.7).
- * Offers the empty cells only: the grid shows one game per cell, so a move onto
- * an occupied one would hide a game from view.
+ *
+ * The options are rendered once the list is reached (focus or a press), not
+ * with every card: a season's grid holds many games, each of which could list
+ * every empty slot.
  */
 function MoveToControl({ assignment, move }) {
+  const [armed, setArmed] = useState(false);
   const [target, setTarget] = useState('');
   const selectRef = useRef(null);
   const { claimFocus } = move;
   const cellId = `${assignment.fieldId}:${assignment.slotId}`;
-  const here = move.cells.find((cell) => cell.id === cellId);
-  const options = move.cells.filter((cell) => cell.id !== cellId && !cell.gameId);
+  const here = move.cellLabels.get(cellId);
+  const options = armed ? move.emptyCells.filter((cell) => cell.id !== cellId) : [];
+  // A choice another move has since filled is no longer a choice.
+  const chosen = options.some((cell) => cell.id === target) ? target : '';
   const matchup = `${assignment.homeTeamId} vs ${assignment.awayTeamId}`;
+  const nothingEmpty = move.emptyCells.every((cell) => cell.id === cellId);
 
   useEffect(() => {
     if (claimFocus(String(assignment.id))) selectRef.current?.focus();
@@ -54,13 +61,17 @@ function MoveToControl({ assignment, move }) {
       <select
         ref={selectRef}
         className="select"
-        aria-label={`Move ${matchup}${here ? `, now at ${here.label},` : ''} to`}
-        value={target}
+        aria-label={`Move ${matchup}${here ? `, now at ${here},` : ''} to`}
+        value={chosen}
         onChange={(event) => setTarget(event.target.value)}
-        onPointerDown={keepPointer}
-        disabled={options.length === 0}
+        onFocus={() => setArmed(true)}
+        onPointerDown={(event) => {
+          keepPointer(event);
+          setArmed(true);
+        }}
+        disabled={nothingEmpty}
       >
-        <option value="">{options.length === 0 ? 'No empty slot' : 'Move to…'}</option>
+        <option value="">{nothingEmpty ? 'No empty slot' : 'Move to…'}</option>
         {options.map((cell) => (
           <option key={cell.id} value={cell.id}>
             {cell.label}
@@ -70,9 +81,9 @@ function MoveToControl({ assignment, move }) {
       <button
         type="button"
         className="btn btn-default sm"
-        disabled={!target}
+        disabled={!chosen}
         onPointerDown={keepPointer}
-        onClick={() => move.moveGame(String(assignment.id), target, { focusMoved: true })}
+        onClick={() => move.moveGame(String(assignment.id), chosen, { focusMoved: true })}
       >
         Move
       </button>
@@ -83,7 +94,8 @@ function MoveToControl({ assignment, move }) {
 MoveToControl.propTypes = {
   assignment: PropTypes.object.isRequired,
   move: PropTypes.shape({
-    cells: PropTypes.array.isRequired,
+    cellLabels: PropTypes.instanceOf(Map).isRequired,
+    emptyCells: PropTypes.array.isRequired,
     moveGame: PropTypes.func.isRequired,
     claimFocus: PropTypes.func.isRequired,
   }).isRequired,

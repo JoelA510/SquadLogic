@@ -9,7 +9,7 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { createChainMock } from './helpers/index.js';
@@ -33,6 +33,14 @@ const TABLES = vi.hoisted(() => ({
       field_id: 'v1',
       start: '2026-04-04T16:30:00Z',
       end: '2026-04-04T17:30:00Z',
+      week_index: 1,
+      capacity: 1,
+    },
+    {
+      id: 'gs-3',
+      field_id: 'v2',
+      start: '2026-04-04T15:00:00Z',
+      end: '2026-04-04T16:00:00Z',
       week_index: 1,
       capacity: 1,
     },
@@ -63,6 +71,17 @@ const DASHBOARD = vi.hoisted(() => ({
         awayTeamId: 'bulls',
         start: '2026-04-04T15:00:00Z',
         end: '2026-04-04T16:00:00Z',
+        division: 'U10',
+        assignmentSource: 'auto',
+      },
+      {
+        id: 'ga-2',
+        slotId: 'gs-2',
+        fieldId: 'v1',
+        homeTeamId: 'wolves',
+        awayTeamId: 'comets',
+        start: '2026-04-04T16:30:00Z',
+        end: '2026-04-04T17:30:00Z',
         division: 'U10',
         assignmentSource: 'auto',
       },
@@ -105,6 +124,62 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
 const { default: GameSchedulingPage } =
   await import('../frontend/src/pages/GameSchedulingPage.jsx');
 
+/**
+ * jsdom has no layout. The grid's geometry: a column per field (240px apart),
+ * a row per slot in the page's order (120px apart), each card inset in its cell.
+ */
+const COLUMNS = { v1: 0, v2: 240 };
+const ROWS = { 'gs-1': 0, 'gs-2': 120, 'gs-3': 240 };
+
+function rectOf(element) {
+  // The drag overlay starts where the game being dragged is (the only one
+  // these cases drag): dnd-kit reads the overlay, not the card, while dragging.
+  if (element.getAttribute?.('data-testid') === 'game-card-preview') {
+    const dragged = document.querySelector('[data-testid="game-card-ga-1"]');
+    return dragged ? rectOf(dragged) : rectOf(document.body);
+  }
+  const zone = element.closest?.('[data-testid^="drop-zone-"]');
+  const [fieldId, slotId] = (zone?.getAttribute('data-testid') ?? '')
+    .replace('drop-zone-', '')
+    .split(':');
+  const testId = element.getAttribute?.('data-testid') ?? '';
+  let box = { left: 0, top: 0, width: 0, height: 0 };
+  if (zone && testId.startsWith('drop-zone-')) {
+    box = { left: COLUMNS[fieldId], top: ROWS[slotId], width: 200, height: 100 };
+  } else if (zone && testId.startsWith('game-card-')) {
+    box = { left: COLUMNS[fieldId] + 10, top: ROWS[slotId] + 24, width: 180, height: 60 };
+  }
+  return {
+    ...box,
+    x: box.left,
+    y: box.top,
+    right: box.left + box.width,
+    bottom: box.top + box.height,
+    toJSON: () => box,
+  };
+}
+
+const settle = () =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+/** Pick up a game from its grip, press `keys`, and drop it. */
+async function keyboardDrag(matchup, keys) {
+  const handle = screen.getByRole('button', { name: `Drag ${matchup}` });
+  handle.focus();
+  fireEvent.keyDown(handle, { code: 'Space' });
+  await settle();
+  for (const code of keys) {
+    fireEvent.keyDown(handle, { code });
+    await settle();
+  }
+  fireEvent.keyDown(handle, { code: 'Space' });
+  await settle();
+}
+
+const STAGED = 'Manual game move staged. Apply the schedule to persist it.';
+
 async function renderEditableGrid() {
   render(
     <MemoryRouter>
@@ -119,35 +194,74 @@ async function renderEditableGrid() {
 }
 
 describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
-  it('stages the move through the page handler and keeps focus on the moved game', async () => {
+  let rectSpy;
+  beforeEach(() => {
+    rectSpy = vi
+      .spyOn(Element.prototype, 'getBoundingClientRect')
+      .mockImplementation(function boundingRect() {
+        return rectOf(this);
+      });
+  });
+  afterEach(() => rectSpy.mockRestore());
+
+  it('stages a Move to through the page handler and keeps focus on the moved game', async () => {
     const from = await renderEditableGrid();
     expect(within(from).getByTestId('game-card-ga-1')).toBeInTheDocument();
 
     const select = within(from).getByRole('combobox', { name: /^Move lions vs bulls, now at/ });
-    const target = [...select.querySelectorAll('option')].find((option) =>
-      option.textContent.startsWith('South Field')
-    );
-    // The South Field cell at the first slot's time, offered by name.
-    expect(target?.value).toBe('v2:gs-1');
-
     select.focus();
+    fireEvent.focus(select);
+    // The one empty booking: South Field's gs-3. North Field's gs-2 holds a
+    // game, and the grid's cross cells (South Field at gs-1's time) are another
+    // field's booking.
+    const offered = [...select.querySelectorAll('option')].map((option) => option.value);
+    expect(offered).toEqual(['', 'v2:gs-3']);
+    const target = { value: 'v2:gs-3' };
     fireEvent.change(select, { target: { value: target.value } });
     await act(async () => {
       fireEvent.click(within(from).getByRole('button', { name: 'Move' }));
     });
 
-    const to = screen.getByTestId('drop-zone-v2:gs-1');
+    const to = screen.getByTestId('drop-zone-v2:gs-3');
     expect(within(to).getByTestId('game-card-ga-1')).toBeInTheDocument();
     expect(within(from).queryByTestId('game-card-ga-1')).not.toBeInTheDocument();
     // What a drop stages: a manual move, waiting for Apply.
     expect(within(to).getByTestId('manual-badge')).toBeInTheDocument();
-    expect(
-      screen.getByText('Manual game move staged. Apply the schedule to persist it.')
-    ).toBeInTheDocument();
+    expect(screen.getByText(STAGED)).toBeInTheDocument();
     // Focus followed the game to its new cell instead of falling to the body.
     expect(
       within(to).getByRole('combobox', { name: /^Move lions vs bulls, now at South/ })
     ).toHaveFocus();
+  });
+
+  it('stages a keyboard drag through the same handler', async () => {
+    await renderEditableGrid();
+    await keyboardDrag('lions vs bulls', ['ArrowRight']);
+    const to = screen.getByTestId('drop-zone-v2:gs-1');
+    expect(within(to).getByTestId('game-card-ga-1')).toBeInTheDocument();
+    expect(within(to).getByTestId('manual-badge')).toBeInTheDocument();
+    expect(screen.getByText(STAGED)).toBeInTheDocument();
+  });
+
+  it('refuses a drop on a cell that already has a game, and says why', async () => {
+    const from = await renderEditableGrid();
+    // Down from gs-1 on North Field is gs-2, which holds wolves vs comets.
+    await keyboardDrag('lions vs bulls', ['ArrowDown']);
+    expect(within(from).getByTestId('game-card-ga-1')).toBeInTheDocument();
+    const occupied = screen.getByTestId('drop-zone-v1:gs-2');
+    expect(within(occupied).getByTestId('game-card-ga-2')).toBeInTheDocument();
+    expect(within(occupied).queryByTestId('game-card-ga-1')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('lions vs bulls was not moved: that slot already has wolves vs comets.')
+    ).toBeInTheDocument();
+  });
+
+  it('stages nothing when a game is picked up and put back', async () => {
+    const from = await renderEditableGrid();
+    await keyboardDrag('lions vs bulls', []);
+    expect(within(from).getByTestId('game-card-ga-1')).toBeInTheDocument();
+    expect(within(from).queryByTestId('manual-badge')).not.toBeInTheDocument();
+    expect(screen.queryByText(STAGED)).not.toBeInTheDocument();
   });
 
   it('names the By Team buttons as a group, with no orphaned label', async () => {

@@ -316,15 +316,19 @@ export function gridKeyboardCoordinates(event, { context }) {
   event.preventDefault();
   if (!active || !collisionRect) return undefined;
 
+  // Directions are read from the cell the game is over, not from the card: a
+  // card sits inset in its cell, so on the first press its own column would
+  // count as "left" of it and its own row as "above" it.
+  const from = (over && droppableRects.get(over.id)) || collisionRect;
   const ahead = [];
   for (const entry of droppableContainers.getEnabled()) {
     const rect = entry && !entry.disabled ? droppableRects.get(entry.id) : null;
     if (!rect) continue;
     if (
-      (event.code === KeyboardCode.Down && rect.top > collisionRect.top) ||
-      (event.code === KeyboardCode.Up && rect.top < collisionRect.top) ||
-      (event.code === KeyboardCode.Right && rect.left > collisionRect.left) ||
-      (event.code === KeyboardCode.Left && rect.left < collisionRect.left)
+      (event.code === KeyboardCode.Down && rect.top > from.top) ||
+      (event.code === KeyboardCode.Up && rect.top < from.top) ||
+      (event.code === KeyboardCode.Right && rect.left > from.left) ||
+      (event.code === KeyboardCode.Left && rect.left < from.left)
     ) {
       ahead.push(entry);
     }
@@ -1048,6 +1052,24 @@ export default function GameSchedulingPage() {
       });
       if (!currentAssignment) return;
 
+      const cellOf = (assignment) => `${assignment.fieldId}:${assignment.slotId}`;
+      const targetCell = `${targetFieldId}:${targetSlotId}`;
+      // Put back where it was (a keyboard pick-up and drop, a drop on its own
+      // cell): nothing moved, so nothing is staged or marked manual.
+      if (cellOf(currentAssignment) === targetCell) return;
+      // The grid shows one game per cell, so a second game there would hide one.
+      const occupant = sourceAssignments.find(
+        (assignment) =>
+          String(assignment.id) !== String(gameId) && cellOf(assignment) === targetCell
+      );
+      if (occupant) {
+        setStatusMessage(
+          `${currentAssignment.homeTeamId} vs ${currentAssignment.awayTeamId} was not moved: ` +
+            `that slot already has ${occupant.homeTeamId} vs ${occupant.awayTeamId}.`
+        );
+        return;
+      }
+
       const updatedAssignment = {
         ...currentAssignment,
         fieldId: targetFieldId,
@@ -1088,29 +1110,38 @@ export default function GameSchedulingPage() {
     return true;
   }, []);
 
-  /** Every cell the grid renders, named for a person, and the game in it. */
-  const gridCells = useMemo(() => {
-    const gameInCell = new Map(
-      displayedAssignments.map((assignment) => [
-        `${assignment.fieldId}:${assignment.slotId}`,
-        String(assignment.id),
-      ])
+  /**
+   * Every cell the grid renders, named for a person: the field and the slot's
+   * time. The grid offers every slot under every field; a game slot is one
+   * field's booking, so the "Move to" list (below) offers only those.
+   */
+  const cellLabels = useMemo(() => {
+    const labels = new Map();
+    for (const field of fields) {
+      for (const slot of gameSlots) {
+        labels.set(`${field.id}:${slot.id}`, `${field.name ?? field.id}, ${slot.label ?? slot.id}`);
+      }
+    }
+    return labels;
+  }, [fields, gameSlots]);
+
+  /** The bookings a game can be moved to: each slot on its own field, with no game in it. */
+  const emptyCells = useMemo(() => {
+    const taken = new Set(
+      displayedAssignments.map((assignment) => `${assignment.fieldId}:${assignment.slotId}`)
     );
     return fields.flatMap((field) =>
-      gameSlots.map((slot) => {
-        const id = `${field.id}:${slot.id}`;
-        return {
-          id,
-          label: `${field.name ?? field.id}, ${slot.label ?? slot.id}`,
-          gameId: gameInCell.get(id) ?? null,
-        };
-      })
+      gameSlots
+        .filter((slot) => slot.fieldId == null || String(slot.fieldId) === String(field.id))
+        .map((slot) => `${field.id}:${slot.id}`)
+        .filter((id) => !taken.has(id))
+        .map((id) => ({ id, label: cellLabels.get(id) }))
     );
-  }, [displayedAssignments, fields, gameSlots]);
+  }, [cellLabels, displayedAssignments, fields, gameSlots]);
 
   const gameMove = useMemo(
-    () => ({ cells: gridCells, moveGame: moveGameTo, claimFocus: claimMoveFocus }),
-    [claimMoveFocus, gridCells, moveGameTo]
+    () => ({ cellLabels, emptyCells, moveGame: moveGameTo, claimFocus: claimMoveFocus }),
+    [cellLabels, claimMoveFocus, emptyCells, moveGameTo]
   );
 
   const gridSensors = useGameGridSensors();
@@ -1118,7 +1149,7 @@ export default function GameSchedulingPage() {
   // What a screen reader hears during a keyboard drag: the game and the cell
   // by name, not dnd-kit's default "draggable item ga-1 ... droppable area v1:gs-2".
   const gridAnnouncements = useMemo(() => {
-    const cellLabel = (id) => gridCells.find((cell) => cell.id === String(id))?.label ?? 'no slot';
+    const cellLabel = (id) => cellLabels.get(String(id)) ?? 'no slot';
     const gameLabel = (id) => {
       const game = displayedAssignmentsRef.current.find((a) => String(a.id) === String(id));
       return game ? `${game.homeTeamId} vs ${game.awayTeamId}` : 'the game';
@@ -1133,7 +1164,7 @@ export default function GameSchedulingPage() {
           : `${gameLabel(active.id)} was dropped outside the grid and did not move.`,
       onDragCancel: ({ active }) => `Moving ${gameLabel(active.id)} was cancelled.`,
     };
-  }, [gridCells]);
+  }, [cellLabels]);
 
   const handleCancelGameAssignment = useCallback(async (assignment) => {
     if (

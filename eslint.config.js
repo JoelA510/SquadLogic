@@ -74,7 +74,9 @@ export default tseslint.config(
   // `Then` step that reads `__MOCK_DB__` checks what a step (or the mock)
   // wrote, not what the page shows -- the Pillar 1 scenarios passed for months
   // that way while forging the engines' results (plan M4.6, audit 6.6). Given
-  // and When steps may still seed inputs through it.
+  // and When steps may still seed inputs through it. It sees only text inside
+  // the `Then(...)` call: a helper defined elsewhere that reads the store, or
+  // the key held in a module-level constant, gets past it.
   {
     files: ['tests/e2e/steps/**/*.ts'],
     rules: {

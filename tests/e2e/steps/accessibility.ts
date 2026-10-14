@@ -23,18 +23,7 @@ const KNOWN_VIOLATIONS: ReadonlyArray<{
   /** A fragment of the element's HTML, as axe reports it. */
   html: string;
   reason: string;
-}> = [
-  {
-    route: '/teams/builder',
-    theme: 'light',
-    rule: 'color-contrast',
-    html: 'avatar-sm',
-    reason:
-      "White initials on light's --accent-green (4.37:1); --accent-teal and --accent-amber fall " +
-      'short too, and neither white nor dark text clears 4.5:1 on all three. Needs a decision on ' +
-      'the light accent palette (remediation plan, "Discovered during execution", M4.2).',
-  },
-];
+}> = [];
 
 async function expectHeading(page: Page, heading: string) {
   await expect(page.getByRole('heading', { name: heading, exact: true }).first()).toBeVisible({

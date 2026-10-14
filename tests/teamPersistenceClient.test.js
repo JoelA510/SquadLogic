@@ -2,6 +2,14 @@ import assert from 'node:assert/strict';
 import { afterEach, test } from 'vitest';
 
 import { triggerTeamPersistence } from '../frontend/src/utils/teamPersistenceClient.js';
+import { PERSISTENCE_INVALID_PAYLOAD } from '../frontend/src/lib/persistenceRequest.js';
+
+// A snapshot the team-persistence Edge Function would accept (its
+// `PersistencePayloadSchema`): since M4.4 the client checks that before sending.
+const TEAM_PAYLOAD = {
+  teamRows: [{ id: 'team-1' }],
+  teamPlayerRows: [{ team_id: 'team-1', player_id: 'player-1' }],
+};
 
 afterEach(() => {
   delete process.env.VITE_SUPABASE_PERSISTENCE_URL;
@@ -17,7 +25,7 @@ test('blocks persistence when pending overrides remain', async () => {
   };
 
   const result = await triggerTeamPersistence({
-    snapshot: { preparedTeamRows: 1, preparedPlayerRows: 1 },
+    snapshot: { payload: TEAM_PAYLOAD, preparedTeamRows: 1, preparedPlayerRows: 1 },
     overrides: [{ id: 'pending-1', status: 'pending' }],
     fetchImpl,
     endpoint: 'http://example.com',
@@ -31,6 +39,7 @@ test('blocks persistence when pending overrides remain', async () => {
 test('falls back to simulation when no endpoint is configured (mock mode)', async () => {
   const result = await triggerTeamPersistence({
     snapshot: {
+      payload: TEAM_PAYLOAD,
       preparedTeamRows: 3,
       preparedPlayerRows: 45,
       lastRunId: 'run-123',
@@ -53,7 +62,7 @@ test('uses provided endpoint and forwards access token', async () => {
   };
 
   const result = await triggerTeamPersistence({
-    snapshot: { preparedTeamRows: 2, preparedPlayerRows: 22 },
+    snapshot: { payload: TEAM_PAYLOAD, preparedTeamRows: 2, preparedPlayerRows: 22 },
     overrides: [],
     fetchImpl,
     accessToken: 'token-123',
@@ -73,7 +82,7 @@ test('uses provided endpoint when available (vite example)', async () => {
   };
 
   const result = await triggerTeamPersistence({
-    snapshot: { preparedTeamRows: 1, preparedPlayerRows: 1 },
+    snapshot: { payload: TEAM_PAYLOAD, preparedTeamRows: 1, preparedPlayerRows: 1 },
     overrides: [],
     fetchImpl,
     accessToken: 'token-abc',
@@ -99,7 +108,7 @@ test('falls back to simulation when using derived endpoint without auth token', 
   };
 
   const result = await triggerTeamPersistence({
-    snapshot: { preparedTeamRows: 2, preparedPlayerRows: 22 },
+    snapshot: { payload: TEAM_PAYLOAD, preparedTeamRows: 2, preparedPlayerRows: 22 },
     overrides: [],
     fetchImpl,
     // No accessToken, No endpoint => Mock
@@ -129,6 +138,7 @@ test('posts to a configured endpoint and returns payload data', async () => {
 
   const result = await triggerTeamPersistence({
     snapshot: {
+      payload: TEAM_PAYLOAD,
       preparedTeamRows: 4,
       preparedPlayerRows: 50,
       lastRunId: 'run-live-1',
@@ -142,6 +152,7 @@ test('posts to a configured endpoint and returns payload data', async () => {
 
   assert.equal(capturedUrl, 'https://api.example.com/team-persistence');
   assert.deepEqual(/** @type {any} */ (capturedBody).snapshot, {
+    payload: TEAM_PAYLOAD,
     preparedTeamRows: 4,
     preparedPlayerRows: 50,
     lastRunId: 'run-live-1',
@@ -164,7 +175,7 @@ test('treats missing status responses as errors (failsafe)', async () => {
   };
 
   const result = await triggerTeamPersistence({
-    snapshot: { preparedTeamRows: 1, preparedPlayerRows: 10 },
+    snapshot: { payload: TEAM_PAYLOAD, preparedTeamRows: 1, preparedPlayerRows: 10 },
     overrides: [],
     fetchImpl,
     endpoint: 'https://api.example.com',
@@ -184,7 +195,7 @@ test('success status but missing message defaults to standard message', async ()
   };
 
   const result = await triggerTeamPersistence({
-    snapshot: { preparedTeamRows: 2, preparedPlayerRows: 22 },
+    snapshot: { payload: TEAM_PAYLOAD, preparedTeamRows: 2, preparedPlayerRows: 22 },
     overrides: [],
     fetchImpl,
     endpoint: 'https://api.example.com',
@@ -206,7 +217,7 @@ test('surfaces backend error messages when the response is not ok', async () => 
   };
 
   const result = await triggerTeamPersistence({
-    snapshot: { preparedTeamRows: 2, preparedPlayerRows: 30 },
+    snapshot: { payload: TEAM_PAYLOAD, preparedTeamRows: 2, preparedPlayerRows: 30 },
     overrides: [],
     fetchImpl,
     endpoint: 'https://api.example.com',
@@ -229,7 +240,7 @@ test('returns an error when the response payload cannot be parsed', async () => 
   };
 
   const result = await triggerTeamPersistence({
-    snapshot: { preparedTeamRows: 2, preparedPlayerRows: 18 },
+    snapshot: { payload: TEAM_PAYLOAD, preparedTeamRows: 2, preparedPlayerRows: 18 },
     overrides: [],
     fetchImpl,
     endpoint: 'https://api.example.com',
@@ -246,7 +257,7 @@ test('returns an error status when the request fails (network error)', async () 
   };
 
   const result = await triggerTeamPersistence({
-    snapshot: { preparedTeamRows: 2, preparedPlayerRows: 20 },
+    snapshot: { payload: TEAM_PAYLOAD, preparedTeamRows: 2, preparedPlayerRows: 20 },
     overrides: [],
     fetchImpl,
     endpoint: 'https://api.example.com',
@@ -255,4 +266,42 @@ test('returns an error status when the request fails (network error)', async () 
 
   assert.equal(result.status, 'error');
   assert.match(result.message, /network failure/);
+});
+
+// M4.4 (audit finding 2.3): the body is checked against the Edge Function's
+// own schema before the network call. Refused in this client's contract, a
+// returned `{ status: 'error' }`, with the Zod issues in a readable message.
+test('refuses a malformed payload client-side, before any request, naming each issue', async () => {
+  let fetchCalls = 0;
+  const fetchImpl = async () => {
+    fetchCalls += 1;
+    return { ok: true, json: async () => ({ status: 'success' }) };
+  };
+
+  const result = await triggerTeamPersistence({
+    snapshot: {
+      payload: {
+        // A numeric team id and a player row with no player: both are what
+        // the Edge's `PersistencePayloadSchema` answers with a 400.
+        teamRows: [{ id: 7 }],
+        teamPlayerRows: [{ team_id: 'team-1' }],
+      },
+    },
+    overrides: [],
+    fetchImpl,
+    endpoint: 'https://api.example.com',
+    accessToken: 'token',
+  });
+
+  assert.equal(fetchCalls, 0, 'a malformed payload reached the network');
+  assert.equal(result.status, 'error');
+  assert.equal(/** @type {any} */ (result).code, PERSISTENCE_INVALID_PAYLOAD);
+  assert.deepEqual(
+    /** @type {any} */ (result).issues.map((issue) => issue.path.join('.')),
+    ['snapshot.payload.teamRows.0.id', 'snapshot.payload.teamPlayerRows.0.player_id']
+  );
+  assert.match(result.message, /^The team roster save was not sent: its data is malformed/);
+  assert.match(result.message, /snapshot\.payload\.teamRows\.0\.id: [^;]*expected string/);
+  assert.match(result.message, /snapshot\.payload\.teamPlayerRows\.0\.player_id: /);
+  assert.match(result.message, /Nothing was saved\.$/);
 });

@@ -1,6 +1,7 @@
 import { preparePracticePersistenceSnapshot } from '@squadlogic/core/practicePersistenceSnapshot.js';
+import { PracticePersistencePayloadSchema } from '@squadlogic/core/schemas/index.js';
 import { IS_MOCK_MODE, PRACTICE_PERSISTENCE_URL } from '../config.js';
-import { postPersistenceRequest } from '../lib/persistenceRequest.js';
+import { assertPersistencePayload, postPersistenceRequest } from '../lib/persistenceRequest.js';
 import { supabase } from '../lib/supabaseClient.js';
 
 export async function persistPracticeScheduleReview({
@@ -85,17 +86,22 @@ export async function persistPracticeEnact({ payload, enact, runMetadata }, opti
   if (!token) {
     throw new Error('Authentication required to enact a practice recommendation.');
   }
+  const body = {
+    snapshot: { payload: { assignmentRows: payload.assignmentRows }, runId: runMetadata.runId },
+    overrides: [],
+    runMetadata,
+    repair: payload.repair,
+    enact,
+  };
+  // The panel frames the clause: "It is not known whether the practice was enacted: ...".
+  const label = 'the enact request';
+  // Plan M4.4: the snapshot against the Edge's schema before the network call.
+  // `repair` and `enact` are the Edge's to validate (see the schema's note).
+  assertPersistencePayload(PracticePersistencePayloadSchema, body, label);
   const { response, result } = await postPersistenceRequest(PRACTICE_PERSISTENCE_URL, {
     token,
-    body: {
-      snapshot: { payload: { assignmentRows: payload.assignmentRows }, runId: runMetadata.runId },
-      overrides: [],
-      runMetadata,
-      repair: payload.repair,
-      enact,
-    },
-    // The panel frames the clause: "It is not known whether the practice was enacted: ...".
-    label: 'the enact request',
+    body,
+    label,
     bareMessages: true,
   });
   if (response.status === 409 && result.code === PRACTICE_SCHEDULE_STALE) {
@@ -173,15 +179,21 @@ async function sendPracticeSnapshot({
     practiceOverrides: [],
   });
 
+  const body = {
+    snapshot,
+    overrides: [],
+    runMetadata,
+    ...(repair ? { repair } : {}),
+  };
+  const label = 'The practice schedule save';
+  // Plan M4.4: the Edge Function's own schema, checked before the network
+  // call; a refusal throws as every other failure here does, with a `code`.
+  assertPersistencePayload(PracticePersistencePayloadSchema, body, label);
+
   const { response, result } = await postPersistenceRequest(PRACTICE_PERSISTENCE_URL, {
     token,
-    body: {
-      snapshot,
-      overrides: [],
-      runMetadata,
-      ...(repair ? { repair } : {}),
-    },
-    label: 'The practice schedule save',
+    body,
+    label,
   });
 
   if (!response.ok) {

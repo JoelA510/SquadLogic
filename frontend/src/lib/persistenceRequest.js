@@ -24,6 +24,13 @@
  * A 2xx whose body is not a JSON object is an error too: it used to read as
  * `{}`, an empty success. A non-2xx with an unreadable body still resolves
  * with `result: {}`, so each caller's own `HTTP <status>` message stands.
+ *
+ * The deadline itself is `withPersistenceDeadline`, so the two other Edge calls
+ * that had none (`EvaluationPanel`'s Save, through `functions.invoke`, and
+ * `useAutoScheduler`'s run, which also has a Cancel) share this one deadline and
+ * its error codes rather than a second mechanism. `payloadRefusal` and
+ * `assertPersistencePayload` are the clients' check of a body against its
+ * schema before it is sent (audit finding 2.3, plan M4.4).
  */
 
 /** Supabase's Edge request idle timeout (150 s, docs: functions/limits) plus 10 s. */
@@ -35,39 +42,111 @@ export const PERSISTENCE_TIMEOUT = 'PERSISTENCE_TIMEOUT';
 /** `code` of the error thrown for a 2xx whose body is not a JSON object. */
 export const PERSISTENCE_UNREADABLE_RESPONSE = 'PERSISTENCE_UNREADABLE_RESPONSE';
 
+/**
+ * `code` of a payload refused before it was sent (audit finding 2.3, plan M4.4):
+ * it does not match the schema the Edge Function would parse it with, so the
+ * request would only have come back a 400 "Invalid payload". Nothing was sent.
+ */
+export const PERSISTENCE_INVALID_PAYLOAD = 'PERSISTENCE_INVALID_PAYLOAD';
+
+/** The timeout's clause for a caller that does not frame the message itself. */
+const UNKNOWN_OUTCOME =
+  ', so it is not known whether the changes were saved. Check the saved schedule before ' +
+  'applying again.';
+
+/** How many Zod issues a refusal names before it says how many more there are. */
+const LISTED_ISSUES = 5;
+
 function persistenceError(message, code, status) {
   return Object.assign(new Error(message), { code, status });
 }
 
 /**
- * @param {string} url
- * @param {Object} options
- * @param {string} options.token - the session's access token
- * @param {unknown} options.body - serialised with `JSON.stringify`
- * @param {string} options.label - what is being saved, for the messages ("The game schedule save")
- * @param {boolean} [options.bareMessages] - messages as a bare clause, for a caller that frames
- *   them itself (the enact panel: "It is not known whether the practice was enacted: <clause>.")
- * @param {number} [options.timeoutMs]
- * @returns {Promise<{ response: Response, result: Record<string, any> }>}
+ * Check a persistence body against its schema before it is sent (plan M4.4).
+ *
+ * The body itself is what is sent, not `parsed.data`: the schemas are
+ * `z.object`s, which strip keys they do not name (`snapshot.runMetadata`, the
+ * practice `repair` and `enact` bodies, which the Edge Function validates on its
+ * own), so sending the parse would drop them. The parse is the gate only.
+ *
+ * @param {{ safeParse: (value: unknown) => { success: boolean, error?: { issues: Array<{ path: PropertyKey[], message: string }> } } }} schema
+ * @param {unknown} body
+ * @param {string} label - what was being saved ("The game schedule save")
+ * @returns {{ message: string, issues: Array<{ path: PropertyKey[], message: string }> } | null}
+ *   `null` when the body passes
  */
-export async function postPersistenceRequest(
-  url,
-  { token, body, label, bareMessages = false, timeoutMs = PERSISTENCE_TIMEOUT_MS }
+export function payloadRefusal(schema, body, label) {
+  const parsed = schema.safeParse(body);
+  if (parsed.success) return null;
+  const issues = parsed.error?.issues ?? [];
+  const listed = issues
+    .slice(0, LISTED_ISSUES)
+    .map(
+      (issue) =>
+        `${issue.path.length ? issue.path.map(String).join('.') : '(body)'}: ${issue.message}`
+    );
+  const more = issues.length > LISTED_ISSUES ? `; and ${issues.length - LISTED_ISSUES} more` : '';
+  return {
+    message:
+      `${label} was not sent: its data is malformed, so the server would refuse it. ` +
+      `${listed.join('; ')}${more}. Nothing was saved.`,
+    issues,
+  };
+}
+
+/**
+ * Throw a {@link payloadRefusal} as the game and practice clients throw every
+ * other failure: an `Error` with a `code` and an HTTP `status` (`null`, as for
+ * a timeout: no request was made), plus the Zod `issues`.
+ *
+ * @param {Parameters<typeof payloadRefusal>[0]} schema
+ * @param {unknown} body
+ * @param {string} label
+ */
+export function assertPersistencePayload(schema, body, label) {
+  const refusal = payloadRefusal(schema, body, label);
+  if (refusal) {
+    throw Object.assign(persistenceError(refusal.message, PERSISTENCE_INVALID_PAYLOAD, null), {
+      issues: refusal.issues,
+    });
+  }
+}
+
+/**
+ * Run one request under the persistence deadline.
+ *
+ * `send` is handed the `AbortSignal` the deadline aborts and must pass it to
+ * its transport. The race settles on the deadline whether or not the transport
+ * honours the abort. A caller's own `signal` (a Cancel button) aborts the
+ * request too, and rejects with an `AbortError` at once, never later with a
+ * timeout the caller has stopped listening for.
+ *
+ * @template T
+ * @param {(signal: AbortSignal) => Promise<T>} send
+ * @param {Object} options
+ * @param {string} options.label - what is being saved ("The game schedule save")
+ * @param {boolean} [options.bareMessages] - the message as a bare clause, for a caller that
+ *   frames it itself (the enact panel: "It is not known whether the practice was enacted: <clause>.")
+ * @param {number} [options.timeoutMs]
+ * @param {AbortSignal} [options.signal] - the caller's own cancel
+ * @returns {Promise<T>}
+ */
+export async function withPersistenceDeadline(
+  send,
+  { label, bareMessages = false, timeoutMs = PERSISTENCE_TIMEOUT_MS, signal = undefined }
 ) {
-  const unknownOutcome = bareMessages
-    ? ''
-    : ', so it is not known whether the changes were saved. Check the saved schedule before ' +
-      'applying again.';
   const controller = new AbortController();
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let timer;
+  /** @type {(() => void) | undefined} */
+  let onCancel;
   const deadline = new Promise((_, reject) => {
     timer = setTimeout(() => {
       // Reject first, then abort: the race settles on the timeout, never on
-      // the AbortError the abort raises inside `fetch`.
+      // the AbortError the abort raises inside the transport.
       reject(
         persistenceError(
-          `${label} did not answer within ${timeoutMs / 1000} seconds${unknownOutcome}`,
+          `${label} did not answer within ${timeoutMs / 1000} seconds${bareMessages ? '' : UNKNOWN_OUTCOME}`,
           PERSISTENCE_TIMEOUT,
           null
         )
@@ -75,8 +154,43 @@ export async function postPersistenceRequest(
       controller.abort();
     }, timeoutMs);
   });
+  const cancelled = new Promise((_, reject) => {
+    if (!signal) return;
+    onCancel = () => {
+      reject(new DOMException('The request was cancelled.', 'AbortError'));
+      controller.abort();
+    };
+    if (signal.aborted) onCancel();
+    else signal.addEventListener('abort', onCancel, { once: true });
+  });
 
-  const exchange = async () => {
+  try {
+    return await Promise.race([send(controller.signal), deadline, cancelled]);
+  } finally {
+    clearTimeout(timer);
+    if (signal && onCancel) signal.removeEventListener('abort', onCancel);
+  }
+}
+
+/**
+ * @param {string} url
+ * @param {Object} options
+ * @param {string} options.token - the session's access token
+ * @param {unknown} options.body - serialised with `JSON.stringify`
+ * @param {string} options.label - what is being saved ("The game schedule save")
+ * @param {boolean} [options.bareMessages] - messages as a bare clause, for a caller that frames
+ *   them itself (the enact panel: "It is not known whether the practice was enacted: <clause>.")
+ * @param {number} [options.timeoutMs]
+ * @param {AbortSignal} [options.signal] - the caller's own cancel (the auto-scheduler's)
+ * @returns {Promise<{ response: Response, result: Record<string, any> }>}
+ */
+export async function postPersistenceRequest(
+  url,
+  { token, body, label, bareMessages = false, timeoutMs = PERSISTENCE_TIMEOUT_MS, signal }
+) {
+  const unknownOutcome = bareMessages ? '' : UNKNOWN_OUTCOME;
+
+  const exchange = async (/** @type {AbortSignal} */ requestSignal) => {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -84,7 +198,7 @@ export async function postPersistenceRequest(
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(body),
-      signal: controller.signal,
+      signal: requestSignal,
     });
     // The body is read under the same deadline: a stalled stream hangs as
     // surely as a stalled response.
@@ -93,10 +207,10 @@ export async function postPersistenceRequest(
     try {
       parsed = await response.json();
     } catch (err) {
-      // An abort is the deadline's, and the race has already settled on it.
-      // Any other failure to read the body (not JSON, empty, cut off) is the
-      // case handled below.
-      if (controller.signal.aborted) throw err;
+      // An abort is the deadline's or the caller's, and the race has already
+      // settled on it. Any other failure to read the body (not JSON, empty,
+      // cut off) is the case handled below.
+      if (requestSignal.aborted) throw err;
       readable = false;
     }
     const isObject =
@@ -112,9 +226,5 @@ export async function postPersistenceRequest(
     return { response, result: isObject ? parsed : {} };
   };
 
-  try {
-    return await Promise.race([exchange(), deadline]);
-  } finally {
-    clearTimeout(timer);
-  }
+  return withPersistenceDeadline(exchange, { label, bareMessages, timeoutMs, signal });
 }

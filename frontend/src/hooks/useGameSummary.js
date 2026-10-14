@@ -13,7 +13,7 @@ const EMPTY_SUMMARY = {
 };
 
 export function useGameSummary() {
-  const { data, loading, error } = useSchedulerRun(
+  const { data, loading, error, refetch } = useSchedulerRun(
     'game',
     mapSchedulerRunToGameSummary,
     EMPTY_SUMMARY
@@ -26,5 +26,6 @@ export function useGameSummary() {
     runId: data ? data.runId : null,
     loading,
     error,
+    refetch,
   };
 }

@@ -107,8 +107,29 @@ export const AssignmentSchema = z
   })
   .passthrough();
 
+/*
+ * The persistence payloads (audit finding 2.3, plan M4.4).
+ *
+ * Each is the client's copy of the `PersistencePayloadSchema` its Edge Function
+ * parses the request with (`supabase/functions/<name>-persistence/index.ts`),
+ * and each client checks its body against it before the network call
+ * (`frontend/src/utils/*PersistenceClient.js`, through
+ * `lib/persistenceRequest.js`). They must refuse exactly what the server
+ * refuses: a client stricter than its server would block a save the server
+ * takes, and a laxer one sends what comes back a 400 "Invalid payload".
+ * `tests/persistencePayloadSchemaDrift.test.js` evaluates each Edge schema from
+ * its own source under zod 3 and holds the two to the same verdict over a
+ * mutation product of a valid body.
+ *
+ * Not here: the practice save's `repair` body and the enact record, which the
+ * Edge Function validates on its own (`PracticeRepairSchema`,
+ * `PracticeEnactSchema`, core's twin of the latter is `PracticeEnactRecordSchema`).
+ * `z.object` strips keys it does not name, so the clients gate on the parse and
+ * send their own body, never `parsed.data`.
+ */
+
 /**
- * Schema for the Team Persistence Payload.
+ * Schema for the Team Persistence Payload (`team-persistence`).
  */
 export const PersistencePayloadSchema = z.object({
   snapshot: z.object({
@@ -118,6 +139,62 @@ export const PersistencePayloadSchema = z.object({
         z.object({ team_id: z.string(), player_id: z.string() }).passthrough()
       ),
     }),
+    lastRunId: z.string().nullish(),
+    runId: z.string().nullish(),
+  }),
+  overrides: z.array(z.unknown()).optional(),
+  runMetadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+/**
+ * Schema for the Game Persistence Payload (`game-persistence`).
+ */
+export const GamePersistencePayloadSchema = z.object({
+  snapshot: z.object({
+    payload: z
+      .object({
+        gameRows: z.array(z.object({ id: z.string().optional() }).passthrough()).optional(),
+        assignmentRows: z
+          .array(
+            z
+              .object({
+                home_team_id: z.string().optional(),
+                homeTeamId: z.string().optional(),
+                away_team_id: z.string().optional(),
+                awayTeamId: z.string().optional(),
+                slot_id: z.string().optional(),
+                slotId: z.string().optional(),
+                game_slot_id: z.string().optional(),
+                gameSlotId: z.string().optional(),
+              })
+              .passthrough()
+          )
+          .optional(),
+      })
+      .refine(
+        (payload) => Array.isArray(payload.assignmentRows) || Array.isArray(payload.gameRows),
+        'snapshot.payload.assignmentRows or snapshot.payload.gameRows is required'
+      ),
+    lastRunId: z.string().nullish(),
+    runId: z.string().nullish(),
+  }),
+  overrides: z.array(z.unknown()).optional(),
+  runMetadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+/**
+ * Schema for the Practice Persistence Payload's snapshot (`practice-persistence`:
+ * the save, the repair save and the enact all send one).
+ */
+export const PracticePersistencePayloadSchema = z.object({
+  snapshot: z.object({
+    payload: z.object({
+      assignmentRows: z.array(
+        z.object({ team_id: z.string(), practice_slot_id: z.string() }).passthrough()
+      ),
+    }),
+    lastRunId: z.string().nullish(),
+    runId: z.string().nullish(),
   }),
   overrides: z.array(z.unknown()).optional(),
   runMetadata: z.record(z.string(), z.unknown()).optional(),

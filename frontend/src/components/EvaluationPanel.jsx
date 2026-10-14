@@ -4,6 +4,7 @@ import { Loader2, AlertCircle, Save, Activity, ShieldCheck, Zap } from 'lucide-r
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { supabase as defaultSupabaseClient } from '../lib/supabaseClient.js';
 import { cachedInvoke, edgeFunctionCache } from '../lib/cache.js';
+import { PERSISTENCE_TIMEOUT, withPersistenceDeadline } from '../lib/persistenceRequest.js';
 
 // Wave 6b Task 1: 60s TTL for fairness-scoring reads. Rationale: evaluations
 // are recomputed as soon as a user edits the schedule (the effect re-fires on
@@ -170,34 +171,57 @@ export default function EvaluationPanel({
     setPersisting(true);
     setMessage('Hardening results in audit trail...');
 
+    const invalidateCachedReads = () =>
+      edgeFunctionCache.invalidateByPrefix(
+        `fairness-scoring:${currentOrganization?.id ?? 'no-org'}:`
+      );
+
     try {
-      const { error } = await supabaseClient.functions.invoke('fairness-scoring', {
-        body: {
-          organizationId: currentOrganization?.id,
-          practice: practiceData,
-          games: gameData,
-          persist: true,
-          metadata: {
-            source: 'EvaluationPanel_ManualSave',
-            timestamp: new Date().toISOString(),
-          },
-        },
-      });
+      // Under the persistence deadline (plan M2.5's, `lib/persistenceRequest.js`):
+      // "Hardening results..." used to spin forever on a request that never
+      // answered. Its timeout is the request's own, not `invoke`'s, whose abort
+      // surfaces as "Failed to send a request", wrong for a request that was sent.
+      const { error } = await withPersistenceDeadline(
+        (signal) =>
+          supabaseClient.functions.invoke('fairness-scoring', {
+            body: {
+              organizationId: currentOrganization?.id,
+              practice: practiceData,
+              games: gameData,
+              persist: true,
+              metadata: {
+                source: 'EvaluationPanel_ManualSave',
+                timestamp: new Date().toISOString(),
+              },
+            },
+            signal,
+          }),
+        { label: 'the save', bareMessages: true }
+      );
 
       if (error) throw error;
 
       // Wave 6b Task 1: invalidate this org's cached fairness-scoring reads
       // after a persist — the server-side side-effect means prior cached
       // "persist: false" scores may be stale against a new audit trail.
-      edgeFunctionCache.invalidateByPrefix(
-        `fairness-scoring:${currentOrganization?.id ?? 'no-org'}:`
-      );
+      invalidateCachedReads();
 
       setMessage('A-1 Audit: Evaluation persisted successfully.');
       setTimeout(() => setMessage(''), 4000);
     } catch (err) {
       logger.error('Edge Function Persistence failed:', err);
-      setMessage(`Save sync failed: ${err.message}`);
+      if (err?.code === PERSISTENCE_TIMEOUT) {
+        // The save may still have landed after the panel stopped waiting, so
+        // the cached reads are dropped as after a save that answered: the next
+        // read is the server's, not one from before it.
+        invalidateCachedReads();
+        setMessage(
+          `It is not known whether the evaluation was saved: ${err.message}. ` +
+            'Check the audit trail before saving it again.'
+        );
+      } else {
+        setMessage(`Save sync failed: ${await describeFailure(err)}`);
+      }
     } finally {
       setPersisting(false);
     }

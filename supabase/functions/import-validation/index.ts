@@ -466,7 +466,9 @@ const ImportValidationPayload = z.object({
   import_type: z.enum(['players', 'coaches', 'fields', 'field_availability']),
   organization_id: z.string().uuid(),
   rows: z.array(z.record(z.unknown())).max(MAX_ROWS, `Maximum ${MAX_ROWS} rows per import`),
-  file_name: z.string().max(255),
+  // `file_name` is no longer read: it went only into the audit row, and the
+  // audit log does not keep upload file names (data minimisation, owner
+  // decision 2026-10-14). A client that still sends it has it stripped.
   import_job_id: z.string().uuid().optional(),
   row_offset: z.number().int().min(0).optional().default(0),
 });
@@ -693,7 +695,6 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
     resourceType: 'import_job',
     metadata: {
       import_type: body.import_type,
-      file_name: body.file_name,
       total_rows: body.rows.length,
       valid_rows: validatedRows.length,
       error_rows: allErrors.length,

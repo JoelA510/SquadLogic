@@ -17,7 +17,13 @@
  */
 import { assert, assertEquals } from 'https://deno.land/std@0.203.0/assert/mod.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
-import { createUserClient, recordAudit, recordAuditNow } from '../auth.ts';
+import {
+  AUDIT_ERROR_MAX_CHARS,
+  auditErrorText,
+  createUserClient,
+  recordAudit,
+  recordAuditNow,
+} from '../auth.ts';
 
 const URL_ = 'https://project.example.test';
 const ANON = 'anon-key-not-a-secret';
@@ -132,4 +138,15 @@ Deno.test('recordAuditNow never rejects when the write fails', async () => {
   }
   assertEquals(errors.length, 1, 'the failure is logged once');
   assertEquals(errors[0][0], 'Audit log write failed:');
+});
+
+Deno.test('auditErrorText bounds what a failure writes into the audit log', () => {
+  assertEquals(AUDIT_ERROR_MAX_CHARS, 200);
+  assertEquals(auditErrorText(new Error('short')), 'short');
+  assertEquals(auditErrorText('not an Error'), 'not an Error');
+  const long = auditErrorText(new Error('x'.repeat(5000)));
+  assertEquals(long.length, AUDIT_ERROR_MAX_CHARS);
+  assert(long.endsWith('\u2026'), 'a cut message says it was cut');
+  const exact = 'y'.repeat(AUDIT_ERROR_MAX_CHARS);
+  assertEquals(auditErrorText(new Error(exact)), exact);
 });

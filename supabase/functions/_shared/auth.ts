@@ -177,6 +177,22 @@ export async function resolveOrgIdsFromTeamIds(
   return [...new Set(data.map((row: { organization_id: string }) => row.organization_id))];
 }
 
+/**
+ * The longest error text an audit row may carry. `audit_log` is append-only and
+ * kept for 180 days, so what a failure writes there is minimised (owner
+ * decision, 2026-10-14): the error's own message, bounded, and nothing from
+ * the request.
+ */
+export const AUDIT_ERROR_MAX_CHARS = 200;
+
+/** `error`'s message, cut to {@link AUDIT_ERROR_MAX_CHARS}, for an audit row's metadata. */
+export function auditErrorText(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  return text.length <= AUDIT_ERROR_MAX_CHARS
+    ? text
+    : `${text.slice(0, AUDIT_ERROR_MAX_CHARS - 1)}\u2026`;
+}
+
 export interface AuditParams {
   organizationId: string;
   action: string;

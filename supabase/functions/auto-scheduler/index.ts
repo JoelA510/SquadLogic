@@ -85,6 +85,7 @@ import {
   jsonResponse,
   recordAudit,
   recordAuditNow,
+  auditErrorText,
 } from '../_shared/auth.ts';
 import { checkRateLimit } from '../_shared/rateLimit.ts';
 import { edgeLogger, logFailure, withFailureLogging } from '../_shared/logtail.ts';
@@ -336,7 +337,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
-        metadata: { reason: preferences.code, message: preferences.message },
+        metadata: { reason: preferences.code, message: auditErrorText(preferences.message) },
       });
       await edgeLogger.flush();
       return jsonResponse(
@@ -372,7 +373,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
-        metadata: { reason: venueDaylight.code, message: venueDaylight.message },
+        metadata: { reason: venueDaylight.code, message: auditErrorText(venueDaylight.message) },
       });
       await edgeLogger.flush();
       return jsonResponse(
@@ -406,7 +407,10 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
-        metadata: { reason: lightingOverrides.code, message: lightingOverrides.message },
+        metadata: {
+          reason: lightingOverrides.code,
+          message: auditErrorText(lightingOverrides.message),
+        },
       });
       await edgeLogger.flush();
       return jsonResponse(
@@ -763,7 +767,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       await recordAuditNow(auditClient, {
         organizationId: logCtx.organizationId,
         action: 'scheduler.auto_failed',
-        metadata: { error: (error as Error).message },
+        metadata: { error: auditErrorText(error) },
       });
     }
 

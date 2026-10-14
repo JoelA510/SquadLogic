@@ -173,6 +173,16 @@ function auditCallsIn(raw) {
   return calls;
 }
 
+/** `args` with every `auditErrorText(...)` call removed: what it wraps is bounded. */
+function withoutBounded(args) {
+  let out = args;
+  for (let i = out.indexOf('auditErrorText('); i >= 0; i = out.indexOf('auditErrorText(')) {
+    const open = i + 'auditErrorText('.length;
+    out = out.slice(0, i) + out.slice(endOfExpression(out, open, true) + 1);
+  }
+  return out;
+}
+
 /** Every action a migration registers with `INSERT INTO audit_actions (action) VALUES ...`. */
 function registeredActionsIn(sql) {
   const found = [];
@@ -258,6 +268,16 @@ describe('Edge audit actions are registered in audit_actions', () => {
     expect(registered.size).toBeGreaterThanOrEqual(MIN_REGISTERED);
   });
 
+  // Owner decision, 2026-10-14: the append-only log keeps no upload file name
+  // and no raw error text (a raw message is unbounded and can echo input).
+  // Errors go through `auditErrorText`, which bounds them.
+  it('audit params carry no file name and no raw error message', () => {
+    const leaks = sites
+      .filter((s) => /file_?name/i.test(s.args) || /\.message\b/.test(withoutBounded(s.args)))
+      .map((s) => `${s.file}:${s.line}`);
+    expect(leaks).toEqual([]);
+  });
+
   it('registers every action an Edge Function writes', () => {
     const missing = sites.flatMap((s) =>
       (s.actions ?? []).filter((a) => !registered.has(a)).map((a) => `${a} (${s.file}:${s.line})`)
@@ -307,6 +327,13 @@ describe('the scanners refuse what they cannot read', () => {
       null
     );
     expect(auditCallsIn('recordAudit(c, params);')[0].actions).toBe(null);
+  });
+
+  it('treats a message as bounded only inside auditErrorText', () => {
+    expect(withoutBounded('{ error: auditErrorText((e as Error).message), x: 1 }')).toBe(
+      '{ error: , x: 1 }'
+    );
+    expect(withoutBounded('{ error: e.message }')).toBe('{ error: e.message }');
   });
 
   it('reads multi-row registrations and ignores INSERT ... SELECT', () => {

@@ -4,6 +4,12 @@
   "installCommand": "npm ci",
   "buildCommand": "npm run frontend:build",
   "outputDirectory": "dist",
+  "git": {
+    "deploymentEnabled": {
+      "claude/**": false,
+      "dependabot/**": false
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",

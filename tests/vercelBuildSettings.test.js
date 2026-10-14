@@ -47,3 +47,25 @@ describe('vercel.json build settings', () => {
     expect(path.resolve(ROOT, vercel.outputDirectory)).toBe(outDir);
   });
 });
+
+// Free-tier budget (docs/operations/ci-cd.md, "Free-tier budgets"): Vercel
+// Hobby allows 100 deployments a day and every push to any branch spends one,
+// so agent and Dependabot branches don't deploy on their own (a preview is
+// requested when someone will look at it). Production must still deploy.
+describe('vercel.json automatic deployments', () => {
+  const rules = Object.entries(vercel.git?.deploymentEnabled ?? {});
+  const deploys = (branch) =>
+    !rules.some(([glob, enabled]) => enabled === false && path.matchesGlob(branch, glob));
+
+  it('deploys the production branch', () => {
+    expect(vercel.git?.deploymentEnabled).not.toBe(false);
+    expect(deploys('main')).toBe(true);
+  });
+
+  it.each(['claude/vibrant-allen-hr7y7s-w4', 'dependabot/npm_and_yarn/vite-8.3.4'])(
+    'does not deploy %s on push',
+    (branch) => {
+      expect(deploys(branch)).toBe(false);
+    }
+  );
+});

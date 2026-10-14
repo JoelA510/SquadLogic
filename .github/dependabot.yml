@@ -1,14 +1,19 @@
-# Version updates (plan item M2.3, audit finding 8.2). Weekly, grouped so a
-# routine bump is one pull request to review, not dozens. Security updates are
-# separate (Settings -> Advanced Security) and ignore the cooldown.
+# Version updates (plan item M2.3, audit finding 8.2). Monthly and grouped so
+# routine bumps are one or two pull requests to review, not dozens, and do not
+# spend free-tier budget (docs/operations/ci-cd.md, "Free-tier budgets"): each
+# Dependabot push runs the full CI. Rebasing is off for the same reason;
+# comment `@dependabot rebase` on a PR when it is about to be merged.
+# Security updates are separate (Settings -> Advanced Security) and ignore the
+# cooldown and the schedule.
 # https://docs.github.com/code-security/dependabot
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    open-pull-requests-limit: 3
+    rebase-strategy: disabled
     # A release is 3 days old before an update takes it, the same wait .npmrc
     # gives `npm install` (min-release-age=3): long enough for a compromised
     # version to be caught and pulled.
@@ -27,12 +32,13 @@ updates:
       # back every other minor and patch update with it.
       - dependency-name: eslint-plugin-react-hooks
         versions: ['>= 7.1.0']
-      # 3.14+ (virtual-core 3.18) grows the lazy virtual-vendor chunk from
-      # 5.0 to 7.9 KB gzip, past its 7,000 B cap in config/bundle-budget.json.
-      # Raising that cap is its own decision (docs/operations/bundle-budget.md);
-      # until then this bump would fail check:bundle and hold back the group.
+      # Owner decision 2026-10-13: pinned at 3.13.23. 3.14+ (virtual-core
+      # 3.18) grows the lazy virtual-vendor chunk from 5.0 to 7.9 KB gzip,
+      # past its 7,000 B cap in config/bundle-budget.json, and even 3.13.24+
+      # pulls a newer virtual-core. Raising that cap is its own decision
+      # (docs/operations/bundle-budget.md).
       - dependency-name: '@tanstack/react-virtual'
-        versions: ['>= 3.14.0']
+        versions: ['> 3.13.23']
       # 2026-10-13: Prettier 3.8+ formats some code differently from 3.7.4
       # (e.g. `for (...; cond; )`), and the prettier/prettier lint rule fails
       # on every file formatted the old way. Upgrading it is its own PR, so
@@ -41,16 +47,24 @@ updates:
         versions: ['> 3.7.4']
     groups:
       # Non-major bumps are almost always safe; batch them into one PR.
-      # Majors arrive one per PR (none is planned: remediation plan D6).
       minor-and-patch:
         update-types:
           - minor
           - patch
+      # Majors arrive together as one PR: a monthly list of what is available,
+      # not a merge candidate (no major is planned: remediation plan D6). Take
+      # a major as its own planned PR. Not an `ignore`: whether an ignore on
+      # majors also suppresses security updates is unverified.
+      majors:
+        update-types:
+          - major
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 2
+    rebase-strategy: disabled
     cooldown:
       default-days: 3
     groups:

@@ -140,11 +140,12 @@ it also checks online that each pinned SHA is a commit of the action it names.
   on workflows nobody changed, so bump the pinned version by hand, in a pull
   request that fixes or configures what the new release reports.
 
-**Not a required check yet.** The job reports as `Workflow audit (zizmor)`; it
-has no `paths` filter and no `if`, so it reports on every pull request and can
-be required like the four in [Branch Protection](#branch-protection): add it to
-`.github/rulesets/main.json` and re-import the ruleset (an owner settings
-change).
+**Required in `main.json`; enforced once the owner applies it.** The job
+reports as `Workflow audit (zizmor)`; it has no `paths` filter and no `if`, so
+it reports on every pull request, and `.github/rulesets/main.json` requires it
+with the others in [Branch Protection](#branch-protection). GitHub does not
+read that file: until the owner adds the check to the live ruleset (the owner
+step there), a pull request can merge with this job red.
 
 ## Edge Functions (`deno-mirror-tests`)
 
@@ -431,8 +432,9 @@ What it enforces on the default branch:
   review is required (the owner is the only maintainer).
 - **Required checks, on an up-to-date branch:** `Build & Test` and
   `Deno Mirror Tests` (jobs of `ci.yml`), `Run pgTAP against local Supabase`
-  (`pgtap.yml`, since plan item M3.2) and `npm audit (high and critical block)`
-  (`audit.yml`), all reported by GitHub Actions. The branch must contain the
+  (`pgtap.yml`, since plan item M3.2), `npm audit (high and critical block)`
+  (`audit.yml`) and `Workflow audit (zizmor)` (`workflow-audit.yml`, since
+  M3.5), all reported by GitHub Actions. The branch must contain the
   latest `main` before it can merge ("strict").
 - **No force pushes and no deletion of `main`.**
 - **Not required:** an approving review, or resolving review conversations
@@ -446,11 +448,12 @@ repository), the Vercel deployment check, and the migration harness
 (`dbharness.yml`, path-filtered: see
 [Running the database harness](#running-the-database-harness-dbharnessyml)).
 
-**Why these four checks can be required.** A required check that never reports
+**Why these five checks can be required.** A required check that never reports
 blocks the pull request forever, so each must report on every pull request to
-`main`, including docs-only ones. `ci.yml`, `pgtap.yml` and `audit.yml` have no
-`paths` or `paths-ignore` filter on `pull_request`; the two `ci.yml` jobs' only
-`if` is `github.event_name != 'schedule'`, and the pgTAP and audit jobs have
+`main`, including docs-only ones. `ci.yml`, `pgtap.yml`, `audit.yml` and
+`workflow-audit.yml` have no `paths` or `paths-ignore` filter on
+`pull_request`; the two `ci.yml` jobs' only `if` is
+`github.event_name != 'schedule'`, and the pgTAP, audit and zizmor jobs have
 none. `Build & Test` runs on a docs-only pull request too: its docs-only path
 skips the build steps inside the job, and the job itself still reports.
 `tests/rulesetRequiredChecks.test.js` reads every workflow in
@@ -458,14 +461,14 @@ skips the build steps inside the job, and the job itself still reports.
 (or more than one), or if a trigger or a job's condition changes in a way that
 could stop it reporting.
 
-**Adding pgTAP and the audit (owner, once the pull request that added them to
-`main.json` has merged).** `main.json` gained `Run pgTAP against local Supabase` and
-`npm audit (high and critical block)`; the live ruleset does not change until
-the owner changes it. Settings -> Rules -> Rulesets -> "main: pull requests
-with green CI" -> Require status checks to pass -> Add checks -> add both
-(source GitHub Actions) -> Save. Or delete the ruleset and import `main.json`
-as described below. Then confirm with the rules API that all four contexts are
-listed.
+**Adding pgTAP, the audit and zizmor (owner, once the pull requests that added
+them to `main.json` have merged).** `main.json` gained `Run pgTAP against local
+Supabase`, `npm audit (high and critical block)` and `Workflow audit (zizmor)`;
+the live ruleset does not change until the owner changes it. Settings -> Rules
+-> Rulesets -> "main: pull requests with green CI" -> Require status checks to
+pass -> Add checks -> add all three (source GitHub Actions) -> Save. Or delete
+the ruleset and import `main.json` as described below. Then confirm with the
+rules API that all five contexts are listed.
 
 **Changing or restoring it (owner):** Settings -> Rules -> Rulesets -> "main:
 pull requests with green CI" -> edit, then save, and change `main.json` to
@@ -513,7 +516,7 @@ build log on 2026-10-13:
 | Framework | Vite | `vercel.json` `framework` |
 | Build command | `npm run frontend:build` | `vercel.json` `buildCommand` (the Vite preset's default, `npm run build`, is not a build: plan item M6.1) |
 | Output directory | `dist` | `vercel.json` `outputDirectory` (where `vite.config.js` builds: `root` plus `build.outDir`) |
-| Install command | `npm install` | Vercel's default for npm; not set anywhere |
+| Install command | `npm ci` | `vercel.json` `installCommand` (#559), so Vercel installs exactly what the lockfile pins, as CI does |
 | Node.js | 24.x | `package.json` `engines` ([ENVIRONMENT.md](./ENVIRONMENT.md#node-runtime)) |
 | Region | `iad1` | Vercel's default |
 | Deployment protection | Vercel Authentication on every deployment except custom domains | Dashboard |

@@ -61,8 +61,9 @@ ZONES=(UTC America/Los_Angeles)
 # `coach-preferences_test.ts`; 8.9 PR 6 to 8 for `practice-daylight_test.ts`; 8.9
 # D14 PR C to 9 for `lighting-overrides_test.ts`; 8.6 3b PR 12a to 10 for
 # `practice-exceptions_test.ts`; 8.6 3b PR 11d-0 to 11 for `practice-lock_test.ts`; remediation
-# M1.2 to 12 for `scoring-parity_test.ts`; M2.6 to 13 for `fairness-empty-roster_test.ts`;
-# the Edge audit fix to 14 for `audit-caller_test.ts`).
+# M1.2 to 12 for `scoring-parity_test.ts`; M2.6 to 13 for `fairness-empty-roster_test.ts`; the
+# games twin of M2.6 (with M4.4) to 14 for `fairness-empty-game-roster_test.ts`; the Edge audit
+# fix to 15 for `audit-caller_test.ts`).
 #
 # **Adding an EXCLUDED entry DOES require lowering this number, and that
 # friction is the point.** It is checked against RUNNABLE, so one exclusion
@@ -74,7 +75,7 @@ ZONES=(UTC America/Los_Angeles)
 # once in EXCLUDED and once here, and the lowered number is the durable record
 # in the diff that coverage went down. A reviewer seeing `6` become `5` is the
 # entire mechanism.
-EXPECTED_MIN_TEST_FILES=14
+EXPECTED_MIN_TEST_FILES=15
 
 # Test files that must NOT run, each with the reason. Empty is the correct
 # state.

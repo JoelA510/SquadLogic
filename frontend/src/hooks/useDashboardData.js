@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useTeamSummary } from './useTeamSummary.js';
 import { usePracticeSummary } from './usePracticeSummary.js';
 import { useCurrentPracticeSchedule } from './useCurrentPracticeSchedule.js';
@@ -53,6 +53,7 @@ export function useDashboardData() {
     loading: practiceLoading,
     error: practiceError,
     runId: practiceRunId,
+    refetch: refetchPracticeRun,
   } = usePracticeSummary();
 
   // The season's current schedule, not the latest run's rows
@@ -62,6 +63,7 @@ export function useDashboardData() {
     assignments: practiceScheduleAssignments,
     loading: practiceScheduleLoading,
     error: practiceScheduleError,
+    refetch: refetchPracticeSchedule,
   } = useCurrentPracticeSchedule();
 
   const {
@@ -71,6 +73,7 @@ export function useDashboardData() {
     loading: gameLoading,
     error: gameError,
     runId: gameRunId,
+    refetch: refetchGameRun,
   } = useGameSummary();
 
   const {
@@ -119,6 +122,20 @@ export function useDashboardData() {
     [errors]
   );
 
+  /**
+   * Re-read one source after a save whose outcome is unknown
+   * (`PERSISTENCE_TIMEOUT`): the save may have landed after the page stopped
+   * waiting, and what is on screen is then the schedule from before it.
+   *
+   * Practice re-reads its latest run and the season's current rows; game
+   * re-reads its latest run, and its rows follow the run id
+   * (`useGameAssignments(gameRunId)`): every game save writes a new run.
+   */
+  const refetchPractice = useCallback(() => {
+    refetchPracticeRun();
+    refetchPracticeSchedule();
+  }, [refetchPracticeRun, refetchPracticeSchedule]);
+
   const roadmapStats = useMemo(() => {
     const completed = ROADMAP_SECTIONS.filter((section) => section.status === 'complete').length;
     const pending = ROADMAP_SECTIONS.length - completed;
@@ -143,6 +160,7 @@ export function useDashboardData() {
     runId: practiceRunId,
     // What the exports and the scheduling grid list: every current row of the season.
     scheduleAssignments: practiceScheduleAssignments,
+    refetch: refetchPractice,
   };
 
   const resolvedGame = {
@@ -152,6 +170,7 @@ export function useDashboardData() {
     generatedAt: gameGeneratedAt,
     runId: gameRunId,
     assignments: gameAssignments,
+    refetch: refetchGameRun,
   };
 
   return {

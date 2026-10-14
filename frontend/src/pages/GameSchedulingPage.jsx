@@ -34,6 +34,7 @@ import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { persistGameScheduleReview } from '../utils/gamePersistenceClient.js';
+import { isUnknownPersistenceOutcome } from '../lib/persistenceRequest.js';
 import { useFieldClosures } from '../hooks/useFieldClosures.js';
 import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
 import { todayIso } from '../utils/today.js';
@@ -868,6 +869,18 @@ export default function GameSchedulingPage() {
     ]
   );
 
+  // A save that timed out, or answered 2xx with a body that could not be
+  // read, may still have been written (the message says the outcome is not
+  // known). The schedule on screen would then be the one from before it, so
+  // the saved schedule is read again; the staged review is left as it was.
+  const refetchGame = game?.refetch;
+  const rereadAfterUnknownOutcome = useCallback(
+    (err) => {
+      if (isUnknownPersistenceOutcome(err)) refetchGame?.();
+    },
+    [refetchGame]
+  );
+
   const handleApplySchedule = useCallback(async () => {
     if (!canManageSchedule || reviewAssignments == null) return;
 
@@ -897,12 +910,14 @@ export default function GameSchedulingPage() {
     } catch (err) {
       setApplyStatus('error');
       setApplyError(err.message || 'Game schedule changes could not be applied.');
+      rereadAfterUnknownOutcome(err);
     }
   }, [
     canManageSchedule,
     game?.runId,
     localAssignments,
     persistReviewedAssignments,
+    rereadAfterUnknownOutcome,
     reviewAssignments,
     schedulerResult,
   ]);
@@ -939,8 +954,14 @@ export default function GameSchedulingPage() {
     } catch (err) {
       setApplyStatus('error');
       setApplyError(err.message || 'Game schedule rollback could not be applied.');
+      rereadAfterUnknownOutcome(err);
     }
-  }, [canManageSchedule, lastRollbackAssignments, persistReviewedAssignments]);
+  }, [
+    canManageSchedule,
+    lastRollbackAssignments,
+    persistReviewedAssignments,
+    rereadAfterUnknownOutcome,
+  ]);
 
   const handleDragStart = useCallback(
     (event) => {

@@ -33,11 +33,19 @@ import { useFeatures } from '../hooks/useFeatures.js';
 import { divisionDisplayName } from '../utils/divisions.js';
 import { logger } from '../lib/logger.js';
 
-function KPI({ icon: Icon, color, label, value, sub = null }) {
+/**
+ * `tone` names a colour token (`--primary`, `--accent-teal`, ...) defined for both themes in
+ * index.css, so the icon re-themes; the tile behind it is that colour at 12%.
+ */
+function KPI({ icon: Icon, tone, label, value, sub = null }) {
+  const color = `var(--${tone})`;
   return (
     <div className="kpi">
       <div className="kpi-top">
-        <span className="kpi-ico" style={{ background: `${color}1f`, color }}>
+        <span
+          className="kpi-ico"
+          style={{ background: `color-mix(in srgb, ${color} 12%, transparent)`, color }}
+        >
           <Icon size={16} aria-hidden="true" />
         </span>
         {label}
@@ -231,19 +239,19 @@ function AdminHome() {
       }
     >
       <div className="kpi-grid" style={{ marginBottom: 18 }}>
-        <KPI icon={User} color="#2a6fdb" label="Players" value={players.length} />
+        <KPI icon={User} tone="primary" label="Players" value={players.length} />
         <KPI
           icon={Shield}
-          color="#6c54d6"
+          tone="accent-violet"
           label="Teams"
           value={teams.length}
           sub={`${divisions.length} divisions`}
         />
-        <KPI icon={Calendar} color="#0d8a8a" label="Practice slots" value={practices.length} />
-        <KPI icon={Flag} color="#c9881a" label="Games scheduled" value={games.length} />
+        <KPI icon={Calendar} tone="accent-teal" label="Practice slots" value={practices.length} />
+        <KPI icon={Flag} tone="accent-amber" label="Games scheduled" value={games.length} />
         <KPI
           icon={ClipboardCheck}
-          color="#1f8a4c"
+          tone="accent-green"
           label="Compliance"
           value={`${compliancePct}%`}
           sub={missingWaivers ? `${missingWaivers} waivers due` : 'All clear'}

@@ -273,7 +273,7 @@ surface in both themes. New colors go into `index.css` (light **and** dark block
 ## 8. Testing
 
 - **Vitest:** `npm run test` (`vitest.config.js`: jsdom, setup `tests/setup.js`), files
-  `tests/*.test.{js,jsx}`. Coverage thresholds 60/50/55/60 (statements/branches/functions/lines)
+  `tests/*.test.{js,jsx}`. Coverage thresholds 92/83/94/93 (statements/branches/functions/lines, CI-enforced)
   over `packages/core/src/**` and `frontend/src/hooks/**`. Import factories and helpers through
   their barrels: `import { makeOrganization } from '../factories/index.js';`
 - **E2E (Playwright-BDD):** `npm run test:e2e` (`bddgen && playwright test`;
@@ -324,14 +324,15 @@ is `docs/operations/ENVIRONMENT.md`.
 ## 11. CI Pipeline
 
 `.github/workflows/ci.yml`, job **Build & Test**: `npm ci` on the Node `.nvmrc` pins (24) →
-`typecheck` → `lint` → `check:unused` → `test` → `frontend:build` → `check:bundle` →
+`typecheck` → `lint` → `check:unused` → `test:coverage` → `frontend:build` → `check:bundle` →
 `check:advisors` → Playwright Chromium → `test:e2e -- --workers=1`, plus
 `scripts/ci/migrationVersions.mjs` (well-formed, unique migration versions; on a PR, every added
 migration above the base branch's latest, and no existing one renamed, edited or removed).
 Job **Deno Mirror Tests**: `scripts/deno-mirror-tests.sh` (the Deno twins of core logic, two host
 time zones) and `scripts/deno-check-edge.sh` (`deno check` on every Edge entrypoint, failing on
 zero found). Both jobs are required to merge. `audit.yml` runs `check:audit` on PRs, pushes and weekly
-(not required yet; `docs/security/dependency-policy.md`).
+(not required yet; `docs/security/dependency-policy.md`). `workflow-audit.yml` runs zizmor
+on PRs; every action is pinned by commit SHA (`docs/operations/ci-cd.md`).
 
 On **push to `main`** only: `deploy-migrations` (environment `production`; `supabase db push`
 behind `scripts/ci/migrationGuard.mjs`; reverts are never automatic), then

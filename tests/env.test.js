@@ -396,7 +396,7 @@ describe('env.js is the only reader of import.meta.env, by name', () => {
       .filter((file) => envReads(readFileSync(file, 'utf8')).length > 0)
       .map((file) => path.relative(ROOT, file));
     expect(offenders).toEqual([]);
-  });
+  }, 25_000); // parses ~900 sources: 1.1 s alone; under coverage (CI, M3.1) 4.1 / 4.5 s alone, 4.3 / 5.4 s in two full runs; ~4x the worst, see docs/testing/test-timeouts.md.
 
   it('env.js reads every variable the rules validate, each by name, and nothing whole', () => {
     const reads = envReads(readFileSync(ENV_MODULE, 'utf8'));

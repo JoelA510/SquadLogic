@@ -29,11 +29,17 @@ export default defineConfig({
       // heat/data's `.bin` lookup tables are data, not code: v8 cannot parse them
       // and logged a PARSE_ERROR on every coverage run.
       exclude: ['**/node_modules/**', 'tests/**', '**/*.bin'],
+      // CI enforces these (plan item M3.1: Build & Test runs test:coverage).
+      // Measured 93.05 / 84.28 / 95.19 / 94.04 on 2026-10-13; each threshold
+      // is about one point under it. At 60 / 50 / 55 / 60 the gate had 30+
+      // points of slack, so deleting a whole test file never failed it. A PR
+      // that drops below one adds the tests, or lowers the figure here with
+      // its reason; it never deletes the threshold.
       thresholds: {
-        statements: 60,
-        branches: 50,
-        functions: 55,
-        lines: 60,
+        statements: 92,
+        branches: 83,
+        functions: 94,
+        lines: 93,
       },
     },
   },

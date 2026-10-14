@@ -79,7 +79,6 @@ import { readSeasonTimezone } from '../_shared/timing/seasonSettings.ts';
 import {
   createUserClient,
   getUserFromRequest,
-  getUserOrgIds,
   verifyOrgAdmin,
   verifyOrgMembership,
   corsHeaders,
@@ -753,21 +752,19 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
   } catch (error) {
     await logFailure(logCtx, 'Auto-scheduler failed', error);
 
-    // Attempt to audit the failure
-    try {
-      const user = await getUserFromRequest(req, supabase);
-      if (user) {
-        const orgIds = await getUserOrgIds(supabase, user.id);
-        if (orgIds.length > 0) {
-          await recordAuditNow(auditClient, {
-            organizationId: orgIds[0],
-            action: 'scheduler.auto_failed',
-            metadata: { error: (error as Error).message },
-          });
-        }
-      }
-    } catch {
-      // Swallow — best effort audit on failure
+    // Audit the failure in the run's own organisation. `logCtx.organizationId`
+    // is set only once the caller's membership of it was verified (step 5); a
+    // failure before that has no organisation to attribute it to, and is
+    // logged above but not audited. (This used to audit into the caller's
+    // FIRST membership, whichever organisation that was -- harmless only
+    // while every Edge audit write was failing.) `recordAuditNow` never
+    // rejects.
+    if (logCtx.organizationId) {
+      await recordAuditNow(auditClient, {
+        organizationId: logCtx.organizationId,
+        action: 'scheduler.auto_failed',
+        metadata: { error: (error as Error).message },
+      });
     }
 
     return jsonResponse({ error: 'Internal server error', message: (error as Error).message }, 500);

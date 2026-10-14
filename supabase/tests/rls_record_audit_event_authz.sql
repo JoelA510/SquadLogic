@@ -85,8 +85,12 @@ RESET role;
 --    RPC through the service role and every one of those writes failed here,
 --    silently. Since 20261014000000 they call it AS THE CALLER (a `UserClient`
 --    from _shared/auth.ts's createUserClient), so the row is attributed to the
---    JWT's subject and this path has no production caller. Keep the 23502: a
---    service-role audit write has no actor, and refusing it is correct.
+--    JWT's subject, and no Edge audit helper reaches this path any more.
+--    (SQL-side `PERFORM record_audit_event` inside other RPCs still runs as
+--    whoever invoked that RPC; persist_practice_schedule, which Edge used to
+--    call as the service role, guards on auth.uid() for exactly this reason.)
+--    Keep the 23502: a service-role audit write has no actor, and refusing it
+--    is correct.
 RESET ROLE;
 SET LOCAL role = 'service_role';
 SET LOCAL "request.jwt.claims" TO '{"role":"service_role"}';

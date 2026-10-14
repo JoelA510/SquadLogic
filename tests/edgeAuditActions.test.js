@@ -124,6 +124,35 @@ function blankComments(src) {
   return out;
 }
 
+/**
+ * The actions named by the TOP-LEVEL `action:` key of the call's second
+ * argument, which must be an object literal; `null` when there is none (an
+ * `action` shorthand, a variable, a spread). A key nested in `metadata` is not
+ * the action, so only depth 0 inside the object is read.
+ */
+function actionOfParams(args) {
+  const second = args.slice(endOfExpression(args, 0) + 1).trimStart();
+  if (!second.startsWith('{')) return null;
+  const body = second.slice(1, endOfExpression(second, 1, true));
+  let depth = 0;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === "'" || c === '"' || c === '`') i = body.indexOf(c, i + 1);
+    else if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) depth--;
+    else if (
+      depth === 0 &&
+      /^action\s*:/.test(body.slice(i)) &&
+      /(^|[,{\s])$/.test(body.slice(0, i))
+    ) {
+      const start = body.indexOf(':', i) + 1;
+      // The last key has no trailing comma: the object's own closer ends it.
+      return actionsOf(body.slice(start, endOfExpression(`${body}}`, start)));
+    }
+  }
+  return null;
+}
+
 /** Every audit call in `src`: its line, its argument text and the actions it writes. */
 function auditCallsIn(raw) {
   const src = blankComments(raw);
@@ -137,16 +166,7 @@ function auditCallsIn(raw) {
     const close = endOfExpression(src, open, true);
     const args = src.slice(open, close);
     const line = src.slice(0, m.index).split('\n').length;
-    const key = /\baction\s*:/.exec(args);
-    calls.push({
-      line,
-      args,
-      actions: key
-        ? actionsOf(
-            args.slice(key.index + key[0].length, endOfExpression(args, key.index + key[0].length))
-          )
-        : null,
-    });
+    calls.push({ line, args, actions: actionOfParams(args) });
   }
   return calls;
 }
@@ -165,10 +185,20 @@ function registeredActionsIn(sql) {
 
 function collectEdgeCalls() {
   const sites = [];
+  const bypasses = [];
   let forwarded = 0;
   for (const file of walk(FUNCTIONS)) {
     const rel = path.relative(ROOT, file);
-    for (const c of auditCallsIn(readFileSync(file, 'utf8'))) {
+    const raw = readFileSync(file, 'utf8');
+    // Any other route to the RPC, or a renamed helper, would write actions this
+    // scan cannot see. The helpers' own file holds the one legitimate RPC call.
+    const code = blankComments(raw);
+    const rpcs = code.match(/['"]record_audit_event['"]/g)?.length ?? 0;
+    if (rpcs !== (file === HELPERS ? 1 : 0))
+      bypasses.push(`${rel}: ${rpcs} record_audit_event call(s)`);
+    if (/\brecordAudit(?:Now)?\s+as\b/.test(code))
+      bypasses.push(`${rel}: imports an audit helper under another name`);
+    for (const c of auditCallsIn(raw)) {
       if (file === HELPERS && /^\s*userClient\s*,\s*params\s*$/.test(c.args)) {
         forwarded++;
         continue;
@@ -176,7 +206,7 @@ function collectEdgeCalls() {
       sites.push({ ...c, file: rel });
     }
   }
-  return { sites, forwarded };
+  return { sites, forwarded, bypasses };
 }
 
 function collectRegistered() {
@@ -199,7 +229,7 @@ function collectRegistered() {
 }
 
 describe('Edge audit actions are registered in audit_actions', () => {
-  const { sites, forwarded } = collectEdgeCalls();
+  const { sites, forwarded, bypasses } = collectEdgeCalls();
   const registered = collectRegistered();
 
   it('finds every auditing function and at least the stated number of call sites', () => {
@@ -211,6 +241,10 @@ describe('Edge audit actions are registered in audit_actions', () => {
         fn
       ).toBe(true);
     }
+  });
+
+  it('Edge code writes audit rows only through the helpers, under their own names', () => {
+    expect(bypasses).toEqual([]);
   });
 
   it('every call site names its action', () => {
@@ -257,6 +291,20 @@ describe('the scanners refuse what they cannot read', () => {
         "// recordAudit(c, { action: x })\n/* await recordAuditNow(c) */\nconst u = 'https://x';"
       )
     ).toEqual([]);
+  });
+
+  it('reads the top-level action, not a key nested in metadata', () => {
+    const [c] = auditCallsIn(
+      "recordAuditNow(c, { metadata: { action: 'game.saved' }, action: 'game.unregistered' });"
+    );
+    expect(c.actions).toEqual(['game.unregistered']);
+  });
+
+  it('reports a call whose only action key is nested, or whose params are not a literal', () => {
+    expect(auditCallsIn("recordAudit(c, { metadata: { action: 'game.saved' } });")[0].actions).toBe(
+      null
+    );
+    expect(auditCallsIn('recordAudit(c, params);')[0].actions).toBe(null);
   });
 
   it('reads multi-row registrations and ignores INSERT ... SELECT', () => {

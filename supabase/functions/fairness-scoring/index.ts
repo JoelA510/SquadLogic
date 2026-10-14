@@ -35,6 +35,9 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
   // to auth.uid()), never with the service role.
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
   const supabase = createClient(supabaseUrl, serviceKey);
+  // Made before any work, so a missing anon key fails the request here rather
+  // than after `persist_evaluation_run` has committed.
+  const auditClient = createUserClient(req, supabaseUrl, anonKey);
 
   try {
     // 2. Auth & Organization Scoping
@@ -281,7 +284,7 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
       runId = id;
 
       // 7. Audit Log (C-1)
-      await recordAuditNow(createUserClient(req, supabaseUrl, anonKey), {
+      await recordAuditNow(auditClient, {
         organizationId,
         action: 'evaluation.run',
         resourceType: 'evaluation_run',

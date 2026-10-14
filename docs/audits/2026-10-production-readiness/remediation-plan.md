@@ -736,8 +736,10 @@ standards these items name · [ ] deployed and smoke-tested
 >   project against a production build: a narrower re-import keeps the guardians the first
 >   import recorded (the July TG-6 path, migration `20260726000300`); import, teams synced
 >   through `team-persistence`, practices placed by `auto-scheduler` and applied through
->   `practice-persistence`, and a master CSV with a practice for every synced team; every
->   `verify_jwt` function refusing a request with only the anon key. Green in run 38502102302,
+>   `practice-persistence`, and a master CSV with a practice for every synced team, by name;
+>   every function `supabase/config.toml` marks `verify_jwt` refusing, by its own `Unauthorized`
+>   answer, a caller with no session, `calendar-feed` answering without one, and a CORS
+>   preflight allowing the headers the app sends. Green in run 38502102302,
 >   nine scenarios, a 2 min 38 s job (*executed*). Test gate (*executed*, throwaway branch
 >   `claude/vibrant-allen-hr7y7s-w3d-ci`): run 38502405552 applied
 >   `docs/sql/20260726000300_revert.sql` after the seed and the re-import scenario failed at its
@@ -746,6 +748,8 @@ standards these items name · [ ] deployed and smoke-tested
 >   with no practice). Run 38502798265 removed that warning check, and the export check failed
 >   instead (practices for 1 team of 2); with `game-persistence` answering anonymous callers
 >   (`verify_jwt` off and its own refusal skipped) its refusal scenario failed (500, not 401).
+>   A function that cannot boot fails it too (503, run 38501076266, before the job gave the
+>   local runtime its import map).
 >   `verify_jwt` off alone does not fail it: the function refuses a caller with no session
 >   itself (run 38502405552). The features and steps are under `tests/e2e/real-backend/`, not
 >   `tests/e2e/features/` and `tests/e2e/steps/`: the mock project's globs would load them.

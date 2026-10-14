@@ -72,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      issues: write
+      issues: write # opens (once) the issue that reports a failing scheduled audit
     steps:
       - name: Open an issue (once)
         env:

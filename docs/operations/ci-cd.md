@@ -140,10 +140,12 @@ it also checks online that each pinned SHA is a commit of the action it names.
   on workflows nobody changed, so bump the pinned version by hand, in a pull
   request that fixes or configures what the new release reports.
 
-**A required check.** The job reports as `Workflow audit (zizmor)`; it has no
-`paths` filter and no `if`, so it reports on every pull request, and
-`.github/rulesets/main.json` requires it with the others in
-[Branch Protection](#branch-protection).
+**Required in `main.json`; enforced once the owner applies it.** The job
+reports as `Workflow audit (zizmor)`; it has no `paths` filter and no `if`, so
+it reports on every pull request, and `.github/rulesets/main.json` requires it
+with the others in [Branch Protection](#branch-protection). GitHub does not
+read that file: until the owner adds the check to the live ruleset (the owner
+step there), a pull request can merge with this job red.
 
 ## Edge Functions (`deno-mirror-tests`)
 

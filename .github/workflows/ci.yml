@@ -31,6 +31,7 @@ env:
 jobs:
   # ── Supabase keep-alive (scheduled runs only) ────────────────
   keepalive:
+    name: Supabase keep-alive
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5

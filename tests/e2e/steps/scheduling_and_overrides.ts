@@ -1,6 +1,7 @@
-import { createBdd } from 'playwright-bdd';
+import { createBdd, type DataTable } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { routeAutoSchedulerToEdgeSolver, type EdgeSolverPage } from './edgeAutoSchedulerRoute.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -98,98 +99,461 @@ async function mockGamePersistenceRoutes(page: Page) {
 }
 
 // ────────────────────────────────────────────────────────────
-// Background Setup
+// Pillar 1: the engines, driven through their own controls
 // ────────────────────────────────────────────────────────────
+//
+// Plan item M4.6. Given steps seed INPUTS (an import, a roster, slots); When
+// steps press the page's own engine control; Then steps read the page. No
+// step writes an engine's result: these scenarios used to write a finished
+// `scheduler_runs` row and then assert it, so they passed with every engine
+// deleted. Each scenario was run with its engine call stubbed to return
+// nothing and failed (the PR records how).
+//
+// Team generation (`generateTeams`) and game scheduling (`scheduleGames`) run
+// in the browser. Practice scheduling runs in the auto-scheduler Edge
+// Function, which mock mode cannot reach: `edgeAutoSchedulerRoute.ts` answers
+// its route with the function's own solver, and says what of the function it
+// does not exercise (its HTTP and database wrapper; plan M4.1 covers that).
 
-Given('a set of registered players and available field slots', async ({ page }) => {
-  await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+type MockRow = Record<string, unknown>;
+type MockDb = Record<string, MockRow[] | undefined>;
 
-    // Seed fields.
-    //
-    // **`location_id` is not decoration.** 20260911000000 made the scheduler
-    // resolve a pitch's venue before offering it, and a field with no venue
-    // is a failed read rather than an unbounded one -- so a row seeded
-    // without one silently vanishes from the list with no error. Nothing here
-    // asserts on that list today; the next fixture that does would have spent
-    // an afternoon on it. Caught by /code-review at high.
-    db.fields = db.fields || [];
-    db.fields.push(
-      {
-        id: 'field-1',
-        name: 'Main Stadium',
-        organization_id: orgId,
-        location_id: 'loc-1',
-        is_active: true,
-        priority: 1,
+/** The mock admin the Background signs in as (`auth_setup.ts`). */
+const MOCK_ADMIN_ID = 'mock-admin-id';
+
+/** `YYYY-MM-DD`, `days` from today (UTC). Keeps every seeded window around today. */
+const isoFromToday = (days: number) =>
+  new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+
+/**
+ * A readable id for a seeded team name ("Hawks" -> "hawks"). The game page
+ * names an unscheduled matchup by its team ids, so they are kept readable.
+ */
+const teamIdOf = (name: string) => name.trim().toLowerCase().replace(/\s+/g, '-');
+
+Given(
+  '{int} players are imported into the {string} program',
+  async ({ page }, count: number, program: string) => {
+    await waitForMockClient(page);
+    await page.evaluate(
+      ({ count, program, adminId, createdAt }) => {
+        const db = window.__MOCK_DB__ as MockDb | undefined;
+        if (!db) throw new Error('mock store not initialised');
+        const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        // The page offers Generate Teams only while no team run is in hand,
+        // so the seeded one is retired (in place: the mock re-merges its seed
+        // rows by id).
+        for (const run of db.scheduler_runs ?? []) {
+          if (run.run_type === 'team' && run.organization_id === orgId) run.status = 'deleted';
+        }
+        const rows = Array.from({ length: count }, (_, index) => ({
+          id: `pillar1-player-${index + 1}`,
+          'First Name': 'Player',
+          'Last Name': String(index + 1),
+          Birthdate: '2015-03-01',
+          Gender: 'm',
+          division: program,
+          'Skill Rating': (index % 5) + 1,
+        }));
+        db.imports = [
+          ...(db.imports ?? []),
+          {
+            id: 'import-pillar1',
+            user_id: adminId,
+            organization_id: orgId,
+            import_type: 'players',
+            // Newer than the seed's import, so it is the one the page reads.
+            created_at: createdAt,
+            data: { totalRows: count, validRows: count, data: rows },
+          },
+        ];
+        window.__saveMockDB__(db);
       },
       {
-        id: 'field-2',
-        name: 'Practice Turf',
-        organization_id: orgId,
-        location_id: 'loc-1',
-        is_active: true,
-        priority: 2,
+        count,
+        program,
+        adminId: MOCK_ADMIN_ID,
+        createdAt: new Date(Date.now() + 60_000).toISOString(),
       }
     );
+  }
+);
 
-    // Seed practice slots
-    db.practice_slots = db.practice_slots || [];
-    db.practice_slots.push(
-      {
-        id: 'slot-1',
-        field_id: 'field-1',
-        day_of_week: 'tue',
-        start_time: '17:00',
-        end_time: '18:30',
-        capacity: 2,
-        organization_id: orgId,
+When(
+  'I ask the Teams page for {int} teams of at most {int} players',
+  async ({ page }, teams: number, maxRoster: number) => {
+    await page.goto('/teams');
+    await expect(page.getByRole('heading', { name: /Teaming & Analysis/i })).toBeVisible({
+      timeout: 15000,
+    });
+    const override = page.locator('#team-count-override');
+    await expect(override).toBeVisible({ timeout: 15000 });
+    await page.locator('#target-team-size').fill(String(maxRoster));
+    await page.locator('#max-roster').fill(String(maxRoster));
+    await override.fill(String(teams));
+  }
+);
+
+When('I press {string} on the Teams page', async ({ page }, label: string) => {
+  const button = page.getByRole('button', { name: label });
+  await expect(button).toBeEnabled({ timeout: 15000 });
+  await button.click();
+});
+
+/** One of the four totals `TeamOverviewPanel` shows, by its label. */
+const teamTotal = (page: Page, label: string) =>
+  page.locator(`article[aria-label="${label}"] .text-xl`);
+
+Then(
+  'the engine forms {int} teams, the fewest that hold {int} players at {int} each',
+  async ({ page }, teams: number, players: number, perTeam: number) => {
+    // The expectation is the feature's arithmetic, never the page's output.
+    expect(Math.ceil(players / perTeam)).toBe(teams);
+    await expect(page.getByText(`Team review staged: ${teams} teams.`)).toBeVisible({
+      timeout: 15000,
+    });
+    await expect(teamTotal(page, 'Teams Formed')).toHaveText(String(teams));
+    // Enumerated from the list the page renders, not from the total above.
+    const listed = page.locator('section[aria-label="Generated Teams"] .font-semibold');
+    await expect(listed).toHaveCount(teams);
+  }
+);
+
+Then(
+  'all {int} players are assigned and none is left for manual review',
+  async ({ page }, players: number) => {
+    await expect(teamTotal(page, 'Assigned Players')).toHaveText(String(players));
+    await expect(teamTotal(page, 'Manual Review')).toHaveText('0');
+  }
+);
+
+// --- Practice and game inputs ---
+
+Given(
+  'these teams and coaches in {string}:',
+  async ({ page }, division: string, table: DataTable) => {
+    const teams = table.hashes().map((row) => ({
+      id: teamIdOf(row.team),
+      name: row.team,
+      division_id: division,
+      coachId: teamIdOf(row.coach),
+      headCoach: row.coach,
+    }));
+    await waitForMockClient(page);
+    await page.evaluate(
+      ({ division, teams, createdAt }) => {
+        const db = window.__MOCK_DB__ as MockDb | undefined;
+        if (!db) throw new Error('mock store not initialised');
+        const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        // The pages schedule the teams of the season's latest team run, so
+        // the roster arrives as its only one: the seed's run (which carries
+        // no `created_at`, so it would sort first) is retired in place. A
+        // roster is an input to the practice and game engines, not their output.
+        for (const run of db.scheduler_runs ?? []) {
+          if (run.run_type === 'team' && run.organization_id === orgId) run.status = 'deleted';
+        }
+        // ... and read the runs of the active season only.
+        const season = (db.season_settings ?? []).find(
+          (row) => row.organization_id === orgId && row.status === 'active'
+        );
+        if (!season) throw new Error(`no active season for ${orgId}`);
+        db.scheduler_runs = [
+          ...(db.scheduler_runs ?? []).filter((r) => r.id !== 'pillar1-team-run'),
+          {
+            id: 'pillar1-team-run',
+            organization_id: orgId,
+            season_settings_id: season.id,
+            run_type: 'team',
+            status: 'completed',
+            created_at: createdAt,
+            completed_at: createdAt,
+            results: {
+              teamsByDivision: { [division]: teams },
+              rosterBalanceByDivision: {},
+              coachCoverageByDivision: {},
+            },
+          },
+        ];
+        window.__saveMockDB__(db);
       },
-      {
-        id: 'slot-2',
-        field_id: 'field-2',
+      { division, teams, createdAt: new Date(Date.now() + 60_000).toISOString() }
+    );
+  }
+);
+
+Given('two practice slots on Thursday at 17:00 with room for one team each', async ({ page }) => {
+  await waitForMockClient(page);
+  await page.evaluate(
+    ({ from, until }) => {
+      const db = window.__MOCK_DB__ as MockDb | undefined;
+      if (!db) throw new Error('mock store not initialised');
+      const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+      const slot = (id: string, fieldId: string) => ({
+        id,
         day_of_week: 'thu',
         start_time: '17:00',
         end_time: '18:30',
-        capacity: 2,
+        capacity: 1,
+        valid_from: from,
+        valid_until: until,
+        field_id: fieldId,
         organization_id: orgId,
-      }
-    );
-
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+      });
+      db.practice_slots = [
+        ...(db.practice_slots ?? []).filter((s) => !String(s.id).startsWith('pillar1-')),
+        slot('pillar1-thu-field-1', 'v1'),
+        slot('pillar1-thu-field-2', 'v2'),
+      ];
+      window.__saveMockDB__(db);
+    },
+    { from: isoFromToday(-30), until: isoFromToday(90) }
+  );
 });
 
-Given('coach availability and preference constraints are defined', async ({ page }) => {
+Given('a Tuesday practice slot that a locked practice already fills', async ({ page }) => {
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-
-    db.profiles = db.profiles || [];
-    db.profiles.push(
-      { id: 'coach-1', full_name: 'Coach Sarah', role: 'coach' },
-      { id: 'coach-2', full_name: 'Coach Mike', role: 'coach' }
-    );
-
-    db.coach_constraints = db.coach_constraints || [];
-    db.coach_constraints.push({
-      id: 'cc-1',
-      coach_id: 'coach-1',
-      max_teams: 1,
-      preferred_days: ['tue'],
-      organization_id: orgId,
-    });
-
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+  await page.evaluate(
+    ({ from, until, range }) => {
+      const db = window.__MOCK_DB__ as MockDb | undefined;
+      if (!db) throw new Error('mock store not initialised');
+      // The seed's `ps-1` and its saved row `pa-1` (another team), re-dated
+      // around today and cut to one place: the slot is full.
+      const slot = (db.practice_slots ?? []).find((s) => s.id === 'ps-1');
+      const row = (db.practice_assignments ?? []).find((r) => r.id === 'pa-1');
+      if (!slot || !row) throw new Error('mock seed ps-1 / pa-1 missing');
+      Object.assign(slot, { capacity: 1, valid_from: from, valid_until: until });
+      row.effective_date_range = range;
+      window.__saveMockDB__(db);
+    },
+    {
+      from: isoFromToday(-30),
+      until: isoFromToday(90),
+      range: `[${isoFromToday(-30)},${isoFromToday(91)})`,
+    }
+  );
 });
 
-// ────────────────────────────────────────────────────────────
-// Scenario 1: Automated Team Generation
-// ────────────────────────────────────────────────────────────
+When('I run the auto-scheduler on the Practice Scheduling page', async ({ page }) => {
+  await routeAutoSchedulerToEdgeSolver(page);
+  await page.goto('/schedule/practice');
+  const run = page.getByRole('button', { name: 'Run auto-scheduler optimization' });
+  await expect(run).toBeEnabled({ timeout: 15000 });
+  await run.click();
+  await expect(
+    page.locator('section[aria-label="Auto-Scheduler"]').getByText('Optimization Complete')
+  ).toBeVisible({ timeout: 30000 });
+  // The result on screen came from the solver: a page that stopped calling
+  // the function (a cache, a renamed route) would complete without it.
+  expect((page as EdgeSolverPage).__edgeSolverRuns).toBe(1);
+});
+
+/** The count the Auto-Scheduler panel shows under `label` ("Assigned", "Unassigned"). */
+const schedulerCount = (page: Page, label: string) =>
+  page
+    .locator('section[aria-label="Auto-Scheduler"]')
+    .getByText(label, { exact: true })
+    .locator('xpath=following-sibling::div[1]');
+
+Then(
+  'the auto-scheduler places {int} teams and leaves {int} unplaced',
+  async ({ page }, placed: number, unplaced: number) => {
+    await expect(schedulerCount(page, 'Assigned')).toHaveText(String(placed));
+    await expect(schedulerCount(page, 'Unassigned')).toHaveText(String(unplaced));
+  }
+);
+
+/**
+ * The staged review's rows: the season's saved practices plus the run's new
+ * placements, as the page lists them under "Review Practice Changes".
+ */
+const reviewRows = (page: Page) =>
+  page
+    .getByRole('table')
+    .filter({ has: page.getByRole('columnheader', { name: 'Field Slot' }) })
+    .getByRole('row')
+    .filter({ has: page.getByRole('cell') });
+
+Then(
+  '{string} and {string} are not both placed, since they share a coach',
+  async ({ page }, first: string, second: string) => {
+    const rows = reviewRows(page);
+    // The planted clash: both slots that are free are at the same hour, so
+    // placing both teams would put their coach in two places at once.
+    await expect(rows.filter({ hasText: /Thursday @ 17:00/ })).toHaveCount(2);
+    // Meta-assertion: both Thursday rows name a seeded team, so the count
+    // below reads team names rather than matching nothing.
+    const seeded = page.getByRole('cell', { name: /^(Hawks|Owls|Bears|Foxes) / });
+    await expect(rows.filter({ hasText: /Thursday @ 17:00/ }).filter({ has: seeded })).toHaveCount(
+      2
+    );
+    // Not both: one of them, or neither if the solver filled both places
+    // with other teams.
+    const teamCell = page.getByRole('cell', { name: new RegExp(`^(${first}|${second}) `) });
+    expect(await rows.filter({ has: teamCell }).count()).toBeLessThanOrEqual(1);
+  }
+);
+
+Then('nothing new is placed in the full Tuesday slot', async ({ page }) => {
+  // The planted full slot: one place, held by the saved practice. A second
+  // row there would be a slot over its capacity.
+  await expect(reviewRows(page).filter({ hasText: /Tuesday @ 18:00/ })).toHaveCount(1);
+});
+
+// --- Games ---
+
+/** The UUID organization the game scenario runs in (see the step below). */
+const PILLAR1_CLUB = {
+  orgId: '6c1f2b9e-7f43-4c0e-9a51-1f0d3a7b2c10',
+  seasonId: 'pillar1-season',
+  siteId: 'pillar1-site',
+};
+
+Given('a club whose organization id is a UUID, as in production', async ({ page }) => {
+  // The mock's own organization is `org-1`, and core's slot schema refuses an
+  // `organization_id` that is not a UUID -- so in it, every game slot is
+  // refused and Generate Schedule can never succeed in mock mode. Production
+  // ids are UUIDs; this club is seeded with one, and made the active one.
+  await waitForMockClient(page);
+  await page.evaluate(
+    ({ club, adminId }) => {
+      const db = window.__MOCK_DB__ as MockDb | undefined;
+      if (!db) throw new Error('mock store not initialised');
+      const organization = { id: club.orgId, name: 'Pillar One FC', is_onboarded: true };
+      const without = (rows: MockRow[] | undefined, key: string, value: string) =>
+        (rows ?? []).filter((row) => row[key] !== value);
+      db.organizations = [...without(db.organizations, 'id', club.orgId), organization];
+      db.organization_members = [
+        ...without(db.organization_members, 'organization_id', club.orgId),
+        {
+          organization_id: club.orgId,
+          profile_id: adminId,
+          role: 'admin',
+          organizations: organization,
+        },
+      ];
+      db.season_settings = [
+        ...without(db.season_settings, 'id', club.seasonId),
+        {
+          id: club.seasonId,
+          organization_id: club.orgId,
+          name: 'Fall 2026',
+          status: 'active',
+          timezone: 'America/Los_Angeles',
+          season_start: '2026-03-01',
+          season_end: '2026-06-30',
+          created_at: new Date().toISOString(),
+        },
+      ];
+      db.locations = [
+        ...without(db.locations, 'id', club.siteId),
+        { id: club.siteId, organization_id: club.orgId, name: 'Pillar One Park' },
+      ];
+      window.__saveMockDB__(db);
+      localStorage.setItem('squadlogic_active_org', club.orgId);
+      localStorage.setItem('squadlogic-current-season', 'Fall 2026');
+    },
+    { club: PILLAR1_CLUB, adminId: MOCK_ADMIN_ID }
+  );
+});
+
+Given("the club's game slots are:", async ({ page }, table: DataTable) => {
+  const rows = table.hashes();
+  const fields = [...new Set(rows.map((row) => row.field))];
+  const slots = rows.map((row) => ({
+    id: `pillar1-${row.slot}`,
+    field_id: `pillar1-${teamIdOf(row.field)}`,
+    week_index: Number(row.week),
+    start: `${row.date}T${row.start}:00Z`,
+    end: `${row.date}T${row.end}:00Z`,
+    capacity: 1,
+  }));
+  await waitForMockClient(page);
+  await page.evaluate(
+    ({ club, fields, slots }) => {
+      const db = window.__MOCK_DB__ as MockDb | undefined;
+      if (!db) throw new Error('mock store not initialised');
+      const fieldRows = fields.map((name) => ({
+        id: `pillar1-${name.trim().toLowerCase().replace(/\s+/g, '-')}`,
+        name,
+        location_id: club.siteId,
+        organization_id: club.orgId,
+        active: true,
+      }));
+      const ids = new Set([...fieldRows, ...slots].map((row) => row.id));
+      db.fields = [...(db.fields ?? []).filter((row) => !ids.has(String(row.id))), ...fieldRows];
+      db.game_slots = [
+        ...(db.game_slots ?? []).filter((row) => !ids.has(String(row.id))),
+        ...slots.map((slot) => ({ ...slot, organization_id: club.orgId })),
+      ];
+      window.__saveMockDB__(db);
+    },
+    { club: PILLAR1_CLUB, fields, slots }
+  );
+});
+
+When('I press {string} on the Game Scheduling page', async ({ page }, label: string) => {
+  await page.goto('/schedule/game');
+  const button = page.getByRole('button', { name: label });
+  await expect(button).toBeEnabled({ timeout: 15000 });
+  await button.click();
+});
+
+/** One of the Game readiness metrics, by its term. */
+const gameMetric = (page: Page, term: string) =>
+  page
+    .locator('.game-readiness .metric-item')
+    .filter({ has: page.getByText(term, { exact: true }) })
+    .locator('dd');
+
+Then(
+  '{int} of the {int} round-robin matchups are scheduled',
+  async ({ page }, scheduled: number, total: number) => {
+    await expect(gameMetric(page, 'Unscheduled')).toHaveText(String(total - scheduled), {
+      timeout: 15000,
+    });
+    await expect(gameMetric(page, 'Scheduled')).toHaveText(
+      new RegExp(`^${Math.round((scheduled / total) * 100)}(\\.0+)?%$`)
+    );
+  }
+);
+
+/** The Unscheduled matchups the page lists, each "Week N", "home vs away", reason. */
+const unscheduledCards = (page: Page) =>
+  page
+    .locator('.game-readiness .insight-card')
+    .filter({ has: page.getByRole('heading', { name: /^Week \d+$/ }) });
+
+Then(
+  'the {string} vs {string} matchup is refused because one coach coaches both teams',
+  async ({ page }, first: string, second: string) => {
+    const card = unscheduledCards(page)
+      .filter({ hasText: 'coach-coaches-both-teams' })
+      .filter({ hasText: teamIdOf(first) })
+      .filter({ hasText: teamIdOf(second) });
+    await expect(card).toHaveCount(1);
+  }
+);
+
+Then(
+  'a week {int} matchup with {string} or {string} is refused for a coach scheduling conflict',
+  async ({ page }, week: number, first: string, second: string) => {
+    const cards = unscheduledCards(page).filter({ hasText: 'coach-scheduling-conflict' });
+    await expect(cards).toHaveCount(1);
+    await expect(cards.getByRole('heading')).toHaveText(`Week ${week}`);
+    await expect(cards).toContainText(new RegExp(`${teamIdOf(first)}|${teamIdOf(second)}`));
+  }
+);
+
+Then(
+  'a week {int} matchup is refused because its one slot is already taken',
+  async ({ page }, week: number) => {
+    const cards = unscheduledCards(page).filter({ hasText: 'no-slot-available' });
+    await expect(cards).toHaveCount(1);
+    await expect(cards.getByRole('heading')).toHaveText(`Week ${week}`);
+  }
+);
+
+// Also used by roster_conflict_detection.feature (a roster input, not an engine result).
 
 Given(
   /there are (\d+) players in the (.*) division/,
@@ -222,336 +586,6 @@ Given(
     );
   }
 );
-
-Given('a target roster size of {int}', async ({ page }, targetSize: number) => {
-  await waitForMockClient(page);
-  await page.evaluate(
-    ({ size }) => {
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-
-      db.season_settings = db.season_settings || [];
-      const season = db.season_settings.find(
-        (s: Record<string, unknown>) => s.organization_id === orgId
-      );
-      if (season) {
-        season.target_roster_size = size;
-      } else {
-        db.season_settings.push({
-          id: 'season-1',
-          organization_id: orgId,
-          name: 'Fall 2026',
-          status: 'active',
-          timezone: 'America/Los_Angeles',
-          target_roster_size: size,
-        });
-      }
-      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    },
-    { size: targetSize }
-  );
-});
-
-When('I trigger the team generation algorithm', async ({ page }) => {
-  await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    const now = new Date().toISOString();
-
-    // Mock the engine's output: 10 teams formatted for the frontend data mapper
-    const generatedTeams = [];
-    const rosterBalance: Record<string, unknown>[] = [];
-
-    for (let i = 1; i <= 10; i++) {
-      generatedTeams.push({
-        id: `team-gen-${i}`,
-        name: `U10 Team ${i}`,
-        division_id: 'div-U10',
-      });
-      rosterBalance.push({ teamId: `team-gen-${i}`, slotsRemaining: 0, skillScore: 95 });
-    }
-
-    // CRITICAL FIX: Override the pre-seeded run-1 to use our 10-team data.
-    // The mock client's mergeSource always brings run-1 back on page reload (it merges
-    // by ID). So we must update run-1 in-place rather than creating a new run.
-    db.scheduler_runs = db.scheduler_runs || [];
-    const existingRun = db.scheduler_runs.find((r: Record<string, unknown>) => r.id === 'run-1');
-    if (existingRun) {
-      existingRun.organization_id = orgId;
-      existingRun.created_at = now;
-      existingRun.completed_at = now;
-      existingRun.results = {
-        teamsByDivision: { U10: generatedTeams },
-        rosterBalanceByDivision: {
-          U10: {
-            summary: {
-              totalPlayers: 100,
-              totalCapacity: 100,
-              averageFillRate: 1.0,
-              averageSkillBalance: 95,
-            },
-            teamStats: rosterBalance,
-          },
-        },
-      };
-    } else {
-      db.scheduler_runs.push({
-        id: 'run-1',
-        organization_id: orgId,
-        run_type: 'team',
-        status: 'completed',
-        results: {
-          teamsByDivision: { U10: generatedTeams },
-          rosterBalanceByDivision: {
-            U10: {
-              summary: {
-                totalPlayers: 100,
-                totalCapacity: 100,
-                averageFillRate: 1.0,
-                averageSkillBalance: 95,
-              },
-              teamStats: rosterBalance,
-            },
-          },
-        },
-        created_at: now,
-        completed_at: now,
-      });
-    }
-
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
-
-  await page.goto('/teams');
-});
-
-Then('{int} teams should be created', async ({ page }, expectedTeams: number) => {
-  const teamsMetric = page.locator('article[aria-label="Teams Formed"]').first();
-  await expect(teamsMetric).toContainText(expectedTeams.toString(), { timeout: 15000 });
-});
-
-Then('players should be balanced by skill level across teams', async ({ page }) => {
-  // The UI currently displays Fill Rate and Coach Coverage, but not explicit skill balance.
-  // We verify the UI successfully rendered the division stats card indicating a balanced run.
-  const divisionCard = page.locator('.insight-card').filter({ hasText: 'U10' }).first();
-  await expect(divisionCard).toBeVisible();
-  await expect(divisionCard).toContainText('Roster Utilization');
-});
-
-Then('mutual buddy requests should be respected where possible', async ({ page }) => {
-  // The UI does not currently display buddy metrics in the summary panel.
-  // We verify the run completed successfully without critical overflow errors.
-  const manualReviewMetric = page.locator('article[aria-label="Manual Review"]').first();
-  await expect(manualReviewMetric).toContainText('0');
-});
-
-// ────────────────────────────────────────────────────────────
-// Scenario 2: Practice Scheduling with Timezone Support
-// ────────────────────────────────────────────────────────────
-
-Given('multiple teams require weekly practice slots', async ({ page }) => {
-  await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-
-    db.teams = db.teams || [];
-    db.teams.push(
-      {
-        id: 'team-p1',
-        name: 'Practice Team 1',
-        division_id: 'div-U10',
-        organization_id: orgId,
-        coach_id: 'coach-1',
-      },
-      {
-        id: 'team-p2',
-        name: 'Practice Team 2',
-        division_id: 'div-U10',
-        organization_id: orgId,
-        coach_id: 'coach-2',
-      }
-    );
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
-});
-
-Given('a team is located in a specific timezone', async ({ page }) => {
-  await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-
-    db.organizations = db.organizations.map((org: Record<string, unknown>) => {
-      if (org.id === orgId) return { ...org, timezone: 'America/Los_Angeles' };
-      return org;
-    });
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
-});
-
-When('the scheduler runs', async ({ page }) => {
-  await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    const now = new Date().toISOString();
-
-    db.scheduler_runs = db.scheduler_runs || [];
-    db.scheduler_runs.push({
-      id: `mock-run-practice-${Date.now()}`,
-      organization_id: orgId,
-      run_type: 'practice',
-      status: 'completed',
-      results: {
-        assignments: [
-          { team_id: 'team-p1', slot_id: 'slot-1', timezone_offset: '-08:00' },
-          { team_id: 'team-p2', slot_id: 'slot-2', timezone_offset: '-08:00' },
-        ],
-        metrics: { conflicts: 0, double_bookings: 0, over_capacity: 0 },
-      },
-      created_at: now,
-      completed_at: now,
-    });
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
-});
-
-Then('practice assignments should respect the local timezone offsets', async ({ page }) => {
-  await waitForMockClient(page);
-  const state = await page.evaluate(() =>
-    JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}')
-  );
-  const run = [...state.scheduler_runs]
-    .reverse()
-    .find((r: Record<string, unknown>) => r.run_type === 'practice');
-  expect(run.results.assignments[0].timezone_offset).toBe('-08:00');
-});
-
-Then('no coach should be scheduled for two concurrent practices', async ({ page }) => {
-  await waitForMockClient(page);
-  const state = await page.evaluate(() =>
-    JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}')
-  );
-  const run = [...state.scheduler_runs]
-    .reverse()
-    .find((r: Record<string, unknown>) => r.run_type === 'practice');
-  expect(run.results.metrics.double_bookings).toBe(0);
-});
-
-Then('no field slot should exceed its maximum capacity', async ({ page }) => {
-  await waitForMockClient(page);
-  const state = await page.evaluate(() =>
-    JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}')
-  );
-  const run = [...state.scheduler_runs]
-    .reverse()
-    .find((r: Record<string, unknown>) => r.run_type === 'practice');
-  expect(run.results.metrics.over_capacity).toBe(0);
-});
-
-// ────────────────────────────────────────────────────────────
-// Scenario 3: Game Schedule Generation
-// ────────────────────────────────────────────────────────────
-
-Given('a list of teams in a division', async ({ page }) => {
-  await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-
-    db.teams = db.teams || [];
-    // Ensure at least 4 teams exist for a round-robin
-    for (let i = 1; i <= 4; i++) {
-      if (!db.teams.find((t: Record<string, unknown>) => t.id === `team-g${i}`)) {
-        db.teams.push({
-          id: `team-g${i}`,
-          name: `Game Team ${i}`,
-          division_id: 'div-U10',
-          organization_id: orgId,
-          coach_id: `coach-${i}`,
-        });
-      }
-    }
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
-});
-
-When('I generate a round-robin game schedule', async ({ page }) => {
-  await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-
-    // Mock game schedule: 4 teams playing each other twice = 12 games total
-    const schedule = [];
-    for (let i = 1; i <= 12; i++) {
-      schedule.push({
-        id: `game-${i}`,
-        home_team_id: `team-g${(i % 4) + 1}`,
-        away_team_id: `team-g${((i + 1) % 4) + 1}`,
-        field_id: 'field-1', // High priority field
-        time: '10:00 AM',
-      });
-    }
-
-    db.scheduler_runs = db.scheduler_runs || [];
-    // CRITICAL FIX: Ensure this run is the absolute latest by future-dating it
-    const futureDate = new Date();
-    futureDate.setFullYear(futureDate.getFullYear() + 1);
-    const timestamp = futureDate.toISOString();
-
-    db.scheduler_runs.push({
-      id: `mock-run-game-${Date.now()}`,
-      organization_id: orgId,
-      run_type: 'game',
-      status: 'completed',
-      results: {
-        schedule: schedule,
-        // Provide both camelCase and snake_case to satisfy any mapper layer
-        summary: { scheduledRate: 1.0, scheduled_rate: 1.0, unscheduledMatchups: 0 },
-        metrics: {
-          consecutive_coach_games: 0,
-          high_priority_field_usage: 1.0,
-          teams_played_twice: true,
-        },
-      },
-      created_at: timestamp,
-      completed_at: timestamp,
-    });
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
-});
-
-Then('every team should play every other team twice', async ({ page }) => {
-  // Verify via the DOM in the Game Readiness panel
-  await page.goto('/schedule/game');
-  // CRITICAL FIX: Use .first() to bypass strict mode violations from hidden skeletons
-  const scheduledMetric = page
-    .locator('.game-readiness .metric-item')
-    .filter({ hasText: 'Scheduled' })
-    .locator('dd')
-    .first();
-  // The mock data sets scheduledRate to 1.0 (100%)
-  await expect(scheduledMetric).toHaveText('100%', { timeout: 15000 });
-});
-
-Then('games should be assigned to the highest priority field slots first', async ({ page }) => {
-  // The UI does not currently display field priority metrics.
-  // We verify the schedule generated without unscheduled matchups.
-  const unscheduledMetric = page
-    .locator('.metric-item')
-    .filter({ hasText: 'Unscheduled' })
-    .locator('dd');
-  await expect(unscheduledMetric).toHaveText('0');
-});
-
-Then('consecutive games for the same coach should be avoided if possible', async ({ page }) => {
-  // The UI does not currently display coach consecutive game metrics.
-  // We verify the schedule generated without conflicts.
-  await expect(page.getByText('No conflicts.')).toBeVisible();
-});
 
 // ────────────────────────────────────────────────────────────
 // 4. Admin Overrides & Manual Adjustments (Restored)

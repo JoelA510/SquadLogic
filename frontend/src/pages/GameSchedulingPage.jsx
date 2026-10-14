@@ -1,5 +1,15 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { DndContext, DragOverlay } from '@dnd-kit/core';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardCode,
+  KeyboardSensor,
+  PointerSensor,
+  closestCorners,
+  getFirstCollision,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
 import { generateRoundRobinWeeks, scheduleGames } from '@squadlogic/core/gameScheduling.js';
 import { evaluateGameSchedule } from '@squadlogic/core/gameMetrics.js';
 import { findBlackoutConflicts } from '@squadlogic/core/fieldAdmin/index.js';
@@ -9,7 +19,7 @@ import { useAutoRunOnNavigate } from '../hooks/useAutoRunOnNavigate.js';
 import TeamScheduleView from '../components/TeamScheduleView.jsx';
 import AutoSchedulerPanel from '../components/scheduling/AutoSchedulerPanel.jsx';
 import GameScheduleGrid from '../components/scheduling/GameScheduleGrid.jsx';
-import { GameCardPreview } from '../components/scheduling/GameCard.jsx';
+import { GameCardPreview, GameMoveContext } from '../components/scheduling/GameCard.jsx';
 import Button from '../components/ui/Button.jsx';
 import ProgressBar from '../components/ui/ProgressBar.jsx';
 import {
@@ -282,6 +292,77 @@ export function composeSchedulerReadinessMessage({
       ];
   return parts.filter(Boolean).join(' \u00b7 ') || null;
 }
+
+/** @type {string[]} */
+const GRID_DIRECTIONS = [KeyboardCode.Down, KeyboardCode.Up, KeyboardCode.Left, KeyboardCode.Right];
+
+/**
+ * Where an arrow key takes a game being dragged with the keyboard: the nearest
+ * cell in that direction (plan item M4.3).
+ *
+ * The roster manager's `sortableKeyboardCoordinates` cannot be used as it is:
+ * it moves only an item that is itself a droppable (a sortable), and a game
+ * card is a plain draggable, so it returned nothing and the card never moved.
+ * This is its direction filter and `closestCorners` pick, without that
+ * requirement. Returns `undefined` (no move) for any other key, or when there
+ * is no cell that way.
+ *
+ * @param {KeyboardEvent} event
+ * @param {{ context: Record<string, any> }} args
+ * @returns {{ x: number, y: number } | undefined}
+ */
+export function gridKeyboardCoordinates(event, { context }) {
+  const { active, collisionRect, droppableRects, droppableContainers, over } = context;
+  if (!GRID_DIRECTIONS.includes(event.code)) return undefined;
+  event.preventDefault();
+  if (!active || !collisionRect) return undefined;
+
+  // Directions are read from the cell the game is over, not from the card: a
+  // card sits inset in its cell, so on the first press its own column would
+  // count as "left" of it and its own row as "above" it.
+  const from = (over && droppableRects.get(over.id)) || collisionRect;
+  const ahead = [];
+  for (const entry of droppableContainers.getEnabled()) {
+    const rect = entry && !entry.disabled ? droppableRects.get(entry.id) : null;
+    if (!rect) continue;
+    if (
+      (event.code === KeyboardCode.Down && rect.top > from.top) ||
+      (event.code === KeyboardCode.Up && rect.top < from.top) ||
+      (event.code === KeyboardCode.Right && rect.left > from.left) ||
+      (event.code === KeyboardCode.Left && rect.left < from.left)
+    ) {
+      ahead.push(entry);
+    }
+  }
+  const collisions = closestCorners({
+    active,
+    collisionRect,
+    droppableRects,
+    droppableContainers: ahead,
+    pointerCoordinates: null,
+  });
+  let closestId = getFirstCollision(collisions, 'id');
+  if (closestId === over?.id && collisions.length > 1) closestId = collisions[1].id;
+  const rect = closestId == null ? null : droppableRects.get(closestId);
+  return rect ? { x: rect.left, y: rect.top } : undefined;
+}
+
+/**
+ * The game grid's sensors: the roster manager's pattern (a pointer drag that
+ * starts after 5px, so a click on a card's controls is not a drag, and a
+ * keyboard drag), with the grid's own arrow-key rule.
+ */
+export function useGameGridSensors() {
+  return useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: gridKeyboardCoordinates })
+  );
+}
+
+const GRID_DRAG_INSTRUCTIONS =
+  'To move a game, press space or enter on its drag handle, use the arrow keys to move ' +
+  'between fields and time slots, then press space or enter to drop it, or escape to cancel. ' +
+  'Each game also has a Move to list.';
 
 function buildRoundRobinByDivision(teams) {
   const teamsByDivision = new Map();
@@ -974,22 +1055,43 @@ export default function GameSchedulingPage() {
     [canEditSchedule]
   );
 
-  const handleDragEnd = useCallback(
-    (event) => {
-      const { active, over } = event;
-      setActiveGame(null);
+  // The one move handler (plan item M4.3): a drop and a "Move to" both stage
+  // through it, so the keyboard path cannot drift from the drag path.
+  const pendingMoveFocusRef = useRef(null);
+  const moveGameTo = useCallback(
+    (gameId, targetCellId, { focusMoved = false } = {}) => {
       if (!canEditSchedule) return;
-      if (!over?.id) return;
+      if (!targetCellId) return;
 
-      const [targetFieldId, targetSlotId] = String(over.id).split(':');
+      const [targetFieldId, targetSlotId] = String(targetCellId).split(':');
       if (!targetFieldId || !targetSlotId) return;
 
       const targetSlot = gameSlots.find((slot) => String(slot.id) === targetSlotId);
       const sourceAssignments = displayedAssignmentsRef.current;
       const currentAssignment = sourceAssignments.find((assignment) => {
-        return String(assignment.id) === String(active.id);
+        return String(assignment.id) === String(gameId);
       });
       if (!currentAssignment) return;
+
+      const cellOf = (assignment) => `${assignment.fieldId}:${assignment.slotId}`;
+      const targetCell = `${targetFieldId}:${targetSlotId}`;
+      // Put back where it was (a keyboard pick-up and drop, a drop on its own
+      // cell): nothing moved, so nothing is staged or marked manual.
+      if (cellOf(currentAssignment) === targetCell) return;
+      // The grid shows one game per cell, so a second game there would hide one.
+      const occupant = sourceAssignments.find(
+        (assignment) =>
+          String(assignment.id) !== String(gameId) && cellOf(assignment) === targetCell
+      );
+      if (occupant) {
+        // Cleared, or a standing apply error would hide the refusal.
+        setApplyError(null);
+        setStatusMessage(
+          `${currentAssignment.homeTeamId} vs ${currentAssignment.awayTeamId} was not moved: ` +
+            `that slot already has ${occupant.homeTeamId} vs ${occupant.awayTeamId}.`
+        );
+        return;
+      }
 
       const updatedAssignment = {
         ...currentAssignment,
@@ -1003,9 +1105,10 @@ export default function GameSchedulingPage() {
       };
 
       const staged = sourceAssignments.map((assignment) =>
-        String(assignment.id) === String(active.id) ? updatedAssignment : assignment
+        String(assignment.id) === String(gameId) ? updatedAssignment : assignment
       );
 
+      if (focusMoved) pendingMoveFocusRef.current = String(gameId);
       setReviewAssignments(staged);
       setApplyStatus('review');
       setApplyError(null);
@@ -1013,6 +1116,85 @@ export default function GameSchedulingPage() {
     },
     [canEditSchedule, gameSlots]
   );
+
+  const handleDragEnd = useCallback(
+    (event) => {
+      const { active, over } = event;
+      setActiveGame(null);
+      if (!over?.id) return;
+      moveGameTo(active.id, over.id);
+    },
+    [moveGameTo]
+  );
+
+  const claimMoveFocus = useCallback((gameId) => {
+    if (pendingMoveFocusRef.current !== gameId) return false;
+    pendingMoveFocusRef.current = null;
+    return true;
+  }, []);
+
+  /**
+   * Every cell the grid renders, named for a person: the field and the slot's
+   * time. The grid offers every slot under every field; a game slot is one
+   * field's booking, so the "Move to" list (below) offers only those.
+   */
+  const cellLabels = useMemo(() => {
+    const labels = new Map();
+    for (const field of fields) {
+      for (const slot of gameSlots) {
+        labels.set(`${field.id}:${slot.id}`, `${field.name ?? field.id}, ${slot.label ?? slot.id}`);
+      }
+    }
+    return labels;
+  }, [fields, gameSlots]);
+
+  /** The bookings a game can be moved to: each slot on its own field, with no game in it. */
+  const emptyCells = useMemo(() => {
+    const taken = new Set(
+      displayedAssignments.map((assignment) => `${assignment.fieldId}:${assignment.slotId}`)
+    );
+    return fields.flatMap((field) =>
+      gameSlots
+        .filter((slot) => slot.fieldId == null || String(slot.fieldId) === String(field.id))
+        .map((slot) => `${field.id}:${slot.id}`)
+        .filter((id) => !taken.has(id))
+        .map((id) => ({ id, label: cellLabels.get(id) }))
+    );
+  }, [cellLabels, displayedAssignments, fields, gameSlots]);
+
+  const gameMove = useMemo(
+    () => ({ cellLabels, emptyCells, moveGame: moveGameTo, claimFocus: claimMoveFocus }),
+    [cellLabels, claimMoveFocus, emptyCells, moveGameTo]
+  );
+
+  const gridSensors = useGameGridSensors();
+
+  // What a screen reader hears during a keyboard drag: the game and the cell
+  // by name, not dnd-kit's default "draggable item ga-1 ... droppable area v1:gs-2".
+  const gridAnnouncements = useMemo(() => {
+    const cellLabel = (id) => cellLabels.get(String(id)) ?? 'no slot';
+    const gameLabel = (id) => {
+      const game = displayedAssignmentsRef.current.find((a) => String(a.id) === String(id));
+      return game ? `${game.homeTeamId} vs ${game.awayTeamId}` : 'the game';
+    };
+    return {
+      onDragStart: ({ active }) => `Picked up ${gameLabel(active.id)}.`,
+      onDragOver: ({ active, over }) =>
+        over ? `${gameLabel(active.id)} is over ${cellLabel(over.id)}.` : undefined,
+      onDragEnd: ({ active, over }) => {
+        if (!over) return `${gameLabel(active.id)} was dropped outside the grid and did not move.`;
+        // `moveGameTo` refuses a cell that holds another game: say so here too,
+        // or the announcement and the status line would disagree.
+        const taken = displayedAssignmentsRef.current.some(
+          (a) => String(a.id) !== String(active.id) && `${a.fieldId}:${a.slotId}` === over.id
+        );
+        return taken
+          ? `${gameLabel(active.id)} was not moved: ${cellLabel(over.id)} already has a game.`
+          : `${gameLabel(active.id)} was dropped on ${cellLabel(over.id)}.`;
+      },
+      onDragCancel: ({ active }) => `Moving ${gameLabel(active.id)} was cancelled.`,
+    };
+  }, [cellLabels]);
 
   const handleCancelGameAssignment = useCallback(async (assignment) => {
     if (
@@ -1161,21 +1343,30 @@ export default function GameSchedulingPage() {
         <div className="lg:col-span-2">
           <div className="bg-bg-glass border border-border-subtle rounded-xl overflow-hidden shadow-md">
             <div className="px-6 py-4 border-b border-border-subtle flex justify-between items-center bg-bg-glass">
+              {/* Tokens, not `text-blue-400` / `text-text-muted`: those measured 2.4:1 and
+                  2.9:1 on this bar in the light theme (axe, M4.2). The accent and secondary
+                  text read 5.9:1 light and 8.2:1 / 8.7:1 dark. */}
               <div className="flex gap-4">
                 <button
                   type="button"
+                  aria-pressed={activeTab === 'full'}
                   onClick={() => setActiveTab('full')}
                   className={`text-sm font-semibold transition-colors ${
-                    activeTab === 'full' ? 'text-blue-400' : 'text-text-muted hover:text-text-muted'
+                    activeTab === 'full'
+                      ? 'text-text-accent'
+                      : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
                   Full Schedule
                 </button>
                 <button
                   type="button"
+                  aria-pressed={activeTab === 'team'}
                   onClick={() => setActiveTab('team')}
                   className={`text-sm font-semibold transition-colors ${
-                    activeTab === 'team' ? 'text-blue-400' : 'text-text-muted hover:text-text-muted'
+                    activeTab === 'team'
+                      ? 'text-text-accent'
+                      : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
                   By Team
@@ -1186,15 +1377,25 @@ export default function GameSchedulingPage() {
             <div className="p-0">
               {canEditSchedule ? (
                 <div className="p-4 overflow-x-auto">
-                  <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-                    <GameScheduleGrid
-                      assignments={displayedAssignments}
-                      fields={fields}
-                      timeSlots={gameSlots}
-                      conflictSet={conflictSet}
-                      activeGameId={activeGame?.id}
-                      timezone={timezone}
-                    />
+                  <DndContext
+                    sensors={gridSensors}
+                    accessibility={{
+                      announcements: gridAnnouncements,
+                      screenReaderInstructions: { draggable: GRID_DRAG_INSTRUCTIONS },
+                    }}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                  >
+                    <GameMoveContext.Provider value={gameMove}>
+                      <GameScheduleGrid
+                        assignments={displayedAssignments}
+                        fields={fields}
+                        timeSlots={gameSlots}
+                        conflictSet={conflictSet}
+                        activeGameId={activeGame?.id}
+                        timezone={timezone}
+                      />
+                    </GameMoveContext.Provider>
                     <DragOverlay>
                       {activeGame ? <GameCardPreview assignment={activeGame} /> : null}
                     </DragOverlay>
@@ -1344,6 +1545,7 @@ function TeamScheduleSelector({
   onEditSchedule,
   timezone,
 }) {
+  const selectTeamHeadingId = useId();
   const teams = useMemo(() => {
     const teamSet = new Map();
     assignments.forEach((a) => {
@@ -1356,14 +1558,24 @@ function TeamScheduleSelector({
   return (
     <div className="p-6">
       <div className="mb-6">
-        <label className="block text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">
+        {/* A name for the group of team buttons, not a <label>: there is no one
+            control for it to label (jsx-a11y label-has-associated-control). */}
+        <p
+          id={selectTeamHeadingId}
+          className="block text-xs font-semibold uppercase tracking-wider text-text-muted mb-2"
+        >
           Select Team
-        </label>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        </p>
+        <div
+          role="group"
+          aria-labelledby={selectTeamHeadingId}
+          className="grid grid-cols-2 sm:grid-cols-3 gap-2"
+        >
           {teams.map((team) => (
             <button
               type="button"
               key={team.id}
+              aria-pressed={selectedTeamId === team.id}
               onClick={() => onSelectTeam(team.id)}
               className={`px-3 py-2 rounded text-xs font-medium transition-all ${
                 selectedTeamId === team.id

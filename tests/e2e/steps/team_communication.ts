@@ -252,6 +252,7 @@ Then(
   async ({ page }) => {
     await waitForMockClient(page);
     const rsvps = await page.evaluate(() => {
+      // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the mock store, not what the page shows.
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
       return db.event_rsvps || [];
     });
@@ -262,6 +263,7 @@ Then(
 Then("the RSVP timestamps should align with the league's official timezone", async ({ page }) => {
   await waitForMockClient(page);
   const rsvps = await page.evaluate(() => {
+    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the mock store, not what the page shows.
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     return db.event_rsvps || [];
   });
@@ -313,6 +315,7 @@ Then(
   async ({ page }) => {
     await waitForMockClient(page);
     const messages = await page.evaluate(() => {
+      // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the mock store, not what the page shows.
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
       return db.team_messages || [];
     });

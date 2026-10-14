@@ -17,15 +17,19 @@ describe('Core Engine Performance Benchmarks', () => {
     const override = Number(process.env.PERF_TEAM_GEN_MAX_MS);
     if (Number.isFinite(override) && override > 0) return override;
 
-    const isFocusedPerformanceRun = process.argv.some((arg) =>
-      /(^|[/\\])performance\.test\.js$/.test(arg)
-    );
+    // `npm run test:perf` runs this file alone (CI's Performance benchmark
+    // step). It used to be detected from process.argv, but this code runs in a
+    // Vitest worker whose argv names the worker, not the test file, so the
+    // 3 s branch never applied. Workers inherit the environment.
+    const isFocusedPerformanceRun = process.env.npm_lifecycle_event === 'test:perf';
 
     // Keep the focused benchmark strict. The aggregate Vitest suite runs many
     // worker files at once, so wall-clock timing includes CPU contention.
-    const isCoverageRun = process.env.npm_lifecycle_event === 'test:coverage';
+    // Never timed under coverage: v8's instrumentation slows this engine about
+    // 9x (1.2 s to 10.9 s alone, 0.9-2.1 s to 20.0 s in CI's full run), so
+    // `test:coverage` excludes this file and CI runs it alone as `test:perf`.
     if (isFocusedPerformanceRun) return 3000;
-    return isCoverageRun ? 20000 : 10000;
+    return 10000;
   };
 
   it(

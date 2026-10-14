@@ -132,9 +132,9 @@ Both follow the same pattern: `DndContext` with `closestCorners` collision detec
 
 ## Testing
 
-- **Unit/Integration**: Vitest + `@testing-library/react` + jsdom — `npm run test`
+- **Unit/Integration**: Vitest + `@testing-library/react` + jsdom — `npm run test`; CI runs `npm run test:coverage` (the same suite with coverage, without the wall-clock benchmark) and `npm run test:perf` (the benchmark alone)
 - **E2E**: Playwright-BDD with Gherkin `.feature` files + TypeScript step definitions — `npm run test:e2e`
-- **Coverage**: V8 provider with thresholds (60% statements, 50% branches, 55% functions, 60% lines) scoped to `packages/core/src/**` and `frontend/src/hooks/**`
+- **Coverage**: V8 provider scoped to `packages/core/src/**` and `frontend/src/hooks/**`, with thresholds CI enforces (`vitest.config.js`): 90% statements, 81% branches, 92% functions, 91% lines overall, and 62 / 52 / 64 / 66% for the hooks alone
 
 ## Accessibility (WCAG 2.2 AA)
 

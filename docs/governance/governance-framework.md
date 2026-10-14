@@ -56,7 +56,8 @@ Every PR must pass, in CI and locally:
 
 Plus: new exports registered in their package index; migrations shipped with
 revert + smoke scripts under `docs/sql/`; tests replaced for every deleted
-tested component (coverage thresholds: 60/50/55/60).
+tested component (coverage thresholds: 90/81/92/91, hooks 62/52/64/66, enforced by CI's
+`npm run test:coverage`).
 
 ## 4. Accessibility
 

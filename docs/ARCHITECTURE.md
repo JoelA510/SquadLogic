@@ -1220,7 +1220,8 @@ webhook.
 ```bash
 npm run test              # Vitest unit + integration (jsdom); vitest.config.js
 npm run test:watch
-npm run test:coverage     # v8 coverage with thresholds
+npm run test:coverage     # v8 coverage with thresholds; CI's test step (M3.1)
+npm run test:perf         # the team-generation benchmark alone, without coverage
 npm run test:e2e          # bddgen && playwright test
 npm run test:e2e:ui
 npm run typecheck         # tsc --noEmit
@@ -1231,8 +1232,8 @@ npm run check:advisors    # scripts/advisor-lint.js
 npm run test:db           # supabase test db (pgTAP; requires a local Supabase stack)
 ```
 
-CI (`.github/workflows/ci.yml`) runs typecheck → lint → test → build → check:bundle →
-check:advisors → E2E with `--workers=1`.
+CI (`.github/workflows/ci.yml`) runs typecheck → lint → check:unused → test:coverage → test:perf →
+build → check:bundle → check:advisors → E2E with `--workers=1`.
 
 ### 5.2 What the suite actually contains
 
@@ -1244,14 +1245,18 @@ Test Files  136 passed | 1 skipped (137)
   Duration  48.51s
 ```
 
-Coverage is scoped and thresholded in `vitest.config.js:27-38`:
+Coverage is scoped and thresholded in `vitest.config.js`, and CI enforces the thresholds (plan
+item M3.1):
 
 ```js
 coverage: {
   provider: 'v8',
   include: ['packages/core/src/**', 'frontend/src/hooks/**'],
-  exclude: ['**/node_modules/**', 'tests/**'],
-  thresholds: { statements: 60, branches: 50, functions: 55, lines: 60 },
+  exclude: ['**/node_modules/**', 'tests/**', '**/*.bin'],
+  thresholds: {
+    statements: 90, branches: 81, functions: 92, lines: 91,
+    'frontend/src/hooks/**': { statements: 62, branches: 52, functions: 64, lines: 66 },
+  },
 },
 ```
 

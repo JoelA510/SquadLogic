@@ -153,13 +153,17 @@ function landTheSave() {
 
 /** Reads of `scheduler_runs` for the game run, counted at the client. */
 let gameRunReads = 0;
+/** Reads of `game_assignments`: the landed run's rows, read once its id arrives. */
+let gameRowReads = 0;
 
 beforeEach(() => {
   sessionStorage.clear();
   gameRunReads = 0;
+  gameRowReads = 0;
   const from = mockSupabase.from.bind(mockSupabase);
   vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
     if (table === 'scheduler_runs') gameRunReads += 1;
+    if (table === 'game_assignments') gameRowReads += 1;
     return from(table);
   });
 });
@@ -215,6 +219,12 @@ describe('the game page after a save whose outcome is unknown', () => {
         await screen.findByText(/it is not known whether the changes were saved/)
       ).toBeVisible();
       await waitFor(() => expect(gameRunReads).toBeGreaterThan(readsBefore));
+      // The re-read has landed: the landed run's id arrived and its rows were
+      // read (no run existed before, so none were). The outcome stays said, so
+      // the page never reads as "nothing happened" and invites a second Apply.
+      await waitFor(() => expect(gameRowReads).toBeGreaterThan(0));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(screen.getByText(/it is not known whether the changes were saved/)).toBeVisible();
       // The landed run's row reaches the page: it is the schedule now saved, so
       // Discard Review shows it (the staged review is left as it was).
       fireEvent.click(screen.getByRole('button', { name: /discard review/i }));

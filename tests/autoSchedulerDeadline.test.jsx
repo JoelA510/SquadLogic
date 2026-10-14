@@ -72,7 +72,7 @@ describe('useAutoScheduler :: the persistence deadline', () => {
 
     expect(result.current.status).toBe('failed');
     expect(result.current.error).toBe(
-      `The auto-scheduler did not answer within ${PERSISTENCE_TIMEOUT_MS / 1000} seconds. Run it again.`
+      `The auto-scheduler did not answer within ${PERSISTENCE_TIMEOUT_MS / 1000} seconds, so the run may have finished and been recorded. Check the latest run under Analytics before running it again.`
     );
     expect(signals).toHaveLength(1);
     expect(signals[0].aborted).toBe(true);
@@ -112,7 +112,7 @@ describe('useAutoScheduler :: the persistence deadline', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('a 2xx whose body cannot be read fails, rather than reading as a result', async () => {
+  it('a 2xx whose body cannot be read fails, and says the run may have completed (the function records it before answering)', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({
@@ -129,7 +129,8 @@ describe('useAutoScheduler :: the persistence deadline', () => {
     });
     expect(result.current.status).toBe('failed');
     expect(result.current.error).toBe(
-      'The auto-scheduler returned a response that could not be read (HTTP 200). Run it again.'
+      'The auto-scheduler returned a response that could not be read (HTTP 200), so the run may ' +
+        'have finished and been recorded. Check the latest run under Analytics before running it again.'
     );
   });
 

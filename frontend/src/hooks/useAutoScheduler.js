@@ -2,11 +2,7 @@ import { useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { buildEdgeFunctionCacheKey, edgeFunctionCache } from '../lib/cache.js';
 import { API_BASE_URL, SUPABASE_URL } from '../config.js';
-import {
-  PERSISTENCE_TIMEOUT,
-  PERSISTENCE_UNREADABLE_RESPONSE,
-  postPersistenceRequest,
-} from '../lib/persistenceRequest.js';
+import { isUnknownPersistenceOutcome, postPersistenceRequest } from '../lib/persistenceRequest.js';
 
 // Wave 6b Task 1: 5-minute TTL for auto-scheduler runs. Rationale: an
 // optimization with identical inputs (same teams, slots, config, weights)
@@ -210,6 +206,7 @@ export function useAutoScheduler({ organizationId }) {
             // A run proposes a schedule: it records an evaluation run and its
             // audit rows, but writes no schedule, so the save's "Check the saved
             // schedule before applying again" does not fit; framed below.
+            // (`/admin/analytics` lists the recorded runs.)
             bareMessages: true,
             signal: controller.signal,
           }
@@ -256,11 +253,14 @@ export function useAutoScheduler({ organizationId }) {
           setStatus('idle');
           return;
         }
-        const deadlineOrUnreadable =
-          err.code === PERSISTENCE_TIMEOUT || err.code === PERSISTENCE_UNREADABLE_RESPONSE;
+        // The function records the evaluation run and its audit entry BEFORE
+        // it answers (`auto-scheduler/index.ts`, `persist_evaluation_run`), so a
+        // deadline or an unreadable 2xx can follow a run that completed. Saying
+        // "run it again" would invite a duplicate run and audit trail.
         setError(
-          deadlineOrUnreadable
-            ? `${err.message}. Run it again.`
+          isUnknownPersistenceOutcome(err)
+            ? `${err.message}, so the run may have finished and been recorded. ` +
+                'Check the latest run under Analytics before running it again.'
             : err.message || 'Auto-scheduler failed'
         );
         setStatus('failed');

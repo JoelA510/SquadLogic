@@ -176,8 +176,19 @@ function landTheSave() {
   });
 }
 
+/** Reads of `practice_assignments` issued after the save failed, counted at the client. */
+let rowReadsAfterFailure = 0;
+let failed = false;
+
 beforeEach(() => {
   sessionStorage.clear();
+  rowReadsAfterFailure = 0;
+  failed = false;
+  const from = mockSupabase.from.bind(mockSupabase);
+  vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
+    if (failed && table === 'practice_assignments') rowReadsAfterFailure += 1;
+    return from(table);
+  });
   vi.spyOn(mockSupabase.auth, 'getSession').mockResolvedValue(
     /** @type {any} */ ({ data: { session: { access_token: 'token-ptimeout' } }, error: null })
   );
@@ -226,9 +237,18 @@ describe('the practice page after a save whose outcome is unknown', () => {
     it(`reads the season again, and lists the save that landed (${outcome})`, async () => {
       await stageAndApply(async () => {
         landTheSave();
+        failed = true;
         throw unknown();
       });
       expect(await screen.findByRole('alert')).toHaveTextContent(
+        'it is not known whether the changes were saved'
+      );
+      // Both re-reads go out after the save failed (the locked set and the
+      // grid's rows), and once they have landed the outcome is still said, so
+      // the page never reads as "nothing happened" and invites a second Apply.
+      await waitFor(() => expect(rowReadsAfterFailure).toBeGreaterThanOrEqual(2));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(screen.getByRole('alert')).toHaveTextContent(
         'it is not known whether the changes were saved'
       );
       fireEvent.click(screen.getByRole('button', { name: /discard review/i }));

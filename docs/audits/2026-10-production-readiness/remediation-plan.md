@@ -860,7 +860,7 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M4.4. Persistence payloads aren't validated before they leave the client** (audit finding 2.3, medium)
-> - **Status: in review, PR w3c (`claude/vibrant-allen-hr7y7s-w3c`); not merged.** Each client
+> - **Status: in review, #576 (`claude/vibrant-allen-hr7y7s-w3c`); not merged.** Each client
 >   checks its body against core's copy of the `PersistencePayloadSchema` its Edge Function parses
 >   it with, before the network call: `PersistencePayloadSchema` (team; it gains the Edge's
 >   `lastRunId`/`runId`), and the new `GamePersistencePayloadSchema` and
@@ -1329,11 +1329,13 @@ smoke-tested
   - Scorecard `node.ci-runs-gate` fails only because `package.json`'s `build` script never runs
     in CI (M6.1's `build`); the test runner is found through `test:coverage`. *Executed.*
 
-- 2026-10-14, found by PR w3c (M4.4, with PR 2-C's three follow-ups):
-  - PR 2-C's follow-ups above are done in PR w3c, *executed* (each test red without its change):
+- 2026-10-14, found by #576 (M4.4, with PR 2-C's three follow-ups):
+  - PR 2-C's follow-ups above are done in #576, *executed* (each test red without its change):
     `EvaluationPanel`'s Save and `useAutoScheduler`'s run are under the M2.5 deadline (its race is
     now `withPersistenceDeadline`, which also takes a caller's Cancel signal; the panel's timeout
-    reads "It is not known whether the evaluation was saved", never "Failed to send"); after a
+    reads "It is not known whether the evaluation was saved", never "Failed to send", and the
+    auto-scheduler's says the run may have finished and been recorded, since the function records
+    it before answering (Codex review on #576)); after a
     `PERSISTENCE_TIMEOUT` or a `PERSISTENCE_UNREADABLE_RESPONSE` (both say the outcome is not
     known) the game page (Apply, Rollback) and the practice page (Apply, override confirm) read
     the saved schedule again (`refetch` on `useSchedulerRun` and `useCurrentPracticeSchedule`,

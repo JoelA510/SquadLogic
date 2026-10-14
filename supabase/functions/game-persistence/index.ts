@@ -10,7 +10,8 @@ import {
   getUserFromRequest,
   getUserOrgIds,
   resolveOrgIdsFromTeamIds,
-  recordAudit,
+  createUserClient,
+  recordAuditNow,
   corsHeaders,
   jsonResponse,
 } from '../_shared/auth.ts';
@@ -181,12 +182,17 @@ type HttpHandler = (request: Request) => Response | Promise<Response>;
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL');
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+// The audit row is written AS THE CALLER (`record_audit_event` attributes it
+// to auth.uid()), which needs the anon key.
+const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
 const allowedRoles = parseAllowedRolesEnv(Deno.env.get('GAME_PERSISTENCE_ALLOWED_ROLES'));
 
 let handler: HttpHandler;
 
-if (!supabaseUrl || !serviceRoleKey) {
-  console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for game persistence function.');
+if (!supabaseUrl || !serviceRoleKey || !anonKey) {
+  console.error(
+    'Missing SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY for game persistence function.'
+  );
   handler = () =>
     jsonResponse({ status: 'error', message: 'Supabase service configuration is missing.' }, 500);
 } else {
@@ -368,8 +374,9 @@ if (!supabaseUrl || !serviceRoleKey) {
         new Date()
       );
 
-      // Audit log (fire-and-forget)
-      recordAudit(serviceClient, {
+      // Audit log, as the caller. Awaited: the response follows immediately,
+      // and the isolate can be frozen once it is sent.
+      await recordAuditNow(createUserClient(req, supabaseUrl, anonKey), {
         organizationId: targetOrgId,
         action: 'game.saved',
         resourceType: 'game',

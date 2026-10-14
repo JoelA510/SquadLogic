@@ -86,7 +86,11 @@ export default function TimeSlotDropZone({
 
       {/* Game card or empty placeholder */}
       {assignment ? (
+        // Keyed by game: when a game leaves a cell another game shows in, a
+        // reused card would keep the focus (and dnd-kit's focus restore) that
+        // belonged to the game that moved.
         <GameCard
+          key={assignment.id}
           assignment={assignment}
           hasConflict={hasConflict}
           isDragDisabled={isDragDisabled}

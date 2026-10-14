@@ -78,16 +78,19 @@ RESET role;
 --    INSERT was attempted. Asserting 23502 therefore pins the exemption's
 --    behavior precisely.
 --
---    The 23502 itself is a PRE-EXISTING defect this PR does not introduce
---    and deliberately does not fix: audit_log.user_id is
+--    The 23502 itself: audit_log.user_id is
 --    `NOT NULL REFERENCES auth.users(id)`
 --    (20260324000004_audit_log.sql:12), but a service-role JWT carries no
---    `sub` claim, so auth.uid() is NULL. Every Edge Function
---    recordAudit(serviceClient, ...) call site therefore fails today and has
---    always failed -- silently, because the fire-and-forget wrapper in
---    _shared/auth.ts:149-159 swallows the error into a console.error. Fixing
---    it (nullable user_id, or a system-actor sentinel) is out of scope here;
---    when it lands, flip this assertion to lives_ok.
+--    `sub` claim, so auth.uid() is NULL. The Edge Functions used to call this
+--    RPC through the service role and every one of those writes failed here,
+--    silently. Since 20261014000000 they call it AS THE CALLER (a `UserClient`
+--    from _shared/auth.ts's createUserClient), so the row is attributed to the
+--    JWT's subject, and no Edge audit helper reaches this path any more.
+--    (SQL-side `PERFORM record_audit_event` inside other RPCs still runs as
+--    whoever invoked that RPC; persist_practice_schedule, which Edge used to
+--    call as the service role, guards on auth.uid() for exactly this reason.)
+--    Keep the 23502: a service-role audit write has no actor, and refusing it
+--    is correct.
 RESET ROLE;
 SET LOCAL role = 'service_role';
 SET LOCAL "request.jwt.claims" TO '{"role":"service_role"}';

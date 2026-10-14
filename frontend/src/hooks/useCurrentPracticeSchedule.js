@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { loadSeasonPracticeRows } from '@squadlogic/core/practiceSupabase.js';
@@ -57,12 +57,19 @@ export const CURRENT_PRACTICE_SCHEDULE_SELECT = `
  * Never partial: `loading` is true until a COMPLETE read of the current
  * organisation and season has landed, and a failed read is `error` with no
  * rows, so the export gate never treats "not read" as "none".
+ *
+ * `refetch()` reads the season again (keyed like `useSeasonPracticeAssignments`,
+ * so the read before it is never served): the practice page calls it when a
+ * save's outcome is unknown (`PERSISTENCE_TIMEOUT`).
  */
 export function useCurrentPracticeSchedule() {
   const { currentOrganization, currentSeasonSetting } = useOrganization() || {};
   const organizationId = currentOrganization?.id ?? null;
   const seasonSettingsId = currentSeasonSetting?.id ?? null;
-  const key = organizationId && seasonSettingsId ? `${organizationId}|${seasonSettingsId}` : null;
+  const [version, setVersion] = useState(0);
+  const refetch = useCallback(() => setVersion((v) => v + 1), []);
+  const key =
+    organizationId && seasonSettingsId ? `${organizationId}|${seasonSettingsId}|${version}` : null;
   const [result, setResult] = useState({ key: null, rows: EMPTY, error: null });
 
   useEffect(() => {
@@ -98,5 +105,6 @@ export function useCurrentPracticeSchedule() {
     assignments: current ? result.rows : EMPTY,
     loading: key !== null && !current,
     error: current ? result.error : null,
+    refetch,
   };
 }

@@ -137,4 +137,29 @@ describe('useSchedulerRun', () => {
     expect(missingRunBuilder.single).not.toHaveBeenCalled();
     expect(mapper).toHaveBeenCalledTimes(1);
   });
+
+  it('refetch() reads the latest run again (after a save whose outcome is unknown)', async () => {
+    const runs = [
+      { id: 'game-run-1', results: {}, completed_at: '2026-05-01T00:00:00Z' },
+      // What a save that landed after the page stopped waiting leaves behind.
+      { id: 'game-run-2', results: {}, completed_at: '2026-05-02T00:00:00Z' },
+    ];
+    vi.mocked(supabase.from).mockImplementation(
+      (table) =>
+        /** @type {any} */ (
+          table === 'scheduler_runs'
+            ? createQueryBuilder({ data: runs[0], error: null })
+            : createQueryBuilder({ data: null, error: null })
+        )
+    );
+    const mapper = vi.fn((run) => ({ runId: run.id }));
+    const { result } = renderHook(() => useSchedulerRun('game', mapper, { runId: null }));
+    await waitFor(() => expect(result.current.data).toEqual({ runId: 'game-run-1' }));
+
+    runs.shift();
+    result.current.refetch();
+
+    await waitFor(() => expect(result.current.data).toEqual({ runId: 'game-run-2' }));
+    expect(mapper).toHaveBeenCalledTimes(2);
+  });
 });

@@ -33,6 +33,7 @@ import {
   persistPracticeRepair,
   persistPracticeScheduleReview,
 } from '../utils/practicePersistenceClient.js';
+import { PERSISTENCE_TIMEOUT } from '../lib/persistenceRequest.js';
 import { loadSeasonPracticeAssignments } from '@squadlogic/core/practiceSupabase.js';
 import GridOverrideDialog from '../components/scheduling/GridOverrideDialog.jsx';
 import {
@@ -562,6 +563,7 @@ export default function PracticeSchedulingPage() {
   });
   const seasonRows = seasonPractice.rows;
   const refetchSeasonPractice = seasonPractice.refetch;
+  const refetchPracticeSchedule = practice?.refetch;
 
   useEffect(() => {
     if (practice?.scheduleAssignments) {
@@ -1352,6 +1354,14 @@ export default function PracticeSchedulingPage() {
         })
       );
     } catch (err) {
+      // A save that timed out may still have landed after the page stopped
+      // waiting (`PERSISTENCE_TIMEOUT`: the outcome is unknown, and the message
+      // says so). Read the season again, the locked set and the grid's rows,
+      // so neither the next run nor the grid is built on the read from before it.
+      if (err?.code === PERSISTENCE_TIMEOUT) {
+        refetchSeasonPractice();
+        refetchPracticeSchedule?.();
+      }
       // Writer v3's lock (ruling 2): a save that would replace a saved
       // practice it does not unlock is refused. Say which one in words; the
       // raw text names it only by id. Every other refusal keeps its message.
@@ -1418,6 +1428,7 @@ export default function PracticeSchedulingPage() {
     practiceSlotRows,
     readOverrideFingerprint,
     readSeasonRows,
+    refetchPracticeSchedule,
     refetchSeasonPractice,
     reviewAssignments,
     schedulerSlots,

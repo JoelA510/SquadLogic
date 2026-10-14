@@ -37,6 +37,22 @@ export async function getUserFromRequest(
   return data?.user ?? null;
 }
 
+declare const userScoped: unique symbol;
+
+/**
+ * A Supabase client that acts AS the caller: made only by
+ * {@link createUserClient}, from the request's own `Authorization` header.
+ *
+ * The brand exists so the audit helpers below cannot be handed the
+ * service-role client. They once were, at every call site: `record_audit_event`
+ * inserts `user_id = auth.uid()`, which is NULL under the service role, so
+ * every Edge Function audit write failed on `audit_log.user_id NOT NULL` and was
+ * only console-logged. A plain `SupabaseClient` does not satisfy this type, so
+ * that mistake is now a `deno check` error rather than a silent gap in the
+ * audit trail.
+ */
+export type UserClient = SupabaseClient & { readonly [userScoped]: true };
+
 /**
  * A client that acts AS the caller: the anon (publishable) key plus the
  * request's own `Authorization` header, so PostgREST runs as `authenticated`,
@@ -51,16 +67,19 @@ export async function getUserFromRequest(
  *
  * `SUPABASE_ANON_KEY` is injected into every Edge Function by the platform
  * (docs/operations/ENVIRONMENT.md).
+ *
+ * Returns a {@link UserClient}: the same client, typed so that only this
+ * factory can produce one.
  */
 export function createUserClient(
   request: Request,
   supabaseUrl: string,
   anonKey: string
-): SupabaseClient {
+): UserClient {
   return _createClient(supabaseUrl, anonKey, {
     global: { fetch, headers: { Authorization: request.headers.get('Authorization') ?? '' } },
     auth: { persistSession: false },
-  });
+  }) as UserClient;
 }
 
 /**
@@ -158,6 +177,22 @@ export async function resolveOrgIdsFromTeamIds(
   return [...new Set(data.map((row: { organization_id: string }) => row.organization_id))];
 }
 
+/**
+ * The longest error text an audit row may carry. `audit_log` is append-only and
+ * kept for 180 days, so what a failure writes there is minimised (owner
+ * decision, 2026-10-14): the error's own message, bounded, and nothing from
+ * the request.
+ */
+export const AUDIT_ERROR_MAX_CHARS = 200;
+
+/** `error`'s message, cut to {@link AUDIT_ERROR_MAX_CHARS}, for an audit row's metadata. */
+export function auditErrorText(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  return text.length <= AUDIT_ERROR_MAX_CHARS
+    ? text
+    : `${text.slice(0, AUDIT_ERROR_MAX_CHARS - 1)}\u2026`;
+}
+
 export interface AuditParams {
   organizationId: string;
   action: string;
@@ -167,7 +202,12 @@ export interface AuditParams {
 }
 
 /**
- * The audit write, **awaitable**.
+ * The audit write, **awaitable**, made AS THE CALLER.
+ *
+ * `userClient` must be the caller's client ({@link createUserClient}), never
+ * the service role: `record_audit_event` attributes the row to `auth.uid()`
+ * and checks the caller is a member of `organizationId`, so the actor is the
+ * JWT's subject and cannot be supplied, or forged, by this function.
  *
  * `recordAudit` below returns `void`, so `await recordAudit(...)` is a no-op
  * that reads exactly like a wait. That is harmless where the handler keeps
@@ -179,12 +219,9 @@ export interface AuditParams {
  *
  * Never rejects: an audit failure must not turn into a 500.
  */
-export async function recordAuditNow(
-  serviceClient: SupabaseClient,
-  params: AuditParams
-): Promise<void> {
+export async function recordAuditNow(userClient: UserClient, params: AuditParams): Promise<void> {
   try {
-    const { error } = await serviceClient.rpc('record_audit_event', {
+    const { error } = await userClient.rpc('record_audit_event', {
       p_organization_id: params.organizationId,
       p_action: params.action,
       p_resource_type: params.resourceType ?? null,
@@ -198,14 +235,15 @@ export async function recordAuditNow(
 }
 
 /**
- * Fire-and-forget audit log entry via the record_audit_event RPC (Phase 4, 4.6).
- * Failures are logged but never block the response to the client.
+ * Fire-and-forget audit log entry via the record_audit_event RPC (Phase 4, 4.6),
+ * made as the caller (see {@link recordAuditNow}). Failures are logged but
+ * never block the response to the client.
  *
  * Returns `void` deliberately and historically. Use {@link recordAuditNow}
  * anywhere the handler is about to return.
  */
-export function recordAudit(serviceClient: SupabaseClient, params: AuditParams): void {
-  void recordAuditNow(serviceClient, params);
+export function recordAudit(userClient: UserClient, params: AuditParams): void {
+  void recordAuditNow(userClient, params);
 }
 
 /**

@@ -11,7 +11,7 @@
 import { createBdd } from 'playwright-bdd';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { expect, type APIResponse, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { SEEDED_ADMIN, registrationCsv, registrations } from './registrations.js';
 
 const { Given, When, Then, Before, After } = createBdd();
@@ -349,32 +349,3 @@ Then(
     expect(response.status(), await response.text()).toBe(404);
   }
 );
-
-const preflights = new WeakMap<object, APIResponse>();
-
-When('I send a CORS preflight to the {string} Edge Function', async ({ request }, name: string) => {
-  const response = await request.fetch(`${stackUrl()}/functions/v1/${name}`, {
-    method: 'OPTIONS',
-    headers: {
-      Origin: 'http://localhost:5174',
-      'Access-Control-Request-Method': 'POST',
-      'Access-Control-Request-Headers': 'authorization, apikey, content-type',
-    },
-    timeout: BACKEND_TIMEOUT,
-  });
-  preflights.set(request, response);
-});
-
-Then('the preflight allows the headers the app sends', async ({ request }) => {
-  const response = preflights.get(request);
-  expect(response, 'a previous step sent the preflight').toBeDefined();
-  expect(response?.status()).toBeLessThan(300);
-  const headers = response?.headers() ?? {};
-  expect(headers['access-control-allow-origin']).toBeTruthy();
-  const allowed = (headers['access-control-allow-headers'] ?? '')
-    .split(',')
-    .map((h) => h.trim().toLowerCase());
-  for (const header of ['authorization', 'apikey', 'content-type']) {
-    expect(allowed, `Access-Control-Allow-Headers: ${allowed.join(', ')}`).toContain(header);
-  }
-});

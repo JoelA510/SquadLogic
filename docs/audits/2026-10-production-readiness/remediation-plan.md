@@ -738,9 +738,9 @@ standards these items name · [ ] deployed and smoke-tested
 >   through `team-persistence`, practices placed by `auto-scheduler` and applied through
 >   `practice-persistence`, and a master CSV with a practice for every synced team, by name;
 >   every function `supabase/config.toml` marks `verify_jwt` refusing, by its own `Unauthorized`
->   answer, a caller with no session, `calendar-feed` answering without one, and a CORS
->   preflight allowing the headers the app sends. Green in run 38502102302,
->   nine scenarios, a 2 min 38 s job (*executed*). Test gate (*executed*, throwaway branch
+>   answer, a caller with no session, and `calendar-feed` answering without one. Green in runs
+>   38502102302, 38516599353 (after merging `main` at `2a0425d`) and 38517235455 (after the
+>   review round), each job under 3 minutes (*executed*). Test gate (*executed*, throwaway branch
 >   `claude/vibrant-allen-hr7y7s-w3d-ci`): run 38502405552 applied
 >   `docs/sql/20260726000300_revert.sql` after the seed and the re-import scenario failed at its
 >   guardian check ("No guardians on file."), where the mock, which runs no migration, would
@@ -750,6 +750,11 @@ standards these items name · [ ] deployed and smoke-tested
 >   (`verify_jwt` off and its own refusal skipped) its refusal scenario failed (500, not 401).
 >   A function that cannot boot fails it too (503, run 38501076266, before the job gave the
 >   local runtime its import map).
+>   After the review round (each refusal read from `config.toml` and required to be the
+>   function's own, the export compared by team name), run 38517555582 planted again: the
+>   refusal scenario failed on `game-persistence` (500) and on `calendar-feed` put behind
+>   `verify_jwt` (400, its own answer); the guardian check failed on the revert; the export
+>   check failed with "U10 Team 02" missing.
 >   `verify_jwt` off alone does not fail it: the function refuses a caller with no session
 >   itself (run 38502405552). The features and steps are under `tests/e2e/real-backend/`, not
 >   `tests/e2e/features/` and `tests/e2e/steps/`: the mock project's globs would load them.
@@ -923,7 +928,10 @@ standards these items name · [ ] deployed and smoke-tested
 >   table that does not exist passed its schema check: it could not fail where it mattered.
 >   It targeted production (there is no staging project). Its schema and RLS checks are held by
 >   the migrations CI applies from scratch and `supabase/tests/rls_anonymous_gate.sql`; its Edge
->   refusal and CORS checks moved to M4.1's `real_backend_edge_auth.feature`.
+>   refusal checks moved to M4.1's `real_backend_edge_auth.feature`, now reading the functions
+>   from `supabase/config.toml` and requiring each function's own refusal. Its CORS preflight
+>   check was not kept: on the local stack a preflight still allowed `authorization` with the
+>   function's own CORS headers stripped (run 38518016051), so it could not fail there.
 > - **Fix approach:** move `tests/integration/staging.test.js` into a `workflow_dispatch`
 >   workflow with staging secrets that records its result, or delete it if M4.1 covers it.
 > - **Files touched:** `tests/integration/staging.test.js`, `.github/workflows/staging.yml`.

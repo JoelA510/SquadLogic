@@ -458,8 +458,10 @@ other environment.
   through `practice-persistence`, and the master export built from what the
   database returns; and every `verify_jwt` function refusing a request with
   only the anon key (read from `supabase/config.toml`, each refusing on its own,
-  not only at the gateway), `calendar-feed` answering without one, and a CORS
-  preflight. One worker, in file order, against one database.
+  not only at the gateway), and `calendar-feed` answering without one. One
+  worker, in file order, against one database. (A CORS preflight check was
+  tried and dropped: the local stack allowed the headers even with a
+  function's own CORS headers stripped, so it could not fail.)
 - **When it fails.** The job log carries each failed scenario's page text,
   browser console errors and HTTP failures, then the edge runtime, auth and
   REST container logs; the trace is in the `e2e-real-backend-test-results`

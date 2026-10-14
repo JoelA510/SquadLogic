@@ -105,6 +105,9 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
   // The lock is read AS THE CALLER (RLS decides), never with the service role.
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
   const supabase = createClient(supabaseUrl, serviceKey);
+  // Every audit row is written AS THE CALLER: `record_audit_event` attributes
+  // it to auth.uid(), which the service role does not have.
+  const auditClient = createUserClient(req, supabaseUrl, anonKey);
 
   try {
     // 2. Auth
@@ -210,7 +213,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       // and `recordAudit` is fire-and-forget returning `void`, so awaiting it
       // waits for nothing and the isolate can be frozen before the insert
       // lands. A refusal is the audit row most worth keeping.
-      await recordAuditNow(supabase, {
+      await recordAuditNow(auditClient, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
@@ -262,7 +265,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         differing: lockCheck.differing,
         withoutId: lockCheck.withoutId,
       });
-      await recordAuditNow(supabase, {
+      await recordAuditNow(auditClient, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
@@ -330,7 +333,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         code: preferences.code,
         message: preferences.message,
       });
-      await recordAuditNow(supabase, {
+      await recordAuditNow(auditClient, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
@@ -366,7 +369,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         seasonSettingsId,
         message: venueDaylight.message,
       });
-      await recordAuditNow(supabase, {
+      await recordAuditNow(auditClient, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
@@ -400,7 +403,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         seasonSettingsId,
         message: lightingOverrides.message,
       });
-      await recordAuditNow(supabase, {
+      await recordAuditNow(auditClient, {
         organizationId: input.organizationId,
         action: 'scheduler.auto_refused',
         resourceType: 'practice_schedule',
@@ -441,7 +444,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       maxIterations: input.config.maxIterations,
       timeBudgetMs: input.config.timeBudgetMs,
     });
-    await recordAudit(supabase, {
+    await recordAuditNow(auditClient, {
       organizationId: input.organizationId,
       action: 'scheduler.auto_started',
       resourceType: 'practice_schedule',
@@ -498,7 +501,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         // Emit progress audit (fire-and-forget). `recordAudit` returns `void`
         // and swallows its own failures; the `.catch` that used to trail this
         // call was a TypeError on `undefined` at every 100th iteration.
-        recordAudit(supabase, {
+        recordAudit(auditClient, {
           organizationId: input.organizationId,
           action: 'scheduler.auto_progress',
           resourceType: 'practice_schedule',
@@ -631,7 +634,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
     }
 
     // 11. Audit: scheduler completed
-    await recordAudit(supabase, {
+    await recordAuditNow(auditClient, {
       organizationId: input.organizationId,
       action: 'scheduler.auto_completed',
       resourceType: 'evaluation_run',
@@ -756,7 +759,7 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       if (user) {
         const orgIds = await getUserOrgIds(supabase, user.id);
         if (orgIds.length > 0) {
-          await recordAudit(supabase, {
+          await recordAuditNow(auditClient, {
             organizationId: orgIds[0],
             action: 'scheduler.auto_failed',
             metadata: { error: (error as Error).message },

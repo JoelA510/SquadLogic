@@ -13,11 +13,12 @@ import {
 import { anchorWallTimes, describeAnchorFailure } from '../_shared/timing/anchorWallTimes.ts';
 import { readSeasonTimezone } from '../_shared/timing/seasonSettings.ts';
 import {
+  createUserClient,
   getUserFromRequest,
   getUserOrgIds as _getUserOrgIds,
   corsHeaders,
   jsonResponse,
-  recordAudit,
+  recordAuditNow,
 } from '../_shared/auth.ts';
 import { checkRateLimit, rateLimitExceededResponse } from '../_shared/rateLimit.ts';
 import { logFailure, withFailureLogging } from '../_shared/logtail.ts';
@@ -30,6 +31,9 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  // The audit row is written AS THE CALLER (`record_audit_event` attributes it
+  // to auth.uid()), never with the service role.
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
   const supabase = createClient(supabaseUrl, serviceKey);
 
   try {
@@ -277,7 +281,7 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
       runId = id;
 
       // 7. Audit Log (C-1)
-      await recordAudit(supabase, {
+      await recordAuditNow(createUserClient(req, supabaseUrl, anonKey), {
         organizationId,
         action: 'evaluation.run',
         resourceType: 'evaluation_run',

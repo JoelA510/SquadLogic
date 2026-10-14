@@ -15,9 +15,10 @@ import { serve } from 'https://deno.land/std@0.223.0/http/server.ts';
 import { z } from 'https://deno.land/x/zod@v3.22.4/mod.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
 import {
+  createUserClient,
   getUserFromRequest,
   verifyOrgAdmin,
-  recordAudit,
+  recordAuditNow,
   corsHeaders,
   jsonResponse,
 } from '../_shared/auth.ts';
@@ -482,7 +483,10 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-  if (!supabaseUrl || !serviceRoleKey) {
+  // The audit row is written AS THE CALLER (`record_audit_event` attributes it
+  // to auth.uid()), which needs the anon key.
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+  if (!supabaseUrl || !serviceRoleKey || !anonKey) {
     return jsonResponse({ status: 'error', message: 'Server configuration error' }, 500);
   }
 
@@ -681,8 +685,9 @@ const handler = withFailureLogging('import-validation', async (req: Request, log
     }
   }
 
-  // 6. Audit log (fire-and-forget, Phase 4)
-  recordAudit(serviceClient, {
+  // 6. Audit log (Phase 4), as the caller. Awaited: the response follows
+  //    immediately, and the isolate can be frozen once it is sent.
+  await recordAuditNow(createUserClient(req, supabaseUrl, anonKey), {
     organizationId: body.organization_id,
     action: allErrors.length > 0 && validatedRows.length === 0 ? 'import.failed' : 'import.started',
     resourceType: 'import_job',

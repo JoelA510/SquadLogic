@@ -34,6 +34,7 @@
   --color-text-secondary: var(--color-text-secondary);
   --color-text-muted: var(--color-text-muted);
   --color-text-accent: var(--color-text-accent);
+  --color-text-inverse: var(--text-inverse);
 
   --color-brand: var(--color-primary);
   --color-brand-400: var(--color-primary-400);
@@ -49,6 +50,11 @@
   --color-status-error-bg: var(--color-status-error-bg);
   --color-status-pending: var(--color-status-pending);
   --color-status-pending-bg: var(--color-status-pending-bg);
+  /* Status text on a status background or a surface: AA in both themes (the bare status colors
+     are for icons and fills, and fall short of 4.5:1 as text). */
+  --color-status-success-text: var(--success-text);
+  --color-status-warning-text: var(--warning-text);
+  --color-status-error-text: var(--danger-text);
 
   /* Font Family */
   --font-display: var(--font-family-base);
@@ -178,7 +184,7 @@
 
   --text-primary: #15191f;
   --text-secondary: #56606e;
-  --text-muted: #8a93a2;
+  --text-muted: #646d7b;
   --text-inverse: #ffffff;
 
   --primary: #2a6fdb;
@@ -276,7 +282,7 @@
 
   --text-primary: #eef1f6;
   --text-secondary: #abb4c2;
-  --text-muted: #727d8c;
+  --text-muted: #8792a1;
   --text-inverse: #0e1116;
 
   --primary: #4f8ef7;
@@ -453,7 +459,7 @@ a {
   background: var(--color-primary);
   border: 1px solid var(--color-primary);
   border-radius: var(--radius-md);
-  color: #ffffff;
+  color: var(--text-inverse);
   transition:
     background 0.2s ease,
     border-color 0.2s ease;

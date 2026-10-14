@@ -35,6 +35,7 @@ export default function Tabs({ tabs, activeTab, onChange, panelId, label, classN
   };
 
   return (
+    // eslint-disable-next-line jsx-a11y/interactive-supports-focus -- the tablist delegates its tabs' arrow keys; each tab is a focusable button (roving tabindex)
     <div
       ref={listRef}
       className={`page-tabs ${className}`.trim()}

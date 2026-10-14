@@ -98,7 +98,7 @@ function TabButton({ active, onClick, icon: Icon, children }) {
       onClick={onClick}
       className={`flex-1 flex items-center justify-center gap-2 py-4 text-xs font-bold uppercase tracking-widest transition-colors ${
         active
-          ? 'text-brand-400 bg-brand-500/5 border-b-2 border-brand-400'
+          ? 'text-text-accent bg-brand-500/5 border-b-2 border-brand-400'
           : 'text-text-muted hover:text-text-primary'
       }`}
     >

@@ -67,16 +67,18 @@ export default function AnalyticalDashboard() {
   }, [currentOrganization?.id, fetchHistory]);
 
   return (
-    <div className="p-8 space-y-8 bg-gray-50/30 min-h-screen">
+    <div className="p-8 space-y-8 min-h-screen">
       <header className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-indigo-900">Analytical Insights</h1>
-          <p className="text-gray-500 mt-1">
+          <h1 className="text-3xl font-bold tracking-tight text-text-primary">
+            Analytical Insights
+          </h1>
+          <p className="text-text-secondary mt-1">
             Enterprise transparency and fairness trends across the organization.
           </p>
         </div>
         <div className="flex gap-3">
-          <Button onClick={fetchHistory} variant="secondary" size="sm" className="bg-white">
+          <Button onClick={fetchHistory} variant="secondary" size="sm">
             Refresh Data
           </Button>
         </div>
@@ -85,7 +87,7 @@ export default function AnalyticalDashboard() {
       {/* Grid of Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Fairness Trend */}
-        <section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm transition-all hover:shadow-md">
+        <section className="bg-bg-surface p-6 rounded-2xl border border-border-subtle shadow-sm transition-all hover:shadow-md">
           <div className="flex justify-between items-start mb-6">
             <div>
               <h2
@@ -93,7 +95,7 @@ export default function AnalyticalDashboard() {
                 className="text-lg font-semibold flex items-center gap-2"
               >
                 <span
-                  className="p-2 bg-indigo-50 text-indigo-600 rounded-lg"
+                  className="p-2 bg-brand/10 text-text-accent rounded-lg"
                   role="img"
                   aria-label="Balance scale"
                 >
@@ -101,16 +103,16 @@ export default function AnalyticalDashboard() {
                 </span>
                 Fairness Index Trend
               </h2>
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-text-secondary mt-1">
                 Aggregate distributive justice score over time.
               </p>
             </div>
             {data.length > 0 && (
               <div className="text-right">
-                <div className="text-2xl font-bold text-indigo-600">
+                <div className="text-2xl font-bold text-text-accent">
                   {(data[data.length - 1].fairness * 100).toFixed(1)}%
                 </div>
-                <div className="text-xs text-indigo-600 font-bold">LATEST RUN</div>
+                <div className="text-xs text-text-accent font-bold">LATEST RUN</div>
               </div>
             )}
           </div>
@@ -169,7 +171,7 @@ export default function AnalyticalDashboard() {
         </section>
 
         {/* Conflicts Trend */}
-        <section className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm transition-all hover:shadow-md">
+        <section className="bg-bg-surface p-6 rounded-2xl border border-border-subtle shadow-sm transition-all hover:shadow-md">
           <div className="flex justify-between items-start mb-6">
             <div>
               <h2
@@ -177,7 +179,7 @@ export default function AnalyticalDashboard() {
                 className="text-lg font-semibold flex items-center gap-2"
               >
                 <span
-                  className="p-2 bg-rose-50 text-rose-600 rounded-lg"
+                  className="p-2 bg-status-error-bg text-status-error-text rounded-lg"
                   role="img"
                   aria-label="Warning"
                 >
@@ -185,7 +187,7 @@ export default function AnalyticalDashboard() {
                 </span>
                 Conflict Frequency
               </h2>
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-text-secondary mt-1">
                 Total scheduling violations detected per run.
               </p>
             </div>
@@ -232,16 +234,16 @@ export default function AnalyticalDashboard() {
       </div>
 
       {/* Recent Evaluations Table */}
-      <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
-          <h2 className="font-semibold text-indigo-900">Traceable Evaluation History</h2>
+      <section className="bg-bg-surface rounded-2xl border border-border-subtle shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-border-subtle bg-bg-glass flex justify-between items-center">
+          <h2 className="font-semibold text-text-primary">Traceable Evaluation History</h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <caption className="sr-only">
               Detailed history of evaluation runs, including fairness indices and conflict counts.
             </caption>
-            <thead className="bg-gray-50 text-gray-600 uppercase text-[10px] font-bold tracking-wider">
+            <thead className="bg-bg-glass text-text-secondary uppercase text-[10px] font-bold tracking-wider">
               <tr>
                 <th scope="col" className="px-6 py-3">
                   Event Timestamp
@@ -260,30 +262,30 @@ export default function AnalyticalDashboard() {
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-border-subtle">
               {data.map((run, idx) => (
-                <tr key={idx} className="hover:bg-indigo-50/20 transition-colors group">
-                  <td className="px-6 py-4 text-sm text-gray-600 whitespace-nowrap">
+                <tr key={idx} className="hover:bg-bg-surface-hover transition-colors group">
+                  <td className="px-6 py-4 text-sm text-text-secondary whitespace-nowrap">
                     {run.timestamp}
                   </td>
                   <td className="px-6 py-4 text-sm">
-                    <span className="capitalize px-2.5 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-[10px] font-bold">
+                    <span className="capitalize px-2.5 py-0.5 bg-brand/10 text-text-accent rounded-full text-[10px] font-bold">
                       {run.type}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-sm font-semibold text-gray-900">
+                  <td className="px-6 py-4 text-sm font-semibold text-text-primary">
                     {(run.fairness * 100).toFixed(1)}%
                   </td>
                   <td className="px-6 py-4 text-sm">
                     <span
-                      className={`font-medium ${run.conflicts > 0 ? 'text-rose-600' : 'text-emerald-600'}`}
+                      className={`font-medium ${run.conflicts > 0 ? 'text-status-error-text' : 'text-status-success-text'}`}
                     >
                       {run.conflicts} {run.conflicts === 1 ? 'Violation' : 'Violations'}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-sm">
-                    <span className="inline-flex items-center gap-1.5 py-0.5 px-2 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium">
-                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                    <span className="inline-flex items-center gap-1.5 py-0.5 px-2 rounded-full bg-status-success-bg text-status-success-text text-xs font-medium">
+                      <span className="w-1.5 h-1.5 bg-status-success rounded-full animate-pulse"></span>
                       Verified Audit
                     </span>
                   </td>
@@ -291,7 +293,7 @@ export default function AnalyticalDashboard() {
               ))}
               {data.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-16 text-center text-gray-400 italic">
+                  <td colSpan={5} className="px-6 py-16 text-center text-text-muted italic">
                     No traceable evaluation records available for the current period.
                   </td>
                 </tr>

@@ -97,6 +97,7 @@ export default function GeneralSettings() {
 
   return (
     <div className="space-y-8">
+      {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- the tablist delegates its tabs' arrow keys; each tab is a focusable button (roving tabindex) */}
       <div
         className="flex gap-2 overflow-x-auto pb-2 -mx-2 px-2 scrollbar-hide"
         role="tablist"
@@ -118,7 +119,7 @@ export default function GeneralSettings() {
             onClick={() => setActiveSubTab(tab.id)}
             className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-medium whitespace-nowrap transition-all border ${
               activeSubTab === tab.id
-                ? 'bg-brand-500/20 text-brand-400 border-brand-500/30'
+                ? 'bg-brand-500/10 text-text-accent border-brand-500/30'
                 : 'bg-bg-surface/50 text-text-muted border-border-subtle hover:bg-bg-surface hover:text-text-primary'
             }`}
           >

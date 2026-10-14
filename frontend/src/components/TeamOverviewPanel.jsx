@@ -75,7 +75,9 @@ export default function TeamOverviewPanel({ totals, divisions, generatedAt }) {
           >
             <Icon size={22} aria-hidden="true" />
             <div>
-              <div className="text-[10px] uppercase tracking-widest opacity-75">{label}</div>
+              <div className="text-[10px] uppercase tracking-widest text-text-secondary">
+                {label}
+              </div>
               <div className="text-xl font-display font-bold text-text-primary">{value ?? 0}</div>
             </div>
           </article>
@@ -92,7 +94,7 @@ export default function TeamOverviewPanel({ totals, divisions, generatedAt }) {
               aria-labelledby={`heading-div-${division.divisionId}`}
             >
               <h3
-                className="text-brand-400 font-bold mb-1"
+                className="text-text-accent font-bold mb-1"
                 id={`heading-div-${division.divisionId}`}
               >
                 {division.divisionId}

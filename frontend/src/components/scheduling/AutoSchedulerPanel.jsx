@@ -30,7 +30,7 @@ export default function AutoSchedulerPanel({
   const isFailed = status === 'failed';
 
   return (
-    <section className="glass-panel p-6" aria-label="Auto-Scheduler" role="region">
+    <section className="glass-panel p-6" aria-label="Auto-Scheduler">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-400/20">

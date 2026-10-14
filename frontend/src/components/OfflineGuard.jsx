@@ -131,6 +131,7 @@ export default function OfflineGuard({ children }) {
             <button
               onClick={handleRetry}
               disabled={isRetrying}
+              // eslint-disable-next-line jsx-a11y/no-autofocus -- the alertdialog's one action takes focus when it opens (APG alertdialog pattern)
               autoFocus
               className="w-full py-3 px-6 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
               style={{

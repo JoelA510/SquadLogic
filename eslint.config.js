@@ -2,6 +2,7 @@ import js from '@eslint/js';
 import globals from 'globals';
 import react from 'eslint-plugin-react';
 import reactHooks from 'eslint-plugin-react-hooks';
+import jsxA11y from 'eslint-plugin-jsx-a11y';
 import prettier from 'eslint-plugin-prettier';
 import eslintConfigPrettier from 'eslint-config-prettier';
 import tseslint from 'typescript-eslint';
@@ -62,6 +63,37 @@ export default tseslint.config(
       react: {
         version: 'detect',
       },
+    },
+  },
+  // Accessibility (plan item M4.2): the recommended set on the app's own JSX. Tests render
+  // fixtures, not UI, so they are left out. Waive a genuine false positive on its line, with the
+  // reason beside it; never turn a rule off here to get green.
+  {
+    ...jsxA11y.flatConfigs.recommended,
+    files: ['frontend/src/**/*.{js,jsx}'],
+    rules: {
+      ...jsxA11y.flatConfigs.recommended.rules,
+      // `Toggle` renders a `<button role="switch">`, which a wrapping <label> names; and a radio
+      // label's text can sit three elements deep (HeatSafetyModule).
+      'jsx-a11y/label-has-associated-control': [
+        'error',
+        { controlComponents: ['Toggle'], depth: 3 },
+      ],
+      // Off in the recommended set, and the one rule that catches a button with no name (an
+      // icon-only <button> without aria-label). The plugin's own options, plus `td`: an empty
+      // table cell (a virtualiser's spacer, a loading skeleton) is not a control.
+      'jsx-a11y/control-has-associated-label': [
+        'error',
+        {
+          ...jsxA11y.flatConfigs.recommended.rules['jsx-a11y/control-has-associated-label'][1],
+          ignoreElements: [
+            ...jsxA11y.flatConfigs.recommended.rules['jsx-a11y/control-has-associated-label'][1]
+              .ignoreElements,
+            'td',
+          ],
+          depth: 3,
+        },
+      ],
     },
   },
   {

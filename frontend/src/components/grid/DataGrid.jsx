@@ -311,8 +311,13 @@ export default function DataGrid({
       )}
 
       <div className="grid-scroll" ref={scrollRef}>
+        {/* The grid is one keyboard widget (useGridKeyboard: arrows, Enter, Space, typing), so its
+            wrapper takes focus and keys. Moving it to role="grid" with focusable cells is a
+            follow-up (remediation plan, "Discovered during execution", M4.2). */}
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- role="application" is a composite widget that owns its keys (see above) */}
         <div
           ref={gridRef}
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- the widget's single tab stop (see above)
           tabIndex={0}
           role="application"
           aria-label={label}
@@ -353,24 +358,31 @@ export default function DataGrid({
                         : undefined
                     }
                   >
-                    <div
-                      className="th-in"
-                      onClick={() => col.sortable !== false && toggleSort(col.key)}
-                    >
-                      {col.label}
-                      {sort.key === col.key && (
-                        <span className="sort-ind">
-                          {sort.dir === 1 ? (
-                            <ArrowUp size={13} aria-hidden="true" />
-                          ) : (
-                            <ArrowDown size={13} aria-hidden="true" />
-                          )}
-                        </span>
-                      )}
-                    </div>
+                    {col.sortable !== false ? (
+                      // A button, so the sort works from the keyboard (Enter or Space) as well as
+                      // the mouse; the th's aria-sort says which way it is sorted.
+                      <button type="button" className="th-in" onClick={() => toggleSort(col.key)}>
+                        {col.label}
+                        {sort.key === col.key && (
+                          <span className="sort-ind">
+                            {sort.dir === 1 ? (
+                              <ArrowUp size={13} aria-hidden="true" />
+                            ) : (
+                              <ArrowDown size={13} aria-hidden="true" />
+                            )}
+                          </span>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="th-in">{col.label}</div>
+                    )}
                   </th>
                 ))}
-                {rowActions.length > 0 && <th style={{ width: 56 }} />}
+                {rowActions.length > 0 && (
+                  <th style={{ width: 56 }}>
+                    <span className="sr-only">Actions</span>
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>

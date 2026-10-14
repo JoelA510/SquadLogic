@@ -186,7 +186,7 @@ describe('the main ruleset', () => {
     expect(rule('deletion')).toBeDefined();
   });
 
-  it('requires CI, the Deno mirror, pgTAP and the dependency audit from GitHub Actions, up to date (D5, M3.2)', () => {
+  it('requires CI, the Deno mirror, pgTAP, the dependency audit and the workflow audit from GitHub Actions, up to date (D5, M3.2, M3.5)', () => {
     const checks = rule('required_status_checks').parameters;
     expect(checks.strict_required_status_checks_policy).toBe(true);
     expect(requiredContexts).toEqual([
@@ -194,6 +194,7 @@ describe('the main ruleset', () => {
       'Deno Mirror Tests',
       'Run pgTAP against local Supabase',
       'npm audit (high and critical block)',
+      'Workflow audit (zizmor)',
     ]);
     for (const check of checks.required_status_checks) {
       expect(check.integration_id).toBe(15368); // the GitHub Actions app
@@ -260,6 +261,7 @@ describe('the detectors catch what they guard against (planted workflows)', () =
       ['ci.yml', 'Build & Test'],
       ['pgtap.yml', 'Run pgTAP against local Supabase'],
       ['audit.yml', 'npm audit (high and critical block)'],
+      ['workflow-audit.yml', 'Workflow audit (zizmor)'],
     ]) {
       const renamed = plant(file, `    name: ${name}\n`, `    name: ${name} (renamed)\n`);
       expect(reportingProblems(renamed, name)).toEqual([

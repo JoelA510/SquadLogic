@@ -12,6 +12,8 @@ Edge Functions are Deno/TypeScript handlers hosted by Supabase at the edge. They
 2. **JWT-authenticated read surfaces.** `calendar-feed` is the only public read surface; every other function enforces `getUserFromRequest()` + `verifyOrgMembership()` / `getUserOrgIds()` before returning data.
 3. **Cross-region low latency and CPU isolation.** The auto-scheduler's Hill Climbing loop and the fairness scoring engine run on the edge isolate rather than the caller's browser, which keeps the UI responsive and keeps the scoring algorithm out of the shipped JS bundle.
 
+**Audit writes are made as the caller.** `recordAudit()` / `recordAuditNow()` (`_shared/auth.ts`) take a `UserClient`, which only `createUserClient(req, …)` produces: the anon key plus the request's own `Authorization` header. `record_audit_event` attributes the row to `auth.uid()` and checks the caller's membership of the organisation, so the actor is the JWT's subject. Until 2026-10 these helpers were handed the service-role client, under which `auth.uid()` is NULL, so every Edge audit write failed on `audit_log.user_id NOT NULL` and was only console-logged. Passing a service client is now a `deno check` error.
+
 Decision rule (see §4 below): push database-only transactional work into an RPC and invoke it from the shortest possible Edge Function wrapper. Only reach for an Edge Function when the work needs transport-level auth, CPU isolation, rate-limiting, or cross-API composition.
 
 ## 2. Inventory
@@ -34,7 +36,7 @@ Seven functions are deployed. Each has its own directory under `supabase/functio
 - **Authentication**: JWT + role allow-list (`authenticated`, `service_role`, `admin`, `scheduler`; configurable via `TEAM_PERSISTENCE_ALLOWED_ROLES`). Validates Zod payload schema, resolves the requested organization from run metadata, season settings, divisions, teams, and players, then requires the caller to be an admin/tenant-admin of that single organization before using the service client (IDOR guard).
 - **Rate limit**: `checkRateLimit(user.id)` — default 60 req/min.
 - **RPC used**: `persist_team_schedule(run_data, teams, team_players)`; returns the persisted scheduler run id and treats the submitted roster rows as authoritative for the teams in the payload.
-- **Audit**: `recordAudit(action: 'team.saved', ...)` fire-and-forget.
+- **Audit**: `recordAuditNow(action: 'team.saved', ...)`, as the caller, awaited before the response.
 
 ### 2.3 `practice-persistence`
 
@@ -52,7 +54,7 @@ Seven functions are deployed. Each has its own directory under `supabase/functio
 - **Authentication**: Same JWT + role allow-list + Zod payload as the other persistence functions; verifies `runMetadata.organizationId`, `runMetadata.seasonSettingsId`, and all target home/away teams resolve to exactly one caller organization before using the service client. The RPC also rejects cross-org game slots, fields, teams, and season references.
 - **Rate limit**: `checkRateLimit(user.id)` — default 60 req/min.
 - **RPC used**: `persist_game_schedule(run_data, assignments)`; returns the persisted scheduler run id, links current assignment rows to that run via `game_assignments.run_id`, and rejects cross-org season, team, slot, or field references.
-- **Audit**: `recordAudit(action: 'game.saved', ...)`.
+- **Audit**: `recordAuditNow(action: 'game.saved', ...)`, as the caller, awaited before the response.
 
 ### 2.5 `fairness-scoring`
 
@@ -61,7 +63,7 @@ Seven functions are deployed. Each has its own directory under `supabase/functio
 - **Authentication**: `getUserFromRequest()` + `verifyOrgMembership(supabase, user.id, body.organizationId)`.
 - **Rate limit**: `checkRateLimit(user.id)` with the default 60 req/min.
 - **RPC used**: `persist_evaluation_run(p_run_data, p_findings, p_metrics)` when `persist: true`.
-- **Audit**: Writes an `evaluation.run` audit row via `recordAudit()` when persisted.
+- **Audit**: Writes an `evaluation.run` audit row via `recordAuditNow()`, as the caller, when persisted.
 
 ### 2.6 `auto-scheduler`
 
@@ -69,7 +71,7 @@ Seven functions are deployed. Each has its own directory under `supabase/functio
 - **Invoked by**: `frontend/src/hooks/useAutoScheduler.js` via a direct `fetch` to `/functions/v1/auto-scheduler`.
 - **Authentication**: `getUserFromRequest()` + `verifyOrgMembership()` + `checkRateLimit()`.
 - **Rate limit**: Enforced via the shared `rateLimit.ts` helper.
-- **RPC used**: `persist_evaluation_run(p_run_data, p_findings, p_metrics)` for the final best result; `record_audit_event` directly for the `scheduler.auto_started` / `scheduler.auto_progress` / `scheduler.auto_completed` / `scheduler.auto_failed` stream.
+- **RPC used**: `persist_evaluation_run(p_run_data, p_findings, p_metrics)` for the final best result; `record_audit_event`, as the caller, for the `scheduler.auto_started` / `scheduler.auto_progress` / `scheduler.auto_completed` / `scheduler.auto_failed` / `scheduler.auto_refused` stream.
 - **Logging**: Structured events via `_shared/logtail.ts` → BetterStack (gated on `BETTERSTACK_SOURCE_TOKEN`).
 
 ### 2.7 `calendar-feed`

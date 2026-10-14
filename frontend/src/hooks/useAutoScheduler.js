@@ -2,6 +2,11 @@ import { useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { buildEdgeFunctionCacheKey, edgeFunctionCache } from '../lib/cache.js';
 import { API_BASE_URL, SUPABASE_URL } from '../config.js';
+import {
+  PERSISTENCE_TIMEOUT,
+  PERSISTENCE_UNREADABLE_RESPONSE,
+  postPersistenceRequest,
+} from '../lib/persistenceRequest.js';
 
 // Wave 6b Task 1: 5-minute TTL for auto-scheduler runs. Rationale: an
 // optimization with identical inputs (same teams, slots, config, weights)
@@ -184,31 +189,34 @@ export function useAutoScheduler({ organizationId }) {
           API_BASE_URL !== DEFAULT_LOCAL_FUNCTIONS_URL || !SUPABASE_URL
             ? API_BASE_URL
             : `${SUPABASE_URL}/functions/v1`;
-        const response = await fetch(`${functionsBaseUrl}/auto-scheduler`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            organizationId,
-            seasonSettingsId,
-            teams,
-            slots,
-            divisionPreferences: divisionPreferences ?? {},
-            lockedAssignments: lockedAssignments ?? [],
-            scoringWeights: scoringWeights ?? {},
-            config: config ?? {},
-          }),
-          signal: controller.signal,
-        });
+        // Under the persistence deadline (plan M2.5's, `lib/persistenceRequest.js`):
+        // a run whose answer never comes used to spin until the user cancelled.
+        // Cancel still aborts it, through the same signal.
+        const { response, result: data } = await postPersistenceRequest(
+          `${functionsBaseUrl}/auto-scheduler`,
+          {
+            token,
+            body: {
+              organizationId,
+              seasonSettingsId,
+              teams,
+              slots,
+              divisionPreferences: divisionPreferences ?? {},
+              lockedAssignments: lockedAssignments ?? [],
+              scoringWeights: scoringWeights ?? {},
+              config: config ?? {},
+            },
+            label: 'The auto-scheduler',
+            // A run proposes a schedule and saves none, so the save's "not known
+            // whether the changes were saved" clause does not apply; framed below.
+            bareMessages: true,
+            signal: controller.signal,
+          }
+        );
 
         if (!response.ok) {
-          const errBody = await response.json().catch(() => ({}));
-          throw new Error(errBody.error || `Server error: ${response.status}`);
+          throw new Error(data.error || `Server error: ${response.status}`);
         }
-
-        const data = await response.json();
 
         const resultPayload = {
           assignments: data.assignments,
@@ -247,7 +255,13 @@ export function useAutoScheduler({ organizationId }) {
           setStatus('idle');
           return;
         }
-        setError(err.message || 'Auto-scheduler failed');
+        const deadlineOrUnreadable =
+          err.code === PERSISTENCE_TIMEOUT || err.code === PERSISTENCE_UNREADABLE_RESPONSE;
+        setError(
+          deadlineOrUnreadable
+            ? `${err.message}. Run it again.`
+            : err.message || 'Auto-scheduler failed'
+        );
         setStatus('failed');
       } finally {
         teardownChannel();

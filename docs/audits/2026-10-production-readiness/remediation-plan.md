@@ -703,6 +703,18 @@ standards these items name · [ ] deployed and smoke-tested
 ## Milestone 4a — Completeness vs. what "complete" means: the flows
 
 > **M4.6. The E2E scenarios named for the engines never run them** (audit finding 13.3, high)
+> - **Status (2026-10-14): built, in review** (branch `claude/vibrant-allen-hr7y7s-w3b`, not
+>   merged). The three scenarios press Generate Teams, Run auto-scheduler and Generate Schedule
+>   on seeded inputs and read the page: the team engine forms 10 teams where 5 were asked for
+>   (100 players, at most 10 each); a planted coach clash leaves one of two teams unplaced and a
+>   slot a locked practice fills gets nobody; 3 of 6 matchups are scheduled, with a coach clash,
+>   a shared coach and a full week each reported by reason. The practice route is answered by
+>   the auto-scheduler's own solver modules in the test runner (the function's HTTP and database
+>   wrapper is not exercised there; M4.1 covers it). Each scenario fails with its engine stubbed
+>   to return nothing, and the coach and capacity checks fail with the solver's constraint
+>   removed (*executed*, locally, mock mode, `--workers=1`). The lint rule is in
+>   `eslint.config.js`; the 15 existing reads it found in four other step files are waived line
+>   by line (see "Discovered during execution").
 > - **Fix approach:** rewrite the three Pillar 1 scenarios to drive the UI's own Generate / Run /
 >   Generate-schedule controls on seeded inputs and assert what the page then shows (team count
 >   from the engine, a planted coach clash reported, a planted over-capacity slot refused), with
@@ -844,6 +856,19 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M4.3. The game grid is drag-only** (audit finding 11.2, high)
+> - **Status (2026-10-14): built, in review** (branch `claude/vibrant-allen-hr7y7s-w3b`, not
+>   merged). The grid uses the roster manager's sensor pattern with its own arrow-key rule
+>   (`gridKeyboardCoordinates`: `sortableKeyboardCoordinates` moves only a droppable, and a game
+>   card is not one), named announcements, a grip button as the keyboard activator, and a
+>   "Move to…" list on each card of the empty game slots on their own field. A drop and a Move
+>   both call `moveGameTo`, which now refuses a cell that already has a game and stages nothing
+>   for a game put back where it was (behaviour change for a pointer drop too); focus follows the
+>   moved game (cards are keyed by game, so dnd-kit's focus restore finds the right one). Tests in
+>   `tests/GameCard.test.jsx` (keyboard drag over the real grid, the control) and
+>   `tests/gameGridKeyboard.test.jsx` (the page), each shown failing with its piece removed
+>   (*executed*); keyboard drag and Move to also checked in real Chromium on the mock app
+>   (*executed*, a scratch scenario, not committed). Also fixes the By Team selector's orphaned
+>   `<label>` that M4.2's jsx-a11y scan reported.
 > - **Fix approach:** the roster manager's `KeyboardSensor` pattern on the game grid's
 >   `DndContext`, and a "Move to…" control on `GameCard` that reuses the existing assignment
 >   handler.
@@ -1314,6 +1339,29 @@ smoke-tested
     budget printed from inside the worker, before and after).
   - Scorecard `node.ci-runs-gate` fails only because `package.json`'s `build` script never runs
     in CI (M6.1's `build`); the test runner is found through `test:coverage`. *Executed.*
+
+- 2026-10-14, found by PR w3b (M4.6, M4.3):
+  - The mock's organization id is `org-1`, not a UUID, and core's `SlotSchema` refuses an
+    `organization_id` that is not one, so in mock mode every game slot is refused and Generate
+    Schedule cannot succeed (the dev server's mock mode included). The forged Pillar 1 scenario
+    hid it. The auto-scheduler's request schema refuses the mock's `org-1` and `season-1` the same
+    way. Not fixed (a change to the mock's ids touches most of the E2E suite); the game scenario
+    seeds a club with a UUID id. *Executed* (the page's own error, on a run of the scenario).
+  - The game grid holds one game per cell (`GameScheduleGrid` keys by field and slot), so a drop
+    onto an occupied cell staged two games in one slot and the grid showed only one of them. Fixed
+    in this PR: the shared move handler refuses it. *Executed* (a page test, shown failing with
+    the refusal removed).
+  - The grid offers every game slot under every field, but a game slot is one field's booking, so
+    a drop onto another field's column stages a game whose `fieldId` and `gameSlotId` disagree
+    (and two such drops can share one capacity-1 booking). "Move to…" offers only each slot on its
+    own field; the drop path still allows it. Not fixed (the grid's layout; wants its own item).
+    *Statically reviewed.*
+  - M4.6's lint rule found 15 `Then` steps in four other files reading `__MOCK_DB__`
+    (`async_and_optimistic_ui.ts`, `data_and_output.ts`, `team_and_roster.ts`,
+    `team_communication.ts`), each waived on its line with a reason. One, "the resulting teams
+    summary should reflect the new constraints", writes a completed team run when none exists:
+    the M4.6 shape, and Generate Teams now demonstrably runs in mock mode, so it can be rewritten
+    on the page. Follow-up. *Executed* (lint).
 
 ## Deferred with reason
 

@@ -58,9 +58,12 @@ export const CURRENT_PRACTICE_SCHEDULE_SELECT = `
  * organisation and season has landed, and a failed read is `error` with no
  * rows, so the export gate never treats "not read" as "none".
  *
- * `refetch()` reads the season again (keyed like `useSeasonPracticeAssignments`,
- * so the read before it is never served): the practice page calls it when a
- * save's outcome is unknown (`PERSISTENCE_TIMEOUT`).
+ * `refetch()` reads the season again: the practice page calls it when a
+ * save's outcome is unknown (`isUnknownPersistenceOutcome`). While that re-read
+ * is in flight, the last COMPLETE read of the SAME organisation and season
+ * stays served, with `loading` true, rather than nothing: the grid keeps its
+ * rows instead of going blank, and a gate on `loading` still waits. A read of
+ * any other organisation or season is never served (the key's first two parts).
  */
 export function useCurrentPracticeSchedule() {
   const { currentOrganization, currentSeasonSetting } = useOrganization() || {};
@@ -68,9 +71,9 @@ export function useCurrentPracticeSchedule() {
   const seasonSettingsId = currentSeasonSetting?.id ?? null;
   const [version, setVersion] = useState(0);
   const refetch = useCallback(() => setVersion((v) => v + 1), []);
-  const key =
-    organizationId && seasonSettingsId ? `${organizationId}|${seasonSettingsId}|${version}` : null;
-  const [result, setResult] = useState({ key: null, rows: EMPTY, error: null });
+  const scope = organizationId && seasonSettingsId ? `${organizationId}|${seasonSettingsId}` : null;
+  const key = scope ? `${scope}|${version}` : null;
+  const [result, setResult] = useState({ key: null, scope: null, rows: EMPTY, error: null });
 
   useEffect(() => {
     if (!key) return undefined;
@@ -83,26 +86,28 @@ export function useCurrentPracticeSchedule() {
       .then((read) => {
         if (cancelled) return;
         if (read.ok === true) {
-          setResult({ key, rows: read.rows.map(mapKeysToCamelCase), error: null });
+          setResult({ key, scope, rows: read.rows.map(mapKeysToCamelCase), error: null });
         } else {
           const message = 'message' in read ? read.message : 'unreadable';
           logger.error('Error fetching the current practice schedule:', message);
-          setResult({ key, rows: EMPTY, error: new Error(message) });
+          setResult({ key, scope, rows: EMPTY, error: new Error(message) });
         }
       })
       .catch((err) => {
         if (cancelled) return;
         logger.error('Error fetching the current practice schedule:', err);
-        setResult({ key, rows: EMPTY, error: err });
+        setResult({ key, scope, rows: EMPTY, error: err });
       });
     return () => {
       cancelled = true;
     };
-  }, [key, organizationId, seasonSettingsId]);
+  }, [key, scope, organizationId, seasonSettingsId]);
 
   const current = key !== null && result.key === key;
+  // A refetch of this same scope: the previous complete read, until it lands.
+  const rereading = !current && scope !== null && result.scope === scope && !result.error;
   return {
-    assignments: current ? result.rows : EMPTY,
+    assignments: current || rereading ? result.rows : EMPTY,
     loading: key !== null && !current,
     error: current ? result.error : null,
     refetch,

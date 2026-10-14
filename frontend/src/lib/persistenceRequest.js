@@ -57,6 +57,19 @@ const UNKNOWN_OUTCOME =
 /** How many Zod issues a refusal names before it says how many more there are. */
 const LISTED_ISSUES = 5;
 
+/**
+ * Whether a failed save may still have been written: the deadline passed
+ * (`PERSISTENCE_TIMEOUT`), or a 2xx came back whose body could not be read
+ * (`PERSISTENCE_UNREADABLE_RESPONSE`). Both messages say the outcome is not
+ * known, and a page re-reads its saved schedule after either.
+ *
+ * @param {unknown} err
+ */
+export function isUnknownPersistenceOutcome(err) {
+  const code = /** @type {{ code?: unknown } | null | undefined} */ (err)?.code;
+  return code === PERSISTENCE_TIMEOUT || code === PERSISTENCE_UNREADABLE_RESPONSE;
+}
+
 function persistenceError(message, code, status) {
   return Object.assign(new Error(message), { code, status });
 }
@@ -76,7 +89,12 @@ function persistenceError(message, code, status) {
  *   `null` when the body passes
  */
 export function payloadRefusal(schema, body, label) {
-  const parsed = schema.safeParse(body);
+  // Judged as it will arrive: the server parses `JSON.parse` of what
+  // `JSON.stringify` sends, which turns a `Date` into its ISO string and drops
+  // an `undefined` key. Judging the object as it is would refuse a body the
+  // server takes.
+  const sent = body === undefined ? undefined : JSON.parse(JSON.stringify(body));
+  const parsed = schema.safeParse(sent);
   if (parsed.success) return null;
   const issues = parsed.error?.issues ?? [];
   const listed = issues

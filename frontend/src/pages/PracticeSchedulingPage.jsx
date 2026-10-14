@@ -33,7 +33,7 @@ import {
   persistPracticeRepair,
   persistPracticeScheduleReview,
 } from '../utils/practicePersistenceClient.js';
-import { PERSISTENCE_TIMEOUT } from '../lib/persistenceRequest.js';
+import { isUnknownPersistenceOutcome } from '../lib/persistenceRequest.js';
 import { loadSeasonPracticeAssignments } from '@squadlogic/core/practiceSupabase.js';
 import GridOverrideDialog from '../components/scheduling/GridOverrideDialog.jsx';
 import {
@@ -1354,11 +1354,11 @@ export default function PracticeSchedulingPage() {
         })
       );
     } catch (err) {
-      // A save that timed out may still have landed after the page stopped
-      // waiting (`PERSISTENCE_TIMEOUT`: the outcome is unknown, and the message
-      // says so). Read the season again, the locked set and the grid's rows,
-      // so neither the next run nor the grid is built on the read from before it.
-      if (err?.code === PERSISTENCE_TIMEOUT) {
+      // A save that timed out, or answered 2xx with a body that could not be
+      // read, may still have been written (the message says the outcome is not
+      // known). Read the season again, the locked set and the grid's rows, so
+      // neither the next run nor the grid is built on the read from before it.
+      if (isUnknownPersistenceOutcome(err)) {
         refetchSeasonPractice();
         refetchPracticeSchedule?.();
       }

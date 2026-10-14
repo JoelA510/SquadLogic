@@ -119,7 +119,8 @@ vi.mock('../frontend/src/utils/practicePersistenceClient.js', async (importOrigi
 const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
 const { default: PracticeSchedulingPage } =
   await import('../frontend/src/pages/PracticeSchedulingPage.jsx');
-const { PERSISTENCE_TIMEOUT } = await import('../frontend/src/lib/persistenceRequest.js');
+const { PERSISTENCE_TIMEOUT, PERSISTENCE_UNREADABLE_RESPONSE } =
+  await import('../frontend/src/lib/persistenceRequest.js');
 
 const SLOTS = [
   { id: 'slot-mon', day_of_week: 'monday', start_time: '17:00:00', end_time: '18:30:00' },
@@ -202,26 +203,38 @@ async function stageAndApply(save) {
   fireEvent.click(apply);
 }
 
-const timeout = () =>
-  Object.assign(
-    new Error(
-      'The practice schedule save did not answer within 160 seconds, so it is not known whether the changes were saved. Check the saved schedule before applying again.'
+const UNKNOWN_OUTCOMES = {
+  // The two errors whose message says the outcome is not known (`persistenceRequest.js`).
+  timeout: () =>
+    Object.assign(
+      new Error(
+        'The practice schedule save did not answer within 160 seconds, so it is not known whether the changes were saved. Check the saved schedule before applying again.'
+      ),
+      { code: PERSISTENCE_TIMEOUT, status: null }
     ),
-    { code: PERSISTENCE_TIMEOUT, status: null }
-  );
+  'unreadable 2xx': () =>
+    Object.assign(
+      new Error(
+        'The practice schedule save returned a response that could not be read (HTTP 200), so it is not known whether the changes were saved. Check the saved schedule before applying again.'
+      ),
+      { code: PERSISTENCE_UNREADABLE_RESPONSE, status: 200 }
+    ),
+};
 
 describe('the practice page after a save whose outcome is unknown', () => {
-  it('reads the season again, and lists the save that landed', async () => {
-    await stageAndApply(async () => {
-      landTheSave();
-      throw timeout();
+  for (const [outcome, unknown] of Object.entries(UNKNOWN_OUTCOMES)) {
+    it(`reads the season again, and lists the save that landed (${outcome})`, async () => {
+      await stageAndApply(async () => {
+        landTheSave();
+        throw unknown();
+      });
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'it is not known whether the changes were saved'
+      );
+      fireEvent.click(screen.getByRole('button', { name: /discard review/i }));
+      await waitFor(() => expect(screen.getAllByText('Synthetic Wrens').length).toBeGreaterThan(0));
     });
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'it is not known whether the changes were saved'
-    );
-    fireEvent.click(screen.getByRole('button', { name: /discard review/i }));
-    await waitFor(() => expect(screen.getAllByText('Synthetic Wrens').length).toBeGreaterThan(0));
-  });
+  }
 
   it('control: after a refusal the page does not re-read, so a row written meanwhile is not listed', async () => {
     // The same landed row, but a refusal: its outcome is known, nothing is

@@ -207,8 +207,9 @@ export function useAutoScheduler({ organizationId }) {
               config: config ?? {},
             },
             label: 'The auto-scheduler',
-            // A run proposes a schedule and saves none, so the save's "not known
-            // whether the changes were saved" clause does not apply; framed below.
+            // A run proposes a schedule: it records an evaluation run and its
+            // audit rows, but writes no schedule, so the save's "Check the saved
+            // schedule before applying again" does not fit; framed below.
             bareMessages: true,
             signal: controller.signal,
           }

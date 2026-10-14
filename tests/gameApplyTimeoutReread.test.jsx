@@ -93,7 +93,8 @@ vi.mock('../frontend/src/utils/gamePersistenceClient.js', () => ({
 const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
 const { default: GameSchedulingPage } =
   await import('../frontend/src/pages/GameSchedulingPage.jsx');
-const { PERSISTENCE_TIMEOUT } = await import('../frontend/src/lib/persistenceRequest.js');
+const { PERSISTENCE_TIMEOUT, PERSISTENCE_UNREADABLE_RESPONSE } =
+  await import('../frontend/src/lib/persistenceRequest.js');
 
 const SLOT = {
   id: 'gs-gt1',
@@ -184,29 +185,45 @@ async function generateAndApply(save) {
   return readsBefore;
 }
 
-const timeout = () =>
-  Object.assign(
-    new Error(
-      'The game schedule save did not answer within 160 seconds, so it is not known whether the changes were saved. Check the saved schedule before applying again.'
+const UNKNOWN_OUTCOMES = {
+  // The two errors whose message says the outcome is not known (`persistenceRequest.js`).
+  timeout: () =>
+    Object.assign(
+      new Error(
+        'The game schedule save did not answer within 160 seconds, so it is not known whether the changes were saved. Check the saved schedule before applying again.'
+      ),
+      { code: PERSISTENCE_TIMEOUT, status: null }
     ),
-    { code: PERSISTENCE_TIMEOUT, status: null }
-  );
+  'unreadable 2xx': () =>
+    Object.assign(
+      new Error(
+        'The game schedule save returned a response that could not be read (HTTP 200), so it is not known whether the changes were saved. Check the saved schedule before applying again.'
+      ),
+      { code: PERSISTENCE_UNREADABLE_RESPONSE, status: 200 }
+    ),
+};
 
 describe('the game page after a save whose outcome is unknown', () => {
-  it('reads the saved schedule again, and shows the save that landed', async () => {
-    const readsBefore = await generateAndApply(async () => {
-      landTheSave();
-      throw timeout();
-    });
+  for (const [outcome, unknown] of Object.entries(UNKNOWN_OUTCOMES)) {
+    it(`reads the saved schedule again, and shows the save that landed (${outcome})`, async () => {
+      const readsBefore = await generateAndApply(async () => {
+        landTheSave();
+        throw unknown();
+      });
 
-    expect(await screen.findByText(/it is not known whether the changes were saved/)).toBeVisible();
-    await waitFor(() => expect(gameRunReads).toBeGreaterThan(readsBefore));
-    // The landed run's row reaches the page: it is the schedule now saved, so
-    // Discard Review shows it (the staged review is left as it was).
-    fireEvent.click(screen.getByRole('button', { name: /discard review/i }));
-    await waitFor(() => expect(screen.getAllByText(/Synthetic Rockets/).length).toBeGreaterThan(0));
-    expect(screen.queryByText(/no games scheduled/i)).toBeNull();
-  });
+      expect(
+        await screen.findByText(/it is not known whether the changes were saved/)
+      ).toBeVisible();
+      await waitFor(() => expect(gameRunReads).toBeGreaterThan(readsBefore));
+      // The landed run's row reaches the page: it is the schedule now saved, so
+      // Discard Review shows it (the staged review is left as it was).
+      fireEvent.click(screen.getByRole('button', { name: /discard review/i }));
+      await waitFor(() =>
+        expect(screen.getAllByText(/Synthetic Rockets/).length).toBeGreaterThan(0)
+      );
+      expect(screen.queryByText(/no games scheduled/i)).toBeNull();
+    });
+  }
 
   it('does not re-read after a refusal, whose outcome is known', async () => {
     const readsBefore = await generateAndApply(async () => {

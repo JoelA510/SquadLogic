@@ -305,3 +305,23 @@ test('refuses a malformed payload client-side, before any request, naming each i
   assert.match(result.message, /snapshot\.payload\.teamPlayerRows\.0\.player_id: /);
   assert.match(result.message, /Nothing was saved\.$/);
 });
+
+test('judges the body as it will arrive: a value JSON sends as a string is not refused', async () => {
+  // `JSON.stringify` sends a Date as its ISO string, which the Edge's
+  // `lastRunId: z.string()` accepts; refusing the object as it is would make
+  // the client stricter than its server.
+  let fetchCalls = 0;
+  const fetchImpl = async () => {
+    fetchCalls += 1;
+    return { ok: true, json: async () => ({ status: 'success' }) };
+  };
+  const result = await triggerTeamPersistence({
+    snapshot: { payload: TEAM_PAYLOAD, lastRunId: new Date('2026-10-14T00:00:00Z') },
+    overrides: [],
+    fetchImpl,
+    endpoint: 'https://api.example.com',
+    accessToken: 'token',
+  });
+  assert.equal(result.status, 'success');
+  assert.equal(fetchCalls, 1);
+});

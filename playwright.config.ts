@@ -11,7 +11,7 @@ const testDir = defineBddConfig({
   outputDir: '.features-gen-local',
 });
 
-export default defineConfig({
+const config = defineConfig({
   testDir,
   globalTeardown: './tests/e2e/global-teardown.ts',
   reporter: 'html',
@@ -46,3 +46,50 @@ export default defineConfig({
     },
   ],
 });
+
+// The real-backend project (plan item M4.1): a few scenarios against a local
+// Supabase stack (`supabase start`, seeded by tests/e2e/real-backend/seed.sql),
+// run by .github/workflows/e2e-real-backend.yml. When that stack's API URL is
+// in the environment, the configuration is that project and its server alone
+// (the mock dev server and project above are not started); otherwise it is
+// exactly the configuration above, so the mock suite (`npm run test:e2e`,
+// ci.yml) is unchanged. Its features and steps live under
+// tests/e2e/real-backend/, outside the mock project's globs.
+const realBackendUrl = process.env.E2E_REAL_BACKEND_SUPABASE_URL?.replace(/\/+$/, '');
+if (realBackendUrl) {
+  const port = 5174;
+  config.webServer = {
+    // A production build of the real client, served by `vite preview`: the
+    // shape that ships (no mock chunk, no StrictMode double effects), against
+    // the local stack and its Edge Functions. Built into its own directory
+    // (paths are relative to Vite's root, frontend/) so `dist/` is untouched.
+    command:
+      'npx vite build --outDir ../.real-backend-dist --emptyOutDir && ' +
+      `npx vite preview --outDir ../.real-backend-dist --port ${port} --strictPort`,
+    url: `http://localhost:${port}`,
+    reuseExistingServer: !process.env.CI,
+    timeout: 300 * 1000,
+    env: {
+      VITE_USE_MOCK_SUPABASE: 'false',
+      VITE_SUPABASE_URL: realBackendUrl,
+      VITE_SUPABASE_ANON_KEY: process.env.E2E_REAL_BACKEND_ANON_KEY ?? '',
+      VITE_SUPABASE_PERSISTENCE_URL: `${realBackendUrl}/functions/v1`,
+    },
+  };
+  config.projects = [
+    {
+      name: 'real-backend',
+      testDir: defineBddConfig({
+        features: 'tests/e2e/real-backend/features/**/*.feature',
+        steps: 'tests/e2e/real-backend/steps/**/*.ts',
+        outputDir: '.features-gen-real-backend',
+      }),
+      // One shared database, so the scenarios run one at a time, in order.
+      fullyParallel: false,
+      timeout: 180000,
+      use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${port}` },
+    },
+  ];
+}
+
+export default config;

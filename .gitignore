@@ -42,6 +42,7 @@ tmp/
 .features-gen/
 .features-gen-backup/
 .features-gen-local/
+.features-gen-real-backend/
 
 # Backup directories
 test-results-backup/
@@ -76,3 +77,4 @@ frontend/lint_results.txt
 
 # Python bytecode (scripts/heat reference generator)
 __pycache__/
+.real-backend-dist/

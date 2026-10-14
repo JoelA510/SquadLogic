@@ -415,6 +415,80 @@ sudo npm run test:db:local              # or: sudo HARNESS_PGUSER=postgres bash 
 `npm run test:db:local:prove` replays the planted defects the harness is
 proven against (`scripts/dbharness/prove.sh`).
 
+## Real-backend E2E (`e2e-real-backend.yml`)
+
+[`.github/workflows/e2e-real-backend.yml`](../../.github/workflows/e2e-real-backend.yml),
+job **E2E against local Supabase**, runs a few end-to-end scenarios through
+the app's real Supabase client, RPCs and Edge Functions (plan item M4.1, audit
+findings 13.2 and 6.4); the main E2E suite in `ci.yml` runs only against the
+in-browser mock. It runs on every pull request to `main` (no `paths` filter,
+no job-level `if`) and on manual dispatch, needs no secret, and touches no
+other environment.
+
+- **The stack.** `supabase start` with the pinned CLI, as `pgtap.yml` does, but
+  with the edge runtime, which serves `supabase/functions/*` (the import and
+  persistence paths call them). A failed start is retried once, with a
+  warning, for the edge runtime's health check (the 502 that once failed a
+  pgTAP run); that risk is why this is its own job and not a step in the
+  required pgTAP job. Before the start, the job copies
+  `supabase/functions/import_map.json` to a `deno.json` beside each function
+  `config.toml` gives an `import_map` (auto-scheduler, fairness-scoring) and
+  drops those lines from its own copy of `config.toml`: the local edge runtime
+  does not apply the per-function import map (their bare `zod` import fails to
+  boot), while the deploy job's bundling does. Nothing is committed; the step
+  fails if no function names an import map any more.
+- **The seed.** [`tests/e2e/real-backend/seed.sql`](../../tests/e2e/real-backend/seed.sql),
+  applied with `psql`: one administrator who can sign in, an onboarded
+  organization, an active season dated from the day of the run, one division,
+  two fields with weekday practice slots. Pseudonymous throughout
+  (`example.test` addresses, a password that exists only on the throwaway
+  stack). It is not `supabase/seed.sql`, which fails against the migrated
+  schema (its own header says why).
+- **The scenarios.** The `real-backend` Playwright project
+  (`playwright.config.ts`), which exists only when the job exports the stack's
+  URL (`E2E_REAL_BACKEND_SUPABASE_URL`, `E2E_REAL_BACKEND_ANON_KEY`), so
+  `npm run test:e2e` and `ci.yml` see the mock project alone, and the job sees
+  this one alone (no mock dev server is started). It serves a
+  production build (`vite build` into `.real-backend-dist/`, then `vite
+  preview`), the shape that ships. Features and steps
+  are under [`tests/e2e/real-backend/`](../../tests/e2e/real-backend/), outside
+  the mock project's globs: a narrower re-import that must keep the guardians
+  the first import recorded (migration `20260726000300`); import, teams synced
+  through `team-persistence`, practices placed by `auto-scheduler` and applied
+  through `practice-persistence`, and the master export built from what the
+  database returns; and every `verify_jwt` function refusing a request with
+  only the anon key (read from `supabase/config.toml`, each refusing on its own,
+  not only at the gateway), and `calendar-feed` answering without one. One
+  worker, in file order, against one database. (A CORS preflight check was
+  tried and dropped: the local stack allowed the headers even with a
+  function's own CORS headers stripped, so it could not fail.)
+- **When it fails.** The job log carries each failed scenario's page text,
+  browser console errors and HTTP failures, then the edge runtime, auth and
+  REST container logs; the trace is in the `e2e-real-backend-test-results`
+  artifact.
+
+**Running it locally** needs Docker. Do what the job does, in a scratch
+checkout or with the two changes undone afterwards: copy
+`supabase/functions/import_map.json` to `supabase/functions/auto-scheduler/deno.json`
+and `supabase/functions/fairness-scoring/deno.json`, delete the two
+`import_map =` lines from `supabase/config.toml`, then `supabase start`, then
+`psql "$(supabase status -o env | sed -n 's/^DB_URL=//p' | tr -d '"')" -f tests/e2e/real-backend/seed.sql`,
+then export `E2E_REAL_BACKEND_SUPABASE_URL` and `E2E_REAL_BACKEND_ANON_KEY` from
+`supabase status -o env` (`API_URL`, `ANON_KEY`) and run
+`npx bddgen && npx playwright test --project=real-backend --workers=1`. The
+scenarios expect a fresh database (the first import inserts its players), so
+before running them again: `supabase db reset` and the seed again.
+
+**Not required yet.** It can be added to the ruleset once it has proven stable
+over several runs: add its job name to `.github/rulesets/main.json` and
+`tests/rulesetRequiredChecks.test.js`, then re-import the ruleset (see "Branch
+Protection").
+
+`tests/integration/staging.test.js`, the suite this replaces as the check
+against a real backend, was deleted with plan item M4.5: it targeted
+production, ran in no gate, and could not fail where it mattered (run against
+production on 2026-10-14, a table that does not exist passed its schema check).
+
 ## Branch Protection
 
 `main` is protected by one repository ruleset, "main: pull requests with green

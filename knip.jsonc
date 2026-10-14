@@ -41,6 +41,8 @@
         "supabase/functions/_shared/tests/*_test.ts",
         // playwright-bdd step files, loaded by the glob in playwright.config.ts.
         "tests/e2e/steps/**/*.ts",
+        // The real-backend project's steps (playwright.config.ts, plan item M4.1).
+        "tests/e2e/real-backend/steps/**/*.ts",
         // The test barrels: CLAUDE.md says to import factories and helpers
         // through them, so what they re-export is their public surface.
         "tests/factories/index.js",

@@ -739,6 +739,39 @@ standards these items name · [ ] deployed and smoke-tested
 
 
 > **M4.1. No core flow is proven against the real backend** (audit finding 13.2, medium)
+> - **Status (2026-10-14): built, in review** (branch `claude/vibrant-allen-hr7y7s-w3d`, not
+>   merged). `.github/workflows/e2e-real-backend.yml`, job **E2E against local Supabase**, runs
+>   on every pull request (no `paths` filter, no job `if`) and is not required yet. It starts
+>   `supabase start` with the edge runtime (its own job, so the required pgTAP job keeps
+>   excluding it), seeds `tests/e2e/real-backend/seed.sql` (pseudonymous; `supabase/seed.sql`
+>   fails on the migrated schema, as its header says) and runs the `real-backend` Playwright
+>   project against a production build: a narrower re-import keeps the guardians the first
+>   import recorded (the July TG-6 path, migration `20260726000300`); import, teams synced
+>   through `team-persistence`, practices placed by `auto-scheduler` and applied through
+>   `practice-persistence`, and a master CSV with a practice for every synced team, by name;
+>   every function `supabase/config.toml` marks `verify_jwt` refusing, by its own `Unauthorized`
+>   answer, a caller with no session, and `calendar-feed` answering without one. Green in runs
+>   38502102302, 38516599353 (after merging `main` at `2a0425d`) and 38517235455 (after the
+>   review round), each job under 3 minutes (*executed*). Test gate (*executed*, throwaway branch
+>   `claude/vibrant-allen-hr7y7s-w3d-ci`): run 38502405552 applied
+>   `docs/sql/20260726000300_revert.sql` after the seed and the re-import scenario failed at its
+>   guardian check ("No guardians on file."), where the mock, which runs no migration, would
+>   not; leaving one practice slot failed the season flow at the page's own warning (a team
+>   with no practice). Run 38502798265 removed that warning check, and the export check failed
+>   instead (practices for 1 team of 2); with `game-persistence` answering anonymous callers
+>   (`verify_jwt` off and its own refusal skipped) its refusal scenario failed (500, not 401).
+>   A function that cannot boot fails it too (503, run 38501076266, before the job gave the
+>   local runtime its import map).
+>   After the review round (each refusal read from `config.toml` and required to be the
+>   function's own, the export compared by team name), run 38517555582 planted again: the
+>   refusal scenario failed on `game-persistence` (500) and on `calendar-feed` put behind
+>   `verify_jwt` (400, its own answer); the guardian check failed on the revert; the export
+>   check failed with "U10 Team 02" missing.
+>   `verify_jwt` off alone does not fail it: the function refuses a caller with no session
+>   itself (run 38502405552). The features and steps are under `tests/e2e/real-backend/`, not
+>   `tests/e2e/features/` and `tests/e2e/steps/`: the mock project's globs would load them.
+>   Recommended as a required check after several green pull-request runs (a ruleset change,
+>   so another owner import). The audit-log assertion after import waits for w3e's fix (below).
 > - **Fix approach:** a Playwright project that runs a small set of scenarios (sign in → import
 >   players → generate teams → schedule practices → export) against a local Supabase stack
 >   (`supabase start`, seeded from `supabase/seed.sql` with pseudonymous data), in the pgTAP job
@@ -928,6 +961,17 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M4.5. The staging suite never runs** (audit finding 6.2, medium)
+> - **Status (2026-10-14): deleted, in review** (branch `claude/vibrant-allen-hr7y7s-w3d`, with
+>   M4.1). Run against production with the publishable key on 2026-10-14 (*executed*: anon
+>   reads, one anon insert RLS refused, unauthenticated Edge calls), its connectivity test
+>   failed on a healthy project (`error` is null, so `toContain` throws), and in a probe copy a
+>   table that does not exist passed its schema check: it could not fail where it mattered.
+>   It targeted production (there is no staging project). Its schema and RLS checks are held by
+>   the migrations CI applies from scratch and `supabase/tests/rls_anonymous_gate.sql`; its Edge
+>   refusal checks moved to M4.1's `real_backend_edge_auth.feature`, now reading the functions
+>   from `supabase/config.toml` and requiring each function's own refusal. Its CORS preflight
+>   check was not kept: on the local stack a preflight still allowed `authorization` with the
+>   function's own CORS headers stripped (run 38518016051), so it could not fail there.
 > - **Fix approach:** move `tests/integration/staging.test.js` into a `workflow_dispatch`
 >   workflow with staging secrets that records its result, or delete it if M4.1 covers it.
 > - **Files touched:** `tests/integration/staging.test.js`, `.github/workflows/staging.yml`.
@@ -1368,6 +1412,49 @@ smoke-tested
     budget printed from inside the worker, before and after).
   - Scorecard `node.ci-runs-gate` fails only because `package.json`'s `build` script never runs
     in CI (M6.1's `build`); the test runner is found through `test:coverage`. *Executed.*
+
+- 2026-10-14, found by PR w3d (M4.1, M4.5):
+  - **Every Edge Function audit write fails.** `recordAuditNow`
+    (`supabase/functions/_shared/auth.ts`) calls `record_audit_event` through the service
+    client, so `auth.uid()` is null and the insert breaks `audit_log.user_id NOT NULL`
+    ("Audit log write failed"). Seen on the local stack (import-validation, team-persistence)
+    and in production's function logs on 2026-10-13 (*executed*, read-only log query). Fixed
+    by w3e's PR (the RPC called with the user-scoped client); M4.1's import scenario should
+    assert the audit row once that lands.
+  - The local edge runtime (CLI 2.118.0) does not apply `config.toml`'s per-function
+    `import_map`, also with `supabase functions serve --import-map`, so auto-scheduler and
+    fairness-scoring fail to boot on their bare `zod` import (runs 38500511704, 38501076266).
+    Production is unaffected (both deployed with `import_map: true`, Supabase MCP
+    `list_edge_functions`). The real-backend job writes a `deno.json` beside each in its own
+    checkout. *Executed.*
+  - `useSchedulerRun` ignores an abort by `err.name === 'AbortError'`, but supabase-js returns
+    a `PostgrestError` whose message is "AbortError: ...", so a cancelled read becomes the
+    hook's error. On the dev server (StrictMode) the Exports page then refuses to build CSVs
+    (run 38501618935); in production it can happen when the effect re-runs mid-read. The mock
+    never honours `abortSignal`, so no mock scenario sees it. Not fixed; the real-backend
+    scenarios use a production build. *Executed* (dev server), production path *statically
+    reviewed*.
+  - After "Sync to Supabase" the teams page drops its success line and shows the generate view
+    until a reload (the dashboard's team summary is not re-read); the sync itself succeeds.
+    Not fixed; the scenario reads the sync from its response and checks the teams after a
+    reload. *Executed* (run 38498654391).
+  - The import page's "Continue" passes the import to `setImportedData` and then
+    `resetImport('all')` clears it in the same handler, and nothing writes the `imports` table
+    the context rehydrates from, so `/teams` opens without the import; the side navigation
+    keeps it. Not fixed. *Statically reviewed.*
+  - A second import can be bounced back to "Import Applied": `ImportContext`'s Realtime handler
+    applies any `import_jobs` UPDATE that arrives while no job is active
+    (`activeJobIdRef.current === job.id || !activeJobIdRef.current`), so a late event for the
+    previous job, after "Upload Another File" reset the panel, puts the completed view back over
+    the file just chosen. The mock has no Realtime. **Fixed in #578**: the handler applies an
+    UPDATE only to the active job (`tests/importContextRealtimeStaleJob.test.jsx`, red without
+    the fix); the import step stays strict. *Executed* (PR run 38518949814, its trace: reset,
+    file chosen, then the completed view at 0% progress).
+  - The Exports page's "Upload to Storage" writes to an `exports` bucket no migration creates,
+    and production has no `storage.objects` policy for it (only `raw-imports` has policies), so
+    an administrator's upload would be refused. Not fixed; not in the scenarios. *Executed*
+    (read-only SELECTs on `storage.buckets` and `pg_policies`); the refusal itself *statically
+    reviewed*.
 
 - 2026-10-14, found by #576 (M4.4, with PR 2-C's three follow-ups):
   - PR 2-C's follow-ups above are done in #576, *executed* (each test red without its change):

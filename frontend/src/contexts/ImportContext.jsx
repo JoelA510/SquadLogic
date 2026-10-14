@@ -546,7 +546,11 @@ export function ImportProvider({ children }) {
                   }
                 }
               } else if (['completed', 'failed', 'completed_with_warnings'].includes(job.status)) {
-                if (activeJobIdRef.current === job.id || !activeJobIdRef.current) {
+                // Only the job this panel is running (or rehydrated). With no
+                // active job, a late UPDATE for the previous one used to put
+                // its "Import Applied" back over a panel the operator had just
+                // reset for the next file (M4.1's re-import scenario, PR #578).
+                if (activeJobIdRef.current === job.id) {
                   setIsImporting(false);
                   setImportStatus(job.status);
                   setActiveJob((prev) => ({ ...(prev || {}), ...job }));

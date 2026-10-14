@@ -19,6 +19,8 @@ export default tseslint.config(
       '**/.features-gen/**',
       '**/.features-gen-local/**',
       '**/.features-gen-backup/**',
+      '**/.features-gen-real-backend/**',
+      '**/.real-backend-dist/**',
       '**/trace/**',
       '**/.claude/**',
       '**/.gemini/**',

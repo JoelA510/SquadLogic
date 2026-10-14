@@ -4,8 +4,12 @@
 # PostgreSQL cluster, run the smokes, and check each revert.
 #
 # **Why this exists.** Two review rounds found six HIGH defects in SQL by eye,
-# and the fixes to two of them introduced two more. Nothing in CI executes a
-# migration, so none of it was catchable. This closes exactly that gap.
+# and the fixes to two of them introduced two more. Nothing in CI executed a
+# migration then, so none of it was catchable. This closed exactly that gap.
+# Since then pgTAP's `supabase start` applies every migration on each pull
+# request (but runs no smoke and no revert), and CI runs this harness itself
+# on pull requests touching `supabase/`, `docs/sql/` or this directory
+# (`.github/workflows/dbharness.yml`, plan item M3.4).
 #
 # **What it verifies**
 #   1. the full migration set applies cleanly from scratch, in order;
@@ -39,7 +43,13 @@
 # fixed under /tmp, not $TMPDIR, so the unquoted `$SCRATCH/...` paths below
 # can never contain whitespace.
 #
-# `HARNESS_PGUSER` still selects the OS user that owns the cluster.
+# **Requirements.** Run as root (`runuser`, and the stub extensions below are
+# installed into the server's share directory), with PostgreSQL 16 at
+# /usr/lib/postgresql/16/bin and `python3`. `HARNESS_PGUSER` selects the OS
+# user that owns the cluster, default `pgrunner`, which must exist: create it
+# (`useradd --create-home pgrunner`, as CI does) or point the variable at one
+# that does (`HARNESS_PGUSER=postgres`). Runbook: docs/operations/ci-cd.md
+# ("Running the database harness").
 set -uo pipefail
 
 PGUSER_LOCAL="${HARNESS_PGUSER:-pgrunner}"

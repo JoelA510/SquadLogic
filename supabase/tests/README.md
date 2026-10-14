@@ -16,7 +16,7 @@ advisor-lint and get caught here.
 ## Quickstart
 
 ```bash
-# One-time install: Supabase CLI 2.95.4 + Docker Desktop.
+# One-time install: Supabase CLI 2.118.0 (the version CI pins) + Docker Desktop.
 # Local ports come from supabase/config.toml:
 # API 55421, Postgres 55422, Studio 55423, Mailpit 55424.
 
@@ -86,10 +86,10 @@ fresh ones unless the test specifically needs a new identity.
 
 ## CI
 
-`.github/workflows/pgtap.yml` runs this suite on every PR that touches
-`supabase/migrations/**`, `supabase/tests/**`, or the workflow itself.
-Other PRs skip the job — which keeps the full `supabase start` (~3–5 min)
-cost off the GitHub Actions minute budget.
+`.github/workflows/pgtap.yml` runs this suite on every pull request to
+`main`, and its job is a required check (plan item M3.2): a failing suite
+blocks the merge. See `docs/testing/pgtap.md` and
+`docs/operations/ci-cd.md` ("Database tests on pull requests").
 
 Manual triggering is available via `workflow_dispatch` from the Actions
 tab if you need to validate the suite without an open PR.

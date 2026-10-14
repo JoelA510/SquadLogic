@@ -1,19 +1,14 @@
 name: pgTAP tests
 
-# Conditional trigger: only runs when a PR touches Supabase DB-layer files.
-# Keeps GitHub Actions minutes under the free-tier cap (~2000/mo) — a full
-# `supabase start` + test cycle costs ~3–5 min per run, so unconditional PR
-# triggering would consume ~300 min/mo at typical PR cadence. Limiting to
-# migrations + tests + this workflow itself caps it at ~40 min/mo.
+# Runs on every pull request to main, with no `paths` filter, because its job
+# is a required check in the main ruleset (plan item M3.2, decision D5): a
+# required check that does not report on a pull request blocks it forever.
+# tests/rulesetRequiredChecks.test.js fails if a filter or a job-level `if`
+# comes back. The repository is public, so standard-runner minutes are free;
+# a run takes about three minutes.
 on:
   pull_request:
-    paths:
-      - 'supabase/migrations/**'
-      - 'supabase/tests/**'
-      - 'supabase/config.toml'
-      - 'package.json'
-      - '.nvmrc'
-      - '.github/workflows/pgtap.yml'
+    branches: [main]
   workflow_dispatch: {}
 
 permissions:
@@ -24,7 +19,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SUPABASE_CLI_VERSION: 2.95.4
+  # The one Supabase CLI version, the same as ci.yml's (the deploy jobs and
+  # the migration guard's parsed output). tests/supabaseCliPin.test.js fails
+  # if the two workflows disagree. Bump procedure: docs/operations/ci-cd.md
+  # ("Supabase CLI version").
+  SUPABASE_CLI_VERSION: 2.118.0
 
 jobs:
   pgtap:
@@ -53,10 +52,29 @@ jobs:
       - name: Verify Supabase CLI version
         run: supabase --version
 
+      # Only what the migrations and the suites use: the database, auth,
+      # storage, realtime and the API. Edge Functions, Studio, image
+      # transformation, the mail catcher and analytics are left out; the edge
+      # runtime's health check failing with a 502 turned a run red that
+      # touched none of it (run 38462349853, 2026-10-13).
       - name: Start local Supabase (applies all migrations)
-        run: supabase start
+        id: start
+        run: supabase start --exclude edge-runtime,studio,imgproxy,mailpit,logflare,vector
 
+      # Supabase's own advisors over the migrated schema (plan item M3.3,
+      # audit finding 8.6). The CLI's --fail-on has no waivers, so it reports
+      # everything and scripts/ci/supabaseAdvisors.mjs fails on any WARN or
+      # ERROR that docs/security/supabase-advisor-waivers.json does not waive
+      # with a reason, and on a stale or expired waiver.
+      - name: Supabase advisors (unwaived WARN and ERROR block)
+        run: |
+          set -euo pipefail
+          supabase db advisors --local --type all --level info --fail-on none --output-format json > advisors.json
+          node scripts/ci/supabaseAdvisors.mjs --input advisors.json
+
+      # Runs even when the advisors step failed, so one run shows both.
       - name: Run pgTAP tests
+        if: ${{ !cancelled() && steps.start.outcome == 'success' }}
         run: npm run test:db
 
       - name: Stop local Supabase

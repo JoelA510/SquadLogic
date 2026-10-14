@@ -15,7 +15,7 @@ Together they cover structural + behavioral regressions.
 
 ## Running locally
 
-Prerequisites: Supabase CLI `2.95.4` + Docker Desktop. The committed
+Prerequisites: Supabase CLI `2.118.0` (the version CI pins) + Docker Desktop. The committed
 `supabase/config.toml` uses non-default local ports (`55421` API, `55422`
 Postgres, `55423` Studio, `55424` Mailpit) so this repo can run alongside
 other local Supabase projects.
@@ -43,20 +43,20 @@ listed files, while tests include the fixture helper with `\ir`.
 ## CI
 
 `.github/workflows/pgtap.yml` runs pgTAP against a fresh local Supabase
-instance on every PR that touches:
+instance on **every pull request to `main`** (and on manual dispatch), and
+its job, `Run pgTAP against local Supabase`, is a required check in the `main`
+ruleset (plan item M3.2). Before the suites it runs Supabase's own advisors
+over the migrated schema, failing on any WARN or ERROR finding not waived in
+`docs/security/supabase-advisor-waivers.json` (plan item M3.3).
 
-- `supabase/migrations/**`
-- `supabase/tests/**`
-- `supabase/config.toml`
-- `.github/workflows/pgtap.yml` itself
+Until M3.2 the workflow had a `paths` filter (migrations, tests,
+`config.toml`), kept to save Actions minutes, so most pull requests never ran
+the suite and it could not be required. The repository is public, so
+standard-runner minutes cost nothing; a run takes about two minutes. Details:
+[`docs/operations/ci-cd.md`](../operations/ci-cd.md#database-tests-on-pull-requests).
 
-**Conditional trigger is load-bearing.** A full `supabase start` + test
-cycle costs ~3–5 min of GitHub Actions time. At typical PR cadence (~50/mo)
-an unconditional trigger would consume ~300 min/mo against the free-tier
-2000/mo cap. The `paths` filter reduces this to ~40 min/mo.
-
-Manual runs are available via `workflow_dispatch` on the Actions tab when
-you need to validate the suite without an open PR.
+Manual runs are available via `workflow_dispatch` on the Actions tab, on any
+branch, when you need to validate the suite without an open PR.
 
 ## Writing a test
 

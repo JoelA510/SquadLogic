@@ -330,8 +330,9 @@ is `docs/operations/ENVIRONMENT.md`.
 migration above the base branch's latest, and no existing one renamed, edited or removed).
 Job **Deno Mirror Tests**: `scripts/deno-mirror-tests.sh` (the Deno twins of core logic, two host
 time zones) and `scripts/deno-check-edge.sh` (`deno check` on every Edge entrypoint, failing on
-zero found). Both jobs are required to merge. `audit.yml` runs `check:audit` on PRs, pushes and weekly
-(not required yet; `docs/security/dependency-policy.md`).
+zero found). Both jobs are required to merge, as are `pgtap.yml`'s pgTAP job (the suites plus
+Supabase's advisors, every PR) and `audit.yml`'s `check:audit` (PRs, pushes, weekly).
+`dbharness.yml` runs the migration harness on PRs touching SQL.
 
 On **push to `main`** only: `deploy-migrations` (environment `production`; `supabase db push`
 behind `scripts/ci/migrationGuard.mjs`; reverts are never automatic), then

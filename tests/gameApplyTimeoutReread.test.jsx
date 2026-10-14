@@ -119,36 +119,36 @@ function seed() {
 
 /** What a save that landed leaves behind: a new completed run and its row. */
 function landTheSave() {
-  const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') ?? '{}');
-  db.scheduler_runs = [
-    {
-      id: LANDED_RUN,
-      organization_id: ORG,
-      run_type: 'game',
-      status: 'completed',
-      season_settings_id: SEASON,
-      completed_at: '2026-10-14T12:00:00Z',
-      results: {},
-    },
-  ];
-  db.game_assignments = [
-    {
-      id: 'ga-landed',
-      run_id: LANDED_RUN,
-      organization_id: ORG,
-      division: 'U10',
-      week_index: 1,
-      slot_id: SLOT.id,
-      game_slot_id: SLOT.id,
-      field_id: 'field-gt1',
-      start: '2026-10-03T13:00:00.000Z',
-      end: '2026-10-03T14:00:00.000Z',
-      home_team_id: 'team-1',
-      away_team_id: 'team-2',
-      assignment_source: 'auto',
-    },
-  ];
-  sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+  seedMockDb({
+    scheduler_runs: [
+      {
+        id: LANDED_RUN,
+        organization_id: ORG,
+        run_type: 'game',
+        status: 'completed',
+        season_settings_id: SEASON,
+        completed_at: '2026-10-14T12:00:00Z',
+        results: {},
+      },
+    ],
+    game_assignments: [
+      {
+        id: 'ga-landed',
+        run_id: LANDED_RUN,
+        organization_id: ORG,
+        division: 'U10',
+        week_index: 1,
+        slot_id: SLOT.id,
+        game_slot_id: SLOT.id,
+        field_id: 'field-gt1',
+        start: '2026-10-03T13:00:00.000Z',
+        end: '2026-10-03T14:00:00.000Z',
+        home_team_id: 'team-1',
+        away_team_id: 'team-2',
+        assignment_source: 'auto',
+      },
+    ],
+  });
 }
 
 /** Reads of `scheduler_runs` for the game run, counted at the client. */

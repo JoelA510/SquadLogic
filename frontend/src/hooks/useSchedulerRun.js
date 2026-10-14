@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
@@ -10,7 +10,11 @@ import { scopeSchedulerRunsToActiveSeason } from '../utils/schedulerRunFilters.j
  * @param {string} runType - 'team', 'practice', or 'game'
  * @param {Function} mapper - Function to transform the raw run row into a summary object
  * @param {Object} emptyState - Fallback state if no data found or error occurs
- * @returns {Object} { data, loading, error }
+ * @returns {Object} { data, evaluation, loading, error, refetch }
+ *
+ * `refetch()` reads the latest run again. A page calls it when a save's outcome
+ * is unknown (`PERSISTENCE_TIMEOUT`): the save may have landed after the page
+ * stopped waiting, and the run on screen is then not the latest one.
  */
 export function useSchedulerRun(runType, mapper, emptyState) {
   const { currentOrganization, currentSeasonSetting } = useOrganization();
@@ -20,6 +24,8 @@ export function useSchedulerRun(runType, mapper, emptyState) {
   const [evaluation, setEvaluation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [version, setVersion] = useState(0);
+  const refetch = useCallback(() => setVersion((v) => v + 1), []);
 
   mapperRef.current = mapper;
   emptyStateRef.current = emptyState;
@@ -104,7 +110,8 @@ export function useSchedulerRun(runType, mapper, emptyState) {
     return () => {
       controller.abort();
     };
-  }, [currentOrganization?.id, currentSeasonSetting?.id, runType]);
+    // `version` is read by nothing in the body: it is here so `refetch` re-runs the read.
+  }, [currentOrganization?.id, currentSeasonSetting?.id, runType, version]);
 
-  return { data, evaluation, loading, error };
+  return { data, evaluation, loading, error, refetch };
 }

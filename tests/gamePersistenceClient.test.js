@@ -4,6 +4,7 @@ import { afterEach, beforeEach, test, vi } from 'vitest';
 import { supabase } from '../frontend/src/lib/supabaseClient.js';
 import { persistGameScheduleReview } from '../frontend/src/utils/gamePersistenceClient.js';
 import {
+  PERSISTENCE_INVALID_PAYLOAD,
   PERSISTENCE_TIMEOUT,
   PERSISTENCE_TIMEOUT_MS,
   PERSISTENCE_UNREADABLE_RESPONSE,
@@ -347,4 +348,38 @@ test('an error status with an unreadable body keeps its HTTP status message', as
     () => persistGameScheduleReview({ assignments: [STAGED_GAME] }),
     /Game persistence failed: 502/
   );
+});
+
+// M4.4 (audit finding 2.3): the body is checked against the Edge Function's
+// own schema before the network call, and refused as this client refuses
+// everything else: a throw with a `code` (and `status: null`: nothing was sent).
+test('refuses a malformed payload client-side, before any request, naming each issue', async () => {
+  signIn();
+  const fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
+
+  await assert.rejects(
+    () =>
+      persistGameScheduleReview({
+        assignments: [STAGED_GAME],
+        // A numeric run id (the snapshot's `lastRunId`) and overrides that are
+        // not a list: both are what the Edge's schema answers with a 400.
+        runId: /** @type {any} */ (42),
+        overrides: /** @type {any} */ ({ pending: 1 }),
+      }),
+    (err) => {
+      const error = /** @type {any} */ (err);
+      assert.equal(error.code, PERSISTENCE_INVALID_PAYLOAD);
+      assert.equal(error.status, null);
+      assert.deepEqual(error.issues.map((issue) => issue.path.join('.')).sort(), [
+        'overrides',
+        'snapshot.lastRunId',
+      ]);
+      assert.match(error.message, /^The game schedule save was not sent: its data is malformed/);
+      assert.match(error.message, /snapshot\.lastRunId: [^;]*expected string/);
+      assert.match(error.message, /overrides: [^;]*expected array/);
+      return true;
+    }
+  );
+  assert.equal(fetchMock.mock.calls.length, 0, 'a malformed payload reached the network');
 });

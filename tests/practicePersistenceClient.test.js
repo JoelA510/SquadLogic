@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, it, vi } from 'vitest';
 
 import {
+  PERSISTENCE_INVALID_PAYLOAD,
   PERSISTENCE_TIMEOUT,
   PERSISTENCE_TIMEOUT_MS,
   PERSISTENCE_UNREADABLE_RESPONSE,
@@ -54,6 +55,44 @@ const SENDERS = {
       },
       { mock: false }
     ),
+};
+
+/**
+ * Each sender with a body the Edge's `PersistencePayloadSchema` refuses (M4.4):
+ * a numeric team id from the save and repair paths, and an enact row with no
+ * slot. Keyed like SENDERS; the coverage case below holds the two key sets equal.
+ */
+const MALFORMED = {
+  persistPracticeScheduleReview: {
+    send: () =>
+      practiceClient.persistPracticeScheduleReview({
+        ...SAVE_ARGS,
+        assignments: [{ teamId: 7, slotId: 'slot-a' }],
+      }),
+    path: 'snapshot.payload.assignmentRows.0.team_id',
+  },
+  persistPracticeRepair: {
+    send: () =>
+      practiceClient.persistPracticeRepair({
+        ...SAVE_ARGS,
+        assignments: [{ teamId: 7, slotId: 'slot-a' }],
+        unlock: [{ assignment_id: 'a1', reason: 'retired' }],
+        baseFingerprint: '0123456789abcdef0123456789abcdef',
+      }),
+    path: 'snapshot.payload.assignmentRows.0.team_id',
+  },
+  persistPracticeEnact: {
+    send: () =>
+      practiceClient.persistPracticeEnact(
+        {
+          payload: { assignmentRows: [{ team_id: 't1' }], repair: { unlock: [] } },
+          enact: { enact_key: ENACT_KEY },
+          runMetadata: { runId: ENACT_KEY, seasonSettingsId: 'season-1' },
+        },
+        { mock: false }
+      ),
+    path: 'snapshot.payload.assignmentRows.0.practice_slot_id',
+  },
 };
 
 /** The label each sender's errors carry. */
@@ -130,6 +169,27 @@ describe('practice persistence client :: deadline', () => {
     });
   }
 
+  for (const [name, { send, path }] of Object.entries(MALFORMED)) {
+    it(`${name}: a malformed payload is refused client-side, before any request`, async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      await assert.rejects(send, (err) => {
+        const error = /** @type {any} */ (err);
+        assert.equal(error.code, PERSISTENCE_INVALID_PAYLOAD);
+        assert.equal(error.status, null);
+        assert.deepEqual(
+          error.issues.map((issue) => issue.path.join('.')),
+          [path]
+        );
+        assert.match(error.message, LABELS[name]);
+        assert.match(error.message, /was not sent: its data is malformed/);
+        assert.ok(error.message.includes(`${path}: `), error.message);
+        return true;
+      });
+      assert.equal(fetchMock.mock.calls.length, 0, 'a malformed payload reached the network');
+    });
+  }
+
   it('the enact clause is bare, for the panel to frame', async () => {
     vi.useFakeTimers();
     vi.stubGlobal(
@@ -173,6 +233,7 @@ describe('practice persistence client :: deadline', () => {
       .sort();
     assert.ok(exported.length > 0, 'no function export found: the enumeration examined nothing');
     assert.deepEqual(exported, Object.keys(SENDERS).sort());
+    assert.deepEqual(Object.keys(MALFORMED).sort(), Object.keys(SENDERS).sort());
   });
 
   it('neither persistence client calls fetch directly (every request goes through the deadline)', () => {

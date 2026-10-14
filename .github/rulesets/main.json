@@ -29,7 +29,8 @@
           { "context": "Build & Test", "integration_id": 15368 },
           { "context": "Deno Mirror Tests", "integration_id": 15368 },
           { "context": "Run pgTAP against local Supabase", "integration_id": 15368 },
-          { "context": "npm audit (high and critical block)", "integration_id": 15368 }
+          { "context": "npm audit (high and critical block)", "integration_id": 15368 },
+          { "context": "Workflow audit (zizmor)", "integration_id": 15368 }
         ]
       }
     }

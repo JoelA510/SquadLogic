@@ -13,7 +13,7 @@ const EMPTY_SUMMARY = {
 };
 
 export function usePracticeSummary() {
-  const { data, evaluation, loading, error } = useSchedulerRun(
+  const { data, evaluation, loading, error, refetch } = useSchedulerRun(
     'practice',
     mapSchedulerRunToPracticeSummary,
     EMPTY_SUMMARY
@@ -29,5 +29,6 @@ export function usePracticeSummary() {
     runId: data ? data.runId : null,
     loading,
     error,
+    refetch,
   };
 }

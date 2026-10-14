@@ -28,6 +28,7 @@ import {
   enactPromptOf,
 } from '../frontend/src/utils/practiceRepairEnact.js';
 import { openPracticeRepair } from '../frontend/src/utils/practiceRepairPanel.js';
+import { PERSISTENCE_INVALID_PAYLOAD } from '../frontend/src/lib/persistenceRequest.js';
 import { loadPracticeRepairSnapshot } from '../frontend/src/hooks/usePracticeRepairSnapshot.js';
 import {
   PRACTICE_SCHEDULE_STALE,
@@ -592,5 +593,21 @@ describe('enact UI :: an outcome after the send is never reported as "nothing wa
     s.client.rpc = () => Promise.resolve({ data: null, error: { message: 'down' } });
     const unread = await s.enact(uuid(601), vi.fn());
     expect(unread).toMatchObject({ status: 'error', sent: false });
+  });
+
+  it('a body the client refused before sending (M4.4) reports `sent: false`', async () => {
+    const s = await session(enactDbOf(main()));
+    const refused = await s.enact(
+      uuid(601),
+      vi.fn(async () =>
+        Promise.reject(
+          Object.assign(new Error('the enact request was not sent: its data is malformed'), {
+            code: PERSISTENCE_INVALID_PAYLOAD,
+            status: null,
+          })
+        )
+      )
+    );
+    expect(refused).toMatchObject({ status: 'error', sent: false });
   });
 });

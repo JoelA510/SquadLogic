@@ -81,6 +81,7 @@ const SmartBadge = ({ score, rationale }) => {
 
   return (
     <div
+      // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- focusable so a keyboard user can open the rationale tooltip (WCAG 1.4.13); it is the badge's only way in
       tabIndex={0}
       role="status"
       aria-label={`${matchPercent}% header match confidence`}
@@ -835,7 +836,7 @@ export default function ImportPanel({ onImport }) {
                   or{' '}
                   <label
                     htmlFor={fileInputId}
-                    className="text-blue-400 hover:text-blue-300 cursor-pointer font-semibold hover:underline transition-colors rounded-sm focus-within:outline-none focus-within:ring-2 focus-within:ring-blue-400/80 focus-within:ring-offset-2 focus-within:ring-offset-bg-surface"
+                    className="text-text-accent cursor-pointer font-semibold hover:underline transition-colors rounded-sm focus-within:outline-none focus-within:ring-2 focus-within:ring-blue-400/80 focus-within:ring-offset-2 focus-within:ring-offset-bg-surface"
                   >
                     browse files
                     <input

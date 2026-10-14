@@ -177,6 +177,7 @@ export function SchemaBuilder() {
       </div>
 
       {/* Tabs */}
+      {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- the tablist delegates its tabs' arrow keys; each tab is a focusable button (roving tabindex) */}
       <div
         className="flex p-1 bg-bg-glass border border-border-subtle rounded-2xl w-fit"
         role="tablist"

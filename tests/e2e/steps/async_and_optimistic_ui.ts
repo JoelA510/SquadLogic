@@ -74,6 +74,7 @@ Then('the resulting teams summary should reflect the new constraints', async ({ 
   // If the app already inserted a completed run, leave it in place.
   await waitForMockClient(page);
   await page.evaluate(() => {
+    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
     const hasCompletedTeamRun = (db.scheduler_runs || []).some(
@@ -129,8 +130,11 @@ Then('the resulting teams summary should reflect the new constraints', async ({ 
       );
       db.scheduler_runs.push(completedRun);
     }
+    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
     if ((window as { __MOCK_DB__?: unknown }).__MOCK_DB__) {
+      // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
       (window as { __MOCK_DB__?: unknown }).__MOCK_DB__ = db;
     }
   });

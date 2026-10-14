@@ -48,6 +48,7 @@ export default function InlineField({
       {editing ? (
         type === 'select' ? (
           <select
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- the editor appears because the user just asked to edit; focus moves to it
             autoFocus
             className="select"
             aria-label={label}
@@ -64,6 +65,7 @@ export default function InlineField({
           </select>
         ) : (
           <input
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- the editor appears because the user just asked to edit; focus moves to it
             autoFocus
             className="input"
             aria-label={label}

@@ -25,7 +25,13 @@ export default function PracticeAssignmentList({
 
   return (
     <div className="glass-panel overflow-hidden mt-8">
-      <div className="overflow-x-auto">
+      <div
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a horizontally scrolling region: focusable so the keyboard can scroll it (WCAG 2.1.1)
+        tabIndex={0}
+        role="region"
+        aria-label="Practice assignments"
+        className="overflow-x-auto"
+      >
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-bg-app/50 border-b border-border-subtle">
@@ -72,7 +78,7 @@ export default function PracticeAssignmentList({
                     </div>
                   </td>
                   <td className="p-4 font-mono text-sm capitalize">
-                    <span className="text-blue-400">
+                    <span className="text-text-accent">
                       {slot.dayOfWeek} @ {slot.startTime?.substring(0, 5)} -{' '}
                       {slot.endTime?.substring(0, 5)}
                     </span>

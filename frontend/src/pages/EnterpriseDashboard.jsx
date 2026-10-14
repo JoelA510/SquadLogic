@@ -202,7 +202,7 @@ export default function EnterpriseDashboard() {
 
       {/* K-Anonymity Warning */}
       {isLowSample && (
-        <div className="p-4 bg-status-warning-bg border border-status-warning/50 text-status-warning rounded-xl text-sm font-medium flex items-center gap-2 shadow-lg">
+        <div className="p-4 bg-status-warning-bg border border-status-warning/50 text-status-warning-text rounded-xl text-sm font-medium flex items-center gap-2 shadow-lg">
           <Lock size={16} /> Sub-population threshold active (K-Anonymity rules applied). Aggregated
           charting features are masked.
         </div>
@@ -314,7 +314,7 @@ export default function EnterpriseDashboard() {
 
           <div className="h-80 w-full relative">
             {isLowSample ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 glass-panel rounded-xl animate-pulse">
+              <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 glass-panel rounded-xl">
                 <Lock size={32} className="text-text-muted mb-4" />
                 <h4 className="text-text-primary font-bold mb-2">Data Masked for Privacy</h4>
                 <p className="text-text-muted text-sm max-w-sm">

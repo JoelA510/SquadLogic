@@ -1,32 +1,58 @@
 Feature: Pillar 1 - The Engine (Scheduling & Team Generation)
   As a league coordinator
-  I want the scheduling engine to automatically assign teams and practices
+  I want the engines to build teams, practices and games from what I give them
   So that I can minimize manual effort and ensure fair allocations
+
+  Each scenario presses the page's own engine control on seeded inputs and reads
+  what the page then shows; no step writes an engine's result (plan item M4.6).
+  Team generation and game scheduling run in the browser. Practice scheduling
+  runs in the auto-scheduler Edge Function, which mock mode cannot reach, so its
+  route is answered by the function's own solver, given the page's request body
+  unchanged: the solver's decisions are real, but the function's HTTP and
+  database wrapper (auth, the season lock read, coach preferences, daylight,
+  persistence) is not exercised here. The real-backend project (plan item M4.1)
+  covers that.
 
   Background:
     Given I am logged into SquadLogic as an "admin"
-    And a set of registered players and available field slots
-    And coach availability and preference constraints are defined
 
   Scenario: Automated Team Generation
-    Given there are 100 players in the U10 division
-    And a target roster size of 10
-    When I trigger the team generation algorithm
-    Then 10 teams should be created
-    And players should be balanced by skill level across teams
-    And mutual buddy requests should be respected where possible
+    Given 100 players are imported into the "U12 Boys" program
+    When I ask the Teams page for 5 teams of at most 10 players
+    And I press "Generate Teams" on the Teams page
+    Then the engine forms 10 teams, the fewest that hold 100 players at 10 each
+    And all 100 players are assigned and none is left for manual review
 
-  Scenario: Practice Scheduling with Timezone Support
-    Given multiple teams require weekly practice slots
-    And a team is located in a specific timezone
-    When the scheduler runs
-    Then practice assignments should respect the local timezone offsets
-    And no coach should be scheduled for two concurrent practices
-    And no field slot should exceed its maximum capacity
+  Scenario: Practice Scheduling
+    Given these teams and coaches in "U10 Boys":
+      | team  | coach        |
+      | Hawks | Coach Rivera |
+      | Owls  | Coach Rivera |
+      | Bears | Coach Chen   |
+      | Foxes | Coach Okafor |
+    And two practice slots on Thursday at 17:00 with room for one team each
+    And a Tuesday practice slot that a locked practice already fills
+    When I run the auto-scheduler on the Practice Scheduling page
+    Then the auto-scheduler places 2 teams and leaves 2 unplaced
+    And "Hawks" and "Owls" are not both placed, since they share a coach
+    And nothing new is placed in the full Tuesday slot
 
   Scenario: Game Schedule Generation
-    Given a list of teams in a division
-    When I generate a round-robin game schedule
-    Then every team should play every other team twice
-    And games should be assigned to the highest priority field slots first
-    And consecutive games for the same coach should be avoided if possible
+    Given a club whose organization id is a UUID, as in production
+    And these teams and coaches in "U10 Boys":
+      | team   | coach       |
+      | Lions  | Coach Patel |
+      | Wolves | Coach Patel |
+      | Comets | Coach Novak |
+      | Bulls  | Coach Diaz  |
+    And the club's game slots are:
+      | slot     | field       | week | date       | start | end   |
+      | w1-north | North Field | 1    | 2026-04-04 | 16:00 | 17:00 |
+      | w1-south | South Field | 1    | 2026-04-04 | 16:00 | 17:00 |
+      | w2-north | North Field | 2    | 2026-04-11 | 16:00 | 17:00 |
+      | w3-south | South Field | 3    | 2026-04-18 | 16:00 | 17:00 |
+    When I press "Generate Schedule" on the Game Scheduling page
+    Then 3 of the 6 round-robin matchups are scheduled
+    And the "Lions" vs "Wolves" matchup is refused because one coach coaches both teams
+    And a week 1 matchup with "Lions" or "Wolves" is refused for a coach scheduling conflict
+    And a week 2 matchup is refused because its one slot is already taken

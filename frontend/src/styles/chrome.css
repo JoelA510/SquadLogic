@@ -232,7 +232,8 @@
   place-items: center;
   font-weight: 700;
   font-size: 12px;
-  color: #fff;
+  /* White on light's accents, near-black on dark's lighter ones: AA in both themes. */
+  color: var(--text-inverse);
   background: linear-gradient(150deg, var(--accent-violet), var(--primary));
 }
 .avatar-sm {
@@ -243,7 +244,7 @@
   place-items: center;
   font-size: 10.5px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-inverse);
   flex: none;
 }
 
@@ -366,7 +367,7 @@
 }
 .nav-item.active .ni-badge {
   background: var(--primary);
-  color: #fff;
+  color: var(--text-inverse);
 }
 .nav-item .ni-badge.alert {
   background: var(--warning-weak);

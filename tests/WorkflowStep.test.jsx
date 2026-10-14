@@ -1,6 +1,6 @@
 import React from 'react';
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import WorkflowStep from '../frontend/src/components/WorkflowStep.jsx';
 
 describe('WorkflowStep', () => {
@@ -47,5 +47,119 @@ describe('WorkflowStep', () => {
 
     const collapsedContent = screen.getByText('Collapsed child').parentElement;
     expect(collapsedContent?.parentElement).toHaveClass('min-w-0', 'overflow-hidden');
+  });
+
+  // M4.2: the card's click handler was mouse-only; a keyboard user could not open a step.
+  it('opens a step from a focusable heading button, once per press', () => {
+    const onClick = vi.fn();
+    render(
+      <WorkflowStep
+        title="Data Import"
+        description="Upload CSVs."
+        status="pending"
+        onClick={onClick}
+      >
+        <div>Collapsed child</div>
+      </WorkflowStep>
+    );
+
+    const control = screen.getByRole('button', { name: 'Data Import' });
+    expect(control.closest('h2')).not.toBeNull();
+    expect(control).toHaveAttribute('aria-expanded', 'false');
+    control.focus();
+    expect(control).toHaveFocus();
+    // Enter and Space on a native button arrive as a click; the card's own handler must not
+    // run the step change a second time.
+    fireEvent.click(control);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    // The rest of the card still works for the mouse.
+    fireEvent.click(screen.getByText('Upload CSVs.'));
+    expect(onClick).toHaveBeenCalledTimes(2);
+  });
+
+  it('disables the heading button of a locked step', () => {
+    const onClick = vi.fn();
+    render(
+      <WorkflowStep
+        title="Data Import"
+        description="Upload CSVs."
+        status="locked"
+        onClick={onClick}
+      >
+        <div>Locked child</div>
+      </WorkflowStep>
+    );
+
+    const control = screen.getByRole('button', { name: 'Data Import' });
+    expect(control).toBeDisabled();
+    fireEvent.click(control);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('marks the active step expanded', () => {
+    render(
+      <WorkflowStep
+        title="Data Import"
+        description="Upload CSVs."
+        status="active"
+        onClick={() => {}}
+      >
+        <div>Expanded child</div>
+      </WorkflowStep>
+    );
+    expect(screen.getByRole('button', { name: 'Data Import' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+  });
+
+  // Review finding: the card's click handler ran for every click inside an open step, so a
+  // "proceed" button there (DashboardWorkflow's step 2 -> 3) was undone by the card re-selecting
+  // its own step.
+  it('does not re-select an open step when a control inside it is clicked', () => {
+    const onClick = vi.fn();
+    const proceed = vi.fn();
+    render(
+      <WorkflowStep
+        title="Data Import"
+        description="Upload CSVs."
+        status="active"
+        onClick={onClick}
+      >
+        <button type="button" onClick={proceed}>
+          Proceed
+        </button>
+      </WorkflowStep>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Proceed' }));
+    expect(proceed).toHaveBeenCalledTimes(1);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('makes a collapsed step inert and an open one not', () => {
+    // aria-expanded="false" on the heading has to be true of the content too: jsdom ignores
+    // inert, so this checks the attribute; the browser keeps inert content out of the tab order.
+    const { rerender } = render(
+      <WorkflowStep
+        title="Data Import"
+        description="Upload CSVs."
+        status="pending"
+        onClick={() => {}}
+      >
+        <button type="button">Hidden action</button>
+      </WorkflowStep>
+    );
+    expect(screen.getByText('Hidden action').closest('[inert]')).not.toBeNull();
+    rerender(
+      <WorkflowStep
+        title="Data Import"
+        description="Upload CSVs."
+        status="active"
+        onClick={() => {}}
+      >
+        <button type="button">Hidden action</button>
+      </WorkflowStep>
+    );
+    expect(screen.getByText('Hidden action').closest('[inert]')).toBeNull();
   });
 });

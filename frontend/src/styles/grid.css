@@ -88,6 +88,11 @@ table.grid thead th .th-in {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+table.grid thead th button.th-in {
+  width: 100%;
+  text-align: inherit;
+  text-transform: inherit;
   cursor: pointer;
 }
 table.grid thead th .sort-ind {

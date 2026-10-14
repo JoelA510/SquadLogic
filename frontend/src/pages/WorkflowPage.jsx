@@ -229,8 +229,8 @@ export default function WorkflowPage() {
                       !readinessKnown
                         ? 'text-text-muted'
                         : readinessScore >= 70
-                          ? 'text-green-400'
-                          : 'text-amber-400'
+                          ? 'text-status-success-text'
+                          : 'text-status-warning-text'
                     }`}
                   >
                     {readinessKnown ? `${readinessScore}%` : '—'}
@@ -338,7 +338,7 @@ function StatusItem({ icon, label, status, isReady }) {
       </div>
       <span
         className={`text-xs font-semibold px-2 py-1 rounded-full ${
-          isReady ? 'bg-green-500/10 text-green-400' : 'bg-bg-glass text-text-muted'
+          isReady ? 'bg-status-success-bg text-status-success-text' : 'bg-bg-glass text-text-muted'
         }`}
       >
         {status}

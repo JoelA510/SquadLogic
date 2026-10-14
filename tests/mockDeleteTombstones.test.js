@@ -365,7 +365,7 @@ const KNOWN_E2E_DEBT = {
   'tests/e2e/steps/rbac_and_fields.ts': 3,
   'tests/e2e/steps/registration_compliance.ts': 2,
   'tests/e2e/steps/reporting.ts': 1,
-  'tests/e2e/steps/scheduling_and_overrides.ts': 14,
+  'tests/e2e/steps/scheduling_and_overrides.ts': 5,
   'tests/e2e/steps/team_and_roster.ts': 7,
   'tests/e2e/steps/team_communication.ts': 3,
   'tests/e2e/steps/visual_rbac_enforcement.ts': 1,
@@ -374,7 +374,9 @@ const KNOWN_E2E_DEBT = {
 describe('mock db writes :: nothing new may go past saveDB', () => {
   it('finds the writes, and would fail if it found none', () => {
     const writes = scanDirectDbWrites();
-    expect(writes.length).toBeGreaterThanOrEqual(60);
+    // A floor for a scanner that broke, not a count: the exact inventory is
+    // pinned below. Lowered from 60 when M4.6 removed nine Pillar 1 writes (56 left).
+    expect(writes.length).toBeGreaterThanOrEqual(50);
     expect(new Set(writes.map((write) => write.file))).toContain(
       'frontend/src/lib/mockSupabaseClient.js'
     );

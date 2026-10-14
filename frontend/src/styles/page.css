@@ -144,7 +144,8 @@
 }
 .btn-primary {
   background: var(--primary);
-  color: #fff;
+  /* White on light's primary (4.8:1); near-black on dark's lighter primary (5.9:1). */
+  color: var(--text-inverse);
 }
 .btn-primary:hover {
   background: var(--primary-hover);
@@ -172,7 +173,7 @@
 }
 .btn-danger {
   background: var(--danger);
-  color: #fff;
+  color: var(--text-inverse);
 }
 .btn-danger:hover {
   filter: brightness(1.05);
@@ -577,12 +578,12 @@
 }
 .setup-step.done .step-num {
   background: var(--success);
-  color: #fff;
+  color: var(--text-inverse);
   border-color: var(--success);
 }
 .setup-step.active .step-num {
   background: var(--primary);
-  color: #fff;
+  color: var(--text-inverse);
   border-color: var(--primary);
 }
 
@@ -674,7 +675,7 @@
   place-items: center;
   font-size: 20px;
   font-weight: 800;
-  color: #fff;
+  color: var(--text-inverse);
   flex: none;
 }
 

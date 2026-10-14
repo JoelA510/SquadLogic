@@ -86,6 +86,31 @@ When asked to run a UI/UX pass on a view or component:
 
 ---
 
+## Automated accessibility checks
+
+Two gates enforce part of the WCAG 2.2 AA bar (plan item M4.2); neither is conformance on its own.
+
+- **Lint:** `eslint-plugin-jsx-a11y`'s recommended rules, plus `control-has-associated-label` (a
+  control with no accessible name), run on `frontend/src/**` in `npm run lint`
+  (`eslint.config.js`). Fix what it reports. Waive a genuine false positive on its own line,
+  `// eslint-disable-next-line <rule> -- <the reason>`, never by turning a rule off.
+- **E2E scan:** `tests/e2e/features/accessibility.feature` runs axe-core (WCAG 2.0-2.2, A and AA)
+  on the sign-in page and every top-level route, light theme then dark, in mock mode, and fails
+  on any serious or critical violation. `tests/accessibilityRoutes.test.js` fails when `App.jsx`
+  gains a route the scan doesn't cover. A violation another change owns goes in
+  `KNOWN_VIOLATIONS` (`tests/e2e/steps/accessibility.ts`) with its reason; an entry that stops
+  matching fails the scan, so it is deleted with the fix.
+
+Not covered by either: anything a route renders only with data the mock seed lacks, overlays
+that are closed when the page loads, keyboard operation and focus order, and dragging
+alternatives. Those stay manual review against `ui-ux-pass.md`.
+
+Colors: text uses the theme tokens (`text-text-*`, `text-text-accent`, and
+`text-status-{success,warning,error}-text` on status fills), never Tailwind's `-400` palette
+shades, which fall short of 4.5:1 on the light theme's surfaces.
+
+---
+
 ## Visual Polish / Beautification
 
 When the user requests “beautification”, “visual polish”, or similar:

@@ -126,6 +126,7 @@ When('I apply the player CSV import', async ({ page }) => {
 Then('the player import should materialize reciprocal buddy pairs', async ({ page }) => {
   await waitForMockClient(page);
   const buddySummary = await page.evaluate(() => {
+    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the import reached the mock store, not what the page shows.
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const latestPlayerJob = [...(db.import_jobs || [])]
       .reverse()
@@ -164,6 +165,7 @@ Then('the coach CSV import should update the coach database', async ({ page }) =
   });
   await waitForMockClient(page);
   const coachExists = await page.evaluate(() => {
+    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the import reached the mock store, not what the page shows.
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     return (db.coaches || []).some(
       (coach: { email?: string }) => coach.email === 'csvcoach@example.com'
@@ -182,6 +184,7 @@ When('I roll back the coach CSV import', async ({ page }) => {
 Then('the imported coach should be removed from the coach database', async ({ page }) => {
   await waitForMockClient(page);
   const coachExists = await page.evaluate(() => {
+    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the import reached the mock store, not what the page shows.
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     return (db.coaches || []).some(
       (coach: { email?: string }) => coach.email === 'csvcoach@example.com'
@@ -227,6 +230,7 @@ Then(
     });
     await waitForMockClient(page);
     const fieldExists = await page.evaluate(() => {
+      // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the import reached the mock store, not what the page shows.
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
       return (db.fields || []).some((field: { name?: string }) => field.name === 'Imported Field');
     });
@@ -247,6 +251,7 @@ Then('the field slot CSV import should update the facilities database', async ({
   });
   await waitForMockClient(page);
   const fieldExists = await page.evaluate(() => {
+    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the import reached the mock store, not what the page shows.
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     const field = (db.fields || []).find(
       (item: { name?: string }) => item.name === 'Imported Field'
@@ -270,6 +275,7 @@ When('I roll back the field slot CSV import', async ({ page }) => {
 Then('the imported field slot should be removed from the facilities database', async ({ page }) => {
   await waitForMockClient(page);
   const fieldExists = await page.evaluate(() => {
+    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the import reached the mock store, not what the page shows.
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     return (db.fields || []).some((field: { name?: string }) => field.name === 'Imported Field');
   });

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useId, useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
 import { AlertCircle, Plus, Check } from 'lucide-react';
 import Button from './ui/Button.jsx';
@@ -51,6 +51,7 @@ export default function PracticeOverridePanel({
   stagedAssignments = [],
   onStageAssignment,
 }) {
+  const fieldId = useId();
   const [selectedTeamId, setSelectedTeamId] = useState('');
   const [selectedSlotId, setSelectedSlotId] = useState('');
 
@@ -126,10 +127,14 @@ export default function PracticeOverridePanel({
 
       <div className="flex flex-wrap items-end gap-4 mb-8 p-4 bg-bg-surface-hover border border-border-subtle rounded-lg">
         <div className="flex-1 min-w-[200px]">
-          <label className="block text-xs font-semibold text-text-muted mb-2 uppercase tracking-wide">
+          <label
+            htmlFor={`${fieldId}-team`}
+            className="block text-xs font-semibold text-text-muted mb-2 uppercase tracking-wide"
+          >
             Select Team
           </label>
           <select
+            id={`${fieldId}-team`}
             data-testid="team-select"
             className="w-full bg-bg-surface border border-border-subtle rounded-md px-3 py-2 text-text-primary focus:border-blue-500 focus:outline-none transition-colors appearance-none"
             value={selectedTeamId}
@@ -145,10 +150,14 @@ export default function PracticeOverridePanel({
         </div>
 
         <div className="flex-1 min-w-[200px]">
-          <label className="block text-xs font-semibold text-text-muted mb-2 uppercase tracking-wide">
+          <label
+            htmlFor={`${fieldId}-slot`}
+            className="block text-xs font-semibold text-text-muted mb-2 uppercase tracking-wide"
+          >
             Select Practice Slot
           </label>
           <select
+            id={`${fieldId}-slot`}
             data-testid="slot-select"
             className="w-full bg-bg-surface border border-border-subtle rounded-md px-3 py-2 text-text-primary focus:border-blue-500 focus:outline-none transition-colors appearance-none"
             value={selectedSlotId}

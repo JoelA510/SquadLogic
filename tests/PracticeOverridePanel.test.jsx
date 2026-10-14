@@ -137,3 +137,20 @@ describe('PracticeOverridePanel :: the conflict check is no longer dead', () => 
     expect(option.textContent.toLowerCase()).not.toContain('assistant');
   });
 });
+
+describe('PracticeOverridePanel :: its pickers are labelled (M4.2)', () => {
+  it('names the team and slot selects by their visible labels', () => {
+    render(
+      <PracticeOverridePanel
+        teams={sharingNobody}
+        baseSlots={baseSlots}
+        stagedAssignments={[]}
+        onStageAssignment={() => {}}
+      />
+    );
+    // The <label>s used to sit beside the selects unattached, so a screen reader announced
+    // two unnamed combo boxes.
+    expect(screen.getByLabelText('Select Team')).toBe(screen.getByTestId('team-select'));
+    expect(screen.getByLabelText('Select Practice Slot')).toBe(screen.getByTestId('slot-select'));
+  });
+});

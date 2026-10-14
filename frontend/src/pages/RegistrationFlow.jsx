@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useId, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -19,6 +19,7 @@ export default function RegistrationFlow() {
   const [step, setStep] = useState(1);
   const [selectedPlayerId, setSelectedPlayerId] = useState(null);
   const [isCreatingNewPlayer, setIsCreatingNewPlayer] = useState(false);
+  const newPlayerFieldId = useId();
   const [newPlayerName, setNewPlayerName] = useState({ first: '', last: '' });
 
   // Form Responses Data
@@ -250,10 +251,14 @@ export default function RegistrationFlow() {
                 <h4 className="font-semibold text-text-primary">Child&apos;s Details</h4>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-1">
+                    <label
+                      htmlFor={`${newPlayerFieldId}-first`}
+                      className="block text-sm font-medium text-text-secondary mb-1"
+                    >
                       First Name
                     </label>
                     <input
+                      id={`${newPlayerFieldId}-first`}
                       type="text"
                       value={newPlayerName.first}
                       onChange={(e) =>
@@ -263,10 +268,14 @@ export default function RegistrationFlow() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-1">
+                    <label
+                      htmlFor={`${newPlayerFieldId}-last`}
+                      className="block text-sm font-medium text-text-secondary mb-1"
+                    >
                       Last Name
                     </label>
                     <input
+                      id={`${newPlayerFieldId}-last`}
                       type="text"
                       value={newPlayerName.last}
                       onChange={(e) => setNewPlayerName({ ...newPlayerName, last: e.target.value })}

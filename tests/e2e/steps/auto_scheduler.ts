@@ -473,8 +473,11 @@ Then(
 );
 
 Then('the auto-scheduler panel should use proper ARIA landmarks', async ({ page }) => {
-  const panel = page.locator('section[aria-label="Auto-Scheduler"]');
-  await expect(panel).toBeVisible();
-  const role = await panel.getAttribute('role');
-  expect(role).toBe('region');
+  // A <section> with an accessible name is a region landmark; the explicit role="region" it once
+  // carried was redundant (jsx-a11y/no-redundant-roles), so ask for the computed role instead.
+  await expect(
+    page
+      .locator('section[aria-label="Auto-Scheduler"]')
+      .and(page.getByRole('region', { name: 'Auto-Scheduler' }))
+  ).toBeVisible();
 });

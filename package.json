@@ -55,7 +55,7 @@
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.18.4",
     "recharts": "^3.8.0",
-    "zod": "^4.3.6"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
@@ -78,7 +78,7 @@
     "eslint-plugin-react-hooks": "7.0.1",
     "globals": "^14.0.0",
     "jsdom": "^27.3.0",
-    "knip": "~6.27.0",
+    "knip": "~6.41.0",
     "playwright-bdd": "^9.0.0",
     "postcss": "^8.5.29",
     "prettier": "3.7.4",

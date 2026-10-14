@@ -254,6 +254,10 @@ describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
     expect(
       screen.getByText('lions vs bulls was not moved: that slot already has wolves vs comets.')
     ).toBeInTheDocument();
+    // The screen reader's announcement agrees with the status line.
+    expect(
+      screen.getByText(/^lions vs bulls was not moved: North Field, .+ already has a game\.$/)
+    ).toBeInTheDocument();
   });
 
   it('stages nothing when a game is picked up and put back', async () => {
@@ -262,6 +266,23 @@ describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
     expect(within(from).getByTestId('game-card-ga-1')).toBeInTheDocument();
     expect(within(from).queryByTestId('manual-badge')).not.toBeInTheDocument();
     expect(screen.queryByText(STAGED)).not.toBeInTheDocument();
+  });
+
+  it('marks the view tabs pressed and colours them with text tokens', async () => {
+    render(
+      <MemoryRouter>
+        <GameSchedulingPage />
+      </MemoryRouter>
+    );
+    const full = await screen.findByRole('button', { name: 'Full Schedule' });
+    const byTeam = screen.getByRole('button', { name: 'By Team' });
+    expect(full).toHaveAttribute('aria-pressed', 'true');
+    expect(byTeam).toHaveAttribute('aria-pressed', 'false');
+    // jsdom cannot measure contrast (M4.2's axe scan in Chromium does); this
+    // pins the tokens the measured ratios belong to.
+    expect(full.className).toContain('text-text-accent');
+    expect(byTeam.className).toContain('text-text-secondary');
+    expect(full.className).not.toMatch(/text-blue-400|text-text-muted/);
   });
 
   it('names the By Team buttons as a group, with no orphaned label', async () => {

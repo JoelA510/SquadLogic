@@ -1179,10 +1179,17 @@ export default function GameSchedulingPage() {
       onDragStart: ({ active }) => `Picked up ${gameLabel(active.id)}.`,
       onDragOver: ({ active, over }) =>
         over ? `${gameLabel(active.id)} is over ${cellLabel(over.id)}.` : undefined,
-      onDragEnd: ({ active, over }) =>
-        over
-          ? `${gameLabel(active.id)} was dropped on ${cellLabel(over.id)}.`
-          : `${gameLabel(active.id)} was dropped outside the grid and did not move.`,
+      onDragEnd: ({ active, over }) => {
+        if (!over) return `${gameLabel(active.id)} was dropped outside the grid and did not move.`;
+        // `moveGameTo` refuses a cell that holds another game: say so here too,
+        // or the announcement and the status line would disagree.
+        const taken = displayedAssignmentsRef.current.some(
+          (a) => String(a.id) !== String(active.id) && `${a.fieldId}:${a.slotId}` === over.id
+        );
+        return taken
+          ? `${gameLabel(active.id)} was not moved: ${cellLabel(over.id)} already has a game.`
+          : `${gameLabel(active.id)} was dropped on ${cellLabel(over.id)}.`;
+      },
       onDragCancel: ({ active }) => `Moving ${gameLabel(active.id)} was cancelled.`,
     };
   }, [cellLabels]);
@@ -1334,21 +1341,30 @@ export default function GameSchedulingPage() {
         <div className="lg:col-span-2">
           <div className="bg-bg-glass border border-border-subtle rounded-xl overflow-hidden shadow-md">
             <div className="px-6 py-4 border-b border-border-subtle flex justify-between items-center bg-bg-glass">
+              {/* Tokens, not `text-blue-400` / `text-text-muted`: those measured 2.4:1 and
+                  2.9:1 on this bar in the light theme (axe, M4.2). The accent and secondary
+                  text read 5.9:1 light and 8.2:1 / 8.7:1 dark. */}
               <div className="flex gap-4">
                 <button
                   type="button"
+                  aria-pressed={activeTab === 'full'}
                   onClick={() => setActiveTab('full')}
                   className={`text-sm font-semibold transition-colors ${
-                    activeTab === 'full' ? 'text-blue-400' : 'text-text-muted hover:text-text-muted'
+                    activeTab === 'full'
+                      ? 'text-text-accent'
+                      : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
                   Full Schedule
                 </button>
                 <button
                   type="button"
+                  aria-pressed={activeTab === 'team'}
                   onClick={() => setActiveTab('team')}
                   className={`text-sm font-semibold transition-colors ${
-                    activeTab === 'team' ? 'text-blue-400' : 'text-text-muted hover:text-text-muted'
+                    activeTab === 'team'
+                      ? 'text-text-accent'
+                      : 'text-text-secondary hover:text-text-primary'
                   }`}
                 >
                   By Team

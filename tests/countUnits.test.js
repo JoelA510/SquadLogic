@@ -340,9 +340,44 @@ describe('counts :: practiceMetrics publishes no number without a unit', () => {
     expect(report.fairnessConcerns.length).toBeGreaterThan(0);
   });
 
-  it('labels every number, and leaves no registry pattern unmatched', () => {
+  // The same schedule, dated (M4.7): every slot on one week's dates and its
+  // wall window, and t3 moved onto t1's window so the pair clashes. Only a
+  // dated report publishes `assignmentRows` and a conflict's `sharedDates`.
+  const DATED_ONLY = ['coachConflicts.[].sharedDates', 'slotUtilization.[].assignmentRows'];
+  const wall = (iso) => iso.slice(11, 16);
+  const datedReport = evaluatePracticeSchedule({
+    assignments: [
+      { teamId: 't1', slotId: 'slot-a' },
+      { teamId: 't2', slotId: 'slot-a' },
+      { teamId: 't3', slotId: 'slot-a' },
+      { teamId: 't3', slotId: 'slot-c', effectiveDateRange: '[2026-09-14,2026-10-31]' },
+      { teamId: 't5', slotId: 'slot-b' },
+      { teamId: 't6', slotId: 'slot-d' },
+    ],
+    unassigned: [{ teamId: 't4', reason: 'no capacity' }],
+    teams,
+    slots: slots.map((s) => ({
+      ...s,
+      firstDate: s.start.slice(0, 10),
+      lastDate: '2026-11-20',
+      startTime: wall(s.start),
+      endTime: s.end.slice(0, 10) === s.start.slice(0, 10) ? wall(s.end) : '23:59',
+    })),
+    schoolDayEnd: undefined,
+    timezone: undefined,
+  });
+
+  it('labels every number; only the dated-only patterns go unmatched undated', () => {
+    expect(report.summary.dateModel).toBe('undated');
     expect(unlabelledCountPaths(report, PRACTICE_METRICS_COUNT_UNITS)).toEqual([]);
-    expect(unmatchedCountPatterns(report, PRACTICE_METRICS_COUNT_UNITS)).toEqual([]);
+    expect(unmatchedCountPatterns(report, PRACTICE_METRICS_COUNT_UNITS)).toEqual(DATED_ONLY);
+  });
+
+  it('a dated report labels every number and leaves no registry pattern unmatched', () => {
+    expect(datedReport.summary.dateModel).toBe('dated');
+    expect(datedReport.coachConflicts.length).toBeGreaterThan(0);
+    expect(unlabelledCountPaths(datedReport, PRACTICE_METRICS_COUNT_UNITS)).toEqual([]);
+    expect(unmatchedCountPatterns(datedReport, PRACTICE_METRICS_COUNT_UNITS)).toEqual([]);
   });
 
   it('says whether a number counts rostered teams, teams holding a slot, or assignments', () => {

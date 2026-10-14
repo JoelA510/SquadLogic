@@ -152,9 +152,9 @@ Security) ignore the cooldown and arrive at once.
   Actions email, which only reaches whoever last edited the cron line. GitHub
   disables schedules in public repositories after 60 days without activity;
   re-enable it from the Actions tab when the banner shows.
-- **Blocking needs the ruleset.** Until the owner adds
-  `npm audit (high and critical block)` to the `main` ruleset's required checks,
-  a red audit run is visible but does not stop a merge. See
-  [`ci-cd.md`](../operations/ci-cd.md#dependency-audit).
+- **It blocks the merge.** `npm audit (high and critical block)` is a required
+  check in the `main` ruleset (`.github/rulesets/main.json`, from the moment
+  the owner applies it to the live ruleset), so a red audit run stops a merge.
+  See [`ci-cd.md`](../operations/ci-cd.md#dependency-audit).
 - **Locally:** run `npm run check:audit` whenever you touch `package.json` or
   the lockfile.

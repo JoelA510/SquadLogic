@@ -1,30 +1,33 @@
 /**
- * Every status check `.github/rulesets/main.json` requires is a `ci.yml` job
- * that reports on every pull request to `main` (plan item M1.3).
+ * Every status check `.github/rulesets/main.json` requires is a workflow job
+ * that reports on every pull request to `main` (plan items M1.3, M3.2).
  *
  * A required check that never reports blocks a pull request forever, and
  * GitHub does not warn when a ruleset names a check no workflow produces. So
- * for each required context this test finds the `ci.yml` job whose `name` it
- * is, and fails if anything could stop that job reporting on a pull request:
- *   - a `paths`, `paths-ignore` or `types` filter on the `pull_request`
- *     trigger, or a `branches` list without `main` (the workflow never starts,
- *     so nothing reports);
+ * for each required context this test finds the one job, in all of
+ * `.github/workflows/`, whose `name` it is, and fails if anything could stop
+ * that job reporting on a pull request:
+ *   - a `paths`, `paths-ignore` or `types` filter on its workflow's
+ *     `pull_request` trigger, or a `branches` list without `main` (the
+ *     workflow never starts, so nothing reports);
  *   - a job-level `if` other than the one proven to admit pull requests;
  *   - `needs` (a needed job that is skipped skips this one, and a skipped job
  *     reports as passing without having run) or a `strategy` (a matrix renames
- *     the check to `name (value)`).
+ *     the check to `name (value)`);
+ *   - no job, or more than one job across the workflows, with that name.
  * The ruleset's own shape (default branch, pull requests, strict checks, no
  * force pushes or deletion) is asserted too.
  *
- * ci.yml is read line by line, as the other ci.yml tests do (no YAML
- * dependency); the detectors are each shown catching a planted workflow.
+ * The workflows are enumerated from the directory, not from the ruleset, and
+ * read line by line, as the other workflow tests do (no YAML dependency); the
+ * detectors are each shown catching a planted workflow.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const RULESET_PATH = path.resolve('.github/rulesets/main.json');
-const CI_WORKFLOW_PATH = path.resolve('.github/workflows/ci.yml');
+const WORKFLOWS_DIR = path.resolve('.github/workflows');
 
 /** Job-level `if` expressions known to let a `pull_request` event through. */
 const IFS_ADMITTING_PULL_REQUESTS = new Set(["github.event_name != 'schedule'"]);
@@ -101,11 +104,11 @@ function workflowJobs(workflow) {
 }
 
 /**
- * Why `context` might never report on a pull request to main; empty when it always does.
+ * Why a job of this workflow might never report on a pull request to main, from
+ * its trigger alone; empty when the trigger always fires.
  * @param {string} workflow
- * @param {string} context
  */
-function reportingProblems(workflow, context) {
+function triggerProblems(workflow) {
   const problems = [];
   const filters = pullRequestFilters(workflow);
   if (filters === null) {
@@ -125,12 +128,28 @@ function reportingProblems(workflow, context) {
       }
     }
   }
-  const matches = workflowJobs(workflow).filter((job) => job.name === context);
+  return problems;
+}
+
+/**
+ * Why `context` might never report on a pull request to main; empty when it always does.
+ * @param {Record<string, string>} workflows file name -> source, every workflow in the directory
+ * @param {string} context
+ */
+function reportingProblems(workflows, context) {
+  const matches = Object.entries(workflows).flatMap(([file, source]) =>
+    workflowJobs(source)
+      .filter((job) => job.name === context)
+      .map((job) => ({ file, source, job }))
+  );
   if (matches.length !== 1) {
-    problems.push(`${matches.length} jobs are named "${context}" (need exactly 1)`);
-    return problems;
+    const where = matches.map((m) => `${m.file}:${m.job.id}`).join(', ');
+    return [
+      `${matches.length} jobs are named "${context}" (need exactly 1)${where ? `: ${where}` : ''}`,
+    ];
   }
-  const [job] = matches;
+  const [{ file, source, job }] = matches;
+  const problems = triggerProblems(source).map((p) => `${file}: ${p}`);
   if (job.if !== undefined && !IFS_ADMITTING_PULL_REQUESTS.has(job.if)) {
     problems.push(`job ${job.id} has "if: ${job.if}", not one known to admit pull requests`);
   }
@@ -140,7 +159,13 @@ function reportingProblems(workflow, context) {
 }
 
 const ruleset = JSON.parse(readFileSync(RULESET_PATH, 'utf8'));
-const workflow = readFileSync(CI_WORKFLOW_PATH, 'utf8');
+/** Every workflow file, enumerated from the directory (never from the ruleset). */
+const workflows = Object.fromEntries(
+  readdirSync(WORKFLOWS_DIR)
+    .filter((f) => /\.ya?ml$/.test(f))
+    .sort()
+    .map((f) => [f, readFileSync(path.join(WORKFLOWS_DIR, f), 'utf8')])
+);
 const rule = (/** @type {string} */ type) =>
   ruleset.rules.find((/** @type {{ type: string }} */ r) => r.type === type);
 const requiredContexts = rule('required_status_checks').parameters.required_status_checks.map(
@@ -161,10 +186,15 @@ describe('the main ruleset', () => {
     expect(rule('deletion')).toBeDefined();
   });
 
-  it('requires Build & Test and Deno Mirror Tests from GitHub Actions, up to date (D5)', () => {
+  it('requires CI, the Deno mirror, pgTAP and the dependency audit from GitHub Actions, up to date (D5, M3.2)', () => {
     const checks = rule('required_status_checks').parameters;
     expect(checks.strict_required_status_checks_policy).toBe(true);
-    expect(requiredContexts).toEqual(['Build & Test', 'Deno Mirror Tests']);
+    expect(requiredContexts).toEqual([
+      'Build & Test',
+      'Deno Mirror Tests',
+      'Run pgTAP against local Supabase',
+      'npm audit (high and critical block)',
+    ]);
     for (const check of checks.required_status_checks) {
       expect(check.integration_id).toBe(15368); // the GitHub Actions app
     }
@@ -172,47 +202,104 @@ describe('the main ruleset', () => {
 });
 
 describe('every required check reports on every pull request', () => {
-  it('reads ci.yml (meta: the parser sees its trigger and all of its jobs)', () => {
-    expect(pullRequestFilters(workflow)).toEqual({ branches: '[main]' });
-    expect(workflowJobs(workflow).map((j) => j.id)).toEqual([
-      'keepalive',
-      'build-and-test',
-      'deno-mirror-tests',
-      'deploy-migrations',
-      'deploy-edge-functions',
-    ]);
+  /**
+   * What the line reader must see in each workflow this file was written
+   * against: the pull_request filters (null: no pull_request trigger) and the
+   * job ids, in order. A workflow added later only has to parse.
+   */
+  const KNOWN = {
+    'audit.yml': { filters: { branches: '[main]' }, jobs: ['audit', 'report-scheduled-failure'] },
+    'ci.yml': {
+      filters: { branches: '[main]' },
+      jobs: [
+        'keepalive',
+        'build-and-test',
+        'deno-mirror-tests',
+        'deploy-migrations',
+        'deploy-edge-functions',
+      ],
+    },
+    'cleanup-raw-imports.yml': { filters: null, jobs: ['cleanup'] },
+    'pgtap.yml': { filters: { branches: '[main]' }, jobs: ['pgtap'] },
+  };
+
+  it('reads every workflow (meta: the parser sees each trigger and every job)', () => {
+    expect(Object.keys(workflows)).toEqual(expect.arrayContaining(Object.keys(KNOWN)));
+    for (const [file, { filters, jobs }] of Object.entries(KNOWN)) {
+      expect(pullRequestFilters(workflows[file]), file).toEqual(filters);
+      expect(
+        workflowJobs(workflows[file]).map((j) => j.id),
+        file
+      ).toEqual(jobs);
+    }
+    for (const [file, source] of Object.entries(workflows)) {
+      expect(workflowJobs(source).length, `${file}: no jobs parsed`).toBeGreaterThan(0);
+    }
   });
 
-  it.each(requiredContexts)('"%s" is a ci.yml job that always reports', (context) => {
-    expect(reportingProblems(workflow, context)).toEqual([]);
+  it.each(requiredContexts)('"%s" is a workflow job that always reports', (context) => {
+    expect(reportingProblems(workflows, context)).toEqual([]);
   });
 });
 
 describe('the detectors catch what they guard against (planted workflows)', () => {
-  const plant = (/** @type {string} */ from, /** @type {string} */ to) => {
-    if (!workflow.includes(from)) throw new Error(`plant target not found: ${from}`);
-    return workflow.replace(from, to);
+  /** `workflows` with one file's text replaced; throws if the target text is gone. */
+  const plant = (
+    /** @type {string} */ file,
+    /** @type {string} */ from,
+    /** @type {string} */ to
+  ) => {
+    if (!workflows[file].includes(from))
+      throw new Error(`plant target not found in ${file}: ${from}`);
+    return { ...workflows, [file]: workflows[file].replace(from, to) };
   };
+  const CI_PR_TRIGGER = '  pull_request:\n    branches: [main]\n';
 
-  it('a renamed job', () => {
-    const renamed = plant('    name: Build & Test\n', '    name: Build and Test\n');
-    expect(reportingProblems(renamed, 'Build & Test')).toEqual([
-      '0 jobs are named "Build & Test" (need exactly 1)',
+  it('a renamed job, in any of the workflows a required check comes from', () => {
+    for (const [file, name] of [
+      ['ci.yml', 'Build & Test'],
+      ['pgtap.yml', 'Run pgTAP against local Supabase'],
+      ['audit.yml', 'npm audit (high and critical block)'],
+    ]) {
+      const renamed = plant(file, `    name: ${name}\n`, `    name: ${name} (renamed)\n`);
+      expect(reportingProblems(renamed, name)).toEqual([
+        `0 jobs are named "${name}" (need exactly 1)`,
+      ]);
+    }
+  });
+
+  it('a second job with a required name, in another workflow', () => {
+    const twice = {
+      ...workflows,
+      'copy.yml': workflows['pgtap.yml'].replace('  pgtap:\n', '  pgtap-copy:\n'),
+    };
+    expect(reportingProblems(twice, 'Run pgTAP against local Supabase')).toEqual([
+      '2 jobs are named "Run pgTAP against local Supabase" (need exactly 1): pgtap.yml:pgtap, copy.yml:pgtap-copy',
     ]);
   });
 
-  it('a paths filter on pull_request', () => {
+  it('a paths filter on pull_request (pgtap.yml had one until M3.2)', () => {
     const filtered = plant(
-      '  pull_request:\n    branches: [main]\n',
-      "  pull_request:\n    branches: [main]\n    paths: ['frontend/**']\n"
+      'pgtap.yml',
+      CI_PR_TRIGGER,
+      `${CI_PR_TRIGGER}    paths:\n      - 'supabase/migrations/**'\n`
     );
-    expect(reportingProblems(filtered, 'Deno Mirror Tests')).toEqual([
-      'pull_request has a "paths" filter',
+    expect(reportingProblems(filtered, 'Run pgTAP against local Supabase')).toEqual([
+      'pgtap.yml: pull_request has a "paths" filter',
+    ]);
+    const ciFiltered = plant(
+      'ci.yml',
+      CI_PR_TRIGGER,
+      `${CI_PR_TRIGGER}    paths: ['frontend/**']\n`
+    );
+    expect(reportingProblems(ciFiltered, 'Deno Mirror Tests')).toEqual([
+      'ci.yml: pull_request has a "paths" filter',
     ]);
   });
 
   it('a job condition that excludes pull requests', () => {
     const pushOnly = plant(
+      'ci.yml',
       "  deno-mirror-tests:\n    if: github.event_name != 'schedule'\n",
       "  deno-mirror-tests:\n    if: github.event_name == 'push'\n"
     );
@@ -223,6 +310,7 @@ describe('the detectors catch what they guard against (planted workflows)', () =
 
   it('a needs, which can skip the job and report it as passing', () => {
     const chained = plant(
+      'ci.yml',
       '    name: Deno Mirror Tests\n',
       '    name: Deno Mirror Tests\n    needs: [build-and-test]\n'
     );
@@ -234,29 +322,31 @@ describe('the detectors catch what they guard against (planted workflows)', () =
   it('a branches list that excludes main, or names it only inside a pattern', () => {
     for (const branches of ["['**', '!main']", '[main-*]', '[release]']) {
       const narrowed = plant(
-        '  pull_request:\n    branches: [main]\n',
+        'audit.yml',
+        CI_PR_TRIGGER,
         `  pull_request:\n    branches: ${branches}\n`
       );
-      expect(reportingProblems(narrowed, 'Build & Test')).toEqual([
-        `pull_request branches (${branches}) are not a plain list naming main`,
+      expect(reportingProblems(narrowed, 'npm audit (high and critical block)')).toEqual([
+        `audit.yml: pull_request branches (${branches}) are not a plain list naming main`,
       ]);
     }
   });
 
   it('an inline pull_request mapping it cannot read', () => {
     const inline = plant(
-      '  pull_request:\n    branches: [main]\n',
+      'ci.yml',
+      CI_PR_TRIGGER,
       "  pull_request: { branches: [main], paths: ['docs/**'] }\n"
     );
     expect(reportingProblems(inline, 'Build & Test')).toEqual([
-      'pull_request has a "(inline)" filter',
+      'ci.yml: pull_request has a "(inline)" filter',
     ]);
   });
 
   it('no pull_request trigger at all', () => {
-    const noPr = plant('  pull_request:\n    branches: [main]\n', '');
-    expect(reportingProblems(noPr, 'Build & Test')).toEqual([
-      'the workflow has no pull_request trigger',
+    const noPr = plant('pgtap.yml', CI_PR_TRIGGER, '');
+    expect(reportingProblems(noPr, 'Run pgTAP against local Supabase')).toEqual([
+      'pgtap.yml: the workflow has no pull_request trigger',
     ]);
   });
 });

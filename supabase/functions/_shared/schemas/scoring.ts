@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { calendarDayNumber, wallSeconds } from '../engines/practice-live-dates.ts';
 
 /**
  * Reusable Zod schemas for the Scoring Engine (Deno/Edge compatible)
@@ -68,13 +69,77 @@ export const SlotSchema = z
      */
     day: z.string().nullable().optional(),
     organization_id: z.string().uuid().optional(),
+    /**
+     * The slot's dating (M4.7, `docs/PLAN_SCORING_DATE_MODEL.md` §3.4): its
+     * first occurrence (`YYYY-MM-DD`, already on its weekday) and the end of
+     * its validity, inclusive, plus its wall window. All four or none per
+     * call (Q8): see {@link datedSlotsIssue}. Absent, the engine compares
+     * first-occurrence instants as it always has (`summary.dateModel:
+     * 'undated'`).
+     */
+    firstDate: z.string().nullable().optional(),
+    lastDate: z.string().nullable().optional(),
+    startTime: z.string().nullable().optional(),
+    endTime: z.string().nullable().optional(),
   })
   .passthrough();
+
+/**
+ * Why a slot list cannot be scored dated, or `null` (M4.7, plan §3.3, Q8):
+ * every slot carries `firstDate` and `lastDate` or none does, and a dated slot
+ * also carries `startTime` and `endTime`, ending after it starts. A mix would
+ * score half a calendar as a whole one, so `fairness-scoring` refuses it with
+ * a 422 rather than guess. `startTime`/`endTime` alone do not date a slot.
+ * The engine (`scoring-engine.ts` `resolveDateModel`) and core refuse the same
+ * inputs -- the engine by calling this, with the same readers
+ * (`calendarDayNumber`, `wallSeconds` in `practice-live-dates.ts`), so the gate
+ * and the engine cannot disagree on what reads; `fairness-scoring` calls it right
+ * after parsing, so the refusal is a 422 naming the reason rather than the
+ * engine's throw becoming a 500.
+ */
+export function datedSlotsIssue(
+  slots: Array<{
+    id: string;
+    firstDate?: string | null;
+    lastDate?: string | null;
+    startTime?: string | null;
+    endTime?: string | null;
+  }>
+): string | null {
+  const isDated = (s: (typeof slots)[number]) =>
+    (s.firstDate !== undefined && s.firstDate !== null) ||
+    (s.lastDate !== undefined && s.lastDate !== null);
+  const dated = slots.filter(isDated).length;
+  if (dated === 0) return null;
+  if (dated !== slots.length) {
+    return `practice slots must all carry firstDate and lastDate, or none: ${dated} of ${slots.length} do`;
+  }
+  for (const s of slots) {
+    const startSec = wallSeconds(s.startTime);
+    const endSec = wallSeconds(s.endTime);
+    if (
+      calendarDayNumber(s.firstDate) === null ||
+      calendarDayNumber(s.lastDate) === null ||
+      startSec === null ||
+      endSec === null
+    ) {
+      return `dated slot ${s.id} needs firstDate and lastDate (YYYY-MM-DD) and startTime and endTime (HH:MM[:SS])`;
+    }
+    if (startSec >= endSec) return `dated slot ${s.id} must end after it starts`;
+  }
+  return null;
+}
 
 export const PracticeAssignmentSchema = z
   .object({
     teamId: z.string(),
     slotId: z.string(),
+    /**
+     * The row's `daterange` literal (stored, `[from,until+1)`) or a staged
+     * placement's inclusive `[from,until]` (M4.7). Read in a dated run only;
+     * absent means live on every date of its slot's validity.
+     */
+    effectiveDateRange: z.string().nullable().optional(),
   })
   .passthrough();
 

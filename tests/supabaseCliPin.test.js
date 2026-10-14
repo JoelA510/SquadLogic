@@ -9,7 +9,8 @@
  * The scan is line-based on purpose (no YAML dependency): each step is found by
  * its `uses:` line, and its `version:` is read from the `with:` block of that
  * same step. A `${{ env.NAME }}` value is resolved against the workflow's
- * top-level `env:` block. The step count is checked against a raw substring
+ * top-level `env:` block. Every workflow must name the same version (plan item
+ * M3.2). The step count is checked against a raw substring
  * count, so a step written in a shape the scanner does not recognise is a loud
  * failure rather than a step nobody examined.
  */
@@ -144,9 +145,16 @@ describe('Supabase CLI pin: the real workflows', () => {
     expect(pinProblems(read(f))).toEqual([]);
   });
 
-  it('ci.yml uses one version in every setup-cli step, the one the guard parses', () => {
-    const versions = new Set(scanSetupCliSteps(read(CI_WORKFLOW)).map((s) => s.resolved));
-    expect(versions.size).toBe(1);
+  it('every workflow uses one version in every setup-cli step, the one the guard parses', () => {
+    // pgtap.yml's `supabase start` once ran 2.95.4 while the deploy jobs ran
+    // 2.118.0 (audit finding 6.3, plan item M3.2): the schema CI tested was
+    // built by a different CLI from the one that deploys it.
+    const byFile = workflowFiles
+      .map((f) => [f, scanSetupCliSteps(read(f)).map((s) => s.resolved)])
+      .filter(([, versions]) => versions.length > 0);
+    expect(byFile.map(([f]) => f)).toEqual(expect.arrayContaining([CI_WORKFLOW, 'pgtap.yml']));
+    const versions = new Set(byFile.flatMap(([, v]) => v));
+    expect(versions.size, JSON.stringify(byFile)).toBe(1);
     const guardVersion = /CLI ([0-9]+\.[0-9]+\.[0-9]+)/.exec(readFileSync(GUARD_PATH, 'utf8'));
     expect(guardVersion, `${GUARD_PATH} header no longer names a CLI version`).not.toBeNull();
     expect([...versions][0]).toBe(guardVersion?.[1]);

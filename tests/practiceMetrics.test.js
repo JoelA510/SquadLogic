@@ -5,6 +5,12 @@ import {
   evaluatePracticeSchedule,
   MANUAL_FOLLOW_UP_CATEGORIES,
 } from '../packages/core/src/practiceMetrics.js';
+import {
+  DATED_VECTORS,
+  datedProjection,
+  overbookedOf,
+  undatedInputs,
+} from './helpers/datedScoringVectors.js';
 
 const SAMPLE_SLOTS = [
   {
@@ -64,6 +70,7 @@ test('evaluatePracticeSchedule summarises utilization and division distribution'
     assignmentsCounted: 3,
     assignmentRate: 0.75,
     manualFollowUpRate: 0.25,
+    dateModel: 'undated',
   });
 
   assert.deepEqual(report.manualFollowUpBreakdown, [
@@ -488,6 +495,7 @@ test('evaluatePracticeSchedule correctly counts teams assigned to multiple slots
     assignmentsCounted: 2,
     assignmentRate: 0.25,
     manualFollowUpRate: 0.75,
+    dateModel: 'undated',
   });
   assert.deepEqual(report.fairnessConcerns, []);
 });
@@ -915,4 +923,133 @@ test('conflictPairKey is the same whichever side is named first, and either assi
     assert.equal(report.coachConflicts.length, 1);
     assert.deepEqual(report.coachConflicts[0].coachIds, ['coach-a', 'assistant-x']);
   }
+});
+
+// ---- M4.7: the dated model (docs/PLAN_SCORING_DATE_MODEL.md §3, §4) ---------
+//
+// The witnesses are hand-written truths in a JSON both arms read; see
+// `tests/helpers/datedScoringVectors.js`. The subject set is the vector table,
+// never an engine's output.
+
+const datedCore = (vector) =>
+  evaluatePracticeSchedule({
+    teams: vector.teams,
+    slots: vector.slots,
+    assignments: vector.assignments,
+    schoolDayEnd: undefined,
+    timezone: DATED_VECTORS.timeZone,
+  });
+
+test('dated witnesses: the table holds the plan witnesses and cases (meta, can fail)', () => {
+  const witnesses = DATED_VECTORS.vectors.map((v) => v.witness);
+  for (const w of ['W1', 'W2', 'W2b', 'overlap', 'W3', 'W4', 'W5', 'open', 'unreadable']) {
+    assert.ok(witnesses.includes(w), `missing ${w}`);
+  }
+  for (const w of ['no-live-date', 'dst', 'peak']) assert.ok(witnesses.includes(w), w);
+  // A clash is expected somewhere and absent somewhere, so neither "always" nor
+  // "never" can pass the table.
+  const withConflict = DATED_VECTORS.vectors.filter((v) => v.expected.conflicts.length > 0);
+  assert.ok(withConflict.length >= 5);
+  assert.ok(DATED_VECTORS.vectors.length - withConflict.length >= 5);
+});
+
+test('dated witnesses: each one the first-occurrence comparison gets wrong, or is a control', () => {
+  // The defect, executed: on the same inputs with their dates removed, the
+  // undated comparison gives the answer recorded as `undated`, and for W1-W4,
+  // the overlap, the peak and DST that answer differs from the truth.
+  const wrongUndated = [];
+  for (const vector of DATED_VECTORS.vectors) {
+    const report = evaluatePracticeSchedule({
+      ...undatedInputs(vector),
+      schoolDayEnd: undefined,
+      timezone: 'UTC',
+    });
+    assert.equal(report.summary.dateModel, 'undated');
+    assert.equal(report.coachConflicts.length, vector.undated.conflicts, vector.name);
+    assert.deepEqual(overbookedOf(report), vector.undated.overbooked, vector.name);
+    const truthOverbooked = Object.entries(vector.expected.slotLoad)
+      .filter(([id, [peak]]) => peak > vector.slots.find((s) => s.id === id).capacity)
+      .map(([id]) => id)
+      .sort();
+    if (
+      vector.undated.conflicts !== vector.expected.conflicts.length ||
+      JSON.stringify(vector.undated.overbooked) !== JSON.stringify(truthOverbooked)
+    ) {
+      wrongUndated.push(vector.witness);
+    }
+  }
+  for (const w of ['W1', 'W2', 'W3', 'W4', 'dst']) assert.ok(wrongUndated.includes(w), w);
+});
+
+for (const vector of DATED_VECTORS.vectors) {
+  test(`dated witness ${vector.witness}: ${vector.name}`, () => {
+    const report = datedCore(vector);
+    assert.equal(report.summary.dateModel, 'dated');
+    assert.deepEqual(
+      datedProjection(report, report.dataQualityWarnings.length),
+      vector.expected,
+      vector.name
+    );
+  });
+}
+
+test('dated: a conflict names its first date and count; the message names the date (Q7)', () => {
+  const vector = DATED_VECTORS.vectors.find((v) => v.witness === 'W4');
+  const [conflict] = datedCore(vector).coachConflicts;
+  assert.equal(conflict.firstDate, '2026-09-01');
+  assert.equal(conflict.sharedDates, 12);
+  assert.match(conflict.reason, /2026-09-01/);
+});
+
+test('dated: the unreadable and the dateless rows are each reported by name', () => {
+  const unreadable = datedCore(DATED_VECTORS.vectors.find((v) => v.witness === 'unreadable'));
+  assert.deepEqual(unreadable.dataQualityWarnings, [
+    'assignment for team T1 to slot S1 has an unreadable date range Full Season',
+  ]);
+  assert.equal(unreadable.summary.assignmentsCounted, 1);
+  const dateless = datedCore(DATED_VECTORS.vectors.find((v) => v.witness === 'no-live-date'));
+  assert.deepEqual(dateless.dataQualityWarnings, [
+    "assignment for team T1 has no date inside slot S1's validity",
+  ]);
+  assert.equal(dateless.summary.assignmentsCounted, 2);
+});
+
+test('dated: a mix of dated and undated slots refuses (Q8)', () => {
+  const vector = DATED_VECTORS.vectors.find((v) => v.witness === 'W4');
+  const { firstDate: _f, lastDate: _l, ...undatedSlot } = vector.slots[1];
+  assert.throws(
+    () =>
+      evaluatePracticeSchedule({
+        ...vector,
+        slots: [vector.slots[0], undatedSlot],
+        schoolDayEnd: undefined,
+        timezone: 'UTC',
+      }),
+    /must all carry firstDate and lastDate, or none: 1 of 2 do/
+  );
+  // A dated slot missing its wall window, or ending before it starts, refuses too.
+  for (const broken of [
+    { ...vector.slots[1], startTime: undefined },
+    { ...vector.slots[1], lastDate: '2026-02-30' },
+    { ...vector.slots[1], endTime: '15:00:00' },
+  ]) {
+    assert.throws(
+      () =>
+        evaluatePracticeSchedule({
+          ...vector,
+          slots: [vector.slots[0], broken],
+          schoolDayEnd: undefined,
+          timezone: 'UTC',
+        }),
+      TypeError
+    );
+  }
+  // Wall times alone do not date a slot: an undated caller sending them is undated.
+  const report = evaluatePracticeSchedule({
+    ...undatedInputs(vector),
+    slots: undatedInputs(vector).slots.map((s) => ({ ...s, startTime: '16:00:00' })),
+    schoolDayEnd: undefined,
+    timezone: 'UTC',
+  });
+  assert.equal(report.summary.dateModel, 'undated');
 });

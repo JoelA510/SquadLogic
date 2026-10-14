@@ -6,11 +6,11 @@
  * "Looks like you planned 14 tests but ran 15".
  *
  * **pgTAP is gated in CI, and this file does not exist because it is not.**
- * `.github/workflows/pgtap.yml` triggers on `supabase/migrations/**`,
- * `supabase/tests/**` and `supabase/config.toml`, starts a local Supabase and
- * runs `npm run test:db` -- `supabase test db`, every suite in the directory.
- * A PR that touches SQL at all therefore runs all forty-five, and a plan that
- * does not match would turn that job red before merge. Saying otherwise is
+ * `.github/workflows/pgtap.yml` runs on every pull request to main (a
+ * required check since plan item M3.2; it once ran only on SQL paths), starts
+ * a local Supabase and runs `npm run test:db` -- `supabase test db`, every
+ * suite in the directory. A plan that does not match turns that job red
+ * before merge. Saying otherwise is
  * how a reader concludes pgTAP is ungated and skips it, and it is an error
  * this phase has already made once and recorded.
  *

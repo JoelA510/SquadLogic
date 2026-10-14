@@ -583,6 +583,17 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M3.2. pgTAP runs only on some PRs, so it can't be required** (audit finding 6.3, medium)
+> - **Status (2026-10-13): done in PR m3b (branch `claude/vibrant-allen-hr7y7s-m3b`; open);
+>   the live ruleset is the owner's step after merge.** `pgtap.yml` has no `paths` filter and
+>   pins CLI `2.118.0`, the deploy jobs' version (kept over 2.95.4 because `migrationGuard.mjs`
+>   parses 2.118.0's JSON; `supabaseCliPin.test.js` now holds every workflow to one version).
+>   `supabase start` skips the services no suite uses, after an edge-runtime 502 failed a run.
+>   `main.json` requires `Run pgTAP against local Supabase` and, with the owner's approval,
+>   `npm audit (high and critical block)`; `rulesetRequiredChecks.test.js` reads every workflow.
+>   Green on 2.118.0: 53 files, 662 assertions (*fully validated*, dispatch run 38484268374).
+>   Test gate: a throwaway migration adding a permissive `USING (true)` SELECT policy on `teams`
+>   failed `rls_cross_org_isolation.sql` tests 1 and 3 (*fully validated*, dispatch run
+>   38484483751 on a throwaway branch, no PR). Merge blocking awaits the live ruleset.
 > - **Fix approach:** drop the `paths` filter from `pgtap.yml` (D5), use the one
 >   `SUPABASE_CLI_VERSION`, and add it to the ruleset's required checks.
 > - **Files touched:** `.github/workflows/pgtap.yml`, `.github/rulesets/main.json`.
@@ -599,6 +610,16 @@ standards these items name · [ ] deployed and smoke-tested
 > 3.1 — resolved by M3.2.
 
 > **M3.3. Supabase's own advisors never run** (audit finding 8.6, medium)
+> - **Status (2026-10-13): done in PR m3b (branch `claude/vibrant-allen-hr7y7s-m3b`; open).**
+>   `supabase db advisors --local --type all --level info --fail-on none --output-format json`
+>   (flags confirmed with `--help` on 2.118.0), read by `scripts/ci/supabaseAdvisors.mjs`
+>   against `docs/security/supabase-advisor-waivers.json` (a waiver names each finding by its
+>   `cacheKey`): unwaived WARN/ERROR, stale, expired or invalid waivers fail; unreadable or empty output exits 2. Triage of 176 findings (33 WARN): `min`
+>   and `set_updated_at` search_path accepted; `auth_rls_initplan` (11 policies) and
+>   `multiple_permissive_policies` (20 tables) waived as debt to 2027-01-11, not fixed (an RLS
+>   rewrite is its own reviewed change). No migration. Test gate: a throwaway table without RLS
+>   failed the step (`ERROR rls_disabled_in_public`), as did the planted policy
+>   (`multiple_permissive_policies` on `teams`) (*fully validated*, run 38484483751).
 > - **Fix approach:** in the pgTAP job, after `supabase start`, run `supabase db advisors
 >   --fail-on warn` (confirm the flag with `--help` on the pinned CLI); triage what it reports,
 >   waiving with reasons in the job.
@@ -615,6 +636,15 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M3.4. The migration harness runs nowhere in CI, and needs an undocumented OS user** (audit finding 4.2, medium)
+> - **Status (2026-10-13): done in PR m3b (branch `claude/vibrant-allen-hr7y7s-m3b`; open).**
+>   `dbharness.yml` (job `Migration harness (PostgreSQL 16)`, ubuntu-24.04) runs on PRs touching
+>   `supabase/`, `docs/sql/`, `scripts/dbharness/` or itself, creates `pgrunner`, runs the
+>   harness as root and fails unless it exits 0 with `HARNESS OK`. Not required (path-filtered).
+>   `ci-cd.md` has "Running the database harness" (`HARNESS_PGUSER`, `pgrunner`, `pgrunner2`);
+>   `run.sh`'s header is corrected. Baseline here: HARNESS OK, 128 migrations, 145 s
+>   (*executed*, `HARNESS_PGUSER=postgres`). Test gate: a smoke assertion planted in
+>   `20261006000000_smoke.sql` gave `FAIL smoke 20261006000000`, HARNESS FAILED, exit 1
+>   (*executed* here; CI: throwaway draft PR #572).
 > - **Fix approach:** a CI job that runs `scripts/dbharness/run.sh` on PRs touching
 >   `supabase/` or `docs/sql/`, creating the harness user (or setting `HARNESS_PGUSER`); a
 >   "Running the database harness" section in `docs/operations/ci-cd.md`; the stale header
@@ -708,10 +738,18 @@ standards these items name · [ ] deployed and smoke-tested
 > 6.4 — resolved by M4.1.
 
 > **M4.7. Both scoring engines judge a weekly slot by its first occurrence and ignore assignment date ranges** (not an audit finding: found by PR 1-A, #551; medium) — **plan first: needs the owner's approval before any code**
-> - **Status (2026-10-13): planned and approved; the owner answered Q1-Q9 as recommended.** The
->   plan is [`docs/PLAN_SCORING_DATE_MODEL.md`](../../PLAN_SCORING_DATE_MODEL.md) (#555).
->   Practice exceptions follow in their own PR (Q1); the solver is a separate plan-first item,
->   M4.8 (Q2).
+> - **Status (2026-10-13): built as planned, in review** (branch
+>   `claude/vibrant-allen-hr7y7s-m47`, not merged). Ranges and slot validity are in both
+>   engines, held together by a dated parity extract (corpus cases C1 and C4) and 14
+>   hand-written witnesses run by core, the cross-arm drift test and Deno; the page sends each
+>   slot's dating and each row's range, the override panel counts from the season's today on,
+>   and apply-time metrics are dated (Q9). The undated extract is byte-identical, and the
+>   solver's outputs over a season-2026 sweep match `main` byte for byte except the new
+>   `dateModel: 'undated'` on its evaluation (*executed*). Each of the plan's plants (P1-P7,
+>   plus three more) turns a test red (*executed*). **Remaining scope:** practice exceptions
+>   (`relocated`, `time_tbd`) are not read by either engine yet; that is its own PR (Q1),
+>   through `applyPracticeExceptions` and its Edge twin. The solver is M4.8 (Q2).
+>   The plan is [`docs/PLAN_SCORING_DATE_MODEL.md`](../../PLAN_SCORING_DATE_MODEL.md) (#555).
 >   Measured (*executed*, scratch witness through the page's own slot builder and both engines):
 >   the two arms agree, so the defect is shared, not drift; modelling the corpus's "Select OLD"
 >   revision as closed series gives 11 reported coach conflicts where 1 is real (Edge fairness
@@ -742,7 +780,42 @@ standards these items name · [ ] deployed and smoke-tested
 >   failing on today's engines; the parity test over the same inputs.
 > - **Rollback:** revert the PR (no data changes).
 > - **Diff class:** flagged change to the domain model (plan first).
-> - **Verification label:** statically reviewed.
+> - **Verification label:** executed (witnesses, parity, plants and the solver sweep, locally);
+>   CI pending.
+
+> **M4.8. The auto-scheduler's coach check compares first-occurrence instants, so it can double-book a coach** (not an audit finding: found by the M4.7 plan, Q2; medium) — **plan first: needs the owner's approval before any code**
+> - **Status (2026-10-13): open, not planned.** Proposed by the M4.7 plan (Q2, approved as
+>   recommended) and left out of M4.7 because it is the solver, whose behaviour that item froze.
+> - **Why here:** it is the same gap M4.7 closes in the evaluators, left open in the one place
+>   that decides placements; after M4.7 the panel reports the clash the solver can create, but
+>   nothing stops the solver creating it.
+> - **Fix approach (to be planned, not built):** give `checkHardConstraints`
+>   (`_shared/engines/practice-coaches.ts`) and the solver's occupancy the dated rule M4.7 put
+>   in the evaluators (live dates of each slot's weekday inside its validity and each row's
+>   range, a clash on a shared date with overlapping wall windows), so two slots on one weekday
+>   and time whose `valid_from` differ (M4.7's W4 shape) are not both given to one coach, and a
+>   locked row holds its slot only on its own dates (today: season-long, declared in
+>   `auto-scheduler-solver.ts`). Decide whether `scoreSchedule` scores dated, which changes the
+>   search. The plan must name the default-freeze contract (CLAUDE.md: maximum freeze, minimal
+>   diff) under the new rule.
+> - **Files touched:** `supabase/functions/_shared/engines/practice-coaches.ts`,
+>   `auto-scheduler-solver.ts`, the page's auto-scheduler payload (slot dating), their tests; the
+>   plan says which.
+> - **Depends on:** M4.7 (the dated rule and its twins) and the owner's approval of the plan
+>   (CLAUDE.md: plan before implementing any solver change).
+> - **Widens:** the season-2026 fixture suite, and a solver sweep against `main` (M4.7's sweep,
+>   lock shares 0 / 0.5 / 0.9 by three seeds, is the template) showing exactly which placements
+>   move and why.
+> - **Effort:** M
+> - **Acceptance criteria:** in W4's shape the solver never places one coach on both slots; on
+>   the undated corpus plan its placements are unchanged; a locked row whose series has ended
+>   no longer blocks its slot from today on.
+> - **Test gate:** a W4-shaped case in `tests/autoSchedulerLock.test.js` (and its Deno twin)
+>   shown failing on today's solver; the sweep's placement diff reviewed and quoted in the PR.
+> - **Rollback:** revert the PR and redeploy `auto-scheduler` (no data changes).
+> - **Diff class:** flagged change to the solver (plan first).
+> - **Verification label:** statically reviewed (the evaluator's version of the shape
+>   *executed* by the M4.7 plan, §2.2 W4).
 
 ## Milestone 4b — Completeness: accessibility and validation
 
@@ -1178,6 +1251,42 @@ smoke-tested
     `VITE_VERCEL_GIT_COMMIT_*` values embeds them on `main` and not on #558; the deployed
     production bundle and #558's preview bundle, fetched and searched for the names). The same
     finding as PR M5's entry above.
+- 2026-10-13, found by the M4.7 build:
+  - The practice page builds its auto-scheduler review once per run id: a result that arrives
+    before the page's slots are read is staged with the display fallback range `Full Season`
+    and is not rebuilt when the slots land. Not reachable from the UI today (the scheduler is
+    disabled until the slots are read), and since M4.7 the engines drop such a row as an
+    unreadable range and report it rather than score it season-long. Not fixed.
+    *Executed* (a test that set the result before the slots loaded saw it).
+  - Both engines refused a second row for the same `team::slot` as a duplicate even when the
+    two rows' ranges are disjoint, although the table's own key is (team, slot, range). Fixed in
+    M4.7 for dated runs (its review round): a duplicate is the same range or one sharing a live
+    date; undated runs keep the old rule. *Executed* (witnesses "two-series" and "duplicate").
+
+- 2026-10-13, found by PR m3b (M3.2-M3.4):
+  - `supabase start` failed at least one of the last 100 pgTAP runs on the edge runtime's
+    health check (`Error status 502`, run 38462349853), a service no suite uses; as a required
+    check that would block a merge. `pgtap.yml` now excludes it and the other unused services.
+    *Executed* (run log).
+  - CLI 2.118.0's advisors are a subset of the hosted ones: they lack lints 0028/0029
+    (`SECURITY DEFINER` callable by `anon`/`authenticated`) and Auth's leaked-password
+    protection. The hosted project reports 89 `authenticated` and 1 `anon` (`submit_registration`,
+    intended) definer findings, and leaked-password protection off. The CI gate cannot see
+    these; turning leaked-password protection on is an Auth setting for the owner. *Executed*
+    (Supabase MCP `get_advisors`, read-only; CLI binary searched for the lint names).
+  - `public.set_updated_at()` exists on a from-scratch build (`20251217000000`) but not in
+    production: schema drift between what CI builds and what production has. Harmless here
+    (waived); not investigated further. *Executed* (one read-only `pg_proc` SELECT through the
+    Supabase MCP).
+  - The `auth_rls_initplan` and `multiple_permissive_policies` waivers expire on 2027-01-11, after
+    which pgTAP, a required check, fails every PR until the policies are rewritten or the waivers
+    renewed. Wants a plan item (RLS policy rewrite, plan first). *Statically reviewed.*
+  - pgTAP run 38338431910 (branch `feat/grid-override-prompt`) failed
+    `practice_grid_current_rows.sql` test 36 with the two series in the other order
+    (`have: thu,fri`, `want: fri,thu`): if that assertion depends on row order, it is a flake that
+    now blocks merges. Not reproduced; *unverified*.
+  - `supabase stop` on 2.118.0 warns that `config.toml`'s `[inbucket]` section is deprecated
+    (`[local_smtp]`). Not changed. *Executed* (run log).
 
 - 2026-10-13, found by PR M3-A (M3.1, M3.5):
   - The suite covers most code several times over, so the aggregate thresholds cannot see one

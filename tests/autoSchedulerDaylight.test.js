@@ -946,7 +946,14 @@ describe('no overrides: the post-pass is byte-identical to main', () => {
     // everything else is still main's bytes, hash unchanged.
     const { relocatedOutsideRun, ...r } = full;
     assert.deepEqual(relocatedOutsideRun, []);
-    assert.equal(sha256(withoutOverrideKeys(r)), MAIN_POST_PASS_SHA256);
+    // M4.7 added one field to the evaluation: the solver scores undated (Q2),
+    // and says so. Removed, the result is main's bytes again.
+    const { dateModel, ...summary } = r.evaluation.summary;
+    assert.equal(dateModel, 'undated');
+    assert.equal(
+      sha256(withoutOverrideKeys({ ...r, evaluation: { ...r.evaluation, summary } })),
+      MAIN_POST_PASS_SHA256
+    );
     for (const key of OVERRIDE_KEYS) assert.equal(r.daylight.meta[key], 0, key);
     // No context key at all (a caller that loaded nothing) is the same result.
     assert.equal(bytes(await run()), bytes(full));

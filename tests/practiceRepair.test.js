@@ -224,6 +224,8 @@ const METRIC_TABLE = Object.freeze({
     forced: true,
     measure: (r) => r.summary.manualFollowUpRate,
   },
+  // Which comparison ran (M4.7): the repair's plans are undated on both sides.
+  'summary.dateModel': { kind: DESCRIPTIVE, measure: (r) => r.summary.dateModel },
   slotUtilization: {
     kind: WORSE_UP,
     measure: (r) => r.slotUtilization.filter((row) => row.overbooked).length,

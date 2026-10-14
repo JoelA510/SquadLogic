@@ -8,8 +8,10 @@ name: Dependency audit
 # gate on pull requests or on the schedule, or lets it fail without failing
 # the run.
 #
-# Not a required check in the main ruleset (yet): that is an owner settings
-# change, see docs/operations/ci-cd.md ("Dependency audit").
+# The audit job is a required check in the main ruleset
+# (.github/rulesets/main.json; docs/operations/ci-cd.md, "Dependency audit"),
+# so it must report on every pull request: no `paths` filter, no job `if`.
+# tests/rulesetRequiredChecks.test.js fails if either appears.
 on:
   push:
     branches: [main]

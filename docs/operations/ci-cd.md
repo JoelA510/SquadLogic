@@ -96,15 +96,14 @@ lockfile only (no install), on the npm `package.json` pins. A failed scheduled
 run opens one issue, "Dependency audit is failing on main". Policy, waivers and
 how to fix an advisory: [`dependency-policy.md`](../security/dependency-policy.md).
 
-**Not a required check yet.** The job reports as
-`npm audit (high and critical block)`. Until the owner adds that context to the
-`main` ruleset (and to `.github/rulesets/main.json` in the same change, teaching
-`tests/rulesetRequiredChecks.test.js`, which looks only in `ci.yml`, to find
-it in `audit.yml`), a red
-audit is visible on the pull request but does not block the merge. It can be
-required safely: the workflow has no `paths` filter and the job no `if`, so it
+**A required check.** The job reports as `npm audit (high and critical block)`,
+and `.github/rulesets/main.json` requires it (see
+[Branch Protection](#branch-protection)), so a red audit blocks the merge. It can
+be required safely: the workflow has no `paths` filter and the job no `if`, so it
 reports on every pull request, docs-only ones included.
-`tests/checkAudit.test.js` fails if that changes.
+`tests/checkAudit.test.js` and `tests/rulesetRequiredChecks.test.js` fail if
+that changes. A new advisory published against `main` turns every open pull
+request red until it is fixed or waived; that is the point.
 
 ## Workflow audit
 
@@ -227,9 +226,14 @@ migration was renamed, edited or removed. It needs no secrets.
 
 ### Supabase CLI version
 
-Both deploy jobs install the CLI with `supabase/setup-cli@v2` and
-`version: ${{ env.SUPABASE_CLI_VERSION }}`. The version is set once, in the
-workflow-level `env:` block of `ci.yml`: **`2.118.0`**.
+Every `supabase/setup-cli` step installs the CLI with
+`version: ${{ env.SUPABASE_CLI_VERSION }}`: the two deploy jobs in `ci.yml` and
+the pgTAP job in `pgtap.yml`. The version is set in the workflow-level `env:`
+block of each of those two files: **`2.118.0`**. pgTAP pinned `2.95.4` until
+plan item M3.2, so the schema CI tested was built by a different CLI from the
+one that deployed it; 2.118.0 was kept rather than 2.95.4 because the migration
+guard parses 2.118.0's JSON output, and pgTAP's whole suite and the advisors run
+green on it (workflow_dispatch run 38484268374).
 
 **Why it is pinned.** With `version: latest`, setup-cli looks up the newest
 release through an unauthenticated GitHub API call. On push-to-main runs 1156
@@ -244,9 +248,9 @@ guard parses this version's `--output-format json` output:
 - a CLI failure: `{"_tag": "Error", "error": {"message"}}`.
 
 `tests/supabaseCliPin.test.js` fails if any `supabase/setup-cli` step in
-`.github/workflows/` uses `latest` or has no version. It also fails if the
-`ci.yml` steps disagree, or if the version differs from the one named in the
-`migrationGuard.mjs` header.
+`.github/workflows/` uses `latest` or has no version. It also fails if any two
+steps in any workflows disagree, or if the version differs from the one named in
+the `migrationGuard.mjs` header.
 
 **How to bump it.**
 
@@ -254,13 +258,13 @@ guard parses this version's `--output-format json` output:
    against a local, production-shaped ledger (see
    [`migration-ledger-normalisation.md`](./migration-ledger-normalisation.md)).
    Update the fixture shapes in `tests/migrationGuard.test.js` if they changed.
-2. In one PR, change `SUPABASE_CLI_VERSION` in `ci.yml` and the version named in
-   the headers of `scripts/ci/migrationGuard.mjs` and
-   `tests/migrationGuard.test.js`.
-3. Run `npm run test`. The pin test fails until all of these agree.
-
-`pgtap.yml` pins its own CLI (`2.95.4`) for `supabase start`. It is a separate
-workflow, and this pin does not change it.
+2. In one PR, change `SUPABASE_CLI_VERSION` in `ci.yml` and `pgtap.yml` and the
+   version named in the headers of `scripts/ci/migrationGuard.mjs` and
+   `tests/migrationGuard.test.js`, and the prerequisites in
+   `docs/testing/pgtap.md` and `supabase/tests/README.md`.
+3. Run `npm run test`. The pin test fails until all of these agree. The pull
+   request's pgTAP run is the proof that `supabase start`, the advisors and the
+   suites work on the new version; a new version can bring new advisor lints.
 
 ### Operator setup (GitHub)
 
@@ -292,6 +296,115 @@ run is green, drop the ledger backup table (see the normalisation doc).
 migration through the Supabase MCP `apply_migration` tool. It records an
 apply-time version, and the next push would try to run the file again.
 
+## Database tests on pull requests
+
+Three jobs exercise the schema itself. None needs a secret, and none touches
+production.
+
+### pgTAP (`pgtap.yml`, required)
+
+[`.github/workflows/pgtap.yml`](../../.github/workflows/pgtap.yml), job
+**Run pgTAP against local Supabase**, runs on every pull request to `main` and
+on manual dispatch. It starts a local Supabase with the pinned CLI
+(`supabase start`, which applies every migration to an empty database), runs
+the advisors (next section), then `npm run test:db`: every suite in
+`supabase/tests/` (53 files, 662 assertions on 2026-10-13). It skips the
+services no suite uses (Edge Functions, Studio, image transformation, the mail
+catcher, analytics); the edge runtime's health check once failed a run that
+touched none of it. A run takes about two minutes.
+
+It had a `paths` filter until plan item M3.2, so it ran only on pull requests
+touching SQL and could not be required: a required check that does not report
+blocks the pull request forever. It now runs on every pull request, docs-only
+ones included, and the ruleset requires it. The repository is public, so
+standard-runner minutes cost nothing. Suite conventions and running it locally:
+[`docs/testing/pgtap.md`](../testing/pgtap.md).
+
+### Supabase advisors
+
+The same job runs Supabase's own advisors (the database linter the dashboard's
+Security and Performance Advisors use) over the migrated local database:
+`supabase db advisors --local --type all --level info --fail-on none
+--output-format json`, read by
+[`scripts/ci/supabaseAdvisors.mjs`](../../scripts/ci/supabaseAdvisors.mjs)
+(plan item M3.3, audit finding 8.6). It fails on:
+
+- any WARN or ERROR finding that
+  [`docs/security/supabase-advisor-waivers.json`](../security/supabase-advisor-waivers.json)
+  does not waive. A waiver names one lint, the findings it covers by the
+  advisor's own `cacheKey` (one per policy, per table, role and action, or per
+  function body, so a new policy on a waived table or a changed function body
+  is a new finding and blocks), a reason, and `expires`: `null` for a finding
+  accepted by design, or a date at most 180 days out for debt (announced as a
+  warning in its last 30 days). INFO findings (unindexed foreign keys, unused
+  indexes) are reported, never blocking;
+- an expired or invalid waiver (it covers nothing), and a stale one: a waived
+  finding the advisors no longer report must be removed, or it would
+  pre-approve the finding if it came back;
+- advisors output it cannot read, a CLI error, or a report with no findings at
+  all (this schema always has INFO findings, so an empty report examined
+  nothing). These exit 2: "couldn't check" is never "clean".
+
+The CLI's own `--fail-on warn` is not used because it has no waivers. Triage on
+2026-10-13 (CLI 2.118.0, 176 findings, 33 at WARN): `function_search_path_mutable`
+on `public.min` (an aggregate, which cannot carry a `search_path`) and
+`public.set_updated_at` (calls only `now()`), accepted; `auth_rls_initplan` (11
+policies on 9 tables) and `multiple_permissive_policies` (20 tables), debt until
+2027-01-11: performance, not access, and rewriting RLS policies is its own
+reviewed change. Tests: `tests/supabaseAdvisors.test.js`.
+
+**The local advisors are a subset of the hosted ones.** The hosted project's
+advisors also report every `SECURITY DEFINER` function callable by `anon` or
+`authenticated` (lints 0028 and 0029: by design here, since every write is a
+definer RPC) and Auth's leaked-password protection, a project setting. CLI
+2.118.0 does not carry those lints, so the gate cannot see them; read them in
+the dashboard, or with the Supabase MCP `get_advisors`.
+
+**To clear a finding:** fix it in a migration (with its `docs/sql/` revert and
+smoke scripts; CI applies it on merge), or add a waiver with the reason in the
+same pull request. Never edit an applied migration to make the finding go away.
+
+### Running the database harness (`dbharness.yml`)
+
+[`scripts/dbharness/run.sh`](../../scripts/dbharness/run.sh)
+(`npm run test:db:local`) applies every migration to a throwaway PostgreSQL 16
+cluster, runs every smoke script under `docs/sql/`, checks each revert after
+its forward migration, and ends with `HARNESS OK` or `HARNESS FAILED`. pgTAP
+applies the migrations too but runs no smoke and no revert, so this is the
+only place either runs. It needs no network and no Docker.
+
+**In CI.** [`.github/workflows/dbharness.yml`](../../.github/workflows/dbharness.yml),
+job **Migration harness (PostgreSQL 16)**, runs it on pull requests that touch
+`supabase/`, `docs/sql/`, `scripts/dbharness/` or the workflow (plan item M3.4),
+and on manual dispatch. It is path-filtered, so it is not a required check (a
+required check with a `paths` filter would block every other pull request). It
+creates the `pgrunner` user, runs the harness as root, and fails unless the run
+exits 0 and prints `HARNESS OK`. About three minutes.
+
+**Locally.** The harness needs:
+
+- **root**: it switches to the cluster's owner with `runuser`, and installs stub
+  `pg_cron` and `pgtap` extensions into the server's share directory;
+- **PostgreSQL 16** server binaries at `/usr/lib/postgresql/16/bin` (Debian and
+  Ubuntu's `postgresql-16` package; the server need not be running), and
+  `python3`;
+- **an OS user to own the cluster**, `HARNESS_PGUSER`, default `pgrunner`. That
+  user exists nowhere by default: create it (`useradd --create-home pgrunner`,
+  as CI does), or point the variable at one that exists. The sandbox the
+  October 2026 audit ran in had only `postgres`, so it ran
+  `HARNESS_PGUSER=postgres npm run test:db:local`; another agent session created
+  a `pgrunner2` user by hand for the same reason and ran with
+  `HARNESS_PGUSER=pgrunner2`. Any unprivileged user with a home directory works;
+  each run uses a private `mktemp -d ~/harness.XXXXXX` under it.
+
+```bash
+sudo useradd --create-home pgrunner     # once
+sudo npm run test:db:local              # or: sudo HARNESS_PGUSER=postgres bash scripts/dbharness/run.sh
+```
+
+`npm run test:db:local:prove` replays the planted defects the harness is
+proven against (`scripts/dbharness/prove.sh`).
+
 ## Branch Protection
 
 `main` is protected by one repository ruleset, "main: pull requests with green
@@ -308,8 +421,10 @@ What it enforces on the default branch:
 - **Pull requests only.** A direct push to `main` is refused. No approving
   review is required (the owner is the only maintainer).
 - **Required checks, on an up-to-date branch:** `Build & Test` and
-  `Deno Mirror Tests`, both jobs of `ci.yml`, reported by GitHub Actions. The
-  branch must contain the latest `main` before it can merge ("strict").
+  `Deno Mirror Tests` (jobs of `ci.yml`), `Run pgTAP against local Supabase`
+  (`pgtap.yml`, since plan item M3.2) and `npm audit (high and critical block)`
+  (`audit.yml`), all reported by GitHub Actions. The branch must contain the
+  latest `main` before it can merge ("strict").
 - **No force pushes and no deletion of `main`.**
 - **Not required:** an approving review, or resolving review conversations
   (`required_review_thread_resolution: false`, the template skeleton's
@@ -318,19 +433,30 @@ What it enforces on the default branch:
 
 Not required: CodeQL (it runs through GitHub's code scanning default setup,
 reported as the `Analyze (...)` checks, not through a workflow in this
-repository), the Vercel deployment check, and pgTAP. pgTAP runs only on pull requests that touch its `paths`, so as a
-required check it would never report on the rest and would block them forever;
-it joins once it runs on every pull request (plan item M3.2, decision D5).
+repository), the Vercel deployment check, and the migration harness
+(`dbharness.yml`, path-filtered: see
+[Running the database harness](#running-the-database-harness-dbharnessyml)).
 
-**Why these two checks can be required.** A required check that never reports
+**Why these four checks can be required.** A required check that never reports
 blocks the pull request forever, so each must report on every pull request to
-`main`, including docs-only ones. `ci.yml` has no `paths` or `paths-ignore`
-filter on `pull_request`, and both jobs' only `if` is
-`github.event_name != 'schedule'`. `Build & Test` runs on a docs-only pull
-request too: its docs-only path skips the build steps inside the job, and the
-job itself still reports. `tests/rulesetRequiredChecks.test.js` fails if a
-required context stops matching a job's `name`, or if the trigger or a job's
-condition changes in a way that could stop it reporting.
+`main`, including docs-only ones. `ci.yml`, `pgtap.yml` and `audit.yml` have no
+`paths` or `paths-ignore` filter on `pull_request`; the two `ci.yml` jobs' only
+`if` is `github.event_name != 'schedule'`, and the pgTAP and audit jobs have
+none. `Build & Test` runs on a docs-only pull request too: its docs-only path
+skips the build steps inside the job, and the job itself still reports.
+`tests/rulesetRequiredChecks.test.js` reads every workflow in
+`.github/workflows/` and fails if a required context matches no job's `name`
+(or more than one), or if a trigger or a job's condition changes in a way that
+could stop it reporting.
+
+**Adding pgTAP and the audit (owner, once the pull request that added them to
+`main.json` has merged).** `main.json` gained `Run pgTAP against local Supabase` and
+`npm audit (high and critical block)`; the live ruleset does not change until
+the owner changes it. Settings -> Rules -> Rulesets -> "main: pull requests
+with green CI" -> Require status checks to pass -> Add checks -> add both
+(source GitHub Actions) -> Save. Or delete the ruleset and import `main.json`
+as described below. Then confirm with the rules API that all four contexts are
+listed.
 
 **Changing or restoring it (owner):** Settings -> Rules -> Rulesets -> "main:
 pull requests with green CI" -> edit, then save, and change `main.json` to
@@ -344,14 +470,14 @@ agent-ready-template's `check:settings` (`core.settings-branch-protected`).
 
 **What changes once it is active:**
 
-- Every merge needs both checks green on a branch that is up to date with
+- Every merge needs every required check green on a branch that is up to date with
   `main`; when `main` moves, "Update branch" re-runs CI (about 15-20 minutes)
   before the merge is allowed.
 - Force pushes to `main` are refused. This repository's history has been
   rewritten by force push before; a future rewrite needs the ruleset disabled
   first (Settings -> Rules -> Rulesets -> the ruleset -> Enforcement status:
   Disabled), and enabled again afterwards.
-- A check renamed in `ci.yml` must be renamed in `main.json` in the same
+- A required job renamed in its workflow must be renamed in `main.json` in the same
   change (the test fails otherwise) and in the live ruleset when it merges;
   otherwise every pull request waits on a check that no longer exists. The
   test reads only the file: nothing compares the file with the live ruleset,

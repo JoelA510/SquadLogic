@@ -183,7 +183,7 @@ recurring shapes:
 ### Definition of Done (Per PR)
 
 - [ ] Types check (`npm run typecheck`).
-- [ ] Tests pass (`npm run test` — Unit + Integration). _(E2E runs separately in CI/bulk.)_
+- [ ] Tests pass at the coverage thresholds (`npm run test:coverage`). _(E2E runs separately in CI/bulk.)_
 - [ ] Linter is happy (`npm run lint`), and `npm run check:unused` (knip) is green.
 - [ ] Frontend build is clean (`npm run frontend:build`).
 - [ ] `npm run check:advisors` and `npm run check:bundle` both green.
@@ -330,8 +330,9 @@ is `docs/operations/ENVIRONMENT.md`.
 migration above the base branch's latest, and no existing one renamed, edited or removed).
 Job **Deno Mirror Tests**: `scripts/deno-mirror-tests.sh` (the Deno twins of core logic, two host
 time zones) and `scripts/deno-check-edge.sh` (`deno check` on every Edge entrypoint, failing on
-zero found). Both jobs are required to merge. `audit.yml` runs `check:audit` on PRs, pushes and weekly
-(not required yet; `docs/security/dependency-policy.md`). `workflow-audit.yml` runs zizmor
+zero found). Both jobs are required to merge, as are `pgtap.yml`'s pgTAP job (the suites plus
+Supabase's advisors, every PR) and `audit.yml`'s `check:audit` (PRs, pushes, weekly).
+`dbharness.yml` runs the migration harness on PRs touching SQL. `workflow-audit.yml` runs zizmor
 on PRs; every action is pinned by commit SHA (`docs/operations/ci-cd.md`).
 
 On **push to `main`** only: `deploy-migrations` (environment `production`; `supabase db push`

@@ -42,6 +42,7 @@ import { applyPracticeExceptions } from '@squadlogic/core/utils/practiceExceptio
 import { canonicalJson } from '@squadlogic/core/scenario/inputs.js';
 import { loadPracticeRepairSnapshot } from '../hooks/usePracticeRepairSnapshot.js';
 import { openPracticeRepair } from './practiceRepairPanel.js';
+import { PERSISTENCE_INVALID_PAYLOAD } from '../lib/persistenceRequest.js';
 
 /** Why an Enact button is disabled. */
 export const ENACT_GATE = Object.freeze({
@@ -518,7 +519,10 @@ export async function enactPracticeRecommendation({
       view: { rows: after.rows, opened, state: next },
     };
   } catch (err) {
-    return { status: 'error', message: err?.message ?? String(err), sent };
+    // A body the client refused before the network call (plan M4.4) was never
+    // sent, whatever `sent` says: its outcome is known, nothing was written.
+    const refusedUnsent = err?.code === PERSISTENCE_INVALID_PAYLOAD;
+    return { status: 'error', message: err?.message ?? String(err), sent: sent && !refusedUnsent };
   }
 }
 

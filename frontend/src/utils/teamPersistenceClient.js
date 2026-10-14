@@ -1,4 +1,6 @@
+import { PersistencePayloadSchema } from '@squadlogic/core/schemas/index.js';
 import { ApiClient } from '../lib/apiClient.js';
+import { PERSISTENCE_INVALID_PAYLOAD, payloadRefusal } from '../lib/persistenceRequest.js';
 import { API_BASE_URL } from '../config.js';
 
 function normalizeEndpoint(baseUrl) {
@@ -65,10 +67,6 @@ export async function triggerTeamPersistence({
     };
   }
 
-  // 4. Execute Request
-  const client = new ApiClient(targetUrl, accessToken, (_url, _ops) =>
-    signal ? fetchImpl(_url, { ..._ops, signal }) : fetchImpl(_url, _ops)
-  );
   const effectiveRunMetadata =
     runMetadata ??
     (snapshot.runMetadata &&
@@ -76,18 +74,29 @@ export async function triggerTeamPersistence({
     !Array.isArray(snapshot.runMetadata)
       ? snapshot.runMetadata
       : undefined);
+  const body = { snapshot, overrides, runMetadata: effectiveRunMetadata };
 
-  const result = await client.post(
-    'team-persistence',
-    {
-      snapshot,
-      overrides,
-      runMetadata: effectiveRunMetadata,
-    },
-    { signal }
+  // 4. Validate the body against the Edge Function's own schema (plan M4.4)
+  // before it leaves the client. Refused in this client's contract, a returned
+  // `{ status: 'error' }`, with the Zod issues named in the message.
+  const refusal = payloadRefusal(PersistencePayloadSchema, body, 'The team roster save');
+  if (refusal) {
+    return {
+      status: 'error',
+      code: PERSISTENCE_INVALID_PAYLOAD,
+      message: refusal.message,
+      issues: refusal.issues,
+    };
+  }
+
+  // 5. Execute Request
+  const client = new ApiClient(targetUrl, accessToken, (_url, _ops) =>
+    signal ? fetchImpl(_url, { ..._ops, signal }) : fetchImpl(_url, _ops)
   );
 
-  // 5. Normalization
+  const result = await client.post('team-persistence', body, { signal });
+
+  // 6. Normalization
   if (result.status === 'error') {
     return {
       status: 'error',

@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
 import {
   ScoringInputSchema,
   datedSlotsIssue,
+  refuseEmptyGameRoster,
   refuseEmptyPracticeRoster,
 } from '../_shared/schemas/scoring.ts';
 import {
@@ -85,6 +86,12 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
     const emptyRoster = refuseEmptyPracticeRoster(practice);
     if (emptyRoster) {
       return jsonResponse(emptyRoster, 422);
+    }
+    // The same for a games block with no teams or no games: the game engine
+    // skips every game whose teams it cannot find and would report it clean.
+    const emptyGameRoster = refuseEmptyGameRoster(games);
+    if (emptyGameRoster) {
+      return jsonResponse(emptyGameRoster, 422);
     }
 
     // 3a'. Dated or undated, never half of each (M4.7, plan Q8): a slot list

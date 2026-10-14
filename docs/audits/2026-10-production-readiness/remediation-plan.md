@@ -885,6 +885,20 @@ standards these items name · [ ] deployed and smoke-tested
 > - **Verification label:** statically reviewed.
 
 > **M4.4. Persistence payloads aren't validated before they leave the client** (audit finding 2.3, medium)
+> - **Status: in review, #576 (`claude/vibrant-allen-hr7y7s-w3c`); not merged.** Each client
+>   checks its body against core's copy of the `PersistencePayloadSchema` its Edge Function parses
+>   it with, before the network call: `PersistencePayloadSchema` (team; it gains the Edge's
+>   `lastRunId`/`runId`), and the new `GamePersistencePayloadSchema` and
+>   `PracticePersistencePayloadSchema` (`packages/core/src/schemas/index.js`), judged on the body
+>   as JSON will send it. A refusal names each Zod issue (`path: message`, the first five and a
+>   count) and keeps each client's contract: the team client returns `{ status: 'error' }`, the
+>   game and practice clients throw, both with `code: 'PERSISTENCE_INVALID_PAYLOAD'` and the
+>   `issues`. Test gate met, *executed*: a malformed-payload case per client (and per practice
+>   sender: save, repair, enact), each red with the parse neutered;
+>   `tests/persistencePayloadSchemaDrift.test.js` evaluates each Edge schema from its source under
+>   zod 3 and holds client and server to one verdict over a mutation product (red on three planted
+>   drifts, and on `main`'s team schema, which lacked `lastRunId`). The three PR 2-C follow-ups
+>   ride in the same PR (Discovered during execution, 2026-10-14).
 > - **Fix approach:** `PersistencePayloadSchema.safeParse()` in `teamPersistenceClient.js` (and
 >   the game and practice snapshot schemas in theirs) before the network call, rejecting with the
 >   Zod issue list.
@@ -1339,6 +1353,34 @@ smoke-tested
     budget printed from inside the worker, before and after).
   - Scorecard `node.ci-runs-gate` fails only because `package.json`'s `build` script never runs
     in CI (M6.1's `build`); the test runner is found through `test:coverage`. *Executed.*
+
+- 2026-10-14, found by #576 (M4.4, with PR 2-C's three follow-ups):
+  - PR 2-C's follow-ups above are done in #576, *executed* (each test red without its change):
+    `EvaluationPanel`'s Save and `useAutoScheduler`'s run are under the M2.5 deadline (its race is
+    now `withPersistenceDeadline`, which also takes a caller's Cancel signal; the panel's timeout
+    reads "It is not known whether the evaluation was saved", never "Failed to send", and the
+    auto-scheduler's says the run may have finished and been recorded, since the function records
+    it before answering (Codex review on #576)); after a
+    `PERSISTENCE_TIMEOUT` or a `PERSISTENCE_UNREADABLE_RESPONSE` (both say the outcome is not
+    known) the game page (Apply, Rollback) and the practice page (Apply, override confirm) read
+    the saved schedule again (`refetch` on `useSchedulerRun` and `useCurrentPracticeSchedule`,
+    through `useDashboardData`; the practice grid keeps its rows while the re-read is in flight),
+    and the panel drops its cached reads; `fairness-scoring` answers 422 `EMPTY_GAME_ROSTER` for a
+    games block with no teams or no games, at the input boundary as M2.6 does, with the engine
+    unchanged. The re-read follow-up was recorded in PR 2-C's progress log, not in this section.
+  - The practice repair panel already handled an unknown enact outcome (it halts and says to
+    reopen the panel to see the season as saved). M4.4's pre-send refusal of an enact body would
+    have reached it as one, since `enactPracticeRecommendation` marks the enact sent before
+    calling the client; a `PERSISTENCE_INVALID_PAYLOAD` now reports `sent: false` ("Nothing was
+    enacted"). *Executed* (found by this PR's review; red without the fix).
+  - `TeamPersistencePanel`'s own 10 s timeout says "Supabase sync timed out. Please retry.": an
+    unknown outcome presented as a failure to retry, the shape M2.5 fixed for games and practice.
+    The team client is not on `postPersistenceRequest`. Not fixed. *Statically reviewed.*
+  - The Edge game evaluator still skips, without a word, a game side whose team is missing from a
+    non-empty roster (core's `evaluateGameSchedule` warns `unknown-team`), so a roster that
+    matches no game still scores clean. Reporting it is a scoring change, so it is not in this
+    PR; `EvaluationPanel` has no client guard for games either, unreachable while no page passes
+    `gameData`. *Statically reviewed.*
 
 - 2026-10-14, found by PR w3b (M4.6, M4.3):
   - The mock's organization id is `org-1`, not a UUID, and core's `SlotSchema` refuses an

@@ -1402,6 +1402,13 @@ smoke-tested
     `resetImport('all')` clears it in the same handler, and nothing writes the `imports` table
     the context rehydrates from, so `/teams` opens without the import; the side navigation
     keeps it. Not fixed. *Statically reviewed.*
+  - A second import can be bounced back to "Import Applied": `ImportContext`'s Realtime handler
+    applies any `import_jobs` UPDATE that arrives while no job is active
+    (`activeJobIdRef.current === job.id || !activeJobIdRef.current`), so a late event for the
+    previous job, after "Upload Another File" reset the panel, puts the completed view back over
+    the file just chosen. The mock has no Realtime. Not fixed; the import step starts again
+    when it happens. *Executed* (PR run 38518949814, its trace: reset, file chosen, then the
+    completed view at 0% progress).
   - The Exports page's "Upload to Storage" writes to an `exports` bucket no migration creates,
     and production has no `storage.objects` policy for it (only `raw-imports` has policies), so
     an administrator's upload would be refused. Not fixed; not in the scenarios. *Executed*

@@ -1197,6 +1197,17 @@ and smoke-tested
 > - **Verification label:** executed.
 
 > **M6.4. README's release line is stale** (audit finding 12.9, low)
+> - **Status: built in PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`).** Reconciled against the
+>   three sources: `CHANGELOG.md`'s latest release is 1.0.1 (2026-04-23), `package.json` says
+>   1.0.1, and the production bundle (`squadlogic.secureyour.tech`, fetched 2026-10-17) carries
+>   `1.0.1` as Sentry's release alongside unreleased work (the heat forecast's chunk). *Executed.*
+>   README now says that: the latest release is v1.0.1, and production, which deploys every merge
+>   to `main`, also runs everything under "Unreleased", still as 1.0.1. `CHANGELOG.md` needed no
+>   change: its "Unreleased" section already lists that work. New `tests/releaseLine.test.js`
+>   holds the line to `package.json` and the CHANGELOG's latest release; it passes on `main`'s
+>   wording too (the old line named v1.0.1), so the staleness itself was a manual check, and the
+>   test guards the next release: a planted 1.1.0 entry fails it. Cutting that release is for the
+>   owner.
 > - **Fix approach:** reconcile README's status line with `CHANGELOG.md` and the deployed
 >   version.
 > - **Files touched:** `README.md`, `CHANGELOG.md`.

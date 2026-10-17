@@ -1153,6 +1153,17 @@ and smoke-tested
 > - **Verification label:** executed (current state).
 
 > **M6.2. CRLF and mixed line endings** (audit finding 12.7, low)
+> - **Status: built in PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`).** The six applied
+>   migrations committed with CRLF or mixed endings are marked `-text` in `.gitattributes`, each by
+>   name, and the five other files are renormalized to LF (three architecture docs, two E2E
+>   `.feature` files; `.gitignore` was done by PR M5). The diff is line endings only. Acceptance,
+>   *executed*: `git ls-files --eol` shows `i/crlf` or `i/mixed` only for the six migrations, each
+>   `attr/-text`. Test gate, *executed*: scorecard `core.lf-line-endings` fails on `main` (11
+>   files) and passes on the branch, with no waiver needed, since the standard accepts a named
+>   `-text`; `migrationVersions.mjs --base origin/main` passes, and fails ("an existing migration
+>   was edited") on a local commit that renormalizes one of the six. New
+>   `tests/lineEndings.test.js` runs the same check in `npm run test` (red on `main`, listing all
+>   eleven), and refuses a `-text` rule that is a pattern or names a file that no longer needs it.
 > - **Fix approach:** mark the six applied migrations `-text` in `.gitattributes` (they must not
 >   be edited) and renormalize the other seven files.
 > - **Files touched:** `.gitattributes`, the seven non-migration files.

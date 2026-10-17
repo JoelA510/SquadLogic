@@ -11,7 +11,8 @@ function renderCellContent(row, col) {
 
 /**
  * One body cell of the DataGrid: displays the value, the focus outline,
- * the dirty corner marker, or the active editor (input/select).
+ * the dirty corner marker, or the active editor (input/select). An editor
+ * that loses focus commits without taking focus back (DataGrid's commitEdit).
  */
 export default function GridCell({
   row,
@@ -28,9 +29,11 @@ export default function GridCell({
   onClick = undefined,
   onDoubleClick = undefined,
   stickyLeft = undefined,
+  cellProps = undefined,
 }) {
   return (
     <td
+      {...cellProps}
       className={[
         col.editable ? 'editable' : '',
         col.sticky ? 'sticky-col' : '',
@@ -99,4 +102,6 @@ GridCell.propTypes = {
   onClick: PropTypes.func,
   onDoubleClick: PropTypes.func,
   stickyLeft: PropTypes.number,
+  /** The grid's cell attributes (role, data-grid-cell, data-r, data-c), from DataGrid. */
+  cellProps: PropTypes.object,
 };

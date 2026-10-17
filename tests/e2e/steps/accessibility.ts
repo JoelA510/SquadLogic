@@ -121,3 +121,71 @@ Then(
     ).toEqual([]);
   }
 );
+
+// ---- DataGrid keyboard (plan, Discovered under M4.2: the grid trapped Tab, WCAG 2.1.2) ----
+
+/** Where focus is, relative to a grid: inside it or not, and the focused cell's row and column. */
+async function focusInGrid(page: Page, gridName: string) {
+  return page.getByRole('grid', { name: gridName }).evaluate((grid) => {
+    const el = document.activeElement;
+    const cell = el?.closest('[data-grid-cell]');
+    return {
+      inside: !!el && grid.contains(el),
+      r: cell?.getAttribute('data-r') ?? null,
+      c: cell?.getAttribute('data-c') ?? null,
+      tag: el?.tagName ?? null,
+    };
+  });
+}
+
+When('I tab from the table search into the {string}', async ({ page }, gridName: string) => {
+  const grid = page.getByRole('grid', { name: gridName });
+  await expect(grid).toBeVisible();
+  await page.getByRole('textbox', { name: 'Search table' }).focus();
+  // A real Tab, pressed until focus enters the grid; the toolbar's controls sit in between.
+  for (let i = 0; i < 12 && !(await focusInGrid(page, gridName)).inside; i += 1) {
+    await page.keyboard.press('Tab');
+  }
+  const at = await focusInGrid(page, gridName);
+  expect(at.inside, 'Tab never reached the grid').toBe(true);
+  // It enters at the grid's one tab stop: the first body row's first editable cell.
+  expect(at.r).toBe('0');
+});
+
+Then(
+  'the arrow keys move focus between the cells of the {string}',
+  async ({ page }, gridName: string) => {
+    const start = await focusInGrid(page, gridName);
+    await page.keyboard.press('ArrowDown');
+    const down = await focusInGrid(page, gridName);
+    expect(down).toMatchObject({ inside: true, r: '1', c: start.c });
+    await page.keyboard.press('ArrowRight');
+    const right = await focusInGrid(page, gridName);
+    expect(right).toMatchObject({ inside: true, r: '1' });
+    expect(Number(right.c)).toBe(Number(start.c) + 1);
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('ArrowUp');
+    const header = await focusInGrid(page, gridName);
+    expect(header).toMatchObject({ inside: true, r: '-1', c: right.c });
+    await page.keyboard.press('ArrowDown');
+    expect(await focusInGrid(page, gridName)).toMatchObject({ inside: true, r: '0' });
+    // The focused cell is visibly marked (WCAG 2.4.7): an inset ring, not the default outline.
+    const ring = await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement;
+      const cell = el.closest('[data-grid-cell]') as HTMLElement;
+      return getComputedStyle(cell).boxShadow;
+    });
+    expect(ring).not.toBe('none');
+  }
+);
+
+Then(
+  'Tab moves focus out of the {string} and Shift+Tab brings it back to the same cell',
+  async ({ page }, gridName: string) => {
+    const before = await focusInGrid(page, gridName);
+    await page.keyboard.press('Tab');
+    expect((await focusInGrid(page, gridName)).inside, 'Tab stayed inside the grid').toBe(false);
+    await page.keyboard.press('Shift+Tab');
+    expect(await focusInGrid(page, gridName)).toEqual(before);
+  }
+);

@@ -1580,7 +1580,14 @@ smoke-tested
   - `DataGrid` is one `role="application"` widget whose wrapper takes Tab (`useGridKeyboard`
     moves the active cell on Tab, so focus cannot leave the grid by keyboard once a cell is
     active: WCAG 2.1.2). Moving it to `role="grid"` with a focusable cell is its own item.
-    *Statically reviewed.*
+    *Statically reviewed.* **Fixed 2026-10-17** (Wave 4 accessibility, branch
+    `claude/vibrant-allen-hr7y7s-a11y`): the table is a `role="grid"` with one tab stop, a roving
+    tabindex over every cell (header row, selection and row-actions columns included) or the one
+    widget a cell holds; arrows, Home and End move focus, Left and Right step through a cell's
+    several widgets, and Tab is never the grid's (an open editor still commits on Tab). An editor
+    left by moving focus elsewhere commits without pulling focus back. `tests/dataGrid.test.jsx`
+    and a keyboard scenario in `accessibility.feature` (real Tab in Chromium on `/players`) each
+    fail with the old Tab handler planted back. *Executed.*
   - Recharts axes and gridlines on the analytics page keep hard-coded slate colours, which do
     not re-theme. *Statically reviewed.*
 

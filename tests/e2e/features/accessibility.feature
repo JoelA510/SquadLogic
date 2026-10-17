@@ -16,6 +16,13 @@ Feature: Every top-level route passes an automated accessibility scan
     When I switch the sign-in page to the dark theme
     Then axe finds no serious or critical violations on "/login" in the "dark" theme
 
+  Scenario: Arrow keys move within the players grid and Tab leaves it (WCAG 2.1.2)
+    Given I am logged into SquadLogic as an admin
+    When I open "/players" and see its "Players" heading
+    And I tab from the table search into the "Players grid"
+    Then the arrow keys move focus between the cells of the "Players grid"
+    And Tab moves focus out of the "Players grid" and Shift+Tab brings it back to the same cell
+
   Scenario Outline: <route> passes axe in the light and dark themes
     Given I am logged into SquadLogic as an admin
     When I open "<route>" and see its "<heading>" heading

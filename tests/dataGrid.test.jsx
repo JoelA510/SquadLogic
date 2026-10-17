@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import DataGrid from '../frontend/src/components/grid/DataGrid.jsx';
 
@@ -50,7 +50,7 @@ describe('DataGrid', () => {
 
     const nameHeader = screen.getByText('Name');
     fireEvent.click(nameHeader);
-    const cells = screen.getAllByRole('cell').map((cell) => cell.textContent);
+    const cells = screen.getAllByRole('gridcell').map((cell) => cell.textContent);
     expect(cells.join(' ')).toMatch(/Ana Cruz.*Ben Diaz.*Zoe Park/s);
     expect(screen.getByText('Name').closest('th')).toHaveAttribute('aria-sort', 'ascending');
     fireEvent.click(nameHeader);
@@ -69,8 +69,12 @@ describe('DataGrid', () => {
     expect(fireEvent.keyDown(sortName, { key: ' ' })).toBe(true);
     fireEvent.click(sortName);
     expect(sortName.closest('th')).toHaveAttribute('aria-sort', 'ascending');
-    // Control: the same keys on the grid itself are still the grid's.
-    expect(fireEvent.keyDown(screen.getByRole('application'), { key: 'Enter' })).toBe(false);
+    // Control: the same key on an editable cell is still the grid's (it opens the editor).
+    expect(fireEvent.keyDown(screen.getByText('Zoe Park').closest('td'), { key: 'Enter' })).toBe(
+      false
+    );
+    expect(screen.getByRole('textbox', { name: 'Name' })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Name' }), { key: 'Escape' });
     // ...and an arrow pressed on the sort button still moves the grid's active cell.
     expect(fireEvent.keyDown(sortName, { key: 'ArrowDown' })).toBe(false);
   });
@@ -134,10 +138,9 @@ describe('DataGrid', () => {
   it('navigates with arrow keys and starts an edit by typing', () => {
     const onCellChange = vi.fn();
     render(<Harness onCellChange={onCellChange} />);
-    const app = screen.getByRole('application');
-    fireEvent.keyDown(app, { key: 'ArrowDown' }); // activate first cell
-    fireEvent.keyDown(app, { key: 'ArrowDown' }); // row 2
-    fireEvent.keyDown(app, { key: 'X' });
+    screen.getByText('Zoe Park').closest('td').focus(); // the first cell
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' }); // row 2
+    fireEvent.keyDown(document.activeElement, { key: 'X' });
     const input = screen.getByRole('textbox', { name: 'Name' });
     expect(input).toHaveValue('X');
     fireEvent.keyDown(input, { key: 'Tab' });
@@ -172,9 +175,136 @@ describe('DataGrid', () => {
     }));
     render(<Harness rows={manyRows} />);
     expect(screen.getByText('1400 records')).toBeInTheDocument();
-    const table = screen.getByRole('table');
+    const table = screen.getByRole('grid');
     const renderedRows = within(table).getAllByRole('row');
     // header + virtual window (+ spacers), far fewer than 1400
     expect(renderedRows.length).toBeLessThan(120);
+  });
+});
+
+/**
+ * Plan, Discovered (M4.2): the grid was one `role="application"` widget whose key handler took Tab
+ * to move the active cell, so once a cell was active, focus could not leave by keyboard (WCAG
+ * 2.1.2). It is now a `role="grid"` with one tab stop (a roving tabindex over its cells, and the
+ * one widget a cell holds): arrows move focus within it and Tab is the browser's, out of it.
+ */
+describe('DataGrid keyboard (role="grid", WCAG 2.1.2)', () => {
+  /** Elements Tab can land on: the container itself and everything in it with tabIndex >= 0. */
+  const tabStops = (container) =>
+    [container, ...container.querySelectorAll('*')].filter(
+      (el) => el.tabIndex >= 0 && !el.disabled
+    );
+
+  const renderWithNeighbour = (props = {}) =>
+    render(
+      <>
+        <Harness {...props} />
+        <button type="button">After the grid</button>
+      </>
+    );
+
+  it('lets Tab leave once a cell is active, and is a single tab stop', () => {
+    renderWithNeighbour();
+    const grid = screen.getByLabelText('Data grid');
+    tabStops(grid)[0].focus();
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' });
+    // Tab is not the grid's: an unprevented Tab is the browser moving focus to the next stop.
+    expect(fireEvent.keyDown(document.activeElement, { key: 'Tab' })).toBe(true);
+    expect(fireEvent.keyDown(document.activeElement, { key: 'Tab', shiftKey: true })).toBe(true);
+    // ...and the next stop is outside the grid: nothing else inside it is in the tab order.
+    expect(tabStops(grid)).toHaveLength(1);
+    expect(tabStops(grid)[0]).toBe(document.activeElement);
+  });
+
+  it('moves focus between cells, the selection column and the header with the arrow keys', () => {
+    renderWithNeighbour();
+    const grid = screen.getByRole('grid', { name: 'Data grid' });
+    const [stop] = tabStops(grid);
+    expect(stop).toHaveTextContent('Zoe Park');
+    stop.focus();
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' });
+    expect(document.activeElement).toHaveTextContent('Ben Diaz');
+    expect(document.activeElement).toHaveAttribute('role', 'gridcell');
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowRight' });
+    expect(document.activeElement).toHaveTextContent('7');
+    // A cell holding one widget gives focus to the widget.
+    fireEvent.keyDown(document.activeElement, { key: 'Home' });
+    expect(document.activeElement).toBe(screen.getAllByRole('checkbox', { name: 'Select row' })[1]);
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowUp' });
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Select all rows' }));
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Name' }));
+    // The roving stop follows focus.
+    expect(tabStops(grid)).toEqual([document.activeElement]);
+  });
+
+  it('reaches each widget of a cell that holds several with Left and Right', () => {
+    const onEdit = vi.fn();
+    renderWithNeighbour({
+      selectable: false,
+      columns: [
+        { key: 'name', label: 'Name' },
+        {
+          key: 'actions',
+          label: 'Actions',
+          render: (row) => (
+            <>
+              <button type="button" onClick={() => onEdit(row.id)}>
+                Edit {row.name}
+              </button>
+              <button type="button">Remove {row.name}</button>
+            </>
+          ),
+        },
+        { key: 'age', label: 'Age' },
+      ],
+    });
+    const grid = screen.getByRole('grid', { name: 'Data grid' });
+    tabStops(grid)[0].focus();
+    expect(document.activeElement).toHaveTextContent('Zoe Park');
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Edit Zoe Park' }));
+    // Enter is the button's own (a native button turns it into a click), not an edit.
+    expect(fireEvent.keyDown(document.activeElement, { key: 'Enter' })).toBe(true);
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove Zoe Park' }));
+    expect(tabStops(grid)).toEqual([document.activeElement]);
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowRight' });
+    expect(document.activeElement).toHaveTextContent('8');
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowLeft' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Edit Zoe Park' }));
+  });
+
+  it('returns focus to the grid after Enter commits an edit, but not after a blur', () => {
+    const onCellChange = vi.fn();
+    renderWithNeighbour({ onCellChange });
+    const grid = screen.getByRole('grid', { name: 'Data grid' });
+    tabStops(grid)[0].focus();
+    fireEvent.keyDown(document.activeElement, { key: 'Enter' });
+    const input = screen.getByRole('textbox', { name: 'Name' });
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: 'Zoe Parks' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onCellChange).toHaveBeenCalledWith('r1', 'name', 'Zoe Parks');
+    expect(document.activeElement).toHaveTextContent('Ben Diaz');
+
+    // An edit left by moving focus elsewhere commits without pulling focus back into the grid.
+    fireEvent.keyDown(document.activeElement, { key: 'F2' });
+    const after = screen.getByRole('button', { name: 'After the grid' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Ben Diaz Jr' },
+    });
+    act(() => after.focus());
+    expect(onCellChange).toHaveBeenCalledWith('r2', 'name', 'Ben Diaz Jr');
+    expect(document.activeElement).toBe(after);
+  });
+
+  it('counts the header row in aria-rowcount and indexes each row', () => {
+    render(<Harness />);
+    const grid = screen.getByRole('grid', { name: 'Data grid' });
+    expect(grid).toHaveAttribute('aria-rowcount', '4');
+    const rows = within(grid).getAllByRole('row');
+    expect(rows.map((row) => row.getAttribute('aria-rowindex'))).toEqual(['1', '2', '3', '4']);
   });
 });

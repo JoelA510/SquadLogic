@@ -102,8 +102,13 @@ Two gates enforce part of the WCAG 2.2 AA bar (plan item M4.2); neither is confo
   matching fails the scan, so it is deleted with the fix.
 
 Not covered by either: anything a route renders only with data the mock seed lacks, overlays
-that are closed when the page loads, keyboard operation and focus order, and dragging
-alternatives. Those stay manual review against `ui-ux-pass.md`.
+that are closed when the page loads, keyboard operation and focus order (beyond the one
+`DataGrid` keyboard scenario in the same feature), and dragging alternatives. Those stay manual
+review against `ui-ux-pass.md`.
+
+`DataGrid` is a `role="grid"` with one tab stop (WAI-ARIA APG data grid): arrows move between
+cells, Tab leaves. A column's `render` may put widgets in a cell; the grid takes them out of the
+tab order and reaches them with the arrow keys, so don't give them a `tabIndex` of your own.
 
 Colors: text uses the theme tokens (`text-text-*`, `text-text-accent`, and
 `text-status-{success,warning,error}-text` on status fills), never Tailwind's `-400` palette

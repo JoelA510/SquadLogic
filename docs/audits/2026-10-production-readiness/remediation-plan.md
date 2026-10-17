@@ -808,17 +808,26 @@ standards these items name · [ ] deployed and smoke-tested
 > 6.4 — resolved by M4.1.
 
 > **M4.7. Both scoring engines judge a weekly slot by its first occurrence and ignore assignment date ranges** (not an audit finding: found by PR 1-A, #551; medium) — **plan first: needs the owner's approval before any code**
-> - **Status (2026-10-13): built as planned, in review** (branch
->   `claude/vibrant-allen-hr7y7s-m47`, not merged). Ranges and slot validity are in both
->   engines, held together by a dated parity extract (corpus cases C1 and C4) and 14
->   hand-written witnesses run by core, the cross-arm drift test and Deno; the page sends each
->   slot's dating and each row's range, the override panel counts from the season's today on,
->   and apply-time metrics are dated (Q9). The undated extract is byte-identical, and the
->   solver's outputs over a season-2026 sweep match `main` byte for byte except the new
->   `dateModel: 'undated'` on its evaluation (*executed*). Each of the plan's plants (P1-P7,
->   plus three more) turns a test red (*executed*). **Remaining scope:** practice exceptions
->   (`relocated`, `time_tbd`) are not read by either engine yet; that is its own PR (Q1),
->   through `applyPracticeExceptions` and its Edge twin. The solver is M4.8 (Q2).
+> - **Status (2026-10-17): built and merged (#560); the exceptions follow-up (Q1) built, in
+>   review** (branch `claude/vibrant-allen-hr7y7s-m47x`, not merged). Ranges and slot
+>   validity are in both engines, held together by a dated parity extract (corpus cases C1
+>   and C4) and 14 hand-written witnesses run by core, the cross-arm drift test and Deno; the
+>   page sends each slot's dating and each row's range, the override panel counts from the
+>   season's today on, and apply-time metrics are dated (Q9). The undated extract is
+>   byte-identical, and the solver's outputs over a season-2026 sweep match `main` byte for
+>   byte except the new `dateModel: 'undated'` on its evaluation (*executed*). Each of the
+>   plan's plants (P1-P7, plus three more) turns a test red (*executed*).
+>   **Exceptions (Q1, the follow-up):** both engines now apply the season's live
+>   `practice_exceptions` through `applyPracticeExceptions` and its Edge twin: a `relocated`
+>   date is compared and counted at its new slot and time, a `time_tbd` date is in neither
+>   comparison and is reported (`timeTbd`, and a `time-tbd` warning on the Edge), and an
+>   exception that cannot be applied is a data-quality line. The page reads and sends them (a
+>   failed read withholds the evaluation and says why), and apply-time metrics apply them.
+>   Held together by 8 more witnesses in the shared vector table (core, drift, Deno) and a
+>   dated parity case C5 (C4 with two modelled exceptions); every witness fails on the
+>   engines before it, in both arms (*executed*, Deno 2.9.6 locally). The override panel's
+>   "N free" does not read exceptions (declared, a question in the PR). The solver is M4.8
+>   (Q2).
 >   The plan is [`docs/PLAN_SCORING_DATE_MODEL.md`](../../PLAN_SCORING_DATE_MODEL.md) (#555).
 >   Measured (*executed*, scratch witness through the page's own slot builder and both engines):
 >   the two arms agree, so the defect is shared, not drift; modelling the corpus's "Select OLD"
@@ -1596,6 +1605,23 @@ smoke-tested
     dates (2025-01-01 to 2025-12-31). Generate Schedule on the seed stages a 1:00 AM kickoff, and
     did not refuse the slot for lying outside the season. Seed data; not changed. *Executed*
     (the staged game on the new scenario's page reads "Sat, 4/4/2026 · 1:00 AM").
+
+- 2026-10-17, found by the M4.7 exceptions follow-up (Q1):
+  - The override panel's per-slot "N free" (`overrideSlotLoad`, Q5) counts series only: a
+    relocated week still holds its original slot and not its target, and a TIME TBD week still
+    counts. Not changed; a question for the owner in the PR. *Statically reviewed.*
+  - The exceptions a save is about to write (the daylight TIME TBD rows the Apply path builds
+    for new placements, `buildDaylightExceptions`) are not in the evaluation until they are saved
+    and re-read: a staged placement has no stored id, so no exception can name it. Its timed
+    range already ends at the daylight cut (`newPlacementRange`), so nothing is miscounted; the
+    TIME TBD tail is just not listed before the save. *Statically reviewed.*
+  - A relocation onto a slot is counted on its date even when that date is outside the target
+    slot's validity (`applyPracticeExceptions` knows the row's range, not the target's
+    validity); the portal and the feed show it the same way. Not changed. *Statically
+    reviewed.*
+  - The auto-scheduler's own score (`scoreSchedule`) stays undated and reads no exception
+    (Q2, M4.8); its lock load already holds slots for live `time_tbd` and `relocated` rows
+    (`practice-lock.ts`). *Statically reviewed.*
 
 ## Deferred with reason
 

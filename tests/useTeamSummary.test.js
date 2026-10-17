@@ -181,4 +181,39 @@ describe('useTeamSummary', () => {
       unmount();
     }
   });
+  it('refetch() reads the latest run again, and reports loading from the same update', async () => {
+    // Before a team sync: no run. After it: the run the sync wrote.
+    const reads = [
+      { data: null, error: null },
+      {
+        data: {
+          id: 'team-run-synced',
+          status: 'completed',
+          completed_at: '2026-10-17T12:00:00Z',
+          results: { teamsByDivision: { U10: [{ id: 'team-1', name: 'Team One' }] } },
+        },
+        error: null,
+      },
+    ];
+    // @ts-expect-error [MOCK] - query builder only implements methods exercised by this hook.
+    vi.mocked(supabase.from).mockImplementation(() => createQueryBuilder(reads.shift()));
+
+    const { result, unmount } = renderHook(() => useTeamSummary());
+
+    try {
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.generatedAt).toBeNull();
+
+      act(() => result.current.refetch());
+      // A caller that clears a staged copy in this update never sees the stale run.
+      expect(result.current.loading).toBe(true);
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.summary.runId).toBe('team-run-synced');
+      expect(result.current.generatedAt).toBe('2026-10-17T12:00:00Z');
+      expect(supabase.from).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
+    }
+  });
 });

@@ -14,6 +14,8 @@ const STATUS_DISPLAY = {
   success: { label: 'Sync complete', tone: 'success', dot: 'bg-status-success' },
   blocked: { label: 'Sync blocked', tone: 'warning', dot: 'bg-status-warning' },
   error: { label: 'Sync failed', tone: 'danger', dot: 'bg-status-error', alert: true },
+  // The panel stopped waiting; the server may still have saved. Not a failure to retry.
+  unknown: { label: 'Outcome unknown', tone: 'warning', dot: 'bg-status-warning', alert: true },
 };
 
 const UNKNOWN_STATUS_DISPLAY = {
@@ -76,7 +78,7 @@ export default function PersistencePanel({
         <div className="flex items-center gap-3">
           <button
             onClick={onSync}
-            disabled={status === 'syncing'}
+            disabled={status === 'syncing' || status === 'unknown'}
             className="glass-button relative z-20"
           >
             {status === 'syncing' ? 'Syncing...' : 'Sync to Supabase'}

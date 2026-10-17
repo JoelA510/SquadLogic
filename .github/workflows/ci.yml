@@ -204,9 +204,11 @@ jobs:
         if: steps.changes.outputs.docs_only != 'true'
         run: npm run test:perf
 
+      # `npm run build` is the frontend build (`frontend:build`, plan item
+      # M6.1), so the script contributors run is the one CI runs.
       - name: Build Frontend
         if: steps.changes.outputs.docs_only != 'true'
-        run: npm run frontend:build
+        run: npm run build
         # A production build fails without the Supabase variables (plan item
         # M2.2, vite.config.js). These are well-formed stand-ins, not
         # credentials: `.invalid` never resolves, and this build is never
@@ -214,9 +216,16 @@ jobs:
         # next step measures this build against the bundle budget, and it
         # should be the shape production ships: the real client, no mock chunk.
         # The E2E step runs the dev server with the opt-in.
+        #
+        # The DSN stand-in is there for the same reason (plan M6): without one,
+        # main.jsx's `if (SENTRY_DSN)` folds away and the bundle budget
+        # measured a build without Sentry, which production never ships.
+        # `.invalid` never resolves; config/bundle-budget.json's Session
+        # Replay rule fails (NO MATCH) on a build without it.
         env:
           VITE_SUPABASE_URL: 'https://ci-build.invalid'
           VITE_SUPABASE_ANON_KEY: 'sb_publishable_ci-build-stand-in'
+          VITE_SENTRY_DSN: 'https://00000000000000000000000000000000@sentry-ci-build.invalid/0'
 
       - name: Bundle-budget gate (Wave 6a)
         if: steps.changes.outputs.docs_only != 'true'

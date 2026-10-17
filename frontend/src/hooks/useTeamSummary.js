@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
 // Use absolute import via configured alias
@@ -30,6 +30,18 @@ export function useTeamSummary() {
   const [status, setStatus] = useState('idle'); // idle, running, completed, error
   const [progress, setProgress] = useState(0);
   const lastKnownStatusRef = useRef('idle');
+  const [version, setVersion] = useState(0);
+  /**
+   * Read the latest team run again, as `useSchedulerRun`'s `refetch` does: a
+   * page calls it after a save that wrote a new run (a team sync), so the run on
+   * screen is not the one from before it. `loading` turns on in the same update,
+   * so a caller that clears its own staged copy in that update never renders the
+   * stale run in between.
+   */
+  const refetch = useCallback(() => {
+    setLoading(true);
+    setVersion((v) => v + 1);
+  }, []);
 
   useEffect(() => {
     let pollTimeout;
@@ -117,7 +129,16 @@ export function useTeamSummary() {
       cancelled = true;
       if (pollTimeout) clearTimeout(pollTimeout);
     };
-  }, [currentOrganization?.id, currentSeasonSetting?.id]);
+    // `version` is read by nothing in the body: it is here so `refetch` re-runs the read.
+  }, [currentOrganization?.id, currentSeasonSetting?.id, version]);
 
-  return { summary, loading, error, status, progress, generatedAt: summary?.generatedAt };
+  return {
+    summary,
+    loading,
+    error,
+    status,
+    progress,
+    generatedAt: summary?.generatedAt,
+    refetch,
+  };
 }

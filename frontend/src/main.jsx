@@ -15,6 +15,10 @@ import './index.css';
 // build). When the env var is absent or empty, Sentry.init() is skipped
 // entirely and the SDK tree-shakes to near-zero in the production bundle
 // (Vite dead-code elimination).
+//
+// Session Replay is not in the main entry: it is added once its own chunk
+// loads (lib/sentryReplay.js says why). Errors before then are reported
+// without a replay; if the chunk cannot load, that is reported too.
 // ---------------------------------------------------------------------------
 
 if (SENTRY_DSN) {
@@ -24,8 +28,12 @@ if (SENTRY_DSN) {
       dev: IS_DEV,
       release: APP_VERSION,
       deployEnv: DEPLOY_ENV,
-      integrations: [Sentry.browserTracingIntegration(), Sentry.replayIntegration()],
+      integrations: [Sentry.browserTracingIntegration()],
     })
+  );
+  import('./lib/sentryReplay.js').then(
+    ({ replayIntegration }) => Sentry.addIntegration(replayIntegration()),
+    (error) => logger.error('[Sentry] Session Replay failed to load; errors still report', error)
   );
 }
 

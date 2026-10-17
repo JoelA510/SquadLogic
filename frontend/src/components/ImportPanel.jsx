@@ -107,6 +107,11 @@ const SmartBadge = ({ score, rationale }) => {
   );
 };
 
+/**
+ * @param {Object} props
+ * @param {() => void} [props.onImport] - Called when the operator continues past an applied
+ *   import. The import itself stays in `ImportContext`; the caller only moves on.
+ */
 export default function ImportPanel({ onImport }) {
   const notifyCheckboxId = React.useId();
   const fileInputId = React.useId();
@@ -627,15 +632,12 @@ export default function ImportPanel({ onImport }) {
                   variant="primary"
                   size="lg"
                   className="w-full sm:w-auto"
-                  onClick={() => {
-                    if (onImport && previewData) {
-                      onImport(previewData, importType);
-                    }
-                    resetImport('all');
-                    setFile(null);
-                    setPreviewData(null);
-                    setOriginalParse(null);
-                  }}
+                  // Continue keeps the import: the context already holds what was applied
+                  // (`startImport` stored it), and the next step reads it from there. It used
+                  // to call `resetImport('all')` here, which cleared that import in the same
+                  // click, so the teams page opened without it. "Upload Another File" is the
+                  // reset. It moves on even with no preview in hand (a reload after the import).
+                  onClick={() => onImport?.()}
                 >
                   Continue
                 </Button>

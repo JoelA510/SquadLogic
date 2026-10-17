@@ -1139,6 +1139,16 @@ and smoke-tested
 ## Milestone 6 — Polish
 
 > **M6.1. `npm run build` isn't a build** (audit finding 7.5, low)
+> - **Status: built in PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`).** `build` runs
+>   `frontend:build`, and Build & Test's build step runs `npm run build`, so CI runs the `build`
+>   script (`node.ci-runs-gate`). One change from the fix approach: `scripts/build.js` (an import
+>   check of seven core functions) is deleted, not renamed to `check:core-exports`. Every one of
+>   those functions is imported by the test suite, which fails on a missing export, so a renamed
+>   check CI never ran would guard nothing, and running it would repeat the tests. Acceptance,
+>   *executed*: `npm run build` writes `dist/`. Test gate: `tests/workflowPins.test.js` holds the
+>   step and the script (red before the change, and on three planted ci.yml defects). The same PR
+>   takes Wave 4's other M6 polish items, from the entries under "Discovered during execution"
+>   (2026-10-17, below).
 > - **Fix approach:** rename `build` to `check:core-exports` and point `build` at
 >   `frontend:build`, updating CLAUDE.md's command table.
 > - **Files touched:** `package.json`, `CLAUDE.md` (or `AGENTS.md` after M5.1).
@@ -1152,6 +1162,17 @@ and smoke-tested
 > - **Verification label:** executed (current state).
 
 > **M6.2. CRLF and mixed line endings** (audit finding 12.7, low)
+> - **Status: built in PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`).** The six applied
+>   migrations committed with CRLF or mixed endings are marked `-text` in `.gitattributes`, each by
+>   name, and the five other files are renormalized to LF (three architecture docs, two E2E
+>   `.feature` files; `.gitignore` was done by PR M5). The diff is line endings only. Acceptance,
+>   *executed*: `git ls-files --eol` shows `i/crlf` or `i/mixed` only for the six migrations, each
+>   `attr/-text`. Test gate, *executed*: scorecard `core.lf-line-endings` fails on `main` (11
+>   files) and passes on the branch, with no waiver needed, since the standard accepts a named
+>   `-text`; `migrationVersions.mjs --base origin/main` passes, and fails ("an existing migration
+>   was edited") on a local commit that renormalizes one of the six. New
+>   `tests/lineEndings.test.js` runs the same check in `npm run test` (red on `main`, listing all
+>   eleven), and refuses a `-text` rule that is a pattern or names a file that no longer needs it.
 > - **Fix approach:** mark the six applied migrations `-text` in `.gitattributes` (they must not
 >   be edited) and renormalize the other seven files.
 > - **Files touched:** `.gitattributes`, the seven non-migration files.
@@ -1167,6 +1188,12 @@ and smoke-tested
 > - **Verification label:** executed (current state).
 
 > **M6.3. Stale `test.todo` entries** (audit finding 6.5, low)
+> - **Status: built in PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`).** The six todos in
+>   `tests/teamGeneration.characterization.test.js` are deleted; a comment in their place names
+>   the test that covers each (`tests/teamGenerationIncremental.test.js` and the numbered
+>   scenarios in `tests/incrementalTeamingScenarios.test.js`). Test gate, *executed*: the file
+>   reports 6 passed and 6 todo on `main`, 6 passed and none after; the full suite's summary on the
+>   branch reports no todo.
 > - **Fix approach:** delete the six todos, pointing to the tests that cover them.
 > - **Files touched:** `tests/teamGeneration.characterization.test.js`.
 > - **Depends on:** none.
@@ -1179,6 +1206,17 @@ and smoke-tested
 > - **Verification label:** executed.
 
 > **M6.4. README's release line is stale** (audit finding 12.9, low)
+> - **Status: built in PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`).** Reconciled against the
+>   three sources: `CHANGELOG.md`'s latest release is 1.0.1 (2026-04-23), `package.json` says
+>   1.0.1, and the production bundle (`squadlogic.secureyour.tech`, fetched 2026-10-17) carries
+>   `1.0.1` as Sentry's release alongside unreleased work (the heat forecast's chunk). *Executed.*
+>   README now says that: the latest release is v1.0.1, and production, which deploys every merge
+>   to `main`, also runs everything under "Unreleased", still as 1.0.1. `CHANGELOG.md` needed no
+>   change: its "Unreleased" section already lists that work. New `tests/releaseLine.test.js`
+>   holds the line to `package.json` and the CHANGELOG's latest release; it passes on `main`'s
+>   wording too (the old line named v1.0.1), so the staleness itself was a manual check, and the
+>   test guards the next release: a planted 1.1.0 entry fails it. Cutting that release is for the
+>   owner.
 > - **Fix approach:** reconcile README's status line with `CHANGELOG.md` and the deployed
 >   version.
 > - **Files touched:** `README.md`, `CHANGELOG.md`.
@@ -1461,17 +1499,18 @@ smoke-tested
     a `PostgrestError` whose message is "AbortError: ...", so a cancelled read becomes the
     hook's error. On the dev server (StrictMode) the Exports page then refuses to build CSVs
     (run 38501618935); in production it can happen when the effect re-runs mid-read. The mock
-    never honours `abortSignal`, so no mock scenario sees it. Not fixed; the real-backend
-    scenarios use a production build. *Executed* (dev server), production path *statically
-    reviewed*.
+    never honours `abortSignal`, so no mock scenario sees it. **Fixed by the Wave 3 UI PR**
+    (`claude/vibrant-allen-hr7y7s-w3ui`, entry below). *Executed* (dev server), production path
+    *statically reviewed*.
   - After "Sync to Supabase" the teams page drops its success line and shows the generate view
     until a reload (the dashboard's team summary is not re-read); the sync itself succeeds.
-    Not fixed; the scenario reads the sync from its response and checks the teams after a
-    reload. *Executed* (run 38498654391).
+    **Fixed by the Wave 3 UI PR** (entry below); the scenario still reads the sync from its
+    response and checks the teams after a reload, and now also the line. *Executed* (run
+    38498654391).
   - The import page's "Continue" passes the import to `setImportedData` and then
     `resetImport('all')` clears it in the same handler, and nothing writes the `imports` table
     the context rehydrates from, so `/teams` opens without the import; the side navigation
-    keeps it. Not fixed. *Statically reviewed.*
+    keeps it. **Fixed by the Wave 3 UI PR** (entry below). *Statically reviewed.*
   - A second import can be bounced back to "Import Applied": `ImportContext`'s Realtime handler
     applies any `import_jobs` UPDATE that arrives while no job is active
     (`activeJobIdRef.current === job.id || !activeJobIdRef.current`), so a late event for the
@@ -1507,7 +1546,8 @@ smoke-tested
     enacted"). *Executed* (found by this PR's review; red without the fix).
   - `TeamPersistencePanel`'s own 10 s timeout says "Supabase sync timed out. Please retry.": an
     unknown outcome presented as a failure to retry, the shape M2.5 fixed for games and practice.
-    The team client is not on `postPersistenceRequest`. Not fixed. *Statically reviewed.*
+    The team client is not on `postPersistenceRequest`. **Fixed by the Wave 3 UI PR** (entry
+    below). *Statically reviewed.*
   - The Edge game evaluator still skips, without a word, a game side whose team is missing from a
     non-empty roster (core's `evaluateGameSchedule` warns `unknown-team`), so a roster that
     matches no game still scores clean. Reporting it is a scoring change, so it is not in this
@@ -1554,7 +1594,7 @@ smoke-tested
   - The grid offers every game slot under every field, but a game slot is one field's booking, so
     a drop onto another field's column stages a game whose `fieldId` and `gameSlotId` disagree
     (and two such drops can share one capacity-1 booking). "Move to…" offers only each slot on its
-    own field; the drop path still allows it. Not fixed (the grid's layout; wants its own item).
+    own field; the drop path still allows it. **Fixed by the Wave 3 UI PR** (entry below).
     *Statically reviewed.*
   - M4.6's lint rule found 15 `Then` steps in four other files reading `__MOCK_DB__`
     (`async_and_optimistic_ui.ts`, `data_and_output.ts`, `team_and_roster.ts`,
@@ -1593,6 +1633,50 @@ smoke-tested
   - Recharts axes and gridlines on the analytics page keep hard-coded slate colours, which do
     not re-theme. *Statically reviewed.*
 
+- 2026-10-17, PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`): Wave 4's M6 polish. The resume
+  queue lists six items as "M6.1-M6.4"; only the `build` script is plan item M6.1. The other five
+  are entries above. The plan's own M6.2 (CRLF), M6.3 (`test.todo`) and M6.4 (README release
+  line) were added to the same PR afterwards; their status lines are above.
+  - **The core package's entry** (PR M5's entry): `packages/core/package.json` declares no `main`
+    now. Nothing imports the package bare; everything goes through the `@squadlogic/core/<module>`
+    alias. An index barrel or a wildcard `exports` map would make an entry true, but knip treats
+    entries as used: with `"exports": {"./*": "./src/*"}` a planted unused core file went
+    unreported. `tests/corePackageEntry.test.js` (red on `main`, naming `src/index.js`): every
+    entry the manifest names exists, with no root entry no bare import, and every core module
+    (287) loads in plain Node, without the aliases, which replaces what `scripts/build.js`
+    checked for seven of them (a planted `@/` import fails it). *Executed.*
+  - **`frontend/.env.local`** (#558's entry): the build wrapper no longer writes it; the derived
+    URL still reaches Vite through the child's environment. Nothing read the file: Vite's
+    `envDir` is the root, Playwright's `dotenv.config()` reads the root `.env`, and no script or
+    workflow names it (searched). *Executed*: a build no longer creates it, and
+    `tests/configurePersistenceEndpoint.test.js` failed before with one `writeFileSync` call.
+  - **`process.env.NODE_ENV`** (#558's entry): `FeatureGuard.jsx` and `featureFlags.js` read
+    env.js's new `IS_DEV_SERVER` (`DEV`, and `MODE` not `test`): the dev server in any mode, as
+    `NODE_ENV === 'development'` was, and not Vitest, where `DEV` is true but `MODE` is `test`.
+    `tests/env.test.js` now forbids a `process.env` read in frontend and core sources (red before,
+    naming the two files); `tests/devModeWarnings.test.jsx` checks each warning on the dev server
+    (default and custom mode), in Vitest and in a build (the dev-server cases red before).
+    *Executed.*
+  - **The bundle budget's shape** (#558's entry): Session Replay loads as its own chunk after
+    `Sentry.init` (`lib/sentryReplay.js`, `Sentry.addIntegration`; `lazyLoadIntegration` loads
+    from Sentry's CDN, which the CSP refuses). CI builds with a stand-in `VITE_SENTRY_DSN`, and a
+    budget rule for the replay chunk fails a build without one. Main entry with a DSN: 213.62 KB
+    before, 174.22 KB now (134.19 KB without a DSN); caps re-baselined to 190,000 B (main) and
+    296,000 B (first paint), rationale in `config/bundle-budget.json`. *Executed*: the gate passes
+    the DSN build and fails a no-DSN build and one with Replay eager; in Chromium against
+    `vite preview`, the client carries Replay and BrowserTracing and a 404 on the chunk is logged.
+  - **esbuild's postinstall** (#559's entry): reviewed and approved in `package.json`'s
+    `allowScripts` by name, as the template does. `npm ci` no longer warns.
+    `tests/allowScripts.test.js` holds the record to the lockfile's `hasInstallScript` packages
+    (red before, naming esbuild). *Executed.* The audit's install row says the postinstall "did
+    not run"; it did: `node_modules/esbuild/bin/esbuild` is a hard link to the platform binary
+    (link count 2), which only `install.js` makes. *Executed.*
+  - **Open for the owner:** `fsevents` 2.3.3 (macOS only) also has an install script
+    (`node-gyp rebuild`); the template denies the same version. Listed as awaiting a decision in
+    `tests/allowScripts.test.js`. *Statically reviewed.*
+  - Without a DSN the main entry is 134.19 KB against the old 137.16 KB cap: about 3 KB was left
+    before this PR's re-baseline. *Executed.*
+
 - 2026-10-17, found by the Wave 0 mock-ids PR:
   - The mock seed's other ids are still not UUIDs: locations (`loc-1`), fields (`v1`, `v2`), game
     and practice slots (`gs-1`..`gs-4`, `ps-1`), teams (`t1`, `t2`), divisions (`u8-div-id`) and
@@ -1605,6 +1689,77 @@ smoke-tested
     dates (2025-01-01 to 2025-12-31). Generate Schedule on the seed stages a 1:00 AM kickoff, and
     did not refuse the slot for lying outside the season. Seed data; not changed. *Executed*
     (the staged game on the new scenario's page reads "Sat, 4/4/2026 · 1:00 AM").
+- 2026-10-17, the Wave 3 UI PR (`claude/vibrant-allen-hr7y7s-w3ui`), the product bugs that don't
+  touch the engines. Each test below was run red with its fix reverted (*executed*):
+  - **Import "Continue"** keeps the import and moves on: it calls only `onImport()`; the import
+    stays in `ImportContext`, `ImportPage` goes to `/teams`, the dashboard goes to step 2, and
+    neither copies the raw preview over the context any more. It also moves on after a reload,
+    when the panel holds no preview. Tests: `tests/importContinue.test.jsx`, two
+    `ImportPanel.test.jsx` cases, and the `ingestion_hardening` scenario "Continuing from an
+    applied player import keeps it for teaming". *Executed.*
+  - **Teams page after "Sync to Supabase":** `useTeamSummary` gains `refetch()` (as
+    `useSchedulerRun` has), exposed as `team.refetch`; after a sync the page re-reads the synced
+    run, and the review status section sits above the page's views, so "Team review applied. N
+    teams and M players synced to Supabase." survives. Tests:
+    `tests/teamSyncKeepsStatus.test.jsx`, a `useTeamSummary` case, the mock scenario "A synced
+    team review keeps its success line"; the real-backend sync step now asserts the line (CI
+    only, *statically reviewed* here). *Executed.*
+  - **`TeamPersistencePanel`'s 10 s timeout** is an `unknown` state, "Outcome unknown": "Supabase
+    sync timed out, so it is not known whether the teams were saved. Reload the page to see the
+    saved teams before syncing again." The E2E "Persistence Sync Timeout Handling" scenario now
+    leaves the POST unanswered so the panel's own deadline runs; it used to answer a 408 whose
+    body carried the panel's text. *Executed.*
+  - **`useSchedulerRun`'s abort check** is `isAbortError` (`frontend/src/lib/abortError.js`): the
+    caller's aborted signal, the `AbortError` name or `ABORT_ERR` code, or the PostgREST shape
+    (message `AbortError: ...`, hint `Request was aborted ...`, read from the installed
+    `@supabase/postgrest-js` 2.117.3). `tests/abortError.test.js` takes the shape from the real
+    supabase-js client. No E2E: the mock ignores `abortSignal` and the real-backend run is a
+    production build. *Executed.*
+  - **Game grid view tabs** are the `Tabs` primitive: a tablist, `aria-selected`, the
+    `.page-tab.active` underline, arrow keys, and a tabpanel. axe on `/schedule/game` passes in
+    both themes. *Executed.*
+  - **"By Team" in Manual Override** is disabled with a visible reason ("By Team is off during
+    Manual Override: games are moved on the field grid."): the override's only surface is the
+    field grid, and a team's list has no cells to move a game to. The view chosen before the
+    override comes back after it. The `Tabs` primitive gains disabled tabs. *Executed.*
+  - **Game grid drops** are held to "Move to"'s rule, now one function, `isSlotOnField`
+    (`frontend/src/utils/gameGridCells.js`): the move handler refuses another field's slot with a
+    status line, the announcements agree, and the grid marks those cells "Other field" with the
+    invalid-target reason while a game is over one. No mock E2E (the mock seed has no games);
+    the page test drives the real dnd-kit keyboard sensor. *Executed.*
+  - From this PR's review: `importedData` is the player import only (`startImport` wrote it for
+    every type, so after "Continue" a coach import reached the teams page as players;
+    `tests/importedDataIsPlayers.test.jsx`), and after a sync times out "Sync to Supabase" stays
+    off until a reload. *Executed.*
+  - Not in this PR: "Upload to Storage" (Wave 2's bucket).
+  - Flagged, not done: the grid draws every slot under every field, so with N fields (N-1)/N of
+    its cells now read "Other field". Drawing only each field's own slots would remove them; a
+    layout change, so its own item (recommended). *Statically reviewed.*
+  - Flagged, not done: the import panel's `importStatus` lives in `localStorage`, with no expiry
+    and not per organization, so a "completed" import shows on `/import` after a reload or an
+    organization switch. Pre-existing on the side-navigation path; "Continue" now matches it
+    rather than resetting. *Statically reviewed.*
+- 2026-10-17, triage of "the issues with teams added through the UI" (Wave 3 UI PR). The
+  report names no symptom, so this is what a mock run of Generate Teams, an unanswered sync, Team
+  Builder and Game Scheduling showed (*executed*, a scratch scenario, not committed), plus
+  reading. None is fixed here:
+  - In mock mode a team sync cannot succeed (no `team-persistence`; "Sync failed", "Failed to
+    fetch"), so teams generated in the UI never reach the `teams` table there, and Team Builder
+    and Game Scheduling ("No generated teams are available for game scheduling.") never see them.
+    Expected of the mock, but no mock scenario covers a generated-then-synced team downstream.
+  - Before any sync, the persistence panel's "Recent Supabase Syncs" lists the staged review's run
+    as `REVIEW`, "Updated 3 teams": a sync that has not happened, worded as one that has.
+    *Executed* (the triage run).
+  - A sync that fails at the network ("Failed to fetch") reads "Sync failed", but a dropped
+    connection can follow a request the server received and committed: the same unknown outcome
+    as the timeout above. The game and practice clients treat only their deadline and an
+    unreadable 2xx as unknown, so this is a question for all three, not this PR. *Statically
+    reviewed.*
+  - Team Builder ignores a refused `teams` read (`if (!error) setTeams(...)`) and shows its empty
+    "generate teams first" state over it, with nothing logged. *Statically reviewed.*
+  - Ruled out: a synced team's players do get `players.team_id` (the `team_players` trigger,
+    `20260611000400_players_team_id_sync.sql`), so Team Builder places them. *Statically
+    reviewed.*
 
 - 2026-10-17, found by the M4.7 exceptions follow-up (Q1):
   - The override panel's per-slot "N free" (`overrideSlotLoad`, Q5) counts series only: a

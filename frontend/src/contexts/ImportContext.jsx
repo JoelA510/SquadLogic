@@ -337,7 +337,10 @@ export function ImportProvider({ children }) {
     if (type === 'coaches') setImportedCoaches(data);
     if (type === 'fields') setImportedFields(data);
     if (type === 'field_availability') setImportedFieldAvailability(data);
-    setImportedData(data);
+    // `importedData` is the player import, as the reload path below reads it (only from the
+    // latest players row) and as every reader takes it: the teams page builds its programs from
+    // it. A coach or field import written here used to reach the teams page as player rows.
+    if (type === 'players') setImportedData(data);
   }, []);
 
   const hydrateReadyImportJob = useCallback(
@@ -1247,14 +1250,13 @@ export function ImportProvider({ children }) {
           if (type === 'coaches') setImportedCoaches(null);
           if (type === 'fields') setImportedFields(null);
           if (type === 'field_availability') setImportedFieldAvailability(null);
-          setImportedData(null);
+          // No `setImportedData`: a rollback is never of a player import (`importedData`).
           setActiveJobId(null);
           setActiveJob(null);
         } else {
           if (type === 'coaches') setImportedCoaches(rollbackData);
           if (type === 'fields') setImportedFields(rollbackData);
           if (type === 'field_availability') setImportedFieldAvailability(rollbackData);
-          setImportedData(rollbackData);
         }
         setIsImporting(false);
         const nextStatus = rollbackSucceeded ? 'idle' : 'completed_with_warnings';

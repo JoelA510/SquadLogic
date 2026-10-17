@@ -147,12 +147,12 @@ Then('the resulting teams summary should reflect the new constraints', async ({ 
 });
 
 When('the network connection stalls', async ({ page }) => {
-  // CRITICAL FIX: Handle CORS preflight successfully, then simulate a gateway timeout
-  // on the POST request so the UI renders the exact expected string.
+  // The POST is never answered, so the panel's own 10 s deadline is what ends
+  // the wait (it used to be answered at once with a 408 whose body carried the
+  // panel's timeout text, so the deadline never ran). The CORS preflight is
+  // answered so the POST itself is sent.
   await page.route('**/team-persistence', async (route) => {
     const request = route.request();
-
-    // 1. Handle the CORS Preflight
     if (request.method() === 'OPTIONS') {
       await route.fulfill({
         status: 204,
@@ -164,27 +164,66 @@ When('the network connection stalls', async ({ page }) => {
       });
       return;
     }
-
-    // 2. Handle the Actual Request
     if (request.method() === 'POST') {
-      await route.fulfill({
-        status: 408,
-        contentType: 'application/json',
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-        },
-        body: JSON.stringify({
-          status: 'error',
-          message: 'Supabase sync timed out. Please retry.',
-        }),
-      });
+      // Left pending: the page aborts it at its deadline.
       return;
     }
-
-    // 3. Fallback for any other methods
     await route.continue();
   });
 });
+
+When('the team-persistence function accepts the sync', async ({ page }) => {
+  // Mock mode cannot reach the Edge Function, so its POST is answered here
+  // with the function's success shape, counted from the request body the page
+  // sent (`team-persistence/index.ts` answers `teamRows.length` and
+  // `teamPlayerRows.length`).
+  await page.route('**/team-persistence', async (route) => {
+    const request = route.request();
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        },
+      });
+      return;
+    }
+    if (request.method() !== 'POST') {
+      await route.continue();
+      return;
+    }
+    const body = JSON.parse(request.postData() || '{}');
+    const payload = body?.snapshot?.payload ?? {};
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({
+        status: 'success',
+        runId: body?.snapshot?.lastRunId ?? null,
+        message: 'Persistence successful.',
+        syncedAt: new Date().toISOString(),
+        updatedTeams: (payload.teamRows ?? []).length,
+        updatedPlayers: (payload.teamPlayerRows ?? []).length,
+      }),
+    });
+  });
+});
+
+Then(
+  'the Teams page still says the team review was applied, with what was synced',
+  async ({ page }) => {
+    // The line used to vanish with the staged review: the page fell back to its
+    // generate view until a reload. The counts are the request's, so 10 teams
+    // and 100 players is what the page generated and sent.
+    await expect(
+      page.getByText('Team review applied. 10 teams and 100 players synced to Supabase.')
+    ).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('heading', { name: 'Team Review Status' })).toBeVisible();
+  }
+);
 
 Then('the panel status should change to {string}', async ({ page }, status: string) => {
   const panel = page

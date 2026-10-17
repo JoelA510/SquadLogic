@@ -1552,7 +1552,18 @@ smoke-tested
     `team_communication.ts`), each waived on its line with a reason. One, "the resulting teams
     summary should reflect the new constraints", writes a completed team run when none exists:
     the M4.6 shape, and Generate Teams now demonstrably runs in mock mode, so it can be rewritten
-    on the page. Follow-up. *Executed* (lint).
+    on the page. Follow-up. *Executed* (lint). **Fixed 2026-10-17** (Wave 4 accessibility, branch
+    `claude/vibrant-allen-hr7y7s-a11y`): no waiver is left. The teams summary step no longer
+    writes a run: its scenario imports 25 players and the Then reads the engine's own result
+    (`ceil(25 / Max Roster)` teams staged, all 25 assigned). The coach and field import steps
+    read the Coaches and Fields pages in a window opened from the import page (it starts with a
+    copy of the mock store and leaves the import page's Roll Back button in place); the buddy
+    step reads the import log; two RSVP steps become one that reloads the portal and reads both
+    children's answers; the chat step reads the message back after a reload. Two unused
+    `team_and_roster.ts` steps are deleted. The rule still fails a planted read in each of its
+    three forms (string, template, identifier), and the teams, buddy, coach and field steps each
+    fail on a planted defect (Max Roster not typed; a one-way buddy request; a rollback not
+    done). *Executed.*
 
 - 2026-10-14, found by PR w3a (M4.2):
   - `GameSchedulingPage.jsx` (M4.3's file): the "Select Team" `<label>` labels nothing (lint, off
@@ -1621,6 +1632,22 @@ smoke-tested
     dates (2025-01-01 to 2025-12-31). Generate Schedule on the seed stages a 1:00 AM kickoff, and
     did not refuse the slot for lying outside the season. Seed data; not changed. *Executed*
     (the staged game on the new scenario's page reads "Sat, 4/4/2026 · 1:00 AM").
+
+- 2026-10-17, found by the Wave 4 accessibility PR (branch `claude/vibrant-allen-hr7y7s-a11y`):
+  - The import page's "Roll Back Coach Import" button is gone once you leave the page and come
+    back in the app (the Coaches link, then Import): the import shows as applied, with no way to
+    roll it back from there. *Executed* (the button list before and after, mock mode).
+  - Nothing on screen reads `player_buddies`: the only sign a buddy pair was stored is the import
+    log's line, which repeats what `materialize_import_buddy_pairs` answered. *Statically
+    reviewed* (a search of `frontend/src` and `packages/core/src` for `player_buddies`).
+  - The team portal shows no RSVP time, so "the RSVP timestamps should align with the league's
+    official timezone" had nothing on the page to assert; its old check matched only the shape of
+    an ISO string. The step is removed, not replaced. *Statically reviewed.*
+  - `text-status-warning` (the bare `--warning`, `#b5740b`) is still used as text in 11 places,
+    `TeamOverviewPanel`'s amber card among them: 3.84:1 on the light surface, 3.39:1 on
+    `--bg-app`. `--success` and `--danger` pass. Not changed (not a palette shade); the `-text`
+    tokens are the fix. *Executed* (ratios computed the way `tests/themeTextContrast.test.js`
+    does).
 
 ## Deferred with reason
 

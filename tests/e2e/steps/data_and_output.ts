@@ -1,5 +1,5 @@
 import { createBdd } from 'playwright-bdd';
-import { expect } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
 import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
@@ -125,23 +125,72 @@ When('I apply the player CSV import', async ({ page }) => {
 });
 
 Then('the player import should materialize reciprocal buddy pairs', async ({ page }) => {
-  await waitForMockClient(page);
-  const buddySummary = await page.evaluate(() => {
-    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the import reached the mock store, not what the page shows.
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const latestPlayerJob = [...(db.import_jobs || [])]
-      .reverse()
-      .find((job: { job_type?: string }) => job.job_type === 'registration');
-    return {
-      relationships: (db.player_buddies || []).filter(
-        (buddy: { source_import_job?: string }) => buddy.source_import_job === latestPlayerJob?.id
-      ).length,
-      materializedPairs: latestPlayerJob?.warning_summary?.buddy_pairs?.materialized_pairs,
-    };
+  // The import log on the page reports what `materialize_import_buddy_pairs` answered: the two
+  // players request each other, so one pair and a relationship row each way. Nothing on screen
+  // reads `player_buddies` itself, so this is the page's own account of the write.
+  const log = page.getByTestId('import-log');
+  await expect(log).toContainText('Buddy pairs materialized: 1 pair(s), 2 relationship rows.', {
+    timeout: 15000,
   });
-
-  expect(buddySummary).toEqual({ relationships: 2, materializedPairs: 1 });
+  await expect(log).not.toContainText('could not be matched reciprocally');
 });
+
+/**
+ * Opens `path` in a second window opened from this page, and waits for its heading.
+ *
+ * The mock store lives in sessionStorage, which a window opened from the page starts with a copy
+ * of, so the second window shows what the first has stored, while the first keeps its own state
+ * (the import page's Roll Back button lives only there). Assertions run on that window's page.
+ */
+async function openFromThisPage(page: Page, path: string, heading: string) {
+  const [other] = await Promise.all([
+    page.waitForEvent('popup'),
+    page.evaluate((target) => {
+      window.open(target, '_blank');
+    }, path),
+  ]);
+  await expect(other.getByRole('heading', { name: heading, exact: true }).first()).toBeVisible({
+    timeout: 20000,
+  });
+  await other.waitForLoadState('networkidle');
+  return other;
+}
+
+/** The Coaches page, opened from this one, and whether it lists the imported coach. */
+async function expectCoachListed(page: Page, listed: boolean) {
+  const coaches = await openFromThisPage(page, '/coaches', 'Coaches');
+  // A seeded coach first: the grid has rendered its rows, so an absence below means something.
+  await expect(coaches.getByRole('gridcell', { name: 'casey.rivera@example.com' })).toBeVisible();
+  const row = coaches.getByRole('row').filter({ hasText: 'csvcoach@example.com' });
+  if (listed) {
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText('CSV Coach');
+    await expect(row).toContainText('555-1212');
+  } else {
+    await expect(row).toHaveCount(0);
+  }
+  await coaches.close();
+}
+
+/** The Fields page, opened from this one, and whether it shows the imported field's slot. */
+async function expectImportedFieldListed(page: Page, listed: boolean) {
+  const fields = await openFromThisPage(page, '/fields', 'Field Management');
+  // A seeded field first, so an absence below is not an unrendered page.
+  await expect(fields.getByText('Field 1', { exact: true }).first()).toBeVisible();
+  const card = fields
+    .locator('div')
+    .filter({ has: fields.getByText('Imported Field', { exact: true }) })
+    .filter({ hasText: 'MON' })
+    .last();
+  if (listed) {
+    await expect(card).toBeVisible();
+    await expect(card).toContainText('Main Park', { ignoreCase: true });
+    await expect(card).toContainText('17:30');
+  } else {
+    await expect(fields.getByText('Imported Field', { exact: true })).toHaveCount(0);
+  }
+  await fields.close();
+}
 
 Given('I upload a valid GotSport coach CSV file', async ({ page }) => {
   await page.locator('button').filter({ hasText: 'coaches' }).first().click();
@@ -164,15 +213,7 @@ Then('the coach CSV import should update the coach database', async ({ page }) =
   await expect(page.getByRole('button', { name: 'Roll Back Coach Import' })).toBeVisible({
     timeout: 10000,
   });
-  await waitForMockClient(page);
-  const coachExists = await page.evaluate(() => {
-    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the import reached the mock store, not what the page shows.
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    return (db.coaches || []).some(
-      (coach: { email?: string }) => coach.email === 'csvcoach@example.com'
-    );
-  });
-  expect(coachExists).toBe(true);
+  await expectCoachListed(page, true);
 });
 
 When('I roll back the coach CSV import', async ({ page }) => {
@@ -183,15 +224,7 @@ When('I roll back the coach CSV import', async ({ page }) => {
 });
 
 Then('the imported coach should be removed from the coach database', async ({ page }) => {
-  await waitForMockClient(page);
-  const coachExists = await page.evaluate(() => {
-    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the import reached the mock store, not what the page shows.
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    return (db.coaches || []).some(
-      (coach: { email?: string }) => coach.email === 'csvcoach@example.com'
-    );
-  });
-  expect(coachExists).toBe(false);
+  await expectCoachListed(page, false);
 });
 
 Given('I upload a valid field slot CSV file', async ({ page }) => {
@@ -229,13 +262,7 @@ Then(
     await expect(page.getByRole('button', { name: 'Apply Field Import' })).toBeVisible({
       timeout: 10000,
     });
-    await waitForMockClient(page);
-    const fieldExists = await page.evaluate(() => {
-      // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the import reached the mock store, not what the page shows.
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      return (db.fields || []).some((field: { name?: string }) => field.name === 'Imported Field');
-    });
-    expect(fieldExists).toBe(false);
+    await expectImportedFieldListed(page, false);
   }
 );
 
@@ -250,20 +277,7 @@ Then('the field slot CSV import should update the facilities database', async ({
   await expect(page.getByRole('button', { name: 'Roll Back Field Import' })).toBeVisible({
     timeout: 10000,
   });
-  await waitForMockClient(page);
-  const fieldExists = await page.evaluate(() => {
-    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the import reached the mock store, not what the page shows.
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const field = (db.fields || []).find(
-      (item: { name?: string }) => item.name === 'Imported Field'
-    );
-    const slotExists = (db.practice_slots || []).some(
-      (slot: { field_id?: string; start_time?: string }) =>
-        slot.field_id === field?.id && slot.start_time === '17:30'
-    );
-    return Boolean(field && slotExists);
-  });
-  expect(fieldExists).toBe(true);
+  await expectImportedFieldListed(page, true);
 });
 
 When('I roll back the field slot CSV import', async ({ page }) => {
@@ -274,13 +288,7 @@ When('I roll back the field slot CSV import', async ({ page }) => {
 });
 
 Then('the imported field slot should be removed from the facilities database', async ({ page }) => {
-  await waitForMockClient(page);
-  const fieldExists = await page.evaluate(() => {
-    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the import reached the mock store, not what the page shows.
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    return (db.fields || []).some((field: { name?: string }) => field.name === 'Imported Field');
-  });
-  expect(fieldExists).toBe(false);
+  await expectImportedFieldListed(page, false);
 });
 
 When('I click to export the team rosters or schedules', async ({ page }) => {

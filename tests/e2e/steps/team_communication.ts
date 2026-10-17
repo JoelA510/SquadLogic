@@ -1,5 +1,5 @@
 import { createBdd } from 'playwright-bdd';
-import { expect } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
 import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
@@ -228,6 +228,17 @@ When(
   }
 );
 
+/** The RSVP row of `child` on the `day` practice card. */
+const rsvpRowOf = (page: Page, day: string, child: string) =>
+  page
+    .locator('.glass-panel')
+    .filter({ hasText: new RegExp(day, 'i') })
+    .filter({ hasText: /practice/i })
+    .first()
+    .locator('.bg-bg-surface\\/30')
+    .filter({ hasText: new RegExp(child, 'i') })
+    .first();
+
 Then(
   'I should see {string} marked as {string} on the {string} practice',
   async ({ page }, child: string, action: string, day: string) => {
@@ -249,31 +260,32 @@ Then(
 );
 
 Then(
-  'the database should have two distinct RSVP records for this practice occurrence',
-  async ({ page }) => {
-    await waitForMockClient(page);
-    const rsvps = await page.evaluate(() => {
-      // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the mock store, not what the page shows.
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      return db.event_rsvps || [];
-    });
-    expect(rsvps.length).toBeGreaterThanOrEqual(2);
+  'after a reload {string} is still {string} and {string} still {string} on the {string} practice',
+  async (
+    { page },
+    first: string,
+    firstAction: string,
+    second: string,
+    secondAction: string,
+    day: string
+  ) => {
+    // Two children, two different answers on one occurrence: both survive a reload only if each
+    // was stored as its own record (one shared record would come back with one answer).
+    await page.reload();
+    for (const [child, action] of [
+      [first, firstAction],
+      [second, secondAction],
+    ]) {
+      const row = rsvpRowOf(page, day, child);
+      await expect(row.getByTitle(action, { exact: true }).first()).toHaveClass(/scale-105/, {
+        timeout: 15000,
+      });
+      for (const other of ['Going', 'Not Going', 'Maybe'].filter((a) => a !== action)) {
+        await expect(row.getByTitle(other, { exact: true }).first()).not.toHaveClass(/scale-105/);
+      }
+    }
   }
 );
-
-Then("the RSVP timestamps should align with the league's official timezone", async ({ page }) => {
-  await waitForMockClient(page);
-  const rsvps = await page.evaluate(() => {
-    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the mock store, not what the page shows.
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    return db.event_rsvps || [];
-  });
-
-  // Find the specific RSVP we just created for Jamie
-  const jamieRsvp = rsvps.find((r: Record<string, unknown>) => r.status === 'declined');
-  expect(jamieRsvp).toBeDefined();
-  expect(jamieRsvp.updated_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
-});
 
 When('I type {string} into the chat input', async ({ page }, msg: string) => {
   const input = page.getByPlaceholder('Type a message...').first();
@@ -312,14 +324,10 @@ Then(
 );
 
 Then(
-  'the message should be broadcasted via Supabase Realtime to other connected clients',
-  async ({ page }) => {
-    await waitForMockClient(page);
-    const messages = await page.evaluate(() => {
-      // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts the mock store, not what the page shows.
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      return db.team_messages || [];
-    });
-    expect(messages.length).toBeGreaterThan(0);
+  'the message {string} should still be in the team chat feed after a reload',
+  async ({ page }, msg: string) => {
+    // Read back from where the page stored it, not from the component state that showed it.
+    await page.reload();
+    await expect(page.getByText(msg, { exact: true }).first()).toBeVisible({ timeout: 15000 });
   }
 );

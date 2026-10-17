@@ -328,36 +328,6 @@ Then('no conflict banner should be displayed', async ({ page }) => {
   await expect(page.locator('.bg-status-error-bg').first()).toBeHidden();
 });
 
-Then(
-  'a new row should be inserted into the {string} table',
-  async ({ page }, tableName: string) => {
-    await waitForMockClient(page);
-    const rows = await page.evaluate((table) => {
-      // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts a mock table row, not what the page shows.
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      return db[table] || [];
-    }, tableName);
-    expect(rows.length).toBeGreaterThan(0);
-  }
-);
-
-Then(
-  'the run should have run_type {string} and status {string}',
-  async ({ page }, type: string, status: string) => {
-    await waitForMockClient(page);
-    const match = await page.evaluate(
-      ({ t, s }) => {
-        // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: asserts a mock table row, not what the page shows.
-        const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-        const runs = db.scheduler_runs || [];
-        return runs.some((r: Record<string, unknown>) => r.run_type === t && r.status === s);
-      },
-      { t: type, s: status }
-    );
-    expect(match).toBe(true);
-  }
-);
-
 Then('I should see a conflict banner with message {string}', async ({ page }, message: string) => {
   const banner = page.locator('.bg-status-error-bg, .text-status-error').first();
   await expect(banner).toBeVisible({ timeout: 10000 });

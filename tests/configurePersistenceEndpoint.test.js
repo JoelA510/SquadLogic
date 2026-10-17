@@ -38,7 +38,7 @@ describe('configurePersistenceEndpoint', () => {
   });
 
   it('leaves the value unset with no Supabase URL', () => {
-    const env = {};
+    const env = /** @type {NodeJS.ProcessEnv} */ ({});
     expect(configurePersistenceEndpoint(env)).toBeUndefined();
     expect(env).toEqual({});
   });

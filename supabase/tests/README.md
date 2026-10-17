@@ -42,6 +42,7 @@ npm run test:db:once supabase/tests/rls_cross_org_isolation.sql
 | `rls_import_efficiency_metrics_view.sql` | `security_invoker = on` view is org-scoped for its caller.                        |
 | `coach_leads.sql`                        | Player-import coach lead RPC stays idempotent and org-scoped.                     |
 | `division_roster_constraints.sql`        | Division roster/team bounds persist and stay admin-owned.                         |
+| `storage_exports_bucket.sql`             | The `exports` bucket is private and scoped to the organization folder.            |
 
 ## Conventions
 

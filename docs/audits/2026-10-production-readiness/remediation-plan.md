@@ -1625,8 +1625,8 @@ smoke-tested
     palette text shade, not only `-400` (176 classes in 36 files; the `-100` to `-300` and `-500`
     shades fail the same way), moved to the tokens by family: blue-like to `text-text-accent`,
     green to `text-status-success-text`, amber to `-warning-text`, red to `-error-text`.
-    `tests/paletteTextShades.test.js` refuses a palette text class outside two commented
-    exceptions (red on today's code, 176 findings); `tests/themeTextContrast.test.js` computes
+    `tests/paletteTextShades.test.js` refuses a palette text class outside one commented
+    exception (red on the old code, 176 findings); `tests/themeTextContrast.test.js` computes
     each text token on each surface, and on each tint in the same class string, from
     `index.css` in both themes (fails with light `--warning-text` set to `--warning`, and with
     the old `bg-blue-900/20` chip behind accent text, 4.43:1, which this sweep moved to

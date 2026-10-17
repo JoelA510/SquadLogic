@@ -42,11 +42,6 @@ const EXCEPTIONS = [
     match: 'text-red-500',
     reason: 'a doc comment quoting the class the banner replaced; nothing renders it',
   },
-  {
-    file: 'pages/GameSchedulingPage.jsx',
-    match: 'text-blue-400',
-    reason: 'a comment recording the class the schedule bar replaced and its measured contrast',
-  },
 ];
 
 /** @returns {string[]} every .js/.jsx file under `dir` */

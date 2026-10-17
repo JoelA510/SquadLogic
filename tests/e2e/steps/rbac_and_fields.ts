@@ -353,22 +353,19 @@ Then('Practice and Game Scheduling should not expose edit or apply controls', as
 
 Given('I am logged in as an administrator', async ({ page }) => {
   await page.goto('/');
-  await page.evaluate(
-    ({ mockOrgId }) => {
-      const session = {
-        user: {
-          id: 'mock-admin-id',
-          email: 'admin@squadlogic.app',
-          user_metadata: { full_name: 'Mock Admin' },
-          app_metadata: { role: 'admin' },
-        },
-        access_token: 'mock-token',
-      };
-      sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify(session));
-      localStorage.setItem('squadlogic_active_org', mockOrgId);
-    },
-    { mockOrgId: MOCK_ORG_ID }
-  );
+  await page.evaluate((mockOrgId) => {
+    const session = {
+      user: {
+        id: 'mock-admin-id',
+        email: 'admin@squadlogic.app',
+        user_metadata: { full_name: 'Mock Admin' },
+        app_metadata: { role: 'admin' },
+      },
+      access_token: 'mock-token',
+    };
+    sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify(session));
+    localStorage.setItem('squadlogic_active_org', mockOrgId);
+  }, MOCK_ORG_ID);
   await page.reload();
   await expect(page.getByRole('button', { name: /Mock Admin|admin@squadlogic\.app/i })).toBeVisible(
     {
@@ -379,44 +376,41 @@ Given('I am logged in as an administrator', async ({ page }) => {
 
 Given('an organization has multiple fields configured', async ({ page }) => {
   await waitForMockClient(page);
-  await page.evaluate(
-    ({ mockOrgId }) => {
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+  await page.evaluate((mockOrgId) => {
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
-      // **`location_id` is not decoration.** 20260911000000 made the scheduler
-      // resolve a pitch's venue before offering it, and a field with no venue
-      // is a failed read rather than an unbounded one -- so a row seeded
-      // without one silently vanishes from the list with no error. `location`
-      // here is free text and is not the foreign key. Caught by /code-review.
-      db.fields = db.fields || [];
-      db.fields.push(
-        {
-          id: 'field-1',
-          name: 'Main Field',
-          location: 'Central Park',
-          location_id: 'loc-1',
-          organization_id: orgId,
-          is_active: true,
-          surface: 'grass',
-          size: 'full',
-        },
-        {
-          id: 'field-2',
-          name: 'Practice Field A',
-          location: 'Central Park',
-          location_id: 'loc-1',
-          organization_id: orgId,
-          is_active: true,
-          surface: 'turf',
-          size: 'half',
-        }
-      );
+    // **`location_id` is not decoration.** 20260911000000 made the scheduler
+    // resolve a pitch's venue before offering it, and a field with no venue
+    // is a failed read rather than an unbounded one -- so a row seeded
+    // without one silently vanishes from the list with no error. `location`
+    // here is free text and is not the foreign key. Caught by /code-review.
+    db.fields = db.fields || [];
+    db.fields.push(
+      {
+        id: 'field-1',
+        name: 'Main Field',
+        location: 'Central Park',
+        location_id: 'loc-1',
+        organization_id: orgId,
+        is_active: true,
+        surface: 'grass',
+        size: 'full',
+      },
+      {
+        id: 'field-2',
+        name: 'Practice Field A',
+        location: 'Central Park',
+        location_id: 'loc-1',
+        organization_id: orgId,
+        is_active: true,
+        surface: 'turf',
+        size: 'half',
+      }
+    );
 
-      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    },
-    { mockOrgId: MOCK_ORG_ID }
-  );
+    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+  }, MOCK_ORG_ID);
 });
 
 When('I view the {string} page', async ({ page }, _pageName: string) => {

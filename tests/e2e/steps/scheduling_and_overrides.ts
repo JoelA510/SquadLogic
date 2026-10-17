@@ -615,53 +615,50 @@ Given(
 Given('I am viewing the Team Roster page', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(
-    ({ mockOrgId }) => {
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
-      const _userId = 'mock-admin-id';
+  await page.evaluate((mockOrgId) => {
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+    const _userId = 'mock-admin-id';
 
-      // CRITICAL FIX: Remove any existing run-1 and re-add with our data
-      // (sessionStorage may not have initialMockData yet, so find() would return undefined)
-      // Use pre-seeded team IDs t1/t2 to match initialMockData
-      // Use index-based player_id '0' to match import-1's first player (Alex Smith)
-      db.scheduler_runs = (db.scheduler_runs || []).filter(
-        (r: Record<string, unknown>) => r.id !== 'run-1'
-      );
-      db.scheduler_runs.push({
-        id: 'run-1',
-        organization_id: orgId,
-        run_type: 'team',
-        status: 'completed',
-        created_at: new Date().toISOString(),
-        completed_at: new Date().toISOString(),
-        results: {
-          teamsByDivision: {
-            'U8 Boys': [
-              { id: 't1', name: 'Team A', division_id: 'U8 Boys' },
-              { id: 't2', name: 'Team B', division_id: 'U8 Boys' },
-            ],
-          },
-          teams: [
+    // CRITICAL FIX: Remove any existing run-1 and re-add with our data
+    // (sessionStorage may not have initialMockData yet, so find() would return undefined)
+    // Use pre-seeded team IDs t1/t2 to match initialMockData
+    // Use index-based player_id '0' to match import-1's first player (Alex Smith)
+    db.scheduler_runs = (db.scheduler_runs || []).filter(
+      (r: Record<string, unknown>) => r.id !== 'run-1'
+    );
+    db.scheduler_runs.push({
+      id: 'run-1',
+      organization_id: orgId,
+      run_type: 'team',
+      status: 'completed',
+      created_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      results: {
+        teamsByDivision: {
+          'U8 Boys': [
             { id: 't1', name: 'Team A', division_id: 'U8 Boys' },
             { id: 't2', name: 'Team B', division_id: 'U8 Boys' },
           ],
-          team_players: [{ team_id: 't1', player_id: '0' }],
-          rosterBalanceByDivision: {
-            'U8 Boys': {
-              summary: { totalPlayers: 1, totalCapacity: 12, averageFillRate: 0.08 },
-              teamStats: [],
-            },
+        },
+        teams: [
+          { id: 't1', name: 'Team A', division_id: 'U8 Boys' },
+          { id: 't2', name: 'Team B', division_id: 'U8 Boys' },
+        ],
+        team_players: [{ team_id: 't1', player_id: '0' }],
+        rosterBalanceByDivision: {
+          'U8 Boys': {
+            summary: { totalPlayers: 1, totalCapacity: 12, averageFillRate: 0.08 },
+            teamStats: [],
           },
         },
-      });
+      },
+    });
 
-      // No extra import needed — import-1 from initialMockData provides player data
+    // No extra import needed — import-1 from initialMockData provides player data
 
-      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    },
-    { mockOrgId: MOCK_ORG_ID }
-  );
+    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+  }, MOCK_ORG_ID);
   await page.goto('/teams');
   // Wait for the roster data to load before entering edit mode
   await page.waitForTimeout(1000);
@@ -883,165 +880,162 @@ Given('I am on the Game Scheduling page viewing an identified conflict', async (
 
   // Step 2: Seed the mock DB with conflict data while ON the page
   await waitForMockClient(page);
-  await page.evaluate(
-    ({ mockOrgId }) => {
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+  await page.evaluate((mockOrgId) => {
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
-      // Ensure we have enough teams with coach assignments
-      db.teams = db.teams || [];
-      if (!db.teams.find((t: Record<string, unknown>) => t.id === 'team-gc1')) {
-        db.teams.push(
-          {
-            id: 'team-gc1',
-            name: 'Conflict A',
-            division_id: 'u8-div-id',
-            coach_id: 'coach-gc1',
-            organization_id: orgId,
-          },
-          {
-            id: 'team-gc2',
-            name: 'Conflict B',
-            division_id: 'u8-div-id',
-            coach_id: 'coach-gc2',
-            organization_id: orgId,
-          },
-          {
-            id: 'team-gc3',
-            name: 'Conflict C',
-            division_id: 'u8-div-id',
-            coach_id: 'coach-gc3',
-            organization_id: orgId,
-          },
-          {
-            id: 'team-gc4',
-            name: 'Conflict D',
-            division_id: 'u8-div-id',
-            coach_id: 'coach-gc4',
-            organization_id: orgId,
-          }
-        );
-      }
-
-      // Ensure two fields exist
-      db.fields = db.fields || [];
-      if (!db.fields.find((f: Record<string, unknown>) => f.id === 'v1')) {
-        db.fields.push({
-          id: 'v1',
-          name: 'Field 1',
-          organization_id: orgId,
-          active: true,
-          surface_type: 'Grass',
-          size: '11v11',
-        });
-      }
-      if (!db.fields.find((f: Record<string, unknown>) => f.id === 'v2')) {
-        db.fields.push({
-          id: 'v2',
-          name: 'Field 2',
-          organization_id: orgId,
-          active: true,
-          surface_type: 'Turf',
-          size: '7v7',
-        });
-      }
-
-      // Wipe and re-seed to avoid stale data from prior tests
-      db.game_assignments = [
+    // Ensure we have enough teams with coach assignments
+    db.teams = db.teams || [];
+    if (!db.teams.find((t: Record<string, unknown>) => t.id === 'team-gc1')) {
+      db.teams.push(
         {
-          id: 'ga-conflict-1',
-          run_id: 'run-game-conflict',
-          slot_id: 'gs-1',
-          field_id: 'v1',
-          home_team_id: 'team-gc1',
-          away_team_id: 'team-gc2',
-          start: '2026-04-04T08:00:00Z',
-          end: '2026-04-04T09:00:00Z',
-          week_index: 1,
-          division: 'U8 Coed',
-          assignment_source: 'auto',
-        },
-        {
-          id: 'ga-conflict-2',
-          run_id: 'run-game-conflict',
-          slot_id: 'gs-1',
-          field_id: 'v1',
-          home_team_id: 'team-gc3',
-          away_team_id: 'team-gc4',
-          start: '2026-04-04T08:00:00Z',
-          end: '2026-04-04T09:00:00Z',
-          week_index: 1,
-          division: 'U8 Coed',
-          assignment_source: 'auto',
-        },
-      ];
-
-      db.game_slots = [
-        {
-          id: 'gs-1',
-          field_id: 'v1',
-          start: '2026-04-04T08:00:00Z',
-          end: '2026-04-04T09:00:00Z',
-          capacity: 1,
+          id: 'team-gc1',
+          name: 'Conflict A',
+          division_id: 'u8-div-id',
+          coach_id: 'coach-gc1',
           organization_id: orgId,
         },
         {
-          id: 'gs-2',
-          field_id: 'v1',
-          start: '2026-04-04T09:30:00Z',
-          end: '2026-04-04T10:30:00Z',
-          capacity: 1,
+          id: 'team-gc2',
+          name: 'Conflict B',
+          division_id: 'u8-div-id',
+          coach_id: 'coach-gc2',
           organization_id: orgId,
         },
         {
-          id: 'gs-3',
-          field_id: 'v2',
-          start: '2026-04-04T08:00:00Z',
-          end: '2026-04-04T09:00:00Z',
-          capacity: 1,
+          id: 'team-gc3',
+          name: 'Conflict C',
+          division_id: 'u8-div-id',
+          coach_id: 'coach-gc3',
           organization_id: orgId,
         },
         {
-          id: 'gs-4',
-          field_id: 'v2',
-          start: '2026-04-04T09:30:00Z',
-          end: '2026-04-04T10:30:00Z',
-          capacity: 1,
+          id: 'team-gc4',
+          name: 'Conflict D',
+          division_id: 'u8-div-id',
+          coach_id: 'coach-gc4',
           organization_id: orgId,
-        },
-      ];
-
-      // Wipe scheduler_runs and inject ONLY our conflict run with a future timestamp
-      // to guarantee it wins the ORDER BY completed_at DESC query
-      const futureDate = new Date();
-      futureDate.setFullYear(futureDate.getFullYear() + 1);
-      const timestamp = futureDate.toISOString();
-      db.scheduler_runs = (db.scheduler_runs || []).filter(
-        (r: Record<string, unknown>) => r.run_type !== 'game'
+        }
       );
-      db.scheduler_runs.push({
-        id: 'run-game-conflict',
-        organization_id: orgId,
-        run_type: 'game',
-        status: 'completed',
-        results: {
-          summary: { scheduledRate: 1.0, unscheduledMatchups: 0 },
-          warnings: [
-            {
-              type: 'field-overlap',
-              message: 'Field 1 has two games at the same kickoff time.',
-              details: { conflicts: [{ id: 'ga-conflict-1' }, { id: 'ga-conflict-2' }] },
-            },
-          ],
-        },
-        created_at: timestamp,
-        completed_at: timestamp,
-      });
+    }
 
-      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    },
-    { mockOrgId: MOCK_ORG_ID }
-  );
+    // Ensure two fields exist
+    db.fields = db.fields || [];
+    if (!db.fields.find((f: Record<string, unknown>) => f.id === 'v1')) {
+      db.fields.push({
+        id: 'v1',
+        name: 'Field 1',
+        organization_id: orgId,
+        active: true,
+        surface_type: 'Grass',
+        size: '11v11',
+      });
+    }
+    if (!db.fields.find((f: Record<string, unknown>) => f.id === 'v2')) {
+      db.fields.push({
+        id: 'v2',
+        name: 'Field 2',
+        organization_id: orgId,
+        active: true,
+        surface_type: 'Turf',
+        size: '7v7',
+      });
+    }
+
+    // Wipe and re-seed to avoid stale data from prior tests
+    db.game_assignments = [
+      {
+        id: 'ga-conflict-1',
+        run_id: 'run-game-conflict',
+        slot_id: 'gs-1',
+        field_id: 'v1',
+        home_team_id: 'team-gc1',
+        away_team_id: 'team-gc2',
+        start: '2026-04-04T08:00:00Z',
+        end: '2026-04-04T09:00:00Z',
+        week_index: 1,
+        division: 'U8 Coed',
+        assignment_source: 'auto',
+      },
+      {
+        id: 'ga-conflict-2',
+        run_id: 'run-game-conflict',
+        slot_id: 'gs-1',
+        field_id: 'v1',
+        home_team_id: 'team-gc3',
+        away_team_id: 'team-gc4',
+        start: '2026-04-04T08:00:00Z',
+        end: '2026-04-04T09:00:00Z',
+        week_index: 1,
+        division: 'U8 Coed',
+        assignment_source: 'auto',
+      },
+    ];
+
+    db.game_slots = [
+      {
+        id: 'gs-1',
+        field_id: 'v1',
+        start: '2026-04-04T08:00:00Z',
+        end: '2026-04-04T09:00:00Z',
+        capacity: 1,
+        organization_id: orgId,
+      },
+      {
+        id: 'gs-2',
+        field_id: 'v1',
+        start: '2026-04-04T09:30:00Z',
+        end: '2026-04-04T10:30:00Z',
+        capacity: 1,
+        organization_id: orgId,
+      },
+      {
+        id: 'gs-3',
+        field_id: 'v2',
+        start: '2026-04-04T08:00:00Z',
+        end: '2026-04-04T09:00:00Z',
+        capacity: 1,
+        organization_id: orgId,
+      },
+      {
+        id: 'gs-4',
+        field_id: 'v2',
+        start: '2026-04-04T09:30:00Z',
+        end: '2026-04-04T10:30:00Z',
+        capacity: 1,
+        organization_id: orgId,
+      },
+    ];
+
+    // Wipe scheduler_runs and inject ONLY our conflict run with a future timestamp
+    // to guarantee it wins the ORDER BY completed_at DESC query
+    const futureDate = new Date();
+    futureDate.setFullYear(futureDate.getFullYear() + 1);
+    const timestamp = futureDate.toISOString();
+    db.scheduler_runs = (db.scheduler_runs || []).filter(
+      (r: Record<string, unknown>) => r.run_type !== 'game'
+    );
+    db.scheduler_runs.push({
+      id: 'run-game-conflict',
+      organization_id: orgId,
+      run_type: 'game',
+      status: 'completed',
+      results: {
+        summary: { scheduledRate: 1.0, unscheduledMatchups: 0 },
+        warnings: [
+          {
+            type: 'field-overlap',
+            message: 'Field 1 has two games at the same kickoff time.',
+            details: { conflicts: [{ id: 'ga-conflict-1' }, { id: 'ga-conflict-2' }] },
+          },
+        ],
+      },
+      created_at: timestamp,
+      completed_at: timestamp,
+    });
+
+    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+  }, MOCK_ORG_ID);
 
   // Step 3: Reload so React re-mounts with the fully seeded mock data
   await page.reload({ waitUntil: 'domcontentloaded' });

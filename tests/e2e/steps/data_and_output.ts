@@ -322,48 +322,45 @@ Then('provide a secure download link or trigger an instant download', async ({ p
 Given('the team rosters have been generated and finalized', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(
-    ({ mockOrgId }) => {
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+  await page.evaluate((mockOrgId) => {
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
-      // Own the team-run fixture for this scenario so earlier E2E scenarios cannot win the
-      // "latest team run" query with a coach-less result.
-      db.scheduler_runs = (db.scheduler_runs || []).filter(
-        (r: Record<string, unknown>) =>
-          !(
-            r.run_type === 'team' &&
-            (r.organization_id === orgId ||
-              r.organization_id === undefined ||
-              r.organization_id === null)
-          )
-      );
-      db.scheduler_runs.push({
-        id: 'run-1',
-        organization_id: orgId,
-        run_type: 'team',
-        status: 'completed',
-        created_at: new Date().toISOString(),
-        completed_at: new Date().toISOString(),
-        results: {
-          teamsByDivision: {
-            U10: [
-              {
-                id: 't1',
-                name: 'Tigers',
-                division: 'U10',
-                headCoach: 'Coach Smith',
-                coachEmail: 'smith@example.com',
-              },
-            ],
-          },
+    // Own the team-run fixture for this scenario so earlier E2E scenarios cannot win the
+    // "latest team run" query with a coach-less result.
+    db.scheduler_runs = (db.scheduler_runs || []).filter(
+      (r: Record<string, unknown>) =>
+        !(
+          r.run_type === 'team' &&
+          (r.organization_id === orgId ||
+            r.organization_id === undefined ||
+            r.organization_id === null)
+        )
+    );
+    db.scheduler_runs.push({
+      id: 'run-1',
+      organization_id: orgId,
+      run_type: 'team',
+      status: 'completed',
+      created_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      results: {
+        teamsByDivision: {
+          U10: [
+            {
+              id: 't1',
+              name: 'Tigers',
+              division: 'U10',
+              headCoach: 'Coach Smith',
+              coachEmail: 'smith@example.com',
+            },
+          ],
         },
-      });
+      },
+    });
 
-      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    },
-    { mockOrgId: MOCK_ORG_ID }
-  );
+    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+  }, MOCK_ORG_ID);
 });
 
 When('I access the communication tools', async ({ page }) => {

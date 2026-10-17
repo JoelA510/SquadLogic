@@ -74,74 +74,71 @@ Then('the resulting teams summary should reflect the new constraints', async ({ 
   // Simulate backend completing the run so the UI transitions out of "Generating Teams...".
   // If the app already inserted a completed run, leave it in place.
   await waitForMockClient(page);
-  await page.evaluate(
-    ({ mockOrgId }) => {
-      // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
-      const hasCompletedTeamRun = (db.scheduler_runs || []).some(
-        (r: Record<string, unknown>) => r.run_type === 'team' && r.status === 'completed'
-      );
-      if (hasCompletedTeamRun) {
-        return;
-      }
+  await page.evaluate((mockOrgId) => {
+    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+    const hasCompletedTeamRun = (db.scheduler_runs || []).some(
+      (r: Record<string, unknown>) => r.run_type === 'team' && r.status === 'completed'
+    );
+    if (hasCompletedTeamRun) {
+      return;
+    }
 
-      const now = new Date().toISOString();
-      const completedRun = {
-        id: 'mock-run-team-constraints',
-        organization_id: orgId,
-        run_type: 'team',
-        status: 'completed',
-        created_at: now,
-        completed_at: now,
-        results: {
-          teamsByDivision: {
-            U10: [
-              {
-                id: 't1',
-                name: 'Tigers',
-                division_id: 'U10',
-                headCoach: 'Coach Smith',
-                coachEmail: 'smith@example.com',
-              },
-            ],
-          },
-          rosterBalanceByDivision: {
-            U10: {
-              summary: { totalPlayers: 10, totalCapacity: 12, averageFillRate: 0.83 },
-              teamStats: [{ teamId: 't1', slotsRemaining: 2 }],
+    const now = new Date().toISOString();
+    const completedRun = {
+      id: 'mock-run-team-constraints',
+      organization_id: orgId,
+      run_type: 'team',
+      status: 'completed',
+      created_at: now,
+      completed_at: now,
+      results: {
+        teamsByDivision: {
+          U10: [
+            {
+              id: 't1',
+              name: 'Tigers',
+              division_id: 'U10',
+              headCoach: 'Coach Smith',
+              coachEmail: 'smith@example.com',
             },
-          },
-          coachCoverageByDivision: {
-            U10: { totalTeams: 1, teamsWithCoach: 1, coverageRate: 1 },
-          },
-          teams: [{ id: 't1', name: 'Tigers', division: 'U10' }],
-          team_players: [],
+          ],
         },
-      };
-      db.scheduler_runs = db.scheduler_runs || [];
-      const run = db.scheduler_runs.find(
-        (r: Record<string, unknown>) => r.run_type === 'team' && r.status === 'running'
+        rosterBalanceByDivision: {
+          U10: {
+            summary: { totalPlayers: 10, totalCapacity: 12, averageFillRate: 0.83 },
+            teamStats: [{ teamId: 't1', slotsRemaining: 2 }],
+          },
+        },
+        coachCoverageByDivision: {
+          U10: { totalTeams: 1, teamsWithCoach: 1, coverageRate: 1 },
+        },
+        teams: [{ id: 't1', name: 'Tigers', division: 'U10' }],
+        team_players: [],
+      },
+    };
+    db.scheduler_runs = db.scheduler_runs || [];
+    const run = db.scheduler_runs.find(
+      (r: Record<string, unknown>) => r.run_type === 'team' && r.status === 'running'
+    );
+    if (run) {
+      run.status = 'completed';
+      Object.assign(run, completedRun, { id: run.id });
+    } else {
+      db.scheduler_runs = db.scheduler_runs.filter(
+        (r: Record<string, unknown>) => r.id !== completedRun.id
       );
-      if (run) {
-        run.status = 'completed';
-        Object.assign(run, completedRun, { id: run.id });
-      } else {
-        db.scheduler_runs = db.scheduler_runs.filter(
-          (r: Record<string, unknown>) => r.id !== completedRun.id
-        );
-        db.scheduler_runs.push(completedRun);
-      }
+      db.scheduler_runs.push(completedRun);
+    }
+    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
+    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
+    if ((window as { __MOCK_DB__?: unknown }).__MOCK_DB__) {
       // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
-      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-      // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
-      if ((window as { __MOCK_DB__?: unknown }).__MOCK_DB__) {
-        // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
-        (window as { __MOCK_DB__?: unknown }).__MOCK_DB__ = db;
-      }
-    },
-    { mockOrgId: MOCK_ORG_ID }
-  );
+      (window as { __MOCK_DB__?: unknown }).__MOCK_DB__ = db;
+    }
+  }, MOCK_ORG_ID);
 
   await page.goto('/teams');
   await expect(page.getByRole('heading', { name: 'Teaming Overview' })).toBeVisible({
@@ -354,39 +351,36 @@ Then('eventually display a green success message confirming completion', async (
 When('I hover my mouse over the {string} chart', async ({ page }, _chartName: string) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(
-    ({ mockOrgId }) => {
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+  await page.evaluate((mockOrgId) => {
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
-      db.view_compliance_stats = [
-        {
-          organization_id: orgId,
-          form_title: 'Fall Registration',
-          total_registrations: 45,
-          medical_cleared: 38,
-        },
-      ];
+    db.view_compliance_stats = [
+      {
+        organization_id: orgId,
+        form_title: 'Fall Registration',
+        total_registrations: 45,
+        medical_cleared: 38,
+      },
+    ];
 
-      db.view_org_metrics = [{ organization_id: orgId, total_teams: 6, total_users: 15 }];
+    db.view_org_metrics = [{ organization_id: orgId, total_teams: 6, total_users: 15 }];
 
-      // Seed players with custom_attributes so the bar chart renders
-      db.players = db.players || [];
-      const attrs = ['beginner', 'intermediate', 'advanced'];
-      for (let i = 0; i < 12; i++) {
-        db.players.push({
-          id: `player-chart-${i}`,
-          organization_id: orgId,
-          team_id: `t${i % 3}`,
-          division: 'U10',
-          custom_attributes: { skill_level: attrs[i % 3] },
-        });
-      }
+    // Seed players with custom_attributes so the bar chart renders
+    db.players = db.players || [];
+    const attrs = ['beginner', 'intermediate', 'advanced'];
+    for (let i = 0; i < 12; i++) {
+      db.players.push({
+        id: `player-chart-${i}`,
+        organization_id: orgId,
+        team_id: `t${i % 3}`,
+        division: 'U10',
+        custom_attributes: { skill_level: attrs[i % 3] },
+      });
+    }
 
-      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    },
-    { mockOrgId: MOCK_ORG_ID }
-  );
+    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+  }, MOCK_ORG_ID);
 
   await page.goto('/admin/reports');
   // Wait for the Recharts canvas/SVG to mount (RadarChart always renders)
@@ -450,52 +444,49 @@ Then('a dark-themed tooltip should appear showing exact counts', async ({ page }
 Given('I have generated a new set of teams', async ({ page }) => {
   // Seed the DB with a completed team run so the persistence panel is visible
   await waitForMockClient(page);
-  await page.evaluate(
-    ({ mockOrgId }) => {
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
-      const now = new Date().toISOString();
-      db.scheduler_runs = db.scheduler_runs || [];
-      const completedRun = {
-        id: 'mock-run-team-sync',
-        organization_id: orgId,
-        run_type: 'team',
-        status: 'completed',
-        created_at: now,
-        completed_at: now,
-        results: {
-          teamsByDivision: {
-            U10: [
-              {
-                id: 't1',
-                name: 'Tigers',
-                division_id: 'U10',
-                headCoach: 'Coach Smith',
-                coachEmail: 'smith@example.com',
-              },
-            ],
-          },
-          rosterBalanceByDivision: {
-            U10: {
-              summary: { totalPlayers: 10, totalCapacity: 12, averageFillRate: 0.83 },
-              teamStats: [{ teamId: 't1', slotsRemaining: 2 }],
+  await page.evaluate((mockOrgId) => {
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+    const now = new Date().toISOString();
+    db.scheduler_runs = db.scheduler_runs || [];
+    const completedRun = {
+      id: 'mock-run-team-sync',
+      organization_id: orgId,
+      run_type: 'team',
+      status: 'completed',
+      created_at: now,
+      completed_at: now,
+      results: {
+        teamsByDivision: {
+          U10: [
+            {
+              id: 't1',
+              name: 'Tigers',
+              division_id: 'U10',
+              headCoach: 'Coach Smith',
+              coachEmail: 'smith@example.com',
             },
-          },
-          coachCoverageByDivision: {
-            U10: { totalTeams: 1, teamsWithCoach: 1, coverageRate: 1 },
-          },
-          teams: [{ id: 't1', name: 'Tigers', division: 'U10' }],
-          team_players: [],
+          ],
         },
-      };
-      db.scheduler_runs = db.scheduler_runs.filter(
-        (r: Record<string, unknown>) => r.id !== completedRun.id
-      );
-      db.scheduler_runs.push(completedRun);
-      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    },
-    { mockOrgId: MOCK_ORG_ID }
-  );
+        rosterBalanceByDivision: {
+          U10: {
+            summary: { totalPlayers: 10, totalCapacity: 12, averageFillRate: 0.83 },
+            teamStats: [{ teamId: 't1', slotsRemaining: 2 }],
+          },
+        },
+        coachCoverageByDivision: {
+          U10: { totalTeams: 1, teamsWithCoach: 1, coverageRate: 1 },
+        },
+        teams: [{ id: 't1', name: 'Tigers', division: 'U10' }],
+        team_players: [],
+      },
+    };
+    db.scheduler_runs = db.scheduler_runs.filter(
+      (r: Record<string, unknown>) => r.id !== completedRun.id
+    );
+    db.scheduler_runs.push(completedRun);
+    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+  }, MOCK_ORG_ID);
   await page.goto('/teams');
   await expect(page.getByRole('heading', { name: 'Teaming Overview' })).toBeVisible({
     timeout: 15000,

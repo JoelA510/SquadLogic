@@ -62,55 +62,52 @@ async function syncPlayerToImports(page: Page, player: Record<string, unknown>) 
 
 Given('teams have been generated for the current season', async ({ page }) => {
   await waitForMockClient(page);
-  await page.evaluate(
-    ({ mockOrgId }) => {
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+  await page.evaluate((mockOrgId) => {
+    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
-      // CRITICAL: Use pre-seeded run-1 teams (t1='Team A', t2='Team B') rather than
-      // creating new teams. The mock client's mergeSource always merges initialMockData
-      // back in on page reload, so we can't remove pre-seeded records — we must work with them.
-      // Update run-1 to ensure it has team_players and created_at for proper sorting.
-      db.scheduler_runs = db.scheduler_runs || [];
-      const existingRun = db.scheduler_runs.find((r: Record<string, unknown>) => r.id === 'run-1');
-      if (existingRun) {
-        existingRun.created_at = new Date().toISOString();
-        existingRun.completed_at = new Date().toISOString();
-        existingRun.results = existingRun.results || {};
-        existingRun.results.team_players = existingRun.results.team_players || [];
-      } else {
-        db.scheduler_runs.push({
-          id: 'run-1',
-          organization_id: orgId,
-          run_type: 'team',
-          status: 'completed',
-          created_at: new Date().toISOString(),
-          completed_at: new Date().toISOString(),
-          results: {
-            teamsByDivision: {
-              U10: [
-                { id: 't1', name: 'Team A', division_id: 'U10', organization_id: orgId },
-                { id: 't2', name: 'Team B', division_id: 'U10', organization_id: orgId },
-              ],
-            },
-            team_players: [],
-            rosterBalanceByDivision: {
-              U10: {
-                summary: { totalPlayers: 20, totalCapacity: 24, averageFillRate: 0.8 },
-                teamStats: [],
-              },
-            },
-            coachCoverageByDivision: {
-              U10: { totalTeams: 2, teamsWithCoach: 2, coverageRate: 1.0 },
+    // CRITICAL: Use pre-seeded run-1 teams (t1='Team A', t2='Team B') rather than
+    // creating new teams. The mock client's mergeSource always merges initialMockData
+    // back in on page reload, so we can't remove pre-seeded records — we must work with them.
+    // Update run-1 to ensure it has team_players and created_at for proper sorting.
+    db.scheduler_runs = db.scheduler_runs || [];
+    const existingRun = db.scheduler_runs.find((r: Record<string, unknown>) => r.id === 'run-1');
+    if (existingRun) {
+      existingRun.created_at = new Date().toISOString();
+      existingRun.completed_at = new Date().toISOString();
+      existingRun.results = existingRun.results || {};
+      existingRun.results.team_players = existingRun.results.team_players || [];
+    } else {
+      db.scheduler_runs.push({
+        id: 'run-1',
+        organization_id: orgId,
+        run_type: 'team',
+        status: 'completed',
+        created_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+        results: {
+          teamsByDivision: {
+            U10: [
+              { id: 't1', name: 'Team A', division_id: 'U10', organization_id: orgId },
+              { id: 't2', name: 'Team B', division_id: 'U10', organization_id: orgId },
+            ],
+          },
+          team_players: [],
+          rosterBalanceByDivision: {
+            U10: {
+              summary: { totalPlayers: 20, totalCapacity: 24, averageFillRate: 0.8 },
+              teamStats: [],
             },
           },
-        });
-      }
+          coachCoverageByDivision: {
+            U10: { totalTeams: 2, teamsWithCoach: 2, coverageRate: 1.0 },
+          },
+        },
+      });
+    }
 
-      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    },
-    { mockOrgId: MOCK_ORG_ID }
-  );
+    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+  }, MOCK_ORG_ID);
 });
 
 Given('all players are correctly assigned to eligible teams', async ({ page }) => {

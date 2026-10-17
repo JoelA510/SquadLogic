@@ -1,8 +1,9 @@
 -- RLS invariant: the `exports` storage bucket (20261017000000) is private and
 -- scoped to the organization named by each object's first folder.
 --
---   * a member of Org A (Alice, admin; Charlie, coach) uploads under A's
---     folder and reads A's exports;
+--   * an admin of Org A (Alice) uploads under A's folder and reads A's
+--     exports; a coach of Org A (Charlie, a member but not an admin) is
+--     refused an upload and still reads them;
 --   * a member of Org B (Bob, admin) reads none of A's exports and cannot
 --     upload under A's folder;
 --   * a name with no folder, or a folder that is not a UUID, is refused with
@@ -25,7 +26,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(15);
+SELECT plan(16);
 
 -- ── 1. The bucket, private (as the test's own superuser role) ─────────────
 SELECT is(
@@ -34,7 +35,7 @@ SELECT is(
     'the exports bucket exists and is private'
 );
 
--- ── 2. Org A's members upload under A's folder ────────────────────────────
+-- ── 2. Org A's admin uploads; Org A's coach is refused, and reads ────────
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
 
@@ -44,12 +45,20 @@ SELECT lives_ok(
     'an Org A admin uploads under Org A''s folder'
 );
 
-SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
-
 SELECT lives_ok(
     $$INSERT INTO storage.objects (bucket_id, name)
       VALUES ('exports', 'a1111111-1111-1111-1111-111111111111/teams/a-team-pgtap.csv')$$,
-    'an Org A coach (a member, not an admin) uploads under Org A''s folder'
+    'an Org A admin uploads a team file under Org A''s folder'
+);
+
+SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';
+
+SELECT throws_ok(
+    $$INSERT INTO storage.objects (bucket_id, name)
+      VALUES ('exports', 'a1111111-1111-1111-1111-111111111111/teams/planted-by-coach.csv')$$,
+    '42501',
+    NULL,
+    'an Org A coach (a member, not an admin) cannot upload under Org A''s folder'
 );
 
 SELECT is(

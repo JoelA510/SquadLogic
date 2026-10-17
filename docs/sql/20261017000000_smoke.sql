@@ -4,9 +4,11 @@
 -- stubs `auth.uid()` from `request.jwt.claim.sub`; Supabase's own reads the
 -- same setting first):
 --   * the `exports` bucket exists and is private;
---   * its policies are exactly a SELECT and an INSERT, both TO authenticated;
---   * an admin and a coach of organization A each upload under A's folder and
---     read both of A's objects;
+--   * its policies are exactly a members' SELECT and an admins' INSERT, both
+--     TO authenticated;
+--   * an admin of organization A uploads under A's folder; a coach of A (a
+--     member, not an admin) is refused with 42501, and still reads both of
+--     A's objects, as the admin does;
 --   * an admin of organization B reads none of A's objects and cannot upload
 --     under A's folder;
 --   * a name with no folder, a non-UUID folder, or another organization's
@@ -107,10 +109,10 @@ BEGIN
      WHERE schemaname = 'storage' AND tablename = 'objects'
        AND (policyname LIKE 'exports%' OR qual LIKE '%''exports''%' OR with_check LIKE '%''exports''%');
     IF v_policies IS DISTINCT FROM
-       'exports org-member insert:INSERT:authenticated exports org-member select:SELECT:authenticated' THEN
-        RAISE EXCEPTION 'the exports policies are not exactly a SELECT and an INSERT for authenticated: %', v_policies;
+       'exports org-admin insert:INSERT:authenticated exports org-member select:SELECT:authenticated' THEN
+        RAISE EXCEPTION 'the exports policies are not exactly a members'' SELECT and an admins'' INSERT for authenticated: %', v_policies;
     END IF;
-    RAISE NOTICE 'the exports bucket is private, with exactly a SELECT and an INSERT policy, both TO authenticated';
+    RAISE NOTICE 'the exports bucket is private, with exactly a members'' SELECT and an admins'' INSERT policy, both TO authenticated';
 
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
         (v_admin_a, 'exports-admin-a@example.test', '{"password_length": 16}'),
@@ -130,11 +132,14 @@ BEGIN
         (v_org_a, v_coach_a, 'coach'),
         (v_org_b, v_admin_b, 'admin');
 
-    -- 3. Members of A upload under A's folder.
+    -- 3. A's admin uploads under A's folder; A's coach, a member but not an
+    --    admin, is refused.
     v_res := pg_temp.exports_upload(v_admin_a, v_org_a || '/master-schedule-smoke.csv');
     IF v_res <> 'ok' THEN RAISE EXCEPTION 'A''s admin could not upload under A''s folder: %', v_res; END IF;
-    v_res := pg_temp.exports_upload(v_coach_a, v_org_a || '/teams/team-smoke.csv');
-    IF v_res <> 'ok' THEN RAISE EXCEPTION 'A''s coach could not upload under A''s folder: %', v_res; END IF;
+    v_res := pg_temp.exports_upload(v_admin_a, v_org_a || '/teams/team-smoke.csv');
+    IF v_res <> 'ok' THEN RAISE EXCEPTION 'A''s admin could not upload a team file under A''s folder: %', v_res; END IF;
+    v_res := pg_temp.exports_upload(v_coach_a, v_org_a || '/teams/planted-by-coach.csv');
+    IF v_res <> '42501' THEN RAISE EXCEPTION 'A''s coach uploading under A''s folder gave % (want 42501: only admins upload)', v_res; END IF;
 
     -- 4. Both read both; B's admin reads none of them.
     IF pg_temp.exports_visible(v_admin_a, v_org_a::text) <> 2
@@ -148,7 +153,7 @@ BEGIN
     IF pg_temp.exports_visible(v_admin_b, '') <> 0 THEN
         RAISE EXCEPTION 'B''s admin reads % exports in all', pg_temp.exports_visible(v_admin_b, '');
     END IF;
-    RAISE NOTICE 'A''s admin and coach each uploaded under A''s folder and read 2 of 2; B''s admin read 0';
+    RAISE NOTICE 'A''s admin uploaded 2 under A''s folder and A''s coach was refused 42501; both read 2 of 2; B''s admin read 0';
 
     -- 5-6. Refusals: another organization's folder, no folder, a non-UUID folder.
     v_res := pg_temp.exports_upload(v_admin_b, v_org_a || '/planted-by-b.csv');

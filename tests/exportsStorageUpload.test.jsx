@@ -3,7 +3,7 @@
  * organization's folder, and says what happened to every file.
  *
  * The bucket's policies (`20261017000000_exports_bucket.sql`) accept an object
- * only under `<organization_id>/` for a member of that organization, and have
+ * only under `<organization_id>/` from an administrator of that organization, and have
  * no UPDATE policy, so the panel must send org-prefixed paths without upsert.
  * The upload goes through the real panel and `uploadScheduleExport` to a
  * storage client double that records what it was asked and answers as

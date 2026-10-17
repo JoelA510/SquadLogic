@@ -1788,11 +1788,13 @@ smoke-tested
   - `uploadScheduleExport` still defaults to `upsert: true`, which the `exports` bucket refuses
     (no UPDATE policy); its one caller now passes `false`. Kept for backward compatibility.
     *Statically reviewed.*
-  - **Open for the owner:** the policies let any member of the organization (coach, parent,
-    player, staff) upload to and read the organization's exports, as asked. The page that
-    uploads is administrator-only (`MANAGE_ORGANIZATION`), and the publication baseline beside it
-    is written only by an admin RPC. Recommended: INSERT for `is_org_admin`, SELECT for members
-    (a one-line migration). *Statically reviewed.*
+  - **Decided 2026-10-17 (coordinator, in this PR):** uploads are for organization
+    administrators only (INSERT through `is_org_admin`), reads for any member (SELECT through
+    `is_org_member`), matching the administrator-only Exports page (`MANAGE_ORGANIZATION`) and
+    the admin RPC that records the publication baseline. Changed in `20261017000000` itself,
+    which had not reached production. A coach's upload is refused 42501 in the smoke and the
+    pgTAP suite; putting the INSERT back on `is_org_member` fails the smoke (*executed*); pgTAP
+    *statically reviewed* until the PR's CI runs it.
 
 ## Deferred with reason
 

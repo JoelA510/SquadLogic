@@ -3,8 +3,8 @@
  * (`packages/core/src/storageSupabase.js`).
  *
  * The bucket's policies (`supabase/migrations/20261017000000_exports_bucket.sql`)
- * accept an object only under the folder of an organization the caller is a
- * member of, and refuse a first folder that is not a UUID. `exportObjectPath`
+ * accept an upload only under the folder of an organization the caller is an
+ * administrator of, and refuse a first folder that is not a UUID. `exportObjectPath`
  * is the one place the app builds such a path, so it refuses what the
  * database would, before anything is sent.
  */

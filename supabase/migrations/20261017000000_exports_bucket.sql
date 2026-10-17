@@ -15,9 +15,10 @@
 -- `<organization_id>/<file>` (the master schedule) and
 -- `<organization_id>/teams/<file>` (one per team), the convention
 -- 20260421001043 set for `raw-imports`. The policies read the first folder of
--- the object's name and require the caller to be a member of that
--- organization, through `public.is_org_member()`, the helper every table
--- policy uses (docs/security/rls-policies.md).
+-- the object's name: reading needs the caller to be a member of that
+-- organization (`public.is_org_member()`, the helper every table policy uses,
+-- docs/security/rls-policies.md), and uploading needs them to be one of its
+-- administrators (`public.is_org_admin()`).
 --
 -- **A first folder that is not a UUID is refused, not an error.** The CASE
 -- casts only a segment that has a UUID's shape, so a name with no folder or a
@@ -25,15 +26,21 @@
 -- 22P02 from the cast, as the `raw-imports` policies would. CASE evaluates its
 -- branches in order; AND does not promise to.
 --
--- **No direct auth call in the policies.** They call `is_org_member()`, a
--- SECURITY DEFINER helper that reads `auth.uid()` inside its own query, so
+-- **No direct auth call in the policies.** They call `is_org_member()` and
+-- `is_org_admin()`, SECURITY DEFINER helpers that read `auth.uid()` inside
+-- their own query, so
 -- there is no bare `auth.uid()` or `auth.role()` here for the
 -- `auth_rls_initplan` advisor to flag (the Wave 2 RLS rewrite exists to remove
 -- those). Both policies are `TO authenticated`, so the anonymous role has no
 -- policy and is refused without evaluating anything.
 --
--- **Read and write, nothing else.** A member of the organization may upload
--- (INSERT) and read (SELECT) its exports. There is no UPDATE or DELETE policy:
+-- **Members read, administrators upload, nothing else.** A member of the
+-- organization may read (SELECT) its exports; only an administrator of it may
+-- upload (INSERT), as only an administrator reaches the Exports page
+-- (`MANAGE_ORGANIZATION`) and records the publication baseline beside the
+-- upload (`admin_publish_schedule_baseline`, `is_org_admin`); a coach or a
+-- parent cannot put a file where published schedules live. There is no
+-- UPDATE or DELETE policy:
 -- a published export is not rewritten or removed by an end user (retention,
 -- if it is ever wanted, runs as the service role, which bypasses RLS, as for
 -- `raw-imports` since 20260602010000). The client uploads with `upsert:
@@ -67,8 +74,8 @@ CREATE POLICY "exports org-member select"
         END
     );
 
-DROP POLICY IF EXISTS "exports org-member insert" ON storage.objects;
-CREATE POLICY "exports org-member insert"
+DROP POLICY IF EXISTS "exports org-admin insert" ON storage.objects;
+CREATE POLICY "exports org-admin insert"
     ON storage.objects
     FOR INSERT TO authenticated
     WITH CHECK (
@@ -76,7 +83,7 @@ CREATE POLICY "exports org-member insert"
         AND CASE
             WHEN (storage.foldername(name))[1]
                  ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-            THEN public.is_org_member(((storage.foldername(name))[1])::uuid)
+            THEN public.is_org_admin(((storage.foldername(name))[1])::uuid)
             ELSE false
         END
     );

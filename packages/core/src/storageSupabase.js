@@ -21,7 +21,8 @@ const SEGMENT = /^(?!\.{1,2}$)[^/\\]+$/;
  * The object path for an export: `<organizationId>/<fileName>`.
  *
  * The `exports` bucket's policies read the first folder of an object's name
- * and require the caller to be a member of that organization, so every upload
+ * and require the caller to be an administrator of that organization to
+ * upload (a member to read), so every upload
  * goes through here: a path without the organization folder would be refused
  * by the database, and one with another organization's would be too.
  *

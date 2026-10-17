@@ -369,6 +369,38 @@ function envReads(code) {
   return reads;
 }
 
+/**
+ * How many times the code reaches `process.env` (`process.env.X`,
+ * `process['env']`, `process.env` whole), outside comments and strings.
+ * @param {string} code
+ */
+function processEnvReads(code) {
+  const source = ts.createSourceFile(
+    's.jsx',
+    code,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.JSX
+  );
+  let reads = 0;
+  const visit = (/** @type {ts.Node} */ node) => {
+    const isProcess = (/** @type {ts.Node} */ n) => ts.isIdentifier(n) && n.text === 'process';
+    if (ts.isPropertyAccessExpression(node) && isProcess(node.expression)) {
+      if (node.name.text === 'env') reads += 1;
+    } else if (
+      ts.isElementAccessExpression(node) &&
+      isProcess(node.expression) &&
+      ts.isStringLiteralLike(node.argumentExpression) &&
+      node.argumentExpression.text === 'env'
+    ) {
+      reads += 1;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return reads;
+}
+
 describe('env.js is the only reader of import.meta.env, by name', () => {
   it('the detector sees named reads, whole-object reads, and skips comments', () => {
     expect(envReads('const a = import.meta.env.VITE_X;')).toEqual(['VITE_X']);
@@ -411,6 +443,26 @@ describe('env.js is the only reader of import.meta.env, by name', () => {
         name !== 'VITE_VERCEL_ENV'
     );
     expect(unvalidated).toEqual([]);
+  });
+
+  it('no frontend or core module reads process.env', () => {
+    // Rule 3 (AGENTS.md): a frontend module asks env.js, never process.env.
+    // `FeatureGuard.jsx` and `featureFlags.js` read `process.env.NODE_ENV`
+    // (Vite's compatibility replacement) until plan M6; they now read env.js's
+    // IS_DEVELOPMENT_MODE.
+    const files = [...listSources(SRC), ...listSources(CORE)];
+    expect(files.length).toBeGreaterThan(200);
+    const offenders = files
+      .filter((file) => processEnvReads(readFileSync(file, 'utf8')) > 0)
+      .map((file) => path.relative(ROOT, file));
+    expect(offenders).toEqual([]);
+  }, 25_000); // parses the same ~900 sources as the import.meta.env scan above.
+
+  it('the process.env detector sees reads and skips comments and strings', () => {
+    expect(processEnvReads("if (process.env.NODE_ENV === 'development') f();")).toBe(1);
+    expect(processEnvReads("const { NODE_ENV } = process.env; g(process['env']);")).toBe(2);
+    expect(processEnvReads('// process.env.NODE_ENV\nconst s = "process.env";')).toBe(0);
+    expect(processEnvReads('const env = { process: 1 }; env.process;')).toBe(0);
   });
 
   it('.env.example documents every variable the rules read', () => {

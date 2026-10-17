@@ -1532,6 +1532,12 @@ smoke-tested
     hid it. The auto-scheduler's request schema refuses the mock's `org-1` and `season-1` the same
     way. Not fixed (a change to the mock's ids touches most of the E2E suite); the game scenario
     seeds a club with a UUID id. *Executed* (the page's own error, on a run of the scenario).
+    **Fixed 2026-10-17** (Wave 0, branch `claude/vibrant-allen-hr7y7s-mockids`): the ids are
+    `MOCK_ORG_ID` and `MOCK_SEASON_ID` (`frontend/src/lib/mockSeedIds.js`), fixed UUIDs shared by
+    the mock, the factories, the unit tests and the E2E steps; the E2E auto-scheduler route now
+    validates the whole request schema. A Pillar 1 scenario runs Generate Schedule on the seed's
+    own organization, and `tests/mockSeedIds.test.js` holds the seeded ids to both schemas; each
+    fails with the old ids put back. *Executed.*
   - The game grid holds one game per cell (`GameScheduleGrid` keys by field and slot), so a drop
     onto an occupied cell staged two games in one slot and the grid showed only one of them. Fixed
     in this PR: the shared move handler refuses it. *Executed* (a page test, shown failing with
@@ -1577,6 +1583,19 @@ smoke-tested
     *Statically reviewed.*
   - Recharts axes and gridlines on the analytics page keep hard-coded slate colours, which do
     not re-theme. *Statically reviewed.*
+
+- 2026-10-17, found by the Wave 0 mock-ids PR:
+  - The mock seed's other ids are still not UUIDs: locations (`loc-1`), fields (`v1`, `v2`), game
+    and practice slots (`gs-1`..`gs-4`, `ps-1`), teams (`t1`, `t2`), divisions (`u8-div-id`) and
+    profiles (`mock-admin-id`, ...). Real ones are. The practice repair adapter already refuses
+    the seed's `loc-1`, which is why `practice_repair_panel.ts` runs in a fresh organization, and
+    any other check that reads one of these as a UUID will refuse the seed the same way. Not
+    changed (the item was the organization and season ids). *Statically reviewed.*
+  - The seed's game slots (`gs-1`..`gs-4`) are at 08:00 and 09:30 UTC on 2026-04-04, which on the
+    seeded season's Los Angeles clock is 1:00 and 2:30 AM, and they fall outside that season's
+    dates (2025-01-01 to 2025-12-31). Generate Schedule on the seed stages a 1:00 AM kickoff, and
+    did not refuse the slot for lying outside the season. Seed data; not changed. *Executed*
+    (the staged game on the new scenario's page reads "Sat, 4/4/2026 · 1:00 AM").
 
 ## Deferred with reason
 

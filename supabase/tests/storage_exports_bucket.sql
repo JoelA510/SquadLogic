@@ -7,22 +7,25 @@
 --     upload under A's folder;
 --   * a name with no folder, or a folder that is not a UUID, is refused with
 --     42501 (the policy's CASE), never 22P02 (a cast error);
---   * an update or a delete, even by A's own admin, changes nothing: there is
---     no UPDATE or DELETE policy;
+--   * an update, even by A's own admin, changes nothing, and there is no
+--     UPDATE or DELETE policy for the bucket at all (a direct DELETE cannot be
+--     tried here: Supabase's `storage.protect_delete()` trigger refuses every
+--     SQL delete on storage.objects, whatever the policies say; deletes go
+--     through the Storage API);
 --   * the anonymous role reads nothing and cannot upload.
 --
 -- The objects are inserted into `storage.objects` directly, as the caller,
 -- which is what the Storage API does with the caller's JWT: the policies are
 -- what decide. INSERT raises on a refusal (a row that passes no WITH CHECK);
--- UPDATE and DELETE with no policy see no rows and affect none, so those are
--- asserted as "unchanged", the way rls_field_blackouts.sql asserts them.
+-- an UPDATE with no policy sees no rows and affects none, so it is asserted
+-- as "unchanged", the way rls_field_blackouts.sql asserts it.
 
 BEGIN;
 
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(14);
+SELECT plan(15);
 
 -- ── 1. The bucket, private (as the test's own superuser role) ─────────────
 SELECT is(
@@ -100,7 +103,7 @@ SELECT throws_ok(
     'an Org A admin cannot upload under Org B''s folder'
 );
 
--- ── 5. No update, no delete, even by A's own admin ────────────────────────
+-- ── 5. No update, even by A's own admin; no update or delete policy ──────
 SELECT is(
     (SELECT COUNT(*) FROM storage.objects
       WHERE bucket_id = 'exports' AND name LIKE 'a1111111-1111-1111-1111-111111111111/%')::int,
@@ -111,15 +114,22 @@ SELECT is(
 UPDATE storage.objects SET name = name || '.renamed'
  WHERE bucket_id = 'exports' AND name LIKE 'a1111111-1111-1111-1111-111111111111/%';
 
-DELETE FROM storage.objects
- WHERE bucket_id = 'exports' AND name LIKE 'a1111111-1111-1111-1111-111111111111/%';
-
 SELECT is(
     (SELECT COUNT(*) FROM storage.objects
       WHERE bucket_id = 'exports' AND name LIKE 'a1111111-1111-1111-1111-111111111111/%'
         AND name NOT LIKE '%.renamed')::int,
     2,
-    'an update and a delete by an Org A admin leave both exports as uploaded'
+    'an update by an Org A admin leaves both exports as uploaded'
+);
+
+SELECT is(
+    (SELECT array_agg(cmd || ' ' || array_to_string(roles, ',') ORDER BY cmd)
+       FROM pg_policies
+      WHERE schemaname = 'storage' AND tablename = 'objects'
+        AND (policyname LIKE 'exports%'
+             OR qual LIKE '%''exports''%' OR with_check LIKE '%''exports''%')),
+    ARRAY['INSERT authenticated', 'SELECT authenticated'],
+    'the exports policies are an INSERT and a SELECT for authenticated, with no UPDATE, DELETE or ALL'
 );
 
 -- ── 6. The anonymous role ─────────────────────────────────────────────────

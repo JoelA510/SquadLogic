@@ -1,15 +1,16 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
 Given('an organization and season are active', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
+  await page.evaluate((mockOrgId) => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = 'org-1';
+    const orgId = mockOrgId;
     db.organizations = [{ id: orgId, name: 'SquadLogic FC', status: 'active', is_onboarded: true }];
     db.organization_members = [
       {
@@ -25,7 +26,7 @@ Given('an organization and season are active', async ({ page }) => {
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
     localStorage.setItem('squadlogic_active_org', orgId);
     localStorage.setItem('squadlogic-current-season', 'Fall 2024');
-  });
+  }, MOCK_ORG_ID);
 });
 
 Then('I should see a {int}-step workflow on the left side', async ({ page }, steps: number) => {
@@ -51,9 +52,9 @@ Then('the League Status panel should show the active season name', async ({ page
 Given('I have imported player data', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
+  await page.evaluate((mockOrgId) => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const activeOrg = localStorage.getItem('squadlogic_active_org') || 'org-1';
+    const activeOrg = localStorage.getItem('squadlogic_active_org') || mockOrgId;
     db.imports = [
       {
         id: 'imp-1',
@@ -73,7 +74,7 @@ Given('I have imported player data', async ({ page }) => {
     ];
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
     localStorage.setItem('dashboardActiveStep', '2'); // Preserve across reloads
-  });
+  }, MOCK_ORG_ID);
   await page.goto('/workflow?step=6');
 
   // Force Playwright to visually locate and click the specific stepper buttons
@@ -123,9 +124,9 @@ Given('I have not generated a game schedule', async ({ page }) => {
 Given('all setup steps are complete', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
+  await page.evaluate((mockOrgId) => {
     const now = new Date().toISOString();
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     db.imports = [
       {
@@ -186,7 +187,7 @@ Given('all setup steps are complete', async ({ page }) => {
       { id: 'run-1', status: 'deleted' },
     ];
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+  }, MOCK_ORG_ID);
   await page.goto('/workflow');
 
   // Force Playwright to visually locate and click the specific stepper buttons
@@ -200,8 +201,8 @@ Given('all setup steps are complete', async ({ page }) => {
 Given('I have generated teams', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+  await page.evaluate((mockOrgId) => {
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     db.scheduler_runs = db.scheduler_runs || [];
     if (
@@ -226,7 +227,7 @@ Given('I have generated teams', async ({ page }) => {
       });
     }
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+  }, MOCK_ORG_ID);
   await page.goto('/workflow');
 
   // Force Playwright to visually locate and click the specific stepper buttons
@@ -251,8 +252,8 @@ Given('I have generated teams', async ({ page }) => {
 Given('I have generated a practice schedule', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+  await page.evaluate((mockOrgId) => {
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     db.scheduler_runs = db.scheduler_runs || [];
     const now = new Date().toISOString();
@@ -274,15 +275,15 @@ Given('I have generated a practice schedule', async ({ page }) => {
       }
     });
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+  }, MOCK_ORG_ID);
   await page.reload();
 });
 
 Given('I have generated a game schedule', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+  await page.evaluate((mockOrgId) => {
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
     db.scheduler_runs = db.scheduler_runs || [];
     db.scheduler_runs.push({
@@ -294,7 +295,7 @@ Given('I have generated a game schedule', async ({ page }) => {
       created_at: new Date().toISOString(),
     });
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+  }, MOCK_ORG_ID);
   await page.reload();
 });
 
@@ -343,9 +344,9 @@ Given(
     await page.goto('/');
     await waitForMockClient(page);
     await page.evaluate(
-      ({ o1, o2 }) => {
+      ({ o1, o2, mockOrgId }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-        const org1Id = 'org-1';
+        const org1Id = mockOrgId;
         const org2Id = 'org-2';
         db.organizations = [
           { id: org1Id, name: o1, status: 'active', is_onboarded: true },
@@ -382,7 +383,7 @@ Given(
         ];
         sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
       },
-      { o1: org1, o2: org2 }
+      { o1: org1, o2: org2, mockOrgId: MOCK_ORG_ID }
     );
     await page.reload();
   }

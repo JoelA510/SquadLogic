@@ -27,6 +27,7 @@ import { mapSchedulerRunToPracticeSummary } from '@squadlogic/core/utils/practic
 import { makeSchedulerRun } from './factories/index.js';
 import PracticeReadinessPanel from '../frontend/src/components/PracticeReadinessPanel.jsx';
 import { formatDateTime } from '../frontend/src/utils/formatters.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const COMPLETED_AT = '2026-03-04T17:45:00Z';
 
@@ -157,7 +158,7 @@ vi.mock('../frontend/src/contexts/ThemeContext.jsx', () => ({
   useTheme: () => ({ theme: 'light' }),
 }));
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
-  useOrganization: () => ({ currentOrganization: { id: 'org-1', name: 'Smoke FC' } }),
+  useOrganization: () => ({ currentOrganization: { id: MOCK_ORG_ID, name: 'Smoke FC' } }),
 }));
 vi.mock('../frontend/src/components/DashboardWorkflow.jsx', () => ({ default: () => null }));
 vi.mock('../frontend/src/components/ui/FeatureGuard.jsx', () => ({

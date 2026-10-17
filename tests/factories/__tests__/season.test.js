@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { makeSeason, makeDivision } from '../season.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 describe('makeSeason', () => {
   it('returns deterministic defaults with no args', () => {
     const s = makeSeason();
     expect(s.id).toBe(1);
-    expect(s.organization_id).toBe('org-1');
+    expect(s.organization_id).toBe(MOCK_ORG_ID);
     expect(s.season_label).toBe('Fall');
     expect(s.season_year).toBe(2026);
     expect(s.roster_formula).toEqual({});
@@ -30,7 +31,7 @@ describe('makeDivision', () => {
     const d = makeDivision();
     expect(d.id).toBe('div-1');
     expect(d.season_settings_id).toBe(1);
-    expect(d.organization_id).toBe('org-1');
+    expect(d.organization_id).toBe(MOCK_ORG_ID);
     expect(d.name).toBe('U8 Coed');
     expect(d.gender_policy).toBe('coed');
     expect(d.max_roster_size).toBe(12);

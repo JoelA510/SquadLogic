@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import PlayerRecordPage from '../frontend/src/pages/PlayerRecordPage.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
@@ -29,7 +30,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
-    currentOrganization: { id: 'org-1' },
+    currentOrganization: { id: MOCK_ORG_ID },
     featureFlags: {},
     loading: false,
   }),
@@ -59,7 +60,7 @@ describe('PlayerRecordPage', () => {
       players: [
         {
           id: 'p1',
-          organization_id: 'org-1',
+          organization_id: MOCK_ORG_ID,
           first_name: 'Alex',
           last_name: 'Smith',
           gender: 'm',
@@ -77,7 +78,7 @@ describe('PlayerRecordPage', () => {
           guardian_contacts: [{ name: 'Dana Smith', email: 'dana@example.com' }],
         },
       ],
-      divisions: [{ id: 'd1', name: 'U8B', organization_id: 'org-1' }],
+      divisions: [{ id: 'd1', name: 'U8B', organization_id: MOCK_ORG_ID }],
       teams: [],
     };
   });

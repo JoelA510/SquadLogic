@@ -10,6 +10,7 @@ import {
   PERSISTENCE_UNREADABLE_RESPONSE,
 } from '../frontend/src/lib/persistenceRequest.js';
 import { settleWithin } from './helpers/index.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
@@ -79,8 +80,8 @@ test('posts Supabase-ready game rows and org metadata to the persistence endpoin
       },
     ],
     runMetadata: {
-      organizationId: 'org-1',
-      seasonSettingsId: 'season-1',
+      organizationId: MOCK_ORG_ID,
+      seasonSettingsId: MOCK_SEASON_ID,
       parameters: { generationMode: 'round-robin' },
     },
   });
@@ -91,8 +92,8 @@ test('posts Supabase-ready game rows and org metadata to the persistence endpoin
 
   const body = JSON.parse(capturedOptions.body);
   assert.deepEqual(body.runMetadata, {
-    organizationId: 'org-1',
-    seasonSettingsId: 'season-1',
+    organizationId: MOCK_ORG_ID,
+    seasonSettingsId: MOCK_SEASON_ID,
     parameters: { generationMode: 'round-robin' },
   });
   assert.equal(body.snapshot.lastRunId, null);

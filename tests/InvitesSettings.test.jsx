@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import InvitesSettings from '../frontend/src/components/settings/InvitesSettings.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
@@ -11,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
-    currentOrganization: { id: 'org-1' },
+    currentOrganization: { id: MOCK_ORG_ID },
   }),
 }));
 
@@ -38,7 +39,7 @@ describe('InvitesSettings', () => {
       {
         id: 'invite-1',
         code: 'ABCD-1234',
-        organization_id: 'org-1',
+        organization_id: MOCK_ORG_ID,
         role: 'coach',
         created_at: '2026-05-01T00:00:00.000Z',
         expires_at: '2099-05-08T00:00:00.000Z',
@@ -64,7 +65,7 @@ describe('InvitesSettings', () => {
 
     await waitFor(() => {
       expect(mocks.rpc).toHaveBeenCalledWith('revoke_org_invite', {
-        p_organization_id: 'org-1',
+        p_organization_id: MOCK_ORG_ID,
         p_invite_id: 'invite-1',
       });
     });

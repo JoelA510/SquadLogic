@@ -30,6 +30,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createChainMock } from './helpers/index.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const BANNER = 'data-error-banner';
 const MESSAGE = 'permission denied for table scheduler_runs';
@@ -44,7 +45,7 @@ vi.mock('../frontend/src/hooks/useDashboardData.js', () => ({
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
-    currentOrganization: { id: 'org-1', name: 'Smoke FC' },
+    currentOrganization: { id: MOCK_ORG_ID, name: 'Smoke FC' },
     currentSeasonSetting: { timezone: 'America/New_York' },
     featureFlags: {},
     permissions: [],

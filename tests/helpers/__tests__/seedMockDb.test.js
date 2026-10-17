@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { seedMockDb } from '../seedMockDb.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 describe('seedMockDb', () => {
   beforeEach(() => {
@@ -7,9 +8,9 @@ describe('seedMockDb', () => {
   });
 
   it('writes rows to sessionStorage under __MOCK_DB__', () => {
-    seedMockDb({ organizations: [{ id: 'org-1', name: 'A' }] });
+    seedMockDb({ organizations: [{ id: MOCK_ORG_ID, name: 'A' }] });
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    expect(db.organizations).toEqual([{ id: 'org-1', name: 'A' }]);
+    expect(db.organizations).toEqual([{ id: MOCK_ORG_ID, name: 'A' }]);
   });
 
   it('appends rows to an existing table instead of clobbering', () => {
@@ -20,10 +21,10 @@ describe('seedMockDb', () => {
   });
 
   it('leaves tables absent from the call unchanged', () => {
-    seedMockDb({ organizations: [{ id: 'org-1' }], teams: [{ id: 't-1' }] });
+    seedMockDb({ organizations: [{ id: MOCK_ORG_ID }], teams: [{ id: 't-1' }] });
     seedMockDb({ teams: [{ id: 't-2' }] });
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    expect(db.organizations).toEqual([{ id: 'org-1' }]);
+    expect(db.organizations).toEqual([{ id: MOCK_ORG_ID }]);
     expect(db.teams).toEqual([{ id: 't-1' }, { id: 't-2' }]);
   });
 
@@ -36,7 +37,7 @@ describe('seedMockDb', () => {
 
   it('handles multiple tables in a single call', () => {
     seedMockDb({
-      organizations: [{ id: 'org-1' }],
+      organizations: [{ id: MOCK_ORG_ID }],
       teams: [{ id: 't-1' }, { id: 't-2' }],
       players: [{ id: 'p-1' }],
     });

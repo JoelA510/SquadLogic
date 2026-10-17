@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, it, vi } from 'vitest';
 import { PRACTICE_TBD_REASON } from '../packages/core/src/practice/index.js';
 import { buildPracticeAssignmentRows } from '../packages/core/src/practiceSupabase.js';
+import { MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
@@ -235,7 +236,7 @@ describe('persistPracticeRepair', () => {
       assignments: [{ teamId: 't1', slotId: 'slot-a' }],
       slots: [{ id: 'slot-a', effectiveFrom: '2026-09-01', effectiveUntil: '2026-11-30' }],
       runId: undefined,
-      runMetadata: { seasonSettingsId: 'season-1' },
+      runMetadata: { seasonSettingsId: MOCK_SEASON_ID },
     };
     await persistPracticeRepair({
       ...common,

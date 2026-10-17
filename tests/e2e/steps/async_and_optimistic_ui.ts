@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -73,10 +74,10 @@ Then('the resulting teams summary should reflect the new constraints', async ({ 
   // Simulate backend completing the run so the UI transitions out of "Generating Teams...".
   // If the app already inserted a completed run, leave it in place.
   await waitForMockClient(page);
-  await page.evaluate(() => {
+  await page.evaluate((mockOrgId) => {
     // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
     const hasCompletedTeamRun = (db.scheduler_runs || []).some(
       (r: Record<string, unknown>) => r.run_type === 'team' && r.status === 'completed'
     );
@@ -137,7 +138,7 @@ Then('the resulting teams summary should reflect the new constraints', async ({ 
       // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
       (window as { __MOCK_DB__?: unknown }).__MOCK_DB__ = db;
     }
-  });
+  }, MOCK_ORG_ID);
 
   await page.goto('/teams');
   await expect(page.getByRole('heading', { name: 'Teaming Overview' })).toBeVisible({
@@ -203,33 +204,41 @@ Given(
   async ({ page }, name: string, status: string) => {
     await page.goto('/');
     await waitForMockClient(page);
-    await page.evaluate((playerName) => {
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+    await page.evaluate(
+      ({ playerName, mockOrgId }) => {
+        const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
-      db.registration_forms = [
-        { id: 'f1', title: 'Fall Registration', organization_id: orgId, status: 'active' },
-      ];
-      db.players = [
-        { id: 'p1', first_name: playerName, last_name: 'Test', organization_id: orgId },
-      ];
-      db.profiles = [
-        { id: 'mock-parent-id', first_name: 'Parent', last_name: 'Test', email: 'parent@test.com' },
-      ];
-      db.registrations = [
-        {
-          id: 'reg-1',
-          organization_id: orgId,
-          form_id: 'f1',
-          player_id: 'p1',
-          profile_id: 'mock-parent-id',
-          medical_cleared: false,
-          waiver_signed: true,
-          created_at: new Date().toISOString(),
-        },
-      ];
-      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    }, name);
+        db.registration_forms = [
+          { id: 'f1', title: 'Fall Registration', organization_id: orgId, status: 'active' },
+        ];
+        db.players = [
+          { id: 'p1', first_name: playerName, last_name: 'Test', organization_id: orgId },
+        ];
+        db.profiles = [
+          {
+            id: 'mock-parent-id',
+            first_name: 'Parent',
+            last_name: 'Test',
+            email: 'parent@test.com',
+          },
+        ];
+        db.registrations = [
+          {
+            id: 'reg-1',
+            organization_id: orgId,
+            form_id: 'f1',
+            player_id: 'p1',
+            profile_id: 'mock-parent-id',
+            medical_cleared: false,
+            waiver_signed: true,
+            created_at: new Date().toISOString(),
+          },
+        ];
+        sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+      },
+      { playerName: name, mockOrgId: MOCK_ORG_ID }
+    );
 
     await page.goto('/admin/compliance');
     await expect(page.getByText(name).first()).toBeVisible({ timeout: 15000 });
@@ -263,53 +272,56 @@ Given('I am on the {string} workflow step on Dashboard', async ({ page }, step: 
   // query param consumed by WorkflowPage's controlled workflow state.
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    // Seed data so the Output Generation panel has something to export
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    db.teams = [{ id: 't1', name: 'Tigers', division: 'U10', organization_id: orgId }];
+  await page.evaluate(
+    ({ mockOrgId, mockSeasonId }) => {
+      // Seed data so the Output Generation panel has something to export
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      db.teams = [{ id: 't1', name: 'Tigers', division: 'U10', organization_id: orgId }];
 
-    // Ensure all previous steps are marked completed by seeding runs
-    const now = new Date().toISOString();
-    db.imports = [{ id: 'imp-1', status: 'completed', data: { totalRows: 10 } }];
-    db.scheduler_runs = [
-      {
-        id: 'run-t',
-        organization_id: orgId,
-        season_id: 'season-1',
-        season_settings_id: 'season-1',
-        run_type: 'team',
-        status: 'completed',
-        created_at: now,
-        completed_at: now,
-        results: { teamsByDivision: { U10: [] } },
-      },
-      {
-        id: 'run-p',
-        organization_id: orgId,
-        run_type: 'practice',
-        season_id: 'season-1',
-        season_settings_id: 'season-1',
-        status: 'completed',
-        created_at: now,
-        completed_at: now,
-        results: { summary: {} },
-      },
-      {
-        id: 'run-g',
-        organization_id: orgId,
-        run_type: 'game',
-        season_id: 'season-1',
-        season_settings_id: 'season-1',
-        status: 'completed',
-        created_at: now,
-        completed_at: now,
-        results: { summary: {} },
-      },
-    ];
+      // Ensure all previous steps are marked completed by seeding runs
+      const now = new Date().toISOString();
+      db.imports = [{ id: 'imp-1', status: 'completed', data: { totalRows: 10 } }];
+      db.scheduler_runs = [
+        {
+          id: 'run-t',
+          organization_id: orgId,
+          season_id: mockSeasonId,
+          season_settings_id: mockSeasonId,
+          run_type: 'team',
+          status: 'completed',
+          created_at: now,
+          completed_at: now,
+          results: { teamsByDivision: { U10: [] } },
+        },
+        {
+          id: 'run-p',
+          organization_id: orgId,
+          run_type: 'practice',
+          season_id: mockSeasonId,
+          season_settings_id: mockSeasonId,
+          status: 'completed',
+          created_at: now,
+          completed_at: now,
+          results: { summary: {} },
+        },
+        {
+          id: 'run-g',
+          organization_id: orgId,
+          run_type: 'game',
+          season_id: mockSeasonId,
+          season_settings_id: mockSeasonId,
+          status: 'completed',
+          created_at: now,
+          completed_at: now,
+          results: { summary: {} },
+        },
+      ];
 
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { mockOrgId: MOCK_ORG_ID, mockSeasonId: MOCK_SEASON_ID }
+  );
   const stepNumber = step.includes('Outcome') ? '6' : '2';
   await page.goto(`/workflow?step=${stepNumber}`);
   const workflowStepName = step.includes('Outcome')
@@ -339,9 +351,9 @@ Then('eventually display a green success message confirming completion', async (
 When('I hover my mouse over the {string} chart', async ({ page }, _chartName: string) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
+  await page.evaluate((mockOrgId) => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
     db.view_compliance_stats = [
       {
@@ -368,7 +380,7 @@ When('I hover my mouse over the {string} chart', async ({ page }, _chartName: st
     }
 
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+  }, MOCK_ORG_ID);
 
   await page.goto('/admin/reports');
   // Wait for the Recharts canvas/SVG to mount (RadarChart always renders)
@@ -432,9 +444,9 @@ Then('a dark-themed tooltip should appear showing exact counts', async ({ page }
 Given('I have generated a new set of teams', async ({ page }) => {
   // Seed the DB with a completed team run so the persistence panel is visible
   await waitForMockClient(page);
-  await page.evaluate(() => {
+  await page.evaluate((mockOrgId) => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
     const now = new Date().toISOString();
     db.scheduler_runs = db.scheduler_runs || [];
     const completedRun = {
@@ -474,7 +486,7 @@ Given('I have generated a new set of teams', async ({ page }) => {
     );
     db.scheduler_runs.push(completedRun);
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+  }, MOCK_ORG_ID);
   await page.goto('/teams');
   await expect(page.getByRole('heading', { name: 'Teaming Overview' })).toBeVisible({
     timeout: 15000,

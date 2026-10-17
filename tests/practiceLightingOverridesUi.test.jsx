@@ -21,6 +21,7 @@ import { handleLightingOverrideRpc } from '../frontend/src/lib/mockLightingOverr
 import { OVERLAP_MESSAGE } from '../frontend/src/utils/lightingOverrides.js';
 import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
 import { useAuth } from '../frontend/src/contexts/AuthContext.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: { from: vi.fn(), rpc: vi.fn() },
@@ -31,7 +32,7 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 
-const ORG = 'org-1';
+const ORG = MOCK_ORG_ID;
 const LONG_AGO = '2020-01-01';
 const ENDED = '2020-06-30';
 

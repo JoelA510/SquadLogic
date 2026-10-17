@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getMockData, mockSupabase as supabase } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 describe('mock stale import job cleanup', () => {
   beforeEach(() => {
@@ -12,7 +13,7 @@ describe('mock stale import job cleanup', () => {
       {
         id: 'mock-stale-importing-job',
         created_by: 'mock-admin-id',
-        organization_id: 'org-1',
+        organization_id: MOCK_ORG_ID,
         job_type: 'registration',
         storage_path: 'imports/mock-admin-id/stale.csv',
         status: 'importing',
@@ -24,7 +25,7 @@ describe('mock stale import job cleanup', () => {
       {
         id: 'mock-recent-importing-job',
         created_by: 'mock-admin-id',
-        organization_id: 'org-1',
+        organization_id: MOCK_ORG_ID,
         job_type: 'registration',
         storage_path: 'imports/mock-admin-id/recent.csv',
         status: 'importing',
@@ -36,7 +37,7 @@ describe('mock stale import job cleanup', () => {
       {
         id: 'mock-ready-field-job',
         created_by: 'mock-admin-id',
-        organization_id: 'org-1',
+        organization_id: MOCK_ORG_ID,
         job_type: 'fields',
         storage_path: 'imports/mock-admin-id/ready.csv',
         status: 'ready_to_apply',
@@ -60,7 +61,7 @@ describe('mock stale import job cleanup', () => {
     ]);
 
     const { data, error } = await supabase.rpc('fail_stale_import_jobs', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_stale_before: '2026-05-03T12:00:00.000Z',
     });
 
@@ -87,7 +88,7 @@ describe('mock stale import job cleanup', () => {
   it('does not persist a no-op cleanup over session-scoped test data', async () => {
     const sessionOnlyRun = {
       id: 'run-1',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       run_type: 'team',
       status: 'completed',
       results: {
@@ -97,7 +98,7 @@ describe('mock stale import job cleanup', () => {
     };
     const staleWindowRun = {
       id: 'run-1',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       run_type: 'team',
       status: 'completed',
       results: {
@@ -110,7 +111,7 @@ describe('mock stale import job cleanup', () => {
     window.__MOCK_DB__ = { scheduler_runs: [staleWindowRun] };
 
     const { data, error } = await supabase.rpc('fail_stale_import_jobs', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_stale_before: '2026-05-03T12:00:00.000Z',
     });
 

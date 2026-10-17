@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mockSupabase as supabase, getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const setSession = (userId) => {
   sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: userId } }));
@@ -129,7 +130,7 @@ describe('mock admin_remove_member rpc', () => {
 
   it('prevents removing yourself', async () => {
     const { data, error } = await supabase.rpc('admin_remove_member', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_profile_id: 'mock-admin-id',
     });
     expect(data).toBeNull();
@@ -139,7 +140,7 @@ describe('mock admin_remove_member rpc', () => {
   it('denies non-admin callers', async () => {
     setSession('mock-coach-id');
     const { data, error } = await supabase.rpc('admin_remove_member', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_profile_id: 'mock-admin-id',
     });
     expect(data).toBeNull();
@@ -174,7 +175,7 @@ describe('mock admin_change_member_role rpc', () => {
 
   it('prevents demoting the last admin', async () => {
     const { data, error } = await supabase.rpc('admin_change_member_role', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_profile_id: 'mock-admin-id',
       p_role: 'coach',
     });
@@ -185,7 +186,7 @@ describe('mock admin_change_member_role rpc', () => {
   it('denies non-admin callers', async () => {
     setSession('mock-coach-id');
     const { data, error } = await supabase.rpc('admin_change_member_role', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_profile_id: 'mock-admin-id',
       p_role: 'staff',
     });

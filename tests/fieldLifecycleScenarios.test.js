@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { getMockData, mockSupabase as supabase } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -29,7 +30,7 @@ const TABLE = JSON.parse(
   readFileSync(path.join(REPO_ROOT, 'tests/fixtures/fieldLifecycleScenarios.json'), 'utf8')
 );
 
-const ORG = 'org-1';
+const ORG = MOCK_ORG_ID;
 
 /** Today, as the mock computes it, so an offset here matches one in the SQL. */
 const today = () => new Date().toISOString().slice(0, 10);

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getMockData, mockSupabase as supabase } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 describe('mock player import buddy materialization', () => {
   beforeEach(() => {
@@ -13,7 +14,7 @@ describe('mock player import buddy materialization', () => {
       .insert({
         id: 'mock-buddy-import-job',
         created_by: 'mock-admin-id',
-        organization_id: 'org-1',
+        organization_id: MOCK_ORG_ID,
         job_type: 'registration',
         storage_path: 'imports/mock-admin-id/players.csv',
         status: 'importing',
@@ -29,7 +30,7 @@ describe('mock player import buddy materialization', () => {
       {
         body: {
           import_type: 'players',
-          organization_id: 'org-1',
+          organization_id: MOCK_ORG_ID,
           rows: [
             {
               'First Name': 'Avery',
@@ -96,7 +97,7 @@ describe('mock player import buddy materialization', () => {
       .insert({
         id: 'mock-buddy-code-import-job',
         created_by: 'mock-admin-id',
-        organization_id: 'org-1',
+        organization_id: MOCK_ORG_ID,
         job_type: 'registration',
         storage_path: 'imports/mock-admin-id/players-buddy-code.csv',
         status: 'importing',
@@ -112,7 +113,7 @@ describe('mock player import buddy materialization', () => {
       {
         body: {
           import_type: 'players',
-          organization_id: 'org-1',
+          organization_id: MOCK_ORG_ID,
           rows: [
             {
               'First Name': 'Emery',

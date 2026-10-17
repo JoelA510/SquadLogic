@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { makeTeam, makeTeamPlayer } from '../team.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 describe('makeTeam', () => {
   it('returns deterministic defaults with no args', () => {
     const t = makeTeam();
     expect(t.id).toBe('team-1');
     expect(t.division_id).toBe('div-1');
-    expect(t.organization_id).toBe('org-1');
+    expect(t.organization_id).toBe(MOCK_ORG_ID);
     expect(t.name).toBe('Test Team');
     expect(t.coach_id).toBeNull();
     expect(t.assistant_coach_ids).toEqual([]);

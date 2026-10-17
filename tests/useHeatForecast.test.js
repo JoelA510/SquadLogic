@@ -14,6 +14,7 @@ import { useGameSummary } from '../frontend/src/hooks/useGameSummary.js';
 import { useGameAssignments } from '../frontend/src/hooks/useGameAssignments.js';
 
 import { REFERENCE_SITES, loadGridpointJson, loadTurbidity } from './helpers/heatFixtures.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const nws = vi.hoisted(() => ({ getForecasts: vi.fn() }));
 
@@ -129,7 +130,7 @@ const fixtureForecast = (venues) =>
 beforeEach(() => {
   vi.mocked(useOrganization).mockReturnValue(
     /** @type {any} */ ({
-      currentOrganization: { id: 'org-1' },
+      currentOrganization: { id: MOCK_ORG_ID },
       currentSeasonSetting: { timezone: 'America/Los_Angeles' },
     })
   );
@@ -229,7 +230,7 @@ describe('useHeatForecast', () => {
   it('no season timezone is a plan error, not a guess', async () => {
     vi.mocked(useOrganization).mockReturnValue(
       /** @type {any} */ ({
-        currentOrganization: { id: 'org-1' },
+        currentOrganization: { id: MOCK_ORG_ID },
         currentSeasonSetting: { timezone: null },
       })
     );

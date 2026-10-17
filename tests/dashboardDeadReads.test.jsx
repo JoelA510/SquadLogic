@@ -61,6 +61,7 @@ import GameReadinessPanel from '../frontend/src/components/GameReadinessPanel.js
 import PracticeReadinessPanel from '../frontend/src/components/PracticeReadinessPanel.jsx';
 import TeamListView from '../frontend/src/components/teaming/TeamListView.jsx';
 import TeamOverviewPanel from '../frontend/src/components/TeamOverviewPanel.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -595,7 +596,7 @@ vi.mock('../frontend/src/contexts/ThemeContext.jsx', () => ({
   useTheme: () => ({ theme: 'light' }),
 }));
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
-  useOrganization: () => ({ currentOrganization: { id: 'org-1', name: 'Smoke FC' } }),
+  useOrganization: () => ({ currentOrganization: { id: MOCK_ORG_ID, name: 'Smoke FC' } }),
 }));
 vi.mock('../frontend/src/components/DashboardWorkflow.jsx', () => ({ default: () => null }));
 vi.mock('../frontend/src/components/ui/FeatureGuard.jsx', () => ({

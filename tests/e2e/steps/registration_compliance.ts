@@ -1,14 +1,15 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
 const seedDatabase = async (page: Page) => {
-  await page.addInitScript(() => {
+  await page.addInitScript((mockOrgId) => {
     type MockTable = Array<Record<string, unknown>>;
     type MockDb = Record<string, MockTable>;
     const db = ((window as { __MOCK_DB__?: MockDb }).__MOCK_DB__ || {}) as MockDb;
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
     db.organizations = db.organizations || [];
     if (!db.organizations.find((o: Record<string, unknown>) => o.id === orgId)) {
       db.organizations.push({ id: orgId, name: 'Test Org', is_onboarded: true });
@@ -74,7 +75,7 @@ const seedDatabase = async (page: Page) => {
     (window as { __MOCK_DB__?: unknown }).__MOCK_DB__ = db;
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
     localStorage.setItem('squadlogic_active_org', orgId);
-  });
+  }, MOCK_ORG_ID);
 };
 
 Given('there is an active season {string}', async ({ page }, _seasonName: string) => {

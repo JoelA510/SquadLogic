@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { mockSupabase as supabase, getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
 import { finalizeDeferredImportJob } from '../frontend/src/utils/importDeferredActions.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 /**
  * Seed the locations and fields an availability row names, so it can resolve.
@@ -16,7 +17,7 @@ import { finalizeDeferredImportJob } from '../frontend/src/utils/importDeferredA
  * construction, not an expected set. What each test asserts afterwards is
  * enumerated from the mock tables, which is where a break would show.
  */
-async function seedFacilityFor(rows, organizationId = 'org-1') {
+async function seedFacilityFor(rows, organizationId = MOCK_ORG_ID) {
   const locations = new Map();
   const fields = [];
   rows.forEach((row, index) => {
@@ -54,7 +55,7 @@ describe('field availability lifecycle', () => {
 
   it('create_import_job sets field_availability job_type', async () => {
     const { data, error } = await supabase.rpc('create_import_job', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_import_type: 'field_availability',
       p_file_name: 'fa.csv',
     });
@@ -66,14 +67,14 @@ describe('field availability lifecycle', () => {
     const basePractice = getMockData('practice_slots').length;
     const baseGame = getMockData('game_slots').length;
     const { data: job } = await supabase.rpc('create_import_job', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_import_type: 'field_availability',
       p_file_name: 'invalid-fa.csv',
     });
     await supabase.from('staging_import_rows').insert({
       id: 'row-invalid',
       import_job_id: job.id,
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       import_type: 'field_availability',
       raw_payload: {},
       normalized_payload: {
@@ -99,7 +100,7 @@ describe('field availability lifecycle', () => {
 
   it('deferred apply routes to finalize_field_availability_import_job and rollback rpc works', async () => {
     const { data: job } = await supabase.rpc('create_import_job', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_import_type: 'field_availability',
       p_file_name: 'fa.csv',
     });
@@ -107,7 +108,7 @@ describe('field availability lifecycle', () => {
     await supabase.from('staging_import_rows').insert({
       id: 'row1',
       import_job_id: job.id,
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       import_type: 'field_availability',
       raw_payload: {},
       normalized_payload: {
@@ -161,14 +162,14 @@ describe('field availability lifecycle', () => {
 
   it('deferred cancel works for field_availability', async () => {
     const { data: job } = await supabase.rpc('create_import_job', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_import_type: 'field_availability',
       p_file_name: 'cancel-fa.csv',
     });
     await supabase.from('staging_import_rows').insert({
       id: 'row-cancel',
       import_job_id: job.id,
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       import_type: 'field_availability',
       raw_payload: {},
       normalized_payload: {
@@ -196,7 +197,7 @@ describe('field availability lifecycle', () => {
 
   it('blackout month parsing supports Aug/Sep/Oct/Nov tokens', async () => {
     const { data: job } = await supabase.rpc('create_import_job', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_import_type: 'field_availability',
       p_file_name: 'months.csv',
     });
@@ -204,7 +205,7 @@ describe('field availability lifecycle', () => {
     await supabase.from('staging_import_rows').insert({
       id: 'row-months',
       import_job_id: job.id,
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       import_type: 'field_availability',
       raw_payload: {},
       normalized_payload: {
@@ -409,7 +410,7 @@ describe('field availability lifecycle', () => {
     const baseGame = getMockData('game_slots').length;
     await seedFacilityFor(rows);
     const { data: job } = await supabase.rpc('create_import_job', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_import_type: 'field_availability',
       p_file_name: 'fall-2026-pack.csv',
     });
@@ -417,7 +418,7 @@ describe('field availability lifecycle', () => {
       rows.map((row, idx) => ({
         id: `fall26-${idx + 1}`,
         import_job_id: job.id,
-        organization_id: 'org-1',
+        organization_id: MOCK_ORG_ID,
         import_type: 'field_availability',
         raw_payload: {},
         normalized_payload: { season_label: 'Fall 2026', ...row },
@@ -479,7 +480,7 @@ describe('field availability lifecycle', () => {
 
   it('refuses an availability row that matches no field, with a reason, and replays it later', async () => {
     const { data: job } = await supabase.rpc('create_import_job', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_import_type: 'field_availability',
       p_file_name: 'unresolvable.csv',
     });
@@ -493,7 +494,7 @@ describe('field availability lifecycle', () => {
     await seedFacilityFor([{ location: 'Alder Park', field_name: 'Main' }]);
     // A decoy in another organisation carrying the exact location and field
     // name the unresolvable row asks for. A resolution that forgot its tenant
-    // filter finds this and attaches org-1's closure to org-2's ground.
+    // filter finds this and attaches this organisation's closure to org-2's ground.
     await supabase
       .from('locations')
       .insert({ id: 'decoy-loc', organization_id: 'org-2', name: 'Alder Park' });
@@ -508,7 +509,7 @@ describe('field availability lifecycle', () => {
     const staged = (id, location, fieldName, sourceRow) => ({
       id,
       import_job_id: job.id,
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       import_type: 'field_availability',
       source_row_number: sourceRow,
       raw_payload: {},
@@ -587,7 +588,7 @@ describe('field availability lifecycle', () => {
     // applied is not applied twice.
     await supabase.from('fields').insert({
       id: 'seed-field-ghost',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       location_id: 'seed-loc-1',
       name: 'Ghost Pitch',
       active: true,

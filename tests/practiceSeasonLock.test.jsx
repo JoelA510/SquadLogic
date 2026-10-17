@@ -23,6 +23,7 @@ import {
   loadSeasonPracticeLock,
 } from '../supabase/functions/_shared/engines/practice-lock.js';
 import { loadSeasonPracticeAssignments } from '../packages/core/src/practiceSupabase.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const state = vi.hoisted(() => ({
   /** @type {any[]} */ rows: [],
@@ -44,8 +45,8 @@ const state = vi.hoisted(() => ({
   },
 }));
 
-const ORG = 'org-1';
-const SEASON = 'season-1';
+const ORG = MOCK_ORG_ID;
+const SEASON = MOCK_SEASON_ID;
 
 /**
  * A PostgREST-shaped query over `state.rows`: `eq` on a column or on an
@@ -178,8 +179,8 @@ function dashboardData() {
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
-    currentOrganization: { id: 'org-1', name: 'Smoke FC' },
-    currentSeasonSetting: { id: 'season-1', timezone: 'America/New_York' },
+    currentOrganization: { id: MOCK_ORG_ID, name: 'Smoke FC' },
+    currentSeasonSetting: { id: MOCK_SEASON_ID, timezone: 'America/New_York' },
     featureFlags: {},
     permissions: ROLE_PERMISSIONS[ROLES.ADMIN],
     loading: false,

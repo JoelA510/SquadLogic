@@ -16,6 +16,7 @@ import ToastHost from '../frontend/src/components/ui/ToastHost.jsx';
 import { supabase } from '../frontend/src/lib/supabaseClient.js';
 import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
 import { useAuth } from '../frontend/src/contexts/AuthContext.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: { from: vi.fn(), rpc: vi.fn() },
@@ -26,7 +27,7 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 
-const ORG = 'org-1';
+const ORG = MOCK_ORG_ID;
 const C1 = '11111111-1111-4111-8111-111111111111';
 const C3 = '33333333-3333-4333-8333-333333333333';
 const T1 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1';

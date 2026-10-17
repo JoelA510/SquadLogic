@@ -4,6 +4,7 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 
 import { ImportProvider, useImport } from '../frontend/src/contexts/ImportContext.jsx';
 import { getMockData, mockSupabase } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 /**
  * **A refused rollback record reaches the operator, or it reaches nobody.**
@@ -31,7 +32,7 @@ vi.mock('papaparse', () => ({
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
-    currentOrganization: { id: 'org-1' },
+    currentOrganization: { id: MOCK_ORG_ID },
     orgMember: { id: 'member-1' },
   }),
 }));
@@ -98,7 +99,7 @@ describe('ImportContext rollback :: a refused record reaches the operator', () =
     await mockSupabase.from('practice_assignments').insert([
       {
         id: 'ctx-practice-assignment',
-        organization_id: 'org-1',
+        organization_id: MOCK_ORG_ID,
         team_id: 'ctx-team',
         field_id: field.id,
         effective_date_range: '[2026-03-01,2026-05-31]',

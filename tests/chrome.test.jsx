@@ -55,6 +55,7 @@ vi.mock('../frontend/src/config.js', () => ({
 }));
 
 import { PERMISSIONS, ROLE_PERMISSIONS, ROLES } from '../frontend/src/constants/permissions.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 function configureRole(role) {
   const perms = ROLE_PERMISSIONS[role] || [];
@@ -75,15 +76,15 @@ beforeEach(() => {
     profile: { full_name: 'Avery Admin', role: 'admin' },
   };
   mocks.org.organizations = [
-    { organization_id: 'org-1', organizations: { id: 'org-1', name: 'North League' } },
+    { organization_id: MOCK_ORG_ID, organizations: { id: MOCK_ORG_ID, name: 'North League' } },
     { organization_id: 'org-2', organizations: { id: 'org-2', name: 'Metro United' } },
   ];
-  mocks.org.currentOrganization = { id: 'org-1', name: 'North League' };
+  mocks.org.currentOrganization = { id: MOCK_ORG_ID, name: 'North League' };
   mocks.org.availableSeasons = [
-    { id: 'season-1', name: 'Spring 2026' },
+    { id: MOCK_SEASON_ID, name: 'Spring 2026' },
     { id: 'season-2', name: 'Fall 2026' },
   ];
-  mocks.org.currentSeasonSetting = { id: 'season-1', name: 'Spring 2026' };
+  mocks.org.currentSeasonSetting = { id: MOCK_SEASON_ID, name: 'Spring 2026' };
   mocks.org.switchOrganization = mocks.switchOrganization;
   mocks.org.switchSeason = mocks.switchSeason;
   configureRole(ROLES.TENANT_ADMIN);

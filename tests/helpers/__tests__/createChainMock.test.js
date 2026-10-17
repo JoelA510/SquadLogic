@@ -1,11 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createChainMock } from '../createChainMock.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 describe('createChainMock', () => {
   it('resolves chained query-builder calls to the provided value', async () => {
     const resolved = { data: [{ id: '1' }], error: null };
     const chain = /** @type {Record<string, any> & PromiseLike<any>} */ (createChainMock(resolved));
-    const result = await chain.select('*').eq('org_id', 'org-1').single();
+    const result = await chain.select('*').eq('org_id', MOCK_ORG_ID).single();
     expect(result).toEqual(resolved);
   });
 

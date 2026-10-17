@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useNavBadges } from '../frontend/src/hooks/useNavBadges.js';
 import { REFRESH_TOPICS, emitRefresh, subscribeRefresh } from '../frontend/src/lib/refreshBus.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const mocks = vi.hoisted(() => ({
   rowsByTable: { players: [], coaches: [], teams: [] },
@@ -18,7 +19,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
 }));
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
-  useOrganization: () => ({ currentOrganization: { id: 'org-1' } }),
+  useOrganization: () => ({ currentOrganization: { id: MOCK_ORG_ID } }),
 }));
 
 describe('refreshBus', () => {

@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -44,11 +45,11 @@ Given(
     if (page.url() === 'about:blank') await page.goto('/');
     await waitForMockClient(page);
     await page.evaluate(
-      ({ name, ids }) => {
+      ({ name, ids, mockOrgId }) => {
         const db = JSON.parse(
           sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
         );
-        const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
         // The org is fresh (see the step above), so nothing of it is replaced:
         // these only keep other orgs' rows.
         const others = (table) =>
@@ -149,6 +150,7 @@ Given(
           a1: uuid(601),
           a2: uuid(602),
         },
+        mockOrgId: MOCK_ORG_ID,
       }
     );
   }

@@ -3,6 +3,7 @@ import { expect, Page } from '@playwright/test';
 import { randomUUID } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, After } = createBdd();
 
@@ -13,9 +14,9 @@ const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabase
 const isMockMode = !supabaseUrl || !supabaseKey || process.env.VITE_USE_MOCK_SUPABASE === 'true';
 
 async function setupIsolatedTenant(page: Page, role: string = 'admin') {
-  // In mock mode, use 'org-1' to align with pre-seeded initialMockData.
+  // In mock mode, use the mock seed's organization to align with pre-seeded initialMockData.
   // Random UUIDs cause org ID fragmentation — hooks filter by active org and find nothing.
-  const dynamicOrgId = isMockMode ? 'org-1' : randomUUID();
+  const dynamicOrgId = isMockMode ? MOCK_ORG_ID : randomUUID();
   const _email =
     role === 'coach'
       ? 'coach@squadlogic.app'
@@ -32,7 +33,7 @@ async function setupIsolatedTenant(page: Page, role: string = 'admin') {
     // CRITICAL FIX: Fully seed the mock DB so the app doesn't get stuck on "Loading League Data"
     await waitForMockClient(page);
     await page.evaluate(
-      ({ orgId, roleName, uId }) => {
+      ({ orgId, roleName, uId, mockSeasonId }) => {
         localStorage.setItem('squadlogic_active_org', orgId);
         localStorage.setItem('squadlogic-current-season', 'Fall 2026');
 
@@ -66,7 +67,7 @@ async function setupIsolatedTenant(page: Page, role: string = 'admin') {
 
         db.season_settings = db.season_settings || [];
         let activeSeason = db.season_settings.find(
-          (s: Record<string, unknown>) => s.organization_id === orgId && s.id === 'season-1'
+          (s: Record<string, unknown>) => s.organization_id === orgId && s.id === mockSeasonId
         );
         if (!activeSeason) {
           activeSeason = db.season_settings.find(
@@ -76,7 +77,7 @@ async function setupIsolatedTenant(page: Page, role: string = 'admin') {
         }
         if (activeSeason) {
           Object.assign(activeSeason, {
-            id: 'season-1',
+            id: mockSeasonId,
             organization_id: orgId,
             name: 'Fall 2026',
             status: 'active',
@@ -88,7 +89,7 @@ async function setupIsolatedTenant(page: Page, role: string = 'admin') {
           });
         } else {
           db.season_settings.push({
-            id: 'season-1',
+            id: mockSeasonId,
             organization_id: orgId,
             name: 'Fall 2026',
             status: 'active',
@@ -99,7 +100,12 @@ async function setupIsolatedTenant(page: Page, role: string = 'admin') {
 
         sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
       },
-      { orgId: dynamicOrgId, roleName: role === 'parent' ? 'parent' : role, uId: userId }
+      {
+        orgId: dynamicOrgId,
+        roleName: role === 'parent' ? 'parent' : role,
+        uId: userId,
+        mockSeasonId: MOCK_SEASON_ID,
+      }
     );
     return;
   }

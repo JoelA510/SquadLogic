@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { ImportProvider, useImport } from '../frontend/src/contexts/ImportContext.jsx';
 import { getMockData, mockSupabase } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 /**
  * The DIRECT apply path, which is the twin of the deferred one.
@@ -30,7 +31,7 @@ vi.mock('papaparse', () => ({
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
-    currentOrganization: { id: 'org-1' },
+    currentOrganization: { id: MOCK_ORG_ID },
     orgMember: { id: 'member-1' },
   }),
 }));

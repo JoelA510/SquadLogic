@@ -27,6 +27,7 @@ import {
   PersistencePayloadSchema,
   PracticePersistencePayloadSchema,
 } from '../packages/core/src/schemas/index.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -94,7 +95,7 @@ const CASES = {
           runId: 'run-1',
         },
         overrides: [],
-        runMetadata: { organizationId: 'org-1' },
+        runMetadata: { organizationId: MOCK_ORG_ID },
       },
       // The legacy spelling: `gameRows` instead of `assignmentRows` (the refine
       // takes either), so removing one list is judged with and without the other.
@@ -121,7 +122,7 @@ const CASES = {
           runId: 'run-1',
         },
         overrides: [],
-        runMetadata: { seasonSettingsId: 'season-1' },
+        runMetadata: { seasonSettingsId: MOCK_SEASON_ID },
         repair: { unlock: [] },
       },
     ],

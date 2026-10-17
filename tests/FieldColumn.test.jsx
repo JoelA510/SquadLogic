@@ -121,4 +121,22 @@ describe('FieldColumn', () => {
     expect(screen.getByText('Field B')).toBeInTheDocument();
     expect(screen.queryByText(/Grass/)).not.toBeInTheDocument();
   });
+  test("marks another field's slot as not bookable, and leaves its own slots open", () => {
+    render(
+      <DndWrapper>
+        <FieldColumn
+          field={FIELD}
+          timeSlots={[
+            { id: 'gs-own', label: '8:00 AM', fieldId: 'v1' },
+            { id: 'gs-other', label: '8:00 AM', fieldId: 'v2' },
+            { id: 'gs-any', label: '9:30 AM', fieldId: null },
+          ]}
+        />
+      </DndWrapper>
+    );
+    expect(screen.getByTestId('empty-slot-v1:gs-own')).toHaveTextContent('Open');
+    expect(screen.getByTestId('empty-slot-v1:gs-other')).toHaveTextContent('Other field');
+    // A slot with no field is offered under every field, as "Move to" offers it.
+    expect(screen.getByTestId('empty-slot-v1:gs-any')).toHaveTextContent('Open');
+  });
 });

@@ -236,11 +236,54 @@ describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
 
   it('stages a keyboard drag through the same handler', async () => {
     await renderEditableGrid();
-    await keyboardDrag('lions vs bulls', ['ArrowRight']);
-    const to = screen.getByTestId('drop-zone-v2:gs-1');
+    // Right to South Field, then down its column to gs-3, South Field's own slot.
+    await keyboardDrag('lions vs bulls', ['ArrowRight', 'ArrowDown', 'ArrowDown']);
+    const to = screen.getByTestId('drop-zone-v2:gs-3');
     expect(within(to).getByTestId('game-card-ga-1')).toBeInTheDocument();
     expect(within(to).getByTestId('manual-badge')).toBeInTheDocument();
     expect(screen.getByText(STAGED)).toBeInTheDocument();
+  });
+
+  it("refuses a drop on another field's slot, as Move to does, and says why", async () => {
+    const from = await renderEditableGrid();
+    // The cell is drawn before anything moves as another field's, not as an open one.
+    const crossCell = screen.getByTestId('drop-zone-v2:gs-1');
+    expect(within(crossCell).getByTestId('empty-slot-v2:gs-1')).toHaveTextContent('Other field');
+    // What Move to offers is the rule a drop is held to: gs-1 is North Field's booking.
+    const select = within(from).getByRole('combobox', { name: /^Move lions vs bulls/ });
+    fireEvent.focus(select);
+    const offered = [...select.querySelectorAll('option')].map((option) => option.value);
+    expect(offered).not.toContain('v2:gs-1');
+
+    // Right from North Field's gs-1 is South Field's column at gs-1's time.
+    const handle = screen.getByRole('button', { name: 'Drag lions vs bulls' });
+    handle.focus();
+    fireEvent.keyDown(handle, { code: 'Space' });
+    await settle();
+    fireEvent.keyDown(handle, { code: 'ArrowRight' });
+    await settle();
+    // While over it, the cell shows it cannot take the game, with the reason.
+    const indicator = within(crossCell).getByTestId('invalid-indicator');
+    expect(indicator).toHaveAccessibleDescription(
+      'This time slot is booked on another field, not South Field.'
+    );
+    fireEvent.keyDown(handle, { code: 'Space' });
+    await settle();
+
+    // Nothing staged: the game is where it was, and the operator is told why.
+    expect(within(from).getByTestId('game-card-ga-1')).toBeInTheDocument();
+    expect(within(crossCell).queryByTestId('game-card-ga-1')).not.toBeInTheDocument();
+    expect(within(from).queryByTestId('manual-badge')).not.toBeInTheDocument();
+    expect(screen.queryByText(STAGED)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'lions vs bulls was not moved: that time slot is booked on North Field, not South Field.'
+      )
+    ).toBeInTheDocument();
+    // The screen reader's announcement agrees with the status line.
+    expect(
+      screen.getByText(/^lions vs bulls was not moved: South Field, .+ is another field's slot\.$/)
+    ).toBeInTheDocument();
   });
 
   it('refuses a drop on a cell that already has a game, and says why', async () => {

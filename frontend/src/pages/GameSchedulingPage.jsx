@@ -50,6 +50,7 @@ import { useFieldClosures } from '../hooks/useFieldClosures.js';
 import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
 import { todayIso } from '../utils/today.js';
 import { isFieldOfferableOn, venueOf, venueRegistry } from '../utils/fieldLifecycle.js';
+import { isSlotOnField } from '../utils/gameGridCells.js';
 import { logger } from '../lib/logger.js';
 
 function normalizeAssignmentSource(source) {
@@ -1083,6 +1084,22 @@ export default function GameSchedulingPage() {
       // Put back where it was (a keyboard pick-up and drop, a drop on its own
       // cell): nothing moved, so nothing is staged or marked manual.
       if (cellOf(currentAssignment) === targetCell) return;
+      // The grid draws every slot under every field, but a slot is one field's
+      // booking: what "Move to" does not offer, a drop does not stage either
+      // (`isSlotOnField`, the one rule for both).
+      if (!isSlotOnField(targetSlot, targetFieldId)) {
+        const fieldName = (id) =>
+          fields.find((field) => String(field.id) === String(id))?.name ?? String(id);
+        setApplyError(null);
+        setStatusMessage(
+          `${currentAssignment.homeTeamId} vs ${currentAssignment.awayTeamId} was not moved: ` +
+            (targetSlot
+              ? `that time slot is booked on ${fieldName(targetSlot.fieldId)}, ` +
+                `not ${fieldName(targetFieldId)}.`
+              : 'that time slot is not one of this season\u2019s game slots.')
+        );
+        return;
+      }
       // The grid shows one game per cell, so a second game there would hide one.
       const occupant = sourceAssignments.find(
         (assignment) =>
@@ -1119,7 +1136,7 @@ export default function GameSchedulingPage() {
       setApplyError(null);
       setStatusMessage('Manual game move staged. Apply the schedule to persist it.');
     },
-    [canEditSchedule, gameSlots]
+    [canEditSchedule, fields, gameSlots]
   );
 
   const handleDragEnd = useCallback(
@@ -1160,7 +1177,7 @@ export default function GameSchedulingPage() {
     );
     return fields.flatMap((field) =>
       gameSlots
-        .filter((slot) => slot.fieldId == null || String(slot.fieldId) === String(field.id))
+        .filter((slot) => isSlotOnField(slot, field.id))
         .map((slot) => `${field.id}:${slot.id}`)
         .filter((id) => !taken.has(id))
         .map((id) => ({ id, label: cellLabels.get(id) }))
@@ -1178,16 +1195,32 @@ export default function GameSchedulingPage() {
   // by name, not dnd-kit's default "draggable item ga-1 ... droppable area v1:gs-2".
   const gridAnnouncements = useMemo(() => {
     const cellLabel = (id) => cellLabels.get(String(id)) ?? 'no slot';
+    // A cell whose slot is another field's booking: `moveGameTo` refuses it.
+    const isOtherFieldsSlot = (id) => {
+      const [fieldId, slotId] = String(id).split(':');
+      return !isSlotOnField(
+        gameSlots.find((slot) => String(slot.id) === slotId),
+        fieldId
+      );
+    };
     const gameLabel = (id) => {
       const game = displayedAssignmentsRef.current.find((a) => String(a.id) === String(id));
       return game ? `${game.homeTeamId} vs ${game.awayTeamId}` : 'the game';
     };
     return {
       onDragStart: ({ active }) => `Picked up ${gameLabel(active.id)}.`,
-      onDragOver: ({ active, over }) =>
-        over ? `${gameLabel(active.id)} is over ${cellLabel(over.id)}.` : undefined,
+      onDragOver: ({ active, over }) => {
+        if (!over) return undefined;
+        return isOtherFieldsSlot(over.id)
+          ? `${gameLabel(active.id)} is over ${cellLabel(over.id)}, another field's slot. ` +
+              'It cannot be dropped here.'
+          : `${gameLabel(active.id)} is over ${cellLabel(over.id)}.`;
+      },
       onDragEnd: ({ active, over }) => {
         if (!over) return `${gameLabel(active.id)} was dropped outside the grid and did not move.`;
+        if (isOtherFieldsSlot(over.id)) {
+          return `${gameLabel(active.id)} was not moved: ${cellLabel(over.id)} is another field's slot.`;
+        }
         // `moveGameTo` refuses a cell that holds another game: say so here too,
         // or the announcement and the status line would disagree.
         const taken = displayedAssignmentsRef.current.some(
@@ -1199,7 +1232,7 @@ export default function GameSchedulingPage() {
       },
       onDragCancel: ({ active }) => `Moving ${gameLabel(active.id)} was cancelled.`,
     };
-  }, [cellLabels]);
+  }, [cellLabels, gameSlots]);
 
   const handleCancelGameAssignment = useCallback(async (assignment) => {
     if (

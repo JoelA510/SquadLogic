@@ -7,7 +7,8 @@
  * change rather than from vercel.json itself:
  *
  * - `buildCommand` runs a package.json script that exists and builds the
- *   frontend (the script `npm run build` is not a build: M6.1);
+ *   frontend (`npm run build` runs the same script since M6.1; Vercel names
+ *   `frontend:build`, the script that does the work);
  * - `outputDirectory` is where vite.config.js writes the build, resolved from
  *   its own `root` and `build.outDir`;
  * - `framework` is Vite, which is what makes Vercel serve the SPA's assets.

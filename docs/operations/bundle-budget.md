@@ -11,8 +11,8 @@
 
 | Trigger | Command | Effect |
 | --- | --- | --- |
-| Local pre-push smoke | `npm run check:bundle` | Runs after `npm run frontend:build`. Fails if any chunk exceeds the budget, a rule matches no file, or a first-paint file is unbudgeted. |
-| CI full matrix | `npm run check:bundle` after `npm run frontend:build` | Same as local; PR cannot merge if budget is busted. Docs-only PRs intentionally skip the full matrix; see [`ci-cd.md`](./ci-cd.md). |
+| Local pre-push smoke | `npm run check:bundle` | Runs after a build made as CI makes it (stand-in Supabase and Sentry variables; see "What is measured"). Fails if any chunk exceeds the budget, a rule matches no file, or a first-paint file is unbudgeted. |
+| CI full matrix | `npm run check:bundle` after `npm run build` | Same as local; PR cannot merge if budget is busted. Docs-only PRs intentionally skip the full matrix; see [`ci-cd.md`](./ci-cd.md). |
 
 ## Budget file shape
 
@@ -86,7 +86,7 @@ top-level `await` in the switcher. A top-level `await` deadlocks the built app
 in mock mode, because the mock chunk imports shared modules back from the main
 entry chunk.
 
-Measured on a build with no credentials (as CI builds), 2026-09-28:
+Measured on a build with no credentials (as CI built then, without Sentry), 2026-09-28:
 
 | File | Before | After |
 | --- | --- | --- |
@@ -96,6 +96,39 @@ Measured on a build with no credentials (as CI builds), 2026-09-28:
 
 The caps are unchanged. The main-entry cap now has ~23 KB of headroom and can
 be tightened per the policy below.
+
+## What is measured: the build production ships, Sentry on
+
+CI builds with stand-in Supabase variables and a stand-in `VITE_SENTRY_DSN`
+(`.invalid` hosts; `.github/workflows/ci.yml`, "Build Frontend"), so the gate
+measures what production ships. Until plan M6 (2026-10-17) CI built without a
+DSN: `main.jsx`'s `if (SENTRY_DSN)` folded away, `Sentry.init` and its
+integrations were never bundled, and the gate passed a main entry 79 KB gzip
+smaller than production's.
+
+Session Replay is not in the main entry: `main.jsx` imports
+`frontend/src/lib/sentryReplay.js` after `Sentry.init` and adds the
+integration with `Sentry.addIntegration`, so Replay is a lazy
+`sentryReplay-*.js` chunk with its own rule. A build without a DSN emits no
+such chunk, so the gate fails it with `[NO MATCH] rule "sentry replay ..."`.
+To measure locally what CI measures:
+
+```bash
+VITE_SUPABASE_URL=https://ci-build.invalid VITE_SUPABASE_ANON_KEY=sb_publishable_ci-build-stand-in VITE_SENTRY_DSN=https://00000000000000000000000000000000@sentry-ci-build.invalid/0 npm run build && npm run check:bundle
+```
+
+Measured 2026-10-17, same tree:
+
+| File | No DSN (what CI measured) | DSN, Replay in the entry | DSN, Replay lazy (now) |
+| --- | --- | --- | --- |
+| main entry | 134.19 KB | 213.62 KB | 174.22 KB (178,399 B) |
+| `sentryReplay-*.js` (lazy) | not emitted | in main entry | 40.19 KB (41,159 B) |
+| total first paint (5 files) | 237.41 KB | 316.84 KB | 277.44 KB (284,101 B) |
+
+The main-entry cap moved from 140,450 B to 190,000 B and the first-paint
+total from 250,000 B to 296,000 B: bytes production already shipped, now
+counted. The rest of the SDK (core and `browserTracingIntegration`, ~40 KB)
+stays in the entry so the pageload is traced from the start.
 
 ## Updating the budget — the policy
 
@@ -120,7 +153,7 @@ be tightened per the policy below.
 | `cannot read dist at .../dist/assets` | Forgot `npm run frontend:build` | `npm run frontend:build && npm run check:bundle` |
 | `[GZIP] main entry ... exceeds budget` | Bundle grew | Diagnose with `npm run frontend:build -- --debug` + Vite's chunk analysis. |
 | `total first-paint exceeds budget` but per-chunk OK | Multiple small growths summed | Tighten one of the large vendors first; first-paint cap is the global gate. |
-| `[NO MATCH] rule "..."` | Rule's regex matches no built file (for a `firstPaint` rule: no file `index.html` loads). Fails the gate. | Fix the regex (a chunk was renamed) or remove the rule (the chunk was deleted). |
+| `[NO MATCH] rule "..."` | Rule's regex matches no built file (for a `firstPaint` rule: no file `index.html` loads). Fails the gate. | Fix the regex (a chunk was renamed) or remove the rule (the chunk was deleted). For `sentry replay`: the build had no `VITE_SENTRY_DSN`; build as CI does (above). |
 | `[UNBUDGETED FIRST-PAINT] assets/...` | `index.html` now loads a file no `firstPaint` rule matches (new `manualChunks` entry, renamed vendor). Fails the gate. | Add or fix a `firstPaint` rule; see "Adding a new rule". |
 | `[CONFIG] ...` | A rule without exactly one cap, a missing or non-number `totalFirstPaintGzipBytes`, or no `rules` array. Fails the gate. | Fix `config/bundle-budget.json`. |
 | `[FIRST-PAINT] index.html ...` | `dist/index.html` has no module entry, or references a file missing from `dist/assets`. Fails the gate. | Rebuild; if it persists, the build is broken. |
@@ -141,8 +174,8 @@ If you ship a new vendor chunk (e.g., a new `analytics-vendor`):
 ## Re-running outside CI
 
 ```bash
-# Build + check.
-npm run frontend:build && npm run check:bundle
+# Build + check, as CI does (stand-ins; see "What is measured").
+VITE_SUPABASE_URL=https://ci-build.invalid VITE_SUPABASE_ANON_KEY=sb_publishable_ci-build-stand-in VITE_SENTRY_DSN=https://00000000000000000000000000000000@sentry-ci-build.invalid/0 npm run build && npm run check:bundle
 
 # Custom dist path (e.g., post-Vite-test):
 node scripts/check-bundle-size.js --dist=./other-dist

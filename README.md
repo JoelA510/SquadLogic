@@ -9,7 +9,7 @@
 >
 > SquadLogic converts raw GotSport registration data into actionable teaming and scheduling frameworks, designed specifically to support youth sports organizations.
 
-> **Release status**: v1.0.1 (2026-04-23) shipped; the "Lightning-class" enterprise redesign has since merged to `main` (unreleased). See [`CHANGELOG.md`](CHANGELOG.md) and [`docs/operations/ci-cd.md`](docs/operations/ci-cd.md).
+> **Release status**: the latest release is v1.0.1 (2026-04-23), the version `package.json` carries and Sentry reports. Production deploys every merge to `main`, so it also runs everything under "Unreleased" in [`CHANGELOG.md`](CHANGELOG.md), the "Lightning-class" redesign and the heat forecast among it, still as 1.0.1. See [`docs/operations/ci-cd.md`](docs/operations/ci-cd.md).
 > **CI**: [![CI](https://github.com/JoelA510/SquadLogic/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/JoelA510/SquadLogic/actions/workflows/ci.yml)
 > **Deployment**: https://squadlogic.vercel.app/
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mockSupabase as supabase, getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const setMockSession = (userId) => {
   sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: userId } }));
@@ -14,14 +15,14 @@ describe('mock facility admin rpcs', () => {
 
   it('creates, updates, and deletes fields through admin RPC handlers', async () => {
     const { data: location, error: locationError } = await supabase.rpc('admin_create_location', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_name: '  New Park  ',
     });
     expect(locationError).toBeNull();
-    expect(location).toMatchObject({ organization_id: 'org-1', name: 'New Park' });
+    expect(location).toMatchObject({ organization_id: MOCK_ORG_ID, name: 'New Park' });
 
     const { data: field, error: fieldError } = await supabase.rpc('admin_create_field', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_location_id: location.id,
       p_name: '  South Field  ',
       p_surface_type: 'Turf',
@@ -32,7 +33,7 @@ describe('mock facility admin rpcs', () => {
     });
     expect(fieldError).toBeNull();
     expect(field).toMatchObject({
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       location_id: location.id,
       name: 'South Field',
       size: '7v7',
@@ -44,7 +45,7 @@ describe('mock facility admin rpcs', () => {
     );
 
     const { data: updated, error: updateError } = await supabase.rpc('admin_update_field', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_field_id: field.id,
       p_location_id: location.id,
       p_name: 'Renamed Field',
@@ -61,11 +62,11 @@ describe('mock facility admin rpcs', () => {
     );
 
     const { data: deleted, error: deleteError } = await supabase.rpc('admin_delete_field', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_field_id: field.id,
     });
     expect(deleteError).toBeNull();
-    expect(deleted).toMatchObject({ id: field.id, organization_id: 'org-1', deleted: true });
+    expect(deleted).toMatchObject({ id: field.id, organization_id: MOCK_ORG_ID, deleted: true });
     expect(getMockData('fields').some((row) => row.id === field.id)).toBe(false);
     // create_location, create_field, update_field, then admin_delete_field's
     // BEFORE and AFTER phases -- five, not four. The delete audits both phases
@@ -88,18 +89,18 @@ describe('mock facility admin rpcs', () => {
   it('rejects non-admin and cross-org facility writes', async () => {
     setMockSession('mock-coach-id');
     const { error: roleError } = await supabase.rpc('admin_create_location', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_name: 'Coach Park',
     });
     expect(roleError?.message).toContain('Admin role is required');
 
     setMockSession('mock-admin-id');
     const { data: location } = await supabase.rpc('admin_create_location', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_name: 'Priority Park',
     });
     const { error: priorityError } = await supabase.rpc('admin_create_field', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_location_id: location.id,
       p_name: 'Bad Priority Field',
       p_surface_type: 'Grass',
@@ -111,7 +112,7 @@ describe('mock facility admin rpcs', () => {
     expect(priorityError?.message).toContain('priority_rating must be at least 1');
 
     const { error: scopeError } = await supabase.rpc('admin_create_field', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_location_id: 'missing-location',
       p_name: 'Bad Field',
       p_surface_type: 'Grass',

@@ -22,6 +22,7 @@ import {
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 import { createDeterministicRandom } from './fixtures/incrementalTeamingFixtures.js';
+import { MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const DIVISION_KEY = 'U10';
 const DIVISION_ID = '33333333-3333-4333-8333-333333333333';
@@ -127,7 +128,7 @@ function persistReview(db, review, createdAt) {
     runData: {
       id: review.lastRunId,
       organizationId: ORG_ID,
-      seasonSettingsId: 'season-1',
+      seasonSettingsId: MOCK_SEASON_ID,
       status: 'needs_manual_review',
       parameters: review.runMetadata.parameters,
       metrics: review.runMetadata.metrics,
@@ -174,7 +175,7 @@ function buildReview(result, runId, idFactory) {
     divisionKey: DIVISION_KEY,
     divisionId: DIVISION_ID,
     organizationId: ORG_ID,
-    seasonSettingsId: 'season-1',
+    seasonSettingsId: MOCK_SEASON_ID,
     userId: 'user-1',
     selectedProgramId: DIVISION_KEY,
     divisionConfig: { id: DIVISION_KEY, maxRosterSize: 4 },

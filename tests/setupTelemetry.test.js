@@ -3,12 +3,13 @@ import {
   buildSetupTelemetryRpcParams,
   logSetupWizardTelemetry,
 } from '../frontend/src/utils/setupTelemetry.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 describe('setup telemetry', () => {
   it('builds org-scoped RPC params and protects explicit telemetry fields', () => {
     expect(
       buildSetupTelemetryRpcParams({
-        organizationId: 'org-1',
+        organizationId: MOCK_ORG_ID,
         eventType: 'wizard.step_completed',
         sessionId: 'session-1',
         step: 2,
@@ -19,7 +20,7 @@ describe('setup telemetry', () => {
         },
       })
     ).toEqual({
-      p_org_id: 'org-1',
+      p_org_id: MOCK_ORG_ID,
       p_event_name: 'wizard.step_completed',
       p_payload: {
         custom: true,
@@ -35,7 +36,7 @@ describe('setup telemetry', () => {
 
     await logSetupWizardTelemetry({
       supabaseClient: { rpc },
-      organizationId: 'org-1',
+      organizationId: MOCK_ORG_ID,
       eventType: 'wizard.finalized',
       sessionId: undefined,
       payload: { final_flags: { imports: true } },
@@ -44,7 +45,7 @@ describe('setup telemetry', () => {
     });
 
     expect(rpc).toHaveBeenCalledWith('log_telemetry_event', {
-      p_org_id: 'org-1',
+      p_org_id: MOCK_ORG_ID,
       p_event_name: 'wizard.finalized',
       p_payload: {
         final_flags: { imports: true },
@@ -74,7 +75,7 @@ describe('setup telemetry', () => {
     await expect(
       logSetupWizardTelemetry({
         supabaseClient: { rpc },
-        organizationId: 'org-1',
+        organizationId: MOCK_ORG_ID,
         eventType: 'wizard.finalized',
         sessionId: 'session-1',
         step: 3,

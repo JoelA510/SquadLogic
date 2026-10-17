@@ -1,6 +1,7 @@
+import { MOCK_ORG_ID } from '../../frontend/src/lib/mockSeedIds.js';
 export function makeOrganization(overrides = {}) {
   return {
-    id: 'org-1',
+    id: MOCK_ORG_ID,
     name: 'Test Organization',
     slug: 'test-org',
     contact_info: {},
@@ -12,7 +13,7 @@ export function makeOrganization(overrides = {}) {
 
 export function makeOrganizationMember(overrides = {}) {
   return {
-    organization_id: 'org-1',
+    organization_id: MOCK_ORG_ID,
     profile_id: 'user-1',
     role: 'admin',
     created_at: '2026-01-01T00:00:00Z',

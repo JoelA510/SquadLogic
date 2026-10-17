@@ -4,6 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import InvitePage from '../frontend/src/pages/InvitePage.jsx';
 import { PENDING_INVITE_STORAGE_KEY } from '../frontend/src/lib/inviteStorage.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const mocks = vi.hoisted(() => ({
   auth: { session: null, loading: false },
@@ -43,7 +44,7 @@ describe('InvitePage', () => {
     vi.clearAllMocks();
     sessionStorage.clear();
     mocks.auth = { session: null, loading: false };
-    mocks.rpc.mockResolvedValue({ data: 'org-1', error: null });
+    mocks.rpc.mockResolvedValue({ data: MOCK_ORG_ID, error: null });
   });
 
   it('renders the inline Login with an invite banner when unauthenticated', () => {

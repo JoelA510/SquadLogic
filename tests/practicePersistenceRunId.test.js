@@ -2,6 +2,7 @@ import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
 import { persistPracticeSnapshotTransactional } from '../packages/core/src/practicePersistenceHandler.js';
 import { persistTeamSnapshotTransactional } from '../packages/core/src/teamPersistenceHandler.js';
+import { MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 // #64: `persist_practice_schedule` now returns jsonb (`run_id`, what it
 // superseded, what it kept). The shared handler must read the id out of it,
@@ -23,11 +24,11 @@ describe('persistence handler run id (#64)', () => {
     const result = await persistPracticeSnapshotTransactional({
       supabaseClient: client,
       snapshot: { payload: { assignmentRows: [{ team_id: 't1', practice_slot_id: 's1' }] } },
-      runMetadata: { seasonSettingsId: 'season-1' },
+      runMetadata: { seasonSettingsId: MOCK_SEASON_ID },
       now: new Date('2026-09-24T00:00:00Z'),
     });
     assert.equal(client.calls.length, 1, 'the RPC was never called');
-    assert.equal(client.calls[0].args.run_data.season_settings_id, 'season-1');
+    assert.equal(client.calls[0].args.run_data.season_settings_id, MOCK_SEASON_ID);
     assert.equal(client.calls[0].name, 'persist_practice_schedule');
     assert.equal(result.runId, 'run-from-rpc');
   });
@@ -37,7 +38,7 @@ describe('persistence handler run id (#64)', () => {
     const result = await persistPracticeSnapshotTransactional({
       supabaseClient: client,
       snapshot: { payload: { assignmentRows: [{ team_id: 't1', practice_slot_id: 's1' }] } },
-      runMetadata: { runId: 'run-from-caller', seasonSettingsId: 'season-1' },
+      runMetadata: { runId: 'run-from-caller', seasonSettingsId: MOCK_SEASON_ID },
       now: new Date('2026-09-24T00:00:00Z'),
     });
     assert.equal(result.runId, 'run-from-caller');
@@ -48,7 +49,7 @@ describe('persistence handler run id (#64)', () => {
     const result = await persistPracticeSnapshotTransactional({
       supabaseClient: client,
       snapshot: { payload: { assignmentRows: [{ team_id: 't1', practice_slot_id: 's1' }] } },
-      runMetadata: { seasonSettingsId: 'season-1' },
+      runMetadata: { seasonSettingsId: MOCK_SEASON_ID },
       now: new Date('2026-09-24T00:00:00Z'),
     });
     assert.equal(result.runId, null);

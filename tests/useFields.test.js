@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { useFields } from '../frontend/src/hooks/useFields.js';
 import { supabase } from '../frontend/src/lib/supabaseClient.js';
 import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
@@ -33,18 +34,18 @@ describe('useFields', () => {
     vi.clearAllMocks();
     // @ts-expect-error [MOCK] - partial organization context is enough for this hook.
     vi.mocked(useOrganization).mockReturnValue({
-      currentOrganization: { id: 'org-1' },
+      currentOrganization: { id: MOCK_ORG_ID },
     });
 
     const locationsBuilder = createReadBuilder({
-      data: [{ id: 'location-1', organization_id: 'org-1', name: 'Park' }],
+      data: [{ id: 'location-1', organization_id: MOCK_ORG_ID, name: 'Park' }],
       error: null,
     });
     const fieldsBuilder = createReadBuilder({
       data: [
         {
           id: 'field-1',
-          organization_id: 'org-1',
+          organization_id: MOCK_ORG_ID,
           location_id: 'location-1',
           name: 'North Field',
         },
@@ -70,7 +71,7 @@ describe('useFields', () => {
     });
 
     expect(supabase.rpc).toHaveBeenCalledWith('admin_create_location', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_name: '  New Park  ',
     });
 
@@ -87,7 +88,7 @@ describe('useFields', () => {
     });
 
     expect(supabase.rpc).toHaveBeenCalledWith('admin_create_field', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_location_id: 'location-1',
       p_name: 'South Field',
       p_surface_type: 'Turf',
@@ -110,7 +111,7 @@ describe('useFields', () => {
     });
 
     expect(supabase.rpc).toHaveBeenCalledWith('admin_update_field', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_field_id: 'field-1',
       p_location_id: 'location-1',
       p_name: 'Renamed Field',
@@ -132,7 +133,7 @@ describe('useFields', () => {
     });
 
     expect(supabase.rpc).toHaveBeenCalledWith('admin_delete_field', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_field_id: 'field-1',
       p_confirm: false,
     });
@@ -178,7 +179,7 @@ describe('useFields', () => {
       await result.current.deleteField('field-1', { confirm: true });
     });
     expect(supabase.rpc).toHaveBeenCalledWith('admin_delete_field', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_field_id: 'field-1',
       p_confirm: true,
     });
@@ -228,7 +229,7 @@ describe('useFields', () => {
     });
 
     expect(supabase.rpc).toHaveBeenCalledWith('admin_retire_field', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_field_id: 'field-1',
       p_effective_to: '2026-09-30',
       p_confirm: false,
@@ -254,7 +255,7 @@ describe('useFields', () => {
       });
     });
     expect(supabase.rpc).toHaveBeenCalledWith('admin_retire_field', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_field_id: 'field-1',
       p_effective_to: '2026-09-30',
       p_confirm: true,
@@ -299,7 +300,7 @@ describe('useFields', () => {
       await result.current.unretireField('field-1');
     });
     expect(supabase.rpc).toHaveBeenCalledWith('admin_unretire_field', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_field_id: 'field-1',
     });
   });
@@ -359,7 +360,7 @@ describe('useFields', () => {
     });
 
     expect(supabase.rpc).toHaveBeenCalledWith(depth.retireRpc, {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       [depth.idParam]: depth.id,
       p_effective_to: '2026-09-30',
       p_confirm: false,
@@ -412,7 +413,7 @@ describe('useFields', () => {
       await result.current[depth.unretire](depth.id);
     });
     expect(supabase.rpc).toHaveBeenCalledWith(depth.unretireRpc, {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       [depth.idParam]: depth.id,
     });
   });

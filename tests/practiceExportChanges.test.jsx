@@ -18,12 +18,13 @@ import {
   readUnshownPracticeChanges,
   unshownPracticeChangesOf,
 } from '../frontend/src/utils/practiceExportChanges.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 // Camel-cased, as `useCurrentPracticeSchedule` hands them to the export.
 const ASSIGNMENTS = [
   {
     id: 'pa-1',
-    organizationId: 'org-1',
+    organizationId: MOCK_ORG_ID,
     teamId: 'team-1',
     effectiveDateRange: '[2026-11-02,2026-12-01)',
     practiceSlots: { dayOfWeek: 'mon', startTime: '17:00', endTime: '18:00' },
@@ -33,7 +34,7 @@ const ASSIGNMENTS = [
   },
   {
     id: 'pa-2',
-    organizationId: 'org-1',
+    organizationId: MOCK_ORG_ID,
     teamId: 'team-1',
     effectiveDateRange: '[2026-11-04,2026-11-19)',
     practiceSlots: { dayOfWeek: 'wed', startTime: '16:00', endTime: '17:00' },
@@ -128,7 +129,7 @@ function fakeClient(rows, { fail = false } = {}) {
   };
 }
 
-const tagged = EXCEPTIONS.map((e) => ({ ...e, organization_id: 'org-1' }));
+const tagged = EXCEPTIONS.map((e) => ({ ...e, organization_id: MOCK_ORG_ID }));
 
 describe('export practice-change count (R9)', () => {
   it('the seed changes series dates, and not through the withdrawn row (meta)', () => {

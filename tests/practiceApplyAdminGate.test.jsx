@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { MemoryRouter } from 'react-router-dom';
 import { createChainMock } from './helpers/index.js';
 import { PERMISSIONS, ROLE_PERMISSIONS, ROLES } from '../frontend/src/constants/permissions.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const state = vi.hoisted(() => ({
   /** @type {string[]} */ permissions: [],
@@ -46,8 +47,8 @@ vi.mock('../frontend/src/hooks/useDashboardData.js', () => ({
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
-    currentOrganization: { id: 'org-1', name: 'Smoke FC' },
-    currentSeasonSetting: { id: 'season-1', timezone: 'America/New_York' },
+    currentOrganization: { id: MOCK_ORG_ID, name: 'Smoke FC' },
+    currentSeasonSetting: { id: MOCK_SEASON_ID, timezone: 'America/New_York' },
     featureFlags: {},
     permissions: state.permissions,
     loading: false,

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getMockData, mockSupabase as supabase } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 describe('mock field import apply and rollback', () => {
   beforeEach(() => {
@@ -13,7 +14,7 @@ describe('mock field import apply and rollback', () => {
       .insert({
         id: 'mock-field-import-job',
         created_by: 'mock-admin-id',
-        organization_id: 'org-1',
+        organization_id: MOCK_ORG_ID,
         job_type: 'fields',
         storage_path: 'imports/mock-admin-id/fields.csv',
         status: 'importing',
@@ -29,7 +30,7 @@ describe('mock field import apply and rollback', () => {
       {
         body: {
           import_type: 'fields',
-          organization_id: 'org-1',
+          organization_id: MOCK_ORG_ID,
           rows: [
             {
               Location: 'Main Park',
@@ -86,7 +87,7 @@ describe('mock field import apply and rollback', () => {
       .insert({
         id: 'mock-deferred-field-import-job',
         created_by: 'mock-admin-id',
-        organization_id: 'org-1',
+        organization_id: MOCK_ORG_ID,
         job_type: 'fields',
         storage_path: 'imports/mock-admin-id/fields.csv',
         status: 'importing',
@@ -100,7 +101,7 @@ describe('mock field import apply and rollback', () => {
     await supabase.functions.invoke('import-validation', {
       body: {
         import_type: 'fields',
-        organization_id: 'org-1',
+        organization_id: MOCK_ORG_ID,
         rows: [
           {
             Location: 'Cancel Park',

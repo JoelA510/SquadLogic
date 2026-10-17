@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { useTeamSummary } from '../frontend/src/hooks/useTeamSummary.js';
 import { supabase } from '../frontend/src/lib/supabaseClient.js';
 import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
@@ -36,8 +37,8 @@ describe('useTeamSummary', () => {
     vi.clearAllMocks();
     // @ts-expect-error [MOCK] - partial organization context is enough for this hook.
     vi.mocked(useOrganization).mockReturnValue({
-      currentOrganization: { id: 'org-1' },
-      currentSeasonSetting: { id: 'season-1' },
+      currentOrganization: { id: MOCK_ORG_ID },
+      currentSeasonSetting: { id: MOCK_SEASON_ID },
     });
   });
 
@@ -73,11 +74,11 @@ describe('useTeamSummary', () => {
       await waitFor(() => expect(result.current.loading).toBe(false));
 
       expect(result.current.summary.runId).toBe('team-run-1');
-      expect(runBuilder.eq).toHaveBeenCalledWith('organization_id', 'org-1');
+      expect(runBuilder.eq).toHaveBeenCalledWith('organization_id', MOCK_ORG_ID);
       expect(runBuilder.eq).toHaveBeenCalledWith('run_type', 'team');
       expect(runBuilder.in).toHaveBeenCalledWith('status', ['completed', 'running']);
       expect(runBuilder.or).toHaveBeenCalledWith(
-        'season_settings_id.eq.season-1,season_id.eq.season-1'
+        `season_settings_id.eq.${MOCK_SEASON_ID},season_id.eq.${MOCK_SEASON_ID}`
       );
       expect(timeoutSpy).not.toHaveBeenCalledWith(expect.any(Function), 2000);
     } finally {

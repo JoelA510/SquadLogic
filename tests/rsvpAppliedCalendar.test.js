@@ -25,12 +25,13 @@ import {
   practiceRangeLowerBound,
 } from '../packages/core/src/utils/practiceOccurrences.js';
 import { getMockData, mockSupabase as supabase } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TABLE = JSON.parse(
   readFileSync(path.join(REPO, 'tests/fixtures/rsvpAppliedCalendarCases.json'), 'utf8')
 );
-const ORG = 'org-1';
+const ORG = MOCK_ORG_ID;
 const PARENT = 'mock-parent-id';
 const ROW_KEYS = Object.keys(TABLE.rows);
 
@@ -167,7 +168,7 @@ function seedMock(exceptions = TABLE.exceptions, extra = {}) {
     practice_exceptions: exceptions.map((e) => ({
       id: `pe-d12-${e.id}`,
       organization_id: ORG,
-      season_settings_id: 'season-1',
+      season_settings_id: MOCK_SEASON_ID,
       team_id: ids(e.row).team,
       assignment_id: ids(e.row).assignment,
       window: e.window,

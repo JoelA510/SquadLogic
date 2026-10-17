@@ -18,6 +18,7 @@ import {
 } from '../frontend/src/lib/persistenceRequest.js';
 import * as practiceClient from '../frontend/src/utils/practicePersistenceClient.js';
 import { settleWithin } from './helpers/index.js';
+import { MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
@@ -33,7 +34,7 @@ const SAVE_ARGS = {
   assignments: [{ teamId: 't1', slotId: 'slot-a' }],
   slots: [{ id: 'slot-a', effectiveFrom: '2026-09-01', effectiveUntil: '2026-11-30' }],
   runId: undefined,
-  runMetadata: { seasonSettingsId: 'season-1' },
+  runMetadata: { seasonSettingsId: MOCK_SEASON_ID },
 };
 
 /** Each sender, called the way its page calls it, against the real network path. */
@@ -51,7 +52,7 @@ const SENDERS = {
       {
         payload: { assignmentRows: [], repair: { unlock: [] } },
         enact: { enact_key: ENACT_KEY },
-        runMetadata: { runId: ENACT_KEY, seasonSettingsId: 'season-1' },
+        runMetadata: { runId: ENACT_KEY, seasonSettingsId: MOCK_SEASON_ID },
       },
       { mock: false }
     ),
@@ -87,7 +88,7 @@ const MALFORMED = {
         {
           payload: { assignmentRows: [{ team_id: 't1' }], repair: { unlock: [] } },
           enact: { enact_key: ENACT_KEY },
-          runMetadata: { runId: ENACT_KEY, seasonSettingsId: 'season-1' },
+          runMetadata: { runId: ENACT_KEY, seasonSettingsId: MOCK_SEASON_ID },
         },
         { mock: false }
       ),

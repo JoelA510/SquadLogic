@@ -15,6 +15,7 @@ import {
   coachesOfTeamOn,
 } from '@squadlogic/core/people/index.js';
 import { mockSupabase as supabase, getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const row = (team_id, coach_id, role, effective_from, effective_to = null, id = undefined) => ({
   id: id ?? `${team_id}-${coach_id}-${role}-${effective_from}`,
@@ -194,7 +195,7 @@ describe('mock twins route through the single writer', () => {
   const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
   const driftOf = () =>
     coachColumnDrift({
-      teams: getMockData('teams').filter((team) => team.organization_id === 'org-1'),
+      teams: getMockData('teams').filter((team) => team.organization_id === MOCK_ORG_ID),
       rows: getMockData('team_coach_assignments'),
       asOf: today(),
     });
@@ -207,7 +208,7 @@ describe('mock twins route through the single writer', () => {
 
   it('starts in sync, over every seeded team of the organisation', () => {
     const drift = driftOf();
-    expect(drift.length).toBe(getMockData('teams', 'organization_id', 'org-1').length);
+    expect(drift.length).toBe(getMockData('teams', 'organization_id', MOCK_ORG_ID).length);
     expect(drift.length).toBeGreaterThan(1);
     expect(drift.filter((entry) => !entry.inSync)).toEqual([]);
   });
@@ -218,7 +219,7 @@ describe('mock twins route through the single writer', () => {
     expect(newCoach?.can_coach_multiple_teams).toBe(true);
 
     const { error } = await supabase.rpc('admin_assign_team_coach', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_team_id: 't2',
       p_coach_id: newCoach.id,
       p_effective_on: daysAgo(3),
@@ -239,14 +240,14 @@ describe('mock twins route through the single writer', () => {
 
     // The two date refusals, with the SQL's words.
     const backdated = await supabase.rpc('admin_assign_team_coach', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_team_id: 't2',
       p_coach_id: null,
       p_effective_on: daysAgo(30),
     });
     expect(backdated.error?.message).toMatch(/would rewrite it/);
     const future = await supabase.rpc('admin_assign_team_coach', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_team_id: 't2',
       p_coach_id: null,
       p_effective_on: '2999-01-01',

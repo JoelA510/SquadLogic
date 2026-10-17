@@ -14,6 +14,7 @@ import {
   buildTeamReviewSnapshot,
 } from '../frontend/src/utils/teamReviewPersistence.js';
 import { createDeterministicRandom } from './fixtures/incrementalTeamingFixtures.js';
+import { MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const U10 = { id: 'U10', teamsCount: 3, slotsPerWeek: 4, maxRosterSize: 4 };
 const NINE = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9'];
@@ -328,7 +329,7 @@ test('8. the frontend review snapshot preserves persisted UUIDs and emits a full
     divisionKey: 'U10',
     divisionId: '33333333-3333-4333-8333-333333333333',
     organizationId: '44444444-4444-4444-8444-444444444444',
-    seasonSettingsId: 'season-1',
+    seasonSettingsId: MOCK_SEASON_ID,
     userId: 'user-1',
     selectedProgramId: 'U10',
     divisionConfig: { id: 'U10', maxRosterSize: 4 },
@@ -405,7 +406,7 @@ test('8b. an expanding re-run mints a UUID only for the new team and preserves t
     divisionKey: 'U10',
     divisionId: '33333333-3333-4333-8333-333333333333',
     organizationId: '44444444-4444-4444-8444-444444444444',
-    seasonSettingsId: 'season-1',
+    seasonSettingsId: MOCK_SEASON_ID,
     userId: 'user-1',
     selectedProgramId: 'U10',
     divisionConfig: { id: 'U10', maxRosterSize: 4 },

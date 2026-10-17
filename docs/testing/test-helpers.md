@@ -70,10 +70,11 @@ settled, so the providers never read an unassigned mock client. Await it.
 ```jsx
 import { renderWithProviders } from '../helpers/index.js';
 import { makeUser, makeOrganization } from '../factories/index.js';
+import { MOCK_ORG_ID } from '../../frontend/src/lib/mockSeedIds.js';
 
 await renderWithProviders(<MyComponent />, {
   user: makeUser({ id: 'u-1' }),
-  organization: makeOrganization({ id: 'org-1' }),
+  organization: makeOrganization({ id: MOCK_ORG_ID }),
   route: '/dashboard',
 });
 ```

@@ -1733,7 +1733,7 @@ export default function PracticeSchedulingPage() {
           {schedulerReadinessMessage && (
             <div
               role="alert"
-              className="mt-4 rounded-lg border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+              className="mt-4 rounded-lg border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-status-warning-text"
             >
               {schedulerReadinessMessage}
             </div>
@@ -1818,14 +1818,14 @@ export default function PracticeSchedulingPage() {
                 </p>
               )}
               {applyError && (
-                <div role="alert" className="mt-3 text-sm text-red-300">
+                <div role="alert" className="mt-3 text-sm text-status-error-text">
                   {applyError}
                 </div>
               )}
               {applyStatus === 'applied' && teamWarnings.length > 0 && (
                 <div
                   role="alert"
-                  className="mt-4 rounded-lg border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+                  className="mt-4 rounded-lg border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-status-warning-text"
                 >
                   <p className="font-semibold">
                     {teamWarnings.length} team(s) have no practice after this save:
@@ -1845,7 +1845,7 @@ export default function PracticeSchedulingPage() {
           {isColdStart && (
             <div className="glass-panel p-12 text-center animate-fadeIn border-brand-400/20 relative overflow-hidden">
               <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
-                <Calendar size={120} className="text-brand-400" />
+                <Calendar size={120} className="text-text-accent" />
               </div>
               <div className="max-w-md mx-auto relative z-10">
                 <h2 className="text-2xl font-display font-bold text-text-primary mb-4">
@@ -1875,7 +1875,7 @@ export default function PracticeSchedulingPage() {
             {statusMessage && (
               <div
                 role="status"
-                className="border-b border-blue-400/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-100"
+                className="border-b border-blue-400/20 bg-blue-500/10 px-4 py-3 text-sm text-text-accent"
               >
                 {statusMessage}
               </div>

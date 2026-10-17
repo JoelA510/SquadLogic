@@ -521,7 +521,7 @@ export default function FieldManagementPage() {
             className={`bg-bg-surface border ${field.active ? 'border-border-subtle' : 'border-red-900/30 bg-red-900/5'} rounded-xl p-6 hover:bg-bg-surface-hover transition-colors group relative`}
           >
             {!field.active && (
-              <div className="absolute top-4 right-4 text-xs font-bold text-red-500 bg-red-900/20 px-2 py-1 rounded">
+              <div className="absolute top-4 right-4 text-xs font-bold text-status-error-text bg-red-900/20 px-2 py-1 rounded">
                 INACTIVE
               </div>
             )}
@@ -542,14 +542,14 @@ export default function FieldManagementPage() {
             )}
 
             <div className="flex justify-between items-start mb-4">
-              <div className="p-3 bg-blue-500/20 rounded-lg text-blue-400">
+              <div className="p-3 bg-blue-500/20 rounded-lg text-text-accent">
                 <MapPin size={24} />
               </div>
               <div className="flex gap-2">
                 <button
                   onClick={() => handleEdit(field)}
                   aria-label={`Edit ${field.name}`}
-                  className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-blue-400 transition-colors"
+                  className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-text-accent transition-colors"
                 >
                   <Edit2 size={16} />
                 </button>
@@ -576,7 +576,7 @@ export default function FieldManagementPage() {
                 <button
                   onClick={() => handleDelete(field)}
                   aria-label={`Delete ${field.name}`}
-                  className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-red-400 transition-colors"
+                  className="p-2 hover:bg-bg-surface-hover rounded-lg text-text-muted hover:text-status-error-text transition-colors"
                 >
                   <Trash2 size={16} />
                 </button>
@@ -595,12 +595,12 @@ export default function FieldManagementPage() {
               <span className="px-2 py-0.5 bg-bg-surface rounded-full border border-border-subtle">
                 {field.size || '11v11'}
               </span>
-              <span className="px-2 py-0.5 bg-blue-900/20 text-blue-300 rounded-full border border-blue-800/30">
+              <span className="px-2 py-0.5 bg-blue-500/10 text-text-accent rounded-full border border-blue-800/30">
                 Priority: {field.priority_rating || 1}
               </span>
               {field.supports_halves && field.field_subunits?.length > 0 && (
                 <span
-                  className="px-2 py-0.5 bg-green-900/20 text-green-400 rounded-full border border-green-800/30 font-semibold"
+                  className="px-2 py-0.5 bg-green-500/10 text-status-success-text rounded-full border border-green-800/30 font-semibold"
                   data-testid={`subunit-indicator-${field.id}`}
                 >
                   Sub-units: {field.field_subunits.length}
@@ -689,7 +689,7 @@ export default function FieldManagementPage() {
                         {slots.map((slot) => (
                           <span
                             key={slot.id}
-                            className="text-[9px] font-mono text-blue-300 whitespace-nowrap"
+                            className="text-[9px] font-mono text-text-accent whitespace-nowrap"
                             title={`${slot.start_time.substring(0, 5)} - ${slot.end_time.substring(0, 5)}`}
                           >
                             {slot.start_time.substring(0, 5)}
@@ -764,7 +764,7 @@ export default function FieldManagementPage() {
                   {!isAddingLocation && (
                     <button
                       onClick={() => setIsAddingLocation(true)}
-                      className="text-xs text-brand-400 hover:text-brand-500 flex items-center"
+                      className="text-xs text-text-accent hover:text-brand-500 flex items-center"
                     >
                       <Plus size={12} className="mr-1" /> Add New Location
                     </button>

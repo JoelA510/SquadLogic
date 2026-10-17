@@ -5,9 +5,9 @@ const ProgressBar = ({ progress, label, showPercentage = true, className = '' })
   return (
     <div className={`w-full ${className}`}>
       <div className="flex justify-between items-center mb-2">
-        {label && <span className="text-sm font-medium text-blue-200">{label}</span>}
+        {label && <span className="text-sm font-medium text-text-accent">{label}</span>}
         {showPercentage && (
-          <span className="text-sm font-bold text-blue-400">{Math.round(progress)}%</span>
+          <span className="text-sm font-bold text-text-accent">{Math.round(progress)}%</span>
         )}
       </div>
       <div className="h-4 bg-bg-glass rounded-full overflow-hidden border border-border-subtle relative">

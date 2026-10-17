@@ -150,7 +150,7 @@ const DashboardWorkflow = ({
               <div className="bg-bg-surface p-8 rounded-xl text-center border border-border-subtle">
                 <div className="text-4xl mb-4 flex justify-center">
                   <svg
-                    className="w-16 h-16 text-blue-400/80"
+                    className="w-16 h-16 text-text-accent"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -231,7 +231,7 @@ const DashboardWorkflow = ({
           <div className="bg-bg-surface p-8 rounded-xl text-center border border-border-subtle">
             <div className="text-4xl mb-4 flex justify-center">
               <svg
-                className="w-16 h-16 text-blue-400/80"
+                className="w-16 h-16 text-text-accent"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"

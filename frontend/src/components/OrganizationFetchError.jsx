@@ -31,7 +31,7 @@ export default function OrganizationFetchError({ error, onRetry }) {
     <div className="min-h-screen bg-bg-app flex items-center justify-center p-6 animate-fadeIn">
       <div className="max-w-md w-full glass-panel-premium p-10 space-y-6">
         <div className="flex items-start gap-4">
-          <div className="p-3 bg-red-500/10 text-red-400 rounded-2xl shrink-0">
+          <div className="p-3 bg-red-500/10 text-status-error-text rounded-2xl shrink-0">
             <AlertTriangle size={24} />
           </div>
           <div className="space-y-2">

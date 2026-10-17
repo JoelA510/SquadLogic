@@ -204,24 +204,24 @@ export default function PracticeOverridePanel({
                   <div className="flex items-center gap-3">
                     <span className="font-bold text-text-primary">{team?.name}</span>
                     <span className="text-text-muted">&rarr;</span>
-                    <span className="font-medium text-blue-400">
+                    <span className="font-medium text-text-accent">
                       {slot?.day} at {slot?.startLabel ?? slot?.baseSlotId.split('_').pop()}
                     </span>
-                    <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-500 border border-amber-500/30">
+                    <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-status-warning-text border border-amber-500/30">
                       Manual
                     </span>
                   </div>
                   <p className="text-xs text-text-secondary">Division: {team?.division}</p>
 
                   {override.conflictWarning && (
-                    <div className="mt-2 text-xs flex items-center gap-1.5 text-amber-500 bg-amber-500/10 p-2 rounded border border-amber-500/20">
+                    <div className="mt-2 text-xs flex items-center gap-1.5 text-status-warning-text bg-amber-500/10 p-2 rounded border border-amber-500/20">
                       <AlertCircle size={14} className="shrink-0" />
                       <span>Conflict: {override.conflictWarning}</span>
                     </div>
                   )}
                 </div>
 
-                <div className="text-emerald-500 flex items-center gap-1 text-xs font-semibold">
+                <div className="text-status-success-text flex items-center gap-1 text-xs font-semibold">
                   <Check size={14} /> Staged
                 </div>
               </div>

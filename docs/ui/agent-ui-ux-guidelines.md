@@ -111,8 +111,11 @@ cells, Tab leaves. A column's `render` may put widgets in a cell; the grid takes
 tab order and reaches them with the arrow keys, so don't give them a `tabIndex` of your own.
 
 Colors: text uses the theme tokens (`text-text-*`, `text-text-accent`, and
-`text-status-{success,warning,error}-text` on status fills), never Tailwind's `-400` palette
-shades, which fall short of 4.5:1 on the light theme's surfaces.
+`text-status-{success,warning,error}-text` on status fills), never Tailwind's palette shades
+(`text-blue-400`, `text-amber-500`, ...), which fall short of 4.5:1 on the light theme's surfaces.
+`tests/paletteTextShades.test.js` refuses them, and `tests/themeTextContrast.test.js` holds the
+tokens to 4.5:1 on every surface and every tint they share a class string with, in both themes.
+Charts take their colours from `frontend/src/constants/chartTheme.js` (`tests/chartColorTokens.test.js`).
 
 ---
 

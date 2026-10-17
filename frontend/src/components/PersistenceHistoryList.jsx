@@ -8,7 +8,7 @@ export default function PersistenceHistoryList({ history }) {
       className="bg-bg-glass border border-border-subtle rounded-lg p-5 flex flex-col gap-2"
       aria-labelledby="persistence-history-heading"
     >
-      <h3 className="text-base font-semibold text-blue-300 m-0" id="persistence-history-heading">
+      <h3 className="text-base font-semibold text-text-accent m-0" id="persistence-history-heading">
         Recent Supabase Syncs
       </h3>
       {history.length > 0 ? (
@@ -19,10 +19,12 @@ export default function PersistenceHistoryList({ history }) {
               className="p-3 rounded-md bg-bg-glass shadow-sm border border-border-subtle"
             >
               <div className="flex justify-between mb-1">
-                <span className="text-blue-300 font-mono text-sm">{run.runId}</span>
+                <span className="text-text-accent font-mono text-sm">{run.runId}</span>
                 <span
                   className={`text-xs font-semibold ${
-                    run.status === 'success' ? 'text-green-400' : 'text-yellow-400'
+                    run.status === 'success'
+                      ? 'text-status-success-text'
+                      : 'text-status-warning-text'
                   }`}
                 >
                   {run.status.toUpperCase()}

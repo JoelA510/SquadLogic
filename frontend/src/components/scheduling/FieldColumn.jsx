@@ -27,7 +27,7 @@ export default function FieldColumn({
       {/* Field header */}
       <div className="p-3 border-b border-border-subtle bg-bg-surface rounded-t-xl shrink-0">
         <div className="flex items-center gap-2">
-          <MapPin size={14} className="text-brand-400" />
+          <MapPin size={14} className="text-text-accent" />
           <h3 className="font-bold text-sm text-text-primary">{field.name}</h3>
         </div>
         {field.surface_type && (

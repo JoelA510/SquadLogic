@@ -59,7 +59,7 @@ export default function TimeSlotDropZone({
       {/* Validation indicator overlay */}
       {showValidIndicator && (
         <div className="absolute top-1 right-1" data-testid="valid-indicator">
-          <Check size={14} className="text-green-500" />
+          <Check size={14} className="text-status-success-text" />
         </div>
       )}
       {showInvalidIndicator && (

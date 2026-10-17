@@ -1570,6 +1570,16 @@ smoke-tested
     `text-green-400`, `text-brand-400`, ...), which fall short of 4.5:1 on light surfaces; this PR
     moved only the elements the scan rendered. A sweep onto the tokens (now including
     `text-status-{success,warning,error}-text`) is a follow-up. *Executed* (a search).
+    **Fixed 2026-10-17** (Wave 4 accessibility, branch `claude/vibrant-allen-hr7y7s-a11y`): every
+    palette text shade, not only `-400` (176 classes in 36 files; the `-100` to `-300` and `-500`
+    shades fail the same way), moved to the tokens by family: blue-like to `text-text-accent`,
+    green to `text-status-success-text`, amber to `-warning-text`, red to `-error-text`.
+    `tests/paletteTextShades.test.js` refuses a palette text class outside two commented
+    exceptions (red on today's code, 176 findings); `tests/themeTextContrast.test.js` computes
+    each text token on each surface, and on each tint in the same class string, from
+    `index.css` in both themes (fails with light `--warning-text` set to `--warning`, and with
+    the old `bg-blue-900/20` chip behind accent text, 4.43:1, which this sweep moved to
+    `bg-blue-500/10`). *Executed.*
   - The scan sees only what the mock seed renders: record pages (`/players/:id`, `/team/:id`),
     registration forms, closed overlays and empty-state branches are not scanned. *Statically
     reviewed* (`tests/accessibilityRoutes.test.js` lists the routes left out and why).

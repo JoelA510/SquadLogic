@@ -113,11 +113,11 @@ const SettingsAuditLog = () => {
             Property: {field}
           </div>
           <div className="flex items-center gap-2 text-xs">
-            <span className="px-1.5 py-0.5 rounded bg-red-500/10 text-red-400/80 line-through border border-red-500/10">
+            <span className="px-1.5 py-0.5 rounded bg-red-500/10 text-status-error-text line-through border border-red-500/10">
               {formatValue(oldVal)}
             </span>
             <ArrowRight size={12} className="text-text-muted shrink-0" />
-            <span className="px-1.5 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/10 font-medium">
+            <span className="px-1.5 py-0.5 rounded bg-green-500/10 text-status-success-text border border-green-500/10 font-medium">
               {formatValue(newVal)}
             </span>
           </div>
@@ -136,7 +136,7 @@ const SettingsAuditLog = () => {
   if (!isAdmin) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
-        <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center text-red-400 mb-4 border border-red-500/20">
+        <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center text-status-error-text mb-4 border border-red-500/20">
           <AlertCircle size={32} />
         </div>
         <h3 className="text-xl font-semibold text-text-primary mb-2">Access Denied</h3>
@@ -176,11 +176,11 @@ const SettingsAuditLog = () => {
 
       {loading ? (
         <div className="flex flex-col items-center justify-center py-32">
-          <Loader2 className="animate-spin text-brand-400 mb-4" size={40} />
+          <Loader2 className="animate-spin text-text-accent mb-4" size={40} />
           <p className="text-text-muted animate-pulse">Synchronizing audit trail...</p>
         </div>
       ) : error ? (
-        <div className="p-6 rounded-xl bg-red-500/5 border border-red-500/20 text-red-400 flex items-start gap-4">
+        <div className="p-6 rounded-xl bg-red-500/5 border border-red-500/20 text-status-error-text flex items-start gap-4">
           <AlertCircle size={24} className="shrink-0" />
           <div className="space-y-1">
             <p className="font-semibold">Sync Error</p>
@@ -236,7 +236,7 @@ const SettingsAuditLog = () => {
                     </td>
                     <td className="px-6 py-5">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center text-brand-400 border border-brand-500/20 group-hover:scale-105 transition-transform shadow-inner">
+                        <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center text-text-accent border border-brand-500/20 group-hover:scale-105 transition-transform shadow-inner">
                           <User size={16} />
                         </div>
                         <div className="flex flex-col min-w-0">
@@ -253,8 +253,8 @@ const SettingsAuditLog = () => {
                       <span
                         className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-tight border ${
                           log.action === 'feature_flags.updated'
-                            ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
-                            : 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                            ? 'bg-purple-500/10 text-text-accent border-purple-500/20'
+                            : 'bg-blue-500/10 text-text-accent border-blue-500/20'
                         }`}
                       >
                         {log.action.split('.')[0]}

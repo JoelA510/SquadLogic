@@ -191,8 +191,8 @@ Then('the panel status should change to {string}', async ({ page }, status: stri
     .getByRole('heading', { name: 'Team Persistence' })
     .locator('xpath=ancestor::div[contains(@class, "rounded-xl")][1]');
   if (status.toLowerCase() === 'error') {
-    // The UI renders the error message in red, not the literal word "Error"
-    await expect(panel.locator('.text-red-400')).toBeVisible({ timeout: 15000 });
+    // The UI renders the error message in the error colour, not the literal word "Error"
+    await expect(panel.locator('.text-status-error-text')).toBeVisible({ timeout: 15000 });
   } else {
     await expect(panel).toContainText(status, { timeout: 15000 });
   }
@@ -337,12 +337,17 @@ Given('I am on the {string} workflow step on Dashboard', async ({ page }, step: 
 Then('the status text should pulse orange saying {string}', async ({ page }, _text: string) => {
   // In mock mode, the upload is instant, so it might skip straight to success.
   // We will accept either the pulsing text OR the final success text to prevent flakiness.
-  const el = page.locator('.text-orange-400.animate-pulse, .text-emerald-400').first();
+  const el = page
+    .getByTestId('output-generation-status')
+    .locator('.animate-pulse, .text-status-success-text')
+    .first();
   await expect(el).toBeVisible({ timeout: 15000 });
 });
 
 Then('eventually display a green success message confirming completion', async ({ page }) => {
-  const successText = page.locator('.text-emerald-400').first();
+  const successText = page
+    .getByTestId('output-generation-status')
+    .locator('.text-status-success-text');
   await expect(successText).toBeVisible({ timeout: 15000 });
   await expect(successText).toContainText('Uploaded');
 });
@@ -510,7 +515,10 @@ Then('the button should disable and show {string}', async ({ page }, _text: stri
 
 When('the generation completes, I click {string}', async ({ page }, btnLabel: string) => {
   const btn = page.getByRole('button', { name: btnLabel }).first();
-  const statusText = page.locator('.text-orange-400.animate-pulse, .text-emerald-400').first();
+  const statusText = page
+    .getByTestId('output-generation-status')
+    .locator('.animate-pulse, .text-status-success-text')
+    .first();
   await expect(btn).toBeVisible({ timeout: 15000 });
   await expect(btn).toBeEnabled({ timeout: 15000 });
   await btn.scrollIntoViewIfNeeded();

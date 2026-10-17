@@ -7,7 +7,7 @@
 // Usage (Playwright step defs):
 //   await page.evaluate(seedMockDb, {
 //     organizations: [makeOrganization()],
-//     teams: [makeTeam({ organization_id: 'org-1' })],
+//     teams: [makeTeam({ organization_id: MOCK_ORG_ID })],
 //   });
 //
 // Append-only: existing rows under each table key are preserved; new rows

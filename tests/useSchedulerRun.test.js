@@ -3,6 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { useSchedulerRun } from '../frontend/src/hooks/useSchedulerRun.js';
 import { supabase } from '../frontend/src/lib/supabaseClient.js';
 import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: {
@@ -38,8 +39,8 @@ describe('useSchedulerRun', () => {
     vi.clearAllMocks();
     // @ts-expect-error [MOCK] - partial organization context is enough for this hook.
     vi.mocked(useOrganization).mockReturnValue({
-      currentOrganization: { id: 'org-1' },
-      currentSeasonSetting: { id: 'season-1' },
+      currentOrganization: { id: MOCK_ORG_ID },
+      currentSeasonSetting: { id: MOCK_SEASON_ID },
     });
   });
 
@@ -68,20 +69,20 @@ describe('useSchedulerRun', () => {
     expect(runBuilder.limit).toHaveBeenCalledWith(1);
     expect(runBuilder.maybeSingle).toHaveBeenCalled();
     expect(runBuilder.single).not.toHaveBeenCalled();
-    expect(runBuilder.eq).toHaveBeenCalledWith('organization_id', 'org-1');
+    expect(runBuilder.eq).toHaveBeenCalledWith('organization_id', MOCK_ORG_ID);
     expect(runBuilder.eq).toHaveBeenCalledWith('run_type', 'practice');
     expect(runBuilder.eq).toHaveBeenCalledWith('status', 'completed');
     expect(runBuilder.or).toHaveBeenCalledWith(
-      'season_settings_id.eq.season-1,season_id.eq.season-1'
+      `season_settings_id.eq.${MOCK_SEASON_ID},season_id.eq.${MOCK_SEASON_ID}`
     );
-    expect(evaluationBuilder.eq).toHaveBeenCalledWith('organization_id', 'org-1');
+    expect(evaluationBuilder.eq).toHaveBeenCalledWith('organization_id', MOCK_ORG_ID);
     expect(evaluationBuilder.eq).toHaveBeenCalledWith('run_id', 'practice-run-1');
   });
 
   it('returns the empty state without querying when org or season context is missing', async () => {
     // @ts-expect-error [MOCK] - partial organization context is enough for this hook.
     vi.mocked(useOrganization).mockReturnValue({
-      currentOrganization: { id: 'org-1' },
+      currentOrganization: { id: MOCK_ORG_ID },
       currentSeasonSetting: null,
     });
 
@@ -97,8 +98,8 @@ describe('useSchedulerRun', () => {
 
   it('clears a previous evaluation when the scoped run is missing after context changes', async () => {
     let organizationContext = {
-      currentOrganization: { id: 'org-1' },
-      currentSeasonSetting: { id: 'season-1' },
+      currentOrganization: { id: MOCK_ORG_ID },
+      currentSeasonSetting: { id: MOCK_SEASON_ID },
     };
     // @ts-expect-error [MOCK] - partial organization context is enough for this hook.
     vi.mocked(useOrganization).mockImplementation(() => organizationContext);
@@ -107,7 +108,11 @@ describe('useSchedulerRun', () => {
       data: { id: 'practice-run-1', results: {}, completed_at: '2026-05-01T00:00:00Z' },
       error: null,
     });
-    const evaluationRecord = { id: 'eval-1', organization_id: 'org-1', run_id: 'practice-run-1' };
+    const evaluationRecord = {
+      id: 'eval-1',
+      organization_id: MOCK_ORG_ID,
+      run_id: 'practice-run-1',
+    };
     const evaluationBuilder = createQueryBuilder({ data: evaluationRecord, error: null });
     const missingRunBuilder = createQueryBuilder({
       data: null,
@@ -126,7 +131,7 @@ describe('useSchedulerRun', () => {
     await waitFor(() => expect(result.current.evaluation).toEqual(evaluationRecord));
 
     organizationContext = {
-      currentOrganization: { id: 'org-1' },
+      currentOrganization: { id: MOCK_ORG_ID },
       currentSeasonSetting: { id: 'season-2' },
     };
     rerender();

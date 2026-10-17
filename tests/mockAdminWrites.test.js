@@ -14,19 +14,22 @@ import {
   handleAdminWriteRpc,
   unmockedRpcError,
 } from '../frontend/src/lib/mockAdminWrites.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NOW = new Date('2026-10-02T16:00:00Z');
 
 const makeDb = () => ({
   organization_members: [
-    { organization_id: 'org-1', profile_id: 'admin-1', role: 'admin' },
-    { organization_id: 'org-1', profile_id: 'coach-1', role: 'coach' },
+    { organization_id: MOCK_ORG_ID, profile_id: 'admin-1', role: 'admin' },
+    { organization_id: MOCK_ORG_ID, profile_id: 'coach-1', role: 'coach' },
   ],
-  registration_forms: [{ id: 'f1', organization_id: 'org-1' }],
-  registrations: [{ id: 'r1', organization_id: 'org-1', form_id: 'f1', medical_cleared: false }],
+  registration_forms: [{ id: 'f1', organization_id: MOCK_ORG_ID }],
+  registrations: [
+    { id: 'r1', organization_id: MOCK_ORG_ID, form_id: 'f1', medical_cleared: false },
+  ],
   season_settings: [
-    { id: 's1', organization_id: 'org-1' },
+    { id: 's1', organization_id: MOCK_ORG_ID },
     { id: 's2', organization_id: 'org-2' },
   ],
   divisions: [],
@@ -92,7 +95,7 @@ describe('admin_update_registration_medical_status', () => {
   it('sets the status and reports the change', () => {
     const db = makeDb();
     const res = call(db, 'admin_update_registration_medical_status', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_registration_id: 'r1',
       p_medical_cleared: true,
     });
@@ -106,7 +109,11 @@ describe('admin_update_registration_medical_status', () => {
 
   it('refuses a coach (42501), a missing flag (23502), array metadata (22023) and a foreign registration (42501)', () => {
     const db = makeDb();
-    const base = { p_organization_id: 'org-1', p_registration_id: 'r1', p_medical_cleared: true };
+    const base = {
+      p_organization_id: MOCK_ORG_ID,
+      p_registration_id: 'r1',
+      p_medical_cleared: true,
+    };
     expect(
       call(db, 'admin_update_registration_medical_status', base, ctxFor(db, 'coach-1')).error.code
     ).toBe('42501');
@@ -129,14 +136,14 @@ describe('admin_upsert_division_settings', () => {
   it('creates by name, then updates by id, reporting changed', () => {
     const db = makeDb();
     const created = call(db, 'admin_upsert_division_settings', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_season_settings_id: 's1',
       p_name: ' U10 ',
       p_max_roster_size: 12,
     });
     expect(created.data).toMatchObject({ name: 'U10', max_roster_size: 12, changed: true });
     const same = call(db, 'admin_upsert_division_settings', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_season_settings_id: 's1',
       p_division_id: created.data.id,
       p_max_roster_size: 12,
@@ -149,7 +156,7 @@ describe('admin_upsert_division_settings', () => {
     const db = makeDb();
     expect(
       call(db, 'admin_upsert_division_settings', {
-        p_organization_id: 'org-1',
+        p_organization_id: MOCK_ORG_ID,
         p_season_settings_id: 's2',
         p_name: 'X',
       }).error.code
@@ -158,13 +165,13 @@ describe('admin_upsert_division_settings', () => {
       call(
         db,
         'admin_upsert_division_settings',
-        { p_organization_id: 'org-1', p_season_settings_id: 's1', p_name: 'X' },
+        { p_organization_id: MOCK_ORG_ID, p_season_settings_id: 's1', p_name: 'X' },
         ctxFor(db, 'coach-1')
       ).error.code
     ).toBe('42501');
     expect(
       call(db, 'admin_upsert_division_settings', {
-        p_organization_id: 'org-1',
+        p_organization_id: MOCK_ORG_ID,
         p_season_settings_id: 's1',
         p_name: '  ',
       }).error.code
@@ -176,7 +183,7 @@ describe('create_org_invite and redeem_org_invite', () => {
   it('an admin creates a code that a new user redeems once', () => {
     const db = makeDb();
     const created = call(db, 'create_org_invite', {
-      p_org_id: 'org-1',
+      p_org_id: MOCK_ORG_ID,
       p_role: 'coach',
       p_expires_in: '7 days',
     });
@@ -189,9 +196,9 @@ describe('create_org_invite and redeem_org_invite', () => {
       { p_code: ` ${code.toLowerCase()} ` },
       ctxFor(db, 'new-user')
     );
-    expect(redeemed.data).toBe('org-1');
+    expect(redeemed.data).toBe(MOCK_ORG_ID);
     expect(db.organization_members).toContainEqual({
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       profile_id: 'new-user',
       role: 'coach',
     });
@@ -203,18 +210,22 @@ describe('create_org_invite and redeem_org_invite', () => {
   it('refuses a non-admin creator, a bad role, no session, an unknown code and an expired code', () => {
     const db = makeDb();
     expect(
-      call(db, 'create_org_invite', { p_org_id: 'org-1', p_role: 'coach' }, ctxFor(db, 'coach-1'))
-        .error.code
+      call(
+        db,
+        'create_org_invite',
+        { p_org_id: MOCK_ORG_ID, p_role: 'coach' },
+        ctxFor(db, 'coach-1')
+      ).error.code
     ).toBe('42501');
-    expect(call(db, 'create_org_invite', { p_org_id: 'org-1', p_role: 'owner' }).error.code).toBe(
-      '22023'
-    );
+    expect(
+      call(db, 'create_org_invite', { p_org_id: MOCK_ORG_ID, p_role: 'owner' }).error.code
+    ).toBe('22023');
     expect(call(db, 'redeem_org_invite', { p_code: 'X' }, ctxFor(db, 'u', false)).error.code).toBe(
       '28000'
     );
     expect(call(db, 'redeem_org_invite', { p_code: 'NOPE' }).error.message).toMatch(/not found/);
     const [{ code }] = call(db, 'create_org_invite', {
-      p_org_id: 'org-1',
+      p_org_id: MOCK_ORG_ID,
       p_role: 'parent',
       p_expires_in: '1 hours',
     }).data;
@@ -227,11 +238,11 @@ describe('create_org_invite and redeem_org_invite', () => {
   it('a null expiry means no expiry; an absent one means 7 days', () => {
     const db = makeDb();
     expect(
-      call(db, 'create_org_invite', { p_org_id: 'org-1', p_role: 'coach', p_expires_in: null })
+      call(db, 'create_org_invite', { p_org_id: MOCK_ORG_ID, p_role: 'coach', p_expires_in: null })
         .data[0].expires_at
     ).toBeNull();
     expect(
-      call(db, 'create_org_invite', { p_org_id: 'org-1', p_role: 'coach' }).data[0].expires_at
+      call(db, 'create_org_invite', { p_org_id: MOCK_ORG_ID, p_role: 'coach' }).data[0].expires_at
     ).toBe('2026-10-09T16:00:00.000Z');
   });
 

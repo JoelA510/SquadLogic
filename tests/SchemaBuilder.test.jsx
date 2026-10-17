@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SchemaBuilder } from '../frontend/src/components/settings/SchemaBuilder.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
@@ -13,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
     currentOrganization: {
-      id: 'org-1',
+      id: MOCK_ORG_ID,
     },
   }),
 }));
@@ -128,7 +129,7 @@ describe('SchemaBuilder', () => {
 
     await waitFor(() => {
       expect(mocks.rpc).toHaveBeenCalledWith('admin_upsert_organization_schema', {
-        p_organization_id: 'org-1',
+        p_organization_id: MOCK_ORG_ID,
         p_entity_type: 'player',
         p_schema_definition: {
           jersey_size: 'string',

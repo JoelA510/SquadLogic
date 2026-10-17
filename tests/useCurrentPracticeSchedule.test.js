@@ -7,11 +7,16 @@
  */
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+// Hoisted with the `vi.hoisted` blocks below, which read the ids before any
+// static import has run.
+const { MOCK_ORG_ID, MOCK_SEASON_ID } = await vi.hoisted(
+  () => import('../frontend/src/lib/mockSeedIds.js')
+);
 
 const ORG_CONTEXT = vi.hoisted(() => ({
   value: /** @type {any} */ ({
-    currentOrganization: { id: 'org-1' },
-    currentSeasonSetting: { id: 'season-1' },
+    currentOrganization: { id: MOCK_ORG_ID },
+    currentSeasonSetting: { id: MOCK_SEASON_ID },
   }),
 }));
 /** Each read, in order: a promise the test resolves. */
@@ -34,8 +39,8 @@ const rowsOf = (...ids) => ({ ok: true, rows: ids.map((id) => ({ id, team_id: `t
 beforeEach(() => {
   READS.pending = [];
   ORG_CONTEXT.value = {
-    currentOrganization: { id: 'org-1' },
-    currentSeasonSetting: { id: 'season-1' },
+    currentOrganization: { id: MOCK_ORG_ID },
+    currentSeasonSetting: { id: MOCK_SEASON_ID },
   };
 });
 
@@ -64,7 +69,7 @@ describe('useCurrentPracticeSchedule :: refetch', () => {
     await act(async () => READS.pending[0](rowsOf('a')));
 
     ORG_CONTEXT.value = {
-      currentOrganization: { id: 'org-1' },
+      currentOrganization: { id: MOCK_ORG_ID },
       currentSeasonSetting: { id: 'season-2' },
     };
     rerender();

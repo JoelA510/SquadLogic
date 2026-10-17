@@ -13,6 +13,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { createChainMock } from './helpers/index.js';
+// Hoisted with the `vi.hoisted` blocks below, which read the ids before any
+// static import has run.
+const { MOCK_ORG_ID, MOCK_SEASON_ID } = await vi.hoisted(
+  () => import('../frontend/src/lib/mockSeedIds.js')
+);
 
 const TABLES = vi.hoisted(() => ({
   fields: [
@@ -106,8 +111,8 @@ vi.mock('../frontend/src/hooks/useDashboardData.js', () => ({
   useDashboardData: () => DASHBOARD,
 }));
 const ORGANIZATION = vi.hoisted(() => ({
-  currentOrganization: { id: 'org-1', name: 'Smoke FC' },
-  currentSeasonSetting: { id: 'season-1', timezone: 'America/Los_Angeles' },
+  currentOrganization: { id: MOCK_ORG_ID, name: 'Smoke FC' },
+  currentSeasonSetting: { id: MOCK_SEASON_ID, timezone: 'America/Los_Angeles' },
   featureFlags: {},
   permissions: ['manage_schedule'],
   loading: false,

@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -41,9 +42,9 @@ Given(
   async ({ page }, childName: string, teamName: string) => {
     await waitForMockClient(page);
     await page.evaluate(
-      ({ child, team }) => {
+      ({ child, team, mockOrgId }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-        const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
         const teamId = team.toLowerCase().replace(/\s+/g, '-');
         const playerId = `player-${child.toLowerCase()}`;
 
@@ -90,7 +91,7 @@ Given(
         localStorage.setItem('test_target_team_id', teamId);
         sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
       },
-      { child: childName, team: teamName }
+      { child: childName, team: teamName, mockOrgId: MOCK_ORG_ID }
     );
   }
 );
@@ -100,9 +101,9 @@ Given(
   async ({ page }, childName: string, teamName: string) => {
     await waitForMockClient(page);
     await page.evaluate(
-      ({ child, team }) => {
+      ({ child, team, mockOrgId }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-        const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
         const teamId = team.toLowerCase().replace(/\s+/g, '-');
         const playerId = `player-${child.toLowerCase()}`;
 
@@ -131,7 +132,7 @@ Given(
         localStorage.setItem('test_target_team_id', teamId);
         sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
       },
-      { child: childName, team: teamName }
+      { child: childName, team: teamName, mockOrgId: MOCK_ORG_ID }
     );
   }
 );

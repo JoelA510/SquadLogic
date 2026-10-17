@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { makeField, makeGameSlot, makePracticeAssignment } from '../scheduling.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 describe('makeField', () => {
   it('returns deterministic defaults with no args', () => {
     const f = makeField();
     expect(f.id).toBe('field-1');
     expect(f.location_id).toBe('loc-1');
-    expect(f.organization_id).toBe('org-1');
+    expect(f.organization_id).toBe(MOCK_ORG_ID);
     expect(f.name).toBe('Field 1');
     expect(f.surface_type).toBe('grass');
     expect(f.supports_halves).toBe(false);

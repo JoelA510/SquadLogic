@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { makeOrganization, makeOrganizationMember } from '../organization.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 describe('makeOrganization', () => {
   it('returns deterministic defaults with no args', () => {
     expect(makeOrganization()).toEqual({
-      id: 'org-1',
+      id: MOCK_ORG_ID,
       name: 'Test Organization',
       slug: 'test-org',
       contact_info: {},
@@ -29,7 +30,7 @@ describe('makeOrganization', () => {
 describe('makeOrganizationMember', () => {
   it('returns deterministic defaults with no args', () => {
     expect(makeOrganizationMember()).toEqual({
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       profile_id: 'user-1',
       role: 'admin',
       created_at: '2026-01-01T00:00:00Z',
@@ -40,7 +41,7 @@ describe('makeOrganizationMember', () => {
     const member = makeOrganizationMember({ role: 'coach', profile_id: 'user-2' });
     expect(member.role).toBe('coach');
     expect(member.profile_id).toBe('user-2');
-    expect(member.organization_id).toBe('org-1');
+    expect(member.organization_id).toBe(MOCK_ORG_ID);
   });
 
   it('respects explicit undefined overrides', () => {

@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import FeatureFlagSettings from '../frontend/src/components/settings/FeatureFlagSettings.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const mocks = vi.hoisted(() => ({
   updateFeatureFlags: vi.fn(),
@@ -15,7 +16,7 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
     featureFlags: mocks.featureFlags,
     updateFeatureFlags: mocks.updateFeatureFlags,
     loading: false,
-    currentOrganization: { id: 'org-1' },
+    currentOrganization: { id: MOCK_ORG_ID },
   }),
 }));
 

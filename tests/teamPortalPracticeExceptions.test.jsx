@@ -27,6 +27,7 @@ import {
   PRACTICE_CHANGES_UNREAD_TEXT,
 } from '../frontend/src/hooks/useTeamPortal.js';
 import { PRACTICE_TBD_CAUSES } from '@squadlogic/core/utils/practiceOccurrences.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const mocks = vi.hoisted(() => ({ client: null }));
 
@@ -93,7 +94,7 @@ const ROWS = [
 
 const exception = (id, assignmentId, window, kind, extra = {}) => ({
   id,
-  organization_id: 'org-1',
+  organization_id: MOCK_ORG_ID,
   team_id: 'team-1',
   assignment_id: assignmentId,
   window,
@@ -261,7 +262,7 @@ const PLAYER = { id: 'player-1', first_name: 'Sam', last_name: 'Sample' };
 
 function dbOf(exceptions = EXCEPTIONS) {
   return {
-    teams: [{ id: 'team-1', name: 'Tigers', organization_id: 'org-1', division: null }],
+    teams: [{ id: 'team-1', name: 'Tigers', organization_id: MOCK_ORG_ID, division: null }],
     team_players: [{ team_id: 'team-1', player: PLAYER }],
     games: [],
     practice_assignments: ROWS,

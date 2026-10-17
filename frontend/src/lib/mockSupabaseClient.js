@@ -15,6 +15,7 @@ import { handleLightingOverrideRpc } from './mockLightingOverrides.js';
 import { handleHeatSettingsRpc } from './mockHeatSettings.js';
 import { handleAdminWriteRpc, unmockedRpcError } from './mockAdminWrites.js';
 import { handlePracticeEnactRpc } from './mockPracticeEnact.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from './mockSeedIds.js';
 import {
   practiceRangeBounds,
   practiceRangeLowerBound,
@@ -38,11 +39,11 @@ const stableSchemaKey = (schema) =>
 
 // ── Mock Data Seed ──────────────────────────────────────────────────────────
 const initialMockData = {
-  organizations: [{ id: 'org-1', name: 'SquadLogic FC', is_onboarded: true }],
+  organizations: [{ id: MOCK_ORG_ID, name: 'SquadLogic FC', is_onboarded: true }],
   audit_log: [
     {
       id: 'audit-1',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       action: 'auth.password_updated',
       user_id: 'mock-admin-id',
       metadata: { user_id: 'mock-admin-id' },
@@ -50,7 +51,7 @@ const initialMockData = {
     },
     {
       id: 'audit-2',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       action: 'impersonation.started',
       user_id: 'mock-admin-id',
       metadata: { target_user_id: 'mock-coach-id', admin_email: 'admin@example.com' },
@@ -58,7 +59,7 @@ const initialMockData = {
     },
     {
       id: 'audit-3',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       action: 'settings.flags_updated',
       user_id: 'mock-coach-id',
       metadata: {
@@ -77,7 +78,7 @@ const initialMockData = {
       full_name: 'Mock Admin',
       email: 'admin@example.com',
       role: 'admin',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
     },
     {
       id: 'mock-coach-id',
@@ -86,7 +87,7 @@ const initialMockData = {
       full_name: 'Mock Coach',
       email: 'coach@example.com',
       role: 'coach',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
     },
     {
       id: 'mock-parent-id',
@@ -95,18 +96,18 @@ const initialMockData = {
       full_name: 'Mock Parent',
       email: 'parent@example.com',
       role: 'parent',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
     },
   ],
   organization_members: [
-    { organization_id: 'org-1', profile_id: 'mock-admin-id', role: 'admin' },
-    { organization_id: 'org-1', profile_id: 'mock-coach-id', role: 'coach' },
-    { organization_id: 'org-1', profile_id: 'mock-parent-id', role: 'parent' },
+    { organization_id: MOCK_ORG_ID, profile_id: 'mock-admin-id', role: 'admin' },
+    { organization_id: MOCK_ORG_ID, profile_id: 'mock-coach-id', role: 'coach' },
+    { organization_id: MOCK_ORG_ID, profile_id: 'mock-parent-id', role: 'parent' },
   ],
   season_settings: [
     {
-      id: 'season-1',
-      organization_id: 'org-1',
+      id: MOCK_SEASON_ID,
+      organization_id: MOCK_ORG_ID,
       name: 'Fall 2024',
       status: 'active',
       season_start: '2025-01-01',
@@ -120,8 +121,8 @@ const initialMockData = {
     {
       id: 'u8-div-id',
       name: 'U8 Coed',
-      organization_id: 'org-1',
-      season_settings_id: 'season-1',
+      organization_id: MOCK_ORG_ID,
+      season_settings_id: MOCK_SEASON_ID,
       max_roster_size: 10,
       min_roster_size: 7,
       target_team_size: 9,
@@ -131,8 +132,8 @@ const initialMockData = {
     {
       id: 'u10-div-id',
       name: 'U10 Girls',
-      organization_id: 'org-1',
-      season_settings_id: 'season-1',
+      organization_id: MOCK_ORG_ID,
+      season_settings_id: MOCK_SEASON_ID,
       max_roster_size: 14,
       min_roster_size: 10,
       target_team_size: 12,
@@ -144,20 +145,20 @@ const initialMockData = {
       name: 'Team A',
       division_id: 'u8-div-id',
       coach_id: 'mock-coach-id',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
     },
     {
       id: 't2',
       name: 'Team B',
       division_id: 'u8-div-id',
       coach_id: 'c2',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
     },
     {
       id: '00000000-0000-0000-0000-000000000001',
       name: 'Tigers',
       division_id: 'u8-div-id',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       calendar_token: 'mock-calendar-token-tigers',
       calendar_token_expires_at: new Date(Date.now() + 90 * 86400000).toISOString(),
     },
@@ -169,7 +170,7 @@ const initialMockData = {
   team_coach_assignments: [
     {
       id: 'tca-t1-lead',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       team_id: 't1',
       coach_id: 'mock-coach-id',
       role: 'lead',
@@ -179,7 +180,7 @@ const initialMockData = {
     },
     {
       id: 'tca-t2-lead',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       team_id: 't2',
       coach_id: 'c2',
       role: 'lead',
@@ -198,7 +199,7 @@ const initialMockData = {
       id: 'player-1',
       first_name: 'Alex',
       last_name: 'Smith',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       team_id: '00000000-0000-0000-0000-000000000001',
       division_id: 'u8-div-id',
       gender: 'm',
@@ -217,7 +218,7 @@ const initialMockData = {
       id: 'player-2',
       first_name: 'Jamie',
       last_name: 'Jones',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       team_id: '00000000-0000-0000-0000-000000000001',
       division_id: 'u8-div-id',
       gender: 'f',
@@ -235,7 +236,7 @@ const initialMockData = {
   coaches: [
     {
       id: 'mock-coach-id',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       profile_id: 'mock-coach-id',
       user_id: 'mock-coach-id',
       full_name: 'Mock Coach',
@@ -248,7 +249,7 @@ const initialMockData = {
     },
     {
       id: 'c2',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       full_name: 'Casey Rivera',
       email: 'casey.rivera@example.com',
       phone: '555-0102',
@@ -259,7 +260,7 @@ const initialMockData = {
     },
     {
       id: 'coach-lead-1',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       full_name: 'Morgan Reyes',
       email: 'morgan.reyes@example.com',
       phone: '555-0103',
@@ -275,7 +276,7 @@ const initialMockData = {
       coach_id: 'coach-lead-1',
       division_id: 'u8-div-id',
       inferred_from_player_id: 'player-1',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       created_at: new Date(Date.now() - 2 * 86400000).toISOString(),
     },
   ],
@@ -293,13 +294,13 @@ const initialMockData = {
       valid_from: '2025-01-01',
       valid_until: '2025-12-31',
       field_id: 'v1',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
     },
   ],
   practice_assignments: [
     {
       id: 'pa-1',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       team_id: '00000000-0000-0000-0000-000000000001',
       slot_id: 'ps-1',
       practice_slot_id: 'ps-1',
@@ -321,8 +322,8 @@ const initialMockData = {
   practice_exceptions: [
     {
       id: 'pe-withdrawn-1',
-      organization_id: 'org-1',
-      season_settings_id: 'season-1',
+      organization_id: MOCK_ORG_ID,
+      season_settings_id: MOCK_SEASON_ID,
       team_id: '00000000-0000-0000-0000-000000000001',
       assignment_id: 'pa-1',
       window: '[2025-03-01,2025-03-31]',
@@ -336,7 +337,7 @@ const initialMockData = {
   event_rsvps: [
     {
       id: 'rsvp-1',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       team_id: '00000000-0000-0000-0000-000000000001',
       player_id: 'player-1',
       reference_id: 'pa-1',
@@ -347,7 +348,7 @@ const initialMockData = {
     },
     {
       id: 'rsvp-2',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       team_id: '00000000-0000-0000-0000-000000000001',
       player_id: 'player-2',
       reference_id: 'pa-1',
@@ -357,13 +358,13 @@ const initialMockData = {
       updated_at: new Date().toISOString(),
     },
   ],
-  locations: [{ id: 'loc-1', organization_id: 'org-1', name: 'Central Park' }],
+  locations: [{ id: 'loc-1', organization_id: MOCK_ORG_ID, name: 'Central Park' }],
   fields: [
     {
       id: 'v1',
       name: 'Field 1',
       location_id: 'loc-1',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       active: true,
       surface_type: 'Grass',
       size: '11v11',
@@ -372,7 +373,7 @@ const initialMockData = {
       id: 'v2',
       name: 'Field 2',
       location_id: 'loc-1',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       active: true,
       surface_type: 'Turf',
       size: '7v7',
@@ -385,7 +386,7 @@ const initialMockData = {
       start: '2026-04-04T08:00:00Z',
       end: '2026-04-04T09:00:00Z',
       capacity: 1,
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
     },
     {
       id: 'gs-2',
@@ -393,7 +394,7 @@ const initialMockData = {
       start: '2026-04-04T09:30:00Z',
       end: '2026-04-04T10:30:00Z',
       capacity: 1,
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
     },
     {
       id: 'gs-3',
@@ -401,7 +402,7 @@ const initialMockData = {
       start: '2026-04-04T08:00:00Z',
       end: '2026-04-04T09:00:00Z',
       capacity: 1,
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
     },
     {
       id: 'gs-4',
@@ -409,15 +410,15 @@ const initialMockData = {
       start: '2026-04-04T09:30:00Z',
       end: '2026-04-04T10:30:00Z',
       capacity: 1,
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
     },
   ],
   game_assignments: [],
   games: [
     {
       id: 'g1',
-      organization_id: 'org-1',
-      season_id: 'season-1',
+      organization_id: MOCK_ORG_ID,
+      season_id: MOCK_SEASON_ID,
       home_team_id: 't1',
       away_team_id: 't2',
       start_time: new Date(Date.now() - 86400000).toISOString(),
@@ -429,8 +430,8 @@ const initialMockData = {
     },
     {
       id: 'game-2',
-      organization_id: 'org-1',
-      season_id: 'season-1',
+      organization_id: MOCK_ORG_ID,
+      season_id: MOCK_SEASON_ID,
       home_team_id: 't1',
       away_team_id: 't2',
       start_time: new Date(Date.now() - 3600000).toISOString(),
@@ -442,8 +443,8 @@ const initialMockData = {
   player_registrations: [
     {
       id: 'player-1',
-      organization_id: 'org-1',
-      season_id: 'season-1',
+      organization_id: MOCK_ORG_ID,
+      season_id: MOCK_SEASON_ID,
       first_name: 'Alex',
       last_name: 'Smith',
       status: 'Reviewing',
@@ -452,8 +453,8 @@ const initialMockData = {
     },
     {
       id: 'player-2',
-      organization_id: 'org-1',
-      season_id: 'season-1',
+      organization_id: MOCK_ORG_ID,
+      season_id: MOCK_SEASON_ID,
       first_name: 'Sam',
       last_name: 'Jones',
       status: 'Approved',
@@ -462,13 +463,13 @@ const initialMockData = {
     },
   ],
   registration_forms: [
-    { id: 'f1', title: 'Spring 2026 Registration', status: 'active', organization_id: 'org-1' },
+    { id: 'f1', title: 'Spring 2026 Registration', status: 'active', organization_id: MOCK_ORG_ID },
   ],
   scheduler_runs: [
     {
       id: 'run-practice-1',
-      organization_id: 'org-1',
-      season_id: 'season-1',
+      organization_id: MOCK_ORG_ID,
+      season_id: MOCK_SEASON_ID,
       run_type: 'practice',
       status: 'completed',
       created_at: new Date().toISOString(),
@@ -483,8 +484,8 @@ const initialMockData = {
     },
     {
       id: 'run-game-1',
-      organization_id: 'org-1',
-      season_id: 'season-1',
+      organization_id: MOCK_ORG_ID,
+      season_id: MOCK_SEASON_ID,
       run_type: 'game',
       status: 'completed',
       created_at: new Date().toISOString(),
@@ -495,8 +496,8 @@ const initialMockData = {
     },
     {
       id: 'run-1',
-      organization_id: 'org-1',
-      season_settings_id: 'season-1',
+      organization_id: MOCK_ORG_ID,
+      season_settings_id: MOCK_SEASON_ID,
       run_type: 'team',
       status: 'completed',
       results: {
@@ -526,7 +527,7 @@ const initialMockData = {
   registrations: [
     {
       id: 'reg-1',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       form_id: 'f1',
       player_id: 'player-1',
       profile_id: 'mock-admin-id',
@@ -538,8 +539,8 @@ const initialMockData = {
   team_summaries: [
     {
       id: 'summary-1',
-      organization_id: 'org-1',
-      season_id: 'season-1',
+      organization_id: MOCK_ORG_ID,
+      season_id: MOCK_SEASON_ID,
       total_players: 24,
       total_teams: 2,
       unassigned_players: 0,
@@ -551,7 +552,7 @@ const initialMockData = {
     {
       id: 'import-1',
       user_id: 'mock-admin-id',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       import_type: 'players',
       data: {
         totalRows: 2,
@@ -591,7 +592,7 @@ const initialMockData = {
   field_availability_scenario_members: [],
   view_league_standings: [
     {
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       team_id: 't1',
       team_name: 'Team A',
       division: 'U8 Coed',
@@ -605,7 +606,7 @@ const initialMockData = {
       points: 3,
     },
     {
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       team_id: 't2',
       team_name: 'Team B',
       division: 'U8 Coed',
@@ -620,11 +621,11 @@ const initialMockData = {
     },
   ],
   view_org_metrics: [
-    { organization_id: 'org-1', total_players: 150, total_teams: 12, total_users: 25 },
+    { organization_id: MOCK_ORG_ID, total_players: 150, total_teams: 12, total_users: 25 },
   ],
   view_compliance_stats: [
     {
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       form_title: 'Spring 2026 Registration',
       total_registrations: 45,
       medical_cleared: 38,
@@ -1482,7 +1483,7 @@ const syncMockFieldSubunits = (db, field, supportsHalves) => {
         id: `sub-${field.id}-${label.toLowerCase()}`,
         field_id: field.id,
         label,
-        organization_id: field.organization_id || 'org-1',
+        organization_id: field.organization_id || MOCK_ORG_ID,
       };
       db.field_subunits.push(subunit);
       triggerRealtimeEvent('field_subunits', 'INSERT', { new: subunit, old: null });
@@ -2077,13 +2078,13 @@ export const mockSupabase = {
         }
 
         // **Seeding, not reinstatement.** This push exists so a demo user who
-        // was never a member lands somewhere; it hardcodes `org-1`, so for the
+        // was never a member lands somewhere; it hardcodes `MOCK_ORG_ID`, so for the
         // demo organisation it re-creates the exact composite key
         // `admin_remove_member` tombstones. Pushing it back would silently
         // reverse a removal AND hand the user `app_metadata.role` rather than
         // the role the admin had assigned. A removed member signs in with no
         // organisation, which is what real Supabase does.
-        const seededMembership = { organization_id: 'org-1', profile_id: userId };
+        const seededMembership = { organization_id: MOCK_ORG_ID, profile_id: userId };
         if (
           !typedDb.organization_members.find((m) => m.profile_id === userId) &&
           !isMockDeleted(
@@ -2195,13 +2196,13 @@ export const mockSupabase = {
               id: `sub-${id}-a`,
               field_id: id,
               label: 'A',
-              organization_id: r.organization_id || 'org-1',
+              organization_id: r.organization_id || MOCK_ORG_ID,
             });
             db.field_subunits.push({
               id: `sub-${id}-b`,
               field_id: id,
               label: 'B',
-              organization_id: r.organization_id || 'org-1',
+              organization_id: r.organization_id || MOCK_ORG_ID,
             });
           }
           const built = { id, created_at: new Date().toISOString(), ...r };
@@ -2273,13 +2274,13 @@ export const mockSupabase = {
                   id: `sub-${rec.id}-a`,
                   field_id: rec.id,
                   label: 'A',
-                  organization_id: rec.organization_id || 'org-1',
+                  organization_id: rec.organization_id || MOCK_ORG_ID,
                 });
                 db.field_subunits.push({
                   id: `sub-${rec.id}-b`,
                   field_id: rec.id,
                   label: 'B',
-                  organization_id: rec.organization_id || 'org-1',
+                  organization_id: rec.organization_id || MOCK_ORG_ID,
                 });
               }
             } else {
@@ -2374,13 +2375,13 @@ export const mockSupabase = {
                           id: `sub-${item.id}-a`,
                           field_id: item.id,
                           label: 'A',
-                          organization_id: item.organization_id || 'org-1',
+                          organization_id: item.organization_id || MOCK_ORG_ID,
                         };
                         const subB = {
                           id: `sub-${item.id}-b`,
                           field_id: item.id,
                           label: 'B',
-                          organization_id: item.organization_id || 'org-1',
+                          organization_id: item.organization_id || MOCK_ORG_ID,
                         };
                         db.field_subunits.push(subA, subB);
                         triggerRealtimeEvent('field_subunits', 'INSERT', { new: subA, old: null });
@@ -5199,7 +5200,7 @@ export const mockSupabase = {
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
         id: mockId(),
-        organization_id: 'org-1',
+        organization_id: MOCK_ORG_ID,
         action: 'player.bulk_updated',
         metadata: { patch: p_patch, player_count: count },
         created_at: new Date().toISOString(),
@@ -5263,7 +5264,7 @@ export const mockSupabase = {
       db.audit_log = db.audit_log || [];
       db.audit_log.push({
         id: mockId(),
-        organization_id: 'org-1',
+        organization_id: MOCK_ORG_ID,
         action: 'player.deleted',
         metadata: { player_count: count, player_ids: ids },
         created_at: new Date().toISOString(),

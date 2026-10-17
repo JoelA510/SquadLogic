@@ -23,6 +23,7 @@ import { useFields } from '../frontend/src/hooks/useFields.js';
 import { useFieldClosures } from '../frontend/src/hooks/useFieldClosures.js';
 import { supabase } from '../frontend/src/lib/supabaseClient.js';
 import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/hooks/useFields.js', () => ({ useFields: vi.fn() }));
 // **Partial**, because the editor imports `BlackoutDraftSchema` from this same
@@ -97,7 +98,7 @@ describe('BlackoutsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // @ts-expect-error [MOCK] - a partial organization context is enough here.
-    vi.mocked(useOrganization).mockReturnValue({ currentOrganization: { id: 'org-1' } });
+    vi.mocked(useOrganization).mockReturnValue({ currentOrganization: { id: MOCK_ORG_ID } });
     vi.mocked(supabase.from).mockImplementation(
       (table) =>
         /** @type {any} */ (

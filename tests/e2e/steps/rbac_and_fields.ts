@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -352,7 +353,7 @@ Then('Practice and Game Scheduling should not expose edit or apply controls', as
 
 Given('I am logged in as an administrator', async ({ page }) => {
   await page.goto('/');
-  await page.evaluate(() => {
+  await page.evaluate((mockOrgId) => {
     const session = {
       user: {
         id: 'mock-admin-id',
@@ -363,8 +364,8 @@ Given('I am logged in as an administrator', async ({ page }) => {
       access_token: 'mock-token',
     };
     sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify(session));
-    localStorage.setItem('squadlogic_active_org', 'org-1');
-  });
+    localStorage.setItem('squadlogic_active_org', mockOrgId);
+  }, MOCK_ORG_ID);
   await page.reload();
   await expect(page.getByRole('button', { name: /Mock Admin|admin@squadlogic\.app/i })).toBeVisible(
     {
@@ -375,9 +376,9 @@ Given('I am logged in as an administrator', async ({ page }) => {
 
 Given('an organization has multiple fields configured', async ({ page }) => {
   await waitForMockClient(page);
-  await page.evaluate(() => {
+  await page.evaluate((mockOrgId) => {
     const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
     // **`location_id` is not decoration.** 20260911000000 made the scheduler
     // resolve a pitch's venue before offering it, and a field with no venue
@@ -409,7 +410,7 @@ Given('an organization has multiple fields configured', async ({ page }) => {
     );
 
     sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+  }, MOCK_ORG_ID);
 });
 
 When('I view the {string} page', async ({ page }, _pageName: string) => {

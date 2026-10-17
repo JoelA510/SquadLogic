@@ -15,9 +15,10 @@ import {
 } from '@squadlogic/core/heat/index.js';
 
 import { HEAT_SETTINGS_RPCS, handleHeatSettingsRpc } from '../frontend/src/lib/mockHeatSettings.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ORG = 'org-1';
+const ORG = MOCK_ORG_ID;
 const ADMIN = 'admin-1';
 
 const makeDb = () => ({

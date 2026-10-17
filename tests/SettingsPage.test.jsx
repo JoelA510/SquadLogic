@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import SettingsPage from '../frontend/src/pages/SettingsPage.jsx';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 // Mocked like the sibling component tests: the real module starts the lazy
 // mock-client import (`supabaseReady`) on load, and nothing here awaits it, so
@@ -12,8 +13,8 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({ supabase: {} }));
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
     permissions: ['manage_global_settings', 'manage_organization'],
-    currentOrganization: { id: 'org-1', name: 'North League' },
-    currentSeasonSetting: { id: 'season-1', name: 'Spring 2026' },
+    currentOrganization: { id: MOCK_ORG_ID, name: 'North League' },
+    currentSeasonSetting: { id: MOCK_SEASON_ID, name: 'Spring 2026' },
   }),
 }));
 

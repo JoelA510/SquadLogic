@@ -1,42 +1,46 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
 Given('I have an organization labeled {string}', async ({ page }, orgName: string) => {
   if (page.url() === 'about:blank') await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate((name) => {
-    const db = JSON.parse(
-      sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
-    );
-    const uniqueOrgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+  await page.evaluate(
+    ({ name, mockOrgId }) => {
+      const db = JSON.parse(
+        sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
+      );
+      const uniqueOrgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
-    db.organizations = (db.organizations || []).filter((o) => o.id !== uniqueOrgId);
-    db.organizations.push({ id: uniqueOrgId, name: name, status: 'active', is_onboarded: true });
+      db.organizations = (db.organizations || []).filter((o) => o.id !== uniqueOrgId);
+      db.organizations.push({ id: uniqueOrgId, name: name, status: 'active', is_onboarded: true });
 
-    db.organization_members = (db.organization_members || []).filter(
-      (m) => m.organization_id !== uniqueOrgId
-    );
-    db.organization_members.unshift({
-      id: `mem-${uniqueOrgId}`,
-      organization_id: uniqueOrgId,
-      profile_id: 'mock-admin-id',
-      role: 'admin',
-      organizations: db.organizations.find((o) => o.id === uniqueOrgId),
-    });
+      db.organization_members = (db.organization_members || []).filter(
+        (m) => m.organization_id !== uniqueOrgId
+      );
+      db.organization_members.unshift({
+        id: `mem-${uniqueOrgId}`,
+        organization_id: uniqueOrgId,
+        profile_id: 'mock-admin-id',
+        role: 'admin',
+        organizations: db.organizations.find((o) => o.id === uniqueOrgId),
+      });
 
-    db.locations = (db.locations || []).filter(
-      (l: Record<string, unknown>) => l.organization_id !== uniqueOrgId
-    );
-    db.fields = (db.fields || []).filter(
-      (f: Record<string, unknown>) => f.organization_id !== uniqueOrgId
-    );
+      db.locations = (db.locations || []).filter(
+        (l: Record<string, unknown>) => l.organization_id !== uniqueOrgId
+      );
+      db.fields = (db.fields || []).filter(
+        (f: Record<string, unknown>) => f.organization_id !== uniqueOrgId
+      );
 
-    window.__saveMockDB__(db);
-    localStorage.setItem('squadlogic_active_org', uniqueOrgId);
-  }, orgName);
+      window.__saveMockDB__(db);
+      localStorage.setItem('squadlogic_active_org', uniqueOrgId);
+    },
+    { name: orgName, mockOrgId: MOCK_ORG_ID }
+  );
 });
 
 When('I load the Field Management page', async ({ page }) => {
@@ -133,11 +137,11 @@ Given(
   async ({ page }, f: string, l: string) => {
     await waitForMockClient(page);
     await page.evaluate(
-      ({ fName, lName }) => {
+      ({ fName, lName, mockOrgId }) => {
         const db = JSON.parse(
           sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
         );
-        const uniqueOrgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        const uniqueOrgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
         const fieldId = 'field-1-test';
         db.fields = (db.fields || []).filter((f: Record<string, unknown>) => f.id !== fieldId);
         db.locations = db.locations || [];
@@ -163,7 +167,7 @@ Given(
         });
         window.__saveMockDB__(db);
       },
-      { fName: f, lName: l }
+      { fName: f, lName: l, mockOrgId: MOCK_ORG_ID }
     );
     await page.reload();
     await page.waitForTimeout(1000);
@@ -267,11 +271,11 @@ Given(
   async ({ page }, f: string, l: string) => {
     await waitForMockClient(page);
     await page.evaluate(
-      ({ fName, lName }) => {
+      ({ fName, lName, mockOrgId }) => {
         const db = JSON.parse(
           sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
         );
-        const uniqueOrgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        const uniqueOrgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
         const fieldId = 'field-2-test';
         db.fields = (db.fields || []).filter((f: Record<string, unknown>) => f.id !== fieldId);
         db.locations = db.locations || [];
@@ -310,7 +314,7 @@ Given(
         });
         window.__saveMockDB__(db);
       },
-      { fName: f, lName: l }
+      { fName: f, lName: l, mockOrgId: MOCK_ORG_ID }
     );
     await page.reload();
   }
@@ -331,11 +335,11 @@ Given(
   async ({ page }, f: string, l: string) => {
     await waitForMockClient(page);
     await page.evaluate(
-      ({ fName, lName }) => {
+      ({ fName, lName, mockOrgId }) => {
         const db = JSON.parse(
           sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
         );
-        const uniqueOrgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        const uniqueOrgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
         const fieldId = 'field-3-test';
         db.fields = (db.fields || []).filter((f: Record<string, unknown>) => f.id !== fieldId);
         db.locations = db.locations || [];
@@ -358,7 +362,7 @@ Given(
         });
         window.__saveMockDB__(db);
       },
-      { fName: f, lName: l }
+      { fName: f, lName: l, mockOrgId: MOCK_ORG_ID }
     );
     await page.reload();
     await page.waitForTimeout(1000);

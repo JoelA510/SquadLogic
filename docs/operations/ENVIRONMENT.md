@@ -83,7 +83,9 @@ falls back to the mock.
 - **CI's build step** (`npm run build`) sets well-formed stand-ins
   (`https://ci-build.invalid` and an `sb_publishable_` placeholder), not the
   opt-in: the bundle-budget gate measures that build, and it should be the
-  shape production ships (the real client, no mock chunk). It is never served.
+  shape production ships (the real client, no mock chunk). It sets a stand-in
+  `VITE_SENTRY_DSN` too (an `.invalid` host), so Sentry is bundled as in
+  production (plan M6). It is never served.
 - **Vercel.** Production and Preview both need the Supabase variables (they
   share the production project; owner decision 2026-10-13). A deploy without
   them now fails at build time, and Vercel keeps serving the previous

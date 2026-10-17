@@ -32,7 +32,9 @@ production build, so it fails, naming the
 variable, without `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (plan item
 M2.2). CI's step sets well-formed stand-ins; to build what CI builds (and
 measures), run
-`VITE_SUPABASE_URL=https://ci-build.invalid VITE_SUPABASE_ANON_KEY=sb_publishable_ci-build-stand-in npm run build`.
+`VITE_SUPABASE_URL=https://ci-build.invalid VITE_SUPABASE_ANON_KEY=sb_publishable_ci-build-stand-in VITE_SENTRY_DSN=https://00000000000000000000000000000000@sentry-ci-build.invalid/0 npm run build`
+(the DSN stand-in makes it the shape production ships, with Sentry; without it
+`check:bundle` fails, see [`bundle-budget.md`](./bundle-budget.md)).
 `VITE_USE_MOCK_SUPABASE=true` also builds, but with the mock chunk, which is
 not what CI measures. See [`ENVIRONMENT.md`](./ENVIRONMENT.md#production-safety).
 

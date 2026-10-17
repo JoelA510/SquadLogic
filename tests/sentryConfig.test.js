@@ -57,6 +57,39 @@ describe('Sentry release', () => {
   });
 });
 
+describe('Sentry Session Replay', () => {
+  // Replay is ~40 KB gzip. It loads as its own chunk after init (plan M6), so
+  // the main entry carries only the SDK core and tracing; the bundle budget
+  // fails a build where Replay is back in the entry.
+  const main = readFileSync(path.join(ROOT, 'frontend/src/main.jsx'), 'utf8');
+  const gate = main.indexOf('if (SENTRY_DSN) {');
+  const gateEnd = main.indexOf('\n}\n', gate);
+
+  it('init passes tracing only; Replay is not imported statically', () => {
+    expect(main).toContain('integrations: [Sentry.browserTracingIntegration()],');
+    expect(main).not.toMatch(/Sentry\.replayIntegration\(/);
+    expect(main).not.toMatch(/^import[^;]*sentryReplay/m);
+  });
+
+  it('main.jsx adds Replay from its lazy chunk, inside the DSN gate, and reports a failed load', () => {
+    expect(gate).toBeGreaterThan(-1);
+    const block = main.slice(gate, gateEnd);
+    const lazy = block.indexOf("import('./lib/sentryReplay.js')");
+    expect(lazy).toBeGreaterThan(block.indexOf('Sentry.init('));
+    expect(block).toContain(
+      '({ replayIntegration }) => Sentry.addIntegration(replayIntegration())'
+    );
+    expect(block).toMatch(/\(error\) => logger\.error\(/);
+  });
+
+  it('sentryReplay.js re-exports the SDK replay integration and nothing else', async () => {
+    const lazy = await import('../frontend/src/lib/sentryReplay.js');
+    const sdk = await import('@sentry/react');
+    expect(Object.keys(lazy)).toEqual(['replayIntegration']);
+    expect(lazy.replayIntegration).toBe(sdk.replayIntegration);
+  });
+});
+
 describe('Sentry privacy and sampling', () => {
   it('states sendDefaultPii: false explicitly', () => {
     expect(Object.hasOwn(options(), 'sendDefaultPii')).toBe(true);

@@ -82,9 +82,39 @@ When(
   }
 );
 
+Then('the scan sees {string} on the page', async ({ page }, content: string) => {
+  // The scan below examines what is rendered; this is what it must find rendered, so a route
+  // that shows only its shell or a spinner fails here rather than passing an emptier scan.
+  await expect(page.getByText(content).first()).toBeVisible({ timeout: 20_000 });
+});
+
+When('I switch to the dark theme on this page', async ({ page }) => {
+  // The top bar's toggle, without leaving the page: content it holds only in memory (an invite
+  // just generated, a schedule staged for review) is still there for the dark scan.
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dark');
+  await page.getByRole('button', { name: 'Switch to dark mode' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+});
+
+When('I generate an invite on the Members page', async ({ page }) => {
+  await page.getByRole('button', { name: 'Generate invite' }).click();
+  await expect(page.getByText('Invite ready')).toBeVisible({ timeout: 15_000 });
+});
+
 Then(
   'axe finds no serious or critical violations on {string} in the {string} theme',
   async ({ page }, route: string, theme: string) => {
+    // Let entrance animations finish first: axe measures colours as drawn, and a panel still
+    // fading in (`animate-slideUp`) reads as lower contrast than it settles at. Looping
+    // animations (a pulse, a spinner) never finish, so only finite ones are awaited.
+    await page.evaluate(() =>
+      Promise.all(
+        document
+          .getAnimations()
+          .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+          .map((a) => a.finished.catch(() => undefined))
+      )
+    );
     const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
 
     // A scan that checked nothing proves nothing: an unrendered page passes every rule.

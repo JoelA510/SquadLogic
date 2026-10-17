@@ -1593,7 +1593,23 @@ smoke-tested
     `bg-blue-500/10`). *Executed.*
   - The scan sees only what the mock seed renders: record pages (`/players/:id`, `/team/:id`),
     registration forms, closed overlays and empty-state branches are not scanned. *Statically
-    reviewed* (`tests/accessibilityRoutes.test.js` lists the routes left out and why).
+    reviewed* (`tests/accessibilityRoutes.test.js` lists the routes left out and why). **Partly fixed
+    2026-10-17** (Wave 4 accessibility, branch `claude/vibrant-allen-hr7y7s-a11y`): every route
+    row names text the scan must see rendered (a route showing only its shell fails before axe
+    runs; shown failing with `/players`' text swapped for absent text); the record pages are
+    scanned on seeded records (`/players/player-1`, `/team/t1`, `/register/f1`), with
+    `tests/accessibilityRoutes.test.js` matching a record path to its route; and six routes the
+    seed leaves empty are scanned again with content, both themes, the theme switched on the page
+    so in-memory content survives: a blackout, a heat forecast, lighting requests and overrides,
+    evaluation runs, a new invite, a staged game schedule. The scan now waits for entrance
+    animations, which had read as low contrast mid-fade on the new invite. New finding, fixed:
+    `--text-muted` labels on the auto-scheduler's emerald result card were 4.42:1 in dark (now
+    `--text-secondary`). `KNOWN_VIOLATIONS` stays empty. *Executed.* Still unscanned with content:
+    `/exports` with a published baseline, `/coaches/practice-preferences` with a pending request,
+    `/fields` with seasonal availability, `/admin/reports` past its 3-player masking threshold,
+    `/invite/:code`, and every overlay that opens on a click (dialogs, menus, drawers).
+    Recommendation: one follow-up that adds those four content scenarios and an "open each
+    route's primary dialog" scan.
   - `WorkflowStep`'s card-wide click ran for every click inside an open step, so its "Confirm
     Teams & Proceed" button (step 2 to 3) was undone by the card re-selecting step 2 (both state
     updates batch; the last wins). Fixed here: an open card takes no click of its own, and its

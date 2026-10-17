@@ -116,7 +116,8 @@ export default function AutoSchedulerPanel({
         </div>
       )}
 
-      {/* Completed results */}
+      {/* Completed results. Labels take --text-secondary: --text-muted on this emerald tint is
+          4.42:1 in the dark theme (axe, Wave 4). */}
       {isCompleted && result && (
         <div
           className="mt-4 p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/20"
@@ -131,7 +132,7 @@ export default function AutoSchedulerPanel({
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
             <div>
-              <div className="text-xs text-text-muted uppercase tracking-wider">
+              <div className="text-xs text-text-secondary uppercase tracking-wider">
                 {assignedLabel}
               </div>
               <div className="text-lg font-display font-bold text-text-primary">
@@ -139,7 +140,7 @@ export default function AutoSchedulerPanel({
               </div>
             </div>
             <div>
-              <div className="text-xs text-text-muted uppercase tracking-wider">
+              <div className="text-xs text-text-secondary uppercase tracking-wider">
                 {unassignedLabel}
               </div>
               <div className="text-lg font-display font-bold text-text-primary">
@@ -147,7 +148,7 @@ export default function AutoSchedulerPanel({
               </div>
             </div>
             <div>
-              <div className="text-xs text-text-muted uppercase tracking-wider">Score</div>
+              <div className="text-xs text-text-secondary uppercase tracking-wider">Score</div>
               <div className="text-lg font-display font-bold text-text-accent">
                 {result.optimization?.bestScore != null
                   ? `${(result.optimization.bestScore * 100).toFixed(1)}%`
@@ -155,7 +156,9 @@ export default function AutoSchedulerPanel({
               </div>
             </div>
             <div>
-              <div className="text-xs text-text-muted uppercase tracking-wider">Improvement</div>
+              <div className="text-xs text-text-secondary uppercase tracking-wider">
+                Improvement
+              </div>
               <div className="text-lg font-display font-bold text-status-success-text">
                 {result.optimization?.improvement != null
                   ? `+${(result.optimization.improvement * 100).toFixed(1)}%`
@@ -164,7 +167,7 @@ export default function AutoSchedulerPanel({
             </div>
           </div>
           {result.optimization && (
-            <p className="mt-3 text-xs text-text-muted">
+            <p className="mt-3 text-xs text-text-secondary">
               {result.optimization.iterations?.toLocaleString()} iterations in{' '}
               {(result.optimization.elapsedMs / 1000).toFixed(1)}s
               {result.optimization.restarts > 0 &&

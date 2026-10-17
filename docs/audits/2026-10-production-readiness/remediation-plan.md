@@ -1618,7 +1618,18 @@ smoke-tested
     status line, the announcements agree, and the grid marks those cells "Other field" with the
     invalid-target reason while a game is over one. No mock E2E (the mock seed has no games);
     the page test drives the real dnd-kit keyboard sensor. *Executed.*
+  - From this PR's review: `importedData` is the player import only (`startImport` wrote it for
+    every type, so after "Continue" a coach import reached the teams page as players;
+    `tests/importedDataIsPlayers.test.jsx`), and after a sync times out "Sync to Supabase" stays
+    off until a reload. *Executed.*
   - Not in this PR: "Upload to Storage" (Wave 2's bucket).
+  - Flagged, not done: the grid draws every slot under every field, so with N fields (N-1)/N of
+    its cells now read "Other field". Drawing only each field's own slots would remove them; a
+    layout change, so its own item (recommended). *Statically reviewed.*
+  - Flagged, not done: the import panel's `importStatus` lives in `localStorage`, with no expiry
+    and not per organization, so a "completed" import shows on `/import` after a reload or an
+    organization switch. Pre-existing on the side-navigation path; "Continue" now matches it
+    rather than resetting. *Statically reviewed.*
 - 2026-10-17, triage of "the issues with teams added through the UI" (Wave 3 UI PR). The
   report names no symptom, so this is what a mock run of Generate Teams, an unanswered sync, Team
   Builder and Game Scheduling showed (*executed*, a scratch scenario, not committed), plus

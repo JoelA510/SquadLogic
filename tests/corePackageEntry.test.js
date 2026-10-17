@@ -16,6 +16,7 @@
  * knip treats a package's entries as used, so a barrel (or a wildcard
  * `exports` map) would stop it reporting a core module nothing imports.
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -120,4 +121,44 @@ describe('packages/core/package.json', () => {
       expect(specifiers.filter(({ specifier }) => specifier === '@squadlogic/core')).toEqual([]);
     }
   });
+});
+
+/**
+ * Imports every module under `dir` in a plain Node process: no Vite or Vitest
+ * aliases. Prints `{ count, failed }` as JSON.
+ */
+const LOAD_ALL = `
+import { readdirSync, statSync } from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const list = (d) => readdirSync(d).flatMap((n) => {
+  const f = path.join(d, n);
+  return statSync(f).isDirectory() ? list(f) : n.endsWith('.js') ? [f] : [];
+});
+const files = list(process.argv[1]);
+const failed = [];
+for (const f of files) {
+  try { await import(pathToFileURL(f).href); }
+  catch (e) { failed.push(path.relative(process.argv[1], f) + ': ' + String(e.message).split('\\n')[0]); }
+}
+console.log(JSON.stringify({ count: files.length, failed }));
+`;
+
+describe('the core package outside the bundler', () => {
+  // scripts/build.js imported seven core modules in plain Node (plan M6.1
+  // deleted it as a build); this loads all of them. Node scripts such as
+  // scripts/generate-scoring-parity.mjs import core without the aliases, so a
+  // core module that imports through `@/` or `@squadlogic/core` would pass
+  // Vitest and the Vite build and fail there.
+  it('every core module loads in plain Node', () => {
+    const out = execFileSync(
+      process.execPath,
+      ['--input-type=module', '-e', LOAD_ALL, path.join(CORE, 'src')],
+      { cwd: ROOT, encoding: 'utf8', timeout: 20_000 }
+    );
+    const { count, failed } = JSON.parse(out.trim().split('\n').pop() ?? '{}');
+    // Meta: the walk found the package (287 modules today).
+    expect(count).toBeGreaterThan(200);
+    expect(failed).toEqual([]);
+  }, 30_000);
 });

@@ -1130,6 +1130,16 @@ and smoke-tested
 ## Milestone 6 — Polish
 
 > **M6.1. `npm run build` isn't a build** (audit finding 7.5, low)
+> - **Status: built in PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`).** `build` runs
+>   `frontend:build`, and Build & Test's build step runs `npm run build`, so CI runs the `build`
+>   script (`node.ci-runs-gate`). One change from the fix approach: `scripts/build.js` (an import
+>   check of seven core functions) is deleted, not renamed to `check:core-exports`. Every one of
+>   those functions is imported by the test suite, which fails on a missing export, so a renamed
+>   check CI never ran would guard nothing, and running it would repeat the tests. Acceptance,
+>   *executed*: `npm run build` writes `dist/`. Test gate: `tests/workflowPins.test.js` holds the
+>   step and the script (red before the change, and on three planted ci.yml defects). The same PR
+>   takes Wave 4's other M6 polish items, from the entries under "Discovered during execution"
+>   (2026-10-17, below).
 > - **Fix approach:** rename `build` to `check:core-exports` and point `build` at
 >   `frontend:build`, updating CLAUDE.md's command table.
 > - **Files touched:** `package.json`, `CLAUDE.md` (or `AGENTS.md` after M5.1).
@@ -1577,6 +1587,50 @@ smoke-tested
     *Statically reviewed.*
   - Recharts axes and gridlines on the analytics page keep hard-coded slate colours, which do
     not re-theme. *Statically reviewed.*
+
+- 2026-10-17, PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`): Wave 4's M6 polish. The resume
+  queue lists six items as "M6.1-M6.4"; only the `build` script is plan item M6.1. The other five
+  are entries above, and the plan's own M6.2 (CRLF), M6.3 (`test.todo`) and M6.4 (README release
+  line) are not in this PR and stay open.
+  - **The core package's entry** (PR M5's entry): `packages/core/package.json` declares no `main`
+    now. Nothing imports the package bare; everything goes through the `@squadlogic/core/<module>`
+    alias. An index barrel or a wildcard `exports` map would make an entry true, but knip treats
+    entries as used: with `"exports": {"./*": "./src/*"}` a planted unused core file went
+    unreported. `tests/corePackageEntry.test.js` (red on `main`, naming `src/index.js`): every
+    entry the manifest names exists, with no root entry no bare import, and every core module
+    (287) loads in plain Node, without the aliases, which replaces what `scripts/build.js`
+    checked for seven of them (a planted `@/` import fails it). *Executed.*
+  - **`frontend/.env.local`** (#558's entry): the build wrapper no longer writes it; the derived
+    URL still reaches Vite through the child's environment. Nothing read the file: Vite's
+    `envDir` is the root, Playwright's `dotenv.config()` reads the root `.env`, and no script or
+    workflow names it (searched). *Executed*: a build no longer creates it, and
+    `tests/configurePersistenceEndpoint.test.js` failed before with one `writeFileSync` call.
+  - **`process.env.NODE_ENV`** (#558's entry): `FeatureGuard.jsx` and `featureFlags.js` read
+    env.js's new `IS_DEV_SERVER` (`DEV`, and `MODE` not `test`): the dev server in any mode, as
+    `NODE_ENV === 'development'` was, and not Vitest, where `DEV` is true but `MODE` is `test`.
+    `tests/env.test.js` now forbids a `process.env` read in frontend and core sources (red before,
+    naming the two files); `tests/devModeWarnings.test.jsx` checks each warning on the dev server
+    (default and custom mode), in Vitest and in a build (the dev-server cases red before).
+    *Executed.*
+  - **The bundle budget's shape** (#558's entry): Session Replay loads as its own chunk after
+    `Sentry.init` (`lib/sentryReplay.js`, `Sentry.addIntegration`; `lazyLoadIntegration` loads
+    from Sentry's CDN, which the CSP refuses). CI builds with a stand-in `VITE_SENTRY_DSN`, and a
+    budget rule for the replay chunk fails a build without one. Main entry with a DSN: 213.62 KB
+    before, 174.22 KB now (134.19 KB without a DSN); caps re-baselined to 190,000 B (main) and
+    296,000 B (first paint), rationale in `config/bundle-budget.json`. *Executed*: the gate passes
+    the DSN build and fails a no-DSN build and one with Replay eager; in Chromium against
+    `vite preview`, the client carries Replay and BrowserTracing and a 404 on the chunk is logged.
+  - **esbuild's postinstall** (#559's entry): reviewed and approved in `package.json`'s
+    `allowScripts` by name, as the template does. `npm ci` no longer warns.
+    `tests/allowScripts.test.js` holds the record to the lockfile's `hasInstallScript` packages
+    (red before, naming esbuild). *Executed.* The audit's install row says the postinstall "did
+    not run"; it did: `node_modules/esbuild/bin/esbuild` is a hard link to the platform binary
+    (link count 2), which only `install.js` makes. *Executed.*
+  - **Open for the owner:** `fsevents` 2.3.3 (macOS only) also has an install script
+    (`node-gyp rebuild`); the template denies the same version. Listed as awaiting a decision in
+    `tests/allowScripts.test.js`. *Statically reviewed.*
+  - Without a DSN the main entry is 134.19 KB against the old 137.16 KB cap: about 3 KB was left
+    before this PR's re-baseline. *Executed.*
 
 ## Deferred with reason
 

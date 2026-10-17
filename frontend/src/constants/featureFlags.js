@@ -8,7 +8,7 @@ import {
   UserRoundCheck,
   Users,
 } from 'lucide-react';
-import { IS_DEVELOPMENT_MODE } from '../env.js';
+import { IS_DEV_SERVER } from '../env.js';
 
 /**
  * Centralized registry of organization-level feature flags.
@@ -141,14 +141,14 @@ export const FeatureFlagSchema = z
       if (key === GENDER_MODEL_KEY) {
         if (typeof value === 'string' && GENDER_MODELS.includes(value)) {
           validated[key] = value;
-        } else if (IS_DEVELOPMENT_MODE) {
+        } else if (IS_DEV_SERVER) {
           console.warn(`[FeatureFlag] Ignoring invalid gender_model value: "${value}"`);
         }
         return;
       }
       if (ALL_FLAGS.includes(key) && typeof value === 'boolean') {
         validated[key] = value;
-      } else if (IS_DEVELOPMENT_MODE) {
+      } else if (IS_DEV_SERVER) {
         console.warn(`[FeatureFlag] Ignoring an unknown feature flag in database: "${key}"`);
       }
     });

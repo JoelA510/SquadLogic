@@ -146,7 +146,8 @@ which deploy only on request: `vercel.json` `git.deploymentEnabled`). Runbook, V
 - `npm run lint` / `lint:fix` / `typecheck` — ESLint / auto-fix / `tsc --noEmit`.
 - `npm run format` — Prettier on every file; prefer `npx prettier --write <your files>` (rule 2).
 - `npm run check:bundle` / `check:advisors` / `check:unused` — bundle budget / advisor lint /
-  knip (`knip.jsonc`).
+  knip (`knip.jsonc`). The bundle budget needs a build made as CI makes it, with stand-in
+  Supabase and Sentry variables: the command is in `docs/operations/bundle-budget.md`.
 - `npm run check:audit` — dependency audit gate (high/critical advisories, waivers).
 
 ## 13. Key Documentation Reference

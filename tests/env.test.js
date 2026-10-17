@@ -449,7 +449,7 @@ describe('env.js is the only reader of import.meta.env, by name', () => {
     // Rule 3 (AGENTS.md): a frontend module asks env.js, never process.env.
     // `FeatureGuard.jsx` and `featureFlags.js` read `process.env.NODE_ENV`
     // (Vite's compatibility replacement) until plan M6; they now read env.js's
-    // IS_DEVELOPMENT_MODE.
+    // IS_DEV_SERVER.
     const files = [...listSources(SRC), ...listSources(CORE)];
     expect(files.length).toBeGreaterThan(200);
     const offenders = files

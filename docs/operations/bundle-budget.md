@@ -11,8 +11,8 @@
 
 | Trigger | Command | Effect |
 | --- | --- | --- |
-| Local pre-push smoke | `npm run check:bundle` | Runs after `npm run frontend:build`. Fails if any chunk exceeds the budget, a rule matches no file, or a first-paint file is unbudgeted. |
-| CI full matrix | `npm run check:bundle` after `npm run frontend:build` | Same as local; PR cannot merge if budget is busted. Docs-only PRs intentionally skip the full matrix; see [`ci-cd.md`](./ci-cd.md). |
+| Local pre-push smoke | `npm run check:bundle` | Runs after a build made as CI makes it (stand-in Supabase and Sentry variables; see "What is measured"). Fails if any chunk exceeds the budget, a rule matches no file, or a first-paint file is unbudgeted. |
+| CI full matrix | `npm run check:bundle` after `npm run build` | Same as local; PR cannot merge if budget is busted. Docs-only PRs intentionally skip the full matrix; see [`ci-cd.md`](./ci-cd.md). |
 
 ## Budget file shape
 

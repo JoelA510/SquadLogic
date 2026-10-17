@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -48,9 +49,9 @@ Given(
   async ({ page }, teamName: string) => {
     await waitForMockClient(page);
     await page.evaluate(
-      ({ team, seed }) => {
+      ({ team, seed, mockOrgId }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-        const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
         const teamId =
           localStorage.getItem('test_target_team_id') || team.toLowerCase().replace(/\s+/g, '-');
         const mine = (id: string) => (row: Record<string, unknown>) => row.id !== id;
@@ -122,7 +123,7 @@ Given(
         );
         window.__saveMockDB__(db);
       },
-      { team: teamName, seed: SEED }
+      { team: teamName, seed: SEED, mockOrgId: MOCK_ORG_ID }
     );
   }
 );

@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -53,94 +54,109 @@ const SEED_SLOTS = [
 Given('practice slots with lighting overrides are seeded', async ({ page }) => {
   if (page.url() === 'about:blank') await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate((slots) => {
-    const db = JSON.parse(
-      sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
-    );
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    const ids = new Set(slots.map((slot) => slot.id));
-    db.fields = (db.fields || []).filter((f) => f.id !== 'field-lantern');
-    db.fields.push({
-      id: 'field-lantern',
-      name: 'Lantern Field',
-      organization_id: orgId,
-      location_id: 'loc-1',
-      active: true,
-    });
-    db.team_coach_assignments = (db.team_coach_assignments || []).filter(
-      (a) => a.id !== 'tca-light-ended'
-    );
-    db.team_coach_assignments.push({
-      id: 'tca-light-ended',
-      organization_id: orgId,
-      team_id: 't-light-ended',
-      coach_id: 'mock-coach-id',
-      role: 'lead',
-      effective_from: '2026-01-01',
-      effective_to: '2026-02-01',
-      started_via: 'backfill',
-    });
-    db.practice_slots = (db.practice_slots || []).filter((s) => !ids.has(s.id));
-    db.practice_assignments = (db.practice_assignments || []).filter(
-      (a) => !ids.has(a.practice_slot_id)
-    );
-    for (const slot of slots) {
-      db.practice_slots.push({
-        id: slot.id,
+  await page.evaluate(
+    ({ slots, mockOrgId }) => {
+      const db = JSON.parse(
+        sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
+      );
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      const ids = new Set(slots.map((slot) => slot.id));
+      db.fields = (db.fields || []).filter((f) => f.id !== 'field-lantern');
+      db.fields.push({
+        id: 'field-lantern',
+        name: 'Lantern Field',
         organization_id: orgId,
-        field_id: 'field-lantern',
-        day_of_week: slot.day,
-        start_time: slot.start,
-        end_time: slot.end,
-        capacity: 1,
-        valid_from: '2026-08-01',
-        valid_until: '2026-12-31',
+        location_id: 'loc-1',
+        active: true,
       });
-      db.practice_assignments.push({
-        id: `pa-${slot.id}`,
+      db.team_coach_assignments = (db.team_coach_assignments || []).filter(
+        (a) => a.id !== 'tca-light-ended'
+      );
+      db.team_coach_assignments.push({
+        id: 'tca-light-ended',
         organization_id: orgId,
-        team_id: slot.team,
-        slot_id: slot.id,
-        practice_slot_id: slot.id,
-        day_of_week: slot.day,
-        start_time: slot.start,
-        end_time: slot.end,
+        team_id: 't-light-ended',
+        coach_id: 'mock-coach-id',
+        role: 'lead',
+        effective_from: '2026-01-01',
+        effective_to: '2026-02-01',
+        started_via: 'backfill',
       });
-    }
-    const row = (id, slotId, window, status, by) => ({
-      id,
-      organization_id: orgId,
-      practice_slot_id: slotId,
-      window,
-      kind: 'portable-lighting',
-      status,
-      requested_by: by,
-      requested_at: '2026-09-20T10:00:00.000Z',
-      decided_by: status === 'approved' ? 'mock-admin-2' : null,
-      decided_at: status === 'approved' ? '2026-09-21T10:00:00.000Z' : null,
-      withdrawn_by: null,
-      withdrawn_at: null,
-    });
-    db.practice_lighting_overrides = [
-      row('lo-e2e-own', 'ps-light-other', '[2026-10-01,2026-10-04)', 'requested', 'mock-admin-id'),
-      row(
-        'lo-e2e-coach',
-        'ps-light-coach',
-        '[2026-10-05,2026-10-09)',
-        'requested',
-        'mock-coach-id'
-      ),
-      row('lo-e2e-clash', 'ps-light-coach', '[2026-10-07,2026-10-11)', 'approved', 'mock-admin-2'),
-      row(
-        'lo-e2e-admin',
-        'ps-light-coach',
-        '[2026-11-20,2026-11-22)',
-        'requested',
-        'mock-admin-id'
-      ),
-    ];
-    window.__saveMockDB__(db);
-  }, SEED_SLOTS);
+      db.practice_slots = (db.practice_slots || []).filter((s) => !ids.has(s.id));
+      db.practice_assignments = (db.practice_assignments || []).filter(
+        (a) => !ids.has(a.practice_slot_id)
+      );
+      for (const slot of slots) {
+        db.practice_slots.push({
+          id: slot.id,
+          organization_id: orgId,
+          field_id: 'field-lantern',
+          day_of_week: slot.day,
+          start_time: slot.start,
+          end_time: slot.end,
+          capacity: 1,
+          valid_from: '2026-08-01',
+          valid_until: '2026-12-31',
+        });
+        db.practice_assignments.push({
+          id: `pa-${slot.id}`,
+          organization_id: orgId,
+          team_id: slot.team,
+          slot_id: slot.id,
+          practice_slot_id: slot.id,
+          day_of_week: slot.day,
+          start_time: slot.start,
+          end_time: slot.end,
+        });
+      }
+      const row = (id, slotId, window, status, by) => ({
+        id,
+        organization_id: orgId,
+        practice_slot_id: slotId,
+        window,
+        kind: 'portable-lighting',
+        status,
+        requested_by: by,
+        requested_at: '2026-09-20T10:00:00.000Z',
+        decided_by: status === 'approved' ? 'mock-admin-2' : null,
+        decided_at: status === 'approved' ? '2026-09-21T10:00:00.000Z' : null,
+        withdrawn_by: null,
+        withdrawn_at: null,
+      });
+      db.practice_lighting_overrides = [
+        row(
+          'lo-e2e-own',
+          'ps-light-other',
+          '[2026-10-01,2026-10-04)',
+          'requested',
+          'mock-admin-id'
+        ),
+        row(
+          'lo-e2e-coach',
+          'ps-light-coach',
+          '[2026-10-05,2026-10-09)',
+          'requested',
+          'mock-coach-id'
+        ),
+        row(
+          'lo-e2e-clash',
+          'ps-light-coach',
+          '[2026-10-07,2026-10-11)',
+          'approved',
+          'mock-admin-2'
+        ),
+        row(
+          'lo-e2e-admin',
+          'ps-light-coach',
+          '[2026-11-20,2026-11-22)',
+          'requested',
+          'mock-admin-id'
+        ),
+      ];
+      window.__saveMockDB__(db);
+    },
+    { slots: SEED_SLOTS, mockOrgId: MOCK_ORG_ID }
+  );
 });
 
 When('I open the Practice Lighting page', async ({ page }) => {

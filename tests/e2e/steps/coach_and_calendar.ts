@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -8,146 +9,152 @@ const { Given, When, Then } = createBdd();
 
 Given('I have been assigned to the {string}', async ({ page }, teamName: string) => {
   await waitForMockClient(page);
-  await page.evaluate((name) => {
-    // CRITICAL FIX: Aggressively clear state to prevent parallel worker contamination
-    const db = JSON.parse(
-      sessionStorage.getItem('__MOCK_DB__') ||
-        JSON.stringify((window as { __MOCK_DB__?: unknown }).__MOCK_DB__ || {})
-    );
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+  await page.evaluate(
+    ({ name, mockOrgId }) => {
+      // CRITICAL FIX: Aggressively clear state to prevent parallel worker contamination
+      const db = JSON.parse(
+        sessionStorage.getItem('__MOCK_DB__') ||
+          JSON.stringify((window as { __MOCK_DB__?: unknown }).__MOCK_DB__ || {})
+      );
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
-    // Wipe players to ensure clean slate for this test
-    db.players = [];
-    db.team_players = [];
-    db.profile_players = [];
-    db.registration_forms = db.registration_forms || [];
-    db.registrations = [];
-    db.coaches = db.coaches || [];
-    db.season_settings = db.season_settings || [];
-    db.divisions = db.divisions || [];
+      // Wipe players to ensure clean slate for this test
+      db.players = [];
+      db.team_players = [];
+      db.profile_players = [];
+      db.registration_forms = db.registration_forms || [];
+      db.registrations = [];
+      db.coaches = db.coaches || [];
+      db.season_settings = db.season_settings || [];
+      db.divisions = db.divisions || [];
 
-    const seasonId = 'team-portal-season-1';
-    const divisionId = 'team-portal-division-1';
+      const seasonId = 'team-portal-season-1';
+      const divisionId = 'team-portal-division-1';
 
-    if (!db.season_settings.find((season: Record<string, unknown>) => season.id === seasonId)) {
-      db.season_settings.push({
-        id: seasonId,
+      if (!db.season_settings.find((season: Record<string, unknown>) => season.id === seasonId)) {
+        db.season_settings.push({
+          id: seasonId,
+          organization_id: orgId,
+          name: 'Team Portal Season',
+          status: 'active',
+          timezone: 'America/Los_Angeles',
+        });
+      }
+
+      if (!db.divisions.find((division: Record<string, unknown>) => division.id === divisionId)) {
+        db.divisions.push({
+          id: divisionId,
+          organization_id: orgId,
+          name: 'U12',
+          season_settings_id: seasonId,
+        });
+      }
+
+      if (!db.coaches.find((coach: Record<string, unknown>) => coach.id === 'mock-coach-id')) {
+        db.coaches.push({
+          id: 'mock-coach-id',
+          organization_id: orgId,
+          profile_id: 'mock-coach-id',
+          user_id: 'mock-coach-id',
+          full_name: 'Mock Coach',
+          email: 'coach@squadlogic.app',
+          status: 'active',
+        });
+      }
+
+      db.teams = db.teams || [];
+      const teamId = name.toLowerCase().replace(/\s+/g, '-');
+      const existingTeam = db.teams.find((t: Record<string, unknown>) => t.id === teamId);
+      const teamContext = {
+        id: teamId,
+        name: name,
         organization_id: orgId,
-        name: 'Team Portal Season',
-        status: 'active',
-        timezone: 'America/Los_Angeles',
-      });
-    }
+        division_id: divisionId,
+        coach_id: 'mock-coach-id',
+      };
 
-    if (!db.divisions.find((division: Record<string, unknown>) => division.id === divisionId)) {
-      db.divisions.push({
-        id: divisionId,
-        organization_id: orgId,
-        name: 'U12',
-        season_settings_id: seasonId,
-      });
-    }
+      if (existingTeam) {
+        Object.assign(existingTeam, teamContext);
+      } else {
+        db.teams.push(teamContext);
+      }
+      db.team_members = db.team_members || [];
+      db.team_members.push({ team_id: teamId, profile_id: 'mock-coach-id', role: 'coach' });
 
-    if (!db.coaches.find((coach: Record<string, unknown>) => coach.id === 'mock-coach-id')) {
-      db.coaches.push({
-        id: 'mock-coach-id',
-        organization_id: orgId,
-        profile_id: 'mock-coach-id',
-        user_id: 'mock-coach-id',
-        full_name: 'Mock Coach',
-        email: 'coach@squadlogic.app',
-        status: 'active',
-      });
-    }
+      // CRITICAL FIX: Save teamId for direct navigation
+      localStorage.setItem('test_target_team_id', teamId);
 
-    db.teams = db.teams || [];
-    const teamId = name.toLowerCase().replace(/\s+/g, '-');
-    const existingTeam = db.teams.find((t: Record<string, unknown>) => t.id === teamId);
-    const teamContext = {
-      id: teamId,
-      name: name,
-      organization_id: orgId,
-      division_id: divisionId,
-      coach_id: 'mock-coach-id',
-    };
-
-    if (existingTeam) {
-      Object.assign(existingTeam, teamContext);
-    } else {
-      db.teams.push(teamContext);
-    }
-    db.team_members = db.team_members || [];
-    db.team_members.push({ team_id: teamId, profile_id: 'mock-coach-id', role: 'coach' });
-
-    // CRITICAL FIX: Save teamId for direct navigation
-    localStorage.setItem('test_target_team_id', teamId);
-
-    (window as { __MOCK_DB__?: unknown }).__MOCK_DB__ = db;
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  }, teamName);
+      (window as { __MOCK_DB__?: unknown }).__MOCK_DB__ = db;
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { name: teamName, mockOrgId: MOCK_ORG_ID }
+  );
 });
 
 Given('my team has {int} players assigned', async ({ page }, count: number) => {
   await waitForMockClient(page);
-  await page.evaluate((num) => {
-    const db = JSON.parse(
-      sessionStorage.getItem('__MOCK_DB__') ||
-        JSON.stringify((window as { __MOCK_DB__?: unknown }).__MOCK_DB__ || {})
-    );
-    const teamId = localStorage.getItem('test_target_team_id') || 'team-1';
-    const team = db.teams?.find((item: Record<string, unknown>) => item.id === teamId) || {
-      id: teamId,
-    };
-    const division = db.divisions?.find(
-      (item: Record<string, unknown>) => item.id === team.division_id
-    );
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    const seasonId = division?.season_settings_id || 'team-portal-season-1';
-    const formId = 'registration-form-1';
+  await page.evaluate(
+    ({ num, mockOrgId }) => {
+      const db = JSON.parse(
+        sessionStorage.getItem('__MOCK_DB__') ||
+          JSON.stringify((window as { __MOCK_DB__?: unknown }).__MOCK_DB__ || {})
+      );
+      const teamId = localStorage.getItem('test_target_team_id') || 'team-1';
+      const team = db.teams?.find((item: Record<string, unknown>) => item.id === teamId) || {
+        id: teamId,
+      };
+      const division = db.divisions?.find(
+        (item: Record<string, unknown>) => item.id === team.division_id
+      );
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      const seasonId = division?.season_settings_id || 'team-portal-season-1';
+      const formId = 'registration-form-1';
 
-    db.team_players = db.team_players || [];
-    db.players = db.players || [];
-    db.profile_players = db.profile_players || [];
-    db.registration_forms = db.registration_forms || [];
-    db.registrations = db.registrations || [];
-    if (!db.registration_forms.find((form: Record<string, unknown>) => form.id === formId)) {
-      db.registration_forms.push({
-        id: formId,
-        organization_id: orgId,
-        title: 'Team Portal Registration',
-        season_id: seasonId,
-        status: 'open',
-      });
-    }
-    for (let i = 0; i < num; i++) {
-      const pid = `p-${i}`;
-      const medicalCleared = i % 2 === 0;
-      db.team_players.push({
-        id: `tp-${i}`,
-        organization_id: orgId,
-        team_id: team.id,
-        player_id: pid,
-      });
-      db.players.push({
-        id: pid,
-        organization_id: orgId,
-        division_id: team.division_id,
-        first_name: `Player ${i}`,
-        last_name: 'Test',
-      });
-      db.registrations.push({
-        id: `reg-${i}`,
-        organization_id: orgId,
-        form_id: formId,
-        player_id: pid,
-        profile_id: 'mock-parent-id',
-        medical_cleared: medicalCleared,
-        updated_at: new Date(Date.now() + i).toISOString(),
-      });
-    }
-    (window as { __MOCK_DB__?: unknown }).__MOCK_DB__ = db;
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  }, count);
+      db.team_players = db.team_players || [];
+      db.players = db.players || [];
+      db.profile_players = db.profile_players || [];
+      db.registration_forms = db.registration_forms || [];
+      db.registrations = db.registrations || [];
+      if (!db.registration_forms.find((form: Record<string, unknown>) => form.id === formId)) {
+        db.registration_forms.push({
+          id: formId,
+          organization_id: orgId,
+          title: 'Team Portal Registration',
+          season_id: seasonId,
+          status: 'open',
+        });
+      }
+      for (let i = 0; i < num; i++) {
+        const pid = `p-${i}`;
+        const medicalCleared = i % 2 === 0;
+        db.team_players.push({
+          id: `tp-${i}`,
+          organization_id: orgId,
+          team_id: team.id,
+          player_id: pid,
+        });
+        db.players.push({
+          id: pid,
+          organization_id: orgId,
+          division_id: team.division_id,
+          first_name: `Player ${i}`,
+          last_name: 'Test',
+        });
+        db.registrations.push({
+          id: `reg-${i}`,
+          organization_id: orgId,
+          form_id: formId,
+          player_id: pid,
+          profile_id: 'mock-parent-id',
+          medical_cleared: medicalCleared,
+          updated_at: new Date(Date.now() + i).toISOString(),
+        });
+      }
+      (window as { __MOCK_DB__?: unknown }).__MOCK_DB__ = db;
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { num: count, mockOrgId: MOCK_ORG_ID }
+  );
 });
 
 When('I view my Team Portal', async ({ page }) => {

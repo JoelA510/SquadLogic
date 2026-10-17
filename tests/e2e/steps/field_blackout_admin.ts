@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -27,11 +28,11 @@ async function seedGround(page, { fieldName, locationName, withGame }: Seed) {
   if (page.url() === 'about:blank') await page.goto('/');
   await waitForMockClient(page);
   await page.evaluate(
-    ({ fName, lName, game, date }) => {
+    ({ fName, lName, game, date, mockOrgId }) => {
       const db = JSON.parse(
         sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
       );
-      const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
       const locationId = 'loc-blackout-test';
       const fieldId = 'field-blackout-test';
 
@@ -89,7 +90,13 @@ async function seedGround(page, { fieldName, locationName, withGame }: Seed) {
 
       window.__saveMockDB__(db);
     },
-    { fName: fieldName, lName: locationName, game: withGame, date: SEED_DATE }
+    {
+      fName: fieldName,
+      lName: locationName,
+      game: withGame,
+      date: SEED_DATE,
+      mockOrgId: MOCK_ORG_ID,
+    }
   );
 }
 

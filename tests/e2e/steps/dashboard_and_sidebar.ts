@@ -1,31 +1,37 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
 Given('an organization and season are active', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = 'org-1';
-    db.organizations = [{ id: orgId, name: 'SquadLogic FC', status: 'active', is_onboarded: true }];
-    db.organization_members = [
-      {
-        organization_id: orgId,
-        profile_id: 'mock-admin-id',
-        role: 'admin',
-        organizations: { id: orgId, name: 'SquadLogic FC', is_onboarded: true },
-      },
-    ];
-    db.season_settings = [
-      { id: 's1', name: 'Fall 2024', organization_id: orgId, timezone: 'America/Los_Angeles' },
-    ];
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    localStorage.setItem('squadlogic_active_org', orgId);
-    localStorage.setItem('squadlogic-current-season', 'Fall 2024');
-  });
+  await page.evaluate(
+    ({ mockOrgId }) => {
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      const orgId = mockOrgId;
+      db.organizations = [
+        { id: orgId, name: 'SquadLogic FC', status: 'active', is_onboarded: true },
+      ];
+      db.organization_members = [
+        {
+          organization_id: orgId,
+          profile_id: 'mock-admin-id',
+          role: 'admin',
+          organizations: { id: orgId, name: 'SquadLogic FC', is_onboarded: true },
+        },
+      ];
+      db.season_settings = [
+        { id: 's1', name: 'Fall 2024', organization_id: orgId, timezone: 'America/Los_Angeles' },
+      ];
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+      localStorage.setItem('squadlogic_active_org', orgId);
+      localStorage.setItem('squadlogic-current-season', 'Fall 2024');
+    },
+    { mockOrgId: MOCK_ORG_ID }
+  );
 });
 
 Then('I should see a {int}-step workflow on the left side', async ({ page }, steps: number) => {
@@ -51,29 +57,32 @@ Then('the League Status panel should show the active season name', async ({ page
 Given('I have imported player data', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const activeOrg = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    db.imports = [
-      {
-        id: 'imp-1',
-        user_id: 'mock-admin-id',
-        organization_id: activeOrg,
-        import_type: 'players',
-        status: 'completed',
-        created_at: new Date().toISOString(),
-        data: { totalRows: 150, validRows: 150 },
-      },
-    ];
-    // CRITICAL FIX: Override initialMockData runs to 'deleted' so they don't match 'completed'
-    db.scheduler_runs = [
-      { id: 'run-practice-1', status: 'deleted' },
-      { id: 'run-game-1', status: 'deleted' },
-      { id: 'run-1', status: 'deleted' },
-    ];
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    localStorage.setItem('dashboardActiveStep', '2'); // Preserve across reloads
-  });
+  await page.evaluate(
+    ({ mockOrgId }) => {
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      const activeOrg = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      db.imports = [
+        {
+          id: 'imp-1',
+          user_id: 'mock-admin-id',
+          organization_id: activeOrg,
+          import_type: 'players',
+          status: 'completed',
+          created_at: new Date().toISOString(),
+          data: { totalRows: 150, validRows: 150 },
+        },
+      ];
+      // CRITICAL FIX: Override initialMockData runs to 'deleted' so they don't match 'completed'
+      db.scheduler_runs = [
+        { id: 'run-practice-1', status: 'deleted' },
+        { id: 'run-game-1', status: 'deleted' },
+        { id: 'run-1', status: 'deleted' },
+      ];
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+      localStorage.setItem('dashboardActiveStep', '2'); // Preserve across reloads
+    },
+    { mockOrgId: MOCK_ORG_ID }
+  );
   await page.goto('/workflow?step=6');
 
   // Force Playwright to visually locate and click the specific stepper buttons
@@ -123,70 +132,73 @@ Given('I have not generated a game schedule', async ({ page }) => {
 Given('all setup steps are complete', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const now = new Date().toISOString();
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    db.imports = [
-      {
-        id: 'imp-full',
-        user_id: 'mock-admin-id',
-        organization_id: orgId,
-        import_type: 'players',
-        status: 'completed',
-        created_at: now,
-        data: { totalRows: 150, validRows: 150 },
-      },
-    ];
-    db.scheduler_runs = [
-      {
-        id: 'run-t',
-        organization_id: orgId,
-        run_type: 'team',
-        status: 'completed',
-        completed_at: now,
-        metrics: { progress: 100 },
-        results: {
-          teamsByDivision: { 'U10 Boys': [{ id: 't1', name: 'Tigers' }] },
-          rosterBalanceByDivision: {
-            'U10 Boys': { summary: { totalPlayers: 15, totalCapacity: 20 } },
+  await page.evaluate(
+    ({ mockOrgId }) => {
+      const now = new Date().toISOString();
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      db.imports = [
+        {
+          id: 'imp-full',
+          user_id: 'mock-admin-id',
+          organization_id: orgId,
+          import_type: 'players',
+          status: 'completed',
+          created_at: now,
+          data: { totalRows: 150, validRows: 150 },
+        },
+      ];
+      db.scheduler_runs = [
+        {
+          id: 'run-t',
+          organization_id: orgId,
+          run_type: 'team',
+          status: 'completed',
+          completed_at: now,
+          metrics: { progress: 100 },
+          results: {
+            teamsByDivision: { 'U10 Boys': [{ id: 't1', name: 'Tigers' }] },
+            rosterBalanceByDivision: {
+              'U10 Boys': { summary: { totalPlayers: 15, totalCapacity: 20 } },
+            },
           },
+          created_at: now,
         },
-        created_at: now,
-      },
-      {
-        id: 'run-p',
-        organization_id: orgId,
-        run_type: 'practice',
-        status: 'completed',
-        completed_at: now,
-        metrics: { progress: 100 },
-        results: {
-          summary: { assignmentRate: 1.0, manualFollowUpRate: 0, unassignedTeams: 0 },
-          totals: { practices: 20 },
+        {
+          id: 'run-p',
+          organization_id: orgId,
+          run_type: 'practice',
+          status: 'completed',
+          completed_at: now,
+          metrics: { progress: 100 },
+          results: {
+            summary: { assignmentRate: 1.0, manualFollowUpRate: 0, unassignedTeams: 0 },
+            totals: { practices: 20 },
+          },
+          created_at: now,
         },
-        created_at: now,
-      },
-      {
-        id: 'run-g',
-        organization_id: orgId,
-        run_type: 'game',
-        status: 'completed',
-        completed_at: now,
-        metrics: { progress: 100 },
-        results: {
-          summary: { totalGames: 15, scheduledRate: 1.0, unscheduledMatchups: 0 },
-          totals: { games: 15 },
+        {
+          id: 'run-g',
+          organization_id: orgId,
+          run_type: 'game',
+          status: 'completed',
+          completed_at: now,
+          metrics: { progress: 100 },
+          results: {
+            summary: { totalGames: 15, scheduledRate: 1.0, unscheduledMatchups: 0 },
+            totals: { games: 15 },
+          },
+          created_at: now,
         },
-        created_at: now,
-      },
-      // Override initialMockData runs
-      { id: 'run-practice-1', status: 'deleted' },
-      { id: 'run-game-1', status: 'deleted' },
-      { id: 'run-1', status: 'deleted' },
-    ];
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+        // Override initialMockData runs
+        { id: 'run-practice-1', status: 'deleted' },
+        { id: 'run-game-1', status: 'deleted' },
+        { id: 'run-1', status: 'deleted' },
+      ];
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { mockOrgId: MOCK_ORG_ID }
+  );
   await page.goto('/workflow');
 
   // Force Playwright to visually locate and click the specific stepper buttons
@@ -200,33 +212,36 @@ Given('all setup steps are complete', async ({ page }) => {
 Given('I have generated teams', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    db.scheduler_runs = db.scheduler_runs || [];
-    if (
-      !db.scheduler_runs.find(
-        (r: Record<string, unknown>) => r.run_type === 'team' && r.status === 'completed'
-      )
-    ) {
-      const now = new Date().toISOString();
-      db.scheduler_runs.push({
-        id: 'run-t',
-        organization_id: orgId,
-        run_type: 'team',
-        status: 'completed',
-        completed_at: now,
-        results: {
-          teamsByDivision: { 'U10 Boys': [{ id: 't1', name: 'Tigers' }] },
-          rosterBalanceByDivision: {
-            'U10 Boys': { summary: { totalPlayers: 15, totalCapacity: 20 } },
+  await page.evaluate(
+    ({ mockOrgId }) => {
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      db.scheduler_runs = db.scheduler_runs || [];
+      if (
+        !db.scheduler_runs.find(
+          (r: Record<string, unknown>) => r.run_type === 'team' && r.status === 'completed'
+        )
+      ) {
+        const now = new Date().toISOString();
+        db.scheduler_runs.push({
+          id: 'run-t',
+          organization_id: orgId,
+          run_type: 'team',
+          status: 'completed',
+          completed_at: now,
+          results: {
+            teamsByDivision: { 'U10 Boys': [{ id: 't1', name: 'Tigers' }] },
+            rosterBalanceByDivision: {
+              'U10 Boys': { summary: { totalPlayers: 15, totalCapacity: 20 } },
+            },
           },
-        },
-        created_at: now,
-      });
-    }
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+          created_at: now,
+        });
+      }
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { mockOrgId: MOCK_ORG_ID }
+  );
   await page.goto('/workflow');
 
   // Force Playwright to visually locate and click the specific stepper buttons
@@ -251,50 +266,56 @@ Given('I have generated teams', async ({ page }) => {
 Given('I have generated a practice schedule', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    db.scheduler_runs = db.scheduler_runs || [];
-    const now = new Date().toISOString();
-    ['team', 'practice', 'game'].forEach((type) => {
-      if (
-        !db.scheduler_runs.find(
-          (r: Record<string, unknown>) => r.run_type === type && r.status === 'completed'
-        )
-      ) {
-        db.scheduler_runs.push({
-          id: `run-${type}`,
-          organization_id: orgId,
-          run_type: type,
-          status: 'completed',
-          created_at: now,
-          completed_at: now,
-          results: { totals: { playersAssigned: 100, teams: 10 } },
-        });
-      }
-    });
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+  await page.evaluate(
+    ({ mockOrgId }) => {
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      db.scheduler_runs = db.scheduler_runs || [];
+      const now = new Date().toISOString();
+      ['team', 'practice', 'game'].forEach((type) => {
+        if (
+          !db.scheduler_runs.find(
+            (r: Record<string, unknown>) => r.run_type === type && r.status === 'completed'
+          )
+        ) {
+          db.scheduler_runs.push({
+            id: `run-${type}`,
+            organization_id: orgId,
+            run_type: type,
+            status: 'completed',
+            created_at: now,
+            completed_at: now,
+            results: { totals: { playersAssigned: 100, teams: 10 } },
+          });
+        }
+      });
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { mockOrgId: MOCK_ORG_ID }
+  );
   await page.reload();
 });
 
 Given('I have generated a game schedule', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    db.scheduler_runs = db.scheduler_runs || [];
-    db.scheduler_runs.push({
-      id: 'run-g',
-      organization_id: orgId,
-      run_type: 'game',
-      status: 'completed',
-      results: { totals: { games: 15 } },
-      created_at: new Date().toISOString(),
-    });
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+  await page.evaluate(
+    ({ mockOrgId }) => {
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      db.scheduler_runs = db.scheduler_runs || [];
+      db.scheduler_runs.push({
+        id: 'run-g',
+        organization_id: orgId,
+        run_type: 'game',
+        status: 'completed',
+        results: { totals: { games: 15 } },
+        created_at: new Date().toISOString(),
+      });
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { mockOrgId: MOCK_ORG_ID }
+  );
   await page.reload();
 });
 
@@ -343,9 +364,9 @@ Given(
     await page.goto('/');
     await waitForMockClient(page);
     await page.evaluate(
-      ({ o1, o2 }) => {
+      ({ o1, o2, mockOrgId }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-        const org1Id = 'org-1';
+        const org1Id = mockOrgId;
         const org2Id = 'org-2';
         db.organizations = [
           { id: org1Id, name: o1, status: 'active', is_onboarded: true },
@@ -382,7 +403,7 @@ Given(
         ];
         sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
       },
-      { o1: org1, o2: org2 }
+      { o1: org1, o2: org2, mockOrgId: MOCK_ORG_ID }
     );
     await page.reload();
   }

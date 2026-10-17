@@ -4,6 +4,7 @@ import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
 import { SYNTHETIC_HEAT_SITES } from '../../helpers/heatSyntheticSites.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -62,38 +63,41 @@ const refusedPoints = new WeakMap<Page, Set<string>>();
 Given('the heat forecast is enabled with the reference venues seeded', async ({ page }) => {
   if (page.url() === 'about:blank') await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate((venues) => {
-    const db = JSON.parse(
-      sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
-    );
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    const org = (db.organizations || []).find((o) => o.id === orgId);
-    if (!org) throw new Error(`seed: organization ${orgId} is not in the mock db`);
-    org.feature_flags = { ...(org.feature_flags || {}), heat_forecast: true };
-    const ids = new Set(venues.map((v) => v.id));
-    db.locations = (db.locations || []).filter((l) => !ids.has(l.id));
-    db.fields = (db.fields || []).filter((f) => !ids.has(f.location_id));
-    for (const v of venues) {
-      db.locations.push({
-        id: v.id,
-        organization_id: orgId,
-        name: v.name,
-        latitude: v.lat,
-        longitude: v.lon,
-        effective_to: null,
-      });
-      db.fields.push({
-        id: `field-${v.id}`,
-        organization_id: orgId,
-        location_id: v.id,
-        name: v.field,
-        surface_type: v.surface,
-        active: true,
-        effective_to: null,
-      });
-    }
-    window.__saveMockDB__(db);
-  }, VENUES);
+  await page.evaluate(
+    ({ venues, mockOrgId }) => {
+      const db = JSON.parse(
+        sessionStorage.getItem('__MOCK_DB__') || JSON.stringify(window.__MOCK_DB__ || {})
+      );
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      const org = (db.organizations || []).find((o) => o.id === orgId);
+      if (!org) throw new Error(`seed: organization ${orgId} is not in the mock db`);
+      org.feature_flags = { ...(org.feature_flags || {}), heat_forecast: true };
+      const ids = new Set(venues.map((v) => v.id));
+      db.locations = (db.locations || []).filter((l) => !ids.has(l.id));
+      db.fields = (db.fields || []).filter((f) => !ids.has(f.location_id));
+      for (const v of venues) {
+        db.locations.push({
+          id: v.id,
+          organization_id: orgId,
+          name: v.name,
+          latitude: v.lat,
+          longitude: v.lon,
+          effective_to: null,
+        });
+        db.fields.push({
+          id: `field-${v.id}`,
+          organization_id: orgId,
+          location_id: v.id,
+          name: v.field,
+          surface_type: v.surface,
+          active: true,
+          effective_to: null,
+        });
+      }
+      window.__saveMockDB__(db);
+    },
+    { venues: VENUES, mockOrgId: MOCK_ORG_ID }
+  );
 });
 
 Given('the NWS API is stubbed with the reference forecast', async ({ page }) => {

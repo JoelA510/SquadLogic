@@ -9,14 +9,14 @@
  * the test runner the way the Vitest witnesses do (`tests/autoSchedulerLock.test.js`),
  * and returns what the solver returns. Nothing here writes or edits a placement.
  *
- * **What is real:** the request schema, the slots' anchoring on the season clock,
- * the team preparation, the lock classification and `runPracticeOptimizer`.
+ * **What is real:** the request schema (all of it: the mock seed's organization
+ * and season ids are UUIDs, `frontend/src/lib/mockSeedIds.js`), the slots'
+ * anchoring on the season clock, the team preparation, the lock classification
+ * and `runPracticeOptimizer`.
  *
  * **What is not exercised here** (the function's HTTP and database wrapper, which
  * the real-backend project of plan item M4.1 covers):
- * - auth, rate limiting, the organization check, and the two ids those reads
- *   use (`organizationId` and `seasonSettingsId` are the mock's `org-1` and
- *   `season-1`, not UUIDs, so they are the two fields not validated);
+ * - auth, rate limiting, and the organization check;
  * - every read `index.ts` makes as the caller: the season's timezone (here the
  *   seeded season's, `SEASON_TIMEZONE`), the season lock (here the page's own
  *   `lockedAssignments`, which `index.ts` only cross-checks against its read),
@@ -38,13 +38,6 @@ import { runPracticeOptimizer } from '../../../supabase/functions/_shared/engine
 /** The seeded season's clock: the value `index.ts` would read from `season_settings`. */
 export const SEASON_TIMEZONE = 'America/Los_Angeles';
 
-// The two ids the mock cannot satisfy (see the header); everything else is the
-// function's own schema.
-const MockIdsInputSchema = AutoSchedulerInputSchema.omit({
-  organizationId: true,
-  seasonSettingsId: true,
-});
-
 /** Every solver call this page made, for a scenario that needs to know it ran. */
 export type EdgeSolverPage = Page & { __edgeSolverRuns?: number };
 
@@ -60,7 +53,9 @@ export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> 
       return;
     }
 
-    const parsed = MockIdsInputSchema.safeParse(JSON.parse(route.request().postData() || '{}'));
+    const parsed = AutoSchedulerInputSchema.safeParse(
+      JSON.parse(route.request().postData() || '{}')
+    );
     if (!parsed.success) {
       // index.ts step 4's answer to the same body.
       await fulfillJson(route, { error: 'Validation failed', details: parsed.error.format() }, 400);

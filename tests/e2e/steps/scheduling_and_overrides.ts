@@ -2,6 +2,7 @@ import { createBdd, type DataTable } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
 import { routeAutoSchedulerToEdgeSolver, type EdgeSolverPage } from './edgeAutoSchedulerRoute.js';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -136,10 +137,10 @@ Given(
   async ({ page }, count: number, program: string) => {
     await waitForMockClient(page);
     await page.evaluate(
-      ({ count, program, adminId, createdAt }) => {
+      ({ count, program, adminId, createdAt, mockOrgId }) => {
         const db = window.__MOCK_DB__ as MockDb | undefined;
         if (!db) throw new Error('mock store not initialised');
-        const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
         // The page offers Generate Teams only while no team run is in hand,
         // so the seeded one is retired (in place: the mock re-merges its seed
         // rows by id).
@@ -174,6 +175,7 @@ Given(
         program,
         adminId: MOCK_ADMIN_ID,
         createdAt: new Date(Date.now() + 60_000).toISOString(),
+        mockOrgId: MOCK_ORG_ID,
       }
     );
   }
@@ -241,10 +243,10 @@ Given(
     }));
     await waitForMockClient(page);
     await page.evaluate(
-      ({ division, teams, createdAt }) => {
+      ({ division, teams, createdAt, mockOrgId }) => {
         const db = window.__MOCK_DB__ as MockDb | undefined;
         if (!db) throw new Error('mock store not initialised');
-        const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
         // The pages schedule the teams of the season's latest team run, so
         // the roster arrives as its only one: the seed's run (which carries
         // no `created_at`, so it would sort first) is retired in place. A
@@ -276,7 +278,12 @@ Given(
         ];
         window.__saveMockDB__(db);
       },
-      { division, teams, createdAt: new Date(Date.now() + 60_000).toISOString() }
+      {
+        division,
+        teams,
+        createdAt: new Date(Date.now() + 60_000).toISOString(),
+        mockOrgId: MOCK_ORG_ID,
+      }
     );
   }
 );
@@ -284,10 +291,10 @@ Given(
 Given('two practice slots on Thursday at 17:00 with room for one team each', async ({ page }) => {
   await waitForMockClient(page);
   await page.evaluate(
-    ({ from, until }) => {
+    ({ from, until, mockOrgId }) => {
       const db = window.__MOCK_DB__ as MockDb | undefined;
       if (!db) throw new Error('mock store not initialised');
-      const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
       const slot = (id: string, fieldId: string) => ({
         id,
         day_of_week: 'thu',
@@ -306,7 +313,7 @@ Given('two practice slots on Thursday at 17:00 with room for one team each', asy
       ];
       window.__saveMockDB__(db);
     },
-    { from: isoFromToday(-30), until: isoFromToday(90) }
+    { from: isoFromToday(-30), until: isoFromToday(90), mockOrgId: MOCK_ORG_ID }
   );
 });
 
@@ -409,10 +416,12 @@ const PILLAR1_CLUB = {
 };
 
 Given('a club whose organization id is a UUID, as in production', async ({ page }) => {
-  // The mock's own organization is `org-1`, and core's slot schema refuses an
-  // `organization_id` that is not a UUID -- so in it, every game slot is
-  // refused and Generate Schedule can never succeed in mock mode. Production
-  // ids are UUIDs; this club is seeded with one, and made the active one.
+  // A club of its own, so the scenario's teams, fields and slots are the only
+  // ones the page schedules (the mock seed's organization has its own). Its id
+  // is a UUID, as in production and in the mock seed (`MOCK_ORG_ID`): core's
+  // slot schema refuses an `organization_id` that is not one. The scenario
+  // "Game Schedule Generation on the mock seed's own organization" runs on the
+  // seed itself.
   await waitForMockClient(page);
   await page.evaluate(
     ({ club, adminId }) => {
@@ -517,6 +526,18 @@ Then(
   }
 );
 
+Then(
+  'the game {string} vs {string} is staged for review on {string}',
+  async ({ page }, home: string, away: string, field: string) => {
+    // The staged list holds what the engine returned and nothing else: no step
+    // in this scenario writes a game, so a row here is the scheduler's.
+    const rows = page.getByTestId('game-schedule-list').locator('tbody tr');
+    await expect(rows).toHaveCount(1, { timeout: 15000 });
+    await expect(rows.first().getByRole('cell').nth(0)).toHaveText(`${home} vs ${away}`);
+    await expect(rows.first().getByRole('cell').nth(1)).toHaveText(field);
+  }
+);
+
 /** The Unscheduled matchups the page lists, each "Week N", "home vs away", reason. */
 const unscheduledCards = (page: Page) =>
   page
@@ -561,9 +582,9 @@ Given(
     const playerCount = parseInt(countStr, 10);
     await waitForMockClient(page);
     await page.evaluate(
-      ({ count, div }) => {
+      ({ count, div, mockOrgId }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-        const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
         db.divisions = db.divisions || [];
         db.divisions.push({ id: `div-${div}`, name: div, organization_id: orgId });
@@ -582,7 +603,7 @@ Given(
         }
         sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
       },
-      { count: playerCount, div: division }
+      { count: playerCount, div: division, mockOrgId: MOCK_ORG_ID }
     );
   }
 );
@@ -594,50 +615,53 @@ Given(
 Given('I am viewing the Team Roster page', async ({ page }) => {
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    const _userId = 'mock-admin-id';
+  await page.evaluate(
+    ({ mockOrgId }) => {
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      const _userId = 'mock-admin-id';
 
-    // CRITICAL FIX: Remove any existing run-1 and re-add with our data
-    // (sessionStorage may not have initialMockData yet, so find() would return undefined)
-    // Use pre-seeded team IDs t1/t2 to match initialMockData
-    // Use index-based player_id '0' to match import-1's first player (Alex Smith)
-    db.scheduler_runs = (db.scheduler_runs || []).filter(
-      (r: Record<string, unknown>) => r.id !== 'run-1'
-    );
-    db.scheduler_runs.push({
-      id: 'run-1',
-      organization_id: orgId,
-      run_type: 'team',
-      status: 'completed',
-      created_at: new Date().toISOString(),
-      completed_at: new Date().toISOString(),
-      results: {
-        teamsByDivision: {
-          'U8 Boys': [
+      // CRITICAL FIX: Remove any existing run-1 and re-add with our data
+      // (sessionStorage may not have initialMockData yet, so find() would return undefined)
+      // Use pre-seeded team IDs t1/t2 to match initialMockData
+      // Use index-based player_id '0' to match import-1's first player (Alex Smith)
+      db.scheduler_runs = (db.scheduler_runs || []).filter(
+        (r: Record<string, unknown>) => r.id !== 'run-1'
+      );
+      db.scheduler_runs.push({
+        id: 'run-1',
+        organization_id: orgId,
+        run_type: 'team',
+        status: 'completed',
+        created_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+        results: {
+          teamsByDivision: {
+            'U8 Boys': [
+              { id: 't1', name: 'Team A', division_id: 'U8 Boys' },
+              { id: 't2', name: 'Team B', division_id: 'U8 Boys' },
+            ],
+          },
+          teams: [
             { id: 't1', name: 'Team A', division_id: 'U8 Boys' },
             { id: 't2', name: 'Team B', division_id: 'U8 Boys' },
           ],
-        },
-        teams: [
-          { id: 't1', name: 'Team A', division_id: 'U8 Boys' },
-          { id: 't2', name: 'Team B', division_id: 'U8 Boys' },
-        ],
-        team_players: [{ team_id: 't1', player_id: '0' }],
-        rosterBalanceByDivision: {
-          'U8 Boys': {
-            summary: { totalPlayers: 1, totalCapacity: 12, averageFillRate: 0.08 },
-            teamStats: [],
+          team_players: [{ team_id: 't1', player_id: '0' }],
+          rosterBalanceByDivision: {
+            'U8 Boys': {
+              summary: { totalPlayers: 1, totalCapacity: 12, averageFillRate: 0.08 },
+              teamStats: [],
+            },
           },
         },
-      },
-    });
+      });
 
-    // No extra import needed — import-1 from initialMockData provides player data
+      // No extra import needed — import-1 from initialMockData provides player data
 
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { mockOrgId: MOCK_ORG_ID }
+  );
   await page.goto('/teams');
   // Wait for the roster data to load before entering edit mode
   await page.waitForTimeout(1000);
@@ -712,102 +736,105 @@ Given('the automated schedule has been generated', async ({ page }) => {
   await mockPracticeSchedulerRoutes(page);
   // ERADICATE NOISE: Wipe the specific tables first to ensure no competing hardcoded runs exist
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+  await page.evaluate(
+    ({ mockOrgId, mockSeasonId }) => {
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
-    db.scheduler_runs = [];
-    db.practice_assignments = [];
+      db.scheduler_runs = [];
+      db.practice_assignments = [];
 
-    // The grid's read is a SEASON read (org + season through teams ->
-    // divisions), so Team A's division belongs to the active season, as in
-    // 'a practice schedule has been generated'.
-    const storedSeason = localStorage.getItem('squadlogic-current-season') || 'Fall 2026';
-    const activeSeason = (db.season_settings || []).find(
-      (s: Record<string, unknown>) =>
-        s.organization_id === orgId && (s.id === storedSeason || s.name === storedSeason)
-    );
-    db.divisions = [
-      ...(db.divisions || []).filter((d: Record<string, unknown>) => d.id !== 'div-1'),
-      {
-        id: 'div-1',
-        name: 'U10',
+      // The grid's read is a SEASON read (org + season through teams ->
+      // divisions), so Team A's division belongs to the active season, as in
+      // 'a practice schedule has been generated'.
+      const storedSeason = localStorage.getItem('squadlogic-current-season') || 'Fall 2026';
+      const activeSeason = (db.season_settings || []).find(
+        (s: Record<string, unknown>) =>
+          s.organization_id === orgId && (s.id === storedSeason || s.name === storedSeason)
+      );
+      db.divisions = [
+        ...(db.divisions || []).filter((d: Record<string, unknown>) => d.id !== 'div-1'),
+        {
+          id: 'div-1',
+          name: 'U10',
+          organization_id: orgId,
+          season_settings_id: activeSeason?.id || mockSeasonId,
+        },
+      ];
+
+      // CRITICAL FIX: Add organization_id so the hooks don't filter these out
+      db.teams = [{ id: 'team-a', name: 'Team A', division_id: 'div-1', organization_id: orgId }];
+      db.practice_slots = [
+        {
+          id: 'slot-1',
+          day_of_week: 'mon',
+          start_time: '17:00',
+          end_time: '18:30',
+          field_id: 'field-1',
+          organization_id: orgId,
+        },
+      ];
+
+      const futureDate = new Date();
+      futureDate.setFullYear(futureDate.getFullYear() + 1);
+      const timestamp = futureDate.toISOString();
+
+      // The Override Panel needs a TEAM run to populate the Team dropdown
+      db.scheduler_runs.push({
+        id: 'active-team-run-id',
         organization_id: orgId,
-        season_settings_id: activeSeason?.id || 'season-1',
-      },
-    ];
+        run_type: 'team',
+        status: 'completed',
+        results: {
+          teamsByDivision: { 'div-1': [{ id: 'team-a', name: 'Team A', division: 'div-1' }] },
+        },
+        created_at: timestamp,
+        completed_at: timestamp,
+      });
 
-    // CRITICAL FIX: Add organization_id so the hooks don't filter these out
-    db.teams = [{ id: 'team-a', name: 'Team A', division_id: 'div-1', organization_id: orgId }];
-    db.practice_slots = [
-      {
-        id: 'slot-1',
-        day_of_week: 'mon',
-        start_time: '17:00',
-        end_time: '18:30',
-        field_id: 'field-1',
+      // The Override Panel needs a PRACTICE run to populate the Slot dropdown
+      db.scheduler_runs.push({
+        id: 'active-practice-run-id',
         organization_id: orgId,
-      },
-    ];
+        run_type: 'practice',
+        status: 'completed',
+        results: {
+          assignments: [{ team_id: 'team-a', slot_id: 'slot-1', source: 'auto' }],
+          // The override panel needs baseSlotDistribution to populate the slot dropdown
+          baseSlotDistribution: [
+            { baseSlotId: 'slot-1', day: 'Monday', totalCapacity: 10, totalAssigned: 1 },
+          ],
+        },
+        created_at: timestamp,
+        completed_at: timestamp,
+      });
 
-    const futureDate = new Date();
-    futureDate.setFullYear(futureDate.getFullYear() + 1);
-    const timestamp = futureDate.toISOString();
+      db.practice_assignments.push({
+        id: 'assign-team-a',
+        // CLAUDE.md §8 rule 1, and the columns a real persisted row carries: the
+        // grid reads the season's current rows (org + season through teams ->
+        // divisions), not the latest run's, so a row without them is not shown.
+        organization_id: orgId,
+        run_id: 'active-practice-run-id',
+        team_id: 'team-a',
+        slot_id: 'slot-1',
+        practice_slot_id: 'slot-1',
+        effective_date_range: '[2025-01-01,2026-01-01)',
+        assigned_via: 'auto',
+        source: 'auto',
+        teams: { name: 'Team A', divisions: { name: 'U10' } },
+        practiceSlots: {
+          dayOfWeek: 'mon',
+          startTime: '17:00',
+          endTime: '18:30',
+          fields: { name: 'Main Field' },
+        },
+      });
 
-    // The Override Panel needs a TEAM run to populate the Team dropdown
-    db.scheduler_runs.push({
-      id: 'active-team-run-id',
-      organization_id: orgId,
-      run_type: 'team',
-      status: 'completed',
-      results: {
-        teamsByDivision: { 'div-1': [{ id: 'team-a', name: 'Team A', division: 'div-1' }] },
-      },
-      created_at: timestamp,
-      completed_at: timestamp,
-    });
-
-    // The Override Panel needs a PRACTICE run to populate the Slot dropdown
-    db.scheduler_runs.push({
-      id: 'active-practice-run-id',
-      organization_id: orgId,
-      run_type: 'practice',
-      status: 'completed',
-      results: {
-        assignments: [{ team_id: 'team-a', slot_id: 'slot-1', source: 'auto' }],
-        // The override panel needs baseSlotDistribution to populate the slot dropdown
-        baseSlotDistribution: [
-          { baseSlotId: 'slot-1', day: 'Monday', totalCapacity: 10, totalAssigned: 1 },
-        ],
-      },
-      created_at: timestamp,
-      completed_at: timestamp,
-    });
-
-    db.practice_assignments.push({
-      id: 'assign-team-a',
-      // CLAUDE.md §8 rule 1, and the columns a real persisted row carries: the
-      // grid reads the season's current rows (org + season through teams ->
-      // divisions), not the latest run's, so a row without them is not shown.
-      organization_id: orgId,
-      run_id: 'active-practice-run-id',
-      team_id: 'team-a',
-      slot_id: 'slot-1',
-      practice_slot_id: 'slot-1',
-      effective_date_range: '[2025-01-01,2026-01-01)',
-      assigned_via: 'auto',
-      source: 'auto',
-      teams: { name: 'Team A', divisions: { name: 'U10' } },
-      practiceSlots: {
-        dayOfWeek: 'mon',
-        startTime: '17:00',
-        endTime: '18:30',
-        fields: { name: 'Main Field' },
-      },
-    });
-
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { mockOrgId: MOCK_ORG_ID, mockSeasonId: MOCK_SEASON_ID }
+  );
 });
 
 When('I manually assign a team to an alternative practice slot', async ({ page }) => {
@@ -856,162 +883,165 @@ Given('I am on the Game Scheduling page viewing an identified conflict', async (
 
   // Step 2: Seed the mock DB with conflict data while ON the page
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+  await page.evaluate(
+    ({ mockOrgId }) => {
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
-    // Ensure we have enough teams with coach assignments
-    db.teams = db.teams || [];
-    if (!db.teams.find((t: Record<string, unknown>) => t.id === 'team-gc1')) {
-      db.teams.push(
-        {
-          id: 'team-gc1',
-          name: 'Conflict A',
-          division_id: 'u8-div-id',
-          coach_id: 'coach-gc1',
-          organization_id: orgId,
-        },
-        {
-          id: 'team-gc2',
-          name: 'Conflict B',
-          division_id: 'u8-div-id',
-          coach_id: 'coach-gc2',
-          organization_id: orgId,
-        },
-        {
-          id: 'team-gc3',
-          name: 'Conflict C',
-          division_id: 'u8-div-id',
-          coach_id: 'coach-gc3',
-          organization_id: orgId,
-        },
-        {
-          id: 'team-gc4',
-          name: 'Conflict D',
-          division_id: 'u8-div-id',
-          coach_id: 'coach-gc4',
-          organization_id: orgId,
-        }
-      );
-    }
-
-    // Ensure two fields exist
-    db.fields = db.fields || [];
-    if (!db.fields.find((f: Record<string, unknown>) => f.id === 'v1')) {
-      db.fields.push({
-        id: 'v1',
-        name: 'Field 1',
-        organization_id: orgId,
-        active: true,
-        surface_type: 'Grass',
-        size: '11v11',
-      });
-    }
-    if (!db.fields.find((f: Record<string, unknown>) => f.id === 'v2')) {
-      db.fields.push({
-        id: 'v2',
-        name: 'Field 2',
-        organization_id: orgId,
-        active: true,
-        surface_type: 'Turf',
-        size: '7v7',
-      });
-    }
-
-    // Wipe and re-seed to avoid stale data from prior tests
-    db.game_assignments = [
-      {
-        id: 'ga-conflict-1',
-        run_id: 'run-game-conflict',
-        slot_id: 'gs-1',
-        field_id: 'v1',
-        home_team_id: 'team-gc1',
-        away_team_id: 'team-gc2',
-        start: '2026-04-04T08:00:00Z',
-        end: '2026-04-04T09:00:00Z',
-        week_index: 1,
-        division: 'U8 Coed',
-        assignment_source: 'auto',
-      },
-      {
-        id: 'ga-conflict-2',
-        run_id: 'run-game-conflict',
-        slot_id: 'gs-1',
-        field_id: 'v1',
-        home_team_id: 'team-gc3',
-        away_team_id: 'team-gc4',
-        start: '2026-04-04T08:00:00Z',
-        end: '2026-04-04T09:00:00Z',
-        week_index: 1,
-        division: 'U8 Coed',
-        assignment_source: 'auto',
-      },
-    ];
-
-    db.game_slots = [
-      {
-        id: 'gs-1',
-        field_id: 'v1',
-        start: '2026-04-04T08:00:00Z',
-        end: '2026-04-04T09:00:00Z',
-        capacity: 1,
-        organization_id: orgId,
-      },
-      {
-        id: 'gs-2',
-        field_id: 'v1',
-        start: '2026-04-04T09:30:00Z',
-        end: '2026-04-04T10:30:00Z',
-        capacity: 1,
-        organization_id: orgId,
-      },
-      {
-        id: 'gs-3',
-        field_id: 'v2',
-        start: '2026-04-04T08:00:00Z',
-        end: '2026-04-04T09:00:00Z',
-        capacity: 1,
-        organization_id: orgId,
-      },
-      {
-        id: 'gs-4',
-        field_id: 'v2',
-        start: '2026-04-04T09:30:00Z',
-        end: '2026-04-04T10:30:00Z',
-        capacity: 1,
-        organization_id: orgId,
-      },
-    ];
-
-    // Wipe scheduler_runs and inject ONLY our conflict run with a future timestamp
-    // to guarantee it wins the ORDER BY completed_at DESC query
-    const futureDate = new Date();
-    futureDate.setFullYear(futureDate.getFullYear() + 1);
-    const timestamp = futureDate.toISOString();
-    db.scheduler_runs = (db.scheduler_runs || []).filter(
-      (r: Record<string, unknown>) => r.run_type !== 'game'
-    );
-    db.scheduler_runs.push({
-      id: 'run-game-conflict',
-      organization_id: orgId,
-      run_type: 'game',
-      status: 'completed',
-      results: {
-        summary: { scheduledRate: 1.0, unscheduledMatchups: 0 },
-        warnings: [
+      // Ensure we have enough teams with coach assignments
+      db.teams = db.teams || [];
+      if (!db.teams.find((t: Record<string, unknown>) => t.id === 'team-gc1')) {
+        db.teams.push(
           {
-            type: 'field-overlap',
-            message: 'Field 1 has two games at the same kickoff time.',
-            details: { conflicts: [{ id: 'ga-conflict-1' }, { id: 'ga-conflict-2' }] },
+            id: 'team-gc1',
+            name: 'Conflict A',
+            division_id: 'u8-div-id',
+            coach_id: 'coach-gc1',
+            organization_id: orgId,
           },
-        ],
-      },
-      created_at: timestamp,
-      completed_at: timestamp,
-    });
+          {
+            id: 'team-gc2',
+            name: 'Conflict B',
+            division_id: 'u8-div-id',
+            coach_id: 'coach-gc2',
+            organization_id: orgId,
+          },
+          {
+            id: 'team-gc3',
+            name: 'Conflict C',
+            division_id: 'u8-div-id',
+            coach_id: 'coach-gc3',
+            organization_id: orgId,
+          },
+          {
+            id: 'team-gc4',
+            name: 'Conflict D',
+            division_id: 'u8-div-id',
+            coach_id: 'coach-gc4',
+            organization_id: orgId,
+          }
+        );
+      }
 
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+      // Ensure two fields exist
+      db.fields = db.fields || [];
+      if (!db.fields.find((f: Record<string, unknown>) => f.id === 'v1')) {
+        db.fields.push({
+          id: 'v1',
+          name: 'Field 1',
+          organization_id: orgId,
+          active: true,
+          surface_type: 'Grass',
+          size: '11v11',
+        });
+      }
+      if (!db.fields.find((f: Record<string, unknown>) => f.id === 'v2')) {
+        db.fields.push({
+          id: 'v2',
+          name: 'Field 2',
+          organization_id: orgId,
+          active: true,
+          surface_type: 'Turf',
+          size: '7v7',
+        });
+      }
+
+      // Wipe and re-seed to avoid stale data from prior tests
+      db.game_assignments = [
+        {
+          id: 'ga-conflict-1',
+          run_id: 'run-game-conflict',
+          slot_id: 'gs-1',
+          field_id: 'v1',
+          home_team_id: 'team-gc1',
+          away_team_id: 'team-gc2',
+          start: '2026-04-04T08:00:00Z',
+          end: '2026-04-04T09:00:00Z',
+          week_index: 1,
+          division: 'U8 Coed',
+          assignment_source: 'auto',
+        },
+        {
+          id: 'ga-conflict-2',
+          run_id: 'run-game-conflict',
+          slot_id: 'gs-1',
+          field_id: 'v1',
+          home_team_id: 'team-gc3',
+          away_team_id: 'team-gc4',
+          start: '2026-04-04T08:00:00Z',
+          end: '2026-04-04T09:00:00Z',
+          week_index: 1,
+          division: 'U8 Coed',
+          assignment_source: 'auto',
+        },
+      ];
+
+      db.game_slots = [
+        {
+          id: 'gs-1',
+          field_id: 'v1',
+          start: '2026-04-04T08:00:00Z',
+          end: '2026-04-04T09:00:00Z',
+          capacity: 1,
+          organization_id: orgId,
+        },
+        {
+          id: 'gs-2',
+          field_id: 'v1',
+          start: '2026-04-04T09:30:00Z',
+          end: '2026-04-04T10:30:00Z',
+          capacity: 1,
+          organization_id: orgId,
+        },
+        {
+          id: 'gs-3',
+          field_id: 'v2',
+          start: '2026-04-04T08:00:00Z',
+          end: '2026-04-04T09:00:00Z',
+          capacity: 1,
+          organization_id: orgId,
+        },
+        {
+          id: 'gs-4',
+          field_id: 'v2',
+          start: '2026-04-04T09:30:00Z',
+          end: '2026-04-04T10:30:00Z',
+          capacity: 1,
+          organization_id: orgId,
+        },
+      ];
+
+      // Wipe scheduler_runs and inject ONLY our conflict run with a future timestamp
+      // to guarantee it wins the ORDER BY completed_at DESC query
+      const futureDate = new Date();
+      futureDate.setFullYear(futureDate.getFullYear() + 1);
+      const timestamp = futureDate.toISOString();
+      db.scheduler_runs = (db.scheduler_runs || []).filter(
+        (r: Record<string, unknown>) => r.run_type !== 'game'
+      );
+      db.scheduler_runs.push({
+        id: 'run-game-conflict',
+        organization_id: orgId,
+        run_type: 'game',
+        status: 'completed',
+        results: {
+          summary: { scheduledRate: 1.0, unscheduledMatchups: 0 },
+          warnings: [
+            {
+              type: 'field-overlap',
+              message: 'Field 1 has two games at the same kickoff time.',
+              details: { conflicts: [{ id: 'ga-conflict-1' }, { id: 'ga-conflict-2' }] },
+            },
+          ],
+        },
+        created_at: timestamp,
+        completed_at: timestamp,
+      });
+
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { mockOrgId: MOCK_ORG_ID }
+  );
 
   // Step 3: Reload so React re-mounts with the fully seeded mock data
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -1086,80 +1116,83 @@ Given('a practice schedule has been generated', async ({ page }) => {
   await mockPracticeSchedulerRoutes(page);
   // ERADICATE NOISE: Wipe the specific tables first to ensure no competing hardcoded runs exist
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    const storedSeason = localStorage.getItem('squadlogic-current-season') || 'Fall 2026';
-    const activeSeason = (db.season_settings || []).find(
-      (s: Record<string, unknown>) =>
-        s.organization_id === orgId && (s.id === storedSeason || s.name === storedSeason)
-    );
-    const seasonId = activeSeason?.id || 'season-1';
+  await page.evaluate(
+    ({ mockOrgId, mockSeasonId }) => {
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      const storedSeason = localStorage.getItem('squadlogic-current-season') || 'Fall 2026';
+      const activeSeason = (db.season_settings || []).find(
+        (s: Record<string, unknown>) =>
+          s.organization_id === orgId && (s.id === storedSeason || s.name === storedSeason)
+      );
+      const seasonId = activeSeason?.id || mockSeasonId;
 
-    // Clear out existing runs and assignments to ensure our injected one is the only "Latest"
-    db.scheduler_runs = [];
-    db.practice_assignments = [];
+      // Clear out existing runs and assignments to ensure our injected one is the only "Latest"
+      db.scheduler_runs = [];
+      db.practice_assignments = [];
 
-    // 1. Seed base tables. The team's division belongs to the active season:
-    //    the page's locked set is a SEASON read (org + season through
-    //    teams -> divisions), exactly as the auto-scheduler loads it.
-    db.divisions = [
-      ...(db.divisions || []).filter((d: Record<string, unknown>) => d.id !== 'div-1'),
-      { id: 'div-1', name: 'U10', organization_id: orgId, season_settings_id: seasonId },
-    ];
-    db.teams = [{ id: 'team-a', name: 'Team A', division_id: 'div-1', organization_id: orgId }];
-    db.practice_slots = [
-      {
-        id: 'slot-1',
-        day_of_week: 'mon',
-        start_time: '17:00',
-        end_time: '18:30',
-        field_id: 'field-1',
+      // 1. Seed base tables. The team's division belongs to the active season:
+      //    the page's locked set is a SEASON read (org + season through
+      //    teams -> divisions), exactly as the auto-scheduler loads it.
+      db.divisions = [
+        ...(db.divisions || []).filter((d: Record<string, unknown>) => d.id !== 'div-1'),
+        { id: 'div-1', name: 'U10', organization_id: orgId, season_settings_id: seasonId },
+      ];
+      db.teams = [{ id: 'team-a', name: 'Team A', division_id: 'div-1', organization_id: orgId }];
+      db.practice_slots = [
+        {
+          id: 'slot-1',
+          day_of_week: 'mon',
+          start_time: '17:00',
+          end_time: '18:30',
+          field_id: 'field-1',
+          organization_id: orgId,
+        },
+      ];
+
+      // 2. Inject the run with a massive future timestamp to guarantee it wins any sort
+      const futureDate = new Date();
+      futureDate.setFullYear(futureDate.getFullYear() + 1);
+      const timestamp = futureDate.toISOString();
+
+      db.scheduler_runs.push({
+        id: 'active-run-id',
         organization_id: orgId,
-      },
-    ];
+        season_id: seasonId,
+        season_settings_id: seasonId,
+        run_type: 'practice',
+        status: 'completed',
+        results: { assignments: [{ team_id: 'team-a', slot_id: 'slot-1', source: 'auto' }] },
+        created_at: timestamp,
+        completed_at: timestamp,
+      });
 
-    // 2. Inject the run with a massive future timestamp to guarantee it wins any sort
-    const futureDate = new Date();
-    futureDate.setFullYear(futureDate.getFullYear() + 1);
-    const timestamp = futureDate.toISOString();
+      // 3. Link the assignment directly to that future-dated run
+      db.practice_assignments.push({
+        id: 'assign-team-a',
+        // CLAUDE.md §8 rule 1, and the columns a real persisted row carries.
+        organization_id: orgId,
+        run_id: 'active-run-id',
+        team_id: 'team-a',
+        slot_id: 'slot-1',
+        practice_slot_id: 'slot-1',
+        effective_date_range: '[2025-01-01,2026-01-01)',
+        assigned_via: 'auto',
+        source: 'auto',
+        // Hydrate objects to bypass any mock client join failures
+        teams: { name: 'Team A', divisions: { name: 'U10' } },
+        practiceSlots: {
+          dayOfWeek: 'mon',
+          startTime: '17:00',
+          endTime: '18:30',
+          fields: { name: 'Main Field' },
+        },
+      });
 
-    db.scheduler_runs.push({
-      id: 'active-run-id',
-      organization_id: orgId,
-      season_id: seasonId,
-      season_settings_id: seasonId,
-      run_type: 'practice',
-      status: 'completed',
-      results: { assignments: [{ team_id: 'team-a', slot_id: 'slot-1', source: 'auto' }] },
-      created_at: timestamp,
-      completed_at: timestamp,
-    });
-
-    // 3. Link the assignment directly to that future-dated run
-    db.practice_assignments.push({
-      id: 'assign-team-a',
-      // CLAUDE.md §8 rule 1, and the columns a real persisted row carries.
-      organization_id: orgId,
-      run_id: 'active-run-id',
-      team_id: 'team-a',
-      slot_id: 'slot-1',
-      practice_slot_id: 'slot-1',
-      effective_date_range: '[2025-01-01,2026-01-01)',
-      assigned_via: 'auto',
-      source: 'auto',
-      // Hydrate objects to bypass any mock client join failures
-      teams: { name: 'Team A', divisions: { name: 'U10' } },
-      practiceSlots: {
-        dayOfWeek: 'mon',
-        startTime: '17:00',
-        endTime: '18:30',
-        fields: { name: 'Main Field' },
-      },
-    });
-
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { mockOrgId: MOCK_ORG_ID, mockSeasonId: MOCK_SEASON_ID }
+  );
 });
 
 Given('I am on the Practice Scheduling page', async ({ page }) => {
@@ -1212,46 +1245,49 @@ Given(
     // "Today" is fixed (noon in New York on 2026-10-20), so the override's
     // close-on-yesterday and start-today dates are known (#546).
     await page.clock.setFixedTime(new Date('2026-10-20T16:00:00Z'));
-    await page.evaluate((name) => {
-      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-      const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-      db.teams = [
-        ...(db.teams || []).filter((t: Record<string, unknown>) => t.id !== 't1'),
-        { id: 't1', name, division_id: 'div-1', organization_id: orgId },
-      ];
-      db.practice_assignments = [
-        ...(db.practice_assignments || []).filter(
-          (a: Record<string, unknown>) => a.id !== 'assign-roster-team-a'
-        ),
-        {
-          id: 'assign-roster-team-a',
-          organization_id: orgId,
-          run_id: 'active-practice-run-id',
-          team_id: 't1',
-          slot_id: 'slot-1',
-          practice_slot_id: 'slot-1',
-          effective_date_range: '[2026-09-07,2026-12-01)',
-          assigned_via: 'auto',
-          source: 'auto',
-        },
-      ];
-      db.practice_slots = [
-        ...(db.practice_slots || []).filter((s: Record<string, unknown>) => s.id !== 'slot-2'),
-        {
-          id: 'slot-2',
-          day_of_week: 'wed',
-          start_time: '18:00',
-          end_time: '19:00',
-          valid_from: '2026-09-07',
-          valid_until: '2026-11-30',
-          field_id: 'field-1',
-          organization_id: orgId,
-        },
-      ];
-      // The sanctioned producer (tests/mockDeleteTombstones.test.js), not a
-      // direct sessionStorage write.
-      window.__saveMockDB__(db);
-    }, teamName);
+    await page.evaluate(
+      ({ name, mockOrgId }) => {
+        const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+        db.teams = [
+          ...(db.teams || []).filter((t: Record<string, unknown>) => t.id !== 't1'),
+          { id: 't1', name, division_id: 'div-1', organization_id: orgId },
+        ];
+        db.practice_assignments = [
+          ...(db.practice_assignments || []).filter(
+            (a: Record<string, unknown>) => a.id !== 'assign-roster-team-a'
+          ),
+          {
+            id: 'assign-roster-team-a',
+            organization_id: orgId,
+            run_id: 'active-practice-run-id',
+            team_id: 't1',
+            slot_id: 'slot-1',
+            practice_slot_id: 'slot-1',
+            effective_date_range: '[2026-09-07,2026-12-01)',
+            assigned_via: 'auto',
+            source: 'auto',
+          },
+        ];
+        db.practice_slots = [
+          ...(db.practice_slots || []).filter((s: Record<string, unknown>) => s.id !== 'slot-2'),
+          {
+            id: 'slot-2',
+            day_of_week: 'wed',
+            start_time: '18:00',
+            end_time: '19:00',
+            valid_from: '2026-09-07',
+            valid_until: '2026-11-30',
+            field_id: 'field-1',
+            organization_id: orgId,
+          },
+        ];
+        // The sanctioned producer (tests/mockDeleteTombstones.test.js), not a
+        // direct sessionStorage write.
+        window.__saveMockDB__(db);
+      },
+      { name: teamName, mockOrgId: MOCK_ORG_ID }
+    );
   }
 );
 

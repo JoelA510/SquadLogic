@@ -56,3 +56,11 @@ Feature: Pillar 1 - The Engine (Scheduling & Team Generation)
     And the "Lions" vs "Wolves" matchup is refused because one coach coaches both teams
     And a week 1 matchup with "Lions" or "Wolves" is refused for a coach scheduling conflict
     And a week 2 matchup is refused because its one slot is already taken
+
+  Scenario: Game Schedule Generation on the mock seed's own organization
+    # The mock seed's organization and season ids are UUIDs (MOCK_ORG_ID,
+    # MOCK_SEASON_ID), as core's slot schema requires; with non-UUID ids every
+    # seeded game slot was refused and this run never succeeded.
+    When I press "Generate Schedule" on the Game Scheduling page
+    Then the game "Team A" vs "Team B" is staged for review on "Field 1"
+    And 1 of the 1 round-robin matchups are scheduled

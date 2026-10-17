@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -10,7 +11,7 @@ const { Given, When, Then } = createBdd();
 async function syncPlayerToImports(page: Page, player: Record<string, unknown>) {
   await waitForMockClient(page);
   await page.evaluate(
-    ({ p }) => {
+    ({ p, mockOrgId }) => {
       const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
       db.imports = db.imports || [];
       let playerImport = db.imports.find(
@@ -18,7 +19,7 @@ async function syncPlayerToImports(page: Page, player: Record<string, unknown>) 
       );
 
       if (!playerImport) {
-        const activeOrg = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        const activeOrg = localStorage.getItem('squadlogic_active_org') || mockOrgId;
         playerImport = {
           id: 'import-players-1',
           import_type: 'players',
@@ -51,7 +52,7 @@ async function syncPlayerToImports(page: Page, player: Record<string, unknown>) 
 
       sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
     },
-    { p: player }
+    { p: player, mockOrgId: MOCK_ORG_ID }
   );
 }
 
@@ -61,52 +62,55 @@ async function syncPlayerToImports(page: Page, player: Record<string, unknown>) 
 
 Given('teams have been generated for the current season', async ({ page }) => {
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+  await page.evaluate(
+    ({ mockOrgId }) => {
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
-    // CRITICAL: Use pre-seeded run-1 teams (t1='Team A', t2='Team B') rather than
-    // creating new teams. The mock client's mergeSource always merges initialMockData
-    // back in on page reload, so we can't remove pre-seeded records — we must work with them.
-    // Update run-1 to ensure it has team_players and created_at for proper sorting.
-    db.scheduler_runs = db.scheduler_runs || [];
-    const existingRun = db.scheduler_runs.find((r: Record<string, unknown>) => r.id === 'run-1');
-    if (existingRun) {
-      existingRun.created_at = new Date().toISOString();
-      existingRun.completed_at = new Date().toISOString();
-      existingRun.results = existingRun.results || {};
-      existingRun.results.team_players = existingRun.results.team_players || [];
-    } else {
-      db.scheduler_runs.push({
-        id: 'run-1',
-        organization_id: orgId,
-        run_type: 'team',
-        status: 'completed',
-        created_at: new Date().toISOString(),
-        completed_at: new Date().toISOString(),
-        results: {
-          teamsByDivision: {
-            U10: [
-              { id: 't1', name: 'Team A', division_id: 'U10', organization_id: orgId },
-              { id: 't2', name: 'Team B', division_id: 'U10', organization_id: orgId },
-            ],
-          },
-          team_players: [],
-          rosterBalanceByDivision: {
-            U10: {
-              summary: { totalPlayers: 20, totalCapacity: 24, averageFillRate: 0.8 },
-              teamStats: [],
+      // CRITICAL: Use pre-seeded run-1 teams (t1='Team A', t2='Team B') rather than
+      // creating new teams. The mock client's mergeSource always merges initialMockData
+      // back in on page reload, so we can't remove pre-seeded records — we must work with them.
+      // Update run-1 to ensure it has team_players and created_at for proper sorting.
+      db.scheduler_runs = db.scheduler_runs || [];
+      const existingRun = db.scheduler_runs.find((r: Record<string, unknown>) => r.id === 'run-1');
+      if (existingRun) {
+        existingRun.created_at = new Date().toISOString();
+        existingRun.completed_at = new Date().toISOString();
+        existingRun.results = existingRun.results || {};
+        existingRun.results.team_players = existingRun.results.team_players || [];
+      } else {
+        db.scheduler_runs.push({
+          id: 'run-1',
+          organization_id: orgId,
+          run_type: 'team',
+          status: 'completed',
+          created_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+          results: {
+            teamsByDivision: {
+              U10: [
+                { id: 't1', name: 'Team A', division_id: 'U10', organization_id: orgId },
+                { id: 't2', name: 'Team B', division_id: 'U10', organization_id: orgId },
+              ],
+            },
+            team_players: [],
+            rosterBalanceByDivision: {
+              U10: {
+                summary: { totalPlayers: 20, totalCapacity: 24, averageFillRate: 0.8 },
+                teamStats: [],
+              },
+            },
+            coachCoverageByDivision: {
+              U10: { totalTeams: 2, teamsWithCoach: 2, coverageRate: 1.0 },
             },
           },
-          coachCoverageByDivision: {
-            U10: { totalTeams: 2, teamsWithCoach: 2, coverageRate: 1.0 },
-          },
-        },
-      });
-    }
+        });
+      }
 
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { mockOrgId: MOCK_ORG_ID }
+  );
 });
 
 Given('all players are correctly assigned to eligible teams', async ({ page }) => {
@@ -126,9 +130,9 @@ Given(
   async ({ page }, p1: string, p2: string) => {
     await waitForMockClient(page);
     await page.evaluate(
-      ({ name1, name2 }) => {
+      ({ name1, name2, mockOrgId }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-        const _orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        const _orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
         const id1 = `player-${name1.toLowerCase()}`;
         const id2 = `player-${name2.toLowerCase()}`;
@@ -148,7 +152,7 @@ Given(
 
         sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
       },
-      { name1: p1, name2: p2 }
+      { name1: p1, name2: p2, mockOrgId: MOCK_ORG_ID }
     );
 
     // Sync to imports for hydration — buddyId must be mutual
@@ -268,9 +272,9 @@ Given(
   async ({ page }, player: string, age: number, team: string) => {
     await waitForMockClient(page);
     await page.evaluate(
-      ({ playerName, playerAge, teamName }) => {
+      ({ playerName, playerAge, teamName, mockOrgId }) => {
         const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-        const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+        const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
         const playerId = `player-${playerName.replace(/\s+/g, '-').toLowerCase()}`;
         const teamId = teamName === 'Team Alpha' ? 'team-alpha' : 'team-beta';
@@ -290,7 +294,7 @@ Given(
 
         sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
       },
-      { playerName: player, playerAge: age, teamName: team }
+      { playerName: player, playerAge: age, teamName: team, mockOrgId: MOCK_ORG_ID }
     );
   }
 );

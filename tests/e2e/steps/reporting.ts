@@ -1,68 +1,75 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
 /**
- * Ensures localStorage points to org-1 so OrganizationContext resolves
+ * Ensures localStorage points to the mock seed's organization (MOCK_ORG_ID) so OrganizationContext resolves
  * to the org that has data in initialMockData. Must be called BEFORE
  * any page.goto() / page.reload() so the fresh context picks it up.
  */
-const pinToOrg1 = async (page: Page) => {
-  await page.evaluate(() => {
-    localStorage.setItem('squadlogic_active_org', 'org-1');
-  });
+const pinToMockOrg = async (page: Page) => {
+  await page.evaluate(
+    ({ mockOrgId }) => {
+      localStorage.setItem('squadlogic_active_org', mockOrgId);
+    },
+    { mockOrgId: MOCK_ORG_ID }
+  );
 };
 
 // ─── Admin Dashboard Steps ──────────────────────────────────────────
 
 Given('the admin views the reporting dashboard', async ({ page }) => {
-  // Pin to org-1 so the next page load resolves to the org with data in initialMockData
-  await pinToOrg1(page);
+  // Pin to the mock seed's org so the next page load resolves to the org with data in initialMockData
+  await pinToMockOrg(page);
 
   // Seed data the EnterpriseDashboard needs: view_org_metrics, players, view_compliance_stats
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
+  await page.evaluate(
+    ({ mockOrgId }) => {
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
 
-    db.view_org_metrics = db.view_org_metrics || [];
-    if (!db.view_org_metrics.find((m: Record<string, unknown>) => m.organization_id === orgId)) {
-      db.view_org_metrics.push({
-        organization_id: orgId,
-        total_teams: 6,
-        total_users: 15,
-      });
-    }
-
-    db.players = db.players || [];
-    if (!db.players.find((p: Record<string, unknown>) => p.organization_id === orgId)) {
-      for (let i = 0; i < 5; i++) {
-        db.players.push({
-          id: `player-rpt-${i}`,
+      db.view_org_metrics = db.view_org_metrics || [];
+      if (!db.view_org_metrics.find((m: Record<string, unknown>) => m.organization_id === orgId)) {
+        db.view_org_metrics.push({
           organization_id: orgId,
-          team_id: `t${i % 3}`,
-          division: 'U10',
-          custom_attributes: { skill_level: ['beginner', 'intermediate', 'advanced'][i % 3] },
+          total_teams: 6,
+          total_users: 15,
         });
       }
-    }
 
-    db.view_compliance_stats = db.view_compliance_stats || [];
-    if (
-      !db.view_compliance_stats.find((c: Record<string, unknown>) => c.organization_id === orgId)
-    ) {
-      db.view_compliance_stats.push({
-        organization_id: orgId,
-        form_title: 'Fall Registration',
-        total_registrations: 45,
-        medical_cleared: 38,
-      });
-    }
+      db.players = db.players || [];
+      if (!db.players.find((p: Record<string, unknown>) => p.organization_id === orgId)) {
+        for (let i = 0; i < 5; i++) {
+          db.players.push({
+            id: `player-rpt-${i}`,
+            organization_id: orgId,
+            team_id: `t${i % 3}`,
+            division: 'U10',
+            custom_attributes: { skill_level: ['beginner', 'intermediate', 'advanced'][i % 3] },
+          });
+        }
+      }
 
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+      db.view_compliance_stats = db.view_compliance_stats || [];
+      if (
+        !db.view_compliance_stats.find((c: Record<string, unknown>) => c.organization_id === orgId)
+      ) {
+        db.view_compliance_stats.push({
+          organization_id: orgId,
+          form_title: 'Fall Registration',
+          total_registrations: 45,
+          medical_cleared: 38,
+        });
+      }
+
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { mockOrgId: MOCK_ORG_ID }
+  );
 
   await page.goto('/admin/reports');
   await page.waitForLoadState('networkidle');
@@ -114,9 +121,9 @@ Then(
 // ─── Coach League Standings Steps ───────────────────────────────────
 
 Given('the coach views the league standings', async ({ page }) => {
-  // Pin to org-1 so OrganizationContext resolves (coach is in initialMockData's org_members).
+  // Pin to the mock seed's org so OrganizationContext resolves (coach is in initialMockData's org_members).
   // All standings, teams, and games data is in initialMockData — no seeding needed.
-  await pinToOrg1(page);
+  await pinToMockOrg(page);
   await page.goto('/standings');
   await page.waitForLoadState('networkidle');
 

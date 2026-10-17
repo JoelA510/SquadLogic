@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect, Page } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -355,42 +356,45 @@ Given('the auto-scheduler service is unavailable', async ({ page }) => {
   // Ensure a completed team run exists so the Auto-Generate button is enabled
   // (the button is disabled when !team?.teams?.length)
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    const now = new Date().toISOString();
+  await page.evaluate(
+    ({ mockOrgId }) => {
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      const now = new Date().toISOString();
 
-    db.scheduler_runs = db.scheduler_runs || [];
-    // Push a separate team run to guarantee the button is enabled
-    if (
-      !db.scheduler_runs.find(
-        (r: Record<string, unknown>) =>
-          r.organization_id === orgId && r.run_type === 'team' && r.status === 'completed'
-      )
-    ) {
-      db.scheduler_runs.push({
-        id: 'run-error-teams',
-        organization_id: orgId,
-        run_type: 'team',
-        status: 'completed',
-        created_at: now,
-        completed_at: now,
-        results: {
-          teamsByDivision: {
-            U10: [{ id: 'et1', name: 'Error Test Team', division_id: 'U10' }],
-          },
-          team_players: [],
-          rosterBalanceByDivision: {
-            U10: {
-              summary: { totalPlayers: 10, totalCapacity: 12, averageFillRate: 0.83 },
-              teamStats: [],
+      db.scheduler_runs = db.scheduler_runs || [];
+      // Push a separate team run to guarantee the button is enabled
+      if (
+        !db.scheduler_runs.find(
+          (r: Record<string, unknown>) =>
+            r.organization_id === orgId && r.run_type === 'team' && r.status === 'completed'
+        )
+      ) {
+        db.scheduler_runs.push({
+          id: 'run-error-teams',
+          organization_id: orgId,
+          run_type: 'team',
+          status: 'completed',
+          created_at: now,
+          completed_at: now,
+          results: {
+            teamsByDivision: {
+              U10: [{ id: 'et1', name: 'Error Test Team', division_id: 'U10' }],
+            },
+            team_players: [],
+            rosterBalanceByDivision: {
+              U10: {
+                summary: { totalPlayers: 10, totalCapacity: 12, averageFillRate: 0.83 },
+                teamStats: [],
+              },
             },
           },
-        },
-      });
-    }
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+        });
+      }
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { mockOrgId: MOCK_ORG_ID }
+  );
 });
 
 Then('I should see an error message in the auto-scheduler panel', async ({ page }) => {
@@ -406,14 +410,14 @@ Given(
     // Inject locked assignment into mock data via sessionStorage
     await waitForMockClient(page);
     await page.evaluate(
-      ([tId, sId]) => {
+      ([tId, sId, mockOrgId]) => {
         const dbKey = '__MOCK_DB__';
         const db = JSON.parse(sessionStorage.getItem(dbKey) || '{}');
         if (!db.practice_assignments) db.practice_assignments = [];
         db.practice_assignments.push({
           id: `locked-${tId}-${sId}`,
           // CLAUDE.md §8 rule 1: the season read filters by organization.
-          organization_id: localStorage.getItem('squadlogic_active_org') || 'org-1',
+          organization_id: localStorage.getItem('squadlogic_active_org') || mockOrgId,
           team_id: tId,
           slot_id: sId,
           practice_slot_id: sId,
@@ -423,7 +427,7 @@ Given(
         });
         sessionStorage.setItem(dbKey, JSON.stringify(db));
       },
-      [teamId, slotId]
+      [teamId, slotId, MOCK_ORG_ID]
     );
   }
 );

@@ -1,6 +1,7 @@
 import { createBdd } from 'playwright-bdd';
 import { expect } from '@playwright/test';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given: _Given, When, Then } = createBdd();
 
@@ -96,24 +97,27 @@ Then(
 When('I view the {string} section', async ({ page }, sectionName: string) => {
   // CRITICAL FIX: Seed games so the score entry fields appear
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || 'org-1';
-    db.games = [
-      {
-        id: 'g1',
-        organization_id: orgId,
-        home_team_id: 't1',
-        away_team_id: 't2',
-        start_time: new Date(Date.now() - 86400000).toISOString(),
-        score_home: null,
-        score_away: null,
-        home_team: { name: 'Team A' },
-        away_team: { name: 'Team B' },
-      },
-    ];
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+  await page.evaluate(
+    ({ mockOrgId }) => {
+      const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      db.games = [
+        {
+          id: 'g1',
+          organization_id: orgId,
+          home_team_id: 't1',
+          away_team_id: 't2',
+          start_time: new Date(Date.now() - 86400000).toISOString(),
+          score_home: null,
+          score_away: null,
+          home_team: { name: 'Team A' },
+          away_team: { name: 'Team B' },
+        },
+      ];
+      sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
+    },
+    { mockOrgId: MOCK_ORG_ID }
+  );
   await page.reload();
 
   await expect(

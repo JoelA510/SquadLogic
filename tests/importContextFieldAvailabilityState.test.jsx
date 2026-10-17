@@ -2,10 +2,11 @@ import React from 'react';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { ImportProvider, useImport } from '../frontend/src/contexts/ImportContext.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
-    currentOrganization: { id: 'org-1' },
+    currentOrganization: { id: MOCK_ORG_ID },
     orgMember: { id: 'member-1' },
   }),
 }));

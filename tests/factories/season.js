@@ -1,7 +1,8 @@
+import { MOCK_ORG_ID } from '../../frontend/src/lib/mockSeedIds.js';
 export function makeSeason(overrides = {}) {
   return {
     id: 1,
-    organization_id: 'org-1',
+    organization_id: MOCK_ORG_ID,
     season_label: 'Fall',
     season_year: 2026,
     season_start: '2026-09-01',
@@ -19,7 +20,7 @@ export function makeDivision(overrides = {}) {
   return {
     id: 'div-1',
     season_settings_id: 1,
-    organization_id: 'org-1',
+    organization_id: MOCK_ORG_ID,
     name: 'U8 Coed',
     gender_policy: 'coed',
     max_roster_size: 12,

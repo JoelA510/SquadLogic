@@ -16,6 +16,7 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 import OutputGenerationPanel from '../frontend/src/components/OutputGenerationPanel.jsx';
 import { getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
 import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', async () => {
   const mock = await import('../frontend/src/lib/mockSupabaseClient.js');
@@ -31,7 +32,7 @@ vi.mock('../frontend/src/lib/logger.js', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), log: vi.fn() },
 }));
 
-const ORG = 'org-1';
+const ORG = MOCK_ORG_ID;
 
 const TEAMS = [
   { id: 't-1', name: 'Blue Bears', division: 'U10' },

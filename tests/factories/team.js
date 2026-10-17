@@ -1,8 +1,9 @@
+import { MOCK_ORG_ID } from '../../frontend/src/lib/mockSeedIds.js';
 export function makeTeam(overrides = {}) {
   return {
     id: 'team-1',
     division_id: 'div-1',
-    organization_id: 'org-1',
+    organization_id: MOCK_ORG_ID,
     name: 'Test Team',
     coach_id: null,
     assistant_coach_ids: [],

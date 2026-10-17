@@ -2,6 +2,7 @@ import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import ImportPanel from '../frontend/src/components/ImportPanel.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const mocks = vi.hoisted(() => ({
   parse: vi.fn(),
@@ -26,7 +27,7 @@ vi.mock('../frontend/src/contexts/ImportContext.jsx', () => ({
 
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({
-    currentOrganization: { id: 'org-1' },
+    currentOrganization: { id: MOCK_ORG_ID },
   }),
 }));
 

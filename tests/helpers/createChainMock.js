@@ -3,7 +3,7 @@
 // Usage:
 //   const chain = createChainMock({ data: [{ id: '1' }], error: null });
 //   supabase.from.mockReturnValue(chain);
-//   // await chain.select().eq('org_id', 'org-1').single()
+//   // await chain.select().eq('org_id', MOCK_ORG_ID).single()
 //   //   → { data: [{ id: '1' }], error: null }
 //
 // The proxy returns itself for every method call (supporting arbitrary

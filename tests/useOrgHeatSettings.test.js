@@ -8,6 +8,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { useOrgHeatSettings } from '../frontend/src/hooks/useOrgHeatSettings.js';
 import { supabase } from '../frontend/src/lib/supabaseClient.js';
 import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: { from: vi.fn(), rpc: vi.fn() },
@@ -32,7 +33,7 @@ beforeEach(() => {
   vi.mocked(supabase.from).mockReset();
   vi.mocked(supabase.rpc).mockReset();
   vi.mocked(useOrganization).mockReturnValue(
-    /** @type {any} */ ({ currentOrganization: { id: 'org-1' } })
+    /** @type {any} */ ({ currentOrganization: { id: MOCK_ORG_ID } })
   );
 });
 
@@ -49,7 +50,7 @@ describe('useOrgHeatSettings', () => {
       error: null,
     });
     expect(supabase.from).toHaveBeenCalledWith('organization_heat_settings');
-    expect(b.eq).toHaveBeenCalledWith('organization_id', 'org-1');
+    expect(b.eq).toHaveBeenCalledWith('organization_id', MOCK_ORG_ID);
   });
 
   it('reads a stored row as configured', async () => {
@@ -134,7 +135,7 @@ describe('useOrgHeatSettings', () => {
     });
     expect(out).toEqual({ ok: true });
     expect(supabase.rpc).toHaveBeenCalledWith('admin_set_org_heat_settings', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_threshold_category: 2,
       p_guidance_links: [{ label: 'L', url: 'https://example.org' }],
     });

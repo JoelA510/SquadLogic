@@ -40,6 +40,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => readFileSync(path.join(ROOT, rel), 'utf8');
@@ -75,7 +76,7 @@ vi.mock('../frontend/src/contexts/ThemeContext.jsx', () => ({
   useTheme: () => ({ theme: 'light' }),
 }));
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
-  useOrganization: () => ({ currentOrganization: { id: 'org-1', name: 'Smoke FC' } }),
+  useOrganization: () => ({ currentOrganization: { id: MOCK_ORG_ID, name: 'Smoke FC' } }),
 }));
 vi.mock('../frontend/src/components/DashboardWorkflow.jsx', () => ({ default: () => null }));
 vi.mock('../frontend/src/components/ui/FeatureGuard.jsx', () => ({

@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { makePlayer } from '../player.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 describe('makePlayer', () => {
   it('returns deterministic defaults with no args', () => {
     const p = makePlayer();
     expect(p.id).toBe('player-1');
     expect(p.division_id).toBe('div-1');
-    expect(p.organization_id).toBe('org-1');
+    expect(p.organization_id).toBe(MOCK_ORG_ID);
     expect(p.external_registration_id).toBe('ext-reg-1');
     expect(p.first_name).toBe('Test');
     expect(p.last_name).toBe('Player');

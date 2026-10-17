@@ -30,8 +30,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { getMockData, mockSupabase as supabase } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
-const ORG = 'org-1';
+const ORG = MOCK_ORG_ID;
 const JOB = 'rollback-guard-job';
 
 const setMockSession = (userId) => {

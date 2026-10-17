@@ -3,6 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { useTeamAnalysis } from '../frontend/src/hooks/useTeamAnalysis.js';
 import { useImport } from '../frontend/src/contexts/ImportContext.jsx';
 import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
+import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/lib/logger', () => ({
   logger: { log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -18,8 +19,8 @@ vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
 
 describe('useTeamAnalysis', () => {
   // season_year controls U-group calculation — no need for fake timers
-  const mockOrg = { id: 'org-1' };
-  const mockSeason = { id: 'season-1', season_year: 2025 };
+  const mockOrg = { id: MOCK_ORG_ID };
+  const mockSeason = { id: MOCK_SEASON_ID, season_year: 2025 };
 
   beforeEach(() => {
     vi.clearAllMocks();

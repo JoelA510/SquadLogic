@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { BlackoutDraftSchema, useFieldClosures } from '../frontend/src/hooks/useFieldClosures.js';
 import { supabase } from '../frontend/src/lib/supabaseClient.js';
 import { useOrganization } from '../frontend/src/contexts/OrganizationContext.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: { from: vi.fn(), rpc: vi.fn() },
@@ -15,7 +16,7 @@ vi.mock('../frontend/src/lib/logger.js', () => ({ logger: { error: vi.fn() } }))
 const CLOSURE_ROWS = [
   {
     id: 'bo-1',
-    organization_id: 'org-1',
+    organization_id: MOCK_ORG_ID,
     closes_field_id: 'field-1',
     closes_location_id: null,
     field_location_id: 'loc-1',
@@ -30,7 +31,7 @@ const CLOSURE_ROWS = [
   },
   {
     id: 'win-1',
-    organization_id: 'org-1',
+    organization_id: MOCK_ORG_ID,
     closes_field_id: null,
     closes_location_id: null,
     field_location_id: null,
@@ -79,7 +80,7 @@ describe('useFieldClosures', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // @ts-expect-error [MOCK] - a partial organization context is enough here.
-    vi.mocked(useOrganization).mockReturnValue({ currentOrganization: { id: 'org-1' } });
+    vi.mocked(useOrganization).mockReturnValue({ currentOrganization: { id: MOCK_ORG_ID } });
     vi.mocked(supabase.from).mockImplementation(
       () => /** @type {any} */ (readBuilder({ data: CLOSURE_ROWS, error: null }))
     );
@@ -117,7 +118,7 @@ describe('useFieldClosures', () => {
       await result.current.createBlackout(draft());
     });
     expect(supabase.rpc).toHaveBeenCalledWith('admin_create_field_blackout', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_location_id: null,
       p_field_id: 'field-1',
       p_blackout_from: '2026-09-14',
@@ -154,7 +155,7 @@ describe('useFieldClosures', () => {
       await result.current.removeBlackout({ id: 'bo-1', source: 'field_blackouts' });
     });
     expect(supabase.rpc).toHaveBeenCalledWith('admin_delete_field_blackout', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_blackout_id: 'bo-1',
     });
   });
@@ -172,7 +173,7 @@ describe('useFieldClosures', () => {
     // make "all day" and "no note" inexpressible; a scope parameter would be a
     // field the RPC has nowhere to put.
     expect(supabase.rpc).toHaveBeenCalledWith('admin_update_field_blackout', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_blackout_id: 'bo-1',
       p_blackout_from: '2026-09-14',
       p_blackout_until: '2026-09-18',

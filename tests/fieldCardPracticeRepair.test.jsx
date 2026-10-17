@@ -17,7 +17,7 @@ vi.mock('../frontend/src/hooks/usePermission.js', () => ({
   usePermission: () => ({ can: () => true }),
 }));
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
-  useOrganization: () => ({ currentOrganization: { id: 'org-1' } }),
+  useOrganization: () => ({ currentOrganization: { id: MOCK_ORG_ID } }),
 }));
 // The launcher is probed: what it is handed is the witness.
 vi.mock('../frontend/src/components/scheduling/PracticeRepairLauncher.jsx', () => ({
@@ -60,6 +60,7 @@ vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
 
 import FieldManagementPage from '../frontend/src/pages/FieldManagementPage.jsx';
 import { useFields } from '../frontend/src/hooks/useFields.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const field = (id, name, effectiveTo) => ({
   id,
@@ -90,7 +91,7 @@ const hook = {
 const storedOf = (fieldId) => FIELDS.find((f) => f.id === fieldId).effective_to;
 const enactRow = (n, fieldId, seriesId, stored = storedOf(fieldId)) => ({
   id: `audit-${n}`,
-  organization_id: 'org-1',
+  organization_id: MOCK_ORG_ID,
   action: 'practice.recommendation_enacted',
   metadata: {
     cause: { kind: 'retirement', id: fieldId, stored_effective_to: stored },
@@ -140,7 +141,7 @@ describe('field card :: the un-retire confirmation counts the series enacted off
         h.audit
           .filter(
             (r) =>
-              r.organization_id === 'org-1' &&
+              r.organization_id === MOCK_ORG_ID &&
               r.action === 'practice.recommendation_enacted' &&
               r.metadata.cause.id === f.id &&
               r.metadata.cause.stored_effective_to === f.effective_to

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../frontend/src/App.jsx';
 import AccountSettingsPage from '../frontend/src/pages/AccountSettingsPage.jsx';
 import { PERMISSIONS } from '../frontend/src/constants/permissions.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const mocks = vi.hoisted(() => ({
   auth: null,
@@ -74,9 +75,9 @@ const baseUser = {
 
 const baseOrganizations = [
   {
-    organization_id: 'org-1',
+    organization_id: MOCK_ORG_ID,
     role: 'coach',
-    organizations: { id: 'org-1', name: 'North League', is_onboarded: true },
+    organizations: { id: MOCK_ORG_ID, name: 'North League', is_onboarded: true },
   },
   {
     organization_id: 'org-2',

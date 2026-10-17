@@ -1,8 +1,9 @@
+import { MOCK_ORG_ID } from '../../frontend/src/lib/mockSeedIds.js';
 export function makeField(overrides = {}) {
   return {
     id: 'field-1',
     location_id: 'loc-1',
-    organization_id: 'org-1',
+    organization_id: MOCK_ORG_ID,
     name: 'Field 1',
     surface_type: 'grass',
     supports_halves: false,

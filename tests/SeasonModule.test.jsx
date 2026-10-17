@@ -2,6 +2,11 @@ import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SeasonModule from '../frontend/src/components/settings/modules/SeasonModule.jsx';
+// Hoisted with the `vi.hoisted` blocks below, which read the ids before any
+// static import has run.
+const { MOCK_ORG_ID, MOCK_SEASON_ID } = await vi.hoisted(
+  () => import('../frontend/src/lib/mockSeedIds.js')
+);
 
 const mocks = vi.hoisted(() => ({
   updateCurrentSeason: vi.fn(),
@@ -10,8 +15,8 @@ const mocks = vi.hoisted(() => ({
   refetchOrgs: vi.fn(),
   /** Mutable so each test can pose a different season row. */
   org: {
-    currentOrganization: { id: 'org-1' },
-    currentSeasonSetting: { id: 'season-1', organization_id: 'org-1', timezone: null },
+    currentOrganization: { id: MOCK_ORG_ID },
+    currentSeasonSetting: { id: MOCK_SEASON_ID, organization_id: MOCK_ORG_ID, timezone: null },
   },
   auth: { isImpersonating: false },
 }));
@@ -31,7 +36,7 @@ vi.mock('../frontend/src/contexts/AuthContext.jsx', () => ({
     user: {
       id: 'user-1',
       email: 'admin@example.com',
-      profile: { id: 'profile-1', organization_id: 'org-1' },
+      profile: { id: 'profile-1', organization_id: MOCK_ORG_ID },
     },
     isImpersonating: mocks.auth.isImpersonating,
   }),
@@ -61,8 +66,12 @@ describe('SeasonModule', () => {
     vi.clearAllMocks();
     mocks.rpc.mockResolvedValue({ error: null });
     mocks.auth.isImpersonating = false;
-    mocks.org.currentOrganization = { id: 'org-1' };
-    mocks.org.currentSeasonSetting = { id: 'season-1', organization_id: 'org-1', timezone: null };
+    mocks.org.currentOrganization = { id: MOCK_ORG_ID };
+    mocks.org.currentSeasonSetting = {
+      id: MOCK_SEASON_ID,
+      organization_id: MOCK_ORG_ID,
+      timezone: null,
+    };
   });
 
   it('exposes season format and quick-select choices with pressed state', () => {
@@ -111,8 +120,12 @@ describe('SeasonModule timezone select: every stored zone renders', () => {
     vi.clearAllMocks();
     mocks.rpc.mockResolvedValue({ error: null });
     mocks.auth.isImpersonating = false;
-    mocks.org.currentOrganization = { id: 'org-1' };
-    mocks.org.currentSeasonSetting = { id: 'season-1', organization_id: 'org-1', timezone: null };
+    mocks.org.currentOrganization = { id: MOCK_ORG_ID };
+    mocks.org.currentSeasonSetting = {
+      id: MOCK_SEASON_ID,
+      organization_id: MOCK_ORG_ID,
+      timezone: null,
+    };
   });
 
   it('renders a zone the shortlist does not carry, and selects it', () => {
@@ -173,10 +186,10 @@ describe('SeasonModule timezone change: one writer, one audit row', () => {
     vi.clearAllMocks();
     mocks.rpc.mockResolvedValue({ error: null });
     mocks.auth.isImpersonating = false;
-    mocks.org.currentOrganization = { id: 'org-1' };
+    mocks.org.currentOrganization = { id: MOCK_ORG_ID };
     mocks.org.currentSeasonSetting = {
-      id: 'season-1',
-      organization_id: 'org-1',
+      id: MOCK_SEASON_ID,
+      organization_id: MOCK_ORG_ID,
       timezone: 'UTC',
     };
   });
@@ -189,8 +202,8 @@ describe('SeasonModule timezone change: one writer, one audit row', () => {
     const names = mocks.rpc.mock.calls.map(([name]) => name);
     expect(names).toEqual(['admin_set_season_timezone']);
     expect(mocks.rpc.mock.calls[0][1]).toMatchObject({
-      p_organization_id: 'org-1',
-      p_season_settings_id: 'season-1',
+      p_organization_id: MOCK_ORG_ID,
+      p_season_settings_id: MOCK_SEASON_ID,
       p_timezone: 'America/Chicago',
       p_actor_context: {},
     });

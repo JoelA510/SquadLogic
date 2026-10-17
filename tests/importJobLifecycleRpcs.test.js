@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getMockData, mockSupabase as supabase } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const signIn = (email) =>
   supabase.auth.signInWithPassword({
@@ -17,7 +18,7 @@ describe('mock import job lifecycle RPCs', () => {
     await signIn('admin@example.com');
 
     const { data: job, error: createError } = await supabase.rpc('create_import_job', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_import_type: 'players',
       p_file_name: '../players:2026.csv',
     });
@@ -68,7 +69,7 @@ describe('mock import job lifecycle RPCs', () => {
   it('rejects non-admin import lifecycle mutations', async () => {
     await signIn('admin@example.com');
     const { data: job } = await supabase.rpc('create_import_job', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_import_type: 'fields',
       p_file_name: 'fields.csv',
     });
@@ -76,7 +77,7 @@ describe('mock import job lifecycle RPCs', () => {
     await signIn('coach@example.com');
 
     const { error: createError } = await supabase.rpc('create_import_job', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_import_type: 'players',
       p_file_name: 'denied.csv',
     });

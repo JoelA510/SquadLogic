@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { makeAuditLogEntry } from '../audit.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 describe('makeAuditLogEntry', () => {
   it('returns deterministic defaults with no args', () => {
@@ -7,7 +8,7 @@ describe('makeAuditLogEntry', () => {
       id: 'audit-1',
       created_at: '2026-01-01T00:00:00Z',
       user_id: 'user-1',
-      organization_id: 'org-1',
+      organization_id: MOCK_ORG_ID,
       action: 'import.started',
       resource_type: null,
       resource_id: null,

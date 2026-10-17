@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { mockSupabase as supabase, getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MIGRATION = readFileSync(
@@ -34,7 +35,7 @@ const EDIT_MIGRATION = readFileSync(
   'utf8'
 );
 
-const ORG = 'org-1';
+const ORG = MOCK_ORG_ID;
 const setMockSession = (userId) =>
   sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: userId } }));
 
@@ -290,9 +291,9 @@ describe('field blackout mock contract :: a deleted blackout is tombstoned', () 
     delete window.__MOCK_DB__;
     sessionStorage.setItem('__MOCK_SESSION__', JSON.stringify({ user: { id: 'mock-admin-id' } }));
 
-    const field = getMockData('fields').find((f) => String(f.organization_id) === 'org-1');
+    const field = getMockData('fields').find((f) => String(f.organization_id) === MOCK_ORG_ID);
     const { data: created } = await supabase.rpc('admin_create_field_blackout', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_location_id: null,
       p_field_id: field.id,
       p_blackout_from: '2099-08-01',
@@ -301,7 +302,7 @@ describe('field blackout mock contract :: a deleted blackout is tombstoned', () 
     expect(getMockData('__deleted__')?.field_blackouts ?? []).not.toContain(created.id);
 
     const { error } = await supabase.rpc('admin_delete_field_blackout', {
-      p_organization_id: 'org-1',
+      p_organization_id: MOCK_ORG_ID,
       p_blackout_id: created.id,
     });
     expect(error).toBeNull();

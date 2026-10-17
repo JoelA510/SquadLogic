@@ -3,12 +3,13 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mockSupabase as supabase, getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MOCK_PATH = path.join(REPO, 'frontend/src/lib/mockSupabaseClient.js');
 const SOURCE = readFileSync(MOCK_PATH, 'utf8');
 
-const ORG = 'org-1';
+const ORG = MOCK_ORG_ID;
 const SEEDED_TEAM = '00000000-0000-0000-0000-000000000001';
 
 const setSession = (userId) => {
@@ -630,7 +631,7 @@ describe('mock .delete() :: only .eq() exists, and says so', () => {
   it('leaves a removed member removed when they sign back in', async () => {
     // **A seeding convenience must not reverse an administrative action.**
     // The sign-in block creates an `organization_members` row for any profile
-    // that has none, hardcoded to `org-1` -- the exact composite key
+    // that has none, hardcoded to `MOCK_ORG_ID` -- the exact composite key
     // `admin_remove_member` tombstones. Routing sign-in through `saveDB` made
     // the lift see that key present and drop it, so a removed member came
     // back, carrying `app_metadata.role` rather than the role the admin had

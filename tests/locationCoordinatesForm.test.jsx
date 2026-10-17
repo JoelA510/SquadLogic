@@ -17,13 +17,14 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 const { supabase } = vi.hoisted(() => ({ supabase: { from: vi.fn(), rpc: vi.fn() } }));
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({ supabase }));
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
-  useOrganization: () => ({ currentOrganization: { id: 'org-1' } }),
+  useOrganization: () => ({ currentOrganization: { id: MOCK_ORG_ID } }),
 }));
 vi.mock('../frontend/src/hooks/usePermission.js', () => ({ usePermission: vi.fn() }));
 
 import FieldManagementPage from '../frontend/src/pages/FieldManagementPage.jsx';
 import LocationCoordinatesForm from '../frontend/src/components/setup/LocationCoordinatesForm.jsx';
 import { usePermission } from '../frontend/src/hooks/usePermission.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 const RPC = 'admin_set_location_coordinates';
 
@@ -45,7 +46,7 @@ function chainFor(table) {
 function venue(overrides) {
   return {
     id: 'loc-1',
-    organization_id: 'org-1',
+    organization_id: MOCK_ORG_ID,
     name: 'Synthetic Park',
     effective_to: null,
     lighting_available: false,
@@ -87,7 +88,7 @@ describe('venue coordinates form: save', () => {
     await openCoordinates();
     // The RPC, not the form, rounds (D9): the form sends what was typed.
     supabase.rpc.mockResolvedValueOnce({
-      data: { id: 'loc-1', organization_id: 'org-1', latitude: 40, longitude: -75 },
+      data: { id: 'loc-1', organization_id: MOCK_ORG_ID, latitude: 40, longitude: -75 },
       error: null,
     });
     type('Latitude', '40.004');
@@ -131,7 +132,7 @@ describe('venue coordinates form: save', () => {
     await openCoordinates();
     expect(screen.getByTestId('venue-coordinates-stored-loc-1')).toHaveTextContent('41.50, -73.50');
     supabase.rpc.mockResolvedValueOnce({
-      data: { id: 'loc-1', organization_id: 'org-1', latitude: null, longitude: null },
+      data: { id: 'loc-1', organization_id: MOCK_ORG_ID, latitude: null, longitude: null },
       error: null,
     });
     fireEvent.click(screen.getByRole('button', { name: 'Clear coordinates' }));

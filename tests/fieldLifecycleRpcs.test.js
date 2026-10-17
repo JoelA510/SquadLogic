@@ -20,8 +20,9 @@ import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { mockSupabase as supabase, getMockData } from '../frontend/src/lib/mockSupabaseClient.js';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
-const ORG = 'org-1';
+const ORG = MOCK_ORG_ID;
 
 /**
  * The text of the migration that defines `public.<fnName>` LAST.

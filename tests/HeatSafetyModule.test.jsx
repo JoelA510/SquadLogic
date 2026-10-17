@@ -9,11 +9,14 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 import HeatSafetyModule from '../frontend/src/components/settings/modules/HeatSafetyModule.jsx';
 import { supabase } from '../frontend/src/lib/supabaseClient.js';
+// Hoisted with the `vi.hoisted` blocks below, which read the ids before any
+// static import has run.
+const { MOCK_ORG_ID } = await vi.hoisted(() => import('../frontend/src/lib/mockSeedIds.js'));
 
 vi.mock('../frontend/src/lib/supabaseClient.js', () => ({
   supabase: { from: vi.fn(), rpc: vi.fn() },
 }));
-const org = vi.hoisted(() => ({ id: 'org-1' }));
+const org = vi.hoisted(() => ({ id: MOCK_ORG_ID }));
 vi.mock('../frontend/src/contexts/OrganizationContext.jsx', () => ({
   useOrganization: () => ({ currentOrganization: { id: org.id } }),
 }));
@@ -37,7 +40,7 @@ function reads(...results) {
 }
 
 beforeEach(() => {
-  org.id = 'org-1';
+  org.id = MOCK_ORG_ID;
   vi.mocked(supabase.from).mockReset();
   vi.mocked(supabase.rpc).mockReset();
 });

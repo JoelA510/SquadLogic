@@ -65,6 +65,7 @@ import {
   OrganizationProvider,
   useOrganization,
 } from '../frontend/src/contexts/OrganizationContext.jsx';
+import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
 
 // ---------- Helpers ----------
 
@@ -100,9 +101,9 @@ describe('Auth & Organization Integration', () => {
   });
 
   const mockOrgMember = makeOrganizationMember({
-    organization_id: 'org-1',
+    organization_id: MOCK_ORG_ID,
     role: 'admin',
-    organizations: makeOrganization({ id: 'org-1', name: 'Test Club' }),
+    organizations: makeOrganization({ id: MOCK_ORG_ID, name: 'Test Club' }),
   });
 
   beforeEach(() => {

@@ -450,6 +450,39 @@ describe('ImportPanel', () => {
     );
   });
 
+  it('Continue moves on and keeps the applied import (no reset in the same click)', async () => {
+    const onImport = vi.fn();
+    const { rerender } = render(<ImportPanel onImport={onImport} />);
+    // A real preview first, so the panel holds the parsed file when the import
+    // completes: the case the old handler passed on and then cleared.
+    fireEvent.change(screen.getByLabelText(/browse files/i), {
+      target: {
+        files: [
+          new File(['first_name,last_name,date_of_birth'], 'players.csv', { type: 'text/csv' }),
+        ],
+      },
+    });
+    await screen.findByText('players.csv');
+
+    mocks.importState = { ...mocks.importState, importStatus: 'completed', progress: 100 };
+    rerender(<ImportPanel onImport={onImport} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect(onImport).toHaveBeenCalledTimes(1);
+    expect(mocks.resetImport).not.toHaveBeenCalled();
+  });
+
+  it('Continue still moves on with no preview in hand (a reload after the import)', () => {
+    mocks.importState = { ...mocks.importState, importStatus: 'completed', progress: 100 };
+    const onImport = vi.fn();
+    render(<ImportPanel onImport={onImport} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect(onImport).toHaveBeenCalledTimes(1);
+    expect(mocks.resetImport).not.toHaveBeenCalled();
+  });
+
   it('keeps the importing notification checkbox focusable', () => {
     mocks.importState = {
       ...mocks.importState,

@@ -1,18 +1,12 @@
 import React from 'react';
 import ImportPanel from '../components/ImportPanel.jsx';
-import { useImport } from '../contexts/ImportContext.jsx';
 import { useNavigate } from 'react-router-dom';
-import { logger } from '../lib/logger.js';
 
 export default function ImportPage() {
-  const { setImportedData } = useImport();
   const navigate = useNavigate();
 
-  const handleImport = (data) => {
-    logger.log('Imported data:', data);
-    setImportedData(data);
-    navigate('/teams');
-  };
+  // The applied import is already in `ImportContext`; continuing only moves on.
+  const handleContinue = () => navigate('/teams');
 
   return (
     <div className="animate-fadeIn">
@@ -22,7 +16,7 @@ export default function ImportPage() {
           Upload player and coach data from GotSport CSVs to initialize the season.
         </p>
       </div>
-      <ImportPanel onImport={handleImport} />
+      <ImportPanel onImport={handleContinue} />
     </div>
   );
 }

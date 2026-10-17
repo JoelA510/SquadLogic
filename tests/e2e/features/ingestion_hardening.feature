@@ -26,6 +26,13 @@ Feature: Ingestion Hardening for CSV Imports
     When I apply the player CSV import
     Then the player import should materialize reciprocal buddy pairs
 
+  Scenario: Continuing from an applied player import keeps it for teaming
+    Given the season has no team run yet
+    And I upload a GotSport player CSV file with reciprocal buddy requests
+    When I apply the player CSV import
+    And I continue from the applied import
+    Then the Teams page offers to generate teams for the imported "U8 Coed" program
+
   Scenario: Applying and rolling back a coach CSV import
     Given I upload a valid GotSport coach CSV file
     When I apply the coach CSV import

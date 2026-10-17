@@ -36,7 +36,6 @@ const baseProps = {
   practiceData: { snapshot: {} },
   gameData: { snapshot: {} },
   persistenceSnapshot: null,
-  onImport: vi.fn(),
   importedData: { totalRows: 5 },
   controlledActiveStep: 2,
   onStepChange: vi.fn(),

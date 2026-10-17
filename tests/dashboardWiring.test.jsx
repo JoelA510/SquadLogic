@@ -725,7 +725,6 @@ describe('DashboardWorkflow hands PracticeReadinessPanel the live practice flag'
           practiceData={{ snapshot, generatedAt: '2026-01-01T00:00:00Z' }}
           gameData={{ snapshot: {}, summary: {} }}
           persistenceSnapshot={null}
-          onImport={() => {}}
           importedData={{ totalRows: 5 }}
           controlledActiveStep={4}
           onStepChange={() => {}}

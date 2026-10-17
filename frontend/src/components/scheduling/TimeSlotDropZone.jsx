@@ -19,6 +19,7 @@ export default function TimeSlotDropZone({
   slotId,
   slotLabel = '',
   assignment = undefined,
+  isBookable = true,
   isValidTarget = false,
   isInvalidTarget = false,
   invalidReason = '',
@@ -99,11 +100,12 @@ export default function TimeSlotDropZone({
       ) : (
         <div
           className={`h-16 border-2 border-dashed rounded-lg flex items-center justify-center text-text-muted text-xs italic ${
-            isOver ? 'border-blue-500/40' : 'border-border-subtle'
+            isOver && isBookable ? 'border-blue-500/40' : 'border-border-subtle'
           }`}
           data-testid={`empty-slot-${droppableId}`}
         >
-          {isOver ? 'Drop here' : 'Open'}
+          {/* A cell drawn for another field's slot says so before anything is dragged. */}
+          {!isBookable ? 'Other field' : isOver ? 'Drop here' : 'Open'}
         </div>
       )}
     </div>
@@ -115,6 +117,7 @@ TimeSlotDropZone.propTypes = {
   slotId: PropTypes.string.isRequired,
   slotLabel: PropTypes.string,
   assignment: PropTypes.object,
+  isBookable: PropTypes.bool,
   isValidTarget: PropTypes.bool,
   isInvalidTarget: PropTypes.bool,
   invalidReason: PropTypes.string,

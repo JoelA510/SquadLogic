@@ -1490,17 +1490,18 @@ smoke-tested
     a `PostgrestError` whose message is "AbortError: ...", so a cancelled read becomes the
     hook's error. On the dev server (StrictMode) the Exports page then refuses to build CSVs
     (run 38501618935); in production it can happen when the effect re-runs mid-read. The mock
-    never honours `abortSignal`, so no mock scenario sees it. Not fixed; the real-backend
-    scenarios use a production build. *Executed* (dev server), production path *statically
-    reviewed*.
+    never honours `abortSignal`, so no mock scenario sees it. **Fixed by the Wave 3 UI PR**
+    (`claude/vibrant-allen-hr7y7s-w3ui`, entry below). *Executed* (dev server), production path
+    *statically reviewed*.
   - After "Sync to Supabase" the teams page drops its success line and shows the generate view
     until a reload (the dashboard's team summary is not re-read); the sync itself succeeds.
-    Not fixed; the scenario reads the sync from its response and checks the teams after a
-    reload. *Executed* (run 38498654391).
+    **Fixed by the Wave 3 UI PR** (entry below); the scenario still reads the sync from its
+    response and checks the teams after a reload, and now also the line. *Executed* (run
+    38498654391).
   - The import page's "Continue" passes the import to `setImportedData` and then
     `resetImport('all')` clears it in the same handler, and nothing writes the `imports` table
     the context rehydrates from, so `/teams` opens without the import; the side navigation
-    keeps it. Not fixed. *Statically reviewed.*
+    keeps it. **Fixed by the Wave 3 UI PR** (entry below). *Statically reviewed.*
   - A second import can be bounced back to "Import Applied": `ImportContext`'s Realtime handler
     applies any `import_jobs` UPDATE that arrives while no job is active
     (`activeJobIdRef.current === job.id || !activeJobIdRef.current`), so a late event for the
@@ -1536,7 +1537,8 @@ smoke-tested
     enacted"). *Executed* (found by this PR's review; red without the fix).
   - `TeamPersistencePanel`'s own 10 s timeout says "Supabase sync timed out. Please retry.": an
     unknown outcome presented as a failure to retry, the shape M2.5 fixed for games and practice.
-    The team client is not on `postPersistenceRequest`. Not fixed. *Statically reviewed.*
+    The team client is not on `postPersistenceRequest`. **Fixed by the Wave 3 UI PR** (entry
+    below). *Statically reviewed.*
   - The Edge game evaluator still skips, without a word, a game side whose team is missing from a
     non-empty roster (core's `evaluateGameSchedule` warns `unknown-team`), so a roster that
     matches no game still scores clean. Reporting it is a scoring change, so it is not in this
@@ -1583,7 +1585,7 @@ smoke-tested
   - The grid offers every game slot under every field, but a game slot is one field's booking, so
     a drop onto another field's column stages a game whose `fieldId` and `gameSlotId` disagree
     (and two such drops can share one capacity-1 booking). "Move to…" offers only each slot on its
-    own field; the drop path still allows it. Not fixed (the grid's layout; wants its own item).
+    own field; the drop path still allows it. **Fixed by the Wave 3 UI PR** (entry below).
     *Statically reviewed.*
   - M4.6's lint rule found 15 `Then` steps in four other files reading `__MOCK_DB__`
     (`async_and_optimistic_ui.ts`, `data_and_output.ts`, `team_and_roster.ts`,
@@ -1678,6 +1680,77 @@ smoke-tested
     dates (2025-01-01 to 2025-12-31). Generate Schedule on the seed stages a 1:00 AM kickoff, and
     did not refuse the slot for lying outside the season. Seed data; not changed. *Executed*
     (the staged game on the new scenario's page reads "Sat, 4/4/2026 · 1:00 AM").
+- 2026-10-17, the Wave 3 UI PR (`claude/vibrant-allen-hr7y7s-w3ui`), the product bugs that don't
+  touch the engines. Each test below was run red with its fix reverted (*executed*):
+  - **Import "Continue"** keeps the import and moves on: it calls only `onImport()`; the import
+    stays in `ImportContext`, `ImportPage` goes to `/teams`, the dashboard goes to step 2, and
+    neither copies the raw preview over the context any more. It also moves on after a reload,
+    when the panel holds no preview. Tests: `tests/importContinue.test.jsx`, two
+    `ImportPanel.test.jsx` cases, and the `ingestion_hardening` scenario "Continuing from an
+    applied player import keeps it for teaming". *Executed.*
+  - **Teams page after "Sync to Supabase":** `useTeamSummary` gains `refetch()` (as
+    `useSchedulerRun` has), exposed as `team.refetch`; after a sync the page re-reads the synced
+    run, and the review status section sits above the page's views, so "Team review applied. N
+    teams and M players synced to Supabase." survives. Tests:
+    `tests/teamSyncKeepsStatus.test.jsx`, a `useTeamSummary` case, the mock scenario "A synced
+    team review keeps its success line"; the real-backend sync step now asserts the line (CI
+    only, *statically reviewed* here). *Executed.*
+  - **`TeamPersistencePanel`'s 10 s timeout** is an `unknown` state, "Outcome unknown": "Supabase
+    sync timed out, so it is not known whether the teams were saved. Reload the page to see the
+    saved teams before syncing again." The E2E "Persistence Sync Timeout Handling" scenario now
+    leaves the POST unanswered so the panel's own deadline runs; it used to answer a 408 whose
+    body carried the panel's text. *Executed.*
+  - **`useSchedulerRun`'s abort check** is `isAbortError` (`frontend/src/lib/abortError.js`): the
+    caller's aborted signal, the `AbortError` name or `ABORT_ERR` code, or the PostgREST shape
+    (message `AbortError: ...`, hint `Request was aborted ...`, read from the installed
+    `@supabase/postgrest-js` 2.117.3). `tests/abortError.test.js` takes the shape from the real
+    supabase-js client. No E2E: the mock ignores `abortSignal` and the real-backend run is a
+    production build. *Executed.*
+  - **Game grid view tabs** are the `Tabs` primitive: a tablist, `aria-selected`, the
+    `.page-tab.active` underline, arrow keys, and a tabpanel. axe on `/schedule/game` passes in
+    both themes. *Executed.*
+  - **"By Team" in Manual Override** is disabled with a visible reason ("By Team is off during
+    Manual Override: games are moved on the field grid."): the override's only surface is the
+    field grid, and a team's list has no cells to move a game to. The view chosen before the
+    override comes back after it. The `Tabs` primitive gains disabled tabs. *Executed.*
+  - **Game grid drops** are held to "Move to"'s rule, now one function, `isSlotOnField`
+    (`frontend/src/utils/gameGridCells.js`): the move handler refuses another field's slot with a
+    status line, the announcements agree, and the grid marks those cells "Other field" with the
+    invalid-target reason while a game is over one. No mock E2E (the mock seed has no games);
+    the page test drives the real dnd-kit keyboard sensor. *Executed.*
+  - From this PR's review: `importedData` is the player import only (`startImport` wrote it for
+    every type, so after "Continue" a coach import reached the teams page as players;
+    `tests/importedDataIsPlayers.test.jsx`), and after a sync times out "Sync to Supabase" stays
+    off until a reload. *Executed.*
+  - Not in this PR: "Upload to Storage" (Wave 2's bucket).
+  - Flagged, not done: the grid draws every slot under every field, so with N fields (N-1)/N of
+    its cells now read "Other field". Drawing only each field's own slots would remove them; a
+    layout change, so its own item (recommended). *Statically reviewed.*
+  - Flagged, not done: the import panel's `importStatus` lives in `localStorage`, with no expiry
+    and not per organization, so a "completed" import shows on `/import` after a reload or an
+    organization switch. Pre-existing on the side-navigation path; "Continue" now matches it
+    rather than resetting. *Statically reviewed.*
+- 2026-10-17, triage of "the issues with teams added through the UI" (Wave 3 UI PR). The
+  report names no symptom, so this is what a mock run of Generate Teams, an unanswered sync, Team
+  Builder and Game Scheduling showed (*executed*, a scratch scenario, not committed), plus
+  reading. None is fixed here:
+  - In mock mode a team sync cannot succeed (no `team-persistence`; "Sync failed", "Failed to
+    fetch"), so teams generated in the UI never reach the `teams` table there, and Team Builder
+    and Game Scheduling ("No generated teams are available for game scheduling.") never see them.
+    Expected of the mock, but no mock scenario covers a generated-then-synced team downstream.
+  - Before any sync, the persistence panel's "Recent Supabase Syncs" lists the staged review's run
+    as `REVIEW`, "Updated 3 teams": a sync that has not happened, worded as one that has.
+    *Executed* (the triage run).
+  - A sync that fails at the network ("Failed to fetch") reads "Sync failed", but a dropped
+    connection can follow a request the server received and committed: the same unknown outcome
+    as the timeout above. The game and practice clients treat only their deadline and an
+    unreadable 2xx as unknown, so this is a question for all three, not this PR. *Statically
+    reviewed.*
+  - Team Builder ignores a refused `teams` read (`if (!error) setTeams(...)`) and shows its empty
+    "generate teams first" state over it, with nothing logged. *Statically reviewed.*
+  - Ruled out: a synced team's players do get `players.team_id` (the `team_players` trigger,
+    `20260611000400_players_team_id_sync.sql`), so Team Builder places them. *Statically
+    reviewed.*
 
 ## Deferred with reason
 

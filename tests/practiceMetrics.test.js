@@ -1163,3 +1163,68 @@ test('apply-time metrics apply the exceptions they are given, as the panel does 
   assert.match(unread.metricsUnavailable.reason, /saved practice changes .* could not be read/);
   assert.equal('coachConflicts' in unread, false);
 });
+
+test('apply-time metrics apply the exceptions the same save writes on new rows (Codex on #590)', async () => {
+  const { buildPracticeAssignmentRows } = await import('../packages/core/src/practiceSupabase.js');
+  const vector = EXCEPTION_VECTORS.find((v) => v.witness === 'X-tbd-clash');
+  // The page's scheduler slots carry their validity as effectiveFrom/Until.
+  const slots = vector.slots.map((s) => ({
+    ...s,
+    effectiveFrom: '2026-08-10',
+    effectiveUntil: s.lastDate,
+  }));
+  // Team T2's row is new in this save: no id, so its exception names it by key.
+  const staged = vector.assignments.map((a) =>
+    a.teamId === 'T2'
+      ? {
+          teamId: a.teamId,
+          slotId: a.slotId,
+          source: 'auto',
+          effectiveFrom: '2026-08-10',
+          effectiveUntil: '2026-11-20',
+          effectiveDateRange: '[2026-08-10,2026-11-20]',
+        }
+      : a
+  );
+  const [key] = buildPracticeAssignmentRows({
+    assignments: staged.filter((a) => !a.id),
+    slots,
+  });
+  const newRow = {
+    team_id: key.team_id,
+    practice_slot_id: key.practice_slot_id,
+    effective_date_range: key.effective_date_range,
+  };
+  const exception = (newAssignment) => ({
+    new_assignment: newAssignment,
+    window: '[2026-08-10,2026-08-23]',
+    kind: 'time_tbd',
+    tbd_reason: 'past-sunset',
+    cause_kind: 'daylight',
+  });
+  const run = (sameSaveExceptions) =>
+    buildPracticeRunResults({
+      assignments: staged,
+      teams: vector.teams,
+      slots,
+      exceptions: [],
+      sameSaveExceptions,
+      schoolDayEnd: undefined,
+      timezone: DATED_VECTORS.timeZone,
+    });
+
+  const applied = run([exception(newRow)]);
+  assert.deepEqual(applied.timeTbd, [{ ...vector.expected.timeTbd[0], exceptionId: null }]);
+  assert.equal(applied.coachConflicts[0].sharedDates, vector.expected.conflicts[0].sharedDates);
+  // The persisted assignments are the payload as sent.
+  assert.deepEqual(applied.assignments, staged);
+
+  // A key no staged row has is reported, never dropped.
+  const stray = run([exception({ ...newRow, practice_slot_id: 'S9' })]);
+  assert.deepEqual(stray.timeTbd, []);
+  assert.deepEqual(stray.dataQualityWarnings, [
+    'practice exception null on assignment null: PRACTICE_EXCEPTION_ROW_UNREAD',
+  ]);
+  // None sent: unchanged.
+  assert.equal(run([]).coachConflicts[0].sharedDates, 15);
+});

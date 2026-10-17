@@ -1766,10 +1766,14 @@ smoke-tested
     relocated week still holds its original slot and not its target, and a TIME TBD week still
     counts. Not changed; a question for the owner in the PR. *Statically reviewed.*
   - The exceptions a save is about to write (the daylight TIME TBD rows the Apply path builds
-    for new placements, `buildDaylightExceptions`) are not in the evaluation until they are saved
-    and re-read: a staged placement has no stored id, so no exception can name it. Its timed
-    range already ends at the daylight cut (`newPlacementRange`), so nothing is miscounted; the
-    TIME TBD tail is just not listed before the save. *Statically reviewed.*
+    for new placements, `buildDaylightExceptions`) are not in the panel's evaluation before the
+    save: a staged placement has no stored id, so no exception can name it. Its timed range
+    already ends at the daylight cut (`newPlacementRange`), so nothing is miscounted; the TIME
+    TBD tail is just not listed before the save. Not changed. *Statically reviewed.* Two gaps
+    after it, found by Codex on #590, are fixed there: the saved run's metrics now apply the
+    same-save exceptions (`buildPracticeRunResults` `sameSaveExceptions`), and the page re-reads
+    its rows after a save, so the next evaluation names the new row by its id. *Executed* (two
+    page tests that fail on 450fd65).
   - A relocation onto a slot is counted on its date even when that date is outside the target
     slot's validity (`applyPracticeExceptions` knows the row's range, not the target's
     validity); the portal and the feed show it the same way. Not changed. *Statically

@@ -572,9 +572,12 @@ consuming the occurrences they return.
 - **Consumers.** The practice page reads the season's live exceptions
   (`useSeasonPracticeExceptions`) and sends them with each stored row's id; a
   failed read withholds the evaluation and says so. Apply-time metrics apply
-  the same list; when it was not read, the run records no metrics and the
-  Apply status says why (`metricsUnavailable`), rather than a report that
-  ignores them.
+  the same list plus the exceptions the same save writes on the rows it
+  inserts (`sameSaveExceptions`: named by `new_assignment`, resolved to an
+  evaluation-only id by the writer's own row key; the persisted assignments
+  stay as sent); when the list was not read, the run records no metrics and
+  the Apply status says why (`metricsUnavailable`). After a save the page
+  re-reads its rows with the exceptions, so a new row is named by its id.
 - **Tests.** Ten witnesses in `scoring-dated-vectors.json` (core, drift,
   Deno), a dated parity case C5 (C4 with a modelled daylight TIME TBD and a
   blackout relocation), the page wiring, and apply-time metrics; each shown
@@ -588,6 +591,7 @@ consuming the occurrences they return.
   answers a wrongly typed exception element with a 400 where core reports a
   finding (`schemas/scoring.ts` says so).
 - **Declared, not built:** the override panel's "N free" (Q5) counts series
-  only; exceptions a save is about to write are not evaluated until saved; a
+  only; exceptions a save is about to write are not in the panel's
+  evaluation before the save (the saved run's metrics do include them); a
   relocated date outside its target slot's validity is counted there; the
   solver stays undated (Q2, M4.8).

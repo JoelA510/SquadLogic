@@ -1307,6 +1307,9 @@ export default function PracticeSchedulingPage() {
       // Unread is not none: without a complete read the run records no
       // metrics and the Apply status says why (`metricsUnavailable`).
       exceptions: seasonExceptions.loaded ? seasonExceptions.rows : null,
+      // The daylight TIME TBD this same save records on the rows it inserts,
+      // so the run's report describes the schedule it commits.
+      sameSaveExceptions: daylightTbd.exceptions,
       schoolDayEnd,
       timezone,
       edgeEvaluation: autoScheduler.result?.evaluation ?? null,
@@ -1365,9 +1368,13 @@ export default function PracticeSchedulingPage() {
       setApplyStatus('applied');
       // The save created rows the page knows only by review ids. Re-read the
       // season so the next run's cross-check names them by their real ids,
-      // and its exceptions, which the save may have written or cut.
+      // its exceptions, which the save may have written or cut, and the
+      // grid's rows, which replace the review rows above once they land: an
+      // exception the save keyed to a new row's id names no review row, so
+      // without this the evaluation reads it as `ROW_UNREAD` until a reload.
       refetchSeasonPractice();
       refetchSeasonExceptions();
+      refetchPracticeSchedule?.();
       // The schedule was persisted either way -- this is not an error -- but
       // a run with no readiness metrics must say so here. The panel can only
       // fall silent (it gates on `summary.unassignedTeams`), and a silent

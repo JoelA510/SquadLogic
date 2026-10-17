@@ -44,6 +44,7 @@ export function useDashboardData() {
     generatedAt: teamGeneratedAt,
     status: teamStatus,
     progress: teamProgress,
+    refetch: refetchTeamRun,
   } = useTeamSummary();
 
   const {
@@ -151,6 +152,8 @@ export function useDashboardData() {
     team_players: teamSummary?.team_players,
     status: teamStatus,
     progress: teamProgress,
+    // A team sync writes a new run; the teams page re-reads it after one.
+    refetch: refetchTeamRun,
   };
 
   const resolvedPractice = {

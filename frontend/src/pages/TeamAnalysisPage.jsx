@@ -967,15 +967,29 @@ export default function TeamAnalysisPage() {
 
   const displayPersistenceSnapshot = stagedReview?.snapshot || persistenceSnapshot;
 
-  const handlePersistSuccess = useCallback(() => {
-    if (stagedReview) {
-      setStagedReview(null);
-      setReviewMessage('Team review applied. Latest persisted teams will load from Supabase.');
-    }
-    // Pull the just-persisted run back into the hook so a same-session re-run preserves it
-    // instead of falling back to the stale pre-sync snapshot.
-    refreshPersistence();
-  }, [stagedReview, refreshPersistence]);
+  const refetchTeam = team?.refetch;
+  const handlePersistSuccess = useCallback(
+    (result) => {
+      if (stagedReview) {
+        setStagedReview(null);
+        // The page's own line, so it survives the panel: the sync's counts are kept here
+        // because the panel below is remounted while the synced run is read back.
+        const counts =
+          Number.isFinite(result?.updatedTeams) && Number.isFinite(result?.updatedPlayers)
+            ? ` ${result.updatedTeams} teams and ${result.updatedPlayers} players synced to Supabase.`
+            : '';
+        setReviewMessage(`Team review applied.${counts}`);
+      }
+      // Pull the just-persisted run back into the hook so a same-session re-run preserves it
+      // instead of falling back to the stale pre-sync snapshot.
+      refreshPersistence();
+      // And the team summary, which the cleared review stood in for: without it the page fell
+      // back to the summary read before the sync (none, on a first run) and showed its
+      // generate view until a reload.
+      refetchTeam?.();
+    },
+    [stagedReview, refreshPersistence, refetchTeam]
+  );
 
   const handleDiscardReview = useCallback(() => {
     setStagedReview(null);
@@ -1236,6 +1250,29 @@ export default function TeamAnalysisPage() {
         )}
       </div>
 
+      {/* Above the views, not inside the generated-teams one: a review's status outlives the
+          view it was staged in. After a sync the page reads the synced run back and shows its
+          loading view meanwhile, so a line kept inside the one view was lost. */}
+      {(stagedReview || reviewMessage) && (
+        <section className="bg-bg-surface border border-border-subtle rounded-xl p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-lg font-bold text-text-primary">
+                {stagedReview ? 'Team Review Pending' : 'Team Review Status'}
+              </h3>
+              <p className="text-sm text-text-secondary">
+                {reviewMessage ||
+                  `${stagedReview.programName || 'Selected program'} is ready for Supabase sync.`}
+              </p>
+            </div>
+            {stagedReview && (
+              <Button variant="secondary" onClick={handleDiscardReview}>
+                Discard Review
+              </Button>
+            )}
+          </div>
+        </section>
+      )}
       {(loading?.team && !stagedReview) || isActuallyGenerating ? (
         <div className="p-12 text-center animate-fadeIn">
           <div className="max-w-md mx-auto">
@@ -1341,26 +1378,6 @@ export default function TeamAnalysisPage() {
             divisions={activeTeamData.divisions}
             generatedAt={activeTeamData.generatedAt}
           />
-          {(stagedReview || reviewMessage) && (
-            <section className="bg-bg-surface border border-border-subtle rounded-xl p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h3 className="text-lg font-bold text-text-primary">
-                    {stagedReview ? 'Team Review Pending' : 'Team Review Status'}
-                  </h3>
-                  <p className="text-sm text-text-secondary">
-                    {reviewMessage ||
-                      `${stagedReview.programName || 'Selected program'} is ready for Supabase sync.`}
-                  </p>
-                </div>
-                {stagedReview && (
-                  <Button variant="secondary" onClick={handleDiscardReview}>
-                    Discard Review
-                  </Button>
-                )}
-              </div>
-            </section>
-          )}
           <TeamPersistencePanel
             teamPersistenceSnapshot={displayPersistenceSnapshot}
             onPersistSuccess={stagedReview ? handlePersistSuccess : undefined}

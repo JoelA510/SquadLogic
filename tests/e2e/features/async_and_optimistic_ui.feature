@@ -20,6 +20,14 @@ Feature: Async States and Optimistic UI Updates
     And I click "Sync to Supabase" on the Team Persistence Panel
     Then the panel status should change to "Supabase sync timed out. Please retry."
 
+  Scenario: A synced team review keeps its success line
+    Given 100 players are imported into the "U12 Boys" program
+    When I ask the Teams page for 5 teams of at most 10 players
+    And I press "Generate Teams" on the Teams page
+    And the team-persistence function accepts the sync
+    And I click "Sync to Supabase" on the Team Persistence Panel
+    Then the Teams page still says the team review was applied, with what was synced
+
   Scenario: Medical Clearance Optimistic Toggle
     Given I am on the "Compliance Dashboard"
     And I am viewing a registration for "Alex" with a "Reviewing" medical status

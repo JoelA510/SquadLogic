@@ -34,7 +34,9 @@ import {
   ScoringInputSchema,
   datedSlotsIssue,
   refuseEmptyPracticeRoster,
+  undatedExceptionsIssue,
 } from '../supabase/functions/_shared/schemas/scoring.ts';
+import { practiceOccurrenceDates } from '../packages/core/src/utils/practiceOccurrences.js';
 import { anchorWallTimes } from '../supabase/functions/_shared/timing/anchorWallTimes.ts';
 import { evaluatePracticeSchedule as edgeEvaluate } from '../supabase/functions/_shared/engines/scoring-engine.js';
 
@@ -181,8 +183,9 @@ const ROWS = [
   row('pa-c', 'team-c', 'slot-tue', { slot_id: null }),
 ];
 
-function dbOf({ roster, slots, rows }) {
+function dbOf({ roster, slots, rows, exceptions = [] }) {
   return {
+    practice_exceptions: exceptions,
     scheduler_runs: [
       {
         id: RUN,
@@ -223,6 +226,11 @@ function fairnessScoringEdge(body) {
   // The handler's 3a': a half-dated slot list is a 422 (M4.7, plan Q8).
   const datedIssue = practice ? datedSlotsIssue(practice.slots) : null;
   if (datedIssue !== null) return { data: null, error: { message: datedIssue } };
+  // And its exceptions gate: exceptions on an undated call are a 422.
+  const exceptionsIssue = practice
+    ? undatedExceptionsIssue(practice.slots, practice.exceptions)
+    : null;
+  if (exceptionsIssue !== null) return { data: null, error: { message: exceptionsIssue } };
   // `any`: the handler makes the same two calls; only Node's zod typings differ from Deno's.
   const anchored = anchorWallTimes(
     /** @type {any} */ (practice?.slots ?? []),
@@ -238,6 +246,7 @@ function fairnessScoringEdge(body) {
         teams: practice.teams,
         slots: /** @type {any} */ (anchored.rows),
         unassigned: practice.unassigned,
+        exceptions: practice.exceptions,
       })
     : null;
   const practiceFairness = result?.summary?.fairnessScore ?? 1.0;
@@ -311,9 +320,9 @@ function teamRead(teams) {
   };
 }
 
-async function renderPage({ roster = ROSTER, slots = SLOTS, rows = ROWS } = {}) {
+async function renderPage({ roster = ROSTER, slots = SLOTS, rows = ROWS, exceptions = [] } = {}) {
   TEAM_READ.value = teamRead(roster);
-  seedMockDb(dbOf({ roster, slots, rows }));
+  seedMockDb(dbOf({ roster, slots, rows, exceptions }));
   return render(
     <MemoryRouter>
       <PracticeSchedulingPage />
@@ -562,5 +571,145 @@ describe('the practice page sends its dates and is scored dated (M4.7)', () => {
     // clock is 2026-10-20 12:00 in New York) to the slot's validity end.
     expect(staged.effectiveDateRange).toBe('[2026-10-20,2026-11-30]');
     expect(scoringResponses.at(-1).data.practice.summary.dateModel).toBe('dated');
+  });
+});
+
+// ---- The M4.7 follow-up: saved practice exceptions (plan Q1) --------------
+//
+// The page reads the season's live exceptions and sends them with each stored
+// row's id; the stand-in Edge applies them as `fairness-scoring` does. Every
+// expected date is enumerated from the seed through core's series reader,
+// never from what the engine answered.
+
+/** A `practice_exceptions` row as the table stores it. */
+function exceptionRow(id, assignmentId, teamId, window, kind, extra = {}) {
+  return {
+    id,
+    organization_id: ORG,
+    season_settings_id: SEASON,
+    team_id: teamId,
+    assignment_id: assignmentId,
+    window,
+    kind,
+    practice_slot_id: null,
+    tbd_reason: null,
+    cause_kind: 'blackout',
+    withdrawn_at: null,
+    ...extra,
+  };
+}
+
+const TBD_WINDOW = '[2026-09-07,2026-09-21)';
+const MOVED_WINDOW = '[2026-10-05,2026-10-12)';
+const EXCEPTIONS = [
+  // Team B's first two Mondays are TIME TBD.
+  exceptionRow('pe-tbd', 'pa-b', 'team-b', TBD_WINDOW, 'time_tbd', {
+    tbd_reason: 'past-sunset',
+    cause_kind: 'daylight',
+  }),
+  // Team A's Monday of 10-05 moves to Tuesday 10-06 at slot-tue.
+  exceptionRow('pe-moved', 'pa-a', 'team-a', MOVED_WINDOW, 'relocated', {
+    practice_slot_id: 'slot-tue',
+  }),
+  // Withdrawn: never read as live, so it changes nothing.
+  exceptionRow('pe-gone', 'pa-a', 'team-a', '[2026-11-02,2026-11-09)', 'time_tbd', {
+    tbd_reason: 'contended',
+    withdrawn_at: '2026-10-01T00:00:00Z',
+  }),
+];
+
+/** Mondays of a range, by core's series reader (the seed's truth, not the engine's). */
+/** @type {(range: string) => string[]} */
+const mondaysIn = (range) => practiceOccurrenceDates({ range, dayOfWeek: 'mon' }).dates;
+
+describe('the practice page sends saved exceptions and is scored with them (M4.7 follow-up)', () => {
+  it('sends each stored row by id and the live exceptions, and the Edge applies them', async () => {
+    await renderPage({ exceptions: EXCEPTIONS });
+    const body = await waitFor(
+      () => {
+        const last = scoringRequests.at(-1);
+        expect(last?.practice?.exceptions?.length ?? 0).toBeGreaterThan(0);
+        return last;
+      },
+      { timeout: 4000 }
+    );
+
+    // Every stored row by its id, and only the live exceptions (as stored).
+    expect(body.practice.assignments.map((a) => a.id).sort()).toEqual(ROWS.map((r) => r.id).sort());
+    const live = EXCEPTIONS.filter((e) => e.withdrawn_at === null);
+    expect(body.practice.exceptions.map((e) => e.id).sort()).toEqual(live.map((e) => e.id).sort());
+    expect(body.practice.exceptions.find((e) => e.id === 'pe-moved')).toMatchObject({
+      assignment_id: 'pa-a',
+      window: MOVED_WINDOW,
+      kind: 'relocated',
+      practice_slot_id: 'slot-tue',
+    });
+
+    // The planted Monday clash loses the TIME TBD Mondays and the moved one.
+    const all = mondaysIn(FULL);
+    const tbd = mondaysIn(TBD_WINDOW);
+    const moved = mondaysIn(MOVED_WINDOW);
+    expect(tbd).toHaveLength(2);
+    expect(moved).toHaveLength(1);
+    const kept = all.filter((d) => !tbd.includes(d) && !moved.includes(d));
+    const scored = scoringResponses.at(-1).data.practice;
+    expect(scored.summary.dateModel).toBe('dated');
+    expect(scored.coachConflicts).toHaveLength(1);
+    expect(scored.coachConflicts[0].firstDate).toBe(kept[0]);
+    expect(scored.coachConflicts[0].sharedDates).toBe(kept.length);
+    // The moved Monday is held at slot-tue, beside team C, on its Tuesday.
+    expect(scored.slotUtilization.find((u) => u.slotId === 'slot-tue').assignedCount).toBe(2);
+    // The TIME TBD Mondays are reported, not dropped.
+    expect(scored.timeTbd).toEqual([
+      {
+        teamId: 'team-b',
+        slotId: 'slot-mon',
+        exceptionId: 'pe-tbd',
+        code: 'past-sunset',
+        dates: tbd,
+      },
+    ]);
+    const panel = await screen.findByRole('region', { name: 'Fairness Scoring Engine' });
+    await waitFor(() =>
+      expect(panel).toHaveTextContent(
+        `Practice for team team-b at slot slot-mon is TIME TBD on 2 date(s) from ${tbd[0]} (past-sunset)`
+      )
+    );
+  });
+
+  it('with no exceptions sent, the planted clash keeps every Monday (control)', async () => {
+    await renderPage();
+    await settledRequest();
+    const [conflict] = scoringResponses.at(-1).data.practice.coachConflicts;
+    expect(conflict.sharedDates).toBe(mondaysIn(FULL).length);
+    expect(scoringResponses.at(-1).data.practice.timeTbd).toEqual([]);
+  });
+
+  it('an exceptions read that fails withholds the evaluation and says why', async () => {
+    const realFrom = mockSupabase.from.bind(mockSupabase);
+    vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
+      if (table !== 'practice_exceptions') return realFrom(table);
+      /** @type {any} */
+      const failing = new Proxy(
+        {},
+        {
+          get: (_target, prop) =>
+            prop === 'then'
+              ? (resolve) => resolve({ data: null, error: { message: 'permission denied' } })
+              : () => failing,
+        }
+      );
+      return failing;
+    });
+    await renderPage({ exceptions: EXCEPTIONS });
+
+    expect(
+      await screen.findByText(
+        /saved practice changes \(moved and TIME TBD practices\) could not be read, so the schedule is not evaluated \(permission denied\)/
+      )
+    ).toBeInTheDocument();
+    // Past the panel's debounce: nothing was scored as if there were none.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(scoringRequests).toEqual([]);
   });
 });

@@ -12,6 +12,7 @@ import {
   overbookedOf,
   undatedInputs,
 } from './helpers/datedScoringVectors.js';
+import { buildPracticeRunResults } from '../packages/core/src/utils/practiceRunResults.js';
 
 const SAMPLE_SLOTS = [
   {
@@ -1133,4 +1134,25 @@ test('exceptions: timeTbd is published only when exceptions are passed', () => {
   const { exceptions: _e, ...withoutExceptions } = vector;
   assert.equal('timeTbd' in datedCore(withoutExceptions), false);
   assert.deepEqual(datedCore({ ...vector, exceptions: [] }).timeTbd, []);
+});
+
+test('apply-time metrics apply the exceptions they are given, as the panel does (Q9 for Q1)', () => {
+  const vector = EXCEPTION_VECTORS.find((v) => v.witness === 'X-tbd-clash');
+  const run = (exceptions) =>
+    buildPracticeRunResults({
+      assignments: vector.assignments,
+      teams: vector.teams,
+      slots: vector.slots,
+      exceptions,
+      schoolDayEnd: undefined,
+      timezone: DATED_VECTORS.timeZone,
+    });
+  const applied = run(vector.exceptions);
+  assert.equal(applied.metricsArm, 'core');
+  assert.deepEqual(applied.timeTbd, vector.expected.timeTbd);
+  assert.equal(applied.coachConflicts[0].sharedDates, vector.expected.conflicts[0].sharedDates);
+  // Not read is not none: no `timeTbd` at all, and the unexcepted answer.
+  const unread = run(undefined);
+  assert.equal('timeTbd' in unread, false);
+  assert.equal(unread.coachConflicts[0].sharedDates, 15);
 });

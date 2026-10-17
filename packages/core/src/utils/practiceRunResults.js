@@ -80,6 +80,9 @@ import { evaluatePracticeSchedule } from '../practiceMetrics.js';
  *   Manual-follow-up entries from the scheduler, before filtering.
  * @param {Array<Object>} params.teams - Scheduler teams (the roster).
  * @param {Array<Object>} params.slots - Scheduler slots.
+ * @param {Array<Object>} [params.exceptions] - The season's live saved practice
+ *   exceptions, applied as the fairness panel applies them (the M4.7
+ *   follow-up); omitted when they were not read.
  * @param {string} [params.schoolDayEnd]
  * @param {string} [params.timezone] - The season's IANA zone.
  * @param {Object|null} [params.edgeEvaluation] - The Edge arm's report, if a
@@ -92,6 +95,7 @@ export function buildPracticeRunResults({
   unassigned = [],
   teams,
   slots,
+  exceptions,
   schoolDayEnd,
   timezone,
   edgeEvaluation = null,
@@ -121,6 +125,7 @@ export function buildPracticeRunResults({
       unassigned: stillUnassigned,
       teams: Array.isArray(teams) ? teams : [],
       slots: Array.isArray(slots) ? slots : [],
+      exceptions,
       schoolDayEnd,
       timezone,
     });

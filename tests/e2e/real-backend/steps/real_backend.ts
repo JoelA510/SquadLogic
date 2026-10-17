@@ -83,6 +83,9 @@ When('I import the {string} registration export', async ({ page }, shape: string
     await another.click();
     await expect(fileInput).toBeAttached();
   }
+  // The import audit rows already on file, so the Then step can tell this
+  // import's rows from the ones earlier imports wrote.
+  stateOf(page).auditBefore = new Set((await importAuditRows(page)).map((row) => row.id));
   await fileInput.setInputFiles({
     name: `registrations-${shape}.csv`,
     mimeType: 'text/csv',
@@ -127,8 +130,90 @@ Then(
   }
 );
 
+/**
+ * The audit actions a player import writes, each as the caller:
+ * import-validation's (`recordAuditNow`, made with the caller's client since
+ * #577; with the service-role client every one was refused on
+ * `audit_log.user_id NOT NULL`, and only logged), and finalize_import_job's.
+ * `create_import_job` also writes an `import.started` row, with the file's
+ * name and no row counts; the counts are how the Edge's row is told apart.
+ */
+const IMPORT_AUDIT = { validated: 'import.started', applied: 'import.completed' } as const;
+
+type AuditRow = {
+  id: string;
+  action: string;
+  resource_type: string | null;
+  resource_id: string | null;
+  user_id: string | null;
+  organization_id: string;
+  metadata: Record<string, unknown> | null;
+};
+
+/** The organization's import audit rows, read as the administrator (RLS: admins read the audit log). */
+async function importAuditRows(page: Page): Promise<AuditRow[]> {
+  const { token, anonKey } = await adminSession(page);
+  const query = new URLSearchParams({
+    select: 'id,action,resource_type,resource_id,user_id,organization_id,metadata',
+    organization_id: `eq.${SEEDED_ADMIN.organizationId}`,
+    action: `in.(${Object.values(IMPORT_AUDIT).join(',')})`,
+  });
+  const response = await page.request.get(`${stackUrl()}/rest/v1/audit_log?${query}`, {
+    headers: { apikey: anonKey, Authorization: `Bearer ${token}` },
+    timeout: BACKEND_TIMEOUT,
+  });
+  const body = (await response.json()) as AuditRow[];
+  expect(response.status(), JSON.stringify(body)).toBe(200);
+  return body;
+}
+
+Then('the audit log records the import as the administrator', async ({ page }) => {
+  const before = stateOf(page).auditBefore;
+  expect(before, 'the import step read the audit log before it started').toBeDefined();
+  const fresh = (await importAuditRows(page)).filter((row) => !before?.has(row.id));
+  const seen = JSON.stringify(fresh);
+  const total = registrations().length;
+
+  // import-validation's row: one, attributed to the administrator, counting
+  // every row of the export as valid.
+  const validated = fresh.filter(
+    (row) => row.action === IMPORT_AUDIT.validated && row.metadata?.total_rows !== undefined
+  );
+  expect(
+    validated.map((row) => ({
+      resource_type: row.resource_type,
+      user_id: row.user_id,
+      import_type: row.metadata?.import_type,
+      total_rows: row.metadata?.total_rows,
+      valid_rows: row.metadata?.valid_rows,
+      error_rows: row.metadata?.error_rows,
+    })),
+    `import-validation's ${IMPORT_AUDIT.validated} row, among this import's audit rows: ${seen}`
+  ).toEqual([
+    {
+      resource_type: 'import_job',
+      user_id: SEEDED_ADMIN.userId,
+      import_type: 'players',
+      total_rows: total,
+      valid_rows: total,
+      error_rows: 0,
+    },
+  ]);
+
+  // finalize_import_job's row: one, for the job it applied.
+  const applied = fresh.filter((row) => row.action === IMPORT_AUDIT.applied);
+  expect(applied, `the ${IMPORT_AUDIT.applied} row, among: ${seen}`).toHaveLength(1);
+  expect(applied[0].resource_type).toBe('import_job');
+  expect(applied[0].resource_id, 'the applied job').toBeTruthy();
+  expect(applied[0].user_id).toBe(SEEDED_ADMIN.userId);
+  stateOf(page).auditBefore = undefined;
+});
+
 /** What a scenario learned from one page and checks on a later one. */
-const scenarioState = new WeakMap<Page, { teams?: number; teamNames?: string[] }>();
+const scenarioState = new WeakMap<
+  Page,
+  { teams?: number; teamNames?: string[]; auditBefore?: Set<string> }
+>();
 const stateOf = (page: Page) => {
   const state = scenarioState.get(page) ?? {};
   scenarioState.set(page, state);
@@ -289,7 +374,11 @@ When('I upload the exports to Storage', async ({ page }) => {
  * for is made as (the exports bucket's listing, the audit log). Every such
  * read goes through the same RLS and Storage policies as the app's.
  */
+const adminSessions = new WeakMap<Page, { token: string; anonKey: string }>();
 async function adminSession(page: Page): Promise<{ token: string; anonKey: string }> {
+  // One sign-in per scenario: the stack allows 30 a 5 minutes per address.
+  const cached = adminSessions.get(page);
+  if (cached) return cached;
   const anonKey = process.env.E2E_REAL_BACKEND_ANON_KEY ?? '';
   const response = await page.request.post(`${stackUrl()}/auth/v1/token?grant_type=password`, {
     headers: { apikey: anonKey, 'Content-Type': 'application/json' },
@@ -299,7 +388,9 @@ async function adminSession(page: Page): Promise<{ token: string; anonKey: strin
   const body = (await response.json()) as { access_token?: string; user?: { id?: string } };
   expect(response.status(), JSON.stringify(body)).toBe(200);
   expect(body.user?.id, 'the session is the seeded administrator').toBe(SEEDED_ADMIN.userId);
-  return { token: body.access_token ?? '', anonKey };
+  const session = { token: body.access_token ?? '', anonKey };
+  adminSessions.set(page, session);
+  return session;
 }
 
 /**

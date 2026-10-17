@@ -456,7 +456,9 @@ other environment.
   preview`), the shape that ships. Features and steps
   are under [`tests/e2e/real-backend/`](../../tests/e2e/real-backend/), outside
   the mock project's globs: a narrower re-import that must keep the guardians
-  the first import recorded (migration `20260726000300`); import, teams synced
+  the first import recorded (migration `20260726000300`), each import leaving its
+  `audit_log` rows as the administrator (import-validation's and
+  `finalize_import_job`'s, read with the administrator's own session); import, teams synced
   through `team-persistence`, practices placed by `auto-scheduler` and applied
   through `practice-persistence`, the master export built from what the
   database returns, and "Upload to Storage" putting it and a file per team in

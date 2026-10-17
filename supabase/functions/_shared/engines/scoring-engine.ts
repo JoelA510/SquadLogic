@@ -1,14 +1,23 @@
-import type { Team, Slot, PracticeAssignment, GameAssignment } from '../schemas/scoring.ts';
-import { datedSlotsIssue } from '../schemas/scoring.ts';
+import type {
+  Team,
+  Slot,
+  PracticeAssignment,
+  PracticeException,
+  GameAssignment,
+} from '../schemas/scoring.ts';
+import { datedSlotsIssue, undatedExceptionsIssue } from '../schemas/scoring.ts';
 import { conflictPairKey, listTeamCoachIds } from './practice-coaches.ts';
 import {
   LIVE_SPAN_STATUS,
+  applyExceptionsToLiveRows,
   assignmentLiveSpan,
   calendarDayNumber,
-  peakLiveCount,
+  peakPieceCount,
   sharedLiveDates,
+  sharedPieceDates,
   wallSeconds,
 } from './practice-live-dates.ts';
+import type { LiveRow, Piece } from './practice-live-dates.ts';
 
 export type Severity = 'info' | 'warning' | 'error';
 
@@ -109,6 +118,37 @@ function resolveDateModel(slots: Slot[]): Map<string, SlotDating> | null {
   return datings;
 }
 
+/** Core `spanPiece`: a row with no exception, as one piece on its own slot. */
+const spanPiece = (entry: {
+  slotId: string;
+  span: { first: number; last: number } | null;
+}): Array<{ slotId: string; span?: { first: number; last: number }; days?: number[] }> =>
+  entry.span ? [{ slotId: entry.slotId, span: entry.span }] : [];
+
+/** Core `sharedHeldDates`. */
+function sharedHeldDates(
+  a: Array<{ slotId: string; span?: { first: number; last: number }; days?: number[] }>,
+  b: Array<{ slotId: string; span?: { first: number; last: number }; days?: number[] }>,
+  datings: Map<string, SlotDating>
+): { count: number; firstDate: string | null } {
+  let count = 0;
+  let firstDate: string | null = null;
+  for (const p of a) {
+    const pw = datings.get(p.slotId) as SlotDating;
+    for (const q of b) {
+      const qw = datings.get(q.slotId) as SlotDating;
+      if (!(pw.startSec < qw.endSec && qw.startSec < pw.endSec)) continue;
+      const shared = sharedPieceDates(p, q);
+      if (shared.count === 0) continue;
+      count += shared.count;
+      if (firstDate === null || (shared.firstDate as string) < firstDate) {
+        firstDate = shared.firstDate;
+      }
+    }
+  }
+  return { count, firstDate };
+}
+
 /**
  * Core Logic for evaluating Practice Schedules
  *
@@ -119,19 +159,31 @@ function resolveDateModel(slots: Slot[]): Map<string, SlotDating> | null {
  * first-occurrence instants and row counts, unchanged. `summary.dateModel`
  * says which ran. The auto-scheduler's own scoring is always undated
  * (`auto-scheduler-solver.ts` `scoreSchedule`, plan Q2).
+ *
+ * **Saved practice exceptions (the M4.7 follow-up, plan Q1)**, exactly as
+ * core: a dated call may pass `exceptions` (`practice_exceptions` rows as
+ * stored), applied through the calendar's `applyPracticeExceptions` twin. A
+ * `relocated` date is compared and counted at its new slot; a `time_tbd` date
+ * is in neither comparison and comes back in `timeTbd` and as a `time-tbd`
+ * warning issue. An exception the helper could not apply is a `data-quality`
+ * issue. An undated call refuses a non-empty `exceptions`
+ * (`undatedExceptionsIssue`, which `fairness-scoring` answers with a 422).
  */
 export function evaluatePracticeSchedule(params: {
   assignments: PracticeAssignment[];
   unassigned?: Array<{ teamId: string; reason: string }> | null;
   teams: Team[];
   slots: Slot[];
+  exceptions?: PracticeException[];
 }) {
-  const { assignments, unassigned = [], teams, slots } = params;
+  const { assignments, unassigned = [], teams, slots, exceptions } = params;
 
   const teamsById = new Map<string, Team>(teams.map((t) => [t.id, t]));
   const slotsById = new Map<string, Slot>(slots.map((s) => [s.id, s]));
   const datings = resolveDateModel(slots);
   const dateModel: 'dated' | 'undated' = datings ? 'dated' : 'undated';
+  const exceptionsIssue = undatedExceptionsIssue(slots, exceptions);
+  if (exceptionsIssue !== null) throw new TypeError(exceptionsIssue);
 
   // **One resolution pass, which is core's contract rather than a fourth one.**
   // This function used to decide what an assignment row was worth in three
@@ -178,6 +230,8 @@ export function evaluatePracticeSchedule(params: {
     slot: Slot;
     span: Span | null;
     row: number;
+    id: unknown;
+    range: unknown;
   }> = [];
   const seenAssignments = new Set<string>();
   // Core's dated duplicate rule: a team may hold one slot in two series
@@ -251,8 +305,48 @@ export function evaluatePracticeSchedule(params: {
       slot,
       span: span?.status === LIVE_SPAN_STATUS.LIVE ? { first: span.first, last: span.last } : null,
       row: resolvedAssignments.length,
+      id: a.id ?? null,
+      range: a.effectiveDateRange,
     });
   }
+
+  // Saved exceptions (plan Q1), core's pass: each row they touch holds
+  // explicit dates per slot (its pieces); TIME TBD dates are held nowhere.
+  const applied =
+    datings && exceptions !== undefined && exceptions.length > 0
+      ? applyExceptionsToLiveRows({
+          rows: resolvedAssignments.map(
+            (a): LiveRow => ({
+              id: a.id,
+              teamId: a.teamId,
+              slotId: a.slotId,
+              firstDay: (datings.get(a.slotId) as SlotDating).firstDay,
+              lastDay: (datings.get(a.slotId) as SlotDating).lastDay,
+              range: a.range,
+              span: a.span,
+            })
+          ),
+          exceptions,
+          slotFirstDays: new Map([...datings].map(([id, d]) => [id, d.firstDay])),
+        })
+      : null;
+  const piecesOfRow = (row: number) => applied?.pieces[row] ?? null;
+  for (const finding of applied?.findings ?? []) {
+    dataQualityMessages.push(
+      `practice exception ${String(finding.exceptionId)} on assignment ${String(finding.assignmentId)}${finding.date ? ` (${finding.date})` : ''}: ${finding.code}`
+    );
+  }
+  const piecesBySlot = new Map<string, Piece[]>();
+  resolvedAssignments.forEach((a) => {
+    const pieces = piecesOfRow(a.row);
+    const held: Array<{ slotId: string; span?: Span; days?: number[] }> =
+      pieces ?? (a.span ? [{ slotId: a.slotId, span: a.span }] : []);
+    for (const piece of held) {
+      const list = piecesBySlot.get(piece.slotId) ?? [];
+      list.push(piece.days ? { days: piece.days } : { span: piece.span });
+      piecesBySlot.set(piece.slotId, list);
+    }
+  });
 
   const totalTeams = teams.length;
   const assignedTeams = new Set(resolvedAssignments.map((a) => a.teamId)).size;
@@ -300,9 +394,10 @@ export function evaluatePracticeSchedule(params: {
   const slotUtilization = [...slotsById.values()].map((slot) => {
     const rowsInSlot = resolvedAssignments.filter((a) => a.slotId === slot.id);
     const assignmentRows = rowsInSlot.length;
-    // Dated: the busiest date's load (plan Q4). Undated: every row.
+    // Dated: the busiest date's load (plan Q4), a relocated date at its new
+    // slot and a TIME TBD date nowhere. Undated: every row.
     const assignedInSlot = datings
-      ? peakLiveCount(rowsInSlot.flatMap((a) => (a.span ? [a.span] : [])))
+      ? peakPieceCount(piecesBySlot.get(slot.id) ?? [])
       : assignmentRows;
     const utilization = slot.capacity > 0 ? assignedInSlot / slot.capacity : null;
 
@@ -362,7 +457,8 @@ export function evaluatePracticeSchedule(params: {
   // Core's dated merge: the dates each pair of ROWS shares, summed per placement pair.
   const datesByPair = new Map<string, Map<string, { count: number; firstDate: string | null }>>();
 
-  resolvedAssignments.forEach(({ team, slot, span, row, ...a }) => {
+  resolvedAssignments.forEach(({ team, slot, span, row, teamId, slotId }) => {
+    const a = { teamId, slotId };
     const start = new Date(slot.start);
     const end = new Date(slot.end);
     // `slot.day ?? 'unknown'`, which is what `practiceMetrics.js:582` does.
@@ -410,12 +506,23 @@ export function evaluatePracticeSchedule(params: {
         let shared: { count: number; firstDate: string | null } | null = null;
         if (datings) {
           // Core's dated rule: every pair, a shared live date, overlapping wall windows.
-          if (!current.span || !candidate.span || !current.dating || !candidate.dating) continue;
-          const windowsOverlap =
-            current.dating.startSec < candidate.dating.endSec &&
-            candidate.dating.startSec < current.dating.endSec;
-          if (!windowsOverlap) continue;
-          shared = sharedLiveDates(current.span, candidate.span);
+          const currentPieces = piecesOfRow(current.row);
+          const candidatePieces = piecesOfRow(candidate.row);
+          if (currentPieces === null && candidatePieces === null) {
+            if (!current.span || !candidate.span || !current.dating || !candidate.dating) continue;
+            const windowsOverlap =
+              current.dating.startSec < candidate.dating.endSec &&
+              candidate.dating.startSec < current.dating.endSec;
+            if (!windowsOverlap) continue;
+            shared = sharedLiveDates(current.span, candidate.span);
+          } else {
+            // Core's `sharedHeldDates`: each piece on its own slot's wall window.
+            shared = sharedHeldDates(
+              currentPieces ?? spanPiece(current),
+              candidatePieces ?? spanPiece(candidate),
+              datings
+            );
+          }
           if (shared.count === 0) continue;
         } else if (candidate.start >= current.end) {
           break;
@@ -484,6 +591,31 @@ export function evaluatePracticeSchedule(params: {
     });
   }
 
+  // Every TIME TBD date, with its row and reason (core's `timeTbd`): out of
+  // both comparisons above, and a warning here so it is never silent.
+  const timeTbd = applied
+    ? applied.timeTbd.map(({ row, exceptionId, code, dates }) => ({
+        teamId: resolvedAssignments[row].teamId,
+        slotId: resolvedAssignments[row].slotId,
+        exceptionId,
+        code,
+        dates,
+      }))
+    : exceptions !== undefined && datings
+      ? []
+      : undefined;
+  for (const entry of timeTbd ?? []) {
+    issues.push({
+      category: 'time-tbd',
+      severity: 'warning',
+      message:
+        entry.dates.length > 0
+          ? `Practice for team ${entry.teamId} at slot ${entry.slotId} is TIME TBD on ${entry.dates.length} date(s) from ${entry.dates[0]} (${entry.code})`
+          : `Practice for team ${entry.teamId} at slot ${entry.slotId} is TIME TBD with no date (${entry.code})`,
+      details: { ...entry } as Record<string, unknown>,
+    });
+  }
+
   // Fairness Score Calculation
   const conflictPenalty = coachConflicts.length * 0.15;
   const coveragePenalty = (1 - summary.assignmentRate) * 0.5;
@@ -502,6 +634,7 @@ export function evaluatePracticeSchedule(params: {
     summary: { ...summary, fairnessScore, dateModel },
     slotUtilization,
     coachConflicts,
+    ...(timeTbd !== undefined ? { timeTbd } : {}),
     manualFollowUpResults: (unassigned || []).map((u) => ({
       ...u,
       category: categorizeManualFollowUpReason(u.reason),

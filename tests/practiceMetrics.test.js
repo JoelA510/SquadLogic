@@ -7,6 +7,7 @@ import {
 } from '../packages/core/src/practiceMetrics.js';
 import {
   DATED_VECTORS,
+  EXCEPTION_VECTORS,
   datedProjection,
   overbookedOf,
   undatedInputs,
@@ -936,6 +937,7 @@ const datedCore = (vector) =>
     teams: vector.teams,
     slots: vector.slots,
     assignments: vector.assignments,
+    exceptions: vector.exceptions,
     schoolDayEnd: undefined,
     timezone: DATED_VECTORS.timeZone,
   });
@@ -1052,4 +1054,83 @@ test('dated: a mix of dated and undated slots refuses (Q8)', () => {
     timezone: 'UTC',
   });
   assert.equal(report.summary.dateModel, 'undated');
+});
+
+// ---- The M4.7 follow-up: saved practice exceptions (plan Q1) --------------
+//
+// The vectors with `exceptions` run through the dated witnesses above (their
+// `expected` carries `timeTbd`); these pin what the table cannot.
+
+test('exception witnesses: relocation and TIME TBD each move a clash and a count (meta, can fail)', () => {
+  const witnesses = EXCEPTION_VECTORS.map((v) => v.witness);
+  for (const w of [
+    'X-relocated-clash',
+    'X-relocated-capacity',
+    'X-tbd-clash',
+    'X-tbd-capacity',
+    'X-relocated-missing-slot',
+    'X-tbd-open',
+    'X-row-unread',
+    'X-withdrawn',
+  ]) {
+    assert.ok(witnesses.includes(w), `missing ${w}`);
+  }
+  // Each vector's truth differs from the answer with its exceptions left out,
+  // except the controls: so an engine that ignores exceptions fails the table.
+  const ignored = (vector) =>
+    datedProjection(
+      evaluatePracticeSchedule({
+        teams: vector.teams,
+        slots: vector.slots,
+        assignments: vector.assignments,
+        schoolDayEnd: undefined,
+        timezone: 'UTC',
+      }),
+      0
+    );
+  const moved = EXCEPTION_VECTORS.filter((v) => {
+    const { timeTbd: _t, dataQuality: _d, ...truth } = v.expected;
+    const { dataQuality: _x, ...without } = ignored(v);
+    return JSON.stringify(truth) !== JSON.stringify(without);
+  }).map((v) => v.witness);
+  assert.deepEqual(moved.sort(), [
+    'X-relocated-capacity',
+    'X-relocated-clash',
+    'X-tbd-capacity',
+    'X-tbd-clash',
+    'X-tbd-open',
+  ]);
+  assert.ok(EXCEPTION_VECTORS.some((v) => v.expected.timeTbd.length > 0));
+});
+
+test('exceptions: an exception naming no row of the call is a data-quality line, by name', () => {
+  const report = datedCore(EXCEPTION_VECTORS.find((v) => v.witness === 'X-row-unread'));
+  assert.deepEqual(report.dataQualityWarnings, [
+    'practice exception e1 on assignment a9: PRACTICE_EXCEPTION_ROW_UNREAD',
+  ]);
+  assert.deepEqual(report.timeTbd, []);
+});
+
+test('exceptions: an undated call refuses them, and none sent is not a refusal', () => {
+  const vector = EXCEPTION_VECTORS.find((v) => v.witness === 'X-tbd-clash');
+  const inputs = { ...undatedInputs(vector), schoolDayEnd: undefined, timezone: 'UTC' };
+  assert.throws(
+    () => evaluatePracticeSchedule({ ...inputs, exceptions: vector.exceptions }),
+    /practice exceptions need a dated call \(every slot with firstDate and lastDate\): 1 sent with undated slots/
+  );
+  const none = evaluatePracticeSchedule({ ...inputs, exceptions: [] });
+  assert.equal(none.summary.dateModel, 'undated');
+  assert.equal('timeTbd' in none, false);
+  assert.throws(
+    // @ts-expect-error [INVALID_INPUT] - not an array, refused at run time.
+    () => evaluatePracticeSchedule({ ...inputs, exceptions: 'e1' }),
+    /exceptions must be an array/
+  );
+});
+
+test('exceptions: timeTbd is published only when exceptions are passed', () => {
+  const vector = EXCEPTION_VECTORS.find((v) => v.witness === 'X-tbd-clash');
+  const { exceptions: _e, ...withoutExceptions } = vector;
+  assert.equal('timeTbd' in datedCore(withoutExceptions), false);
+  assert.deepEqual(datedCore({ ...vector, exceptions: [] }).timeTbd, []);
 });

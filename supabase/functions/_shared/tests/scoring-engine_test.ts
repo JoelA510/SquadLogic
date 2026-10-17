@@ -4,7 +4,7 @@ import {
   assertThrows,
 } from 'https://deno.land/std@0.203.0/assert/mod.ts';
 import { evaluatePracticeSchedule } from '../engines/scoring-engine.ts';
-import { Team, Slot, PracticeAssignment } from '../schemas/scoring.ts';
+import { Team, Slot, PracticeAssignment, PracticeException } from '../schemas/scoring.ts';
 import dated from './fixtures/scoring-dated-vectors.json' with { type: 'json' };
 
 Deno.test('evaluatePracticeSchedule - basic assignment calculation', () => {
@@ -84,11 +84,19 @@ interface DatedVector {
   teams: Team[];
   slots: Slot[];
   assignments: PracticeAssignment[];
+  exceptions?: PracticeException[];
   expected: {
     conflicts: Array<{ key: string; firstDate: string; sharedDates: number }>;
     slotLoad: Record<string, [number, number]>;
     dataQuality: number;
     assignedTeams: number;
+    timeTbd?: Array<{
+      teamId: string;
+      slotId: string;
+      exceptionId: unknown;
+      code: string;
+      dates: string[];
+    }>;
   };
   undated: { conflicts: number; overbooked: string[] };
 }
@@ -118,6 +126,7 @@ function projection(report: Report) {
     ),
     dataQuality: report.issues.filter((i) => i.category === 'data-quality').length,
     assignedTeams: report.summary.assignedTeams,
+    ...(report.timeTbd !== undefined ? { timeTbd: report.timeTbd } : {}),
   };
 }
 
@@ -163,4 +172,50 @@ Deno.test('evaluatePracticeSchedule dated - a mix of dated and undated slots ref
     TypeError,
     'must all carry firstDate and lastDate, or none: 1 of 2 do'
   );
+});
+
+// ---- The M4.7 follow-up: saved practice exceptions (plan Q1) ---------------
+//
+// The vectors with `exceptions` above run through the same projection, which
+// carries `timeTbd`; these add what only the Edge reports.
+
+const EXCEPTIONAL = DATED.filter((v) => v.exceptions !== undefined);
+
+Deno.test('evaluatePracticeSchedule exceptions - the witnesses are present (meta)', () => {
+  const witnesses = new Set(EXCEPTIONAL.map((v) => v.witness));
+  for (const w of ['X-relocated-clash', 'X-relocated-capacity', 'X-tbd-clash', 'X-tbd-capacity']) {
+    assertEquals(witnesses.has(w), true, w);
+  }
+  // A TIME TBD date is expected somewhere, so a report that never has one fails.
+  assertEquals(
+    EXCEPTIONAL.some((v) => (v.expected.timeTbd ?? []).length > 0),
+    true
+  );
+});
+
+Deno.test('evaluatePracticeSchedule exceptions - each TIME TBD entry is a warning issue', () => {
+  const vector = DATED.find((v) => v.witness === 'X-tbd-clash')!;
+  const report = evaluatePracticeSchedule(vector);
+  const tbd = report.issues.filter((i) => i.category === 'time-tbd');
+  assertEquals(tbd.length, 1);
+  assertEquals(tbd[0].severity, 'warning');
+  assertStringIncludes(tbd[0].message, 'TIME TBD on 2 date(s) from 2026-08-11 (past-sunset)');
+});
+
+Deno.test('evaluatePracticeSchedule exceptions - an undated call refuses them', () => {
+  const vector = DATED.find((v) => v.witness === 'X-tbd-clash')!;
+  const slots = vector.slots.map(({ id, day, capacity, start, end }) => ({
+    id,
+    day,
+    capacity,
+    start,
+    end,
+  }));
+  assertThrows(
+    () => evaluatePracticeSchedule({ ...vector, slots }),
+    TypeError,
+    'practice exceptions need a dated call'
+  );
+  // None sent is not a refusal.
+  evaluatePracticeSchedule({ ...vector, slots, exceptions: [] });
 });

@@ -23,6 +23,13 @@
  *   before.
  * - `YYYY-MM-DD` day numbers only: no `Date` is constructed (GAP-30).
  *
+ * - Saved practice exceptions (the M4.7 follow-up, plan Q1) go through
+ *   `applyPracticeExceptions`, the helper the portal, the feed and the RSVP
+ *   check already use: {@link applyExceptionsToLiveRows} turns a dated run's
+ *   rows plus their exceptions into each row's dated **pieces** (the dates it
+ *   is held on, per slot) and its TIME TBD dates, and the engines compare
+ *   pieces instead of spans for the rows it touched.
+ *
  * The Edge twin is `supabase/functions/_shared/engines/practice-live-dates.ts`;
  * `tests/scoringEngineDrift.test.js` holds the two to the same answers.
  *
@@ -30,7 +37,12 @@
  */
 
 import { isoDateOfDayNumber, isoDayNumber } from '../facility/eligibility.js';
-import { practiceRangeBounds, practiceRangeLowerBound } from './practiceOccurrences.js';
+import {
+  DAY_OF_WEEK_ENUM,
+  practiceRangeBounds,
+  practiceRangeLowerBound,
+} from './practiceOccurrences.js';
+import { PRACTICE_EXCEPTION_CODE, applyPracticeExceptions } from './practiceExceptions.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const WALL_TIME = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
@@ -150,4 +162,234 @@ export function peakLiveCount(spans) {
     if (live > peak) peak = live;
   }
   return peak;
+}
+
+/** The `day_of_week` of a day number: day 0 (1970-01-01) is a Thursday. */
+const weekdayOfDay = (day) => DAY_OF_WEEK_ENUM[(((day + 4) % 7) + 7) % 7];
+
+/** Every date of a live span, as day numbers. */
+const spanDays = (span) => {
+  const days = [];
+  for (let d = span.first; d <= span.last; d += 7) days.push(d);
+  return days;
+};
+
+/**
+ * The dates two pieces share. A piece is a live span (`{ span }`, weekly) or
+ * the explicit dates a row holds on one slot after its exceptions
+ * (`{ days }`, day numbers). Two spans go through {@link sharedLiveDates}
+ * unchanged, so a run with no exception compares exactly as before.
+ *
+ * @param {{ span?: { first: number, last: number }, days?: number[] }} a
+ * @param {{ span?: { first: number, last: number }, days?: number[] }} b
+ * @returns {{ count: number, firstDate: string | null }}
+ */
+export function sharedPieceDates(a, b) {
+  if (a.days === undefined && b.days === undefined) return sharedLiveDates(a.span, b.span);
+  const left = new Set(a.days ?? spanDays(a.span));
+  const shared = (b.days ?? spanDays(b.span)).filter((d) => left.has(d));
+  if (shared.length === 0) return { count: 0, firstDate: null };
+  return { count: shared.length, firstDate: isoDateOfDayNumber(Math.min(...shared)) };
+}
+
+/**
+ * The most pieces held on any one date: a slot's load on its busiest date.
+ * All spans go through {@link peakLiveCount} unchanged.
+ *
+ * @param {Array<{ span?: { first: number, last: number }, days?: number[] }>} pieces
+ * @returns {number}
+ */
+export function peakPieceCount(pieces) {
+  if (pieces.every((p) => p.days === undefined)) return peakLiveCount(pieces.map((p) => p.span));
+  const load = new Map();
+  let peak = 0;
+  for (const piece of pieces) {
+    for (const day of piece.days ?? spanDays(piece.span)) {
+      const count = (load.get(day) ?? 0) + 1;
+      load.set(day, count);
+      if (count > peak) peak = count;
+    }
+  }
+  return peak;
+}
+
+/**
+ * The helper's findings the engines report as their own lines. The others
+ * (`CONFLICT`, `WINDOW_OPEN`, `WINDOW_UNREADABLE`) always arrive with a TIME
+ * TBD entry for the same row and exception, which is reported instead.
+ */
+export const REPORTED_EXCEPTION_FINDINGS = Object.freeze([
+  PRACTICE_EXCEPTION_CODE.ROW_UNREAD,
+  PRACTICE_EXCEPTION_CODE.ROW_REFUSED,
+  PRACTICE_EXCEPTION_CODE.RELOCATION_UNMATCHED,
+  PRACTICE_EXCEPTION_CODE.TBD_SHADOWED,
+  PRACTICE_EXCEPTION_CODE.UNREADABLE,
+]);
+
+const order = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const text = (value) => String(value ?? '');
+
+/**
+ * Apply saved practice exceptions to a dated run's counted rows (the M4.7
+ * follow-up, `docs/PLAN_SCORING_DATE_MODEL.md` §3.1 and Q1).
+ *
+ * The rules are `applyPracticeExceptions`' and nothing here restates them: a
+ * live `relocated` exception moves the row's dates in its window to its slot
+ * (`practice_slot_id`, resolved against the run's own slots), a live
+ * `time_tbd` turns them into TIME TBD dates, and the helper's refusals and
+ * findings come back as they are. Called once per team, as the helper's rule
+ * 9 (a TIME TBD shadowed by another practice) is a per-team rule; exceptions
+ * naming no row of the run go to one more call with no rows, so they come
+ * back as the helper's `ROW_UNREAD`, never dropped here.
+ *
+ * What the engines add, stated:
+ *
+ * - **The row handed to the helper** carries its own range, as stored. A row
+ *   sent with no range, or an open-ended one, is given the range the engines
+ *   already read it as (plan §3.1, Q3): the slot's validity, or from its
+ *   lower bound to the validity end. Its slot's `day_of_week` is the weekday
+ *   of the slot's `firstDate` (day arithmetic, no label parsed).
+ * - **Series dates are clipped to the row's live span** (its range inside the
+ *   slot's validity), exactly the dates the engine held without exceptions.
+ *   Relocated dates are as the helper gives them (the window inside the
+ *   row's range), at the target slot.
+ * - **A relocation to a slot the run does not carry** has no `slot`, so the
+ *   helper turns its dates into TIME TBD `PRACTICE_SLOT_MISSING`.
+ * - Only rows with an `id` can be named by an exception. A second counted row
+ *   with an id already seen is not handed to the helper (a stored row id is
+ *   unique, so this needs a malformed request) and keeps its span.
+ *
+ * @param {{
+ *   rows: Array<{ id?: unknown, teamId: string, slotId: string, firstDay: number,
+ *     lastDay: number, range?: unknown, span: { first: number, last: number } | null }>,
+ *   exceptions: Array<unknown>,
+ *   slotFirstDays: Map<string, number>,
+ * }} input - `rows` are the run's counted rows in order; `slotFirstDays` each
+ *   slot's `firstDate` as a day number.
+ * @returns {{
+ *   pieces: Array<Array<{ slotId: string, days: number[] }> | null>,
+ *   timeTbd: Array<{ row: number, exceptionId: unknown, code: string, dates: string[] }>,
+ *   findings: Array<{ code: string, assignmentId: unknown, exceptionId: unknown, date?: string }>,
+ * }} `pieces[i]` is null for a row the helper was not given; `dates` is empty
+ *   for an undated TIME TBD entry.
+ */
+export function applyExceptionsToLiveRows({ rows, exceptions, slotFirstDays }) {
+  /** @type {(value: unknown) => value is Record<string, any>} */
+  const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+  const rowById = new Map();
+  rows.forEach((row, index) => {
+    if (row.id === undefined || row.id === null || rowById.has(row.id)) return;
+    rowById.set(row.id, index);
+  });
+
+  // Each exception goes with the team of the row it names; the rest together.
+  const byTeam = new Map();
+  const unnamed = [];
+  for (const exception of exceptions) {
+    const index = isRecord(exception) ? rowById.get(exception.assignment_id) : undefined;
+    if (!isRecord(exception) || index === undefined) {
+      unnamed.push(exception);
+      continue;
+    }
+    // The relocated slot is the run's own slot of that id, never a slot the
+    // request embedded: its weekday is the one the engines compare on.
+    const targetDay = slotFirstDays.get(exception.practice_slot_id);
+    const resolved = {
+      ...exception,
+      slot:
+        targetDay === undefined
+          ? null
+          : { id: exception.practice_slot_id, day_of_week: weekdayOfDay(targetDay) },
+    };
+    const team = rows[index].teamId;
+    const list = byTeam.get(team) ?? [];
+    list.push(resolved);
+    byTeam.set(team, list);
+  }
+
+  const pieces = rows.map(() => null);
+  const tbdByKey = new Map();
+  const findings = [];
+  const keep = (result) => {
+    for (const finding of result.findings) {
+      if (REPORTED_EXCEPTION_FINDINGS.includes(finding.code)) findings.push(finding);
+    }
+  };
+  const tbd = (index, exceptionId, code, date) => {
+    const key = `${index}|${text(exceptionId)}|${code}|${date === null ? 'undated' : 'dated'}`;
+    const entry = tbdByKey.get(key) ?? { row: index, exceptionId, code, dates: [] };
+    if (date !== null) entry.dates.push(date);
+    tbdByKey.set(key, entry);
+  };
+
+  const rowsOfTeam = new Map();
+  for (const [id, index] of rowById) {
+    const team = rows[index].teamId;
+    const list = rowsOfTeam.get(team) ?? [];
+    list.push({ id, index });
+    rowsOfTeam.set(team, list);
+  }
+  for (const [team, teamExceptions] of byTeam) {
+    const helperRows = rowsOfTeam.get(team).map(({ id, index }) => {
+      const row = rows[index];
+      return {
+        id,
+        effective_date_range: helperRange(row),
+        slot: { day_of_week: weekdayOfDay(row.firstDay) },
+      };
+    });
+    const result = applyPracticeExceptions({ rows: helperRows, exceptions: teamExceptions });
+    keep(result);
+    for (const { index } of rowsOfTeam.get(team)) pieces[index] = [];
+    const daysBySlot = new Map();
+    for (const o of result.occurrences) {
+      const index = rowById.get(o.assignmentId);
+      const row = rows[index];
+      const day = isoDayNumber(o.date);
+      if (o.kind === 'time_tbd') {
+        tbd(index, o.exceptionId, o.code, o.date);
+        continue;
+      }
+      // A series date counts only inside the row's live span; a relocated
+      // one is held at its target slot.
+      if (
+        o.kind === 'series' &&
+        (row.span === null || day < row.span.first || day > row.span.last)
+      ) {
+        continue;
+      }
+      const slotId = o.kind === 'relocated' ? o.slot.id : row.slotId;
+      const key = `${index}|${slotId}`;
+      const entry = daysBySlot.get(key) ?? { index, slotId, days: [] };
+      entry.days.push(day);
+      daysBySlot.set(key, entry);
+    }
+    for (const { index, slotId, days } of daysBySlot.values()) {
+      pieces[index].push({ slotId, days: days.sort((x, y) => x - y) });
+    }
+    for (const entry of result.undated) {
+      tbd(rowById.get(entry.assignmentId), entry.exceptionId, entry.code, null);
+    }
+  }
+  if (unnamed.length > 0) keep(applyPracticeExceptions({ rows: [], exceptions: unnamed }));
+
+  const timeTbd = [...tbdByKey.values()].sort(
+    (a, b) =>
+      a.row - b.row ||
+      order(text(a.exceptionId), text(b.exceptionId)) ||
+      order(a.code, b.code) ||
+      a.dates.length - b.dates.length
+  );
+  return { pieces, timeTbd, findings };
+}
+
+/** The range the helper is given for a row: its own, or the one the engines read it as. */
+function helperRange(row) {
+  const validityEnd = isoDateOfDayNumber(row.lastDay);
+  if (row.range === undefined || row.range === null) {
+    return `[${isoDateOfDayNumber(row.firstDay)},${validityEnd}]`;
+  }
+  if (practiceRangeBounds(row.range) !== null) return row.range;
+  // Unreadable rows were dropped before this, so the lower bound reads (Q3).
+  return `[${practiceRangeLowerBound(row.range).first},${validityEnd}]`;
 }

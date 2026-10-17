@@ -78,7 +78,7 @@ export default function PersistencePanel({
         <div className="flex items-center gap-3">
           <button
             onClick={onSync}
-            disabled={status === 'syncing'}
+            disabled={status === 'syncing' || status === 'unknown'}
             className="glass-button relative z-20"
           >
             {status === 'syncing' ? 'Syncing...' : 'Sync to Supabase'}

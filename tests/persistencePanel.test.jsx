@@ -261,30 +261,28 @@ describe('PersistencePanel status display (via TeamPersistencePanel)', () => {
     expect(triggerTeamPersistence.mock.calls[0][0].signal.aborted).toBe(true);
   });
 
-  it('a timed-out request that resolves late cannot overwrite a retry', async () => {
+  it('after a timeout, no second sync until a reload, and a late answer changes nothing', async () => {
     vi.useFakeTimers();
     let resolveFirst;
-    triggerTeamPersistence
-      .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
-      .mockReturnValueOnce(new Promise(() => {}));
+    triggerTeamPersistence.mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)));
     renderPanel();
     await clickSync();
     await act(async () => {
       vi.advanceTimersByTime(10000);
     });
-    await clickSync();
-    expect(within(screen.getByRole('status')).getByText('Syncing active...')).toBeVisible();
 
+    // The first sync may have saved: the button that would send the same teams again is off.
+    const sync = screen.getByRole('button', { name: SYNC_BUTTON });
+    expect(sync).toBeDisabled();
+    await clickSync();
+    expect(triggerTeamPersistence).toHaveBeenCalledTimes(1);
+
+    // The aborted request answering late does not overwrite the unknown outcome.
     await act(async () => {
       resolveFirst({ status: 'success', syncedAt: '2026-09-01T12:00:00Z', updatedTeams: 2 });
     });
-    expect(within(screen.getByRole('status')).getByText('Syncing active...')).toBeVisible();
-
-    // The retry's own timeout was not cleared by the stale request's `finally`.
-    await act(async () => {
-      vi.advanceTimersByTime(10000);
-    });
     expect(within(screen.getByRole('alert')).getByText('Outcome unknown')).toBeVisible();
+    expect(screen.queryByText('Sync complete')).toBeNull();
   });
 
   it('only animates the indicator while a sync is in flight', async () => {

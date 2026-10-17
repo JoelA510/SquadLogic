@@ -115,7 +115,9 @@ export default function TeamPersistencePanel({
   }
 
   const handlePersist = async () => {
-    if (persistenceActionState === 'submitting') {
+    // After a timeout the first sync may have saved: no second one until a reload shows what
+    // the first did (the message says so, and the button is off).
+    if (persistenceActionState === 'submitting' || persistenceActionState === 'unknown') {
       return;
     }
 

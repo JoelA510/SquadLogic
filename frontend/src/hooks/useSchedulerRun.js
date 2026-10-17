@@ -64,6 +64,8 @@ export function useSchedulerRun(runType, mapper, emptyState) {
           .maybeSingle()
           // @ts-expect-error [SUP] abortSignal present but untyped in PostgREST builder
           .abortSignal(controller.signal);
+        // Cancelled while it was answered: nothing below is for a read anyone awaits.
+        if (controller.signal.aborted) return;
 
         if (queryError) {
           throw queryError;

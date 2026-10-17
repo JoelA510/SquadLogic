@@ -85,6 +85,19 @@ const DASHBOARD = vi.hoisted(() => ({
         division: 'U10',
         assignmentSource: 'auto',
       },
+      {
+        // Saved on North Field although gs-3 is South Field's booking: the
+        // disagreement the grid now refuses to create, as older data may hold it.
+        id: 'ga-3',
+        slotId: 'gs-3',
+        fieldId: 'v1',
+        homeTeamId: 'hawks',
+        awayTeamId: 'owls',
+        start: '2026-04-04T15:00:00Z',
+        end: '2026-04-04T16:00:00Z',
+        division: 'U10',
+        assignmentSource: 'auto',
+      },
     ],
   },
 }));
@@ -132,10 +145,10 @@ const COLUMNS = { v1: 0, v2: 240 };
 const ROWS = { 'gs-1': 0, 'gs-2': 120, 'gs-3': 240 };
 
 function rectOf(element) {
-  // The drag overlay starts where the game being dragged is (the only one
-  // these cases drag): dnd-kit reads the overlay, not the card, while dragging.
+  // The drag overlay starts where the game being dragged is: dnd-kit reads the
+  // overlay, not the card, while dragging.
   if (element.getAttribute?.('data-testid') === 'game-card-preview') {
-    const dragged = document.querySelector('[data-testid="game-card-ga-1"]');
+    const dragged = document.querySelector(`[data-testid="${draggedCard}"]`);
     return dragged ? rectOf(dragged) : rectOf(document.body);
   }
   const zone = element.closest?.('[data-testid^="drop-zone-"]');
@@ -164,9 +177,14 @@ const settle = () =>
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
+/** The card a case is dragging, for the overlay's starting rect. */
+let draggedCard = 'game-card-ga-1';
+
 /** Pick up a game from its grip, press `keys`, and drop it. */
 async function keyboardDrag(matchup, keys) {
   const handle = screen.getByRole('button', { name: `Drag ${matchup}` });
+  draggedCard =
+    handle.closest('[data-testid^="game-card-"]')?.getAttribute('data-testid') ?? draggedCard;
   handle.focus();
   fireEvent.keyDown(handle, { code: 'Space' });
   await settle();
@@ -196,6 +214,7 @@ async function renderEditableGrid() {
 describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
   let rectSpy;
   beforeEach(() => {
+    draggedCard = 'game-card-ga-1';
     rectSpy = vi
       .spyOn(Element.prototype, 'getBoundingClientRect')
       .mockImplementation(function boundingRect() {
@@ -300,6 +319,22 @@ describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
     // The screen reader's announcement agrees with the status line.
     expect(
       screen.getByText(/^lions vs bulls was not moved: North Field, .+ already has a game\.$/)
+    ).toBeInTheDocument();
+  });
+
+  it("puts back, without a refusal, a game saved in another field's slot", async () => {
+    await renderEditableGrid();
+    const own = screen.getByTestId('drop-zone-v1:gs-3');
+    expect(within(own).getByTestId('game-card-ga-3')).toBeInTheDocument();
+
+    await keyboardDrag('hawks vs owls', []);
+
+    // `moveGameTo` treats its own cell as put back; the announcement says the same.
+    expect(within(own).getByTestId('game-card-ga-3')).toBeInTheDocument();
+    expect(screen.queryByText(STAGED)).not.toBeInTheDocument();
+    expect(screen.queryByText(/was not moved/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/^hawks vs owls was dropped on North Field, .+\.$/)
     ).toBeInTheDocument();
   });
 

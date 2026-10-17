@@ -1,4 +1,16 @@
 /**
+ * A grid cell's id, `${fieldId}:${slotId}` (the drop zone's droppable id), split. The one
+ * parser of that format for the move handler and the drag announcements.
+ *
+ * @param {unknown} cellId
+ * @returns {{ fieldId: string, slotId: string }}
+ */
+export function parseCellId(cellId) {
+  const [fieldId = '', slotId = ''] = String(cellId ?? '').split(':');
+  return { fieldId, slotId };
+}
+
+/**
  * Whether a game slot can hold a game in a field's column of the game grid.
  *
  * The grid draws every game slot under every field, but a game slot is one

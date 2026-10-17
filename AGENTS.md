@@ -188,7 +188,8 @@ recurring shapes:
 - [ ] Tests pass at the coverage thresholds (`npm run test:coverage`). _(E2E runs separately in CI/bulk.)_
 - [ ] Linter is happy (`npm run lint`), and `npm run check:unused` (knip) is green.
 - [ ] Frontend build is clean (`npm run frontend:build`).
-- [ ] `npm run check:advisors` and `npm run check:bundle` both green.
+- [ ] `npm run check:advisors` and `npm run check:bundle` both green (`check:bundle` measures a
+      build made as CI makes it, with a stand-in Sentry DSN: `docs/operations/bundle-budget.md`).
 - [ ] New exports are registered in their package/module index.
 - [ ] Database migrations (if any) have matching revert + smoke scripts under `docs/sql/`. CI
       applies them on merge (§11); never apply one by hand.

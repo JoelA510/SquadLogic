@@ -5,13 +5,12 @@ import { configurePersistenceEndpoint } from './configurePersistenceEndpoint.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
-const frontendRoot = path.join(repoRoot, 'frontend');
-const envFilePath = path.join(frontendRoot, '.env.local');
 
 const viteCommand = process.argv[2] || 'build';
 const viteArgs = [viteCommand, ...process.argv.slice(3)];
 
-configurePersistenceEndpoint(process.env, { persistEnvFilePath: envFilePath });
+// The derived value reaches Vite through the child's environment.
+configurePersistenceEndpoint(process.env);
 
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 

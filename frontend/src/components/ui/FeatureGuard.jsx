@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { useFeatures } from '../../hooks/useFeatures.js';
 import { ALL_FLAGS } from '../../constants/featureFlags.js';
+import { IS_DEV_SERVER } from '../../env.js';
 
 /**
  * FeatureGuard Component
@@ -22,7 +23,7 @@ export const FeatureGuard = ({ flag, children, fallback = null, inverted = false
   const { isEnabled: isFlagEnabled, loading } = useFeatures();
 
   useEffect(() => {
-    if (process.env.NODE_ENV === 'development' && !ALL_FLAGS.includes(flag)) {
+    if (IS_DEV_SERVER && !ALL_FLAGS.includes(flag)) {
       console.warn(
         `[FeatureGuard] Warning: The flag "${flag}" is not recognized in constants/featureFlags.js. This may be a typo.`
       );

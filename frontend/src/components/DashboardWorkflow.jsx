@@ -23,7 +23,6 @@ const DashboardWorkflow = ({
   practiceData,
   gameData,
   persistenceSnapshot,
-  onImport,
   importedData,
   controlledActiveStep,
   onStepChange,
@@ -112,12 +111,8 @@ const DashboardWorkflow = ({
           status={getStatus(1)}
           onClick={() => handleStepChange(1)}
         >
-          <ImportPanel
-            onImport={(data) => {
-              onImport(data);
-              handleStepChange(2); // Auto-advance
-            }}
-          />
+          {/* Continue moves on to step 2; the applied import stays in `ImportContext`. */}
+          <ImportPanel onImport={() => handleStepChange(2)} />
         </WorkflowStep>
 
         {/* Step 2: Teaming & Analysis */}

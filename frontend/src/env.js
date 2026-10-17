@@ -22,6 +22,14 @@ export const IS_PRODUCTION_BUILD = import.meta.env.PROD === true;
 export const IS_DEV = import.meta.env.DEV === true;
 
 /**
+ * The Vite dev server, in any mode, and not Vitest: `IS_DEV` is true in Vitest
+ * too, where `MODE` is `test`. For dev-only console warnings that would bury
+ * test output. Replaces the old `process.env.NODE_ENV === 'development'` reads
+ * (plan M6), which Vite set on the dev server and Vitest set to `test`.
+ */
+export const IS_DEV_SERVER = import.meta.env.DEV === true && import.meta.env.MODE !== 'test';
+
+/**
  * Build-time: can this build ever run the mock? Vite replaces both reads with
  * literals, so in a production build without `VITE_USE_MOCK_SUPABASE=true`
  * this is the literal `false`, and Rollup drops the mock's dynamic import in

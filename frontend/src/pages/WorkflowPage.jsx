@@ -28,7 +28,7 @@ export default function WorkflowPage() {
   // the three fetch failures underneath it.
   const { team, practice, game, loading, error: dataError, errors } = useDashboardData();
   const { persistenceSnapshot, loading: _persistenceLoading } = useTeamPersistence();
-  const { importedData, setImportedData } = useImport();
+  const { importedData } = useImport();
   const { theme: _theme } = useTheme();
   const { currentOrganization } = useOrganization();
   // The banner has two sources with different lifetimes, and collapsing them
@@ -142,10 +142,6 @@ export default function WorkflowPage() {
   const gameUnknown = gamePending && !game?.generatedAt;
   const readinessKnown = !teamUnknown && !practiceUnknown && !gameUnknown;
 
-  const handleImport = (data) => {
-    setImportedData(data);
-  };
-
   return (
     <div className="animate-fadeIn">
       {/* Markup moved to `DataErrorBanner` so the four sibling pages that had
@@ -200,7 +196,6 @@ export default function WorkflowPage() {
             practiceData={practice}
             gameData={game}
             persistenceSnapshot={persistenceSnapshot}
-            onImport={handleImport}
             importedData={importedData}
             controlledActiveStep={activeStep}
             onStepChange={setActiveStep}

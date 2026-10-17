@@ -2,6 +2,7 @@ import React from 'react';
 import PropTypes from 'prop-types';
 import { MapPin } from 'lucide-react';
 import TimeSlotDropZone from './TimeSlotDropZone.jsx';
+import { isSlotOnField } from '../../utils/gameGridCells.js';
 
 /**
  * FieldColumn — one vertical column in the schedule grid, representing a single field.
@@ -41,6 +42,9 @@ export default function FieldColumn({
       <div className="flex-1 p-2 space-y-2">
         {timeSlots.map((slot) => {
           const assignment = assignmentsBySlot[slot.id] || null;
+          // Another field's booking, drawn in this column: no drop lands here (the page's
+          // move handler refuses it, as "Move to" never offers it).
+          const isBookable = isSlotOnField(slot, field.id);
 
           // Determine validation state for this specific cell
           const isActiveTarget =
@@ -56,10 +60,17 @@ export default function FieldColumn({
               slotId={slot.id}
               slotLabel={slot.label || ''}
               assignment={assignment}
-              isValidTarget={isActiveTarget ? validationResult.valid === true : false}
-              isInvalidTarget={isActiveTarget ? validationResult.valid === false : false}
+              isBookable={isBookable}
+              isValidTarget={isBookable && isActiveTarget ? validationResult.valid === true : false}
+              isInvalidTarget={
+                !isBookable || (isActiveTarget ? validationResult.valid === false : false)
+              }
               invalidReason={
-                isActiveTarget && !validationResult.valid ? validationResult.reason : ''
+                !isBookable
+                  ? `This time slot is booked on another field, not ${field.name}.`
+                  : isActiveTarget && !validationResult.valid
+                    ? validationResult.reason
+                    : ''
               }
               conflictSet={conflictSet}
               isDragDisabled={isDragDisabled}

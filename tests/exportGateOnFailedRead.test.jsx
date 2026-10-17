@@ -546,7 +546,6 @@ describe('every call site of the panel hands it the distinction', () => {
           practiceData={{ snapshot: {}, assignments: PRACTICES }}
           gameData={{ snapshot: {}, assignments: [] }}
           persistenceSnapshot={null}
-          onImport={() => {}}
           importedData={{ totalRows: 5 }}
           controlledActiveStep={6}
           onStepChange={() => {}}

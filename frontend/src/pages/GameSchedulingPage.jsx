@@ -22,6 +22,7 @@ import GameScheduleGrid from '../components/scheduling/GameScheduleGrid.jsx';
 import { GameCardPreview, GameMoveContext } from '../components/scheduling/GameCard.jsx';
 import Button from '../components/ui/Button.jsx';
 import ProgressBar from '../components/ui/ProgressBar.jsx';
+import Tabs from '../components/ui/Tabs.jsx';
 import {
   Edit2,
   Save,
@@ -49,6 +50,7 @@ import { useFieldClosures } from '../hooks/useFieldClosures.js';
 import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/fieldBookings.js';
 import { todayIso } from '../utils/today.js';
 import { isFieldOfferableOn, venueOf, venueRegistry } from '../utils/fieldLifecycle.js';
+import { isSlotOnField, parseCellId } from '../utils/gameGridCells.js';
 import { logger } from '../lib/logger.js';
 
 function normalizeAssignmentSource(source) {
@@ -476,6 +478,8 @@ export default function GameSchedulingPage() {
   const [selectedTeamId, setSelectedTeamId] = useState(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [activeTab, setActiveTab] = useState('full');
+  const viewPanelId = useId();
+  const byTeamReasonId = useId();
   const [schedulerStatus, setSchedulerStatus] = useState('idle');
   const [schedulerProgress, setSchedulerProgress] = useState(null);
   const [schedulerResult, setSchedulerResult] = useState(null);
@@ -514,6 +518,8 @@ export default function GameSchedulingPage() {
     permissions.includes(PERMISSIONS.MANAGE_SCHEDULE) ||
     permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);
   const canEditSchedule = canManageSchedule && isEditMode;
+  // The grid is the full schedule; while it is open, By Team cannot be chosen.
+  const shownTab = canEditSchedule ? 'full' : activeTab;
   // Cancelling is destructive and the RPC requires org admin, so the button
   // is gated tighter than general schedule editing.
   const canCancelAssignments = permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION) && isEditMode;
@@ -1055,6 +1061,12 @@ export default function GameSchedulingPage() {
     [canEditSchedule]
   );
 
+  // A grid cell's slot, by the slot id in the cell's id (`parseCellId`).
+  const slotByCellSlotId = useMemo(
+    () => new Map(gameSlots.map((slot) => [String(slot.id), slot])),
+    [gameSlots]
+  );
+
   // The one move handler (plan item M4.3): a drop and a "Move to" both stage
   // through it, so the keyboard path cannot drift from the drag path.
   const pendingMoveFocusRef = useRef(null);
@@ -1063,10 +1075,10 @@ export default function GameSchedulingPage() {
       if (!canEditSchedule) return;
       if (!targetCellId) return;
 
-      const [targetFieldId, targetSlotId] = String(targetCellId).split(':');
+      const { fieldId: targetFieldId, slotId: targetSlotId } = parseCellId(targetCellId);
       if (!targetFieldId || !targetSlotId) return;
 
-      const targetSlot = gameSlots.find((slot) => String(slot.id) === targetSlotId);
+      const targetSlot = slotByCellSlotId.get(targetSlotId);
       const sourceAssignments = displayedAssignmentsRef.current;
       const currentAssignment = sourceAssignments.find((assignment) => {
         return String(assignment.id) === String(gameId);
@@ -1078,6 +1090,22 @@ export default function GameSchedulingPage() {
       // Put back where it was (a keyboard pick-up and drop, a drop on its own
       // cell): nothing moved, so nothing is staged or marked manual.
       if (cellOf(currentAssignment) === targetCell) return;
+      // The grid draws every slot under every field, but a slot is one field's
+      // booking: what "Move to" does not offer, a drop does not stage either
+      // (`isSlotOnField`, the one rule for both).
+      if (!isSlotOnField(targetSlot, targetFieldId)) {
+        const fieldName = (id) =>
+          fields.find((field) => String(field.id) === String(id))?.name ?? String(id);
+        setApplyError(null);
+        setStatusMessage(
+          `${currentAssignment.homeTeamId} vs ${currentAssignment.awayTeamId} was not moved: ` +
+            (targetSlot
+              ? `that time slot is booked on ${fieldName(targetSlot.fieldId)}, ` +
+                `not ${fieldName(targetFieldId)}.`
+              : 'that time slot is not one of this season\u2019s game slots.')
+        );
+        return;
+      }
       // The grid shows one game per cell, so a second game there would hide one.
       const occupant = sourceAssignments.find(
         (assignment) =>
@@ -1114,7 +1142,7 @@ export default function GameSchedulingPage() {
       setApplyError(null);
       setStatusMessage('Manual game move staged. Apply the schedule to persist it.');
     },
-    [canEditSchedule, gameSlots]
+    [canEditSchedule, fields, slotByCellSlotId]
   );
 
   const handleDragEnd = useCallback(
@@ -1155,7 +1183,7 @@ export default function GameSchedulingPage() {
     );
     return fields.flatMap((field) =>
       gameSlots
-        .filter((slot) => slot.fieldId == null || String(slot.fieldId) === String(field.id))
+        .filter((slot) => isSlotOnField(slot, field.id))
         .map((slot) => `${field.id}:${slot.id}`)
         .filter((id) => !taken.has(id))
         .map((id) => ({ id, label: cellLabels.get(id) }))
@@ -1173,16 +1201,33 @@ export default function GameSchedulingPage() {
   // by name, not dnd-kit's default "draggable item ga-1 ... droppable area v1:gs-2".
   const gridAnnouncements = useMemo(() => {
     const cellLabel = (id) => cellLabels.get(String(id)) ?? 'no slot';
+    const gameOf = (id) => displayedAssignmentsRef.current.find((a) => String(a.id) === String(id));
+    // A cell `moveGameTo` refuses because its slot is another field's booking. Not the game's
+    // own cell, which it treats as put back (a game saved with a field its slot is not on).
+    const isOtherFieldsSlot = (activeId, cellId) => {
+      const game = gameOf(activeId);
+      if (game && `${game.fieldId}:${game.slotId}` === String(cellId)) return false;
+      const { fieldId, slotId } = parseCellId(cellId);
+      return !isSlotOnField(slotByCellSlotId.get(slotId), fieldId);
+    };
     const gameLabel = (id) => {
-      const game = displayedAssignmentsRef.current.find((a) => String(a.id) === String(id));
+      const game = gameOf(id);
       return game ? `${game.homeTeamId} vs ${game.awayTeamId}` : 'the game';
     };
     return {
       onDragStart: ({ active }) => `Picked up ${gameLabel(active.id)}.`,
-      onDragOver: ({ active, over }) =>
-        over ? `${gameLabel(active.id)} is over ${cellLabel(over.id)}.` : undefined,
+      onDragOver: ({ active, over }) => {
+        if (!over) return undefined;
+        return isOtherFieldsSlot(active.id, over.id)
+          ? `${gameLabel(active.id)} is over ${cellLabel(over.id)}, another field's slot. ` +
+              'It cannot be dropped here.'
+          : `${gameLabel(active.id)} is over ${cellLabel(over.id)}.`;
+      },
       onDragEnd: ({ active, over }) => {
         if (!over) return `${gameLabel(active.id)} was dropped outside the grid and did not move.`;
+        if (isOtherFieldsSlot(active.id, over.id)) {
+          return `${gameLabel(active.id)} was not moved: ${cellLabel(over.id)} is another field's slot.`;
+        }
         // `moveGameTo` refuses a cell that holds another game: say so here too,
         // or the announcement and the status line would disagree.
         const taken = displayedAssignmentsRef.current.some(
@@ -1194,7 +1239,7 @@ export default function GameSchedulingPage() {
       },
       onDragCancel: ({ active }) => `Moving ${gameLabel(active.id)} was cancelled.`,
     };
-  }, [cellLabels]);
+  }, [cellLabels, slotByCellSlotId]);
 
   const handleCancelGameAssignment = useCallback(async (assignment) => {
     if (
@@ -1342,41 +1387,42 @@ export default function GameSchedulingPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2">
           <div className="bg-bg-glass border border-border-subtle rounded-xl overflow-hidden shadow-md">
-            <div className="px-6 py-4 border-b border-border-subtle flex justify-between items-center bg-bg-glass">
-              {/* Tokens, not `text-blue-400` / `text-text-muted`: those measured 2.4:1 and
-                  2.9:1 on this bar in the light theme (axe, M4.2). The accent and secondary
-                  text read 5.9:1 light and 8.2:1 / 8.7:1 dark. */}
-              <div className="flex gap-4">
-                <button
-                  type="button"
-                  aria-pressed={activeTab === 'full'}
-                  onClick={() => setActiveTab('full')}
-                  className={`text-sm font-semibold transition-colors ${
-                    activeTab === 'full'
-                      ? 'text-text-accent'
-                      : 'text-text-secondary hover:text-text-primary'
-                  }`}
-                >
-                  Full Schedule
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={activeTab === 'team'}
-                  onClick={() => setActiveTab('team')}
-                  className={`text-sm font-semibold transition-colors ${
-                    activeTab === 'team'
-                      ? 'text-text-accent'
-                      : 'text-text-secondary hover:text-text-primary'
-                  }`}
-                >
-                  By Team
-                </button>
-              </div>
+            {/* The view tabs are the shared `Tabs` primitive: the selected one carries an
+                underline and `aria-selected`, not only a colour (WCAG 1.4.1). The bar's
+                bottom padding matches `.page-tabs`' negative margin, so the underline sits on
+                the bar's border. */}
+            <div className="px-6 pb-3 border-b border-border-subtle bg-bg-glass">
+              <Tabs
+                tabs={[
+                  { id: 'full', label: 'Full Schedule' },
+                  {
+                    id: 'team',
+                    label: 'By Team',
+                    disabled: canEditSchedule,
+                    describedBy: canEditSchedule ? byTeamReasonId : undefined,
+                  },
+                ]}
+                activeTab={shownTab}
+                onChange={setActiveTab}
+                panelId={viewPanelId}
+                label="Game schedule views"
+              />
             </div>
 
-            <div className="p-0">
+            <div
+              className="p-0"
+              id={viewPanelId}
+              role="tabpanel"
+              aria-label={shownTab === 'full' ? 'Full Schedule' : 'By Team'}
+            >
               {canEditSchedule ? (
                 <div className="p-4 overflow-x-auto">
+                  {/* Manual Override edits the field grid; a team's list has nothing to move a
+                      game to, so By Team waits until the override is exited (the choice made
+                      before it is kept). */}
+                  <p id={byTeamReasonId} className="mb-3 text-xs text-text-secondary">
+                    By Team is off during Manual Override: games are moved on the field grid.
+                  </p>
                   <DndContext
                     sensors={gridSensors}
                     accessibility={{

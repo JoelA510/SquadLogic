@@ -82,5 +82,8 @@ Free-tier budgets bound this (`docs/operations/ci-cd.md`, "Free-tier budgets"):
   or `PLAYWRIGHT_CHROMIUM_EXECUTABLE`. Its pinned headless shell is not installed.
 - **A production build** needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. Stand-in values
   are enough locally.
+- **`check:bundle`** also needs a stand-in `VITE_SENTRY_DSN` in that build, as well as the
+  Supabase stand-ins; without one it fails (`NO MATCH`, sentry replay). The command is in
+  `docs/operations/bundle-budget.md`.
 - **Workflows:** every action is pinned by SHA (`tests/workflowPins.test.js`), and zizmor must
   stay clean.

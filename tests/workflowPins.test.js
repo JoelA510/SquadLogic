@@ -19,6 +19,8 @@
  * 3. Build & Test runs `npm run test:coverage`, and vitest.config.js carries
  *    the thresholds that make it fail; the wall-clock benchmark is excluded
  *    from that run (coverage slows it ~9x) and runs alone as `test:perf`.
+ * 4. Build & Test runs `npm run build` (the frontend build, M6.1), with a
+ *    stand-in Sentry DSN so the bundle budget measures what production ships.
  *
  * The workflows are read line by line, as the other workflow tests are (no
  * YAML dependency). The pin scan's subject set is every line that mentions
@@ -29,6 +31,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { validateClientEnv } from '../frontend/src/envRules.js';
 
 const WORKFLOWS_DIR = path.resolve('.github/workflows');
 const AUDIT_WORKFLOW = 'workflow-audit.yml';
@@ -559,5 +562,94 @@ describe('coverage and the benchmark in CI', () => {
     const planted = plant(workflow);
     expect(planted).not.toBe(workflow);
     expect(stepProblems(planted, name, command).join('\n')).toContain(problem);
+  });
+});
+
+// ── The build (M6.1, audit finding 7.5) ─────────────────────────────────────
+
+const BUILD_STEP = 'Build Frontend';
+
+/**
+ * The `env:` of Build & Test's build step, as name to value (quotes stripped).
+ * @param {string} workflow
+ * @returns {Record<string, string>}
+ */
+function buildStepEnv(workflow) {
+  const lines = workflow.split('\n');
+  const at = lines.findIndex((l) => l.trim() === `- name: ${BUILD_STEP}`);
+  if (at === -1) return {};
+  const step = stepAround(lines, at);
+  const start = step.findIndex((l) => /^\s*env:\s*$/.test(l));
+  if (start === -1) return {};
+  const indent = indentOf(step[start]);
+  /** @type {Record<string, string>} */
+  const env = {};
+  for (const line of step.slice(start + 1)) {
+    if (!isCode(line)) continue;
+    if (indentOf(line) <= indent) break;
+    const match = /^\s*([A-Z_][A-Z0-9_]*):\s*'?([^'#]*?)'?\s*$/.exec(beforeComment(line));
+    if (match) env[match[1]] = match[2];
+  }
+  return env;
+}
+
+describe('the build in CI', () => {
+  const workflow = read(CI_WORKFLOW);
+  const pkg = JSON.parse(readFileSync(path.resolve('package.json'), 'utf8'));
+
+  it('Build & Test runs npm run build, able to fail', () => {
+    // Standard node.ci-runs-gate: CI runs the project's `build` script. It used
+    // to be `node scripts/build.js`, an import check CI never ran, while CI
+    // built through `frontend:build`.
+    expect(stepProblems(workflow, BUILD_STEP, 'npm run build')).toEqual([]);
+  });
+
+  it('npm run build is the frontend build', () => {
+    expect(pkg.scripts.build).toBe('npm run frontend:build');
+    expect(pkg.scripts['frontend:build']).toBe(
+      'node scripts/runViteWithPersistenceEndpoint.js build'
+    );
+  });
+
+  it('builds with Sentry on, as production does, so the bundle budget measures that shape', () => {
+    // Without a DSN, main.jsx's `if (SENTRY_DSN)` folds away and the SDK's
+    // init and integrations are not bundled (plan M6). The value is a
+    // well-formed stand-in on a host that never resolves.
+    const env = buildStepEnv(workflow);
+    const dsn = env.VITE_SENTRY_DSN;
+    expect(dsn, 'the build step sets no VITE_SENTRY_DSN').toBeDefined();
+    expect(new URL(dsn).hostname).toMatch(/\.invalid$/);
+    const { problems } = validateClientEnv(env, { production: true });
+    expect(problems).toEqual([]);
+  });
+
+  it('catches a planted build step without the DSN', () => {
+    const planted = workflow.replace(/^\s+VITE_SENTRY_DSN: .*\n/m, '');
+    expect(planted).not.toBe(workflow);
+    expect(buildStepEnv(planted).VITE_SENTRY_DSN).toBeUndefined();
+    // Meta: the parser still reads the step's other variables.
+    expect(Object.keys(buildStepEnv(planted))).toContain('VITE_SUPABASE_URL');
+  });
+
+  it.each([
+    [
+      'the frontend build named directly',
+      (/** @type {string} */ w) => w.replace('run: npm run build', 'run: npm run frontend:build'),
+      'does not run exactly',
+    ],
+    [
+      'an `|| true`',
+      (/** @type {string} */ w) => w.replace('run: npm run build', 'run: npm run build || true'),
+      'does not run exactly',
+    ],
+    [
+      'the step renamed',
+      (/** @type {string} */ w) => w.replace(`- name: ${BUILD_STEP}`, '- name: Build'),
+      'no step named',
+    ],
+  ])('catches a planted ci.yml with %s', (_label, plant, problem) => {
+    const planted = plant(workflow);
+    expect(planted).not.toBe(workflow);
+    expect(stepProblems(planted, BUILD_STEP, 'npm run build').join('\n')).toContain(problem);
   });
 });

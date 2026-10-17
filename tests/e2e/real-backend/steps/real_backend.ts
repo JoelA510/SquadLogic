@@ -146,10 +146,9 @@ When('I generate teams from the import and sync them to Supabase', async ({ page
     timeout: 30_000,
   });
 
-  // The page's own success line does not survive the sync: the staged review
-  // is cleared and, until a reload, the page falls back to its generate view
-  // (recorded in the plan, M4.1's discoveries). So the sync is read from the
-  // team-persistence response, and the next step proves it on a reload.
+  // The sync is read from the team-persistence response, and the next step
+  // proves it on a reload. The page's own success line survives the sync too
+  // (Wave 3: it used to fall back to its generate view until a reload).
   const [response] = await Promise.all([
     page.waitForResponse(
       (r) => r.url().includes('/functions/v1/team-persistence') && r.request().method() === 'POST',
@@ -169,6 +168,11 @@ When('I generate teams from the import and sync them to Supabase', async ({ page
     registrations().length
   );
   expect(body.updatedTeams).toBeGreaterThan(1);
+  await expect(
+    page.getByText(
+      `Team review applied. ${body.updatedTeams} teams and ${body.updatedPlayers} players synced to Supabase.`
+    )
+  ).toBeVisible({ timeout: 30_000 });
   stateOf(page).teams = body.updatedTeams;
 });
 

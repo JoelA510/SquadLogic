@@ -90,6 +90,19 @@ const DASHBOARD = vi.hoisted(() => ({
         division: 'U10',
         assignmentSource: 'auto',
       },
+      {
+        // Saved on North Field although gs-3 is South Field's booking: the
+        // disagreement the grid now refuses to create, as older data may hold it.
+        id: 'ga-3',
+        slotId: 'gs-3',
+        fieldId: 'v1',
+        homeTeamId: 'hawks',
+        awayTeamId: 'owls',
+        start: '2026-04-04T15:00:00Z',
+        end: '2026-04-04T16:00:00Z',
+        division: 'U10',
+        assignmentSource: 'auto',
+      },
     ],
   },
 }));
@@ -137,10 +150,10 @@ const COLUMNS = { v1: 0, v2: 240 };
 const ROWS = { 'gs-1': 0, 'gs-2': 120, 'gs-3': 240 };
 
 function rectOf(element) {
-  // The drag overlay starts where the game being dragged is (the only one
-  // these cases drag): dnd-kit reads the overlay, not the card, while dragging.
+  // The drag overlay starts where the game being dragged is: dnd-kit reads the
+  // overlay, not the card, while dragging.
   if (element.getAttribute?.('data-testid') === 'game-card-preview') {
-    const dragged = document.querySelector('[data-testid="game-card-ga-1"]');
+    const dragged = document.querySelector(`[data-testid="${draggedCard}"]`);
     return dragged ? rectOf(dragged) : rectOf(document.body);
   }
   const zone = element.closest?.('[data-testid^="drop-zone-"]');
@@ -169,9 +182,14 @@ const settle = () =>
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
+/** The card a case is dragging, for the overlay's starting rect. */
+let draggedCard = 'game-card-ga-1';
+
 /** Pick up a game from its grip, press `keys`, and drop it. */
 async function keyboardDrag(matchup, keys) {
   const handle = screen.getByRole('button', { name: `Drag ${matchup}` });
+  draggedCard =
+    handle.closest('[data-testid^="game-card-"]')?.getAttribute('data-testid') ?? draggedCard;
   handle.focus();
   fireEvent.keyDown(handle, { code: 'Space' });
   await settle();
@@ -201,6 +219,7 @@ async function renderEditableGrid() {
 describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
   let rectSpy;
   beforeEach(() => {
+    draggedCard = 'game-card-ga-1';
     rectSpy = vi
       .spyOn(Element.prototype, 'getBoundingClientRect')
       .mockImplementation(function boundingRect() {
@@ -241,11 +260,54 @@ describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
 
   it('stages a keyboard drag through the same handler', async () => {
     await renderEditableGrid();
-    await keyboardDrag('lions vs bulls', ['ArrowRight']);
-    const to = screen.getByTestId('drop-zone-v2:gs-1');
+    // Right to South Field, then down its column to gs-3, South Field's own slot.
+    await keyboardDrag('lions vs bulls', ['ArrowRight', 'ArrowDown', 'ArrowDown']);
+    const to = screen.getByTestId('drop-zone-v2:gs-3');
     expect(within(to).getByTestId('game-card-ga-1')).toBeInTheDocument();
     expect(within(to).getByTestId('manual-badge')).toBeInTheDocument();
     expect(screen.getByText(STAGED)).toBeInTheDocument();
+  });
+
+  it("refuses a drop on another field's slot, as Move to does, and says why", async () => {
+    const from = await renderEditableGrid();
+    // The cell is drawn before anything moves as another field's, not as an open one.
+    const crossCell = screen.getByTestId('drop-zone-v2:gs-1');
+    expect(within(crossCell).getByTestId('empty-slot-v2:gs-1')).toHaveTextContent('Other field');
+    // What Move to offers is the rule a drop is held to: gs-1 is North Field's booking.
+    const select = within(from).getByRole('combobox', { name: /^Move lions vs bulls/ });
+    fireEvent.focus(select);
+    const offered = [...select.querySelectorAll('option')].map((option) => option.value);
+    expect(offered).not.toContain('v2:gs-1');
+
+    // Right from North Field's gs-1 is South Field's column at gs-1's time.
+    const handle = screen.getByRole('button', { name: 'Drag lions vs bulls' });
+    handle.focus();
+    fireEvent.keyDown(handle, { code: 'Space' });
+    await settle();
+    fireEvent.keyDown(handle, { code: 'ArrowRight' });
+    await settle();
+    // While over it, the cell shows it cannot take the game, with the reason.
+    const indicator = within(crossCell).getByTestId('invalid-indicator');
+    expect(indicator).toHaveAccessibleDescription(
+      'This time slot is booked on another field, not South Field.'
+    );
+    fireEvent.keyDown(handle, { code: 'Space' });
+    await settle();
+
+    // Nothing staged: the game is where it was, and the operator is told why.
+    expect(within(from).getByTestId('game-card-ga-1')).toBeInTheDocument();
+    expect(within(crossCell).queryByTestId('game-card-ga-1')).not.toBeInTheDocument();
+    expect(within(from).queryByTestId('manual-badge')).not.toBeInTheDocument();
+    expect(screen.queryByText(STAGED)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'lions vs bulls was not moved: that time slot is booked on North Field, not South Field.'
+      )
+    ).toBeInTheDocument();
+    // The screen reader's announcement agrees with the status line.
+    expect(
+      screen.getByText(/^lions vs bulls was not moved: South Field, .+ is another field's slot\.$/)
+    ).toBeInTheDocument();
   });
 
   it('refuses a drop on a cell that already has a game, and says why', async () => {
@@ -265,6 +327,22 @@ describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
     ).toBeInTheDocument();
   });
 
+  it("puts back, without a refusal, a game saved in another field's slot", async () => {
+    await renderEditableGrid();
+    const own = screen.getByTestId('drop-zone-v1:gs-3');
+    expect(within(own).getByTestId('game-card-ga-3')).toBeInTheDocument();
+
+    await keyboardDrag('hawks vs owls', []);
+
+    // `moveGameTo` treats its own cell as put back; the announcement says the same.
+    expect(within(own).getByTestId('game-card-ga-3')).toBeInTheDocument();
+    expect(screen.queryByText(STAGED)).not.toBeInTheDocument();
+    expect(screen.queryByText(/was not moved/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/^hawks vs owls was dropped on North Field, .+\.$/)
+    ).toBeInTheDocument();
+  });
+
   it('stages nothing when a game is picked up and put back', async () => {
     const from = await renderEditableGrid();
     await keyboardDrag('lions vs bulls', []);
@@ -273,21 +351,69 @@ describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
     expect(screen.queryByText(STAGED)).not.toBeInTheDocument();
   });
 
-  it('marks the view tabs pressed and colours them with text tokens', async () => {
+  it('tells the view tabs apart by selection state and an underline, not colour alone', async () => {
     render(
       <MemoryRouter>
         <GameSchedulingPage />
       </MemoryRouter>
     );
-    const full = await screen.findByRole('button', { name: 'Full Schedule' });
-    const byTeam = screen.getByRole('button', { name: 'By Team' });
-    expect(full).toHaveAttribute('aria-pressed', 'true');
-    expect(byTeam).toHaveAttribute('aria-pressed', 'false');
-    // jsdom cannot measure contrast (M4.2's axe scan in Chromium does); this
-    // pins the tokens the measured ratios belong to.
-    expect(full.className).toContain('text-text-accent');
-    expect(byTeam.className).toContain('text-text-secondary');
-    expect(full.className).not.toMatch(/text-blue-400|text-text-muted/);
+    const views = await screen.findByRole('tablist', { name: 'Game schedule views' });
+    const full = within(views).getByRole('tab', { name: 'Full Schedule' });
+    const byTeam = within(views).getByRole('tab', { name: 'By Team' });
+    expect(full).toHaveAttribute('aria-selected', 'true');
+    expect(byTeam).toHaveAttribute('aria-selected', 'false');
+    // `.page-tab.active` is the underline (page.css); only the selected tab has it.
+    expect(full).toHaveClass('page-tab', 'active');
+    expect(byTeam).toHaveClass('page-tab');
+    expect(byTeam).not.toHaveClass('active');
+    // The selected tab controls the panel, which is named for it.
+    const panel = screen.getByRole('tabpanel', { name: 'Full Schedule' });
+    expect(full).toHaveAttribute('aria-controls', panel.id);
+    expect(within(panel).getByTestId('game-schedule-list')).toBeInTheDocument();
+
+    // Arrow keys move the selection (the primitive's roving tabindex).
+    fireEvent.keyDown(views, { key: 'ArrowRight' });
+    expect(within(views).getByRole('tab', { name: 'By Team' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    expect(screen.getByRole('tabpanel', { name: 'By Team' })).toBeInTheDocument();
+  });
+
+  it('turns By Team off during Manual Override, says why, and restores it after', async () => {
+    render(
+      <MemoryRouter>
+        <GameSchedulingPage />
+      </MemoryRouter>
+    );
+    fireEvent.click(await screen.findByRole('tab', { name: 'By Team' }));
+    expect(screen.getByRole('tab', { name: 'By Team' })).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Manual Override' }));
+    await screen.findByTestId('game-schedule-grid');
+
+    // The grid is the full schedule: that tab is the selected one, and By Team cannot be chosen.
+    const full = screen.getByRole('tab', { name: 'Full Schedule' });
+    const byTeam = screen.getByRole('tab', { name: 'By Team' });
+    expect(full).toHaveAttribute('aria-selected', 'true');
+    expect(byTeam).toBeDisabled();
+    // The reason is on screen, and is the disabled tab's description.
+    const reason = screen.getByText(
+      'By Team is off during Manual Override: games are moved on the field grid.'
+    );
+    expect(reason).toBeVisible();
+    expect(byTeam).toHaveAttribute('aria-describedby', reason.id);
+    // Neither a click nor an arrow key reaches it.
+    fireEvent.click(byTeam);
+    fireEvent.keyDown(screen.getByRole('tablist'), { key: 'ArrowRight' });
+    expect(screen.getByTestId('game-schedule-grid')).toBeInTheDocument();
+    expect(full).toHaveAttribute('aria-selected', 'true');
+
+    // Leaving the override brings back the view chosen before it.
+    fireEvent.click(screen.getByRole('button', { name: 'Exit Manual Override' }));
+    expect(screen.getByRole('tab', { name: 'By Team' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'By Team' })).toBeEnabled();
+    expect(screen.queryByText(/By Team is off during Manual Override/)).not.toBeInTheDocument();
   });
 
   it('names the By Team buttons as a group, with no orphaned label', async () => {
@@ -296,7 +422,7 @@ describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
         <GameSchedulingPage />
       </MemoryRouter>
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'By Team' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'By Team' }));
     const group = screen.getByRole('group', { name: 'Select Team' });
     const lions = within(group).getByRole('button', { name: 'lions' });
     expect(lions).toHaveAttribute('aria-pressed', 'false');

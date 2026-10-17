@@ -115,6 +115,18 @@ check `npm -v` before adding or updating a dependency, or run
 an error, but Dependabot runs its own npm and Node, and either would fail every
 update it tries.
 
+**Install scripts.** `package.json`'s `allowScripts` records each dependency
+install script's review (npm 11's own field): `true` lets it run, `false`
+stops it. npm still runs a script it does not name, with a warning
+(`strict-allow-scripts` is off), so when `npm ci` or `npm install` warns
+"not yet covered by allowScripts", read the script, then record the decision
+with `npm install-scripts approve <pkg> --no-allow-scripts-pin` or
+`npm install-scripts deny <pkg>`. `esbuild` is approved (plan M6: its
+postinstall links the platform binary the lockfile already installs and runs
+`--version`). `tests/allowScripts.test.js` fails when a package in the
+lockfile has an install script and no decision; `fsevents` (macOS only) is
+listed there as awaiting the owner's.
+
 None of them changes what `npm ci` installs: CI and Vercel install
 `package-lock.json` as it is. To take an urgent fix younger than the wait, once
 the owner approves it: `npm install <pkg>@<version> --min-release-age=0`, and

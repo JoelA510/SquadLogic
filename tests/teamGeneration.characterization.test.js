@@ -164,12 +164,18 @@ test('characterization: rosterBalanceByDivision summary exposes the documented k
   assert.equal(summary.totalPlayers, 9);
 });
 
-// Future hardening scenarios, implemented in the noted PRs. Registered as todos so the
-// intended incremental contract is visible now without failing the suite (Vitest treats
-// `test.todo` as pending, never failing).
-test.todo('incremental: preserves existing team count after a player drops (PR 04)');
-test.todo('incremental: preserves team IDs from an existing snapshot (PR 04 / PR 08)');
-test.todo("incremental: routes a late player to their buddy's locked team (PR 05)");
-test.todo('incremental: overflows a full buddy target with a specific reason (PR 05)');
-test.todo('incremental: assistant-only coach unit backfills an existing team (PR 06)');
-test.todo('incremental: dropped coach preserves roster and marks coach needed (PR 06)');
+// The incremental contract once registered here as six `test.todo` entries is
+// implemented and tested (plan item M6.3, audit finding 6.5), so the todos are
+// gone. Where each is covered:
+// - team count kept after a player drops: teamGenerationIncremental.test.js
+//   "preserves team count, ids, and names after a player drops (published
+//   default)"; incrementalTeamingScenarios.test.js scenario 1.
+// - team IDs kept from an existing snapshot: the same test; scenarios 8 and 8b.
+// - a late player routed to their buddy's team: teamGenerationIncremental.test.js
+//   "routes a late player onto their buddy's preserved team when capacity
+//   allows"; scenario 3.
+// - a full buddy target overflows with a specific reason: "overflows a late buddy
+//   with buddy-target-capacity when the target team is full (no reshuffle)" and
+//   "... buddy-target-locked when the target team is locked"; scenario 4.
+// - an assistant-only coach unit backfills an existing team: scenario 7.
+// - a dropped coach keeps the roster and marks the team coach-needed: scenario 5.

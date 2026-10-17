@@ -478,6 +478,7 @@ export default function GameSchedulingPage() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [activeTab, setActiveTab] = useState('full');
   const viewPanelId = useId();
+  const byTeamReasonId = useId();
   const [schedulerStatus, setSchedulerStatus] = useState('idle');
   const [schedulerProgress, setSchedulerProgress] = useState(null);
   const [schedulerResult, setSchedulerResult] = useState(null);
@@ -516,6 +517,8 @@ export default function GameSchedulingPage() {
     permissions.includes(PERMISSIONS.MANAGE_SCHEDULE) ||
     permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION);
   const canEditSchedule = canManageSchedule && isEditMode;
+  // The grid is the full schedule; while it is open, By Team cannot be chosen.
+  const shownTab = canEditSchedule ? 'full' : activeTab;
   // Cancelling is destructive and the RPC requires org admin, so the button
   // is gated tighter than general schedule editing.
   const canCancelAssignments = permissions.includes(PERMISSIONS.MANAGE_ORGANIZATION) && isEditMode;
@@ -1348,13 +1351,18 @@ export default function GameSchedulingPage() {
                 underline and `aria-selected`, not only a colour (WCAG 1.4.1). The bar's
                 bottom padding matches `.page-tabs`' negative margin, so the underline sits on
                 the bar's border. */}
-            <div className="px-6 pb-3 border-b border-border-subtle flex flex-wrap items-end justify-between gap-x-4 gap-y-1 bg-bg-glass">
+            <div className="px-6 pb-3 border-b border-border-subtle bg-bg-glass">
               <Tabs
                 tabs={[
                   { id: 'full', label: 'Full Schedule' },
-                  { id: 'team', label: 'By Team' },
+                  {
+                    id: 'team',
+                    label: 'By Team',
+                    disabled: canEditSchedule,
+                    describedBy: canEditSchedule ? byTeamReasonId : undefined,
+                  },
                 ]}
-                activeTab={activeTab}
+                activeTab={shownTab}
                 onChange={setActiveTab}
                 panelId={viewPanelId}
                 label="Game schedule views"
@@ -1365,10 +1373,16 @@ export default function GameSchedulingPage() {
               className="p-0"
               id={viewPanelId}
               role="tabpanel"
-              aria-label={activeTab === 'full' ? 'Full Schedule' : 'By Team'}
+              aria-label={shownTab === 'full' ? 'Full Schedule' : 'By Team'}
             >
               {canEditSchedule ? (
                 <div className="p-4 overflow-x-auto">
+                  {/* Manual Override edits the field grid; a team's list has nothing to move a
+                      game to, so By Team waits until the override is exited (the choice made
+                      before it is kept). */}
+                  <p id={byTeamReasonId} className="mb-3 text-xs text-text-secondary">
+                    By Team is off during Manual Override: games are moved on the field grid.
+                  </p>
                   <DndContext
                     sensors={gridSensors}
                     accessibility={{

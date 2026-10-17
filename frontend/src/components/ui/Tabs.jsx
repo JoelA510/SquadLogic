@@ -8,8 +8,13 @@ import PropTypes from 'prop-types';
  * Renders only the tablist; the active panel is the caller's concern
  * (pass `panelId` so aria-controls points at it).
  *
+ * A tab can be `disabled` while its view means nothing (the game grid's By Team during Manual
+ * Override): it stays in the strip, cannot be chosen by click or arrow key, and names its reason
+ * through `describedBy`, the id of visible text the caller renders beside the strip.
+ *
  * @param {Object} props
- * @param {Array<{ id: string, label: React.ReactNode, badge?: React.ReactNode }>} props.tabs
+ * @param {Array<{ id: string, label: React.ReactNode, badge?: React.ReactNode,
+ *   disabled?: boolean, describedBy?: string }>} props.tabs
  * @param {string} props.activeTab - id of the active tab.
  * @param {(id: string) => void} props.onChange
  * @param {string} [props.panelId] - id of the panel the active tab controls.
@@ -23,14 +28,18 @@ export default function Tabs({ tabs, activeTab, onChange, panelId, label, classN
   const handleKeyDown = (event) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    const index = tabs.findIndex((tab) => tab.id === activeTab);
+    // Arrow keys, Home and End move among the tabs that can be chosen.
+    const enabled = tabs.filter((tab) => !tab.disabled);
+    if (enabled.length === 0) return;
+    const index = enabled.findIndex((tab) => tab.id === activeTab);
     let nextIndex = index;
-    if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
-    if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+    if (event.key === 'ArrowLeft') nextIndex = (index - 1 + enabled.length) % enabled.length;
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % enabled.length;
     if (event.key === 'Home') nextIndex = 0;
-    if (event.key === 'End') nextIndex = tabs.length - 1;
-    const next = tabs[nextIndex];
-    onChange(next.id);
+    if (event.key === 'End') nextIndex = enabled.length - 1;
+    const next = enabled[nextIndex];
+    // A key that lands on the selected tab (the only one that can be chosen) changes nothing.
+    if (next.id !== activeTab) onChange(next.id);
     listRef.current?.querySelector(`#${CSS.escape(`${baseId}-${next.id}`)}`)?.focus();
   };
 
@@ -55,6 +64,8 @@ export default function Tabs({ tabs, activeTab, onChange, panelId, label, classN
             aria-controls={isActive ? panelId : undefined}
             tabIndex={isActive ? 0 : -1}
             className={`page-tab ${isActive ? 'active' : ''}`.trim()}
+            disabled={tab.disabled || undefined}
+            aria-describedby={tab.describedBy}
             onClick={() => onChange(tab.id)}
           >
             {tab.label}
@@ -72,6 +83,8 @@ Tabs.propTypes = {
       id: PropTypes.string.isRequired,
       label: PropTypes.node.isRequired,
       badge: PropTypes.node,
+      disabled: PropTypes.bool,
+      describedBy: PropTypes.string,
     })
   ).isRequired,
   activeTab: PropTypes.string.isRequired,

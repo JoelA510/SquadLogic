@@ -297,6 +297,42 @@ describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
     expect(screen.getByRole('tabpanel', { name: 'By Team' })).toBeInTheDocument();
   });
 
+  it('turns By Team off during Manual Override, says why, and restores it after', async () => {
+    render(
+      <MemoryRouter>
+        <GameSchedulingPage />
+      </MemoryRouter>
+    );
+    fireEvent.click(await screen.findByRole('tab', { name: 'By Team' }));
+    expect(screen.getByRole('tab', { name: 'By Team' })).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Manual Override' }));
+    await screen.findByTestId('game-schedule-grid');
+
+    // The grid is the full schedule: that tab is the selected one, and By Team cannot be chosen.
+    const full = screen.getByRole('tab', { name: 'Full Schedule' });
+    const byTeam = screen.getByRole('tab', { name: 'By Team' });
+    expect(full).toHaveAttribute('aria-selected', 'true');
+    expect(byTeam).toBeDisabled();
+    // The reason is on screen, and is the disabled tab's description.
+    const reason = screen.getByText(
+      'By Team is off during Manual Override: games are moved on the field grid.'
+    );
+    expect(reason).toBeVisible();
+    expect(byTeam).toHaveAttribute('aria-describedby', reason.id);
+    // Neither a click nor an arrow key reaches it.
+    fireEvent.click(byTeam);
+    fireEvent.keyDown(screen.getByRole('tablist'), { key: 'ArrowRight' });
+    expect(screen.getByTestId('game-schedule-grid')).toBeInTheDocument();
+    expect(full).toHaveAttribute('aria-selected', 'true');
+
+    // Leaving the override brings back the view chosen before it.
+    fireEvent.click(screen.getByRole('button', { name: 'Exit Manual Override' }));
+    expect(screen.getByRole('tab', { name: 'By Team' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'By Team' })).toBeEnabled();
+    expect(screen.queryByText(/By Team is off during Manual Override/)).not.toBeInTheDocument();
+  });
+
   it('names the By Team buttons as a group, with no orphaned label', async () => {
     render(
       <MemoryRouter>

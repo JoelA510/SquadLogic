@@ -78,6 +78,46 @@ describe('Tabs', () => {
     fireEvent.keyDown(screen.getByRole('tablist'), { key: 'ArrowLeft' });
     expect(onChange).toHaveBeenCalledWith('schedule');
   });
+
+  it('keeps a disabled tab in the strip, named by its reason, and out of reach', () => {
+    const onChange = vi.fn();
+    render(
+      <>
+        <Tabs
+          tabs={[tabs[0], { ...tabs[1], disabled: true, describedBy: 'guardians-reason' }, tabs[2]]}
+          activeTab="overview"
+          onChange={onChange}
+          label="Player record"
+        />
+        <p id="guardians-reason">No guardians on file.</p>
+      </>
+    );
+    const guardians = screen.getByRole('tab', { name: 'Guardians' });
+    expect(guardians).toBeDisabled();
+    expect(guardians).toHaveAccessibleDescription('No guardians on file.');
+
+    fireEvent.click(guardians);
+    expect(onChange).not.toHaveBeenCalled();
+    // ArrowRight from Overview skips Guardians.
+    fireEvent.keyDown(screen.getByRole('tablist'), { key: 'ArrowRight' });
+    expect(onChange).toHaveBeenCalledWith('schedule');
+    expect(onChange).not.toHaveBeenCalledWith('guardians');
+  });
+
+  it('does not report a change when a key lands on the selected tab', () => {
+    const onChange = vi.fn();
+    render(
+      <Tabs
+        tabs={[tabs[0], { ...tabs[1], disabled: true }]}
+        activeTab="overview"
+        onChange={onChange}
+        label="Player record"
+      />
+    );
+    fireEvent.keyDown(screen.getByRole('tablist'), { key: 'ArrowRight' });
+    fireEvent.keyDown(screen.getByRole('tablist'), { key: 'End' });
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });
 
 describe('Modal', () => {

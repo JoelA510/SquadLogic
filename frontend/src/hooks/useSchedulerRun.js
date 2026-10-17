@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
+import { isAbortError } from '../lib/abortError.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { scopeSchedulerRunsToActiveSeason } from '../utils/schedulerRunFilters.js';
 
@@ -87,12 +88,18 @@ export function useSchedulerRun(runType, mapper, emptyState) {
             .abortSignal(controller.signal); // Use maybeSingle to avoid 406/error if none found
           evalRecord = evalData;
         }
+        // A cancelled evaluation read resolves (with an error this read ignores) rather than
+        // throwing, so the run read before it must not be written for a read nobody awaits.
+        if (controller.signal.aborted) return;
 
         const mapped = mapperRef.current(run);
         setData(mapped || emptyStateRef.current);
         setEvaluation(evalRecord);
       } catch (err) {
-        if (err.name !== 'AbortError') {
+        // Not by `err.name` alone: supabase-js reports a cancelled read as a PostgREST error
+        // object with no `name` (`isAbortError` names the shapes), which used to become the
+        // hook's error, and the Exports page then refused to build CSVs.
+        if (!isAbortError(err, controller.signal)) {
           logger.error(`Failed to fetch ${runType} summary:`, JSON.stringify(err, null, 2));
           setError(err);
           setData(emptyStateRef.current);

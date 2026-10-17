@@ -1179,6 +1179,12 @@ and smoke-tested
 > - **Verification label:** executed (current state).
 
 > **M6.3. Stale `test.todo` entries** (audit finding 6.5, low)
+> - **Status: built in PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`).** The six todos in
+>   `tests/teamGeneration.characterization.test.js` are deleted; a comment in their place names
+>   the test that covers each (`tests/teamGenerationIncremental.test.js` and the numbered
+>   scenarios in `tests/incrementalTeamingScenarios.test.js`). Test gate, *executed*: the file
+>   reports 6 passed and 6 todo on `main`, 6 passed and none after; the full suite's summary on the
+>   branch reports no todo.
 > - **Fix approach:** delete the six todos, pointing to the tests that cover them.
 > - **Files touched:** `tests/teamGeneration.characterization.test.js`.
 > - **Depends on:** none.

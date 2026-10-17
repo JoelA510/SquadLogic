@@ -1618,8 +1618,8 @@ smoke-tested
 
 - 2026-10-17, PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`): Wave 4's M6 polish. The resume
   queue lists six items as "M6.1-M6.4"; only the `build` script is plan item M6.1. The other five
-  are entries above, and the plan's own M6.2 (CRLF), M6.3 (`test.todo`) and M6.4 (README release
-  line) are not in this PR and stay open.
+  are entries above. The plan's own M6.2 (CRLF), M6.3 (`test.todo`) and M6.4 (README release
+  line) were added to the same PR afterwards; their status lines are above.
   - **The core package's entry** (PR M5's entry): `packages/core/package.json` declares no `main`
     now. Nothing imports the package bare; everything goes through the `@squadlogic/core/<module>`
     alias. An index barrel or a wildcard `exports` map would make an entry true, but knip treats

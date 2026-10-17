@@ -11,3 +11,14 @@
 *.zip binary
 *.woff binary
 *.woff2 binary
+
+# Applied migrations committed with CRLF or mixed line endings (plan item M6.2).
+# They must stay byte for byte as applied: the migration tool never re-runs them,
+# and scripts/ci/migrationVersions.mjs refuses an edit to an existing migration.
+# Named one by one, so a new migration is still normalized to LF.
+supabase/migrations/20240405180000_password_hardening.sql -text
+supabase/migrations/20260324000000_phase1_rls_unification.sql -text
+supabase/migrations/20260324000002_calendar_token_expiry.sql -text
+supabase/migrations/20260324000003_phase3_registration_rpc_hardening.sql -text
+supabase/migrations/20260324000004_audit_log.sql -text
+supabase/migrations/20260331000000_definitive_schema.sql -text

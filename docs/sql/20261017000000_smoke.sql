@@ -11,7 +11,10 @@
 --     under A's folder;
 --   * a name with no folder, a non-UUID folder, or another organization's
 --     folder is refused with 42501 (RLS), never 22P02 (a cast error);
---   * an update or a delete by A's own admin changes nothing (no policy);
+--   * an update by A's own admin changes nothing (no policy). A delete is not
+--     tried: on Supabase, `storage.protect_delete()` refuses every SQL delete
+--     on storage.objects whatever the policies say (pgTAP run 39007939141),
+--     and the policy check above already proves there is no DELETE policy;
 --   * the anonymous role reads nothing and cannot upload.
 --
 -- **The harness's storage stand-in.** scripts/dbharness/prelude.sql creates
@@ -158,7 +161,7 @@ BEGIN
     IF v_res <> '42501' THEN RAISE EXCEPTION 'an upload under a non-UUID folder gave % (want 42501)', v_res; END IF;
     RAISE NOTICE 'uploads under another organization''s folder, no folder, or a non-UUID folder were each refused 42501, 4 of 4';
 
-    -- 7. No update, no delete, even by A's own admin.
+    -- 7. No update, even by A's own admin.
     PERFORM set_config('request.jwt.claim.sub', v_admin_a::text, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
     SET LOCAL ROLE authenticated;
@@ -166,15 +169,12 @@ BEGIN
      WHERE bucket_id = 'exports' AND name LIKE v_org_a || '/%';
     GET DIAGNOSTICS v_rows = ROW_COUNT;
     IF v_rows <> 0 THEN RESET ROLE; RAISE EXCEPTION 'A''s admin updated % export(s)', v_rows; END IF;
-    DELETE FROM storage.objects WHERE bucket_id = 'exports' AND name LIKE v_org_a || '/%';
-    GET DIAGNOSTICS v_rows = ROW_COUNT;
-    IF v_rows <> 0 THEN RESET ROLE; RAISE EXCEPTION 'A''s admin deleted % export(s)', v_rows; END IF;
     RESET ROLE;
     IF (SELECT count(*) FROM storage.objects
          WHERE bucket_id = 'exports' AND name LIKE v_org_a || '/%' AND name NOT LIKE '%.renamed') <> 2 THEN
-        RAISE EXCEPTION 'A''s exports changed under an update or delete with no policy';
+        RAISE EXCEPTION 'A''s exports changed under an update with no policy';
     END IF;
-    RAISE NOTICE 'an update and a delete by A''s admin each changed 0 rows; both exports are as uploaded';
+    RAISE NOTICE 'an update by A''s admin changed 0 rows; both exports are as uploaded';
 
     -- 8. The anonymous role.
     IF pg_temp.exports_visible(NULL, '') <> 0 THEN

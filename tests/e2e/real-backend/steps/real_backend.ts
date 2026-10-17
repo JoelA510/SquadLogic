@@ -200,12 +200,35 @@ Then('the audit log records the import as the administrator', async ({ page }) =
     },
   ]);
 
-  // finalize_import_job's row: one, for the job it applied.
+  // finalize_import_job's rows, for the job it applied: its own, counting the
+  // players it wrote, and one per later stage (`metadata.stage`, e.g. the
+  // buddy pairs). Every one attributed to the administrator, for one job.
   const applied = fresh.filter((row) => row.action === IMPORT_AUDIT.applied);
-  expect(applied, `the ${IMPORT_AUDIT.applied} row, among: ${seen}`).toHaveLength(1);
-  expect(applied[0].resource_type).toBe('import_job');
-  expect(applied[0].resource_id, 'the applied job').toBeTruthy();
-  expect(applied[0].user_id).toBe(SEEDED_ADMIN.userId);
+  const finalized = applied.filter((row) => row.metadata?.stage === undefined);
+  expect(
+    finalized.map((row) => ({
+      resource_type: row.resource_type,
+      user_id: row.user_id,
+      status: row.metadata?.status,
+      promoted_rows: row.metadata?.promoted_rows,
+    })),
+    `finalize_import_job's ${IMPORT_AUDIT.applied} row, among: ${seen}`
+  ).toEqual([
+    {
+      resource_type: 'import_job',
+      user_id: SEEDED_ADMIN.userId,
+      status: 'completed',
+      promoted_rows: total,
+    },
+  ]);
+  const job = finalized[0].resource_id;
+  expect(job, 'the applied job').toBeTruthy();
+  for (const row of applied) {
+    expect([row.user_id, row.resource_id], `every ${IMPORT_AUDIT.applied} row: ${seen}`).toEqual([
+      SEEDED_ADMIN.userId,
+      job,
+    ]);
+  }
   stateOf(page).auditBefore = undefined;
 });
 
@@ -361,7 +384,8 @@ When('I upload the exports to Storage', async ({ page }) => {
   const uploaded = page.getByText(/Uploaded \d+ files to 'exports' bucket\./);
   const failed = page.getByText(/^Upload failed:/);
   await expect(uploaded.or(failed)).toBeVisible({ timeout: BACKEND_TIMEOUT });
-  await expect(failed).toHaveCount(0);
+  // The page's own words when it failed, rather than a count.
+  expect(await failed.allInnerTexts()).toEqual([]);
   // The master CSV and one per synced team, and the publication recorded.
   await expect(uploaded).toContainText(
     `Uploaded ${teamNames.length + 1} files to 'exports' bucket. Recorded as published baseline v`

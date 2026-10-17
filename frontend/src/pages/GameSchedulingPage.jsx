@@ -22,6 +22,7 @@ import GameScheduleGrid from '../components/scheduling/GameScheduleGrid.jsx';
 import { GameCardPreview, GameMoveContext } from '../components/scheduling/GameCard.jsx';
 import Button from '../components/ui/Button.jsx';
 import ProgressBar from '../components/ui/ProgressBar.jsx';
+import Tabs from '../components/ui/Tabs.jsx';
 import {
   Edit2,
   Save,
@@ -476,6 +477,7 @@ export default function GameSchedulingPage() {
   const [selectedTeamId, setSelectedTeamId] = useState(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [activeTab, setActiveTab] = useState('full');
+  const viewPanelId = useId();
   const [schedulerStatus, setSchedulerStatus] = useState('idle');
   const [schedulerProgress, setSchedulerProgress] = useState(null);
   const [schedulerResult, setSchedulerResult] = useState(null);
@@ -1342,39 +1344,29 @@ export default function GameSchedulingPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2">
           <div className="bg-bg-glass border border-border-subtle rounded-xl overflow-hidden shadow-md">
-            <div className="px-6 py-4 border-b border-border-subtle flex justify-between items-center bg-bg-glass">
-              {/* Tokens, not `text-blue-400` / `text-text-muted`: those measured 2.4:1 and
-                  2.9:1 on this bar in the light theme (axe, M4.2). The accent and secondary
-                  text read 5.9:1 light and 8.2:1 / 8.7:1 dark. */}
-              <div className="flex gap-4">
-                <button
-                  type="button"
-                  aria-pressed={activeTab === 'full'}
-                  onClick={() => setActiveTab('full')}
-                  className={`text-sm font-semibold transition-colors ${
-                    activeTab === 'full'
-                      ? 'text-text-accent'
-                      : 'text-text-secondary hover:text-text-primary'
-                  }`}
-                >
-                  Full Schedule
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={activeTab === 'team'}
-                  onClick={() => setActiveTab('team')}
-                  className={`text-sm font-semibold transition-colors ${
-                    activeTab === 'team'
-                      ? 'text-text-accent'
-                      : 'text-text-secondary hover:text-text-primary'
-                  }`}
-                >
-                  By Team
-                </button>
-              </div>
+            {/* The view tabs are the shared `Tabs` primitive: the selected one carries an
+                underline and `aria-selected`, not only a colour (WCAG 1.4.1). The bar's
+                bottom padding matches `.page-tabs`' negative margin, so the underline sits on
+                the bar's border. */}
+            <div className="px-6 pb-3 border-b border-border-subtle flex flex-wrap items-end justify-between gap-x-4 gap-y-1 bg-bg-glass">
+              <Tabs
+                tabs={[
+                  { id: 'full', label: 'Full Schedule' },
+                  { id: 'team', label: 'By Team' },
+                ]}
+                activeTab={activeTab}
+                onChange={setActiveTab}
+                panelId={viewPanelId}
+                label="Game schedule views"
+              />
             </div>
 
-            <div className="p-0">
+            <div
+              className="p-0"
+              id={viewPanelId}
+              role="tabpanel"
+              aria-label={activeTab === 'full' ? 'Full Schedule' : 'By Team'}
+            >
               {canEditSchedule ? (
                 <div className="p-4 overflow-x-auto">
                   <DndContext

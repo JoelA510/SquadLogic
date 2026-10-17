@@ -268,21 +268,33 @@ describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
     expect(screen.queryByText(STAGED)).not.toBeInTheDocument();
   });
 
-  it('marks the view tabs pressed and colours them with text tokens', async () => {
+  it('tells the view tabs apart by selection state and an underline, not colour alone', async () => {
     render(
       <MemoryRouter>
         <GameSchedulingPage />
       </MemoryRouter>
     );
-    const full = await screen.findByRole('button', { name: 'Full Schedule' });
-    const byTeam = screen.getByRole('button', { name: 'By Team' });
-    expect(full).toHaveAttribute('aria-pressed', 'true');
-    expect(byTeam).toHaveAttribute('aria-pressed', 'false');
-    // jsdom cannot measure contrast (M4.2's axe scan in Chromium does); this
-    // pins the tokens the measured ratios belong to.
-    expect(full.className).toContain('text-text-accent');
-    expect(byTeam.className).toContain('text-text-secondary');
-    expect(full.className).not.toMatch(/text-blue-400|text-text-muted/);
+    const views = await screen.findByRole('tablist', { name: 'Game schedule views' });
+    const full = within(views).getByRole('tab', { name: 'Full Schedule' });
+    const byTeam = within(views).getByRole('tab', { name: 'By Team' });
+    expect(full).toHaveAttribute('aria-selected', 'true');
+    expect(byTeam).toHaveAttribute('aria-selected', 'false');
+    // `.page-tab.active` is the underline (page.css); only the selected tab has it.
+    expect(full).toHaveClass('page-tab', 'active');
+    expect(byTeam).toHaveClass('page-tab');
+    expect(byTeam).not.toHaveClass('active');
+    // The selected tab controls the panel, which is named for it.
+    const panel = screen.getByRole('tabpanel', { name: 'Full Schedule' });
+    expect(full).toHaveAttribute('aria-controls', panel.id);
+    expect(within(panel).getByTestId('game-schedule-list')).toBeInTheDocument();
+
+    // Arrow keys move the selection (the primitive's roving tabindex).
+    fireEvent.keyDown(views, { key: 'ArrowRight' });
+    expect(within(views).getByRole('tab', { name: 'By Team' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    expect(screen.getByRole('tabpanel', { name: 'By Team' })).toBeInTheDocument();
   });
 
   it('names the By Team buttons as a group, with no orphaned label', async () => {
@@ -291,7 +303,7 @@ describe('GameSchedulingPage :: a game moved with the keyboard (M4.3)', () => {
         <GameSchedulingPage />
       </MemoryRouter>
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'By Team' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'By Team' }));
     const group = screen.getByRole('group', { name: 'Select Team' });
     const lions = within(group).getByRole('button', { name: 'lions' });
     expect(lions).toHaveAttribute('aria-pressed', 'false');

@@ -27,7 +27,7 @@
 
 import { assert, assertEquals } from 'https://deno.land/std@0.203.0/assert/mod.ts';
 import { evaluatePracticeSchedule } from '../engines/scoring-engine.ts';
-import type { PracticeAssignment, Slot, Team } from '../schemas/scoring.ts';
+import type { PracticeAssignment, PracticeException, Slot, Team } from '../schemas/scoring.ts';
 import extract from './fixtures/scoring-parity.season-2026.json' with { type: 'json' };
 import dated from './fixtures/scoring-parity-dated.season-2026.json' with { type: 'json' };
 
@@ -162,6 +162,11 @@ const DATED_EXPECTED = {
   c4Conflicts: 1,
   c4UndatedConflicts: 0,
   c4SharedDates: 10,
+  c5Exceptions: 2,
+  c5Conflicts: 2,
+  c5SharedDates: 8,
+  c5TbdDates: 2,
+  c5PeakOnTarget: 2,
 };
 const DATED_EXTRACT_PATH =
   'supabase/functions/_shared/tests/fixtures/scoring-parity-dated.season-2026.json';
@@ -169,7 +174,15 @@ const DATED_EXTRACT_PATH =
 type DatedCase = {
   slots: Slot[];
   assignments: PracticeAssignment[];
+  exceptions?: PracticeException[];
   expected: Agreed & {
+    timeTbd?: Array<{
+      teamId: string;
+      slotId: string;
+      exceptionId: unknown;
+      code: string;
+      dates: string[];
+    }>;
     dateModel: string;
     slotUtilization: Array<{
       slotId: string;
@@ -179,7 +192,7 @@ type DatedCase = {
     }>;
   };
 };
-const datedCases = dated.cases as unknown as Record<'C1' | 'C4', DatedCase>;
+const datedCases = dated.cases as unknown as Record<'C1' | 'C4' | 'C5', DatedCase>;
 const datedTeams = dated.teams as unknown as Team[];
 
 function runEdgeDated(c: DatedCase) {
@@ -187,6 +200,7 @@ function runEdgeDated(c: DatedCase) {
     teams: datedTeams,
     slots: c.slots,
     assignments: c.assignments,
+    exceptions: c.exceptions,
   });
   return {
     summary: {
@@ -208,6 +222,7 @@ function runEdgeDated(c: DatedCase) {
       .sort(),
     droppedRows: result.issues.filter((i) => i.category === 'data-quality').length,
     dateModel: result.summary.dateModel,
+    timeTbd: result.timeTbd,
   };
 }
 
@@ -242,7 +257,7 @@ Deno.test('scoring parity dated - the cases hold what the plan measured', () => 
 });
 
 Deno.test("scoring parity dated - the Edge engine gives core's recorded answer", () => {
-  for (const name of ['C1', 'C4'] as const) {
+  for (const name of ['C1', 'C4', 'C5'] as const) {
     const edge = runEdgeDated(datedCases[name]);
     const { expected } = datedCases[name];
     assertEquals(edge.dateModel, 'dated', name);
@@ -250,7 +265,23 @@ Deno.test("scoring parity dated - the Edge engine gives core's recorded answer",
     assertEquals(edge.slotUtilization, expected.slotUtilization, name);
     assertEquals(edge.coachConflicts, expected.coachConflicts, name);
     assertEquals(edge.droppedRows, expected.droppedRows, name);
+    assertEquals(edge.timeTbd, expected.timeTbd, name);
   }
+});
+
+Deno.test('scoring parity dated - C5 holds the exceptions the plan follow-up models', () => {
+  const { C5 } = datedCases;
+  assertEquals(C5.exceptions?.length, DATED_EXPECTED.c5Exceptions);
+  assertEquals(C5.expected.coachConflicts.length, DATED_EXPECTED.c5Conflicts);
+  assert(
+    C5.expected.coachConflicts.some((c) =>
+      c.endsWith(` @ 2026-10-02 x${DATED_EXPECTED.c5SharedDates}`)
+    )
+  );
+  assertEquals(C5.expected.timeTbd?.[0].dates.length, DATED_EXPECTED.c5TbdDates);
+  assert(
+    C5.expected.slotUtilization.some((s) => s.assignedCount === DATED_EXPECTED.c5PeakOnTarget)
+  );
 });
 
 Deno.test('scoring parity dated - the generator writes the extract this file reads', () => {

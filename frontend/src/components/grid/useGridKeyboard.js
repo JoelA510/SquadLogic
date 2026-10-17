@@ -46,7 +46,11 @@ export function focusTargetOf(cell) {
   return cellWidgets(cell)[0] || cell;
 }
 
-const OWN_KEYS_SELECTOR = 'input, select, textarea, [role="menu"], [contenteditable="true"]';
+// A form control, an open menu, and the trigger of an open popup (its arrows move into the menu,
+// Dropdown) keep their own keys.
+const OWN_KEYS_SELECTOR =
+  'input, select, textarea, [role="menu"], [aria-haspopup][aria-expanded="true"], ' +
+  '[contenteditable="true"]';
 
 export function useGridKeyboard({
   view,
@@ -78,7 +82,6 @@ export function useGridKeyboard({
     if (editing) return;
     const { target } = event;
     if (!(target instanceof Element)) return;
-    // A form control or a menu inside a cell owns its keys (a menu's arrows move its items).
     if (target.closest(OWN_KEYS_SELECTOR)) return;
     const cell = target.closest('[data-grid-cell]');
     if (!(cell instanceof HTMLElement)) return;

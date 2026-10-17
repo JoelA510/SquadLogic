@@ -7,7 +7,7 @@ import Button from '../ui/Button.jsx';
 import GridCell from './GridCell.jsx';
 import GridCheckbox from './GridCheckbox.jsx';
 import { useGridSelection } from './useGridSelection.js';
-import { allFocusables, focusTargetOf, useGridKeyboard } from './useGridKeyboard.js';
+import { allFocusables, cellWidgets, focusTargetOf, useGridKeyboard } from './useGridKeyboard.js';
 
 const ROW_HEIGHT = 38;
 const DENSE_ROW_HEIGHT = 32;
@@ -239,7 +239,7 @@ export default function DataGrid({
     const cell = stopCell || cells.find((el) => el.dataset.r !== '-1') || cells[0];
     const last = lastFocusedRef.current;
     const target =
-      last instanceof HTMLElement && last !== cell && last.isConnected && cell.contains(last)
+      last instanceof HTMLElement && last !== cell && cellWidgets(cell).includes(last)
         ? last
         : focusTargetOf(cell);
     target.tabIndex = 0;
@@ -264,6 +264,9 @@ export default function DataGrid({
   const onGridFocus = (event) => {
     const cell = event.target instanceof Element ? event.target.closest('[data-grid-cell]') : null;
     if (!(cell instanceof HTMLElement)) return;
+    // An item of a menu open in the cell is not a stop: the menu unmounts on close, and a stop
+    // recorded on its item would leave the grid with none. The trigger stays the cell's stop.
+    if (event.target.closest('[role="menu"]')) return;
     lastFocusedRef.current = event.target;
     const r = Number(cell.dataset.r);
     const c = Number(cell.dataset.c);

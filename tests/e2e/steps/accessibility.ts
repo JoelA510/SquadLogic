@@ -221,6 +221,67 @@ Then(
   }
 );
 
+// ---- Row-actions menu inside the grid (#591 review: its items joined the tab order) ----
+
+When(
+  "I open the first row's actions menu in the {string} from the keyboard",
+  async ({ page }, gridName: string) => {
+    // End on the first row lands on the row-actions cell, whose one widget takes focus.
+    await page.keyboard.press('End');
+    const trigger = page.getByRole('grid', { name: gridName }).getByRole('button', {
+      name: 'Row actions',
+    });
+    await expect(trigger.first()).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('menu')).toBeVisible();
+    await expect(trigger.first()).toBeFocused();
+  }
+);
+
+Then(
+  'the arrow keys move through the menu and Escape returns to the {string} cell',
+  async ({ page }, gridName: string) => {
+    const items = page.getByRole('menuitem');
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(0)).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(1)).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    const trigger = page
+      .getByRole('grid', { name: gridName })
+      .getByRole('button', { name: 'Row actions' })
+      .first();
+    await expect(trigger).toBeFocused();
+    // Open it again for the next step, and step into it.
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(0)).toBeFocused();
+  }
+);
+
+Then(
+  'Tab from the open menu leaves the {string} and closes the menu',
+  async ({ page }, gridName: string) => {
+    await page.keyboard.press('Tab');
+    expect((await focusInGrid(page, gridName)).inside, 'Tab stayed inside the grid').toBe(false);
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    // And from the trigger itself, the menu open but not entered: the reviewed case, where the
+    // newly mounted items were the next tab stops.
+    await page.keyboard.press('Shift+Tab');
+    const trigger = page
+      .getByRole('grid', { name: gridName })
+      .getByRole('button', { name: 'Row actions' })
+      .first();
+    await expect(trigger).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press('Tab');
+    expect((await focusInGrid(page, gridName)).inside, 'Tab went into the open menu').toBe(false);
+    await expect(page.getByRole('menu')).toHaveCount(0);
+  }
+);
+
 // ---- Chart colours (plan, Discovered under M4.2: Recharts kept hard-coded slate colours) ----
 
 Given('the organization has {int} evaluation runs on record', async ({ page }, count: number) => {

@@ -1664,7 +1664,12 @@ smoke-tested
     several widgets, and Tab is never the grid's (an open editor still commits on Tab). An editor
     left by moving focus elsewhere commits without pulling focus back. `tests/dataGrid.test.jsx`
     and a keyboard scenario in `accessibility.feature` (real Tab in Chromium on `/players`) each
-    fail with the old Tab handler planted back. *Executed.*
+    fail with the old Tab handler planted back. *Executed.* Review round (#591, Codex): a row's
+    actions menu mounted its items as tab stops after the grid had set the tab order, so Tab from
+    an open row-actions cell walked into the menu. `Dropdown` items are now never tab stops and
+    Tab closes the menu, moving on from the trigger (APG menu button); the grid keeps its stop
+    off menu items and leaves an open trigger's arrows to the menu. A unit test and a Chromium
+    scenario each fail on the previous head. *Executed.*
   - Recharts axes and gridlines on the analytics page keep hard-coded slate colours, which do
     not re-theme. *Statically reviewed.* **Fixed 2026-10-17** (Wave 4 accessibility, branch
     `claude/vibrant-allen-hr7y7s-a11y`): the charts on `/admin/analytics` and `/admin/reports`

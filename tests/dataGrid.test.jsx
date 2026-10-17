@@ -308,3 +308,82 @@ describe('DataGrid keyboard (role="grid", WCAG 2.1.2)', () => {
     expect(rows.map((row) => row.getAttribute('aria-rowindex'))).toEqual(['1', '2', '3', '4']);
   });
 });
+
+/**
+ * #591 review (Codex): opening a row's actions menu mounted `role="menuitem"` buttons with their
+ * native tab stop, after the grid had last taken its cells' widgets out of the tab order, so the
+ * grid had more than one tab stop and Tab from the open cell walked into the menu instead of out.
+ * The menu's items are never tab stops (WAI-ARIA APG menu pattern), Tab closes the menu, and the
+ * menu's own keys (arrows, Escape) keep working inside the grid.
+ */
+describe('DataGrid row-actions menu keeps the single tab stop', () => {
+  const tabStops = (container) =>
+    [container, ...container.querySelectorAll('*')].filter(
+      (el) => el.tabIndex >= 0 && !el.disabled
+    );
+
+  const renderWithActions = () => {
+    const onRowAction = vi.fn();
+    render(
+      <>
+        <Harness
+          rowActions={[
+            { id: 'open', label: 'Open record' },
+            { id: 'delete', label: 'Delete player', danger: true },
+          ]}
+          onRowAction={onRowAction}
+        />
+        <button type="button">After the grid</button>
+      </>
+    );
+    const grid = screen.getByRole('grid', { name: 'Data grid' });
+    const trigger = screen.getAllByRole('button', { name: 'Row actions' })[0];
+    // Reach the trigger the keyboard way: End on the first row lands on the actions cell.
+    tabStops(grid)[0].focus();
+    fireEvent.keyDown(document.activeElement, { key: 'End' });
+    expect(document.activeElement).toBe(trigger);
+    fireEvent.click(trigger);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    return { grid, trigger, onRowAction };
+  };
+
+  it('leaves no menu item in the tab order, so Tab from the open cell leaves the grid', () => {
+    const { grid, trigger } = renderWithActions();
+    for (const item of screen.getAllByRole('menuitem')) expect(item.tabIndex).toBe(-1);
+    expect(tabStops(grid)).toEqual([trigger]);
+    // Tab is the browser's (not prevented) and closes the menu on its way out.
+    expect(fireEvent.keyDown(trigger, { key: 'Tab' })).toBe(true);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('keeps the menu keyboard: arrows move within it, Tab from an item closes it', () => {
+    renderWithActions();
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Open record' }));
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Delete player' }));
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Open record' }));
+    expect(fireEvent.keyDown(document.activeElement, { key: 'Tab' })).toBe(true);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('returns focus to the row-actions cell on Escape, and the grid keys work again', () => {
+    const { trigger } = renderWithActions();
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Open record' }));
+    fireEvent.keyDown(document.activeElement, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    // With the menu closed, an arrow on the trigger is the grid's again: down a row.
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(screen.getAllByRole('button', { name: 'Row actions' })[1]);
+  });
+
+  it('runs the chosen action from the keyboard', () => {
+    const { onRowAction } = renderWithActions();
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' });
+    fireEvent.click(document.activeElement);
+    expect(onRowAction).toHaveBeenCalledWith('open', expect.objectContaining({ id: 'r1' }));
+  });
+});

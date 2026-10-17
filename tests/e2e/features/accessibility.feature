@@ -29,6 +29,14 @@ Feature: Every top-level route passes an automated accessibility scan
     Then the arrow keys move focus between the cells of the "Players grid"
     And Tab moves focus out of the "Players grid" and Shift+Tab brings it back to the same cell
 
+  Scenario: A row-actions menu in the players grid keeps the grid's single tab stop
+    Given I am logged into SquadLogic as an admin
+    When I open "/players" and see its "Players" heading
+    And I tab from the table search into the "Players grid"
+    And I open the first row's actions menu in the "Players grid" from the keyboard
+    Then the arrow keys move through the menu and Escape returns to the "Players grid" cell
+    And Tab from the open menu leaves the "Players grid" and closes the menu
+
   Scenario: The analytics charts follow the theme
     Given I am logged into SquadLogic as an admin
     And the organization has 6 evaluation runs on record

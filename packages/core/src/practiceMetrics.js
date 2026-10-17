@@ -7,8 +7,9 @@ import {
   assignmentLiveSpan,
   calendarDayNumber,
   peakPieceCount,
+  sharedHeldDates,
   sharedLiveDates,
-  sharedPieceDates,
+  spanPiece,
   wallSeconds,
 } from './utils/practiceLiveDates.js';
 
@@ -295,36 +296,6 @@ function resolveDateModel(slots) {
     }
   }
   return 'dated';
-}
-
-/** A row with no exception, as one piece: its span on its own slot. */
-const spanPiece = (entry) => (entry.span ? [{ slotId: entry.slotId, span: entry.span }] : []);
-
-/**
- * The dates two rows are both held on with overlapping wall windows, over
- * every pair of their pieces. A row holds each date once, so the sum counts
- * each shared date once.
- *
- * @param {Array<{ slotId: string, span?: any, days?: number[] }>} a
- * @param {Array<{ slotId: string, span?: any, days?: number[] }>} b
- * @param {Map<string, any>} slotsById
- * @returns {{ count: number, firstDate: string | null }}
- */
-function sharedHeldDates(a, b, slotsById) {
-  let count = 0;
-  let firstDate = null;
-  for (const p of a) {
-    const pw = slotsById.get(p.slotId).dating;
-    for (const q of b) {
-      const qw = slotsById.get(q.slotId).dating;
-      if (!(pw.startSec < qw.endSec && qw.startSec < pw.endSec)) continue;
-      const shared = sharedPieceDates(p, q);
-      if (shared.count === 0) continue;
-      count += shared.count;
-      if (firstDate === null || shared.firstDate < firstDate) firstDate = shared.firstDate;
-    }
-  }
-  return { count, firstDate };
 }
 
 /**
@@ -983,7 +954,7 @@ export function evaluatePracticeSchedule({
             shared = sharedHeldDates(
               currentPieces ?? spanPiece(current),
               candidatePieces ?? spanPiece(candidate),
-              slotsById
+              (slotId) => slotsById.get(slotId).dating
             );
           }
           if (shared.count === 0) continue;

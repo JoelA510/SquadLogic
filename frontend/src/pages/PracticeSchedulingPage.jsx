@@ -1304,9 +1304,9 @@ export default function PracticeSchedulingPage() {
       unassigned: autoScheduler.result?.unassigned ?? [],
       teams: schedulerTeams,
       slots: schedulerSlots.map((slot) => ({ ...slot, ...slotDating(slot) })),
-      // Unread is not none: without a complete read the report carries no
-      // `timeTbd` at all (the page says why above the panel), never `[]`.
-      exceptions: seasonExceptions.loaded ? seasonExceptions.rows : undefined,
+      // Unread is not none: without a complete read the run records no
+      // metrics and the Apply status says why (`metricsUnavailable`).
+      exceptions: seasonExceptions.loaded ? seasonExceptions.rows : null,
       schoolDayEnd,
       timezone,
       edgeEvaluation: autoScheduler.result?.evaluation ?? null,
@@ -1910,7 +1910,7 @@ export default function PracticeSchedulingPage() {
           {seasonExceptionsMessage && (
             <div
               role="alert"
-              className="mt-4 rounded-lg border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+              className="mt-4 rounded-lg border border-status-warning/30 bg-status-warning-bg px-4 py-3 text-sm text-status-warning-text"
             >
               {seasonExceptionsMessage}
             </div>

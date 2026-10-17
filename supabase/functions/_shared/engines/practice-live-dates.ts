@@ -208,7 +208,10 @@ export function applyExceptionsToLiveRows(input: {
     value !== null && typeof value === 'object' && !Array.isArray(value);
   const rowById = new Map<unknown, number>();
   rows.forEach((row, index) => {
-    if (row.id === undefined || row.id === null || rowById.has(row.id)) return;
+    // Core: a row with no live date holds nothing an exception could change.
+    if (row.span === null || row.id === undefined || row.id === null || rowById.has(row.id)) {
+      return;
+    }
     rowById.set(row.id, index);
   });
 
@@ -316,12 +319,48 @@ export function applyExceptionsToLiveRows(input: {
 }
 
 /** Core `helperRange`. */
-function helperRange(row: LiveRow): unknown {
-  const validityEnd = isoDateOfDayNumber(row.lastDay);
-  if (row.range === undefined || row.range === null) {
-    return `[${isoDateOfDayNumber(row.firstDay)},${validityEnd}]`;
+function helperRange(row: LiveRow): string {
+  let from = row.firstDay;
+  let to = row.lastDay;
+  if (row.range !== undefined && row.range !== null) {
+    const bounds = practiceRangeBounds(row.range);
+    if (bounds !== null) {
+      from = Math.max(from, isoDayNumber(bounds.first));
+      to = Math.min(to, isoDayNumber(bounds.last));
+    } else {
+      const lower = practiceRangeLowerBound(row.range) as { first: string };
+      from = Math.max(from, isoDayNumber(lower.first));
+    }
   }
-  if (practiceRangeBounds(row.range) !== null) return row.range;
-  const lower = practiceRangeLowerBound(row.range) as { first: string };
-  return `[${lower.first},${validityEnd}]`;
+  return `[${isoDateOfDayNumber(from)},${isoDateOfDayNumber(to)}]`;
+}
+
+type HeldPiece = { slotId: string; span?: Span; days?: number[] };
+
+/** Core `spanPiece`. */
+export const spanPiece = (entry: { slotId: string; span: Span | null }): HeldPiece[] =>
+  entry.span ? [{ slotId: entry.slotId, span: entry.span }] : [];
+
+/** Core `sharedHeldDates`. */
+export function sharedHeldDates(
+  a: HeldPiece[],
+  b: HeldPiece[],
+  windowOf: (slotId: string) => { startSec: number; endSec: number }
+): { count: number; firstDate: string | null } {
+  let count = 0;
+  let firstDate: string | null = null;
+  for (const p of a) {
+    const pw = windowOf(p.slotId);
+    for (const q of b) {
+      const qw = windowOf(q.slotId);
+      if (!(pw.startSec < qw.endSec && qw.startSec < pw.endSec)) continue;
+      const shared = sharedPieceDates(p, q);
+      if (shared.count === 0) continue;
+      count += shared.count;
+      if (firstDate === null || (shared.firstDate as string) < firstDate) {
+        firstDate = shared.firstDate;
+      }
+    }
+  }
+  return { count, firstDate };
 }

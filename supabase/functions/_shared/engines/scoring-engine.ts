@@ -13,8 +13,9 @@ import {
   assignmentLiveSpan,
   calendarDayNumber,
   peakPieceCount,
+  sharedHeldDates,
   sharedLiveDates,
-  sharedPieceDates,
+  spanPiece,
   wallSeconds,
 } from './practice-live-dates.ts';
 import type { LiveRow, Piece } from './practice-live-dates.ts';
@@ -116,37 +117,6 @@ function resolveDateModel(slots: Slot[]): Map<string, SlotDating> | null {
     });
   }
   return datings;
-}
-
-/** Core `spanPiece`: a row with no exception, as one piece on its own slot. */
-const spanPiece = (entry: {
-  slotId: string;
-  span: { first: number; last: number } | null;
-}): Array<{ slotId: string; span?: { first: number; last: number }; days?: number[] }> =>
-  entry.span ? [{ slotId: entry.slotId, span: entry.span }] : [];
-
-/** Core `sharedHeldDates`. */
-function sharedHeldDates(
-  a: Array<{ slotId: string; span?: { first: number; last: number }; days?: number[] }>,
-  b: Array<{ slotId: string; span?: { first: number; last: number }; days?: number[] }>,
-  datings: Map<string, SlotDating>
-): { count: number; firstDate: string | null } {
-  let count = 0;
-  let firstDate: string | null = null;
-  for (const p of a) {
-    const pw = datings.get(p.slotId) as SlotDating;
-    for (const q of b) {
-      const qw = datings.get(q.slotId) as SlotDating;
-      if (!(pw.startSec < qw.endSec && qw.startSec < pw.endSec)) continue;
-      const shared = sharedPieceDates(p, q);
-      if (shared.count === 0) continue;
-      count += shared.count;
-      if (firstDate === null || (shared.firstDate as string) < firstDate) {
-        firstDate = shared.firstDate;
-      }
-    }
-  }
-  return { count, firstDate };
 }
 
 /**
@@ -339,8 +309,7 @@ export function evaluatePracticeSchedule(params: {
   const piecesBySlot = new Map<string, Piece[]>();
   resolvedAssignments.forEach((a) => {
     const pieces = piecesOfRow(a.row);
-    const held: Array<{ slotId: string; span?: Span; days?: number[] }> =
-      pieces ?? (a.span ? [{ slotId: a.slotId, span: a.span }] : []);
+    const held: Array<{ slotId: string; span?: Span; days?: number[] }> = pieces ?? spanPiece(a);
     for (const piece of held) {
       const list = piecesBySlot.get(piece.slotId) ?? [];
       list.push(piece.days ? { days: piece.days } : { span: piece.span });
@@ -520,7 +489,7 @@ export function evaluatePracticeSchedule(params: {
             shared = sharedHeldDates(
               currentPieces ?? spanPiece(current),
               candidatePieces ?? spanPiece(candidate),
-              datings
+              (slotId) => datings.get(slotId) as SlotDating
             );
           }
           if (shared.count === 0) continue;

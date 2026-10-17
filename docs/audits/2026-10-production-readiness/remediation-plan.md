@@ -822,12 +822,12 @@ standards these items name · [ ] deployed and smoke-tested
 >   date is compared and counted at its new slot and time, a `time_tbd` date is in neither
 >   comparison and is reported (`timeTbd`, and a `time-tbd` warning on the Edge), and an
 >   exception that cannot be applied is a data-quality line. The page reads and sends them (a
->   failed read withholds the evaluation and says why), and apply-time metrics apply them.
->   Held together by 8 more witnesses in the shared vector table (core, drift, Deno) and a
->   dated parity case C5 (C4 with two modelled exceptions); every witness fails on the
->   engines before it, in both arms (*executed*, Deno 2.9.6 locally). The override panel's
->   "N free" does not read exceptions (declared, a question in the PR). The solver is M4.8
->   (Q2).
+>   failed read withholds the evaluation and says why), and apply-time metrics apply them (an
+>   unread list records no metrics and says why). Held together by 10 more witnesses in
+>   the shared vector table (core, drift, Deno) and a dated parity case C5 (C4 with two
+>   modelled exceptions); every witness fails on the engines before it, in both arms
+>   (*executed*, Deno 2.9.6 locally). The override panel's "N free" does not read exceptions
+>   (declared, a question in the PR). The solver is M4.8 (Q2).
 >   The plan is [`docs/PLAN_SCORING_DATE_MODEL.md`](../../PLAN_SCORING_DATE_MODEL.md) (#555).
 >   Measured (*executed*, scratch witness through the page's own slot builder and both engines):
 >   the two arms agree, so the defect is shared, not drift; modelling the corpus's "Select OLD"

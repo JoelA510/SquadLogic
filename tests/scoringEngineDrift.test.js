@@ -622,6 +622,34 @@ describe('scoring-engine cross-arm drift: dated (M4.7)', () => {
       expect(edgeLive.sharedPieceDates(a, b)).toEqual(coreLive.sharedPieceDates(a, b));
       expect(edgeLive.peakPieceCount([a, b])).toBe(coreLive.peakPieceCount([a, b]));
     }
+    // The held-dates pair and spanPiece, moved out of the engines into the twins.
+    const windows = {
+      S1: { startSec: 57600, endSec: 61200 },
+      S2: { startSec: 59400, endSec: 63000 },
+    };
+    const windowOf = (id) => windows[id];
+    const held = [
+      [{ slotId: 'S1', span: { first: 20311, last: 20402 } }],
+      [{ slotId: 'S2', days: [20360, 20367] }],
+      [
+        { slotId: 'S1', days: [20367] },
+        { slotId: 'S2', days: [20374] },
+      ],
+      [],
+    ];
+    for (const x of held) {
+      for (const y of held) {
+        expect(edgeLive.sharedHeldDates(x, y, windowOf)).toEqual(
+          coreLive.sharedHeldDates(x, y, windowOf)
+        );
+      }
+    }
+    for (const entry of [
+      { slotId: 'S1', span: { first: 1, last: 8 } },
+      { slotId: 'S1', span: null },
+    ]) {
+      expect(edgeLive.spanPiece(entry)).toEqual(coreLive.spanPiece(entry));
+    }
   });
 
   it('the two live-date modules agree on an enumerated product of ranges', () => {

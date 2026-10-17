@@ -545,15 +545,19 @@ consuming the occurrences they return.
   (`utils/practiceLiveDates.js`, twin in `practice-live-dates.ts`) calls the
   helper once per team (its rule 9 is per team) and once more for exceptions
   naming no row of the call, so those come back as the helper's `ROW_UNREAD`.
-  Each row it is given is its own range (or, absent or open-ended, the range
-  the engines already read it as: Q3) on the weekday of its slot's
-  `firstDate`. A relocation's slot is the call's own slot of that id; one the
+  Each row it is given carries its range inside its slot's validity (absent
+  or open-ended read as the engines already read it: Q3), not snapped to the
+  weekday, on the weekday of its slot's `firstDate`; so its series dates are
+  exactly its live span, and a relocation in the window's first or last week
+  keeps the dates the helper's rule 5 gives it. A row with no live date is
+  not handed over (it holds nothing an exception could change). A relocation's slot is the call's own slot of that id; one the
   call does not carry has no slot, which the helper turns into TIME TBD
   `PRACTICE_SLOT_MISSING`.
 - **What the engines compare.** A row the helper was given holds explicit
-  dates per slot: its series dates clipped to its live span (range ∩ slot
-  validity, exactly the dates it held before), and its relocated dates at the
-  target slot. Two rows clash on a date they both hold with overlapping wall
+  dates per slot: its series dates (its live span, exactly the dates it held
+  before) and its relocated dates at the target slot. The pair helpers
+  (`spanPiece`, `sharedHeldDates`) live in the twin modules, pinned by the
+  drift test. Two rows clash on a date they both hold with overlapping wall
   windows, each piece on its own slot's window; a slot's `assignedCount` is
   its busiest date over what it holds, relocations included. A row no
   exception reaches compares by its span as before, so a call with no
@@ -568,11 +572,21 @@ consuming the occurrences they return.
 - **Consumers.** The practice page reads the season's live exceptions
   (`useSeasonPracticeExceptions`) and sends them with each stored row's id; a
   failed read withholds the evaluation and says so. Apply-time metrics apply
-  the same list, or carry no `timeTbd` when it was not read.
-- **Tests.** Eight witnesses in `scoring-dated-vectors.json` (core, drift,
+  the same list; when it was not read, the run records no metrics and the
+  Apply status says why (`metricsUnavailable`), rather than a report that
+  ignores them.
+- **Tests.** Ten witnesses in `scoring-dated-vectors.json` (core, drift,
   Deno), a dated parity case C5 (C4 with a modelled daylight TIME TBD and a
   blackout relocation), the page wiring, and apply-time metrics; each shown
   failing on the engines and page before this change.
+- **Review round (`/code-review`).** Fixed: a teammate row with no live date
+  reported as TIME TBD (the helper was given an inverted range); Apply
+  persisting metrics that ignored unread exceptions; the pair helpers
+  duplicated in both engines; `cause_kind` selected and parsed but read by
+  no output; the new alert's raw palette colours. Not changed: a relocated
+  clash is named by the rows' own placements (Q7's identity), and the Edge
+  answers a wrongly typed exception element with a 400 where core reports a
+  finding (`schemas/scoring.ts` says so).
 - **Declared, not built:** the override panel's "N free" (Q5) counts series
   only; exceptions a save is about to write are not evaluated until saved; a
   relocated date outside its target slot's validity is counted there; the

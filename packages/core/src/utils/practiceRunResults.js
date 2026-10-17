@@ -80,9 +80,11 @@ import { evaluatePracticeSchedule } from '../practiceMetrics.js';
  *   Manual-follow-up entries from the scheduler, before filtering.
  * @param {Array<Object>} params.teams - Scheduler teams (the roster).
  * @param {Array<Object>} params.slots - Scheduler slots.
- * @param {Array<Object>} [params.exceptions] - The season's live saved practice
- *   exceptions, applied as the fairness panel applies them (the M4.7
- *   follow-up); omitted when they were not read.
+ * @param {Array<Object> | null} [params.exceptions] - The season's live saved
+ *   practice exceptions, applied as the fairness panel applies them (the M4.7
+ *   follow-up). `null` means they could not be read: the run then carries no
+ *   metrics and says why, rather than a report that ignores them. Omitted
+ *   (`undefined`) by a caller that predates them.
  * @param {string} [params.schoolDayEnd]
  * @param {string} [params.timezone] - The season's IANA zone.
  * @param {Object|null} [params.edgeEvaluation] - The Edge arm's report, if a
@@ -118,6 +120,15 @@ export function buildPracticeRunResults({
 
   /** The one place this function decides a run carries no metrics. */
   const unmeasurable = (reason) => ({ metricsArm: null, metricsUnavailable: { reason }, ...base });
+
+  // Unread is not none: a report that counted relocated weeks at their old
+  // slot and TIME TBD weeks as held would read as complete.
+  if (exceptions === null) {
+    return unmeasurable(
+      "This season's saved practice changes (moved and TIME TBD practices) could not be read, " +
+        'so no practice metrics were recorded for this run.'
+    );
+  }
 
   try {
     const report = evaluatePracticeSchedule({

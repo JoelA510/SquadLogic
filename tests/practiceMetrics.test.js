@@ -1095,8 +1095,10 @@ test('exception witnesses: relocation and TIME TBD each move a clash and a count
     return JSON.stringify(truth) !== JSON.stringify(without);
   }).map((v) => v.witness);
   assert.deepEqual(moved.sort(), [
+    'X-dateless-teammate',
     'X-relocated-capacity',
     'X-relocated-clash',
+    'X-relocated-last-week',
     'X-tbd-capacity',
     'X-tbd-clash',
     'X-tbd-open',
@@ -1151,8 +1153,13 @@ test('apply-time metrics apply the exceptions they are given, as the panel does 
   assert.equal(applied.metricsArm, 'core');
   assert.deepEqual(applied.timeTbd, vector.expected.timeTbd);
   assert.equal(applied.coachConflicts[0].sharedDates, vector.expected.conflicts[0].sharedDates);
-  // Not read is not none: no `timeTbd` at all, and the unexcepted answer.
-  const unread = run(undefined);
-  assert.equal('timeTbd' in unread, false);
-  assert.equal(unread.coachConflicts[0].sharedDates, 15);
+  // A caller that predates exceptions: no `timeTbd` at all, the unexcepted answer.
+  const predates = run(undefined);
+  assert.equal('timeTbd' in predates, false);
+  assert.equal(predates.coachConflicts[0].sharedDates, 15);
+  // Unread is not none: no metrics, and the reason, never a report that ignores them.
+  const unread = run(null);
+  assert.equal(unread.metricsArm, null);
+  assert.match(unread.metricsUnavailable.reason, /saved practice changes .* could not be read/);
+  assert.equal('coachConflicts' in unread, false);
 });

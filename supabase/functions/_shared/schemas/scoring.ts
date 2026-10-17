@@ -151,13 +151,17 @@ export const PracticeAssignmentSchema = z
 
 /**
  * A `practice_exceptions` row as stored (the M4.7 follow-up, plan Q1), sent
- * with a dated practice evaluation. Typed loosely on purpose:
- * `applyPracticeExceptions` reads every field itself (rule 2: a row with no
- * `withdrawn_at` key, an unknown `kind` or `tbd_reason`, an unreadable
- * `window`), and turns what it cannot read into TIME TBD or a finding. A
- * stricter schema here would answer the same row with a 400 instead of the
- * reason the portal and the feed give for it. `.optional()` keeps an absent
- * key absent, which rule 2 depends on.
+ * with a dated practice evaluation. The shape is checked (an object, string or
+ * null fields), the values are not: `applyPracticeExceptions` reads them
+ * itself (rule 2: a row with no `withdrawn_at` key, an unknown `kind` or
+ * `tbd_reason`, an unreadable `window`) and turns what it cannot read into
+ * TIME TBD or a finding, the reason the portal and the feed give for the same
+ * row. A wrongly typed element (not an object, a number for a string) is a 400
+ * here, where core, called in-process with the same input, reports it as the
+ * helper's `UNREADABLE` finding: the Edge refuses at its trust boundary what
+ * core reads as malformed, and no caller sends either. `.optional()` keeps an
+ * absent key absent, which rule 2 depends on. `cause_kind` is not listed: no
+ * engine output reads it (a passthrough field is still accepted).
  */
 export const PracticeExceptionSchema = z
   .object({
@@ -166,7 +170,6 @@ export const PracticeExceptionSchema = z
     window: z.string().nullable().optional(),
     kind: z.string().nullable().optional(),
     tbd_reason: z.string().nullable().optional(),
-    cause_kind: z.string().nullable().optional(),
     withdrawn_at: z.string().nullable().optional(),
     practice_slot_id: z.string().nullable().optional(),
   })

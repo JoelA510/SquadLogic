@@ -10,10 +10,11 @@ const EMPTY = /** @type {any[]} */ (Object.freeze([]));
  * follow-up, `docs/PLAN_SCORING_DATE_MODEL.md` Q1): the row as stored, which
  * is what `applyPracticeExceptions` reads. The relocated slot is named by
  * `practice_slot_id` and resolved by the engines against the slots they are
- * sent, so no slot is embedded.
+ * sent, so no slot is embedded. `cause_kind` is not read: no engine output
+ * carries it.
  */
 export const SEASON_PRACTICE_EXCEPTIONS_SELECT =
-  'id, assignment_id, window, kind, tbd_reason, cause_kind, withdrawn_at, practice_slot_id';
+  'id, assignment_id, window, kind, tbd_reason, withdrawn_at, practice_slot_id';
 
 /**
  * Every live saved practice exception of the season, read as the user through

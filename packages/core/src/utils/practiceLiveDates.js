@@ -244,15 +244,19 @@ const text = (value) => String(value ?? '');
  *
  * What the engines add, stated:
  *
- * - **The row handed to the helper** carries its own range, as stored. A row
- *   sent with no range, or an open-ended one, is given the range the engines
- *   already read it as (plan §3.1, Q3): the slot's validity, or from its
- *   lower bound to the validity end. Its slot's `day_of_week` is the weekday
- *   of the slot's `firstDate` (day arithmetic, no label parsed).
- * - **Series dates are clipped to the row's live span** (its range inside the
- *   slot's validity), exactly the dates the engine held without exceptions.
- *   Relocated dates are as the helper gives them (the window inside the
- *   row's range), at the target slot.
+ * - **The row handed to the helper** carries its range inside its slot's
+ *   validity (`firstDate`..`lastDate`), read as the engines read it (plan
+ *   §3.1, Q3: no range is the whole validity, an open upper bound runs to
+ *   its end), and not snapped to the weekday: the series dates are then
+ *   exactly the row's live span, and a relocation in the window's first or
+ *   last week keeps the dates the helper's rule 5 gives it (window ∩ range).
+ *   Its slot's `day_of_week` is the weekday of the slot's `firstDate` (day
+ *   arithmetic, no label parsed). A row with no live date is not handed
+ *   over: it holds nothing an exception could change, and an exception
+ *   naming it comes back as `ROW_UNREAD` beside the row's own report.
+ * - Relocated dates are as the helper gives them, at the target slot, even
+ *   outside the target's validity (as the portal and the feed show them;
+ *   declared in the plan's Discovered entries).
  * - **A relocation to a slot the run does not carry** has no `slot`, so the
  *   helper turns its dates into TIME TBD `PRACTICE_SLOT_MISSING`.
  * - Only rows with an `id` can be named by an exception. A second counted row
@@ -278,7 +282,10 @@ export function applyExceptionsToLiveRows({ rows, exceptions, slotFirstDays }) {
   const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
   const rowById = new Map();
   rows.forEach((row, index) => {
-    if (row.id === undefined || row.id === null || rowById.has(row.id)) return;
+    // A row with no live date holds nothing an exception could change.
+    if (row.span === null || row.id === undefined || row.id === null || rowById.has(row.id)) {
+      return;
+    }
     rowById.set(row.id, index);
   });
 
@@ -383,13 +390,59 @@ export function applyExceptionsToLiveRows({ rows, exceptions, slotFirstDays }) {
   return { pieces, timeTbd, findings };
 }
 
-/** The range the helper is given for a row: its own, or the one the engines read it as. */
+/**
+ * The range the helper is given for a live row: its range inside its slot's
+ * validity, as {@link assignmentLiveSpan} reads it before snapping to the
+ * weekday. Never empty: a live row has a date in it.
+ */
 function helperRange(row) {
-  const validityEnd = isoDateOfDayNumber(row.lastDay);
-  if (row.range === undefined || row.range === null) {
-    return `[${isoDateOfDayNumber(row.firstDay)},${validityEnd}]`;
+  let from = row.firstDay;
+  let to = row.lastDay;
+  if (row.range !== undefined && row.range !== null) {
+    const bounds = practiceRangeBounds(row.range);
+    if (bounds !== null) {
+      from = Math.max(from, isoDayNumber(bounds.first));
+      to = Math.min(to, isoDayNumber(bounds.last));
+    } else {
+      // Unreadable rows were dropped before this, so the lower bound reads (Q3).
+      from = Math.max(from, isoDayNumber(practiceRangeLowerBound(row.range).first));
+    }
   }
-  if (practiceRangeBounds(row.range) !== null) return row.range;
-  // Unreadable rows were dropped before this, so the lower bound reads (Q3).
-  return `[${practiceRangeLowerBound(row.range).first},${validityEnd}]`;
+  return `[${isoDateOfDayNumber(from)},${isoDateOfDayNumber(to)}]`;
+}
+
+/**
+ * A row with no exception, as its one piece: its span on its own slot.
+ *
+ * @param {{ slotId: string, span: { first: number, last: number } | null }} entry
+ * @returns {Array<{ slotId: string, span?: { first: number, last: number }, days?: number[] }>}
+ */
+export const spanPiece = (entry) =>
+  entry.span ? [{ slotId: entry.slotId, span: entry.span }] : [];
+
+/**
+ * The dates two rows are both held on with overlapping wall windows, over
+ * every pair of their pieces, each piece on its own slot's window. A row
+ * holds each date once, so the sum counts each shared date once.
+ *
+ * @param {Array<{ slotId: string, span?: { first: number, last: number }, days?: number[] }>} a
+ * @param {Array<{ slotId: string, span?: { first: number, last: number }, days?: number[] }>} b
+ * @param {(slotId: string) => { startSec: number, endSec: number }} windowOf
+ * @returns {{ count: number, firstDate: string | null }}
+ */
+export function sharedHeldDates(a, b, windowOf) {
+  let count = 0;
+  let firstDate = null;
+  for (const p of a) {
+    const pw = windowOf(p.slotId);
+    for (const q of b) {
+      const qw = windowOf(q.slotId);
+      if (!(pw.startSec < qw.endSec && qw.startSec < pw.endSec)) continue;
+      const shared = sharedPieceDates(p, q);
+      if (shared.count === 0) continue;
+      count += shared.count;
+      if (firstDate === null || shared.firstDate < firstDate) firstDate = shared.firstDate;
+    }
+  }
+  return { count, firstDate };
 }

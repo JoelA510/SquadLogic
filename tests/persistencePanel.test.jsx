@@ -91,6 +91,20 @@ const SCENARIOS = {
       await clickSync();
     },
   },
+  unknown: {
+    label: 'Outcome unknown',
+    role: 'alert',
+    detail: /so it is not known whether the teams were saved/,
+    async reach() {
+      vi.useFakeTimers();
+      triggerTeamPersistence.mockReturnValue(new Promise(() => {}));
+      renderPanel();
+      await clickSync();
+      await act(async () => {
+        vi.advanceTimersByTime(10000);
+      });
+    },
+  },
   blocked: {
     label: 'Sync blocked',
     role: 'status',
@@ -220,7 +234,7 @@ describe('PersistencePanel status display (via TeamPersistencePanel)', () => {
     expect(within(alert).getByText('Supabase sync failed. Please retry.')).toBeVisible();
   });
 
-  it('a client-side timeout stays a visible failure instead of resetting to idle', async () => {
+  it('a client-side timeout says the outcome is unknown and how to check, not to retry', async () => {
     vi.useFakeTimers();
     triggerTeamPersistence.mockReturnValue(new Promise(() => {}));
     renderPanel();
@@ -231,9 +245,18 @@ describe('PersistencePanel status display (via TeamPersistencePanel)', () => {
       vi.advanceTimersByTime(10000);
     });
 
+    // The request reached the server, which may have saved the teams after the panel stopped
+    // waiting: neither "Sync failed" nor an invitation to sync the same teams again unseen.
     const alert = screen.getByRole('alert');
-    expect(within(alert).getByText('Sync failed')).toBeVisible();
-    expect(within(alert).getByText('Supabase sync timed out. Please retry.')).toBeVisible();
+    expect(within(alert).getByText('Outcome unknown')).toBeVisible();
+    expect(
+      within(alert).getByText(
+        'Supabase sync timed out, so it is not known whether the teams were saved. Reload the ' +
+          'page to see the saved teams before syncing again.'
+      )
+    ).toBeVisible();
+    expect(screen.queryByText('Sync failed')).toBeNull();
+    expect(screen.queryByText(/please retry/i)).toBeNull();
     expect(screen.queryByText('All manual overrides have been reviewed.')).toBeNull();
     expect(triggerTeamPersistence.mock.calls[0][0].signal.aborted).toBe(true);
   });
@@ -261,7 +284,7 @@ describe('PersistencePanel status display (via TeamPersistencePanel)', () => {
     await act(async () => {
       vi.advanceTimersByTime(10000);
     });
-    expect(within(screen.getByRole('alert')).getByText('Sync failed')).toBeVisible();
+    expect(within(screen.getByRole('alert')).getByText('Outcome unknown')).toBeVisible();
   });
 
   it('only animates the indicator while a sync is in flight', async () => {

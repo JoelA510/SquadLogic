@@ -146,12 +146,12 @@ Then('the resulting teams summary should reflect the new constraints', async ({ 
 });
 
 When('the network connection stalls', async ({ page }) => {
-  // CRITICAL FIX: Handle CORS preflight successfully, then simulate a gateway timeout
-  // on the POST request so the UI renders the exact expected string.
+  // The POST is never answered, so the panel's own 10 s deadline is what ends
+  // the wait (it used to be answered at once with a 408 whose body carried the
+  // panel's timeout text, so the deadline never ran). The CORS preflight is
+  // answered so the POST itself is sent.
   await page.route('**/team-persistence', async (route) => {
     const request = route.request();
-
-    // 1. Handle the CORS Preflight
     if (request.method() === 'OPTIONS') {
       await route.fulfill({
         status: 204,
@@ -163,24 +163,10 @@ When('the network connection stalls', async ({ page }) => {
       });
       return;
     }
-
-    // 2. Handle the Actual Request
     if (request.method() === 'POST') {
-      await route.fulfill({
-        status: 408,
-        contentType: 'application/json',
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-        },
-        body: JSON.stringify({
-          status: 'error',
-          message: 'Supabase sync timed out. Please retry.',
-        }),
-      });
+      // Left pending: the page aborts it at its deadline.
       return;
     }
-
-    // 3. Fallback for any other methods
     await route.continue();
   });
 });

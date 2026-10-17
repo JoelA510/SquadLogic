@@ -10,6 +10,16 @@ import PersistenceHistoryList from './PersistenceHistoryList.jsx';
 
 const SUPABASE_SYNC_TIMEOUT_MS = 10000;
 
+/**
+ * What the panel says when it stops waiting. The request has reached the server, which may
+ * have saved the teams after the panel gave up, so the outcome is not known: "Please retry"
+ * invited a second sync of the same teams without a look at what the first one did. Worded as
+ * `persistenceRequest.js`'s timeout is for games and practices (plan M2.5).
+ */
+const SYNC_TIMEOUT_MESSAGE =
+  'Supabase sync timed out, so it is not known whether the teams were saved. Reload the page ' +
+  'to see the saved teams before syncing again.';
+
 export default function TeamPersistencePanel({
   teamPersistenceSnapshot,
   onPersistSuccess = undefined,
@@ -122,11 +132,11 @@ export default function TeamPersistencePanel({
     const controller = new AbortController();
     activeSyncRef.current = controller;
     persistenceTimeoutRef.current = setTimeout(() => {
-      // A timeout is a failed sync, not a blocked precondition. Abort so a late response cannot
-      // overwrite this state or a retry's.
+      // A timeout is an unknown outcome, not a failed sync and not a blocked precondition. Abort
+      // so a late response cannot overwrite this state or a later sync's.
       controller.abort();
-      setPersistenceActionState('error');
-      setPersistenceActionMessage('Supabase sync timed out. Please retry.');
+      setPersistenceActionState('unknown');
+      setPersistenceActionMessage(SYNC_TIMEOUT_MESSAGE);
     }, SUPABASE_SYNC_TIMEOUT_MS);
 
     try {
@@ -191,6 +201,7 @@ export default function TeamPersistencePanel({
   if (persistenceActionState === 'ready') panelStatus = 'success';
   if (persistenceActionState === 'blocked') panelStatus = 'blocked';
   if (persistenceActionState === 'error') panelStatus = 'error';
+  if (persistenceActionState === 'unknown') panelStatus = 'unknown';
 
   return (
     <PersistencePanel
@@ -201,7 +212,7 @@ export default function TeamPersistencePanel({
         { label: 'Prepared', value: `${teamPersistenceSnapshot.preparedTeamRows || 0} teams` },
       ]}
       onSync={handlePersist}
-      status={/** @type {'idle'|'syncing'|'success'|'blocked'|'error'} */ (panelStatus)}
+      status={/** @type {'idle'|'syncing'|'success'|'blocked'|'error'|'unknown'} */ (panelStatus)}
       message={persistenceActionMessage}
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

@@ -18,7 +18,7 @@ Feature: Async States and Optimistic UI Updates
     And I have generated a new set of teams
     When the network connection stalls
     And I click "Sync to Supabase" on the Team Persistence Panel
-    Then the panel status should change to "Supabase sync timed out. Please retry."
+    Then the panel status should change to "Supabase sync timed out, so it is not known whether the teams were saved. Reload the page to see the saved teams before syncing again."
 
   Scenario: A synced team review keeps its success line
     Given 100 players are imported into the "U12 Boys" program

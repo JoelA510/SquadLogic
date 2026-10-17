@@ -71,6 +71,22 @@ Every data table has a direct `organization_id` column (either native or backfil
 | **Staging**         | `staging_players`, `player_buddies`                                                                       | Direct `organization_id`                            |
 | **Heat forecast**   | `organization_heat_settings`                                                                              | Direct `organization_id` (PK); members SELECT, no write policy -- `admin_set_org_heat_settings` only |
 
+## Storage buckets
+
+Both buckets are private, and their `storage.objects` policies scope every object to the
+organization named by the first folder of its path (`<organization_id>/...`):
+
+| Bucket        | Who may                                                                                          | Migration                          |
+| ------------- | ------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| `raw-imports` | Members read and upload under their organization's folder; no delete                             | `20260421001043`, `20260602010000` |
+| `exports`     | Members read and upload under their organization's folder (`is_org_member`); no update or delete | `20261017000000`                   |
+
+The `exports` policies are `TO authenticated` and refuse, rather than fail on, a first folder that
+is not a UUID. The Exports page's "Upload to Storage" builds its paths with `exportObjectPath`
+(`packages/core/src/storageSupabase.js`) and uploads without upsert, since there is no UPDATE
+policy. Retention, if wanted, runs as the service role. pgTAP:
+`supabase/tests/storage_exports_bucket.sql`.
+
 ## Edge Function Security
 
 Edge Functions use a dual-client pattern:

@@ -4,7 +4,7 @@ import {
   readUnshownPracticeChanges,
 } from '../utils/practiceExportChanges.js';
 import { generateScheduleExports } from '@squadlogic/core/outputGeneration.js';
-import { uploadScheduleExport } from '@squadlogic/core/storageSupabase.js';
+import { exportObjectPath, uploadScheduleExport } from '@squadlogic/core/storageSupabase.js';
 import {
   baselineDriftSummary,
   baselineParitySoundness,
@@ -17,6 +17,7 @@ import {
 } from '@squadlogic/core/people/coachList.js';
 import { teamCoachFields, teamCoaches } from '../utils/teamCoaches.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import {
   naivePublicationStamp,
   usePublicationBaselines,
@@ -465,6 +466,7 @@ export default function OutputGenerationPanel({
     });
   };
   const { user } = useAuth() || {};
+  const { currentOrganization } = useOrganization() || {};
   const {
     baselines,
     loading: baselinesLoading,
@@ -634,6 +636,19 @@ export default function OutputGenerationPanel({
     }, 0);
   };
 
+  /**
+   * Upload the master CSV and one CSV per team to the `exports` bucket, under
+   * the active organization's folder (`<organizationId>/...`), which is what
+   * the bucket's policies require (`20261017000000_exports_bucket.sql`).
+   *
+   * **Every file's outcome is read, and a partial upload says so.** Each
+   * upload is settled on its own: `Promise.all` reported the first refusal
+   * while the others carried on, so "Upload failed" could follow files that
+   * had in fact gone out. When any file fails, the message counts what did
+   * reach the bucket and no baseline is recorded: the publication is
+   * incomplete, and pressing Upload again sends a complete set under a new
+   * stamp, which is then recorded.
+   */
   const handleUpload = async () => {
     if (!generated || csvBlocked) return;
     if (!supabaseClient && !IS_MOCK_MODE) {
@@ -642,24 +657,53 @@ export default function OutputGenerationPanel({
       return;
     }
 
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    let files;
+    try {
+      const organizationId = currentOrganization?.id;
+      files = [
+        {
+          path: exportObjectPath(organizationId, `master-schedule-${timestamp}.csv`),
+          content: generated.master.csv,
+        },
+        ...generated.perTeam.map((teamExport) => ({
+          path: exportObjectPath(organizationId, `teams/${teamExport.teamId}-${timestamp}.csv`),
+          content: teamExport.csv,
+        })),
+      ];
+    } catch (err) {
+      logger.error('Upload error:', err);
+      setStatus('error');
+      setMessage(`Upload failed: nothing was uploaded. ${err.message}`);
+      return;
+    }
+
     setStatus('uploading');
     setMessage('Uploading to Storage...');
 
     try {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const uploads = [];
-
-      uploads.push(
-        uploadFile(supabaseClient, `master-schedule-${timestamp}.csv`, generated.master.csv)
+      const results = await Promise.allSettled(
+        files.map((file) => uploadFile(supabaseClient, file.path, file.content))
       );
-
-      for (const teamExport of generated.perTeam) {
-        uploads.push(
-          uploadFile(supabaseClient, `teams/${teamExport.teamId}-${timestamp}.csv`, teamExport.csv)
+      const failures = results.flatMap((result, index) =>
+        result.status === 'rejected' ? [{ path: files[index].path, reason: result.reason }] : []
+      );
+      if (failures.length > 0) {
+        for (const failure of failures) {
+          logger.error('Upload error:', failure.path, failure.reason);
+        }
+        const reached = files.length - failures.length;
+        setStatus('error');
+        setMessage(
+          `Upload failed: ${failures.length} of ${files.length} files were not uploaded ` +
+            `(${failures[0].reason?.message ?? String(failures[0].reason)}). ` +
+            (reached === 0
+              ? `Nothing reached the 'exports' bucket. `
+              : `${reached} did reach the 'exports' bucket. `) +
+            'No published baseline was recorded.'
         );
+        return;
       }
-
-      await Promise.all(uploads);
 
       // **Stage 3: the writer, on the path that actually publishes.** The
       // rows go in exactly as the CSV was rendered from them.
@@ -687,7 +731,7 @@ export default function OutputGenerationPanel({
       }
 
       setStatus(baselineFailed ? 'error' : 'success');
-      setMessage(`Uploaded ${uploads.length} files to 'exports' bucket. ${baselineNote}`);
+      setMessage(`Uploaded ${files.length} files to 'exports' bucket. ${baselineNote}`);
     } catch (err) {
       logger.error('Upload error:', err);
       setStatus('error');
@@ -724,6 +768,9 @@ export default function OutputGenerationPanel({
       bucket: 'exports',
       path,
       file: content,
+      // The bucket has no UPDATE policy: a published export is never
+      // overwritten, and an upsert would be refused.
+      upsert: false,
     });
   };
 

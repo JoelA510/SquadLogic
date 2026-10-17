@@ -458,8 +458,11 @@ other environment.
   the mock project's globs: a narrower re-import that must keep the guardians
   the first import recorded (migration `20260726000300`); import, teams synced
   through `team-persistence`, practices placed by `auto-scheduler` and applied
-  through `practice-persistence`, and the master export built from what the
-  database returns; and every `verify_jwt` function refusing a request with
+  through `practice-persistence`, the master export built from what the
+  database returns, and "Upload to Storage" putting it and a file per team in
+  the `exports` bucket under the organization's folder (migration
+  `20261017000000`; the listing is read with the administrator's own session);
+  and every `verify_jwt` function refusing a request with
   only the anon key (read from `supabase/config.toml`, each refusing on its own,
   not only at the gateway), and `calendar-feed` answering without one. One
   worker, in file order, against one database. (A CORS preflight check was

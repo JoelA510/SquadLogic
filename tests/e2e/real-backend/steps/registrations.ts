@@ -12,6 +12,9 @@ export const SEEDED_ADMIN = {
   email: 'e2e-admin@example.test',
   password: 'e2e-local-only-password',
   organizationName: 'Example Valley Soccer (E2E)',
+  /** The seed's fixed ids (`auth.users.id`, `organizations.id`). */
+  userId: 'e2e0a000-0000-4000-8000-000000000001',
+  organizationId: 'e2e0b000-0000-4000-8000-000000000001',
 } as const;
 
 const FIRST_NAMES = [

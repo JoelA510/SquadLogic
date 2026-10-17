@@ -3,9 +3,12 @@
  * client against a local stack (`supabase start`, seeded by
  * tests/e2e/real-backend/seed.sql), with the Edge Functions that stack serves.
  *
- * Every assertion reads the page. Nothing here touches sessionStorage, the
- * mock's `__MOCK_DB__`, or the database directly: what the scenarios prove is
- * that the app, through its own client, RPCs and Edge Functions, does what it
+ * Every assertion reads the page, or, where the app has no screen for it (the
+ * exports bucket's listing, the audit log), the seeded administrator's own
+ * session through the stack's APIs, under the same RLS and Storage policies
+ * (`adminSession`). Nothing here touches sessionStorage, the mock's
+ * `__MOCK_DB__`, or the database directly: what the scenarios prove is that
+ * the app, through its own client, RPCs and Edge Functions, does what it
  * shows.
  */
 import { createBdd } from 'playwright-bdd';
@@ -264,6 +267,77 @@ Then('the master schedule export lists a practice for every synced team', async 
   // missing, none unnamed, none the page did not show.
   expect([...new Set(practiced)].sort()).toEqual([...teamNames].sort());
 });
+
+When('I upload the exports to Storage', async ({ page }) => {
+  const teamNames = stateOf(page).teamNames ?? [];
+  expect(teamNames.length, 'a previous step read the synced teams').toBeGreaterThan(1);
+  // On /exports with the CSVs generated, as the previous step left it.
+  await page.getByRole('button', { name: 'Upload to Storage' }).click();
+  const uploaded = page.getByText(/Uploaded \d+ files to 'exports' bucket\./);
+  const failed = page.getByText(/^Upload failed:/);
+  await expect(uploaded.or(failed)).toBeVisible({ timeout: BACKEND_TIMEOUT });
+  await expect(failed).toHaveCount(0);
+  // The master CSV and one per synced team, and the publication recorded.
+  await expect(uploaded).toContainText(
+    `Uploaded ${teamNames.length + 1} files to 'exports' bucket. Recorded as published baseline v`
+  );
+});
+
+/**
+ * The seeded administrator's own session on the stack, signed in through the
+ * auth API with the seed's password: what a read the page offers no screen
+ * for is made as (the exports bucket's listing, the audit log). Every such
+ * read goes through the same RLS and Storage policies as the app's.
+ */
+async function adminSession(page: Page): Promise<{ token: string; anonKey: string }> {
+  const anonKey = process.env.E2E_REAL_BACKEND_ANON_KEY ?? '';
+  const response = await page.request.post(`${stackUrl()}/auth/v1/token?grant_type=password`, {
+    headers: { apikey: anonKey, 'Content-Type': 'application/json' },
+    data: { email: SEEDED_ADMIN.email, password: SEEDED_ADMIN.password },
+    timeout: BACKEND_TIMEOUT,
+  });
+  const body = (await response.json()) as { access_token?: string; user?: { id?: string } };
+  expect(response.status(), JSON.stringify(body)).toBe(200);
+  expect(body.user?.id, 'the session is the seeded administrator').toBe(SEEDED_ADMIN.userId);
+  return { token: body.access_token ?? '', anonKey };
+}
+
+/**
+ * The objects (not folders) directly in the `folder` of the exports bucket, as
+ * the admin lists them (supabase-js `list(folder)`'s request).
+ */
+async function listExports(page: Page, folder: string): Promise<string[]> {
+  const { token, anonKey } = await adminSession(page);
+  const response = await page.request.post(`${stackUrl()}/storage/v1/object/list/exports`, {
+    headers: { apikey: anonKey, Authorization: `Bearer ${token}` },
+    data: { prefix: folder, limit: 1000, offset: 0, sortBy: { column: 'name', order: 'asc' } },
+    timeout: BACKEND_TIMEOUT,
+  });
+  const body = (await response.json()) as { name: string; id: string | null }[];
+  expect(response.status(), JSON.stringify(body)).toBe(200);
+  // A folder is listed with a null id.
+  return body.filter((entry) => entry.id !== null).map((entry) => entry.name);
+}
+
+Then(
+  "the exports bucket holds the master schedule and a file per synced team, under the organization's folder",
+  async ({ page }) => {
+    const teamNames = stateOf(page).teamNames ?? [];
+    expect(teamNames.length, 'a previous step read the synced teams').toBeGreaterThan(1);
+    const org = SEEDED_ADMIN.organizationId;
+    const masters = await listExports(page, org);
+    expect(masters, `the master CSV under ${org}/`).toEqual([
+      expect.stringMatching(/^master-schedule-[\dT-]+Z\.csv$/),
+    ]);
+    const stamp = masters[0].replace(/^master-schedule-/, '');
+    const teamFiles = await listExports(page, `${org}/teams`);
+    // One per synced team, each carrying the master's stamp: the same upload.
+    expect(teamFiles).toHaveLength(teamNames.length);
+    for (const name of teamFiles) {
+      expect(name.endsWith(`-${stamp}`), `${name} carries the stamp ${stamp}`).toBe(true);
+    }
+  }
+);
 
 /** The local stack's API, as the job exported it (playwright.config.ts). */
 function stackUrl(): string {

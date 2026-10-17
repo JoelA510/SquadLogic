@@ -561,3 +561,48 @@ describe('coverage and the benchmark in CI', () => {
     expect(stepProblems(planted, name, command).join('\n')).toContain(problem);
   });
 });
+
+// ── The build (M6.1, audit finding 7.5) ─────────────────────────────────────
+
+const BUILD_STEP = 'Build Frontend';
+
+describe('the build in CI', () => {
+  const workflow = read(CI_WORKFLOW);
+  const pkg = JSON.parse(readFileSync(path.resolve('package.json'), 'utf8'));
+
+  it('Build & Test runs npm run build, able to fail', () => {
+    // Standard node.ci-runs-gate: CI runs the project's `build` script. It used
+    // to be `node scripts/build.js`, an import check CI never ran, while CI
+    // built through `frontend:build`.
+    expect(stepProblems(workflow, BUILD_STEP, 'npm run build')).toEqual([]);
+  });
+
+  it('npm run build is the frontend build', () => {
+    expect(pkg.scripts.build).toBe('npm run frontend:build');
+    expect(pkg.scripts['frontend:build']).toBe(
+      'node scripts/runViteWithPersistenceEndpoint.js build'
+    );
+  });
+
+  it.each([
+    [
+      'the frontend build named directly',
+      (/** @type {string} */ w) => w.replace('run: npm run build', 'run: npm run frontend:build'),
+      'does not run exactly',
+    ],
+    [
+      'an `|| true`',
+      (/** @type {string} */ w) => w.replace('run: npm run build', 'run: npm run build || true'),
+      'does not run exactly',
+    ],
+    [
+      'the step renamed',
+      (/** @type {string} */ w) => w.replace(`- name: ${BUILD_STEP}`, '- name: Build'),
+      'no step named',
+    ],
+  ])('catches a planted ci.yml with %s', (_label, plant, problem) => {
+    const planted = plant(workflow);
+    expect(planted).not.toBe(workflow);
+    expect(stepProblems(planted, BUILD_STEP, 'npm run build').join('\n')).toContain(problem);
+  });
+});

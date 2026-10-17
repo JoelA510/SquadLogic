@@ -22,20 +22,21 @@ npm run typecheck
 npm run lint
 npm run test:coverage
 npm run test:perf
-npm run frontend:build
+npm run build
 npm run check:bundle
 npm run check:advisors
 ```
 
-`npm run frontend:build` is a production build, so it fails, naming the
+`npm run build` (the same as `npm run frontend:build`; plan item M6.1) is a
+production build, so it fails, naming the
 variable, without `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (plan item
 M2.2). CI's step sets well-formed stand-ins; to build what CI builds (and
 measures), run
-`VITE_SUPABASE_URL=https://ci-build.invalid VITE_SUPABASE_ANON_KEY=sb_publishable_ci-build-stand-in npm run frontend:build`.
+`VITE_SUPABASE_URL=https://ci-build.invalid VITE_SUPABASE_ANON_KEY=sb_publishable_ci-build-stand-in npm run build`.
 `VITE_USE_MOCK_SUPABASE=true` also builds, but with the mock chunk, which is
 not what CI measures. See [`ENVIRONMENT.md`](./ENVIRONMENT.md#production-safety).
 
-`npm run check:bundle` must run after `npm run frontend:build` because it
+`npm run check:bundle` must run after `npm run build` because it
 reads `dist/assets`. If the build artifact is missing, the bundle gate fails
 loudly and tells the operator to build first.
 
@@ -594,7 +595,7 @@ build log on 2026-10-13:
 | Setting | Value | Where it is set |
 | --- | --- | --- |
 | Framework | Vite | `vercel.json` `framework` |
-| Build command | `npm run frontend:build` | `vercel.json` `buildCommand` (the Vite preset's default, `npm run build`, is not a build: plan item M6.1) |
+| Build command | `npm run frontend:build` | `vercel.json` `buildCommand` (`npm run build`, the Vite preset's default, runs the same script since plan item M6.1) |
 | Output directory | `dist` | `vercel.json` `outputDirectory` (where `vite.config.js` builds: `root` plus `build.outDir`) |
 | Install command | `npm ci` | `vercel.json` `installCommand` (#559), so Vercel installs exactly what the lockfile pins, as CI does |
 | Node.js | 24.x | `package.json` `engines` ([ENVIRONMENT.md](./ENVIRONMENT.md#node-runtime)) |

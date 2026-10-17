@@ -80,7 +80,7 @@ falls back to the mock.
   rebuild (a redeploy of an existing build does not pick it up).
 - **Development** (the Vite dev server, `npm run frontend:dev`) still falls
   back to the mock when the Supabase variables are missing.
-- **CI's `frontend:build` step** sets well-formed stand-ins
+- **CI's build step** (`npm run build`) sets well-formed stand-ins
   (`https://ci-build.invalid` and an `sb_publishable_` placeholder), not the
   opt-in: the bundle-budget gate measures that build, and it should be the
   shape production ships (the real client, no mock chunk). It is never served.

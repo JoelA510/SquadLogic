@@ -11,7 +11,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage --exclude tests/performance.test.js",
     "test:perf": "vitest run tests/performance.test.js",
-    "build": "node scripts/build.js",
+    "build": "npm run frontend:build",
     "frontend:dev": "vite",
     "frontend:build": "node scripts/runViteWithPersistenceEndpoint.js build",
     "frontend:preview": "node scripts/runViteWithPersistenceEndpoint.js preview",

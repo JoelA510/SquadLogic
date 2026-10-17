@@ -204,9 +204,11 @@ jobs:
         if: steps.changes.outputs.docs_only != 'true'
         run: npm run test:perf
 
+      # `npm run build` is the frontend build (`frontend:build`, plan item
+      # M6.1), so the script contributors run is the one CI runs.
       - name: Build Frontend
         if: steps.changes.outputs.docs_only != 'true'
-        run: npm run frontend:build
+        run: npm run build
         # A production build fails without the Supabase variables (plan item
         # M2.2, vite.config.js). These are well-formed stand-ins, not
         # credentials: `.invalid` never resolves, and this build is never

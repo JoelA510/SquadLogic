@@ -1599,7 +1599,15 @@ smoke-tested
     and a keyboard scenario in `accessibility.feature` (real Tab in Chromium on `/players`) each
     fail with the old Tab handler planted back. *Executed.*
   - Recharts axes and gridlines on the analytics page keep hard-coded slate colours, which do
-    not re-theme. *Statically reviewed.*
+    not re-theme. *Statically reviewed.* **Fixed 2026-10-17** (Wave 4 accessibility, branch
+    `claude/vibrant-allen-hr7y7s-a11y`): the charts on `/admin/analytics` and `/admin/reports`
+    take their axes, gridlines, tooltips, cursor and series from
+    `frontend/src/constants/chartTheme.js`, all `var(--token)`. In dark, the old tick labels were
+    `#475569` on the dark card (about 2.2:1) under near-white gridlines. A scenario in
+    `accessibility.feature` seeds evaluation runs and checks each tick label's and gridline's
+    computed colour against `--text-secondary` and `--border` in both themes (red on the old page:
+    `rgb(71, 85, 105)`), and `tests/chartColorTokens.test.js` refuses a literal colour in any file
+    that imports Recharts (red on the old page). Light and dark screenshots compared. *Executed.*
 
 - 2026-10-17, found by the Wave 0 mock-ids PR:
   - The mock seed's other ids are still not UUIDs: locations (`loc-1`), fields (`v1`, `v2`), game

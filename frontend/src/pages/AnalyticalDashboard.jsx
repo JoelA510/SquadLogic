@@ -14,6 +14,13 @@ import {
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { logger } from '../lib/logger.js';
 import Button from '../components/ui/Button.jsx';
+import {
+  CHART_ACTIVE_DOT,
+  CHART_AXIS_PROPS,
+  CHART_COLORS,
+  CHART_LINE_CURSOR,
+  CHART_TOOLTIP_PROPS,
+} from '../constants/chartTheme.js';
 
 /**
  * AnalyticalDashboard - Phase 7 "Enterprise Glass" visualization page.
@@ -126,39 +133,37 @@ export default function AnalyticalDashboard() {
                 >
                   <defs>
                     <linearGradient id="colorFairness" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1} />
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                      <stop offset="5%" stopColor={CHART_COLORS.primary} stopOpacity={0.15} />
+                      <stop offset="95%" stopColor={CHART_COLORS.primary} stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    vertical={false}
+                    stroke={CHART_COLORS.grid}
+                  />
                   <XAxis
                     dataKey="timestamp"
-                    stroke="#475569"
+                    {...CHART_AXIS_PROPS}
                     fontSize={11}
                     tickLine={false}
                     axisLine={false}
                     dy={10}
                   />
                   <YAxis
-                    stroke="#475569"
+                    {...CHART_AXIS_PROPS}
                     fontSize={11}
                     tickLine={false}
                     axisLine={false}
                     domain={[0, 1]}
                     tickFormatter={(val) => `${(val * 100).toFixed(0)}%`}
                   />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#fff',
-                      borderRadius: '12px',
-                      border: '1px solid #e2e8f0',
-                      boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-                    }}
-                  />
+                  <Tooltip {...CHART_TOOLTIP_PROPS} cursor={CHART_LINE_CURSOR} />
                   <Area
                     type="monotone"
                     dataKey="fairness"
-                    stroke="#6366f1"
+                    stroke={CHART_COLORS.primary}
+                    activeDot={CHART_ACTIVE_DOT}
                     fillOpacity={1}
                     fill="url(#colorFairness)"
                     strokeWidth={2.5}
@@ -200,30 +205,28 @@ export default function AnalyticalDashboard() {
                   title="Conflict Frequency"
                   desc="A chart displaying the number of scheduling conflicts or violations detected over time."
                 >
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    vertical={false}
+                    stroke={CHART_COLORS.grid}
+                  />
                   <XAxis
                     dataKey="timestamp"
-                    stroke="#475569"
+                    {...CHART_AXIS_PROPS}
                     fontSize={11}
                     tickLine={false}
                     axisLine={false}
                     dy={10}
                   />
-                  <YAxis stroke="#475569" fontSize={11} tickLine={false} axisLine={false} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#fff',
-                      borderRadius: '12px',
-                      border: '1px solid #e2e8f0',
-                      boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-                    }}
-                  />
+                  <YAxis {...CHART_AXIS_PROPS} fontSize={11} tickLine={false} axisLine={false} />
+                  <Tooltip {...CHART_TOOLTIP_PROPS} cursor={CHART_LINE_CURSOR} />
                   <Line
                     type="stepAfter"
                     dataKey="conflicts"
-                    stroke="#f43f5e"
+                    stroke={CHART_COLORS.danger}
                     strokeWidth={2.5}
-                    dot={{ r: 4, fill: '#f43f5e', strokeWidth: 0 }}
+                    dot={{ r: 4, fill: CHART_COLORS.danger, strokeWidth: 0 }}
+                    activeDot={CHART_ACTIVE_DOT}
                     animationDuration={1500}
                   />
                 </LineChart>

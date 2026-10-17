@@ -23,6 +23,14 @@ Feature: Every top-level route passes an automated accessibility scan
     Then the arrow keys move focus between the cells of the "Players grid"
     And Tab moves focus out of the "Players grid" and Shift+Tab brings it back to the same cell
 
+  Scenario: The analytics charts follow the theme
+    Given I am logged into SquadLogic as an admin
+    And the organization has 6 evaluation runs on record
+    When I open "/admin/analytics" and see its "Analytical Insights" heading
+    Then the charts draw their axis labels and gridlines in the "light" theme's tokens
+    When I switch to the dark theme and reopen "/admin/analytics" with its "Analytical Insights" heading
+    Then the charts draw their axis labels and gridlines in the "dark" theme's tokens
+
   Scenario Outline: <route> passes axe in the light and dark themes
     Given I am logged into SquadLogic as an admin
     When I open "<route>" and see its "<heading>" heading

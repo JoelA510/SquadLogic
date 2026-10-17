@@ -2,6 +2,7 @@ import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { AxeBuilder } from '@axe-core/playwright';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -187,5 +188,73 @@ Then(
     expect((await focusInGrid(page, gridName)).inside, 'Tab stayed inside the grid').toBe(false);
     await page.keyboard.press('Shift+Tab');
     expect(await focusInGrid(page, gridName)).toEqual(before);
+  }
+);
+
+// ---- Chart colours (plan, Discovered under M4.2: Recharts kept hard-coded slate colours) ----
+
+Given('the organization has {int} evaluation runs on record', async ({ page }, count: number) => {
+  // The mock seed has none, so the analytics page draws empty charts; these are its input.
+  await waitForMockClient(page);
+  await page.evaluate(
+    ({ count, mockOrgId }) => {
+      const db = window.__MOCK_DB__ as Record<string, Array<Record<string, unknown>> | undefined>;
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      const day = 86_400_000;
+      const start = Date.now() - count * 7 * day;
+      db.evaluation_runs = [
+        ...(db.evaluation_runs ?? []).filter((run) => !String(run.id).startsWith('a11y-eval-')),
+        ...Array.from({ length: count }, (_, index) => ({
+          id: `a11y-eval-${index + 1}`,
+          organization_id: orgId,
+          created_at: new Date(start + index * 7 * day).toISOString(),
+          scheduler_run_type: index % 2 === 0 ? 'team' : 'practice',
+          status: 'completed',
+          metrics_summary: { fairnessIndex: 0.6 + index * 0.05, conflictCount: (index * 3) % 5 },
+        })),
+      ];
+      window.__saveMockDB__(db);
+    },
+    { count, mockOrgId: MOCK_ORG_ID }
+  );
+});
+
+Then(
+  "the charts draw their axis labels and gridlines in the {string} theme's tokens",
+  async ({ page }, theme: string) => {
+    const ticks = page.locator('.recharts-cartesian-axis-tick-value');
+    await expect(ticks.first()).toBeVisible({ timeout: 20_000 });
+    const drawn = await page.evaluate(() => {
+      /** A token's computed colour, read through a probe so it compares as rgb(). */
+      const resolve = (token: string) => {
+        const probe = document.createElement('span');
+        probe.style.color = `var(${token})`;
+        document.body.append(probe);
+        const value = getComputedStyle(probe).color;
+        probe.remove();
+        return value;
+      };
+      const tickFills = [...document.querySelectorAll('.recharts-cartesian-axis-tick-value')].map(
+        (el) => getComputedStyle(el).fill
+      );
+      const gridStrokes = [
+        ...document.querySelectorAll('.recharts-cartesian-grid-horizontal line'),
+      ].map((el) => getComputedStyle(el).stroke);
+      return {
+        theme: document.documentElement.getAttribute('data-theme') ?? 'light',
+        axis: resolve('--text-secondary'),
+        grid: resolve('--border'),
+        tickFills: [...new Set(tickFills)],
+        gridStrokes: [...new Set(gridStrokes)],
+        ticks: tickFills.length,
+        lines: gridStrokes.length,
+      };
+    });
+    expect(drawn.theme).toBe(theme);
+    // A chart with no ticks or gridlines checked nothing.
+    expect(drawn.ticks).toBeGreaterThan(3);
+    expect(drawn.lines).toBeGreaterThan(3);
+    expect(drawn.tickFills).toEqual([drawn.axis]);
+    expect(drawn.gridStrokes).toEqual([drawn.grid]);
   }
 );

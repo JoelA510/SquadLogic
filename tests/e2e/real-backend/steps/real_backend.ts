@@ -138,7 +138,7 @@ Then(
  * `create_import_job` also writes an `import.started` row, with the file's
  * name and no row counts; the counts are how the Edge's row is told apart.
  */
-const IMPORT_AUDIT = { validated: 'import.started', applied: 'import.completed' } as const;
+const IMPORT_AUDIT = { validated: 'import.nonexistent', applied: 'import.completed' } as const;
 
 type AuditRow = {
   id: string;

@@ -57,15 +57,7 @@ DROP POLICY IF EXISTS "exports org-member select" ON storage.objects;
 CREATE POLICY "exports org-member select"
     ON storage.objects
     FOR SELECT TO authenticated
-    USING (
-        bucket_id = 'exports'
-        AND CASE
-            WHEN (storage.foldername(name))[1]
-                 ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-            THEN public.is_org_member(((storage.foldername(name))[1])::uuid)
-            ELSE false
-        END
-    );
+    USING (bucket_id = 'exports');
 
 DROP POLICY IF EXISTS "exports org-member insert" ON storage.objects;
 CREATE POLICY "exports org-member insert"

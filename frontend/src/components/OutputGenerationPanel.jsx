@@ -663,7 +663,7 @@ export default function OutputGenerationPanel({
       const organizationId = currentOrganization?.id;
       files = [
         {
-          path: exportObjectPath(organizationId, `master-schedule-${timestamp}.csv`),
+          path: `master-schedule-${timestamp}.csv`,
           content: generated.master.csv,
         },
         ...generated.perTeam.map((teamExport) => ({

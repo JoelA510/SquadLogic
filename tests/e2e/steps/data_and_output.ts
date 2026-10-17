@@ -123,6 +123,44 @@ When('I apply the player CSV import', async ({ page }) => {
   });
 });
 
+Given('the season has no team run yet', async ({ page }) => {
+  // The Teams page offers Generate Teams, built from the import, only while no
+  // team run is in hand; the mock seed has one, so it is retired in place (the
+  // mock re-merges its seed rows by id), as Pillar 1's import step does.
+  await waitForMockClient(page);
+  await page.evaluate(() => {
+    const db = window.__MOCK_DB__ as Record<string, Array<Record<string, unknown>> | undefined>;
+    if (!db) throw new Error('mock store not initialised');
+    const orgId = localStorage.getItem('squadlogic_active_org');
+    if (!orgId) throw new Error('no active organization in localStorage');
+    for (const run of db.scheduler_runs ?? []) {
+      if (run.run_type === 'team' && run.organization_id === orgId) run.status = 'deleted';
+    }
+    window.__saveMockDB__(db);
+  });
+});
+
+When('I continue from the applied import', async ({ page }) => {
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page).toHaveURL(/\/teams$/);
+});
+
+Then(
+  'the Teams page offers to generate teams for the imported {string} program',
+  async ({ page }, program: string) => {
+    // In-app navigation, no reload: the program list is built from the import
+    // the page was handed, so it reads the file just applied. "Continue" used
+    // to clear that import in the same click, and the page opened without it.
+    await expect(page.getByRole('heading', { name: /Teaming & Analysis/i })).toBeVisible({
+      timeout: 15000,
+    });
+    await expect(page.getByRole('button', { name: /Generate Teams/ })).toBeVisible({
+      timeout: 15000,
+    });
+    await expect(page.getByText(program).first()).toBeVisible();
+  }
+);
+
 Then('the player import should materialize reciprocal buddy pairs', async ({ page }) => {
   await waitForMockClient(page);
   const buddySummary = await page.evaluate(() => {

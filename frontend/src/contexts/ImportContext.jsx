@@ -806,7 +806,6 @@ export function ImportProvider({ children }) {
                       import_type: type,
                       organization_id: currentOrganization.id,
                       rows: chunkRows,
-                      file_name: file.name,
                       import_job_id: job.id,
                       row_offset: currentIndex,
                     },

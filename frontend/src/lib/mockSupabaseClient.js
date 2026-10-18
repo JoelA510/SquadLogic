@@ -1468,30 +1468,38 @@ const dropMockFieldSubunits = (db, fieldId) => {
   );
 };
 
+/**
+ * The sub-surface step of `admin_create_field` / `admin_update_field`
+ * (20261018010000): with halves on, `A` and `B` exist afterwards (insert-only,
+ * so a retired one stays retired); with halves off, nothing is deleted -- a
+ * sub-surface leaves only through `admin_retire_field_subunit`. Production's
+ * `trigger_manage_field_subunits` used to delete them, with their practice
+ * slots and assignments; this mock imitated it until that trigger was dropped.
+ *
+ * @returns {string[]} the labels it created, as the RPC's audit row names them
+ */
 const syncMockFieldSubunits = (db, field, supportsHalves) => {
   db.field_subunits = db.field_subunits || [];
+  if (!supportsHalves) return [];
 
-  if (supportsHalves) {
-    ['A', 'B'].forEach((label) => {
-      const exists = db.field_subunits.some(
-        (subunit) =>
-          String(subunit.field_id) === String(field.id) && String(subunit.label) === label
-      );
-      if (exists) return;
+  const created = [];
+  ['A', 'B'].forEach((label) => {
+    const exists = db.field_subunits.some(
+      (subunit) => String(subunit.field_id) === String(field.id) && String(subunit.label) === label
+    );
+    if (exists) return;
 
-      const subunit = {
-        id: `sub-${field.id}-${label.toLowerCase()}`,
-        field_id: field.id,
-        label,
-        organization_id: field.organization_id || MOCK_ORG_ID,
-      };
-      db.field_subunits.push(subunit);
-      triggerRealtimeEvent('field_subunits', 'INSERT', { new: subunit, old: null });
-    });
-    return;
-  }
-
-  dropMockFieldSubunits(db, field.id);
+    const subunit = {
+      id: `sub-${field.id}-${label.toLowerCase()}`,
+      field_id: field.id,
+      label,
+      organization_id: field.organization_id || MOCK_ORG_ID,
+    };
+    db.field_subunits.push(subunit);
+    created.push(label);
+    triggerRealtimeEvent('field_subunits', 'INSERT', { new: subunit, old: null });
+  });
+  return created;
 };
 
 // Initial state load
@@ -3618,8 +3626,8 @@ export const mockSupabase = {
         };
         db.fields = db.fields || [];
         db.fields.push(field);
-        syncMockFieldSubunits(db, field, field.supports_halves);
-        audit('field', field.id, 'created', { current: field });
+        const subunitsCreated = syncMockFieldSubunits(db, field, field.supports_halves);
+        audit('field', field.id, 'created', { current: field, subunits_created: subunitsCreated });
         saveDB(db);
         return { data: field, error: null };
       }
@@ -4335,8 +4343,12 @@ export const mockSupabase = {
           updated_at: new Date().toISOString(),
         });
         applyRetirementTrigger(field);
-        syncMockFieldSubunits(db, field, field.supports_halves);
-        audit('field', field.id, 'updated', { previous, current: field });
+        const subunitsCreated = syncMockFieldSubunits(db, field, field.supports_halves);
+        audit('field', field.id, 'updated', {
+          previous,
+          current: field,
+          subunits_created: subunitsCreated,
+        });
         saveDB(db);
         return { data: field, error: null };
       }

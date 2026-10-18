@@ -250,7 +250,7 @@ describe('OutputGenerationPanel :: the published baseline, on the publish path',
     // The reason is named, not merely asserted: an operator who is told the
     // numbers are unreadable needs to know which check said so.
     expect(verdict).toContain('PARITY_FIELD_ABSENT');
-    expect(within(report).getByTestId('parity-verdict')).toHaveClass('text-red-400');
+    expect(within(report).getByTestId('parity-verdict')).toHaveClass('text-status-error-text');
     expect(within(report).getAllByTestId('parity-blocking').length).toBeGreaterThan(0);
   });
 
@@ -319,7 +319,7 @@ describe('OutputGenerationPanel :: the published baseline, on the publish path',
     expect(message.textContent).toMatch(/Uploaded 3 files/);
     expect(message.textContent).toMatch(/Access denied/);
     // Rendered in the error style, which is what `status === 'error'` drives.
-    expect(message).toHaveClass('text-red-400');
+    expect(message).toHaveClass('text-status-error-text');
     await waitFor(() => expect(getMockData('publication_baselines')).toEqual([]));
   });
 });

@@ -6,6 +6,10 @@ import { Check } from 'lucide-react';
  * Anchored dropdown menu. The trigger is render-prop'd so any element can
  * open it; items render in a `.menu` popover (styles/chrome.css).
  *
+ * Keyboard (WAI-ARIA APG menu button): with the menu open, Up and Down move
+ * through the items, Home and End jump, Escape closes it and returns focus to
+ * the trigger, and Tab closes it and moves on. The items are never tab stops.
+ *
  * @param {Object} props
  * @param {(args: { open: boolean, toggle: () => void, triggerProps: Object }) => React.ReactNode} props.renderTrigger
  * @param {Array<{ id: string, label: React.ReactNode, icon?: React.ElementType, danger?: boolean, checked?: boolean, separatorAbove?: boolean, onSelect?: () => void }>} props.items
@@ -36,6 +40,17 @@ export default function Dropdown({
         setOpen(false);
         // Return focus to the trigger so keyboard users keep their place.
         if (trigger instanceof HTMLElement) trigger.focus();
+        return;
+      }
+      // Tab closes the menu and moves on as if from the trigger (WAI-ARIA APG menu button):
+      // focus goes back to the trigger first, and the browser's own Tab, which runs after this
+      // handler, moves from there. Left on an item that the close unmounts, the browser would
+      // restart from the menu's container, which holds the trigger.
+      if (event.key === 'Tab') {
+        if (trigger instanceof HTMLElement && rootRef.current?.contains(document.activeElement)) {
+          trigger.focus();
+        }
+        setOpen(false);
         return;
       }
       if (menuItems.length === 0) return;
@@ -88,6 +103,9 @@ export default function Dropdown({
                 <button
                   type="button"
                   role="menuitem"
+                  // Reached with the arrow keys, never with Tab (APG menu pattern): a menu opened
+                  // inside a composite such as DataGrid must not add tab stops to it.
+                  tabIndex={-1}
                   className={`menu-item ${item.danger ? 'danger' : ''}`.trim()}
                   onClick={() => {
                     setOpen(false);

@@ -106,7 +106,7 @@ export default function InvitePage() {
     return (
       <div className="min-h-screen bg-bg-app flex items-center justify-center p-6 animate-fadeIn">
         <div className="max-w-md w-full glass-panel-premium p-10 text-center space-y-6">
-          <div className="w-20 h-20 bg-green-500/20 text-green-400 rounded-full flex items-center justify-center mx-auto animate-bounce">
+          <div className="w-20 h-20 bg-green-500/20 text-status-success-text rounded-full flex items-center justify-center mx-auto animate-bounce">
             <CheckCircle size={48} />
           </div>
           <h2 className="text-2xl font-bold text-text-primary tracking-tight">You&apos;re in!</h2>
@@ -122,7 +122,7 @@ export default function InvitePage() {
     <div className="min-h-screen bg-bg-app flex items-center justify-center p-6 animate-fadeIn">
       <div className="max-w-md w-full glass-panel-premium p-10 space-y-6">
         <div className="flex items-start gap-4">
-          <div className="p-3 bg-red-500/10 text-red-400 rounded-2xl shrink-0">
+          <div className="p-3 bg-red-500/10 text-status-error-text rounded-2xl shrink-0">
             <AlertCircle size={24} />
           </div>
           <div className="space-y-2">

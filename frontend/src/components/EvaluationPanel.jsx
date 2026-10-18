@@ -261,7 +261,7 @@ export default function EvaluationPanel({
         <div className="flex items-center gap-6">
           <div className="w-12 h-12 rounded-lg bg-bg-glass flex items-center justify-center border border-border-subtle">
             <Activity
-              className="w-6 h-6 text-indigo-400 rotate-12 transition-transform duration-1000 animate-spin"
+              className="w-6 h-6 text-text-accent rotate-12 transition-transform duration-1000 animate-spin"
               aria-hidden="true"
             />
           </div>
@@ -294,7 +294,7 @@ export default function EvaluationPanel({
   const statusConfig = {
     ok: {
       label: 'SLA Compliant',
-      color: 'text-emerald-400',
+      color: 'text-status-success-text',
       glow: 'shadow-emerald-500/20',
       bg: 'bg-emerald-500/10',
       border: 'border-emerald-500/20',
@@ -302,7 +302,7 @@ export default function EvaluationPanel({
     },
     'attention-needed': {
       label: 'Optimizations Available',
-      color: 'text-amber-400',
+      color: 'text-status-warning-text',
       glow: 'shadow-amber-500/20',
       bg: 'bg-amber-500/10',
       border: 'border-amber-500/20',
@@ -310,7 +310,7 @@ export default function EvaluationPanel({
     },
     'action-required': {
       label: 'Critical Violation',
-      color: 'text-rose-400',
+      color: 'text-status-error-text',
       glow: 'shadow-rose-500/20',
       bg: 'bg-rose-500/10',
       border: 'border-rose-500/20',
@@ -369,7 +369,11 @@ export default function EvaluationPanel({
               <span>
                 Issues:{' '}
                 <span
-                  className={evaluation?.issues?.length > 0 ? 'text-amber-400' : 'text-emerald-400'}
+                  className={
+                    evaluation?.issues?.length > 0
+                      ? 'text-status-warning-text'
+                      : 'text-status-success-text'
+                  }
                 >
                   {evaluation?.issues?.length || 0}
                 </span>
@@ -417,7 +421,7 @@ export default function EvaluationPanel({
 
         <div className="flex items-center gap-4">
           {message && (
-            <span className="text-[11px] text-indigo-300 animate-fadeIn font-mono font-medium tracking-tight bg-indigo-500/10 px-3 py-1.5 rounded-lg border border-indigo-500/20">
+            <span className="text-[11px] text-text-accent animate-fadeIn font-mono font-medium tracking-tight bg-indigo-500/10 px-3 py-1.5 rounded-lg border border-indigo-500/20">
               {message}
             </span>
           )}
@@ -459,8 +463,8 @@ export default function EvaluationPanel({
                 key={`${issue.category}-${idx}`}
                 className={`group flex items-start gap-4 p-3.5 rounded-xl border transition-all hover:translate-x-1 ${
                   issue.severity === 'error'
-                    ? 'bg-rose-500/[0.03] border-rose-500/10 text-rose-200/90 hover:bg-rose-500/[0.08]'
-                    : 'bg-amber-500/[0.03] border-amber-500/10 text-amber-200/90 hover:bg-amber-500/[0.08]'
+                    ? 'bg-rose-500/[0.03] border-rose-500/10 text-status-error-text hover:bg-rose-500/[0.08]'
+                    : 'bg-amber-500/[0.03] border-amber-500/10 text-status-warning-text hover:bg-amber-500/[0.08]'
                 }`}
               >
                 <div

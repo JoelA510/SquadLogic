@@ -161,7 +161,7 @@ export function SchemaBuilder() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-text-primary tracking-tight flex items-center gap-3">
-            <Database className="text-sky-400 w-7 h-7" aria-hidden="true" />
+            <Database className="text-text-accent w-7 h-7" aria-hidden="true" />
             Dynamic Schema Architect
           </h2>
           <p className="text-text-muted text-sm mt-1">
@@ -169,8 +169,8 @@ export function SchemaBuilder() {
           </p>
         </div>
         <div className="bg-emerald-500/10 border border-emerald-500/20 px-4 py-2 rounded-xl flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-emerald-400" aria-hidden="true" />
-          <span className="text-xs font-bold text-emerald-400 uppercase tracking-widest">
+          <ShieldCheck className="w-4 h-4 text-status-success-text" aria-hidden="true" />
+          <span className="text-xs font-bold text-status-success-text uppercase tracking-widest">
             Level 5 Security Active
           </span>
         </div>
@@ -242,7 +242,7 @@ export function SchemaBuilder() {
                     <div className="w-2 h-2 rounded-full bg-sky-500 shadow-[0_0_8px_rgba(14,165,233,0.4)]" />
                     <div>
                       <p className="text-sm font-bold text-text-primary tracking-tight">{name}</p>
-                      <p className="text-[10px] font-bold text-sky-400/60 uppercase tracking-widest">
+                      <p className="text-[10px] font-bold text-text-accent uppercase tracking-widest">
                         {type}
                       </p>
                     </div>
@@ -251,7 +251,7 @@ export function SchemaBuilder() {
                     type="button"
                     aria-label={`Remove ${name} ${activeTab} attribute`}
                     onClick={() => handleRemoveField(name)}
-                    className="p-2 text-text-muted hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
+                    className="p-2 text-text-muted hover:text-status-error-text hover:bg-red-500/10 rounded-lg transition-all opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
                   >
                     <Trash2 className="w-4 h-4" aria-hidden="true" />
                   </button>
@@ -279,7 +279,7 @@ export function SchemaBuilder() {
         <div className="space-y-6">
           <div className="glass-panel-enterprise p-6 space-y-6 border-indigo-500/10 bg-indigo-500/5">
             <h3 className="text-lg font-bold text-text-primary flex items-center gap-2">
-              <Plus className="w-5 h-5 text-indigo-400" aria-hidden="true" />
+              <Plus className="w-5 h-5 text-text-accent" aria-hidden="true" />
               New Attribute
             </h3>
 
@@ -323,15 +323,15 @@ export function SchemaBuilder() {
 
               {error && (
                 <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-400" aria-hidden="true" />
-                  <p className="text-[10px] text-red-400 font-bold uppercase">{error}</p>
+                  <AlertCircle className="w-4 h-4 text-status-error-text" aria-hidden="true" />
+                  <p className="text-[10px] text-status-error-text font-bold uppercase">{error}</p>
                 </div>
               )}
 
               <button
                 type="button"
                 onClick={handleAddField}
-                className="w-full py-4 rounded-xl bg-indigo-500/20 text-indigo-300 font-bold text-xs uppercase tracking-widest border border-indigo-500/30 hover:bg-indigo-500/30 transition-all"
+                className="w-full py-4 rounded-xl bg-indigo-500/20 text-text-accent font-bold text-xs uppercase tracking-widest border border-indigo-500/30 hover:bg-indigo-500/30 transition-all"
               >
                 Draft Attribute
               </button>
@@ -340,12 +340,12 @@ export function SchemaBuilder() {
 
           <div className="p-5 rounded-2xl bg-bg-glass border border-border-subtle">
             <div className="flex gap-3">
-              <Shield className="w-5 h-5 text-sky-400 shrink-0" aria-hidden="true" />
+              <Shield className="w-5 h-5 text-text-accent shrink-0" aria-hidden="true" />
               <p className="text-[11px] leading-relaxed text-text-muted">
                 <strong className="text-text-primary">Governance Note:</strong> Changes to schema
                 definitions are audited in{' '}
-                <code className="text-sky-300">organization_schema_history</code>. System fields are
-                immutable.
+                <code className="text-text-accent">organization_schema_history</code>. System fields
+                are immutable.
               </p>
             </div>
           </div>

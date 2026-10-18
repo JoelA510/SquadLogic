@@ -5,31 +5,54 @@ import { MOCK_ORG_ID, MOCK_SEASON_ID } from '../../../frontend/src/lib/mockSeedI
 
 const { Given, When, Then } = createBdd();
 
+/** Players the Teaming Configuration Rules scenario imports: more than one roster of 10 holds. */
+const CONSTRAINT_PLAYERS = 25;
+/** The Max Roster the scenario typed, which its Then holds the result to. */
+let typedMaxRoster = Number.NaN;
+
 // --- Teaming Rules ---
 When('I change the {string} input to {string}', async ({ page }, label: string, value: string) => {
-  // CRITICAL FIX: Go to root first to set origin, then clear scheduler runs
+  // Setup, not an assertion: retire the seed's team run, so the page offers Generate Teams, and
+  // import more players than one roster of 10 holds, so the Max Roster constraint shapes the
+  // result. The import carries the organization, as the page filters by it.
   await page.goto('/');
   await waitForMockClient(page);
-  await page.evaluate(() => {
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    db.scheduler_runs = [
-      { id: 'run-1', status: 'deleted' }, // Override initialMockData team run
-    ];
-    // Ensure imports has totalRows and validRows so the UI considers it valid
-    db.imports = [
-      {
-        id: 'imp-1',
-        user_id: 'mock-admin-id',
-        import_type: 'players',
-        data: {
-          totalRows: 1,
-          validRows: 1,
-          data: [{ 'First Name': 'A', 'Last Name': 'B', Birthdate: '2015-01-01', Gender: 'm' }],
+  await page.evaluate(
+    ({ count, mockOrgId, createdAt }) => {
+      const db = window.__MOCK_DB__ as Record<string, Array<Record<string, unknown>> | undefined>;
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      for (const run of db.scheduler_runs ?? []) {
+        if (run.run_type === 'team' && run.organization_id === orgId) run.status = 'deleted';
+      }
+      const rows = Array.from({ length: count }, (_, index) => ({
+        id: `constraints-player-${index + 1}`,
+        'First Name': 'Player',
+        'Last Name': String(index + 1),
+        Birthdate: '2015-03-01',
+        Gender: 'm',
+        division: 'U10 Boys',
+        'Skill Rating': (index % 5) + 1,
+      }));
+      db.imports = [
+        ...(db.imports ?? []).filter((row) => row.id !== 'import-constraints'),
+        {
+          id: 'import-constraints',
+          user_id: 'mock-admin-id',
+          organization_id: orgId,
+          import_type: 'players',
+          // Newer than the seed's import, so it is the one the page reads.
+          created_at: createdAt,
+          data: { totalRows: count, validRows: count, data: rows },
         },
-      },
-    ];
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-  });
+      ];
+      window.__saveMockDB__(db);
+    },
+    {
+      count: CONSTRAINT_PLAYERS,
+      mockOrgId: MOCK_ORG_ID,
+      createdAt: new Date(Date.now() + 60_000).toISOString(),
+    }
+  );
 
   await page.goto('/teams');
   await expect(page.getByRole('heading', { name: /Teaming & Analysis/i }).first()).toBeVisible({
@@ -42,6 +65,7 @@ When('I change the {string} input to {string}', async ({ page }, label: string, 
 
   await expect(input).toBeVisible({ timeout: 10000 });
   await input.fill(value);
+  if (label.toLowerCase().includes('max roster')) typedMaxRoster = Number(value);
 });
 
 When('I enter a {string} of {string}', async ({ page }, label: string, value: string) => {
@@ -62,88 +86,27 @@ When('I click {string} on the Team Persistence Panel', async ({ page }, btnLabel
 });
 
 Then('the resulting teams summary should reflect the new constraints', async ({ page }) => {
-  // The page now performs local generation and writes a completed scheduler run immediately.
-  // Older runs showed a longer in-progress state, so keep this observation optional and assert
-  // the durable completed summary below.
-  await page
-    .getByText('Generating Teams...')
-    .first()
-    .waitFor({ state: 'visible', timeout: 1000 })
-    .catch(() => {});
-
-  // Simulate backend completing the run so the UI transitions out of "Generating Teams...".
-  // If the app already inserted a completed run, leave it in place.
-  await waitForMockClient(page);
-  await page.evaluate((mockOrgId) => {
-    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
-    const db = JSON.parse(sessionStorage.getItem('__MOCK_DB__') || '{}');
-    const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
-    const hasCompletedTeamRun = (db.scheduler_runs || []).some(
-      (r: Record<string, unknown>) => r.run_type === 'team' && r.status === 'completed'
-    );
-    if (hasCompletedTeamRun) {
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const completedRun = {
-      id: 'mock-run-team-constraints',
-      organization_id: orgId,
-      run_type: 'team',
-      status: 'completed',
-      created_at: now,
-      completed_at: now,
-      results: {
-        teamsByDivision: {
-          U10: [
-            {
-              id: 't1',
-              name: 'Tigers',
-              division_id: 'U10',
-              headCoach: 'Coach Smith',
-              coachEmail: 'smith@example.com',
-            },
-          ],
-        },
-        rosterBalanceByDivision: {
-          U10: {
-            summary: { totalPlayers: 10, totalCapacity: 12, averageFillRate: 0.83 },
-            teamStats: [{ teamId: 't1', slotsRemaining: 2 }],
-          },
-        },
-        coachCoverageByDivision: {
-          U10: { totalTeams: 1, teamsWithCoach: 1, coverageRate: 1 },
-        },
-        teams: [{ id: 't1', name: 'Tigers', division: 'U10' }],
-        team_players: [],
-      },
-    };
-    db.scheduler_runs = db.scheduler_runs || [];
-    const run = db.scheduler_runs.find(
-      (r: Record<string, unknown>) => r.run_type === 'team' && r.status === 'running'
-    );
-    if (run) {
-      run.status = 'completed';
-      Object.assign(run, completedRun, { id: run.id });
-    } else {
-      db.scheduler_runs = db.scheduler_runs.filter(
-        (r: Record<string, unknown>) => r.id !== completedRun.id
-      );
-      db.scheduler_runs.push(completedRun);
-    }
-    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
-    sessionStorage.setItem('__MOCK_DB__', JSON.stringify(db));
-    // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
-    if ((window as { __MOCK_DB__?: unknown }).__MOCK_DB__) {
-      // eslint-disable-next-line no-restricted-syntax -- M4.6 follow-up: this Then writes a completed team run when none exists, forging the result the scenario names; rewrite it on the page (Generate Teams runs in mock mode, as Pillar1_Engine.feature shows).
-      (window as { __MOCK_DB__?: unknown }).__MOCK_DB__ = db;
-    }
-  }, MOCK_ORG_ID);
-
-  await page.goto('/teams');
-  await expect(page.getByRole('heading', { name: 'Teaming Overview' })).toBeVisible({
+  // What the page shows once Generate Teams has run on the seeded import: the engine's own
+  // result, never one written for it. The typed Max Roster over CONSTRAINT_PLAYERS players is
+  // the fewest teams that hold them, every player assigned; the expectation is the scenario's
+  // arithmetic, not the page's output.
+  expect(typedMaxRoster, 'the scenario typed no Max Roster').toBeGreaterThan(0);
+  const teams = Math.ceil(CONSTRAINT_PLAYERS / typedMaxRoster);
+  expect(
+    teams,
+    'one roster would hold every player: the constraint shapes nothing'
+  ).toBeGreaterThan(1);
+  await expect(page.getByText(`Team review staged: ${teams} teams.`)).toBeVisible({
     timeout: 15000,
   });
+  const total = (label: string) => page.locator(`article[aria-label="${label}"] .text-xl`);
+  await expect(total('Teams Formed')).toHaveText(String(teams));
+  await expect(total('Assigned Players')).toHaveText(String(CONSTRAINT_PLAYERS));
+  await expect(total('Manual Review')).toHaveText('0');
+  // Enumerated from the list the page renders, not from the total above.
+  await expect(page.locator('section[aria-label="Generated Teams"] .font-semibold')).toHaveCount(
+    teams
+  );
 });
 
 When('the network connection stalls', async ({ page }) => {
@@ -230,8 +193,8 @@ Then('the panel status should change to {string}', async ({ page }, status: stri
     .getByRole('heading', { name: 'Team Persistence' })
     .locator('xpath=ancestor::div[contains(@class, "rounded-xl")][1]');
   if (status.toLowerCase() === 'error') {
-    // The UI renders the error message in red, not the literal word "Error"
-    await expect(panel.locator('.text-red-400')).toBeVisible({ timeout: 15000 });
+    // The UI renders the error message in the error colour, not the literal word "Error"
+    await expect(panel.locator('.text-status-error-text')).toBeVisible({ timeout: 15000 });
   } else {
     await expect(panel).toContainText(status, { timeout: 15000 });
   }
@@ -376,12 +339,17 @@ Given('I am on the {string} workflow step on Dashboard', async ({ page }, step: 
 Then('the status text should pulse orange saying {string}', async ({ page }, _text: string) => {
   // In mock mode, the upload is instant, so it might skip straight to success.
   // We will accept either the pulsing text OR the final success text to prevent flakiness.
-  const el = page.locator('.text-orange-400.animate-pulse, .text-emerald-400').first();
+  const el = page
+    .getByTestId('output-generation-status')
+    .locator('.animate-pulse, .text-status-success-text')
+    .first();
   await expect(el).toBeVisible({ timeout: 15000 });
 });
 
 Then('eventually display a green success message confirming completion', async ({ page }) => {
-  const successText = page.locator('.text-emerald-400').first();
+  const successText = page
+    .getByTestId('output-generation-status')
+    .locator('.text-status-success-text');
   await expect(successText).toBeVisible({ timeout: 15000 });
   await expect(successText).toContainText('Uploaded');
 });
@@ -549,7 +517,10 @@ Then('the button should disable and show {string}', async ({ page }, _text: stri
 
 When('the generation completes, I click {string}', async ({ page }, btnLabel: string) => {
   const btn = page.getByRole('button', { name: btnLabel }).first();
-  const statusText = page.locator('.text-orange-400.animate-pulse, .text-emerald-400').first();
+  const statusText = page
+    .getByTestId('output-generation-status')
+    .locator('.animate-pulse, .text-status-success-text')
+    .first();
   await expect(btn).toBeVisible({ timeout: 15000 });
   await expect(btn).toBeEnabled({ timeout: 15000 });
   await btn.scrollIntoViewIfNeeded();

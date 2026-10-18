@@ -19,6 +19,7 @@ import {
 } from 'recharts';
 import { Download, Users, ShieldCheck, Activity, Lock } from 'lucide-react';
 import { logger } from '../lib/logger.js';
+import { CHART_BAR_CURSOR, CHART_SERIES } from '../constants/chartTheme.js';
 
 /**
  * Accessible Data Table for Screen Readers.
@@ -170,8 +171,6 @@ export default function EnterpriseDashboard() {
   const handleExportDummy = () => {
     alert('Export triggered');
   };
-
-  const COLORS = ['#2cdb85', '#60a5fa', '#fcd34d', '#f472b6', '#a78bfa'];
 
   if (loading) {
     return (
@@ -358,7 +357,7 @@ export default function EnterpriseDashboard() {
                       tick={{ fill: 'var(--color-text-muted)' }}
                     />
                     <Tooltip
-                      cursor={{ fill: 'rgba(15,23,42,0.05)' }}
+                      cursor={CHART_BAR_CURSOR}
                       contentStyle={{
                         backgroundColor: 'var(--color-bg-surface)',
                         borderColor: 'var(--color-border-subtle)',
@@ -374,7 +373,10 @@ export default function EnterpriseDashboard() {
                       animationDuration={800}
                     >
                       {dynamicChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        <Cell
+                          key={`cell-${index}`}
+                          fill={CHART_SERIES[index % CHART_SERIES.length]}
+                        />
                       ))}
                     </Bar>
                   </BarChart>

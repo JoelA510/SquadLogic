@@ -99,8 +99,8 @@ export default function PracticeAssignmentList({
                         aria-pressed={isLocked}
                         className={`p-2 rounded-lg transition-all inline-flex border ${
                           isLocked
-                            ? 'bg-amber-500/10 text-amber-500 border-amber-500/30 hover:bg-amber-500/20 shadow-[0_0_10px_rgba(245,158,11,0.1)]'
-                            : 'bg-bg-app text-text-muted border-border-subtle hover:text-brand-400 hover:border-brand-400/50'
+                            ? 'bg-amber-500/10 text-status-warning-text border-amber-500/30 hover:bg-amber-500/20 shadow-[0_0_10px_rgba(245,158,11,0.1)]'
+                            : 'bg-bg-app text-text-muted border-border-subtle hover:text-text-accent hover:border-brand-400/50'
                         } ${!onToggleLock ? 'cursor-not-allowed opacity-60' : ''}`}
                         title={lockTitle}
                       >
@@ -113,7 +113,7 @@ export default function PracticeAssignmentList({
                       {onCancelAssignment && assignment.persisted && (
                         <button
                           type="button"
-                          className="p-2 rounded-lg border border-border-subtle bg-bg-app text-text-muted hover:text-red-400 hover:border-red-400/50 hover:bg-red-500/10 transition-all"
+                          className="p-2 rounded-lg border border-border-subtle bg-bg-app text-text-muted hover:text-status-error-text hover:border-red-400/50 hover:bg-red-500/10 transition-all"
                           aria-label={`Cancel practice for ${teamName}`}
                           onClick={() => onCancelAssignment(assignment)}
                         >

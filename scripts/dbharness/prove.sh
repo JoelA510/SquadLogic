@@ -37,6 +37,7 @@ R11="$REPO/docs/sql/20260924000000_revert.sql"
 M13="$REPO/supabase/migrations/20260927000000_coach_practice_preferences.sql"
 R13="$REPO/docs/sql/20260927000000_revert.sql"
 # The production RLS drift reconcile, whose smoke replays production's drift.
+# Its function body is replaced by 20261018030000 ($M24): aim plants there.
 M14="$REPO/supabase/migrations/20260928000000_reconcile_prod_rls_drift.sql"
 # 8.6 PR 3b PR 6: writer v3 (lock-by-default) and its revert.
 M15="$REPO/supabase/migrations/20260929000000_practice_writer_v3_lock_by_default.sql"
@@ -66,9 +67,13 @@ R22="$REPO/docs/sql/20261006000000_revert.sql"
 # wrapper, so the M20 plants are aimed here), and its revert.
 M23="$REPO/supabase/migrations/20261007000000_enact_practice_recommendation_blackout.sql"
 R23="$REPO/docs/sql/20261007000000_revert.sql"
+# The RLS advisor rewrite: it replaces reconcile_prod_rls_drift() whole (the
+# spec's scheduler_runs admin write split by command, the legacy import_jobs
+# SELECT gone), so the M14 plants are aimed here.
+M24="$REPO/supabase/migrations/20261018030000_rls_advisor_rewrite.sql"
 # Wave 2: create_import_job stops auditing the file name, and its revert.
-M24="$REPO/supabase/migrations/20261018050000_create_import_job_no_file_name.sql"
-R24="$REPO/docs/sql/20261018050000_revert.sql"
+M26="$REPO/supabase/migrations/20261018050000_create_import_job_no_file_name.sql"
+R26="$REPO/docs/sql/20261018050000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -2823,13 +2828,14 @@ plant "R13 the preference warning stops counting coaches distinctly" "$R13" \
 # policy already does -- so neither plant can be seen by the migration build.
 # Only the smoke's replay of production's drift reaches them, and that is the
 # point: a reconcile that skipped either step would pass everywhere but
-# production.
-plant "M14 the reconcile skips dropping the broad policy" "$M14" \
+# production. The function's live body is 20261018030000's copy ($M24), which
+# replaces 20260928000000's; the plants are aimed there.
+plant "M14 the reconcile skips dropping the broad policy" "$M24" \
   "        EXECUTE format('DROP POLICY %I ON %I.%I', v_pol.policyname, v_pol.schemaname, v_pol.tablename);" \
   "        NULL; -- plant: the broad policy is left standing" \
   "FAIL smoke 20260928000000"
 
-plant "M14 the reconcile skips creating the missing read policies" "$M14" \
+plant "M14 the reconcile skips creating the missing read policies" "$M24" \
   "            EXECUTE format('CREATE POLICY %I ', v_spec.pol) || v_ddl;" \
   "            IF v_spec.tbl = 'scheduler_runs' THEN EXECUTE format('CREATE POLICY %I ', v_spec.pol) || v_ddl; END IF; -- plant: only the repo chain's own creates survive, so the no-op check passes and the drift replay's restore check is what must fail" \
   "FAIL smoke 20260928000000"
@@ -2837,27 +2843,35 @@ plant "M14 the reconcile skips creating the missing read policies" "$M14" \
 # The end-state check was a hand-picked table list once; this puts it back.
 # The smoke's probe table -- member-writable, on no list -- must then pass
 # the reconcile, and the smoke says so.
-plant "M14 the end-state check goes back to a hand-picked table list" "$M14" \
+plant "M14 the end-state check goes back to a hand-picked table list" "$M24" \
   "         WHERE p.schemaname = 'public' AND p.cmd <> 'SELECT'" \
   "         WHERE p.schemaname = 'public' AND p.cmd <> 'SELECT' AND p.tablename = ANY (ARRAY['coaches', 'teams'])" \
   "FAIL smoke 20260928000000"
 
 # `member OR admin` carries an admin token in every clause, so the
-# migration's TEXT-level check passes it; only the smoke's semantic census,
-# evaluating the clause as a plain member, can see the hole.
-plant "M14 the scheduler_runs admin write also admits members" "$M14" \
-  "scheduler_runs_write_admin', 'ALL', 'authenticated',
-             'public.is_org_admin(organization_id)'" \
-  "scheduler_runs_write_admin', 'ALL', 'authenticated',
-             'public.is_org_member(organization_id) OR public.is_org_admin(organization_id)'" \
+# migration's TEXT-level check passes it. Since 20261018030000 the head
+# build's scheduler_runs admin policies come from that migration's own split,
+# not from this spec, so the smoke's no-op check is what sees it: the spec no
+# longer matches the policy of the same name, and the reconcile refuses.
+plant "M14 the scheduler_runs admin write also admits members" "$M24" \
+  "scheduler_runs_insert_admin', 'INSERT', 'authenticated',
+             NULL, 'public.is_org_admin(organization_id)'" \
+  "scheduler_runs_insert_admin', 'INSERT', 'authenticated',
+             NULL, 'public.is_org_member(organization_id) OR public.is_org_admin(organization_id)'" \
   "FAIL smoke 20260928000000"
 
 # Closing scheduler_runs to members without the admin write leaves the
 # SECURITY INVOKER persist_practice_schedule unable to write it for admins.
-# (20260924000000's smoke, which runs that writer as an admin, goes red too.)
-plant "M14 scheduler_runs gets no admin write policy" "$M14" \
-  "('scheduler_runs', 'scheduler_runs_write_admin', 'ALL', 'authenticated',
-             'public.is_org_admin(organization_id)', 'public.is_org_admin(organization_id)')" \
+# Since 20261018030000 the head build's admin policies come from that
+# migration's own split, so a spec without them is seen by the smoke's no-op
+# check (it verifies 18 policies, not 20), not by the writer.
+plant "M14 scheduler_runs gets no admin write policy" "$M24" \
+  "('scheduler_runs', 'scheduler_runs_insert_admin', 'INSERT', 'authenticated',
+             NULL, 'public.is_org_admin(organization_id)'),
+            ('scheduler_runs', 'scheduler_runs_update_admin', 'UPDATE', 'authenticated',
+             'public.is_org_admin(organization_id)', 'public.is_org_admin(organization_id)'),
+            ('scheduler_runs', 'scheduler_runs_delete_admin', 'DELETE', 'authenticated',
+             'public.is_org_admin(organization_id)', NULL)" \
   "('scheduler_runs', 'scheduler_runs_select_member', 'SELECT', 'authenticated',
              'public.is_org_member(organization_id)', NULL)" \
   "FAIL smoke 20260928000000"
@@ -3504,12 +3518,12 @@ plant "R23 the revert leaves the lock helper in place" "$R23" \
 
 # Wave 2: the import.started audit keeps no file name. The smoke RAISEs on a
 # row that still stores one; the revert's md5 claim on a body that drifted.
-plant "M24 create_import_job still audits the file name" "$M24" \
+plant "M26 create_import_job still audits the file name" "$M26" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'status','importing')" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'file_name',v_file_name,'status','importing')" \
   "smoke 20261018050000"
 
-plant "R24 the revert restores a drifted create_import_job body" "$R24" \
+plant "R26 the revert restores a drifted create_import_job body" "$R26" \
   "    RETURN v_job;
 END;" \
   "    RETURN v_job; -- drifted
@@ -3645,7 +3659,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) a blackout edit from a second session waits for an open blackout enact: the enact holds its blackout row FOR SHARE until it commits"]="M23 the blackout row is not locked FOR SHARE"
   ["(checked) a write of the retired field from a second session waits for an open retirement enact: the enact holds its field row FOR SHARE until it commits"]="M23 the retired field is not locked FOR SHARE"
   ["(checked) the blackout enact revert restores the 20261004000000 enact_practice_recommendation body byte for byte, SECURITY INVOKER, and drops enact_lock_cause_row"]="R23 the revert leaves the lock helper in place"
-  ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R24 the revert restores a drifted create_import_job body"
+  ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R26 the revert restores a drifted create_import_job body"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"
   ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M14 the reconcile skips dropping the broad policy"
   ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M14 the reconcile skips creating the missing read policies"

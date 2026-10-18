@@ -33,16 +33,16 @@ const HELPERS = path.join(FUNCTIONS, '_shared/auth.ts');
  * Stated floors, not counts read off the scan: a scan that silently shrinks (a
  * moved directory, a renamed helper) must fail rather than vouch for less.
  */
-const MIN_CALL_SITES = 13;
+const MIN_CALL_SITES = 12;
 const MIN_REGISTERED = 70;
-/** Every function that audits today; each must still yield a call site. */
-const AUDITING_FUNCTIONS = [
-  'auto-scheduler',
-  'fairness-scoring',
-  'game-persistence',
-  'import-validation',
-  'team-persistence',
-];
+/**
+ * Every function that audits through the helpers today; each must still yield
+ * a call site. team-persistence and game-persistence left this list in
+ * 20261018060000: their RPCs write `team.saved` / `game.saved` in the save's
+ * own transaction (docs/PLAN_AUDIT_IN_TRANSACTION.md), and
+ * tests/teamGamePersistenceUserClient.test.js pins that they call no helper.
+ */
+const AUDITING_FUNCTIONS = ['auto-scheduler', 'fairness-scoring', 'import-validation'];
 
 function walk(dir, acc = []) {
   // A missing root yields nothing, so the floors below are what fail.
@@ -125,15 +125,33 @@ function blankComments(src) {
 }
 
 /**
- * The actions named by the TOP-LEVEL `action:` key of the call's second
- * argument, which must be an object literal; `null` when there is none (an
- * `action` shorthand, a variable, a spread). A key nested in `metadata` is not
- * the action, so only depth 0 inside the object is read.
+ * The call's arguments split at top-level commas: `[client, failure, params]`
+ * for `recordAudit(client, failure, params)`.
+ */
+function argumentsOf(args) {
+  // The call's own closer, put back, ends the last argument.
+  const text = `${args})`;
+  const parts = [];
+  let from = 0;
+  for (;;) {
+    const end = endOfExpression(text, from);
+    parts.push(text.slice(from, end));
+    if (text[end] !== ',') return parts;
+    from = end + 1;
+  }
+}
+
+/**
+ * The actions named by the TOP-LEVEL `action:` key of the call's third
+ * argument (after the client and the failure context), which must be an
+ * object literal; `null` when there is none (an `action` shorthand, a
+ * variable, a spread). A key nested in `metadata` is not the action, so only
+ * depth 0 inside the object is read.
  */
 function actionOfParams(args) {
-  const second = args.slice(endOfExpression(args, 0) + 1).trimStart();
-  if (!second.startsWith('{')) return null;
-  const body = second.slice(1, endOfExpression(second, 1, true));
+  const third = (argumentsOf(args)[2] ?? '').trimStart();
+  if (!third.startsWith('{')) return null;
+  const body = third.slice(1, endOfExpression(third, 1, true));
   let depth = 0;
   for (let i = 0; i < body.length; i++) {
     const c = body[i];
@@ -168,7 +186,12 @@ function auditCallsIn(raw) {
     const close = endOfExpression(src, open, true);
     const args = src.slice(open, close);
     const line = src.slice(0, m.index).split('\n').length;
-    calls.push({ line, args, actions: actionOfParams(args) });
+    calls.push({
+      line,
+      args,
+      failure: (argumentsOf(args)[1] ?? '').trim(),
+      actions: actionOfParams(args),
+    });
   }
   return calls;
 }
@@ -211,7 +234,7 @@ function collectEdgeCalls() {
     if (/\brecordAudit(?:Now)?\s+as\b/.test(code))
       bypasses.push(`${rel}: imports an audit helper under another name`);
     for (const c of auditCallsIn(raw)) {
-      if (file === HELPERS && /^\s*userClient\s*,\s*params\s*$/.test(c.args)) {
+      if (file === HELPERS && /^\s*userClient\s*,\s*failure\s*,\s*params\s*$/.test(c.args)) {
         forwarded++;
         continue;
       }
@@ -259,6 +282,14 @@ describe('Edge audit actions are registered in audit_actions', () => {
     expect(bypasses).toEqual([]);
   });
 
+  // docs/PLAN_AUDIT_IN_TRANSACTION.md 3.3: a failed after-the-fact audit
+  // write reaches BetterStack through `logFailure`, with the handler's own
+  // context. The type requires a context; this pins that it is the handler's.
+  it("every call site passes its handler's failure context", () => {
+    const without = sites.filter((s) => s.failure !== 'logCtx').map((s) => `${s.file}:${s.line}`);
+    expect(without).toEqual([]);
+  });
+
   it('every call site names its action', () => {
     const unnamed = sites.filter((s) => s.actions === null).map((s) => `${s.file}:${s.line}`);
     expect(unnamed).toEqual([]);
@@ -288,9 +319,9 @@ describe('Edge audit actions are registered in audit_actions', () => {
 
 describe('the scanners refuse what they cannot read', () => {
   it('refuses an action held in a variable', () => {
-    expect(() => auditCallsIn('recordAudit(c, { organizationId, action: someAction });')).toThrow(
-      /not a string literal/
-    );
+    expect(() =>
+      auditCallsIn('recordAudit(c, ctx, { organizationId, action: someAction });')
+    ).toThrow(/not a string literal/);
   });
 
   it('refuses a conditional with a non-literal branch', () => {
@@ -300,7 +331,7 @@ describe('the scanners refuse what they cannot read', () => {
   it('reads both branches of a conditional and skips declarations', () => {
     const calls = auditCallsIn(
       'export async function recordAuditNow(\n  c: UserClient,\n) {}\n' +
-        "await recordAuditNow(c, { action: n > 0 ? 'import.failed' : 'import.started', metadata: { a: [1, 2] } });"
+        "await recordAuditNow(c, ctx, { action: n > 0 ? 'import.failed' : 'import.started', metadata: { a: [1, 2] } });"
     );
     expect(calls).toHaveLength(1);
     expect(calls[0].actions).toEqual(['import.failed', 'import.started']);
@@ -315,18 +346,26 @@ describe('the scanners refuse what they cannot read', () => {
     ).toEqual([]);
   });
 
+  it('reads the failure context, and refuses a call that names none', () => {
+    expect(auditCallsIn("recordAudit(c, logCtx, { action: 'a.b' });")[0].failure).toBe('logCtx');
+    // The old two-argument shape: no context, and its params are not read as one.
+    const [old] = auditCallsIn("recordAudit(c, { action: 'a.b' });");
+    expect(old.failure).not.toBe('logCtx');
+    expect(old.actions).toBe(null);
+  });
+
   it('reads the top-level action, not a key nested in metadata', () => {
     const [c] = auditCallsIn(
-      "recordAuditNow(c, { metadata: { action: 'game.saved' }, action: 'game.unregistered' });"
+      "recordAuditNow(c, ctx, { metadata: { action: 'game.saved' }, action: 'game.unregistered' });"
     );
     expect(c.actions).toEqual(['game.unregistered']);
   });
 
   it('reports a call whose only action key is nested, or whose params are not a literal', () => {
-    expect(auditCallsIn("recordAudit(c, { metadata: { action: 'game.saved' } });")[0].actions).toBe(
-      null
-    );
-    expect(auditCallsIn('recordAudit(c, params);')[0].actions).toBe(null);
+    expect(
+      auditCallsIn("recordAudit(c, ctx, { metadata: { action: 'game.saved' } });")[0].actions
+    ).toBe(null);
+    expect(auditCallsIn('recordAudit(c, ctx, params);')[0].actions).toBe(null);
   });
 
   it('treats a message as bounded only inside auditErrorText', () => {

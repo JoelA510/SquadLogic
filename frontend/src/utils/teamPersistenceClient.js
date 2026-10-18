@@ -98,9 +98,13 @@ export async function triggerTeamPersistence({
 
   // 6. Normalization
   if (result.status === 'error') {
+    // `AUDIT_WRITE_FAILED`: the save was rolled back because its audit row
+    // could not be written, and the message says nothing was saved.
+    const code = result.code ?? result.data?.code;
     return {
       status: 'error',
       message: result.message || 'Supabase sync failed. Please retry.',
+      ...(typeof code === 'string' ? { code } : {}),
     };
   }
 

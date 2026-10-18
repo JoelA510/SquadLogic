@@ -23,8 +23,29 @@ interface LogEntry {
 }
 
 const LOGTAIL_URL = 'https://in.logs.betterstack.com';
-const SOURCE_TOKEN = Deno.env.get('BETTERSTACK_SOURCE_TOKEN') ?? '';
-const FUNCTION_NAME = Deno.env.get('FUNCTION_NAME') ?? 'unknown';
+
+/**
+ * An environment variable, or '' where the process may not read the
+ * environment. The Edge runtime always may; a `deno test` run without
+ * `--allow-env` may not, and since `_shared/auth.ts` reports audit failures
+ * through this module, every test that imports `auth.ts` loads it. Without the
+ * permission there is no token, so nothing is sent to BetterStack -- the safe
+ * reading. Only the permission refusal is caught; anything else is rethrown.
+ */
+function envOrEmpty(name: string): string {
+  try {
+    return Deno.env.get(name) ?? '';
+  } catch (error) {
+    const refused = [Deno.errors.NotCapable, Deno.errors.PermissionDenied].some(
+      (kind) => typeof kind === 'function' && error instanceof kind
+    );
+    if (refused) return '';
+    throw error;
+  }
+}
+
+const SOURCE_TOKEN = envOrEmpty('BETTERSTACK_SOURCE_TOKEN');
+const FUNCTION_NAME = envOrEmpty('FUNCTION_NAME') || 'unknown';
 
 /** Buffered log entries waiting to be flushed. */
 const buffer: LogEntry[] = [];

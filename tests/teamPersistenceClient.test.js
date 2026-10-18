@@ -228,6 +228,29 @@ test('surfaces backend error messages when the response is not ok', async () => 
   assert.equal(result.message, 'Overrides blocked on the server');
 });
 
+// docs/PLAN_AUDIT_IN_TRANSACTION.md 3.2: a save rolled back for its audit row
+// answers 500 AUDIT_WRITE_FAILED; the caller sees the server's "Nothing was
+// saved" and the code, never the generic retry line.
+test("passes a rolled-back save's AUDIT_WRITE_FAILED code and message through", async () => {
+  const message =
+    'Nothing was saved: the audit record could not be written. Try again; if it keeps failing, report it.';
+  const fetchImpl = async () => ({
+    ok: false,
+    status: 500,
+    json: async () => ({ status: 'error', code: 'AUDIT_WRITE_FAILED', message }),
+  });
+
+  const result = await triggerTeamPersistence({
+    snapshot: { payload: TEAM_PAYLOAD, preparedTeamRows: 1, preparedPlayerRows: 1 },
+    overrides: [],
+    fetchImpl,
+    endpoint: 'https://api.example.com',
+    accessToken: 'token',
+  });
+
+  assert.deepEqual(result, { status: 'error', message, code: 'AUDIT_WRITE_FAILED' });
+});
+
 test('returns an error when the response payload cannot be parsed', async () => {
   const fetchImpl = async () => {
     return {

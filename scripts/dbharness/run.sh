@@ -1251,7 +1251,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018060000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2184,6 +2184,30 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the RSVP revert did not restore the previous upsert_team_event_rsvp body and posture"
         dump 10 $SCRATCH/harness_rsvp; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261018060000" ]; then
+      # Both bodies read back from the catalogue, not from the revert's own
+      # NOTICE: md5 of the 20260923000000 and 20260503030000 dollar-quoted
+      # texts (the bodies production ran before this change, read back
+      # 2026-10-18), and the posture. `missing` fires when the lookup finds
+      # either function absent, so a broken query cannot read as restored.
+      if psql_cmd "SELECT 'SAVE-RPC-VERDICT:' || CASE
+               WHEN to_regprocedure('public.persist_team_schedule(jsonb, jsonb, jsonb)') IS NULL
+                 OR to_regprocedure('public.persist_game_schedule(jsonb, jsonb)') IS NULL THEN 'missing'
+               WHEN (SELECT count(*) FROM pg_proc p
+                      WHERE p.prosecdef AND p.proconfig = ARRAY['search_path=public']
+                        AND ((p.oid = 'public.persist_team_schedule(jsonb, jsonb, jsonb)'::regprocedure
+                              AND md5(p.prosrc) = '8c4b31f70f0bbfb68c1c09d24e2f6d89')
+                          OR (p.oid = 'public.persist_game_schedule(jsonb, jsonb)'::regprocedure
+                              AND md5(p.prosrc) = '2beda365936ae8964338bcf6f2deb5ba'))) = 2
+                 THEN 'restored'
+               ELSE 'wrong' END;" \
+         >$SCRATCH/harness_save_rpcs 2>&1 && grep -q 'SAVE-RPC-VERDICT:restored' $SCRATCH/harness_save_rpcs; then
+        echo "  | (checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"
+      else
+        echo "FAIL revert ${id}: the save-audit revert did not restore both previous save RPC bodies and their posture"
+        dump 10 $SCRATCH/harness_save_rpcs; STATUS=1
       fi
     fi
     if [ "$id" = "20261006000000" ]; then

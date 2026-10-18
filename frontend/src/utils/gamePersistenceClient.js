@@ -45,8 +45,12 @@ export async function persistGameScheduleReview({
   });
 
   if (!response.ok) {
-    throw new Error(
-      result.message || result.error || `Game persistence failed: ${response.status}`
+    // The server's `code` travels with the error: `AUDIT_WRITE_FAILED` says the
+    // save was rolled back (nothing was saved), a known outcome, so no caller
+    // re-reads for it (it is not `isUnknownPersistenceOutcome`).
+    throw Object.assign(
+      new Error(result.message || result.error || `Game persistence failed: ${response.status}`),
+      { code: typeof result.code === 'string' ? result.code : undefined, status: response.status }
     );
   }
 

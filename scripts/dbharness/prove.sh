@@ -66,6 +66,9 @@ R22="$REPO/docs/sql/20261006000000_revert.sql"
 # wrapper, so the M20 plants are aimed here), and its revert.
 M23="$REPO/supabase/migrations/20261007000000_enact_practice_recommendation_blackout.sql"
 R23="$REPO/docs/sql/20261007000000_revert.sql"
+# Wave 2: team and game saves audit in their own transaction, and the revert.
+M25="$REPO/supabase/migrations/20261018060000_audit_in_save_transaction.sql"
+R25="$REPO/docs/sql/20261018060000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3499,6 +3502,61 @@ plant "R23 the revert leaves the lock helper in place" "$R23" \
   "DROP FUNCTION IF EXISTS public.enact_lock_cause_row(uuid);" \
   "revert 20261007000000"
 
+# Wave 2: the save audit in the save's transaction (plan section 5, P1-P3, P6).
+# The smoke RAISEs on each; the revert claim on a body that drifted.
+plant "M25 P1 the team save writes no audit row" "$M25" \
+  "        PERFORM public.record_audit_event(
+            v_org_id, 'team.saved'," \
+  "        PERFORM jsonb_build_array(
+            v_org_id, 'team.saved'," \
+  "smoke 20261018060000"
+
+plant "M25 P2 the game save swallows a failed audit write" "$M25" \
+  "                'game_count', jsonb_array_length(assignments)));
+    EXCEPTION WHEN OTHERS THEN
+        RAISE EXCEPTION 'audit write failed, nothing was saved: %', SQLERRM
+            USING ERRCODE = 'SLA01', DETAIL = SQLSTATE;" \
+  "                'game_count', jsonb_array_length(assignments)));
+    EXCEPTION WHEN OTHERS THEN
+        NULL;" \
+  "smoke 20261018060000"
+
+plant "M25 P3 the team save drops the no-actor guard" "$M25" \
+  "        RAISE EXCEPTION 'persist_team_schedule needs a signed-in caller to audit the save'
+            USING ERRCODE = '42501';" \
+  "        NULL;" \
+  "smoke 20261018060000"
+
+plant "M25 P6 the game save admits any member again" "$M25" \
+  "        RAISE EXCEPTION 'organization_id or season_settings_id is required'
+            USING ERRCODE = '23502';
+    END IF;
+
+    IF NOT public.is_org_admin(v_org_id) THEN" \
+  "        RAISE EXCEPTION 'organization_id or season_settings_id is required'
+            USING ERRCODE = '23502';
+    END IF;
+
+    IF NOT public.is_org_member(v_org_id) THEN" \
+  "smoke 20261018060000"
+
+plant "R25 the revert restores a drifted persist_game_schedule body" "$R25" \
+  "        updated_at = timezone('utc', now());
+
+    RETURN v_persisted_run_id;
+END;
+\$\$;
+
+DO" \
+  "        updated_at = timezone('utc', now());
+
+    RETURN v_persisted_run_id; -- drifted
+END;
+\$\$;
+
+DO" \
+  "revert 20261018060000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -3628,6 +3686,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) a blackout edit from a second session waits for an open blackout enact: the enact holds its blackout row FOR SHARE until it commits"]="M23 the blackout row is not locked FOR SHARE"
   ["(checked) a write of the retired field from a second session waits for an open retirement enact: the enact holds its field row FOR SHARE until it commits"]="M23 the retired field is not locked FOR SHARE"
   ["(checked) the blackout enact revert restores the 20261004000000 enact_practice_recommendation body byte for byte, SECURITY INVOKER, and drops enact_lock_cause_row"]="R23 the revert leaves the lock helper in place"
+  ["(checked) the save-audit revert restores the 20260923000000 persist_team_schedule and 20260503030000 persist_game_schedule bodies byte for byte, SECURITY DEFINER with search_path=public"]="R25 the revert restores a drifted persist_game_schedule body"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"
   ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M14 the reconcile skips dropping the broad policy"
   ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M14 the reconcile skips creating the missing read policies"

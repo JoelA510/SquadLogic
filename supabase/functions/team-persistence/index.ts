@@ -11,7 +11,8 @@ import {
   getUserOrgIds,
   verifyOrgAdmin,
   createUserClient,
-  recordAuditNow,
+  isAuditWriteFailure,
+  auditWriteFailedResponse,
   corsHeaders,
   jsonResponse,
 } from '../_shared/auth.ts';
@@ -75,7 +76,6 @@ interface RunMetadata {
   parameters?: Record<string, unknown>;
   metrics?: Record<string, unknown>;
   results?: Record<string, unknown>;
-  createdBy?: string;
   startedAt?: string;
   completedAt?: string;
 }
@@ -104,7 +104,6 @@ async function persistTeamSnapshot(
         parameters: runMetadata.parameters ?? {},
         metrics: runMetadata.metrics ?? {},
         results: runMetadata.results ?? {},
-        created_by: runMetadata.createdBy ?? 'system',
         started_at: runMetadata.startedAt ?? now.toISOString(),
         completed_at: runMetadata.completedAt ?? now.toISOString(),
         updated_at: now.toISOString(),
@@ -262,8 +261,8 @@ type HttpHandler = (request: Request) => Response | Promise<Response>;
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL');
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-// The audit row is written AS THE CALLER (`record_audit_event` attributes it
-// to auth.uid()), which needs the anon key.
+// The save is made AS THE CALLER, which needs the anon key: the RPC's admin
+// check, its `created_by` and its audit row all read auth.uid().
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
 const allowedRoles = parseAllowedRolesEnv(Deno.env.get('TEAM_PERSISTENCE_ALLOWED_ROLES'));
 
@@ -365,7 +364,6 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
       );
     }
 
-    const teamRows = body.snapshot.payload.teamRows;
     body.runMetadata = body.runMetadata ?? {};
     body.runMetadata.organizationId = targetOrg.organizationId;
 
@@ -382,27 +380,28 @@ if (!supabaseUrl || !serviceRoleKey || !anonKey) {
       );
     }
 
-    // 5. Persist
+    // 5. Persist -- AS THE CALLER (docs/PLAN_AUDIT_IN_TRANSACTION.md, 3.2),
+    // as practice-persistence does. `persist_team_schedule` checks the caller
+    // is an admin of the organization, records them as the run's creator and
+    // writes the `team.saved` audit row in the save's own transaction, so a
+    // save cannot land without its audit row; a service-role client has no
+    // user and is refused. `verifyOrgAdmin` above stays as the early 403.
+    const userClient = createUserClient(req, supabaseUrl, anonKey);
     try {
       const result = await persistTeamSnapshot(
-        serviceClient,
+        userClient,
         body.snapshot as Parameters<typeof persistTeamSnapshot>[1],
         (body.runMetadata ?? {}) as RunMetadata,
         new Date()
       );
 
-      // Audit log, as the caller. Awaited: the response follows immediately,
-      // and the isolate can be frozen once it is sent.
-      await recordAuditNow(createUserClient(req, supabaseUrl, anonKey), {
-        organizationId: targetOrg.organizationId,
-        action: 'team.saved',
-        resourceType: 'team',
-        metadata: { team_count: teamRows.length },
-      });
-
-      const response = jsonResponse(result, 200);
-      return response;
+      return jsonResponse(result, 200);
     } catch (error) {
+      // The audit row could not be written, so the RPC rolled the save back:
+      // the outcome is known, and the caller is told nothing was saved.
+      if (isAuditWriteFailure(error)) {
+        return await auditWriteFailedResponse(logCtx, 'Team save', error);
+      }
       await logFailure(logCtx, 'Team persistence failed', error);
       return jsonResponse(
         {

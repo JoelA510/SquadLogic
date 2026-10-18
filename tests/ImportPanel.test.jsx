@@ -119,8 +119,10 @@ describe('ImportPanel', () => {
   });
 
   it('sends import telemetry without the uploaded file name', async () => {
-    supabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'user-1' } } });
-    supabase.rpc.mockResolvedValue({ data: null, error: null });
+    const getUser = vi.mocked(supabase.auth.getUser);
+    const rpc = vi.mocked(supabase.rpc);
+    getUser.mockResolvedValue(/** @type {any} */ ({ data: { user: { id: 'user-1' } } }));
+    rpc.mockResolvedValue(/** @type {any} */ ({ data: null, error: null }));
     render(<ImportPanel onImport={vi.fn()} />);
 
     const file = new File(
@@ -134,12 +136,14 @@ describe('ImportPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /start import/i }));
 
     await waitFor(() =>
-      expect(supabase.rpc).toHaveBeenCalledWith(
+      expect(rpc).toHaveBeenCalledWith(
         'log_telemetry_event',
         expect.objectContaining({ p_event_name: 'import.suggestions_applied' })
       )
     );
-    const [, args] = supabase.rpc.mock.calls.find(([name]) => name === 'log_telemetry_event');
+    const [, args] = /** @type {[string, any]} */ (
+      rpc.mock.calls.find(([name]) => name === 'log_telemetry_event')
+    );
     expect(args.p_payload).not.toHaveProperty('file_name');
     expect(JSON.stringify(args.p_payload)).not.toContain('Smith family');
     expect(args.p_payload).toEqual(

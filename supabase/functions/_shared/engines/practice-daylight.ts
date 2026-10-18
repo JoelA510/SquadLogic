@@ -126,6 +126,14 @@ export interface DaylightSlot {
   firstDate: string | null;
   /** The last date the slot runs, inclusive: the store's, else the body's. */
   effectiveUntil: string | null;
+  /**
+   * Seconds past local midnight the practice starts and ends, on the season's
+   * clock: the store's `start_time` / `end_time`, else the slot's instants
+   * read there (M4.8: the wall window the solver's dated hard constraint
+   * compares, seconds kept). The pass itself judges `endMinutes` only.
+   */
+  startSeconds: number | null;
+  endSeconds: number | null;
   /** Minutes past local midnight the practice ends, on the season's clock. */
   endMinutes: number | null;
 }
@@ -163,8 +171,15 @@ export function addDays(date: string, days: number): string {
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
-/** An instant's date and minutes past midnight on `timeZone`'s wall clock. */
-function wallReading(instant: Date, timeZone: string): { date: string; minutes: number } | null {
+/**
+ * An instant's date, and minutes and seconds past midnight, on `timeZone`'s
+ * wall clock. `minutes` is whole (the daylight pass judges minutes);
+ * `seconds` keeps the instant's seconds (the solver's wall window, M4.8).
+ */
+function wallReading(
+  instant: Date,
+  timeZone: string
+): { date: string; minutes: number; seconds: number } | null {
   try {
     const parts = new Intl.DateTimeFormat('en-CA', {
       timeZone,
@@ -173,15 +188,42 @@ function wallReading(instant: Date, timeZone: string): { date: string; minutes: 
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
+      second: '2-digit',
       hourCycle: 'h23',
     }).formatToParts(instant);
     const get = (type: string) => parts.find((part) => part.type === type)?.value;
-    const [y, mo, d, h, mi] = [get('year'), get('month'), get('day'), get('hour'), get('minute')];
-    if (!y || !mo || !d || !h || !mi) return null;
-    return { date: `${y}-${mo}-${d}`, minutes: Number(h) * 60 + Number(mi) };
+    const [y, mo, d, h, mi, se] = [
+      get('year'),
+      get('month'),
+      get('day'),
+      get('hour'),
+      get('minute'),
+      get('second'),
+    ];
+    if (!y || !mo || !d || !h || !mi || !se) return null;
+    const minutes = Number(h) * 60 + Number(mi);
+    return { date: `${y}-${mo}-${d}`, minutes, seconds: minutes * 60 + Number(se) };
   } catch {
     return null;
   }
+}
+
+/**
+ * A stored `time` (`HH:MM`, `HH:MM:SS`, or with fractional seconds, as
+ * Postgres returns a `time` column) as seconds past midnight, or `null`.
+ * Seconds are kept, never truncated to the minute: a window of
+ * 16:00:30-17:00:30 overlaps one of 17:00-18:00. A fraction rounds outward
+ * (`'floor'` for a start, `'ceil'` for an end), so the window read is never
+ * narrower than the one stored.
+ */
+export function storedWallSeconds(time: unknown, round: 'floor' | 'ceil'): number | null {
+  const match = /^(\d{1,2}):([0-5]\d)(?::([0-5]\d)(\.\d+)?)?$/.exec(String(time ?? '').trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  if (hours > 23) return null;
+  const whole = hours * 3600 + Number(match[2]) * 60 + Number(match[3] ?? 0);
+  const fraction = match[4] ? Number(match[4]) : 0;
+  return round === 'ceil' && fraction > 0 ? whole + 1 : whole;
 }
 
 /** One run slot as `practice_slots` stores it. */
@@ -196,6 +238,12 @@ export interface StoredSlot {
   firstDate?: string | null;
   /** `end_time` in minutes; `null` when unreadable. Absent only off the load path. */
   endMinutes?: number | null;
+  /**
+   * `start_time` / `end_time` in seconds (M4.8, `storedWallSeconds`); `null`
+   * when unreadable. Absent only off the load path.
+   */
+  startSeconds?: number | null;
+  endSeconds?: number | null;
 }
 
 const WEEKDAY_INDEX: Readonly<Record<string, number>> = Object.freeze({
@@ -226,7 +274,9 @@ function storedFirstDate(validFrom: unknown, dayOfWeek: unknown): string | null 
  * silent, as the page itself falls back: the first date from the `start`
  * instant on the season's clock when `valid_from` is null, and
  * `effectiveUntil` when `valid_until` is null (the season's end). No other
- * body key is read (W9).
+ * body key is read (W9). The start minute is the store's `start_time` as the
+ * end minute is its `end_time` (M4.8), so the wall window the solver judges is
+ * the stored one, never half body and half store.
  */
 export function toDaylightSlot(
   row: { id: string; start: Date; end: Date; effectiveUntil?: unknown },
@@ -243,6 +293,14 @@ export function toDaylightSlot(
     firstDate: stored?.firstDate ?? (sameDay ? start.date : null),
     effectiveUntil:
       stored?.validUntil ?? (isIsoDate(row.effectiveUntil) ? row.effectiveUntil : null),
+    startSeconds:
+      stored && stored.startSeconds !== undefined
+        ? stored.startSeconds
+        : sameDay
+          ? start.seconds
+          : null,
+    endSeconds:
+      stored && stored.endSeconds !== undefined ? stored.endSeconds : sameDay ? end.seconds : null,
     endMinutes:
       stored && stored.endMinutes !== undefined ? stored.endMinutes : sameDay ? end.minutes : null,
   };
@@ -293,7 +351,7 @@ export async function loadVenueDaylight(
     () =>
       client
         .from('practice_slots')
-        .select('id, field_id, valid_from, valid_until, day_of_week, end_time')
+        .select('id, field_id, valid_from, valid_until, day_of_week, start_time, end_time')
         .eq('organization_id', organizationId)
         .order('id', { ascending: true }),
     pageSize
@@ -313,6 +371,8 @@ export async function loadVenueDaylight(
       validUntil: isIsoDate(row.valid_until) ? row.valid_until : null,
       firstDate: storedFirstDate(row.valid_from, row.day_of_week),
       endMinutes: startMinutesOf(row.end_time),
+      startSeconds: storedWallSeconds(row.start_time, 'floor'),
+      endSeconds: storedWallSeconds(row.end_time, 'ceil'),
     });
   }
   const unreadSlots = params.slotIds.filter((id) => !storedById.has(id));

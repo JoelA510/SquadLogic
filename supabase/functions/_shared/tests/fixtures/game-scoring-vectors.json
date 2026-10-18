@@ -1,0 +1,405 @@
+{
+  "description": "Hand-written game evaluation vectors (#576 follow-up, docs/PLAN_GAME_EVALUATOR_UNKNOWN_TEAM.md §3.5). Each truth is worked out by hand from the inputs, never from an engine. Read by core (tests/gameMetrics.test.js), the Node drift test (tests/scoringEngineDrift.test.js) and Deno (_shared/tests/scoring-engine_test.ts), projected by tests/fixtures/gameScoringProjection.js. Synthetic ids only.",
+  "vectors": [
+    {
+      "name": "G1: a roster that matches no game",
+      "note": "Both sides unknown: nothing on the roster is examined. The Edge used to answer ok, no issues, coverage 100.",
+      "teams": [
+        {
+          "id": "A",
+          "division": "U10",
+          "coachId": "cA"
+        },
+        {
+          "id": "B",
+          "division": "U10",
+          "coachId": "cB"
+        }
+      ],
+      "games": [
+        {
+          "id": "g1",
+          "slotId": "slot-g1",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "X",
+          "awayTeamId": "Y",
+          "start": "2026-10-03T13:00:00Z",
+          "end": "2026-10-03T14:00:00Z"
+        }
+      ],
+      "truth": {
+        "unknownTeams": ["X", "Y"],
+        "teamsRostered": 2,
+        "teamsScheduled": 0,
+        "teamsReferencedUnknown": 2,
+        "coachConflicts": [],
+        "teamsDoubleBooked": [],
+        "coveragePercent": 0,
+        "edgeStatus": "action-required"
+      }
+    },
+    {
+      "name": "G2: one unknown opponent among rostered games",
+      "note": "X is unknown; A and B both play. The Edge used to say nothing.",
+      "teams": [
+        {
+          "id": "A",
+          "division": "U10",
+          "coachId": "cA"
+        },
+        {
+          "id": "B",
+          "division": "U10",
+          "coachId": "cB"
+        }
+      ],
+      "games": [
+        {
+          "id": "g1",
+          "slotId": "slot-g1",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "A",
+          "awayTeamId": "X",
+          "start": "2026-10-03T13:00:00Z",
+          "end": "2026-10-03T14:00:00Z"
+        },
+        {
+          "id": "g2",
+          "slotId": "slot-g2",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "B",
+          "awayTeamId": "A",
+          "start": "2026-10-03T15:00:00Z",
+          "end": "2026-10-03T16:00:00Z"
+        }
+      ],
+      "truth": {
+        "unknownTeams": ["X"],
+        "teamsRostered": 2,
+        "teamsScheduled": 2,
+        "teamsReferencedUnknown": 1,
+        "coachConflicts": [],
+        "teamsDoubleBooked": [],
+        "coveragePercent": 100,
+        "edgeStatus": "attention-needed"
+      }
+    },
+    {
+      "name": "G3 (control): every side rostered",
+      "note": "Nothing to report in either arm.",
+      "teams": [
+        {
+          "id": "A",
+          "division": "U10",
+          "coachId": "cA"
+        },
+        {
+          "id": "B",
+          "division": "U10",
+          "coachId": "cB"
+        }
+      ],
+      "games": [
+        {
+          "id": "g1",
+          "slotId": "slot-g1",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "A",
+          "awayTeamId": "B",
+          "start": "2026-10-03T13:00:00Z",
+          "end": "2026-10-03T14:00:00Z"
+        }
+      ],
+      "truth": {
+        "unknownTeams": [],
+        "teamsRostered": 2,
+        "teamsScheduled": 2,
+        "teamsReferencedUnknown": 0,
+        "coachConflicts": [],
+        "teamsDoubleBooked": [],
+        "coveragePercent": 100,
+        "edgeStatus": "ok"
+      }
+    },
+    {
+      "name": "G4: a team renamed between roster and schedule",
+      "note": "B plays as B2: B2 is unknown and B plays nothing (3 of 4 scheduled). The c1 clash between A and B is invisible to both arms, since neither knows B2's coach; the warning is the signal.",
+      "teams": [
+        {
+          "id": "A",
+          "division": "U10",
+          "coachId": "c1"
+        },
+        {
+          "id": "B",
+          "division": "U10",
+          "coachId": "c1"
+        },
+        {
+          "id": "C",
+          "division": "U10",
+          "coachId": "cC"
+        },
+        {
+          "id": "D",
+          "division": "U10",
+          "coachId": "cD"
+        }
+      ],
+      "games": [
+        {
+          "id": "g1",
+          "slotId": "slot-g1",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "A",
+          "awayTeamId": "C",
+          "start": "2026-10-03T13:00:00Z",
+          "end": "2026-10-03T14:00:00Z"
+        },
+        {
+          "id": "g2",
+          "slotId": "slot-g2",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "B2",
+          "awayTeamId": "D",
+          "start": "2026-10-03T13:00:00Z",
+          "end": "2026-10-03T14:00:00Z"
+        }
+      ],
+      "truth": {
+        "unknownTeams": ["B2"],
+        "teamsRostered": 4,
+        "teamsScheduled": 3,
+        "teamsReferencedUnknown": 1,
+        "coachConflicts": [],
+        "teamsDoubleBooked": [],
+        "coveragePercent": 75,
+        "edgeStatus": "attention-needed"
+      }
+    },
+    {
+      "name": "S1: a head coach of one team assists another playing at the same time",
+      "note": "c1 heads A and assists B: one person in two games. The Edge used to read only the head coach.",
+      "teams": [
+        {
+          "id": "A",
+          "division": "U10",
+          "coachId": "c1"
+        },
+        {
+          "id": "B",
+          "division": "U10",
+          "coachId": "cB",
+          "assistantCoachIds": ["c1"]
+        },
+        {
+          "id": "C",
+          "division": "U10",
+          "coachId": "cC"
+        },
+        {
+          "id": "D",
+          "division": "U10",
+          "coachId": "cD"
+        }
+      ],
+      "games": [
+        {
+          "id": "g1",
+          "slotId": "slot-g1",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "A",
+          "awayTeamId": "C",
+          "start": "2026-10-03T13:00:00Z",
+          "end": "2026-10-03T14:00:00Z"
+        },
+        {
+          "id": "g2",
+          "slotId": "slot-g2",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "B",
+          "awayTeamId": "D",
+          "start": "2026-10-03T13:00:00Z",
+          "end": "2026-10-03T14:00:00Z"
+        }
+      ],
+      "truth": {
+        "unknownTeams": [],
+        "teamsRostered": 4,
+        "teamsScheduled": 4,
+        "teamsReferencedUnknown": 0,
+        "coachConflicts": ["c1"],
+        "teamsDoubleBooked": [],
+        "coveragePercent": 100,
+        "edgeStatus": "action-required"
+      }
+    },
+    {
+      "name": "S2: one coach on both sides of one game",
+      "note": "c1 heads A and B, which play each other: one commitment, not a clash. The Edge used to report c1 against himself.",
+      "teams": [
+        {
+          "id": "A",
+          "division": "U10",
+          "coachId": "c1"
+        },
+        {
+          "id": "B",
+          "division": "U10",
+          "coachId": "c1"
+        }
+      ],
+      "games": [
+        {
+          "id": "g1",
+          "slotId": "slot-g1",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "A",
+          "awayTeamId": "B",
+          "start": "2026-10-03T13:00:00Z",
+          "end": "2026-10-03T14:00:00Z"
+        }
+      ],
+      "truth": {
+        "unknownTeams": [],
+        "teamsRostered": 2,
+        "teamsScheduled": 2,
+        "teamsReferencedUnknown": 0,
+        "coachConflicts": [],
+        "teamsDoubleBooked": [],
+        "coveragePercent": 100,
+        "edgeStatus": "ok"
+      }
+    },
+    {
+      "name": "U2: a team with two unknown opponents, one of them met twice",
+      "note": "X appears in two games and Y in one: X and Y are each reported once (per team id, not per game).",
+      "teams": [
+        {
+          "id": "A",
+          "division": "U10",
+          "coachId": "cA"
+        },
+        {
+          "id": "B",
+          "division": "U10",
+          "coachId": "cB"
+        }
+      ],
+      "games": [
+        {
+          "id": "g1",
+          "slotId": "slot-g1",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "A",
+          "awayTeamId": "X",
+          "start": "2026-10-03T13:00:00Z",
+          "end": "2026-10-03T14:00:00Z"
+        },
+        {
+          "id": "g2",
+          "slotId": "slot-g2",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "X",
+          "awayTeamId": "A",
+          "start": "2026-10-10T13:00:00Z",
+          "end": "2026-10-10T14:00:00Z"
+        },
+        {
+          "id": "g3",
+          "slotId": "slot-g3",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "A",
+          "awayTeamId": "Y",
+          "start": "2026-10-17T13:00:00Z",
+          "end": "2026-10-17T14:00:00Z"
+        },
+        {
+          "id": "g4",
+          "slotId": "slot-g4",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "B",
+          "awayTeamId": "A",
+          "start": "2026-10-24T13:00:00Z",
+          "end": "2026-10-24T14:00:00Z"
+        }
+      ],
+      "truth": {
+        "unknownTeams": ["X", "Y"],
+        "teamsRostered": 2,
+        "teamsScheduled": 2,
+        "teamsReferencedUnknown": 2,
+        "coachConflicts": [],
+        "teamsDoubleBooked": [],
+        "coveragePercent": 100,
+        "edgeStatus": "attention-needed"
+      }
+    },
+    {
+      "name": "D1: a team double-booked into overlapping games",
+      "note": "A plays B at 13:00-14:00 and C at 13:30: A is double-booked, and its coach cA with it.",
+      "teams": [
+        {
+          "id": "A",
+          "division": "U10",
+          "coachId": "cA"
+        },
+        {
+          "id": "B",
+          "division": "U10",
+          "coachId": "cB"
+        },
+        {
+          "id": "C",
+          "division": "U10",
+          "coachId": "cC"
+        }
+      ],
+      "games": [
+        {
+          "id": "g1",
+          "slotId": "slot-g1",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "A",
+          "awayTeamId": "B",
+          "start": "2026-10-03T13:00:00Z",
+          "end": "2026-10-03T14:00:00Z"
+        },
+        {
+          "id": "g2",
+          "slotId": "slot-g2",
+          "weekIndex": 1,
+          "division": "U10",
+          "homeTeamId": "A",
+          "awayTeamId": "C",
+          "start": "2026-10-03T13:30:00Z",
+          "end": "2026-10-03T14:30:00Z"
+        }
+      ],
+      "truth": {
+        "unknownTeams": [],
+        "teamsRostered": 3,
+        "teamsScheduled": 3,
+        "teamsReferencedUnknown": 0,
+        "coachConflicts": ["cA"],
+        "teamsDoubleBooked": ["A"],
+        "coveragePercent": 100,
+        "edgeStatus": "action-required"
+      }
+    }
+  ]
+}

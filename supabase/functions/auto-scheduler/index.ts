@@ -22,11 +22,19 @@
  * `practice_assignments` itself, AS THE CALLER through RLS, locks every row,
  * refuses the run if the client's `lockedAssignments` disagrees, and places
  * only roster teams with no row -- never a team whose series is TIME TBD
- * (decision 4). It returns only those new placements. Limitation: there is no
- * date model here, so a locked row consumes its slot for the whole season --
- * never a double-booking, possibly an under-used slot. A live `relocated`
- * exception's slot is held the same way (8.6 3b PR 11d-0). See
+ * (decision 4). It returns only those new placements. A live `relocated`
+ * exception's slot is held season-wide (8.6 3b PR 11d-0). See
  * `_shared/engines/practice-lock.ts` and `_shared/engines/auto-scheduler-solver.ts`.
+ *
+ * The date model (M4.8, `docs/PLAN_SOLVER_DATE_MODEL.md`): every run slot is
+ * dated from the store -- its first and last date and its wall window, the
+ * daylight pass's own reading (`toDaylightSlot`) -- and the solver judges
+ * dated occupancy: a new placement is live from `max(slot first date,
+ * liveFrom)`, a locked row inside its own range. `liveFrom` is today on the
+ * season's clock, the date the daylight pass judges from, and the response
+ * carries it so the page writes the range the solver judged (Q7). A slot the
+ * solver cannot date refuses the run (422 `SLOT_DATING_UNREADABLE`, Q3); the
+ * page's payload is unchanged (§3.6).
  *
  * Coach preferences (8.6 PR 3b PR 8, plan §4 and §5 decision 3): approved
  * `coach_practice_preferences`, with coaches from `team_coach_assignments`
@@ -66,7 +74,11 @@ import {
 } from '../_shared/engines/coach-preference-load.ts';
 import { loadVenueDaylight, toDaylightSlot } from '../_shared/engines/practice-daylight.ts';
 import { loadLightingOverrides } from '../_shared/engines/practice-lighting-overrides.ts';
-import { runPracticeOptimizer } from '../_shared/engines/auto-scheduler-solver.ts';
+import {
+  runPracticeOptimizer,
+  SLOT_DATING_UNREADABLE,
+  undatableSlotIds,
+} from '../_shared/engines/auto-scheduler-solver.ts';
 import {
   classifyTeamsForRun,
   crossCheckLockedAssignments,
@@ -387,6 +399,59 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       );
     }
 
+    // 5e-bis. THE RUN'S DATING (M4.8, plan §3.1 and §3.7). Each slot's dates
+    //     and wall window as the daylight pass reads them (the store first, the
+    //     body only where the store is silent), and today on the season's clock.
+    //     A slot the solver cannot date refuses the run, naming it: the solver
+    //     never guesses a season for one slot (Q3).
+    const liveFrom = seasonCalendarDate(Date.now(), season.timezone);
+    const daylightSlots = new Map(
+      anchored.rows.map((s) => [
+        s.id,
+        toDaylightSlot(s, season.timezone, venueDaylight.slots.get(s.id)),
+      ])
+    );
+    const undatable =
+      liveFrom === null
+        ? anchored.rows.map((s) => s.id)
+        : undatableSlotIds(
+            anchored.rows.map((s) => s.id),
+            daylightSlots
+          );
+    if (liveFrom === null || undatable.length > 0) {
+      edgeLogger.error('Auto-scheduler refused: slots could not be dated', {
+        orgId: input.organizationId,
+        seasonSettingsId,
+        liveFrom,
+        undatableCount: undatable.length,
+      });
+      await recordAuditNow(auditClient, {
+        organizationId: input.organizationId,
+        action: 'scheduler.auto_refused',
+        resourceType: 'practice_schedule',
+        metadata: {
+          reason: SLOT_DATING_UNREADABLE,
+          liveFrom,
+          slotIds: undatable.slice(0, 20),
+          undatableCount: undatable.length,
+        },
+      });
+      await edgeLogger.flush();
+      return jsonResponse(
+        {
+          error:
+            liveFrom === null
+              ? "Today's date on the season's clock could not be read, so no practice can be dated."
+              : `${undatable.length} practice slot(s) have no readable first date, last date or ` +
+                'start and end time, so the run was refused rather than scheduled on a guessed ' +
+                `season: ${undatable.slice(0, 5).join(', ')}`,
+          code: SLOT_DATING_UNREADABLE,
+          slotIds: undatable,
+        },
+        422
+      );
+    }
+
     // 5f. PORTABLE LIGHTING (8.9 D14 PR C). Approved overrides on the run's
     //     slots, loaded as the caller through RLS -- never from the body
     //     (W25). A failed read refuses (W26): it never runs as if there were
@@ -488,17 +553,14 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       placeableTeamIds: classification.placeable,
       preferenceGate: preferences.gate,
       daylight: {
-        slots: new Map(
-          anchored.rows.map((s) => [
-            s.id,
-            toDaylightSlot(s, season.timezone, venueDaylight.slots.get(s.id)),
-          ])
-        ),
+        slots: daylightSlots,
         venues: venueDaylight.venues,
         timeZone: season.timezone,
-        today: seasonCalendarDate(Date.now(), season.timezone),
+        today: liveFrom,
         lightingOverrides: lightingOverrides.overrides,
       },
+      // M4.8: the same dating, and the same today, as the daylight pass.
+      dating: { liveFrom, slots: daylightSlots },
       config: input.config,
       onProgress: (progress) => {
         // Emit progress audit (fire-and-forget). `recordAudit` returns `void`
@@ -656,6 +718,12 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
         lockedOutsideRun: run.lockedOutsideRun.length,
         relocatedLoaded: lock.relocations.length,
         relocatedOutsideRun: run.relocatedOutsideRun.length,
+        // M4.8: the date new placements are live from, and the locked rows
+        // that hold nothing from it (ended) or are held season-long (range
+        // unreadable).
+        liveFrom: run.liveFrom,
+        lockedEndedRows: run.endedRows.length,
+        lockedUnreadableRange: run.unreadableRange.map((row) => row.assignmentId),
         assignedCount: bestAssignments.length,
         unassignedCount: bestUnassigned.length,
         approvedPreferencesLoaded: preferences.preferencesLoaded,
@@ -698,8 +766,14 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       {
         runId,
         // New placements ONLY, for roster teams with no current row. Locked
-        // rows are never returned: the page keeps its own, unchanged.
-        assignments: bestAssignments,
+        // rows are never returned: the page keeps its own, unchanged. Each
+        // carries the range it was judged on (M4.8), from the store's dating:
+        // the page writes exactly that, not one rebuilt from slot dates it
+        // loaded earlier and that may since have changed.
+        assignments: bestAssignments.map((placement) => ({
+          ...placement,
+          effectiveDateRange: run.placementRanges[placement.teamId],
+        })),
         unassigned: bestUnassigned,
         // Every roster team is accounted for: placed above, unplaced with a
         // reason above, locked (counted here), or TIME TBD (excluded, decision 4).
@@ -712,7 +786,16 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
           relocatedLoaded: lock.relocations.length,
           relocatedOutsideRun: run.relocatedOutsideRun.map((r) => r.exceptionId),
           timeTbdExcluded,
+          // M4.8: rows with no live date from `liveFrom` on, which therefore
+          // hold nothing; and rows whose range could not be read, held on
+          // their slot's whole validity (Q2). Both still locked.
+          endedRows: run.endedRows.map((row) => row.assignmentId),
+          unreadableRange: run.unreadableRange.map((row) => row.assignmentId),
         },
+        // M4.8 Q7: the date every new placement above is live from. The page
+        // writes each one as `[max(slot first date, liveFrom), slot end]`, so
+        // the range saved is the range this run judged, even across midnight.
+        liveFrom: run.liveFrom,
         // The approved coach preferences this run honoured, as loaded
         // server-side: how many, the run date they were current on, the
         // prefer_keep breaches the placements carry, and every finding (a

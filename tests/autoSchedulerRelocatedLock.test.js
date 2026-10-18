@@ -20,8 +20,11 @@ import { describe, it } from 'vitest';
 
 import {
   buildLockedOccupancy,
+  dateSchedulerSlots,
   runPracticeOptimizer,
 } from '../supabase/functions/_shared/engines/auto-scheduler-solver.js';
+import { toDaylightSlot } from '../supabase/functions/_shared/engines/practice-daylight.js';
+import { seasonLongDating } from './fixtures/solverDatedCases.js';
 import { loadSeasonPracticeLock } from '../supabase/functions/_shared/engines/practice-lock.js';
 import { prepareTeam } from '../supabase/functions/_shared/engines/practice-coaches.js';
 import {
@@ -119,6 +122,22 @@ async function loadSeed(overrides = {}) {
 const teams = RELOCATED_ROSTER.map((t) => prepareTeam(t));
 const teamsById = new Map(teams.map((t) => [t.id, t]));
 const slotsById = new Map(RELOCATED_SLOTS.map((s) => [s.id, s]));
+/**
+ * M4.8: the seed's dating, season-long from each slot's first occurrence
+ * (the week of 2026-09-07) to the locked rows' end, and the run's slots dated
+ * by it, as `runPracticeOptimizer` dates them.
+ */
+const DATING = seasonLongDating(RELOCATED_SLOTS, toDaylightSlot, {
+  timeZone: 'UTC',
+  until: '2026-11-30',
+  liveFrom: '2026-09-07',
+});
+const datedSlotsById = new Map(
+  dateSchedulerSlots(/** @type {any} */ (RELOCATED_SLOTS), DATING).map((s) => [s.id, s])
+);
+/** Places of `slotId` no locked row or relocation holds (every holder here is season-long). */
+const freeUnits = (base, slotId) =>
+  slotsById.get(slotId).capacity - (base.slotOccupants.get(slotId)?.length ?? 0);
 const lockedTeamIds = new Set(RELOCATED_DB_ASSIGNMENTS.map((r) => r.team_id));
 const placeableTeamIds = RELOCATED_ROSTER.map((t) => t.id).filter((id) => !lockedTeamIds.has(id));
 const seedException = new Map(RELOCATED_DB_EXCEPTIONS.map((x) => [x.id, x]));
@@ -142,6 +161,7 @@ async function runSeed(config, { withRelocations = true } = {}) {
     locked: lockedOf(lock),
     ...(withRelocations ? { relocated: lock.relocations } : {}),
     placeableTeamIds,
+    dating: DATING,
     config,
   });
   return { lock, run };
@@ -308,10 +328,16 @@ describe('the lock loads live relocated exceptions, as the caller, scoped like t
       [...live].sort(),
       'paging skipped or repeated a relocation'
     );
-    const base = buildLockedOccupancy(lockedOf(lock), teamsById, slotsById, lock.relocations);
+    const base = buildLockedOccupancy(
+      lockedOf(lock),
+      teamsById,
+      datedSlotsById,
+      lock.relocations,
+      DATING.liveFrom
+    );
     for (const [slotId, units] of Object.entries(RELOCATED_EXPECT.unitsHeld)) {
       assert.equal(
-        base.slotCapacity.get(slotId),
+        freeUnits(base, slotId),
         slotsById.get(slotId).capacity - units,
         `${slotId} is not held after a paged read`
       );
@@ -385,20 +411,30 @@ describe('the lock loads live relocated exceptions, as the caller, scoped like t
 describe('a live relocated slot is held season-wide (the locked-row contract)', () => {
   it('takes one unit of its slot and holds its team coaches there; withdrawn holds nothing', async () => {
     const { lock } = await loadSeed();
-    const base = buildLockedOccupancy(lockedOf(lock), teamsById, slotsById, lock.relocations);
+    const base = buildLockedOccupancy(
+      lockedOf(lock),
+      teamsById,
+      datedSlotsById,
+      lock.relocations,
+      DATING.liveFrom
+    );
     for (const id of RELOCATED_EXPECT.liveInRun) {
       const x = seedException.get(id);
       const capacity = slotsById.get(x.practice_slot_id).capacity;
       assert.equal(
-        base.slotCapacity.get(x.practice_slot_id),
+        freeUnits(base, x.practice_slot_id),
         capacity - RELOCATED_EXPECT.unitsHeld[x.practice_slot_id],
         `${id}: ${x.practice_slot_id} does not hold exactly its units`
       );
-      const held = slotsById.get(x.practice_slot_id);
+      const held = datedSlotsById.get(x.practice_slot_id);
       for (const coachId of teamsById.get(x.team_id).coachIds) {
         assert.ok(
           (base.coachAssignments.get(coachId) ?? []).some(
-            (w) => w.slotId === held.id && w.start === held.start && w.end === held.end
+            (w) =>
+              w.slotId === held.id &&
+              w.startSec === held.startSec &&
+              w.endSec === held.endSec &&
+              w.first === held.firstDay
           ),
           `${id} does not hold coach ${coachId} at ${held.id}`
         );
@@ -407,14 +443,14 @@ describe('a live relocated slot is held season-wide (the locked-row contract)', 
     for (const id of RELOCATED_EXPECT.withdrawn) {
       const slotId = seedException.get(id).practice_slot_id;
       assert.equal(
-        base.slotCapacity.get(slotId),
+        freeUnits(base, slotId),
         slotsById.get(slotId).capacity,
         `withdrawn ${id} holds ${slotId}`
       );
     }
     // Frees nothing: every locked row still holds its own slot.
     for (const row of RELOCATED_DB_ASSIGNMENTS) {
-      assert.equal(base.slotCapacity.get(row.practice_slot_id), 0, `${row.id} no longer holds`);
+      assert.equal(freeUnits(base, row.practice_slot_id), 0, `${row.id} no longer holds`);
     }
     assert.deepEqual(
       base.relocatedOutsideRun.map((r) => r.exceptionId).sort(),

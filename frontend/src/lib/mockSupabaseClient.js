@@ -4668,7 +4668,6 @@ export const mockSupabase = {
         metadata: {
           import_type: importType,
           job_type: jobType,
-          file_name: fileName,
           status: 'importing',
         },
         created_at: now,

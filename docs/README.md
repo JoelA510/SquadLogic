@@ -42,6 +42,7 @@
 - [Environment Variables](operations/ENVIRONMENT.md) — Full `VITE_*` / server-side env-var reference.
 - [CI/CD Operations](operations/ci-cd.md) — GitHub Actions scope, reproducibility, artifacts, branch-protection policy, and the `deploy-migrations` job.
 - [Migration Ledger Normalisation](operations/migration-ledger-normalisation.md) — One-time 2026-09-28 rewrite of the production migration ledger so the CLI keys on repo versions.
+- [Schema Drift 2026-10](operations/schema-drift-2026-10.md) — Why a fresh build and production had different triggers and functions, and the migration and catalogue check that closed it.
 - [Production Cutover](operations/production-cutover.md) — Production deployment runbook.
 - [Release Prep Closure](operations/release-prep.md) — Current release-prep evidence, explicit deferrals, and operator checks.
 - [Ingestion Pipeline](operations/ingestion-pipeline.md) — GotSport CSV import flow end-to-end.

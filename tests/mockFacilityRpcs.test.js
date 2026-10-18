@@ -57,9 +57,21 @@ describe('mock facility admin rpcs', () => {
     });
     expect(updateError).toBeNull();
     expect(updated).toMatchObject({ name: 'Renamed Field', active: false, size: '11v11' });
-    expect(getMockData('field_subunits').filter((row) => row.field_id === field.id)).toHaveLength(
-      0
-    );
+    // Halves off deletes nothing (20261018060000): the sub-surfaces stay until
+    // each is retired through admin_retire_field_subunit.
+    expect(
+      getMockData('field_subunits')
+        .filter((row) => row.field_id === field.id)
+        .map((row) => row.label)
+        .sort()
+    ).toEqual(['A', 'B']);
+    const fieldAudit = getMockData('audit_log').filter((row) => row.resource_id === field.id);
+    expect(
+      fieldAudit.map((row) => [row.metadata.operation, row.metadata.subunits_created])
+    ).toEqual([
+      ['created', ['A', 'B']],
+      ['updated', []],
+    ]);
 
     const { data: deleted, error: deleteError } = await supabase.rpc('admin_delete_field', {
       p_organization_id: MOCK_ORG_ID,
@@ -84,6 +96,50 @@ describe('mock facility admin rpcs', () => {
         .map((row) => row.metadata.phase)
         .sort()
     ).toEqual(['after', 'before']);
+  });
+
+  it('ensures A and B on every halves-on save and never deletes or duplicates them', async () => {
+    const { data: location } = await supabase.rpc('admin_create_location', {
+      p_organization_id: MOCK_ORG_ID,
+      p_name: 'Halves Park',
+    });
+    const base = {
+      p_organization_id: MOCK_ORG_ID,
+      p_location_id: location.id,
+      p_name: 'Halves Field',
+      p_surface_type: 'Grass',
+      p_size: '11v11',
+      p_priority_rating: 1,
+      p_active: true,
+    };
+    const { data: field } = await supabase.rpc('admin_create_field', {
+      ...base,
+      p_supports_halves: false,
+    });
+    const subunits = () =>
+      getMockData('field_subunits')
+        .filter((row) => row.field_id === field.id)
+        .map((row) => row.label)
+        .sort();
+    expect(subunits()).toEqual([]);
+
+    const update = (halves) =>
+      supabase.rpc('admin_update_field', {
+        ...base,
+        p_field_id: field.id,
+        p_supports_halves: halves,
+      });
+    await update(true);
+    expect(subunits()).toEqual(['A', 'B']);
+    await update(false);
+    expect(subunits()).toEqual(['A', 'B']);
+    await update(true);
+    expect(subunits()).toEqual(['A', 'B']);
+
+    const created = getMockData('audit_log')
+      .filter((row) => row.resource_id === field.id)
+      .map((row) => row.metadata.subunits_created);
+    expect(created).toEqual([[], ['A', 'B'], [], []]);
   });
 
   it('rejects non-admin and cross-org facility writes', async () => {

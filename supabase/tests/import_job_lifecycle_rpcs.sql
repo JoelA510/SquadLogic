@@ -53,7 +53,7 @@ SELECT is(
 );
 
 -- The audit log keeps no upload file names (owner decision 2026-10-14;
--- 20261018000000). The metadata is compared whole, so a row that lost its
+-- 20261018050000). The metadata is compared whole, so a row that lost its
 -- other keys fails here too, not only one that kept `file_name`.
 SELECT is(
     (

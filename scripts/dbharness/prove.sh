@@ -67,8 +67,8 @@ R22="$REPO/docs/sql/20261006000000_revert.sql"
 M23="$REPO/supabase/migrations/20261007000000_enact_practice_recommendation_blackout.sql"
 R23="$REPO/docs/sql/20261007000000_revert.sql"
 # Wave 2: create_import_job stops auditing the file name, and its revert.
-M24="$REPO/supabase/migrations/20261018000000_create_import_job_no_file_name.sql"
-R24="$REPO/docs/sql/20261018000000_revert.sql"
+M24="$REPO/supabase/migrations/20261018050000_create_import_job_no_file_name.sql"
+R24="$REPO/docs/sql/20261018050000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3507,14 +3507,14 @@ plant "R23 the revert leaves the lock helper in place" "$R23" \
 plant "M24 create_import_job still audits the file name" "$M24" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'status','importing')" \
   "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'file_name',v_file_name,'status','importing')" \
-  "smoke 20261018000000"
+  "smoke 20261018050000"
 
 plant "R24 the revert restores a drifted create_import_job body" "$R24" \
   "    RETURN v_job;
 END;" \
   "    RETURN v_job; -- drifted
 END;" \
-  "revert 20261018000000"
+  "revert 20261018050000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

@@ -1596,7 +1596,7 @@ smoke-tested
     - `scheduler.auto_progress` volume is accepted (about 50 rows per run, 180-day retention).
     - Still open: the SQL-side `create_import_job` audit (`20260522130000`) stores `file_name`
       and needs its own migration. *Statically reviewed.* **Fixed 2026-10-18** (branch
-      `claude/vibrant-allen-hr7y7s-importfilename`, migration `20261018000000`;
+      `claude/vibrant-allen-hr7y7s-importfilename`, migration `20261018050000`;
       `docs/PLAN_AUDIT_IN_TRANSACTION.md` §3.4, Q1, Q5): `create_import_job` is replaced wholesale
       without `file_name` in its `import.started` metadata (the name still forms `storage_path`),
       and `ImportContext` no longer sends `file_name` to `import-validation`. The production rows
@@ -1873,7 +1873,7 @@ smoke-tested
     `metadata.stage = 'buddy_pairs'`, both for the same job. A reader counting completed imports
     by action counts each import twice. Not changed. *Executed* (real-backend run 39007937255).
   - `create_import_job`'s `import.started` row still stores `file_name` (the open Wave 2 item);
-    seen in the same run's rows. *Executed.* **Fixed 2026-10-18** by `20261018000000` (the
+    seen in the same run's rows. *Executed.* **Fixed 2026-10-18** by `20261018050000` (the
     2026-10-14 entry above).
   - The real-backend runs' Edge logs show the auto-scheduler's own run record refused ("Persistence
     failed: Not authorized: User is not a member of organization ..."), and the run completes with

@@ -22,8 +22,8 @@
 -- and the rows that carry a file name age out under the 180-day retention
 -- (`prune_old_audit_logs`).
 --
--- Reversible: see docs/sql/20261018000000_revert.sql.
--- Smoke checks: see docs/sql/20261018000000_smoke.sql.
+-- Reversible: see docs/sql/20261018050000_revert.sql.
+-- Smoke checks: see docs/sql/20261018050000_smoke.sql.
 
 BEGIN;
 

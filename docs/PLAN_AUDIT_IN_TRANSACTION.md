@@ -2,11 +2,13 @@
 
 Approved by the owner on 2026-10-18, with every recommendation as written.
 
-Status: **PROPOSED, awaiting the owner's approval** (§10). Persistence and a
+Status: **APPROVED** (§10, every recommendation as written). Persistence and a
 schema change, so plan first (`AGENTS.md` rule 14); the migration is applied by
 CI on merge, never by hand. Resume queue, Wave 2 ("write each audit row in the
-same transaction as its save"). To be built by one PR,
-`fix/audit-in-save-transaction`.
+same transaction as its save"). Built by two PRs (Q1): the `create_import_job`
+`file_name` fix (§3.4), then the rest (branches
+`claude/vibrant-allen-hr7y7s-importfilename` and
+`claude/vibrant-allen-hr7y7s-audittxn`).
 
 Evidence labels, per `AGENTS.md` rule 4: _read_ (statically reviewed),
 _executed_ (run, output quoted), _test-verified_ (a committed test asserts it).

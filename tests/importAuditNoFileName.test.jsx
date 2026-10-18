@@ -12,7 +12,7 @@ import { MOCK_ORG_ID } from '../frontend/src/lib/mockSeedIds.js';
  * name still forms the import job's `storage_path`, which the import reads
  * back, so `create_import_job` still takes it; but `import-validation` has not
  * read `file_name` since #577, and `create_import_job` stopped writing it into
- * its `import.started` audit row in 20261018000000. (The import panel's
+ * its `import.started` audit row in 20261018050000. (The import panel's
  * telemetry write-back still sends it; that is recorded as an open question in
  * the remediation plan, not covered here.) This runs a real import
  * through the mock client (the mock's `create_import_job` mirrors the RPC) and

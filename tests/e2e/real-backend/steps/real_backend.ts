@@ -136,7 +136,7 @@ Then(
  * #577; with the service-role client every one was refused on
  * `audit_log.user_id NOT NULL`, and only logged), and finalize_import_job's.
  * `create_import_job` also writes an `import.started` row, with no row counts
- * (the counts are how the Edge's row is told apart) and, since 20261018000000,
+ * (the counts are how the Edge's row is told apart) and, since 20261018050000,
  * no file name: the audit log keeps none (owner decision 2026-10-14).
  */
 const IMPORT_AUDIT = { validated: 'import.started', applied: 'import.completed' } as const;

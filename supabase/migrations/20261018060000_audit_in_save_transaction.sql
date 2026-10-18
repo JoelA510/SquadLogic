@@ -693,7 +693,7 @@ BEGIN
         PERFORM public.record_audit_event(
             v_org_id, 'team.saved', 'scheduler_run', v_persisted_run_id,
             jsonb_build_object(
-                'season_settings_id', v_season_settings_id,
+                'season_settings_id', COALESCE(v_season_settings_id, v_season_id),
                 'team_count', jsonb_array_length(teams),
                 'team_player_count', jsonb_array_length(team_players)));
     EXCEPTION WHEN OTHERS THEN
@@ -1244,7 +1244,7 @@ BEGIN
         PERFORM public.record_audit_event(
             v_org_id, 'game.saved', 'scheduler_run', v_persisted_run_id,
             jsonb_build_object(
-                'season_settings_id', v_season_settings_id,
+                'season_settings_id', COALESCE(v_season_settings_id, v_season_id),
                 'game_count', jsonb_array_length(assignments)));
     EXCEPTION WHEN OTHERS THEN
         RAISE EXCEPTION 'audit write failed, nothing was saved: %', SQLERRM

@@ -1941,6 +1941,14 @@ smoke-tested
     on a scratch build). Both now require an organization admin (Q6). The smoke and pgTAP both hold
     a coach's game save refused 42501 with nothing written; putting the RPC back on
     `is_org_member` fails the smoke. *Executed.*
+  - Found by this PR's review: the game page offered Apply and Rollback to anyone with
+    `MANAGE_SCHEDULE` (coaches and staff), who would now always be refused 403. Both are now
+    offered only to an organization admin, with a note saying why, as the practice page's Apply
+    is (#64). *Executed* (a page test, red with the old gate).
+  - Not changed: an RPC refusal on the user-client path (an admin demoted between the Edge
+    check and the RPC) still answers 500 with the RPC's message, as every non-audit error did
+    before (plan section 3.2); and `teamReviewPersistence.js` still sends `runMetadata.createdBy`,
+    which nothing reads now that the run's creator is always `auth.uid()`. *Statically reviewed.*
   - Found while rewriting the pgTAP suites: with the service role refused, every refusal case in
     `team_persistence_rpc.sql` and `game_persistence_rpc.sql` that ran as `service_role` with no
     message pinned would have kept passing on the new 42501 (team's run-type case aside), and the

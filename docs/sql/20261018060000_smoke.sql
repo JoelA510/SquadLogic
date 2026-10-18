@@ -6,10 +6,12 @@
 --      `team.saved` row on that run (`resource_type` scheduler_run,
 --      `resource_id` the run, `user_id` the admin, the counts in metadata);
 --      the same for a game save and `game.saved`;
---   2. atomicity: with `team.saved` and `game.saved` unregistered from
---      `audit_actions` inside a rolled-back block, each save raises SLA01 with
---      the audit's own SQLSTATE (23503) in DETAIL, and leaves no
---      `scheduler_runs` row, no team, no roster row and no game assignment;
+--   2. atomicity: with a trigger planted inside a rolled-back block refusing
+--      every `team.saved` and `game.saved` insert into `audit_log` (P0001),
+--      each save raises SLA01 with the audit's own SQLSTATE in DETAIL, and
+--      leaves no `scheduler_runs` row, no team, no roster row and no game
+--      assignment. A trigger rather than unregistering the actions, so the
+--      smoke also runs on a database that already holds such audit rows;
 --   3. a caller with no user (the service role) is refused 42501 by the
 --      no-actor guard on both RPCs, and a coach of the organization -- a
 --      member, not an admin -- is refused 42501 by the admin check on both;
@@ -92,12 +94,19 @@ BEGIN
     PERFORM set_config('request.jwt.claim.sub', v_admin::text, true);
     PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
 
-    -- (2) Atomicity, first, while no audit row names either action (the
-    --     registry rows cannot be removed once one does). The block ends in a
-    --     sentinel raise, so the registry comes back; what it saw is kept in
-    --     variables.
+    -- (2) Atomicity. The block plants a trigger that refuses the two audit
+    --     inserts and ends in a sentinel raise, so the trigger is gone after
+    --     it; what it saw is kept in variables.
     BEGIN
-        DELETE FROM public.audit_actions WHERE action IN ('team.saved', 'game.saved');
+        CREATE FUNCTION pg_temp.smoke_refuse_save_audit() RETURNS trigger
+        LANGUAGE plpgsql AS $fn$
+        BEGIN
+            RAISE EXCEPTION 'planted audit failure' USING ERRCODE = 'P0001';
+        END;
+        $fn$;
+        CREATE TRIGGER smoke_refuse_save_audit BEFORE INSERT ON public.audit_log
+            FOR EACH ROW WHEN (NEW.action IN ('team.saved', 'game.saved'))
+            EXECUTE FUNCTION pg_temp.smoke_refuse_save_audit();
         BEGIN
             PERFORM public.persist_team_schedule(
                 v_team_run_data || jsonb_build_object('id', gen_random_uuid()),
@@ -118,28 +127,27 @@ BEGIN
         END;
         SELECT count(*) INTO v_game_runs FROM public.scheduler_runs WHERE organization_id = v_org;
         SELECT count(*) INTO v_game_rows FROM public.game_assignments WHERE organization_id = v_org;
-        RAISE EXCEPTION 'smoke-restore-audit-actions';
+        RAISE EXCEPTION 'smoke-drop-planted-trigger';
     EXCEPTION WHEN raise_exception THEN
-        IF SQLERRM <> 'smoke-restore-audit-actions' THEN RAISE; END IF;
+        IF SQLERRM <> 'smoke-drop-planted-trigger' THEN RAISE; END IF;
     END;
-    IF v_team_code IS DISTINCT FROM 'SLA01' OR v_team_detail IS DISTINCT FROM '23503' THEN
-        RAISE EXCEPTION 'a team save whose audit write failed raised % (detail %), not SLA01 with 23503', v_team_code, v_team_detail;
+    IF v_team_code IS DISTINCT FROM 'SLA01' OR v_team_detail IS DISTINCT FROM 'P0001' THEN
+        RAISE EXCEPTION 'a team save whose audit write failed raised % (detail %), not SLA01 with P0001', v_team_code, v_team_detail;
     END IF;
     IF v_team_runs <> 0 OR v_team_teams <> 0 OR v_team_roster <> 0 THEN
         RAISE EXCEPTION 'a team save whose audit write failed left % run(s), % team(s), % roster row(s)',
             v_team_runs, v_team_teams, v_team_roster;
     END IF;
-    IF v_game_code IS DISTINCT FROM 'SLA01' OR v_game_detail IS DISTINCT FROM '23503' THEN
-        RAISE EXCEPTION 'a game save whose audit write failed raised % (detail %), not SLA01 with 23503', v_game_code, v_game_detail;
+    IF v_game_code IS DISTINCT FROM 'SLA01' OR v_game_detail IS DISTINCT FROM 'P0001' THEN
+        RAISE EXCEPTION 'a game save whose audit write failed raised % (detail %), not SLA01 with P0001', v_game_code, v_game_detail;
     END IF;
     IF v_game_runs <> 0 OR v_game_rows <> 0 THEN
         RAISE EXCEPTION 'a game save whose audit write failed left % run(s) and % game assignment(s)', v_game_runs, v_game_rows;
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM public.audit_actions WHERE action = 'team.saved')
-       OR NOT EXISTS (SELECT 1 FROM public.audit_actions WHERE action = 'game.saved') THEN
-        RAISE EXCEPTION 'the atomicity block did not restore the audit_actions registry';
+    IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'smoke_refuse_save_audit') THEN
+        RAISE EXCEPTION 'the planted audit trigger outlived its block';
     END IF;
-    RAISE NOTICE 'audit atomicity: with its audit write failing, the team save and the game save each raised SLA01 (detail 23503) and left 0 runs, 0 teams, 0 roster rows and 0 game assignments';
+    RAISE NOTICE 'audit atomicity: with its audit write failing, the team save and the game save each raised SLA01 (detail P0001) and left 0 runs, 0 teams, 0 roster rows and 0 game assignments';
 
     -- (1) The admin's saves, each audited once on its run.
     v_run := public.persist_team_schedule(
@@ -167,6 +175,17 @@ BEGIN
         RAISE EXCEPTION 'the game save left % game.saved row(s); expected one on run % by the admin: %', v_rows, v_run, row_to_json(v_row);
     END IF;
     RAISE NOTICE 'an admin''s team save and game save each leave exactly 1 audit row on their run (scheduler_run), attributed to the admin, with the season and counts';
+
+    -- A run that names its season only as `season_id` (team-persistence sends
+    -- that for a save with no run id): the audit row still names the season.
+    v_run := public.persist_team_schedule(
+        jsonb_build_object('organization_id', v_org, 'season_id', v_season, 'run_type', 'team'),
+        '[]'::jsonb, '[]'::jsonb);
+    IF (SELECT metadata->>'season_settings_id' FROM public.audit_log
+         WHERE action = 'team.saved' AND resource_id = v_run) IS DISTINCT FROM v_season::text THEN
+        RAISE EXCEPTION 'a team save naming its season only as season_id audited no season';
+    END IF;
+    RAISE NOTICE 'a team save naming its season only as season_id still records the season in its audit row';
 
     -- (3) The refusals: no user, then a coach. Each must be 42501 with its own
     --     message, and none may write.

@@ -1223,6 +1223,7 @@ BEGIN
         RAISE EXCEPTION 'persist_game_schedule was not restored to its 20260503030000 body and posture';
     END IF;
     RAISE NOTICE 'revert verified: both saves exempt the service role again and write no audit row; the game save admits any member again';
+    RAISE WARNING 'revert the team-persistence and game-persistence Edge Functions with this: the code deployed with 20261018060000 writes no audit row of its own, so with these bodies back every team and game save would go unaudited';
 END;
 $revert$;
 

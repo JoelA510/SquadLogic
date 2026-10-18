@@ -1914,8 +1914,8 @@ smoke-tested
 
 - 2026-10-18, the RLS advisor rewrite, PR 1 (branch `claude/vibrant-allen-hr7y7s-rlsmatrix`,
   `docs/PLAN_RLS_ADVISOR_REWRITE.md` §4.2): the persona matrix only, no migration.
-  `supabase/tests/rls_policy_matrix.sql` records SELECT, INSERT, UPDATE, a move to the other
-  organization (an UPDATE's WITH CHECK) and DELETE for seven personas on the 26 tables the two
+  `supabase/tests/rls_policy_matrix.sql` records SELECT, INSERT, UPDATE, a move to an
+  organization nobody belongs to (an UPDATE's WITH CHECK) and DELETE for seven personas on the 26 tables the two
   waived lints name (910 cells), against a literal expected table generated on `a31ddde` and
   checked row by row against the policy text. Green against today's policies; five planted
   policy changes and seven planted test defects each turn it red (the PR lists them).

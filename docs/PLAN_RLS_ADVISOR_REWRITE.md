@@ -8,8 +8,9 @@ Status: **APPROVED 2026-10-18; PR 1 (the persona matrix, §4.2) on branch
 `test/...` and `fix/...` names below). Re-measured on `main` at `a31ddde`
 before PR 1: 130 migrations, 82 policies on `public` as §1.3 counts (_executed_);
 the figures below were taken at `cab8ce1` (129 migrations). §4.2's matrix
-gained a fifth probe in review, a move of Org A's row to Org B, so an UPDATE
-policy's WITH CHECK is tested too (910 cells). Was: PROPOSED,
+gained a fifth probe in review, an UPDATE moving every row the persona may
+update to an organization no persona belongs to, so an UPDATE policy's WITH
+CHECK is tested too (910 cells). Was: PROPOSED,
 awaiting the owner's approval (§9). A schema change to
 row-level security, so plan first; applied by CI on merge. Resume queue,
 Wave 2, with a deadline: the advisor waivers in

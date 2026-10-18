@@ -386,7 +386,6 @@ export default function ImportPanel({ onImport }) {
               p_payload: {
                 session_id: crypto.randomUUID?.() || 'unknown',
                 import_type: importType,
-                file_name: file.name,
                 match_count: Object.keys(previewData.smartMetadata.mappings).length,
                 avg_confidence:
                   Object.values(previewData.smartMetadata.confidence).reduce((a, b) => a + b, 0) /

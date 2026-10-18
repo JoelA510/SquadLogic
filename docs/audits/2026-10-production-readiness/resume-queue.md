@@ -45,6 +45,9 @@ At most two agent PRs in flight; read [`agent-brief.md`](./agent-brief.md) first
   - Their advisor waivers expire on **2027-01-11**. After that the required pgTAP check fails
     every PR.
   - Start this by early December even if the other waves slip.
+  - **Status (2026-10-18):** planned (`docs/PLAN_RLS_ADVISOR_REWRITE.md`, approved); the persona
+    matrix on branch `claude/vibrant-allen-hr7y7s-rlsmatrix`, the rewrite (migration
+    `20261018030000`, both waivers removed) on `claude/vibrant-allen-hr7y7s-rlsrewrite`.
 
 ## Wave 3: product bugs
 

@@ -53,6 +53,16 @@ rows because roster-size and team-count constraints control downstream generatio
 The `enforce_division_season_org_match` trigger also requires each division row to match its
 season settings organization.
 
+Since `20261018030000_rls_advisor_rewrite.sql`, a table with both a member `SELECT` policy and
+an admin write policy carries the write as three policies, `FOR INSERT`, `FOR UPDATE` and
+`FOR DELETE` (`players_select_member`, `players_insert_admin`, `players_update_admin`,
+`players_delete_admin`), not as one `FOR ALL`: beside the member policy, an admin `FOR ALL` is a
+second permissive `SELECT` policy, which Supabase's `multiple_permissive_policies` advisor flags.
+A table whose only policy is an admin `FOR ALL` (`coach_team_requests`) has no second one. A policy that
+reads the caller calls `(select auth.uid())`, not `auth.uid()`, so Postgres evaluates it once
+per statement (the `auth_rls_initplan` advisor). The advisors gate in the pgTAP job fails a
+pull request that brings either back (`docs/operations/ci-cd.md`, "Supabase advisors").
+
 ## Organization Scoping
 
 Every data table has a direct `organization_id` column (either native or backfilled via migration). This eliminates the need for multi-table JOINs in RLS policies and ensures consistent, performant access control:
@@ -124,6 +134,7 @@ The RLS system evolved through multiple migrations, consolidated during a 4-phas
 | Unified RLS      | `20260310000002` | `organization_id` denormalization, `is_org_member()` on all tables |
 | Registration Fix | `20260310000003` | Fixed policies referencing non-existent `organization_roles` table |
 | Audit Logging    | `20260324000004` | Append-only `audit_log` table with admin-read-only RLS             |
+| Advisor rewrite  | `20261018030000` | Admin `FOR ALL` split by command; `(select auth.uid())`; no access change |
 
 The pre-production security audit that produced these policies is closed; its remediations are reflected in the migration history (`20260602010000_consolidated_rls_security_hardening.sql` and earlier).
 
@@ -131,6 +142,7 @@ The pre-production security audit that produced these policies is closed; its re
 
 RLS enforcement is validated at multiple levels:
 
+- **pgTAP**: `supabase/tests/rls_policy_matrix.sql` — seven personas' read and write access on the 26 tables the advisor rewrite touched, against a literal expected table
 - **Unit tests**: `tests/usePermission.test.js` — role-based permission checks
 - **Unit tests**: `tests/verifyRpcUsage.test.js` — verifies RPC calls use correct org-scoped patterns
 - **E2E tests**: `rbac_multi_tenancy.feature` — cross-org isolation scenarios

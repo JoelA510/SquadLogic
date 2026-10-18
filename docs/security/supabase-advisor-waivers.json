@@ -9,51 +9,6 @@
       ],
       "reason": "public.min(uuid) is an aggregate (20260612000000), which cannot carry SET search_path; its support function min_uuid pins search_path = public. public.set_updated_at() is a trigger function that calls only now(), which resolves from pg_catalog before any search_path entry; a from-scratch build creates it (20251217000000) but production has none (schema drift, recorded in the plan).",
       "expires": null
-    },
-    {
-      "lint": "auth_rls_initplan",
-      "findings": [
-        "auth_rls_init_plan_public_audit_log_Audit Log: admins view",
-        "auth_rls_init_plan_public_import_jobs_Users can view their organization's import jobs",
-        "auth_rls_init_plan_public_organization_schema_history_Schema History: Admins Only",
-        "auth_rls_init_plan_public_profile_players_Profile Players: users view own",
-        "auth_rls_init_plan_public_profiles_Profiles: users update own",
-        "auth_rls_init_plan_public_profiles_Profiles: users view own",
-        "auth_rls_init_plan_public_registration_forms_registration_forms_admin_manage",
-        "auth_rls_init_plan_public_registrations_registrations_user_own_or_admin",
-        "auth_rls_init_plan_public_season_settings_Season Settings: admins manage",
-        "auth_rls_init_plan_public_telemetry_log_Insert telemetry for own organization",
-        "auth_rls_init_plan_public_telemetry_log_View telemetry for own organization"
-      ],
-      "reason": "Debt: these policies call auth.uid() or current_setting() per row instead of once through (select auth.uid()). A performance cost at scale, not an access defect. Rewriting RLS policies is a security-surface change for its own reviewed pull request (plan rule 14), not part of adding the gate (M3.3).",
-      "expires": "2027-01-11"
-    },
-    {
-      "lint": "multiple_permissive_policies",
-      "findings": [
-        "multiple_permissive_policies_public_email_log_authenticated_SELECT",
-        "multiple_permissive_policies_public_evaluation_findings_authenticated_SELECT",
-        "multiple_permissive_policies_public_evaluation_metrics_authenticated_SELECT",
-        "multiple_permissive_policies_public_evaluation_run_events_authenticated_SELECT",
-        "multiple_permissive_policies_public_evaluation_runs_authenticated_SELECT",
-        "multiple_permissive_policies_public_export_jobs_authenticated_SELECT",
-        "multiple_permissive_policies_public_game_slots_authenticated_SELECT",
-        "multiple_permissive_policies_public_games_authenticated_SELECT",
-        "multiple_permissive_policies_public_import_jobs_authenticated_SELECT",
-        "multiple_permissive_policies_public_organization_members_authenticated_SELECT",
-        "multiple_permissive_policies_public_organizations_authenticated_SELECT",
-        "multiple_permissive_policies_public_player_buddies_authenticated_SELECT",
-        "multiple_permissive_policies_public_players_authenticated_SELECT",
-        "multiple_permissive_policies_public_practice_assignments_authenticated_SELECT",
-        "multiple_permissive_policies_public_practice_exceptions_authenticated_SELECT",
-        "multiple_permissive_policies_public_registration_forms_authenticated_SELECT",
-        "multiple_permissive_policies_public_scheduler_runs_authenticated_SELECT",
-        "multiple_permissive_policies_public_season_settings_authenticated_SELECT",
-        "multiple_permissive_policies_public_staging_players_authenticated_SELECT",
-        "multiple_permissive_policies_public_team_players_authenticated_SELECT"
-      ],
-      "reason": "Debt: each table has a member SELECT policy and an admin ALL policy, both permissive for authenticated, so SELECT evaluates both. A performance cost, not an access defect (permissive policies OR together either way). Merging them is an RLS change for its own reviewed pull request, not part of adding the gate (M3.3).",
-      "expires": "2027-01-11"
     }
   ]
 }

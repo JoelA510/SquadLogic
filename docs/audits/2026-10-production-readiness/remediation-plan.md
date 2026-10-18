@@ -1934,6 +1934,38 @@ smoke-tested
   - Any member of an organization, a coach or a parent included, can INSERT `telemetry_log`
     rows for it; only its admins read them. *Executed.*
 
+- 2026-10-18, the RLS advisor rewrite, PR 2 (branch `claude/vibrant-allen-hr7y7s-rlsrewrite`,
+  stacked on PR 1): migration `20261018030000_rls_advisor_rewrite.sql` with its revert and smoke,
+  `reconcile_prod_rls_drift()` and the `20260928000000` smoke on the new spec, and the
+  `auth_rls_initplan` and `multiple_permissive_policies` waivers removed. 82 policies on `public`
+  become 119; the persona matrix passes unchanged; the revert restores a catalogue identical to
+  the one before (every policy's command, roles and deparsed clauses compared, and the reconcile
+  function's body by hash). *Executed* locally (all suites, the harness, plants listed in the
+  PR); CI's runs are the PR's.
+  - **Production matches the build exactly, today.** Its 82 `public` policies hash to the same
+    digest as a fresh build's before the rewrite (`89d6a1d4...`, over table, name, command,
+    permissive, roles and both clauses), and its advisors still report 11 `auth_rls_initplan`
+    and 20 `multiple_permissive_policies`. *Executed* (read-only SELECT and `get_advisors`,
+    2026-10-18). After deploy, the same digest should read `a9380ecab8c4...` on 119 policies, if
+    production's Postgres deparses the new clauses as the harness's does.
+  - **An UPDATE that names its row also checks the new row against the SELECT policies.** So a
+    matrix probe moving the subject row to another organization (`... WHERE id = ...`) was
+    refused by the member SELECT policy and could not see an UPDATE policy's `WITH CHECK
+    (true)`; the probe now has no WHERE (PR 1). The same masking protects the app's own
+    filtered PATCHes; an unfiltered one reaches only the UPDATE policy. *Executed.*
+  - `scripts/dbharness/prove.sh`'s five `20260928000000` plants targeted a function body this
+    migration replaces (its anchor pre-flight refused them); they are re-aimed at
+    `20261018030000`, and each was run once by hand against the `20260928000000` smoke and
+    turned it red. The full prover (about 5.4 hours) was not run. *Executed* (the five).
+  - Comments that name the replaced policies were left as they are: the practice-persistence
+    Edge Function's (`practice_assignments_write_admin`; changing it would redeploy the
+    function) and those in earlier migrations. `docs/security/rls-policies.md`'s example of the
+    usual policy shape (a member `FOR ALL`) is out of date with every table this rewrite
+    touched; a note on the new shape is added, the example is not rewritten. *Statically
+    reviewed.*
+  - `coach_team_requests` keeps its single admin `FOR ALL` policy: it has no member SELECT beside
+    it, so it is not a finding. *Executed* (the migration's closing check).
+
 ## Deferred with reason
 
 - 2.1 (strict types) — D2's default: the repository's stated rule is `strict: false`; raising it

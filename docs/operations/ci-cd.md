@@ -362,9 +362,14 @@ The CLI's own `--fail-on warn` is not used because it has no waivers. Triage on
 2026-10-13 (CLI 2.118.0, 176 findings, 33 at WARN): `function_search_path_mutable`
 on `public.min` (an aggregate, which cannot carry a `search_path`) and
 `public.set_updated_at` (calls only `now()`), accepted; `auth_rls_initplan` (11
-policies on 9 tables) and `multiple_permissive_policies` (20 tables), debt until
-2027-01-11: performance, not access, and rewriting RLS policies is its own
-reviewed change. Tests: `tests/supabaseAdvisors.test.js`.
+policies on 9 tables) and `multiple_permissive_policies` (20 tables) were waived
+as debt until 2027-01-11 (performance, not access). They are fixed by
+`20261018030000_rls_advisor_rewrite.sql` (`docs/PLAN_RLS_ADVISOR_REWRITE.md`);
+the same change removed both waivers from the register, so either lint now
+fails the gate on its first finding (reverting the migration needs them put
+back by hand); `supabase/tests/rls_policy_matrix.sql` holds the rewrite to no change
+in access.
+Tests: `tests/supabaseAdvisors.test.js`.
 
 **The local advisors are a subset of the hosted ones.** The hosted project's
 advisors also report every `SECURITY DEFINER` function callable by `anon` or

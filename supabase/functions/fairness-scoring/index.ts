@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.3';
 import {
   ScoringInputSchema,
   datedSlotsIssue,
+  undatedExceptionsIssue,
   refuseEmptyGameRoster,
   refuseEmptyPracticeRoster,
 } from '../_shared/schemas/scoring.ts';
@@ -108,6 +109,14 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
     if (datedIssue !== null) {
       return jsonResponse({ error: datedIssue, code: 'PRACTICE_SLOT_DATES_INCOMPLETE' }, 422);
     }
+    // Saved exceptions are dated: an undated call cannot honour them, so it
+    // is refused rather than read and ignored (the M4.7 follow-up).
+    const exceptionsIssue = practice
+      ? undatedExceptionsIssue(practice.slots, practice.exceptions)
+      : null;
+    if (exceptionsIssue !== null) {
+      return jsonResponse({ error: exceptionsIssue, code: 'PRACTICE_EXCEPTIONS_UNDATED' }, 422);
+    }
 
     // 3b. Place every wall reading on the SEASON's clock before the engine
     //     calls `new Date()` on it (LIVE-7).
@@ -172,6 +181,7 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
           teams: practice.teams,
           slots: anchoredPracticeSlots.rows,
           unassigned: practice.unassigned,
+          exceptions: practice.exceptions,
         })
       : null;
 

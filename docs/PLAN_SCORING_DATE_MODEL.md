@@ -373,7 +373,8 @@ examined nothing fails.
   season (already declared at `auto-scheduler-solver.ts:19-20`). Its persisted
   `edgeEvaluation` says `dateModel: 'undated'`.
 - **Exceptions** are not read until the follow-up (Q1): a relocated week is
-  judged at its original slot; a TIME TBD window still counts.
+  judged at its original slot; a TIME TBD window still counts. Built by the
+  follow-up; see §12.
 - **Coverage** is season-level (Q6): a team whose only series ended counts as
   assigned.
 - **Game evaluation** (`evaluateGameSchedule`) is untouched: games are dated
@@ -524,3 +525,73 @@ dated extract is `scoring-parity-dated.season-2026.json` (one roster, cases C1
 and C4), and the witnesses are one hand-written table,
 `_shared/tests/fixtures/scoring-dated-vectors.json`, which core, the drift test
 and Deno all read.
+
+---
+
+## 12. As built: the exceptions follow-up (Q1)
+
+Built in branch `claude/vibrant-allen-hr7y7s-m47x`, as §3.1 said exceptions
+would go: through `applyPracticeExceptions` and its Edge twin, the evaluator
+consuming the occurrences they return.
+
+- **Input.** A dated call may pass `exceptions`: `practice_exceptions` rows as
+  stored (`id`, `assignment_id`, `window`, `kind`, `tbd_reason`, `cause_kind`,
+  `withdrawn_at`, `practice_slot_id`). An assignment carries its stored `id`,
+  which is what `assignment_id` names. An undated call refuses a non-empty
+  list (core `TypeError`; `fairness-scoring` 422
+  `PRACTICE_EXCEPTIONS_UNDATED`, `undatedExceptionsIssue`), since the
+  first-occurrence comparison has no date to apply one to.
+- **One pass, both arms.** `applyExceptionsToLiveRows`
+  (`utils/practiceLiveDates.js`, twin in `practice-live-dates.ts`) calls the
+  helper once per team (its rule 9 is per team) and once more for exceptions
+  naming no row of the call, so those come back as the helper's `ROW_UNREAD`.
+  Each row it is given carries its range inside its slot's validity (absent
+  or open-ended read as the engines already read it: Q3), not snapped to the
+  weekday, on the weekday of its slot's `firstDate`; so its series dates are
+  exactly its live span, and a relocation in the window's first or last week
+  keeps the dates the helper's rule 5 gives it. A row with no live date is
+  not handed over (it holds nothing an exception could change). A relocation's slot is the call's own slot of that id; one the
+  call does not carry has no slot, which the helper turns into TIME TBD
+  `PRACTICE_SLOT_MISSING`.
+- **What the engines compare.** A row the helper was given holds explicit
+  dates per slot: its series dates (its live span, exactly the dates it held
+  before) and its relocated dates at the target slot. The pair helpers
+  (`spanPiece`, `sharedHeldDates`) live in the twin modules, pinned by the
+  drift test. Two rows clash on a date they both hold with overlapping wall
+  windows, each piece on its own slot's window; a slot's `assignedCount` is
+  its busiest date over what it holds, relocations included. A row no
+  exception reaches compares by its span as before, so a call with no
+  exceptions is unchanged and the C1/C4 extracts are byte-identical.
+- **What is reported.** Every TIME TBD date, grouped by row, exception and
+  reason, in `timeTbd` (present only when `exceptions` was passed); the Edge
+  also raises one `time-tbd` warning per entry. The helper's findings that
+  arrive without a TIME TBD entry (`ROW_UNREAD`, `ROW_REFUSED`,
+  `RELOCATION_UNMATCHED`, `TBD_SHADOWED`, a non-record `UNREADABLE`) are
+  data-quality lines. Conflict identity (Q7) is unchanged: a relocated clash
+  is named by the row's own placement.
+- **Consumers.** The practice page reads the season's live exceptions
+  (`useSeasonPracticeExceptions`) and sends them with each stored row's id; a
+  failed read withholds the evaluation and says so. Apply-time metrics apply
+  the same list plus the exceptions the same save writes on the rows it
+  inserts (`sameSaveExceptions`: named by `new_assignment`, resolved to an
+  evaluation-only id by the writer's own row key; the persisted assignments
+  stay as sent); when the list was not read, the run records no metrics and
+  the Apply status says why (`metricsUnavailable`). After a save the page
+  re-reads its rows with the exceptions, so a new row is named by its id.
+- **Tests.** Ten witnesses in `scoring-dated-vectors.json` (core, drift,
+  Deno), a dated parity case C5 (C4 with a modelled daylight TIME TBD and a
+  blackout relocation), the page wiring, and apply-time metrics; each shown
+  failing on the engines and page before this change.
+- **Review round (`/code-review`).** Fixed: a teammate row with no live date
+  reported as TIME TBD (the helper was given an inverted range); Apply
+  persisting metrics that ignored unread exceptions; the pair helpers
+  duplicated in both engines; `cause_kind` selected and parsed but read by
+  no output; the new alert's raw palette colours. Not changed: a relocated
+  clash is named by the rows' own placements (Q7's identity), and the Edge
+  answers a wrongly typed exception element with a 400 where core reports a
+  finding (`schemas/scoring.ts` says so).
+- **Declared, not built:** the override panel's "N free" (Q5) counts series
+  only; exceptions a save is about to write are not in the panel's
+  evaluation before the save (the saved run's metrics do include them); a
+  relocated date outside its target slot's validity is counted there; the
+  solver stays undated (Q2, M4.8).

@@ -132,6 +132,12 @@ export function datedSlotsIssue(
 
 export const PracticeAssignmentSchema = z
   .object({
+    /**
+     * The stored row's id: what a practice exception's `assignment_id` names
+     * (the M4.7 follow-up). A staged placement has none, and no exception can
+     * name it.
+     */
+    id: z.string().nullable().optional(),
     teamId: z.string(),
     slotId: z.string(),
     /**
@@ -142,6 +148,54 @@ export const PracticeAssignmentSchema = z
     effectiveDateRange: z.string().nullable().optional(),
   })
   .passthrough();
+
+/**
+ * A `practice_exceptions` row as stored (the M4.7 follow-up, plan Q1), sent
+ * with a dated practice evaluation. The shape is checked (an object, string or
+ * null fields), the values are not: `applyPracticeExceptions` reads them
+ * itself (rule 2: a row with no `withdrawn_at` key, an unknown `kind` or
+ * `tbd_reason`, an unreadable `window`) and turns what it cannot read into
+ * TIME TBD or a finding, the reason the portal and the feed give for the same
+ * row. A wrongly typed element (not an object, a number for a string) is a 400
+ * here, where core, called in-process with the same input, reports it as the
+ * helper's `UNREADABLE` finding: the Edge refuses at its trust boundary what
+ * core reads as malformed, and no caller sends either. `.optional()` keeps an
+ * absent key absent, which rule 2 depends on. `cause_kind` is not listed: no
+ * engine output reads it (a passthrough field is still accepted).
+ */
+export const PracticeExceptionSchema = z
+  .object({
+    id: z.string().nullable().optional(),
+    assignment_id: z.string().nullable().optional(),
+    window: z.string().nullable().optional(),
+    kind: z.string().nullable().optional(),
+    tbd_reason: z.string().nullable().optional(),
+    withdrawn_at: z.string().nullable().optional(),
+    practice_slot_id: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+/**
+ * Why a call's exceptions cannot be honoured, or `null`: a non-empty
+ * `exceptions` with undated slots. An exception is dated, and the undated
+ * comparison (first-occurrence instants) has no date to apply it to, so it is
+ * refused rather than read and ignored. Core's `evaluatePracticeSchedule`
+ * refuses the same input with the same words; `fairness-scoring` answers it
+ * with a 422.
+ */
+export function undatedExceptionsIssue(
+  slots: Array<{ firstDate?: string | null; lastDate?: string | null }>,
+  exceptions: unknown[] | null | undefined
+): string | null {
+  if (!exceptions || exceptions.length === 0) return null;
+  const dated = slots.some(
+    (s) =>
+      (s.firstDate !== undefined && s.firstDate !== null) ||
+      (s.lastDate !== undefined && s.lastDate !== null)
+  );
+  if (dated) return null;
+  return `practice exceptions need a dated call (every slot with firstDate and lastDate): ${exceptions.length} sent with undated slots`;
+}
 
 export const GameAssignmentSchema = z
   .object({
@@ -162,6 +216,8 @@ export const ScoringInputSchema = z.object({
       teams: z.array(TeamSchema),
       slots: z.array(SlotSchema),
       assignments: z.array(PracticeAssignmentSchema),
+      /** The season's saved practice exceptions; dated calls only (see above). */
+      exceptions: z.array(PracticeExceptionSchema).optional(),
       unassigned: z
         .array(z.object({ teamId: z.string(), reason: z.string() }))
         .nullable()
@@ -286,5 +342,6 @@ export function refuseEmptyGameRoster(
 export type Team = z.infer<typeof TeamSchema>;
 export type Slot = z.infer<typeof SlotSchema>;
 export type PracticeAssignment = z.infer<typeof PracticeAssignmentSchema>;
+export type PracticeException = z.infer<typeof PracticeExceptionSchema>;
 export type GameAssignment = z.infer<typeof GameAssignmentSchema>;
 export type ScoringInput = z.infer<typeof ScoringInputSchema>;

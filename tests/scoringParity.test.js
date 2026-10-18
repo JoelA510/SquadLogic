@@ -172,6 +172,11 @@ const DATED_EXPECTED = {
   c4Conflicts: 1,
   c4UndatedConflicts: 0,
   c4SharedDates: 10,
+  c5Exceptions: 2,
+  c5Conflicts: 2,
+  c5SharedDates: 8,
+  c5TbdDates: 2,
+  c5PeakOnTarget: 2,
 };
 const DENO_DATED_ARM = 'supabase/functions/_shared/tests/scoring-parity_test.ts';
 
@@ -180,7 +185,11 @@ const datedInputsOf = (name) => ({
   teams: dated.teams,
   slots: dated.cases[name].slots,
   assignments: dated.cases[name].assignments,
+  ...(dated.cases[name].exceptions !== undefined
+    ? { exceptions: dated.cases[name].exceptions }
+    : {}),
 });
+const DATED_CASES = ['C1', 'C4', 'C5'];
 const undatedOf = ({ teams, slots, assignments }) => ({
   teams,
   slots: slots.map(({ id, day, capacity, start, end }) => ({ id, day, capacity, start, end })),
@@ -190,10 +199,10 @@ const undatedOf = ({ teams, slots, assignments }) => ({
 describe('core vs Edge scoring parity, dated (M4.7)', () => {
   it('the dated extract is what the corpus derives today', () => {
     const derived = deriveDatedParityInputs();
-    for (const name of ['C1', 'C4']) {
+    for (const name of DATED_CASES) {
       expect(datedInputsOf(name), name).toEqual(derived[name]);
     }
-    expect(Object.keys(dated.cases).sort()).toEqual(['C1', 'C4']);
+    expect(Object.keys(dated.cases).sort()).toEqual(DATED_CASES);
   });
 
   it('the cases are the plan cases, and the undated comparison gets both wrong (meta, can fail)', () => {
@@ -230,11 +239,44 @@ describe('core vs Edge scoring parity, dated (M4.7)', () => {
     expect(dated.cases.C1.expected.dateModel).toBe('dated');
   });
 
-  it.each(['C1', 'C4'])('core gives the recorded dated answer: %s', (name) => {
+  it('C5 is C4 with two saved exceptions, and they are what move its answer (meta, can fail)', () => {
+    const c5 = datedInputsOf('C5');
+    expect(c5.exceptions).toHaveLength(DATED_EXPECTED.c5Exceptions);
+    expect(new Set(c5.exceptions.map((e) => e.kind))).toEqual(new Set(['relocated', 'time_tbd']));
+    // Every exception names a row of the case, so none is read as ROW_UNREAD.
+    const ids = new Set(c5.assignments.map((a) => a.id));
+    expect(c5.exceptions.every((e) => ids.has(e.assignment_id))).toBe(true);
+    const { expected } = dated.cases.C5;
+    expect(expected.droppedRows).toBe(0);
+    expect(expected.coachConflicts).toHaveLength(DATED_EXPECTED.c5Conflicts);
+    // C4's real clash keeps 8 of its 10 Fridays; the relocation adds one clash.
+    expect(expected.coachConflicts).toContain(
+      dated.cases.C4.expected.coachConflicts[0].replace(
+        / @ 2026-09-18 x10$/,
+        ` @ 2026-10-02 x${DATED_EXPECTED.c5SharedDates}`
+      )
+    );
+    expect(expected.coachConflicts.filter((c) => / @ 2026-10-15 x1$/.test(c))).toHaveLength(1);
+    expect(expected.timeTbd).toHaveLength(1);
+    expect(expected.timeTbd[0].dates).toHaveLength(DATED_EXPECTED.c5TbdDates);
+    const target = c5.exceptions.find((e) => e.kind === 'relocated').practice_slot_id;
+    expect(expected.slotUtilization.find((s) => s.slotId === target)).toEqual({
+      slotId: target,
+      assignedCount: DATED_EXPECTED.c5PeakOnTarget,
+      assignmentRows: 1,
+      capacity: 1,
+    });
+    // Without its exceptions C5 scores exactly as C4: nothing else differs.
+    const { exceptions: _e, ...without } = c5;
+    const { timeTbd: _t, ...plain } = coreDatedAgreedFields(without);
+    expect(plain).toEqual(dated.cases.C4.expected);
+  });
+
+  it.each(DATED_CASES)('core gives the recorded dated answer: %s', (name) => {
     expect(coreDatedAgreedFields(datedInputsOf(name))).toEqual(dated.cases[name].expected);
   });
 
-  it.each(['C1', 'C4'])('the Edge engine gives the same dated answer: %s', (name) => {
+  it.each(DATED_CASES)('the Edge engine gives the same dated answer: %s', (name) => {
     const result = edgeEvaluate(datedInputsOf(name));
     expect(
       datedAgreedFields(result, result.issues.filter((i) => i.category === 'data-quality').length)

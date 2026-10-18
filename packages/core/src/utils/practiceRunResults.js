@@ -1,4 +1,56 @@
 import { evaluatePracticeSchedule } from '../practiceMetrics.js';
+import { buildPracticeAssignmentRows } from '../practiceSupabase.js';
+
+/**
+ * The exceptions this same save writes, resolved for the evaluation only.
+ *
+ * A row the save inserts has no id yet, so its exception names it by the
+ * (team, slot, range) key it will be inserted under (`new_assignment`, built
+ * by `buildPracticeAssignmentRows`: the page's `buildDaylightExceptions` and
+ * the writer use the same key). Each id-less assignment whose key an
+ * exception names is given an evaluation-only id (`new-row:<key>`, never a
+ * UUID, so it cannot meet a stored one) and the exception is restated as a
+ * stored row on it. Nothing is written: the metrics are built before the save
+ * and travel inside it, so this changes no write and no write order.
+ *
+ * An exception whose key matches no staged row (or that does not read as an
+ * object) keeps `assignment_id: null`, so the engine reports it
+ * (`PRACTICE_EXCEPTION_ROW_UNREAD`) rather than this function dropping it.
+ *
+ * @param {{ assignments: any[], exceptions: any[], slots: any[] }} input
+ * @returns {{ assignments: any[], exceptions: any[] }}
+ */
+function resolveSameSaveExceptions({ assignments, exceptions, slots }) {
+  const keyOf = (row) =>
+    `${String(row?.team_id)}|${String(row?.practice_slot_id)}|${String(row?.effective_date_range)}`;
+  const idByKey = new Map();
+  const resolved = assignments.map((assignment) => {
+    if (assignment?.id) return assignment;
+    let row;
+    try {
+      [row] = buildPracticeAssignmentRows({ assignments: [assignment], slots });
+    } catch {
+      // A row the writer itself would refuse: no exception can be keyed to it,
+      // and the evaluation still reads (and reports) the assignment as sent.
+      return assignment;
+    }
+    const key = keyOf(row);
+    if (idByKey.has(key)) return assignment;
+    const id = `new-row:${key}`;
+    idByKey.set(key, id);
+    return { ...assignment, id };
+  });
+  const stored = exceptions.map((exception) => ({
+    id: null,
+    assignment_id: idByKey.get(keyOf(exception?.new_assignment)) ?? null,
+    window: exception?.window,
+    kind: exception?.kind,
+    tbd_reason: exception?.tbd_reason ?? null,
+    withdrawn_at: null,
+    practice_slot_id: exception?.practice_slot_id ?? null,
+  }));
+  return { assignments: resolved, exceptions: stored };
+}
 
 /**
  * Build the `scheduler_runs.results` payload for an applied practice schedule.
@@ -80,6 +132,16 @@ import { evaluatePracticeSchedule } from '../practiceMetrics.js';
  *   Manual-follow-up entries from the scheduler, before filtering.
  * @param {Array<Object>} params.teams - Scheduler teams (the roster).
  * @param {Array<Object>} params.slots - Scheduler slots.
+ * @param {Array<Object> | null} [params.exceptions] - The season's live saved
+ *   practice exceptions, applied as the fairness panel applies them (the M4.7
+ *   follow-up). `null` means they could not be read: the run then carries no
+ *   metrics and says why, rather than a report that ignores them. Omitted
+ *   (`undefined`) by a caller that predates them.
+ * @param {Array<Object>} [params.sameSaveExceptions] - Exceptions this same
+ *   save writes on rows it inserts, named by `new_assignment` (the daylight
+ *   TIME TBD of a truncated placement). Applied with `exceptions` so the run
+ *   describes the schedule it commits; the persisted `assignments` stay as
+ *   sent. Ignored when `exceptions` is `null` (the run carries no metrics).
  * @param {string} [params.schoolDayEnd]
  * @param {string} [params.timezone] - The season's IANA zone.
  * @param {Object|null} [params.edgeEvaluation] - The Edge arm's report, if a
@@ -92,6 +154,8 @@ export function buildPracticeRunResults({
   unassigned = [],
   teams,
   slots,
+  exceptions,
+  sameSaveExceptions = [],
   schoolDayEnd,
   timezone,
   edgeEvaluation = null,
@@ -115,12 +179,30 @@ export function buildPracticeRunResults({
   /** The one place this function decides a run carries no metrics. */
   const unmeasurable = (reason) => ({ metricsArm: null, metricsUnavailable: { reason }, ...base });
 
+  // Unread is not none: a report that counted relocated weeks at their old
+  // slot and TIME TBD weeks as held would read as complete.
+  if (exceptions === null) {
+    return unmeasurable(
+      "This season's saved practice changes (moved and TIME TBD practices) could not be read, " +
+        'so no practice metrics were recorded for this run.'
+    );
+  }
+
   try {
+    const sameSave =
+      Array.isArray(sameSaveExceptions) && sameSaveExceptions.length > 0
+        ? resolveSameSaveExceptions({
+            assignments: appliedAssignments,
+            exceptions: sameSaveExceptions,
+            slots: Array.isArray(slots) ? slots : [],
+          })
+        : null;
     const report = evaluatePracticeSchedule({
-      assignments: appliedAssignments,
+      assignments: sameSave ? sameSave.assignments : appliedAssignments,
       unassigned: stillUnassigned,
       teams: Array.isArray(teams) ? teams : [],
       slots: Array.isArray(slots) ? slots : [],
+      exceptions: sameSave ? [...(exceptions ?? []), ...sameSave.exceptions] : exceptions,
       schoolDayEnd,
       timezone,
     });

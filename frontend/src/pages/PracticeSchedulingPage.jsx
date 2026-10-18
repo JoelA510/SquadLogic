@@ -15,12 +15,14 @@ import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/f
 import { requireZonedInstant, seasonCalendarDate } from '@squadlogic/core/timing/index.js';
 import { buildPracticeRunResults } from '@squadlogic/core/utils/practiceRunResults.js';
 import { practiceRangeBounds } from '@squadlogic/core/utils/practiceOccurrences.js';
+import { calendarDayNumber } from '@squadlogic/core/utils/practiceLiveDates.js';
 import {
   describeTimingFindings,
   describeUnplaceableSlots,
   isSeasonClockLoading,
 } from '../utils/seasonClockSlots.js';
 import { describeDaylightReport } from '../utils/daylightReport.js';
+import { describeLockReport } from '../utils/lockReport.js';
 import { overrideSlotLoad } from '../utils/overrideSlotLoad.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { useOrganization } from '../contexts/OrganizationContext.jsx';
@@ -425,6 +427,41 @@ export function newPlacementRange(slot, seasonToday, truncatedUntil = null) {
 }
 
 /**
+ * The date an auto-scheduler run judged its new placements from (M4.8 Q7):
+ * the response's `liveFrom`, today on the season's clock as the server read it
+ * when the run started. The review dates each new placement from it, so the
+ * range written is the range the solver judged, even across midnight. `null`
+ * when the response carries no readable date (a function deployed before
+ * M4.8): the caller falls back to its own season clock.
+ *
+ * @param {{ liveFrom?: unknown } | null | undefined} result
+ * @returns {string | null} `YYYY-MM-DD`
+ */
+export function runLiveFrom(result) {
+  const value = result?.liveFrom;
+  return typeof value === 'string' && calendarDayNumber(value) !== null ? value : null;
+}
+
+/**
+ * The range an auto-scheduler run judged a new placement on (M4.8): the
+ * `effectiveDateRange` the function returns with each placement, from the
+ * store's slot dating at run time. The review writes exactly this, so the
+ * range saved is the range judged even when a slot's dates changed after this
+ * page loaded them. `null` when the placement carries no readable range (a
+ * function deployed before M4.8): the caller falls back to
+ * {@link newPlacementRange}.
+ *
+ * @param {{ effectiveDateRange?: unknown } | null | undefined} placement
+ * @returns {string | null} `[first,last]`, inclusive
+ */
+export function judgedPlacementRange(placement) {
+  const range = placement?.effectiveDateRange;
+  if (typeof range !== 'string') return null;
+  const bounds = practiceRangeBounds(range);
+  return bounds ? `[${bounds.first},${bounds.last}]` : null;
+}
+
+/**
  * What the auto-scheduler's cross-check compares, and nothing else: every
  * field sent is one the function reads.
  */
@@ -690,17 +727,29 @@ export default function PracticeSchedulingPage() {
     const placements = autoScheduler.result.assignments ?? [];
     const lockedTeamIds = new Set(seasonRows.map(getAssignmentTeamId));
     const clash = placements.find((placement) => lockedTeamIds.has(placement.teamId));
-    const seasonToday = seasonCalendarDate(Date.now(), timezone);
-    // The function has no date model, so it can place a team in a slot whose
-    // window has already ended. That placement has no dates left to hold --
-    // nor has one the daylight pass truncated to end before today.
-    const ended = seasonToday
+    // Each new placement is dated from the date the solver judged it from
+    // (M4.8 Q7), else this page's own clock.
+    const pageToday = seasonCalendarDate(Date.now(), timezone);
+    const seasonToday = runLiveFrom(autoScheduler.result) ?? pageToday;
+    // A placement in a slot whose window has already ended has no dates left
+    // to hold -- nor has one the daylight pass truncated to end before today.
+    // The dated solver (M4.8) never offers such a slot from its own today; but
+    // a run reviewed after midnight can hold one whose last date was the
+    // solver's today and is now past, so "ended" is judged on the later of the
+    // two clocks. The range staged is still the one the solver judged.
+    const endedBefore =
+      pageToday && seasonToday && pageToday > seasonToday ? pageToday : seasonToday;
+    const ended = endedBefore
       ? placements.filter((placement) => {
+          // The judged range's end when the run sent one (M4.8), else the
+          // slot's as this page loaded it.
+          const judged = judgedPlacementRange(placement);
+          if (judged) return practiceRangeBounds(judged).last < endedBefore;
           const slot = slotById.get(placement.slotId);
           return (
             Boolean(slot) &&
-            (slot.effectiveUntil < seasonToday ||
-              (Boolean(placement.effectiveUntil) && placement.effectiveUntil < seasonToday))
+            (slot.effectiveUntil < endedBefore ||
+              (Boolean(placement.effectiveUntil) && placement.effectiveUntil < endedBefore))
           );
         })
       : [];
@@ -711,7 +760,7 @@ export default function PracticeSchedulingPage() {
         ? "Today's date on the season's clock is unknown, so new practices cannot be dated."
         : ended.length > 0
           ? `The scheduler placed ${ended.map((p) => p.teamId).join(', ')} in a practice slot ` +
-            `whose dates end before today (${seasonToday}), so nothing was staged.`
+            `whose dates end before today (${endedBefore}), so nothing was staged.`
           : null;
     if (refusal) {
       setReviewAssignments(null);
@@ -735,11 +784,9 @@ export default function PracticeSchedulingPage() {
           assignment: slot
             ? {
                 ...assignment,
-                effectiveDateRange: newPlacementRange(
-                  slot,
-                  seasonToday,
-                  assignment.effectiveUntil ?? null
-                ),
+                effectiveDateRange:
+                  judgedPlacementRange(assignment) ??
+                  newPlacementRange(slot, seasonToday, assignment.effectiveUntil ?? null),
               }
             : assignment,
           index,
@@ -939,6 +986,12 @@ export default function PracticeSchedulingPage() {
   /** The daylight post-pass's report (8.9 PR 6), one line per kind. */
   const daylightMessage = useMemo(
     () => describeDaylightReport(autoScheduler.result?.daylight),
+    [autoScheduler.result]
+  );
+  // M4.8: saved practices the run held season-long (range unreadable) or
+  // that have ended, so the operator sees why a slot was kept or offered.
+  const lockMessage = useMemo(
+    () => describeLockReport(autoScheduler.result?.lock),
     [autoScheduler.result]
   );
 
@@ -1805,6 +1858,16 @@ export default function PracticeSchedulingPage() {
               className="mt-4 rounded-lg border border-border-subtle bg-bg-glass px-4 py-3 text-sm text-text-secondary"
             >
               {daylightMessage}
+            </div>
+          )}
+
+          {lockMessage && (
+            <div
+              role="status"
+              data-testid="auto-scheduler-lock-report"
+              className="mt-4 rounded-lg border border-border-subtle bg-bg-glass px-4 py-3 text-sm text-text-secondary"
+            >
+              {lockMessage}
             </div>
           )}
 

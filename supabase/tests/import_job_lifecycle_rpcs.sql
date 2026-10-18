@@ -5,7 +5,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(17);
+SELECT plan(18);
 
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"11111111-1111-1111-1111-111111111111"}';
@@ -50,6 +50,20 @@ SELECT is(
     )::int,
     1,
     'create_import_job writes import.started audit metadata'
+);
+
+-- The audit log keeps no upload file names (owner decision 2026-10-14;
+-- 20261018000000). The metadata is compared whole, so a row that lost its
+-- other keys fails here too, not only one that kept `file_name`.
+SELECT is(
+    (
+        SELECT metadata
+        FROM public.audit_log
+        WHERE resource_id = ((SELECT job FROM created_import_job)).id
+          AND action = 'import.started'
+    ),
+    '{"import_type": "players", "job_type": "registration", "status": "importing"}'::jsonb,
+    'create_import_job''s import.started metadata is import_type, job_type and status, with no file_name'
 );
 
 CREATE TEMP TABLE updated_import_job AS

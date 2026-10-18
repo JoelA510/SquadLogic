@@ -1577,7 +1577,20 @@ smoke-tested
       characters (#577).
     - `scheduler.auto_progress` volume is accepted (about 50 rows per run, 180-day retention).
     - Still open: the SQL-side `create_import_job` audit (`20260522130000`) stores `file_name`
-      and needs its own migration. *Statically reviewed.*
+      and needs its own migration. *Statically reviewed.* **Fixed 2026-10-18** (branch
+      `claude/vibrant-allen-hr7y7s-importfilename`, migration `20261018000000`;
+      `docs/PLAN_AUDIT_IN_TRANSACTION.md` §3.4, Q1, Q5): `create_import_job` is replaced wholesale
+      without `file_name` in its `import.started` metadata (the name still forms `storage_path`),
+      and `ImportContext` no longer sends `file_name` to `import-validation`. The production rows
+      that carry a name are left to the 180-day retention. The smoke, a pgTAP assertion, a unit
+      test and the real-backend import scenario each fail with the field put back. *Executed*
+      (harness and unit test; pgTAP and the real-backend scenario by CI).
+    - Discovered by that fix, not changed: the import panel's telemetry write-back
+      (`ImportPanel.jsx`, `log_telemetry_event` `import.suggestions_applied`) still sends
+      `file_name`, and `telemetry_log.payload` stores it: all 5 such production rows carry one
+      (read-only count, 2026-10-18). The owner's 2026-10-14 decision named the audit log; whether
+      it covers telemetry is a question for the owner. *Executed* (the count); the code path
+      *statically reviewed*.
 
 - 2026-10-14, found by PR w3b (M4.6, M4.3):
   - The mock's organization id is `org-1`, not a UUID, and core's `SlotSchema` refuses an
@@ -1842,7 +1855,8 @@ smoke-tested
     `metadata.stage = 'buddy_pairs'`, both for the same job. A reader counting completed imports
     by action counts each import twice. Not changed. *Executed* (real-backend run 39007937255).
   - `create_import_job`'s `import.started` row still stores `file_name` (the open Wave 2 item);
-    seen in the same run's rows. *Executed.*
+    seen in the same run's rows. *Executed.* **Fixed 2026-10-18** by `20261018000000` (the
+    2026-10-14 entry above).
   - The real-backend runs' Edge logs show the auto-scheduler's own run record refused ("Persistence
     failed: Not authorized: User is not a member of organization ..."), and the run completes with
     `runId: null`; the scenario passes. Not investigated; whether `main` shows it too is

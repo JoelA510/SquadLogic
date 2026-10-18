@@ -66,6 +66,9 @@ R22="$REPO/docs/sql/20261006000000_revert.sql"
 # wrapper, so the M20 plants are aimed here), and its revert.
 M23="$REPO/supabase/migrations/20261007000000_enact_practice_recommendation_blackout.sql"
 R23="$REPO/docs/sql/20261007000000_revert.sql"
+# Wave 2: create_import_job stops auditing the file name, and its revert.
+M24="$REPO/supabase/migrations/20261018000000_create_import_job_no_file_name.sql"
+R24="$REPO/docs/sql/20261018000000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3499,6 +3502,20 @@ plant "R23 the revert leaves the lock helper in place" "$R23" \
   "DROP FUNCTION IF EXISTS public.enact_lock_cause_row(uuid);" \
   "revert 20261007000000"
 
+# Wave 2: the import.started audit keeps no file name. The smoke RAISEs on a
+# row that still stores one; the revert's md5 claim on a body that drifted.
+plant "M24 create_import_job still audits the file name" "$M24" \
+  "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'status','importing')" \
+  "jsonb_build_object('import_type',v_import_type,'job_type',v_job_type,'file_name',v_file_name,'status','importing')" \
+  "smoke 20261018000000"
+
+plant "R24 the revert restores a drifted create_import_job body" "$R24" \
+  "    RETURN v_job;
+END;" \
+  "    RETURN v_job; -- drifted
+END;" \
+  "revert 20261018000000"
+
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye
 # ---------------------------------------------------------------------------
@@ -3628,6 +3645,7 @@ declare -A CLAIM_PROVER=(
   ["(checked) a blackout edit from a second session waits for an open blackout enact: the enact holds its blackout row FOR SHARE until it commits"]="M23 the blackout row is not locked FOR SHARE"
   ["(checked) a write of the retired field from a second session waits for an open retirement enact: the enact holds its field row FOR SHARE until it commits"]="M23 the retired field is not locked FOR SHARE"
   ["(checked) the blackout enact revert restores the 20261004000000 enact_practice_recommendation body byte for byte, SECURITY INVOKER, and drops enact_lock_cause_row"]="R23 the revert leaves the lock helper in place"
+  ["(checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"]="R24 the revert restores a drifted create_import_job body"
   ["(checked) the revert counted the coach practice preferences it was about to destroy, the coaches they span, and the approved ones"]="R13 the preference warning stops counting coaches distinctly"
   ["(checked) replaying the production drift, the reconcile left no broad ALL policy and a non-admin member could write neither teams nor fields"]="M14 the reconcile skips dropping the broad policy"
   ["(checked) replaying the production drift, the reconcile restored the missing read policies and a member read teams and practice_slots in their own org only"]="M14 the reconcile skips creating the missing read policies"

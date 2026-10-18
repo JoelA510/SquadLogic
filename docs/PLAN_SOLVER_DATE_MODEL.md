@@ -497,7 +497,10 @@ the build settled it:
   does not end after it starts** (such a window would overlap nothing, so a
   coach clash through it would pass unseen). The solver throws on one;
   `index.ts` refuses the run first (422 `SLOT_DATING_UNREADABLE`, the slot
-  ids in `slotIds`, audited as `scheduler.auto_refused`).
+  ids in `slotIds`, audited as `scheduler.auto_refused`). The start minute is
+  the store's `start_time` (the loader now selects it), the end its
+  `end_time`, the body's instants only where the store is silent, so the wall
+  window is never half body and half store (found by the self-review).
 - **`no-live-date`** is given to every unplaced team when no run slot has a
   live date from today on: every slot is open to every team, so "every slot it
   could take has ended" is the run's condition.
@@ -508,7 +511,15 @@ the build settled it:
   validity**, the span the constraint holds it on (Q2), so the two still agree.
 - **The page** reads `liveFrom` through `runLiveFrom` (a calendar date, else
   `null`), falling back to its own season clock for a response from a
-  function deployed before this one.
+  function deployed before this one. New placements are dated from it (Q7);
+  a placement whose slot ends before the _later_ of `liveFrom` and the page's
+  own today is still refused, so a run reviewed after midnight cannot stage a
+  practice whose only date has passed.
+- **The daylight pass truncating a placement** re-measures the evaluation, as
+  withdrawing one already did: the objective is dated, so the dates handed to
+  TIME TBD leave the persisted evaluation too.
+- **Moving a placement** frees only that placement (occupants and coach
+  windows carry `placed`), never a relocation that names the same team.
 - **The daylight witness** (`tests/autoSchedulerDaylight.test.js`): its slot
   with no end date anywhere (`s-g-nodates`) can no longer reach the solver
   (Q3), so its solver runs use the other slots and six teams, the pass's

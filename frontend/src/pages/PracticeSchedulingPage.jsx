@@ -707,20 +707,25 @@ export default function PracticeSchedulingPage() {
     const placements = autoScheduler.result.assignments ?? [];
     const lockedTeamIds = new Set(seasonRows.map(getAssignmentTeamId));
     const clash = placements.find((placement) => lockedTeamIds.has(placement.teamId));
-    // The date the solver judged from (M4.8 Q7), else this page's own clock.
-    const seasonToday =
-      runLiveFrom(autoScheduler.result) ?? seasonCalendarDate(Date.now(), timezone);
+    // Each new placement is dated from the date the solver judged it from
+    // (M4.8 Q7), else this page's own clock.
+    const pageToday = seasonCalendarDate(Date.now(), timezone);
+    const seasonToday = runLiveFrom(autoScheduler.result) ?? pageToday;
     // A placement in a slot whose window has already ended has no dates left
     // to hold -- nor has one the daylight pass truncated to end before today.
-    // The dated solver (M4.8) never offers such a slot; this still refuses
-    // one, from a function deployed before it.
-    const ended = seasonToday
+    // The dated solver (M4.8) never offers such a slot from its own today; but
+    // a run reviewed after midnight can hold one whose last date was the
+    // solver's today and is now past, so "ended" is judged on the later of the
+    // two clocks. The range staged is still the one the solver judged.
+    const endedBefore =
+      pageToday && seasonToday && pageToday > seasonToday ? pageToday : seasonToday;
+    const ended = endedBefore
       ? placements.filter((placement) => {
           const slot = slotById.get(placement.slotId);
           return (
             Boolean(slot) &&
-            (slot.effectiveUntil < seasonToday ||
-              (Boolean(placement.effectiveUntil) && placement.effectiveUntil < seasonToday))
+            (slot.effectiveUntil < endedBefore ||
+              (Boolean(placement.effectiveUntil) && placement.effectiveUntil < endedBefore))
           );
         })
       : [];
@@ -731,7 +736,7 @@ export default function PracticeSchedulingPage() {
         ? "Today's date on the season's clock is unknown, so new practices cannot be dated."
         : ended.length > 0
           ? `The scheduler placed ${ended.map((p) => p.teamId).join(', ')} in a practice slot ` +
-            `whose dates end before today (${seasonToday}), so nothing was staged.`
+            `whose dates end before today (${endedBefore}), so nothing was staged.`
           : null;
     if (refusal) {
       setReviewAssignments(null);

@@ -31,11 +31,15 @@ export interface TimeWindow extends LiveDays {
   endSec: number;
   teamId?: string;
   slotId?: string;
+  /** A new placement's window (the search may move it); absent on fixed occupancy. */
+  placed?: boolean;
 }
 
 /** One holder of a slot's capacity (a locked row, a relocation, a new placement), on its dates. */
 export interface SlotOccupant extends LiveDays {
   teamId: string;
+  /** A new placement (the search may move it); absent on a locked row or relocation. */
+  placed?: boolean;
 }
 
 /**

@@ -128,9 +128,9 @@ export interface DaylightSlot {
   effectiveUntil: string | null;
   /**
    * Minutes past local midnight the practice starts, on the season's clock:
-   * the slot's `start` instant read there (M4.8: with `endMinutes`, the wall
-   * window the solver's dated hard constraint compares). The pass itself
-   * judges the end only.
+   * the store's `start_time`, else the slot's `start` instant read there
+   * (M4.8: with `endMinutes`, the wall window the solver's dated hard
+   * constraint compares). The pass itself judges the end only.
    */
   startMinutes: number | null;
   /** Minutes past local midnight the practice ends, on the season's clock. */
@@ -203,6 +203,8 @@ export interface StoredSlot {
   firstDate?: string | null;
   /** `end_time` in minutes; `null` when unreadable. Absent only off the load path. */
   endMinutes?: number | null;
+  /** `start_time` in minutes (M4.8); `null` when unreadable. Absent only off the load path. */
+  startMinutes?: number | null;
 }
 
 const WEEKDAY_INDEX: Readonly<Record<string, number>> = Object.freeze({
@@ -233,8 +235,9 @@ function storedFirstDate(validFrom: unknown, dayOfWeek: unknown): string | null 
  * silent, as the page itself falls back: the first date from the `start`
  * instant on the season's clock when `valid_from` is null, and
  * `effectiveUntil` when `valid_until` is null (the season's end). No other
- * body key is read (W9). The start minute is the `start` instant's, on the
- * season's clock (the store's `start_time` is what the page built it from).
+ * body key is read (W9). The start minute is the store's `start_time` as the
+ * end minute is its `end_time` (M4.8), so the wall window the solver judges is
+ * the stored one, never half body and half store.
  */
 export function toDaylightSlot(
   row: { id: string; start: Date; end: Date; effectiveUntil?: unknown },
@@ -251,7 +254,12 @@ export function toDaylightSlot(
     firstDate: stored?.firstDate ?? (sameDay ? start.date : null),
     effectiveUntil:
       stored?.validUntil ?? (isIsoDate(row.effectiveUntil) ? row.effectiveUntil : null),
-    startMinutes: sameDay ? start.minutes : null,
+    startMinutes:
+      stored && stored.startMinutes !== undefined
+        ? stored.startMinutes
+        : sameDay
+          ? start.minutes
+          : null,
     endMinutes:
       stored && stored.endMinutes !== undefined ? stored.endMinutes : sameDay ? end.minutes : null,
   };
@@ -302,7 +310,7 @@ export async function loadVenueDaylight(
     () =>
       client
         .from('practice_slots')
-        .select('id, field_id, valid_from, valid_until, day_of_week, end_time')
+        .select('id, field_id, valid_from, valid_until, day_of_week, start_time, end_time')
         .eq('organization_id', organizationId)
         .order('id', { ascending: true }),
     pageSize
@@ -322,6 +330,7 @@ export async function loadVenueDaylight(
       validUntil: isIsoDate(row.valid_until) ? row.valid_until : null,
       firstDate: storedFirstDate(row.valid_from, row.day_of_week),
       endMinutes: startMinutesOf(row.end_time),
+      startMinutes: startMinutesOf(row.start_time),
     });
   }
   const unreadSlots = params.slotIds.filter((id) => !storedById.has(id));

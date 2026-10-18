@@ -176,6 +176,7 @@ function storedRow(s) {
     valid_from: s.effectiveFrom,
     valid_until: s.effectiveUntil ?? null,
     day_of_week: 'tue',
+    start_time: `${s.startTime}:00`,
     end_time: `${s.endTime}:00`,
   };
 }
@@ -448,7 +449,7 @@ describe('the venue loader: from the database, as the caller, paged', () => {
     const fieldCalls = client.calls.filter((c) => c.table === 'fields');
     assert.equal(
       slotCalls[0].select,
-      'id, field_id, valid_from, valid_until, day_of_week, end_time'
+      'id, field_id, valid_from, valid_until, day_of_week, start_time, end_time'
     );
     assert.match(
       fieldCalls[0].select,
@@ -473,6 +474,8 @@ describe('the venue loader: from the database, as the caller, paged', () => {
       validUntil: '2026-11-24',
       firstDate: '2026-09-01',
       endMinutes: 19 * 60,
+      // M4.8: the stored start too, so the solver's wall window is the store's.
+      startMinutes: 17 * 60 + 30,
     });
     assert.equal(loaded.slots.get('s-g-nodates').validUntil, null);
   });
@@ -549,6 +552,14 @@ describe('W9: the body never supplies the venue, its coordinates or its lighting
       'startMinutes',
     ]);
     assert.equal(read.fieldId, F.unlit, "the body's fieldId was read");
+    // M4.8: the stored start wins over the body's instant, as the end does.
+    const storedStart = toDaylightSlot(row, ZONE, {
+      fieldId: F.unlit,
+      validUntil: '2026-10-01',
+      startMinutes: 16 * 60,
+      endMinutes: 17 * 60,
+    });
+    assert.deepEqual([storedStart.startMinutes, storedStart.endMinutes], [16 * 60, 17 * 60]);
     assert.equal(read.effectiveUntil, '2026-10-01', "the body's end date beat the store's");
   });
 
@@ -622,6 +633,51 @@ describe('W7: nothing silently dropped; truncated + TIME TBD = the full span', (
     const result = await run();
     assert.ok(result.daylight.meta.placementsWithdrawn > 0);
     assert.equal(result.evaluation.summary.assignedTeams, result.placements.length + LOCKED.length);
+  });
+
+  it('a truncated placement re-measures the dated evaluation too (M4.8 Q1)', async () => {
+    // A two-place unlit slot past sunset from late September, a locked row on
+    // it from 10-20 only, and one team to place. The search judges the team's
+    // whole range and seats it beside the row; the pass truncates it before the
+    // row starts. The persisted evaluation is the returned schedule's, so the
+    // two never share a date: the busiest date holds one, not two.
+    const body = [
+      slot('s-cap2', F.unlit, '2026-09-01', '2026-11-24', '17:30', '19:00', {
+        capacity: 2,
+      }),
+    ];
+    const rows = anchoredSlots(body);
+    const loaded = await loadDaylight({ ...TABLES, practice_slots: body.map(storedRow) }, rows);
+    const slots = new Map(rows.map((s) => [s.id, toDaylightSlot(s, ZONE, loaded.slots.get(s.id))]));
+    const result = await runPracticeOptimizer({
+      teams: [
+        prepareTeam({ id: 't1', division: 'U10', coachId: 'k-t1' }),
+        prepareTeam({ id: 't-row', division: 'U10', coachId: 'k-row' }),
+      ],
+      slots: rows.map((s) => ({ id: s.id, day: s.day, start: s.start, end: s.end, capacity: 2 })),
+      locked: [
+        {
+          assignmentId: 'a-late',
+          teamId: 't-row',
+          slotId: 's-cap2',
+          effectiveDateRange: '[2026-10-20,2026-11-25)',
+        },
+      ],
+      placeableTeamIds: ['t1'],
+      config: CONFIG,
+      dating: { liveFrom: TODAY, slots },
+      daylight: { slots, venues: loaded.venues, timeZone: ZONE, today: TODAY },
+    });
+    const [placed] = result.placements;
+    assert.equal(placed?.slotId, 's-cap2', 'the fixture did not place t1 on the slot');
+    assert.ok(placed.effectiveUntil && placed.effectiveUntil < '2026-10-20', 'not truncated first');
+    assert.equal(result.daylight.meta.placementsTruncated, 1);
+    assert.equal(result.daylight.meta.placementsWithdrawn, 0);
+    const util = result.evaluation.slotUtilization.find((u) => u.slotId === 's-cap2');
+    assert.deepEqual(
+      { assignedCount: util.assignedCount, assignmentRows: util.assignmentRows },
+      { assignedCount: 1, assignmentRows: 2 }
+    );
   });
 
   it('the page honours the truncated range, and never extends it', () => {

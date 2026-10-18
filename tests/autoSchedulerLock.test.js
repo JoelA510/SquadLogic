@@ -410,6 +410,18 @@ describe('the dated hard constraint (M4.8 §3, the shared witness table)', () =>
     });
   }
 
+  it('a run with no slots at all is not "no live date": the teams have no slot', async () => {
+    const run = await runPracticeOptimizer({
+      teams: [prepareTeam({ id: 'N', division: 'U10', coachId: 'cN' })],
+      slots: [],
+      locked: [],
+      placeableTeamIds: ['N'],
+      dating: { liveFrom: SOLVER_DATED_TODAY, slots: new Map() },
+      config: { timeBudgetMs: 20000, maxIterations: 10, seed: 1 },
+    });
+    assert.deepEqual(run.unassigned, [{ teamId: 'N', reason: 'no-slot-available' }]);
+  });
+
   it('a slot the solver cannot date throws, naming it, and is what index.ts refuses', async () => {
     const { slots, dating } = solverDatedRun(SOLVER_DATED_CASES[0], toDaylightSlot);
     // The store holds no first date and the body's start and end fall on two
@@ -434,6 +446,8 @@ describe('the dated hard constraint (M4.8 §3, the shared witness table)', () =>
       { effectiveUntil: '2026-02-30' },
       { startMinutes: null },
       { endMinutes: good.startMinutes },
+      // 24:00 is not a wall time the scoring engine reads, so it is undatable here.
+      { endMinutes: 1440 },
     ]) {
       assert.deepEqual(
         undatableSlotIds(['sA'], new Map([['sA', { ...good, ...bad }]])),
@@ -740,10 +754,11 @@ describe('the page payload (plan §3 "Payload builder")', () => {
       path.join(process.cwd(), 'frontend/src/pages/PracticeSchedulingPage.jsx'),
       'utf8'
     );
-    assert.match(
-      page,
-      /const seasonToday =\s*runLiveFrom\(autoScheduler\.result\) \?\? seasonCalendarDate\(Date\.now\(\), timezone\);/
-    );
+    assert.match(page, /const pageToday = seasonCalendarDate\(Date\.now\(\), timezone\);/);
+    assert.match(page, /const seasonToday = runLiveFrom\(autoScheduler\.result\) \?\? pageToday;/);
+    // The staged range starts from the run's date; "ended" is judged on the later clock.
+    assert.match(page, /newPlacementRange\(\s*slot,\s*seasonToday,/);
+    assert.match(page, /slot\.effectiveUntil < endedBefore/);
     const hook = readFileSync(
       path.join(process.cwd(), 'frontend/src/hooks/useAutoScheduler.js'),
       'utf8'

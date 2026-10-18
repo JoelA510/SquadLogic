@@ -124,8 +124,10 @@ function readDating(
   if (!dating) return null;
   const firstDay = calendarDayNumber(dating.firstDate);
   const lastDay = calendarDayNumber(dating.effectiveUntil);
+  // A wall minute of one day, as the loaders read one (0-1439): the scoring
+  // engine's wall-time reading has no 24:00, so neither does this.
   const minutes = (value: unknown) =>
-    typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 1440
+    typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 1439
       ? value
       : null;
   const start = minutes(dating.startMinutes);
@@ -552,7 +554,7 @@ function seat(
 ): void {
   const span = slot.span as LiveDays;
   const list = occupants.get(slot.id) ?? [];
-  list.push({ teamId, first: span.first, last: span.last });
+  list.push({ teamId, first: span.first, last: span.last, placed: true });
   occupants.set(slot.id, list);
   if (!team) return;
   for (const coachId of team.coachIds) {
@@ -564,6 +566,7 @@ function seat(
       last: span.last,
       startSec: slot.startSec,
       endSec: slot.endSec,
+      placed: true,
     });
     coachAssignments.set(coachId, existing);
   }
@@ -630,11 +633,14 @@ function tryMutate(
     const slotId = newMap.get(teamId);
     if (!slotId) return;
     newMap.delete(teamId);
-    // A placeable team holds no locked row or relocation, so its id names
-    // only its own placement among the slot's occupants.
+    // Only the team's own placement leaves: a relocation or locked row that
+    // names the same team (a relocation whose source row is not current) is
+    // fixed occupancy and stays held.
+    const ownPlacement = (o: { teamId?: string; placed?: boolean }) =>
+      o.placed === true && o.teamId === teamId;
     newOcc.set(
       slotId,
-      (newOcc.get(slotId) ?? []).filter((o) => o.teamId !== teamId)
+      (newOcc.get(slotId) ?? []).filter((o) => !ownPlacement(o))
     );
     const team = teamsById.get(teamId);
     if (!team) return;
@@ -642,7 +648,7 @@ function tryMutate(
       const entries = newCoach.get(coachId) ?? [];
       newCoach.set(
         coachId,
-        entries.filter((e) => e.teamId !== teamId)
+        entries.filter((e) => !ownPlacement(e))
       );
     }
   };
@@ -806,7 +812,7 @@ function explainUnplaced(
   teamsById: Map<string, SchedulerTeam>,
   slotsById: Map<string, DatedSchedulerSlot>
 ): Unplaced[] {
-  if ([...slotsById.values()].every((slot) => slot.span === null)) {
+  if (slotsById.size > 0 && [...slotsById.values()].every((slot) => slot.span === null)) {
     return unassigned.map((entry) => ({ teamId: entry.teamId, reason: NO_LIVE_DATE_REASON }));
   }
   if (gate.verdicts.size === 0) return unassigned;
@@ -1075,7 +1081,10 @@ export async function runPracticeOptimizer(params: {
       ...params.daylight,
     });
     daylight = pass.report;
-    if (pass.report.meta.placementsWithdrawn > 0) {
+    // Re-measured when the pass truncated a placement as well as when it
+    // withdrew one: the objective is dated (M4.8 Q1), so the dates a
+    // truncation hands to TIME TBD leave the persisted evaluation too.
+    if (pass.report.meta.placementsWithdrawn > 0 || pass.report.meta.placementsTruncated > 0) {
       const rescored = scoreSchedule(
         base,
         pass.placements,

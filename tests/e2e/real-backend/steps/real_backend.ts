@@ -135,8 +135,9 @@ Then(
  * import-validation's (`recordAuditNow`, made with the caller's client since
  * #577; with the service-role client every one was refused on
  * `audit_log.user_id NOT NULL`, and only logged), and finalize_import_job's.
- * `create_import_job` also writes an `import.started` row, with the file's
- * name and no row counts; the counts are how the Edge's row is told apart.
+ * `create_import_job` also writes an `import.started` row, with no row counts
+ * (the counts are how the Edge's row is told apart) and, since 20261018050000,
+ * no file name: the audit log keeps none (owner decision 2026-10-14).
  */
 const IMPORT_AUDIT = { validated: 'import.started', applied: 'import.completed' } as const;
 
@@ -223,6 +224,33 @@ Then('the audit log records the import as the administrator', async ({ page }) =
   ]);
   const job = finalized[0].resource_id;
   expect(job, 'the applied job').toBeTruthy();
+
+  // No import audit row stores the file name: every fresh one, not only the
+  // rows picked out below.
+  expect(
+    fresh.filter((row) => row.metadata !== null && 'file_name' in row.metadata),
+    `import audit rows carrying a file name, among: ${seen}`
+  ).toEqual([]);
+  // create_import_job's row: one, for the applied job, naming the import.
+  const started = fresh.filter(
+    (row) => row.action === IMPORT_AUDIT.validated && row.metadata?.total_rows === undefined
+  );
+  expect(
+    started.map((row) => ({
+      resource_type: row.resource_type,
+      resource_id: row.resource_id,
+      user_id: row.user_id,
+      metadata: row.metadata,
+    })),
+    `create_import_job's ${IMPORT_AUDIT.validated} row, among: ${seen}`
+  ).toEqual([
+    {
+      resource_type: 'import_job',
+      resource_id: job,
+      user_id: SEEDED_ADMIN.userId,
+      metadata: { import_type: 'players', job_type: 'registration', status: 'importing' },
+    },
+  ]);
   for (const row of applied) {
     expect([row.user_id, row.resource_id], `every ${IMPORT_AUDIT.applied} row: ${seen}`).toEqual([
       SEEDED_ADMIN.userId,

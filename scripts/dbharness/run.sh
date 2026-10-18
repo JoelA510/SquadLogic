@@ -1251,7 +1251,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018070000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018030000 20261018050000 20261018070000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old
@@ -2184,6 +2184,27 @@ NEEDLES
       else
         echo "FAIL revert ${id}: the RSVP revert did not restore the previous upsert_team_event_rsvp body and posture"
         dump 10 $SCRATCH/harness_rsvp; STATUS=1
+      fi
+    fi
+    if [ "$id" = "20261018050000" ]; then
+      # The body read back from the catalogue, not from the revert's own
+      # NOTICE: md5 of the 20260522130000 dollar-quoted text (the body
+      # production runs, read back 2026-10-18), and the posture. `missing`
+      # fires when the lookup finds no function, so a broken query cannot read
+      # as restored.
+      if psql_cmd "SELECT 'IMPORT-JOB-VERDICT:' || CASE
+               WHEN to_regprocedure('public.create_import_job(uuid, text, text)') IS NULL THEN 'missing'
+               WHEN (SELECT md5(p.prosrc) = '08b6ffefe1e48615a786a64449128386' AND p.prosecdef
+                            AND p.proconfig = ARRAY['search_path=public']
+                       FROM pg_proc p
+                      WHERE p.oid = 'public.create_import_job(uuid, text, text)'::regprocedure)
+                 THEN 'restored'
+               ELSE 'wrong' END;" \
+         >$SCRATCH/harness_import_job 2>&1 && grep -q 'IMPORT-JOB-VERDICT:restored' $SCRATCH/harness_import_job; then
+        echo "  | (checked) the create_import_job revert restores the 20260522130000 body byte for byte, SECURITY DEFINER with search_path=public"
+      else
+        echo "FAIL revert ${id}: the create_import_job revert did not restore the previous body and posture"
+        dump 10 $SCRATCH/harness_import_job; STATUS=1
       fi
     fi
     if [ "$id" = "20261018070000" ]; then

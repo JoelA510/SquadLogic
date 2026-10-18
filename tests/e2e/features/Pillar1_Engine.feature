@@ -37,6 +37,15 @@ Feature: Pillar 1 - The Engine (Scheduling & Team Generation)
     And "Hawks" and "Owls" are not both placed, since they share a coach
     And nothing new is placed in the full Tuesday slot
 
+  Scenario: A saved practice that has ended no longer holds its slot
+    Given these teams and coaches in "U10 Boys":
+      | team  | coach        |
+      | Hawks | Coach Rivera |
+    And a Tuesday practice slot whose saved practice ended last week
+    When I run the auto-scheduler on the Practice Scheduling page
+    Then the auto-scheduler places 1 teams and leaves 0 unplaced
+    And the page says 1 saved practice has ended and its slot was offered
+
   Scenario: Game Schedule Generation
     Given a club whose organization id is a UUID, as in production
     And these teams and coaches in "U10 Boys":

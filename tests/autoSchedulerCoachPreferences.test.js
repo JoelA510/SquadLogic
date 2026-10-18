@@ -22,6 +22,8 @@ import {
   weekdayCode,
 } from '../supabase/functions/_shared/engines/coach-preference-load.js';
 import { prepareTeam } from '../supabase/functions/_shared/engines/practice-coaches.js';
+import { toDaylightSlot } from '../supabase/functions/_shared/engines/practice-daylight.js';
+import { seasonLongDating } from './fixtures/solverDatedCases.js';
 import { AutoSchedulerInputSchema } from '../supabase/functions/_shared/schemas/auto-scheduler.js';
 
 const LOC_A = '00000000-0000-4000-8000-00000000000a';
@@ -179,6 +181,13 @@ async function run(gate) {
     locked: LOCKED,
     placeableTeamIds: PLACEABLE,
     preferenceGate: gate,
+    // M4.8: season-long from each slot's first occurrence, so the dated rule
+    // judges this fixture as the undated one did.
+    dating: seasonLongDating(SLOTS, toDaylightSlot, {
+      timeZone: 'UTC',
+      until: '2026-11-30',
+      liveFrom: '2026-09-01',
+    }),
     config: { timeBudgetMs: 20000, maxIterations: 300, seed: 42 },
   });
 }

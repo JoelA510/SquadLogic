@@ -29,6 +29,7 @@ const state = vi.hoisted(() => ({
   /** @type {any[]} */ rows: [],
   /** @type {any[]} */ triggers: [],
   /** @type {any[]} */ placements: [],
+  /** @type {any} */ lock: null,
   failSeasonRead: false,
   nextId: 1,
   /** @type {any} */ dashboard: null,
@@ -136,6 +137,7 @@ vi.mock('../frontend/src/hooks/useAutoScheduler.js', async () => {
               runId: `edge-run-${state.triggers.length}`,
               assignments: state.placements,
               unassigned: [],
+              lock: state.lock,
             },
           });
         },
@@ -249,6 +251,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-10-01T16:00:00Z'));
   state.triggers = [];
   state.placements = [];
+  state.lock = null;
   state.failSeasonRead = false;
   state.rows = [
     dbRow('r-a', 'team-a', 'run-1'),
@@ -391,5 +394,85 @@ describe('the page loader and the Edge loader read one set, one way', () => {
       assignedVia,
     });
     expect(page.rows.map(key)).toEqual(edge.rows.map(key));
+  });
+});
+
+describe('the review writes the range the run judged (M4.8)', () => {
+  it("a placement is saved with the function's judged range, not one rebuilt from stale slot dates", async () => {
+    // The page loaded slot-1 valid to 2026-11-30; since then the store's slot
+    // was cut to 2026-11-15, which is what the function read and judged.
+    const sent = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      sent.push(...rowsIn(JSON.parse(String(init?.body ?? '{}'))));
+      return new Response(
+        JSON.stringify({ status: 'success', runId: 'run-3', teamsWithoutPractice: [] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    });
+    render(
+      <MemoryRouter>
+        <PracticeSchedulingPage />
+      </MemoryRouter>
+    );
+    expect(state.slotRow.valid_until).toBe('2026-11-30');
+    state.placements = [
+      {
+        teamId: 'team-c',
+        slotId: 'slot-1',
+        source: 'auto',
+        effectiveDateRange: '[2026-10-01,2026-11-15]',
+      },
+    ];
+    await runScheduler();
+    const apply = await screen.findByRole('button', { name: /apply schedule/i });
+    await waitFor(() => expect(apply).not.toBeDisabled());
+    fireEvent.click(apply);
+    await waitFor(() => expect(sent.some((r) => r.team_id === 'team-c')).toBe(true));
+    expect(sent.find((r) => r.team_id === 'team-c').effective_date_range).toBe(
+      '[2026-10-01,2026-11-15]'
+    );
+  });
+
+  it("control: a placement with no judged range (an older function) is dated from the page's slot", async () => {
+    const sent = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      sent.push(...rowsIn(JSON.parse(String(init?.body ?? '{}'))));
+      return new Response(
+        JSON.stringify({ status: 'success', runId: 'run-3', teamsWithoutPractice: [] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    });
+    render(
+      <MemoryRouter>
+        <PracticeSchedulingPage />
+      </MemoryRouter>
+    );
+    state.placements = [{ teamId: 'team-c', slotId: 'slot-1', source: 'auto' }];
+    await runScheduler();
+    const apply = await screen.findByRole('button', { name: /apply schedule/i });
+    await waitFor(() => expect(apply).not.toBeDisabled());
+    fireEvent.click(apply);
+    await waitFor(() => expect(sent.some((r) => r.team_id === 'team-c')).toBe(true));
+    expect(sent.find((r) => r.team_id === 'team-c').effective_date_range).toBe(
+      '[2026-10-01,2026-11-30]'
+    );
+  });
+
+  it('says which saved practices the run held season-long, and which have ended', async () => {
+    render(
+      <MemoryRouter>
+        <PracticeSchedulingPage />
+      </MemoryRouter>
+    );
+    state.lock = { unreadableRange: ['r-a'], endedRows: ['r-b'] };
+    await runScheduler();
+    const report = await screen.findByTestId('auto-scheduler-lock-report');
+    expect(report).toHaveAttribute('role', 'status');
+    expect(report.textContent).toContain(
+      '1 saved practice has a date range that could not be read, so its slot was held for the whole season: r-a.'
+    );
+    expect(report.textContent).toContain(
+      '1 saved practice has ended, so its slot was offered to other teams from today.'
+    );
   });
 });

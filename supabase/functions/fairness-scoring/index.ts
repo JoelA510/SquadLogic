@@ -5,6 +5,7 @@ import {
   datedSlotsIssue,
   undatedExceptionsIssue,
   refuseEmptyGameRoster,
+  refuseUnmatchedGameRoster,
   refuseEmptyPracticeRoster,
 } from '../_shared/schemas/scoring.ts';
 import {
@@ -100,6 +101,12 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
     const emptyGameRoster = refuseEmptyGameRoster(games);
     if (emptyGameRoster) {
       return jsonResponse(emptyGameRoster, 422);
+    }
+    // And one step on (#576 follow-up, Q2): games and teams, but no game names
+    // a rostered team, so nothing on the roster would be examined.
+    const unmatchedGameRoster = refuseUnmatchedGameRoster(games);
+    if (unmatchedGameRoster) {
+      return jsonResponse(unmatchedGameRoster, 422);
     }
 
     // 3a'. Dated or undated, never half of each (M4.7, plan Q8): a slot list
@@ -208,9 +215,13 @@ const handler = withFailureLogging('fairness-scoring', async (req, logCtx) => {
 
     // Fairness Index Calculation (Composite)
     const practiceFairness = practiceResults?.summary?.fairnessScore ?? 1.0;
-    const gameFairness = gameResults?.summary?.coveragePercent
-      ? gameResults.summary.coveragePercent / 100
-      : 1.0;
+    // Coverage from the roster since the #576 follow-up. A 0 is a reading, not
+    // an absent one: read as a number, never as truthy (a 0 used to fall
+    // through to 1.0). The refusals above keep a 0 from reaching here today.
+    const gameFairness =
+      typeof gameResults?.summary?.coveragePercent === 'number'
+        ? gameResults.summary.coveragePercent / 100
+        : 1.0;
     const combinedScore = (practiceFairness + gameFairness) / 2;
 
     const evaluationPayload: EvaluationResult = {

@@ -7,11 +7,14 @@ import { assertEquals, assertThrows } from 'https://deno.land/std@0.203.0/assert
 import {
   checkHardConstraints,
   conflictPairKey,
+  type DatedCandidate,
+  type LiveDays,
   listTeamCoachIds,
   prepareTeam,
   type PreparedTeam,
   type TimeWindow,
 } from '../engines/practice-coaches.ts';
+import { calendarDayNumber } from '../engines/practice-live-dates.ts';
 import { evaluatePracticeSchedule } from '../engines/scoring-engine.ts';
 import {
   COACH_IDENTITY_PARITY_CASES,
@@ -26,21 +29,40 @@ import {
   TeamSchema,
 } from '../schemas/scoring.ts';
 
-const hour = (h: number) => new Date(`2026-04-06T${String(h).padStart(2, '0')}:00:00Z`);
-const slotAt = (id: string, startHour: number) => ({
+/** Day number of a date: the dated check (M4.8) reads day numbers, never a `Date`. */
+const dayOf = (iso: string) => calendarDayNumber(iso) as number;
+/** Monday 2026-04-06, every week for ten weeks. */
+const MONDAYS: LiveDays = { first: dayOf('2026-04-06'), last: dayOf('2026-06-08') };
+/** A slot on those Mondays, an hour from `startHour` on the wall clock. */
+const slotAt = (
+  id: string,
+  startHour: number,
+  span: LiveDays | null = MONDAYS
+): DatedCandidate => ({
   id,
-  start: hour(startHour),
-  end: hour(startHour + 1),
+  span,
+  startSec: startHour * 3600,
+  endSec: (startHour + 1) * 3600,
 });
 const early = slotAt('early', 17);
 const overlap = slotAt('overlap', 17);
 const late = slotAt('late', 19);
+/** No slot holds anyone. */
+const NO_OCCUPANTS = new Map<string, LiveDays[]>();
 
-/** Book a team the way index.ts does: one window per coach on the team. */
-function book(team: PreparedTeam, slot: { id: string; start: Date; end: Date }) {
+/** Book a team the way the solver does: one window per coach, on the slot's dates. */
+function book(team: PreparedTeam, slot: DatedCandidate) {
   const coachAssignments = new Map<string, TimeWindow[]>();
   for (const coachId of team.coachIds) {
-    coachAssignments.set(coachId, [{ teamId: team.id, slotId: slot.id, ...slot }]);
+    coachAssignments.set(coachId, [
+      {
+        teamId: team.id,
+        slotId: slot.id,
+        ...(slot.span as LiveDays),
+        startSec: slot.startSec,
+        endSec: slot.endSec,
+      },
+    ]);
   }
   return coachAssignments;
 }
@@ -120,15 +142,83 @@ Deno.test('checkHardConstraints - two name-only teams are never refused as one c
   const t1 = named('T1', 'Coach Mike');
   const t2 = named('T2', 'Coach Mike');
   assertEquals(t1.coachIds, []);
-  assertEquals(checkHardConstraints(t2, overlap, book(t1, early), capacity()), true);
+  assertEquals(checkHardConstraints(t2, overlap, book(t1, early), NO_OCCUPANTS, capacity()), true);
   // POSITIVE CONTROL: the same two rows carrying one id are one person.
   const byId = (id: string) =>
     prepareTeam({ id, division: 'U10', coaches: [{ personId: 'mike', slot: 1 }] });
   assertEquals(
-    checkHardConstraints(byId('T2'), overlap, book(byId('T1'), early), capacity()),
+    checkHardConstraints(byId('T2'), overlap, book(byId('T1'), early), NO_OCCUPANTS, capacity()),
     false
   );
 });
+
+Deno.test(
+  'checkHardConstraints (M4.8) - a clash needs a shared live date AND overlapping wall windows',
+  () => {
+    const t1: PreparedTeam = { id: 'T1', coachId: 'c1', coachIds: ['c1'] };
+    const t2: PreparedTeam = { id: 'T2', coachId: 'c1', coachIds: ['c1'] };
+    const booked = book(t1, early);
+    // POSITIVE CONTROL: same dates, same hour.
+    assertEquals(checkHardConstraints(t2, overlap, booked, NO_OCCUPANTS, capacity()), false);
+    // Same hour, another weekday (Tuesdays): no shared date.
+    const tuesdays = { first: MONDAYS.first + 1, last: MONDAYS.last + 1 };
+    assertEquals(
+      checkHardConstraints(t2, slotAt('overlap', 17, tuesdays), booked, NO_OCCUPANTS, capacity()),
+      true
+    );
+    // Same weekday and hour, after the booked series ends: no shared date.
+    const later = { first: MONDAYS.last + 7, last: MONDAYS.last + 70 };
+    assertEquals(
+      checkHardConstraints(t2, slotAt('overlap', 17, later), booked, NO_OCCUPANTS, capacity()),
+      true
+    );
+    // Touching on the last booked date is a shared date (inclusive).
+    const touching = { first: MONDAYS.last, last: MONDAYS.last + 70 };
+    assertEquals(
+      checkHardConstraints(t2, slotAt('overlap', 17, touching), booked, NO_OCCUPANTS, capacity()),
+      false
+    );
+    // Back to back on the wall clock (18:00 after 17:00-18:00) is not a clash.
+    assertEquals(
+      checkHardConstraints(t2, slotAt('late', 18), booked, NO_OCCUPANTS, capacity()),
+      true
+    );
+  }
+);
+
+Deno.test(
+  'checkHardConstraints (M4.8) - no live date is refused; capacity is a peak per date',
+  () => {
+    const t: PreparedTeam = { id: 'T', coachId: 'c', coachIds: ['c'] };
+    // No live date from today on (plan Q3): never a candidate, even when empty.
+    assertEquals(
+      checkHardConstraints(t, slotAt('early', 17, null), new Map(), NO_OCCUPANTS, capacity()),
+      false
+    );
+    const cap2 = new Map([['early', 2]]);
+    const half = (a: number, b: number): LiveDays => ({
+      first: MONDAYS.first + 7 * a,
+      last: MONDAYS.first + 7 * b,
+    });
+    // Two holders on disjoint dates hold one place of two: the candidate fits.
+    const disjoint = new Map([['early', [half(0, 4), half(5, 9)]]]);
+    assertEquals(checkHardConstraints(t, early, new Map(), disjoint, cap2), true);
+    // Two holders on one date fill both places: refused.
+    const together = new Map([['early', [half(0, 9), half(3, 3)]]]);
+    assertEquals(checkHardConstraints(t, early, new Map(), together, cap2), false);
+    // Holders that meet only before the candidate starts do not count against it.
+    const before = new Map([['early', [half(0, 2), half(1, 2)]]]);
+    assertEquals(
+      checkHardConstraints(t, slotAt('early', 17, half(3, 9)), new Map(), before, cap2),
+      true
+    );
+    // POSITIVE CONTROL for that: the same candidate from week 1 meets both.
+    assertEquals(
+      checkHardConstraints(t, slotAt('early', 17, half(1, 9)), new Map(), before, cap2),
+      false
+    );
+  }
+);
 
 Deno.test('prepareTeam - carries `coaches` through, so the evaluator can recompute from it', () => {
   const prepared = prepareTeam({
@@ -170,12 +260,12 @@ Deno.test('checkHardConstraints - two teams sharing an assistant cannot overlap'
   const t2: PreparedTeam = { id: 'T2', coachId: 'h2', coachIds: ['h2', 'shared'] };
   const booked = book(t1, early);
 
-  assertEquals(checkHardConstraints(t2, overlap, booked, capacity()), false);
-  assertEquals(checkHardConstraints(t2, late, booked, capacity()), true);
+  assertEquals(checkHardConstraints(t2, overlap, booked, NO_OCCUPANTS, capacity()), false);
+  assertEquals(checkHardConstraints(t2, late, booked, NO_OCCUPANTS, capacity()), true);
 
   // Control: a distinct assistant fits the overlapping slot.
   const t3: PreparedTeam = { id: 'T3', coachId: 'h3', coachIds: ['h3', 'other'] };
-  assertEquals(checkHardConstraints(t3, overlap, booked, capacity()), true);
+  assertEquals(checkHardConstraints(t3, overlap, booked, NO_OCCUPANTS, capacity()), true);
 });
 
 Deno.test(
@@ -183,7 +273,10 @@ Deno.test(
   () => {
     const t1: PreparedTeam = { id: 'T1', coachId: 'h1', coachIds: ['h1', 'shared'] };
     const t2: PreparedTeam = { id: 'T2', coachId: null, coachIds: ['shared'] };
-    assertEquals(checkHardConstraints(t2, overlap, book(t1, early), capacity()), false);
+    assertEquals(
+      checkHardConstraints(t2, overlap, book(t1, early), NO_OCCUPANTS, capacity()),
+      false
+    );
   }
 );
 
@@ -198,7 +291,7 @@ Deno.test(
     });
     const prepared: PreparedTeam = { ...parsed, coachIds: listTeamCoachIds(parsed) };
     assertEquals(prepared.coachIds, ['h1']);
-    assertEquals(checkHardConstraints(prepared, early, new Map(), capacity()), true);
+    assertEquals(checkHardConstraints(prepared, early, new Map(), NO_OCCUPANTS, capacity()), true);
     // Control: the schema still rejects a non-array list.
     assertThrows(() =>
       TeamSchema.parse({ id: 'T1', division: 'U10', coachId: 'h1', assistantCoachIds: 'a1' })
@@ -221,7 +314,10 @@ Deno.test(
     // The same preparation index.ts performs, then the seat check the greedy pass runs.
     const prepared = parsed.data.teams.map((t) => ({ ...t, coachIds: listTeamCoachIds(t) }));
     assertEquals(prepared[0].coachIds, ['h1']);
-    assertEquals(checkHardConstraints(prepared[0], early, new Map(), capacity()), true);
+    assertEquals(
+      checkHardConstraints(prepared[0], early, new Map(), NO_OCCUPANTS, capacity()),
+      true
+    );
     // Control: the request schema still rejects a non-array list.
     const rejected = AutoSchedulerInputSchema.safeParse({
       organizationId: '11111111-1111-4111-8111-111111111111',

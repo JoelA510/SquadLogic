@@ -3,10 +3,13 @@ import { SlotSchema, TeamSchema } from './schemas/index.js';
 import { listTeamCoachIds, resolveSchoolDayEndFilter } from './practiceScheduling.js';
 import {
   LIVE_SPAN_STATUS,
+  applyExceptionsToLiveRows,
   assignmentLiveSpan,
   calendarDayNumber,
-  peakLiveCount,
+  peakPieceCount,
+  sharedHeldDates,
   sharedLiveDates,
+  spanPiece,
   wallSeconds,
 } from './utils/practiceLiveDates.js';
 
@@ -166,6 +169,7 @@ export function conflictPairKey(a, b) {
  *     sharedDates?: number,
  *   }>,
  *   dataQualityWarnings: Array<string>,
+ *   timeTbd?: Array<{ teamId: string, slotId: string, exceptionId: unknown, code: string, dates: Array<string> }>,
  * }}
  */
 const FAIRNESS_DOMINANCE_THRESHOLD = 0.7;
@@ -308,9 +312,25 @@ function resolveDateModel(slots) {
  * `summary.dateModel` says which ran. Coverage, `coachLoad` and the base-slot
  * and division distributions are season-level in both (plan Q6).
  *
+ * **Saved practice exceptions (the M4.7 follow-up, plan Q1).** A dated call
+ * may pass `exceptions`, the season's `practice_exceptions` rows. They are
+ * applied by `applyPracticeExceptions` (through
+ * `utils/practiceLiveDates.js` `applyExceptionsToLiveRows`): a `relocated`
+ * date is compared and counted at its new slot, on its own wall window, and a
+ * `time_tbd` date is in neither comparison. Every TIME TBD date comes back in
+ * `timeTbd`, with its exception and reason, so none is dropped silently; an
+ * exception the helper could not apply (it names no row of the call, say) is a
+ * `dataQualityWarnings` line. `timeTbd` is present only when `exceptions` is
+ * passed. An undated call refuses a non-empty `exceptions`: an exception is
+ * dated, and an undated comparison could not honour it.
+ *
  * @param {Object} params
- * @param {Array<{ teamId: string, slotId: string, effectiveDateRange?: string | null }>} params.assignments
- *   `effectiveDateRange` (a `daterange` literal) is read in a dated run only.
+ * @param {Array<{ id?: string, teamId: string, slotId: string, effectiveDateRange?: string | null }>} params.assignments
+ *   `effectiveDateRange` (a `daterange` literal) is read in a dated run only;
+ *   `id`, the stored row's, is what an exception's `assignment_id` names.
+ * @param {Array<Object>} [params.exceptions] - `practice_exceptions` rows as
+ *   stored (`id`, `assignment_id`, `window`, `kind`, `tbd_reason`,
+ *   `cause_kind`, `withdrawn_at`, `practice_slot_id`). Dated calls only.
  * @param {Array<{ teamId: string, reason?: unknown }>} [params.unassigned] -
  *   `reason` is deliberately untyped: `normalizeManualFollowUpReasonInput`
  *   takes whatever a persisted run put there, and a test pins a number and an
@@ -354,6 +374,7 @@ export function evaluatePracticeSchedule({
   slots,
   schoolDayEnd,
   timezone,
+  exceptions,
 }) {
   if (!Array.isArray(assignments)) {
     throw new TypeError('assignments must be an array');
@@ -368,6 +389,14 @@ export function evaluatePracticeSchedule({
     throw new TypeError('slots must be an array');
   }
   const dateModel = resolveDateModel(slots);
+  if (exceptions !== undefined && !Array.isArray(exceptions)) {
+    throw new TypeError('exceptions must be an array');
+  }
+  if (dateModel === 'undated' && exceptions !== undefined && exceptions.length > 0) {
+    throw new TypeError(
+      `practice exceptions need a dated call (every slot with firstDate and lastDate): ${exceptions.length} sent with undated slots`
+    );
+  }
 
   const teamsById = new Map();
   for (const team of teams) {
@@ -480,6 +509,8 @@ export function evaluatePracticeSchedule({
   const seriesByKey = new Map();
   let assignmentsCounted = 0;
   let rowIndex = 0;
+  // Dated runs: every counted row in order, for the exceptions pass below.
+  const countedRows = [];
   const assignedTeamIds = new Set();
   const assignmentsBySlot = new Map();
   const assignmentsByDivision = new Map();
@@ -598,6 +629,17 @@ export function evaluatePracticeSchedule({
       );
     }
     const liveSpan = span?.status === LIVE_SPAN_STATUS.LIVE ? span : null;
+    if (slot.dating) {
+      countedRows.push({
+        id: assignment.id ?? null,
+        teamId: team.id,
+        slotId: slot.id,
+        firstDay: slot.dating.firstDay,
+        lastDay: slot.dating.lastDay,
+        range: assignment.effectiveDateRange,
+        span: liveSpan,
+      });
+    }
 
     const slotAssignments = assignmentsBySlot.get(slot.id) ?? [];
     slotAssignments.push({ teamId: assignment.teamId, team, span: liveSpan });
@@ -671,14 +713,47 @@ export function evaluatePracticeSchedule({
     }
   }
 
+  // Saved exceptions (plan Q1): each row they touch holds explicit dates per
+  // slot (its pieces) instead of its span; TIME TBD dates are held nowhere.
+  const applied =
+    dateModel === 'dated' && exceptions !== undefined && exceptions.length > 0
+      ? applyExceptionsToLiveRows({
+          rows: countedRows,
+          exceptions,
+          slotFirstDays: new Map(
+            [...slotsById.values()].map((slot) => [slot.id, slot.dating.firstDay])
+          ),
+        })
+      : null;
+  const piecesOfRow = (row) => applied?.pieces[row] ?? null;
+  for (const finding of applied?.findings ?? []) {
+    dataQualityWarnings.push(
+      `practice exception ${String(finding.exceptionId)} on assignment ${String(finding.assignmentId)}${finding.date ? ` (${finding.date})` : ''}: ${finding.code}`
+    );
+  }
+  // Dated runs: what each slot holds, row by row -- a span, or the dates an
+  // excepted row holds there, which may be a relocation from another slot.
+  const piecesBySlot = new Map();
+  countedRows.forEach((row, index) => {
+    const pieces = piecesOfRow(index);
+    /** @type {Array<{ slotId: string, span?: { first: number, last: number }, days?: number[] }>} */
+    const held = pieces ?? spanPiece(row);
+    for (const piece of held) {
+      const list = piecesBySlot.get(piece.slotId) ?? [];
+      list.push(piece.days ? { days: piece.days } : { span: piece.span });
+      piecesBySlot.set(piece.slotId, list);
+    }
+  });
+
   const slotUtilization = [];
   for (const slot of slotsById.values()) {
     const slotRows = assignmentsBySlot.get(slot.id) ?? [];
     const assignmentRows = slotRows.length;
     // Dated: the busiest date's load (plan Q4), so a closed series and its
-    // successor never count against each other. Undated: every row.
+    // successor never count against each other, a relocated date counts at
+    // its new slot and a TIME TBD date nowhere. Undated: every row.
     const assignedCount = slot.dating
-      ? peakLiveCount(slotRows.flatMap((row) => (row.span ? [row.span] : [])))
+      ? peakPieceCount(piecesBySlot.get(slot.id) ?? [])
       : assignmentRows;
     const capacity = slot.capacity;
     const utilization = capacity === 0 ? null : assignedCount / capacity;
@@ -864,12 +939,24 @@ export function evaluatePracticeSchedule({
           // Every pair is visited: first-occurrence order says nothing about
           // which dates two series share. A clash needs a shared live date
           // and overlapping wall windows on it; back-to-back is not one.
-          if (!current.span || !candidate.span) continue;
-          const windowsOverlap =
-            current.dating.startSec < candidate.dating.endSec &&
-            candidate.dating.startSec < current.dating.endSec;
-          if (!windowsOverlap) continue;
-          shared = sharedLiveDates(current.span, candidate.span);
+          const currentPieces = piecesOfRow(current.row);
+          const candidatePieces = piecesOfRow(candidate.row);
+          if (currentPieces === null && candidatePieces === null) {
+            if (!current.span || !candidate.span) continue;
+            const windowsOverlap =
+              current.dating.startSec < candidate.dating.endSec &&
+              candidate.dating.startSec < current.dating.endSec;
+            if (!windowsOverlap) continue;
+            shared = sharedLiveDates(current.span, candidate.span);
+          } else {
+            // A row an exception touched: each piece on its own slot's wall
+            // window, so a relocated date is judged where and when it is held.
+            shared = sharedHeldDates(
+              currentPieces ?? spanPiece(current),
+              candidatePieces ?? spanPiece(candidate),
+              (slotId) => slotsById.get(slotId).dating
+            );
+          }
           if (shared.count === 0) continue;
         } else if (candidate.start >= current.end) {
           break;
@@ -909,6 +996,20 @@ export function evaluatePracticeSchedule({
     conflict.reason = `overlapping slots on ${conflict.sharedDates} date(s) from ${conflict.firstDate}`;
   }
   const coachConflicts = [...conflictsByPair.values()];
+
+  // Every TIME TBD date, with its row and reason: dropped from both
+  // comparisons above, never from the report.
+  const timeTbd = applied
+    ? applied.timeTbd.map(({ row, exceptionId, code, dates }) => ({
+        teamId: countedRows[row].teamId,
+        slotId: countedRows[row].slotId,
+        exceptionId,
+        code,
+        dates,
+      }))
+    : exceptions !== undefined && dateModel === 'dated'
+      ? []
+      : undefined;
 
   const totalTeams = teams.length;
   const assignedTeams = assignedTeamIds.size;
@@ -995,6 +1096,7 @@ export function evaluatePracticeSchedule({
     coachLoad,
     coachConflicts,
     dataQualityWarnings,
+    ...(timeTbd !== undefined ? { timeTbd } : {}),
     fairnessConcerns,
     underutilizedBaseSlots,
     unassignedByReason,

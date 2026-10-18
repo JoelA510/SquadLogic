@@ -43,10 +43,18 @@ export function datedProjection(report, dataQuality) {
     ),
     dataQuality,
     assignedTeams: report.summary.assignedTeams,
+    // Present when the call passed `exceptions` (the M4.7 follow-up).
+    ...(report.timeTbd !== undefined ? { timeTbd: report.timeTbd } : {}),
   };
 }
 
-/** What the undated comparison sees: the same inputs with every date removed. */
+/** The vectors that carry saved practice exceptions (the M4.7 follow-up, plan Q1). */
+export const EXCEPTION_VECTORS = DATED_VECTORS.vectors.filter((v) => v.exceptions !== undefined);
+
+/**
+ * What the undated comparison sees: the same inputs with every date removed,
+ * and with them the ids and exceptions (an undated call refuses exceptions).
+ */
 export function undatedInputs(vector) {
   return {
     teams: vector.teams,

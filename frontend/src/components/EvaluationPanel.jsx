@@ -123,6 +123,10 @@ export default function EvaluationPanel({
                 teams: practiceData.teams || [],
                 slots: practiceData.slots || [],
                 unassigned: practiceData.unassigned || [],
+                // The season's saved exceptions, when the page sent them (M4.7 follow-up).
+                ...(practiceData.exceptions !== undefined
+                  ? { exceptions: practiceData.exceptions }
+                  : {}),
               }
             : null,
           games: gameData

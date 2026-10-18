@@ -34,7 +34,9 @@ import {
   ScoringInputSchema,
   datedSlotsIssue,
   refuseEmptyPracticeRoster,
+  undatedExceptionsIssue,
 } from '../supabase/functions/_shared/schemas/scoring.ts';
+import { practiceOccurrenceDates } from '../packages/core/src/utils/practiceOccurrences.js';
 import { anchorWallTimes } from '../supabase/functions/_shared/timing/anchorWallTimes.ts';
 import { evaluatePracticeSchedule as edgeEvaluate } from '../supabase/functions/_shared/engines/scoring-engine.js';
 
@@ -51,6 +53,11 @@ const TZ = 'America/New_York';
 const TEAM_READ = vi.hoisted(() => ({ value: /** @type {any} */ (null) }));
 /** The auto-scheduler hook's state, swapped by the review-path test (M4.7). */
 const AUTO = vi.hoisted(() => ({ value: /** @type {any} */ (null) }));
+/** The stubbed practice save, per test: `null` keeps the real client (the follow-up's Apply tests). */
+const SAVE = vi.hoisted(() => ({
+  impl: /** @type {any} */ (null),
+  requests: /** @type {any[]} */ ([]),
+}));
 /** The props the override panel was last rendered with (M4.7, its per-slot count). */
 const OVERRIDE_PROPS = vi.hoisted(() => ({ value: /** @type {any} */ (null) }));
 
@@ -140,6 +147,19 @@ vi.mock('../frontend/src/components/PracticeOverridePanel.jsx', () => ({
   },
 }));
 
+vi.mock('../frontend/src/utils/practicePersistenceClient.js', async (importOriginal) => {
+  const actual = /** @type {any} */ (await importOriginal());
+  const stubbed = (name) => (request) => {
+    SAVE.requests.push({ name, request });
+    return SAVE.impl ? SAVE.impl(name, request) : actual[name](request);
+  };
+  return {
+    ...actual,
+    persistPracticeRepair: stubbed('persistPracticeRepair'),
+    persistPracticeScheduleReview: stubbed('persistPracticeScheduleReview'),
+  };
+});
+
 const { mockSupabase } = await import('../frontend/src/lib/mockSupabaseClient.js');
 const { edgeFunctionCache } = await import('../frontend/src/lib/cache.js');
 const { default: PracticeSchedulingPage } =
@@ -181,8 +201,9 @@ const ROWS = [
   row('pa-c', 'team-c', 'slot-tue', { slot_id: null }),
 ];
 
-function dbOf({ roster, slots, rows }) {
+function dbOf({ roster, slots, rows, exceptions = [] }) {
   return {
+    practice_exceptions: exceptions,
     scheduler_runs: [
       {
         id: RUN,
@@ -223,6 +244,11 @@ function fairnessScoringEdge(body) {
   // The handler's 3a': a half-dated slot list is a 422 (M4.7, plan Q8).
   const datedIssue = practice ? datedSlotsIssue(practice.slots) : null;
   if (datedIssue !== null) return { data: null, error: { message: datedIssue } };
+  // And its exceptions gate: exceptions on an undated call are a 422.
+  const exceptionsIssue = practice
+    ? undatedExceptionsIssue(practice.slots, practice.exceptions)
+    : null;
+  if (exceptionsIssue !== null) return { data: null, error: { message: exceptionsIssue } };
   // `any`: the handler makes the same two calls; only Node's zod typings differ from Deno's.
   const anchored = anchorWallTimes(
     /** @type {any} */ (practice?.slots ?? []),
@@ -238,6 +264,7 @@ function fairnessScoringEdge(body) {
         teams: practice.teams,
         slots: /** @type {any} */ (anchored.rows),
         unassigned: practice.unassigned,
+        exceptions: practice.exceptions,
       })
     : null;
   const practiceFairness = result?.summary?.fairnessScore ?? 1.0;
@@ -274,6 +301,8 @@ beforeEach(() => {
   scoringResponses = [];
   edgeRefuses = false;
   AUTO.value = AUTO_IDLE;
+  SAVE.impl = null;
+  SAVE.requests = [];
   const realInvoke = mockSupabase.functions.invoke;
   vi.spyOn(mockSupabase.functions, 'invoke').mockImplementation(async (name, options) => {
     if (name !== 'fairness-scoring') return realInvoke(name, options);
@@ -311,9 +340,9 @@ function teamRead(teams) {
   };
 }
 
-async function renderPage({ roster = ROSTER, slots = SLOTS, rows = ROWS } = {}) {
+async function renderPage({ roster = ROSTER, slots = SLOTS, rows = ROWS, exceptions = [] } = {}) {
   TEAM_READ.value = teamRead(roster);
-  seedMockDb(dbOf({ roster, slots, rows }));
+  seedMockDb(dbOf({ roster, slots, rows, exceptions }));
   return render(
     <MemoryRouter>
       <PracticeSchedulingPage />
@@ -562,5 +591,282 @@ describe('the practice page sends its dates and is scored dated (M4.7)', () => {
     // clock is 2026-10-20 12:00 in New York) to the slot's validity end.
     expect(staged.effectiveDateRange).toBe('[2026-10-20,2026-11-30]');
     expect(scoringResponses.at(-1).data.practice.summary.dateModel).toBe('dated');
+  });
+});
+
+// ---- The M4.7 follow-up: saved practice exceptions (plan Q1) --------------
+//
+// The page reads the season's live exceptions and sends them with each stored
+// row's id; the stand-in Edge applies them as `fairness-scoring` does. Every
+// expected date is enumerated from the seed through core's series reader,
+// never from what the engine answered.
+
+/** A `practice_exceptions` row as the table stores it. */
+function exceptionRow(id, assignmentId, teamId, window, kind, extra = {}) {
+  return {
+    id,
+    organization_id: ORG,
+    season_settings_id: SEASON,
+    team_id: teamId,
+    assignment_id: assignmentId,
+    window,
+    kind,
+    practice_slot_id: null,
+    tbd_reason: null,
+    cause_kind: 'blackout',
+    withdrawn_at: null,
+    ...extra,
+  };
+}
+
+const TBD_WINDOW = '[2026-09-07,2026-09-21)';
+const MOVED_WINDOW = '[2026-10-05,2026-10-12)';
+const EXCEPTIONS = [
+  // Team B's first two Mondays are TIME TBD.
+  exceptionRow('pe-tbd', 'pa-b', 'team-b', TBD_WINDOW, 'time_tbd', {
+    tbd_reason: 'past-sunset',
+    cause_kind: 'daylight',
+  }),
+  // Team A's Monday of 10-05 moves to Tuesday 10-06 at slot-tue.
+  exceptionRow('pe-moved', 'pa-a', 'team-a', MOVED_WINDOW, 'relocated', {
+    practice_slot_id: 'slot-tue',
+  }),
+  // Withdrawn: never read as live, so it changes nothing.
+  exceptionRow('pe-gone', 'pa-a', 'team-a', '[2026-11-02,2026-11-09)', 'time_tbd', {
+    tbd_reason: 'contended',
+    withdrawn_at: '2026-10-01T00:00:00Z',
+  }),
+];
+
+/** Mondays of a range, by core's series reader (the seed's truth, not the engine's). */
+/** @type {(range: string) => string[]} */
+const mondaysIn = (range) => practiceOccurrenceDates({ range, dayOfWeek: 'mon' }).dates;
+
+describe('the practice page sends saved exceptions and is scored with them (M4.7 follow-up)', () => {
+  it('sends each stored row by id and the live exceptions, and the Edge applies them', async () => {
+    await renderPage({ exceptions: EXCEPTIONS });
+    const body = await waitFor(
+      () => {
+        const last = scoringRequests.at(-1);
+        expect(last?.practice?.exceptions?.length ?? 0).toBeGreaterThan(0);
+        return last;
+      },
+      { timeout: 4000 }
+    );
+
+    // Every stored row by its id, and only the live exceptions (as stored).
+    expect(body.practice.assignments.map((a) => a.id).sort()).toEqual(ROWS.map((r) => r.id).sort());
+    const live = EXCEPTIONS.filter((e) => e.withdrawn_at === null);
+    expect(body.practice.exceptions.map((e) => e.id).sort()).toEqual(live.map((e) => e.id).sort());
+    expect(body.practice.exceptions.find((e) => e.id === 'pe-moved')).toMatchObject({
+      assignment_id: 'pa-a',
+      window: MOVED_WINDOW,
+      kind: 'relocated',
+      practice_slot_id: 'slot-tue',
+    });
+
+    // The planted Monday clash loses the TIME TBD Mondays and the moved one.
+    const all = mondaysIn(FULL);
+    const tbd = mondaysIn(TBD_WINDOW);
+    const moved = mondaysIn(MOVED_WINDOW);
+    expect(tbd).toHaveLength(2);
+    expect(moved).toHaveLength(1);
+    const kept = all.filter((d) => !tbd.includes(d) && !moved.includes(d));
+    const scored = scoringResponses.at(-1).data.practice;
+    expect(scored.summary.dateModel).toBe('dated');
+    expect(scored.coachConflicts).toHaveLength(1);
+    expect(scored.coachConflicts[0].firstDate).toBe(kept[0]);
+    expect(scored.coachConflicts[0].sharedDates).toBe(kept.length);
+    // The moved Monday is held at slot-tue, beside team C, on its Tuesday.
+    expect(scored.slotUtilization.find((u) => u.slotId === 'slot-tue').assignedCount).toBe(2);
+    // The TIME TBD Mondays are reported, not dropped.
+    expect(scored.timeTbd).toEqual([
+      {
+        teamId: 'team-b',
+        slotId: 'slot-mon',
+        exceptionId: 'pe-tbd',
+        code: 'past-sunset',
+        dates: tbd,
+      },
+    ]);
+    const panel = await screen.findByRole('region', { name: 'Fairness Scoring Engine' });
+    await waitFor(() =>
+      expect(panel).toHaveTextContent(
+        `Practice for team team-b at slot slot-mon is TIME TBD on 2 date(s) from ${tbd[0]} (past-sunset)`
+      )
+    );
+  });
+
+  it('with no exceptions sent, the planted clash keeps every Monday (control)', async () => {
+    await renderPage();
+    await settledRequest();
+    const [conflict] = scoringResponses.at(-1).data.practice.coachConflicts;
+    expect(conflict.sharedDates).toBe(mondaysIn(FULL).length);
+    expect(scoringResponses.at(-1).data.practice.timeTbd).toEqual([]);
+  });
+
+  it('an exceptions read that fails withholds the evaluation and says why', async () => {
+    const realFrom = mockSupabase.from.bind(mockSupabase);
+    vi.spyOn(mockSupabase, 'from').mockImplementation((table) => {
+      if (table !== 'practice_exceptions') return realFrom(table);
+      /** @type {any} */
+      const failing = new Proxy(
+        {},
+        {
+          get: (_target, prop) =>
+            prop === 'then'
+              ? (resolve) => resolve({ data: null, error: { message: 'permission denied' } })
+              : () => failing,
+        }
+      );
+      return failing;
+    });
+    await renderPage({ exceptions: EXCEPTIONS });
+
+    expect(
+      await screen.findByText(
+        /saved practice changes \(moved and TIME TBD practices\) could not be read, so the schedule is not evaluated \(permission denied\)/
+      )
+    ).toBeInTheDocument();
+    // Past the panel's debounce: nothing was scored as if there were none.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(scoringRequests).toEqual([]);
+  });
+});
+
+// ---- Exceptions written by the same Apply that saves a new placement --------
+//
+// The auto-scheduler's daylight post-pass truncates a new placement and the
+// Apply records its remainder as a TIME TBD exception on the row it inserts
+// (`buildDaylightExceptions`, named by `new_assignment` until the row has an
+// id). The save is stood in for by what writer v3 leaves behind: the new row
+// under a database id, and the exception keyed to that id
+// (`20261002000000_practice_exceptions_daylight.sql`). Everything after it is
+// the real page.
+
+const NEW_ROW_ID = '00000000-0000-4000-8000-0000000000d9';
+const DAYLIGHT_FROM = '2026-11-04';
+const DAYLIGHT_UNTIL = '2026-11-30';
+/** Wednesdays of the daylight window, by core's series reader. */
+/** @type {() => string[]} */
+const daylightDates = () =>
+  practiceOccurrenceDates({ range: `[${DAYLIGHT_FROM},${DAYLIGHT_UNTIL}]`, dayOfWeek: 'wed' })
+    .dates;
+
+function writerV3(name, request) {
+  if (name !== 'persistPracticeRepair') throw new Error(`expected a repair save, got ${name}`);
+  const [exception] = request.exceptions;
+  const key = exception.new_assignment;
+  seedMockDb({
+    practice_assignments: [
+      row(NEW_ROW_ID, key.team_id, key.practice_slot_id, {
+        effective_date_range: key.effective_date_range,
+        run_id: request.runId ?? RUN,
+      }),
+    ],
+    practice_exceptions: [
+      {
+        id: 'pe-daylight-1',
+        organization_id: ORG,
+        season_settings_id: SEASON,
+        team_id: key.team_id,
+        assignment_id: NEW_ROW_ID,
+        window: exception.window,
+        kind: exception.kind,
+        practice_slot_id: null,
+        tbd_reason: exception.tbd_reason,
+        cause_kind: exception.cause_kind,
+        withdrawn_at: null,
+      },
+    ],
+  });
+  return Promise.resolve({
+    runId: request.runId,
+    supersededCount: 0,
+    retainedManualCount: 0,
+    teamsWithoutPractice: [],
+  });
+}
+
+/** Render, stage team D's truncated Wednesday placement from a run, and Apply it. */
+async function applyDaylightPlacement() {
+  SAVE.impl = writerV3;
+  const view = await renderPage();
+  await settledRequest();
+  AUTO.value = {
+    ...AUTO_IDLE,
+    status: 'completed',
+    result: {
+      runId: 'run-daylight',
+      assignments: [
+        { teamId: 'team-d', slotId: 'slot-wed', source: 'auto', effectiveUntil: '2026-11-03' },
+      ],
+      unassigned: [],
+      daylight: {
+        timeTbd: [
+          { teamId: 'team-d', slotId: 'slot-wed', from: DAYLIGHT_FROM, until: DAYLIGHT_UNTIL },
+        ],
+      },
+    },
+  };
+  view.rerender(
+    <MemoryRouter>
+      <PracticeSchedulingPage />
+    </MemoryRouter>
+  );
+  const apply = await screen.findByRole('button', { name: /apply schedule/i });
+  await waitFor(() => expect(apply).toBeEnabled());
+  fireEvent.click(apply);
+  await waitFor(() => expect(SAVE.requests).toHaveLength(1));
+  return SAVE.requests[0].request;
+}
+
+describe('exceptions written by the same Apply (Codex on #590)', () => {
+  it("the saved run's metrics list the TIME TBD the same save records", async () => {
+    const request = await applyDaylightPlacement();
+    // The save carries the daylight exception by its new-row key (the writer's contract)...
+    expect(request.exceptions).toHaveLength(1);
+    expect(request.exceptions[0]).toMatchObject({ kind: 'time_tbd', tbd_reason: 'past-sunset' });
+    // ...and the run's own report lists its dates, not an empty list.
+    const results = request.runMetadata.results;
+    expect(results.metricsArm).toBe('core');
+    expect(results.timeTbd).toEqual([
+      {
+        teamId: 'team-d',
+        slotId: 'slot-wed',
+        exceptionId: null,
+        code: 'past-sunset',
+        dates: daylightDates(),
+      },
+    ]);
+    expect(results.dataQualityWarnings.filter((w) => /practice exception/.test(w))).toEqual([]);
+    // The persisted assignments are the payload as sent: no evaluation-only id leaks in.
+    expect(results.assignments.find((a) => a.teamId === 'team-d').id).toBeNull();
+  });
+
+  it('after the save, the next evaluation names the new row by its id and applies its exception', async () => {
+    await applyDaylightPlacement();
+    const scored = await waitFor(
+      () => {
+        const last = scoringRequests.at(-1);
+        const placed = last?.practice?.assignments?.find((a) => a.teamId === 'team-d');
+        expect(placed?.id).toBe(NEW_ROW_ID);
+        expect(last.practice.exceptions.map((e) => e.id)).toContain('pe-daylight-1');
+        return scoringResponses.at(-1).data.practice;
+      },
+      { timeout: 4000 }
+    );
+    expect(scored.timeTbd).toEqual([
+      {
+        teamId: 'team-d',
+        slotId: 'slot-wed',
+        exceptionId: 'pe-daylight-1',
+        code: 'past-sunset',
+        dates: daylightDates(),
+      },
+    ]);
+    expect(scored.issues.filter((i) => /PRACTICE_EXCEPTION_ROW_UNREAD/.test(i.message))).toEqual(
+      []
+    );
   });
 });

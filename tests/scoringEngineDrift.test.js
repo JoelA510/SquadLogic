@@ -56,7 +56,10 @@ import { evaluatePracticeSchedule as edgeEvaluate } from '../supabase/functions/
 import { DATED_VECTORS, datedProjection, undatedInputs } from './helpers/datedScoringVectors.js';
 import * as coreLive from '@squadlogic/core/utils/practiceLiveDates.js';
 import * as edgeLive from '../supabase/functions/_shared/engines/practice-live-dates.ts';
-import { datedSlotsIssue } from '../supabase/functions/_shared/schemas/scoring.ts';
+import {
+  datedSlotsIssue,
+  undatedExceptionsIssue,
+} from '../supabase/functions/_shared/schemas/scoring.ts';
 
 /** Summary fields both arms publish under the same name, which must agree. */
 const AGREED_SUMMARY_COUNTS = ['totalTeams', 'assignedTeams', 'unassignedTeams'];
@@ -432,6 +435,7 @@ const runBothDated = (vector) => {
     teams: vector.teams,
     slots: vector.slots,
     assignments: vector.assignments,
+    exceptions: vector.exceptions,
     schoolDayEnd: undefined,
     timezone: DATED_VECTORS.timeZone,
   });
@@ -439,6 +443,7 @@ const runBothDated = (vector) => {
     teams: vector.teams,
     slots: vector.slots,
     assignments: vector.assignments,
+    exceptions: vector.exceptions,
   });
   return {
     core,
@@ -532,6 +537,118 @@ describe('scoring-engine cross-arm drift: dated (M4.7)', () => {
       } else {
         expect(() => edgeEvaluate(inputs), name).not.toThrow();
       }
+    }
+  });
+
+  it('both arms publish the same timeTbd for every exception witness', () => {
+    const withExceptions = DATED_VECTORS.vectors.filter((v) => v.exceptions !== undefined);
+    expect(withExceptions.length).toBeGreaterThanOrEqual(8);
+    let entries = 0;
+    for (const vector of withExceptions) {
+      const { core, edge } = runBothDated(vector);
+      expect(edge.timeTbd, vector.name).toEqual(core.timeTbd);
+      expect(core.timeTbd, vector.name).toEqual(vector.expected.timeTbd);
+      // Each TIME TBD entry is one Edge warning, so the panel shows it.
+      expect(edge.issues.filter((i) => i.category === 'time-tbd').length).toBe(core.timeTbd.length);
+      entries += core.timeTbd.length;
+    }
+    expect(entries).toBeGreaterThan(0);
+  });
+
+  it("fairness-scoring's exceptions gate refuses exactly what both engines refuse", () => {
+    const vector = DATED_VECTORS.vectors.find((v) => v.witness === 'X-tbd-clash');
+    const undated = undatedInputs(vector);
+    const cases = [
+      { name: 'dated, with exceptions', slots: vector.slots, exceptions: vector.exceptions },
+      { name: 'undated, none', slots: undated.slots, exceptions: undefined },
+      { name: 'undated, empty', slots: undated.slots, exceptions: [] },
+      { name: 'undated, with exceptions', slots: undated.slots, exceptions: vector.exceptions },
+    ];
+    for (const { name, slots, exceptions } of cases) {
+      const issue = undatedExceptionsIssue(slots, exceptions);
+      const inputs = { teams: vector.teams, slots, assignments: vector.assignments, exceptions };
+      const run = {
+        edge: () => edgeEvaluate(inputs),
+        core: () => coreEvaluate({ ...inputs, schoolDayEnd: undefined, timezone: 'UTC' }),
+      };
+      if (issue !== null) {
+        expect(run.edge, name).toThrow(issue);
+        expect(run.core, name).toThrow(issue);
+      } else {
+        expect(run.edge, name).not.toThrow();
+        expect(run.core, name).not.toThrow();
+      }
+    }
+    expect(
+      cases.filter((c) => undatedExceptionsIssue(c.slots, c.exceptions) !== null)
+    ).toHaveLength(1);
+  });
+
+  it('the two live-date modules apply exceptions to the same pieces', () => {
+    let compared = 0;
+    for (const vector of DATED_VECTORS.vectors.filter((v) => v.exceptions !== undefined)) {
+      const slotFirstDays = new Map(
+        vector.slots.map((s) => [s.id, coreLive.calendarDayNumber(s.firstDate)])
+      );
+      const byId = new Map(vector.slots.map((s) => [s.id, s]));
+      const rows = vector.assignments.map((a) => {
+        const s = byId.get(a.slotId);
+        const firstDay = coreLive.calendarDayNumber(s.firstDate);
+        const lastDay = coreLive.calendarDayNumber(s.lastDate);
+        const span = coreLive.assignmentLiveSpan({
+          firstDay,
+          lastDay,
+          range: a.effectiveDateRange,
+        });
+        return {
+          id: a.id,
+          teamId: a.teamId,
+          slotId: a.slotId,
+          firstDay,
+          lastDay,
+          range: a.effectiveDateRange,
+          span: span.status === 'live' ? { first: span.first, last: span.last } : null,
+        };
+      });
+      const input = { rows, exceptions: vector.exceptions, slotFirstDays };
+      expect(edgeLive.applyExceptionsToLiveRows(input), vector.name).toEqual(
+        coreLive.applyExceptionsToLiveRows(input)
+      );
+      compared += 1;
+    }
+    expect(compared).toBeGreaterThanOrEqual(8);
+    const a = { days: [20360, 20367, 20374] };
+    for (const b of [{ days: [20367] }, { span: { first: 20353, last: 20381 } }, { days: [] }]) {
+      expect(edgeLive.sharedPieceDates(a, b)).toEqual(coreLive.sharedPieceDates(a, b));
+      expect(edgeLive.peakPieceCount([a, b])).toBe(coreLive.peakPieceCount([a, b]));
+    }
+    // The held-dates pair and spanPiece, moved out of the engines into the twins.
+    const windows = {
+      S1: { startSec: 57600, endSec: 61200 },
+      S2: { startSec: 59400, endSec: 63000 },
+    };
+    const windowOf = (id) => windows[id];
+    const held = [
+      [{ slotId: 'S1', span: { first: 20311, last: 20402 } }],
+      [{ slotId: 'S2', days: [20360, 20367] }],
+      [
+        { slotId: 'S1', days: [20367] },
+        { slotId: 'S2', days: [20374] },
+      ],
+      [],
+    ];
+    for (const x of held) {
+      for (const y of held) {
+        expect(edgeLive.sharedHeldDates(x, y, windowOf)).toEqual(
+          coreLive.sharedHeldDates(x, y, windowOf)
+        );
+      }
+    }
+    for (const entry of [
+      { slotId: 'S1', span: { first: 1, last: 8 } },
+      { slotId: 'S1', span: null },
+    ]) {
+      expect(edgeLive.spanPiece(entry)).toEqual(coreLive.spanPiece(entry));
     }
   });
 

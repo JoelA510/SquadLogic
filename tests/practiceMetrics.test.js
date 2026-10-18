@@ -7,10 +7,12 @@ import {
 } from '../packages/core/src/practiceMetrics.js';
 import {
   DATED_VECTORS,
+  EXCEPTION_VECTORS,
   datedProjection,
   overbookedOf,
   undatedInputs,
 } from './helpers/datedScoringVectors.js';
+import { buildPracticeRunResults } from '../packages/core/src/utils/practiceRunResults.js';
 
 const SAMPLE_SLOTS = [
   {
@@ -936,6 +938,7 @@ const datedCore = (vector) =>
     teams: vector.teams,
     slots: vector.slots,
     assignments: vector.assignments,
+    exceptions: vector.exceptions,
     schoolDayEnd: undefined,
     timezone: DATED_VECTORS.timeZone,
   });
@@ -1052,4 +1055,176 @@ test('dated: a mix of dated and undated slots refuses (Q8)', () => {
     timezone: 'UTC',
   });
   assert.equal(report.summary.dateModel, 'undated');
+});
+
+// ---- The M4.7 follow-up: saved practice exceptions (plan Q1) --------------
+//
+// The vectors with `exceptions` run through the dated witnesses above (their
+// `expected` carries `timeTbd`); these pin what the table cannot.
+
+test('exception witnesses: relocation and TIME TBD each move a clash and a count (meta, can fail)', () => {
+  const witnesses = EXCEPTION_VECTORS.map((v) => v.witness);
+  for (const w of [
+    'X-relocated-clash',
+    'X-relocated-capacity',
+    'X-tbd-clash',
+    'X-tbd-capacity',
+    'X-relocated-missing-slot',
+    'X-tbd-open',
+    'X-row-unread',
+    'X-withdrawn',
+  ]) {
+    assert.ok(witnesses.includes(w), `missing ${w}`);
+  }
+  // Each vector's truth differs from the answer with its exceptions left out,
+  // except the controls: so an engine that ignores exceptions fails the table.
+  const ignored = (vector) =>
+    datedProjection(
+      evaluatePracticeSchedule({
+        teams: vector.teams,
+        slots: vector.slots,
+        assignments: vector.assignments,
+        schoolDayEnd: undefined,
+        timezone: 'UTC',
+      }),
+      0
+    );
+  const moved = EXCEPTION_VECTORS.filter((v) => {
+    const { timeTbd: _t, dataQuality: _d, ...truth } = v.expected;
+    const { dataQuality: _x, ...without } = ignored(v);
+    return JSON.stringify(truth) !== JSON.stringify(without);
+  }).map((v) => v.witness);
+  assert.deepEqual(moved.sort(), [
+    'X-dateless-teammate',
+    'X-relocated-capacity',
+    'X-relocated-clash',
+    'X-relocated-last-week',
+    'X-tbd-capacity',
+    'X-tbd-clash',
+    'X-tbd-open',
+  ]);
+  assert.ok(EXCEPTION_VECTORS.some((v) => v.expected.timeTbd.length > 0));
+});
+
+test('exceptions: an exception naming no row of the call is a data-quality line, by name', () => {
+  const report = datedCore(EXCEPTION_VECTORS.find((v) => v.witness === 'X-row-unread'));
+  assert.deepEqual(report.dataQualityWarnings, [
+    'practice exception e1 on assignment a9: PRACTICE_EXCEPTION_ROW_UNREAD',
+  ]);
+  assert.deepEqual(report.timeTbd, []);
+});
+
+test('exceptions: an undated call refuses them, and none sent is not a refusal', () => {
+  const vector = EXCEPTION_VECTORS.find((v) => v.witness === 'X-tbd-clash');
+  const inputs = { ...undatedInputs(vector), schoolDayEnd: undefined, timezone: 'UTC' };
+  assert.throws(
+    () => evaluatePracticeSchedule({ ...inputs, exceptions: vector.exceptions }),
+    /practice exceptions need a dated call \(every slot with firstDate and lastDate\): 1 sent with undated slots/
+  );
+  const none = evaluatePracticeSchedule({ ...inputs, exceptions: [] });
+  assert.equal(none.summary.dateModel, 'undated');
+  assert.equal('timeTbd' in none, false);
+  assert.throws(
+    // @ts-expect-error [INVALID_INPUT] - not an array, refused at run time.
+    () => evaluatePracticeSchedule({ ...inputs, exceptions: 'e1' }),
+    /exceptions must be an array/
+  );
+});
+
+test('exceptions: timeTbd is published only when exceptions are passed', () => {
+  const vector = EXCEPTION_VECTORS.find((v) => v.witness === 'X-tbd-clash');
+  const { exceptions: _e, ...withoutExceptions } = vector;
+  assert.equal('timeTbd' in datedCore(withoutExceptions), false);
+  assert.deepEqual(datedCore({ ...vector, exceptions: [] }).timeTbd, []);
+});
+
+test('apply-time metrics apply the exceptions they are given, as the panel does (Q9 for Q1)', () => {
+  const vector = EXCEPTION_VECTORS.find((v) => v.witness === 'X-tbd-clash');
+  const run = (exceptions) =>
+    buildPracticeRunResults({
+      assignments: vector.assignments,
+      teams: vector.teams,
+      slots: vector.slots,
+      exceptions,
+      schoolDayEnd: undefined,
+      timezone: DATED_VECTORS.timeZone,
+    });
+  const applied = run(vector.exceptions);
+  assert.equal(applied.metricsArm, 'core');
+  assert.deepEqual(applied.timeTbd, vector.expected.timeTbd);
+  assert.equal(applied.coachConflicts[0].sharedDates, vector.expected.conflicts[0].sharedDates);
+  // A caller that predates exceptions: no `timeTbd` at all, the unexcepted answer.
+  const predates = run(undefined);
+  assert.equal('timeTbd' in predates, false);
+  assert.equal(predates.coachConflicts[0].sharedDates, 15);
+  // Unread is not none: no metrics, and the reason, never a report that ignores them.
+  const unread = run(null);
+  assert.equal(unread.metricsArm, null);
+  assert.match(unread.metricsUnavailable.reason, /saved practice changes .* could not be read/);
+  assert.equal('coachConflicts' in unread, false);
+});
+
+test('apply-time metrics apply the exceptions the same save writes on new rows (Codex on #590)', async () => {
+  const { buildPracticeAssignmentRows } = await import('../packages/core/src/practiceSupabase.js');
+  const vector = EXCEPTION_VECTORS.find((v) => v.witness === 'X-tbd-clash');
+  // The page's scheduler slots carry their validity as effectiveFrom/Until.
+  const slots = vector.slots.map((s) => ({
+    ...s,
+    effectiveFrom: '2026-08-10',
+    effectiveUntil: s.lastDate,
+  }));
+  // Team T2's row is new in this save: no id, so its exception names it by key.
+  const staged = vector.assignments.map((a) =>
+    a.teamId === 'T2'
+      ? {
+          teamId: a.teamId,
+          slotId: a.slotId,
+          source: 'auto',
+          effectiveFrom: '2026-08-10',
+          effectiveUntil: '2026-11-20',
+          effectiveDateRange: '[2026-08-10,2026-11-20]',
+        }
+      : a
+  );
+  const [key] = buildPracticeAssignmentRows({
+    assignments: staged.filter((a) => !a.id),
+    slots,
+  });
+  const newRow = {
+    team_id: key.team_id,
+    practice_slot_id: key.practice_slot_id,
+    effective_date_range: key.effective_date_range,
+  };
+  const exception = (newAssignment) => ({
+    new_assignment: newAssignment,
+    window: '[2026-08-10,2026-08-23]',
+    kind: 'time_tbd',
+    tbd_reason: 'past-sunset',
+    cause_kind: 'daylight',
+  });
+  const run = (sameSaveExceptions) =>
+    buildPracticeRunResults({
+      assignments: staged,
+      teams: vector.teams,
+      slots,
+      exceptions: [],
+      sameSaveExceptions,
+      schoolDayEnd: undefined,
+      timezone: DATED_VECTORS.timeZone,
+    });
+
+  const applied = run([exception(newRow)]);
+  assert.deepEqual(applied.timeTbd, [{ ...vector.expected.timeTbd[0], exceptionId: null }]);
+  assert.equal(applied.coachConflicts[0].sharedDates, vector.expected.conflicts[0].sharedDates);
+  // The persisted assignments are the payload as sent.
+  assert.deepEqual(applied.assignments, staged);
+
+  // A key no staged row has is reported, never dropped.
+  const stray = run([exception({ ...newRow, practice_slot_id: 'S9' })]);
+  assert.deepEqual(stray.timeTbd, []);
+  assert.deepEqual(stray.dataQualityWarnings, [
+    'practice exception null on assignment null: PRACTICE_EXCEPTION_ROW_UNREAD',
+  ]);
+  // None sent: unchanged.
+  assert.equal(run([]).coachConflicts[0].sharedDates, 15);
 });

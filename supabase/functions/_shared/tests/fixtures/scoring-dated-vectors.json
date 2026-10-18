@@ -1,5 +1,5 @@
 {
-  "description": "Dated scoring witnesses (M4.7, docs/PLAN_SCORING_DATE_MODEL.md \u00a72.2 and \u00a74). Hand-written: every expected value is the truth worked out from the dates, not an engine answer. Read by tests/practiceMetrics.test.js and tests/scoringEngineDrift.test.js (Vitest) and _shared/tests/scoring-engine_test.ts (Deno). `slotLoad` is slot id -> [assignedCount (busiest date), assignmentRows]; `undated` is what the first-occurrence comparison reports on the same inputs with the dates removed.",
+  "description": "Dated scoring witnesses (M4.7, docs/PLAN_SCORING_DATE_MODEL.md \u00a72.2 and \u00a74). Hand-written: every expected value is the truth worked out from the dates, not an engine answer. Read by tests/practiceMetrics.test.js and tests/scoringEngineDrift.test.js (Vitest) and _shared/tests/scoring-engine_test.ts (Deno). `slotLoad` is slot id -> [assignedCount (busiest date), assignmentRows]; `undated` is what the first-occurrence comparison reports on the same inputs with the dates removed. Vectors with `exceptions` (the M4.7 follow-up, plan Q1) carry `practice_exceptions` rows as stored, each assignment its stored `id`, and an expected `timeTbd` (the report's TIME TBD entries: team, slot, exception, reason, dates); `undated` for them is the old comparison with the dates and the exceptions removed.",
   "timeZone": "America/New_York",
   "vectors": [
     {
@@ -1079,6 +1079,938 @@
         },
         "dataQuality": 1,
         "assignedTeams": 1
+      },
+      "undated": {
+        "conflicts": 0,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "relocated: a Wednesday practice moved for one week to Tuesday 16:30 clashes there, on that date only",
+      "witness": "X-relocated-clash",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": ["C1"]
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Wednesday",
+          "capacity": 1,
+          "start": "2026-08-12T16:00:00-04:00",
+          "end": "2026-08-12T17:00:00-04:00",
+          "firstDate": "2026-08-12",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S3",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:30:00-04:00",
+          "end": "2026-08-11T17:30:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:30:00",
+          "endTime": "17:30:00"
+        }
+      ],
+      "assignments": [
+        {
+          "id": "a1",
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        },
+        {
+          "id": "a2",
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        }
+      ],
+      "exceptions": [
+        {
+          "id": "e1",
+          "assignment_id": "a2",
+          "window": "[2026-09-28,2026-10-04]",
+          "kind": "relocated",
+          "tbd_reason": null,
+          "cause_kind": "blackout",
+          "withdrawn_at": null,
+          "practice_slot_id": "S3"
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-09-29",
+            "sharedDates": 1
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1],
+          "S3": [1, 0]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2,
+        "timeTbd": []
+      },
+      "undated": {
+        "conflicts": 0,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "relocated: the moved date counts against its new slot's capacity and frees its old one",
+      "witness": "X-relocated-capacity",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T3",
+          "division": "U12",
+          "coachId": "C3",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Wednesday",
+          "capacity": 1,
+          "start": "2026-08-12T16:00:00-04:00",
+          "end": "2026-08-12T17:00:00-04:00",
+          "firstDate": "2026-08-12",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "id": "a1",
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        },
+        {
+          "id": "a2",
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        },
+        {
+          "id": "a3",
+          "teamId": "T3",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-09-30,2026-09-30]"
+        }
+      ],
+      "exceptions": [
+        {
+          "id": "e1",
+          "assignment_id": "a2",
+          "window": "[2026-09-28,2026-10-04]",
+          "kind": "relocated",
+          "tbd_reason": null,
+          "cause_kind": null,
+          "withdrawn_at": null,
+          "practice_slot_id": "S1"
+        }
+      ],
+      "expected": {
+        "conflicts": [],
+        "slotLoad": {
+          "S1": [2, 1],
+          "S2": [1, 2]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 3,
+        "timeTbd": []
+      },
+      "undated": {
+        "conflicts": 0,
+        "overbooked": ["S2"]
+      }
+    },
+    {
+      "name": "time_tbd: two TIME TBD Tuesdays drop out of a season-long clash and are reported",
+      "witness": "X-tbd-clash",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": ["C1"]
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "id": "a1",
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        },
+        {
+          "id": "a2",
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        }
+      ],
+      "exceptions": [
+        {
+          "id": "e1",
+          "assignment_id": "a2",
+          "window": "[2026-08-10,2026-08-23]",
+          "kind": "time_tbd",
+          "tbd_reason": "past-sunset",
+          "cause_kind": null,
+          "withdrawn_at": null,
+          "practice_slot_id": null
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-08-25",
+            "sharedDates": 13
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2,
+        "timeTbd": [
+          {
+            "teamId": "T2",
+            "slotId": "S2",
+            "exceptionId": "e1",
+            "code": "past-sunset",
+            "dates": ["2026-08-11", "2026-08-18"]
+          }
+        ]
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "time_tbd: a TIME TBD date does not hold a place in its slot",
+      "witness": "X-tbd-capacity",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": []
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Wednesday",
+          "capacity": 1,
+          "start": "2026-08-12T17:00:00-04:00",
+          "end": "2026-08-12T18:00:00-04:00",
+          "firstDate": "2026-08-12",
+          "lastDate": "2026-11-20",
+          "startTime": "17:00:00",
+          "endTime": "18:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "id": "a1",
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        },
+        {
+          "id": "a2",
+          "teamId": "T2",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-09-30,2026-09-30]"
+        }
+      ],
+      "exceptions": [
+        {
+          "id": "e1",
+          "assignment_id": "a2",
+          "window": "[2026-09-30,2026-10-01)",
+          "kind": "time_tbd",
+          "tbd_reason": "contended",
+          "cause_kind": null,
+          "withdrawn_at": null,
+          "practice_slot_id": null
+        }
+      ],
+      "expected": {
+        "conflicts": [],
+        "slotLoad": {
+          "S1": [1, 2]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2,
+        "timeTbd": [
+          {
+            "teamId": "T2",
+            "slotId": "S1",
+            "exceptionId": "e1",
+            "code": "contended",
+            "dates": ["2026-09-30"]
+          }
+        ]
+      },
+      "undated": {
+        "conflicts": 0,
+        "overbooked": ["S1"]
+      }
+    },
+    {
+      "name": "relocated to a slot the call does not carry: TIME TBD with the reason, not dropped and not judged",
+      "witness": "X-relocated-missing-slot",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": ["C1"]
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Wednesday",
+          "capacity": 1,
+          "start": "2026-08-12T16:00:00-04:00",
+          "end": "2026-08-12T17:00:00-04:00",
+          "firstDate": "2026-08-12",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "id": "a1",
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        },
+        {
+          "id": "a2",
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        }
+      ],
+      "exceptions": [
+        {
+          "id": "e1",
+          "assignment_id": "a2",
+          "window": "[2026-09-28,2026-10-04]",
+          "kind": "relocated",
+          "tbd_reason": null,
+          "cause_kind": null,
+          "withdrawn_at": null,
+          "practice_slot_id": "S9"
+        }
+      ],
+      "expected": {
+        "conflicts": [],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2,
+        "timeTbd": [
+          {
+            "teamId": "T2",
+            "slotId": "S2",
+            "exceptionId": "e1",
+            "code": "PRACTICE_SLOT_MISSING",
+            "dates": ["2026-09-30"]
+          }
+        ]
+      },
+      "undated": {
+        "conflicts": 0,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "an open-ended TIME TBD window suppresses every date from its start and is reported undated",
+      "witness": "X-tbd-open",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": ["C1"]
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "id": "a1",
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        },
+        {
+          "id": "a2",
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        }
+      ],
+      "exceptions": [
+        {
+          "id": "e1",
+          "assignment_id": "a2",
+          "window": "[2026-11-02,)",
+          "kind": "time_tbd",
+          "tbd_reason": "declined",
+          "cause_kind": null,
+          "withdrawn_at": null,
+          "practice_slot_id": null
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-08-11",
+            "sharedDates": 12
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2,
+        "timeTbd": [
+          {
+            "teamId": "T2",
+            "slotId": "S2",
+            "exceptionId": "e1",
+            "code": "PRACTICE_EXCEPTION_WINDOW_OPEN",
+            "dates": []
+          }
+        ]
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "an exception naming no row of the call is reported, never applied or ignored silently",
+      "witness": "X-row-unread",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": ["C1"]
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "id": "a1",
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        },
+        {
+          "id": "a2",
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        }
+      ],
+      "exceptions": [
+        {
+          "id": "e1",
+          "assignment_id": "a9",
+          "window": "[2026-08-10,2026-08-23]",
+          "kind": "time_tbd",
+          "tbd_reason": "past-sunset",
+          "cause_kind": null,
+          "withdrawn_at": null,
+          "practice_slot_id": null
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-08-11",
+            "sharedDates": 15
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 1,
+        "assignedTeams": 2,
+        "timeTbd": []
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "a withdrawn exception is not applied (control)",
+      "witness": "X-withdrawn",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": ["C1"]
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "id": "a1",
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        },
+        {
+          "id": "a2",
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        }
+      ],
+      "exceptions": [
+        {
+          "id": "e1",
+          "assignment_id": "a2",
+          "window": "[2026-08-10,2026-08-23]",
+          "kind": "time_tbd",
+          "tbd_reason": "past-sunset",
+          "cause_kind": null,
+          "withdrawn_at": "2026-08-01T00:00:00+00:00",
+          "practice_slot_id": null
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-08-11",
+            "sharedDates": 15
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2,
+        "timeTbd": []
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "a teammate's row with no live date is not handed to the helper, so it is not reported TIME TBD",
+      "witness": "X-dateless-teammate",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": ["C1"]
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S3",
+          "day": "Thursday",
+          "capacity": 1,
+          "start": "2026-08-13T16:00:00-04:00",
+          "end": "2026-08-13T17:00:00-04:00",
+          "firstDate": "2026-08-13",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "id": "a1",
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        },
+        {
+          "id": "a2",
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        },
+        {
+          "id": "a3",
+          "teamId": "T2",
+          "slotId": "S3",
+          "effectiveDateRange": "[2026-12-01,)"
+        }
+      ],
+      "exceptions": [
+        {
+          "id": "e1",
+          "assignment_id": "a2",
+          "window": "[2026-08-10,2026-08-23]",
+          "kind": "time_tbd",
+          "tbd_reason": "past-sunset",
+          "cause_kind": null,
+          "withdrawn_at": null,
+          "practice_slot_id": null
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-08-25",
+            "sharedDates": 13
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [1, 1],
+          "S3": [0, 1]
+        },
+        "dataQuality": 1,
+        "assignedTeams": 2,
+        "timeTbd": [
+          {
+            "teamId": "T2",
+            "slotId": "S2",
+            "exceptionId": "e1",
+            "code": "past-sunset",
+            "dates": ["2026-08-11", "2026-08-18"]
+          }
+        ]
+      },
+      "undated": {
+        "conflicts": 1,
+        "overbooked": []
+      }
+    },
+    {
+      "name": "relocated in the window's last week to a later weekday: the moved date is kept and judged there",
+      "witness": "X-relocated-last-week",
+      "teams": [
+        {
+          "id": "T1",
+          "division": "U12",
+          "coachId": "C1",
+          "assistantCoachIds": []
+        },
+        {
+          "id": "T2",
+          "division": "U12",
+          "coachId": "C2",
+          "assistantCoachIds": ["C1"]
+        }
+      ],
+      "slots": [
+        {
+          "id": "S1",
+          "day": "Tuesday",
+          "capacity": 1,
+          "start": "2026-08-11T16:00:00-04:00",
+          "end": "2026-08-11T17:00:00-04:00",
+          "firstDate": "2026-08-11",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        },
+        {
+          "id": "S2",
+          "day": "Thursday",
+          "capacity": 1,
+          "start": "2026-08-13T16:00:00-04:00",
+          "end": "2026-08-13T17:00:00-04:00",
+          "firstDate": "2026-08-13",
+          "lastDate": "2026-11-20",
+          "startTime": "16:00:00",
+          "endTime": "17:00:00"
+        }
+      ],
+      "assignments": [
+        {
+          "id": "a1",
+          "teamId": "T1",
+          "slotId": "S1",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        },
+        {
+          "id": "a2",
+          "teamId": "T2",
+          "slotId": "S2",
+          "effectiveDateRange": "[2026-08-10,2026-11-21)"
+        }
+      ],
+      "exceptions": [
+        {
+          "id": "e1",
+          "assignment_id": "a1",
+          "window": "[2026-11-16,2026-11-20]",
+          "kind": "relocated",
+          "tbd_reason": null,
+          "cause_kind": null,
+          "withdrawn_at": null,
+          "practice_slot_id": "S2"
+        }
+      ],
+      "expected": {
+        "conflicts": [
+          {
+            "key": "T1@S1 + T2@S2 :: C1",
+            "firstDate": "2026-11-19",
+            "sharedDates": 1
+          }
+        ],
+        "slotLoad": {
+          "S1": [1, 1],
+          "S2": [2, 1]
+        },
+        "dataQuality": 0,
+        "assignedTeams": 2,
+        "timeTbd": []
       },
       "undated": {
         "conflicts": 0,

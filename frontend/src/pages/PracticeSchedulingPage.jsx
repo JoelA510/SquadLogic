@@ -27,6 +27,7 @@ import { useOrganization } from '../contexts/OrganizationContext.jsx';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { useAutoScheduler } from '../hooks/useAutoScheduler.js';
 import { useSeasonPracticeAssignments } from '../hooks/useSeasonPracticeAssignments.js';
+import { useSeasonPracticeExceptions } from '../hooks/useSeasonPracticeExceptions.js';
 import { useAutoRunOnNavigate } from '../hooks/useAutoRunOnNavigate.js';
 import {
   PRACTICE_SCHEDULE_STALE,
@@ -563,6 +564,13 @@ export default function PracticeSchedulingPage() {
   });
   const seasonRows = seasonPractice.rows;
   const refetchSeasonPractice = seasonPractice.refetch;
+  // The season's live saved exceptions (relocated, TIME TBD), which the
+  // evaluation applies (the M4.7 follow-up, plan Q1).
+  const seasonExceptions = useSeasonPracticeExceptions({
+    organizationId: currentOrganization?.id,
+    seasonSettingsId: currentSeasonSetting?.id,
+  });
+  const refetchSeasonExceptions = seasonExceptions.refetch;
   const refetchPracticeSchedule = practice?.refetch;
 
   useEffect(() => {
@@ -771,7 +779,11 @@ export default function PracticeSchedulingPage() {
   // Dated (M4.7): each slot also carries its dating (`slotDating`) and each row
   // its range -- the stored `effectiveDateRange`, or a staged placement's
   // `newPlacementRange` -- so a closed series and its successor are judged on
-  // the dates each is live, not as one weekly instant.
+  // the dates each is live, not as one weekly instant. Saved exceptions (the
+  // M4.7 follow-up): each stored row carries its `id`, and the season's live
+  // exceptions are sent with them, so a relocated week is judged at its new
+  // slot and a TIME TBD week is reported rather than counted. A staged
+  // placement has no stored id, so no saved exception can name it.
   // `null` while a read is still landing or after one failed (the page reports
   // those failures itself), so the panel never scores a partial list as the
   // season's. Memoized so the panel's debounced request isn't restarted by
@@ -784,6 +796,9 @@ export default function PracticeSchedulingPage() {
     errors.team,
     errors.practice,
     practiceSlotsError,
+    // Never scored as if the season had no exceptions when they were unread.
+    seasonExceptions.loading,
+    seasonExceptions.error,
   ].some(Boolean);
   const evaluationPracticeData = useMemo(
     () =>
@@ -791,11 +806,14 @@ export default function PracticeSchedulingPage() {
         ? null
         : {
             assignments: localAssignments.map((assignment) => ({
+              // A display row's synthetic id is not a stored one (`persisted`).
+              id: assignment.persisted === false ? null : (assignment.id ?? null),
               teamId: getAssignmentTeamId(assignment),
               slotId: getAssignmentSlotId(assignment),
               effectiveDateRange:
                 assignment.effectiveDateRange ?? assignment.effective_date_range ?? null,
             })),
+            exceptions: seasonExceptions.rows,
             teams: schedulerTeams.map(({ id, division, coachId, assistantCoachIds }) => ({
               id,
               division,
@@ -811,8 +829,19 @@ export default function PracticeSchedulingPage() {
               ...slotDating(slot),
             })),
           },
-    [evaluationReadsPending, localAssignments, schedulerTeams, schedulerSlots]
+    [
+      evaluationReadsPending,
+      localAssignments,
+      schedulerTeams,
+      schedulerSlots,
+      seasonExceptions.rows,
+    ]
   );
+  // Said, not only withheld: the panel falls silent without its inputs.
+  const seasonExceptionsMessage = seasonExceptions.error
+    ? "This season's saved practice changes (moved and TIME TBD practices) could not be read, " +
+      `so the schedule is not evaluated (${seasonExceptions.error.message ?? 'unreadable'}).`
+    : null;
   const schoolDayEnd =
     currentSeasonSetting?.school_day_end ?? currentSeasonSetting?.schoolDayEnd ?? undefined;
 
@@ -1275,6 +1304,12 @@ export default function PracticeSchedulingPage() {
       unassigned: autoScheduler.result?.unassigned ?? [],
       teams: schedulerTeams,
       slots: schedulerSlots.map((slot) => ({ ...slot, ...slotDating(slot) })),
+      // Unread is not none: without a complete read the run records no
+      // metrics and the Apply status says why (`metricsUnavailable`).
+      exceptions: seasonExceptions.loaded ? seasonExceptions.rows : null,
+      // The daylight TIME TBD this same save records on the rows it inserts,
+      // so the run's report describes the schedule it commits.
+      sameSaveExceptions: daylightTbd.exceptions,
       schoolDayEnd,
       timezone,
       edgeEvaluation: autoScheduler.result?.evaluation ?? null,
@@ -1332,8 +1367,14 @@ export default function PracticeSchedulingPage() {
       setOverridePrompt(null);
       setApplyStatus('applied');
       // The save created rows the page knows only by review ids. Re-read the
-      // season so the next run's cross-check names them by their real ids.
+      // season so the next run's cross-check names them by their real ids,
+      // its exceptions, which the save may have written or cut, and the
+      // grid's rows, which replace the review rows above once they land: an
+      // exception the save keyed to a new row's id names no review row, so
+      // without this the evaluation reads it as `ROW_UNREAD` until a reload.
       refetchSeasonPractice();
+      refetchSeasonExceptions();
+      refetchPracticeSchedule?.();
       // The schedule was persisted either way -- this is not an error -- but
       // a run with no readiness metrics must say so here. The panel can only
       // fall silent (it gates on `summary.unassignedTeams`), and a silent
@@ -1360,6 +1401,7 @@ export default function PracticeSchedulingPage() {
       // neither the next run nor the grid is built on the read from before it.
       if (isUnknownPersistenceOutcome(err)) {
         refetchSeasonPractice();
+        refetchSeasonExceptions();
         refetchPracticeSchedule?.();
       }
       // Writer v3's lock (ruling 2): a save that would replace a saved
@@ -1429,9 +1471,12 @@ export default function PracticeSchedulingPage() {
     readOverrideFingerprint,
     readSeasonRows,
     refetchPracticeSchedule,
+    refetchSeasonExceptions,
     refetchSeasonPractice,
     reviewAssignments,
     schedulerSlots,
+    seasonExceptions.loaded,
+    seasonExceptions.rows,
     // The array, not its length: the roster is now an input to the metrics
     // report this callback persists, so a change of membership at an
     // unchanged count has to re-create it.
@@ -1869,6 +1914,14 @@ export default function PracticeSchedulingPage() {
             </div>
           )}
 
+          {seasonExceptionsMessage && (
+            <div
+              role="alert"
+              className="mt-4 rounded-lg border border-status-warning/30 bg-status-warning-bg px-4 py-3 text-sm text-status-warning-text"
+            >
+              {seasonExceptionsMessage}
+            </div>
+          )}
           <EvaluationPanel practiceData={evaluationPracticeData} />
 
           <div className="bg-bg-glass border border-border-subtle rounded-xl overflow-hidden shadow-md mt-8">

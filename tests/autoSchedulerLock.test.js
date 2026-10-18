@@ -16,7 +16,11 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'vitest';
 
-import { runPracticeOptimizer } from '../supabase/functions/_shared/engines/auto-scheduler-solver.js';
+import {
+  NO_LIVE_DATE_REASON,
+  runPracticeOptimizer,
+  undatableSlotIds,
+} from '../supabase/functions/_shared/engines/auto-scheduler-solver.js';
 import {
   classifyTeamsForRun,
   crossCheckLockedAssignments,
@@ -25,12 +29,22 @@ import {
   TIME_TBD_EXCLUDED_REASON,
 } from '../supabase/functions/_shared/engines/practice-lock.js';
 import { prepareTeam } from '../supabase/functions/_shared/engines/practice-coaches.js';
+import { toDaylightSlot } from '../supabase/functions/_shared/engines/practice-daylight.js';
+import { evaluatePracticeSchedule as evaluateCore } from '../packages/core/src/practiceMetrics.js';
 import { seasonCalendarDate } from '../packages/core/src/timing/index.js';
 import { buildPracticeAssignmentRows } from '../packages/core/src/practiceSupabase.js';
 import {
   newPlacementRange,
+  runLiveFrom,
   toPersistenceAssignment,
 } from '../frontend/src/pages/PracticeSchedulingPage.jsx';
+import {
+  SOLVER_DATED_CASES,
+  SOLVER_DATED_TODAY,
+  SOLVER_DATED_ZONE,
+  seasonLongDating,
+  solverDatedRun,
+} from './fixtures/solverDatedCases.js';
 
 // ---------------------------------------------------------------------------
 // The fixture: a two-row team, a one-row team, a TIME TBD team, and three
@@ -79,6 +93,17 @@ const ROWS = [
 ];
 const TIME_TBD_TEAMS = ['tbd'];
 
+/**
+ * The fixture's dating (M4.8): every slot from its own first occurrence to the
+ * end of November, and `liveFrom` on the first day of the week, so the dated
+ * rule judges this pre-M4.8 fixture exactly as the undated one did.
+ */
+const DATING = seasonLongDating(SLOTS, toDaylightSlot, {
+  timeZone: 'UTC',
+  until: '2026-11-30',
+  liveFrom: '2026-09-01',
+});
+
 function row(id, teamId, slotId) {
   return {
     id,
@@ -101,6 +126,7 @@ async function runFixture() {
     slots: SLOTS,
     locked: ROWS.map((r) => ({ assignmentId: r.id, teamId: r.teamId, slotId: r.slotId })),
     placeableTeamIds: classification.placeable,
+    dating: DATING,
     config: { timeBudgetMs: 20000, maxIterations: 300, seed: 42 },
   });
   return { classification, run };
@@ -198,16 +224,17 @@ describe('an ordinary run places only teams with no row, and returns only those'
   });
 });
 
-describe('the solver scores undated, whatever the page sends (M4.7, plan Q2 and §8)', () => {
-  // The page sends its whole slot objects to the auto-scheduler. If they ever
-  // carry the scoring engine's date fields, the solver's objective must not
-  // switch to the dated model: its search is frozen until M4.8.
-  const dated = SLOTS.map((s) => ({
+describe("the solver scores dated, from the store's dating, whatever the page sends (M4.8 Q1)", () => {
+  // Inverted from M4.7's guard ("the solver scores undated"). The page sends
+  // its whole slot objects; if they carry the scoring engine's date fields,
+  // they must change nothing: the objective is dated from `dating` (the
+  // store's reading, `index.ts`), never from the body.
+  const pageDated = SLOTS.map((s) => ({
     ...s,
-    firstDate: s.start.toISOString().slice(0, 10),
-    lastDate: '2026-11-30',
-    startTime: s.start.toISOString().slice(11, 19),
-    endTime: s.end.toISOString().slice(11, 19),
+    firstDate: '2026-11-02',
+    lastDate: '2026-11-03',
+    startTime: '06:00:00',
+    endTime: '06:30:00',
   }));
   const runWith = (slots) => {
     const teams = ROSTER.map((t) => prepareTeam(t));
@@ -219,25 +246,214 @@ describe('the solver scores undated, whatever the page sends (M4.7, plan Q2 and 
     return runPracticeOptimizer({
       teams,
       slots,
-      locked: ROWS.map((r) => ({ assignmentId: r.id, teamId: r.teamId, slotId: r.slotId })),
+      locked: ROWS.map((r) => ({
+        assignmentId: r.id,
+        teamId: r.teamId,
+        slotId: r.slotId,
+        effectiveDateRange: r.effectiveDateRange,
+      })),
       placeableTeamIds: classification.placeable,
+      dating: DATING,
       config: { timeBudgetMs: 20000, maxIterations: 300, seed: 42 },
     });
   };
 
-  it('slots carrying dates give the same run, scored undated', async () => {
+  it('scores dated, and slots carrying other dates give the same run', async () => {
     const plain = await runWith(SLOTS);
-    const withDates = await runWith(dated);
-    // Meta: the dated slots really carry every field that would date a call.
-    assert.ok(dated.every((s) => s.firstDate && s.lastDate && s.startTime && s.endTime));
+    const withDates = await runWith(pageDated);
+    // Meta: the page's slots really carry every field that would date a call.
+    assert.ok(pageDated.every((s) => s.firstDate && s.lastDate && s.startTime && s.endTime));
     assert.ok(plain.placements.length > 0, 'the fixture placed nothing');
-    assert.equal(withDates.evaluation.summary.dateModel, 'undated');
-    assert.equal(plain.evaluation.summary.dateModel, 'undated');
+    assert.equal(plain.evaluation.summary.dateModel, 'dated');
+    // The dated shape (M4.7 §11): each slot's busiest date beside its rows.
+    assert.ok(plain.evaluation.slotUtilization.every((u) => 'assignmentRows' in u));
     assert.deepEqual(withDates.placements, plain.placements);
     assert.deepEqual(withDates.unassigned, plain.unassigned);
     assert.deepEqual(withDates.evaluation, plain.evaluation);
     assert.equal(withDates.seedScore, plain.seedScore);
     assert.equal(withDates.bestScore, plain.bestScore);
+  });
+
+  it("the persisted evaluation dates a conflict between locked rows, as the panel's does", async () => {
+    // W4's shape between two LOCKED rows: Tuesday 16:00 from 08-11 and from
+    // 09-01, one coach. The search cannot create a conflict; this one is the
+    // operator's, and the run reports it with its dates (12 Tuesdays from
+    // 09-01), which the undated evaluation reported with none.
+    const testCase = SOLVER_DATED_CASES[0];
+    const { slots, dating } = solverDatedRun(testCase, toDaylightSlot);
+    const locked = [
+      {
+        assignmentId: 'a1',
+        teamId: 'T1',
+        slotId: 'sA',
+        effectiveDateRange: '[2026-08-10,2026-11-21)',
+      },
+      {
+        assignmentId: 'a2',
+        teamId: 'T2',
+        slotId: 'sB',
+        effectiveDateRange: '[2026-08-10,2026-11-21)',
+      },
+    ];
+    const teams = testCase.teams.map((t) => prepareTeam(t));
+    const run = await runPracticeOptimizer({
+      teams,
+      slots,
+      locked,
+      placeableTeamIds: [],
+      dating,
+      config: { timeBudgetMs: 20000, maxIterations: 50, seed: 42 },
+    });
+    assert.equal(run.evaluation.summary.dateModel, 'dated');
+    assert.deepEqual(
+      run.evaluation.coachConflicts.map((c) => ({
+        coachIds: c.coachIds,
+        firstDate: c.firstDate,
+        sharedDates: c.sharedDates,
+      })),
+      [{ coachIds: ['c1'], firstDate: '2026-09-01', sharedDates: 12 }]
+    );
+    // Core's dated engine, given the same dated inputs, agrees.
+    const core = evaluateCore({
+      teams,
+      slots: slots.map((s) => {
+        const d = dating.slots.get(s.id);
+        return {
+          ...s,
+          day: 'Tuesday',
+          firstDate: d.firstDate,
+          lastDate: d.effectiveUntil,
+          startTime: '16:00:00',
+          endTime: '17:00:00',
+        };
+      }),
+      assignments: locked.map((r) => ({
+        teamId: r.teamId,
+        slotId: r.slotId,
+        effectiveDateRange: r.effectiveDateRange,
+      })),
+    });
+    assert.equal(core.coachConflicts.length, 1);
+    assert.equal(core.coachConflicts[0].firstDate, '2026-09-01');
+    assert.equal(core.coachConflicts[0].sharedDates, 12);
+  });
+});
+
+describe('the dated hard constraint (M4.8 §3, the shared witness table)', () => {
+  it('the table exercises every rule it claims', () => {
+    // Meta-assertions, from the table's own inputs: a table that lost a shape
+    // would leave its plant with nothing to turn red.
+    const names = SOLVER_DATED_CASES.map((c) => c.name);
+    for (const shape of ['W4-S1', 'W4-S2', 'E1', 'E2', 'E3', 'DST', 'cannot be read']) {
+      assert.ok(
+        names.some((n) => n.includes(shape)),
+        `no case for ${shape}`
+      );
+    }
+    assert.ok(
+      SOLVER_DATED_CASES.some((c) =>
+        c.expect.unassigned.some((u) => u.endsWith(NO_LIVE_DATE_REASON))
+      )
+    );
+    assert.ok(SOLVER_DATED_CASES.some((c) => c.expect.ended.length > 0));
+    assert.ok(SOLVER_DATED_CASES.some((c) => c.expect.unreadable.length > 0));
+    assert.ok(SOLVER_DATED_CASES.some((c) => c.slots.some((s) => s.capacity > 1)));
+  });
+
+  for (const testCase of SOLVER_DATED_CASES) {
+    it(testCase.name, async () => {
+      const { slots, dating } = solverDatedRun(testCase, toDaylightSlot);
+      const run = await runPracticeOptimizer({
+        teams: testCase.teams.map((t) => prepareTeam(t)),
+        slots,
+        locked: testCase.locked,
+        placeableTeamIds: testCase.placeable,
+        dating,
+        config: { timeBudgetMs: 20000, maxIterations: 300, seed: 42 },
+      });
+      assert.deepEqual(
+        run.placements.map((p) => `${p.teamId} -> ${p.slotId}`).sort(),
+        [...testCase.expect.placements].sort(),
+        'placements'
+      );
+      assert.deepEqual(
+        run.unassigned.map((u) => `${u.teamId}: ${u.reason}`).sort(),
+        [...testCase.expect.unassigned].sort(),
+        'unplaced'
+      );
+      assert.deepEqual(
+        run.endedRows.map((r) => r.assignmentId),
+        testCase.expect.ended,
+        'ended rows'
+      );
+      assert.deepEqual(
+        run.unreadableRange.map((r) => r.assignmentId),
+        testCase.expect.unreadable,
+        'unreadable ranges'
+      );
+      // Never silently dropped: every placeable team is placed or unplaced
+      // with a reason, enumerated from the case's own placeable list.
+      for (const teamId of testCase.placeable) {
+        const placed = run.placements.some((p) => p.teamId === teamId);
+        const reason = run.unassigned.find((u) => u.teamId === teamId)?.reason;
+        assert.ok(placed !== Boolean(reason), `${teamId} is in no outcome, or in two`);
+      }
+      // One rule: the run's own dated evaluation finds no conflict and no
+      // overbooked slot in what the dated constraint admitted.
+      assert.equal(run.evaluation.summary.dateModel, 'dated');
+      assert.equal(run.evaluation.coachConflicts.length, 0, 'the search created a conflict');
+      assert.ok(
+        run.evaluation.slotUtilization.every((u) => !u.overbooked),
+        'overbooked'
+      );
+      assert.equal(run.liveFrom, SOLVER_DATED_TODAY);
+    });
+  }
+
+  it('a slot the solver cannot date throws, naming it, and is what index.ts refuses', async () => {
+    const { slots, dating } = solverDatedRun(SOLVER_DATED_CASES[0], toDaylightSlot);
+    // The store holds no first date and the body's start and end fall on two
+    // dates: `toDaylightSlot` reads no first date (plan §3.7).
+    const overnight = {
+      id: 'sN',
+      start: new Date('2026-08-11T23:30:00-04:00'),
+      end: new Date('2026-08-12T00:30:00-04:00'),
+      capacity: 1,
+    };
+    const read = toDaylightSlot(overnight, SOLVER_DATED_ZONE, {
+      fieldId: 'f',
+      validUntil: '2026-11-20',
+    });
+    assert.equal(read.firstDate, null);
+    const withOvernight = new Map([...dating.slots, ['sN', read]]);
+    assert.deepEqual(undatableSlotIds(['sA', 'sB', 'sN'], withOvernight), ['sN']);
+    // Each unreadable field on its own, and a window that does not end after it starts.
+    const good = dating.slots.get('sA');
+    for (const bad of [
+      { firstDate: null },
+      { effectiveUntil: '2026-02-30' },
+      { startMinutes: null },
+      { endMinutes: good.startMinutes },
+    ]) {
+      assert.deepEqual(
+        undatableSlotIds(['sA'], new Map([['sA', { ...good, ...bad }]])),
+        ['sA'],
+        JSON.stringify(bad)
+      );
+    }
+    assert.deepEqual(undatableSlotIds(['sA'], new Map()), ['sA'], 'a slot with no dating');
+    assert.deepEqual(undatableSlotIds(['sA'], dating.slots), [], 'control: a dated slot');
+    await assert.rejects(
+      runPracticeOptimizer({
+        teams: [],
+        slots: [...slots, overnight],
+        locked: [],
+        placeableTeamIds: [],
+        dating: { ...dating, slots: withOvernight },
+        config: { timeBudgetMs: 20000, maxIterations: 10, seed: 1 },
+      }),
+      /SLOT_DATING_UNREADABLE: sN/
+    );
   });
 });
 
@@ -484,6 +700,27 @@ describe('auto-scheduler/index.ts wiring (source pin)', () => {
     assert.doesNotMatch(source, /input\.lockedAssignments\.map|generateGreedySeed/);
   });
 
+  it('dates the run from the store, refuses a slot it cannot date, and returns liveFrom (M4.8)', () => {
+    // One today and one dating, shared with the daylight pass.
+    assert.match(source, /const liveFrom = seasonCalendarDate\(Date\.now\(\), season\.timezone\);/);
+    assert.match(source, /today: liveFrom,/);
+    assert.match(source, /dating: \{ liveFrom, slots: daylightSlots \}/);
+    assert.match(source, /slots: daylightSlots,/);
+    // The refusal precedes the solver, as a 422 naming the slots (Q3).
+    const guard = source.indexOf('if (liveFrom === null || undatable.length > 0) {');
+    const solve = source.indexOf('await runPracticeOptimizer(');
+    assert.ok(guard >= 0 && solve > guard, 'the dating refusal does not precede the solver');
+    assert.match(
+      source.slice(guard, guard + 2500),
+      /return jsonResponse\([\s\S]*?code: SLOT_DATING_UNREADABLE,[\s\S]*?slotIds: undatable,[\s\S]*?422/
+    );
+    // The response carries the date judged, and the lock its ended and unreadable rows.
+    const response = source.slice(source.indexOf('// 13. Response'));
+    assert.match(response, /liveFrom: run\.liveFrom,/);
+    assert.match(response, /endedRows: run\.endedRows\.map\(/);
+    assert.match(response, /unreadableRange: run\.unreadableRange\.map\(/);
+  });
+
   it('audits the locked rows loaded and the placements proposed', () => {
     const completed = source.slice(source.indexOf("action: 'scheduler.auto_completed'"));
     assert.match(completed, /lockedLoaded: lock\.rows\.length/);
@@ -492,6 +729,28 @@ describe('auto-scheduler/index.ts wiring (source pin)', () => {
 });
 
 describe('the page payload (plan §3 "Payload builder")', () => {
+  it("the review dates new placements from the run's liveFrom, not the page's clock (M4.8 Q7)", () => {
+    assert.equal(runLiveFrom({ liveFrom: '2026-10-17' }), '2026-10-17');
+    // Anything else is not a date the page may write from: it falls back.
+    for (const bad of [undefined, null, '', '2026-10-17T00:00:00Z', '2026-02-30', 20261017]) {
+      assert.equal(runLiveFrom({ liveFrom: bad }), null, String(bad));
+    }
+    assert.equal(runLiveFrom(null), null);
+    const page = readFileSync(
+      path.join(process.cwd(), 'frontend/src/pages/PracticeSchedulingPage.jsx'),
+      'utf8'
+    );
+    assert.match(
+      page,
+      /const seasonToday =\s*runLiveFrom\(autoScheduler\.result\) \?\? seasonCalendarDate\(Date\.now\(\), timezone\);/
+    );
+    const hook = readFileSync(
+      path.join(process.cwd(), 'frontend/src/hooks/useAutoScheduler.js'),
+      'utf8'
+    );
+    assert.match(hook, /liveFrom: data\.liveFrom \?\? null,/);
+  });
+
   it('a new placement starts at max(slot.validFrom, today on the season clock)', () => {
     const slotWindow = { effectiveFrom: '2026-09-01', effectiveUntil: '2026-11-30' };
     assert.equal(newPlacementRange(slotWindow, '2026-10-15'), '[2026-10-15,2026-11-30]');

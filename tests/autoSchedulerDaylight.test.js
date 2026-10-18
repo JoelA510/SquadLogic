@@ -23,7 +23,10 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'vitest';
 
-import { runPracticeOptimizer } from '../supabase/functions/_shared/engines/auto-scheduler-solver.js';
+import {
+  runPracticeOptimizer,
+  undatableSlotIds,
+} from '../supabase/functions/_shared/engines/auto-scheduler-solver.js';
 import {
   applyDaylightPostPass,
   DAYLIGHT_CODE,
@@ -153,6 +156,16 @@ const BODY_SLOTS = [
   slot('s-h-locked', F.unlit, '2026-09-01', '2026-11-24', '18:00', '19:30'),
 ];
 
+/**
+ * M4.8: the auto-scheduler refuses a run holding a slot it cannot date (422
+ * `SLOT_DATING_UNREADABLE`, plan Q3), so `s-g-nodates` never reaches the
+ * solver -- and the pass's `slot-dates-unreadable` cause for a NEW placement
+ * is reachable only by calling the pass directly (the D4 tests below do).
+ * Every solver run here is over the slots `index.ts` would let through.
+ */
+const UNDATED_SLOT = 's-g-nodates';
+const SOLVER_SLOTS = BODY_SLOTS.filter((s) => s.id !== UNDATED_SLOT);
+
 /** `practice_slots` as the store holds them: the venue and last date. */
 const SLOT_ROWS = BODY_SLOTS.map((s) => storedRow(s));
 /** A body slot as `practice_slots` stores it (every fixture date is a Tuesday). */
@@ -168,7 +181,9 @@ function storedRow(s) {
 }
 const TABLES = { practice_slots: SLOT_ROWS, fields: FIELD_ROWS };
 
-const PLACEABLE = ['t1', 't2', 't3', 't4', 't5', 't6', 't7'];
+// M4.8: six, one per slot the solver may run on. A seventh team used to take
+// `s-g-nodates`, which no run reaches now (`SOLVER_SLOTS` above).
+const PLACEABLE = ['t1', 't2', 't3', 't4', 't5', 't6'];
 const ROSTER = [...PLACEABLE, 't-locked'].map((id) => ({
   id,
   division: 'U10',
@@ -217,7 +232,7 @@ async function loadDaylight(tables = TABLES, rows = anchoredSlots()) {
 async function run({
   daylight = true,
   tables = TABLES,
-  bodySlots = BODY_SLOTS,
+  bodySlots = SOLVER_SLOTS,
   roster = ROSTER,
   overrides = undefined,
 } = {}) {
@@ -245,6 +260,12 @@ async function run({
     locked: roster.some((t) => t.id === 't-locked') ? LOCKED : [],
     placeableTeamIds: placeable,
     config: CONFIG,
+    // M4.8: the solver is dated from the same reading the pass judges (the
+    // store first, the body where the store is silent), as `index.ts` passes it.
+    dating: {
+      liveFrom: TODAY,
+      slots: new Map(rows.map((s) => [s.id, toDaylightSlot(s, ZONE, loaded?.slots.get(s.id))])),
+    },
     daylight: loaded
       ? {
           slots: new Map(rows.map((s) => [s.id, toDaylightSlot(s, ZONE, loaded.slots.get(s.id))])),
@@ -525,13 +546,14 @@ describe('W9: the body never supplies the venue, its coordinates or its lighting
       'fieldId',
       'firstDate',
       'id',
+      'startMinutes',
     ]);
     assert.equal(read.fieldId, F.unlit, "the body's fieldId was read");
     assert.equal(read.effectiveUntil, '2026-10-01', "the body's end date beat the store's");
   });
 
   it('a body claiming a lit field, lit ground, other coordinates or an earlier end changes nothing', async () => {
-    const lying = BODY_SLOTS.map((s) => ({
+    const lying = SOLVER_SLOTS.map((s) => ({
       ...s,
       // Thirty seconds after the start: in daylight on every date, if believed.
       end: s.start.replace(':00-0', ':30-0'),
@@ -624,10 +646,6 @@ describe('D4: an unlit venue with no coordinates is flagged, counted, never allo
       DAYLIGHT_UNKNOWN_CAUSE.VENUE_COORDINATES_MISSING
     );
     assert.equal(byCause.get('s-e-nocoords').code, 'SUNSET_UNKNOWN');
-    assert.equal(byCause.get('s-g-nodates').cause, DAYLIGHT_UNKNOWN_CAUSE.SLOT_DATES_UNREADABLE);
-    assert.ok(
-      result.placements.some((p) => p.slotId === 's-g-nodates' && !('effectiveUntil' in p))
-    );
     assert.ok(
       result.placements.some((p) => p.slotId === 's-e-nocoords' && !('effectiveUntil' in p))
     );
@@ -635,13 +653,45 @@ describe('D4: an unlit venue with no coordinates is flagged, counted, never allo
       result.daylight.meta.daylightUnknownOccurrences,
       derivedDates('s-e-nocoords').length
     );
-    assert.equal(result.daylight.meta.daylightUnknownPlacements, 2);
+    assert.equal(result.daylight.meta.daylightUnknownPlacements, 1);
     // Never allowed: the within-daylight count is the judged slots' alone.
     const judgedWithin = baseline.placements
       .map((p) => derive(p.slotId))
       .filter((k) => k.kind === 'judged')
       .reduce((n, k) => n + k.legal.length, 0);
     assert.equal(result.daylight.meta.occurrencesWithinDaylight, judgedWithin);
+  });
+
+  it('a slot with no end date anywhere: the run is refused (M4.8 Q3); the pass alone flags it', async () => {
+    // What `index.ts` reads of it: no last date in the store or the body, so
+    // the solver cannot date it and the run is refused before the solver.
+    const loaded = await loadDaylight();
+    const read = new Map(
+      anchoredSlots().map((s) => [s.id, toDaylightSlot(s, ZONE, loaded.slots.get(s.id))])
+    );
+    assert.deepEqual(
+      undatableSlotIds(
+        BODY_SLOTS.map((s) => s.id),
+        read
+      ),
+      [UNDATED_SLOT]
+    );
+    // The pass, called directly with a placement there, still never judges
+    // or allows it: unknown, with its cause, the placement untouched.
+    const pass = applyDaylightPostPass({
+      placements: [{ teamId: 't1', slotId: UNDATED_SLOT, source: 'auto' }],
+      unassigned: [],
+      locked: [],
+      slots: read,
+      venues: loaded.venues,
+      timeZone: ZONE,
+      today: TODAY,
+    });
+    assert.deepEqual(
+      pass.report.unknown.map((u) => [u.slotId, u.cause]),
+      [[UNDATED_SLOT, DAYLIGHT_UNKNOWN_CAUSE.SLOT_DATES_UNREADABLE]]
+    );
+    assert.deepEqual(pass.placements, [{ teamId: 't1', slotId: UNDATED_SLOT, source: 'auto' }]);
   });
 });
 
@@ -744,7 +794,7 @@ describe('with no unlit venue, or every venue in daylight, the output is unchang
     }));
     // Every slot but the one with no end date (which is unknown on any ground
     // but lit -- and lit here) keeps the roster at one team per slot.
-    const body = BODY_SLOTS;
+    const body = SOLVER_SLOTS;
     const roster = ROSTER;
     const without = await run({ daylight: false, bodySlots: body, roster });
     const withPass = await run({ tables: { ...TABLES, fields: allLit }, bodySlots: body, roster });
@@ -931,29 +981,39 @@ function withoutOverrideKeys(r) {
 const bytes = (r) => JSON.stringify({ ...r, elapsedMs: 0 });
 const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 /**
- * `run()`'s full result on `origin/main` 3fa69ec, before this PR, hashed as
+ * `run()`'s result on `origin/main` a31ddde, before M4.8, over this file's
+ * fixture as M4.8 left it (`SOLVER_SLOTS`, six placeable teams), with its
+ * `evaluation` and `relocatedOutsideRun` removed and hashed as
  * {@link withoutOverrideKeys} hashes it (elapsedMs zeroed). Captured by
- * executing main's modules over this file's fixture.
+ * executing main's modules over this file. (The pin before M4.8, over the
+ * whole result and the seven-team fixture, was
+ * f79c9f82b512ea18eca285673a0395238f2e2491444ee18bdf54e26176a9c926.)
  */
-const MAIN_POST_PASS_SHA256 = 'f79c9f82b512ea18eca285673a0395238f2e2491444ee18bdf54e26176a9c926';
+const MAIN_POST_PASS_SHA256 = '34fe04500d9c4ed1d1f3d7d44aceac781b7ae2bcaa7176b0019b154012d88356';
+/**
+ * What M4.8 adds to, or changes in, a run's result (plan §3.3, §3.4, §3.5):
+ * the dated evaluation (Q1), the locked rows ended or held season-long, and
+ * the date judged from. Everything else is main's.
+ */
+const M48_KEYS = ['evaluation', 'relocatedOutsideRun', 'unreadableRange', 'endedRows', 'liveFrom'];
+const withoutM48Keys = (r) =>
+  Object.fromEntries(Object.entries(r).filter(([key]) => !M48_KEYS.includes(key)));
 
 const byTeam = (list) => new Map(list.map((x) => [x.teamId, x]));
 
 describe('no overrides: the post-pass is byte-identical to main', () => {
   it('an empty approved read reproduces main exactly, and adds only five zero counters', async () => {
     const full = await run({ overrides: [] });
-    // 8.6 3b PR 11d-0 added one result key, empty when no relocation is held;
-    // everything else is still main's bytes, hash unchanged.
-    const { relocatedOutsideRun, ...r } = full;
-    assert.deepEqual(relocatedOutsideRun, []);
-    // M4.7 added one field to the evaluation: the solver scores undated (Q2),
-    // and says so. Removed, the result is main's bytes again.
-    const { dateModel, ...summary } = r.evaluation.summary;
-    assert.equal(dateModel, 'undated');
-    assert.equal(
-      sha256(withoutOverrideKeys({ ...r, evaluation: { ...r.evaluation, summary } })),
-      MAIN_POST_PASS_SHA256
-    );
+    // 8.6 3b PR 11d-0 added one result key, empty when no relocation is held.
+    assert.deepEqual(full.relocatedOutsideRun, []);
+    // M4.8 dates the evaluation (Q1) and adds three keys; with them removed
+    // the placements, the unplaced and the daylight report are main's bytes.
+    assert.equal(full.evaluation.summary.dateModel, 'dated');
+    assert.equal(full.liveFrom, TODAY);
+    assert.deepEqual(full.endedRows, []);
+    assert.deepEqual(full.unreadableRange, []);
+    const r = withoutM48Keys(full);
+    assert.equal(sha256(withoutOverrideKeys(r)), MAIN_POST_PASS_SHA256);
     for (const key of OVERRIDE_KEYS) assert.equal(r.daylight.meta[key], 0, key);
     // No context key at all (a caller that loaded nothing) is the same result.
     assert.equal(bytes(await run()), bytes(full));
@@ -1007,7 +1067,8 @@ describe('W23: an override exempts only its own window, on its own slot', () => 
     assert.deepEqual(r.unassigned, baseline.unassigned);
     // s-h-locked shares s-a-unlit's field; its locked report is unchanged.
     assert.deepEqual(r.daylight.lockedPastSunset, baseline.daylight.lockedPastSunset);
-    assert.ok(compared >= 5, `only ${compared} other placements were compared`);
+    // Six placements, less t1's on s-a-unlit and the one withdrawn (s-c-late).
+    assert.ok(compared >= 4, `only ${compared} other placements were compared`);
   });
 });
 
@@ -1056,7 +1117,7 @@ describe('W24: only approved rows exempt', () => {
 describe('W25: lighting claimed in the request body is ignored', () => {
   it('a body override list, or a slot claiming portable lighting, changes nothing', async () => {
     const whole = { from: '2026-09-01', until: '2026-11-24' };
-    const claims = BODY_SLOTS.map((s) => ({
+    const claims = SOLVER_SLOTS.map((s) => ({
       ...s,
       lightingOverride: whole,
       lightingOverrides: [{ slotId: s.id, ...whole }],

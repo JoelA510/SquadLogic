@@ -32,6 +32,9 @@ const DEFAULT_LOCAL_FUNCTIONS_URL = 'http://localhost:54321/functions/v1';
  * @property {Object|null} [approvedPreferences]
  * @property {Object|null} [daylight] The daylight post-pass's report (8.9 PR 6):
  *   `timeTbd`, `unknown`, `lockedPastSunset` and counts.
+ * @property {string|null} [liveFrom] The date the run judged new placements
+ *   from (M4.8 Q7): today on the season's clock, server-side. `null` from a
+ *   function deployed before it.
  */
 
 /**
@@ -236,6 +239,11 @@ export function useAutoScheduler({ organizationId }) {
           // sunsets and locked rows past sunset. Carried through for the same
           // reason.
           daylight: data.daylight ?? null,
+          // M4.8 Q7: the date the run judged new placements from (today on the
+          // season's clock, server-side). The review writes each placement's
+          // range from it, so a cached run reviewed after midnight still saves
+          // the range the solver checked.
+          liveFrom: data.liveFrom ?? null,
         };
         // Wave 6b Task 1: cache the successful run. Errors are intentionally
         // NOT cached so retries after a failed run go back to the Edge Function.

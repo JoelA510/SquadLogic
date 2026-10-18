@@ -1,17 +1,53 @@
 /**
  * Every coach a team carries, and the hard-constraint check the auto-scheduler runs before
- * seating a team. Mirrors `listTeamCoachIds` in packages/core/src/practiceScheduling.js and
- * `checkHardConstraints` in packages/core/src/autoScheduler.js (Phase 8.1; the reconciled
- * `coaches` shape added in 8.2, where the core helper became a call on
- * `people/coachList.js`). Kept in _shared so a
- * Deno test can reach the check without importing the serving module.
+ * seating a team. `listTeamCoachIds` mirrors core's in packages/core/src/practiceScheduling.js
+ * (Phase 8.1; the reconciled `coaches` shape added in 8.2, where the core helper became a call
+ * on `people/coachList.js`). Kept in _shared so a Deno test can reach the check without
+ * importing the serving module.
+ *
+ * **The check is dated (M4.8, `docs/PLAN_SOLVER_DATE_MODEL.md` §3.2).** It used to mirror core
+ * `checkHardConstraints` (`packages/core/src/autoScheduler.js`), which compares each slot's
+ * first-occurrence instants; it now judges the dates each commitment is live on, with M4.7's
+ * live-date arithmetic (`practice-live-dates.ts`). Core's stays undated: it is not on a live
+ * path (plan Q6, declared in its header).
  */
 
-export interface TimeWindow {
-  start: Date;
-  end: Date;
+import { peakLiveCount, sharedLiveDates } from './practice-live-dates.ts';
+
+/** A weekly run of dates, as day numbers, on one weekday (M4.7's live span). */
+export interface LiveDays {
+  first: number;
+  last: number;
+}
+
+/**
+ * One commitment a coach holds (M4.8): the dates it is live on, and its wall window on the
+ * season's clock, in seconds past midnight. Two windows clash only when they share a live date
+ * AND their wall windows overlap, so back-to-back is never a clash and a slot pair straddling a
+ * DST change is compared on the wall clock, not on instants.
+ */
+export interface TimeWindow extends LiveDays {
+  startSec: number;
+  endSec: number;
   teamId?: string;
   slotId?: string;
+}
+
+/** One holder of a slot's capacity (a locked row, a relocation, a new placement), on its dates. */
+export interface SlotOccupant extends LiveDays {
+  teamId: string;
+}
+
+/**
+ * A slot as the check judges a NEW placement on it: the placement's live dates (`span`, from
+ * `max(slot first date, today)` to the slot's last date on its weekday; `null` when there is no
+ * such date) and the slot's wall window.
+ */
+export interface DatedCandidate {
+  id: string;
+  span: LiveDays | null;
+  startSec: number;
+  endSec: number;
 }
 
 /**
@@ -127,7 +163,17 @@ export function conflictPairKey(
 }
 
 /**
- * Capacity, then time overlap for every coach on the team.
+ * Whether a NEW placement of `team` on `slot` is legal (M4.8, plan §3.2). Refused when:
+ *
+ * 1. the candidate has no live date (the slot has none from today on, plan Q3);
+ * 2. the slot's busiest live date inside the candidate's span, with the candidate added, would
+ *    exceed `slotCapacity` -- occupants are clipped to the candidate's span, so two holders that
+ *    meet only before it starts do not count against it (capacity is a peak per date, never a
+ *    count of rows); or
+ * 3. any coach on the team holds a window that shares a live date with the candidate and whose
+ *    wall window overlaps the slot's.
+ *
+ * `slotCapacity` is each slot's capacity, not what remains of it.
  *
  * A per-coach `unavailableSlotIds` used to be read here from the request body
  * (`coachPreferences`). No client ever sent one, and a coach's availability is
@@ -137,15 +183,24 @@ export function conflictPairKey(
  */
 export function checkHardConstraints(
   team: PreparedTeam,
-  slot: { id: string; start: Date; end: Date },
+  slot: DatedCandidate,
   coachAssignments: Map<string, TimeWindow[]>,
+  slotOccupants: Map<string, LiveDays[]>,
   slotCapacity: Map<string, number>
 ): boolean {
-  if ((slotCapacity.get(slot.id) ?? 0) <= 0) return false;
+  const span = slot.span;
+  if (span === null) return false;
+  const live: LiveDays[] = [span];
+  for (const held of slotOccupants.get(slot.id) ?? []) {
+    const first = Math.max(held.first, span.first);
+    const last = Math.min(held.last, span.last);
+    if (first <= last) live.push({ first, last });
+  }
+  if (peakLiveCount(live) > (slotCapacity.get(slot.id) ?? 0)) return false;
   for (const coachId of team.coachIds) {
-    const existing = coachAssignments.get(coachId) ?? [];
-    for (const a of existing) {
-      if (slot.start < a.end && slot.end > a.start) return false;
+    for (const held of coachAssignments.get(coachId) ?? []) {
+      if (!(held.startSec < slot.endSec && slot.startSec < held.endSec)) continue;
+      if (sharedLiveDates(held, span).count > 0) return false;
     }
   }
   return true;

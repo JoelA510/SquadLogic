@@ -39,8 +39,6 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createServer } from 'vite';
-
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SOLVER_GOLDEN = 'tests/fixtures/autoSchedulerDatedSweep.golden.json';
 const EXTRACT = 'supabase/functions/_shared/tests/fixtures/scoring-parity.season-2026.json';
@@ -134,6 +132,9 @@ export const goldenOf = (run) => ({
 
 async function main() {
   const check = process.argv.includes('--check');
+  // Loaded here, not at the top: the sweep test imports this module's grid,
+  // and esbuild refuses to load under Vitest's jsdom.
+  const { createServer } = await import('vite');
   const server = await createServer({
     root: REPO_ROOT,
     configFile: false,

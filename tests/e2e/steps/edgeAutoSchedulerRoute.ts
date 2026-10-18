@@ -11,8 +11,12 @@
  *
  * **What is real:** the request schema (all of it: the mock seed's organization
  * and season ids are UUIDs, `frontend/src/lib/mockSeedIds.js`), the slots'
- * anchoring on the season clock, the team preparation, the lock classification
- * and `runPracticeOptimizer`.
+ * anchoring on the season clock, the team preparation, the lock classification,
+ * the run's dating (M4.8: each slot read by `toDaylightSlot` as `index.ts`
+ * reads it, here with no store row, so the body's first date and
+ * `effectiveUntil` -- the page's own fallback -- and today on the season's
+ * clock as `liveFrom`, returned as `index.ts` returns it) and
+ * `runPracticeOptimizer`.
  *
  * **What is not exercised here** (the function's HTTP and database wrapper, which
  * the real-backend project of plan item M4.1 covers):
@@ -33,7 +37,13 @@ import {
 } from '../../../supabase/functions/_shared/timing/anchorWallTimes.js';
 import { prepareTeam } from '../../../supabase/functions/_shared/engines/practice-coaches.js';
 import { classifyTeamsForRun } from '../../../supabase/functions/_shared/engines/practice-lock.js';
-import { runPracticeOptimizer } from '../../../supabase/functions/_shared/engines/auto-scheduler-solver.js';
+import {
+  runPracticeOptimizer,
+  SLOT_DATING_UNREADABLE,
+  undatableSlotIds,
+} from '../../../supabase/functions/_shared/engines/auto-scheduler-solver.js';
+import { toDaylightSlot } from '../../../supabase/functions/_shared/engines/practice-daylight.js';
+import { seasonCalendarDate } from '../../../supabase/functions/_shared/engines/coach-preference-load.js';
 
 /** The seeded season's clock: the value `index.ts` would read from `season_settings`. */
 export const SEASON_TIMEZONE = 'America/Los_Angeles';
@@ -88,6 +98,27 @@ export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> 
       baseSlotId: s.baseSlotId,
     }));
 
+    // index.ts step 5e-bis (M4.8): the run's dating, and its refusal.
+    const liveFrom = seasonCalendarDate(Date.now(), SEASON_TIMEZONE);
+    const datingSlots = new Map(
+      anchored.rows.map((s) => [s.id, toDaylightSlot(s, SEASON_TIMEZONE, undefined)])
+    );
+    const undatable =
+      liveFrom === null
+        ? anchored.rows.map((s) => s.id)
+        : undatableSlotIds(
+            anchored.rows.map((s) => s.id),
+            datingSlots
+          );
+    if (liveFrom === null || undatable.length > 0) {
+      await fulfillJson(
+        route,
+        { error: 'slots could not be dated', code: SLOT_DATING_UNREADABLE, slotIds: undatable },
+        422
+      );
+      return;
+    }
+
     // index.ts step 5c, with the page's list standing in for the lock read.
     const lockRows = input.lockedAssignments.map((row) => ({
       id: row.id ?? '',
@@ -113,6 +144,7 @@ export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> 
         effectiveDateRange: row.effectiveDateRange,
       })),
       placeableTeamIds: classification.placeable,
+      dating: { liveFrom, slots: datingSlots },
       config: input.config,
     });
     (page as EdgeSolverPage).__edgeSolverRuns =
@@ -123,6 +155,7 @@ export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> 
       runId: null,
       assignments: run.placements,
       unassigned: run.unassigned,
+      liveFrom: run.liveFrom,
       evaluation: run.evaluation,
       timingFindings: anchored.findings,
       optimization: {

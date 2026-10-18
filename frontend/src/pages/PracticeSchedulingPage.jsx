@@ -15,6 +15,7 @@ import { toBlackoutWarnings, toClosureInputs, toFieldBookings } from '../utils/f
 import { requireZonedInstant, seasonCalendarDate } from '@squadlogic/core/timing/index.js';
 import { buildPracticeRunResults } from '@squadlogic/core/utils/practiceRunResults.js';
 import { practiceRangeBounds } from '@squadlogic/core/utils/practiceOccurrences.js';
+import { calendarDayNumber } from '@squadlogic/core/utils/practiceLiveDates.js';
 import {
   describeTimingFindings,
   describeUnplaceableSlots,
@@ -425,6 +426,22 @@ export function newPlacementRange(slot, seasonToday, truncatedUntil = null) {
 }
 
 /**
+ * The date an auto-scheduler run judged its new placements from (M4.8 Q7):
+ * the response's `liveFrom`, today on the season's clock as the server read it
+ * when the run started. The review dates each new placement from it, so the
+ * range written is the range the solver judged, even across midnight. `null`
+ * when the response carries no readable date (a function deployed before
+ * M4.8): the caller falls back to its own season clock.
+ *
+ * @param {{ liveFrom?: unknown } | null | undefined} result
+ * @returns {string | null} `YYYY-MM-DD`
+ */
+export function runLiveFrom(result) {
+  const value = result?.liveFrom;
+  return typeof value === 'string' && calendarDayNumber(value) !== null ? value : null;
+}
+
+/**
  * What the auto-scheduler's cross-check compares, and nothing else: every
  * field sent is one the function reads.
  */
@@ -690,10 +707,13 @@ export default function PracticeSchedulingPage() {
     const placements = autoScheduler.result.assignments ?? [];
     const lockedTeamIds = new Set(seasonRows.map(getAssignmentTeamId));
     const clash = placements.find((placement) => lockedTeamIds.has(placement.teamId));
-    const seasonToday = seasonCalendarDate(Date.now(), timezone);
-    // The function has no date model, so it can place a team in a slot whose
-    // window has already ended. That placement has no dates left to hold --
-    // nor has one the daylight pass truncated to end before today.
+    // The date the solver judged from (M4.8 Q7), else this page's own clock.
+    const seasonToday =
+      runLiveFrom(autoScheduler.result) ?? seasonCalendarDate(Date.now(), timezone);
+    // A placement in a slot whose window has already ended has no dates left
+    // to hold -- nor has one the daylight pass truncated to end before today.
+    // The dated solver (M4.8) never offers such a slot; this still refuses
+    // one, from a function deployed before it.
     const ended = seasonToday
       ? placements.filter((placement) => {
           const slot = slotById.get(placement.slotId);

@@ -16,13 +16,34 @@
  * no TIME TBD series: see `practice-lock.ts`) are searched, and only their
  * placements are returned.
  *
- * Limitation (plan §3): no date model. A locked row occupies its slot for the
- * whole season, so the run never double-books but may under-use a slot.
+ * **Dated occupancy (M4.8, `docs/PLAN_SOLVER_DATE_MODEL.md`).** Every slot is
+ * dated from the store (`dating`, the daylight pass's own reading, §1.2): its
+ * first and last date and its wall window on the season's clock. A NEW
+ * placement is live on the slot's weekday from `max(slot first date, liveFrom)`
+ * to the slot's last date -- the range the page writes (`newPlacementRange`).
+ * A locked row is live inside its own stored range and the slot's validity;
+ * one whose range cannot be read is held on its slot's whole validity and
+ * reported (`unreadableRange`, Q2); one with no live date from `liveFrom` on
+ * holds nothing and is counted (`endedRows`). The hard constraint
+ * (`practice-coaches.ts`) judges those dates, and the objective scores dated
+ * (Q1), so the search, its persisted evaluation and the panel use one rule.
+ * The search itself -- move types, acceptance, restarts, PRNG draws -- is
+ * unchanged; on an input where everything is live on every date from today
+ * (the undated corpus) it is byte-identical to the undated solver
+ * (`tests/autoSchedulerDatedSweep.test.js`, a golden taken before M4.8).
+ * A run slot the solver cannot date is refused by `index.ts` (422
+ * `SLOT_DATING_UNREADABLE`, Q3) and throws here.
+ *
+ * Declared, not enforced (plan §7): no partial placement -- a team whose slot
+ * is free only until a future locked row starts stays unplaced (Q4); `liveFrom`
+ * is the date the run started on.
  *
  * Relocated slots (8.6 3b PR 11d-0, gap G2): a live `relocated` exception
  * holds the slot its practice moved onto by the same contract -- one unit of
- * capacity and its team's coaches at that slot's time, season-wide. It is
- * occupancy only: not scored and not judged by the daylight pass (declared).
+ * capacity and its team's coaches at that slot's time, **season-wide** on that
+ * slot's whole validity (M4.8 Q5: its own `window` is not read yet, so it is
+ * over-held, never double-booked). It is occupancy only: not scored and not
+ * judged by the daylight pass (declared).
  *
  * Daylight (8.9 PR 6): given a `daylight` context, the search's placements go
  * through `practice-daylight.ts`'s post-pass -- truncated at the first date
@@ -30,7 +51,14 @@
  * unchanged and does not optimise toward surviving slots (D11).
  */
 import { evaluatePracticeSchedule } from './scoring-engine.ts';
-import { checkHardConstraints, type PreparedTeam, type TimeWindow } from './practice-coaches.ts';
+import {
+  checkHardConstraints,
+  type LiveDays,
+  type PreparedTeam,
+  type SlotOccupant,
+  type TimeWindow,
+} from './practice-coaches.ts';
+import { LIVE_SPAN_STATUS, assignmentLiveSpan, calendarDayNumber } from './practice-live-dates.ts';
 import { COACH_PREFERENCE_TBD_REASON } from './coach-preferences.ts';
 import { EMPTY_PREFERENCE_GATE, type PreferenceGate } from './coach-preference-load.ts';
 import {
@@ -51,12 +79,145 @@ export interface SchedulerSlot {
   baseSlotId?: string;
 }
 
+/**
+ * One slot's dating, as `index.ts` reads it for the daylight pass
+ * (`toDaylightSlot`: the store first, the body only where the store is
+ * silent). A `DaylightSlot` is one.
+ */
+export interface SlotDatingInput {
+  /** The slot's first occurrence, `YYYY-MM-DD` on the season's clock. */
+  firstDate: string | null;
+  /** The last date the slot runs, inclusive. */
+  effectiveUntil: string | null;
+  /** Minutes past local midnight the practice starts and ends, on the season's clock. */
+  startMinutes: number | null;
+  endMinutes: number | null;
+}
+
+/** The run's dating (M4.8). */
+export interface SolverDating {
+  /**
+   * The run's today on the season's clock (`seasonCalendarDate`): a new
+   * placement is live from `max(slot first date, liveFrom)`. Returned to the
+   * page as `liveFrom`, so the range it writes is the range judged (Q7).
+   */
+  liveFrom: string;
+  slots: ReadonlyMap<string, SlotDatingInput>;
+}
+
+/** The refusal `index.ts` answers an undatable run slot with (Q3). */
+export const SLOT_DATING_UNREADABLE = 'SLOT_DATING_UNREADABLE';
+
+/**
+ * Why a team is unplaced when no run slot has a live date from today on
+ * (Q3): the season's slots have run out, not the teams' fit.
+ */
+export const NO_LIVE_DATE_REASON = 'no-live-date';
+
+/** The search's own reason for a team no legal slot was left for. */
+const NO_SLOT_REASON = 'no-slot-available';
+
+/** One slot's dating, read; `null` when it cannot be dated. */
+function readDating(
+  dating: SlotDatingInput | undefined
+): { firstDay: number; lastDay: number; startSec: number; endSec: number } | null {
+  if (!dating) return null;
+  const firstDay = calendarDayNumber(dating.firstDate);
+  const lastDay = calendarDayNumber(dating.effectiveUntil);
+  const minutes = (value: unknown) =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 1440
+      ? value
+      : null;
+  const start = minutes(dating.startMinutes);
+  const end = minutes(dating.endMinutes);
+  // A window that does not end after it starts would overlap nothing, so a
+  // coach clash through it would pass unseen: undatable, not empty.
+  if (firstDay === null || lastDay === null || start === null || end === null || end <= start) {
+    return null;
+  }
+  return { firstDay, lastDay, startSec: start * 60, endSec: end * 60 };
+}
+
+/**
+ * The run slots the solver cannot date (Q3): no dating, or a first date, last
+ * date or wall window it cannot read. `index.ts` refuses a run naming them.
+ */
+export function undatableSlotIds(
+  slotIds: readonly string[],
+  dating: ReadonlyMap<string, SlotDatingInput>
+): string[] {
+  return slotIds.filter((id) => readDating(dating.get(id)) === null);
+}
+
+/** A run slot with its dating read (M4.8). */
+export interface DatedSchedulerSlot extends SchedulerSlot {
+  firstDay: number;
+  lastDay: number;
+  startSec: number;
+  endSec: number;
+  /** A new placement's live dates, from `max(firstDay, liveFrom)`; `null` when none (Q3). */
+  span: LiveDays | null;
+  /** The dated scoring fields (M4.7's `Slot`): `YYYY-MM-DD` and `HH:MM:SS`. */
+  firstDate: string;
+  lastDate: string;
+  startTime: string;
+  endTime: string;
+}
+
+const wallTime = (seconds: number) => {
+  const minutes = Math.floor(seconds / 60);
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}:00`;
+};
+
+/**
+ * Every run slot with its dating read. Throws on a `liveFrom` that is not a
+ * date or a slot it cannot date: `index.ts` refuses both first (422), so a
+ * throw here is a caller bug, never a guessed season.
+ */
+export function dateSchedulerSlots(
+  slots: SchedulerSlot[],
+  dating: SolverDating
+): DatedSchedulerSlot[] {
+  if (calendarDayNumber(dating.liveFrom) === null) {
+    throw new TypeError(`liveFrom ${String(dating.liveFrom)} is not a date`);
+  }
+  const undatable = undatableSlotIds(
+    slots.map((s) => s.id),
+    dating.slots
+  );
+  if (undatable.length > 0) {
+    throw new TypeError(`${SLOT_DATING_UNREADABLE}: ${undatable.join(', ')}`);
+  }
+  return slots.map((slot) => {
+    const read = readDating(dating.slots.get(slot.id))!;
+    const raw = dating.slots.get(slot.id)!;
+    const span = assignmentLiveSpan({
+      firstDay: read.firstDay,
+      lastDay: read.lastDay,
+      notBefore: dating.liveFrom,
+    });
+    return {
+      ...slot,
+      ...read,
+      span: span.status === LIVE_SPAN_STATUS.LIVE ? { first: span.first, last: span.last } : null,
+      firstDate: raw.firstDate as string,
+      lastDate: raw.effectiveUntil as string,
+      startTime: wallTime(read.startSec),
+      endTime: wallTime(read.endSec),
+    };
+  });
+}
+
 /** One locked row's occupancy. One entry per ROW, so a team may appear twice. */
 export interface LockedOccupant {
   assignmentId: string;
   teamId: string;
   slotId: string | null;
-  /** The row's stored range; read by the daylight pass's report only. */
+  /**
+   * The row's stored range (M4.8): the dates it holds, inside its slot's
+   * validity. Read by the hard constraint, the objective and the daylight
+   * report. Absent or null: the slot's whole validity.
+   */
   effectiveDateRange?: string | null;
 }
 
@@ -107,12 +268,13 @@ export function totalBreaches(gate: PreferenceGate, placements: Placement[]): nu
 function admissible(
   gate: PreferenceGate,
   team: PreparedTeam,
-  slot: { id: string; start: Date; end: Date },
+  slot: DatedSchedulerSlot,
   coachAssignments: Map<string, TimeWindow[]>,
+  slotOccupants: Map<string, SlotOccupant[]>,
   slotCapacity: Map<string, number>
 ): boolean {
   if (mustKeepViolated(gate, team.id, slot.id)) return false;
-  return checkHardConstraints(team, slot, coachAssignments, slotCapacity);
+  return checkHardConstraints(team, slot, coachAssignments, slotOccupants, slotCapacity);
 }
 
 // ---------------------------------------------------------------------------
@@ -134,9 +296,11 @@ export function createPRNG(seed: number): () => number {
 // ---------------------------------------------------------------------------
 
 export interface BaseOccupancy {
-  /** Remaining capacity per slot after every locked row took its unit. */
+  /** Each slot's capacity: what the occupants below are judged against, per date. */
   slotCapacity: Map<string, number>;
-  /** Coach windows held by locked rows. */
+  /** Who holds each slot, on which dates: locked rows and relocations (M4.8). */
+  slotOccupants: Map<string, SlotOccupant[]>;
+  /** Coach windows held by locked rows and relocations, each on its dates. */
   coachAssignments: Map<string, TimeWindow[]>;
   /** Locked rows that occupy a slot of this run (scored as `locked`). */
   inRun: LockedOccupant[];
@@ -153,32 +317,66 @@ export interface BaseOccupancy {
    * (capacity and coach windows above), never scored.
    */
   relocatedOutsideRun: LoadedRelocation[];
+  /**
+   * In-run rows whose stored range cannot be read (M4.8 Q2): held on their
+   * slot's whole validity, as every row was before M4.8 -- never freed -- and
+   * reported (`lock.unreadableRange`).
+   */
+  unreadableRange: LockedOccupant[];
+  /**
+   * In-run rows with no live date from `liveFrom` on: still locked, holding
+   * nothing a new placement could meet, and counted (`lock.endedRows`) so the
+   * run says why a slot they used to block is offered.
+   */
+  endedRows: LockedOccupant[];
+}
+
+/** A slot's whole validity on its weekday; `null` when it has no date at all. */
+function wholeValidity(slot: DatedSchedulerSlot): LiveDays | null {
+  const span = assignmentLiveSpan({ firstDay: slot.firstDay, lastDay: slot.lastDay });
+  return span.status === LIVE_SPAN_STATUS.LIVE ? { first: span.first, last: span.last } : null;
 }
 
 /**
- * Every locked row, one at a time. Iterating the list -- not a team-keyed
- * collection -- is what keeps a two-row team's both slots occupied. Then every
- * live relocation, by the same contract (11d-0).
+ * Every locked row, one at a time, each on its own live dates (M4.8, plan
+ * §3.3). Iterating the list -- not a team-keyed collection -- is what keeps a
+ * two-row team's both slots occupied. Then every live relocation, on its
+ * target slot's whole validity (Q5).
  */
 export function buildLockedOccupancy(
   locked: LockedOccupant[],
   teamsById: Map<string, SchedulerTeam>,
-  slotsById: Map<string, SchedulerSlot>,
-  relocated: LoadedRelocation[] = []
+  slotsById: Map<string, DatedSchedulerSlot>,
+  relocated: LoadedRelocation[],
+  liveFrom: string
 ): BaseOccupancy {
+  const today = calendarDayNumber(liveFrom);
+  if (today === null) throw new TypeError(`liveFrom ${String(liveFrom)} is not a date`);
   const slotCapacity = new Map([...slotsById.values()].map((s) => [s.id, s.capacity]));
+  const slotOccupants = new Map<string, SlotOccupant[]>();
   const coachAssignments = new Map<string, TimeWindow[]>();
   const inRun: LockedOccupant[] = [];
   const outsideRun: LockedOccupant[] = [];
   const relocatedOutsideRun: LoadedRelocation[] = [];
-  // One unit of the slot, and the team's coaches at its time.
-  const hold = (teamId: string, slot: SchedulerSlot) => {
-    slotCapacity.set(slot.id, (slotCapacity.get(slot.id) ?? 0) - 1);
+  const unreadableRange: LockedOccupant[] = [];
+  const endedRows: LockedOccupant[] = [];
+  // One unit of the slot on these dates, and the team's coaches there then.
+  const hold = (teamId: string, slot: DatedSchedulerSlot, days: LiveDays) => {
+    const occupants = slotOccupants.get(slot.id) ?? [];
+    occupants.push({ teamId, first: days.first, last: days.last });
+    slotOccupants.set(slot.id, occupants);
     const team = teamsById.get(teamId);
     if (!team) return;
     for (const coachId of team.coachIds) {
       const existing = coachAssignments.get(coachId) ?? [];
-      existing.push({ teamId, slotId: slot.id, start: slot.start, end: slot.end });
+      existing.push({
+        teamId,
+        slotId: slot.id,
+        first: days.first,
+        last: days.last,
+        startSec: slot.startSec,
+        endSec: slot.endSec,
+      });
       coachAssignments.set(coachId, existing);
     }
   };
@@ -189,7 +387,24 @@ export function buildLockedOccupancy(
       continue;
     }
     inRun.push(row);
-    hold(row.teamId, slot);
+    const span = assignmentLiveSpan({
+      firstDay: slot.firstDay,
+      lastDay: slot.lastDay,
+      range: row.effectiveDateRange,
+    });
+    if (span.status === LIVE_SPAN_STATUS.UNREADABLE) {
+      // Q2: never freed. The slot's whole validity is the most the row could
+      // ever be live on, so this holds at least what it does.
+      unreadableRange.push(row);
+      const whole = wholeValidity(slot);
+      if (whole) hold(row.teamId, slot, whole);
+      continue;
+    }
+    if (span.status !== LIVE_SPAN_STATUS.LIVE || span.last < today) {
+      endedRows.push(row);
+      continue;
+    }
+    hold(row.teamId, slot, span);
   }
   // One unit per (row, slot): a row has at most one live window at a time
   // (the table's EXCLUDE constraint), so two windows of one row moved onto
@@ -204,9 +419,19 @@ export function buildLockedOccupancy(
     const key = `${relocation.assignmentId ?? relocation.exceptionId}|${slot.id}`;
     if (heldForRow.has(key)) continue;
     heldForRow.add(key);
-    hold(relocation.teamId, slot);
+    const whole = wholeValidity(slot);
+    if (whole) hold(relocation.teamId, slot, whole);
   }
-  return { slotCapacity, coachAssignments, inRun, outsideRun, relocatedOutsideRun };
+  return {
+    slotCapacity,
+    slotOccupants,
+    coachAssignments,
+    inRun,
+    outsideRun,
+    relocatedOutsideRun,
+    unreadableRange,
+    endedRows,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -223,34 +448,59 @@ function scoreSchedule(
   placements: Placement[],
   unassigned: Unplaced[],
   teams: SchedulerTeam[],
-  slots: SchedulerSlot[]
+  slots: DatedSchedulerSlot[],
+  liveFrom: string
 ): ScoringResult {
+  const slotsById = new Map(slots.map((s) => [s.id, s]));
+  const unreadable = new Set(base.unreadableRange);
   // The whole schedule is measured -- locked rows and new placements -- so
   // coverage and coach conflicts are the season's, not the proposal's alone.
+  //
+  // **Dated (M4.8 Q1)**, from the store's dating: every slot carries M4.7's
+  // `firstDate`, `lastDate`, `startTime` and `endTime`, each locked row its
+  // stored range (one the constraint holds season-long, Q2, is scored the same
+  // way: on its slot's whole validity), and each new placement the range the
+  // page writes, `[max(firstDate, liveFrom), lastDate]` -- or the daylight
+  // pass's truncated end. So the objective, the hard constraint, the persisted
+  // evaluation and the panel judge one schedule by one rule
+  // (`summary.dateModel: 'dated'`). Nothing from the request's slot objects
+  // reaches here: only the fields below are passed.
   const assignments = [
     ...base.inRun.map((row) => ({
+      id: row.assignmentId,
       teamId: row.teamId,
       slotId: row.slotId as string,
       source: 'locked',
+      ...(unreadable.has(row) || row.effectiveDateRange == null
+        ? {}
+        : { effectiveDateRange: row.effectiveDateRange }),
     })),
-    ...placements,
+    ...placements.map((p) => {
+      const slot = slotsById.get(p.slotId)!;
+      const from = liveFrom > slot.firstDate ? liveFrom : slot.firstDate;
+      const until = p.effectiveUntil ?? slot.lastDate;
+      return { ...p, effectiveDateRange: `[${from},${until}]` };
+    }),
   ];
-  // **Always undated** (M4.7, plan Q2 and §8): the solver's search must not
-  // change while it has no date model of its own (M4.8). Only the fields the
-  // undated comparison reads are passed, so a page that one day sends slot
-  // dates here cannot switch the objective by accident; the evaluation says
-  // `dateModel: 'undated'`. `tests/autoSchedulerLock.test.js` pins it.
   const evaluation = evaluatePracticeSchedule({
-    assignments,
+    assignments: assignments as unknown as Parameters<
+      typeof evaluatePracticeSchedule
+    >[0]['assignments'],
     unassigned,
     teams: teams as unknown as Parameters<typeof evaluatePracticeSchedule>[0]['teams'],
-    slots: slots.map(({ id, day, start, end, capacity }) => ({
-      id,
-      day,
-      start,
-      end,
-      capacity,
-    })) as unknown as Parameters<typeof evaluatePracticeSchedule>[0]['slots'],
+    slots: slots.map(
+      ({ id, day, start, end, capacity, firstDate, lastDate, startTime, endTime }) => ({
+        id,
+        day,
+        start,
+        end,
+        capacity,
+        firstDate,
+        lastDate,
+        startTime,
+        endTime,
+      })
+    ) as unknown as Parameters<typeof evaluatePracticeSchedule>[0]['slots'],
   });
 
   // Compute fitness from scoring-engine metrics
@@ -272,19 +522,51 @@ interface OptimizerState {
   /** Placeable teams only. A locked team is never a key here. */
   assignmentMap: Map<string, string>;
   autoTeams: string[];
-  slotsById: Map<string, SchedulerSlot>;
+  slotsById: Map<string, DatedSchedulerSlot>;
   teamsById: Map<string, SchedulerTeam>;
   slotCapacity: Map<string, number>;
+  slotOccupants: Map<string, SlotOccupant[]>;
   coachAssignments: Map<string, TimeWindow[]>;
   gate: PreferenceGate;
   placeableTeamIds: string[];
   unassignedTeamIds: string[];
 }
 
-function cloneWindows(source: Map<string, TimeWindow[]>): Map<string, TimeWindow[]> {
-  const copy = new Map<string, TimeWindow[]>();
+function cloneWindows<T>(source: Map<string, T[]>): Map<string, T[]> {
+  const copy = new Map<string, T[]>();
   for (const [k, v] of source) copy.set(k, [...v]);
   return copy;
+}
+
+/**
+ * Seat `teamId` on `slot`, on the new placement's live dates: one occupant of
+ * the slot, and a window for every coach on the team. The caller has checked
+ * the seat is legal, so `slot.span` is set.
+ */
+function seat(
+  occupants: Map<string, SlotOccupant[]>,
+  coachAssignments: Map<string, TimeWindow[]>,
+  team: SchedulerTeam | undefined,
+  teamId: string,
+  slot: DatedSchedulerSlot
+): void {
+  const span = slot.span as LiveDays;
+  const list = occupants.get(slot.id) ?? [];
+  list.push({ teamId, first: span.first, last: span.last });
+  occupants.set(slot.id, list);
+  if (!team) return;
+  for (const coachId of team.coachIds) {
+    const existing = coachAssignments.get(coachId) ?? [];
+    existing.push({
+      teamId,
+      slotId: slot.id,
+      first: span.first,
+      last: span.last,
+      startSec: slot.startSec,
+      endSec: slot.endSec,
+    });
+    coachAssignments.set(coachId, existing);
+  }
 }
 
 function buildState(
@@ -292,7 +574,7 @@ function buildState(
   placements: Placement[],
   placeableTeamIds: string[],
   teamsById: Map<string, SchedulerTeam>,
-  slotsById: Map<string, SchedulerSlot>,
+  slotsById: Map<string, DatedSchedulerSlot>,
   gate: PreferenceGate
 ): OptimizerState {
   const assignmentMap = new Map<string, string>();
@@ -302,18 +584,12 @@ function buildState(
     autoTeams.push(a.teamId);
   }
 
-  const slotCapacity = new Map(base.slotCapacity);
+  const slotOccupants = cloneWindows(base.slotOccupants);
   const coachAssignments = cloneWindows(base.coachAssignments);
   for (const [teamId, slotId] of assignmentMap) {
-    slotCapacity.set(slotId, (slotCapacity.get(slotId) ?? 0) - 1);
-    const team = teamsById.get(teamId);
     const slot = slotsById.get(slotId);
-    if (!team || !slot) continue;
-    for (const coachId of team.coachIds) {
-      const existing = coachAssignments.get(coachId) ?? [];
-      existing.push({ teamId, slotId, start: slot.start, end: slot.end });
-      coachAssignments.set(coachId, existing);
-    }
+    if (!slot || !slot.span) continue;
+    seat(slotOccupants, coachAssignments, teamsById.get(teamId), teamId, slot);
   }
 
   return {
@@ -321,7 +597,8 @@ function buildState(
     autoTeams,
     slotsById,
     teamsById,
-    slotCapacity,
+    slotCapacity: base.slotCapacity,
+    slotOccupants,
     coachAssignments,
     gate,
     placeableTeamIds,
@@ -346,14 +623,19 @@ function tryMutate(
   else return null;
 
   const newMap = new Map(state.assignmentMap);
-  const newCap = new Map(state.slotCapacity);
+  const newOcc = cloneWindows(state.slotOccupants);
   const newCoach = cloneWindows(state.coachAssignments);
 
   const remove = (teamId: string) => {
     const slotId = newMap.get(teamId);
     if (!slotId) return;
     newMap.delete(teamId);
-    newCap.set(slotId, (newCap.get(slotId) ?? 0) + 1);
+    // A placeable team holds no locked row or relocation, so its id names
+    // only its own placement among the slot's occupants.
+    newOcc.set(
+      slotId,
+      (newOcc.get(slotId) ?? []).filter((o) => o.teamId !== teamId)
+    );
     const team = teamsById.get(teamId);
     if (!team) return;
     for (const coachId of team.coachIds) {
@@ -369,14 +651,9 @@ function tryMutate(
     const team = teamsById.get(teamId);
     const slot = slotsById.get(slotId);
     if (!team || !slot) return false;
-    if (!admissible(gate, team, slot, newCoach, newCap)) return false;
+    if (!admissible(gate, team, slot, newCoach, newOcc, state.slotCapacity)) return false;
     newMap.set(teamId, slotId);
-    newCap.set(slotId, (newCap.get(slotId) ?? 0) - 1);
-    for (const coachId of team.coachIds) {
-      const entries = newCoach.get(coachId) ?? [];
-      entries.push({ teamId, slotId, start: slot.start, end: slot.end });
-      newCoach.set(coachId, entries);
-    }
+    seat(newOcc, newCoach, team, teamId, slot);
     return true;
   };
 
@@ -437,25 +714,19 @@ function generateGreedySeed(
   base: BaseOccupancy,
   teams: SchedulerTeam[],
   placeableTeamIds: string[],
-  slots: SchedulerSlot[],
+  slots: DatedSchedulerSlot[],
   gate: PreferenceGate
 ): { placements: Placement[]; unassigned: Unplaced[] } {
   const slotsById = new Map(slots.map((s) => [s.id, s]));
-  const slotCapacity = new Map(base.slotCapacity);
+  const slotOccupants = cloneWindows(base.slotOccupants);
   const coachAssignments = cloneWindows(base.coachAssignments);
   const assignedTeamIds = new Set<string>();
   const placements: Placement[] = [];
 
   const assign = (team: SchedulerTeam, slotId: string) => {
-    const slot = slotsById.get(slotId)!;
     placements.push({ teamId: team.id, slotId, source: 'auto' });
     assignedTeamIds.add(team.id);
-    slotCapacity.set(slotId, (slotCapacity.get(slotId) ?? 0) - 1);
-    for (const coachId of team.coachIds) {
-      const existing = coachAssignments.get(coachId) ?? [];
-      existing.push({ teamId: team.id, slotId, start: slot.start, end: slot.end });
-      coachAssignments.set(coachId, existing);
-    }
+    seat(slotOccupants, coachAssignments, team, team.id, slotsById.get(slotId)!);
   };
 
   // 1. Locked rows are already in `base` -- one unit per row.
@@ -491,7 +762,9 @@ function generateGreedySeed(
     let bestSlot: SchedulerSlot | undefined;
     let bestBreaches = Infinity;
     for (const slot of slots) {
-      if (!admissible(gate, team, slot, coachAssignments, slotCapacity)) continue;
+      if (!admissible(gate, team, slot, coachAssignments, slotOccupants, base.slotCapacity)) {
+        continue;
+      }
       const breaches = breachesOf(gate, team.id, slot.id);
       if (breaches < bestBreaches) {
         bestSlot = slot;
@@ -504,7 +777,7 @@ function generateGreedySeed(
 
   const unassigned = sorted
     .filter((t) => !assignedTeamIds.has(t.id))
-    .map((t) => ({ teamId: t.id, reason: 'no-slot-available' }));
+    .map((t) => ({ teamId: t.id, reason: NO_SLOT_REASON }));
 
   return { placements, unassigned };
 }
@@ -520,6 +793,10 @@ function generateGreedySeed(
  * legal slot at all keeps the search's own reason. The subject set is the
  * search's unplaced list, which both the seed and `tryMutate` derive from the
  * placeable roster minus the placements -- never from the placements alone.
+ *
+ * When no run slot has a live date from today on, every unplaced team is
+ * `no-live-date` (M4.8 Q3): no slot was left to fit, whatever the search
+ * called it.
  */
 function explainUnplaced(
   gate: PreferenceGate,
@@ -527,8 +804,11 @@ function explainUnplaced(
   placements: Placement[],
   unassigned: Unplaced[],
   teamsById: Map<string, SchedulerTeam>,
-  slotsById: Map<string, SchedulerSlot>
+  slotsById: Map<string, DatedSchedulerSlot>
 ): Unplaced[] {
+  if ([...slotsById.values()].every((slot) => slot.span === null)) {
+    return unassigned.map((entry) => ({ teamId: entry.teamId, reason: NO_LIVE_DATE_REASON }));
+  }
   if (gate.verdicts.size === 0) return unassigned;
   const final = buildState(base, placements, [], teamsById, slotsById, gate);
   return unassigned.map((entry) => {
@@ -536,7 +816,13 @@ function explainUnplaced(
     const team = teamsById.get(entry.teamId);
     if (!verdicts || !team) return entry;
     const legal = [...slotsById.values()].filter((slot) =>
-      checkHardConstraints(team, slot, final.coachAssignments, final.slotCapacity)
+      checkHardConstraints(
+        team,
+        slot,
+        final.coachAssignments,
+        final.slotOccupants,
+        final.slotCapacity
+      )
     );
     const kept = legal.filter((slot) => !verdicts.get(slot.id)?.mustKeepViolated);
     if (legal.length === 0 || kept.length > 0) return entry;
@@ -568,6 +854,12 @@ export interface OptimizerResult {
   lockedOutsideRun: LockedOccupant[];
   /** Live relocations whose slot is not in this run (11d-0): still held, nothing here to hold. */
   relocatedOutsideRun: LoadedRelocation[];
+  /** In-run locked rows whose range could not be read: held season-long (M4.8 Q2). */
+  unreadableRange: LockedOccupant[];
+  /** In-run locked rows with no live date from `liveFrom` on: holding nothing (M4.8). */
+  endedRows: LockedOccupant[];
+  /** The date new placements are live from (M4.8 Q7). */
+  liveFrom: string;
   /** The daylight post-pass's report; `null` when the run was given no daylight context. */
   daylight: DaylightReport | null;
   evaluation: ReturnType<typeof evaluatePracticeSchedule>;
@@ -608,6 +900,12 @@ export async function runPracticeOptimizer(params: {
    * given, the daylight post-pass runs over the search's result.
    */
   daylight?: DaylightContext;
+  /**
+   * The run's dating (M4.8): today on the season's clock and every run slot's
+   * dates and wall window, read from the store as the daylight pass reads
+   * them. Required: the solver never guesses a season for a slot.
+   */
+  dating: SolverDating;
   config: OptimizerConfig;
   /** Called at each CPU yield, e.g. for a progress audit. */
   onProgress?: (progress: {
@@ -617,16 +915,18 @@ export async function runPracticeOptimizer(params: {
     restartCount: number;
   }) => void;
 }): Promise<OptimizerResult> {
-  const { teams, slots, locked, placeableTeamIds, config: cfg } = params;
+  const { teams, locked, placeableTeamIds, config: cfg } = params;
+  const { liveFrom } = params.dating;
   const gate = params.preferenceGate ?? EMPTY_PREFERENCE_GATE;
   const startTime = Date.now();
+  const slots = dateSchedulerSlots(params.slots, params.dating);
   const teamsById = new Map(teams.map((t) => [t.id, t]));
   const slotsById = new Map(slots.map((s) => [s.id, s]));
-  const base = buildLockedOccupancy(locked, teamsById, slotsById, params.relocated ?? []);
+  const base = buildLockedOccupancy(locked, teamsById, slotsById, params.relocated ?? [], liveFrom);
   const rand = createPRNG(cfg.seed);
 
   const seed = generateGreedySeed(base, teams, placeableTeamIds, slots, gate);
-  const seedScoring = scoreSchedule(base, seed.placements, seed.unassigned, teams, slots);
+  const seedScoring = scoreSchedule(base, seed.placements, seed.unassigned, teams, slots, liveFrom);
   let bestPlacements = seed.placements;
   let bestUnassigned = seed.unassigned;
   let bestScore = seedScoring.score;
@@ -680,7 +980,8 @@ export async function runPracticeOptimizer(params: {
           currentPlacements,
           restart.unassigned,
           teams,
-          slots
+          slots,
+          liveFrom
         ).score;
       }
       // Phase 9: yield on stall iterations too (every YIELD_EVERY)
@@ -695,7 +996,8 @@ export async function runPracticeOptimizer(params: {
       mutated.placements,
       mutated.unassigned,
       teams,
-      slots
+      slots,
+      liveFrom
     );
 
     const candidateBreaches = totalBreaches(gate, mutated.placements);
@@ -774,7 +1076,14 @@ export async function runPracticeOptimizer(params: {
     });
     daylight = pass.report;
     if (pass.report.meta.placementsWithdrawn > 0) {
-      const rescored = scoreSchedule(base, pass.placements, pass.unassigned, teams, slots);
+      const rescored = scoreSchedule(
+        base,
+        pass.placements,
+        pass.unassigned,
+        teams,
+        slots,
+        liveFrom
+      );
       evaluation = rescored.evaluation;
       bestScore = rescored.score;
       preferKeepBreaches = totalBreaches(gate, pass.placements);
@@ -789,6 +1098,9 @@ export async function runPracticeOptimizer(params: {
     preferKeepBreaches,
     lockedOutsideRun: base.outsideRun,
     relocatedOutsideRun: base.relocatedOutsideRun,
+    unreadableRange: base.unreadableRange,
+    endedRows: base.endedRows,
+    liveFrom,
     daylight,
     evaluation,
     seedScore: seedScoring.score,

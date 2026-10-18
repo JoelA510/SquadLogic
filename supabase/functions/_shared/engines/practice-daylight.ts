@@ -126,6 +126,13 @@ export interface DaylightSlot {
   firstDate: string | null;
   /** The last date the slot runs, inclusive: the store's, else the body's. */
   effectiveUntil: string | null;
+  /**
+   * Minutes past local midnight the practice starts, on the season's clock:
+   * the slot's `start` instant read there (M4.8: with `endMinutes`, the wall
+   * window the solver's dated hard constraint compares). The pass itself
+   * judges the end only.
+   */
+  startMinutes: number | null;
   /** Minutes past local midnight the practice ends, on the season's clock. */
   endMinutes: number | null;
 }
@@ -226,7 +233,8 @@ function storedFirstDate(validFrom: unknown, dayOfWeek: unknown): string | null 
  * silent, as the page itself falls back: the first date from the `start`
  * instant on the season's clock when `valid_from` is null, and
  * `effectiveUntil` when `valid_until` is null (the season's end). No other
- * body key is read (W9).
+ * body key is read (W9). The start minute is the `start` instant's, on the
+ * season's clock (the store's `start_time` is what the page built it from).
  */
 export function toDaylightSlot(
   row: { id: string; start: Date; end: Date; effectiveUntil?: unknown },
@@ -243,6 +251,7 @@ export function toDaylightSlot(
     firstDate: stored?.firstDate ?? (sameDay ? start.date : null),
     effectiveUntil:
       stored?.validUntil ?? (isIsoDate(row.effectiveUntil) ? row.effectiveUntil : null),
+    startMinutes: sameDay ? start.minutes : null,
     endMinutes:
       stored && stored.endMinutes !== undefined ? stored.endMinutes : sameDay ? end.minutes : null,
   };

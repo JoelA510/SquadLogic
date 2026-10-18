@@ -788,7 +788,10 @@ standards these items name · [ ] deployed and smoke-tested
 >   itself (run 38502405552). The features and steps are under `tests/e2e/real-backend/`, not
 >   `tests/e2e/features/` and `tests/e2e/steps/`: the mock project's globs would load them.
 >   Recommended as a required check after several green pull-request runs (a ruleset change,
->   so another owner import). The audit-log assertion after import waits for w3e's fix (below).
+>   so another owner import). The audit-log assertion after import is done (2026-10-17, branch
+>   `claude/vibrant-allen-hr7y7s-exports`, entry below): each import in the re-import scenario
+>   requires its import-validation and `finalize_import_job` audit rows, as the administrator
+>   (*executed*, dispatched run 39008438365; red with the action renamed, run 39008441959).
 > - **Fix approach:** a Playwright project that runs a small set of scenarios (sign in → import
 >   players → generate teams → schedule practices → export) against a local Supabase stack
 >   (`supabase start`, seeded from `supabase/seed.sql` with pseudonymous data), in the pgTAP job
@@ -1488,7 +1491,8 @@ smoke-tested
     ("Audit log write failed"). Seen on the local stack (import-validation, team-persistence)
     and in production's function logs on 2026-10-13 (*executed*, read-only log query). Fixed
     by #577 (the RPC called with the user-scoped client); M4.1's import scenario should
-    assert the audit row (follow-up).
+    assert the audit row (follow-up). **Done 2026-10-17** (branch
+    `claude/vibrant-allen-hr7y7s-exports`, entry below).
   - The local edge runtime (CLI 2.118.0) does not apply `config.toml`'s per-function
     `import_map`, also with `supabase functions serve --import-map`, so auto-scheduler and
     fairness-scoring fail to boot on their bare `zod` import (runs 38500511704, 38501076266).
@@ -1523,7 +1527,8 @@ smoke-tested
     and production has no `storage.objects` policy for it (only `raw-imports` has policies), so
     an administrator's upload would be refused. Not fixed; not in the scenarios. *Executed*
     (read-only SELECTs on `storage.buckets` and `pg_policies`); the refusal itself *statically
-    reviewed*.
+    reviewed*. **Fixed 2026-10-17** (branch `claude/vibrant-allen-hr7y7s-exports`, migration
+    `20261017000000`, entry below); the real-backend season flow now uploads.
 
 - 2026-10-14, found by #576 (M4.4, with PR 2-C's three follow-ups):
   - PR 2-C's follow-ups above are done in #576, *executed* (each test red without its change):
@@ -1817,6 +1822,55 @@ smoke-tested
   - Ruled out: a synced team's players do get `players.team_id` (the `team_players` trigger,
     `20260611000400_players_team_id_sync.sql`), so Team Builder places them. *Statically
     reviewed.*
+
+- 2026-10-17, the exports PR (branch `claude/vibrant-allen-hr7y7s-exports`): the `exports`
+  bucket and its policies (migration `20261017000000`), "Upload to Storage" wired to it, and the
+  real-backend import scenario's audit assertion. CI evidence below is from `workflow_dispatch`
+  runs on the branch and on the throwaway `claude/vibrant-allen-hr7y7s-exports-plant`:
+  - **Production already has an `exports` bucket**, made by hand on 2025-12-06: private, empty,
+    no `storage.objects` policy. The migration's insert is `ON CONFLICT (id) DO UPDATE SET
+    public = false`, so it adopts that bucket. *Executed* (read-only SELECTs on
+    `storage.buckets`, `storage.objects` counts and `pg_policies`, 2026-10-17).
+  - **Production also has an `uploads` bucket** (private, empty, created 2026-04-01) that no
+    migration creates and nothing in the repository names (searched `frontend/src`,
+    `packages/core/src`, `supabase/`). Not touched. *Executed* (the same SELECTs).
+  - **Supabase refuses every SQL `DELETE` on `storage.objects`** (`storage.protect_delete()`,
+    "Use the Storage API instead"), whatever the policies say, so neither pgTAP nor the smoke
+    can try a delete; both assert that no DELETE or UPDATE policy exists. *Executed* (pgTAP run
+    39007939141).
+  - **`finalize_import_job` writes one `import.completed` row per stage**: its own, and one with
+    `metadata.stage = 'buddy_pairs'`, both for the same job. A reader counting completed imports
+    by action counts each import twice. Not changed. *Executed* (real-backend run 39007937255).
+  - `create_import_job`'s `import.started` row still stores `file_name` (the open Wave 2 item);
+    seen in the same run's rows. *Executed.*
+  - The real-backend runs' Edge logs show the auto-scheduler's own run record refused ("Persistence
+    failed: Not authorized: User is not a member of organization ..."), and the run completes with
+    `runId: null`; the scenario passes. Not investigated; whether `main` shows it too is
+    *unverified*.
+  - The Audit Explorer page (`/admin/audit-logs`) offers no import action in its filter
+    (`data.imported` is listed; nothing writes it), so the import audit rows are reachable there
+    only unfiltered. The scenario reads them with the administrator's own session instead.
+    *Statically reviewed.*
+  - `uploadScheduleExport` still defaults to `upsert: true`, which the `exports` bucket refuses
+    (no UPDATE policy); its one caller now passes `false`. Kept for backward compatibility.
+    *Statically reviewed.*
+  - **Decided 2026-10-17 (coordinator, in this PR):** uploads are for organization
+    administrators only (INSERT through `is_org_admin`), reads for any member (SELECT through
+    `is_org_member`), matching the administrator-only Exports page (`MANAGE_ORGANIZATION`) and
+    the admin RPC that records the publication baseline. Changed in `20261017000000` itself,
+    which had not reached production. A coach's upload is refused 42501 in the smoke and the
+    pgTAP suite; putting the INSERT back on `is_org_member` fails the smoke (*executed*); pgTAP
+    *statically reviewed* until the PR's CI runs it.
+  - **Codex on #592:** a publish with one file refused left the others in the bucket, readable to
+    members, with no baseline or audit row saying what went out, and no DELETE policy to clean
+    them up. Decided (coordinator): a publish is all or nothing. `20261017000000` gains
+    `exports org-admin delete` (`is_org_admin`, the insert's folder check; still no UPDATE), and
+    the panel removes what a failed publish uploaded through the Storage API, records no
+    baseline, and names any file it could not remove (each logged). Unit tests red on the
+    previous panel and with the cleanup result ignored; the smoke catches a member DELETE, an
+    unscoped DELETE and a missing one (*executed*); the real-backend season flow refuses one
+    team file through a Playwright route and lists the bucket empty afterwards (*statically
+    reviewed* until the PR's CI runs it).
 
 - 2026-10-17, found by the M4.7 exceptions follow-up (Q1):
   - The override panel's per-slot "N free" (`overrideSlotLoad`, Q5) counts series only: a

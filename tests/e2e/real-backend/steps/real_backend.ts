@@ -3,9 +3,12 @@
  * client against a local stack (`supabase start`, seeded by
  * tests/e2e/real-backend/seed.sql), with the Edge Functions that stack serves.
  *
- * Every assertion reads the page. Nothing here touches sessionStorage, the
- * mock's `__MOCK_DB__`, or the database directly: what the scenarios prove is
- * that the app, through its own client, RPCs and Edge Functions, does what it
+ * Every assertion reads the page, or, where the app has no screen for it (the
+ * exports bucket's listing, the audit log), the seeded administrator's own
+ * session through the stack's APIs, under the same RLS and Storage policies
+ * (`adminSession`). Nothing here touches sessionStorage, the mock's
+ * `__MOCK_DB__`, or the database directly: what the scenarios prove is that
+ * the app, through its own client, RPCs and Edge Functions, does what it
  * shows.
  */
 import { createBdd } from 'playwright-bdd';
@@ -80,6 +83,9 @@ When('I import the {string} registration export', async ({ page }, shape: string
     await another.click();
     await expect(fileInput).toBeAttached();
   }
+  // The import audit rows already on file, so the Then step can tell this
+  // import's rows from the ones earlier imports wrote.
+  stateOf(page).auditBefore = new Set((await importAuditRows(page)).map((row) => row.id));
   await fileInput.setInputFiles({
     name: `registrations-${shape}.csv`,
     mimeType: 'text/csv',
@@ -124,8 +130,113 @@ Then(
   }
 );
 
+/**
+ * The audit actions a player import writes, each as the caller:
+ * import-validation's (`recordAuditNow`, made with the caller's client since
+ * #577; with the service-role client every one was refused on
+ * `audit_log.user_id NOT NULL`, and only logged), and finalize_import_job's.
+ * `create_import_job` also writes an `import.started` row, with the file's
+ * name and no row counts; the counts are how the Edge's row is told apart.
+ */
+const IMPORT_AUDIT = { validated: 'import.started', applied: 'import.completed' } as const;
+
+type AuditRow = {
+  id: string;
+  action: string;
+  resource_type: string | null;
+  resource_id: string | null;
+  user_id: string | null;
+  organization_id: string;
+  metadata: Record<string, unknown> | null;
+};
+
+/** The organization's import audit rows, read as the administrator (RLS: admins read the audit log). */
+async function importAuditRows(page: Page): Promise<AuditRow[]> {
+  const { token, anonKey } = await adminSession(page);
+  const query = new URLSearchParams({
+    select: 'id,action,resource_type,resource_id,user_id,organization_id,metadata',
+    organization_id: `eq.${SEEDED_ADMIN.organizationId}`,
+    action: `in.(${Object.values(IMPORT_AUDIT).join(',')})`,
+  });
+  const response = await page.request.get(`${stackUrl()}/rest/v1/audit_log?${query}`, {
+    headers: { apikey: anonKey, Authorization: `Bearer ${token}` },
+    timeout: BACKEND_TIMEOUT,
+  });
+  const body = (await response.json()) as AuditRow[];
+  expect(response.status(), JSON.stringify(body)).toBe(200);
+  return body;
+}
+
+Then('the audit log records the import as the administrator', async ({ page }) => {
+  const before = stateOf(page).auditBefore;
+  expect(before, 'the import step read the audit log before it started').toBeDefined();
+  const fresh = (await importAuditRows(page)).filter((row) => !before?.has(row.id));
+  const seen = JSON.stringify(fresh);
+  const total = registrations().length;
+
+  // import-validation's row: one, attributed to the administrator, counting
+  // every row of the export as valid.
+  const validated = fresh.filter(
+    (row) => row.action === IMPORT_AUDIT.validated && row.metadata?.total_rows !== undefined
+  );
+  expect(
+    validated.map((row) => ({
+      resource_type: row.resource_type,
+      user_id: row.user_id,
+      import_type: row.metadata?.import_type,
+      total_rows: row.metadata?.total_rows,
+      valid_rows: row.metadata?.valid_rows,
+      error_rows: row.metadata?.error_rows,
+    })),
+    `import-validation's ${IMPORT_AUDIT.validated} row, among this import's audit rows: ${seen}`
+  ).toEqual([
+    {
+      resource_type: 'import_job',
+      user_id: SEEDED_ADMIN.userId,
+      import_type: 'players',
+      total_rows: total,
+      valid_rows: total,
+      error_rows: 0,
+    },
+  ]);
+
+  // finalize_import_job's rows, for the job it applied: its own, counting the
+  // players it wrote, and one per later stage (`metadata.stage`, e.g. the
+  // buddy pairs). Every one attributed to the administrator, for one job.
+  const applied = fresh.filter((row) => row.action === IMPORT_AUDIT.applied);
+  const finalized = applied.filter((row) => row.metadata?.stage === undefined);
+  expect(
+    finalized.map((row) => ({
+      resource_type: row.resource_type,
+      user_id: row.user_id,
+      status: row.metadata?.status,
+      promoted_rows: row.metadata?.promoted_rows,
+    })),
+    `finalize_import_job's ${IMPORT_AUDIT.applied} row, among: ${seen}`
+  ).toEqual([
+    {
+      resource_type: 'import_job',
+      user_id: SEEDED_ADMIN.userId,
+      status: 'completed',
+      promoted_rows: total,
+    },
+  ]);
+  const job = finalized[0].resource_id;
+  expect(job, 'the applied job').toBeTruthy();
+  for (const row of applied) {
+    expect([row.user_id, row.resource_id], `every ${IMPORT_AUDIT.applied} row: ${seen}`).toEqual([
+      SEEDED_ADMIN.userId,
+      job,
+    ]);
+  }
+  stateOf(page).auditBefore = undefined;
+});
+
 /** What a scenario learned from one page and checks on a later one. */
-const scenarioState = new WeakMap<Page, { teams?: number; teamNames?: string[] }>();
+const scenarioState = new WeakMap<
+  Page,
+  { teams?: number; teamNames?: string[]; auditBefore?: Set<string> }
+>();
 const stateOf = (page: Page) => {
   const state = scenarioState.get(page) ?? {};
   scenarioState.set(page, state);
@@ -264,6 +375,140 @@ Then('the master schedule export lists a practice for every synced team', async 
   // missing, none unnamed, none the page did not show.
   expect([...new Set(practiced)].sort()).toEqual([...teamNames].sort());
 });
+
+/** The Exports panel's upload line, whichever it is now: uploading, uploaded or failed. */
+async function uploadStatus(page: Page): Promise<string> {
+  const lines = await page
+    .getByText(/^(Uploading to Storage\.\.\.|Uploaded \d+ files|Upload failed:)/)
+    .allInnerTexts();
+  return lines.join(' | ');
+}
+
+When("an upload to Storage is refused for one team's file", async ({ page }) => {
+  const teamNames = stateOf(page).teamNames ?? [];
+  expect(teamNames.length, 'a previous step read the synced teams').toBeGreaterThan(1);
+  // The first team file's upload is answered as Storage answers a refusal;
+  // every other request, the cleanup's DELETE included, reaches the stack.
+  let refused = 0;
+  const teamUpload = (url: URL) =>
+    url.pathname.includes('/storage/v1/object/exports/') && url.pathname.includes('/teams/');
+  await page.route(teamUpload, async (route) => {
+    if (route.request().method() !== 'POST' || refused > 0) return route.continue();
+    refused += 1;
+    return route.fulfill({
+      status: 403,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        statusCode: '403',
+        error: 'Unauthorized',
+        message: 'refused by the scenario (one team file)',
+      }),
+    });
+  });
+  try {
+    await page.getByRole('button', { name: 'Upload to Storage' }).click();
+    await expect
+      .poll(() => uploadStatus(page), { timeout: BACKEND_TIMEOUT })
+      .toMatch(/^Upload failed:/);
+  } finally {
+    await page.unroute(teamUpload);
+  }
+  expect(refused, 'exactly one team file was refused').toBe(1);
+  const status = await uploadStatus(page);
+  expect(status).toContain(`Upload failed: 1 of ${teamNames.length + 1} files were not uploaded (`);
+  expect(status).toContain('refused by the scenario (one team file)');
+  expect(status).toContain(
+    `The ${teamNames.length} that uploaded were removed, so nothing was published. ` +
+      'No published baseline was recorded.'
+  );
+});
+
+When('I upload the exports to Storage', async ({ page }) => {
+  const teamNames = stateOf(page).teamNames ?? [];
+  expect(teamNames.length, 'a previous step read the synced teams').toBeGreaterThan(1);
+  // On /exports with the CSVs generated, as the previous step left it.
+  await page.getByRole('button', { name: 'Upload to Storage' }).click();
+  // Polled, so a failure is reported in the page's own words, and a line
+  // left by an earlier attempt is not taken for this one's.
+  await expect
+    .poll(() => uploadStatus(page), { timeout: BACKEND_TIMEOUT })
+    .toMatch(/^Uploaded \d+ files to 'exports' bucket\./);
+  const uploaded = page.getByText(/Uploaded \d+ files to 'exports' bucket\./);
+  // The master CSV and one per synced team, and the publication recorded.
+  await expect(uploaded).toContainText(
+    `Uploaded ${teamNames.length + 1} files to 'exports' bucket. Recorded as published baseline v`
+  );
+});
+
+/**
+ * The seeded administrator's own session on the stack, signed in through the
+ * auth API with the seed's password: what a read the page offers no screen
+ * for is made as (the exports bucket's listing, the audit log). Every such
+ * read goes through the same RLS and Storage policies as the app's.
+ */
+const adminSessions = new WeakMap<Page, { token: string; anonKey: string }>();
+async function adminSession(page: Page): Promise<{ token: string; anonKey: string }> {
+  // One sign-in per scenario: the stack allows 30 a 5 minutes per address.
+  const cached = adminSessions.get(page);
+  if (cached) return cached;
+  const anonKey = process.env.E2E_REAL_BACKEND_ANON_KEY ?? '';
+  const response = await page.request.post(`${stackUrl()}/auth/v1/token?grant_type=password`, {
+    headers: { apikey: anonKey, 'Content-Type': 'application/json' },
+    data: { email: SEEDED_ADMIN.email, password: SEEDED_ADMIN.password },
+    timeout: BACKEND_TIMEOUT,
+  });
+  const body = (await response.json()) as { access_token?: string; user?: { id?: string } };
+  expect(response.status(), JSON.stringify(body)).toBe(200);
+  expect(body.user?.id, 'the session is the seeded administrator').toBe(SEEDED_ADMIN.userId);
+  const session = { token: body.access_token ?? '', anonKey };
+  adminSessions.set(page, session);
+  return session;
+}
+
+/**
+ * The objects (not folders) directly in the `folder` of the exports bucket, as
+ * the admin lists them (supabase-js `list(folder)`'s request).
+ */
+async function listExports(page: Page, folder: string): Promise<string[]> {
+  const { token, anonKey } = await adminSession(page);
+  const response = await page.request.post(`${stackUrl()}/storage/v1/object/list/exports`, {
+    headers: { apikey: anonKey, Authorization: `Bearer ${token}` },
+    data: { prefix: folder, limit: 1000, offset: 0, sortBy: { column: 'name', order: 'asc' } },
+    timeout: BACKEND_TIMEOUT,
+  });
+  const body = (await response.json()) as { name: string; id: string | null }[];
+  expect(response.status(), JSON.stringify(body)).toBe(200);
+  // A folder is listed with a null id.
+  return body.filter((entry) => entry.id !== null).map((entry) => entry.name);
+}
+
+Then('none of those files is left in the exports bucket', async ({ page }) => {
+  // Read with the admin's session through the Storage API, which is also the
+  // path the cleanup's DELETE took (the bucket's admin DELETE policy).
+  const org = SEEDED_ADMIN.organizationId;
+  expect(await listExports(page, org), `master CSVs under ${org}/`).toEqual([]);
+  expect(await listExports(page, `${org}/teams`), `team files under ${org}/teams/`).toEqual([]);
+});
+
+Then(
+  "the exports bucket holds the master schedule and a file per synced team, under the organization's folder",
+  async ({ page }) => {
+    const teamNames = stateOf(page).teamNames ?? [];
+    expect(teamNames.length, 'a previous step read the synced teams').toBeGreaterThan(1);
+    const org = SEEDED_ADMIN.organizationId;
+    const masters = await listExports(page, org);
+    expect(masters, `the master CSV under ${org}/`).toEqual([
+      expect.stringMatching(/^master-schedule-[\dT-]+Z\.csv$/),
+    ]);
+    const stamp = masters[0].replace(/^master-schedule-/, '');
+    const teamFiles = await listExports(page, `${org}/teams`);
+    // One per synced team, each carrying the master's stamp: the same upload.
+    expect(teamFiles).toHaveLength(teamNames.length);
+    for (const name of teamFiles) {
+      expect(name.endsWith(`-${stamp}`), `${name} carries the stamp ${stamp}`).toBe(true);
+    }
+  }
+);
 
 /** The local stack's API, as the job exported it (playwright.config.ts). */
 function stackUrl(): string {

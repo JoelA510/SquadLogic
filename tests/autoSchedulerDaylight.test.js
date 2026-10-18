@@ -35,6 +35,7 @@ import {
   PRACTICE_SUNSET_MARGIN_MINUTES as EDGE_MARGIN,
   addDays,
   loadVenueDaylight,
+  storedWallSeconds,
   toDaylightSlot,
 } from '../supabase/functions/_shared/engines/practice-daylight.js';
 import { loadLightingOverrides } from '../supabase/functions/_shared/engines/practice-lighting-overrides.js';
@@ -474,8 +475,10 @@ describe('the venue loader: from the database, as the caller, paged', () => {
       validUntil: '2026-11-24',
       firstDate: '2026-09-01',
       endMinutes: 19 * 60,
-      // M4.8: the stored start too, so the solver's wall window is the store's.
-      startMinutes: 17 * 60 + 30,
+      // M4.8: the stored start and end in seconds, so the solver's wall window
+      // is the store's, seconds kept.
+      startSeconds: (17 * 60 + 30) * 60,
+      endSeconds: 19 * 3600,
     });
     assert.equal(loaded.slots.get('s-g-nodates').validUntil, null);
   });
@@ -546,20 +549,21 @@ describe('W9: the body never supplies the venue, its coordinates or its lighting
     assert.deepEqual(Object.keys(read).sort(), [
       'effectiveUntil',
       'endMinutes',
+      'endSeconds',
       'fieldId',
       'firstDate',
       'id',
-      'startMinutes',
+      'startSeconds',
     ]);
     assert.equal(read.fieldId, F.unlit, "the body's fieldId was read");
     // M4.8: the stored start wins over the body's instant, as the end does.
     const storedStart = toDaylightSlot(row, ZONE, {
       fieldId: F.unlit,
       validUntil: '2026-10-01',
-      startMinutes: 16 * 60,
-      endMinutes: 17 * 60,
+      startSeconds: 16 * 3600,
+      endSeconds: 17 * 3600,
     });
-    assert.deepEqual([storedStart.startMinutes, storedStart.endMinutes], [16 * 60, 17 * 60]);
+    assert.deepEqual([storedStart.startSeconds, storedStart.endSeconds], [16 * 3600, 17 * 3600]);
     assert.equal(read.effectiveUntil, '2026-10-01', "the body's end date beat the store's");
   });
 
@@ -685,6 +689,61 @@ describe('W7: nothing silently dropped; truncated + TIME TBD = the full span', (
     assert.equal(newPlacementRange(window, TODAY, '2026-09-21'), '[2026-09-01,2026-09-21]');
     assert.equal(newPlacementRange(window, TODAY, null), '[2026-09-01,2026-11-24]');
     assert.equal(newPlacementRange(window, TODAY, '2026-12-31'), '[2026-09-01,2026-11-24]');
+  });
+});
+
+describe("M4.8: the solver's wall window keeps the stored seconds", () => {
+  it('reads a stored time to the second, rounding a fraction outward', () => {
+    assert.equal(storedWallSeconds('16:00:30', 'floor'), 16 * 3600 + 30);
+    assert.equal(storedWallSeconds('17:00', 'floor'), 17 * 3600);
+    assert.equal(storedWallSeconds('16:00:30.25', 'floor'), 16 * 3600 + 30);
+    assert.equal(storedWallSeconds('16:00:30.25', 'ceil'), 16 * 3600 + 31);
+    assert.equal(storedWallSeconds('16:00:30', 'ceil'), 16 * 3600 + 30);
+    for (const bad of ['24:00', '16:60', '', null, undefined, 'four']) {
+      assert.equal(storedWallSeconds(bad, 'floor'), null, String(bad));
+    }
+  });
+
+  // A locked practice stored 16:00:30-17:00:30 and a free slot stored
+  // 17:00-18:00, the same Tuesdays, one coach: they share 17:00-17:00:30.
+  // Read to the minute the two were back to back and the team was placed.
+  const placedNext = async (lockedStart, lockedEnd) => {
+    const body = [
+      slot('s-locked', F.lit, '2026-09-01', '2026-11-24', '16:00', '17:00'),
+      slot('s-next', F.lit, '2026-09-01', '2026-11-24', '17:00', '18:00'),
+    ];
+    const stored = body.map(storedRow);
+    Object.assign(stored[0], { start_time: lockedStart, end_time: lockedEnd });
+    const rows = anchoredSlots(body);
+    const loaded = await loadDaylight({ ...TABLES, practice_slots: stored }, rows);
+    const slots = new Map(rows.map((s) => [s.id, toDaylightSlot(s, ZONE, loaded.slots.get(s.id))]));
+    const run = await runPracticeOptimizer({
+      teams: [
+        prepareTeam({ id: 't-row', division: 'U10', coachId: 'k-shared' }),
+        prepareTeam({ id: 't-new', division: 'U10', coachId: 'k-shared' }),
+      ],
+      slots: rows.map((s) => ({ id: s.id, day: s.day, start: s.start, end: s.end, capacity: 1 })),
+      locked: [
+        {
+          assignmentId: 'a-row',
+          teamId: 't-row',
+          slotId: 's-locked',
+          effectiveDateRange: '[2026-09-01,2026-11-25)',
+        },
+      ],
+      placeableTeamIds: ['t-new'],
+      config: CONFIG,
+      dating: { liveFrom: TODAY, slots },
+    });
+    return run.placements.map((p) => p.slotId);
+  };
+
+  it('a 30-second overlap is a clash: the team is not placed beside its coach', async () => {
+    assert.deepEqual(await placedNext('16:00:30', '17:00:30'), []);
+  });
+
+  it('control: stored on the minute, back to back, the team is placed', async () => {
+    assert.deepEqual(await placedNext('16:00:00', '17:00:00'), ['s-next']);
   });
 });
 
@@ -1051,7 +1110,14 @@ const MAIN_POST_PASS_SHA256 = '34fe04500d9c4ed1d1f3d7d44aceac781b7ae2bcaa7176b00
  * the dated evaluation (Q1), the locked rows ended or held season-long, and
  * the date judged from. Everything else is main's.
  */
-const M48_KEYS = ['evaluation', 'relocatedOutsideRun', 'unreadableRange', 'endedRows', 'liveFrom'];
+const M48_KEYS = [
+  'evaluation',
+  'relocatedOutsideRun',
+  'unreadableRange',
+  'endedRows',
+  'liveFrom',
+  'placementRanges',
+];
 const withoutM48Keys = (r) =>
   Object.fromEntries(Object.entries(r).filter(([key]) => !M48_KEYS.includes(key)));
 

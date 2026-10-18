@@ -407,6 +407,17 @@ describe('the dated hard constraint (M4.8 §3, the shared witness table)', () =>
         'overbooked'
       );
       assert.equal(run.liveFrom, SOLVER_DATED_TODAY);
+      // The judged range the page writes, derived here from the case's own
+      // slot: [max(first date, today), last date], one per placement.
+      assert.deepEqual(
+        Object.keys(run.placementRanges).sort(),
+        run.placements.map((p) => p.teamId).sort()
+      );
+      for (const p of run.placements) {
+        const s = testCase.slots.find((x) => x.id === p.slotId);
+        const from = s.firstDate > SOLVER_DATED_TODAY ? s.firstDate : SOLVER_DATED_TODAY;
+        assert.equal(run.placementRanges[p.teamId], `[${from},${s.validUntil}]`, p.teamId);
+      }
     });
   }
 
@@ -444,10 +455,11 @@ describe('the dated hard constraint (M4.8 §3, the shared witness table)', () =>
     for (const bad of [
       { firstDate: null },
       { effectiveUntil: '2026-02-30' },
-      { startMinutes: null },
-      { endMinutes: good.startMinutes },
+      { startSeconds: null },
+      { endSeconds: good.startSeconds },
       // 24:00 is not a wall time the scoring engine reads, so it is undatable here.
-      { endMinutes: 1440 },
+      { endSeconds: 86400 },
+      { startSeconds: 1.5 },
     ]) {
       assert.deepEqual(
         undatableSlotIds(['sA'], new Map([['sA', { ...good, ...bad }]])),
@@ -710,7 +722,9 @@ describe('auto-scheduler/index.ts wiring (source pin)', () => {
     assert.match(source, /placeableTeamIds: classification\.placeable/);
     assert.match(source, /locked: lock\.rows\.map\(/);
     assert.match(source, /const bestAssignments = run\.placements;/);
-    assert.match(source, /assignments: bestAssignments,/);
+    assert.match(source, /assignments: bestAssignments\.map\(/);
+    // M4.8: each placement goes out with the range it was judged on.
+    assert.match(source, /effectiveDateRange: run\.placementRanges\[placement\.teamId\],/);
     assert.doesNotMatch(source, /input\.lockedAssignments\.map|generateGreedySeed/);
   });
 

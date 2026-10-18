@@ -89,9 +89,12 @@ export interface SlotDatingInput {
   firstDate: string | null;
   /** The last date the slot runs, inclusive. */
   effectiveUntil: string | null;
-  /** Minutes past local midnight the practice starts and ends, on the season's clock. */
-  startMinutes: number | null;
-  endMinutes: number | null;
+  /**
+   * Seconds past local midnight the practice starts and ends, on the season's
+   * clock: seconds kept, so 16:00:30-17:00:30 overlaps 17:00-18:00.
+   */
+  startSeconds: number | null;
+  endSeconds: number | null;
 }
 
 /** The run's dating (M4.8). */
@@ -124,20 +127,20 @@ function readDating(
   if (!dating) return null;
   const firstDay = calendarDayNumber(dating.firstDate);
   const lastDay = calendarDayNumber(dating.effectiveUntil);
-  // A wall minute of one day, as the loaders read one (0-1439): the scoring
-  // engine's wall-time reading has no 24:00, so neither does this.
-  const minutes = (value: unknown) =>
-    typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 1439
+  // A wall second of one day (0-86399): the scoring engine's wall-time
+  // reading has no 24:00, so neither does this.
+  const seconds = (value: unknown) =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 86399
       ? value
       : null;
-  const start = minutes(dating.startMinutes);
-  const end = minutes(dating.endMinutes);
+  const start = seconds(dating.startSeconds);
+  const end = seconds(dating.endSeconds);
   // A window that does not end after it starts would overlap nothing, so a
   // coach clash through it would pass unseen: undatable, not empty.
   if (firstDay === null || lastDay === null || start === null || end === null || end <= start) {
     return null;
   }
-  return { firstDay, lastDay, startSec: start * 60, endSec: end * 60 };
+  return { firstDay, lastDay, startSec: start, endSec: end };
 }
 
 /**
@@ -167,8 +170,8 @@ export interface DatedSchedulerSlot extends SchedulerSlot {
 }
 
 const wallTime = (seconds: number) => {
-  const minutes = Math.floor(seconds / 60);
-  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}:00`;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(Math.floor(seconds / 3600))}:${pad(Math.floor((seconds % 3600) / 60))}:${pad(seconds % 60)}`;
 };
 
 /**
@@ -208,6 +211,23 @@ export function dateSchedulerSlots(
       endTime: wallTime(read.endSec),
     };
   });
+}
+
+/**
+ * The range a NEW placement is judged on and written with (M4.8, plan §1.2):
+ * `[max(slot first date, liveFrom), slot last date]`, inclusive, or to the
+ * daylight pass's truncated end. One place for it: the objective scores it,
+ * and the response hands it to the page, which writes it unchanged, so the
+ * range saved is the range judged even when the slot's dates changed in the
+ * store after the page loaded them.
+ */
+export function placementRange(
+  slot: Pick<DatedSchedulerSlot, 'firstDate' | 'lastDate'>,
+  liveFrom: string,
+  effectiveUntil?: string
+): string {
+  const from = liveFrom > slot.firstDate ? liveFrom : slot.firstDate;
+  return `[${from},${effectiveUntil ?? slot.lastDate}]`;
 }
 
 /** One locked row's occupancy. One entry per ROW, so a team may appear twice. */
@@ -479,9 +499,7 @@ function scoreSchedule(
     })),
     ...placements.map((p) => {
       const slot = slotsById.get(p.slotId)!;
-      const from = liveFrom > slot.firstDate ? liveFrom : slot.firstDate;
-      const until = p.effectiveUntil ?? slot.lastDate;
-      return { ...p, effectiveDateRange: `[${from},${until}]` };
+      return { ...p, effectiveDateRange: placementRange(slot, liveFrom, p.effectiveUntil) };
     }),
   ];
   const evaluation = evaluatePracticeSchedule({
@@ -866,6 +884,11 @@ export interface OptimizerResult {
   endedRows: LockedOccupant[];
   /** The date new placements are live from (M4.8 Q7). */
   liveFrom: string;
+  /**
+   * Each returned placement's judged range, by team (`placementRange`): what
+   * the page writes. A placeable team holds at most one placement.
+   */
+  placementRanges: Record<string, string>;
   /** The daylight post-pass's report; `null` when the run was given no daylight context. */
   daylight: DaylightReport | null;
   evaluation: ReturnType<typeof evaluatePracticeSchedule>;
@@ -1110,6 +1133,12 @@ export async function runPracticeOptimizer(params: {
     unreadableRange: base.unreadableRange,
     endedRows: base.endedRows,
     liveFrom,
+    placementRanges: Object.fromEntries(
+      placements.map((p) => [
+        p.teamId,
+        placementRange(slotsById.get(p.slotId)!, liveFrom, p.effectiveUntil),
+      ])
+    ),
     daylight,
     evaluation,
     seedScore: seedScoring.score,

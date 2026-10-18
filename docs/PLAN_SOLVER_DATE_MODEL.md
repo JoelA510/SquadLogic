@@ -520,6 +520,21 @@ the build settled it:
   TIME TBD leave the persisted evaluation too.
 - **Moving a placement** frees only that placement (occupants and coach
   windows carry `placed`), never a relocation that names the same team.
+- **Review of PR #593** (Codex):
+  - Each placement in the response carries the range it was judged on
+    (`placementRange`, one function for the objective and the response), and
+    the page writes exactly that (`judgedPlacementRange`), so a slot whose
+    dates an admin changed after the page loaded is saved with the store's
+    range. A response without one (an older function) falls back to
+    `newPlacementRange`.
+  - The wall window is kept to the second: `storedWallSeconds` reads a stored
+    `time` (`practice_slots.start_time`/`end_time` are Postgres `time`, which
+    holds seconds, and the field import casts text to it), rounding a fraction
+    outward; the body fallback reads the instant's seconds.
+  - The hook carries `lock` through, and the page shows the actionable part as
+    a status line (`utils/lockReport.js`): rows whose range could not be read
+    (held season-long; save them again) and rows that have ended (their slot
+    offered).
 - **The daylight witness** (`tests/autoSchedulerDaylight.test.js`): its slot
   with no end date anywhere (`s-g-nodates`) can no longer reach the solver
   (Q3), so its solver runs use the other slots and six teams, the pass's

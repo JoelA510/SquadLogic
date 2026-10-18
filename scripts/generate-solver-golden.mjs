@@ -55,8 +55,9 @@ export const SWEEP = Object.freeze({
   seasonEnd: '2026-11-20',
 });
 
-/** `HH:MM` minutes of an extract instant (`2026-09-15T16:00:00-04:00`), as written. */
-const minutesOf = (iso) => Number(iso.slice(11, 13)) * 60 + Number(iso.slice(14, 16));
+/** Seconds past midnight of an extract instant (`2026-09-15T16:00:00-04:00`), as written. */
+const secondsOf = (iso) =>
+  Number(iso.slice(11, 13)) * 3600 + Number(iso.slice(14, 16)) * 60 + Number(iso.slice(17, 19));
 
 /**
  * The dated solver's inputs for the corpus: each slot live from its own first
@@ -72,8 +73,8 @@ export function corpusDating(rawSlots, liveFrom) {
         {
           firstDate: s.start.slice(0, 10),
           effectiveUntil: SWEEP.seasonEnd,
-          startMinutes: minutesOf(s.start),
-          endMinutes: minutesOf(s.end),
+          startSeconds: secondsOf(s.start),
+          endSeconds: secondsOf(s.end),
         },
       ])
     ),

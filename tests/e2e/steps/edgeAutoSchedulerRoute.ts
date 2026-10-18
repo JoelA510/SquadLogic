@@ -153,7 +153,16 @@ export async function routeAutoSchedulerToEdgeSolver(page: Page): Promise<void> 
     // index.ts step 13, the fields the solver produced.
     await fulfillJson(route, {
       runId: null,
-      assignments: run.placements,
+      assignments: run.placements.map((placement) => ({
+        ...placement,
+        effectiveDateRange: run.placementRanges[placement.teamId],
+      })),
+      lock: {
+        lockedLoaded: lockRows.length,
+        lockedOutsideRun: run.lockedOutsideRun.map((row) => row.assignmentId),
+        endedRows: run.endedRows.map((row) => row.assignmentId),
+        unreadableRange: run.unreadableRange.map((row) => row.assignmentId),
+      },
       unassigned: run.unassigned,
       liveFrom: run.liveFrom,
       evaluation: run.evaluation,

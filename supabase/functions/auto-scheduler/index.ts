@@ -766,8 +766,14 @@ const handler = withFailureLogging('auto-scheduler', async (req, logCtx) => {
       {
         runId,
         // New placements ONLY, for roster teams with no current row. Locked
-        // rows are never returned: the page keeps its own, unchanged.
-        assignments: bestAssignments,
+        // rows are never returned: the page keeps its own, unchanged. Each
+        // carries the range it was judged on (M4.8), from the store's dating:
+        // the page writes exactly that, not one rebuilt from slot dates it
+        // loaded earlier and that may since have changed.
+        assignments: bestAssignments.map((placement) => ({
+          ...placement,
+          effectiveDateRange: run.placementRanges[placement.teamId],
+        })),
         unassigned: bestUnassigned,
         // Every roster team is accounted for: placed above, unplaced with a
         // reason above, locked (counted here), or TIME TBD (excluded, decision 4).

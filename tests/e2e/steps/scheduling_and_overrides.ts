@@ -340,6 +340,30 @@ Given('a Tuesday practice slot that a locked practice already fills', async ({ p
   );
 });
 
+Given('a Tuesday practice slot whose saved practice ended last week', async ({ page }) => {
+  await waitForMockClient(page);
+  await page.evaluate(
+    ({ from, until, range }) => {
+      const db = window.__MOCK_DB__ as MockDb | undefined;
+      if (!db) throw new Error('mock store not initialised');
+      // The seed's `ps-1`, re-dated around today with one place, and its saved
+      // row `pa-1` (another team) ended a week ago: still locked, holding
+      // nothing from today (M4.8).
+      const slot = (db.practice_slots ?? []).find((s) => s.id === 'ps-1');
+      const row = (db.practice_assignments ?? []).find((r) => r.id === 'pa-1');
+      if (!slot || !row) throw new Error('mock seed ps-1 / pa-1 missing');
+      Object.assign(slot, { capacity: 1, valid_from: from, valid_until: until });
+      row.effective_date_range = range;
+      window.__saveMockDB__(db);
+    },
+    {
+      from: isoFromToday(-30),
+      until: isoFromToday(90),
+      range: `[${isoFromToday(-30)},${isoFromToday(-6)})`,
+    }
+  );
+});
+
 When('I run the auto-scheduler on the Practice Scheduling page', async ({ page }) => {
   await routeAutoSchedulerToEdgeSolver(page);
   await page.goto('/schedule/practice');
@@ -397,6 +421,21 @@ Then(
     // with other teams.
     const teamCell = page.getByRole('cell', { name: new RegExp(`^(${first}|${second}) `) });
     expect(await rows.filter({ has: teamCell }).count()).toBeLessThanOrEqual(1);
+  }
+);
+
+Then(
+  'the page says {int} saved practice has ended and its slot was offered',
+  async ({ page }, count: number) => {
+    // The run's lock report, as the page shows it (M4.8): a status line,
+    // read from the DOM.
+    await expect(
+      page
+        .getByRole('status')
+        .filter({ hasText: `${count} saved practice has ended, so its slot was offered` })
+    ).toBeVisible();
+    // The slot it held was offered: the placement is on the Tuesday.
+    await expect(reviewRows(page).filter({ hasText: /Tuesday @ 18:00/ })).toHaveCount(2);
   }
 );
 

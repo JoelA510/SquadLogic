@@ -241,11 +241,11 @@ describe('the real register', () => {
 
   it('waives the lints the M3.3 triage found, each with a decision on expiry', () => {
     // A literal, not derived from the file: the WARN lints a from-scratch build
-    // reported on CLI 2.118.0 (2026-10-13). A new lint needs a new triage.
+    // reported on CLI 2.118.0 (2026-10-13), less the two the RLS advisor
+    // rewrite fixed (20261018030000: auth_rls_initplan,
+    // multiple_permissive_policies). A new lint needs a new triage.
     expect(register.waivers.map((/** @type {{ lint: string }} */ w) => w.lint).sort()).toEqual([
-      'auth_rls_initplan',
       'function_search_path_mutable',
-      'multiple_permissive_policies',
     ]);
     for (const w of register.waivers) {
       expect(w.expires === null || /^\d{4}-\d{2}-\d{2}$/.test(w.expires)).toBe(true);

@@ -363,7 +363,7 @@ export default function AdminComplianceDashboard() {
                         {isAdmin && reg.profiles?.id && (
                           <button
                             onClick={() => impersonateUser(reg.profiles)}
-                            className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-amber-500/10 text-amber-500 text-xs font-bold border border-amber-500/20 hover:bg-amber-500/20 transition-all"
+                            className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-amber-500/10 text-status-warning-text text-xs font-bold border border-amber-500/20 hover:bg-amber-500/20 transition-all"
                             title="View as this parent"
                           >
                             <Eye size={12} /> View As

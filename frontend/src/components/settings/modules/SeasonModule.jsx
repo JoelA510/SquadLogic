@@ -169,7 +169,7 @@ export default function SeasonModule() {
                     }}
                     className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                       localCurrentSeason === season
-                        ? 'bg-brand-500/20 text-brand-400 border-brand-500/30'
+                        ? 'bg-brand-500/20 text-text-accent border-brand-500/30'
                         : 'bg-bg-surface text-text-muted border-border-subtle hover:bg-bg-surface-hover'
                     }`}
                   >

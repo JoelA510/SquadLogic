@@ -177,7 +177,7 @@ export default function GameCard({
         </div>
         {isManual && (
           <span
-            className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-500 border border-amber-500/30"
+            className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-status-warning-text border border-amber-500/30"
             data-testid="manual-badge"
           >
             manual
@@ -232,7 +232,7 @@ export function GameCardPreview({ assignment }) {
       data-testid="game-card-preview"
     >
       <div className="flex items-center gap-2">
-        <GripVertical size={14} className="text-blue-400" />
+        <GripVertical size={14} className="text-text-accent" />
         <span className="font-semibold text-sm text-text-primary">
           {assignment.homeTeamId} vs {assignment.awayTeamId}
         </span>

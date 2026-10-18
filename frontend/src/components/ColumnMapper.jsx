@@ -236,7 +236,7 @@ export default function ColumnMapper({
         <div className="lg:w-44 shrink-0 flex items-center gap-2">
           <span className="text-sm font-medium text-text-primary">{field.label}</span>
           {isRequired ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-status-error-text border border-red-500/20">
               required
             </span>
           ) : (
@@ -263,7 +263,7 @@ export default function ColumnMapper({
                   })
                 }
                 className={`px-2 py-0.5 rounded ${
-                  !isComposite ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-bg-surface-hover'
+                  !isComposite ? 'bg-blue-500/20 text-text-accent' : 'hover:bg-bg-surface-hover'
                 }`}
               >
                 Single
@@ -279,7 +279,7 @@ export default function ColumnMapper({
                   })
                 }
                 className={`px-2 py-0.5 rounded ${
-                  isComposite ? 'bg-blue-500/20 text-blue-300' : 'hover:bg-bg-surface-hover'
+                  isComposite ? 'bg-blue-500/20 text-text-accent' : 'hover:bg-bg-surface-hover'
                 }`}
               >
                 Combine
@@ -366,7 +366,7 @@ export default function ColumnMapper({
       <div className="p-4 border-b border-border-subtle bg-bg-surface">
         <div className="flex items-start gap-3">
           <div className="p-2 bg-blue-500/20 rounded-lg">
-            <BrainCircuit className="text-blue-400" size={20} />
+            <BrainCircuit className="text-text-accent" size={20} />
           </div>
           <div>
             <h3 className="text-lg font-semibold text-text-primary">Map your columns</h3>
@@ -397,14 +397,14 @@ export default function ColumnMapper({
         <div className="flex items-center gap-2 text-xs">
           {missingRequired.length === 0 ? (
             <>
-              <CheckCircle size={14} className="text-green-400" />
+              <CheckCircle size={14} className="text-status-success-text" />
               <span className="text-text-secondary">
                 All required fields mapped — we&apos;ll remember this for next time.
               </span>
             </>
           ) : (
             <>
-              <AlertCircle size={14} className="text-amber-400" />
+              <AlertCircle size={14} className="text-status-warning-text" />
               <span className="text-text-secondary">
                 Still need: {missingRequired.map((f) => f.label).join(', ')}
               </span>

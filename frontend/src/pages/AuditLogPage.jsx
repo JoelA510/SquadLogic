@@ -240,7 +240,7 @@ export default function AuditLogPage() {
                           </div>
                         ) : (
                           <span className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
-                            <ShieldCheck className="w-3 h-3 text-green-500/50" />
+                            <ShieldCheck className="w-3 h-3 text-status-success-text" />
                             Direct Session
                           </span>
                         )}

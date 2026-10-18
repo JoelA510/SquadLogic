@@ -12,7 +12,7 @@ export default function PersistenceOverridesList({
       className="bg-bg-glass border border-border-subtle rounded-lg p-5 flex flex-col gap-2"
       aria-labelledby="manual-overrides-heading"
     >
-      <h3 className="text-base font-semibold text-blue-300 m-0" id="manual-overrides-heading">
+      <h3 className="text-base font-semibold text-text-accent m-0" id="manual-overrides-heading">
         Manual Overrides
       </h3>
       <p className="text-sm text-text-muted mt-auto pt-3 border-t border-border-subtle">

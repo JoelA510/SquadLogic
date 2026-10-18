@@ -25,9 +25,9 @@ export function IngestionOverlay() {
   if (!isVisible) return null;
 
   const getStatusColor = () => {
-    if (importStatus === 'failed' || importStatus === 'error') return 'text-red-400';
-    if (importStatus === 'completed') return 'text-emerald-400';
-    return 'text-sky-400';
+    if (importStatus === 'failed' || importStatus === 'error') return 'text-status-error-text';
+    if (importStatus === 'completed') return 'text-status-success-text';
+    return 'text-text-accent';
   };
 
   const getStatusIcon = () => {
@@ -115,7 +115,7 @@ export function IngestionOverlay() {
                   Efficiency
                 </p>
                 <div className="flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-sky-400/80" aria-hidden="true" />
+                  <BarChart3 className="w-4 h-4 text-text-accent" aria-hidden="true" />
                   <span className="text-sm font-bold text-text-primary">
                     {activeJob?.efficiency_metadata?.efficiency || '100'}%
                   </span>
@@ -126,7 +126,7 @@ export function IngestionOverlay() {
                   Latency
                 </p>
                 <div className="flex items-center gap-1.5">
-                  <Activity className="w-4 h-4 text-emerald-400/80" aria-hidden="true" />
+                  <Activity className="w-4 h-4 text-status-success-text" aria-hidden="true" />
                   <span className="text-sm font-bold text-text-primary">
                     {activeJob?.efficiency_metadata?.latency?.toFixed(1) || '0.0'}ms
                   </span>
@@ -141,7 +141,7 @@ export function IngestionOverlay() {
                   className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse"
                   aria-hidden="true"
                 />
-                <span className="text-[10px] text-sky-400 font-bold uppercase tracking-widest">
+                <span className="text-[10px] text-text-accent font-bold uppercase tracking-widest">
                   Live Broadcast Active
                 </span>
               </div>
@@ -149,8 +149,8 @@ export function IngestionOverlay() {
 
             {importStatus === 'completed' && (
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                <CheckCircle className="w-3 h-3 text-emerald-400" aria-hidden="true" />
-                <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest">
+                <CheckCircle className="w-3 h-3 text-status-success-text" aria-hidden="true" />
+                <span className="text-[10px] text-status-success-text font-bold uppercase tracking-widest">
                   Ingestion Certified
                 </span>
               </div>
@@ -160,8 +160,8 @@ export function IngestionOverlay() {
             {activeJob?.efficiency_metadata?.needs_confirmation?.length > 0 && (
               <div className="space-y-2 pt-2 border-t border-border-subtle">
                 <div className="flex items-center gap-2">
-                  <AlertCircle className="w-3 h-3 text-indigo-400" aria-hidden="true" />
-                  <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest">
+                  <AlertCircle className="w-3 h-3 text-text-accent" aria-hidden="true" />
+                  <span className="text-[10px] text-text-accent font-bold uppercase tracking-widest">
                     Manual Confirmation Required
                   </span>
                 </div>
@@ -169,7 +169,7 @@ export function IngestionOverlay() {
                   {activeJob.efficiency_metadata.needs_confirmation.map((header) => (
                     <span
                       key={header}
-                      className="px-2 py-0.5 rounded text-[9px] font-bold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20"
+                      className="px-2 py-0.5 rounded text-[9px] font-bold bg-indigo-500/10 text-text-accent border border-indigo-500/20"
                     >
                       {header}
                     </span>

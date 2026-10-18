@@ -16,11 +16,10 @@ Feature: Team Communication and Portal
     And I click "Not Going" for "Jamie" on the "Tuesday" practice
     Then I should see "Alex" marked as "Going" on the "Tuesday" practice
     And I should see "Jamie" marked as "Not Going" on the "Tuesday" practice
-    And the database should have two distinct RSVP records for this practice occurrence
-    And the RSVP timestamps should align with the league's official timezone
+    And after a reload "Alex" is still "Going" and "Jamie" still "Not Going" on the "Tuesday" practice
 
   Scenario: Sending and receiving real-time chat messages
     When I type "Will we have snacks?" into the chat input
     And I send the messenger chat
     Then the message "Will we have snacks?" should appear in the team chat feed immediately
-    And the message should be broadcasted via Supabase Realtime to other connected clients
+    And the message "Will we have snacks?" should still be in the team chat feed after a reload

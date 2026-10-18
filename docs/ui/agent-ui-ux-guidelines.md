@@ -95,19 +95,29 @@ Two gates enforce part of the WCAG 2.2 AA bar (plan item M4.2); neither is confo
   (`eslint.config.js`). Fix what it reports. Waive a genuine false positive on its own line,
   `// eslint-disable-next-line <rule> -- <the reason>`, never by turning a rule off.
 - **E2E scan:** `tests/e2e/features/accessibility.feature` runs axe-core (WCAG 2.0-2.2, A and AA)
-  on the sign-in page and every top-level route, light theme then dark, in mock mode, and fails
-  on any serious or critical violation. `tests/accessibilityRoutes.test.js` fails when `App.jsx`
+  on the sign-in page, every top-level route and the record pages (on seeded records), light theme
+  then dark, in mock mode, and fails on any serious or critical violation. Each row names text the
+  scan must see rendered; routes the mock seed leaves empty have their own scenarios that give
+  them content first. A new route with an empty seed gets such a scenario. `tests/accessibilityRoutes.test.js` fails when `App.jsx`
   gains a route the scan doesn't cover. A violation another change owns goes in
   `KNOWN_VIOLATIONS` (`tests/e2e/steps/accessibility.ts`) with its reason; an entry that stops
   matching fails the scan, so it is deleted with the fix.
 
-Not covered by either: anything a route renders only with data the mock seed lacks, overlays
-that are closed when the page loads, keyboard operation and focus order, and dragging
-alternatives. Those stay manual review against `ui-ux-pass.md`.
+Not covered by either: content the scan's scenarios don't create (the plan lists which), overlays
+that are closed when the page loads, keyboard operation and focus order (beyond the one
+`DataGrid` keyboard scenario in the same feature), and dragging alternatives. Those stay manual
+review against `ui-ux-pass.md`.
+
+`DataGrid` is a `role="grid"` with one tab stop (WAI-ARIA APG data grid): arrows move between
+cells, Tab leaves. A column's `render` may put widgets in a cell; the grid takes them out of the
+tab order and reaches them with the arrow keys, so don't give them a `tabIndex` of your own.
 
 Colors: text uses the theme tokens (`text-text-*`, `text-text-accent`, and
-`text-status-{success,warning,error}-text` on status fills), never Tailwind's `-400` palette
-shades, which fall short of 4.5:1 on the light theme's surfaces.
+`text-status-{success,warning,error}-text` on status fills), never Tailwind's palette shades
+(`text-blue-400`, `text-amber-500`, ...), which fall short of 4.5:1 on the light theme's surfaces.
+`tests/paletteTextShades.test.js` refuses them, and `tests/themeTextContrast.test.js` holds the
+tokens to 4.5:1 on every surface and every tint they share a class string with, in both themes.
+Charts take their colours from `frontend/src/constants/chartTheme.js` (`tests/chartColorTokens.test.js`).
 
 ---
 

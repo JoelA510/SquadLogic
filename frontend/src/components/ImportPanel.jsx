@@ -74,9 +74,9 @@ const SmartBadge = ({ score, rationale }) => {
   const matchPercent = (score * 100).toFixed(0);
 
   const getColor = () => {
-    if (score >= 0.9) return 'text-green-400 bg-green-400/10 border-green-400/20';
-    if (score >= 0.7) return 'text-blue-400 bg-blue-400/10 border-blue-400/20';
-    return 'text-amber-400 bg-amber-400/10 border-amber-400/20';
+    if (score >= 0.9) return 'text-status-success-text bg-green-400/10 border-green-400/20';
+    if (score >= 0.7) return 'text-text-accent bg-blue-400/10 border-blue-400/20';
+    return 'text-status-warning-text bg-amber-400/10 border-amber-400/20';
   };
 
   return (
@@ -98,7 +98,7 @@ const SmartBadge = ({ score, rationale }) => {
         className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 p-2 bg-bg-surface border border-border-highlight rounded-lg shadow-md opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 pointer-events-none transition-opacity z-50 text-text-primary text-[11px] leading-snug"
       >
         <div className="flex items-start gap-1.5">
-          <Info size={12} className="shrink-0 mt-0.5 text-blue-400" />
+          <Info size={12} className="shrink-0 mt-0.5 text-text-accent" />
           <span>{rationale}</span>
         </div>
         <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-bg-surface"></div>
@@ -463,11 +463,11 @@ export default function ImportPanel({ onImport }) {
         <div className="relative z-10 flex flex-col items-center justify-center text-center py-8">
           {isComplete || isReadyToApply ? (
             <div className="mb-6 w-20 h-20 rounded-full bg-green-500/20 flex items-center justify-center animate-fadeIn">
-              <CheckCircle className="w-10 h-10 text-green-400" />
+              <CheckCircle className="w-10 h-10 text-status-success-text" />
             </div>
           ) : (
             <div className="mb-6 w-20 h-20 rounded-full bg-blue-500/20 flex items-center justify-center animate-pulse">
-              <UploadCloud className="w-10 h-10 text-blue-400" />
+              <UploadCloud className="w-10 h-10 text-text-accent" />
             </div>
           )}
 
@@ -491,7 +491,7 @@ export default function ImportPanel({ onImport }) {
           {error && (
             <div
               data-testid="import-error-banner"
-              className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-2 rounded-lg text-sm mb-6 animate-slideUp flex items-center gap-2"
+              className="bg-red-500/10 border border-red-500/20 text-status-error-text px-4 py-2 rounded-lg text-sm mb-6 animate-slideUp flex items-center gap-2"
             >
               <AlertCircle size={16} />
               {error}
@@ -701,7 +701,7 @@ export default function ImportPanel({ onImport }) {
                     ? 'Disable import completion email notifications'
                     : 'Notify when import completes'
                 }
-                className={`p-2 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface ${notifyOnComplete ? 'bg-blue-500/20 text-blue-400' : 'bg-bg-surface text-text-muted hover:text-text-primary'}`}
+                className={`p-2 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface ${notifyOnComplete ? 'bg-blue-500/20 text-text-accent' : 'bg-bg-surface text-text-muted hover:text-text-primary'}`}
                 onClick={() => setNotifyOnComplete(!notifyOnComplete)}
               >
                 <Bell size={20} aria-hidden="true" />
@@ -739,12 +739,12 @@ export default function ImportPanel({ onImport }) {
                 <div className="relative z-10">
                   <div className="flex justify-between items-center gap-2 mb-1 min-w-0">
                     <span
-                      className={`font-semibold capitalize truncate ${importType === type ? 'text-blue-400' : 'text-text-primary'}`}
+                      className={`font-semibold capitalize truncate ${importType === type ? 'text-text-accent' : 'text-text-primary'}`}
                     >
                       {type}
                     </span>
                     {getImportedCount(type) > 0 && (
-                      <span className="shrink-0 text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <span className="shrink-0 text-xs bg-green-500/20 text-status-success-text px-2 py-0.5 rounded-full flex items-center gap-1">
                         <CheckCircle size={10} />
                         {getImportedCount(type)}
                       </span>
@@ -766,7 +766,7 @@ export default function ImportPanel({ onImport }) {
         {/* Template download + defer-field hint */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6 p-3 bg-bg-surface/50 border border-border-subtle rounded-lg">
           <div className="text-xs text-text-secondary flex items-start gap-2 min-w-0">
-            <Info size={14} className="shrink-0 mt-0.5 text-blue-400" />
+            <Info size={14} className="shrink-0 mt-0.5 text-text-accent" />
             <span>
               {importType === 'fields' ? (
                 <>
@@ -774,7 +774,7 @@ export default function ImportPanel({ onImport }) {
                   <span className="text-text-primary">
                     You can skip this step and add them later
                   </span>{' '}
-                  at <span className="font-mono text-brand-400">/fields</span> — useful if your
+                  at <span className="font-mono text-text-accent">/fields</span> — useful if your
                   permits aren&apos;t finalized.
                 </>
               ) : importType === 'field_availability' ? (
@@ -827,7 +827,7 @@ export default function ImportPanel({ onImport }) {
                 className={`p-6 rounded-full transition-colors duration-300 ${isDragging ? 'bg-blue-500/20' : 'bg-bg-surface'}`}
               >
                 <UploadCloud
-                  className={`w-12 h-12 transition-colors duration-300 ${isDragging ? 'text-blue-400' : 'text-text-muted'}`}
+                  className={`w-12 h-12 transition-colors duration-300 ${isDragging ? 'text-text-accent' : 'text-text-muted'}`}
                 />
               </div>
               <div>
@@ -854,7 +854,7 @@ export default function ImportPanel({ onImport }) {
               {error && (
                 <div
                   data-testid="import-error-banner"
-                  className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-2 rounded-lg text-sm mt-2 animate-slideUp flex items-center gap-2"
+                  className="bg-red-500/10 border border-red-500/20 text-status-error-text px-4 py-2 rounded-lg text-sm mt-2 animate-slideUp flex items-center gap-2"
                 >
                   <AlertCircle size={16} />
                   {error}
@@ -876,7 +876,7 @@ export default function ImportPanel({ onImport }) {
                 className="flex items-start gap-3 min-w-0"
               >
                 <div className="p-2 bg-blue-500/20 rounded-lg shrink-0">
-                  <FileText className="text-blue-400" size={20} />
+                  <FileText className="text-text-accent" size={20} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3
@@ -888,7 +888,7 @@ export default function ImportPanel({ onImport }) {
                   <p className="text-sm text-text-secondary flex flex-wrap items-center gap-2 min-w-0">
                     {previewData.totalRows} rows detected
                     {previewData.smartMetadata && !previewData.smartMetadata.isFallback && (
-                      <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/30 inline-flex items-center gap-1">
+                      <span className="text-[10px] bg-blue-500/20 text-text-accent px-1.5 py-0.5 rounded border border-blue-500/30 inline-flex items-center gap-1">
                         <BrainCircuit size={10} />
                         Smart Mapping Active ({previewData.smartMetadata.timing.toFixed(1)}ms)
                       </span>
@@ -899,7 +899,7 @@ export default function ImportPanel({ onImport }) {
               <div className="w-full xl:w-auto xl:text-right">
                 {importType === 'field_availability' && (
                   <>
-                    <div className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                    <div className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-status-warning-text">
                       This import stores seasonal field availability metadata. It does not create
                       practice or game slots.
                     </div>

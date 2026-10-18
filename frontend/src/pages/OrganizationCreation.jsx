@@ -58,7 +58,7 @@ export default function OrganizationCreation() {
       <div className="max-w-2xl w-full glass-panel-premium overflow-hidden flex flex-col shadow-md">
         {/* Header */}
         <div className="p-8 border-b border-border-subtle bg-bg-glass flex items-center gap-4">
-          <div className="w-12 h-12 bg-brand-500/20 text-brand-400 rounded-2xl flex items-center justify-center">
+          <div className="w-12 h-12 bg-brand-500/20 text-text-accent rounded-2xl flex items-center justify-center">
             <Rocket size={24} />
           </div>
           <div>
@@ -181,7 +181,7 @@ function CreateOrganizationForm() {
   if (success) {
     return (
       <div role="status" aria-live="polite" className="p-10 text-center space-y-6">
-        <div className="w-20 h-20 bg-green-500/20 text-green-400 rounded-full flex items-center justify-center mx-auto animate-bounce">
+        <div className="w-20 h-20 bg-green-500/20 text-status-success-text rounded-full flex items-center justify-center mx-auto animate-bounce">
           <CheckCircle size={48} />
         </div>
         <h2 className="text-3xl font-bold text-text-primary uppercase tracking-tight">
@@ -198,7 +198,7 @@ function CreateOrganizationForm() {
         {error && (
           <div
             role="alert"
-            className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-red-400 animate-slideUp"
+            className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-status-error-text animate-slideUp"
           >
             <AlertCircle size={20} className="shrink-0" />
             <p className="text-xs font-medium">{error}</p>
@@ -224,7 +224,7 @@ function CreateOrganizationForm() {
               className="w-full glass-input"
             />
             {fieldErrors?.name ? (
-              <p id="org-name-error" role="alert" className="text-xs text-red-400">
+              <p id="org-name-error" role="alert" className="text-xs text-status-error-text">
                 {fieldErrors?.name}
               </p>
             ) : null}
@@ -248,7 +248,7 @@ function CreateOrganizationForm() {
               className="w-full glass-input font-mono text-sm"
             />
             {fieldErrors?.slug ? (
-              <p id="org-slug-error" role="alert" className="text-xs text-red-400">
+              <p id="org-slug-error" role="alert" className="text-xs text-status-error-text">
                 {fieldErrors?.slug}
               </p>
             ) : null}
@@ -299,7 +299,7 @@ function CreateOrganizationForm() {
               className="w-full glass-input"
             />
             {fieldErrors?.seasonYear ? (
-              <p id="org-season-error" role="alert" className="text-xs text-red-400">
+              <p id="org-season-error" role="alert" className="text-xs text-status-error-text">
                 {fieldErrors?.seasonYear}
               </p>
             ) : null}
@@ -381,7 +381,7 @@ function JoinWithInviteForm({ initialCode }) {
       {error && (
         <div
           role="alert"
-          className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-red-400 animate-slideUp"
+          className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-status-error-text animate-slideUp"
         >
           <AlertCircle size={20} className="shrink-0" />
           <p className="text-xs font-medium">{error}</p>

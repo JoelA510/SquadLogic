@@ -34,7 +34,7 @@ export default function AutoSchedulerPanel({
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-400/20">
-            <Zap size={20} className="text-cyan-400" aria-hidden="true" />
+            <Zap size={20} className="text-text-accent" aria-hidden="true" />
           </div>
           <div>
             <h3 className="text-lg font-display font-bold text-text-primary">{title}</h3>
@@ -90,7 +90,7 @@ export default function AutoSchedulerPanel({
           aria-label="Optimization progress"
         >
           <div className="flex items-center gap-3 mb-2">
-            <Loader2 size={16} className="text-cyan-400 animate-spin" aria-hidden="true" />
+            <Loader2 size={16} className="text-text-accent animate-spin" aria-hidden="true" />
             <span className="text-sm text-text-secondary">{runningLabel}</span>
           </div>
           <div className="grid grid-cols-3 gap-4 text-center">
@@ -102,7 +102,7 @@ export default function AutoSchedulerPanel({
             </div>
             <div>
               <div className="text-xs text-text-muted uppercase tracking-wider">Best Score</div>
-              <div className="text-lg font-display font-bold text-cyan-400">
+              <div className="text-lg font-display font-bold text-text-accent">
                 {progress.bestScore != null ? `${(progress.bestScore * 100).toFixed(1)}%` : '—'}
               </div>
             </div>
@@ -116,7 +116,8 @@ export default function AutoSchedulerPanel({
         </div>
       )}
 
-      {/* Completed results */}
+      {/* Completed results. Labels take --text-secondary: --text-muted on this emerald tint is
+          4.42:1 in the dark theme (axe, Wave 4). */}
       {isCompleted && result && (
         <div
           className="mt-4 p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/20"
@@ -124,12 +125,14 @@ export default function AutoSchedulerPanel({
           aria-live="polite"
         >
           <div className="flex items-center gap-2 mb-3">
-            <CheckCircle size={16} className="text-emerald-400" aria-hidden="true" />
-            <span className="text-sm font-semibold text-emerald-400">Optimization Complete</span>
+            <CheckCircle size={16} className="text-status-success-text" aria-hidden="true" />
+            <span className="text-sm font-semibold text-status-success-text">
+              Optimization Complete
+            </span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
             <div>
-              <div className="text-xs text-text-muted uppercase tracking-wider">
+              <div className="text-xs text-text-secondary uppercase tracking-wider">
                 {assignedLabel}
               </div>
               <div className="text-lg font-display font-bold text-text-primary">
@@ -137,7 +140,7 @@ export default function AutoSchedulerPanel({
               </div>
             </div>
             <div>
-              <div className="text-xs text-text-muted uppercase tracking-wider">
+              <div className="text-xs text-text-secondary uppercase tracking-wider">
                 {unassignedLabel}
               </div>
               <div className="text-lg font-display font-bold text-text-primary">
@@ -145,16 +148,18 @@ export default function AutoSchedulerPanel({
               </div>
             </div>
             <div>
-              <div className="text-xs text-text-muted uppercase tracking-wider">Score</div>
-              <div className="text-lg font-display font-bold text-cyan-400">
+              <div className="text-xs text-text-secondary uppercase tracking-wider">Score</div>
+              <div className="text-lg font-display font-bold text-text-accent">
                 {result.optimization?.bestScore != null
                   ? `${(result.optimization.bestScore * 100).toFixed(1)}%`
                   : '—'}
               </div>
             </div>
             <div>
-              <div className="text-xs text-text-muted uppercase tracking-wider">Improvement</div>
-              <div className="text-lg font-display font-bold text-emerald-400">
+              <div className="text-xs text-text-secondary uppercase tracking-wider">
+                Improvement
+              </div>
+              <div className="text-lg font-display font-bold text-status-success-text">
                 {result.optimization?.improvement != null
                   ? `+${(result.optimization.improvement * 100).toFixed(1)}%`
                   : '—'}
@@ -162,7 +167,7 @@ export default function AutoSchedulerPanel({
             </div>
           </div>
           {result.optimization && (
-            <p className="mt-3 text-xs text-text-muted">
+            <p className="mt-3 text-xs text-text-secondary">
               {result.optimization.iterations?.toLocaleString()} iterations in{' '}
               {(result.optimization.elapsedMs / 1000).toFixed(1)}s
               {result.optimization.restarts > 0 &&
@@ -182,8 +187,8 @@ export default function AutoSchedulerPanel({
           aria-live="assertive"
         >
           <div className="flex items-center gap-2">
-            <AlertTriangle size={16} className="text-red-400" aria-hidden="true" />
-            <span className="text-sm text-red-400">{error}</span>
+            <AlertTriangle size={16} className="text-status-error-text" aria-hidden="true" />
+            <span className="text-sm text-status-error-text">{error}</span>
           </div>
         </div>
       )}

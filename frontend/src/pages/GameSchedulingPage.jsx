@@ -1314,11 +1314,11 @@ export default function GameSchedulingPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3 text-sm">
               {applyStatus === 'applied' ? (
-                <CheckCircle size={18} className="text-emerald-400 mt-0.5" />
+                <CheckCircle size={18} className="text-status-success-text mt-0.5" />
               ) : applyStatus === 'error' ? (
-                <XCircle size={18} className="text-red-400 mt-0.5" />
+                <XCircle size={18} className="text-status-error-text mt-0.5" />
               ) : (
-                <RotateCcw size={18} className="text-cyan-400 mt-0.5" />
+                <RotateCcw size={18} className="text-text-accent mt-0.5" />
               )}
               <div>
                 <p className="font-semibold text-text-primary">
@@ -1332,7 +1332,7 @@ export default function GameSchedulingPage() {
                           ? 'Game schedule review discarded'
                           : 'Game schedule workflow'}
                 </p>
-                <p className={applyError ? 'text-red-300' : 'text-text-muted'}>
+                <p className={applyError ? 'text-status-error-text' : 'text-text-muted'}>
                   {applyError ||
                     statusMessage ||
                     schedulerReadinessMessage ||
@@ -1347,7 +1347,7 @@ export default function GameSchedulingPage() {
                     above, so whenever there was no apply error and no status
                     message -- the common case -- the operator read it twice. */}
                 {unplaceableSlotMessage && (
-                  <p className="text-amber-300 mt-1">{unplaceableSlotMessage}</p>
+                  <p className="text-status-warning-text mt-1">{unplaceableSlotMessage}</p>
                 )}
               </div>
             </div>
@@ -1500,7 +1500,7 @@ function GameScheduleList({ assignments, timezone, onEditSchedule, onCancelAssig
     return (
       <div className="glass-panel p-12 text-center animate-fadeIn border-brand-400/20 relative overflow-hidden">
         <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
-          <Trophy size={120} className="text-brand-400" />
+          <Trophy size={120} className="text-text-accent" />
         </div>
         <div className="max-w-md mx-auto relative z-10">
           <h2 className="text-2xl font-display font-bold text-text-primary mb-4">
@@ -1567,7 +1567,7 @@ function GameScheduleList({ assignments, timezone, onEditSchedule, onCancelAssig
                   {a.persisted && (
                     <button
                       type="button"
-                      className="p-1.5 rounded text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      className="p-1.5 rounded text-text-muted hover:text-status-error-text hover:bg-red-500/10 transition-colors"
                       aria-label={`Cancel game ${a.homeTeamName ?? ''} vs ${a.awayTeamName ?? ''}`}
                       onClick={() => onCancelAssignment(a)}
                     >
@@ -1641,7 +1641,7 @@ function TeamScheduleSelector({
         ) : assignments.length === 0 ? (
           <div className="glass-panel p-12 text-center animate-fadeIn border-brand-400/20 relative overflow-hidden">
             <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
-              <Trophy size={120} className="text-brand-400" />
+              <Trophy size={120} className="text-text-accent" />
             </div>
             <div className="max-w-md mx-auto relative z-10">
               <h2 className="text-2xl font-display font-bold text-text-primary mb-4">

@@ -66,7 +66,7 @@ const PlayerCard = ({ player }) => {
           <span className="text-xs text-text-muted flex items-center gap-2">
             Skill: {playerSkill}
             {player.assignment_source === 'manual' && (
-              <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-500 border border-amber-500/30">
+              <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-status-warning-text border border-amber-500/30">
                 manual
               </span>
             )}
@@ -113,13 +113,13 @@ export function TeamColumn({ team, players }) {
             <h3 className="font-bold text-text-primary">{team.name}</h3>
             <a
               href={`/team/${team.id}`}
-              className="text-[10px] text-blue-400 hover:text-blue-300 hover:underline uppercase tracking-widest font-bold flex items-center gap-1 mt-0.5"
+              className="text-[10px] text-text-accent hover:underline uppercase tracking-widest font-bold flex items-center gap-1 mt-0.5"
             >
               View Team Portal <ArrowRight size={10} />
             </a>
           </div>
           <span
-            className={`text-xs px-2 py-1 rounded-full font-bold ${players.length > 14 ? 'bg-amber-500/20 text-amber-500' : 'bg-blue-500/20 text-blue-400'}`}
+            className={`text-xs px-2 py-1 rounded-full font-bold ${players.length > 14 ? 'bg-amber-500/20 text-status-warning-text' : 'bg-blue-500/20 text-text-accent'}`}
           >
             {players.length} Players
           </span>
@@ -337,7 +337,7 @@ export default function RosterManager({ initialTeams, onTeamsChange }) {
           {activePlayer ? (
             <div className="p-3 bg-bg-surface border border-blue-500 rounded-md shadow-md flex items-center justify-between opacity-90 scale-105 transform rotate-2">
               <div className="flex items-center gap-3">
-                <GripVertical size={16} className="text-blue-400" />
+                <GripVertical size={16} className="text-text-accent" />
                 <div className="flex flex-col">
                   <span className="font-medium text-sm text-text-primary">{activePlayer.name}</span>
                   <span className="text-xs text-text-muted">Moving player...</span>

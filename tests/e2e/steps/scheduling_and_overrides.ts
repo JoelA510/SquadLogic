@@ -1217,8 +1217,8 @@ Then(
   async ({ page }, teamName: string, _status: string) => {
     const row = page.locator('tr').filter({ hasText: teamName }).first();
 
-    // Based on PracticeAssignmentList.jsx, check for the specific locked CSS class applied to the button
-    await expect(row.locator('button.text-amber-500').first()).toBeVisible({ timeout: 5000 });
+    // PracticeAssignmentList.jsx: the lock toggle is pressed when the assignment is locked.
+    await expect(row.locator('button[aria-pressed="true"]').first()).toBeVisible({ timeout: 5000 });
   }
 );
 
@@ -1226,7 +1226,7 @@ Then('the lock state should be persisted to the database', async ({ page }) => {
   // Since we removed the DB check, we verify the UI state remains stable after a brief wait
   await page.waitForTimeout(1000);
   const row = page.locator('tr').filter({ hasText: 'Team A' }).first();
-  await expect(row.locator('button.text-amber-500').first()).toBeVisible();
+  await expect(row.locator('button[aria-pressed="true"]').first()).toBeVisible();
 });
 
 // ── The override prompt (docs/PLAN_GRID_OVERRIDE_PROMPT.md, ruling 2) ──────
@@ -1377,12 +1377,12 @@ Given('{string} has a locked practice assignment', async ({ page }, teamName: st
     await editBtn.click();
   }
 
-  // If it's not locked yet (amber text), click the toggle to lock it
+  // If it's not locked yet (the toggle not pressed), click the toggle to lock it
   const lockBtn = row.locator('button').first();
-  const isLocked = await lockBtn.evaluate((el) => el.classList.contains('text-amber-500'));
+  const isLocked = (await lockBtn.getAttribute('aria-pressed')) === 'true';
   if (!isLocked) {
     await lockBtn.click({ force: true });
-    await expect(row.locator('button.text-amber-500').first()).toBeVisible();
+    await expect(row.locator('button[aria-pressed="true"]').first()).toBeVisible();
   }
 });
 

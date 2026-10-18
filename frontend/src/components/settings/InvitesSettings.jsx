@@ -220,7 +220,7 @@ export default function InvitesSettings() {
         </div>
 
         {createError && (
-          <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2 text-red-400 text-xs">
+          <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2 text-status-error-text text-xs">
             <AlertCircle size={14} className="shrink-0" />
             {createError.message || 'Failed to create invite'}
           </div>
@@ -228,7 +228,7 @@ export default function InvitesSettings() {
 
         {justCreated?.code && (
           <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-xl space-y-3 animate-slideUp">
-            <div className="flex items-center gap-2 text-green-400 text-xs font-bold uppercase tracking-widest">
+            <div className="flex items-center gap-2 text-status-success-text text-xs font-bold uppercase tracking-widest">
               <CheckCircle size={14} /> Invite ready — share either the code or the link
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -258,7 +258,7 @@ export default function InvitesSettings() {
 
       {/* List */}
       {fetchError && (
-        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2 text-red-400 text-xs">
+        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2 text-status-error-text text-xs">
           <AlertCircle size={14} className="shrink-0" />
           {fetchError.message || 'Could not load invites'}
         </div>
@@ -275,8 +275,8 @@ export default function InvitesSettings() {
             const status = inv.used_at
               ? { label: 'Redeemed', color: 'text-text-muted', bg: 'bg-bg-glass' }
               : isExpired
-                ? { label: 'Expired', color: 'text-amber-400', bg: 'bg-amber-500/10' }
-                : { label: 'Active', color: 'text-green-400', bg: 'bg-green-500/10' };
+                ? { label: 'Expired', color: 'text-status-warning-text', bg: 'bg-amber-500/10' }
+                : { label: 'Active', color: 'text-status-success-text', bg: 'bg-green-500/10' };
             return (
               <li
                 key={inv.id}
@@ -322,7 +322,7 @@ export default function InvitesSettings() {
                       size="sm"
                       onClick={() => handleRevoke(inv.id)}
                       disabled={revokingId === inv.id}
-                      className="flex items-center gap-1 text-red-400 hover:text-red-300"
+                      className="flex items-center gap-1 text-status-error-text"
                       aria-label="Revoke invite"
                     >
                       <Trash2 size={14} />
@@ -354,7 +354,7 @@ function CopyRow({ label, value, onCopy, copied, mono = false, icon: Icon = null
       <button
         type="button"
         onClick={onCopy}
-        className="px-2 py-1 rounded bg-brand-500/10 text-brand-400 text-[10px] font-bold uppercase tracking-widest hover:bg-brand-500/20 flex items-center gap-1 shrink-0"
+        className="px-2 py-1 rounded bg-brand-500/10 text-text-accent text-[10px] font-bold uppercase tracking-widest hover:bg-brand-500/20 flex items-center gap-1 shrink-0"
       >
         {copied ? <CheckCircle size={12} /> : <Copy size={12} />}
         {copied ? 'Copied' : 'Copy'}

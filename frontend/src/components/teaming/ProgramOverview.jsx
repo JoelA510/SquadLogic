@@ -33,7 +33,7 @@ export default function ProgramOverview({ programs, onSelectProgram, selectedPro
                 <td className="p-4 text-text-secondary">{program.estimatedTeams}</td>
                 <td className="p-4 text-text-secondary">{program.avgRosterSize}</td>
                 <td className="p-4">
-                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-500/10 text-green-500">
+                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-500/10 text-status-success-text">
                     Ready
                   </span>
                 </td>

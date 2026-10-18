@@ -124,6 +124,7 @@ a new test that needs known identities.
 | `rls_admin_vs_coach.sql`                           | `audit_log` is readable by Alice (admin) and blocked for Charlie (coach). |
 | `rls_service_role_bypass.sql`                      | `service_role` sees every team across every org.                          |
 | `rls_import_efficiency_metrics_view.sql`           | The `security_invoker = on` view is org-scoped for its caller.            |
+| `rls_policy_matrix.sql`                            | Seven personas' SELECT, INSERT, UPDATE and DELETE on the 26 tables the advisors flag, against a literal expected table (`docs/PLAN_RLS_ADVISOR_REWRITE.md` §4.2). |
 
 ## When a test fails
 

@@ -1455,6 +1455,9 @@ smoke-tested
   - The `auth_rls_initplan` and `multiple_permissive_policies` waivers expire on 2027-01-11, after
     which pgTAP, a required check, fails every PR until the policies are rewritten or the waivers
     renewed. Wants a plan item (RLS policy rewrite, plan first). *Statically reviewed.*
+    **Planned, 2026-10-18:** `docs/PLAN_RLS_ADVISOR_REWRITE.md`, approved with every
+    recommendation; PR 1 lands the persona matrix (`supabase/tests/rls_policy_matrix.sql`),
+    PR 2 the rewrite (see the 2026-10-18 entry below).
   - pgTAP run 38338431910 (branch `feat/grid-override-prompt`) failed
     `practice_grid_current_rows.sql` test 36 with the two series in the other order
     (`have: thu,fri`, `want: fri,thu`): if that assertion depends on row order, it is a flake that
@@ -1908,6 +1911,27 @@ smoke-tested
     `--bg-app`. `--success` and `--danger` pass. Not changed (not a palette shade); the `-text`
     tokens are the fix. *Executed* (ratios computed the way `tests/themeTextContrast.test.js`
     does).
+
+- 2026-10-18, the RLS advisor rewrite, PR 1 (branch `claude/vibrant-allen-hr7y7s-rlsmatrix`,
+  `docs/PLAN_RLS_ADVISOR_REWRITE.md` §4.2): the persona matrix only, no migration.
+  `supabase/tests/rls_policy_matrix.sql` records SELECT, INSERT, UPDATE and DELETE for seven
+  personas on the 26 tables the two waived lints name (728 cells), against a literal expected
+  table generated on `a31ddde` and checked row by row against the policy text. Green against
+  today's policies; four planted policy changes and four planted test defects each turn it red
+  (the PR lists them). *Executed* on a local build of all 130 migrations with pgTAP 1.3.3 and
+  Supabase's default grants and `auth.uid()`; CI's run is the PR's.
+  - **A `tenant_admin` is narrower than `is_org_admin` in four places, not two.** The plan's Q5
+    names `season_settings` and `registration_forms` (writes need `role = 'admin'`); the matrix
+    shows the same inline test on two SELECT policies: a `tenant_admin` reads no `audit_log`
+    row and no `organization_schema_history` row of its own organization, while it reads
+    `telemetry_log` (which admits `tenant_admin` by name). Not changed (the rewrite changes no
+    access); belongs with Q5's product question. *Executed.*
+  - `profile_players` has no INSERT, UPDATE or DELETE policy, and `profiles` no INSERT or
+    DELETE policy: no persona writes them through the table, admins included. Their writes go
+    through definer functions (`handle_new_user`, the registration RPCs, *statically reviewed*).
+    *Executed* (the matrix).
+  - Any member of an organization, a coach or a parent included, can INSERT `telemetry_log`
+    rows for it; only its admins read them. *Executed.*
 
 ## Deferred with reason
 

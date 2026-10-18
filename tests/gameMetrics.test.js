@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { test } from 'vitest';
 
 import { evaluateGameSchedule } from '../packages/core/src/gameMetrics.js';
+import { coreGameProjection, truthProjection } from './fixtures/gameScoringProjection.js';
 
 test('evaluateGameSchedule summarises assignments and byes without warnings', () => {
   const teams = [
@@ -283,3 +286,27 @@ test('evaluateGameSchedule flags shared slot imbalances across divisions', () =>
   ]);
   assert.ok(slotOneImbalance.details.spread > 1);
 });
+
+// ---- The game vector table (#576 follow-up, docs/PLAN_GAME_EVALUATOR_UNKNOWN_TEAM.md §3.5) ----
+//
+// Core is the sibling whose contract the Edge adopts, so it must give each
+// hand-worked truth first: a vector core gets wrong would hold the Edge to a
+// wrong answer. The drift test and the Deno arm run the Edge over the same table.
+const GAME_VECTORS = JSON.parse(
+  readFileSync(
+    path.join(process.cwd(), 'supabase/functions/_shared/tests/fixtures/game-scoring-vectors.json'),
+    'utf8'
+  )
+).vectors;
+
+test('the game vector table is the plan table (meta, can fail)', () => {
+  const names = GAME_VECTORS.map((v) => v.name.split(':')[0]);
+  assert.deepEqual(names, ['G1', 'G2', 'G3 (control)', 'G4', 'S1', 'S2', 'U2', 'D1']);
+});
+
+for (const vector of GAME_VECTORS) {
+  test(`core gives the hand-worked truth: ${vector.name}`, () => {
+    const result = evaluateGameSchedule({ assignments: vector.games, teams: vector.teams });
+    assert.deepEqual(coreGameProjection(result), truthProjection(vector.truth));
+  });
+}

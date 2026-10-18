@@ -43,6 +43,7 @@ npm run test:db:once supabase/tests/rls_cross_org_isolation.sql
 | `coach_leads.sql`                        | Player-import coach lead RPC stays idempotent and org-scoped.                     |
 | `division_roster_constraints.sql`        | Division roster/team bounds persist and stay admin-owned.                         |
 | `storage_exports_bucket.sql`             | `exports` is private: members of the folder's org read, its admins upload.        |
+| `rls_policy_matrix.sql`                  | Seven personas' read and write access on the 26 advisor-flagged tables.           |
 
 ## Conventions
 

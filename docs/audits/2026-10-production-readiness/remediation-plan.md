@@ -18,7 +18,7 @@ on 2026-10-13 "as recommended": D1-D8 at their defaults, and finding 5.1 moved i
   - Free-tier budgets, the AA accent palette, and the real-backend E2E made required: #581.
 - M5: #557.
 
-Open: M4.8 (needs an owner-approved plan before any code), M6, the M1 tails, and the follow-ups in
+Open: M4.8 (plan approved 2026-10-18, built, in review), M6, the M1 tails, and the follow-ups in
 "Discovered during execution".
 
 The order to take them in, by dependency, is [`resume-queue.md`](./resume-queue.md). Every agent
@@ -866,6 +866,15 @@ standards these items name · [ ] deployed and smoke-tested
 >   CI pending.
 
 > **M4.8. The auto-scheduler's coach check compares first-occurrence instants, so it can double-book a coach** (not an audit finding: found by the M4.7 plan, Q2; medium) — **plan first: needs the owner's approval before any code**
+> - **Status (2026-10-18): built, in review.** Plan `docs/PLAN_SOLVER_DATE_MODEL.md`, approved
+>   by the owner on 2026-10-18 with every recommendation as written; built in branch
+>   `claude/vibrant-allen-hr7y7s-m48` (the PR is opened by the coordinator). The solver judges
+>   dated occupancy from the store's slot dating; `scoreSchedule` scores dated; a slot it cannot
+>   date refuses the run (422 `SLOT_DATING_UNREADABLE`); the response carries `liveFrom` and the
+>   page dates new placements from it. On the season-2026 corpus sweep (lock shares 0 / 0.5 /
+>   0.9, seeds 1 / 2 / 3, two todays) the placements are byte-identical to a golden generated on
+>   `main` before the change (*executed*). No migration. The plan's §12 records how the build
+>   settled what the text left open.
 > - **Status (2026-10-13): open, not planned.** Proposed by the M4.7 plan (Q2, approved as
 >   recommended) and left out of M4.7 because it is the solver, whose behaviour that item froze.
 > - **Why here:** it is the same gap M4.7 closes in the evaluators, left open in the one place
@@ -1463,6 +1472,9 @@ smoke-tested
   - The `auth_rls_initplan` and `multiple_permissive_policies` waivers expire on 2027-01-11, after
     which pgTAP, a required check, fails every PR until the policies are rewritten or the waivers
     renewed. Wants a plan item (RLS policy rewrite, plan first). *Statically reviewed.*
+    **Planned, 2026-10-18:** `docs/PLAN_RLS_ADVISOR_REWRITE.md`, approved with every
+    recommendation; PR 1 lands the persona matrix (`supabase/tests/rls_policy_matrix.sql`),
+    PR 2 the rewrite (see the 2026-10-18 entry below).
   - pgTAP run 38338431910 (branch `feat/grid-override-prompt`) failed
     `practice_grid_current_rows.sql` test 36 with the two series in the other order
     (`have: thu,fri`, `want: fri,thu`): if that assertion depends on row order, it is a flake that
@@ -1565,7 +1577,13 @@ smoke-tested
     non-empty roster (core's `evaluateGameSchedule` warns `unknown-team`), so a roster that
     matches no game still scores clean. Reporting it is a scoring change, so it is not in this
     PR; `EvaluationPanel` has no client guard for games either, unreachable while no page passes
-    `gameData`. *Statically reviewed.*
+    `gameData`. *Statically reviewed.* **Status (2026-10-18): built, in review**, by plan
+    `docs/PLAN_GAME_EVALUATOR_UNKNOWN_TEAM.md` (approved by the owner on 2026-10-18 with every
+    recommendation as written), branch `claude/vibrant-allen-hr7y7s-gameeval`: the Edge reports
+    each unknown side, counts coverage from the roster, checks every coach, treats one fixture as
+    one commitment, and `fairness-scoring` refuses a schedule naming no rostered team (422
+    `GAME_ROSTER_UNMATCHED`); the first game parity check holds both engines to one vector table
+    and the season-2026 games. *Executed.*
 - 2026-10-14, found by w3d (real-backend E2E), fixed by #577:
   - **Every Edge Function audit write failed.** `_shared/auth.ts`'s `recordAudit` /
     `recordAuditNow` called `record_audit_event` through the service-role client; the RPC writes
@@ -1917,13 +1935,35 @@ smoke-tested
     tokens are the fix. *Executed* (ratios computed the way `tests/themeTextContrast.test.js`
     does).
 
+- 2026-10-18, the RLS advisor rewrite, PR 1 (branch `claude/vibrant-allen-hr7y7s-rlsmatrix`,
+  `docs/PLAN_RLS_ADVISOR_REWRITE.md` §4.2): the persona matrix only, no migration.
+  `supabase/tests/rls_policy_matrix.sql` records SELECT, INSERT, UPDATE, a move to an
+  organization nobody belongs to (an UPDATE's WITH CHECK) and DELETE for seven personas on the 26 tables the two
+  waived lints name (910 cells), against a literal expected table generated on `a31ddde` and
+  checked row by row against the policy text. Green against today's policies; five planted
+  policy changes and seven planted test defects each turn it red (the PR lists them).
+  *Executed* on a local build of all 130 migrations with pgTAP 1.3.3 and Supabase's default
+  grants and `auth.uid()`; CI's run is the PR's.
+  - **A `tenant_admin` is narrower than `is_org_admin` in four places, not two.** The plan's Q5
+    names `season_settings` and `registration_forms` (writes need `role = 'admin'`); the matrix
+    shows the same inline test on two SELECT policies: a `tenant_admin` reads no `audit_log`
+    row and no `organization_schema_history` row of its own organization, while it reads
+    `telemetry_log` (which admits `tenant_admin` by name). Not changed (the rewrite changes no
+    access); belongs with Q5's product question. *Executed.*
+  - `profile_players` has no INSERT, UPDATE or DELETE policy, and `profiles` no INSERT or
+    DELETE policy: no persona writes them through the table, admins included. Their writes go
+    through definer functions (`handle_new_user`, the registration RPCs, *statically reviewed*).
+    *Executed* (the matrix).
+  - Any member of an organization, a coach or a parent included, can INSERT `telemetry_log`
+    rows for it; only its admins read them. *Executed.*
+
 - 2026-10-18, found by the schema drift PR (branch `claude/vibrant-allen-hr7y7s-drift`):
   - **The field import relied on the dropped trigger for sub-surfaces, in production only.**
     `finalize_field_import_job` (`20260503070000`) writes `supports_halves`, and in production
     `trigger_manage_field_subunits` then created `A` and `B` (and `rollback_field_import_job`,
-    `20260909000000`, restoring `supports_halves = false`, deleted them). After `20261018040000` a field imported
-    with halves has no sub-surfaces until an admin saves it on the Fields page, which is what a
-    fresh build (CI) has always done. Production holds 0 fields, so nothing changes for existing
+    `20260909000000`, restoring `supports_halves = false`, deleted them). After `20261018040000`
+    a field imported with halves has no sub-surfaces until an admin saves it on the Fields page,
+    which is what a fresh build (CI) has always done. Production holds 0 fields, so nothing changes for existing
     data. Not changed: the import RPC is its own change. *Statically reviewed.*
   - **The mock's direct-table `fields` paths still imitate the dropped trigger** (insert and
     update of `fields` through `from('fields')` create, and with halves off delete, sub-surfaces;

@@ -127,8 +127,8 @@ function resolveDateModel(slots: Slot[]): Map<string, SlotDating> | null {
  * clash only on a shared live date with overlapping wall windows, and a slot's
  * `assignedCount` is its busiest date (rows as `assignmentRows`); with none,
  * first-occurrence instants and row counts, unchanged. `summary.dateModel`
- * says which ran. The auto-scheduler's own scoring is always undated
- * (`auto-scheduler-solver.ts` `scoreSchedule`, plan Q2).
+ * says which ran. The auto-scheduler's own scoring is dated since M4.8, from
+ * the store's slot dating (`auto-scheduler-solver.ts` `scoreSchedule`, Q1).
  *
  * **Saved practice exceptions (the M4.7 follow-up, plan Q1)**, exactly as
  * core: a dated call may pass `exceptions` (`practice_exceptions` rows as
@@ -614,10 +614,48 @@ export function evaluatePracticeSchedule(params: {
 interface TimedGameAssignment extends GameAssignment {
   start: Date;
   end: Date;
+  /**
+   * One fixture's identity (core `gameMetrics.js`'s `assignmentKey`): a coach
+   * on both sides of one game holds two entries carrying the same key, which
+   * are one commitment, never a clash. Set on coach entries only.
+   */
+  sourceKey?: string;
 }
+
+/** The message of the Edge's unknown-team warning; `tests/fixtures/gameScoringProjection.js` reads it. */
+export const GAME_UNKNOWN_TEAM_MESSAGE = 'game references unknown team';
 
 /**
  * Core Logic for evaluating Game Schedules
+ *
+ * **Core's contract, adopted (#576 follow-up, `docs/PLAN_GAME_EVALUATOR_UNKNOWN_TEAM.md`).**
+ * Core `evaluateGameSchedule` (`packages/core/src/gameMetrics.js`) is the
+ * sibling that already settles each of these, so this arm follows it rather
+ * than inventing a third answer:
+ *
+ * - **A side the roster does not carry is reported**, once per team id in
+ *   schedule order, as a `data-quality` warning -- the shape this file's
+ *   practice evaluator gives an unknown team. It used to be dropped without a
+ *   word, so a roster matching no game scored `ok` and a team renamed between
+ *   roster and schedule played nothing, invisibly. The game still counts in
+ *   `totalAssignments` and its known side is still checked.
+ * - **Coverage is from the roster**: `teamsRostered`, `teamsScheduled` and
+ *   `teamsReferencedUnknown`, counted as core counts them, and
+ *   `coveragePercent = round(100 x teamsScheduled / teamsRostered, 2)`. It
+ *   used to be 100 whenever there was a game ("Simplified").
+ * - **A schedule that names no rostered team examined nothing** and is an
+ *   `error` issue, so a direct caller is never told `ok`; `fairness-scoring`
+ *   refuses it first (422 `GAME_ROSTER_UNMATCHED`).
+ * - **Every coach on a team** is conflict-checked (`listTeamCoachIds`, 8.2),
+ *   not the head coach alone.
+ * - **The two entries of one fixture are one commitment** (core's
+ *   `sourceKey`): a coach on both sides of a game is in one place.
+ *
+ * Declared, not enforced: core's `field-overlap` check has no twin here (the
+ * game input carries no field model this arm reads); a clash through an
+ * unknown team cannot be seen by either arm, and the unknown-team warning is
+ * the signal. `tests/scoringEngineDrift.test.js` holds both arms to
+ * `game-scoring-vectors.json`, and the parity tests to the season-2026 games.
  */
 export function evaluateGameSchedule(params: { assignments: GameAssignment[]; teams: Team[] }) {
   const { assignments, teams } = params;
@@ -626,12 +664,16 @@ export function evaluateGameSchedule(params: { assignments: GameAssignment[]; te
   const issues: Issue[] = [];
   const summary = {
     totalAssignments: assignments.length,
-    coveragePercent: assignments.length > 0 ? 100 : 0, // Simplified
+    teamsRostered: teamsById.size,
+    teamsScheduled: 0,
+    teamsReferencedUnknown: 0,
+    coveragePercent: 0,
     divisionGameDistribution: {} as Record<string, number>,
   };
 
   const teamAssignments = new Map<string, TimedGameAssignment[]>();
   const coachAssignments = new Map<string, TimedGameAssignment[]>();
+  const seenUnknownTeams = new Set<string>();
 
   assignments.forEach((a) => {
     summary.divisionGameDistribution[a.division] =
@@ -639,6 +681,11 @@ export function evaluateGameSchedule(params: { assignments: GameAssignment[]; te
 
     const start = new Date(a.start);
     const end = new Date(a.end);
+    const slotId = (a as { slotId?: unknown }).slotId;
+    // Core's `assignmentKey`, spelled the same way.
+    const sourceKey = String(
+      (a as { id?: unknown }).id ?? `${String(slotId)}|${String(a.start)}|${a.homeTeamId}`
+    );
 
     const participants = [
       { teamId: a.homeTeamId, role: 'home' },
@@ -647,18 +694,55 @@ export function evaluateGameSchedule(params: { assignments: GameAssignment[]; te
 
     participants.forEach(({ teamId }) => {
       const team = teamsById.get(teamId);
-      if (!team) return;
+      if (!team) {
+        if (!seenUnknownTeams.has(teamId)) {
+          seenUnknownTeams.add(teamId);
+          issues.push({
+            category: 'data-quality',
+            severity: 'warning',
+            message: `${GAME_UNKNOWN_TEAM_MESSAGE} ${teamId}`,
+            details: { teamId, weekIndex: a.weekIndex, slotId: slotId ?? null },
+          });
+        }
+        return;
+      }
 
       if (!teamAssignments.has(teamId)) teamAssignments.set(teamId, []);
-      teamAssignments.get(teamId)!.push({ ...a, start, end });
+      // `sourceKey` set to nothing: a team's own entries are never one
+      // commitment (a client-sent `sourceKey` passes the schema's
+      // passthrough, and must not hide a team double-booked).
+      teamAssignments.get(teamId)!.push({ ...a, start, end, sourceKey: undefined });
 
-      // Game coach conflicts remain head-coach-only pending 8.2 (games' coach model).
-      if (team.coachId) {
-        if (!coachAssignments.has(team.coachId)) coachAssignments.set(team.coachId, []);
-        coachAssignments.get(team.coachId)!.push({ ...a, start, end });
+      // Every coach on the team (8.2), through the producer the practice
+      // evaluator above already uses.
+      for (const coachId of listTeamCoachIds(team)) {
+        if (!coachAssignments.has(coachId)) coachAssignments.set(coachId, []);
+        coachAssignments.get(coachId)!.push({ ...a, start, end, sourceKey });
       }
     });
   });
+
+  summary.teamsScheduled = teamAssignments.size;
+  summary.teamsReferencedUnknown = seenUnknownTeams.size;
+  summary.coveragePercent =
+    summary.teamsRostered > 0
+      ? Math.round((10000 * summary.teamsScheduled) / summary.teamsRostered) / 100
+      : 0;
+
+  if (assignments.length > 0 && summary.teamsScheduled === 0) {
+    issues.push({
+      category: 'coverage',
+      severity: 'error',
+      message:
+        `No game names a rostered team: ${assignments.length} game(s) against ` +
+        `${summary.teamsRostered} rostered team(s), so nothing was examined`,
+      details: {
+        totalAssignments: assignments.length,
+        teamsRostered: summary.teamsRostered,
+        teamsReferencedUnknown: summary.teamsReferencedUnknown,
+      },
+    });
+  }
 
   const detectConflicts = (
     map: Map<string, TimedGameAssignment[]>,
@@ -666,9 +750,21 @@ export function evaluateGameSchedule(params: { assignments: GameAssignment[]; te
     severity: Severity
   ) => {
     map.forEach((events, id) => {
-      events.sort((a, b) => a.start.getTime() - b.start.getTime());
+      // Core's order: by start, then slot, so one fixture's two entries sit
+      // side by side.
+      events.sort(
+        (a, b) =>
+          a.start.getTime() - b.start.getTime() ||
+          String((a as { slotId?: unknown }).slotId ?? '').localeCompare(
+            String((b as { slotId?: unknown }).slotId ?? '')
+          )
+      );
       for (let i = 1; i < events.length; i++) {
-        if (events[i].start < events[i - 1].end) {
+        const prev = events[i - 1];
+        const curr = events[i];
+        // One fixture is one commitment, not a clash (core's `sourceKey`).
+        if (prev.sourceKey !== undefined && prev.sourceKey === curr.sourceKey) continue;
+        if (curr.start < prev.end) {
           issues.push({
             category: type,
             severity,
@@ -676,8 +772,8 @@ export function evaluateGameSchedule(params: { assignments: GameAssignment[]; te
             details: {
               id,
               events: [
-                events[i - 1] as unknown as Record<string, unknown>,
-                events[i] as unknown as Record<string, unknown>,
+                prev as unknown as Record<string, unknown>,
+                curr as unknown as Record<string, unknown>,
               ],
             },
           });

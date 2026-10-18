@@ -3,13 +3,17 @@
  * refusal (`fairness-empty-roster_test.ts`), for games. Found by PR 2-C (plan
  * "Discovered during execution").
  *
- * The defect: `evaluateGameSchedule` skips each side of a game whose team is
- * not in `teams`, without a word, so with `teams` empty it skips every game and
- * reports `ok`, coverage 100, no conflict; with `games` empty it reports `ok`
- * over nothing. With `persist: true` the handler recorded either as a run.
+ * The defect: `evaluateGameSchedule` skipped each side of a game whose team
+ * was not in `teams`, without a word, so with `teams` empty it skipped every
+ * game and reported `ok`, coverage 100, no conflict; with `games` empty it
+ * reports `ok` over nothing. With `persist: true` the handler recorded either
+ * as a run.
  *
- * Input validation at the boundary, as M2.6 did, not a scoring change: the
- * engine is untouched (the meta tests below pin the shape it still has).
+ * Input validation at the boundary, as M2.6 did. Since the #576 follow-up the
+ * engine itself reports each unknown side and a roster nothing matches (the
+ * meta test below pins that); the no-games shape is still `ok` over nothing,
+ * so the refusal still stands in front of both. A block with teams and games
+ * but no rostered side is `fairness-game-roster-unmatched_test.ts`'s.
  *
  * Two halves, because the handler module calls `serve()` when it is imported:
  *   1. the refusal itself, `refuseEmptyGameRoster`, on every empty shape and
@@ -67,19 +71,20 @@ function parsedGames(teams: unknown[], games: unknown[], persist: boolean) {
 }
 
 Deno.test(
-  'the defect: with no teams the engine scores a conflicted schedule clean (meta, can fail)',
+  'with no teams the engine now reports every side unknown and examined nothing (meta, can fail)',
   () => {
     // Control: with the teams, the coach's double-booking is found.
     const seen = evaluateGameSchedule({ assignments: GAMES as never, teams: [TEAM_A, TEAM_B] });
     assertEquals(seen.status, 'action-required');
     assert(seen.issues.some((i) => i.category === 'coach-game-conflict'));
-    // Without them, every game is skipped and the report is perfect. If the
-    // engine stops scoring an empty roster this way, this fails and the
-    // refusal's reason should be re-read.
+    // Without them, every side is an unknown team and the run is an error,
+    // not a perfect report (#576 follow-up). The refusal still answers first.
     const blind = evaluateGameSchedule({ assignments: GAMES as never, teams: [] });
-    assertEquals(blind.status, 'ok');
-    assertEquals(blind.issues, []);
-    assertEquals(blind.summary.coveragePercent, 100);
+    assertEquals(blind.status, 'action-required');
+    assertEquals(blind.summary.teamsScheduled, 0);
+    assertEquals(blind.summary.teamsReferencedUnknown, 4);
+    assertEquals(blind.summary.coveragePercent, 0);
+    assert(blind.issues.some((i) => i.category === 'coverage' && i.severity === 'error'));
   }
 );
 

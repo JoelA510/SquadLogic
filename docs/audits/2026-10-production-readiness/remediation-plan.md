@@ -1566,7 +1566,13 @@ smoke-tested
     non-empty roster (core's `evaluateGameSchedule` warns `unknown-team`), so a roster that
     matches no game still scores clean. Reporting it is a scoring change, so it is not in this
     PR; `EvaluationPanel` has no client guard for games either, unreachable while no page passes
-    `gameData`. *Statically reviewed.*
+    `gameData`. *Statically reviewed.* **Status (2026-10-18): built, in review**, by plan
+    `docs/PLAN_GAME_EVALUATOR_UNKNOWN_TEAM.md` (approved by the owner on 2026-10-18 with every
+    recommendation as written), branch `claude/vibrant-allen-hr7y7s-gameeval`: the Edge reports
+    each unknown side, counts coverage from the roster, checks every coach, treats one fixture as
+    one commitment, and `fairness-scoring` refuses a schedule naming no rostered team (422
+    `GAME_ROSTER_UNMATCHED`); the first game parity check holds both engines to one vector table
+    and the season-2026 games. *Executed.*
 - 2026-10-14, found by w3d (real-backend E2E), fixed by #577:
   - **Every Edge Function audit write failed.** `_shared/auth.ts`'s `recordAudit` /
     `recordAuditNow` called `record_audit_event` through the service-role client; the RPC writes

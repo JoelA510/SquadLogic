@@ -50,9 +50,20 @@
  * `CORE_ONLY_KEYS` / `EDGE_ONLY_KEYS` so that "not compared" is written down
  * rather than left to be discovered as another silent divergence.
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { evaluatePracticeSchedule as coreEvaluate } from '@squadlogic/core/practiceMetrics.js';
-import { evaluatePracticeSchedule as edgeEvaluate } from '../supabase/functions/_shared/engines/scoring-engine.js';
+import { evaluateGameSchedule as coreEvaluateGames } from '@squadlogic/core/gameMetrics.js';
+import {
+  evaluatePracticeSchedule as edgeEvaluate,
+  evaluateGameSchedule as edgeEvaluateGames,
+} from '../supabase/functions/_shared/engines/scoring-engine.js';
+import {
+  coreGameProjection,
+  edgeGameProjection,
+  truthProjection,
+} from './fixtures/gameScoringProjection.js';
 import { DATED_VECTORS, datedProjection, undatedInputs } from './helpers/datedScoringVectors.js';
 import * as coreLive from '@squadlogic/core/utils/practiceLiveDates.js';
 import * as edgeLive from '../supabase/functions/_shared/engines/practice-live-dates.ts';
@@ -699,5 +710,109 @@ describe('scoring-engine cross-arm drift: dated (M4.7)', () => {
     for (const value of ['16:00', '16:00:30', '24:00', '9:00', '', null, '23:59:59']) {
       expect(edgeLive.wallSeconds(value)).toBe(coreLive.wallSeconds(value));
     }
+  });
+});
+
+// ---- Games (#576 follow-up, docs/PLAN_GAME_EVALUATOR_UNKNOWN_TEAM.md §3.5) ----
+//
+// The first cross-arm check for games: none existed, which is how the Edge
+// came to drop an unknown side without a word, read only the head coach, and
+// report a coach on both sides of one game as a clash with himself, while
+// core had settled all three. Both arms run over `game-scoring-vectors.json`
+// and are compared on `gameScoringProjection.js`'s projection, each against
+// the vector's hand-worked truth (so a table wrong about both cannot pass by
+// agreement) and against each other.
+
+const GAME_VECTORS = JSON.parse(
+  readFileSync(
+    path.join(process.cwd(), 'supabase/functions/_shared/tests/fixtures/game-scoring-vectors.json'),
+    'utf8'
+  )
+).vectors;
+
+describe('scoring-engine cross-arm drift: games', () => {
+  it('the table reaches every rule it is compared on (meta, can fail)', () => {
+    const truths = GAME_VECTORS.map((v) => v.truth);
+    // An unknown side, a roster nothing matches, and a partial coverage.
+    expect(truths.some((t) => t.unknownTeams.length > 0)).toBe(true);
+    expect(truths.some((t) => t.teamsScheduled === 0)).toBe(true);
+    expect(truths.some((t) => t.coveragePercent > 0 && t.coveragePercent < 100)).toBe(true);
+    // A coach conflict, a double-booked team, and a clean control.
+    expect(truths.some((t) => t.coachConflicts.length > 0)).toBe(true);
+    expect(truths.some((t) => t.teamsDoubleBooked.length > 0)).toBe(true);
+    expect(truths.some((t) => t.edgeStatus === 'ok')).toBe(true);
+    // An unknown team in two games (pins "once per id"), from the inputs.
+    const repeated = GAME_VECTORS.some((v) => {
+      const rostered = new Set(v.teams.map((t) => t.id));
+      const sides = v.games
+        .flatMap((g) => [g.homeTeamId, g.awayTeamId])
+        .filter((id) => !rostered.has(id));
+      return sides.length > new Set(sides).size;
+    });
+    expect(repeated).toBe(true);
+    // A team whose coach is only an assistant, and one coach on both sides of a game.
+    expect(GAME_VECTORS.some((v) => v.teams.some((t) => (t.assistantCoachIds ?? []).length))).toBe(
+      true
+    );
+    const coachOf = (v, id) => v.teams.find((t) => t.id === id)?.coachId;
+    expect(
+      GAME_VECTORS.some((v) =>
+        v.games.some(
+          (g) => coachOf(v, g.homeTeamId) && coachOf(v, g.homeTeamId) === coachOf(v, g.awayTeamId)
+        )
+      )
+    ).toBe(true);
+  });
+
+  for (const vector of GAME_VECTORS) {
+    it(`both arms give the truth: ${vector.name}`, () => {
+      const input = { assignments: vector.games, teams: vector.teams };
+      const core = coreEvaluateGames(input);
+      const edge = edgeEvaluateGames(input);
+      const truth = truthProjection(vector.truth);
+      expect(coreGameProjection(core)).toEqual(truth);
+      expect(edgeGameProjection(edge)).toEqual(truth);
+      // Edge-only: coverage from the roster, and the status its issues give.
+      expect(edge.summary.coveragePercent).toBe(vector.truth.coveragePercent);
+      expect(edge.status).toBe(vector.truth.edgeStatus);
+    });
+  }
+
+  it('a client-sent sourceKey never hides a team double-booked (Edge)', () => {
+    // The schema passes unknown game keys through; only a coach's two entries
+    // of one fixture are one commitment.
+    const [d1] = GAME_VECTORS.filter((v) => v.name.startsWith('D1'));
+    const games = d1.games.map((g) => ({ ...g, sourceKey: 'same' }));
+    const edge = edgeEvaluateGames({ assignments: games, teams: d1.teams });
+    expect(edgeGameProjection(edge)).toEqual(truthProjection(d1.truth));
+  });
+
+  it('declared, not compared: field-overlap is core-only (Q5)', () => {
+    // Two games on one field at one time: core warns, the Edge has no field
+    // model in its game input and says nothing. Written down here so the
+    // difference is a known one, not a silent divergence.
+    const teams = ['A', 'B', 'C', 'D'].map((id) => ({
+      id,
+      name: id,
+      division: 'U10',
+      coachId: `c${id}`,
+    }));
+    const at = (id, home, away) => ({
+      id,
+      slotId: `slot-${id}`,
+      weekIndex: 1,
+      division: 'U10',
+      fieldId: 'field-1',
+      homeTeamId: home,
+      awayTeamId: away,
+      start: '2026-10-03T13:00:00Z',
+      end: '2026-10-03T14:00:00Z',
+    });
+    const games = [at('g1', 'A', 'B'), at('g2', 'C', 'D')];
+    const core = coreEvaluateGames({ assignments: games, teams });
+    const edge = edgeEvaluateGames({ assignments: games, teams });
+    expect(core.warnings.map((w) => w.type)).toContain('field-overlap');
+    expect(edge.issues).toEqual([]);
+    expect(coreGameProjection(core)).toEqual(edgeGameProjection(edge));
   });
 });

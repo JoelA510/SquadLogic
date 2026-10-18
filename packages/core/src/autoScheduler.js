@@ -12,6 +12,16 @@
  * - Wall-clock budget prevents Edge Function timeouts (default 25 000 ms).
  * - Locked assignments (source === 'locked') are never mutated.
  * - Random restarts escape local optima when score stalls.
+ *
+ * **Not on a live path, and undated (M4.8, `docs/PLAN_SOLVER_DATE_MODEL.md`
+ * Q6, declared).** No frontend or Edge file imports this module: the product's
+ * auto-scheduler is the Edge solver (`supabase/functions/_shared/engines/
+ * auto-scheduler-solver.ts`), which judges dated occupancy since M4.8. This
+ * one still compares each slot's first-occurrence instants and holds a locked
+ * assignment for the whole season, so it double-books a coach across
+ * staggered slots and blocks a slot with an ended series. It was not ported:
+ * a second solver nobody runs would double the test surface for no user.
+ * Retiring it is a separate refactor, to be flagged first.
  */
 
 import { listTeamCoachIds, schedulePractices } from './practiceScheduling.js';

@@ -60,10 +60,18 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { loadSeason2026 } from '@squadlogic/core/fixtures/index.js';
 import { evaluatePracticeSchedule } from '@squadlogic/core/practiceMetrics.js';
-import { evaluatePracticeSchedule as edgeEvaluate } from '../supabase/functions/_shared/engines/scoring-engine.js';
+import {
+  evaluateGameSchedule as edgeEvaluateGames,
+  evaluatePracticeSchedule as edgeEvaluate,
+} from '../supabase/functions/_shared/engines/scoring-engine.js';
+import { evaluateGameSchedule as coreEvaluateGames } from '@squadlogic/core/gameMetrics.js';
+import { coreGameProjection, edgeGameProjection } from './fixtures/gameScoringProjection.js';
 import {
   SCORING_PARITY_DATED_EXTRACT,
   SCORING_PARITY_EXTRACT,
+  SCORING_PARITY_GAMES_EXTRACT,
+  coreGameAgreedFields,
+  deriveGameParityInputs,
   agreedFields,
   coreAgreedFields,
   coreDatedAgreedFields,
@@ -288,6 +296,74 @@ describe('core vs Edge scoring parity, dated (M4.7)', () => {
     expect(deno).toContain('./fixtures/scoring-parity-dated.season-2026.json');
     expect(deno).toContain(SCORING_PARITY_DATED_EXTRACT);
     for (const [name, value] of Object.entries(DATED_EXPECTED)) {
+      expect(deno, name).toMatch(new RegExp(`\\b${name}: ${value},`));
+    }
+  });
+});
+
+// ---- Games (#576 follow-up, docs/PLAN_GAME_EVALUATOR_UNKNOWN_TEAM.md §2.2, §3.5) ----
+//
+// The corpus's combined game schedule (the 542 rows naming both sides) against
+// the same 132-team roster. Its five unknown teams are the external league's
+// sides, which the club does not roster: real opponents, reported as warnings
+// (Q3), not suppressed. Its three coach conflicts include assistants, which the
+// Edge used to leave unread (2 instead of 3).
+
+/** Literals, as above; the Deno arm declares the same. */
+const GAMES_EXPECTED = {
+  games: 542,
+  teamsRostered: 132,
+  teamsScheduled: 131,
+  unknownTeams: 5,
+  gameCoachConflicts: 3,
+};
+const games = JSON.parse(readFileSync(path.join(REPO_ROOT, SCORING_PARITY_GAMES_EXTRACT), 'utf8'));
+
+describe('core vs Edge game scoring parity on the season-2026 corpus', () => {
+  it('the games extract is what the corpus derives today', () => {
+    expect(games.inputs).toEqual(deriveGameParityInputs());
+  });
+
+  it('the extract holds the season and the cases parity needs (meta, can fail)', () => {
+    expect(games.inputs.games).toHaveLength(GAMES_EXPECTED.games);
+    expect(games.inputs.teams).toHaveLength(GAMES_EXPECTED.teamsRostered);
+    expect(games.expected.teamsRostered).toBe(GAMES_EXPECTED.teamsRostered);
+    expect(games.expected.teamsScheduled).toBe(GAMES_EXPECTED.teamsScheduled);
+    expect(games.expected.unknownTeams).toHaveLength(GAMES_EXPECTED.unknownTeams);
+    expect(games.expected.teamsReferencedUnknown).toBe(GAMES_EXPECTED.unknownTeams);
+    expect(games.expected.coachConflicts).toHaveLength(GAMES_EXPECTED.gameCoachConflicts);
+    // Every unknown side is one the roster lacks, from the roster: never a
+    // rostered team the engine failed to find.
+    const rostered = new Set(games.inputs.teams.map((t) => t.id));
+    expect(games.expected.unknownTeams.every((id) => !rostered.has(id))).toBe(true);
+    // An assistant is needed for the third conflict: the head-coach-only
+    // reading finds fewer.
+    const headOnly = coreEvaluateGames({
+      assignments: games.inputs.games,
+      teams: games.inputs.teams.map(({ assistantCoachIds: _a, ...t }) => t),
+    });
+    expect(coreGameProjection(headOnly).coachConflicts.length).toBeLessThan(
+      GAMES_EXPECTED.gameCoachConflicts
+    );
+  });
+
+  it('core gives the recorded game answer', () => {
+    expect(coreGameAgreedFields(games.inputs)).toEqual(games.expected);
+  });
+
+  it('the Edge engine gives the same game answer', () => {
+    const edge = edgeEvaluateGames({ assignments: games.inputs.games, teams: games.inputs.teams });
+    expect(edgeGameProjection(edge)).toEqual(games.expected);
+    // Coverage from the roster: 131 of 132.
+    expect(edge.summary.coveragePercent).toBe(99.24);
+    expect(edge.status).toBe('action-required');
+  });
+
+  it('the Deno arm reads the games extract with the same literals', () => {
+    const deno = readFileSync(path.join(REPO_ROOT, DENO_ARM), 'utf8');
+    expect(deno).toContain('./fixtures/scoring-parity-games.season-2026.json');
+    expect(deno).toContain(SCORING_PARITY_GAMES_EXTRACT);
+    for (const [name, value] of Object.entries(GAMES_EXPECTED)) {
       expect(deno, name).toMatch(new RegExp(`\\b${name}: ${value},`));
     }
   });

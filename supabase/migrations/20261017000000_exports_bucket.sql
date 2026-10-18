@@ -31,20 +31,28 @@
 -- their own query, so
 -- there is no bare `auth.uid()` or `auth.role()` here for the
 -- `auth_rls_initplan` advisor to flag (the Wave 2 RLS rewrite exists to remove
--- those). Both policies are `TO authenticated`, so the anonymous role has no
+-- those). Every policy is `TO authenticated`, so the anonymous role has no
 -- policy and is refused without evaluating anything.
 --
--- **Members read, administrators upload, nothing else.** A member of the
--- organization may read (SELECT) its exports; only an administrator of it may
--- upload (INSERT), as only an administrator reaches the Exports page
--- (`MANAGE_ORGANIZATION`) and records the publication baseline beside the
--- upload (`admin_publish_schedule_baseline`, `is_org_admin`); a coach or a
--- parent cannot put a file where published schedules live. There is no
--- UPDATE or DELETE policy:
--- a published export is not rewritten or removed by an end user (retention,
--- if it is ever wanted, runs as the service role, which bypasses RLS, as for
--- `raw-imports` since 20260602010000). The client uploads with `upsert:
--- false` to match: an upsert would also need UPDATE.
+-- **Members read; administrators upload and remove; nothing rewrites.** A
+-- member of the organization may read (SELECT) its exports; only an
+-- administrator of it may upload (INSERT) or remove (DELETE) one, as only an
+-- administrator reaches the Exports page (`MANAGE_ORGANIZATION`) and records
+-- the publication baseline beside the upload (`admin_publish_schedule_baseline`,
+-- `is_org_admin`); a coach or a parent cannot put a file where published
+-- schedules live, or take one away.
+--
+-- The DELETE is what makes a publish all-or-nothing: when one file of a
+-- publish is refused, the panel removes the ones that did upload, through the
+-- Storage API, so no partial set stays readable to members with no baseline
+-- or audit row saying what went out (Codex review on #592). Supabase refuses
+-- a plain SQL DELETE on storage.objects (`storage.protect_delete()`), so the
+-- API is the only path this policy serves.
+--
+-- There is no UPDATE policy: a published export is never rewritten in place.
+-- The client uploads with `upsert: false` to match: an upsert would need
+-- UPDATE. Retention, if it is ever wanted, runs as the service role, which
+-- bypasses RLS, as for `raw-imports` since 20260602010000.
 --
 -- **Private.** The insert creates the bucket private where it is missing and
 -- the conflict branch sets `public = false` where it exists (production's
@@ -79,6 +87,20 @@ CREATE POLICY "exports org-admin insert"
     ON storage.objects
     FOR INSERT TO authenticated
     WITH CHECK (
+        bucket_id = 'exports'
+        AND CASE
+            WHEN (storage.foldername(name))[1]
+                 ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            THEN public.is_org_admin(((storage.foldername(name))[1])::uuid)
+            ELSE false
+        END
+    );
+
+DROP POLICY IF EXISTS "exports org-admin delete" ON storage.objects;
+CREATE POLICY "exports org-admin delete"
+    ON storage.objects
+    FOR DELETE TO authenticated
+    USING (
         bucket_id = 'exports'
         AND CASE
             WHEN (storage.foldername(name))[1]

@@ -1,7 +1,7 @@
 -- Revert for 20261017000000_exports_bucket.sql
 --
--- Drops the two `exports` policies (members' SELECT, administrators'
--- INSERT), so `storage.objects` refuses every
+-- Drops the three `exports` policies (members' SELECT, administrators'
+-- INSERT and DELETE), so `storage.objects` refuses every
 -- end-user read and upload in the bucket again (RLS denies by default) and
 -- "Upload to Storage" fails as it did before, with its error shown.
 --
@@ -19,6 +19,7 @@ BEGIN;
 
 DROP POLICY IF EXISTS "exports org-member select" ON storage.objects;
 DROP POLICY IF EXISTS "exports org-admin insert" ON storage.objects;
+DROP POLICY IF EXISTS "exports org-admin delete" ON storage.objects;
 
 DO $revert$
 DECLARE

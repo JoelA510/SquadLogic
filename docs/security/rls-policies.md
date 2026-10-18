@@ -76,17 +76,20 @@ Every data table has a direct `organization_id` column (either native or backfil
 Both buckets are private, and their `storage.objects` policies scope every object to the
 organization named by the first folder of its path (`<organization_id>/...`):
 
-| Bucket        | Who may                                                                                                                | Migration                          |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `raw-imports` | Members read and upload under their organization's folder; no delete                                                   | `20260421001043`, `20260602010000` |
-| `exports`     | Members read (`is_org_member`); admins upload (`is_org_admin`), under their organization's folder; no update or delete | `20261017000000`                   |
+| Bucket        | Who may                                                                                                                 | Migration                          |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `raw-imports` | Members read and upload under their organization's folder; no delete                                                    | `20260421001043`, `20260602010000` |
+| `exports`     | Members read (`is_org_member`); admins upload and remove (`is_org_admin`), under their organization's folder; no update | `20261017000000`                   |
 
-Only an administrator uploads exports, as only an administrator reaches the Exports page and records
-the publication baseline beside the upload. The `exports` policies are `TO authenticated` and
-refuse, rather than fail on, a first folder that is not a UUID. The Exports page's "Upload to
-Storage" builds its paths with `exportObjectPath` (`packages/core/src/storageSupabase.js`) and
-uploads without upsert, since there is no UPDATE policy. Retention, if wanted, runs as the service
-role. pgTAP: `supabase/tests/storage_exports_bucket.sql`.
+Only an administrator uploads or removes exports, as only an administrator reaches the Exports page
+and records the publication baseline beside the upload. The admin DELETE makes a publish all or
+nothing: when one file is refused, the panel removes the ones that uploaded, through the Storage API
+(Supabase refuses SQL deletes on `storage.objects`), and names any it could not remove. The
+`exports` policies are `TO authenticated` and refuse, rather than fail on, a first folder that is
+not a UUID. The Exports page's "Upload to Storage" builds its paths with `exportObjectPath`
+(`packages/core/src/storageSupabase.js`) and uploads without upsert, since there is no UPDATE
+policy. Retention, if wanted, runs as the service role. pgTAP:
+`supabase/tests/storage_exports_bucket.sql`.
 
 ## Edge Function Security
 

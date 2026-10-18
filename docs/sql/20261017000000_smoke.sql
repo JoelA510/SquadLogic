@@ -4,8 +4,8 @@
 -- stubs `auth.uid()` from `request.jwt.claim.sub`; Supabase's own reads the
 -- same setting first):
 --   * the `exports` bucket exists and is private;
---   * its policies are exactly a members' SELECT and an admins' INSERT, both
---     TO authenticated;
+--   * its policies are exactly a members' SELECT, an admins' INSERT and an
+--     admins' DELETE, all TO authenticated (no UPDATE);
 --   * an admin of organization A uploads under A's folder; a coach of A (a
 --     member, not an admin) is refused with 42501, and still reads both of
 --     A's objects, as the admin does;
@@ -13,11 +13,16 @@
 --     under A's folder;
 --   * a name with no folder, a non-UUID folder, or another organization's
 --     folder is refused with 42501 (RLS), never 22P02 (a cast error);
---   * an update by A's own admin changes nothing (no policy). A delete is not
---     tried: on Supabase, `storage.protect_delete()` refuses every SQL delete
---     on storage.objects whatever the policies say (pgTAP run 39007939141),
---     and the policy check above already proves there is no DELETE policy;
---   * the anonymous role reads nothing and cannot upload.
+--   * an update by A's own admin changes nothing (no policy);
+--   * the anonymous role reads nothing and cannot upload;
+--   * a delete by A's coach, by B's admin or by the anonymous role removes
+--     nothing, and one by A's admin removes the one file it names. That part
+--     runs only where SQL deletes reach the policies: on Supabase,
+--     `storage.protect_delete()` refuses every SQL delete on storage.objects
+--     whatever the policies say (pgTAP run 39007939141), so there the delete
+--     policy is held by the catalog check above and by the real-backend E2E,
+--     which removes files through the Storage API. The harness's stand-in has
+--     no such trigger, so the harness runs it; its NOTICE says which ran.
 --
 -- **The harness's storage stand-in.** scripts/dbharness/prelude.sql creates
 -- `storage.objects` without RLS and without table grants, where Supabase has
@@ -68,6 +73,30 @@ BEGIN
 END;
 $$;
 
+-- One delete of p_name as p_user ('anon' when NULL): the rows removed, or the
+-- SQLSTATE it raised.
+CREATE FUNCTION pg_temp.exports_delete(p_user uuid, p_name text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_rows integer;
+    v_state text;
+BEGIN
+    PERFORM set_config('request.jwt.claim.sub', coalesce(p_user::text, ''), true);
+    PERFORM set_config('request.jwt.claim.role', CASE WHEN p_user IS NULL THEN 'anon' ELSE 'authenticated' END, true);
+    BEGIN
+        IF p_user IS NULL THEN SET LOCAL ROLE anon; ELSE SET LOCAL ROLE authenticated; END IF;
+        DELETE FROM storage.objects WHERE bucket_id = 'exports' AND name = p_name;
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+        RESET ROLE;
+        RETURN v_rows::text;
+    EXCEPTION WHEN OTHERS THEN
+        GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+    END;
+    RESET ROLE;
+    RETURN v_state;
+END;
+$$;
+
 -- How many `exports` objects under p_prefix p_user ('anon' when NULL) can read.
 CREATE FUNCTION pg_temp.exports_visible(p_user uuid, p_prefix text) RETURNS integer
 LANGUAGE plpgsql AS $$
@@ -102,17 +131,17 @@ BEGIN
         RAISE EXCEPTION 'the exports bucket is not private';
     END IF;
 
-    -- 2. Exactly its two policies, both for authenticated callers only.
+    -- 2. Exactly its three policies, all for authenticated callers only.
     SELECT string_agg(policyname || ':' || cmd || ':' || array_to_string(roles, ','), ' ' ORDER BY policyname)
       INTO v_policies
       FROM pg_policies
      WHERE schemaname = 'storage' AND tablename = 'objects'
        AND (policyname LIKE 'exports%' OR qual LIKE '%''exports''%' OR with_check LIKE '%''exports''%');
     IF v_policies IS DISTINCT FROM
-       'exports org-admin insert:INSERT:authenticated exports org-member select:SELECT:authenticated' THEN
-        RAISE EXCEPTION 'the exports policies are not exactly a members'' SELECT and an admins'' INSERT for authenticated: %', v_policies;
+       'exports org-admin delete:DELETE:authenticated exports org-admin insert:INSERT:authenticated exports org-member select:SELECT:authenticated' THEN
+        RAISE EXCEPTION 'the exports policies are not exactly a members'' SELECT and an admins'' INSERT and DELETE for authenticated: %', v_policies;
     END IF;
-    RAISE NOTICE 'the exports bucket is private, with exactly a members'' SELECT and an admins'' INSERT policy, both TO authenticated';
+    RAISE NOTICE 'the exports bucket is private, with exactly a members'' SELECT and an admins'' INSERT and DELETE policy, all TO authenticated';
 
     INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES
         (v_admin_a, 'exports-admin-a@example.test', '{"password_length": 16}'),
@@ -188,6 +217,29 @@ BEGIN
     v_res := pg_temp.exports_upload(NULL, v_org_a || '/anon.csv');
     IF v_res <> '42501' THEN RAISE EXCEPTION 'an anonymous upload gave % (want 42501)', v_res; END IF;
     RAISE NOTICE 'the anonymous role read 0 exports and its upload was refused 42501';
+
+    -- 9. Deletes, where SQL deletes reach the policies (see the header).
+    IF EXISTS (SELECT 1 FROM pg_trigger t
+                WHERE t.tgrelid = 'storage.objects'::regclass AND NOT t.tgisinternal
+                  AND t.tgfoid = ANY (SELECT oid FROM pg_proc WHERE proname = 'protect_delete')) THEN
+        RAISE NOTICE 'deletes not tried in SQL: storage.protect_delete() refuses them here; the catalog check holds the DELETE policy';
+    ELSE
+        v_res := pg_temp.exports_delete(v_coach_a, v_org_a || '/master-schedule-smoke.csv');
+        IF v_res <> '0' THEN RAISE EXCEPTION 'A''s coach deleting A''s export gave % (want 0 rows)', v_res; END IF;
+        v_res := pg_temp.exports_delete(v_admin_b, v_org_a || '/master-schedule-smoke.csv');
+        IF v_res <> '0' THEN RAISE EXCEPTION 'B''s admin deleting A''s export gave % (want 0 rows)', v_res; END IF;
+        v_res := pg_temp.exports_delete(NULL, v_org_a || '/master-schedule-smoke.csv');
+        IF v_res <> '0' THEN RAISE EXCEPTION 'an anonymous delete of A''s export gave % (want 0 rows)', v_res; END IF;
+        v_res := pg_temp.exports_delete(v_admin_a, v_org_a || '/teams/team-smoke.csv');
+        IF v_res <> '1' THEN RAISE EXCEPTION 'A''s admin deleting A''s team export gave % (want 1 row)', v_res; END IF;
+        IF (SELECT array_agg(name ORDER BY name) FROM storage.objects
+             WHERE bucket_id = 'exports' AND name LIKE v_org_a || '/%')
+           IS DISTINCT FROM ARRAY[v_org_a || '/master-schedule-smoke.csv'] THEN
+            RAISE EXCEPTION 'after the deletes A''s exports are not exactly the master: %',
+                (SELECT array_agg(name ORDER BY name) FROM storage.objects WHERE bucket_id = 'exports');
+        END IF;
+        RAISE NOTICE 'deletes by A''s coach, B''s admin and the anonymous role removed 0 rows each; A''s admin removed the 1 file it named, and only that one';
+    END IF;
 END;
 $$;
 

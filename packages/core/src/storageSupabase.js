@@ -90,3 +90,46 @@ export async function uploadScheduleExport({
 
   return { data, error: null };
 }
+
+/**
+ * Remove objects from Supabase Storage, and say which ones are gone.
+ *
+ * Storage removes only the objects the caller's policies let it delete, and
+ * answers with the ones it removed; one it may not delete, or that is not
+ * there, is simply missing from that answer, with no error. So the answer is
+ * compared with the request: every path not in it is `leftBehind`, and a
+ * refused request (`error`) leaves them all behind. A refusal is returned,
+ * not thrown: the caller reports what is left.
+ *
+ * @param {Object} params
+ * @param {Object} params.supabaseClient - Supabase client.
+ * @param {string} [params.bucket] - Storage bucket name (default: 'exports').
+ * @param {string[]} params.paths - Object paths within the bucket.
+ * @returns {Promise<{ removed: string[], leftBehind: string[], error: string | null }>}
+ */
+export async function removeScheduleExports({ supabaseClient, bucket = 'exports', paths }) {
+  if (!supabaseClient || typeof supabaseClient.storage !== 'object') {
+    throw new TypeError('supabaseClient with storage support is required');
+  }
+  if (!Array.isArray(paths) || paths.length === 0) {
+    return { removed: [], leftBehind: [], error: null };
+  }
+
+  // supabase-js answers a refusal or a network failure as `error` (a
+  // StorageError); anything it throws instead is not expected here, and
+  // reaches the caller.
+  const { data, error } = await supabaseClient.storage.from(bucket).remove(paths);
+  if (error) {
+    return {
+      removed: [],
+      leftBehind: [...paths],
+      error: error.message ?? String(error),
+    };
+  }
+  const gone = new Set((Array.isArray(data) ? data : []).map((object) => object?.name));
+  return {
+    removed: paths.filter((path) => gone.has(path)),
+    leftBehind: paths.filter((path) => !gone.has(path)),
+    error: null,
+  };
+}

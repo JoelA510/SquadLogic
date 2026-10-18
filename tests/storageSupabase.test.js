@@ -10,7 +10,11 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import { exportObjectPath, uploadScheduleExport } from '@squadlogic/core/storageSupabase.js';
+import {
+  exportObjectPath,
+  removeScheduleExports,
+  uploadScheduleExport,
+} from '@squadlogic/core/storageSupabase.js';
 
 const ORG = '5eed0000-0000-4000-8000-000000000001';
 
@@ -83,5 +87,56 @@ describe('uploadScheduleExport', () => {
       uploadScheduleExport({ supabaseClient: client, path: `${ORG}/x.csv`, file: 'a' })
     ).rejects.toThrow(`Failed to upload ${ORG}/x.csv: new row violates row-level security policy`);
     consoleError.mockRestore();
+  });
+});
+
+describe('removeScheduleExports', () => {
+  const clientAnswering = (answer) => {
+    const remove = vi.fn(async () => answer);
+    const from = vi.fn(() => ({ remove }));
+    return { client: { storage: { from } }, from, remove };
+  };
+  const paths = [`${ORG}/master.csv`, `${ORG}/teams/t-1.csv`];
+
+  it('reports every path Storage answered as removed', async () => {
+    const { client, from, remove } = clientAnswering({
+      data: paths.map((name) => ({ name })),
+      error: null,
+    });
+    await expect(removeScheduleExports({ supabaseClient: client, paths })).resolves.toEqual({
+      removed: paths,
+      leftBehind: [],
+      error: null,
+    });
+    expect(from).toHaveBeenCalledWith('exports');
+    expect(remove).toHaveBeenCalledWith(paths);
+  });
+
+  it('leaves behind a path Storage did not answer (RLS hides it, no error)', async () => {
+    const { client } = clientAnswering({ data: [{ name: paths[1] }], error: null });
+    await expect(removeScheduleExports({ supabaseClient: client, paths })).resolves.toEqual({
+      removed: [paths[1]],
+      leftBehind: [paths[0]],
+      error: null,
+    });
+  });
+
+  it('leaves every path behind on a refusal, with its message', async () => {
+    const { client } = clientAnswering({ data: null, error: { message: 'Unauthorized' } });
+    await expect(removeScheduleExports({ supabaseClient: client, paths })).resolves.toEqual({
+      removed: [],
+      leftBehind: paths,
+      error: 'Unauthorized',
+    });
+  });
+
+  it('asks nothing when there is nothing to remove', async () => {
+    const { client, remove } = clientAnswering({ data: [], error: null });
+    await expect(removeScheduleExports({ supabaseClient: client, paths: [] })).resolves.toEqual({
+      removed: [],
+      leftBehind: [],
+      error: null,
+    });
+    expect(remove).not.toHaveBeenCalled();
   });
 });

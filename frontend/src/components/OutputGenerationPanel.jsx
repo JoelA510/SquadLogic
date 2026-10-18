@@ -4,7 +4,11 @@ import {
   readUnshownPracticeChanges,
 } from '../utils/practiceExportChanges.js';
 import { generateScheduleExports } from '@squadlogic/core/outputGeneration.js';
-import { exportObjectPath, uploadScheduleExport } from '@squadlogic/core/storageSupabase.js';
+import {
+  exportObjectPath,
+  removeScheduleExports,
+  uploadScheduleExport,
+} from '@squadlogic/core/storageSupabase.js';
 import {
   baselineDriftSummary,
   baselineParitySoundness,
@@ -643,13 +647,15 @@ export default function OutputGenerationPanel({
    * the active organization's folder (`<organizationId>/...`), which is what
    * the bucket's policies require (`20261017000000_exports_bucket.sql`).
    *
-   * **Every file's outcome is read, and a partial upload says so.** Each
-   * upload is settled on its own: `Promise.all` reported the first refusal
-   * while the others carried on, so "Upload failed" could follow files that
-   * had in fact gone out. When any file fails, the message counts what did
-   * reach the bucket and no baseline is recorded: the publication is
-   * incomplete, and pressing Upload again sends a complete set under a new
-   * stamp, which is then recorded.
+   * **A publish is all or nothing.** Each upload is settled on its own
+   * (`Promise.all` reported the first refusal while the others carried on).
+   * When any file fails, the ones that did upload are removed again through
+   * the Storage API (the bucket's admin DELETE policy), no baseline is
+   * recorded, and the message says exactly that. Otherwise a partial set
+   * would stay readable to every member with no baseline or audit row saying
+   * what went out (Codex review on #592). A removal that itself fails is not
+   * hidden: the message names every file still in the bucket, and each is
+   * logged. Pressing Upload again sends a complete set under a new stamp.
    */
   const handleUpload = async () => {
     if (!generated || csvBlocked) return;
@@ -694,15 +700,29 @@ export default function OutputGenerationPanel({
         for (const failure of failures) {
           logger.error('Upload error:', failure.path, failure.reason);
         }
-        const reached = files.length - failures.length;
+        const failedPaths = new Set(failures.map((failure) => failure.path));
+        const uploaded = files.map((file) => file.path).filter((path) => !failedPaths.has(path));
+        const cleanup = await removeUploaded(supabaseClient, uploaded);
+        for (const path of cleanup.leftBehind) {
+          logger.error('Upload cleanup left a file in the exports bucket:', path, cleanup.error);
+        }
+        let outcome;
+        if (uploaded.length === 0) {
+          outcome = "Nothing reached the 'exports' bucket.";
+        } else if (cleanup.leftBehind.length === 0) {
+          outcome = `The ${uploaded.length} that uploaded ${uploaded.length === 1 ? 'was' : 'were'} removed, so nothing was published.`;
+        } else {
+          outcome =
+            `Of the ${uploaded.length} that uploaded, ${cleanup.removed.length} ${cleanup.removed.length === 1 ? 'was' : 'were'} removed and ` +
+            `${cleanup.leftBehind.length} could not be` +
+            (cleanup.error ? ` (${cleanup.error})` : '') +
+            ` and ${cleanup.leftBehind.length === 1 ? 'is' : 'are'} still in the 'exports' bucket: ${cleanup.leftBehind.join(', ')}.`;
+        }
         setStatus('error');
         setMessage(
           `Upload failed: ${failures.length} of ${files.length} files were not uploaded ` +
             `(${failures[0].reason?.message ?? String(failures[0].reason)}). ` +
-            (reached === 0
-              ? `Nothing reached the 'exports' bucket. `
-              : `${reached} did reach the 'exports' bucket. `) +
-            'No published baseline was recorded.'
+            `${outcome} No published baseline was recorded.`
         );
         return;
       }
@@ -774,6 +794,26 @@ export default function OutputGenerationPanel({
       // overwritten, and an upsert would be refused.
       upsert: false,
     });
+  };
+
+  /**
+   * Remove the files a failed publish did upload. A removal the client
+   * throws on (not a refusal, which comes back as `error`) is reported the
+   * same way: every file is still there, with the reason.
+   *
+   * @returns {Promise<{ removed: string[], leftBehind: string[], error: string | null }>}
+   */
+  const removeUploaded = async (client, paths) => {
+    if (paths.length === 0) return { removed: [], leftBehind: [], error: null };
+    if (MOCK_UPLOAD) {
+      logger.log(`[Mock Upload] removed ${paths.join(', ')}`);
+      return { removed: [...paths], leftBehind: [], error: null };
+    }
+    try {
+      return await removeScheduleExports({ supabaseClient: client, bucket: 'exports', paths });
+    } catch (err) {
+      return { removed: [], leftBehind: [...paths], error: err?.message ?? String(err) };
+    }
   };
 
   const downloadCsv = (filename, content) => {

@@ -463,7 +463,9 @@ other environment.
   through `practice-persistence`, the master export built from what the
   database returns, and "Upload to Storage" putting it and a file per team in
   the `exports` bucket under the organization's folder (migration
-  `20261017000000`; the listing is read with the administrator's own session);
+  `20261017000000`; the listing is read with the administrator's own session),
+  after a publish with one team file refused (a Playwright route) has removed
+  the files it did upload;
   and every `verify_jwt` function refusing a request with
   only the anon key (read from `supabase/config.toml`, each refusing on its own,
   not only at the gateway), and `calendar-feed` answering without one. One

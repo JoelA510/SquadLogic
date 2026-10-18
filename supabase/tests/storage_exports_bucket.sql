@@ -9,10 +9,14 @@
 --   * a name with no folder, or a folder that is not a UUID, is refused with
 --     42501 (the policy's CASE), never 22P02 (a cast error);
 --   * an update, even by A's own admin, changes nothing, and there is no
---     UPDATE or DELETE policy for the bucket at all (a direct DELETE cannot be
---     tried here: Supabase's `storage.protect_delete()` trigger refuses every
---     SQL delete on storage.objects, whatever the policies say; deletes go
---     through the Storage API);
+--     UPDATE policy;
+--   * the policies are exactly a members' SELECT and an admins' INSERT and
+--     DELETE, each on the object's organization folder. The DELETE is held
+--     from pg_policies only: Supabase's `storage.protect_delete()` trigger
+--     refuses every SQL delete on storage.objects, whatever the policies say,
+--     so a delete cannot be tried here. The real-backend E2E removes files
+--     through the Storage API, and the harness smoke tries the deletes
+--     (an admin may, a coach and the other org's admin may not);
 --   * the anonymous role reads nothing and cannot upload.
 --
 -- The objects are inserted into `storage.objects` directly, as the caller,
@@ -26,7 +30,7 @@ BEGIN;
 \set squadlogic_fixture_include 1
 \ir _fixtures.sql
 
-SELECT plan(16);
+SELECT plan(17);
 
 -- ── 1. The bucket, private (as the test's own superuser role) ─────────────
 SELECT is(
@@ -112,7 +116,7 @@ SELECT throws_ok(
     'an Org A admin cannot upload under Org B''s folder'
 );
 
--- ── 5. No update, even by A's own admin; no update or delete policy ──────
+-- ── 5. No update, even by A's own admin; the policy set ──────────────────
 SELECT is(
     (SELECT COUNT(*) FROM storage.objects
       WHERE bucket_id = 'exports' AND name LIKE 'a1111111-1111-1111-1111-111111111111/%')::int,
@@ -137,8 +141,28 @@ SELECT is(
       WHERE schemaname = 'storage' AND tablename = 'objects'
         AND (policyname LIKE 'exports%'
              OR qual LIKE '%''exports''%' OR with_check LIKE '%''exports''%')),
-    ARRAY['INSERT authenticated', 'SELECT authenticated'],
-    'the exports policies are an INSERT and a SELECT for authenticated, with no UPDATE, DELETE or ALL'
+    ARRAY['DELETE authenticated', 'INSERT authenticated', 'SELECT authenticated'],
+    'the exports policies are a DELETE, an INSERT and a SELECT for authenticated, with no UPDATE or ALL'
+);
+
+-- Which helper each one checks against the organization folder: the admin
+-- helper for the writes (so a coach and another org's admin cannot delete or
+-- upload), the member helper for the read.
+SELECT is(
+    (SELECT array_agg(
+                cmd || ' ' ||
+                CASE
+                    WHEN coalesce(qual, with_check) LIKE '%is_org_admin(((storage.foldername(name))[1])::uuid)%'
+                    THEN 'is_org_admin'
+                    WHEN coalesce(qual, with_check) LIKE '%is_org_member(((storage.foldername(name))[1])::uuid)%'
+                    THEN 'is_org_member'
+                    ELSE 'neither: ' || coalesce(qual, with_check)
+                END
+                ORDER BY cmd)
+       FROM pg_policies
+      WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname LIKE 'exports%'),
+    ARRAY['DELETE is_org_admin', 'INSERT is_org_admin', 'SELECT is_org_member'],
+    'an admin of the folder''s organization deletes and uploads; a member of it reads'
 );
 
 -- ── 6. The anonymous role ─────────────────────────────────────────────────

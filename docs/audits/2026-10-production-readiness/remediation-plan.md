@@ -1852,6 +1852,16 @@ smoke-tested
     which had not reached production. A coach's upload is refused 42501 in the smoke and the
     pgTAP suite; putting the INSERT back on `is_org_member` fails the smoke (*executed*); pgTAP
     *statically reviewed* until the PR's CI runs it.
+  - **Codex on #592:** a publish with one file refused left the others in the bucket, readable to
+    members, with no baseline or audit row saying what went out, and no DELETE policy to clean
+    them up. Decided (coordinator): a publish is all or nothing. `20261017000000` gains
+    `exports org-admin delete` (`is_org_admin`, the insert's folder check; still no UPDATE), and
+    the panel removes what a failed publish uploaded through the Storage API, records no
+    baseline, and names any file it could not remove (each logged). Unit tests red on the
+    previous panel and with the cleanup result ignored; the smoke catches a member DELETE, an
+    unscoped DELETE and a missing one (*executed*); the real-backend season flow refuses one
+    team file through a Playwright route and lists the bucket empty afterwards (*statically
+    reviewed* until the PR's CI runs it).
 
 - 2026-10-17, found by the Wave 4 accessibility PR (branch `claude/vibrant-allen-hr7y7s-a11y`):
   - The import page's "Roll Back Coach Import" button is gone once you leave the page and come

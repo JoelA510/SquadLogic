@@ -376,16 +376,64 @@ Then('the master schedule export lists a practice for every synced team', async 
   expect([...new Set(practiced)].sort()).toEqual([...teamNames].sort());
 });
 
+/** The Exports panel's upload line, whichever it is now: uploading, uploaded or failed. */
+async function uploadStatus(page: Page): Promise<string> {
+  const lines = await page
+    .getByText(/^(Uploading to Storage\.\.\.|Uploaded \d+ files|Upload failed:)/)
+    .allInnerTexts();
+  return lines.join(' | ');
+}
+
+When("an upload to Storage is refused for one team's file", async ({ page }) => {
+  const teamNames = stateOf(page).teamNames ?? [];
+  expect(teamNames.length, 'a previous step read the synced teams').toBeGreaterThan(1);
+  // The first team file's upload is answered as Storage answers a refusal;
+  // every other request, the cleanup's DELETE included, reaches the stack.
+  let refused = 0;
+  const teamUpload = (url: URL) =>
+    url.pathname.includes('/storage/v1/object/exports/') && url.pathname.includes('/teams/');
+  await page.route(teamUpload, async (route) => {
+    if (route.request().method() !== 'POST' || refused > 0) return route.continue();
+    refused += 1;
+    return route.fulfill({
+      status: 403,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        statusCode: '403',
+        error: 'Unauthorized',
+        message: 'refused by the scenario (one team file)',
+      }),
+    });
+  });
+  try {
+    await page.getByRole('button', { name: 'Upload to Storage' }).click();
+    await expect
+      .poll(() => uploadStatus(page), { timeout: BACKEND_TIMEOUT })
+      .toMatch(/^Upload failed:/);
+  } finally {
+    await page.unroute(teamUpload);
+  }
+  expect(refused, 'exactly one team file was refused').toBe(1);
+  const status = await uploadStatus(page);
+  expect(status).toContain(`Upload failed: 1 of ${teamNames.length + 1} files were not uploaded (`);
+  expect(status).toContain('refused by the scenario (one team file)');
+  expect(status).toContain(
+    `The ${teamNames.length} that uploaded were removed, so nothing was published. ` +
+      'No published baseline was recorded.'
+  );
+});
+
 When('I upload the exports to Storage', async ({ page }) => {
   const teamNames = stateOf(page).teamNames ?? [];
   expect(teamNames.length, 'a previous step read the synced teams').toBeGreaterThan(1);
   // On /exports with the CSVs generated, as the previous step left it.
   await page.getByRole('button', { name: 'Upload to Storage' }).click();
+  // Polled, so a failure is reported in the page's own words, and a line
+  // left by an earlier attempt is not taken for this one's.
+  await expect
+    .poll(() => uploadStatus(page), { timeout: BACKEND_TIMEOUT })
+    .toMatch(/^Uploaded \d+ files to 'exports' bucket\./);
   const uploaded = page.getByText(/Uploaded \d+ files to 'exports' bucket\./);
-  const failed = page.getByText(/^Upload failed:/);
-  await expect(uploaded.or(failed)).toBeVisible({ timeout: BACKEND_TIMEOUT });
-  // The page's own words when it failed, rather than a count.
-  expect(await failed.allInnerTexts()).toEqual([]);
   // The master CSV and one per synced team, and the publication recorded.
   await expect(uploaded).toContainText(
     `Uploaded ${teamNames.length + 1} files to 'exports' bucket. Recorded as published baseline v`
@@ -433,6 +481,14 @@ async function listExports(page: Page, folder: string): Promise<string[]> {
   // A folder is listed with a null id.
   return body.filter((entry) => entry.id !== null).map((entry) => entry.name);
 }
+
+Then('none of those files is left in the exports bucket', async ({ page }) => {
+  // Read with the admin's session through the Storage API, which is also the
+  // path the cleanup's DELETE took (the bucket's admin DELETE policy).
+  const org = SEEDED_ADMIN.organizationId;
+  expect(await listExports(page, org), `master CSVs under ${org}/`).toEqual([]);
+  expect(await listExports(page, `${org}/teams`), `team files under ${org}/teams/`).toEqual([]);
+});
 
 Then(
   "the exports bucket holds the master schedule and a file per synced team, under the organization's folder",

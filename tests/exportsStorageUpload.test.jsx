@@ -57,12 +57,17 @@ const RLS_REFUSAL = 'new row violates row-level security policy';
 
 /**
  * A Supabase Storage double: records every upload and answers each with the
- * refusal `refuse(path)` returns, or success.
+ * refusal `refuse(path)` returns, or success; and every removal, answered
+ * as Storage answers one: the objects it removed (each path `keep` does not
+ * hold back, as an object RLS hides is silently not removed), or a refusal
+ * when `removeError` is set.
  *
  * @param {(path: string) => string | null} [refuse]
+ * @param {{ keep?: (path: string) => boolean, removeError?: string }} [removal]
  */
-function storageClient(refuse = () => null) {
+function storageClient(refuse = () => null, { keep = () => false, removeError } = {}) {
   const calls = [];
+  const removals = [];
   const client = {
     storage: {
       from: (bucket) => ({
@@ -71,10 +76,18 @@ function storageClient(refuse = () => null) {
           const message = refuse(path);
           return message ? { data: null, error: { message } } : { data: { path }, error: null };
         },
+        remove: async (paths) => {
+          removals.push({ bucket, paths: [...paths] });
+          if (removeError) return { data: null, error: { message: removeError } };
+          return {
+            data: paths.filter((path) => !keep(path)).map((name) => ({ name, bucket_id: bucket })),
+            error: null,
+          };
+        },
       }),
     },
   };
-  return { client, calls };
+  return { client, calls, removals };
 }
 
 async function generateAndUpload(client) {
@@ -117,8 +130,8 @@ describe('OutputGenerationPanel :: Upload to Storage', () => {
     expect(getMockData('publication_baselines')).toHaveLength(1);
   });
 
-  it('says how many files a refusal stopped and how many went out, and records no baseline', async () => {
-    const { client, calls } = storageClient((path) =>
+  it('removes what a refused publish did upload, says so, and records no baseline', async () => {
+    const { client, calls, removals } = storageClient((path) =>
       path.includes('/teams/t-2-') ? RLS_REFUSAL : null
     );
     await generateAndUpload(client);
@@ -130,10 +143,18 @@ describe('OutputGenerationPanel :: Upload to Storage', () => {
       )
     );
     expect(message.textContent).toContain(RLS_REFUSAL);
-    expect(message.textContent).toContain("2 did reach the 'exports' bucket.");
-    expect(message.textContent).toContain('No published baseline was recorded.');
+    expect(message.textContent).toContain(
+      'The 2 that uploaded were removed, so nothing was published. No published baseline was recorded.'
+    );
     // Every file was attempted: one refusal does not hide what the others did.
     expect(calls).toHaveLength(3);
+    // The two that went out are removed again, in one call to the same bucket.
+    const uploaded = calls
+      .map((call) => call.path)
+      .filter((path) => !path.includes('/teams/t-2-'))
+      .sort();
+    expect(removals).toEqual([{ bucket: 'exports', paths: expect.any(Array) }]);
+    expect([...removals[0].paths].sort()).toEqual(uploaded);
     expect(getMockData('publication_baselines') ?? []).toHaveLength(0);
     expect(vi.mocked(logger.error)).toHaveBeenCalledWith(
       'Upload error:',
@@ -143,13 +164,62 @@ describe('OutputGenerationPanel :: Upload to Storage', () => {
     expect(screen.queryByText(/Uploaded 3 files/)).toBeNull();
   });
 
-  it('says nothing reached the bucket when every file is refused', async () => {
-    const { client } = storageClient(() => RLS_REFUSAL);
+  it('names every file a refused removal leaves in the bucket, and logs each', async () => {
+    const { client, calls, removals } = storageClient(
+      (path) => (path.includes('/teams/t-2-') ? RLS_REFUSAL : null),
+      { removeError: 'storage unavailable' }
+    );
+    await generateAndUpload(client);
+
+    const message = await screen.findByText(/^Upload failed:/);
+    const left = calls.map((call) => call.path).filter((path) => !path.includes('/teams/t-2-'));
+    expect(removals).toHaveLength(1);
+    expect(message.textContent).toContain(
+      'Of the 2 that uploaded, 0 were removed and 2 could not be (storage unavailable) and are still in the ' +
+        "'exports' bucket: "
+    );
+    for (const path of left) {
+      expect(message.textContent).toContain(path);
+      expect(vi.mocked(logger.error)).toHaveBeenCalledWith(
+        'Upload cleanup left a file in the exports bucket:',
+        path,
+        'storage unavailable'
+      );
+    }
+    expect(message.textContent).toContain('No published baseline was recorded.');
+    expect(getMockData('publication_baselines') ?? []).toHaveLength(0);
+  });
+
+  it('names the file a removal silently kept (Storage answers only what it removed)', async () => {
+    const { client } = storageClient(
+      (path) => (path.includes('/teams/t-2-') ? RLS_REFUSAL : null),
+      {
+        keep: (path) => path.includes('/master-schedule-'),
+      }
+    );
+    await generateAndUpload(client);
+
+    const message = await screen.findByText(/^Upload failed:/);
+    expect(message.textContent).toMatch(
+      new RegExp(
+        `Of the 2 that uploaded, 1 was removed and 1 could not be and is still in the 'exports' bucket: ${ORG}/master-schedule-[\\dT-]+Z\\.csv\\.`
+      )
+    );
+    expect(vi.mocked(logger.error)).toHaveBeenCalledWith(
+      'Upload cleanup left a file in the exports bucket:',
+      expect.stringMatching(new RegExp(`^${ORG}/master-schedule-`)),
+      null
+    );
+  });
+
+  it('says nothing reached the bucket when every file is refused, and removes nothing', async () => {
+    const { client, removals } = storageClient(() => RLS_REFUSAL);
     await generateAndUpload(client);
 
     const message = await screen.findByText(/^Upload failed:/);
     expect(message.textContent).toMatch(/^Upload failed: 3 of 3 files were not uploaded/);
     expect(message.textContent).toContain("Nothing reached the 'exports' bucket.");
+    expect(removals).toHaveLength(0);
     expect(getMockData('publication_baselines') ?? []).toHaveLength(0);
   });
 

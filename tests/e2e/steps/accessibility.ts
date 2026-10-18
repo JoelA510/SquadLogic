@@ -2,6 +2,7 @@ import { createBdd } from 'playwright-bdd';
 import { expect, type Page } from '@playwright/test';
 import { AxeBuilder } from '@axe-core/playwright';
 import { waitForMockClient } from './mockReady.js';
+import { MOCK_ORG_ID } from '../../../frontend/src/lib/mockSeedIds.js';
 
 const { Given, When, Then } = createBdd();
 
@@ -81,9 +82,39 @@ When(
   }
 );
 
+Then('the scan sees {string} on the page', async ({ page }, content: string) => {
+  // The scan below examines what is rendered; this is what it must find rendered, so a route
+  // that shows only its shell or a spinner fails here rather than passing an emptier scan.
+  await expect(page.getByText(content).first()).toBeVisible({ timeout: 20_000 });
+});
+
+When('I switch to the dark theme on this page', async ({ page }) => {
+  // The top bar's toggle, without leaving the page: content it holds only in memory (an invite
+  // just generated, a schedule staged for review) is still there for the dark scan.
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dark');
+  await page.getByRole('button', { name: 'Switch to dark mode' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+});
+
+When('I generate an invite on the Members page', async ({ page }) => {
+  await page.getByRole('button', { name: 'Generate invite' }).click();
+  await expect(page.getByText('Invite ready')).toBeVisible({ timeout: 15_000 });
+});
+
 Then(
   'axe finds no serious or critical violations on {string} in the {string} theme',
   async ({ page }, route: string, theme: string) => {
+    // Let entrance animations finish first: axe measures colours as drawn, and a panel still
+    // fading in (`animate-slideUp`) reads as lower contrast than it settles at. Looping
+    // animations (a pulse, a spinner) never finish, so only finite ones are awaited.
+    await page.evaluate(() =>
+      Promise.all(
+        document
+          .getAnimations()
+          .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+          .map((a) => a.finished.catch(() => undefined))
+      )
+    );
     const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
 
     // A scan that checked nothing proves nothing: an unrendered page passes every rule.
@@ -119,5 +150,202 @@ Then(
       stale.map((k) => `${k.rule} "${k.html}"`),
       `KNOWN_VIOLATIONS entries for ${route} (${theme}) that no longer occur: delete them`
     ).toEqual([]);
+  }
+);
+
+// ---- DataGrid keyboard (plan, Discovered under M4.2: the grid trapped Tab, WCAG 2.1.2) ----
+
+/** Where focus is, relative to a grid: inside it or not, and the focused cell's row and column. */
+async function focusInGrid(page: Page, gridName: string) {
+  return page.getByRole('grid', { name: gridName }).evaluate((grid) => {
+    const el = document.activeElement;
+    const cell = el?.closest('[data-grid-cell]');
+    return {
+      inside: !!el && grid.contains(el),
+      r: cell?.getAttribute('data-r') ?? null,
+      c: cell?.getAttribute('data-c') ?? null,
+      tag: el?.tagName ?? null,
+    };
+  });
+}
+
+When('I tab from the table search into the {string}', async ({ page }, gridName: string) => {
+  const grid = page.getByRole('grid', { name: gridName });
+  await expect(grid).toBeVisible();
+  await page.getByRole('textbox', { name: 'Search table' }).focus();
+  // A real Tab, pressed until focus enters the grid; the toolbar's controls sit in between.
+  for (let i = 0; i < 12 && !(await focusInGrid(page, gridName)).inside; i += 1) {
+    await page.keyboard.press('Tab');
+  }
+  const at = await focusInGrid(page, gridName);
+  expect(at.inside, 'Tab never reached the grid').toBe(true);
+  // It enters at the grid's one tab stop: the first body row's first editable cell.
+  expect(at.r).toBe('0');
+});
+
+Then(
+  'the arrow keys move focus between the cells of the {string}',
+  async ({ page }, gridName: string) => {
+    const start = await focusInGrid(page, gridName);
+    await page.keyboard.press('ArrowDown');
+    const down = await focusInGrid(page, gridName);
+    expect(down).toMatchObject({ inside: true, r: '1', c: start.c });
+    await page.keyboard.press('ArrowRight');
+    const right = await focusInGrid(page, gridName);
+    expect(right).toMatchObject({ inside: true, r: '1' });
+    expect(Number(right.c)).toBe(Number(start.c) + 1);
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('ArrowUp');
+    const header = await focusInGrid(page, gridName);
+    expect(header).toMatchObject({ inside: true, r: '-1', c: right.c });
+    await page.keyboard.press('ArrowDown');
+    expect(await focusInGrid(page, gridName)).toMatchObject({ inside: true, r: '0' });
+    // The focused cell is visibly marked (WCAG 2.4.7): an inset ring, not the default outline.
+    const ring = await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement;
+      const cell = el.closest('[data-grid-cell]') as HTMLElement;
+      return getComputedStyle(cell).boxShadow;
+    });
+    expect(ring).not.toBe('none');
+  }
+);
+
+Then(
+  'Tab moves focus out of the {string} and Shift+Tab brings it back to the same cell',
+  async ({ page }, gridName: string) => {
+    const before = await focusInGrid(page, gridName);
+    await page.keyboard.press('Tab');
+    expect((await focusInGrid(page, gridName)).inside, 'Tab stayed inside the grid').toBe(false);
+    await page.keyboard.press('Shift+Tab');
+    expect(await focusInGrid(page, gridName)).toEqual(before);
+  }
+);
+
+// ---- Row-actions menu inside the grid (#591 review: its items joined the tab order) ----
+
+When(
+  "I open the first row's actions menu in the {string} from the keyboard",
+  async ({ page }, gridName: string) => {
+    // End on the first row lands on the row-actions cell, whose one widget takes focus.
+    await page.keyboard.press('End');
+    const trigger = page.getByRole('grid', { name: gridName }).getByRole('button', {
+      name: 'Row actions',
+    });
+    await expect(trigger.first()).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('menu')).toBeVisible();
+    await expect(trigger.first()).toBeFocused();
+  }
+);
+
+Then(
+  'the arrow keys move through the menu and Escape returns to the {string} cell',
+  async ({ page }, gridName: string) => {
+    const items = page.getByRole('menuitem');
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(0)).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(1)).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    const trigger = page
+      .getByRole('grid', { name: gridName })
+      .getByRole('button', { name: 'Row actions' })
+      .first();
+    await expect(trigger).toBeFocused();
+    // Open it again for the next step, and step into it.
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(0)).toBeFocused();
+  }
+);
+
+Then(
+  'Tab from the open menu leaves the {string} and closes the menu',
+  async ({ page }, gridName: string) => {
+    await page.keyboard.press('Tab');
+    expect((await focusInGrid(page, gridName)).inside, 'Tab stayed inside the grid').toBe(false);
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    // And from the trigger itself, the menu open but not entered: the reviewed case, where the
+    // newly mounted items were the next tab stops.
+    await page.keyboard.press('Shift+Tab');
+    const trigger = page
+      .getByRole('grid', { name: gridName })
+      .getByRole('button', { name: 'Row actions' })
+      .first();
+    await expect(trigger).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press('Tab');
+    expect((await focusInGrid(page, gridName)).inside, 'Tab went into the open menu').toBe(false);
+    await expect(page.getByRole('menu')).toHaveCount(0);
+  }
+);
+
+// ---- Chart colours (plan, Discovered under M4.2: Recharts kept hard-coded slate colours) ----
+
+Given('the organization has {int} evaluation runs on record', async ({ page }, count: number) => {
+  // The mock seed has none, so the analytics page draws empty charts; these are its input.
+  await waitForMockClient(page);
+  await page.evaluate(
+    ({ count, mockOrgId }) => {
+      const db = window.__MOCK_DB__ as Record<string, Array<Record<string, unknown>> | undefined>;
+      const orgId = localStorage.getItem('squadlogic_active_org') || mockOrgId;
+      const day = 86_400_000;
+      const start = Date.now() - count * 7 * day;
+      db.evaluation_runs = [
+        ...(db.evaluation_runs ?? []).filter((run) => !String(run.id).startsWith('a11y-eval-')),
+        ...Array.from({ length: count }, (_, index) => ({
+          id: `a11y-eval-${index + 1}`,
+          organization_id: orgId,
+          created_at: new Date(start + index * 7 * day).toISOString(),
+          scheduler_run_type: index % 2 === 0 ? 'team' : 'practice',
+          status: 'completed',
+          metrics_summary: { fairnessIndex: 0.6 + index * 0.05, conflictCount: (index * 3) % 5 },
+        })),
+      ];
+      window.__saveMockDB__(db);
+    },
+    { count, mockOrgId: MOCK_ORG_ID }
+  );
+});
+
+Then(
+  "the charts draw their axis labels and gridlines in the {string} theme's tokens",
+  async ({ page }, theme: string) => {
+    const ticks = page.locator('.recharts-cartesian-axis-tick-value');
+    await expect(ticks.first()).toBeVisible({ timeout: 20_000 });
+    const drawn = await page.evaluate(() => {
+      /** A token's computed colour, read through a probe so it compares as rgb(). */
+      const resolve = (token: string) => {
+        const probe = document.createElement('span');
+        probe.style.color = `var(${token})`;
+        document.body.append(probe);
+        const value = getComputedStyle(probe).color;
+        probe.remove();
+        return value;
+      };
+      const tickFills = [...document.querySelectorAll('.recharts-cartesian-axis-tick-value')].map(
+        (el) => getComputedStyle(el).fill
+      );
+      const gridStrokes = [
+        ...document.querySelectorAll('.recharts-cartesian-grid-horizontal line'),
+      ].map((el) => getComputedStyle(el).stroke);
+      return {
+        theme: document.documentElement.getAttribute('data-theme') ?? 'light',
+        axis: resolve('--text-secondary'),
+        grid: resolve('--border'),
+        tickFills: [...new Set(tickFills)],
+        gridStrokes: [...new Set(gridStrokes)],
+        ticks: tickFills.length,
+        lines: gridStrokes.length,
+      };
+    });
+    expect(drawn.theme).toBe(theme);
+    // A chart with no ticks or gridlines checked nothing.
+    expect(drawn.ticks).toBeGreaterThan(3);
+    expect(drawn.lines).toBeGreaterThan(3);
+    expect(drawn.tickFills).toEqual([drawn.axis]);
+    expect(drawn.gridStrokes).toEqual([drawn.grid]);
   }
 );

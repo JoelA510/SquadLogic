@@ -182,6 +182,14 @@ td.cell-focus {
 td.cell-focus .cell {
   padding-left: 11px;
 }
+/* A focused cell (DataGrid's roving tab stop) draws the same inset ring as the active cell, so
+   the header row and cells that are not active yet show where focus is too. */
+table.grid [data-grid-cell]:focus {
+  outline: none;
+}
+table.grid [data-grid-cell]:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
 
 .cell-input {
   position: absolute;

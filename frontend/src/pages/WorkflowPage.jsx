@@ -164,7 +164,7 @@ export default function WorkflowPage() {
       {readinessKnown && readinessScore === 0 && (
         <div className="glass-panel p-12 text-center mb-12 animate-fadeIn border-brand-400/20 relative overflow-hidden">
           <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
-            <Sparkles size={120} className="text-brand-400" />
+            <Sparkles size={120} className="text-text-accent" />
           </div>
           <div className="max-w-md mx-auto relative z-10">
             <h2 className="text-2xl font-display font-bold text-text-primary mb-4">
@@ -322,7 +322,7 @@ function StatusItem({ icon, label, status, isReady }) {
       <div className="flex items-center gap-3">
         <div
           className={`p-2 rounded-md transition-colors ${
-            isReady ? 'bg-green-500/10 text-green-400' : 'bg-bg-glass text-text-muted'
+            isReady ? 'bg-green-500/10 text-status-success-text' : 'bg-bg-glass text-text-muted'
           }`}
         >
           {icon}

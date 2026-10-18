@@ -1431,7 +1431,7 @@ export default function TeamAnalysisPage() {
                             <>
                               <button
                                 type="button"
-                                className="p-1.5 rounded-lg border border-border-subtle bg-bg-app text-text-muted hover:text-brand-400 hover:border-brand-400/50 transition-all"
+                                className="p-1.5 rounded-lg border border-border-subtle bg-bg-app text-text-muted hover:text-text-accent hover:border-brand-400/50 transition-all"
                                 aria-label={`Save name for team ${displayName}`}
                                 onClick={() => handleRenameTeam(generatedTeam)}
                               >
@@ -1450,7 +1450,7 @@ export default function TeamAnalysisPage() {
                             <>
                               <button
                                 type="button"
-                                className="p-1.5 rounded-lg border border-border-subtle bg-bg-app text-text-muted hover:text-brand-400 hover:border-brand-400/50 transition-all"
+                                className="p-1.5 rounded-lg border border-border-subtle bg-bg-app text-text-muted hover:text-text-accent hover:border-brand-400/50 transition-all"
                                 aria-label={`Rename team ${displayName}`}
                                 onClick={() => startRenameTeam(generatedTeam, displayName)}
                               >
@@ -1458,7 +1458,7 @@ export default function TeamAnalysisPage() {
                               </button>
                               <button
                                 type="button"
-                                className="p-1.5 rounded-lg border border-border-subtle bg-bg-app text-text-muted hover:text-red-400 hover:border-red-400/50 hover:bg-red-500/10 transition-all"
+                                className="p-1.5 rounded-lg border border-border-subtle bg-bg-app text-text-muted hover:text-status-error-text hover:border-red-400/50 hover:bg-red-500/10 transition-all"
                                 aria-label={`Delete team ${displayName}`}
                                 onClick={() => handleDeleteTeam(generatedTeam)}
                               >

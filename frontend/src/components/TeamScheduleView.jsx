@@ -32,7 +32,7 @@ export default function TeamScheduleView({ assignments, teamId, timezone }) {
           >
             <div>
               <div className="font-medium text-text-primary">
-                <span className={isHome ? 'text-brand-400' : 'text-text-secondary'}>
+                <span className={isHome ? 'text-text-accent' : 'text-text-secondary'}>
                   {isHome ? 'Vs' : '@'}
                 </span>{' '}
                 {opponent}

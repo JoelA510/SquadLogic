@@ -264,10 +264,10 @@ function ParityReport({ report }) {
       <p
         className={
           unsound
-            ? 'text-sm text-red-400 mb-2'
+            ? 'text-sm text-status-error-text mb-2'
             : drift.drifted
-              ? 'text-sm text-amber-400 mb-2'
-              : 'text-sm text-emerald-400 mb-2'
+              ? 'text-sm text-status-warning-text mb-2'
+              : 'text-sm text-status-success-text mb-2'
         }
         data-testid="parity-verdict"
       >
@@ -321,8 +321,8 @@ function ParityReport({ report }) {
 
       {blocking.length > 0 && (
         <div className="mt-3">
-          <h5 className="text-xs font-medium text-red-400 mb-1">Blocking findings</h5>
-          <ul className="text-xs text-red-400 space-y-1">
+          <h5 className="text-xs font-medium text-status-error-text mb-1">Blocking findings</h5>
+          <ul className="text-xs text-status-error-text space-y-1">
             {blocking.map((finding, index) => (
               <li key={`${finding.code}-${index}`} data-testid="parity-blocking">
                 {`${finding.code}: ${finding.message}`}
@@ -334,8 +334,10 @@ function ParityReport({ report }) {
 
       {qualified.length > 0 && (
         <div className="mt-3">
-          <h5 className="text-xs font-medium text-amber-400 mb-1">What these numbers do not say</h5>
-          <ul className="text-xs text-amber-400 space-y-1">
+          <h5 className="text-xs font-medium text-status-warning-text mb-1">
+            What these numbers do not say
+          </h5>
+          <ul className="text-xs text-status-warning-text space-y-1">
             {qualified.map((finding, index) => (
               <li key={`${finding.code}-${index}`} data-testid="parity-qualified">
                 {`${finding.code}: ${finding.message}`}
@@ -808,7 +810,7 @@ export default function OutputGenerationPanel({
                 <button
                   type="button"
                   onClick={() => downloadCsv('master-schedule.csv', generated.master.csv)}
-                  className="relative z-20 text-xs text-blue-400 hover:text-blue-300"
+                  className="relative z-20 text-xs text-text-accent"
                 >
                   Download Master CSV
                 </button>
@@ -844,7 +846,7 @@ export default function OutputGenerationPanel({
                  could not find out — which is the false statement
                  `docs/sql/20260920000000_revert.sql` explicitly promises this
                  surface will not make. */
-              <p className="text-sm text-red-400" data-testid="baselines-error">
+              <p className="text-sm text-status-error-text" data-testid="baselines-error">
                 {`Published baselines could not be read, so this says nothing about whether any exist: ${baselinesError}`}
               </p>
             ) : baselines.length === 0 ? (
@@ -901,7 +903,7 @@ export default function OutputGenerationPanel({
 
             <div aria-live="polite" className="mt-4">
               {parityError && (
-                <p className="text-sm text-red-400" data-testid="parity-error">
+                <p className="text-sm text-status-error-text" data-testid="parity-error">
                   {parityError}
                 </p>
               )}
@@ -917,7 +919,7 @@ export default function OutputGenerationPanel({
               onClick={generateEmails}
               aria-disabled={emailsBlocked || undefined}
               aria-describedby={emailsBlocked ? 'output-emails-blocked' : undefined}
-              className={`relative z-20 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 px-4 py-2 rounded-lg transition-colors mb-4${
+              className={`relative z-20 bg-purple-500/20 hover:bg-purple-500/30 text-text-accent border border-purple-500/30 px-4 py-2 rounded-lg transition-colors mb-4${
                 emailsBlocked ? ' opacity-50 cursor-not-allowed' : ''
               }`}
             >
@@ -954,7 +956,7 @@ export default function OutputGenerationPanel({
                         </div>
                         <a
                           href={`mailto:${email.coachEmail}?subject=${encodeURIComponent(email.subject)}&body=${encodeURIComponent(email.body)}`}
-                          className="relative z-20 bg-blue-500/20 text-blue-400 px-3 py-1 text-xs rounded hover:bg-blue-500/30 transition-colors shrink-0"
+                          className="relative z-20 bg-blue-500/20 text-text-accent px-3 py-1 text-xs rounded hover:bg-blue-500/30 transition-colors shrink-0"
                         >
                           Open in Mail App
                         </a>
@@ -969,11 +971,11 @@ export default function OutputGenerationPanel({
             )}
           </div>
 
-          <div className="text-sm min-h-[20px]">
-            {status === 'error' && <span className="text-red-400">{message}</span>}
-            {status === 'success' && <span className="text-emerald-400">{message}</span>}
+          <div className="text-sm min-h-[20px]" data-testid="output-generation-status">
+            {status === 'error' && <span className="text-status-error-text">{message}</span>}
+            {status === 'success' && <span className="text-status-success-text">{message}</span>}
             {(status === 'generating' || status === 'uploading') && (
-              <span className="text-orange-400 animate-pulse">{message}</span>
+              <span className="text-status-warning-text animate-pulse">{message}</span>
             )}
             {status === 'idle' && message && <span className="text-text-muted">{message}</span>}
           </div>

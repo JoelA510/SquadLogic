@@ -59,7 +59,7 @@ export default function AccountModule() {
   return (
     <div className="space-y-6 animate-fadeIn">
       <div className="p-4 bg-bg-surface rounded-lg border border-border-subtle flex items-center gap-4">
-        <div className="w-12 h-12 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400">
+        <div className="w-12 h-12 rounded-full bg-blue-500/20 flex items-center justify-center text-text-accent">
           <User size={24} />
         </div>
         <div>
@@ -75,8 +75,8 @@ export default function AccountModule() {
             <div
               className={`p-3 rounded-lg text-sm ${
                 message.type === 'success'
-                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                  : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                  ? 'bg-emerald-500/10 text-status-success-text border border-emerald-500/20'
+                  : 'bg-red-500/10 text-status-error-text border border-red-500/20'
               }`}
             >
               {message.text}

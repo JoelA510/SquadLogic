@@ -355,7 +355,7 @@ const SANCTIONED_WRITES = {
 };
 
 const KNOWN_E2E_DEBT = {
-  'tests/e2e/steps/async_and_optimistic_ui.ts': 7,
+  'tests/e2e/steps/async_and_optimistic_ui.ts': 4,
   'tests/e2e/steps/auth_setup.ts': 1,
   'tests/e2e/steps/auto_scheduler.ts': 1,
   'tests/e2e/steps/coach_and_calendar.ts': 4,

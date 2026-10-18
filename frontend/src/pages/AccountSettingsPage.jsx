@@ -171,7 +171,7 @@ export default function AccountSettingsPage() {
     <div className="max-w-5xl mx-auto py-8 px-4 space-y-8">
       <header>
         <h1 className="text-3xl font-bold text-text-primary flex items-center gap-3">
-          <UserRound className="text-brand-400" size={32} aria-hidden="true" />
+          <UserRound className="text-text-accent" size={32} aria-hidden="true" />
           Account Settings
         </h1>
         <p className="text-text-muted mt-2">
@@ -439,7 +439,7 @@ function StatusMessage({ id = undefined, message }) {
     <p
       id={id}
       role={isError ? 'alert' : 'status'}
-      className={`text-sm ${isError ? 'text-red-400' : 'text-green-400'}`}
+      className={`text-sm ${isError ? 'text-status-error-text' : 'text-status-success-text'}`}
     >
       {message.text}
     </p>

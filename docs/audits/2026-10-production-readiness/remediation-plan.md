@@ -1601,7 +1601,18 @@ smoke-tested
     `team_communication.ts`), each waived on its line with a reason. One, "the resulting teams
     summary should reflect the new constraints", writes a completed team run when none exists:
     the M4.6 shape, and Generate Teams now demonstrably runs in mock mode, so it can be rewritten
-    on the page. Follow-up. *Executed* (lint).
+    on the page. Follow-up. *Executed* (lint). **Fixed 2026-10-17** (Wave 4 accessibility, branch
+    `claude/vibrant-allen-hr7y7s-a11y`): no waiver is left. The teams summary step no longer
+    writes a run: its scenario imports 25 players and the Then reads the engine's own result
+    (`ceil(25 / Max Roster)` teams staged, all 25 assigned). The coach and field import steps
+    read the Coaches and Fields pages in a window opened from the import page (it starts with a
+    copy of the mock store and leaves the import page's Roll Back button in place); the buddy
+    step reads the import log; two RSVP steps become one that reloads the portal and reads both
+    children's answers; the chat step reads the message back after a reload. Two unused
+    `team_and_roster.ts` steps are deleted. The rule still fails a planted read in each of its
+    three forms (string, template, identifier), and the teams, buddy, coach and field steps each
+    fail on a planted defect (Max Roster not typed; a one-way buddy request; a rollback not
+    done). *Executed.*
 
 - 2026-10-14, found by PR w3a (M4.2):
   - `GameSchedulingPage.jsx` (M4.3's file): the "Select Team" `<label>` labels nothing (lint, off
@@ -1619,9 +1630,35 @@ smoke-tested
     `text-green-400`, `text-brand-400`, ...), which fall short of 4.5:1 on light surfaces; this PR
     moved only the elements the scan rendered. A sweep onto the tokens (now including
     `text-status-{success,warning,error}-text`) is a follow-up. *Executed* (a search).
+    **Fixed 2026-10-17** (Wave 4 accessibility, branch `claude/vibrant-allen-hr7y7s-a11y`): every
+    palette text shade, not only `-400` (176 classes in 36 files; the `-100` to `-300` and `-500`
+    shades fail the same way), moved to the tokens by family: blue-like to `text-text-accent`,
+    green to `text-status-success-text`, amber to `-warning-text`, red to `-error-text`.
+    `tests/paletteTextShades.test.js` refuses a palette text class outside one commented
+    exception (red on the old code, 176 findings); `tests/themeTextContrast.test.js` computes
+    each text token on each surface, and on each tint in the same class string, from
+    `index.css` in both themes (fails with light `--warning-text` set to `--warning`, and with
+    the old `bg-blue-900/20` chip behind accent text, 4.43:1, which this sweep moved to
+    `bg-blue-500/10`). *Executed.*
   - The scan sees only what the mock seed renders: record pages (`/players/:id`, `/team/:id`),
     registration forms, closed overlays and empty-state branches are not scanned. *Statically
-    reviewed* (`tests/accessibilityRoutes.test.js` lists the routes left out and why).
+    reviewed* (`tests/accessibilityRoutes.test.js` lists the routes left out and why). **Partly fixed
+    2026-10-17** (Wave 4 accessibility, branch `claude/vibrant-allen-hr7y7s-a11y`): every route
+    row names text the scan must see rendered (a route showing only its shell fails before axe
+    runs; shown failing with `/players`' text swapped for absent text); the record pages are
+    scanned on seeded records (`/players/player-1`, `/team/t1`, `/register/f1`), with
+    `tests/accessibilityRoutes.test.js` matching a record path to its route; and six routes the
+    seed leaves empty are scanned again with content, both themes, the theme switched on the page
+    so in-memory content survives: a blackout, a heat forecast, lighting requests and overrides,
+    evaluation runs, a new invite, a staged game schedule. The scan now waits for entrance
+    animations, which had read as low contrast mid-fade on the new invite. New finding, fixed:
+    `--text-muted` labels on the auto-scheduler's emerald result card were 4.42:1 in dark (now
+    `--text-secondary`). `KNOWN_VIOLATIONS` stays empty. *Executed.* Still unscanned with content:
+    `/exports` with a published baseline, `/coaches/practice-preferences` with a pending request,
+    `/fields` with seasonal availability, `/admin/reports` past its 3-player masking threshold,
+    `/invite/:code`, and every overlay that opens on a click (dialogs, menus, drawers).
+    Recommendation: one follow-up that adds those four content scenarios and an "open each
+    route's primary dialog" scan.
   - `WorkflowStep`'s card-wide click ran for every click inside an open step, so its "Confirm
     Teams & Proceed" button (step 2 to 3) was undone by the card re-selecting step 2 (both state
     updates batch; the last wins). Fixed here: an open card takes no click of its own, and its
@@ -1629,9 +1666,29 @@ smoke-tested
   - `DataGrid` is one `role="application"` widget whose wrapper takes Tab (`useGridKeyboard`
     moves the active cell on Tab, so focus cannot leave the grid by keyboard once a cell is
     active: WCAG 2.1.2). Moving it to `role="grid"` with a focusable cell is its own item.
-    *Statically reviewed.*
+    *Statically reviewed.* **Fixed 2026-10-17** (Wave 4 accessibility, branch
+    `claude/vibrant-allen-hr7y7s-a11y`): the table is a `role="grid"` with one tab stop, a roving
+    tabindex over every cell (header row, selection and row-actions columns included) or the one
+    widget a cell holds; arrows, Home and End move focus, Left and Right step through a cell's
+    several widgets, and Tab is never the grid's (an open editor still commits on Tab). An editor
+    left by moving focus elsewhere commits without pulling focus back. `tests/dataGrid.test.jsx`
+    and a keyboard scenario in `accessibility.feature` (real Tab in Chromium on `/players`) each
+    fail with the old Tab handler planted back. *Executed.* Review round (#591, Codex): a row's
+    actions menu mounted its items as tab stops after the grid had set the tab order, so Tab from
+    an open row-actions cell walked into the menu. `Dropdown` items are now never tab stops and
+    Tab closes the menu, moving on from the trigger (APG menu button); the grid keeps its stop
+    off menu items and leaves an open trigger's arrows to the menu. A unit test and a Chromium
+    scenario each fail on the previous head. *Executed.*
   - Recharts axes and gridlines on the analytics page keep hard-coded slate colours, which do
-    not re-theme. *Statically reviewed.*
+    not re-theme. *Statically reviewed.* **Fixed 2026-10-17** (Wave 4 accessibility, branch
+    `claude/vibrant-allen-hr7y7s-a11y`): the charts on `/admin/analytics` and `/admin/reports`
+    take their axes, gridlines, tooltips, cursor and series from
+    `frontend/src/constants/chartTheme.js`, all `var(--token)`. In dark, the old tick labels were
+    `#475569` on the dark card (about 2.2:1) under near-white gridlines. A scenario in
+    `accessibility.feature` seeds evaluation runs and checks each tick label's and gridline's
+    computed colour against `--text-secondary` and `--border` in both themes (red on the old page:
+    `rgb(71, 85, 105)`), and `tests/chartColorTokens.test.js` refuses a literal colour in any file
+    that imports Recharts (red on the old page). Light and dark screenshots compared. *Executed.*
 
 - 2026-10-17, PR M6 (branch `claude/vibrant-allen-hr7y7s-m6`): Wave 4's M6 polish. The resume
   queue lists six items as "M6.1-M6.4"; only the `build` script is plan item M6.1. The other five
@@ -1781,6 +1838,22 @@ smoke-tested
   - The auto-scheduler's own score (`scoreSchedule`) stays undated and reads no exception
     (Q2, M4.8); its lock load already holds slots for live `time_tbd` and `relocated` rows
     (`practice-lock.ts`). *Statically reviewed.*
+
+- 2026-10-17, found by the Wave 4 accessibility PR (branch `claude/vibrant-allen-hr7y7s-a11y`):
+  - The import page's "Roll Back Coach Import" button is gone once you leave the page and come
+    back in the app (the Coaches link, then Import): the import shows as applied, with no way to
+    roll it back from there. *Executed* (the button list before and after, mock mode).
+  - Nothing on screen reads `player_buddies`: the only sign a buddy pair was stored is the import
+    log's line, which repeats what `materialize_import_buddy_pairs` answered. *Statically
+    reviewed* (a search of `frontend/src` and `packages/core/src` for `player_buddies`).
+  - The team portal shows no RSVP time, so "the RSVP timestamps should align with the league's
+    official timezone" had nothing on the page to assert; its old check matched only the shape of
+    an ISO string. The step is removed, not replaced. *Statically reviewed.*
+  - `text-status-warning` (the bare `--warning`, `#b5740b`) is still used as text in 11 places,
+    `TeamOverviewPanel`'s amber card among them: 3.84:1 on the light surface, 3.39:1 on
+    `--bg-app`. `--success` and `--danger` pass. Not changed (not a palette shade); the `-text`
+    tokens are the fix. *Executed* (ratios computed the way `tests/themeTextContrast.test.js`
+    does).
 
 ## Deferred with reason
 

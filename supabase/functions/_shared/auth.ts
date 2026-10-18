@@ -263,7 +263,7 @@ export function recordAudit(
 
 /**
  * The SQLSTATE `persist_team_schedule` and `persist_game_schedule` raise when
- * their own audit row could not be written (20261018060000). The RPC has
+ * their own audit row could not be written (20261018070000). The RPC has
  * rolled the whole save back by then, so the outcome is known: nothing was
  * saved. A custom class nothing else raises, so it cannot be mistaken for
  * another refusal.

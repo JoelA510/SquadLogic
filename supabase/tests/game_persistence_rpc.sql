@@ -1,6 +1,6 @@
 -- pgTAP: game persistence RPC is current-schema compatible and org-scoped.
 --
--- Since 20261018060000 (docs/PLAN_AUDIT_IN_TRANSACTION.md) it requires an
+-- Since 20261018070000 (docs/PLAN_AUDIT_IN_TRANSACTION.md) it requires an
 -- organization admin (a coach could save the season's games before: plan
 -- section 1.1, pinned below), writes its `game.saved` audit row in the save's
 -- own transaction, and refuses a caller with no user. Every refusal runs as a
@@ -391,7 +391,7 @@ SELECT is(
 
 -- Plan section 1.1, the coach witness: Charlie, a coach of Org A (a member,
 -- not an admin), saved a run and a game assignment here before
--- 20261018060000. Now refused by the admin check, and nothing is written.
+-- 20261018070000. Now refused by the admin check, and nothing is written.
 RESET ROLE;
 SET LOCAL role = 'authenticated';
 SET LOCAL "request.jwt.claims" TO '{"sub":"33333333-3333-3333-3333-333333333333"}';

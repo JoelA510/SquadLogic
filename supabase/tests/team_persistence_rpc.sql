@@ -1,7 +1,7 @@
 -- pgTAP: team persistence RPC is current-schema compatible, org-scoped, and
 -- treats submitted team rosters as authoritative for the teams in the payload.
 --
--- Since 20261018060000 (docs/PLAN_AUDIT_IN_TRANSACTION.md) it also writes its
+-- Since 20261018070000 (docs/PLAN_AUDIT_IN_TRANSACTION.md) it also writes its
 -- `team.saved` audit row in the save's own transaction, refuses a caller with
 -- no user, and applies its admin check to every caller. So every refusal below
 -- runs as an admin and pins its message: run as the service role, each would

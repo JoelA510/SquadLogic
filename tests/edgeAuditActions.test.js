@@ -38,7 +38,7 @@ const MIN_REGISTERED = 70;
 /**
  * Every function that audits through the helpers today; each must still yield
  * a call site. team-persistence and game-persistence left this list in
- * 20261018060000: their RPCs write `team.saved` / `game.saved` in the save's
+ * 20261018070000: their RPCs write `team.saved` / `game.saved` in the save's
  * own transaction (docs/PLAN_AUDIT_IN_TRANSACTION.md), and
  * tests/teamGamePersistenceUserClient.test.js pins that they call no helper.
  */

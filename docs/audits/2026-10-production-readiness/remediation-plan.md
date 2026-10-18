@@ -1982,7 +1982,7 @@ smoke-tested
     it, so it is not a finding. *Executed* (the migration's closing check).
 
 - 2026-10-18, the audit-in-transaction PR (branch `claude/vibrant-allen-hr7y7s-audittxn`, migration
-  `20261018060000`; `docs/PLAN_AUDIT_IN_TRANSACTION.md`, approved by the owner on 2026-10-18 with
+  `20261018070000`; `docs/PLAN_AUDIT_IN_TRANSACTION.md`, approved by the owner on 2026-10-18 with
   every recommendation as written). Wave 2's "write each audit row in the same transaction as its
   save" is done: `persist_team_schedule` and `persist_game_schedule` write `team.saved` /
   `game.saved` on `scheduler_run` with the run id, inside the save, and a failed audit write rolls

@@ -1,4 +1,4 @@
--- Smoke checks for 20261018060000_audit_in_save_transaction.sql
+-- Smoke checks for 20261018070000_audit_in_save_transaction.sql
 --
 -- What it proves (plan section 4), with prelude.sql stubbing `auth.uid()` from
 -- `request.jwt.claim.sub` and `auth.role()` from `request.jwt.claim.role`:

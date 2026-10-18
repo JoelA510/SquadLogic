@@ -37,8 +37,8 @@
 -- service role and is refused 42501: refused saves, never partial ones.
 -- Production has 0 teams and 0 games (plan section 6).
 --
--- Reversible: see docs/sql/20261018060000_revert.sql.
--- Smoke checks: see docs/sql/20261018060000_smoke.sql.
+-- Reversible: see docs/sql/20261018070000_revert.sql.
+-- Smoke checks: see docs/sql/20261018070000_smoke.sql.
 
 BEGIN;
 
@@ -128,7 +128,7 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
-    -- 20261018060000: the save writes its own audit row (below), and an audit
+    -- 20261018070000: the save writes its own audit row (below), and an audit
     -- row needs an actor, so a caller with no user -- the service role -- is
     -- refused before anything is read or written (plan Q2).
     IF auth.uid() IS NULL THEN
@@ -685,7 +685,7 @@ BEGIN
         role = EXCLUDED.role,
         source = EXCLUDED.source;
 
-    -- 20261018060000: the audit row, in this transaction (plan section 3.1).
+    -- 20261018070000: the audit row, in this transaction (plan section 3.1).
     -- A failed write rolls the whole save back; SLA01 tells the Edge Function
     -- it was the audit, and DETAIL keeps the original SQLSTATE. Every error is
     -- caught and every one is re-raised.
@@ -778,7 +778,7 @@ BEGIN
             USING ERRCODE = '22023';
     END IF;
 
-    -- 20261018060000: the save writes its own audit row (below), and an audit
+    -- 20261018070000: the save writes its own audit row (below), and an audit
     -- row needs an actor, so a caller with no user -- the service role -- is
     -- refused before anything is read or written (plan Q2).
     IF auth.uid() IS NULL THEN
@@ -791,7 +791,7 @@ BEGIN
     v_season_settings_id := NULLIF(run_data->>'season_settings_id', '')::uuid;
     v_season_id := COALESCE(NULLIF(run_data->>'season_id', '')::uuid, v_season_settings_id);
 
-    -- 20261018060000: an organization admin, not any member (plan Q6), as
+    -- 20261018070000: an organization admin, not any member (plan Q6), as
     -- persist_team_schedule and persist_practice_schedule require.
     IF v_org_id IS NOT NULL
        AND NOT public.is_org_admin(v_org_id) THEN
@@ -1236,7 +1236,7 @@ BEGIN
         assignment_source = EXCLUDED.assignment_source,
         updated_at = timezone('utc', now());
 
-    -- 20261018060000: the audit row, in this transaction (plan section 3.1).
+    -- 20261018070000: the audit row, in this transaction (plan section 3.1).
     -- A failed write rolls the whole save back; SLA01 tells the Edge Function
     -- it was the audit, and DETAIL keeps the original SQLSTATE. Every error is
     -- caught and every one is re-raised.

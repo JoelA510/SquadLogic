@@ -287,7 +287,7 @@ When('I generate teams from the import and sync them to Supabase', async ({ page
   ).toBeVisible({ timeout: 30_000 });
   stateOf(page).teams = body.updatedTeams;
 
-  // The save wrote its audit row in its own transaction (20261018060000,
+  // The save wrote its audit row in its own transaction (20261018070000,
   // docs/PLAN_AUDIT_IN_TRANSACTION.md): exactly one `team.saved` row on the
   // run it returned, attributed to the administrator, read with their session.
   expect(body.runId, 'the sync returned its run id').toBeTruthy();

@@ -6,7 +6,7 @@
 
 Approved by the owner on 2026-10-18, with every recommendation as written.
 
-**Built (2026-10-18):** migration `20261018010000_reconcile_trigger_drift.sql`
+**Built (2026-10-18):** migration `20261018040000_reconcile_trigger_drift.sql`
 (section 5, Q1-Q5 as recommended), its revert and smoke under `docs/sql/`, the
 committed `supabase/catalog-snapshot.json` checked by the database harness, and
 the operator query in `ci-cd.md` ("Catalogue drift check"). Two departures from

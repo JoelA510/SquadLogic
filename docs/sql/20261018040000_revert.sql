@@ -1,4 +1,4 @@
--- Revert for 20261018010000_reconcile_trigger_drift.sql
+-- Revert for 20261018040000_reconcile_trigger_drift.sql
 --
 -- **Restores production as it was before the migration, not a fresh build.**
 -- Every object below is production's own definition, read back read-only on

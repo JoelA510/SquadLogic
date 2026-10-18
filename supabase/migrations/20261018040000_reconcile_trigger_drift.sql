@@ -27,8 +27,7 @@
 -- them (a trigger this file does not know about), the drop fails and the
 -- deploy stops, rather than taking the dependant with it. Function BODIES do
 -- not record a dependency in pg_depend, so the block before the drops searches
--- every function body outside the system schemas for the names and refuses if
--- one mentions them. Read back from production on 2026-10-18 (read-only): the
+-- every `public` function body for the names and refuses if one mentions them. Read back from production on 2026-10-18 (read-only): the
 -- only users of `propagate_org_id_from_*`, `handle_field_subunits` and
 -- `set_created_by_to_auth_uid` are the 17 triggers dropped here; no function
 -- body, view, policy or event trigger names them. The same on a fresh build.
@@ -50,8 +49,8 @@
 -- `B`; a field imported with halves now gets none until an admin saves it
 -- (recorded in the remediation plan, "Discovered during execution").
 --
--- Reversible: docs/sql/20261018010000_revert.sql (recreates production's
--- objects exactly as read back). Smoke: docs/sql/20261018010000_smoke.sql.
+-- Reversible: docs/sql/20261018040000_revert.sql (recreates production's
+-- objects exactly as read back). Smoke: docs/sql/20261018040000_smoke.sql.
 -- The drift check that keeps this closed: supabase/catalog-snapshot.json,
 -- regenerated and compared by scripts/dbharness/run.sh.
 
@@ -64,6 +63,10 @@ DO $guard$
 DECLARE
     v_users text;
 BEGIN
+    -- `public` only: it is the schema these functions live in and the only one
+    -- this repository writes; Supabase's own schemas are not ours to judge. The
+    -- names are matched as text (strpos, no LIKE wildcards), and only the
+    -- functions being dropped are exempt from mentioning them.
     SELECT string_agg(DISTINCT format('%I.%I mentions %s', n.nspname, p.proname, m.name), '; ')
       INTO v_users
       FROM pg_proc p
@@ -71,9 +74,15 @@ BEGIN
      CROSS JOIN (VALUES ('propagate_org_id_from_'), ('handle_field_subunits'),
                         ('set_created_by_to_auth_uid'), ('set_updated_at'),
                         ('ensure_assistant_coach_ids_valid'), ('ensure_game_team_consistency')) AS m(name)
-     WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-       AND p.prosrc LIKE '%' || m.name || '%'
-       AND p.proname NOT LIKE m.name || '%';
+     WHERE n.nspname = 'public'
+       AND strpos(p.prosrc, m.name) > 0
+       AND p.proname NOT IN ('propagate_org_id_from_field', 'propagate_org_id_from_team',
+                             'propagate_org_id_from_home_team', 'propagate_org_id_from_import_job',
+                             'propagate_org_id_from_player', 'propagate_org_id_from_season_settings',
+                             'propagate_org_id_from_scheduler_run', 'propagate_org_id_from_evaluation_run',
+                             'propagate_org_id_from_export_job', 'handle_field_subunits',
+                             'set_created_by_to_auth_uid', 'set_updated_at',
+                             'ensure_assistant_coach_ids_valid', 'ensure_game_team_consistency');
     IF v_users IS NOT NULL THEN
         RAISE EXCEPTION 'reconcile_trigger_drift: a function body still uses a function this migration drops: %', v_users;
     END IF;

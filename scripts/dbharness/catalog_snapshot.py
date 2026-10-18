@@ -39,7 +39,7 @@ import sys
 
 SECTIONS = ('functions', 'triggers', 'policies')
 # Floors well under today's counts (133 functions, 35 triggers, 82 policies on
-# a fresh build at 20261018010000) and well over zero: a catalogue below one of
+# a fresh build at 20261018040000) and well over zero: a catalogue below one of
 # them was read from the wrong database or schema, not from this one.
 FLOORS = {'functions': 50, 'triggers': 10, 'policies': 30}
 COMMENT = ('Generated from a fresh build by scripts/dbharness/run.sh (catalog_snapshot.sql). '
@@ -112,8 +112,9 @@ def key(section, entry):
     """A short, stable name for an entry: the section's initial and 10 hex of md5.
 
     The operator query carries these rather than the entries themselves, so it
-    stays a few kilobytes (the entries are 35). 40 bits per section: write()
-    and diff() refuse a snapshot in which two entries share one.
+    stays about 6 KB (with the entries it would be about 35 KB). 40 bits of
+    hash each: write() and diff() refuse a snapshot in which two entries share
+    a key, so a collision cannot hide an entry.
     """
     return section[0] + hashlib.md5(entry.encode('utf8')).hexdigest()[:10]
 
@@ -151,6 +152,9 @@ def compare_sql(expected):
             "SELECT 'only_in_database' AS side, section, entry FROM db WHERE k NOT IN (SELECT k FROM snap)\n"
             'UNION ALL\n'
             "SELECT 'only_in_snapshot', k, NULL FROM snap WHERE k NOT IN (SELECT k FROM db)\n"
+            'UNION ALL\n'
+            "SELECT 'search_path', current_setting('search_path'), 'public is not on it, so names print qualified'\n"
+            "  WHERE NOT ('public' = ANY (current_schemas(false)))\n"
             'UNION ALL\n'
             "SELECT 'count', section, count(*)::text FROM db GROUP BY section\n"
             'ORDER BY 1, 2, 3;\n'

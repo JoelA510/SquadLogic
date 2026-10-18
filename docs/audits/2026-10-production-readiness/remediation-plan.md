@@ -1456,7 +1456,7 @@ smoke-tested
     an orphan of `definitive_schema`'s fresh-replay reset, which also hid 17 production-only
     triggers (one deleting data) and a production-only `persist_evaluation_run` overload.
     **Built 2026-10-18, in review** (branch `claude/vibrant-allen-hr7y7s-drift`; the plan approved
-    by the owner as recommended): `20261018010000_reconcile_trigger_drift` and the catalogue drift
+    by the owner as recommended): `20261018040000_reconcile_trigger_drift` and the catalogue drift
     check (`supabase/catalog-snapshot.json`, checked by the harness; the operator query in
     `ci-cd.md`). Production compared with the snapshot before deploy differs by exactly the 29
     objects the migration drops (*executed*, read-only). Not deployed.
@@ -1921,7 +1921,7 @@ smoke-tested
   - **The field import relied on the dropped trigger for sub-surfaces, in production only.**
     `finalize_field_import_job` (`20260503070000`) writes `supports_halves`, and in production
     `trigger_manage_field_subunits` then created `A` and `B` (and `rollback_field_import_job`,
-    `20260909000000`, restoring `supports_halves = false`, deleted them). After `20261018010000` a field imported
+    `20260909000000`, restoring `supports_halves = false`, deleted them). After `20261018040000` a field imported
     with halves has no sub-surfaces until an admin saves it on the Fields page, which is what a
     fresh build (CI) has always done. Production holds 0 fields, so nothing changes for existing
     data. Not changed: the import RPC is its own change. *Statically reviewed.*
@@ -1932,7 +1932,7 @@ smoke-tested
     now. Not changed. *Statically reviewed* (a search of `frontend/src` for `from('fields')`).
   - **The production-only `persist_evaluation_run(jsonb, jsonb[], jsonb[])` checked no
     organization membership**: any authenticated caller could write an evaluation run into any
-    organization through it (its body, read back). Dropped by `20261018010000`; production holds
+    organization through it (its body, read back). Dropped by `20261018040000`; production holds
     0 `evaluation_runs`. *Executed* (read-only `pg_get_functiondef`).
   - **The mock E2E "Reverting a field to no longer support halves" never edited the field it
     seeded.** Its field was called "Field 2", as is one in the mock seed, and "Edit" opened the

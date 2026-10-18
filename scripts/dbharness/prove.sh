@@ -68,8 +68,8 @@ M23="$REPO/supabase/migrations/20261007000000_enact_practice_recommendation_blac
 R23="$REPO/docs/sql/20261007000000_revert.sql"
 # The schema drift reconcile (docs/operations/schema-drift-2026-10.md) and its
 # revert; the CS plant is aimed at the catalogue snapshot stage.
-M24="$REPO/supabase/migrations/20261018010000_reconcile_trigger_drift.sql"
-R24="$REPO/docs/sql/20261018010000_revert.sql"
+M24="$REPO/supabase/migrations/20261018040000_reconcile_trigger_drift.sql"
+R24="$REPO/docs/sql/20261018040000_revert.sql"
 SEED="$REPO/supabase/migrations/20251208000001_seed_data.sql"
 ATTEMPTED=0; PASS=0; FAIL=0; MISS=0
 # Plants whose `expect` carried the `FAIL ` prefix `plant()` adds itself; see
@@ -3503,7 +3503,7 @@ plant "R23 the revert leaves the lock helper in place" "$R23" \
   "DROP FUNCTION IF EXISTS public.enact_lock_cause_row(uuid);" \
   "revert 20261007000000"
 
-# 20261018010000: the drift reconcile. The witness first: production's delete,
+# 20261018040000: the drift reconcile. The witness first: production's delete,
 # put back into the RPC that replaced its trigger.
 plant "M24 admin_update_field deletes the sub-surfaces when halves go off" "$M24" \
   "    -- Halves on: sub-surfaces A and B exist (a retired one stays retired)." \
@@ -3511,25 +3511,25 @@ plant "M24 admin_update_field deletes the sub-surfaces when halves go off" "$M24
         DELETE FROM public.field_subunits WHERE field_id = v_field.id;
     END IF;
     -- Halves on: sub-surfaces A and B exist (a retired one stays retired)." \
-  "smoke 20261018010000"
+  "smoke 20261018040000"
 
 plant "M24 admin_create_field stops creating sub-surfaces" "$M24" \
   "    -- Halves on: sub-surfaces A and B exist. Insert-only; never deletes.
     IF v_field.supports_halves THEN" \
   "    -- Halves on: sub-surfaces A and B exist. Insert-only; never deletes.
     IF false THEN" \
-  "smoke 20261018010000"
+  "smoke 20261018040000"
 
 plant "M24 the orphan set_updated_at is kept" "$M24" \
   "DROP FUNCTION IF EXISTS public.set_updated_at();" \
   "SELECT 1;" \
-  "smoke 20261018010000"
+  "smoke 20261018040000"
 
 plant "M24 the migration creates a second persist_evaluation_run overload" "$M24" \
   "DROP FUNCTION IF EXISTS public.persist_evaluation_run(jsonb, jsonb[], jsonb[]);" \
   "CREATE FUNCTION public.persist_evaluation_run(p_run_data jsonb, p_findings jsonb[], p_metrics jsonb[] DEFAULT '{}')
 RETURNS uuid LANGUAGE sql SET search_path = public AS 'SELECT NULL::uuid';" \
-  "smoke 20261018010000"
+  "smoke 20261018040000"
 
 plant "CS a migration adds a function the snapshot does not list" "$M24" \
   "COMMIT;" \
@@ -3541,12 +3541,12 @@ plant "R24 the revert leaves trigger_manage_field_subunits out" "$R24" \
   "CREATE TRIGGER trigger_manage_field_subunits AFTER INSERT OR UPDATE OF supports_halves ON public.fields
     FOR EACH ROW EXECUTE FUNCTION public.handle_field_subunits();" \
   "" \
-  "revert 20261018010000"
+  "revert 20261018040000"
 
 plant "R24 the revert lets anon run the restored overload" "$R24" \
   "REVOKE ALL ON FUNCTION public.persist_evaluation_run(jsonb, jsonb[], jsonb[]) FROM PUBLIC, anon;" \
   "GRANT EXECUTE ON FUNCTION public.persist_evaluation_run(jsonb, jsonb[], jsonb[]) TO anon;" \
-  "revert 20261018010000"
+  "revert 20261018040000"
 
 # ---------------------------------------------------------------------------
 # The census, executed rather than counted by eye

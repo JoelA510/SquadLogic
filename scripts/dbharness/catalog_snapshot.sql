@@ -14,11 +14,17 @@
 --   * functions that belong to an extension (pg_depend deptype 'e'): a bare
 --     PostgreSQL cluster puts pgcrypto in `public`, Supabase puts it in
 --     `extensions`, and neither is the schema this repository writes;
---   * function bodies: production's early bodies were applied with LF line
---     endings and the repository's files carry CRLF, so every such body would
---     differ by md5 while behaving identically. A signature, a trigger and a
---     policy's expression are what the drift of 2026-10 was made of;
+--   * function bodies: production's early bodies were applied from other
+--     texts than the repository's (LF where some files carry CRLF, and at least
+--     one without the file's comments), so a body hash would report drift that
+--     changes no behaviour. A signature, a trigger and a policy's expression are
+--     what the drift of 2026-10 was made of; body drift is recorded as a gap in
+--     the remediation plan;
 --   * internal (constraint) triggers, and anything outside `public`.
+--
+-- Names print relative to the session's search_path (pg_get_triggerdef, the
+-- argument types): both the harness and Supabase have `public` on it, and
+-- compare-sql's query reports a session that does not as drift of its own.
 --
 -- Policy digests coalesce a missing USING or WITH CHECK to '' before hashing:
 -- the investigation's `md5(qual || '#' || with_check)` was NULL for every

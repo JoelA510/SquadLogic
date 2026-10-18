@@ -285,8 +285,8 @@ STATUS=0
 # It runs on the database built to head and BEFORE the smokes: a smoke may
 # commit a seed (`smoke_plant`), and the snapshot is of what the migrations
 # build, nothing else. `HARNESS_WRITE_CATALOG_SNAPSHOT=1` rewrites the file
-# from this build instead of failing -- for the author of such a migration,
-# never for CI. `catalog_snapshot.py` refuses (exit 2) a catalogue with a
+# from this build (and still fails the run) -- for the author of such a
+# migration, never for CI. `catalog_snapshot.py` refuses (exit 2) a catalogue with a
 # section under its floor, so an empty read cannot match anything.
 echo "=== catalogue snapshot (supabase/catalog-snapshot.json) ==="
 v_cat_sql="$RUN_DIR/catalog_snapshot.sql"
@@ -303,11 +303,15 @@ else
   if [ "$v_cat_rc" -eq 0 ]; then
     echo "PASS catalog snapshot"
     dump 1 $SCRATCH/catalog_diff
-  elif [ "$v_cat_rc" -eq 1 ] && [ "${HARNESS_WRITE_CATALOG_SNAPSHOT:-}" = "1" ]; then
+  elif [ "${HARNESS_WRITE_CATALOG_SNAPSHOT:-}" = "1" ]; then
+    # Written from the build whatever the old file held (a merge conflict in
+    # it refuses the diff, exit 2), and the run still FAILS: a rewrite is not a
+    # pass, so this switch can never turn a drifted build green.
     if python3 "$REPO/scripts/dbharness/catalog_snapshot.py" write \
          $SCRATCH/catalog.json "$REPO/supabase/catalog-snapshot.json" >$SCRATCH/catalog_write 2>&1; then
-      echo "note: HARNESS_WRITE_CATALOG_SNAPSHOT=1 -- rewrote supabase/catalog-snapshot.json from this build; review and commit it. What changed:"
+      echo "FAIL catalog snapshot: HARNESS_WRITE_CATALOG_SNAPSHOT=1 rewrote supabase/catalog-snapshot.json from this build; review it, commit it, and run again. What differed:"
       dump 60 $SCRATCH/catalog_diff
+      STATUS=1
     else
       echo "FAIL catalog snapshot: could not rewrite supabase/catalog-snapshot.json"; dump 5 $SCRATCH/catalog_write; STATUS=1
     fi
@@ -1307,7 +1311,7 @@ echo "=== reverts (each applied on a database built up to its own migration) ===
 # it is checked below to name only real ones, and the coverage question --
 # does every smoke-era migration HAVE a revert -- is asserted rather than left
 # to whoever remembered.
-REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018010000)
+REVERT_CHECKS=(20260906000000 20260906000100 20260907000000 20260908000000 20260909000000 20260910000000 20260911000000 20260912000000 20260913000000 20260917000000 20260920000000 20260923000000 20260924000000 20260927000000 20260928000000 20260929000000 20260930000000 20261001000000 20261002000000 20261003000000 20261004000000 20261005000000 20261006000000 20261007000000 20261014000000 20261017000000 20261018040000)
 
 # Every migration that must carry a smoke must carry a revert too, and the
 # reverts named for execution must exist. The first is the coverage the old

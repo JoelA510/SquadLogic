@@ -778,6 +778,15 @@ describe('scoring-engine cross-arm drift: games', () => {
     });
   }
 
+  it('a client-sent sourceKey never hides a team double-booked (Edge)', () => {
+    // The schema passes unknown game keys through; only a coach's two entries
+    // of one fixture are one commitment.
+    const [d1] = GAME_VECTORS.filter((v) => v.name.startsWith('D1'));
+    const games = d1.games.map((g) => ({ ...g, sourceKey: 'same' }));
+    const edge = edgeEvaluateGames({ assignments: games, teams: d1.teams });
+    expect(edgeGameProjection(edge)).toEqual(truthProjection(d1.truth));
+  });
+
   it('declared, not compared: field-overlap is core-only (Q5)', () => {
     // Two games on one field at one time: core warns, the Edge has no field
     // model in its game input and says nothing. Written down here so the

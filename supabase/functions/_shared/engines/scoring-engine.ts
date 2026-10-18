@@ -708,7 +708,10 @@ export function evaluateGameSchedule(params: { assignments: GameAssignment[]; te
       }
 
       if (!teamAssignments.has(teamId)) teamAssignments.set(teamId, []);
-      teamAssignments.get(teamId)!.push({ ...a, start, end });
+      // `sourceKey` set to nothing: a team's own entries are never one
+      // commitment (a client-sent `sourceKey` passes the schema's
+      // passthrough, and must not hide a team double-booked).
+      teamAssignments.get(teamId)!.push({ ...a, start, end, sourceKey: undefined });
 
       // Every coach on the team (8.2), through the producer the practice
       // evaluator above already uses.

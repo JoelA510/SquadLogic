@@ -14,6 +14,11 @@ export const TeamSchema = z
     // The `teams` column spelling; validated here so it cannot bypass the gate on its way to
     // listTeamCoachIds, which reads it when assistantCoachIds is absent.
     assistant_coach_ids: z.array(z.string()).nullable().optional(),
+    // The reconciled 8.2 shape `listTeamCoachIds` reads: a list when present.
+    // Validated here so a malformed one is a 400 at the boundary, not a throw
+    // inside the engine (the game evaluator reads every coach since #576's
+    // follow-up, as the practice evaluator already did).
+    coaches: z.array(z.object({}).passthrough()).nullable().optional(),
     organization_id: z.string().uuid().optional(),
   })
   .passthrough();
@@ -315,9 +320,9 @@ export type EmptyGameRosterRefusal = {
  * a recorded run. With `games` empty it
  * answers `ok` over no game at all. Both are refused here, at the input
  * boundary, before the season read, the engine and persistence. (Since the
- * #576 follow-up the engine reports each unknown side and an empty match as an
- * error too; a block that names no rostered team is
- * {@link refuseUnmatchedGameRoster}'s.)
+ * #576 follow-up the engine reports each unknown side as a warning, and a
+ * schedule naming no rostered team as an error; such a block is refused by
+ * {@link refuseUnmatchedGameRoster}.)
  *
  * `null` games (a practice-only request) is not refused here.
  */

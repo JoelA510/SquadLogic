@@ -7,6 +7,7 @@ import { evaluateGameSchedule, evaluatePracticeSchedule } from '../engines/scori
 import {
   GameAssignment,
   Team,
+  TeamSchema,
   Slot,
   PracticeAssignment,
   PracticeException,
@@ -267,4 +268,15 @@ Deno.test('evaluateGameSchedule - an unknown side is a warning naming it, once p
   assertEquals(unknown[0].severity, 'warning');
   assertEquals(unknown[0].message, 'game references unknown team X');
   assertEquals(unknown[0].details, { teamId: 'X', weekIndex: 1, slotId: 'slot-g1' });
+});
+
+Deno.test('TeamSchema - a coaches list that is not a list is refused at the boundary', () => {
+  // The game evaluator reads every coach (#576 follow-up); a malformed list
+  // is a 400 from the schema, never a throw inside the engine.
+  assertEquals(TeamSchema.safeParse({ id: 'A', division: 'U10', coaches: 'x' }).success, false);
+  assertEquals(
+    TeamSchema.safeParse({ id: 'A', division: 'U10', coaches: [{ personId: 'c1' }] }).success,
+    true
+  );
+  assertEquals(TeamSchema.safeParse({ id: 'A', division: 'U10', coaches: null }).success, true);
 });

@@ -39,7 +39,7 @@ import sys
 
 SECTIONS = ('functions', 'triggers', 'policies')
 # Floors well under today's counts (133 functions, 35 triggers, 119 policies on
-# a fresh build at 20261018040000) and well over zero: a catalogue below one of
+# a fresh build at 20261018060000) and well over zero: a catalogue below one of
 # them was read from the wrong database or schema, not from this one.
 FLOORS = {'functions': 50, 'triggers': 10, 'policies': 30}
 COMMENT = ('Generated from a fresh build by scripts/dbharness/run.sh (catalog_snapshot.sql). '

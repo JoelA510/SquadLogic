@@ -1,4 +1,4 @@
--- Smoke checks for 20261018040000_reconcile_trigger_drift.sql
+-- Smoke checks for 20261018060000_reconcile_trigger_drift.sql
 --
 -- **These ASSERT rather than report**, so a defect turns the harness red.
 --

@@ -93,7 +93,7 @@ describe('the committed snapshot', () => {
     expect(fs.readFileSync(out, 'utf8')).toBe(fs.readFileSync(SNAPSHOT, 'utf8'));
   });
 
-  it('holds none of the objects 20261018040000 drops (meta: it holds the ones it keeps)', () => {
+  it('holds none of the objects 20261018060000 drops (meta: it holds the ones it keeps)', () => {
     const snap = JSON.parse(fs.readFileSync(SNAPSHOT, 'utf8'));
     const all = [...snap.functions, ...snap.triggers].join('\n');
     expect(all).toContain('admin_update_field(');

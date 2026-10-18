@@ -323,7 +323,7 @@ Given(
 Then(
   '{string} should still list its sub-surfaces {string} and {string}',
   async ({ page }, f: string, a: string, b: string) => {
-    // Halves off deletes nothing (20261018040000): each sub-surface stays,
+    // Halves off deletes nothing (20261018060000): each sub-surface stays,
     // retirable on its own, until an admin retires it. Matched by its retire
     // control's label, which names the field. (The scenario's field is not
     // called "Field 2": the mock seed has one, and "Edit" then opened that one,

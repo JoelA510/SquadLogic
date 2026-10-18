@@ -57,7 +57,7 @@ describe('mock facility admin rpcs', () => {
     });
     expect(updateError).toBeNull();
     expect(updated).toMatchObject({ name: 'Renamed Field', active: false, size: '11v11' });
-    // Halves off deletes nothing (20261018040000): the sub-surfaces stay until
+    // Halves off deletes nothing (20261018060000): the sub-surfaces stay until
     // each is retired through admin_retire_field_subunit.
     expect(
       getMockData('field_subunits')

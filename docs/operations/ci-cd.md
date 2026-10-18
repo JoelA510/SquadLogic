@@ -361,7 +361,7 @@ Security and Performance Advisors use) over the migrated local database:
 The CLI's own `--fail-on warn` is not used because it has no waivers. Triage on
 2026-10-13 (CLI 2.118.0, 176 findings, 33 at WARN): `function_search_path_mutable`
 on `public.min` (an aggregate, which cannot carry a `search_path`) and
-`public.set_updated_at` (calls only `now()`), accepted (`20261018040000` later
+`public.set_updated_at` (calls only `now()`), accepted (`20261018060000` later
 dropped `set_updated_at`, an orphan only a fresh build had, and its waiver);
 `auth_rls_initplan` (11
 policies on 9 tables) and `multiple_permissive_policies` (20 tables) were waived
@@ -432,7 +432,7 @@ until October 2026 nothing compared the two: 17 triggers and a function
 overload existed only in production, three orphan functions only in what CI
 builds, and one of those triggers deleted data
 ([`schema-drift-2026-10.md`](./schema-drift-2026-10.md); fixed by
-`20261018040000_reconcile_trigger_drift`). Two halves keep it closed. Neither
+`20261018060000_reconcile_trigger_drift`). Two halves keep it closed. Neither
 gives CI a production credential.
 
 **In the harness, on every pull request that touches `supabase/`.**
@@ -473,7 +473,7 @@ and the repository does not build; an `only_in_snapshot` row carries a key,
 which `python3 scripts/dbharness/catalog_snapshot.py name supabase/catalog-snapshot.json <key>`
 names. Either is drift: record it in the remediation plan and fix it with a
 migration, never by hand. Measured on 2026-10-18, before `20261018030000` and
-`20261018040000` deployed: the 29 objects `20261018040000` drops (17 triggers,
+`20261018060000` deployed: the 29 objects `20261018060000` drops (17 triggers,
 12 functions) were `only_in_database`, and the policies differed by exactly
 the RLS rewrite (28 old policies `only_in_database`, 65 new ones
 `only_in_snapshot`); nothing else differed. Once both have deployed, expect only

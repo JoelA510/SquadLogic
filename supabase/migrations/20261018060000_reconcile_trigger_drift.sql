@@ -49,8 +49,8 @@
 -- `B`; a field imported with halves now gets none until an admin saves it
 -- (recorded in the remediation plan, "Discovered during execution").
 --
--- Reversible: docs/sql/20261018040000_revert.sql (recreates production's
--- objects exactly as read back). Smoke: docs/sql/20261018040000_smoke.sql.
+-- Reversible: docs/sql/20261018060000_revert.sql (recreates production's
+-- objects exactly as read back). Smoke: docs/sql/20261018060000_smoke.sql.
 -- The drift check that keeps this closed: supabase/catalog-snapshot.json,
 -- regenerated and compared by scripts/dbharness/run.sh.
 

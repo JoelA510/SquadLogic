@@ -1470,7 +1470,7 @@ const dropMockFieldSubunits = (db, fieldId) => {
 
 /**
  * The sub-surface step of `admin_create_field` / `admin_update_field`
- * (20261018040000): with halves on, `A` and `B` exist afterwards (insert-only,
+ * (20261018060000): with halves on, `A` and `B` exist afterwards (insert-only,
  * so a retired one stays retired); with halves off, nothing is deleted -- a
  * sub-surface leaves only through `admin_retire_field_subunit`. Production's
  * `trigger_manage_field_subunits` used to delete them, with their practice
